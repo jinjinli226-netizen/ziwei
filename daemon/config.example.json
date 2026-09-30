@@ -1,0 +1,10 @@
+{
+  "serviceName": "ziwei_user",
+  "agentId": "ziwei_user",
+  "workspace": "test-111",
+  "apiBase": "http://127.0.0.1:4178",
+  "healthHost": "127.0.0.1",
+  "healthPort": 20242,
+  "heartbeatMs": 15000,
+  "pollMs": 5000
+}

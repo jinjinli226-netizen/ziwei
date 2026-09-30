@@ -1,0 +1,32 @@
+# local runtime state and logs
+.local/
+node_modules/
+**/node_modules/
+data/ziwei_user.json
+data/*.sqlite
+data/git-sync/
+data/objects/
+dist/
+frontend/dist/
+.gstack/
+
+# Local reverse-engineering captures and review screenshots
+/AuraBaba-*.md
+/aurababa-*.json
+/aurababa-*.js
+/scripts-list.json
+/*-issues.png
+/*-calendar.png
+/*-composer*.png
+/*-docs*.png
+/*-members*.png
+/HANDOFF*.md
+/design-qa.md
+
+# Keep only the dependency artifact used by package.json
+artifacts/*.tgz
+!artifacts/ziwei-ui-0.3.0.tgz
+
+# Runtime database journals and root-level review captures
+data/*.sqlite-*
+/*.png

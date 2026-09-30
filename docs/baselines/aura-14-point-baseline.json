@@ -1,0 +1,327 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-09-30",
+  "workspace": "test-111",
+  "application": {
+    "frontend": "frontend/src/App.vue",
+    "shell": "frontend/src/components/WorkspaceShell.vue",
+    "api": "backend/app.mjs",
+    "playwright": {
+      "available": false,
+      "fallback": "node:test + fetch + static Vue contract checks",
+      "reason": "No Playwright package is installed in this workspace"
+    }
+  },
+  "routeMap": {
+    "home": "/test-111/home",
+    "issues": "/test-111/issues",
+    "automations": "/test-111/autopilots",
+    "calendar": "/test-111/calendar",
+    "docs": "/test-111/project-docs",
+    "members": "/test-111/members",
+    "runtimes": "/test-111/runtimes",
+    "skills": "/test-111/skills",
+    "settings": "/test-111/settings",
+    "invite": "/me/invite",
+    "inviteAccept": "/invite?code=<one-time-code>",
+    "open": "/test-111/open-platform",
+    "inbox": "/test-111/inbox"
+  },
+  "points": [
+    {
+      "id": 1,
+      "module": "global shell and cross-page buttons",
+      "routes": [
+        "/test-111/home",
+        "/test-111/issues",
+        "/test-111/calendar",
+        "/test-111/project-docs",
+        "/test-111/members",
+        "/test-111/skills",
+        "/test-111/settings"
+      ],
+      "uiContracts": [
+        "workspace navigation",
+        "home button",
+        "language menu",
+        "help modal",
+        "quick action tray",
+        "Escape closes overlays"
+      ],
+      "httpChecks": [
+        "GET /healthz",
+        "GET /api/workspaces/test-111/summary"
+      ],
+      "status": "partial",
+      "evidence": "test/routes.test.mjs, test/e2e/aura-14-point.spec.mjs"
+    },
+    {
+      "id": 2,
+      "module": "home",
+      "routes": [
+        "/test-111/home"
+      ],
+      "uiContracts": [
+        "empty state",
+        "new task quick action",
+        "calendar quick action",
+        "workspace overview"
+      ],
+      "httpChecks": [
+        "GET /api/workspaces/test-111/summary",
+        "POST /api/workspaces/test-111/tasks"
+      ],
+      "status": "partial",
+      "evidence": "test/e2e/aura-14-point.spec.mjs"
+    },
+    {
+      "id": 3,
+      "module": "tasks",
+      "routes": [
+        "/test-111/issues"
+      ],
+      "uiContracts": [
+        "board/list view",
+        "filters",
+        "create task",
+        "task detail and messages"
+      ],
+      "httpChecks": [
+        "GET/POST /api/workspaces/test-111/tasks",
+        "PATCH /api/tasks/:id",
+        "POST /api/tasks/:id/messages"
+      ],
+      "status": "partial",
+      "evidence": "test/e2e/aura-14-point.spec.mjs, test/completion-gaps.test.mjs"
+    },
+    {
+      "id": 4,
+      "module": "automations",
+      "routes": [
+        "/test-111/autopilots"
+      ],
+      "uiContracts": [
+        "template selector",
+        "create",
+        "run",
+        "pause/enable",
+        "run history"
+      ],
+      "httpChecks": [
+        "GET /api/workspaces/test-111/automation-templates",
+        "POST /api/workspaces/test-111/automations",
+        "POST /api/automations/:id/run"
+      ],
+      "status": "partial",
+      "evidence": "test/e2e/aura-14-point.spec.mjs, test/completion-gaps.test.mjs"
+    },
+    {
+      "id": 5,
+      "module": "calendar",
+      "routes": [
+        "/test-111/calendar"
+      ],
+      "uiContracts": [
+        "month/week/day tabs",
+        "previous/next/today",
+        "task filter",
+        "new task for date"
+      ],
+      "httpChecks": [
+        "GET /api/workspaces/test-111/calendar",
+        "task due_date appears as calendar event"
+      ],
+      "status": "partial",
+      "evidence": "test/e2e/aura-14-point.spec.mjs"
+    },
+    {
+      "id": 6,
+      "module": "documents",
+      "routes": [
+        "/test-111/project-docs"
+      ],
+      "uiContracts": [
+        "tree",
+        "search",
+        "new file/folder",
+        "open/edit/save",
+        "download",
+        "trash/restore"
+      ],
+      "httpChecks": [
+        "POST/PATCH/GET /api/documents/:id",
+        "GET /api/documents/:id/download",
+        "DELETE/POST restore"
+      ],
+      "status": "partial",
+      "evidence": "test/e2e/aura-14-point.spec.mjs, test/completion-gaps.test.mjs"
+    },
+    {
+      "id": 7,
+      "module": "team, devices and runtime",
+      "routes": [
+        "/test-111/members",
+        "/test-111/runtimes"
+      ],
+      "uiContracts": [
+        "members/device tabs",
+        "add device",
+        "install command",
+        "heartbeat status",
+        "runtime list"
+      ],
+      "httpChecks": [
+        "GET/POST /api/workspaces/test-111/members",
+        "GET/POST /api/workspaces/test-111/devices",
+        "GET /api/workspaces/test-111/runtimes"
+      ],
+      "status": "partial",
+      "evidence": "test/e2e/aura-14-point.spec.mjs, test/daemon.test.mjs"
+    },
+    {
+      "id": 8,
+      "module": "digital employees",
+      "routes": [
+        "/test-111/members"
+      ],
+      "uiContracts": [
+        "create employee modal",
+        "visibility",
+        "runtime/model/skills selectors"
+      ],
+      "httpChecks": [
+        "GET/POST /api/workspaces/test-111/employees",
+        "GET /api/workspaces/test-111/models"
+      ],
+      "status": "partial",
+      "evidence": "test/e2e/aura-14-point.spec.mjs"
+    },
+    {
+      "id": 9,
+      "module": "skills",
+      "routes": [
+        "/test-111/skills"
+      ],
+      "uiContracts": [
+        "platform/team tabs",
+        "category/search",
+        "SKILL.md import",
+        "install/uninstall"
+      ],
+      "httpChecks": [
+        "GET/POST /api/workspaces/test-111/skills",
+        "POST /api/workspaces/test-111/skills/import",
+        "PATCH /api/skills/:id"
+      ],
+      "status": "partial",
+      "evidence": "test/e2e/aura-14-point.spec.mjs, test/skills-import.test.mjs"
+    },
+    {
+      "id": 10,
+      "module": "settings and access",
+      "routes": [
+        "/test-111/settings"
+      ],
+      "uiContracts": [
+        "general/security tabs",
+        "save workspace",
+        "create/rotate/revoke API key"
+      ],
+      "httpChecks": [
+        "GET/PATCH /api/workspaces/test-111/settings",
+        "POST /api/workspaces/test-111/api-keys",
+        "POST /api/api-keys/:id/rotate"
+      ],
+      "status": "partial",
+      "evidence": "test/e2e/aura-14-point.spec.mjs, test/completion-gaps.test.mjs"
+    },
+    {
+      "id": 11,
+      "module": "invitations and credits",
+      "routes": [
+        "/me/invite",
+        "/invite?code=<one-time-code>"
+      ],
+      "uiContracts": [
+        "invite form",
+        "link copy",
+        "resend",
+        "revoke",
+        "accept invitation"
+      ],
+      "httpChecks": [
+        "POST /api/workspaces/test-111/invitations",
+        "GET /api/invitations/lookup/:code",
+        "POST /api/invitations/:code/accept"
+      ],
+      "status": "partial",
+      "evidence": "test/e2e/aura-14-point.spec.mjs, test/invite-lifecycle.test.mjs"
+    },
+    {
+      "id": 12,
+      "module": "open platform",
+      "routes": [
+        "/test-111/open-platform"
+      ],
+      "uiContracts": [
+        "REST card",
+        "A2A card",
+        "Webhook planned card",
+        "API key entry"
+      ],
+      "httpChecks": [
+        "GET /a2a/v1/agents",
+        "external API key requires auth"
+      ],
+      "status": "partial",
+      "evidence": "test/e2e/aura-14-point.spec.mjs, test/api.test.mjs"
+    },
+    {
+      "id": 13,
+      "module": "inbox and new conversation",
+      "routes": [
+        "/test-111/inbox"
+      ],
+      "uiContracts": [
+        "empty/notification state",
+        "mark all read",
+        "conversation message",
+        "archive"
+      ],
+      "httpChecks": [
+        "GET/POST /api/workspaces/test-111/notifications",
+        "GET/POST /api/workspaces/test-111/conversations"
+      ],
+      "status": "partial",
+      "evidence": "test/e2e/aura-14-point.spec.mjs, test/completion-gaps.test.mjs"
+    },
+    {
+      "id": 14,
+      "module": "backend, A2A and acceptance",
+      "routes": [
+        "/healthz",
+        "/a2a/v1/agents",
+        "/a2a/v1/actions"
+      ],
+      "uiContracts": [
+        "route matrix",
+        "unknown route observation",
+        "no credential literals"
+      ],
+      "httpChecks": [
+        "health",
+        "A2A register/action/ack/result",
+        "SSE notification boundary",
+        "API key auth and revocation"
+      ],
+      "status": "partial",
+      "evidence": "test/routes.test.mjs, test/e2e/aura-14-point.spec.mjs, test/api.test.mjs"
+    }
+  ],
+  "knownLimitations": [
+    "Playwright is not installed; browser clicks/screenshots are not exercised by this baseline.",
+    "Visual screenshot comparison, real WebSocket transport, external object storage/Git sync, and real browser clipboard are outside the Node fallback.",
+    "Tests use an in-memory repository and an ephemeral HTTP port; they do not restart or attach to the existing services.",
+    "Unsupported /test-111/<page> aliases continue to fall back to home for compatibility; arbitrary non-workspace paths now render a dedicated not-found empty state."
+  ]
+}
