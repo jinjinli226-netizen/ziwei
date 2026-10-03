@@ -1,4 +1,11 @@
-export const API_BASE = import.meta.env.VITE_API_URL || 'http://127.0.0.1:4178';
+import { resolveApiBase } from './api-base.js';
+
+const runtimeOrigin = typeof window === 'undefined' ? '' : window.location.origin;
+export const API_BASE = resolveApiBase({
+  configured: import.meta.env.VITE_API_URL,
+  dev: import.meta.env.DEV,
+  origin: runtimeOrigin,
+});
 const WORKSPACE_KEY = 'ziwei.workspace';
 export function workspaceSlug() {
   try { return localStorage.getItem(WORKSPACE_KEY) || 'test-111'; } catch { return 'test-111'; }
