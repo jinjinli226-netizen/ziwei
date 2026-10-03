@@ -8,7 +8,7 @@
 
 > **当前本机运行态**：当前 `ziwei_user` 已接入工作区 `bjc-ops`。文中的 `test-111` 是默认示例和历史验收 fixture；接手时必须先读取 `data/ziwei_user.json` 与 `/readyz`，不要把示例工作区当成当前运行工作区。
 
-> **版本事实**：当前分支为 `main`；基线 HEAD 为 `cb7bfed`，工作树包含后续未提交修改。不要在未审查 `git status --short` 前执行 reset、clean 或覆盖式 checkout。
+> **版本事实**：当前分支为 `main`；最新 HEAD 为 `6caf04a`，工作树仅保留既有未跟踪临时文件 `tmp_gzgov.html`。不要在未审查 `git status --short` 前执行 reset、clean 或覆盖式 checkout。
 
 ## 1. 先看结论
 
@@ -17,7 +17,7 @@
 当前通过的本地质量门槛：
 
 ```text
-npm test       84 passed
+npm test       87 passed
 npm run lint   passed
 npm run build  passed
 ```
