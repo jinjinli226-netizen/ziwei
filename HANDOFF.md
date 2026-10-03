@@ -202,3 +202,11 @@ npm run lint
 
 本轮文档校准（2026-10-01）：以上状态以当前工作区代码和最近一次 `npm test` 62/62、`npm run lint`、`npm run build` 结果为准。日历拖拽、自动化生命周期、成员/数字员工/设备动态管理、A2A 终态事件保护、WebSocket/SSE 实时双通道、登录用户创建工作区路由和真实会话注销已落地；远端 Git 同步、完整浏览器四态/截图验收仍明确延期。
 - 追加落地：数字伙伴编排器麦克风使用浏览器 SpeechRecognition（无支持时给出明确反馈），工作区语言属性和浅色/深色/跟随系统主题设置会实际应用到页面根节点。
+
+### 2026-10-04 Hermes 独立人格服务器验收
+
+- 服务器 `/opt/ziwei` 已切换到 `codex/hermes-independent-profile`，部署提交 `d1a4c9c`；部署前备份为 `/opt/ziwei-backups/ziwei.sqlite.20261003T165528Z`，生产 `main` 保持不变。
+- 本机 `bjc-ops` daemon 与服务器 A2A 令牌已同步。由于服务器使用自签名证书，启动器现在支持配置 `tlsCaFile` 并把证书作为 `NODE_EXTRA_CA_CERTS` 传给子进程，不再依赖关闭 TLS 校验。
+- 真实动作验收通过：Hermes profile `ziwei-aigc` 返回 `HERMES_PROD_PROFILE_OK` 与 `HERMES_PROD_PROFILE_RECHECK_OK`，服务器动作终态为 `succeeded`。
+- 本轮质量门槛：`npm test` 90/90、`npm run lint`、`npm run build` 通过。工作树中的 `tmp_gzgov.html` 继续保留，未改动。
+

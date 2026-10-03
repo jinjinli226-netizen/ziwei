@@ -37,6 +37,23 @@ async function probeReady() {
   return { ...result, ok: result.ok && result.body.ready === true };
 }
 
+function childEnvironment() {
+  const env = { ...process.env };
+  const configuredCa = config.tlsCaFile || process.env.ZIWEI_TLS_CA_FILE;
+  if (!configuredCa) return env;
+  const caFile = path.isAbsolute(String(configuredCa))
+    ? String(configuredCa)
+    : path.resolve(ROOT, String(configuredCa));
+  if (!fs.existsSync(caFile)) {
+    throw new Error(`TLS CA 文件不存在：${caFile}`);
+  }
+  // NODE_EXTRA_CA_CERTS is read by the child Node process at startup. Prefer
+  // the pinned server certificate over the temporary insecure override.
+  env.NODE_EXTRA_CA_CERTS = caFile;
+  delete env.NODE_TLS_REJECT_UNAUTHORIZED;
+  return env;
+}
+
 async function main() {
   if (configError) {
     console.error(`ziwei_user 配置文件无法读取：${configPath}`);
@@ -69,7 +86,7 @@ async function main() {
   // Launch the daemon entrypoint directly.  Spawning npm.cmd with detached=true
   // raises EINVAL on some Windows installations and leaves the UI disconnected.
   // Using the current Node executable also avoids an extra npm shim process.
-  const child = spawn(process.execPath, [path.join(ROOT, 'daemon', 'ziwei_user.mjs')], { cwd: ROOT, detached: true, stdio: 'ignore', windowsHide: true });
+  const child = spawn(process.execPath, [path.join(ROOT, 'daemon', 'ziwei_user.mjs')], { cwd: ROOT, env: childEnvironment(), detached: true, stdio: 'ignore', windowsHide: true });
   child.unref();
   console.log(`已启动 ziwei_user（PID ${child.pid || '后台进程'}），等待首次心跳...`);
 

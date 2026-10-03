@@ -8,7 +8,7 @@
 
 > **当前本机运行态**：当前 `ziwei_user` 已接入工作区 `bjc-ops`。文中的 `test-111` 是默认示例和历史验收 fixture；接手时必须先读取 `data/ziwei_user.json` 与 `/readyz`，不要把示例工作区当成当前运行工作区。
 
-> **版本事实**：本次 Hermes 独立人格改动位于分支 `codex/hermes-independent-profile`，生产 `main` 未更新；工作树仍保留既有未跟踪临时文件 `tmp_gzgov.html`。不要在未审查 `git status --short` 前执行 reset、clean 或覆盖式 checkout。
+> **版本事实**：本次 Hermes 独立人格改动位于分支 `codex/hermes-independent-profile`；服务器已按该分支部署，生产 Git `main` 仍保持不变。工作树仍保留既有未跟踪临时文件 `tmp_gzgov.html`。不要在未审查 `git status --short` 前执行 reset、clean 或覆盖式 checkout。
 
 ## 1. 先看结论
 
@@ -22,9 +22,17 @@ npm run lint   passed
 npm run build  passed
 ```
 
-最近一次验证环境为 Windows、Node v24.13.0、npm 11.6.2；当前分支为 `main`，工作区仍有未提交的功能修改。接手时先运行 `git status --short`，把这些修改视为现有工作，不要重置、清理或覆盖。
+最近一次验证环境为 Windows、Node v24.13.0、npm 11.6.2；当前分支为 `codex/hermes-independent-profile`，工作区只保留既有未跟踪临时文件。接手时先运行 `git status --short`，把这些修改视为现有工作，不要重置、清理或覆盖。
 
 这不等于所有部署边界都完成。远端 Git 同步、生产级 PostgreSQL/Redis/对象存储、云端 OAuth、计费、真正的沙箱隔离以及完整浏览器逐页截图验收仍属于后续工作。不要把这些项目写成“已完成”。
+
+### 2026-10-04 发布与真实链路验证
+
+- 服务器 `154.202.118.5` 已部署分支 `codex/hermes-independent-profile` 的提交 `d1a4c9c`；服务器 `main` 未被改写。部署前 SQLite 备份为 `/opt/ziwei-backups/ziwei.sqlite.20261003T165528Z`。
+- 服务器 `ziwei-api` 重启后保持 active；本地和公网 `/healthz` 均返回 200。服务器前端构建产物包含岗位说明内联编辑入口。
+- 本机 `data/ziwei_user.json` 以 `bjc-ops` 为工作区，A2A 令牌与服务器已重新同步；本机 `/readyz` 为 ready，daemon 日志持续记录 `heartbeat` 和 `a2a_poll` 成功。
+- 真实服务器动作已完成两次独立验收：`runtime=Hermes`、`profile=ziwei-aigc`，分别返回 `HERMES_PROD_PROFILE_OK` 和 `HERMES_PROD_PROFILE_RECHECK_OK`，结果均为 `succeeded`。服务器返回结果包含独立 profile，profile 不存在时仍会明确失败。
+- 本轮代码验证：`npm test` 90/90、`npm run lint`、`npm run build` 均通过。
 
 ## 2. 60 秒启动和验收
 
@@ -80,10 +88,11 @@ Invoke-RestMethod http://127.0.0.1:4178/api/workspaces/test-111/summary
 本机配置：
 
 ```text
-data/ziwei_user.json       # 不提交令牌；示例工作区为 test-111，当前本机以文件内容为准
+data/ziwei_user.json       # 不提交令牌；当前本机以文件内容为准，并引用本机私有 TLS CA 路径
 data/ziwei.sqlite          # 本地持久化数据库
  data/a2a.token             # 本机 A2A 令牌，禁止写入日志或提交
 .local/runtime/             # daemon 动作状态
+.local/server.crt           # 服务器自签名证书副本，仅供本机 daemon 的 NODE_EXTRA_CA_CERTS 使用
 .local/logs/                # 追加日志，单文件超过 5 MiB 会轮转
 ```
 
@@ -134,7 +143,7 @@ ziwei_user daemon（daemon/ziwei_user.mjs）
 - 数字员工创建、运行时选择、任务安排、持久会话和对话收件箱。
 - `ziwei_user` 首次安装引导、心跳、就绪状态、设备和 Agent CLI 版本发现。
 - Codex/Claude/Gemini/Hermes 本机 CLI 适配；Codex 使用真实本机配置和系统代理，不使用伪造输出。
-- Hermes 独立人格（本地分支）：数字员工可绑定本机 Hermes profile；执行时隔离 `HERMES_HOME`，并把岗位说明注入真实 task/conversation prompt。profile 不存在时明确失败，不回退主 profile。该改动尚未部署到生产。
+- Hermes 独立人格：数字员工可绑定本机 Hermes profile；执行时隔离 `HERMES_HOME`，并把岗位说明注入真实 task/conversation prompt。profile 不存在时明确失败，不回退主 profile。服务器当前运行 `codex/hermes-independent-profile`，已用真实 A2A action 验证 `runtime=Hermes`、`profile=ziwei-aigc` 和独立输出。
 - 数字伙伴岗位说明页支持内联编辑；保存只更新岗位说明，不再打开完整的数字伙伴配置弹窗。
 - A2A action 的创建、去重、ACK、事件、执行租约、结果、失败和过期处理。
 - 公开推理摘要、命令/工具安全摘要、CLI 输出量和阶段状态；不展示模型原始私有思维链。
