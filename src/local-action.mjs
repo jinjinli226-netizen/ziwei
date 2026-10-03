@@ -163,6 +163,7 @@ export function createLocalActionExecutor({runtimeDir, allowedExecutables = [], 
       return executeRuntime({
         runtime,
         model: payload.model || payload.modelId || payload.model_id || null,
+        profile: payload.profile || payload.runtimeProfile || payload.runtime_profile || payload.hermesProfile || payload.hermes_profile || null,
         prompt,
         cwd: payload.cwd || payload.workingDirectory || payload.workdir || process.cwd(),
         env: payload.env,

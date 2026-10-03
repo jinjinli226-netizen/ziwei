@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeProxyUrl, parseRuntimeStreamLine, proxyUrlForChild, runtimeInvocation } from '../src/runtime-adapters.mjs';
+import { hermesProfileHome, normalizeProxyUrl, parseRuntimeStreamLine, proxyUrlForChild, runtimeInvocation } from '../src/runtime-adapters.mjs';
 
 test('Codex nested agent messages become the runtime response', () => {
   const state = { output: '', response: '', bytes: 0, truncated: false, lineBuffer: '' };
@@ -65,4 +65,10 @@ test('proxy settings normalize the Windows host:port and protocol-map forms', ()
 
 test('explicit proxy environment wins over machine discovery', () => {
   assert.equal(proxyUrlForChild({ HTTPS_PROXY: 'http://127.0.0.1:9988' }), 'http://127.0.0.1:9988');
+});
+
+test('Hermes profile home is isolated beneath the configured Hermes home', () => {
+  assert.equal(hermesProfileHome('default', { baseHome: 'C:\\hermes' }), 'C:\\hermes');
+  assert.equal(hermesProfileHome('ziwei-aigc', { baseHome: 'C:\\hermes' }), 'C:\\hermes\\profiles\\ziwei-aigc');
+  assert.throws(() => hermesProfileHome('../outside', { baseHome: 'C:\\hermes' }), /profile 名称无效/);
 });

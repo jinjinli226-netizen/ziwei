@@ -59,7 +59,7 @@ test('repository persists invitations, devices, and digital employees', () => {
   const repo = createRepository({ memory: true });
   const member = repo.createMember('test-111', { email: 'new@example.com', role: 'admin' });
   const device = repo.createDevice('test-111', { name: 'office-pc' });
-  const employee = repo.createEmployee('test-111', { name: '日报整理员', runtime: 'Codex', model: 'openai:gpt-6', visibility: 'personal', skills: ['skill-code'], instructions: '整理日报' });
+  const employee = repo.createEmployee('test-111', { name: '日报整理员', runtime: 'Codex', model: 'openai:gpt-6', visibility: 'personal', skills: ['skill-code'], instructions: '整理日报', runtimeProfile: 'ziwei-aigc' });
   const paused = repo.createEmployee('test-111', { name: '暂停中的员工', status: 'paused' });
   const invalid = repo.createEmployee('test-111', { name: '未知状态员工', status: 'not-a-status' });
   assert.equal(repo.listMembers('test-111').some(item => item.id === member.id), true);
@@ -71,7 +71,42 @@ test('repository persists invitations, devices, and digital employees', () => {
   assert.equal(invalid.status, 'active');
   assert.equal(employees.find(item => item.id === employee.id).status, 'active');
   assert.equal(employees.find(item => item.id === employee.id).model_id, 'openai:gpt-6');
+  assert.equal(employees.find(item => item.id === employee.id).runtime_profile, 'ziwei-aigc');
   assert.deepEqual(employees.find(item => item.id === employee.id).skills, ['skill-code']);
+});
+
+test('employee execution payload carries Hermes profile and role personality', () => {
+  const repo = createRepository({ memory: true });
+  const employee = repo.createEmployee('test-111', {
+    name: '紫薇研究员',
+    runtime: 'Hermes',
+    runtimeProfile: 'ziwei-aigc',
+    instructions: '你负责核对来源，输出结论和下一步。'
+  });
+  const conversation = repo.createConversation('test-111', { employeeId: employee.id, title: '独立人格测试' });
+  const task = repo.createTask('test-111', {
+    title: '执行独立人格测试', description: '只回复 PROFILE_PERSONA_OK', employeeId: employee.id,
+    execute: true, runtime: 'Hermes', conversationId: conversation.id
+  });
+  const action = repo.listA2AActions('test-111', { status: 'pending' })[0];
+  assert.equal(action.task_id, task.id);
+  assert.equal(action.payload.profile, 'ziwei-aigc');
+  assert.match(action.payload.prompt, /紫薇研究员/);
+  assert.match(action.payload.prompt, /你负责核对来源/);
+  assert.match(action.payload.prompt, /PROFILE_PERSONA_OK/);
+});
+
+test('employee conversation dispatch injects the configured role personality', () => {
+  const repo = createRepository({ memory: true });
+  const employee = repo.createEmployee('test-111', {
+    name: '独立会话伙伴', runtime: 'Hermes', runtimeProfile: 'ziwei-aigc', instructions: '必须保持严谨口吻。'
+  });
+  const conversation = repo.createConversation('test-111', { employeeId: employee.id });
+  repo.addConversationMessage(conversation.id, { role: 'user', content: '返回 CONVERSATION_PERSONA_OK' });
+  const action = repo.listA2AActions('test-111', { status: 'pending' })[0];
+  assert.equal(action.payload.profile, 'ziwei-aigc');
+  assert.match(action.payload.prompt, /必须保持严谨口吻/);
+  assert.match(action.payload.prompt, /CONVERSATION_PERSONA_OK/);
 });
 
 test('repository updates task details and stores task messages', () => {

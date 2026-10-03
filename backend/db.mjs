@@ -127,7 +127,7 @@ export function openDatabase({ memory = false, filename = path.join(ROOT, 'data'
     CREATE TABLE IF NOT EXISTS employees (
       id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, name TEXT NOT NULL,
       runtime TEXT NOT NULL, model_id TEXT, description TEXT NOT NULL DEFAULT '', visibility TEXT NOT NULL DEFAULT 'workspace',
-      skills_json TEXT NOT NULL DEFAULT '[]', instructions TEXT NOT NULL DEFAULT '', avatar TEXT, status TEXT NOT NULL DEFAULT 'draft',
+      skills_json TEXT NOT NULL DEFAULT '[]', instructions TEXT NOT NULL DEFAULT '', runtime_profile TEXT, avatar TEXT, status TEXT NOT NULL DEFAULT 'draft',
       created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
       FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
     );
@@ -208,6 +208,7 @@ export function openDatabase({ memory = false, filename = path.join(ROOT, 'data'
     "ALTER TABLE employees ADD COLUMN description TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE employees ADD COLUMN visibility TEXT NOT NULL DEFAULT 'workspace'",
     "ALTER TABLE employees ADD COLUMN skills_json TEXT NOT NULL DEFAULT '[]'",
+    "ALTER TABLE employees ADD COLUMN runtime_profile TEXT",
     "ALTER TABLE employees ADD COLUMN avatar TEXT",
     "ALTER TABLE skills ADD COLUMN scope TEXT NOT NULL DEFAULT 'platform'",
     "ALTER TABLE skills ADD COLUMN recommended INTEGER NOT NULL DEFAULT 0",

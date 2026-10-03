@@ -7,6 +7,7 @@ import { MAX_SKILL_BYTES, hashSkillContent, parseSkillMarkdown, validateSkillDoc
 import { extractSkillMarkdownArchive } from './skills/archive.mjs';
 import { objectStoreFromOptions } from './storage.mjs';
 import { sanitizeHtml } from './sanitize.mjs';
+import { composeEmployeePrompt, normalizeRuntimeProfile } from '../src/employee-runtime.mjs';
 
 const now = () => new Date().toISOString();
 const id = prefix => `${prefix}_${crypto.randomUUID()}`;
@@ -136,6 +137,8 @@ const automationView = (row, runCount = 0) => {
   return view;
 };
 
+const employeeView = row => row ? ({ ...row, skills: parse(row.skills_json) }) : null;
+
 const calendarEventView = row => row ? ({
   ...row,
   source: 'event',
@@ -170,6 +173,28 @@ export function createRepository(options = {}) {
   const objectStore = objectStoreFromOptions(options);
   const discover = options.discoverLocalVersions || discoverLocalVersions;
   const workspace = slug => db.prepare('SELECT * FROM workspaces WHERE slug = ?').get(slug);
+  const employeeForInput = (workspaceId, input = {}) => {
+    const employeeId = String(input.employeeId ?? input.employee_id ?? '').trim();
+    if (employeeId) return db.prepare('SELECT * FROM employees WHERE id=? AND workspace_id=?').get(employeeId, workspaceId) || null;
+    const assignee = String(input.assignee || '').trim();
+    if (!assignee) return null;
+    return db.prepare('SELECT * FROM employees WHERE workspace_id=? AND lower(name)=lower(?) ORDER BY created_at DESC LIMIT 1').get(workspaceId, assignee) || null;
+  };
+  const executionPayload = ({ prompt, employee = null, runtime = null, model = null, profile = null, taskId = null, conversationId = null, cwd = null } = {}) => {
+    const selectedRuntime = runtime || employee?.runtime || null;
+    const selectedModel = model || employee?.model_id || null;
+    const selectedProfile = normalizeRuntimeProfile(profile ?? employee?.runtime_profile);
+    return {
+      ...(taskId ? { taskId } : {}),
+      prompt: composeEmployeePrompt({ prompt, name: employee?.name, instructions: employee?.instructions }),
+      runtime: selectedRuntime,
+      model: selectedModel,
+      profile: selectedProfile,
+      ...(employee ? { employeeId: employee.id, employeeName: employee.name } : {}),
+      ...(cwd ? { cwd } : {}),
+      ...(conversationId ? { conversationId } : {}),
+    };
+  };
   // A workspace can be created after the database seed has run.  Keep the
   // four built-in runtime rows available as soon as our own bridge reports a
   // heartbeat, while leaving any existing row (including its version and
@@ -313,7 +338,18 @@ export function createRepository(options = {}) {
       db.prepare('INSERT INTO tasks(id,workspace_id,title,description,description_format,state,priority,created_by,assignee,labels_json,due_date,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)').run(task.id,ws.id,task.title,task.description,task.description_format,task.state,task.priority,task.created_by,task.assignee,JSON.stringify(task.labels),task.due_date,created,created);
       audit(slug,'user','task.created',{taskId:task.id});
       if (input.runtime || input.model || input.execute === true) {
-        this.createA2AAction(slug,{agentId:'ziwei_user',taskId:task.id,type:'task.execute',dedupeKey:`task:${task.id}:execute`,payload:{taskId:task.id,prompt:task.description || task.title,runtime:input.runtime || null,model:input.model || input.modelId || null,cwd:input.cwd || null,conversationId:input.conversationId || input.conversation_id || null}});
+        const employee = employeeForInput(ws.id, input);
+        const payload = executionPayload({
+          prompt: task.description || task.title,
+          employee,
+          runtime: input.runtime || null,
+          model: input.model || input.modelId || input.model_id || null,
+          profile: input.profile ?? input.runtimeProfile ?? input.runtime_profile ?? input.hermesProfile ?? input.hermes_profile,
+          taskId: task.id,
+          cwd: input.cwd || null,
+          conversationId: input.conversationId || input.conversation_id || null,
+        });
+        this.createA2AAction(slug,{agentId:'ziwei_user',taskId:task.id,type:'task.execute',dedupeKey:`task:${task.id}:execute`,payload});
       }
       return task;
     },
@@ -898,8 +934,8 @@ export function createRepository(options = {}) {
         member: { read:['workspace','tasks','runtimes','skills','documents','automations','calendar','members','invitations','devices','employees','audit','notifications','conversations'], write:['tasks','skills','documents','automations','employees','notifications','conversations'] }
       };
     },
-    listEmployees(slug) { const ws=workspace(slug); if (!ws) throw new Error('Workspace not found'); return db.prepare('SELECT * FROM employees WHERE workspace_id=? ORDER BY created_at DESC').all(ws.id).map(row => ({...row, skills: parse(row.skills_json)})); },
-    createEmployee(slug, input = {}) { const ws=workspace(slug); if (!ws) throw new Error('Workspace not found'); const timestamp=now(); const name=String(input.name || '未命名数字员工').trim(); if (!name) throw new Error('数字员工名称不能为空'); const requestedStatus=String(input.status || 'active'); const status=new Set(['draft','active','paused','archived']).has(requestedStatus) ? requestedStatus : 'active'; const employee={id:id('employee'),workspace_id:ws.id,name,runtime:String(input.runtime || 'Codex'),model_id:input.model || input.modelId || input.model_id || null,description:String(input.description || ''),visibility:input.visibility === 'personal' ? 'personal' : 'workspace',skills:Array.isArray(input.skills) ? input.skills : [],instructions:String(input.instructions || ''),avatar:input.avatar ? String(input.avatar) : null,status,created_at:timestamp,updated_at:timestamp}; db.prepare('INSERT INTO employees(id,workspace_id,name,runtime,model_id,description,visibility,skills_json,instructions,avatar,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)').run(employee.id,ws.id,employee.name,employee.runtime,employee.model_id,employee.description,employee.visibility,JSON.stringify(employee.skills),employee.instructions,employee.avatar,employee.status,timestamp,timestamp); audit(slug,'user','employee.created',{employeeId:employee.id,modelId:employee.model_id,status}); return employee; },
+    listEmployees(slug) { const ws=workspace(slug); if (!ws) throw new Error('Workspace not found'); return db.prepare('SELECT * FROM employees WHERE workspace_id=? ORDER BY created_at DESC').all(ws.id).map(employeeView); },
+    createEmployee(slug, input = {}) { const ws=workspace(slug); if (!ws) throw new Error('Workspace not found'); const timestamp=now(); const name=String(input.name || '未命名数字员工').trim(); if (!name) throw new Error('数字员工名称不能为空'); const requestedStatus=String(input.status || 'active'); const status=new Set(['draft','active','paused','archived']).has(requestedStatus) ? requestedStatus : 'active'; const runtimeProfile=normalizeRuntimeProfile(input.runtimeProfile ?? input.runtime_profile ?? input.profile ?? input.hermesProfile ?? input.hermes_profile); const employee={id:id('employee'),workspace_id:ws.id,name,runtime:String(input.runtime || 'Codex'),model_id:input.model || input.modelId || input.model_id || null,description:String(input.description || ''),visibility:input.visibility === 'personal' ? 'personal' : 'workspace',skills:Array.isArray(input.skills) ? input.skills : [],instructions:String(input.instructions || ''),runtime_profile:runtimeProfile,avatar:input.avatar ? String(input.avatar) : null,status,created_at:timestamp,updated_at:timestamp}; db.prepare('INSERT INTO employees(id,workspace_id,name,runtime,model_id,description,visibility,skills_json,instructions,runtime_profile,avatar,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(employee.id,ws.id,employee.name,employee.runtime,employee.model_id,employee.description,employee.visibility,JSON.stringify(employee.skills),employee.instructions,employee.runtime_profile,employee.avatar,employee.status,timestamp,timestamp); audit(slug,'user','employee.created',{employeeId:employee.id,modelId:employee.model_id,runtimeProfile:employee.runtime_profile,status}); return employee; },
     updateEmployee(employeeId, input = {}) {
       const row = db.prepare('SELECT * FROM employees WHERE id=?').get(employeeId); if (!row) throw new Error('数字员工不存在');
       const ws = db.prepare('SELECT * FROM workspaces WHERE id=?').get(row.workspace_id); if (!ws) throw new Error('Workspace not found');
@@ -910,11 +946,12 @@ export function createRepository(options = {}) {
       const visibility=input.visibility === undefined ? row.visibility : (input.visibility === 'personal' ? 'personal' : 'workspace');
       const skills=input.skills === undefined ? parse(row.skills_json) : (Array.isArray(input.skills) ? input.skills : []);
       const instructions=input.instructions === undefined ? row.instructions : String(input.instructions || '');
+      const runtimeProfile=input.runtimeProfile === undefined && input.runtime_profile === undefined && input.profile === undefined && input.hermesProfile === undefined && input.hermes_profile === undefined ? row.runtime_profile : normalizeRuntimeProfile(input.runtimeProfile ?? input.runtime_profile ?? input.profile ?? input.hermesProfile ?? input.hermes_profile);
       const avatar=input.avatar === undefined ? row.avatar : (input.avatar ? String(input.avatar) : null);
       const statuses=new Set(['draft','active','paused','archived']); const status=input.status === undefined ? row.status : String(input.status); if (!statuses.has(status)) throw new Error('数字员工状态无效');
-      const updated=now(); db.prepare('UPDATE employees SET name=?,runtime=?,model_id=?,description=?,visibility=?,skills_json=?,instructions=?,avatar=?,status=?,updated_at=? WHERE id=?').run(name,runtime,modelId,description,visibility,JSON.stringify(skills),instructions,avatar,status,updated,employeeId);
-      audit(ws.slug,'user','employee.updated',{employeeId,name,runtime,modelId,status});
-      const saved=db.prepare('SELECT * FROM employees WHERE id=?').get(employeeId); return {...saved,skills:parse(saved.skills_json)};
+      const updated=now(); db.prepare('UPDATE employees SET name=?,runtime=?,model_id=?,description=?,visibility=?,skills_json=?,instructions=?,runtime_profile=?,avatar=?,status=?,updated_at=? WHERE id=?').run(name,runtime,modelId,description,visibility,JSON.stringify(skills),instructions,runtimeProfile,avatar,status,updated,employeeId);
+      audit(ws.slug,'user','employee.updated',{employeeId,name,runtime,modelId,runtimeProfile,status});
+      const saved=db.prepare('SELECT * FROM employees WHERE id=?').get(employeeId); return employeeView(saved);
     },
     deleteEmployee(employeeId) {
       const row=db.prepare('SELECT * FROM employees WHERE id=?').get(employeeId); if (!row) throw new Error('数字员工不存在');
@@ -1027,7 +1064,7 @@ export function createRepository(options = {}) {
     listConversations(slug) { const ws=workspace(slug); if(!ws) throw new Error('Workspace not found'); return db.prepare('SELECT * FROM conversations WHERE workspace_id=? ORDER BY updated_at DESC').all(ws.id).map(row=>({...row,message_count:db.prepare('SELECT COUNT(*) AS count FROM conversation_messages WHERE conversation_id=?').get(row.id).count,execution:conversationExecution(row.id)})); },
     getConversation(conversationId) { const row=db.prepare('SELECT * FROM conversations WHERE id=?').get(conversationId); if(!row) return null; return {...row,execution:conversationExecution(conversationId),messages:db.prepare('SELECT * FROM conversation_messages WHERE conversation_id=? ORDER BY created_at').all(conversationId).map(item=>({...item,attachments:parse(item.attachment_json)}))}; },
     createConversation(slug,input={}) { const ws=workspace(slug); if(!ws) throw new Error('Workspace not found'); const employeeId=input.employeeId || input.employee_id || null; if(employeeId && !db.prepare('SELECT 1 FROM employees WHERE id=? AND workspace_id=?').get(employeeId,ws.id)) throw new Error('数字员工不存在'); const timestamp=now(); const conversation={id:id('conv'),workspace_id:ws.id,employee_id:employeeId,title:String(input.title || '新对话').trim() || '新对话',status:'active',created_at:timestamp,updated_at:timestamp}; db.prepare('INSERT INTO conversations(id,workspace_id,employee_id,title,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?)').run(conversation.id,ws.id,employeeId,conversation.title,'active',timestamp,timestamp); audit(slug,'user','conversation.created',{conversationId:conversation.id,employeeId}); return {...conversation,messages:[]}; },
-    addConversationMessage(conversationId,input={}) { const conversation=db.prepare('SELECT * FROM conversations WHERE id=?').get(conversationId); if(!conversation) throw new Error('Conversation not found'); const message={id:id('convmsg'),conversation_id:conversationId,role:['user','assistant','system'].includes(input.role) ? input.role : 'user',content:String(input.content || '').trim(),attachments:Array.isArray(input.attachments) ? input.attachments : [],created_at:now()}; if(!message.content && !message.attachments.length) throw new Error('消息内容不能为空'); db.prepare('INSERT INTO conversation_messages(id,conversation_id,role,content,attachment_json,created_at) VALUES(?,?,?,?,?,?)').run(message.id,conversationId,message.role,message.content,JSON.stringify(message.attachments),message.created_at); db.prepare('UPDATE conversations SET updated_at=? WHERE id=?').run(message.created_at,conversationId); const ws=db.prepare('SELECT slug FROM workspaces WHERE id=?').get(conversation.workspace_id); audit(ws.slug,message.role,'conversation.message.created',{conversationId,messageId:message.id,dispatch:input.dispatch !== false}); if (message.role === 'user' && input.dispatch !== false) this.createA2AAction(ws.slug,{type:'conversation.execute',payload:{conversationId,messageId:message.id,prompt:message.content,runtime:input.runtime || null,model:input.model || null},dedupeKey:`conversation:${conversationId}:${message.id}`}); return {...message,execution:conversationExecution(conversationId)}; },
+    addConversationMessage(conversationId,input={}) { const conversation=db.prepare('SELECT * FROM conversations WHERE id=?').get(conversationId); if(!conversation) throw new Error('Conversation not found'); const message={id:id('convmsg'),conversation_id:conversationId,role:['user','assistant','system'].includes(input.role) ? input.role : 'user',content:String(input.content || '').trim(),attachments:Array.isArray(input.attachments) ? input.attachments : [],created_at:now()}; if(!message.content && !message.attachments.length) throw new Error('消息内容不能为空'); db.prepare('INSERT INTO conversation_messages(id,conversation_id,role,content,attachment_json,created_at) VALUES(?,?,?,?,?,?)').run(message.id,conversationId,message.role,message.content,JSON.stringify(message.attachments),message.created_at); db.prepare('UPDATE conversations SET updated_at=? WHERE id=?').run(message.created_at,conversationId); const ws=db.prepare('SELECT slug FROM workspaces WHERE id=?').get(conversation.workspace_id); const employee=conversation.employee_id ? db.prepare('SELECT * FROM employees WHERE id=? AND workspace_id=?').get(conversation.employee_id,conversation.workspace_id) : null; audit(ws.slug,message.role,'conversation.message.created',{conversationId,messageId:message.id,dispatch:input.dispatch !== false}); if (message.role === 'user' && input.dispatch !== false) { const payload=executionPayload({prompt:message.content,employee,runtime:input.runtime || null,model:input.model || input.modelId || null,profile:input.profile ?? input.runtimeProfile ?? input.runtime_profile ?? input.hermesProfile ?? input.hermes_profile,conversationId}); payload.messageId=message.id; this.createA2AAction(ws.slug,{type:'conversation.execute',payload,dedupeKey:`conversation:${conversationId}:${message.id}`}); } return {...message,execution:conversationExecution(conversationId)}; },
     archiveConversation(conversationId, archived = true) { const row=db.prepare('SELECT * FROM conversations WHERE id=?').get(conversationId); if(!row) throw new Error('Conversation not found'); db.prepare('UPDATE conversations SET status=? WHERE id=?').run(archived ? 'archived' : 'active',conversationId); return this.getConversation(conversationId); },
     registerA2AAgent(slug, input = {}) { const ws = workspace(slug); if (!ws) throw new Error('Workspace not found'); const agentId = String(input.agentId || input.agent_id || 'ziwei_user'); if (agentId !== 'ziwei_user') throw new Error('Only ziwei_user agent is accepted'); return this.heartbeatDevice(slug, { ...input, agentId, serviceName:'ziwei_user' }); },
     createA2AAction(slug, input = {}) {

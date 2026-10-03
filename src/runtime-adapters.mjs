@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { redactSecrets } from './redaction.mjs';
+import { normalizeRuntimeProfile } from './employee-runtime.mjs';
 
 /**
  * Native local runtime adapters used by ziwei_user.
@@ -230,6 +231,21 @@ function normalizeRuntime(value) {
   return Object.keys(DEFINITIONS).find(runtime => runtime.toLowerCase() === needle || DEFINITIONS[runtime].aliases.some(alias => alias.toLowerCase() === needle)) || null;
 }
 
+export function hermesProfileHome(profile, { baseHome = null } = {}) {
+  const normalized = normalizeRuntimeProfile(profile);
+  if (!normalized) return null;
+  const configuredHome = String(baseHome || process.env.HERMES_HOME || (process.platform === 'win32'
+    ? path.join(os.homedir(), 'AppData', 'Local', 'hermes')
+    : path.join(os.homedir(), '.hermes')));
+  const root = path.resolve(configuredHome);
+  if (normalized === 'default') return root;
+  const profilesRoot = path.resolve(root, 'profiles');
+  const candidate = path.resolve(profilesRoot, normalized);
+  const relative = path.relative(profilesRoot, candidate);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('Hermes profile 路径无效');
+  return candidate;
+}
+
 function appendOutput(state, chunk, onOutput) {
   const text = String(chunk || '');
   if (!text) return;
@@ -336,7 +352,7 @@ export function parseRuntimeStreamLine(line, state, onOutput = () => {}, onStage
 }
 
 /** Execute an installed CLI using an explicit argv, with full local approval. */
-export function executeRuntime({ runtime, prompt, model = null, cwd = process.cwd(), env = {}, signal, onOutput, onProgress, onStage } = {}) {
+export function executeRuntime({ runtime, prompt, model = null, profile = null, cwd = process.cwd(), env = {}, signal, onOutput, onProgress, onStage } = {}) {
   const resolvedRuntime = normalizeRuntime(runtime);
   if (!resolvedRuntime) return Promise.reject(new Error(`未知本机运行时: ${runtime || '(empty)'}`));
   const definition = DEFINITIONS[resolvedRuntime];
@@ -348,6 +364,13 @@ export function executeRuntime({ runtime, prompt, model = null, cwd = process.cw
   const spec = spawnSpec(discovered.binary, invocation.args);
   const childEnv = { ...process.env, ...env };
   delete childEnv.ZIWEI_CONFIG;
+  if (resolvedRuntime === 'Hermes' && profile) {
+    const selectedHome = hermesProfileHome(profile, { baseHome: childEnv.HERMES_HOME });
+    if (String(profile).trim() !== 'default' && !fs.existsSync(selectedHome)) {
+      return Promise.reject(new Error(`Hermes profile 不存在: ${String(profile).trim()}`));
+    }
+    childEnv.HERMES_HOME = selectedHome;
+  }
   // The desktop user session may have a proxy configured in Windows Internet
   // Settings while the daemon process has no proxy variables in its service
   // environment. Propagate that proxy to each local CLI child, preserving any
@@ -392,7 +415,7 @@ export function executeRuntime({ runtime, prompt, model = null, cwd = process.cw
     child.once('close', (code, childSignal) => {
       if (state.lineBuffer) parseRuntimeStreamLine(state.lineBuffer, state, onOutput, onStage);
       if (signal?.aborted) return finish({ status: 'failed', code: 'cancelled', error: 'runtime execution cancelled', result: { runtime: resolvedRuntime, code, signal: childSignal, output: state.output, truncated: state.truncated } });
-      const result = { runtime: resolvedRuntime, model: model || null, binary: discovered.binary, code, signal: childSignal, output: state.response.trim() || state.output, diagnostics: state.response.trim() ? state.output : null, truncated: state.truncated };
+      const result = { runtime: resolvedRuntime, model: model || null, profile: profile || null, binary: discovered.binary, code, signal: childSignal, output: state.response.trim() || state.output, diagnostics: state.response.trim() ? state.output : null, truncated: state.truncated };
       if (code !== 0) return finish({ status: 'failed', code: 'runtime_failed', error: `${resolvedRuntime} CLI exited with code ${code ?? 'unknown'}`, result });
       finish({ status: 'succeeded', result });
     });

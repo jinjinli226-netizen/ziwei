@@ -4,11 +4,11 @@
 >
 > **项目目录**：`D:\灵光爸爸拆解`
 >
-> **文档状态**：以 2026-10-03 工作区实际代码为准；每次结构、运行方式或功能边界发生变化时必须更新本文。
+> **文档状态**：以 2026-10-04 工作区实际代码为准；每次结构、运行方式或功能边界发生变化时必须更新本文。
 
 > **当前本机运行态**：当前 `ziwei_user` 已接入工作区 `bjc-ops`。文中的 `test-111` 是默认示例和历史验收 fixture；接手时必须先读取 `data/ziwei_user.json` 与 `/readyz`，不要把示例工作区当成当前运行工作区。
 
-> **版本事实**：当前分支为 `main`；最新 HEAD 为 `6caf04a`，工作树仅保留既有未跟踪临时文件 `tmp_gzgov.html`。不要在未审查 `git status --short` 前执行 reset、clean 或覆盖式 checkout。
+> **版本事实**：本次 Hermes 独立人格改动位于分支 `codex/hermes-independent-profile`，生产 `main` 未更新；工作树仍保留既有未跟踪临时文件 `tmp_gzgov.html`。不要在未审查 `git status --short` 前执行 reset、clean 或覆盖式 checkout。
 
 ## 1. 先看结论
 
@@ -17,7 +17,7 @@
 当前通过的本地质量门槛：
 
 ```text
-npm test       87 passed
+npm test       90 passed
 npm run lint   passed
 npm run build  passed
 ```
@@ -134,6 +134,7 @@ ziwei_user daemon（daemon/ziwei_user.mjs）
 - 数字员工创建、运行时选择、任务安排、持久会话和对话收件箱。
 - `ziwei_user` 首次安装引导、心跳、就绪状态、设备和 Agent CLI 版本发现。
 - Codex/Claude/Gemini/Hermes 本机 CLI 适配；Codex 使用真实本机配置和系统代理，不使用伪造输出。
+- Hermes 独立人格（本地分支）：数字员工可绑定本机 Hermes profile；执行时隔离 `HERMES_HOME`，并把岗位说明注入真实 task/conversation prompt。profile 不存在时明确失败，不回退主 profile。该改动尚未部署到生产。
 - A2A action 的创建、去重、ACK、事件、执行租约、结果、失败和过期处理。
 - 公开推理摘要、命令/工具安全摘要、CLI 输出量和阶段状态；不展示模型原始私有思维链。
 - 文档目录树、文件夹、Markdown、二进制附件、下载、回收站、净化和本地 Git 导入/导出。
