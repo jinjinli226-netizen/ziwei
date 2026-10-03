@@ -135,6 +135,7 @@ ziwei_user daemon（daemon/ziwei_user.mjs）
 - `ziwei_user` 首次安装引导、心跳、就绪状态、设备和 Agent CLI 版本发现。
 - Codex/Claude/Gemini/Hermes 本机 CLI 适配；Codex 使用真实本机配置和系统代理，不使用伪造输出。
 - Hermes 独立人格（本地分支）：数字员工可绑定本机 Hermes profile；执行时隔离 `HERMES_HOME`，并把岗位说明注入真实 task/conversation prompt。profile 不存在时明确失败，不回退主 profile。该改动尚未部署到生产。
+- 数字伙伴岗位说明页支持内联编辑；保存只更新岗位说明，不再打开完整的数字伙伴配置弹窗。
 - A2A action 的创建、去重、ACK、事件、执行租约、结果、失败和过期处理。
 - 公开推理摘要、命令/工具安全摘要、CLI 输出量和阶段状态；不展示模型原始私有思维链。
 - 文档目录树、文件夹、Markdown、二进制附件、下载、回收站、净化和本地 Git 导入/导出。

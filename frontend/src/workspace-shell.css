@@ -278,6 +278,11 @@
 .employee-profile-panels h3 span, .employee-profile-section h3 span { color:#97a3b2; font-size:12px; font-weight:400; }
 .employee-profile-panels p, .employee-profile-copy { margin:0; color:#9aa6b4; font-size:13px; line-height:1.6; }
 .employee-profile-section { min-height:420px; padding:22px; }
+.employee-profile-role-editor { max-width:760px; }
+.employee-profile-role-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:12px; }
+.employee-profile-role-save { color:#fff; border-color:#2f6fca; background:#2f6fca; }
+.employee-profile-role-save:hover:not(:disabled) { border-color:#245eaf; background:#245eaf; }
+.employee-profile-role-actions button:disabled { cursor:default; opacity:.55; }
 .employee-profile-task-list { display:grid; gap:8px; }
 .employee-profile-task-row { display:flex; align-items:center; justify-content:space-between; width:100%; padding:12px 14px; border:1px solid #e1e8f0; border-radius:8px; color:#42536a; background:#fff; cursor:pointer; font:inherit; text-align:left; }
 .employee-profile-task-row:hover { border-color:#a9c7e8; background:#f5f9fd; }

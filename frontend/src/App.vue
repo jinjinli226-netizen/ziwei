@@ -46,6 +46,7 @@ const taskForm = ref({title:'',description:'',priority:'medium',dueDate:'',state
 const issueTab = ref('all'); const calendarTab = ref('month'); const skillTab = ref('all'); const settingsTab = ref('general'); const switchValue = ref(true); const automationDefaultMode = ref('notification'); const teamView = ref('org');
 const issueView = ref('board'); const issueFilter = ref('all'); const quickTrayMenu = ref(''); const collapsedDevices = ref(new Set()); const laneMenuKey = ref(''); const agentComposerEmployeeId = ref(''); const agentComposerEmployeeOpen = ref(false);
 const employeeRouteId = ref(employeeIdFromPath()); const employeeProfileTab = ref('activity');
+const employeeRoleEditing = ref(false); const employeeRoleDraft = ref(''); const employeeRoleSaving = ref(false);
 const voiceListening = ref(false); let voiceRecognition = null;
 const notifications = ref([]); const notificationStats = ref({unread:0}); const conversations = ref([]); const selectedConversation = ref(null); const conversationDraft = ref(''); const conversationExecution = ref(null); const conversationStatusLoading = ref(false); const conversationExecutionList = ref(null); const taskExecutionList = ref(null); let conversationPollTimer = null; let taskDetailPollTimer = null; const eventSource = ref(null);
 const calendarEventForm = ref({id:'',name:'',description:'',startAt:'',endAt:'',status:'planned',assignee:'',allDay:true}); const showCalendarEvent = ref(false);
@@ -622,8 +623,34 @@ function openEmployeeProfile(employee) {
   employeeActionId.value='';
   employeeRouteId.value=employee.id;
   employeeProfileTab.value='activity';
+  employeeRoleEditing.value=false;
+  employeeRoleDraft.value='';
   page.value='employee';
   history.pushState({},'',routePath('employee', employee.id));
+}
+function beginEmployeeRoleEdit(employee = employeeProfile.value) {
+  if (!employee?.id) return;
+  employeeRoleDraft.value = employee.instructions || employee.description || '';
+  employeeRoleEditing.value = true;
+}
+function cancelEmployeeRoleEdit() {
+  employeeRoleEditing.value = false;
+  employeeRoleDraft.value = '';
+}
+async function saveEmployeeRole() {
+  const employee = employeeProfile.value;
+  if (!employee?.id || employeeRoleSaving.value) return;
+  employeeRoleSaving.value = true;
+  try {
+    const updated = await api.updateEmployee(employee.id, { instructions: employeeRoleDraft.value.trim() });
+    employees.value = employees.value.map(item => item.id === updated.id ? { ...item, ...updated } : item);
+    cancelEmployeeRoleEdit();
+    notify('岗位说明已保存');
+  } catch (error) {
+    notify(error.message);
+  } finally {
+    employeeRoleSaving.value = false;
+  }
 }
 function openEmployeeAvatarPicker() { employeeAvatarFile.value?.click(); }
 function clearEmployeeAvatar() { employeeAvatar.value=''; if (employeeAvatarFile.value) employeeAvatarFile.value.value=''; }
@@ -842,7 +869,7 @@ onMounted(async () => { applyDisplayPreferences(); await refreshAuth(); if (auth
               <nav class="employee-profile-tabs" role="tablist"><button type="button" :class="{active:employeeProfileTab==='activity'}" @click="employeeProfileTab='activity'">⌁ 动态</button><button type="button" :class="{active:employeeProfileTab==='tasks'}" @click="employeeProfileTab='tasks'">☷ Tasks</button><button type="button" :class="{active:employeeProfileTab==='role'}" @click="employeeProfileTab='role'">▤ 岗位说明</button><button type="button" :class="{active:employeeProfileTab==='skills'}" @click="employeeProfileTab='skills'">▥ 技能</button><button type="button" :class="{active:employeeProfileTab==='variables'}" @click="employeeProfileTab='variables'">⌘ 环境变量</button><button type="button" :class="{active:employeeProfileTab==='params'}" @click="employeeProfileTab='params'">›_ 自定义参数</button><button type="button" :class="{active:employeeProfileTab==='mcp'}" @click="employeeProfileTab='mcp'">♧ MCP</button><button type="button" :class="{active:employeeProfileTab==='external'}" @click="employeeProfileTab='external'">⌘ 外部接入</button></nav>
               <div v-if="employeeProfileTab==='activity'" class="employee-profile-panels"><ZiCard><h3>当前 <span>无进行中的工作</span></h3><p>这个数字伙伴当前没有在跑任何 task。</p></ZiCard><ZiCard><h3>近 30 天 <span>表现</span></h3><p>近 30 天没有完成记录。</p></ZiCard><ZiCard><h3>最近工作 <span>{{ employeeProfileConversations.length ? employeeProfileConversations.length + ' 条会话' : '还没有完成的 task' }}</span></h3><p>{{ employeeProfileConversations.length ? '从收件箱继续打开持久会话。' : '这个数字伙伴还没有完成过任何 task。' }}</p><button v-if="employeeProfileConversations.length" type="button" class="pill" @click="navigate('inbox')">打开收件箱</button></ZiCard></div>
               <div v-else-if="employeeProfileTab==='tasks'" class="employee-profile-section"><h3>Tasks <span>{{ employeeProfileTasks.length }}</span></h3><div v-if="employeeProfileTasks.length" class="employee-profile-task-list"><button v-for="task in employeeProfileTasks" :key="task.id" type="button" class="employee-profile-task-row" @click="openTaskDetail(task)"><strong>{{ task.title }}</strong><span>{{ task.state }}</span></button></div><p v-else class="task-detail-empty">这个数字伙伴还没有被安排任务。</p></div>
-              <div v-else-if="employeeProfileTab==='role'" class="employee-profile-section"><h3>岗位说明</h3><p class="employee-profile-copy">{{ employeeProfile.instructions || employeeProfile.description || '暂未填写岗位说明。' }}</p><button type="button" class="pill" @click="openEmployeeModal(employeeProfile)">编辑岗位说明</button></div>
+              <div v-else-if="employeeProfileTab==='role'" class="employee-profile-section"><h3>岗位说明</h3><div v-if="employeeRoleEditing" class="employee-profile-role-editor"><div class="employee-role-editor"><FileText :size="17"/><textarea v-model="employeeRoleDraft" rows="8" maxlength="2000" aria-label="岗位说明" placeholder="写清楚它负责什么、什么时候运行，以及怎样算完成。"></textarea></div><div class="employee-profile-role-actions"><button type="button" class="pill" :disabled="employeeRoleSaving" @click="cancelEmployeeRoleEdit">取消</button><button type="button" class="pill employee-profile-role-save" :disabled="employeeRoleSaving" @click="saveEmployeeRole">{{ employeeRoleSaving ? '保存中…' : '保存岗位说明' }}</button></div></div><template v-else><p class="employee-profile-copy">{{ employeeProfile.instructions || employeeProfile.description || '暂未填写岗位说明。' }}</p><button type="button" class="pill" @click="beginEmployeeRoleEdit(employeeProfile)">编辑岗位说明</button></template></div>
               <div v-else-if="employeeProfileTab==='skills'" class="employee-profile-section"><h3>技能 <span>{{ employeeProfile.skills?.length || 0 }}</span></h3><p class="employee-profile-copy">{{ employeeProfile.skills?.length ? '已配置 ' + employeeProfile.skills.length + ' 个工作区技能。' : '暂未配置技能。' }}</p></div>
               <div v-else-if="employeeProfileTab==='variables'" class="employee-profile-section"><h3>环境变量</h3><p class="employee-profile-copy">环境变量由本机 ziwei_user 运行时提供，当前页面不会暴露密钥。</p></div>
               <div v-else-if="employeeProfileTab==='params'" class="employee-profile-section"><h3>自定义参数</h3><p class="employee-profile-copy">暂未配置自定义参数。</p></div>
