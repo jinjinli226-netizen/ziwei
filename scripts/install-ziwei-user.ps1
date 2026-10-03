@@ -17,6 +17,13 @@ if ([int]$Matches[1] -lt 24) {
 
 Push-Location $root
 try {
+  # Bootstrap dependencies when this checkout is fresh.  The installer never
+  # downloads or executes a third-party daemon and never accepts credentials.
+  if (-not (Test-Path (Join-Path $root 'node_modules\vue'))) {
+    Write-Host 'Installing Ziwei dependencies...'
+    & npm ci --ignore-scripts
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  }
   # Local installer for Ziwei; it does not download AuraBaba CLI or accept tokens.
   & npm run ziwei:setup -- $args
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

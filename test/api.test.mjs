@@ -25,9 +25,11 @@ test('http api exposes summary and creates tasks', async () => {
     const device = await fetch(`http://127.0.0.1:${port}/api/workspaces/test-111/devices`, {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({name:'office-pc'})}).then(r => r.json());
     assert.equal(device.name, 'office-pc');
     const employee = await fetch(`http://127.0.0.1:${port}/api/workspaces/test-111/employees`, {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({name:'日报整理员'})}).then(r => r.json());
-    assert.equal(employee.status, 'draft');
+    assert.equal(employee.status, 'active');
+    await fetch(`http://127.0.0.1:${port}/api/workspaces/test-111/devices/device-ziwei-user/heartbeat`, {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({agentId:'ziwei_user',version:'0.1.0',bridgeVersion:'0.1.0'})});
     const models = await fetch(`http://127.0.0.1:${port}/api/workspaces/test-111/models?q=sonnet`).then(r => r.json());
-    assert.equal(models.models[0].id, 'anthropic:claude-sonnet-5');
+    assert.equal(models.models[0].provider, 'Anthropic');
+    assert.ok(models.models[0].id);
   } finally { server.close(); }
 });
 

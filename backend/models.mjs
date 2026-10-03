@@ -1,24 +1,21 @@
-/*
- * Model discovery is kept behind the API so the UI never has to invent model
- * options.  A connected runtime can later replace this catalog with its own
- * discovery adapter without changing the employee-creation flow.
- */
-const MODEL_CATALOG = [
-  { id:'anthropic:claude-fable-5.1', provider:'Anthropic', label:'claude-fable-5.1', runtime:'Claude', source:'runtime-catalog' },
-  { id:'anthropic:claude-fable-5', provider:'Anthropic', label:'claude-fable-5', runtime:'Claude', source:'runtime-catalog' },
-  { id:'anthropic:claude-opus-5', provider:'Anthropic', label:'claude-opus-5', runtime:'Claude', source:'runtime-catalog' },
-  { id:'anthropic:claude-sonnet-5', provider:'Anthropic', label:'claude-sonnet-5', runtime:'Claude', source:'runtime-catalog' },
-  { id:'anthropic:claude-opus-4-8', provider:'Anthropic', label:'claude-opus-4-8', runtime:'Claude', source:'runtime-catalog' },
-  { id:'openai:gpt-6', provider:'OpenAI', label:'gpt-6', runtime:'Codex', source:'runtime-catalog' },
-  { id:'openai:gpt-6-mini', provider:'OpenAI', label:'gpt-6-mini', runtime:'Codex', source:'runtime-catalog' },
-  { id:'google:gemini-2.5-pro', provider:'Google', label:'gemini-2.5-pro', runtime:'Gemini', source:'runtime-catalog' },
-  { id:'google:gemini-2.5-flash', provider:'Google', label:'gemini-2.5-flash', runtime:'Gemini', source:'runtime-catalog' },
-  { id:'aurababa:hermes-0.3.71', provider:'AuraBaba', label:'hermes-0.3.71', runtime:'Hermes', source:'runtime-catalog' }
-];
-
-export function listModels({ runtime, query = '' } = {}) {
-  const needle = String(query).trim().toLowerCase();
-  return MODEL_CATALOG.filter(model => (!runtime || model.runtime === runtime) && (!needle || `${model.provider} ${model.label} ${model.id}`.toLowerCase().includes(needle)));
+/* Model choices come from the connected local CLI, never a fabricated server catalog. */
+export function listModels({ runtime, query = '', discovery = null } = {}) {
+  const needle = String(query || '').trim().toLowerCase();
+  const agents = discovery?.agents || {};
+  const runtimes = runtime ? [runtime] : Object.keys(agents);
+  const result = [];
+  const seen = new Set();
+  for (const name of runtimes) {
+    const entry = agents[name];
+    for (const model of Array.isArray(entry?.models) ? entry.models : []) {
+      const id = String(model?.id || '').trim();
+      if (!id || seen.has(`${name}:${id}`)) continue;
+      const provider = name === 'Claude' ? 'Anthropic' : name === 'Codex' ? 'OpenAI' : name === 'Gemini' ? 'Google' : name;
+      const item = { id, label: String(model.label || id), provider, runtime: name, source: model.source || 'local-config', cli_version: entry.version || null, cli_binary: entry.binary || null };
+      if (!needle || `${item.provider} ${item.label} ${item.id} ${item.runtime}`.toLowerCase().includes(needle)) {
+        result.push(item); seen.add(`${name}:${id}`);
+      }
+    }
+  }
+  return result;
 }
-
-export { MODEL_CATALOG };

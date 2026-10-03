@@ -14,7 +14,7 @@ export function openDatabase({ memory = false, filename = path.join(ROOT, 'data'
       created_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS members (
-      id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, name TEXT NOT NULL,
+      id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, user_id TEXT, name TEXT NOT NULL,
       email TEXT NOT NULL, role TEXT NOT NULL, avatar TEXT, joined_at TEXT NOT NULL,
       FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
     );
@@ -40,6 +40,12 @@ export function openDatabase({ memory = false, filename = path.join(ROOT, 'data'
       id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, name TEXT NOT NULL,
       provider TEXT NOT NULL, version TEXT, status TEXT NOT NULL, capabilities_json TEXT NOT NULL,
       last_seen TEXT, FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS runtime_metadata (
+      id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, runtime_name TEXT NOT NULL,
+      version TEXT, binary TEXT, status TEXT, models_json TEXT NOT NULL DEFAULT '[]',
+      last_seen TEXT NOT NULL, UNIQUE(workspace_id,runtime_name),
+      FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
     );
     CREATE TABLE IF NOT EXISTS tasks (
       id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, title TEXT NOT NULL,
@@ -121,7 +127,7 @@ export function openDatabase({ memory = false, filename = path.join(ROOT, 'data'
     CREATE TABLE IF NOT EXISTS employees (
       id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, name TEXT NOT NULL,
       runtime TEXT NOT NULL, model_id TEXT, description TEXT NOT NULL DEFAULT '', visibility TEXT NOT NULL DEFAULT 'workspace',
-      skills_json TEXT NOT NULL DEFAULT '[]', instructions TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'draft',
+      skills_json TEXT NOT NULL DEFAULT '[]', instructions TEXT NOT NULL DEFAULT '', avatar TEXT, status TEXT NOT NULL DEFAULT 'draft',
       created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
       FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
     );
@@ -146,6 +152,12 @@ export function openDatabase({ memory = false, filename = path.join(ROOT, 'data'
       acked_at TEXT, completed_at TEXT, result_json TEXT, error TEXT,
       FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS a2a_action_events (
+      id TEXT PRIMARY KEY, action_id TEXT NOT NULL, type TEXT NOT NULL,
+      message TEXT NOT NULL DEFAULT '', data_json TEXT NOT NULL DEFAULT 'null', created_at TEXT NOT NULL,
+      FOREIGN KEY(action_id) REFERENCES a2a_actions(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_a2a_action_events_action ON a2a_action_events(action_id, created_at);
     CREATE TABLE IF NOT EXISTS api_keys (
       id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, name TEXT NOT NULL,
       prefix TEXT NOT NULL, token_hash TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active',
@@ -196,6 +208,7 @@ export function openDatabase({ memory = false, filename = path.join(ROOT, 'data'
     "ALTER TABLE employees ADD COLUMN description TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE employees ADD COLUMN visibility TEXT NOT NULL DEFAULT 'workspace'",
     "ALTER TABLE employees ADD COLUMN skills_json TEXT NOT NULL DEFAULT '[]'",
+    "ALTER TABLE employees ADD COLUMN avatar TEXT",
     "ALTER TABLE skills ADD COLUMN scope TEXT NOT NULL DEFAULT 'platform'",
     "ALTER TABLE skills ADD COLUMN recommended INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE skills ADD COLUMN install_count INTEGER NOT NULL DEFAULT 0",
@@ -271,10 +284,11 @@ function seed(db) {
     ['runtime-claude','Claude','Anthropic','4.5','offline',['chat','code','browser']],
     ['runtime-codex','Codex','OpenAI','GPT-6','offline',['code','review','terminal']],
     ['runtime-gemini','Gemini','Google','2.5','offline',['research','vision','chat']],
-    ['runtime-hermes','Hermes','AuraBaba','0.3.71','offline',['orchestration','a2a','automation']]
+    ['runtime-hermes','Hermes','Hermes','0.3.71','offline',['orchestration','a2a','automation']]
   ];
   const stmt = db.prepare(`INSERT OR IGNORE INTO runtimes(id,workspace_id,name,provider,version,status,capabilities_json,last_seen) VALUES(?,?,?,?,?,?,?,?)`);
   for (const [id,name,provider,version,status,caps] of runtimes) stmt.run(id,'ws-test-111',name,provider,version,status,JSON.stringify(caps),null);
+  db.prepare("UPDATE runtimes SET provider='Hermes' WHERE provider='AuraBaba'").run();
   // Older seeds also stamped the catalog rows with the installation time.
   // Clear those timestamps while the own bridge has not reported a heartbeat;
   // the runtime catalog version is metadata, not a liveness signal.

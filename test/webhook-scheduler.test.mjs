@@ -28,7 +28,11 @@ test('automation completion signs and durably delivers a webhook once', async ()
     const run = repo.runAutomation(automation.id);
     repo.ackA2AAction(run.action_id);
     repo.resultA2AAction(run.action_id, { status: 'succeeded', result: { ok: true } });
-    for (let i = 0; i < 20 && !received; i++) await new Promise(resolve => setTimeout(resolve, 25));
+    for (let i = 0; i < 40; i++) {
+      const delivery = repo.listWebhookDeliveries(run.id)[0];
+      if (received && delivery?.status === 'delivered') break;
+      await new Promise(resolve => setTimeout(resolve, 25));
+    }
     assert.ok(received);
     const expected = `sha256=${crypto.createHmac('sha256', secret).update(received.body).digest('hex')}`;
     assert.equal(received.headers['x-ziwei-signature'], expected);

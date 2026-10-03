@@ -14,9 +14,57 @@ test('acknowledges an action once and deduplicates retries', async () => {
   assert.deepEqual(events, ['a-1']);
 });
 
+test('agent actions default to the registered project workdir for local CLI access', async () => {
+  let received;
+  const dispatcher = new ActionDispatcher({
+    workdir: 'C:/ziwei-project',
+    execute: async action => { received = action; return {ok: true}; },
+    now: () => 1000
+  });
+  const result = await dispatcher.dispatch({ id:'a-project', dedupeKey:'project', type:'agent.execute', payload:{prompt:'inspect the project'} });
+  assert.equal(result.status, 'succeeded');
+  assert.equal(received.payload.workdir, 'C:\\ziwei-project');
+});
+
 test('rejects A2A workdirs outside the registered runtime directory', async () => {
   const dispatcher = new ActionDispatcher({ workdir: 'C:/ziwei-runtime', execute: async () => ({ok:true}) });
   const result = await dispatcher.dispatch({ id:'a-escape', dedupeKey:'escape', type:'command.execute', payload:{cwd:'../secrets'} });
   assert.equal(result.status, 'failed');
   assert.match(result.error, /outside the registered runtime directory/);
+});
+
+test('summarizes CLI output as a safe execution stage instead of a generic update', async () => {
+  const events = [];
+  const dispatcher = new ActionDispatcher({
+    execute: async (_action, context) => { context.onOutput('running command: rg --files'); return {ok:true}; },
+    onEvent: (type, payload) => events.push({type, payload}),
+    now: () => 1000
+  });
+  const result = await dispatcher.dispatch({ id:'a-stage', dedupeKey:'stage', type:'agent.execute', payload:{prompt:'inspect'} });
+  assert.equal(result.status, 'succeeded');
+  const output = events.find(event => event.type === 'action.output');
+  assert.equal(output?.payload?.message, '运行命令');
+  assert.equal(output?.payload?.stage, 'command');
+});
+
+test('forwards the provider public reasoning summary without exposing raw reasoning tokens', async () => {
+  const events = [];
+  const dispatcher = new ActionDispatcher({
+    execute: async (_action, context) => {
+      context.onStage({
+        stage: 'reasoning',
+        message: '思考摘要',
+        detail: '公开推理摘要',
+        summary: '先检查任务状态，再运行验证。 token=[REDACTED]'
+      });
+      return {ok: true};
+    },
+    onEvent: (type, payload) => events.push({type, payload}),
+    now: () => 1000
+  });
+  const result = await dispatcher.dispatch({ id:'a-reasoning', dedupeKey:'reasoning', type:'agent.execute', payload:{prompt:'inspect'} });
+  assert.equal(result.status, 'succeeded');
+  const reasoning = events.find(event => event.type === 'action.stage' && event.payload.stage === 'reasoning');
+  assert.equal(reasoning?.payload?.detail, '公开推理摘要');
+  assert.equal(reasoning?.payload?.summary, '先检查任务状态，再运行验证。 token=[REDACTED]');
 });

@@ -3,6 +3,7 @@
 node_modules/
 **/node_modules/
 data/ziwei_user.json
+data/a2a.token
 data/*.sqlite
 data/git-sync/
 data/objects/
@@ -21,6 +22,7 @@ frontend/dist/
 /*-docs*.png
 /*-members*.png
 /HANDOFF*.md
+!/HANDOFF.md
 /design-qa.md
 
 # Keep only the dependency artifact used by package.json

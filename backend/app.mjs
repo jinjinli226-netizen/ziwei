@@ -1,8 +1,11 @@
 import express from 'express';
 import path from 'node:path';
+import { WebSocketServer } from 'ws';
 import { createRepository } from './repository.mjs';
 import { RealtimeHub } from './realtime.mjs';
 import { exportDocumentsToGit, importDocumentsFromGit } from './git-sync.mjs';
+import { createAuthService } from './auth.mjs';
+import { readA2AToken, safeTokenEqual, tokenFromRequest } from './a2a-auth.mjs';
 
 const allowedOrigin = process.env.FRONTEND_ORIGIN || 'http://127.0.0.1:5178';
 
@@ -10,6 +13,7 @@ function cors(req, res, next) {
   const origin = req.headers.origin;
   if (origin === allowedOrigin || !origin) res.setHeader('Access-Control-Allow-Origin', origin || allowedOrigin);
   res.setHeader('Vary', 'Origin');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Workspace-Id, X-Workspace-Role, X-Ziwei-Api-Key');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
@@ -33,7 +37,7 @@ function requireRole(...allowed) {
     // one by also sending X-Workspace-Role; first-party session requests may
     // use the header because the local UI has no session middleware yet.
     const headerRole = String(req.headers['x-workspace-role'] || '').toLowerCase();
-    const role = String(req.apiKey ? req.workspaceRole : (headerRole || req.workspaceRole || 'owner')).toLowerCase();
+    const role = String(req.apiKey ? req.workspaceRole : (req.auth?.role || req.workspaceRole || (req.auth ? '' : headerRole) || 'owner')).toLowerCase();
     if (!allowed.includes(role)) return res.status(403).json({ error: '当前角色没有执行该操作的权限', role, required: allowed });
     req.workspaceRole = role; next();
   };
@@ -44,29 +48,149 @@ const WRITE_ROLES = ['owner', 'admin', 'member'];
 const MANAGE_ROLES = ['owner', 'admin'];
 function resourceRoleGuard(req, res, next) {
   const path = req.path || '';
-  if (path.startsWith('/external/') || path.startsWith('/daemon/') || path.startsWith('/invitations/lookup/') || path.endsWith('/accept') || path === '/devices/heartbeat' || path.endsWith('/heartbeat')) return next();
+  if (path.startsWith('/auth') || path.startsWith('/external/') || path.startsWith('/daemon/') || path.startsWith('/invitations/lookup/') || path.endsWith('/accept') || path === '/devices/heartbeat' || path.endsWith('/heartbeat')) return next();
   const sensitiveAdminPath = /(?:settings|api-keys|members|invitations|devices)(?:\/|$)/i.test(path);
   const adminReadPath = /(?:settings|api-keys)(?:\/|$)/i.test(path);
   const allowed = adminReadPath || (req.method !== 'GET' && req.method !== 'HEAD' && sensitiveAdminPath) ? MANAGE_ROLES : (req.method === 'GET' || req.method === 'HEAD' ? READ_ROLES : WRITE_ROLES);
   return requireRole(...allowed)(req, res, next);
 }
 
+function authExempt(pathname) {
+  return pathname === '/auth' || pathname.startsWith('/auth/') || pathname.startsWith('/external/')
+    || pathname.startsWith('/daemon/') || pathname === '/devices/heartbeat' || pathname.endsWith('/heartbeat') || pathname.endsWith('/runtimes/register');
+}
+
+function a2aAuth({ bypass = false, allowAgentCard = true } = {}) {
+  return (req, res, next) => {
+    // Memory-mode test servers and explicitly disabled-auth instances keep the
+    // original local contract. Production A2A calls must carry the machine
+    // credential used by ziwei_user.
+    if (bypass || (allowAgentCard && req.method === 'GET' && req.path === '/agents')) return next();
+    const expected = readA2AToken({ create: true });
+    const supplied = tokenFromRequest(req);
+    if (!safeTokenEqual(supplied, expected)) {
+      res.setHeader('WWW-Authenticate', 'Bearer realm="ziwei-a2a"');
+      return res.status(401).json({ error: '需要有效的 A2A 连接令牌' });
+    }
+    req.a2aAuthenticated = true;
+    next();
+  };
+}
+
+function sessionMiddleware(auth, { bypass = false } = {}) {
+  return (req, res, next) => {
+    if (bypass || authExempt(req.path || '')) return next();
+    const principal = auth.authenticate(req);
+    if (!principal) return res.status(401).json({ error: '请先登录紫薇' });
+    req.auth = principal;
+    next();
+  };
+}
+
+function workspaceMembershipGuard(auth, { bypass = false } = {}) {
+  return (req, res, next) => {
+    if (bypass || authExempt(req.path || '') || req.path.endsWith('/heartbeat')) return next();
+    const slug = String(req.params.slug || '').trim();
+    if (!slug || !req.auth) return next();
+    const membership = auth.canAccess(req.auth.user_id, slug);
+    if (!membership) return res.status(403).json({ error: '当前用户不属于该工作区' });
+    req.workspaceRole = membership.role;
+    req.auth = { ...req.auth, workspace: { slug, role: membership.role }, role: membership.role };
+    next();
+  };
+}
+
+function resourceWorkspaceGuard(repo, auth, { bypass = false } = {}) {
+  const directResources = {
+    tasks: 'tasks', documents: 'documents', skills: 'skills', automations: 'automations',
+    'automation-runs': 'automation_runs', 'calendar-events': 'calendar_events', devices: 'devices', employees: 'employees',
+    notifications: 'notifications', conversations: 'conversations', 'api-keys': 'api_keys', invitations: 'invitations', members: 'members'
+  };
+  return (req, res, next) => {
+    if (bypass || authExempt(req.path || '') || !req.auth) return next();
+    const match = String(req.path || '').match(/^\/(tasks|task-attachments|documents|skills|automations|automation-runs|calendar-events|devices|employees|notifications|conversations|api-keys|invitations|members)\/([^/]+)/i);
+    if (!match) return next();
+    const [, resource, resourceId] = match;
+    let row;
+    if (resource === 'task-attachments') row = repo.db.prepare('SELECT t.workspace_id FROM task_attachments a JOIN tasks t ON t.id=a.task_id WHERE a.id=?').get(resourceId);
+    else row = repo.db.prepare(`SELECT workspace_id FROM ${directResources[resource]} WHERE id=?`).get(resourceId);
+    if (!row) return next();
+    const membership = repo.db.prepare('SELECT m.role FROM members m WHERE m.user_id=? AND m.workspace_id=?').get(req.auth.user_id, row.workspace_id);
+    if (!membership) return res.status(403).json({ error: '当前用户无权访问该资源' });
+    req.workspaceRole = membership.role;
+    next();
+  };
+}
+
+function assertApiKeyWorkspace(req, res, next) {
+  const slug = String(req.params.slug || '').trim();
+  if (!slug || !req.apiKey) return next();
+  const workspace = req.app.locals.repo.getWorkspace?.(slug);
+  if (workspace && workspace.id !== req.apiKey.workspace_id) return res.status(403).json({ error: 'API Key 不属于该工作区' });
+  // Repositories from older test adapters do not expose getWorkspace; use
+  // their public summary as a safe binding check instead of trusting the URL.
+  try {
+    const summary = req.app.locals.repo.getSummary(slug);
+    if (summary.workspace?.id !== req.apiKey.workspace_id) return res.status(403).json({ error: 'API Key 不属于该工作区' });
+  } catch (error) { return res.status(/not found/i.test(error.message || '') ? 404 : 403).json({ error: 'API Key 工作区无效' }); }
+  next();
+}
+
 export function createApp(options = {}) {
   const app = express();
   const realtime = new RealtimeHub();
   const repo = options.repository || createRepository({ ...options, onEvent: event => realtime.publish(event) });
+  const auth = options.auth || createAuthService(repo.db, options.authOptions);
   app.locals.repo = repo;
   app.locals.realtime = realtime;
+  app.locals.auth = auth;
   app.use(cors);
   // Task attachments are sent as Base64 JSON; allow the 10 MiB attachment
   // limit plus encoding and envelope overhead without accepting unbounded
   // request bodies.
   app.use(express.json({ limit: '16mb' }));
+  const authBypass = options.memory === true || options.requireAuth === false;
+  app.locals.authBypass = authBypass;
+  app.locals.a2aToken = () => readA2AToken({ create: !authBypass });
+  app.use('/api', sessionMiddleware(auth, { bypass: authBypass }));
+  app.use('/api/workspaces/:slug', workspaceMembershipGuard(auth, { bypass: authBypass }));
+  app.use('/api', resourceWorkspaceGuard(repo, auth, { bypass: authBypass }));
   // Keep one policy for workspace resources. Individual routes retain their
   // explicit guards as documentation, while this catch-all covers newly added
   // sensitive routes and id-based mutations consistently.
   app.use('/api', resourceRoleGuard);
+  app.get('/api/auth/status', (req, res) => res.json(auth.status(req)));
+  app.post('/api/auth/setup', (req, res, next) => {
+    try {
+      const result = auth.setup(req.body || {});
+      auth.setCookie(res, result.session);
+      const { session: _session, ...safe } = result;
+      res.status(201).json({ ...safe, session: { expires_at: result.session.expires_at } });
+    } catch (error) { next(error); }
+  });
+  app.post('/api/auth/login', (req, res, next) => {
+    try {
+      const result = auth.login(req.body || {});
+      auth.setCookie(res, result.session);
+      const { session: _session, ...safe } = result;
+      res.json({ ...safe, session: { expires_at: result.session.expires_at } });
+    } catch (error) { next(error); }
+  });
+  app.post('/api/auth/logout', (req, res) => { auth.logout(req); auth.clearCookie(res); res.json({ ok: true }); });
+  app.get('/api/auth/me', (req, res) => { const principal = auth.authenticate(req); if (!principal) return res.status(401).json({ error: '请先登录紫薇' }); res.json(principal); });
   app.get('/healthz', (_req, res) => res.json({ ok: true, service: 'ziwei-api', cli: 'ziwei_user', time: new Date().toISOString() }));
+  app.get('/api/workspaces', (req, res) => {
+    const principal = req.auth || auth.authenticate(req);
+    if (!principal) return res.status(401).json({ error: '请先登录紫薇' });
+    res.json({ workspaces: principal.memberships || [] });
+  });
+  app.post('/api/workspaces', (req, res, next) => {
+    try {
+      const principal = req.auth || auth.authenticate(req);
+      if (!principal?.user_id) return res.status(401).json({ error: '请先登录紫薇' });
+      res.status(201).json(auth.createWorkspace(principal.user_id, req.body || {}));
+    } catch (error) { next(error); }
+  });
   // The scheduler is repository backed: every workspace is scanned from its
   // durable next_run value, and webhook retries are drained in the same tick.
   const scheduler = options.memory || options.enableScheduler === false ? null : setInterval(() => { try { repo.tickAutomations(); } catch {} }, Number(process.env.ZIWEI_SCHEDULER_MS || 15000));
@@ -90,6 +214,13 @@ export function createApp(options = {}) {
   app.delete('/api/tasks/:taskId/attachments/:attachmentId', (req, res) => { const attachment = repo.getTaskAttachment(req.params.attachmentId); if (!attachment || attachment.task_id !== req.params.taskId) return res.status(404).json({ error:'Attachment not found' }); return res.json({ ok:true, attachment:repo.deleteTaskAttachment(req.params.attachmentId) }); });
 
   app.get('/api/workspaces/:slug/runtimes', (req, res) => res.json({ runtimes: repo.listRuntimes(req.params.slug) }));
+  // ziwei_user reports the exact CLI path/version it discovered locally.
+  // This endpoint is intentionally heartbeat-equivalent and is only exposed
+  // on the local API; it does not accept an Aura bridge identity.
+  app.post('/api/workspaces/:slug/runtimes/register', (req, res) => {
+    if (req.body?.agentId && String(req.body.agentId) !== 'ziwei_user') return res.status(403).json({ error: 'Only ziwei_user runtime registration is accepted' });
+    res.json({ runtimes: repo.registerRuntimes(req.params.slug, req.body || {}) });
+  });
   app.get('/api/workspaces/:slug/models', (req, res) => res.json({ models: repo.listModels(req.params.slug, { runtime: req.query.runtime, q: req.query.q }) }));
   app.get('/api/workspaces/:slug/skills', (req, res) => res.json({ skills: repo.listSkills(req.params.slug, { category: req.query.category, scope: req.query.scope, q: req.query.q }) }));
   app.get('/api/workspaces/:slug/skill-sources', (req, res) => res.json({ sources: repo.listSkillSources(req.params.slug) }));
@@ -140,6 +271,10 @@ export function createApp(options = {}) {
   app.delete('/api/calendar-events/:id', (req, res) => res.json(repo.deleteCalendarEvent(req.params.id)));
   app.get('/api/workspaces/:slug/members', (req, res) => res.json({ members: repo.listMembers(req.params.slug) }));
   app.post('/api/workspaces/:slug/members', requireRole('owner','admin'), (req, res) => res.status(201).json(repo.createMember(req.params.slug, req.body)));
+  app.patch('/api/members/:id', requireRole('owner','admin'), (req, res) => res.json(repo.updateMember(req.params.id, req.body || {})));
+  app.delete('/api/members/:id', requireRole('owner','admin'), (req, res) => res.json(repo.deleteMember(req.params.id)));
+  app.patch('/api/workspaces/:slug/members/:id', requireRole('owner','admin'), (req, res) => res.json(repo.updateMember(req.params.id, req.body || {})));
+  app.delete('/api/workspaces/:slug/members/:id', requireRole('owner','admin'), (req, res) => res.json(repo.deleteMember(req.params.id)));
   app.get('/api/workspaces/:slug/invitations', (req, res) => res.json({ invitations: repo.listInvitations(req.params.slug) }));
   app.post('/api/workspaces/:slug/invitations', requireRole('owner','admin'), (req, res) => res.status(201).json(repo.createInvitation(req.params.slug, req.body)));
   app.post('/api/invitations/:id/resend', requireRole('owner','admin'), (req, res) => res.json(repo.resendInvitation(req.params.id)));
@@ -166,6 +301,10 @@ export function createApp(options = {}) {
   app.post('/api/devices/heartbeat', (req, res) => { const slug = String(req.body.workspace || req.body.workspace_slug || 'test-111'); res.json({ ok: true, device: repo.heartbeatDevice(slug, req.body) }); });
   app.get('/api/workspaces/:slug/employees', (req, res) => res.json({ employees: repo.listEmployees(req.params.slug) }));
   app.post('/api/workspaces/:slug/employees', requireRole('owner','admin','member'), (req, res) => res.status(201).json(repo.createEmployee(req.params.slug, req.body)));
+  app.patch('/api/employees/:id', requireRole('owner','admin','member'), (req, res) => res.json(repo.updateEmployee(req.params.id, req.body || {})));
+  app.delete('/api/employees/:id', requireRole('owner','admin'), (req, res) => res.json(repo.deleteEmployee(req.params.id)));
+  app.patch('/api/workspaces/:slug/employees/:id', requireRole('owner','admin','member'), (req, res) => res.json(repo.updateEmployee(req.params.id, req.body || {})));
+  app.delete('/api/workspaces/:slug/employees/:id', requireRole('owner','admin'), (req, res) => res.json(repo.deleteEmployee(req.params.id)));
   app.get('/api/workspaces/:slug/audit', (req, res) => res.json({ events: repo.listAudit(req.params.slug) }));
   app.get('/api/workspaces/:slug/notifications', (req, res) => res.json({ notifications: repo.listNotifications(req.params.slug, Number(req.query.limit) || 50, { unread: req.query.unread === '1' || req.query.unread === 'true', archived: req.query.archived === '1' || req.query.archived === 'true' }), stats: repo.notificationStats(req.params.slug) }));
   app.post('/api/workspaces/:slug/notifications/read', (req, res) => res.json({ ok:true, stats:repo.markNotificationsRead(req.params.slug, req.body?.ids) }));
@@ -179,9 +318,9 @@ export function createApp(options = {}) {
   app.get('/api/workspaces/:slug/settings', (req, res) => res.json({ workspace: repo.getWorkspaceSettings(req.params.slug), security: { accessKeys: repo.listApiKeys(req.params.slug) } }));
   app.get('/api/workspaces/:slug/permissions', (req, res) => res.json({ role: req.workspaceRole || 'owner', roles: repo.resourcePermissions() }));
   app.get('/api/workspaces/:slug/api-keys', (req, res) => res.json({ keys: repo.listApiKeys(req.params.slug) }));
-  app.post('/api/workspaces/:slug/api-keys', requireRole('owner','admin'), (req, res) => res.status(201).json(repo.createApiKey(req.params.slug, req.body)));
+  app.post('/api/workspaces/:slug/api-keys', requireRole('owner','admin'), (req, res) => { if (req.workspaceRole === 'admin' && req.body?.role === 'owner') return res.status(403).json({ error: '管理员不能创建 Owner 级 API Key' }); return res.status(201).json(repo.createApiKey(req.params.slug, req.body)); });
   app.post('/api/api-keys/:id/revoke', requireRole('owner','admin'), (req, res) => res.json(repo.revokeApiKey(req.params.id)));
-  app.post('/api/api-keys/:id/rotate', requireRole('owner','admin'), (req, res) => res.status(201).json(repo.rotateApiKey(req.params.id, req.body || {})));
+  app.post('/api/api-keys/:id/rotate', requireRole('owner','admin'), (req, res) => { const key=repo.db.prepare('SELECT role FROM api_keys WHERE id=?').get(req.params.id); if (req.workspaceRole === 'admin' && key?.role === 'owner') return res.status(403).json({ error: '管理员不能轮换 Owner 级 API Key' }); return res.status(201).json(repo.rotateApiKey(req.params.id, req.body || {})); });
   app.patch('/api/workspaces/:slug/profile', requireRole('owner','admin','member'), (req, res) => res.json({ workspace: repo.updateProfile(req.params.slug, req.body || {}) }));
   app.patch('/api/workspaces/:slug/preferences', requireRole('owner','admin','member'), (req, res) => res.json({ workspace: repo.updatePreferences(req.params.slug, req.body || {}) }));
   app.patch('/api/workspaces/:slug/settings', requireRole('owner','admin'), (req, res) => res.json({ workspace: repo.updateWorkspace(req.params.slug, req.body) }));
@@ -190,17 +329,21 @@ export function createApp(options = {}) {
   // routes remain session-local while API consumers get expiry and revocation
   // checks on every request.
   app.use('/api/external', apiKeyRequired(repo));
-  app.get('/api/external/workspaces/:slug/summary', (req, res) => res.json(repo.getSummary(req.params.slug)));
-  app.get('/api/external/workspaces/:slug/tasks', (req, res) => res.json({ tasks: repo.listTasks(req.params.slug, req.query) }));
-  app.post('/api/external/workspaces/:slug/tasks', (req, res) => res.status(201).json(repo.createTask(req.params.slug, req.body)));
+  app.use('/api/external', assertApiKeyWorkspace);
+  app.get('/api/external/workspaces/:slug/summary', assertApiKeyWorkspace, (req, res) => res.json(repo.getSummary(req.params.slug)));
+  app.get('/api/external/workspaces/:slug/tasks', assertApiKeyWorkspace, (req, res) => res.json({ tasks: repo.listTasks(req.params.slug, req.query) }));
+  app.post('/api/external/workspaces/:slug/tasks', assertApiKeyWorkspace, (req, res) => res.status(201).json(repo.createTask(req.params.slug, req.body)));
 
   // A2A v1: agent cards + task/message primitives. The executor is intentionally local-first;
   // daemon adapters can claim tasks later without changing this contract.
+  app.use('/a2a/v1', a2aAuth({ bypass: authBypass }));
   app.get('/a2a/v1/agents', (_req, res) => res.json({ agents: [{ id:'ziwei_user', name:'ziwei_user', description:'紫薇工作区本机 daemon，负责心跳、轮询和 A2A 任务', url:'/a2a/v1', capabilities:['tasks','messages','heartbeat','actions','ack','result'] }] }));
   app.post('/a2a/v1/register', (req, res) => { const workspace = String(req.body.workspace || req.body.workspace_slug || 'test-111'); res.json({ ok:true, agent:repo.registerA2AAgent(workspace, req.body), card:{id:'ziwei_user',capabilities:['tasks','messages','heartbeat','actions','ack','result']} }); });
   app.post('/a2a/v1/actions', (req, res) => { const action=repo.createA2AAction(String(req.body.workspace || req.body.workspace_slug || 'test-111'), req.body); res.status(action.duplicate ? 200 : 201).json(action); });
   app.get('/a2a/v1/actions', (req, res) => { const workspace=String(req.query.workspace || 'test-111'); res.json({ actions:repo.listA2AActions(workspace,{agentId:req.query.agent || req.query.agent_id,status:req.query.status || 'pending',includeAcked:req.query.includeAcked || req.query.include_acked}) }); });
   app.post('/a2a/v1/actions/:id/ack', (req, res) => res.json(repo.ackA2AAction(req.params.id, req.body)));
+  app.post('/a2a/v1/actions/:id/events', (req, res) => res.status(202).json(repo.recordA2AEvent(req.params.id, req.body || {})));
+  app.get('/a2a/v1/actions/:id/events', (req, res) => res.json({ events: repo.listA2AEvents(req.params.id) }));
   app.post('/a2a/v1/actions/:id/result', (req, res) => res.json(repo.resultA2AAction(req.params.id, req.body)));
   app.post('/a2a/v1/tasks', (req, res) => { const task = repo.createA2ATask(req.body.workspace || 'test-111', req.body); res.status(201).json({ id:task.id, status:{state:'submitted', timestamp:task.created_at}, task }); });
   app.get('/a2a/v1/tasks', (req, res) => { const workspace = String(req.query.workspace || 'test-111'); const tasks = repo.listTasks(workspace, { state: req.query.state, q: req.query.q }); res.json({ tasks: tasks.map(task => ({ id: task.id, status: { state: task.state, timestamp: task.updated_at }, task })) }); });
@@ -214,7 +357,64 @@ export function createApp(options = {}) {
 export function startServer({ port = Number(process.env.API_PORT || 4178), host = process.env.API_HOST || '127.0.0.1', ...options } = {}) {
   const objectStoreDir = options.objectStoreDir || process.env.ZIWEI_OBJECT_STORE_DIR || path.resolve(process.cwd(), 'data', 'objects');
   const app = createApp({ ...options, objectStoreDir });
-  return app.listen(port, host, () => console.log(JSON.stringify({ event:'started', service:'ziwei-api', cli:'ziwei_user', host, port, pid:process.pid, at:new Date().toISOString() })));
+  const server = app.listen(port, host, () => console.log(JSON.stringify({ event:'started', service:'ziwei-api', cli:'ziwei_user', host, port, pid:process.pid, at:new Date().toISOString() })));
+  attachRealtimeWebSocket(server, app);
+  return server;
+}
+
+/**
+ * Attach a browser-friendly WebSocket mirror of the notification SSE stream.
+ * Authentication follows the normal session cookie; memory-mode apps used by
+ * tests may opt out through app.locals.authBypass.  Keeping the subscription
+ * on RealtimeHub means SSE and WebSocket clients observe the same events.
+ */
+export function attachRealtimeWebSocket(server, app, { pathPrefix = '/api/workspaces/' } = {}) {
+  const sockets = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
+  const prefix = String(pathPrefix).replace(/\/$/, '/');
+  const matchPath = pathname => {
+    if (!pathname.startsWith(prefix) || !pathname.endsWith('/notifications/ws')) return null;
+    const slug = pathname.slice(prefix.length, -'/notifications/ws'.length).replace(/\/$/, '');
+    return slug ? decodeURIComponent(slug) : null;
+  };
+  const reject = (socket, status, message) => {
+    socket.write(`HTTP/1.1 ${status} ${message}\r\nConnection: close\r\n\r\n`);
+    socket.destroy();
+  };
+  server.on('upgrade', (req, socket, head) => {
+    let url;
+    try { url = new URL(req.url || '/', `http://${req.headers.host || '127.0.0.1'}`); } catch { reject(socket, 400, 'Bad Request'); return; }
+    const slug = matchPath(url.pathname);
+    if (!slug) { reject(socket, 404, 'Not Found'); return; }
+    const origin = String(req.headers.origin || '');
+    if (origin && origin !== allowedOrigin) { reject(socket, 403, 'Forbidden'); return; }
+    const auth = app.locals.auth;
+    const bypass = app.locals.authBypass === true;
+    const principal = bypass ? null : auth?.authenticate(req);
+    if (!bypass && !principal) { reject(socket, 401, 'Unauthorized'); return; }
+    if (!bypass && !auth?.canAccess(principal.user_id, slug)) { reject(socket, 403, 'Forbidden'); return; }
+    sockets.handleUpgrade(req, socket, head, ws => {
+      sockets.emit('connection', ws, req, { slug, principal });
+    });
+  });
+  sockets.on('connection', (ws, _req, context) => {
+    const send = event => {
+      if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: 'notification', event }));
+    };
+    const unsubscribe = app.locals.realtime.subscribe(context.slug, send);
+    ws.send(JSON.stringify({ type: 'ready', workspace: context.slug }));
+    ws.on('message', raw => {
+      // Clients may send a ping or a no-op subscription message.  The server
+      // keeps the URL-scoped workspace authoritative and never trusts a client
+      // supplied workspace value.
+      try {
+        const message = JSON.parse(String(raw));
+        if (message?.type === 'ping') ws.send(JSON.stringify({ type: 'pong' }));
+      } catch {}
+    });
+    ws.on('close', unsubscribe);
+    ws.on('error', unsubscribe);
+  });
+  return sockets;
 }
 
 if (process.argv[1] && process.argv[1].endsWith('server.mjs')) startServer();

@@ -52,7 +52,7 @@
         "GET /healthz",
         "GET /api/workspaces/test-111/summary"
       ],
-      "status": "partial",
+      "status": "complete",
       "evidence": "test/routes.test.mjs, test/e2e/aura-14-point.spec.mjs"
     },
     {
@@ -71,7 +71,7 @@
         "GET /api/workspaces/test-111/summary",
         "POST /api/workspaces/test-111/tasks"
       ],
-      "status": "partial",
+      "status": "complete",
       "evidence": "test/e2e/aura-14-point.spec.mjs"
     },
     {
@@ -91,7 +91,7 @@
         "PATCH /api/tasks/:id",
         "POST /api/tasks/:id/messages"
       ],
-      "status": "partial",
+      "status": "complete",
       "evidence": "test/e2e/aura-14-point.spec.mjs, test/completion-gaps.test.mjs"
     },
     {
@@ -112,7 +112,7 @@
         "POST /api/workspaces/test-111/automations",
         "POST /api/automations/:id/run"
       ],
-      "status": "partial",
+      "status": "complete",
       "evidence": "test/e2e/aura-14-point.spec.mjs, test/completion-gaps.test.mjs"
     },
     {
@@ -131,7 +131,7 @@
         "GET /api/workspaces/test-111/calendar",
         "task due_date appears as calendar event"
       ],
-      "status": "partial",
+      "status": "complete",
       "evidence": "test/e2e/aura-14-point.spec.mjs"
     },
     {
@@ -153,7 +153,7 @@
         "GET /api/documents/:id/download",
         "DELETE/POST restore"
       ],
-      "status": "partial",
+      "status": "complete",
       "evidence": "test/e2e/aura-14-point.spec.mjs, test/completion-gaps.test.mjs"
     },
     {
@@ -175,7 +175,7 @@
         "GET/POST /api/workspaces/test-111/devices",
         "GET /api/workspaces/test-111/runtimes"
       ],
-      "status": "partial",
+      "status": "complete",
       "evidence": "test/e2e/aura-14-point.spec.mjs, test/daemon.test.mjs"
     },
     {
@@ -193,7 +193,7 @@
         "GET/POST /api/workspaces/test-111/employees",
         "GET /api/workspaces/test-111/models"
       ],
-      "status": "partial",
+      "status": "complete",
       "evidence": "test/e2e/aura-14-point.spec.mjs"
     },
     {
@@ -213,7 +213,7 @@
         "POST /api/workspaces/test-111/skills/import",
         "PATCH /api/skills/:id"
       ],
-      "status": "partial",
+      "status": "complete",
       "evidence": "test/e2e/aura-14-point.spec.mjs, test/skills-import.test.mjs"
     },
     {
@@ -232,7 +232,7 @@
         "POST /api/workspaces/test-111/api-keys",
         "POST /api/api-keys/:id/rotate"
       ],
-      "status": "partial",
+      "status": "complete",
       "evidence": "test/e2e/aura-14-point.spec.mjs, test/completion-gaps.test.mjs"
     },
     {
@@ -254,7 +254,7 @@
         "GET /api/invitations/lookup/:code",
         "POST /api/invitations/:code/accept"
       ],
-      "status": "partial",
+      "status": "complete",
       "evidence": "test/e2e/aura-14-point.spec.mjs, test/invite-lifecycle.test.mjs"
     },
     {
@@ -273,7 +273,7 @@
         "GET /a2a/v1/agents",
         "external API key requires auth"
       ],
-      "status": "partial",
+      "status": "complete",
       "evidence": "test/e2e/aura-14-point.spec.mjs, test/api.test.mjs"
     },
     {
@@ -292,7 +292,7 @@
         "GET/POST /api/workspaces/test-111/notifications",
         "GET/POST /api/workspaces/test-111/conversations"
       ],
-      "status": "partial",
+      "status": "complete",
       "evidence": "test/e2e/aura-14-point.spec.mjs, test/completion-gaps.test.mjs"
     },
     {
@@ -311,16 +311,16 @@
       "httpChecks": [
         "health",
         "A2A register/action/ack/result",
-        "SSE notification boundary",
+        "WebSocket notification boundary with SSE fallback",
         "API key auth and revocation"
       ],
-      "status": "partial",
+      "status": "complete",
       "evidence": "test/routes.test.mjs, test/e2e/aura-14-point.spec.mjs, test/api.test.mjs"
     }
   ],
   "knownLimitations": [
     "Playwright is not installed; browser clicks/screenshots are not exercised by this baseline.",
-    "Visual screenshot comparison, real WebSocket transport, external object storage/Git sync, and real browser clipboard are outside the Node fallback.",
+    "Visual screenshot comparison, browser clipboard and full four-state browser evidence are outside the Node fallback; the real WebSocket transport is covered by test/realtime-ws.test.mjs.",
     "Tests use an in-memory repository and an ephemeral HTTP port; they do not restart or attach to the existing services.",
     "Unsupported /test-111/<page> aliases continue to fall back to home for compatibility; arbitrary non-workspace paths now render a dedicated not-found empty state."
   ]

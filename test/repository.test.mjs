@@ -16,10 +16,29 @@ test('repository seeds workspace and supports task lifecycle', () => {
   assert.equal(repo.listTasks('test-111').length, 1);
 });
 
+test('ziwei_user heartbeat creates the runtime catalog for a fresh workspace', () => {
+  const repo = createRepository({ memory: true });
+  const timestamp = new Date().toISOString();
+  repo.db.prepare('INSERT INTO workspaces(id,slug,name,plan,timezone,created_at) VALUES(?,?,?,?,?,?)')
+    .run('ws-bjc-ops', 'bjc-ops', 'BJC Ops', 'free', 'Asia/Shanghai', timestamp);
+
+  const heartbeat = repo.heartbeatDevice('bjc-ops', {
+    agentId: 'ziwei_user',
+    deviceId: 'device-bjc-ops',
+    version: '0.1.0',
+    runtimes: { Claude: { version: '4.5', status: 'available' } }
+  });
+  assert.equal(heartbeat.status, 'online');
+  const runtimes = repo.listRuntimes('bjc-ops');
+  assert.deepEqual(runtimes.map(item => item.name), ['Claude', 'Codex', 'Gemini', 'Hermes']);
+  assert.equal(runtimes.every(item => item.status === 'online'), true);
+});
+
 test('repository exposes A2A agent cards and documents', () => {
   const repo = createRepository({ memory: true });
   const agents = repo.listRuntimes('test-111');
   assert.equal(agents.length, 4);
+  repo.heartbeatDevice('test-111', { agentId: 'ziwei_user', version: '0.1.0', bridgeVersion: '0.1.0' });
   assert.equal(repo.listModels('test-111', { q: 'sonnet' })[0].provider, 'Anthropic');
   const doc = repo.createDocument('test-111', { name: '复刻说明.md', type: 'file', content: '# hello' });
   assert.equal(doc.type, 'file');
@@ -41,11 +60,18 @@ test('repository persists invitations, devices, and digital employees', () => {
   const member = repo.createMember('test-111', { email: 'new@example.com', role: 'admin' });
   const device = repo.createDevice('test-111', { name: 'office-pc' });
   const employee = repo.createEmployee('test-111', { name: '日报整理员', runtime: 'Codex', model: 'openai:gpt-6', visibility: 'personal', skills: ['skill-code'], instructions: '整理日报' });
+  const paused = repo.createEmployee('test-111', { name: '暂停中的员工', status: 'paused' });
+  const invalid = repo.createEmployee('test-111', { name: '未知状态员工', status: 'not-a-status' });
   assert.equal(repo.listMembers('test-111').some(item => item.id === member.id), true);
   assert.equal(repo.listDevices('test-111').some(item => item.id === device.id), true);
-  assert.equal(repo.listEmployees('test-111')[0].name, employee.name);
-  assert.equal(repo.listEmployees('test-111')[0].model_id, 'openai:gpt-6');
-  assert.deepEqual(repo.listEmployees('test-111')[0].skills, ['skill-code']);
+  const employees = repo.listEmployees('test-111');
+  assert.equal(employees.some(item => item.id === employee.id && item.name === employee.name), true);
+  assert.equal(employee.status, 'active');
+  assert.equal(paused.status, 'paused');
+  assert.equal(invalid.status, 'active');
+  assert.equal(employees.find(item => item.id === employee.id).status, 'active');
+  assert.equal(employees.find(item => item.id === employee.id).model_id, 'openai:gpt-6');
+  assert.deepEqual(employees.find(item => item.id === employee.id).skills, ['skill-code']);
 });
 
 test('repository updates task details and stores task messages', () => {
@@ -58,6 +84,76 @@ test('repository updates task details and stores task messages', () => {
   assert.equal(repo.getTask(task.id).state, 'in_progress');
   const message = repo.addTaskMessage(task.id, { role: 'user', content: '请补充验收标准' });
   assert.equal(repo.getTaskMessages(task.id)[0].id, message.id);
+});
+
+test('execution-backed tasks are linked to ziwei_user and reflect terminal results', () => {
+  const repo = createRepository({ memory: true });
+  const task = repo.createTask('test-111', {
+    title: '执行链路验收', description: '只验证任务状态回写', runtime: 'Codex', execute: true
+  });
+  const queued = repo.listA2AActions('test-111', { status: 'pending' })[0];
+  assert.equal(queued.task_id, task.id);
+  assert.equal(repo.listTasks('test-111')[0].execution.status, 'pending');
+  repo.ackA2AAction(queued.id, { agentId: 'ziwei_user' });
+  assert.equal(repo.getTask(task.id).state, 'in_progress');
+  repo.recordA2AEvent(queued.id, { agentId: 'ziwei_user', type: 'action.progress', message: '已启动 Codex CLI', data: { phase: 'started' } });
+  assert.equal(repo.getTask(task.id).execution.events[0].message, '已启动 Codex CLI');
+  repo.resultA2AAction(queued.id, { agentId: 'ziwei_user', status: 'failed', error: 'CLI timeout' });
+  const finished = repo.getTask(task.id);
+  assert.equal(finished.state, 'blocked');
+  assert.equal(finished.execution.status, 'failed');
+  assert.match(repo.getTaskMessages(task.id)[0].content, /CLI timeout/);
+});
+
+test('conversation history can be recorded without dispatching a duplicate action', () => {
+  const repo = createRepository({ memory: true });
+  const conversation = repo.createConversation('test-111', { title: '任务历史' });
+  repo.addConversationMessage(conversation.id, { role: 'user', content: '只保存这条历史', runtime: 'Codex', dispatch: false });
+  assert.equal(repo.listA2AActions('test-111', { status: 'all' }).length, 0);
+  assert.equal(repo.getConversation(conversation.id).messages[0].content, '只保存这条历史');
+});
+
+test('conversation exposes ziwei_user execution status, progress, and reply', () => {
+  const repo = createRepository({ memory: true });
+  const conversation = repo.createConversation('test-111', { title: '持久会话' });
+  const submitted = repo.addConversationMessage(conversation.id, { role: 'user', content: '执行一次本地检查', runtime: 'Codex' });
+  assert.equal(submitted.execution.status, 'pending');
+  let current = repo.getConversation(conversation.id);
+  assert.equal(current.execution.status, 'pending');
+  assert.equal(current.messages.length, 1);
+  const action = repo.listA2AActions('test-111', { status: 'pending' })[0];
+  repo.ackA2AAction(action.id, { agentId: 'ziwei_user' });
+  repo.recordA2AEvent(action.id, { agentId: 'ziwei_user', type: 'action.progress', message: '已启动 Codex' });
+  current = repo.getConversation(conversation.id);
+  assert.equal(current.execution.status, 'acked');
+  assert.equal(current.execution.events[0].message, '已启动 Codex');
+  repo.resultA2AAction(action.id, { agentId: 'ziwei_user', status: 'succeeded', result: { output: '检查完成' } });
+  current = repo.getConversation(conversation.id);
+  assert.equal(current.execution.status, 'succeeded');
+  assert.equal(current.messages.at(-1).role, 'assistant');
+  assert.match(current.messages.at(-1).content, /检查完成/);
+});
+
+test('conversation follows task.execute actions created for a digital employee', () => {
+  const repo = createRepository({ memory: true });
+  const conversation = repo.createConversation('test-111', { title: '任务型持久会话' });
+  const task = repo.createTask('test-111', {
+    title: '通过数字员工执行',
+    description: '查询并返回结果',
+    runtime: 'Codex',
+    execute: true,
+    conversationId: conversation.id
+  });
+  const action = repo.listA2AActions('test-111', { status: 'pending' }).find(item => item.task_id === task.id);
+  assert.ok(action);
+  assert.equal(repo.getConversation(conversation.id).execution.type, 'task.execute');
+  repo.ackA2AAction(action.id, { agentId: 'ziwei_user' });
+  repo.recordA2AEvent(action.id, { agentId: 'ziwei_user', type: 'action.stage', message: '正在查询', data: { stage: 'reasoning', summary: '规划查询步骤' } });
+  assert.equal(repo.getConversation(conversation.id).execution.events.length, 1);
+  repo.resultA2AAction(action.id, { agentId: 'ziwei_user', status: 'failed', error: 'A2A action timed out after 600000ms' });
+  const current = repo.getConversation(conversation.id);
+  assert.equal(current.execution.status, 'failed');
+  assert.match(current.messages.at(-1).content, /600000ms/);
 });
 
 test('tasks support creator, tag and due date filters plus durable attachments', () => {

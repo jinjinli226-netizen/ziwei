@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
+import {executeRuntime, discoverInstalledRuntimes} from './runtime-adapters.mjs';
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_OUTPUT_BYTES = 1024 * 1024;
@@ -145,11 +146,32 @@ function runCommand({runtimeDir, action, executable, baseArgs = [], allowedExecu
  * Unknown/unsupported actions fail loudly so the cloud never sees a fake
  * success merely because an action was accepted by the daemon.
  */
-export function createLocalActionExecutor({runtimeDir, allowedExecutables = [], executorCommand = null, executorArgs = []} = {}) {
+export function createLocalActionExecutor({runtimeDir, allowedExecutables = [], executorCommand = null, executorArgs = [], defaultRuntime = null} = {}) {
   if (!runtimeDir) throw new TypeError('runtimeDir is required');
   fs.mkdirSync(runtimeDir, {recursive: true});
-  return async action => {
+  return async (action, context = {}) => {
     const type = String(action?.type || '');
+    // Native model calls intentionally use the installed local CLI.  This is
+    // the one action family with full local permissions; the ordinary file and
+    // command actions below remain bounded to the bridge runtime directory.
+    if (['agent.execute', 'conversation.execute', 'runtime.execute', 'automation.execute'].includes(type)
+      || (type === 'task.execute' && (action.payload?.runtime || action.payload?.agent || action.payload?.modelId || action.payload?.prompt))) {
+      const payload = action.payload || {};
+      const runtime = payload.runtime || payload.agent || payload.runtimeName || defaultRuntime
+        || Object.values(discoverInstalledRuntimes().runtimes).find(item => item.status === 'available')?.runtime;
+      const prompt = payload.prompt ?? payload.message ?? payload.content ?? payload.instructions;
+      return executeRuntime({
+        runtime,
+        model: payload.model || payload.modelId || payload.model_id || null,
+        prompt,
+        cwd: payload.cwd || payload.workingDirectory || payload.workdir || process.cwd(),
+        env: payload.env,
+        signal: context.signal,
+        onOutput: context.onOutput,
+        onProgress: context.onProgress,
+        onStage: context.onStage,
+      });
+    }
     if (type === 'message.deliver' || type === 'local.message' || type === 'task.execute') {
       return {status: 'succeeded', result: await writeMessage(runtimeDir, action)};
     }

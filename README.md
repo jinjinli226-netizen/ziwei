@@ -2,6 +2,10 @@
 
 紫薇是一个前后端分离的智能工作区原型，复刻了 AuraBaba `test-111` 的核心工作区、任务、文档、运行时、技能、自动化和连接器流程。项目中的本机 daemon 由我们自己实现，服务名称是 `ziwei_user`。
 
+## 维护与 AI 接手
+
+开发、启动、架构、真实完成边界、扩展规范、故障排查、发布门槛和接手顺序统一维护在 [PROJECT_MANAGEMENT.md](PROJECT_MANAGEMENT.md)；项目级变更摘要见 [CHANGELOG.md](CHANGELOG.md)。需要把项目交给新 AI 时，直接使用 [NEW_AI_SESSION_PROMPT.md](NEW_AI_SESSION_PROMPT.md) 中的提示词。任何 AI 接手项目时先读维护手册，再读本文件和 `HANDOFF.md`；不要只依据旧截图或历史计划判断当前状态。
+
 ## 已实现
 
 - Vue 3 + Vite 前端，使用本地 `@ziwei/ui@0.1.1` 组件包。
@@ -46,6 +50,7 @@ scripts\install-ziwei-user.bat --workspace test-111 --api http://127.0.0.1:4178 
 ## API 入口
 
 - `GET /healthz`
+- `GET /api/workspaces`、`POST /api/workspaces`（登录用户列出/创建项目；创建后访问 `/<slug>/<page>`）
 - `GET /api/workspaces/test-111/summary`
 - `GET|POST /api/workspaces/test-111/tasks`
 - `PATCH /api/tasks/:id`、`GET|POST /api/tasks/:id/messages`
@@ -57,7 +62,7 @@ scripts\install-ziwei-user.bat --workspace test-111 --api http://127.0.0.1:4178 
 - `POST /api/workspaces/test-111/heartbeat`（仅接受 `ziwei_user`，用于设备与运行时健康链路）
 - `GET|POST /api/workspaces/test-111/api-keys`、`POST /api/api-keys/:id/revoke`、`POST /api/api-keys/:id/rotate`
 - `GET|POST /api/external/workspaces/:slug/*`（需要 `Authorization: Bearer zwi_...` 或 `X-Ziwei-Api-Key`）
-- `GET|POST /api/workspaces/test-111/notifications`（支持 `unread`/`archived`、未读统计和已读；`GET /api/workspaces/test-111/notifications/stream` 提供 SSE 实时边界）
+- `GET|POST /api/workspaces/test-111/notifications`（支持 `unread`/`archived`、未读统计和已读；`/notifications/ws` 优先使用 WebSocket，`/notifications/stream` 提供 SSE fallback）
 - `GET|POST /api/workspaces/test-111/conversations`、`GET|POST /api/conversations/:id/messages`（新对话、消息和附件元数据）
 - `GET|POST /api/workspaces/test-111/skills`、`PATCH /api/skills/:id`
 - `POST /api/skills/:id/uninstall`、`GET /api/skills/:id/versions`、`POST /api/skills/:id/rollback`
@@ -77,11 +82,11 @@ scripts\install-ziwei-user.bat --workspace test-111 --api http://127.0.0.1:4178 
 
 ## 界面约定
 
-页面布局、导航层级、操作位置和流程参考 AuraBaba；配色、字体、Logo 和基础组件使用紫薇自己的品牌与 `@ziwei/ui`。保持浅色背景，主操作和选中态使用组件库的紫色令牌 `--ziwei-violet`，成功与告警色沿用组件库语义色。不要把原站蓝灰配色作为视觉验收要求。
+页面布局、导航层级、操作位置和流程参考 AuraBaba；配色、字体、Logo 和基础组件使用紫薇自己的品牌与 `@ziwei/ui`。保持浅色背景，主操作和选中态使用紫薇的蓝色主色令牌，成功与告警色沿用组件库语义色。
 
 ## 还未接生产的部分
 
-生产 PostgreSQL/Redis、云端 OAuth、对象存储、真正的任务执行沙箱、WebSocket/队列、计费和伙伴市场仍保留在适配边界中；本地 SQLite 已支持 API Key 轮换、A2A action 重试、通知 SSE、Webhook HMAC 签名与重试、文档回收站和技能回滚。
+生产 PostgreSQL/Redis、云端 OAuth、外部对象存储、真正的任务执行沙箱、队列、计费和伙伴市场仍保留在适配边界中；本地 SQLite 已支持 API Key 轮换、A2A action 重试、通知 WebSocket（SSE fallback）、Webhook HMAC 签名与重试、文档回收站和技能回滚。远端 Git 同步按当前范围保留本地 Git 导入/导出，暂不连接远端仓库。
 
 ## 许可证
 

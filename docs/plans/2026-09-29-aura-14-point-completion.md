@@ -8,6 +8,10 @@
 
 **Tech Stack:** Vue 3、Vite、`@ziwei/ui`、Express 5、Node 内置 SQLite、Node fetch、A2A v1、Playwright/Node test。
 
+## 当前状态（2026-10-01）
+
+14 个本地功能点已经实现并通过当前回归：前后端真实持久化、`ziwei_user` 心跳与 CLI 发现、A2A 令牌/动作、自动化重试与 Webhook、文档二进制/回收站/版本、技能多来源导入、邀请/API Key、通知 WebSocket/SSE 和安装脚本均可用。远端 Git 同步按用户要求暂缓；生产对象存储/队列和完整浏览器截图比对属于后续部署验收边界。历史章节保留当时的缺口记录，不代表当前代码状态。
+
 ---
 
 ## 当前审计结论
@@ -286,6 +290,16 @@
 - 浏览器修复：窄窗口下快捷托盘与文档操作栏发生命中遮挡，已通过窄屏定位和操作栏层级修复，并在 5178 实例复测导出 Git 弹窗。
 - 验证：`npm test` 59/59、`npm run lint`、`npm run build` 通过。14 点仍不能标记全部完成，剩余项见 `HANDOFF.md`。
 
+## 2026-10-01 最终收口增量
+
+- A2A 生产链路：新增机器级随机令牌文件 `data/a2a.token`（已加入 `.gitignore`），生产动作端点要求 Bearer 令牌；`ziwei_user` 自动读取并用于轮询、确认、结果和事件回写，Agent Card 仍可发现。
+- 实时通知：新增 WebSocket `/api/workspaces/:slug/notifications/ws`，沿用会话和工作区权限；前端优先 WebSocket，失败自动回退 SSE，指数退避重连，并在 ready 后重新拉取持久化通知。
+- 设备/安装：保留 `ziwei_user` 自有 PowerShell、cmd、Shell 安装入口与健康检查；不读取 Aura daemon 状态。
+- 当前验证：`npm test` **62/62**、`npm run lint`、`npm run build`、`git diff --check` 通过；真实端口 4178/5178/20242 监听，`ziwei_user /readyz` 在线。
+- 追加验证：登录用户可通过工作区选择器创建新项目；后端写入唯一 slug 与 Owner 成员，前端会把当前页面切换到 `/<slug>/<page>`，`test/workspace-create.test.mjs` 覆盖创建、列表和 summary 路由。
+- 仍按用户要求暂缓：远端 Git 同步。浏览器像素截图比对仍受当前环境登录态和 Playwright 缺失限制，不能用静态测试冒充已完成。
+- 当前全量测试已更新为 `npm test` **62/62**；lint、build 和 `git diff --check` 同步通过。
+
 
 ## 2026-09-29 当前进度
 
@@ -337,6 +351,12 @@
 - Task 8：设备资源新增重命名、停用/启用、删除接口；停用设备的心跳不会重新唤醒，重命名会在后续 `ziwei_user` 心跳中保留。管理工位页面已接入重命名、停用/启用和删除确认操作。
 - Task 11：新增统一 Owner/Admin/Member 资源权限矩阵接口；`/api` 资源路由统一执行角色检查，API Key 角色不能被请求头覆盖，工作区设置和 API Key 读取也受管理员权限保护。新增设备与资源矩阵回归测试。
 - 验证证据：`npm test` **43/43**、`npm run lint`、`npm run build` 均通过；未重启现有服务。
+
+## 2026-10-01 完成项与剩余限制校准
+
+- 已完成：任务负责人泳道和拖拽状态切换；日历事件/任务拖动改日期；自动化编辑、启用/暂停、立即运行、删除和运行记录；成员/数字员工动态列表与删除；头像持久化；设备冗余记录清理及组织树/目录树移除入口；A2A action events 查询与终态事件保护；技能中心的文本/文件、URL、ZIP、在线工位复制来源；快捷创建附件随任务保存。
+- 验证：`npm test` **59/59**、`npm run lint`、`npm run build` 通过；运行端口保持 5178/4178/20242，未改动原生启动入口。
+- 明确延期：远端 Git 同步（仅保留本地 Git 导入/导出）、WebSocket（当前使用 SSE）、完整浏览器四态/截图比对、受控执行目录和外部对象存储。14 点不能据此标记为全部完成。
 
 ## 2026-09-30 继续补齐 UI 链路与最终验收
 

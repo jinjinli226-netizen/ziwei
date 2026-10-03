@@ -6,5 +6,6 @@
   "healthHost": "127.0.0.1",
   "healthPort": 20242,
   "heartbeatMs": 15000,
-  "pollMs": 5000
+  "pollMs": 5000,
+  "defaultRuntime": null
 }

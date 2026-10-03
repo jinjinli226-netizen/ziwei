@@ -17,6 +17,14 @@ function toSkillRecord(row) {
 }
 const configuredHeartbeatTimeout = Number(process.env.ZIWEI_HEARTBEAT_TIMEOUT_MS);
 const HEARTBEAT_TIMEOUT_MS = Number.isFinite(configuredHeartbeatTimeout) && configuredHeartbeatTimeout > 0 ? configuredHeartbeatTimeout : 45_000;
+const A2A_MIN_EXECUTION_TIMEOUT_MS = 15 * 60 * 1000;
+const A2A_MAX_EXECUTION_TIMEOUT_MS = 60 * 60 * 1000;
+const A2A_EXECUTION_LEASE_BUFFER_MS = 60 * 1000;
+const a2aExecutionTimeoutMs = payload => {
+  const requested = Number(payload?.timeoutMs ?? payload?.timeout_ms);
+  if (!Number.isFinite(requested)) return A2A_MIN_EXECUTION_TIMEOUT_MS;
+  return Math.min(A2A_MAX_EXECUTION_TIMEOUT_MS, Math.max(A2A_MIN_EXECUTION_TIMEOUT_MS, requested));
+};
 const ownVersion = () => process.env.ZIWEI_USER_VERSION || '0.1.0';
 const appOrigin = () => String(process.env.ZIWEI_APP_URL || process.env.FRONTEND_ORIGIN || 'http://127.0.0.1:5178').replace(/\/$/, '');
 const invitationExpiry = input => {
@@ -162,12 +170,105 @@ export function createRepository(options = {}) {
   const objectStore = objectStoreFromOptions(options);
   const discover = options.discoverLocalVersions || discoverLocalVersions;
   const workspace = slug => db.prepare('SELECT * FROM workspaces WHERE slug = ?').get(slug);
+  // A workspace can be created after the database seed has run.  Keep the
+  // four built-in runtime rows available as soon as our own bridge reports a
+  // heartbeat, while leaving any existing row (including its version and
+  // capabilities) untouched.  Runtime liveness is still derived from the
+  // ziwei_user heartbeat in listRuntimes().
+  const ensureRuntimeCatalog = (workspaceId, timestamp) => {
+    const defaults = [
+      ['Claude', 'Anthropic', ['chat', 'code', 'browser']],
+      ['Codex', 'OpenAI', ['code', 'review', 'terminal']],
+      ['Gemini', 'Google', ['research', 'vision', 'chat']],
+      ['Hermes', 'Hermes', ['orchestration', 'a2a', 'automation']]
+    ];
+    const insert = db.prepare('INSERT INTO runtimes(id,workspace_id,name,provider,version,status,capabilities_json,last_seen) VALUES(?,?,?,?,?,?,?,?)');
+    for (const [name, provider, capabilities] of defaults) {
+      const existing = db.prepare('SELECT id FROM runtimes WHERE workspace_id=? AND name=?').get(workspaceId, name);
+      if (!existing) insert.run(id('runtime'), workspaceId, name, provider, null, 'online', JSON.stringify(capabilities), timestamp);
+    }
+  };
   const audit = (slug, actor, action, payload = {}) => {
     const eventId = id('audit'); const timestamp = now(); const ws = workspace(slug);
     db.prepare('INSERT INTO audit_events(id,workspace_id,actor,action,payload_json,created_at) VALUES(?,?,?,?,?,?)').run(eventId, ws.id, actor, action, JSON.stringify(payload), timestamp);
     db.prepare('INSERT INTO notifications(id,workspace_id,event_id,actor,action,payload_json,created_at,read_at,archived_at) VALUES(?,?,?,?,?,?,?,?,?)').run(id('notice'), ws.id, eventId, actor, action, JSON.stringify(payload), timestamp, null, null);
     options.onEvent?.({ id:eventId, workspaceId:ws.id, workspaceSlug:slug, actor, action, payload, created_at:timestamp });
     return eventId;
+  };
+  const actionEvents = actionId => db.prepare('SELECT id,action_id,type,message,data_json,created_at FROM a2a_action_events WHERE action_id=? ORDER BY created_at,id').all(actionId).map(event => ({
+    id:event.id, action_id:event.action_id, type:event.type, message:event.message,
+    data:parse(event.data_json), created_at:event.created_at
+  }));
+  const actionView = (row, { includeEvents = false } = {}) => row ? ({
+    id: row.id,
+    task_id: row.task_id,
+    agent_id: row.agent_id,
+    type: row.type,
+    status: row.status,
+    payload: parse(row.payload_json),
+    dedupe_key: row.dedupe_key,
+    created_at: row.created_at,
+    acked_at: row.acked_at,
+    completed_at: row.completed_at,
+    result: parse(row.result_json),
+    error: row.error || null,
+    ...(includeEvents ? { events: actionEvents(row.id) } : {})
+  }) : null;
+  // Conversation messages are dispatched through a2a_actions.  Expose the
+  // latest dispatch and its progress events alongside the messages so the UI
+  // can show whether ziwei_user has received, started, or finished a reply.
+  // The action payload is JSON (rather than a separate FK), therefore filter
+  // the candidate rows after parsing to avoid matching a conversation id that
+  // happens to occur in the prompt text.
+  const conversationExecution = conversationId => {
+    // A persistent conversation can be dispatched directly as
+    // `conversation.execute`, or through a task created for a digital
+    // employee (`task.execute`).  Both payloads carry conversationId.  The
+    // UI needs the latest one regardless of which dispatch path was used.
+    const candidates = db.prepare("SELECT * FROM a2a_actions WHERE payload_json LIKE ? ORDER BY created_at DESC").all(`%${String(conversationId)}%`);
+    const row = candidates.find(candidate => parse(candidate.payload_json)?.conversationId === conversationId);
+    if (!row) return null;
+    let current = row;
+    if (['pending','acked'].includes(current.status) && current.expires_at && Date.parse(current.expires_at) <= Date.now()) {
+      const timestamp = now();
+      db.prepare("UPDATE a2a_actions SET status='expired',completed_at=? WHERE id=? AND status IN ('pending','acked')").run(timestamp, current.id);
+      current = { ...current, status:'expired', completed_at:timestamp };
+    }
+    const view = actionView(current);
+    view.events = actionEvents(current.id);
+    return view;
+  };
+  const taskExecutionMessage = (taskId, status, error = null, result = null) => {
+    const task = db.prepare('SELECT * FROM tasks WHERE id=?').get(taskId);
+    if (!task) return null;
+    const timestamp = now();
+    const output = typeof result === 'string'
+      ? result
+      : (result?.output || result?.text || result?.result?.output || result?.result?.text || '');
+    const detail = status === 'succeeded'
+      ? `数字员工执行完成${output ? `：${String(output).slice(0, 3800)}` : ''}`
+      : `数字员工执行失败：${String(error || '未知执行错误').slice(0, 3900)}`;
+    const message = { id:id('msg'), task_id:taskId, role:'assistant', content:detail, created_at:timestamp };
+    db.prepare('INSERT INTO task_messages(id,task_id,role,content,created_at) VALUES(?,?,?,?,?)').run(message.id, message.task_id, message.role, message.content, message.created_at);
+    // A terminal runtime result is authoritative for an execution-backed task.
+    // Keep manually cancelled/completed cards intact, but otherwise expose the
+    // real daemon result in the board instead of leaving the card in progress.
+    if (!['completed', 'cancelled'].includes(task.state)) {
+      const nextState = status === 'succeeded' ? 'completed' : 'blocked';
+      db.prepare('UPDATE tasks SET state=?,updated_at=? WHERE id=?').run(nextState, timestamp, taskId);
+      const workspaceRow = db.prepare('SELECT slug FROM workspaces WHERE id=?').get(task.workspace_id);
+      if (workspaceRow) audit(workspaceRow.slug, 'ziwei_user', `task.execution.${status}`, { taskId, from:task.state, to:nextState, error:error || null });
+    }
+    return message;
+  };
+  const markTaskRunning = taskId => {
+    if (!taskId) return;
+    const task = db.prepare('SELECT * FROM tasks WHERE id=?').get(taskId);
+    if (!task || ['in_progress','review','completed','blocked','cancelled'].includes(task.state)) return;
+    const timestamp = now();
+    db.prepare('UPDATE tasks SET state=?,updated_at=? WHERE id=?').run('in_progress', timestamp, taskId);
+    const workspaceRow = db.prepare('SELECT slug FROM workspaces WHERE id=?').get(task.workspace_id);
+    if (workspaceRow) audit(workspaceRow.slug, 'ziwei_user', 'task.execution.started', { taskId, from:task.state, to:'in_progress' });
   };
   return {
     db,
@@ -197,7 +298,11 @@ export function createRepository(options = {}) {
         if (dateTo) { sql += ' AND due_date <= ?'; params.push(String(dateTo)); }
       }
       sql += ' ORDER BY updated_at DESC';
-      return db.prepare(sql).all(...params).map(row => ({ ...row, labels: parse(row.labels_json) }));
+      return db.prepare(sql).all(...params).map(row => ({
+        ...row,
+        labels: parse(row.labels_json),
+        execution: actionView(db.prepare('SELECT * FROM a2a_actions WHERE task_id=? ORDER BY created_at DESC LIMIT 1').get(row.id), { includeEvents:true })
+      }));
     },
     createTask(slug, input = {}) {
       const ws = workspace(slug); if (!ws) throw new Error('Workspace not found'); const created = now();
@@ -205,7 +310,12 @@ export function createRepository(options = {}) {
       const rawDescription = String(input.description || '');
       const task = { id: id('task'), workspace_id: ws.id, title: String(input.title || '未命名任务').trim(), description: descriptionFormat === 'html' ? sanitizeHtml(rawDescription) : rawDescription, description_format: descriptionFormat, state: input.state || 'planned', priority: input.priority || 'medium', created_by: String(input.createdBy ?? input.created_by ?? input.creator ?? 'user').trim() || 'user', assignee: input.assignee || null, labels: Array.isArray(input.labels) ? input.labels : [], due_date: input.dueDate ?? input.due_date ?? null, created_at: created, updated_at: created };
       if (!task.title) throw new Error('Task title is required');
-      db.prepare('INSERT INTO tasks(id,workspace_id,title,description,description_format,state,priority,created_by,assignee,labels_json,due_date,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)').run(task.id,ws.id,task.title,task.description,task.description_format,task.state,task.priority,task.created_by,task.assignee,JSON.stringify(task.labels),task.due_date,created,created); audit(slug,'user','task.created',{taskId:task.id}); return task;
+      db.prepare('INSERT INTO tasks(id,workspace_id,title,description,description_format,state,priority,created_by,assignee,labels_json,due_date,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)').run(task.id,ws.id,task.title,task.description,task.description_format,task.state,task.priority,task.created_by,task.assignee,JSON.stringify(task.labels),task.due_date,created,created);
+      audit(slug,'user','task.created',{taskId:task.id});
+      if (input.runtime || input.model || input.execute === true) {
+        this.createA2AAction(slug,{agentId:'ziwei_user',taskId:task.id,type:'task.execute',dedupeKey:`task:${task.id}:execute`,payload:{taskId:task.id,prompt:task.description || task.title,runtime:input.runtime || null,model:input.model || input.modelId || null,cwd:input.cwd || null,conversationId:input.conversationId || input.conversation_id || null}});
+      }
+      return task;
     },
     updateTask(taskId, input = {}) {
       const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId);
@@ -233,7 +343,7 @@ export function createRepository(options = {}) {
       return { ...task, ...next, labels: next.labels };
     },
     transitionTask(taskId, to) {
-      const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId); if (!task) throw new Error('Task not found'); const state = transitionTask(task.state, to); const updated = now(); db.prepare('UPDATE tasks SET state=?,updated_at=? WHERE id=?').run(state,updated,taskId); audit('test-111','user','task.state_changed',{taskId,from:task.state,to:state}); return {...task,state,updated_at:updated,labels:parse(task.labels_json)};
+      const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId); if (!task) throw new Error('Task not found'); const state = transitionTask(task.state, to); const updated = now(); db.prepare('UPDATE tasks SET state=?,updated_at=? WHERE id=?').run(state,updated,taskId); const ws = db.prepare('SELECT slug FROM workspaces WHERE id=?').get(task.workspace_id); audit(ws?.slug || 'test-111','user','task.state_changed',{taskId,from:task.state,to:state}); return {...task,state,updated_at:updated,labels:parse(task.labels_json)};
     },
     listRuntimes(slug) {
       const ws = workspace(slug);
@@ -243,23 +353,80 @@ export function createRepository(options = {}) {
       // CLI identity/version.  We never use an Aura daemon to infer either.
       const discovery = online ? discover() : null;
       db.prepare('UPDATE runtimes SET status=? WHERE workspace_id=?').run(online ? 'online' : 'offline', ws.id);
+      const metadata = Object.fromEntries(db.prepare('SELECT * FROM runtime_metadata WHERE workspace_id=?').all(ws.id).map(item => [item.runtime_name, item]));
       return db.prepare('SELECT * FROM runtimes WHERE workspace_id = ? ORDER BY name').all(ws.id).map(row => ({
         ...row,
+        // The runtime's version is the CLI probe result, never the old seed
+        // catalog value.  Keep the catalog value only as an internal legacy
+        // field so disconnected devices do not appear to have a live CLI.
+        version: online ? (discovery?.agents?.[row.name]?.version || metadata[row.name]?.version || null) : null,
         status: online ? 'online' : 'offline',
         last_seen: device?.last_seen || row.last_seen,
         capabilities: parse(row.capabilities_json),
-        // row.version is the catalog's display/model version, not proof that
-        // a local CLI is installed.  Only a successful local probe may fill
-        // cli_version; bridge_version remains the ziwei_user version below.
-        cli_version: online ? (discovery?.agents?.[row.name]?.version || null) : null,
-        cli_binary: online ? (discovery?.agents?.[row.name]?.binary || row.name.toLowerCase()) : null,
-        cli_status: online ? (discovery?.agents?.[row.name]?.status === 'available' ? 'available' : 'unavailable') : 'offline',
+        // Only a successful local probe may fill cli_version; bridge_version
+        // remains the ziwei_user version below.
+        cli_version: online ? (discovery?.agents?.[row.name]?.version || metadata[row.name]?.version || null) : null,
+        cli_binary: online ? (discovery?.agents?.[row.name]?.binary || metadata[row.name]?.binary || null) : null,
+        cli_status: online ? ((discovery?.agents?.[row.name]?.status === 'available' || metadata[row.name]?.status === 'available') ? 'available' : 'unavailable') : 'offline',
         bridge_name: device?.bridge_name || 'ziwei_user',
         bridge_version: device?.bridge_version || null,
         bridge_status: online ? (device.bridge_status || 'online') : 'offline'
       }));
     },
-    listModels(slug, filters = {}) { const ws = workspace(slug); if (!ws) throw new Error('Workspace not found'); return listModels({ runtime: filters.runtime, query: filters.q }); },
+    registerRuntimes(slug, input = {}) {
+      const ws = workspace(slug); if (!ws) throw new Error('Workspace not found');
+      const source = input.runtimes || input.runtimeMetadata || input.runtime_metadata || {};
+      const entries = Array.isArray(source) ? source.map(item => [item.runtime || item.name, item]) : Object.entries(source);
+      const timestamp = now();
+      const providers = { Claude: 'Anthropic', Codex: 'OpenAI', Gemini: 'Google', Hermes: 'Hermes' };
+      const capabilities = {
+        Claude: ['chat', 'code', 'browser'],
+        Codex: ['code', 'review', 'terminal'],
+        Gemini: ['research', 'vision', 'chat'],
+        Hermes: ['orchestration', 'a2a', 'automation']
+      };
+      for (const [nameValue, raw] of entries) {
+        const name = String(nameValue || '').trim(); if (!name || !raw || typeof raw !== 'object') continue;
+        const version = raw.version ? String(raw.version) : null;
+        const binary = raw.binary ? String(raw.binary) : null;
+        const status = raw.status ? String(raw.status) : (version ? 'available' : 'unavailable');
+        const models = Array.isArray(raw.models) ? raw.models.filter(item => item && typeof item === 'object').slice(0, 100) : [];
+        const existing = db.prepare('SELECT id FROM runtime_metadata WHERE workspace_id=? AND runtime_name=?').get(ws.id, name);
+        if (existing) db.prepare('UPDATE runtime_metadata SET version=?,binary=?,status=?,models_json=?,last_seen=? WHERE id=?').run(version,binary,status,JSON.stringify(models),timestamp,existing.id);
+        else db.prepare('INSERT INTO runtime_metadata(id,workspace_id,runtime_name,version,binary,status,models_json,last_seen) VALUES(?,?,?,?,?,?,?,?)').run(id('runtime-meta'),ws.id,name,version,binary,status,JSON.stringify(models),timestamp);
+        const runtime = db.prepare('SELECT id FROM runtimes WHERE workspace_id=? AND name=?').get(ws.id,name);
+        if (runtime) {
+          db.prepare('UPDATE runtimes SET version=?,last_seen=? WHERE id=?').run(version,timestamp,runtime.id);
+        } else {
+          // A newly created workspace has no seeded runtime rows.  The local
+          // ziwei_user heartbeat is the source of truth, so create the catalog
+          // row from the discovered CLI instead of leaving the device with
+          // zero visible Agent environments.
+          db.prepare('INSERT INTO runtimes(id,workspace_id,name,provider,version,status,capabilities_json,last_seen) VALUES(?,?,?,?,?,?,?,?)')
+            .run(id('runtime'), ws.id, name, providers[name] || name, version, 'online', JSON.stringify(capabilities[name] || []), timestamp);
+        }
+      }
+      return this.listRuntimes(slug);
+    },
+    listModels(slug, filters = {}) {
+      const ws = workspace(slug); if (!ws) throw new Error('Workspace not found');
+      const device = ownDevice(this.listDevices(slug));
+      // A model is selectable only when the own ziwei_user bridge is online
+      // and has reported/located it on this computer.  No vendor catalog is
+      // substituted when discovery has no answer; the UI can accept a manual
+      // model ID in that case.
+      const discovery = device?.status === 'online' ? discover() : null;
+      const metadata = Object.fromEntries(db.prepare('SELECT * FROM runtime_metadata WHERE workspace_id=?').all(ws.id).map(item => [item.runtime_name, item]));
+      const mergedDiscovery = discovery || { agents: {} };
+      for (const [name, item] of Object.entries(metadata)) {
+        const current = mergedDiscovery.agents[name] || {};
+        const models = (() => { try { return JSON.parse(item.models_json || '[]'); } catch { return []; } })();
+        const combinedModels = [...(Array.isArray(current.models) ? current.models : []), ...models];
+        const seenModels = new Set();
+        mergedDiscovery.agents[name] = { ...current, version: current.version || item.version, binary: current.binary || item.binary, status: current.status === 'available' ? current.status : item.status, models: combinedModels.filter(model => { const key = String(model?.id || ''); if (!key || seenModels.has(key)) return false; seenModels.add(key); return true; }) };
+      }
+      return listModels({ runtime: filters.runtime, query: filters.q, discovery: mergedDiscovery });
+    },
     listSkills(slug, filters = {}) {
       const ws = workspace(slug);
       if (!ws) throw new Error('Workspace not found');
@@ -546,9 +713,32 @@ export function createRepository(options = {}) {
     createMember(slug, input = {}) {
       const ws=workspace(slug); if (!ws) throw new Error('Workspace not found');
       const email=normalizeEmail(input.email); if (!email) throw new Error('成员邮箱不能为空');
+      if (db.prepare('SELECT id FROM members WHERE workspace_id=? AND lower(email)=?').get(ws.id,email)) throw new Error('该邮箱已属于当前工作区成员');
       const member={id:id('member'),workspace_id:ws.id,name:String(input.name || email || '新成员').trim(),email,role:input.role === 'admin' ? 'admin' : 'member',avatar:null,joined_at:now()};
       db.prepare('INSERT INTO members(id,workspace_id,name,email,role,avatar,joined_at) VALUES(?,?,?,?,?,?,?)').run(member.id,ws.id,member.name,member.email,member.role,null,member.joined_at);
       audit(slug,'user','member.created',{memberId:member.id}); return member;
+    },
+    updateMember(memberId, input = {}) {
+      const row = db.prepare('SELECT * FROM members WHERE id=?').get(memberId); if (!row) throw new Error('Member not found');
+      const ws = db.prepare('SELECT * FROM workspaces WHERE id=?').get(row.workspace_id); if (!ws) throw new Error('Workspace not found');
+      const name = String(input.name ?? row.name).trim(); if (!name) throw new Error('成员名称不能为空');
+      const email = normalizeEmail(input.email ?? row.email);
+      const role = row.role === 'owner' ? 'owner' : (input.role === 'admin' ? 'admin' : 'member');
+      const avatar = input.avatar === undefined ? row.avatar : (input.avatar ? String(input.avatar) : null);
+      const duplicate = db.prepare('SELECT id FROM members WHERE workspace_id=? AND lower(email)=? AND id<>?').get(row.workspace_id, email, memberId);
+      if (duplicate) throw new Error('该邮箱已属于当前工作区成员');
+      db.prepare('UPDATE members SET name=?,email=?,role=?,avatar=? WHERE id=?').run(name,email,role,avatar,memberId);
+      const userId = row.user_id || null; if (userId) { try { db.prepare('UPDATE local_users SET name=?,email=? WHERE id=?').run(name,email,userId); } catch {} }
+      audit(ws.slug,'user','member.updated',{memberId,name,email,role});
+      return db.prepare('SELECT * FROM members WHERE id=?').get(memberId);
+    },
+    deleteMember(memberId) {
+      const row = db.prepare('SELECT * FROM members WHERE id=?').get(memberId); if (!row) throw new Error('Member not found');
+      const ws = db.prepare('SELECT * FROM workspaces WHERE id=?').get(row.workspace_id); if (!ws) throw new Error('Workspace not found');
+      if (row.role === 'owner') throw new Error('工作区所有者不能被删除');
+      db.prepare('DELETE FROM members WHERE id=?').run(memberId);
+      audit(ws.slug,'user','member.deleted',{memberId,name:row.name,email:row.email});
+      return { id: memberId, name: row.name, deleted: true };
     },
     listInvitations(slug) {
       const ws=workspace(slug); if (!ws) throw new Error('Workspace not found');
@@ -645,8 +835,29 @@ export function createRepository(options = {}) {
         const heartbeatName = requestedName && requestedName !== 'ziwei_user' ? requestedName : (row.name || 'ziwei_user');
         db.prepare('UPDATE devices SET name=?,os=?,status=?,last_seen=?,ip_hint=?,version=?,pid=?,bridge_name=?,bridge_version=?,bridge_status=?,heartbeat_at=?,heartbeat_interval_ms=? WHERE id=?').run(heartbeatName, String(input.os || row.os || 'Windows'), 'online', timestamp, String(input.ipHint || input.ip_hint || row.ip_hint || '127.0.0.1'), String(input.version || input.daemon_version || ownVersion()), Number(input.pid) || null, 'ziwei_user', String(input.bridgeVersion || input.bridge_version || input.version || input.daemon_version || ownVersion()), 'online', timestamp, Number(input.heartbeatMs || input.heartbeat_ms) || row.heartbeat_interval_ms || null, row.id);
       }
+      ensureRuntimeCatalog(ws.id, timestamp);
       db.prepare("UPDATE runtimes SET status='online',last_seen=? WHERE workspace_id=?").run(timestamp, ws.id);
+      // The daemon includes its local CLI discovery in the heartbeat.  Persist
+      // it here as well as through the optional /runtimes/register follow-up so
+      // a transient follow-up failure cannot leave a fresh workspace without
+      // versions/models.
+      const runtimePayload = input.runtimes || input.runtimeMetadata || input.runtime_metadata;
+      if (runtimePayload && typeof runtimePayload === 'object') this.registerRuntimes(slug, { runtimes: runtimePayload });
       return this.listDevices(slug).find(device => device.id === row.id) || null;
+    },
+    registerRuntimeDiscovery(slug, input = {}) {
+      const ws = workspace(slug); if (!ws) throw new Error('Workspace not found');
+      const runtimes = input.runtimes && typeof input.runtimes === 'object' ? input.runtimes : {};
+      const timestamp = now(); const updates = [];
+      for (const [name, meta] of Object.entries(runtimes)) {
+        const runtime = String(name || meta?.runtime || '').trim(); if (!runtime) continue;
+        const row = db.prepare('SELECT * FROM runtimes WHERE workspace_id=? AND lower(name)=lower(?)').get(ws.id, runtime); if (!row) continue;
+        const version = meta?.version ? String(meta.version) : null;
+        const status = meta?.status === 'available' && version ? 'online' : 'offline';
+        db.prepare('UPDATE runtimes SET version=?,status=?,last_seen=? WHERE id=?').run(version,status,status === 'online' ? timestamp : null,row.id);
+        updates.push({id:row.id,name:row.name,version,status,binary:meta?.binary || null,cli_version:version,cli_status:meta?.status || 'unavailable'});
+      }
+      return {runtimes:updates,registered_at:timestamp};
     },
     createDevice(slug, input = {}) {
       const ws=workspace(slug); if (!ws) throw new Error('Workspace not found');
@@ -675,6 +886,7 @@ export function createRepository(options = {}) {
     deleteDevice(deviceId) {
       const row=db.prepare('SELECT * FROM devices WHERE id=?').get(deviceId); if (!row) throw new Error('Device not found');
       const ws=db.prepare('SELECT * FROM workspaces WHERE id=?').get(row.workspace_id); if (!ws) throw new Error('Workspace not found');
+      if (row.id === 'device-ziwei-user' && row.status === 'online') throw new Error('在线 ziwei_user 设备不能直接删除，请先停止心跳或停用设备');
       db.prepare('DELETE FROM devices WHERE id=?').run(deviceId);
       audit(ws.slug,'user','device.deleted',{deviceId,name:row.name});
       return { id:deviceId, name:row.name, deleted:true };
@@ -686,8 +898,29 @@ export function createRepository(options = {}) {
         member: { read:['workspace','tasks','runtimes','skills','documents','automations','calendar','members','invitations','devices','employees','audit','notifications','conversations'], write:['tasks','skills','documents','automations','employees','notifications','conversations'] }
       };
     },
-    listEmployees(slug) { const ws=workspace(slug); return db.prepare('SELECT * FROM employees WHERE workspace_id=? ORDER BY created_at DESC').all(ws.id).map(row => ({...row, skills: parse(row.skills_json)})); },
-    createEmployee(slug, input = {}) { const ws=workspace(slug); const timestamp=now(); const employee={id:id('employee'),workspace_id:ws.id,name:String(input.name || '未命名数字员工'),runtime:String(input.runtime || 'Codex'),model_id:input.model || null,description:String(input.description || ''),visibility:input.visibility === 'personal' ? 'personal' : 'workspace',skills:Array.isArray(input.skills) ? input.skills : [],instructions:String(input.instructions || ''),status:'draft',created_at:timestamp,updated_at:timestamp}; db.prepare('INSERT INTO employees(id,workspace_id,name,runtime,model_id,description,visibility,skills_json,instructions,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)').run(employee.id,ws.id,employee.name,employee.runtime,employee.model_id,employee.description,employee.visibility,JSON.stringify(employee.skills),employee.instructions,employee.status,timestamp,timestamp); audit(slug,'user','employee.created',{employeeId:employee.id,modelId:employee.model_id}); return employee; },
+    listEmployees(slug) { const ws=workspace(slug); if (!ws) throw new Error('Workspace not found'); return db.prepare('SELECT * FROM employees WHERE workspace_id=? ORDER BY created_at DESC').all(ws.id).map(row => ({...row, skills: parse(row.skills_json)})); },
+    createEmployee(slug, input = {}) { const ws=workspace(slug); if (!ws) throw new Error('Workspace not found'); const timestamp=now(); const name=String(input.name || '未命名数字员工').trim(); if (!name) throw new Error('数字员工名称不能为空'); const requestedStatus=String(input.status || 'active'); const status=new Set(['draft','active','paused','archived']).has(requestedStatus) ? requestedStatus : 'active'; const employee={id:id('employee'),workspace_id:ws.id,name,runtime:String(input.runtime || 'Codex'),model_id:input.model || input.modelId || input.model_id || null,description:String(input.description || ''),visibility:input.visibility === 'personal' ? 'personal' : 'workspace',skills:Array.isArray(input.skills) ? input.skills : [],instructions:String(input.instructions || ''),avatar:input.avatar ? String(input.avatar) : null,status,created_at:timestamp,updated_at:timestamp}; db.prepare('INSERT INTO employees(id,workspace_id,name,runtime,model_id,description,visibility,skills_json,instructions,avatar,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)').run(employee.id,ws.id,employee.name,employee.runtime,employee.model_id,employee.description,employee.visibility,JSON.stringify(employee.skills),employee.instructions,employee.avatar,employee.status,timestamp,timestamp); audit(slug,'user','employee.created',{employeeId:employee.id,modelId:employee.model_id,status}); return employee; },
+    updateEmployee(employeeId, input = {}) {
+      const row = db.prepare('SELECT * FROM employees WHERE id=?').get(employeeId); if (!row) throw new Error('数字员工不存在');
+      const ws = db.prepare('SELECT * FROM workspaces WHERE id=?').get(row.workspace_id); if (!ws) throw new Error('Workspace not found');
+      const name=String(input.name ?? row.name).trim(); if (!name) throw new Error('数字员工名称不能为空');
+      const runtime=String(input.runtime ?? row.runtime).trim() || row.runtime;
+      const modelId=input.model === undefined && input.modelId === undefined && input.model_id === undefined ? row.model_id : (input.model ?? input.modelId ?? input.model_id) || null;
+      const description=input.description === undefined ? row.description : String(input.description || '');
+      const visibility=input.visibility === undefined ? row.visibility : (input.visibility === 'personal' ? 'personal' : 'workspace');
+      const skills=input.skills === undefined ? parse(row.skills_json) : (Array.isArray(input.skills) ? input.skills : []);
+      const instructions=input.instructions === undefined ? row.instructions : String(input.instructions || '');
+      const avatar=input.avatar === undefined ? row.avatar : (input.avatar ? String(input.avatar) : null);
+      const statuses=new Set(['draft','active','paused','archived']); const status=input.status === undefined ? row.status : String(input.status); if (!statuses.has(status)) throw new Error('数字员工状态无效');
+      const updated=now(); db.prepare('UPDATE employees SET name=?,runtime=?,model_id=?,description=?,visibility=?,skills_json=?,instructions=?,avatar=?,status=?,updated_at=? WHERE id=?').run(name,runtime,modelId,description,visibility,JSON.stringify(skills),instructions,avatar,status,updated,employeeId);
+      audit(ws.slug,'user','employee.updated',{employeeId,name,runtime,modelId,status});
+      const saved=db.prepare('SELECT * FROM employees WHERE id=?').get(employeeId); return {...saved,skills:parse(saved.skills_json)};
+    },
+    deleteEmployee(employeeId) {
+      const row=db.prepare('SELECT * FROM employees WHERE id=?').get(employeeId); if (!row) throw new Error('数字员工不存在');
+      const ws=db.prepare('SELECT * FROM workspaces WHERE id=?').get(row.workspace_id); if (!ws) throw new Error('Workspace not found');
+      db.prepare('DELETE FROM employees WHERE id=?').run(employeeId); audit(ws.slug,'user','employee.deleted',{employeeId,name:row.name}); return {id:employeeId,name:row.name,deleted:true};
+    },
     listCalendarEvents(slug) {
       const ws = workspace(slug); if (!ws) throw new Error('Workspace not found');
       return db.prepare('SELECT * FROM calendar_events WHERE workspace_id=? ORDER BY start_at,created_at').all(ws.id).map(calendarEventView);
@@ -745,7 +978,7 @@ export function createRepository(options = {}) {
     notificationStats(slug) { const ws=workspace(slug); return { unread:db.prepare('SELECT COUNT(*) AS count FROM notifications WHERE workspace_id=? AND read_at IS NULL AND archived_at IS NULL').get(ws.id).count, total:db.prepare('SELECT COUNT(*) AS count FROM notifications WHERE workspace_id=? AND archived_at IS NULL').get(ws.id).count }; },
     markNotificationsRead(slug, ids = null) { const ws=workspace(slug); const timestamp=now(); if (Array.isArray(ids) && ids.length) { const placeholders=ids.map(()=>'?').join(','); db.prepare(`UPDATE notifications SET read_at=COALESCE(read_at,?) WHERE workspace_id=? AND id IN (${placeholders})`).run(timestamp,ws.id,...ids); } else db.prepare('UPDATE notifications SET read_at=COALESCE(read_at,?) WHERE workspace_id=? AND archived_at IS NULL').run(timestamp,ws.id); return this.notificationStats(slug); },
     archiveNotification(notificationId, archived = true) { const row=db.prepare('SELECT * FROM notifications WHERE id=?').get(notificationId); if(!row) throw new Error('Notification not found'); db.prepare('UPDATE notifications SET archived_at=? WHERE id=?').run(archived ? now() : null,notificationId); return {...db.prepare('SELECT * FROM notifications WHERE id=?').get(notificationId),read:Boolean(row.read_at),payload:jsonObject(row.payload_json)}; },
-    updateWorkspace(slug, input = {}) { const ws=workspace(slug); if (!ws) throw new Error('Workspace not found'); const current=this.getWorkspaceSettings(slug); const name=String(input.name ?? ws.name).trim() || ws.name; const timezone=String(input.timezone ?? ws.timezone); const description=input.description === undefined ? current.description : String(input.description); const context=input.context === undefined ? current.context : String(input.context); const visibility=input.visibility === undefined ? current.visibility : (input.visibility === 'personal' ? 'personal' : 'workspace'); const prefix=input.prefix === undefined ? current.prefix : String(input.prefix); const quota=input.quota === undefined ? current.quota : input.quota; db.prepare('UPDATE workspaces SET name=?,timezone=? WHERE id=?').run(name,timezone,ws.id); db.prepare('INSERT INTO workspace_preferences(workspace_id,description,context,visibility,prefix,quota_json,profile_json,preferences_json) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(workspace_id) DO UPDATE SET description=excluded.description,context=excluded.context,visibility=excluded.visibility,prefix=excluded.prefix,quota_json=excluded.quota_json').run(ws.id,description,context,visibility,prefix,JSON.stringify(quota),JSON.stringify(current.profile),JSON.stringify(current.preferences)); audit(slug,'user','workspace.updated',{name,timezone}); return this.getWorkspaceSettings(slug); },
+    updateWorkspace(slug, input = {}) { const ws=workspace(slug); if (!ws) throw new Error('Workspace not found'); const current=this.getWorkspaceSettings(slug); const name=String(input.name ?? ws.name).trim() || ws.name; const timezone=String(input.timezone ?? ws.timezone); const description=input.description === undefined ? current.description : String(input.description); const context=input.context === undefined ? current.context : String(input.context); const visibility=input.visibility === undefined ? current.visibility : (input.visibility === 'personal' ? 'personal' : 'workspace'); const prefix=input.prefix === undefined ? current.prefix : String(input.prefix); const quota=input.quota === undefined ? current.quota : input.quota; const preferences=input.preferences && typeof input.preferences === 'object' ? {...current.preferences,...input.preferences} : current.preferences; db.prepare('UPDATE workspaces SET name=?,timezone=? WHERE id=?').run(name,timezone,ws.id); db.prepare('INSERT INTO workspace_preferences(workspace_id,description,context,visibility,prefix,quota_json,profile_json,preferences_json) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(workspace_id) DO UPDATE SET description=excluded.description,context=excluded.context,visibility=excluded.visibility,prefix=excluded.prefix,quota_json=excluded.quota_json,preferences_json=excluded.preferences_json').run(ws.id,description,context,visibility,prefix,JSON.stringify(quota),JSON.stringify(current.profile),JSON.stringify(preferences)); audit(slug,'user','workspace.updated',{name,timezone}); return this.getWorkspaceSettings(slug); },
     getWorkspaceSettings(slug) { const ws=workspace(slug); if(!ws) throw new Error('Workspace not found'); const prefs=db.prepare('SELECT * FROM workspace_preferences WHERE workspace_id=?').get(ws.id) || {description:'',context:'',visibility:'workspace',prefix:'',quota_json:'{}',profile_json:'{}',preferences_json:'{}'}; return {...ws,description:prefs.description,context:prefs.context,visibility:prefs.visibility,prefix:prefs.prefix,quota:jsonObject(prefs.quota_json),profile:jsonObject(prefs.profile_json),preferences:jsonObject(prefs.preferences_json)}; },
     updateProfile(slug, input = {}) { const ws=workspace(slug); const current=this.getWorkspaceSettings(slug); const profile={...current.profile,...input}; db.prepare('INSERT INTO workspace_preferences(workspace_id,description,context,visibility,prefix,quota_json,profile_json,preferences_json) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(workspace_id) DO UPDATE SET profile_json=excluded.profile_json').run(ws.id,current.description,current.context,current.visibility,current.prefix,JSON.stringify(current.quota),JSON.stringify(profile),JSON.stringify(current.preferences)); audit(slug,'user','profile.updated',Object.keys(input)); return this.getWorkspaceSettings(slug); },
     updatePreferences(slug, input = {}) { const ws=workspace(slug); const current=this.getWorkspaceSettings(slug); const preferences={...current.preferences,...input}; db.prepare('INSERT INTO workspace_preferences(workspace_id,description,context,visibility,prefix,quota_json,profile_json,preferences_json) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(workspace_id) DO UPDATE SET preferences_json=excluded.preferences_json').run(ws.id,current.description,current.context,current.visibility,current.prefix,JSON.stringify(current.quota),JSON.stringify(current.profile),JSON.stringify(preferences)); audit(slug,'user','preferences.updated',Object.keys(input)); return this.getWorkspaceSettings(slug); },
@@ -755,7 +988,12 @@ export function createRepository(options = {}) {
     rotateApiKey(keyId, input = {}) { const row=db.prepare('SELECT * FROM api_keys WHERE id=?').get(keyId); if(!row) throw new Error('API Key not found'); if(row.status !== 'active') throw new Error('只有 active API Key 可以轮换'); const ws=db.prepare('SELECT slug FROM workspaces WHERE id=?').get(row.workspace_id); const rotated=this.createApiKey(ws.slug,{name:input.name || row.name,expiresAt:input.expiresAt || input.expires_at || row.expires_at,role:row.role,rotatedFrom:row.id}); this.revokeApiKey(row.id); audit(ws.slug,'user','api_key.rotated',{oldKeyId:row.id,newKeyId:rotated.id}); return rotated; },
     verifyApiKey(token) { const candidate=String(token || '').trim(); if (!candidate) return null; const hash=crypto.createHash('sha256').update(candidate).digest('hex'); const row=db.prepare('SELECT * FROM api_keys WHERE token_hash=?').get(hash); if (!row || row.status !== 'active' || (row.expires_at && Date.parse(row.expires_at) <= Date.now())) return null; db.prepare('UPDATE api_keys SET last_used_at=? WHERE id=?').run(now(),row.id); return {id:row.id,workspace_id:row.workspace_id,name:row.name,prefix:row.prefix,role:row.role || 'member'}; },
     createA2ATask(slug,input={}) { return this.createTask(slug,{title:input.title || input.message || 'A2A task',description:input.description || '',priority:input.priority || 'medium'}); },
-    getTask(taskId) { const task=db.prepare('SELECT * FROM tasks WHERE id=?').get(taskId); return task ? {...task,labels:parse(task.labels_json),attachments:this.listTaskAttachments(taskId)} : null; },
+    taskExecution(taskId) {
+      const row = db.prepare("SELECT * FROM a2a_actions WHERE task_id=? AND type='task.execute' ORDER BY created_at DESC LIMIT 1").get(taskId);
+      if (!row) return null;
+       return { id:row.id, type:row.type, status:row.status, created_at:row.created_at, acked_at:row.acked_at, completed_at:row.completed_at, result:parse(row.result_json), error:row.error, events:actionEvents(row.id) };
+    },
+    getTask(taskId) { const task=db.prepare('SELECT * FROM tasks WHERE id=?').get(taskId); return task ? {...task,labels:parse(task.labels_json),attachments:this.listTaskAttachments(taskId),execution:this.taskExecution(taskId)} : null; },
     createTaskAttachment(taskId, input = {}) {
       const task = db.prepare('SELECT * FROM tasks WHERE id=?').get(taskId); if (!task) throw new Error('Task not found');
       let name = String(input.name || input.filename || '').trim(); if (!name) throw new Error('附件名称不能为空');
@@ -783,13 +1021,13 @@ export function createRepository(options = {}) {
     },
     listTaskAttachments(taskId) { const task = db.prepare('SELECT id FROM tasks WHERE id=?').get(taskId); if (!task) throw new Error('Task not found'); return db.prepare('SELECT id,task_id,name,mime_type,size,content_encoding,storage_key,checksum,created_at FROM task_attachments WHERE task_id=? ORDER BY created_at').all(taskId); },
     getTaskAttachment(attachmentId) { const row = db.prepare('SELECT * FROM task_attachments WHERE id=?').get(attachmentId); if (!taskAttachmentView(row)) return null; if (objectStore && row.storage_key) { const bytes=objectStore.get(row.storage_key,{checksum:row.checksum}); return {...taskAttachmentView(row), content:bytes.toString('base64'), content_encoding:'base64'}; } return {...taskAttachmentView(row), content:row.content}; },
-    deleteTaskAttachment(attachmentId) { const row = db.prepare('SELECT a.*,t.workspace_id FROM task_attachments a JOIN tasks t ON t.id=a.task_id WHERE a.id=?').get(attachmentId); if (!row) throw new Error('附件不存在'); db.prepare('DELETE FROM task_attachments WHERE id=?').run(attachmentId); if (objectStore && row.storage_key) objectStore.delete(row.storage_key); const ws = db.prepare('SELECT slug FROM workspaces WHERE id=?').get(row.workspace_id); audit(ws.slug,'user','task.attachment.deleted',{taskId:row.task_id,attachmentId}); return taskAttachmentView(row); },
+    deleteTaskAttachment(attachmentId) { const row = db.prepare('SELECT a.*,t.workspace_id FROM task_attachments a JOIN tasks t ON t.id=a.task_id WHERE a.id=?').get(attachmentId); if (!row) throw new Error('附件不存在'); db.prepare('DELETE FROM task_attachments WHERE id=?').run(attachmentId); if (objectStore && row.storage_key) { const refs = db.prepare('SELECT COUNT(*) AS count FROM task_attachments WHERE storage_key=?').get(row.storage_key).count; if (!refs) objectStore.delete(row.storage_key); } const ws = db.prepare('SELECT slug FROM workspaces WHERE id=?').get(row.workspace_id); audit(ws.slug,'user','task.attachment.deleted',{taskId:row.task_id,attachmentId}); return taskAttachmentView(row); },
     addTaskMessage(taskId, input={}) { const message={id:id('msg'),task_id:taskId,role:input.role||'user',content:String(input.content||''),created_at:now()}; db.prepare('INSERT INTO task_messages(id,task_id,role,content,created_at) VALUES(?,?,?,?,?)').run(message.id,message.task_id,message.role,message.content,message.created_at); return message; },
     getTaskMessages(taskId) { return db.prepare('SELECT * FROM task_messages WHERE task_id=? ORDER BY created_at').all(taskId); },
-    listConversations(slug) { const ws=workspace(slug); if(!ws) throw new Error('Workspace not found'); return db.prepare('SELECT * FROM conversations WHERE workspace_id=? ORDER BY updated_at DESC').all(ws.id).map(row=>({...row,message_count:db.prepare('SELECT COUNT(*) AS count FROM conversation_messages WHERE conversation_id=?').get(row.id).count})); },
-    getConversation(conversationId) { const row=db.prepare('SELECT * FROM conversations WHERE id=?').get(conversationId); if(!row) return null; return {...row,messages:db.prepare('SELECT * FROM conversation_messages WHERE conversation_id=? ORDER BY created_at').all(conversationId).map(item=>({...item,attachments:parse(item.attachment_json)}))}; },
+    listConversations(slug) { const ws=workspace(slug); if(!ws) throw new Error('Workspace not found'); return db.prepare('SELECT * FROM conversations WHERE workspace_id=? ORDER BY updated_at DESC').all(ws.id).map(row=>({...row,message_count:db.prepare('SELECT COUNT(*) AS count FROM conversation_messages WHERE conversation_id=?').get(row.id).count,execution:conversationExecution(row.id)})); },
+    getConversation(conversationId) { const row=db.prepare('SELECT * FROM conversations WHERE id=?').get(conversationId); if(!row) return null; return {...row,execution:conversationExecution(conversationId),messages:db.prepare('SELECT * FROM conversation_messages WHERE conversation_id=? ORDER BY created_at').all(conversationId).map(item=>({...item,attachments:parse(item.attachment_json)}))}; },
     createConversation(slug,input={}) { const ws=workspace(slug); if(!ws) throw new Error('Workspace not found'); const employeeId=input.employeeId || input.employee_id || null; if(employeeId && !db.prepare('SELECT 1 FROM employees WHERE id=? AND workspace_id=?').get(employeeId,ws.id)) throw new Error('数字员工不存在'); const timestamp=now(); const conversation={id:id('conv'),workspace_id:ws.id,employee_id:employeeId,title:String(input.title || '新对话').trim() || '新对话',status:'active',created_at:timestamp,updated_at:timestamp}; db.prepare('INSERT INTO conversations(id,workspace_id,employee_id,title,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?)').run(conversation.id,ws.id,employeeId,conversation.title,'active',timestamp,timestamp); audit(slug,'user','conversation.created',{conversationId:conversation.id,employeeId}); return {...conversation,messages:[]}; },
-    addConversationMessage(conversationId,input={}) { const conversation=db.prepare('SELECT * FROM conversations WHERE id=?').get(conversationId); if(!conversation) throw new Error('Conversation not found'); const message={id:id('convmsg'),conversation_id:conversationId,role:['user','assistant','system'].includes(input.role) ? input.role : 'user',content:String(input.content || '').trim(),attachments:Array.isArray(input.attachments) ? input.attachments : [],created_at:now()}; if(!message.content && !message.attachments.length) throw new Error('消息内容不能为空'); db.prepare('INSERT INTO conversation_messages(id,conversation_id,role,content,attachment_json,created_at) VALUES(?,?,?,?,?,?)').run(message.id,conversationId,message.role,message.content,JSON.stringify(message.attachments),message.created_at); db.prepare('UPDATE conversations SET updated_at=? WHERE id=?').run(message.created_at,conversationId); const ws=db.prepare('SELECT slug FROM workspaces WHERE id=?').get(conversation.workspace_id); audit(ws.slug,message.role,'conversation.message.created',{conversationId,messageId:message.id}); return message; },
+    addConversationMessage(conversationId,input={}) { const conversation=db.prepare('SELECT * FROM conversations WHERE id=?').get(conversationId); if(!conversation) throw new Error('Conversation not found'); const message={id:id('convmsg'),conversation_id:conversationId,role:['user','assistant','system'].includes(input.role) ? input.role : 'user',content:String(input.content || '').trim(),attachments:Array.isArray(input.attachments) ? input.attachments : [],created_at:now()}; if(!message.content && !message.attachments.length) throw new Error('消息内容不能为空'); db.prepare('INSERT INTO conversation_messages(id,conversation_id,role,content,attachment_json,created_at) VALUES(?,?,?,?,?,?)').run(message.id,conversationId,message.role,message.content,JSON.stringify(message.attachments),message.created_at); db.prepare('UPDATE conversations SET updated_at=? WHERE id=?').run(message.created_at,conversationId); const ws=db.prepare('SELECT slug FROM workspaces WHERE id=?').get(conversation.workspace_id); audit(ws.slug,message.role,'conversation.message.created',{conversationId,messageId:message.id,dispatch:input.dispatch !== false}); if (message.role === 'user' && input.dispatch !== false) this.createA2AAction(ws.slug,{type:'conversation.execute',payload:{conversationId,messageId:message.id,prompt:message.content,runtime:input.runtime || null,model:input.model || null},dedupeKey:`conversation:${conversationId}:${message.id}`}); return {...message,execution:conversationExecution(conversationId)}; },
     archiveConversation(conversationId, archived = true) { const row=db.prepare('SELECT * FROM conversations WHERE id=?').get(conversationId); if(!row) throw new Error('Conversation not found'); db.prepare('UPDATE conversations SET status=? WHERE id=?').run(archived ? 'archived' : 'active',conversationId); return this.getConversation(conversationId); },
     registerA2AAgent(slug, input = {}) { const ws = workspace(slug); if (!ws) throw new Error('Workspace not found'); const agentId = String(input.agentId || input.agent_id || 'ziwei_user'); if (agentId !== 'ziwei_user') throw new Error('Only ziwei_user agent is accepted'); return this.heartbeatDevice(slug, { ...input, agentId, serviceName:'ziwei_user' }); },
     createA2AAction(slug, input = {}) {
@@ -814,10 +1052,22 @@ export function createRepository(options = {}) {
       return rows.map(row => ({...row,payload:parse(row.payload_json),result:parse(row.result_json)}));
     },
     ackA2AAction(actionId, input = {}) {
-      const row=db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId); if (!row) throw new Error('A2A action not found'); if (input.agentId && String(input.agentId) !== row.agent_id) throw new Error('A2A agent mismatch'); if (row.status === 'expired') throw new Error('A2A action expired'); if (row.status === 'succeeded' || row.status === 'failed') return {...row,duplicate:true,payload:parse(row.payload_json),result:parse(row.result_json)}; const timestamp=now(); db.prepare("UPDATE a2a_actions SET status='acked',acked_at=? WHERE id=? AND status='pending'").run(timestamp,actionId); const updated=db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId); return {...updated,duplicate:updated.acked_at !== timestamp,payload:parse(updated.payload_json),result:parse(updated.result_json)};
+      const row=db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId); if (!row) throw new Error('A2A action not found'); if (input.agentId && String(input.agentId) !== row.agent_id) throw new Error('A2A agent mismatch'); if (row.status === 'expired') throw new Error('A2A action expired'); if (row.status === 'succeeded' || row.status === 'failed') return {...row,duplicate:true,payload:parse(row.payload_json),result:parse(row.result_json)};
+      const timestamp=now(); const timestampMs=Date.parse(timestamp); const payload=parse(row.payload_json); const originalExpiryMs=Date.parse(row.expires_at || '');
+      if (row.status === 'pending' && Number.isFinite(originalExpiryMs) && originalExpiryMs <= timestampMs) {
+        db.prepare("UPDATE a2a_actions SET status='expired',completed_at=? WHERE id=? AND status='pending'").run(timestamp,actionId);
+        throw new Error('A2A action expired');
+      }
+      const executionLeaseMs = a2aExecutionTimeoutMs(payload) + A2A_EXECUTION_LEASE_BUFFER_MS;
+      const leaseExpiry = new Date(timestampMs + executionLeaseMs).toISOString();
+      const expiresAt = Number.isFinite(originalExpiryMs) && originalExpiryMs > Date.parse(leaseExpiry) ? row.expires_at : leaseExpiry;
+      db.prepare("UPDATE a2a_actions SET status='acked',acked_at=?,expires_at=? WHERE id=? AND status='pending'").run(timestamp,expiresAt,actionId);
+      markTaskRunning(row.task_id); const updated=db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId); return {...updated,duplicate:updated.acked_at !== timestamp,payload:parse(updated.payload_json),result:parse(updated.result_json)};
     },
+    recordA2AEvent(actionId, input = {}) { const row=db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId); if(!row) throw new Error('A2A action not found'); if(input.agentId && String(input.agentId)!==row.agent_id) throw new Error('A2A agent mismatch'); if (['succeeded','failed','expired'].includes(row.status)) throw new Error('A2A action is already terminal'); const event={id:id('action-event'),action_id:actionId,type:String(input.type || 'progress').slice(0,80),message:String(input.message || '').slice(0,4000),data:input.data ?? null,created_at:now()}; db.prepare('INSERT INTO a2a_action_events(id,action_id,type,message,data_json,created_at) VALUES(?,?,?,?,?,?)').run(event.id,event.action_id,event.type,event.message,JSON.stringify(event.data),event.created_at); const ws=db.prepare('SELECT slug FROM workspaces WHERE id=?').get(row.workspace_id); audit(ws?.slug || 'test-111','ziwei_user','a2a.action.event',{actionId,type:event.type,message:event.message}); return event; },
+    listA2AEvents(actionId) { const row=db.prepare('SELECT id FROM a2a_actions WHERE id=?').get(actionId); if (!row) throw new Error('A2A action not found'); return db.prepare('SELECT id,action_id,type,message,data_json,created_at FROM a2a_action_events WHERE action_id=? ORDER BY created_at,id').all(actionId).map(item => ({...item,data:parse(item.data_json)})); },
     resultA2AAction(actionId, input = {}) {
-      const row=db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId); if (!row) throw new Error('A2A action not found'); if (input.agentId && String(input.agentId) !== row.agent_id) throw new Error('A2A agent mismatch'); if (row.status === 'succeeded' || row.status === 'failed' || row.status === 'expired') return {...row,duplicate:true,payload:parse(row.payload_json),result:parse(row.result_json)}; const status=String(input.status || (input.error ? 'failed' : 'succeeded')); if (!['succeeded','failed'].includes(status)) throw new Error('A2A result status must be succeeded or failed'); const timestamp=now(); db.prepare('UPDATE a2a_actions SET status=?,completed_at=?,result_json=?,error=? WHERE id=?').run(status,timestamp,input.result === undefined ? null : JSON.stringify(input.result),input.error ? String(input.error) : null,actionId); const updated=db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId); const payload=parse(updated.payload_json); const ws=db.prepare('SELECT slug FROM workspaces WHERE id=?').get(updated.workspace_id); audit(ws.slug,'ziwei_user',`a2a.action.${status}`,{actionId, type:updated.type, error:input.error || null}); if(updated.type === 'automation.execute' && payload.runId) this.completeAutomationRun(payload.runId,{status:status==='succeeded'?'completed':'failed',result:input.result,error:input.error}); return {...updated,payload,result:parse(updated.result_json)};
+      const row=db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId); if (!row) throw new Error('A2A action not found'); if (input.agentId && String(input.agentId) !== row.agent_id) throw new Error('A2A agent mismatch'); if (row.status === 'succeeded' || row.status === 'failed' || row.status === 'expired') return {...row,duplicate:true,payload:parse(row.payload_json),result:parse(row.result_json)}; const status=String(input.status || (input.error ? 'failed' : 'succeeded')); if (!['succeeded','failed'].includes(status)) throw new Error('A2A result status must be succeeded or failed'); const timestamp=now(); db.prepare('UPDATE a2a_actions SET status=?,completed_at=?,result_json=?,error=? WHERE id=?').run(status,timestamp,input.result === undefined ? null : JSON.stringify(input.result),input.error ? String(input.error) : null,actionId); const updated=db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId); const payload=parse(updated.payload_json); const ws=db.prepare('SELECT slug FROM workspaces WHERE id=?').get(updated.workspace_id); audit(ws.slug,'ziwei_user',`a2a.action.${status}`,{actionId, type:updated.type, error:input.error || null}); if (updated.task_id) taskExecutionMessage(updated.task_id, status, input.error || null, input.result); if (updated.task_id && payload.conversationId) { const content = input.error ? `执行失败：${input.error}` : (typeof input.result === 'string' ? input.result : (input.result?.output || input.result?.text || input.result?.result?.output || input.result?.result?.text || '执行完成')); if (content) this.addConversationMessage(payload.conversationId,{role:'assistant',content,dispatch:false}); } if(updated.type === 'automation.execute' && payload.runId) this.completeAutomationRun(payload.runId,{status:status==='succeeded'?'completed':'failed',result:input.result,error:input.error}); if (updated.type === 'conversation.execute' && payload.conversationId) { const content = input.error ? `执行失败：${input.error}` : (typeof input.result === 'string' ? input.result : (input.result?.output || input.result?.text || input.result?.result?.output || input.result?.result?.text || '执行完成')); if (content) this.addConversationMessage(payload.conversationId,{role:'assistant',content,dispatch:false}); } return {...updated,payload,result:parse(updated.result_json)};
     }
   };
 }

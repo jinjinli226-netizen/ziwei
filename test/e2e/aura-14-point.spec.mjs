@@ -78,7 +78,7 @@ test('Aura 14-point HTTP acceptance covers core UI flows without restarting serv
     assert.ok(models.body.models.length > 0);
     const employee = await request(base, '/api/workspaces/test-111/employees', { method: 'POST', body: json({ name: '验收伙伴', runtime: 'Codex', model: models.body.models[0].id, visibility: 'workspace' }) });
     assert.equal(employee.response.status, 201);
-    assert.equal(employee.body.status, 'draft');
+    assert.equal(employee.body.status, 'active');
 
     // Skills: valid SKILL.md import, install and uninstall.
     const skill = await request(base, '/api/workspaces/test-111/skills/import', { method: 'POST', body: json({ content: '---\nname: acceptance-skill\nversion: 1.0.0\ncategory: testing\n---\n\n# Acceptance\n\nRun acceptance checks.' }) });

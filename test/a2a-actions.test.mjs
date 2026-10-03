@@ -21,3 +21,24 @@ test('expired A2A actions are not delivered', () => {
   assert.equal(repo.listA2AActions('test-111').length, 0);
   assert.equal(repo.listA2AActions('test-111', { status: 'expired' })[0].id, action.id);
 });
+
+test('acked A2A actions keep an execution lease after the original expiry', async () => {
+  const repo = createRepository({ memory: true });
+  const originalExpiresAt = new Date(Date.now() + 40).toISOString();
+  const action = repo.createA2AAction('test-111', {
+    agentId: 'ziwei_user',
+    type: 'task.execute',
+    dedupeKey: 'task-lease-after-ack',
+    expiresAt: originalExpiresAt,
+    payload: { timeout_ms: 100 }
+  });
+
+  const acked = repo.ackA2AAction(action.id, { agentId: 'ziwei_user' });
+  assert.equal(acked.status, 'acked');
+  assert.ok(Date.parse(acked.expires_at) >= Date.parse(acked.acked_at) + 16 * 60 * 1000);
+
+  await new Promise(resolve => setTimeout(resolve, 80));
+  assert.equal(repo.listA2AActions('test-111', { status: 'acked' })[0].status, 'acked');
+  assert.equal(repo.resultA2AAction(action.id, { agentId: 'ziwei_user', status: 'succeeded', result: { ok: true } }).status, 'succeeded');
+  assert.equal(repo.listA2AActions('test-111', { status: 'all' })[0].status, 'succeeded');
+});

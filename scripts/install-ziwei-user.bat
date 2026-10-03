@@ -22,6 +22,14 @@ if %NODE_MAJOR% LSS 24 (
   exit /b 1
 )
 pushd "%ROOT%"
+if not exist "%ROOT%\node_modules\vue" (
+  echo 正在安装紫薇依赖...
+  call npm ci --ignore-scripts
+  if errorlevel 1 (
+    set "CODE=%ERRORLEVEL%"
+    goto :done
+  )
+)
 call npm run ziwei:setup -- %*
 set "CODE=%ERRORLEVEL%"
 if not "%CODE%"=="0" goto :done
