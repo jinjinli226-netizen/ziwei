@@ -421,7 +421,12 @@ const deviceInstallCommands = computed(() => {
 async function copyDeviceCommand() { const command = deviceInstallCommands.value[deviceInstallTab.value]; try { await navigator.clipboard?.writeText(command); } catch {} copiedDeviceCommand.value=deviceInstallTab.value; notify('安装命令已复制'); }
 function openDeviceModal(setup = false) { deviceSetupMode.value = setup; showDevice.value = true; }
 function closeDeviceModal() { showDevice.value = false; deviceSetupMode.value = false; }
-function dismissDeviceSetup() { try { localStorage.setItem('ziwei.deviceSetupDismissed', '1'); } catch {} closeDeviceModal(); }
+function deviceSetupDismissedKey() {
+  const userKey = authState.value.user?.id || authState.value.user?.email || 'anonymous';
+  const workspaceKey = workspaceSlugValue.value || workspaceSlug();
+  return `ziwei.deviceSetupDismissed:${encodeURIComponent(String(userKey))}:${encodeURIComponent(String(workspaceKey))}`;
+}
+function dismissDeviceSetup() { try { localStorage.setItem(deviceSetupDismissedKey(), '1'); } catch {} closeDeviceModal(); }
 function openSkillCatalog() { skillScope.value='platform'; skillTab.value='all'; notify('已打开平台技能目录'); }
 async function load() {
   loading.value = true;
@@ -432,7 +437,7 @@ async function load() {
     await Promise.all([loadNotifications(),loadConversations()]);
     openRealtime();
     const needsDeviceSetup = !s.device || s.device.status !== 'online';
-    let setupDismissed = false; try { setupDismissed = localStorage.getItem('ziwei.deviceSetupDismissed') === '1'; } catch {}
+    let setupDismissed = false; try { setupDismissed = localStorage.getItem(deviceSetupDismissedKey()) === '1'; } catch {}
     if (needsDeviceSetup && !setupDismissed && !showDevice.value) openDeviceModal(true);
   } catch (error) { notify(error.message); } finally { loading.value=false; }
 }

@@ -17,7 +17,7 @@
 当前通过的本地质量门槛：
 
 ```text
-npm test       113 passed
+npm test       115 passed
 npm run lint   passed
 npm run build  passed
 ```
@@ -59,6 +59,13 @@ npm run build  passed
 - 修复内容：新增 `POST /api/auth/register`，前端登录页增加“注册新账号”；注册成功会建立真实 `local_users`、工作区成员关系和会话，不直接操作 SQLite 文件。若存在同邮箱的待接受邀请，会在注册事务中绑定原成员记录。
 - 本地验证：`npm test` 113/113、`npm run lint`、`npm run build` 全部通过；注册成功、加入已有工作区、自动登录和重复邮箱错误均有 HTTP 测试覆盖。
 - 生产验证：服务器 `/opt/ziwei` 已快进到 `7fa17dd`，部署前 SQLite 备份为 `/opt/ziwei-backups/ziwei.sqlite.20261004T151310Z.before-7fa17dd`；构建成功并重启 `ziwei-api`，服务保持 active。公网 `GET /api/auth/status=200`、已有邮箱注册返回预期 `400`、注册预检 `OPTIONS=204`，正式页面构建产物包含“注册新账号”。
+
+### 2026-10-04 新注册用户的 ziwei_user 引导
+
+- 问题归属：前端 onboarding 状态。新注册后页面会立即加载工作区数据并检查真实 `ziwei_user` 心跳；此前“稍后”标记使用全浏览器共享 key，旧账号关闭过引导会抑制新账号的首次提示。
+- 修复内容：引导关闭标记改为按认证用户和工作区隔离；`load()` 检测到离线且当前账号未关闭过时，会打开包含 API 地址、工作区、证书下载和安装命令的连接引导。没有伪造在线状态，也不依赖 AuraBaba daemon。
+- 本地验证：`npm test` 115/115、`npm run lint`、`npm run build` 全部通过；UI contract 覆盖新账号登录后加载与引导 key 隔离。
+- 生产状态：修复待推送并替换服务器；部署后需用新账号刷新 `https://qzelynth.top`，看到“连接本机 ziwei_user”弹窗后再标记为 `verified`。
 
 ## 2. 60 秒启动和验收
 

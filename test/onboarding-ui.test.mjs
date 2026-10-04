@@ -20,6 +20,16 @@ test('configured workspaces expose a real registration path instead of reusing f
   assert.match(appSource, /authMode==='login'\s*\?\s*'注册新账号'/);
 });
 
+test('successful authentication loads workspace state so device onboarding can run immediately', () => {
+  assert.match(appSource, /authState\.value = \{ \.\.\.authState\.value, \.\.\.result[\s\S]*?setWorkspaceSlug\([\s\S]*?await load\(\)/);
+});
+
+test('device setup dismissal is scoped to the authenticated workspace', () => {
+  assert.match(appSource, /deviceSetupDismissedKey/);
+  assert.match(appSource, /localStorage\.setItem\(deviceSetupDismissedKey\(\), '1'\)/);
+  assert.match(appSource, /localStorage\.getItem\(deviceSetupDismissedKey\(\)/);
+});
+
 test('device onboarding shows the API origin and pinned certificate steps', () => {
   assert.match(appSource, /deviceApiBase/);
   assert.match(appSource, /deviceServerCertificateUrl/);
