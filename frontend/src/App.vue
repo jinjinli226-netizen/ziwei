@@ -431,7 +431,14 @@ function openSkillCatalog() { skillScope.value='platform'; skillTab.value='all';
 async function load() {
   loading.value = true;
   try {
-    const [s,t,r,mo,sk,d,a,m,dev,e,c,st,ag] = await Promise.all([api.summary(),api.tasks(),api.runtimes(),api.models(),api.skills(),api.documents(),api.automations(),api.members(),api.devices(),api.employees(),api.calendar(),api.settings(),api.agents()]);
+    const activeWorkspace = workspaceSlug();
+    const activeMembership = (authState.value.memberships || []).find(item => item?.slug === activeWorkspace) || authState.value.memberships?.[0];
+    const workspaceRole = authState.value.role || activeMembership?.role || '';
+    const canReadWorkspaceSettings = ['owner','admin'].includes(String(workspaceRole).toLowerCase());
+    const settingsRequest = canReadWorkspaceSettings
+      ? api.settings()
+      : Promise.resolve({ workspace: { name: summary.value.workspace?.name || activeWorkspace, timezone: summary.value.workspace?.timezone || 'Asia/Shanghai', preferences: {} } });
+    const [s,t,r,mo,sk,d,a,m,dev,e,c,st,ag] = await Promise.all([api.summary(),api.tasks(),api.runtimes(),api.models(),api.skills(),api.documents(),api.automations(),api.members(),api.devices(),api.employees(),api.calendar(),settingsRequest,api.agents()]);
     const runtimeRows = Array.isArray(r?.runtimes) ? r.runtimes.filter(item => item && typeof item === 'object') : [];
     summary.value=s; tasks.value=t.tasks; runtimes.value=runtimeRows; if (runtimes.value.length && !runtimes.value.some(item => item?.name === employeeForm.value.runtime)) employeeForm.value.runtime = runtimes.value[0]?.name || employeeForm.value.runtime; models.value=mo.models; skills.value=sk.skills; documents.value=d.documents; automations.value=a.automations; members.value=m.members; devices.value=dev.devices; employees.value=Array.isArray(e?.employees) ? e.employees.filter(item => item && typeof item === 'object') : []; calendar.value=c.calendars; settings.value=st; workspaceName.value=st.workspace.name; workspaceTimezone.value=st.workspace.timezone; workspaceDescription.value=st.workspace.description || ''; workspaceContext.value=st.workspace.context || ''; workspaceVisibility.value=st.workspace.visibility || 'workspace'; workspacePrefix.value=st.workspace.prefix || ''; profileName.value=st.workspace.profile?.name || authState.value.user?.name || ''; workspaceLanguage.value=st.workspace.preferences?.language || 'zh-CN'; workspaceTheme.value=st.workspace.preferences?.theme || 'light'; workspaceWeekStart.value=st.workspace.preferences?.weekStart || 'monday'; switchValue.value = st.workspace.preferences?.daemonHeartbeat !== false; automationDefaultMode.value = st.workspace.preferences?.automationDefaultMode || 'notification'; agents.value=ag.agents;
     await Promise.all([loadNotifications(),loadConversations()]);

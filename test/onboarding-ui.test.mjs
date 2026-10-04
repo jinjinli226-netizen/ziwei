@@ -30,6 +30,12 @@ test('device setup dismissal is scoped to the authenticated workspace', () => {
   assert.match(appSource, /localStorage\.getItem\(deviceSetupDismissedKey\(\)/);
 });
 
+test('member workspace loading does not let admin-only settings block device onboarding', () => {
+  assert.match(appSource, /canReadWorkspaceSettings/);
+  assert.match(appSource, /settingsRequest/);
+  assert.match(appSource, /canReadWorkspaceSettings\s*\?\s*api\.settings\(\)/);
+});
+
 test('device onboarding shows the API origin and pinned certificate steps', () => {
   assert.match(appSource, /deviceApiBase/);
   assert.match(appSource, /deviceServerCertificateUrl/);
