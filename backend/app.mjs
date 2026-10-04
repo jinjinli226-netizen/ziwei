@@ -1,4 +1,5 @@
 import express from 'express';
+import fs from 'node:fs';
 import path from 'node:path';
 import { WebSocketServer } from 'ws';
 import { createRepository } from './repository.mjs';
@@ -153,6 +154,29 @@ export function createApp(options = {}) {
   const authBypass = options.memory === true || options.requireAuth === false;
   app.locals.authBypass = authBypass;
   app.locals.a2aToken = () => readA2AToken({ create: !authBypass });
+  // The certificate is public material, but the endpoint remains explicitly
+  // opt-in through a configured file so an accidental deployment cannot expose
+  // arbitrary filesystem content.  New devices use this endpoint to pin the
+  // reverse-proxy certificate before starting ziwei_user over HTTPS.
+  const publicCertificatePath = options.tlsCertFile
+    || process.env.ZIWEI_TLS_CERT_FILE
+    || path.resolve(process.cwd(), '.local', 'server.crt');
+  app.get('/server.crt', (_req, res) => {
+    try {
+      const stat = fs.statSync(publicCertificatePath);
+      if (!stat.isFile()) return res.status(404).json({ error: '服务器证书未配置' });
+      const certificate = fs.readFileSync(publicCertificatePath);
+      const text = certificate.toString('ascii');
+      if (!text.includes('BEGIN CERTIFICATE') || text.includes('PRIVATE KEY')) return res.status(500).json({ error: '服务器证书格式无效' });
+      res.setHeader('Content-Type', 'application/x-x509-ca-cert');
+      res.setHeader('Content-Disposition', 'attachment; filename="ziwei-server.crt"');
+      res.setHeader('Cache-Control', 'public, max-age=300');
+      return res.send(certificate);
+    } catch (error) {
+      if (error?.code === 'ENOENT' || error?.code === 'ENOTDIR') return res.status(404).json({ error: '服务器证书未配置' });
+      return res.status(500).json({ error: '服务器证书暂不可用' });
+    }
+  });
   app.use('/api', sessionMiddleware(auth, { bypass: authBypass }));
   app.use('/api/workspaces/:slug', workspaceMembershipGuard(auth, { bypass: authBypass }));
   app.use('/api', resourceWorkspaceGuard(repo, auth, { bypass: authBypass }));

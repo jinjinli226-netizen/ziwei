@@ -17,7 +17,7 @@
 当前通过的本地质量门槛：
 
 ```text
-npm test       104 passed
+npm test       111 passed
 npm run lint   passed
 npm run build  passed
 ```
@@ -34,7 +34,7 @@ npm run build  passed
 - 真实服务器动作已完成两次独立验收：`runtime=Hermes`、`profile=ziwei-aigc`，分别返回 `HERMES_PROD_PROFILE_OK` 和 `HERMES_PROD_PROFILE_RECHECK_OK`，结果均为 `succeeded`。服务器返回结果包含独立 profile，profile 不存在时仍会明确失败。
 - 本机和服务器 `bjc-ops` 均已创建数字员工“调研大师”：本机 ID 为 `employee_53dae986-9446-4e05-b474-3e0c000472a6`，服务器 ID 为 `employee_f5deedce-1404-4764-86ae-835c4f219bc6`，两者都绑定 `runtime=Hermes`、`profile=ziwei-research`。该 profile 拥有独立的 `SOUL.md`、记忆、会话和技能目录；本机 `executeRuntime` 返回 `RESEARCH_PROFILE_OK`，服务器真实 A2A 链路返回 `SERVER_RESEARCH_PROFILE_OK`。服务器 SQLite 备份为 `/opt/ziwei-backups/ziwei.sqlite.20261004T021917Z.before-research-master`；生产 `main` 未修改。
 - MCP 管理入口已部署：`/mcp/v1/workspaces/:slug/employees`、`/tasks`、`/documents` 由独立 bearer 文件和显式工作区白名单保护，MCP 客户端只调用 HTTPS API，repository 负责所有持久化。服务器 Nginx 已为 `/mcp/` 增加反代；本机 `ziwei-research` profile 已注册 `ziwei_management`，通过服务器真实 MCP 链路完成员工列表、描述更新回读与原值恢复，确认没有直接打开 SQLite。令牌文件和服务器自签 CA 仅保存在被忽略的 `data/` 文件中。
-- 本轮代码验证：`npm test` 104/104、`npm run lint`、`npm run build` 均通过；公网 `/healthz` 与前端返回 200，未授权 `/mcp/v1` 返回 401，带本机 CA 和令牌的真实 HTTPS MCP 客户端可读取服务器员工列表。
+- 本轮代码验证：此前数字员工/MCP 版本为 `npm test` 104/104；当前引导补丁的本地门槛为 `npm test` 111/111、`npm run lint`、`npm run build`，公网引导入口待部署后复测。
 
 ## 2. 60 秒启动和验收
 
@@ -160,6 +160,13 @@ ziwei_user daemon（daemon/ziwei_user.mjs）
 
 - 本地 `npm test` 104/104、`npm run lint`、`npm run build` 通过；隔离 HTTP 链路使用真实 `scripts/ziwei-mcp.mjs` 客户端验证 health、员工列表和窄管理面能力。
 - 未启动或修改 5178/4178/20242 生产入口，未写入生产 SQLite；既有 `tmp_gzgov.html` 保持未跟踪。
+
+### 2026-10-04 新用户服务器连接引导（本地已验证，待生产替换）
+
+- 归属层：前端引导 + CLI 配置 + API 公开证书入口；不直接写 SQLite，不依赖 AuraBaba daemon。
+- 首次账号页要求明确填写工作区标识；设备连接弹窗显示当前 API 地址、工作区和证书下载入口。Windows、macOS、Linux 命令都携带明确的 `--api` 与 `--tls-ca-file`，不会通过关闭 TLS 校验来掩盖证书问题。
+- `GET /server.crt` 只返回配置的公开 PEM 证书；缺失、格式错误或包含私钥时拒绝服务。CLI 会校验证书文件存在并把路径写入本机 `data/ziwei_user.json`，启动器继续通过 `NODE_EXTRA_CA_CERTS` 注入 daemon 子进程。
+- 本地证据：`npm test` 111/111、`npm run lint`、`npm run build` 通过；隔离 HTTP 链路验证 `/healthz=200`、证书下载 `200`、首次账号创建 `201` 且工作区标识持久化。当前服务器尚未替换，待提交推送后再部署并验证 Nginx `/server.crt` 反代和公网证书内容。
 
 ### 明确延期或有边界的能力
 

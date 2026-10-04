@@ -49,9 +49,12 @@ scripts\install-ziwei-user.bat --workspace test-111 --api http://127.0.0.1:4178 
 
 引导会把不含令牌的配置写到 `data/ziwei_user.json`（也可用 `ZIWEI_CONFIG` 指定路径），再调用 `scripts/start-ziwei-user.mjs` 复用或后台启动 daemon。`ziwei:status` 同时检查本机 `ziwei_user` 的 `/healthz` 存活和 `/readyz` 就绪状态；只有最近心跳已接入当前工作区才报告在线。配置命令拒绝 `--token`、`--auth`、`--secret` 等凭据参数，也会清理 API 地址中的查询串、凭据和片段，避免把敏感值写入配置或日志。
 
+服务器使用自签名 HTTPS 证书时，首次使用的设备引导会显示当前页面的 API 地址和工作区标识，并提供 `GET /server.crt` 公钥下载入口。先把证书保存为项目内的 `data/ziwei-server.crt`，再运行引导命令；命令会把 `--api` 和 `--tls-ca-file data/ziwei-server.crt` 写入 `data/ziwei_user.json`，由 `ziwei_user` 通过 `NODE_EXTRA_CA_CERTS` 校验证书。不要关闭 TLS 校验，也不要把私钥放入证书文件。生产部署必须让 `/server.crt` 反代到 API，并将 `ZIWEI_TLS_CERT_FILE` 指向 HTTPS 服务器使用的公钥证书。
+
 ## API 入口
 
 - `GET /healthz`
+- `GET /server.crt`（下载配置的公开服务器证书，不需要登录）
 - `GET /api/workspaces`、`POST /api/workspaces`（登录用户列出/创建项目；创建后访问 `/<slug>/<page>`）
 - `GET /api/workspaces/test-111/summary`
 - `GET|POST /api/workspaces/test-111/tasks`

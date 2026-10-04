@@ -13,6 +13,11 @@ const nav = [
 ];
 function routeParts(pathname = location.pathname) { return pathname.split('/').filter(Boolean); }
 function routeFromPath(pathname) { const parts = routeParts(pathname); if (!parts.length) return 'home'; if (parts[0] === 'invite' && new URLSearchParams(location.search).has('code')) return 'invite-accept'; if (parts[0] === 'me' && parts[1] === 'invite') return 'invite'; if (parts.length > 1) return ({home:'home',issues:'issues',calendar:'calendar','project-docs':'docs',members:'members',skills:'skills',settings:'settings','open-platform':'open',autopilots:'automations',runtimes:'runtimes',inbox:'inbox',employee:'employee'}[parts[1] || 'home'] || 'home'); if (parts.length === 1) return 'home'; return 'home'; }
+function workspaceSlugFromPath(pathname = location.pathname) {
+  const parts = routeParts(pathname);
+  if (parts.length < 2 || ['invite', 'me'].includes(parts[0])) return '';
+  try { return decodeURIComponent(parts[0]); } catch { return parts[0]; }
+}
 function conversationIdFromPath(pathname = location.pathname) { const parts = routeParts(pathname); return parts[1] === 'inbox' ? (parts[2] || '') : ''; }
 function employeeIdFromPath(pathname = location.pathname) { const parts = routeParts(pathname); return parts[1] === 'employee' ? (parts[2] || '') : ''; }
 function routePath(key, detailId = '') { if (key === 'invite') return '/me/invite'; const map = {home:'home',issues:'issues',calendar:'calendar',docs:'project-docs',members:'members',runtimes:'runtimes',skills:'skills',settings:'settings',open:'open-platform',automations:'autopilots',inbox:'inbox',employee:'employee'}; const base = `/${encodeURIComponent(workspaceSlug())}/${map[key] || key}`; return (key === 'inbox' || key === 'employee') && detailId ? `${base}/${encodeURIComponent(detailId)}` : base; }
@@ -20,6 +25,10 @@ const page = ref(routeFromPath(location.pathname));
 const authState = ref({ loading:true, configured:false, setup_required:false, authenticated:false, user:null, workspaces:[] });
 const authForm = ref({ name:'', email:'', password:'', confirmPassword:'' });
 const authMode = ref('login');
+// Keep the first-run workspace explicit.  A new browser may not have the
+// workspace slug in localStorage yet, so the setup form must not silently
+// create the account in the example workspace.
+const authWorkspaceSlug = ref(workspaceSlugFromPath() || workspaceSlug());
 const authBusy = ref(false);
 const currentAccount = computed(() => authState.value.user ? { ...authState.value.user, role: authState.value.role || authState.value.user.role || 'member' } : {name:'紫薇用户',email:'',role:'owner'});
 const workspaceSlugValue = computed(() => summary.value.workspace?.slug || workspaceSlug());
@@ -204,6 +213,7 @@ async function refreshAuth() {
     const status = await api.authStatus();
     authState.value = { ...authState.value, ...status, configured:!status.setup_required, loading:false };
     authMode.value = status.setup_required ? 'setup' : 'login';
+    if (status.setup_required && !authWorkspaceSlug.value.trim()) authWorkspaceSlug.value = workspaceSlug();
     if (status.memberships?.length && !localStorage.getItem('ziwei.workspace')) setWorkspaceSlug(status.memberships[0].workspace_slug || status.memberships[0].slug);
   } catch {
     authState.value = { ...authState.value, loading:false, configured:false, setup_required:false, authenticated:false };
@@ -213,10 +223,11 @@ async function refreshAuth() {
 async function submitAuth() {
   if (!authForm.value.password) return notify('请输入密码');
   if (authMode.value === 'setup' && authForm.value.password !== authForm.value.confirmPassword) return notify('两次密码不一致');
+  if (authMode.value === 'setup' && !authWorkspaceSlug.value.trim()) return notify('请输入工作区标识');
   authBusy.value = true;
   try {
     const result = authMode.value === 'setup'
-      ? await api.authSetup({ name:authForm.value.name || '紫薇用户', email:authForm.value.email, password:authForm.value.password, workspaceSlug:workspaceSlugValue.value })
+      ? await api.authSetup({ name:authForm.value.name || '紫薇用户', email:authForm.value.email, password:authForm.value.password, workspaceSlug:authWorkspaceSlug.value.trim() })
       : await api.authLogin({ email:authForm.value.email, password:authForm.value.password });
     authState.value = { ...authState.value, ...result, setup_required:false, configured:true, authenticated:true, loading:false };
     if (result.memberships?.length) setWorkspaceSlug(result.memberships[0].workspace_slug || result.memberships[0].slug);
@@ -388,11 +399,22 @@ function employeesForRuntime(runtime) {
 function openHelp() { notify('帮助中心：请查看 README.md 与完整复刻流程文档'); }
 function openProfile() { notify(`当前账号：${currentAccount.value.name || currentAccount.value.email || '紫薇用户'} · ${currentAccount.value.role || 'member'}`); }
 async function copyInviteLink() { const link = `${location.origin}/invite?workspace=${encodeURIComponent(workspaceSlugValue.value)}`; try { await navigator.clipboard?.writeText(link); } catch {} notify('邀请链接已复制'); }
-const deviceInstallCommands = computed(() => ({
-  windows: `powershell -ExecutionPolicy Bypass -File .\\scripts\\install-ziwei-user.ps1 --workspace ${workspaceSlugValue.value}`,
-  macos: `npm run ziwei:setup -- --workspace ${workspaceSlugValue.value}\nnpm run ziwei:start`,
-  linux: `npm run ziwei:setup -- --workspace ${workspaceSlugValue.value}\nnpm run ziwei:start`
-}));
+const deviceApiBase = computed(() => String(API_BASE || location.origin).replace(/\/+$/, ''));
+const deviceServerCertificateUrl = computed(() => {
+  try { return new URL('/server.crt', deviceApiBase.value).toString(); } catch { return `${location.origin}/server.crt`; }
+});
+const deviceWorkspaceSlug = computed(() => String(workspaceSlugValue.value || '').trim() || 'test-111');
+function powerShellLiteral(value) { return `'${String(value).replace(/'/g, "''")}'`; }
+function shellLiteral(value) { return `'${String(value).replace(/'/g, "'\\''")}'`; }
+const deviceInstallCommands = computed(() => {
+  const workspace = deviceWorkspaceSlug.value;
+  const apiBase = deviceApiBase.value;
+  return {
+    windows: `powershell -ExecutionPolicy Bypass -File .\\scripts\\install-ziwei-user.ps1 --workspace ${powerShellLiteral(workspace)} --api ${powerShellLiteral(apiBase)} --tls-ca-file ${powerShellLiteral('data\\ziwei-server.crt')}`,
+    macos: `npm run ziwei:setup -- --workspace ${shellLiteral(workspace)} --api ${shellLiteral(apiBase)} --tls-ca-file ${shellLiteral('data/ziwei-server.crt')}\nnpm run ziwei:start`,
+    linux: `npm run ziwei:setup -- --workspace ${shellLiteral(workspace)} --api ${shellLiteral(apiBase)} --tls-ca-file ${shellLiteral('data/ziwei-server.crt')}\nnpm run ziwei:start`
+  };
+});
 async function copyDeviceCommand() { const command = deviceInstallCommands.value[deviceInstallTab.value]; try { await navigator.clipboard?.writeText(command); } catch {} copiedDeviceCommand.value=deviceInstallTab.value; notify('安装命令已复制'); }
 function openDeviceModal(setup = false) { deviceSetupMode.value = setup; showDevice.value = true; }
 function closeDeviceModal() { showDevice.value = false; deviceSetupMode.value = false; }
@@ -718,7 +740,7 @@ onMounted(async () => { applyDisplayPreferences(); await refreshAuth(); if (auth
 
 <template>
   <section v-if="authState.loading" class="auth-screen"><div class="auth-card"><img src="/ziwei-logo.png" alt="紫薇"/><p>正在连接紫薇工作区…</p></div></section>
-  <section v-else-if="!authState.authenticated" class="auth-screen"><div class="auth-card"><img src="/ziwei-logo.png" alt="紫薇"/><h1>{{ authMode==='setup' ? '创建紫薇账号' : '登录紫薇' }}</h1><p>{{ authMode==='setup' ? '首次使用请设置本地账号密码。' : '使用本机账号进入工作区。' }}</p><div class="form-stack"><ZiFormField v-if="authMode==='setup'" label="姓名"><ZiInput v-model="authForm.name" placeholder="紫薇用户"/></ZiFormField><ZiFormField label="邮箱"><ZiInput v-model="authForm.email" type="email" placeholder="name@example.com"/></ZiFormField><ZiFormField label="密码"><ZiInput v-model="authForm.password" type="password" placeholder="至少 8 位"/></ZiFormField><ZiFormField v-if="authMode==='setup'" label="确认密码"><ZiInput v-model="authForm.confirmPassword" type="password"/></ZiFormField><ZiButton :disabled="authBusy" @click="submitAuth">{{ authBusy ? '处理中…' : (authMode==='setup' ? '创建账号并登录' : '登录') }}</ZiButton></div><button class="link-button" @click="authMode=authMode==='setup'?'login':'setup'">{{ authMode==='setup' ? '已有账号，登录' : '首次使用，创建账号' }}</button></div></section>
+  <section v-else-if="!authState.authenticated" class="auth-screen"><div class="auth-card"><img src="/ziwei-logo.png" alt="紫薇"/><h1>{{ authMode==='setup' ? '创建紫薇账号' : '登录紫薇' }}</h1><p>{{ authMode==='setup' ? '首次使用请设置本地账号密码。' : '使用本机账号进入工作区。' }}</p><div class="form-stack"><ZiFormField v-if="authMode==='setup'" label="姓名"><ZiInput v-model="authForm.name" placeholder="紫薇用户"/></ZiFormField><ZiFormField v-if="authMode==='setup'" label="工作区标识" hint="用于服务器 API 和本机 ziwei_user 连接"><ZiInput v-model="authWorkspaceSlug" placeholder="例如：bjc-ops"/></ZiFormField><ZiFormField label="邮箱"><ZiInput v-model="authForm.email" type="email" placeholder="name@example.com"/></ZiFormField><ZiFormField label="密码"><ZiInput v-model="authForm.password" type="password" placeholder="至少 8 位"/></ZiFormField><ZiFormField v-if="authMode==='setup'" label="确认密码"><ZiInput v-model="authForm.confirmPassword" type="password"/></ZiFormField><ZiButton :disabled="authBusy" @click="submitAuth">{{ authBusy ? '处理中…' : (authMode==='setup' ? '创建账号并登录' : '登录') }}</ZiButton></div><button class="link-button" @click="authMode=authMode==='setup'?'login':'setup'">{{ authMode==='setup' ? '已有账号，登录' : '首次使用，创建账号' }}</button></div></section>
   <WorkspaceShell v-else :page="page" :account="currentAccount" :workspace="summary.workspace" :workspaces="authState.memberships" :language="workspaceLanguage" @navigate="navigate" @workspace="switchWorkspace" @create-workspace="createWorkspace" @language="changeLanguage" @logout="logout">
     <section class="content">
         <Transition name="toast">
@@ -967,7 +989,7 @@ onMounted(async () => { applyDisplayPreferences(); await refreshAuth(); if (auth
   <ZiModal v-if="showGitSync" :title="gitSyncMode==='export' ? '导出文档到 Git' : '从 Git 导入文档'" @close="showGitSync=false"><div class="form-stack"><p class="modal-copy">{{ gitSyncMode==='export' ? '将当前工作区文档导出到本机受控 Git 目录并提交。' : '读取本机受控 Git 目录中的文档并更新当前工作区。' }}</p><ZiFormField label="同步目录名" required><ZiInput v-model="gitSyncForm.name" :placeholder="`例如：${workspaceSlugValue}`"/></ZiFormField><ZiFormField v-if="gitSyncMode==='export'" label="提交说明"><ZiInput v-model="gitSyncForm.message" placeholder="本次文档同步"/></ZiFormField><div class="form-actions"><ZiButton variant="secondary" @click="showGitSync=false">取消</ZiButton><ZiButton @click="runGitSync">{{ gitSyncMode==='export' ? '导出并提交' : '导入文档' }}</ZiButton></div></div></ZiModal>
   <ZiModal v-if="showApiKeys" title="管理 API Key" wide @close="showApiKeys=false"><div class="form-stack"><p class="modal-copy">创建、轮换或撤销访问紫薇 REST API 的密钥。真实密钥只在创建和轮换后显示一次。</p><div v-if="createdApiToken" class="api-token-box"><strong>请立即复制新密钥</strong><code>{{ createdApiToken }}</code><ZiButton size="sm" @click="copyApiToken">复制密钥</ZiButton></div><ZiFormField label="名称" required><ZiInput v-model="apiKeyForm.name" placeholder="例如：本机 CLI"/></ZiFormField><ZiFormField label="角色"><ZiSelect v-model="apiKeyForm.role" :options="[{label:'成员',value:'member'},{label:'管理员',value:'admin'},{label:'所有者',value:'owner'}]"/></ZiFormField><ZiFormField label="过期时间"><ZiInput v-model="apiKeyForm.expiresAt" type="date"/></ZiFormField><div class="form-actions"><ZiButton @click="createApiKey">创建密钥</ZiButton></div><div class="api-key-list"><div v-for="key in apiKeys" :key="key.id" class="runtime-row"><div class="row-main"><strong>{{ key.name }}</strong><small>{{ key.prefix }}•••• · {{ key.role }} · {{ key.status }}</small></div><div class="api-key-actions"><button class="pill" :disabled="key.status!=='active'" @click="rotateApiKey(key)">轮换</button><button class="pill" :disabled="key.status!=='active'" @click="revokeApiKey(key)">撤销</button></div></div><p v-if="!apiKeys.length" class="task-detail-empty">暂无密钥</p></div></div></ZiModal>
   <ZiModal v-if="showInvite" title="邀请成员" @close="showInvite=false"><div class="form-stack"><ZiFormField label="邮箱"><ZiInput v-model="inviteForm.email" type="email" placeholder="name@example.com"/></ZiFormField><ZiFormField label="角色"><ZiSelect v-model="inviteForm.role" :options="[{label:'成员',value:'member'},{label:'管理员',value:'admin'}]"/></ZiFormField><div class="form-actions"><ZiButton @click="invite">发送邀请</ZiButton></div></div></ZiModal>
-  <ZiModal v-if="showDevice" :title="deviceSetupMode ? '连接本机 ziwei_user' : '添加本机设备'" wide @close="closeDeviceModal"><div class="device-install-modal"><p class="modal-copy">{{ deviceSetupMode ? '首次使用需要在这台电脑安装并启动紫薇 ziwei_user。它会通过心跳连接当前工作区，页面只认自己的 ziwei_user 状态。' : '先在这台电脑安装并启动紫薇 ziwei_user，它会主动连接当前工作区。紫薇不依赖 AuraBaba daemon，也不要求公网入站端口。' }}</p><div class="device-install-tabs" role="tablist"><button v-for="tab in [{key:'windows',label:'Windows'},{key:'macos',label:'macOS'},{key:'linux',label:'Linux'}]" :key="tab.key" type="button" :class="{active:deviceInstallTab===tab.key}" @click="deviceInstallTab=tab.key">{{ tab.label }}</button></div><div class="device-install-command"><div class="device-install-command-head"><strong>安装并连接 ziwei_user</strong><button type="button" class="pill" @click="copyDeviceCommand">{{ copiedDeviceCommand===deviceInstallTab?'已复制':'复制命令' }}</button></div><pre>{{ deviceInstallCommands[deviceInstallTab] }}</pre><small>命令只配置并启动本地 ziwei_user，不包含访问令牌。启动后可用 <code>npm run ziwei:status</code> 检查。</small></div><div class="device-install-status"><span class="online-dot" :class="{offline:!ownDeviceOnline}"></span><div><strong>{{ ownDeviceOnline?'ziwei_user 已在线':'等待 ziwei_user 上线' }}</strong><small>{{ ownDeviceOnline?`最近心跳 ${summary.device?.heartbeat_age_ms || 0}ms 前`:'安装并启动后点击刷新，页面会重新读取真实心跳。' }}</small></div><button type="button" class="pill" @click="load">刷新状态</button></div><div class="form-stack" v-if="!deviceSetupMode"><ZiFormField label="设备显示名称"><ZiInput v-model="deviceForm.name"/></ZiFormField><div class="form-actions"><ZiButton variant="secondary" @click="closeDeviceModal">关闭</ZiButton><ZiButton @click="addDevice">登记其他设备</ZiButton></div></div><div class="form-actions" v-else><ZiButton variant="secondary" @click="dismissDeviceSetup">稍后</ZiButton><ZiButton :disabled="!ownDeviceOnline" @click="closeDeviceModal">已连接，继续使用</ZiButton></div></div></ZiModal>
+  <ZiModal v-if="showDevice" :title="deviceSetupMode ? '连接本机 ziwei_user' : '添加本机设备'" wide @close="closeDeviceModal"><div class="device-install-modal"><p class="modal-copy">{{ deviceSetupMode ? '首次使用需要在这台电脑安装并启动紫薇 ziwei_user。它会通过心跳连接当前工作区，页面只认自己的 ziwei_user 状态。' : '先在这台电脑安装并启动紫薇 ziwei_user，它会主动连接当前工作区。紫薇不依赖 AuraBaba daemon，也不要求公网入站端口。' }}</p><div class="device-connection-details"><div><strong>服务器 API 地址</strong><code>{{ deviceApiBase }}</code></div><div><strong>工作区标识</strong><code>{{ deviceWorkspaceSlug }}</code></div><div><strong>连接证书</strong><span><a :href="deviceServerCertificateUrl" download="ziwei-server.crt" target="_blank" rel="noopener">下载服务器证书</a><small>将文件保存到项目的 <code>data/ziwei-server.crt</code>，命令会用它校验证书。</small></span></div></div><div class="device-install-tabs" role="tablist"><button v-for="tab in [{key:'windows',label:'Windows'},{key:'macos',label:'macOS'},{key:'linux',label:'Linux'}]" :key="tab.key" type="button" :class="{active:deviceInstallTab===tab.key}" @click="deviceInstallTab=tab.key">{{ tab.label }}</button></div><div class="device-install-command"><div class="device-install-command-head"><strong>安装并连接 ziwei_user</strong><button type="button" class="pill" @click="copyDeviceCommand">{{ copiedDeviceCommand===deviceInstallTab?'已复制':'复制命令' }}</button></div><pre>{{ deviceInstallCommands[deviceInstallTab] }}</pre><small>先下载并保存证书，再运行命令。命令只配置并启动本地 ziwei_user，不包含访问令牌；启动后可用 <code>npm run ziwei:status</code> 检查。</small></div><div class="device-install-status"><span class="online-dot" :class="{offline:!ownDeviceOnline}"></span><div><strong>{{ ownDeviceOnline?'ziwei_user 已在线':'等待 ziwei_user 上线' }}</strong><small>{{ ownDeviceOnline?`最近心跳 ${summary.device?.heartbeat_age_ms || 0}ms 前`:'安装并启动后点击刷新，页面会重新读取真实心跳。' }}</small></div><button type="button" class="pill" @click="load">刷新状态</button></div><div class="form-stack" v-if="!deviceSetupMode"><ZiFormField label="设备显示名称"><ZiInput v-model="deviceForm.name"/></ZiFormField><div class="form-actions"><ZiButton variant="secondary" @click="closeDeviceModal">关闭</ZiButton><ZiButton @click="addDevice">登记其他设备</ZiButton></div></div><div class="form-actions" v-else><ZiButton variant="secondary" @click="dismissDeviceSetup">稍后</ZiButton><ZiButton :disabled="!ownDeviceOnline" @click="closeDeviceModal">已连接，继续使用</ZiButton></div></div></ZiModal>
   <ZiModal v-if="showMemberEditor" title="编辑成员" @close="showMemberEditor=false"><div class="form-stack"><ZiFormField label="姓名" required><ZiInput v-model="memberEditForm.name"/></ZiFormField><ZiFormField label="邮箱" required><ZiInput v-model="memberEditForm.email" type="email"/></ZiFormField><ZiFormField label="角色"><ZiSelect v-model="memberEditForm.role" :options="[{label:'成员',value:'member'},{label:'管理员',value:'admin'}]"/></ZiFormField><div class="form-actions"><ZiButton variant="secondary" @click="showMemberEditor=false">取消</ZiButton><ZiButton @click="saveMember">保存</ZiButton></div></div></ZiModal>
   <ZiModal v-if="showEmployee" :title="employeeEditId ? '编辑数字伙伴' : '创建数字伙伴'" wide @close="showEmployee=false">
     <div class="employee-create-modal">

@@ -25,6 +25,32 @@ test('ziwei_user CLI writes a token-free local configuration', async () => {
   assert.doesNotMatch(stdout, /do-not-store/);
 });
 
+test('ziwei_user CLI persists and validates the pinned TLS CA file', async () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'ziwei-cli-tls-'));
+  const config = path.join(temp, 'config.json');
+  const caFile = path.join(temp, 'server.crt');
+  fs.writeFileSync(caFile, 'test certificate\n');
+  const env = { ...process.env, ZIWEI_CONFIG: config };
+  const { stdout } = await run(process.execPath, [
+    cli,
+    'setup',
+    '--workspace',
+    'secure-demo',
+    '--api',
+    'https://example.test',
+    '--tls-ca-file',
+    caFile,
+  ], { cwd: root, env });
+  const saved = JSON.parse(fs.readFileSync(config, 'utf8'));
+  assert.equal(saved.tlsCaFile, path.normalize(caFile));
+  assert.match(stdout, /TLS CA:/);
+
+  await assert.rejects(
+    run(process.execPath, [cli, 'setup', '--tls-ca-file', path.join(temp, 'missing.crt')], { cwd: root, env }),
+    /--tls-ca-file 指向的文件不存在/,
+  );
+});
+
 test('ziwei_user CLI reports its version', async () => {
   const { stdout } = await run(process.execPath, [cli, 'version'], { cwd: root });
   assert.match(stdout.trim(), /^ziwei_user \d+\.\d+\.\d+$/);

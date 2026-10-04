@@ -15,7 +15,7 @@ function usage() {
   console.log(`紫薇 ziwei_user CLI ${VERSION}
 
 用法:
-  npm run ziwei:setup -- [--workspace <slug>] [--api <url>] [--health-port <port>]
+  npm run ziwei:setup -- [--workspace <slug>] [--api <url>] [--health-port <port>] [--tls-ca-file <path>]
   npm run ziwei:status [--json]
   npm run ziwei:version
 
@@ -74,6 +74,26 @@ function parsePort(value) {
     throw new Error('--health-port 必须是 1-65535 的整数');
   }
   return port;
+}
+
+function cleanTlsCaFile(value) {
+  const candidate = String(value ?? '').trim();
+  if (!candidate) throw new Error('--tls-ca-file 不能为空');
+  const resolved = path.isAbsolute(candidate)
+    ? path.normalize(candidate)
+    : path.resolve(ROOT, candidate);
+  let stat;
+  try {
+    stat = fs.statSync(resolved);
+  } catch {
+    throw new Error(`--tls-ca-file 指向的文件不存在：${resolved}`);
+  }
+  if (!stat.isFile()) {
+    throw new Error(`--tls-ca-file 必须指向文件：${resolved}`);
+  }
+  // Keep relative paths portable when setup is run from the project root;
+  // start-ziwei-user.mjs resolves them against the same root at launch.
+  return path.isAbsolute(candidate) ? resolved : path.normalize(candidate);
 }
 
 function rejectSecrets(args) {
@@ -145,6 +165,9 @@ function makeConfig(args, previous = {}) {
   const healthPort = args['health-port'] !== undefined
     ? parsePort(args['health-port'])
     : parsePort(previous.healthPort || 20242);
+  const tlsCaFile = args['tls-ca-file'] !== undefined
+    ? cleanTlsCaFile(args['tls-ca-file'])
+    : (previous.tlsCaFile ? String(previous.tlsCaFile) : undefined);
   return {
     agentId: 'ziwei_user',
     serviceName: 'ziwei_user',
@@ -155,6 +178,7 @@ function makeConfig(args, previous = {}) {
     heartbeatMs: Number(previous.heartbeatMs) > 0 ? Number(previous.heartbeatMs) : 15000,
     pollMs: Number(previous.pollMs) > 0 ? Number(previous.pollMs) : 5000,
     deviceId: String(previous.deviceId || 'device-ziwei-user'),
+    ...(tlsCaFile ? { tlsCaFile } : {}),
   };
 }
 
@@ -166,6 +190,7 @@ async function setup(args) {
   console.log(`ziwei_user 已配置`);
   console.log(`工作区: ${config.workspace}`);
   console.log(`API: ${config.apiBase}`);
+  if (config.tlsCaFile) console.log(`TLS CA: ${config.tlsCaFile}`);
   console.log(`本地存活检查: http://${config.healthHost}:${config.healthPort}/healthz`);
   console.log(`本地就绪检查: http://${config.healthHost}:${config.healthPort}/readyz`);
   console.log(`配置文件: ${file}`);
@@ -192,6 +217,7 @@ async function status(args) {
     config: current.file,
     workspace: config.workspace,
     apiBase: config.apiBase,
+    ...(config.tlsCaFile ? { tlsCaFile: config.tlsCaFile } : {}),
     health,
   };
   if (args.json) {
