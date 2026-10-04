@@ -37,6 +37,13 @@ npm run build  passed
 - MCP 管理入口已部署：`/mcp/v1/workspaces/:slug/employees`、`/tasks`、`/documents` 由独立 bearer 文件和显式工作区白名单保护，MCP 客户端只调用 HTTPS API，repository 负责所有持久化。服务器 Nginx 已为 `/mcp/` 增加反代；本机 `ziwei-research` profile 已注册 `ziwei_management`，通过服务器真实 MCP 链路完成员工列表、描述更新回读与原值恢复，确认没有直接打开 SQLite。令牌文件和服务器自签 CA 仅保存在被忽略的 `data/` 文件中。
 - 本轮代码验证：此前数字员工/MCP 版本为 `npm test` 104/104；当前引导补丁的本地门槛为 `npm test` 111/111、`npm run lint`、`npm run build`，公网引导入口待部署后复测。
 
+### 2026-10-04 正式域名证书切换进度
+
+- 已在服务器安装 Certbot，并为 `qzelynth.top` / `www.qzelynth.top` 配置了可回滚的 ACME webroot：`/var/www/letsencrypt/.well-known/acme-challenge/`。Nginx 已通过语法检查，源站直连挑战文件返回 200。
+- 真实 Let’s Encrypt webroot 申请已执行但未通过：两个域名当前仍解析到 Cloudflare 代理 IP，CA 从公网获取挑战文件时收到 403。没有生成或替换任何证书，现有 `/etc/ziwei/server.crt` 与 `/etc/ziwei/server.key` 保持不变。
+- 继续申请前需将 Cloudflare 中 `@` 和 `www` 临时切换为 DNS only（灰云），或改用 Cloudflare DNS-01。解析切回服务器 `154.202.118.5` 后再重试；签发成功才会切换 Nginx/systemd 到 `/etc/letsencrypt/live/qzelynth.top/`。
+- 本轮服务器 Nginx 配置备份：`/etc/nginx/sites-available/ziwei.20261004T121751Z.before-qzelynth-acme.bak`。重复的旧备份 symlink 已移出 `sites-enabled`，当前 `nginx -t` 无重复 `server_name` 警告。
+
 ## 2. 60 秒启动和验收
 
 在项目根目录打开 PowerShell：
