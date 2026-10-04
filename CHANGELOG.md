@@ -54,13 +54,14 @@
 ### Verification
 
 - 新增 repository、API、UI contract、Hermes profile discovery 测试；专项测试和现有 MCP/runtime 测试通过。
-- `npm test`：104 passed；`npm run lint`：passed；`npm run build`：passed；本轮未对生产服务器或生产 SQLite 做写入。
+- `npm test`：104 passed；`npm run lint`：passed；`npm run build`：passed；服务器已快进到 `8a95ac8`，SQLite 备份为 `/opt/ziwei-backups/ziwei.sqlite.20261004T104845Z.before-8a95ac8`，API 重启后健康检查通过。
 - 隔离 HTTP 验证：实际 `scripts/ziwei-mcp.mjs` 客户端通过 `/mcp/v1` 返回 health、员工列表和窄管理面能力；本机 Hermes profile 发现 5 个，`ziwei-aigc` 校验通过。
 
 ### Deferred
 
 - 伙伴市场、帮助中心和邮件发送保持现状并延期；本轮未用假页面标记为完成。远端 Git、生产外部存储/队列、OAuth、计费、沙箱和完整浏览器逐页截图验收仍延期。
+- 环境变量和自定义参数当前仅完成加密持久化与配置页编辑，尚未进入 A2A/CLI 执行环境；MCP 尚未提供这两类配置的工具入口。
 
 ### Rollback
 
-- 本轮代码未触碰 `tmp_gzgov.html`、生产服务或生产 SQLite。审查前可用 `git diff` 保存补丁；若已提交，按提交粒度执行 `git revert <commit>`，并保留数据库迁移表以兼容旧库。
+- 本轮未触碰 `tmp_gzgov.html`，生产 SQLite 只做了备份和兼容迁移初始化。代码可用 `git revert 8a95ac8` 回滚，服务器数据可恢复 `/opt/ziwei-backups/ziwei.sqlite.20261004T104845Z.before-8a95ac8`。

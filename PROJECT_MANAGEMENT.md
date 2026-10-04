@@ -28,13 +28,13 @@ npm run build  passed
 
 ### 2026-10-04 发布与真实链路验证
 
-- 服务器 `154.202.118.5` 已部署分支 `codex/hermes-independent-profile` 的提交 `d1a4c9c`；服务器 `main` 未被改写。部署前 SQLite 备份为 `/opt/ziwei-backups/ziwei.sqlite.20261003T165528Z`。
+- 服务器 `154.202.118.5` 已部署分支 `codex/hermes-independent-profile` 的提交 `8a95ac8`；服务器 `main` 未被改写。部署前 SQLite 备份为 `/opt/ziwei-backups/ziwei.sqlite.20261004T104845Z.before-8a95ac8`。
 - 服务器 `ziwei-api` 重启后保持 active；本地和公网 `/healthz` 均返回 200。服务器前端构建产物包含岗位说明内联编辑入口。
 - 本机 `data/ziwei_user.json` 以 `bjc-ops` 为工作区，A2A 令牌与服务器已重新同步；本机 `/readyz` 为 ready，daemon 日志持续记录 `heartbeat` 和 `a2a_poll` 成功。
 - 真实服务器动作已完成两次独立验收：`runtime=Hermes`、`profile=ziwei-aigc`，分别返回 `HERMES_PROD_PROFILE_OK` 和 `HERMES_PROD_PROFILE_RECHECK_OK`，结果均为 `succeeded`。服务器返回结果包含独立 profile，profile 不存在时仍会明确失败。
 - 本机和服务器 `bjc-ops` 均已创建数字员工“调研大师”：本机 ID 为 `employee_53dae986-9446-4e05-b474-3e0c000472a6`，服务器 ID 为 `employee_f5deedce-1404-4764-86ae-835c4f219bc6`，两者都绑定 `runtime=Hermes`、`profile=ziwei-research`。该 profile 拥有独立的 `SOUL.md`、记忆、会话和技能目录；本机 `executeRuntime` 返回 `RESEARCH_PROFILE_OK`，服务器真实 A2A 链路返回 `SERVER_RESEARCH_PROFILE_OK`。服务器 SQLite 备份为 `/opt/ziwei-backups/ziwei.sqlite.20261004T021917Z.before-research-master`；生产 `main` 未修改。
 - MCP 管理入口已部署：`/mcp/v1/workspaces/:slug/employees`、`/tasks`、`/documents` 由独立 bearer 文件和显式工作区白名单保护，MCP 客户端只调用 HTTPS API，repository 负责所有持久化。服务器 Nginx 已为 `/mcp/` 增加反代；本机 `ziwei-research` profile 已注册 `ziwei_management`，通过服务器真实 MCP 链路完成员工列表、描述更新回读与原值恢复，确认没有直接打开 SQLite。令牌文件和服务器自签 CA 仅保存在被忽略的 `data/` 文件中。
-- 本轮代码验证：`npm test` 98/98、`npm run lint`、`npm run build` 均通过。
+- 本轮代码验证：`npm test` 104/104、`npm run lint`、`npm run build` 均通过；公网 `/healthz` 与前端返回 200，未授权 `/mcp/v1` 返回 401，带本机 CA 和令牌的真实 HTTPS MCP 客户端可读取服务器员工列表。
 
 ## 2. 60 秒启动和验收
 
@@ -146,7 +146,7 @@ ziwei_user daemon（daemon/ziwei_user.mjs）
 - `ziwei_user` 首次安装引导、心跳、就绪状态、设备和 Agent CLI 版本发现。
 - Codex/Claude/Gemini/Hermes 本机 CLI 适配；Codex 使用真实本机配置和系统代理，不使用伪造输出。
 - Hermes 独立人格：数字员工可绑定本机 Hermes profile；执行时隔离 `HERMES_HOME`，并把岗位说明注入真实 task/conversation prompt。profile 不存在时明确失败，不回退主 profile。服务器当前运行 `codex/hermes-independent-profile`，已用真实 A2A action 验证 `runtime=Hermes`、`profile=ziwei-aigc` 和独立输出。
-- 数字员工配置页已接入员工级环境变量、自定义 JSON 参数、MCP 状态/健康检查和 Hermes profile 发现；敏感变量使用 AES-256-GCM 加密存储，列表与审计不暴露原值。
+- 数字员工配置页已接入员工级环境变量、自定义 JSON 参数、MCP 状态/健康检查和 Hermes profile 发现；敏感变量使用 AES-256-GCM 加密存储，列表与审计不暴露原值。当前环境变量和自定义参数完成配置持久化，尚未注入 A2A/CLI 执行环境；MCP 仍是员工、任务、文档的窄管理面，不提供这两类配置工具。
 - MCP 客户端继续通过 HTTPS /mcp/v1 窄管理面调用 repository，不直接打开 SQLite；开放能力明确限定为员工、任务和文档。
 - 数字伙伴岗位说明页支持内联编辑；保存只更新岗位说明，不再打开完整的数字伙伴配置弹窗。
 - A2A action 的创建、去重、ACK、事件、执行租约、结果、失败和过期处理。
