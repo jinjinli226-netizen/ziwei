@@ -87,6 +87,7 @@ export const api = {
   lookupInvitation: code => request(`/api/invitations/lookup/${encodeURIComponent(code)}`),
   acceptInvitation: (code, body) => request(`/api/invitations/${encodeURIComponent(code)}/accept`, { method:'POST', body: JSON.stringify(body || {}) }),
   devices: () => request(`/api/workspaces/${encodeURIComponent(workspaceSlug())}/devices`),
+  createDevicePairing: body => request(`/api/workspaces/${encodeURIComponent(workspaceSlug())}/devices/pairing`, { method: 'POST', body: JSON.stringify(body || {}) }),
   addDevice: body => request(`/api/workspaces/${encodeURIComponent(workspaceSlug())}/devices`, { method: 'POST', body: JSON.stringify(body) }),
   updateDevice: (id, body) => request(`/api/devices/${encodeURIComponent(id)}`, { method:'PATCH', body:JSON.stringify(body) }),
   disableDevice: id => request(`/api/devices/${encodeURIComponent(id)}/disable`, { method:'POST', body:'{}' }),

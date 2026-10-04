@@ -38,3 +38,9 @@ export function tokenFromRequest(req) {
   return String(req.headers['x-ziwei-a2a-token'] || '').trim();
 }
 
+export function deviceTokenFromRequest(req) {
+  const authorization = String(req.headers.authorization || '');
+  if (/^device\s+/i.test(authorization)) return authorization.replace(/^device\s+/i, '').trim();
+  return String(req.headers['x-ziwei-device-token'] || '').trim();
+}
+

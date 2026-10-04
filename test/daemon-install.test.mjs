@@ -13,9 +13,9 @@ const root = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const cli = path.join(root, 'scripts', 'ziwei-cli.mjs');
 const starter = path.join(root, 'scripts', 'start-ziwei-user.mjs');
 
-test('ziwei_user dispatches local runtime actions from the project root by default', () => {
+test('ziwei_user dispatches local runtime actions from the connected workdir', () => {
   const source = fs.readFileSync(path.join(root, 'daemon', 'ziwei_user.mjs'), 'utf8');
-  assert.match(source, /workdir:\s*ROOT/);
+  assert.match(source, /workdir:\s*config\.workdir\s*\|\|\s*process\.cwd\(\)/);
 });
 
 function responseFor(state, pathname) {

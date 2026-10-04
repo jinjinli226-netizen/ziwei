@@ -36,6 +36,21 @@ export function openDatabase({ memory = false, filename = path.join(ROOT, 'data'
       bridge_status TEXT, heartbeat_at TEXT, heartbeat_interval_ms INTEGER,
       FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS device_pairing_codes (
+      id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, code_hash TEXT NOT NULL UNIQUE,
+      code_prefix TEXT NOT NULL, expires_at TEXT NOT NULL, created_at TEXT NOT NULL,
+      created_by TEXT, consumed_at TEXT,
+      FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_device_pairing_codes_workspace ON device_pairing_codes(workspace_id, expires_at, consumed_at);
+    CREATE TABLE IF NOT EXISTS device_credentials (
+      id TEXT PRIMARY KEY, device_id TEXT NOT NULL UNIQUE, workspace_id TEXT NOT NULL,
+      token_hash TEXT NOT NULL UNIQUE, token_prefix TEXT NOT NULL, created_at TEXT NOT NULL,
+      last_seen_at TEXT, revoked_at TEXT,
+      FOREIGN KEY(device_id) REFERENCES devices(id) ON DELETE CASCADE,
+      FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_device_credentials_workspace ON device_credentials(workspace_id, revoked_at);
     CREATE TABLE IF NOT EXISTS runtimes (
       id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, name TEXT NOT NULL,
       provider TEXT NOT NULL, version TEXT, status TEXT NOT NULL, capabilities_json TEXT NOT NULL,

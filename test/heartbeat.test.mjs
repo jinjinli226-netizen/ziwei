@@ -36,6 +36,24 @@ test('ziwei_user heartbeat marks only its own device online', () => {
   assert.equal(repo.getSummary('test-111').counts.runtimes, 4);
 });
 
+test('one generic daemon reports all four installed Agent runtimes together', () => {
+  const repo = createRepository({ memory: true, discoverLocalVersions: unavailableDiscovery });
+  repo.heartbeatDevice('test-111', {
+    agentId: 'ziwei_user',
+    deviceId: 'device-ziwei-user',
+    runtimes: {
+      Claude: { version: '1.0.0', status: 'available' },
+      Codex: { version: '2.0.0', status: 'available' },
+      Gemini: { version: '3.0.0', status: 'available' },
+      Hermes: { version: '4.0.0', status: 'available', profiles: [{ name: 'default' }] }
+    }
+  });
+  const runtimes = repo.listRuntimes('test-111');
+  assert.deepEqual(runtimes.map(item => item.name), ['Claude', 'Codex', 'Gemini', 'Hermes']);
+  assert.equal(runtimes.every(item => item.status === 'online'), true);
+  assert.deepEqual(runtimes.map(item => item.cli_version), ['1.0.0', '2.0.0', '3.0.0', '4.0.0']);
+});
+
 test('stale and future heartbeat timestamps are offline', () => {
   const repo = createRepository({ memory: true });
   const old = new Date(Date.now() - 60_000).toISOString();

@@ -4,18 +4,20 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { resolveConfigPath } from '../daemon/config.mjs';
 
 const ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const PACKAGE_PATH = path.join(ROOT, 'package.json');
 const PACKAGE_META = JSON.parse(fs.readFileSync(PACKAGE_PATH, 'utf8'));
 const VERSION = process.env.ZIWEI_USER_VERSION || PACKAGE_META.version || '0.1.0';
-const DEFAULT_CONFIG_PATH = path.join(ROOT, 'data', 'ziwei_user.json');
 
 function usage() {
   console.log(`紫薇 ziwei_user CLI ${VERSION}
 
 用法:
   npm run ziwei:setup -- [--workspace <slug>] [--api <url>] [--health-port <port>] [--tls-ca-file <path>]
+  ziwei_user connect --api <url> --code <一次性配对码> [--name <设备名>]
+  ziwei_user start
   npm run ziwei:status [--json]
   npm run ziwei:version
 
@@ -25,8 +27,7 @@ function usage() {
 }
 
 function configPath() {
-  const configured = process.env.ZIWEI_CONFIG;
-  return path.resolve(configured || DEFAULT_CONFIG_PATH);
+  return resolveConfigPath({ root: ROOT, env: process.env });
 }
 
 function parseArgs(argv) {
@@ -178,6 +179,7 @@ function makeConfig(args, previous = {}) {
     heartbeatMs: Number(previous.heartbeatMs) > 0 ? Number(previous.heartbeatMs) : 15000,
     pollMs: Number(previous.pollMs) > 0 ? Number(previous.pollMs) : 5000,
     deviceId: String(previous.deviceId || 'device-ziwei-user'),
+    ...(previous.deviceToken ? { deviceToken: String(previous.deviceToken) } : {}),
     ...(tlsCaFile ? { tlsCaFile } : {}),
   };
 }
@@ -195,6 +197,47 @@ async function setup(args) {
   console.log(`本地就绪检查: http://${config.healthHost}:${config.healthPort}/readyz`);
   console.log(`配置文件: ${file}`);
   console.log('启动 daemon: npm run ziwei:start');
+}
+
+async function connect(args) {
+  const code = String(args.code || '').trim();
+  if (!code) throw new Error('connect 需要 --code <一次性配对码>');
+  const apiBase = cleanApiBase(args.api || process.env.ZIWEI_API_BASE);
+  const response = await fetch(`${apiBase}/api/daemon/pair`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      code,
+      apiBase,
+      name: String(args.name || args.device || '').trim() || undefined,
+      os: process.platform === 'win32' ? 'Windows' : process.platform,
+    }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok || !body.deviceToken || !body.deviceId || !body.workspace) {
+    throw new Error(body.error || `设备配对失败（HTTP ${response.status}）`);
+  }
+  const previous = readConfig()?.value || {};
+  const config = {
+    agentId: 'ziwei_user',
+    serviceName: 'ziwei_user',
+    workspace: String(body.workspace),
+    apiBase: cleanApiBase(body.apiBase || apiBase),
+    healthHost: String(previous.healthHost || '127.0.0.1'),
+    healthPort: parsePort(previous.healthPort || 20242),
+    heartbeatMs: Number(previous.heartbeatMs) > 0 ? Number(previous.heartbeatMs) : 15000,
+    pollMs: Number(previous.pollMs) > 0 ? Number(previous.pollMs) : 5000,
+    deviceId: String(body.deviceId),
+    deviceToken: String(body.deviceToken),
+    workdir: String(previous.workdir || process.cwd()),
+    ...(previous.tlsCaFile ? { tlsCaFile: String(previous.tlsCaFile) } : {}),
+  };
+  const file = writeConfig(config);
+  console.log(`设备已连接：${config.workspace}`);
+  console.log(`设备 ID：${config.deviceId}`);
+  console.log(`配置文件：${file}`);
+  console.log('下一步：启动 ziwei_user daemon，然后在网页刷新设备状态。');
 }
 
 async function status(args) {
@@ -232,6 +275,12 @@ async function status(args) {
   process.exitCode = health.ok ? 0 : 1;
 }
 
+async function start() {
+  // Keep the process manager in one place so the same command works from the
+  // npm-installed standalone bundle and from a source checkout.
+  await import('./start-ziwei-user.mjs');
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const command = args._[0] || 'help';
@@ -240,6 +289,8 @@ async function main() {
     return;
   }
   if (command === 'setup') return setup(args);
+  if (command === 'connect') return connect(args);
+  if (command === 'start') return start();
   if (command === 'status') return status(args);
   if (command === 'help' || command === '--help' || command === '-h') return usage();
   throw new Error(`未知命令: ${command}`);

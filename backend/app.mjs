@@ -6,7 +6,7 @@ import { createRepository } from './repository.mjs';
 import { RealtimeHub } from './realtime.mjs';
 import { exportDocumentsToGit, importDocumentsFromGit } from './git-sync.mjs';
 import { createAuthService } from './auth.mjs';
-import { readA2AToken, safeTokenEqual, tokenFromRequest } from './a2a-auth.mjs';
+import { deviceTokenFromRequest, readA2AToken, safeTokenEqual, tokenFromRequest } from './a2a-auth.mjs';
 import { mcpTokenRequired, readMCPCredential, mcpWorkspaceAllowed } from './mcp-auth.mjs';
 
 const allowedOrigin = process.env.FRONTEND_ORIGIN || 'http://127.0.0.1:5178';
@@ -50,7 +50,7 @@ const WRITE_ROLES = ['owner', 'admin', 'member'];
 const MANAGE_ROLES = ['owner', 'admin'];
 function resourceRoleGuard(req, res, next) {
   const path = req.path || '';
-  if (path.startsWith('/auth') || path.startsWith('/external/') || path.startsWith('/daemon/') || path.startsWith('/invitations/lookup/') || path.endsWith('/accept') || path === '/devices/heartbeat' || path.endsWith('/heartbeat')) return next();
+  if (path.startsWith('/auth') || path.startsWith('/external/') || path.startsWith('/daemon/') || path.startsWith('/invitations/lookup/') || path.endsWith('/accept') || path === '/devices/heartbeat' || path.endsWith('/heartbeat') || path.endsWith('/devices/pairing')) return next();
   const sensitiveAdminPath = /(?:settings|api-keys|members|invitations|devices)(?:\/|$)/i.test(path);
   const adminReadPath = /(?:settings|api-keys)(?:\/|$)/i.test(path);
   const allowed = adminReadPath || (req.method !== 'GET' && req.method !== 'HEAD' && sensitiveAdminPath) ? MANAGE_ROLES : (req.method === 'GET' || req.method === 'HEAD' ? READ_ROLES : WRITE_ROLES);
@@ -62,17 +62,54 @@ function authExempt(pathname) {
     || pathname.startsWith('/daemon/') || pathname === '/devices/heartbeat' || pathname.endsWith('/heartbeat') || pathname.endsWith('/runtimes/register');
 }
 
-function a2aAuth({ bypass = false, allowAgentCard = true } = {}) {
+function deviceWorkspaceForRequest(repo, req) {
+  const direct = req.params?.slug || req.body?.workspace || req.body?.workspace_slug || req.query?.workspace || req.query?.workspace_slug;
+  if (direct) return String(direct).trim();
+  if (req.params?.id && typeof repo.workspaceSlugForA2AAction === 'function') return repo.workspaceSlugForA2AAction(req.params.id);
+  return null;
+}
+
+function verifyDeviceRequest(repo, req) {
+  const token = deviceTokenFromRequest(req);
+  if (!token) return null;
+  const workspaceSlug = deviceWorkspaceForRequest(repo, req);
+  const deviceId = req.body?.deviceId || req.body?.device_id || req.query?.deviceId || req.query?.device_id || null;
+  const credential = repo.authenticateDeviceToken(token, { workspaceSlug, deviceId });
+  if (!credential) return null;
+  // A paired credential is bound to one machine. Never allow the request body
+  // to make that credential impersonate another device.
+  if (deviceId && String(deviceId) !== credential.deviceId) return null;
+  return credential;
+}
+
+function requireDeviceCredential(repo) {
+  return (req, res, next) => {
+    const credential = verifyDeviceRequest(repo, req);
+    if (credential) { req.deviceCredential = credential; return next(); }
+    if (!req.app.locals.requireDeviceAuth && !deviceTokenFromRequest(req)) return next();
+    return res.status(401).json({ error: '需要有效的 ziwei_user 设备凭证' });
+  };
+}
+
+function a2aAuth({ bypass = false, allowAgentCard = true, deviceVerifier = null, requireDevice = false } = {}) {
   return (req, res, next) => {
     // Memory-mode test servers and explicitly disabled-auth instances keep the
     // original local contract. Production A2A calls must carry the machine
     // credential used by ziwei_user.
     if (bypass || (allowAgentCard && req.method === 'GET' && req.path === '/agents')) return next();
+    if (typeof deviceVerifier === 'function') {
+      const credential = deviceVerifier(req);
+      if (credential) { req.deviceCredential = credential; return next(); }
+    }
+    // Keep the existing deployment token as a backwards-compatible machine
+    // credential for older bridges. New paired daemons use their workspace
+    // scoped device token above, so a remote computer never needs the server's
+    // global secret in its config.
     const expected = readA2AToken({ create: true });
     const supplied = tokenFromRequest(req);
     if (!safeTokenEqual(supplied, expected)) {
       res.setHeader('WWW-Authenticate', 'Bearer realm="ziwei-a2a"');
-      return res.status(401).json({ error: '需要有效的 A2A 连接令牌' });
+      return res.status(401).json({ error: requireDevice ? '需要有效的 ziwei_user 设备凭证或兼容的 A2A 连接令牌' : '需要有效的 A2A 连接令牌' });
     }
     req.a2aAuthenticated = true;
     next();
@@ -153,6 +190,7 @@ export function createApp(options = {}) {
   app.use(express.json({ limit: '16mb' }));
   const authBypass = options.memory === true || options.requireAuth === false;
   app.locals.authBypass = authBypass;
+  app.locals.requireDeviceAuth = options.requireDeviceAuth === undefined ? !authBypass : Boolean(options.requireDeviceAuth);
   app.locals.a2aToken = () => readA2AToken({ create: !authBypass });
   // The certificate is public material, but the endpoint remains explicitly
   // opt-in through a configured file so an accidental deployment cannot expose
@@ -176,6 +214,15 @@ export function createApp(options = {}) {
       if (error?.code === 'ENOENT' || error?.code === 'ENOTDIR') return res.status(404).json({ error: '服务器证书未配置' });
       return res.status(500).json({ error: '服务器证书暂不可用' });
     }
+  });
+  // A pairing exchange is the only unauthenticated way to provision a
+  // remote ziwei_user. The short-lived code is consumed server-side and the
+  // returned device credential is never written to the repository or logs.
+  app.post('/api/daemon/pair', (req, res, next) => {
+    try {
+      const result = repo.claimDevicePairing(req.body || {});
+      res.json({ ...result, apiBase: String(req.body?.apiBase || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '') });
+    } catch (error) { next(error); }
   });
   app.use('/api', sessionMiddleware(auth, { bypass: authBypass }));
   app.use('/api/workspaces/:slug', workspaceMembershipGuard(auth, { bypass: authBypass }));
@@ -250,7 +297,7 @@ export function createApp(options = {}) {
   // ziwei_user reports the exact CLI path/version it discovered locally.
   // This endpoint is intentionally heartbeat-equivalent and is only exposed
   // on the local API; it does not accept an Aura bridge identity.
-  app.post('/api/workspaces/:slug/runtimes/register', (req, res) => {
+  app.post('/api/workspaces/:slug/runtimes/register', requireDeviceCredential(repo), (req, res) => {
     if (req.body?.agentId && String(req.body.agentId) !== 'ziwei_user') return res.status(403).json({ error: 'Only ziwei_user runtime registration is accepted' });
     res.json({ runtimes: repo.registerRuntimes(req.params.slug, req.body || {}) });
   });
@@ -315,6 +362,15 @@ export function createApp(options = {}) {
   app.get('/api/invitations/lookup/:code', (req, res) => { const invitation = repo.getInvitationByCode(req.params.code); if (!invitation) return res.status(404).json({ error: 'Invitation not found' }); res.json(invitation); });
   app.post('/api/invitations/:code/accept', (req, res) => res.json(repo.acceptInvitation(req.params.code, req.body)));
   app.get('/api/workspaces/:slug/devices', (req, res) => res.json({ devices: repo.listDevices(req.params.slug) }));
+  // Any workspace member may pair the computer they control. The short-lived
+  // code is scoped to this workspace and can only create one credential; it
+  // does not grant administrative access to the workspace.
+  app.post('/api/workspaces/:slug/devices/pairing', requireRole('owner','admin','member'), (req, res, next) => {
+    try {
+      const result = repo.createDevicePairing(req.params.slug, { ...(req.body || {}), createdBy: req.auth?.user_id || 'user' });
+      res.status(201).json(result);
+    } catch (error) { next(error); }
+  });
   app.post('/api/workspaces/:slug/devices', requireRole('owner','admin'), (req, res) => res.status(201).json(repo.createDevice(req.params.slug, req.body)));
   app.patch('/api/devices/:id', requireRole('owner','admin'), (req, res) => res.json(repo.updateDevice(req.params.id, req.body || {})));
   app.post('/api/devices/:id/disable', requireRole('owner','admin'), (req, res) => res.json(repo.setDeviceStatus(req.params.id, 'disabled')));
@@ -328,10 +384,10 @@ export function createApp(options = {}) {
   app.delete('/api/workspaces/:slug/devices/:id', requireRole('owner','admin'), (req, res) => res.json(repo.deleteDevice(req.params.id)));
   // The only liveness signal used by the workspace is the local ziwei_user daemon.
   // AuraBaba or any other bridge is deliberately ignored by this endpoint.
-  app.post('/api/workspaces/:slug/heartbeat', (req, res) => res.json({ ok: true, device: repo.heartbeatDevice(req.params.slug, req.body) }));
-  app.post('/api/workspaces/:slug/devices/:id/heartbeat', (req, res) => res.json({ ok: true, device: repo.heartbeatDevice(req.params.slug, { ...req.body, deviceId: req.params.id }) }));
-  app.post('/api/daemon/heartbeat', (req, res) => { const slug = String(req.body.workspace || req.body.workspace_slug || 'test-111'); res.json({ ok: true, device: repo.heartbeatDevice(slug, req.body) }); });
-  app.post('/api/devices/heartbeat', (req, res) => { const slug = String(req.body.workspace || req.body.workspace_slug || 'test-111'); res.json({ ok: true, device: repo.heartbeatDevice(slug, req.body) }); });
+  app.post('/api/workspaces/:slug/heartbeat', requireDeviceCredential(repo), (req, res) => res.json({ ok: true, device: repo.heartbeatDevice(req.params.slug, req.body) }));
+  app.post('/api/workspaces/:slug/devices/:id/heartbeat', requireDeviceCredential(repo), (req, res) => res.json({ ok: true, device: repo.heartbeatDevice(req.params.slug, { ...req.body, deviceId: req.params.id }) }));
+  app.post('/api/daemon/heartbeat', requireDeviceCredential(repo), (req, res) => { const slug = String(req.body.workspace || req.body.workspace_slug || 'test-111'); res.json({ ok: true, device: repo.heartbeatDevice(slug, req.body) }); });
+  app.post('/api/devices/heartbeat', requireDeviceCredential(repo), (req, res) => { const slug = String(req.body.workspace || req.body.workspace_slug || 'test-111'); res.json({ ok: true, device: repo.heartbeatDevice(slug, req.body) }); });
   app.get('/api/workspaces/:slug/employees', (req, res) => res.json({ employees: repo.listEmployees(req.params.slug) }));
   app.post('/api/workspaces/:slug/employees', requireRole('owner','admin','member'), (req, res) => res.status(201).json(repo.createEmployee(req.params.slug, req.body)));
   app.patch('/api/employees/:id', requireRole('owner','admin','member'), (req, res) => res.json(repo.updateEmployee(req.params.id, req.body || {})));
@@ -446,15 +502,19 @@ export function createApp(options = {}) {
 
   // A2A v1: agent cards + task/message primitives. The executor is intentionally local-first;
   // daemon adapters can claim tasks later without changing this contract.
-  app.use('/a2a/v1', a2aAuth({ bypass: authBypass }));
+  app.use('/a2a/v1', a2aAuth({
+    bypass: authBypass,
+    requireDevice: app.locals.requireDeviceAuth,
+    deviceVerifier: req => verifyDeviceRequest(repo, req)
+  }));
   app.get('/a2a/v1/agents', (_req, res) => res.json({ agents: [{ id:'ziwei_user', name:'ziwei_user', description:'紫薇工作区本机 daemon，负责心跳、轮询和 A2A 任务', url:'/a2a/v1', capabilities:['tasks','messages','heartbeat','actions','ack','result'] }] }));
   app.post('/a2a/v1/register', (req, res) => { const workspace = String(req.body.workspace || req.body.workspace_slug || 'test-111'); res.json({ ok:true, agent:repo.registerA2AAgent(workspace, req.body), card:{id:'ziwei_user',capabilities:['tasks','messages','heartbeat','actions','ack','result']} }); });
   app.post('/a2a/v1/actions', (req, res) => { const action=repo.createA2AAction(String(req.body.workspace || req.body.workspace_slug || 'test-111'), req.body); res.status(action.duplicate ? 200 : 201).json(action); });
-  app.get('/a2a/v1/actions', (req, res) => { const workspace=String(req.query.workspace || 'test-111'); res.json({ actions:repo.listA2AActions(workspace,{agentId:req.query.agent || req.query.agent_id,status:req.query.status || 'pending',includeAcked:req.query.includeAcked || req.query.include_acked}) }); });
-  app.post('/a2a/v1/actions/:id/ack', (req, res) => res.json(repo.ackA2AAction(req.params.id, req.body)));
-  app.post('/a2a/v1/actions/:id/events', (req, res) => res.status(202).json(repo.recordA2AEvent(req.params.id, req.body || {})));
+  app.get('/a2a/v1/actions', (req, res) => { const workspace=String(req.query.workspace || 'test-111'); res.json({ actions:repo.listA2AActions(workspace,{agentId:req.query.agent || req.query.agent_id,status:req.query.status || 'pending',includeAcked:req.query.includeAcked || req.query.include_acked,deviceId:req.deviceCredential?.deviceId}) }); });
+  app.post('/a2a/v1/actions/:id/ack', (req, res) => res.json(repo.ackA2AAction(req.params.id, { ...(req.body || {}), deviceId:req.deviceCredential?.deviceId })));
+  app.post('/a2a/v1/actions/:id/events', (req, res) => res.status(202).json(repo.recordA2AEvent(req.params.id, { ...(req.body || {}), deviceId:req.deviceCredential?.deviceId })));
   app.get('/a2a/v1/actions/:id/events', (req, res) => res.json({ events: repo.listA2AEvents(req.params.id) }));
-  app.post('/a2a/v1/actions/:id/result', (req, res) => res.json(repo.resultA2AAction(req.params.id, req.body)));
+  app.post('/a2a/v1/actions/:id/result', (req, res) => res.json(repo.resultA2AAction(req.params.id, { ...(req.body || {}), deviceId:req.deviceCredential?.deviceId })));
   app.post('/a2a/v1/tasks', (req, res) => { const task = repo.createA2ATask(req.body.workspace || 'test-111', req.body); res.status(201).json({ id:task.id, status:{state:'submitted', timestamp:task.created_at}, task }); });
   app.get('/a2a/v1/tasks', (req, res) => { const workspace = String(req.query.workspace || 'test-111'); const tasks = repo.listTasks(workspace, { state: req.query.state, q: req.query.q }); res.json({ tasks: tasks.map(task => ({ id: task.id, status: { state: task.state, timestamp: task.updated_at }, task })) }); });
   app.get('/a2a/v1/tasks/:id', (req, res) => { const task=repo.getTask(req.params.id); if(!task) return res.status(404).json({error:'Task not found'}); res.json({id:task.id,status:{state:task.state,timestamp:task.updated_at},task,messages:repo.getTaskMessages(task.id)}); });

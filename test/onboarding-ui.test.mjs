@@ -36,12 +36,21 @@ test('member workspace loading does not let admin-only settings block device onb
   assert.match(appSource, /canReadWorkspaceSettings\s*\?\s*api\.settings\(\)/);
 });
 
-test('device onboarding shows the API origin and pinned certificate steps', () => {
+test('device onboarding shows the API origin and optional certificate steps', () => {
   assert.match(appSource, /deviceApiBase/);
   assert.match(appSource, /deviceServerCertificateUrl/);
   assert.match(appSource, /下载服务器证书/);
-  assert.match(appSource, /data\\\/ziwei-server\.crt|data\\\\ziwei-server\.crt/);
   assert.match(appSource, /--api/);
   assert.match(appSource, /--tls-ca-file/);
-  assert.match(appSource, /先下载并保存证书/);
+  assert.match(appSource, /正式域名证书无需额外文件/);
+});
+
+test('device onboarding provisions a generic ziwei_user daemon with a one-time pairing code', () => {
+  const apiSource = fs.readFileSync(path.join(root, 'frontend', 'src', 'api.js'), 'utf8');
+  assert.match(apiSource, /createDevicePairing:/);
+  assert.match(appSource, /api\.createDevicePairing/);
+  assert.match(appSource, /devicePairing/);
+  assert.match(appSource, /ziwei_user connect/);
+  assert.match(appSource, /--code/);
+  assert.doesNotMatch(appSource, /install-ziwei-user\.ps1/);
 });

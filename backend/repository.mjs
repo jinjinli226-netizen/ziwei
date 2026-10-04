@@ -14,6 +14,7 @@ import { listHermesProfiles, validateHermesProfile } from '../src/runtime-adapte
 
 const now = () => new Date().toISOString();
 const id = prefix => `${prefix}_${crypto.randomUUID()}`;
+const hashSecret = value => crypto.createHash('sha256').update(String(value || '')).digest('hex');
 const parse = value => { try { return JSON.parse(value); } catch { return []; } };
 function toSkillRecord(row) {
   if (!row) return null;
@@ -298,6 +299,16 @@ export function createRepository(options = {}) {
     error: row.error || null,
     ...(includeEvents ? { events: actionEvents(row.id) } : {})
   }) : null;
+  const actionTargetDevice = row => {
+    const payload = parse(row?.payload_json);
+    return String(payload.deviceId || payload.device_id || payload.targetDeviceId || payload.target_device_id || '').trim() || null;
+  };
+  const assertActionDevice = (row, input = {}) => {
+    const target = actionTargetDevice(row);
+    const deviceId = String(input.deviceId || input.device_id || '').trim();
+    if (target && deviceId && target !== deviceId) throw new Error('A2A action is assigned to another device');
+    return target;
+  };
   // Conversation messages are dispatched through a2a_actions.  Expose the
   // latest dispatch and its progress events alongside the messages so the UI
   // can show whether ziwei_user has received, started, or finished a reply.
@@ -998,6 +1009,68 @@ export function createRepository(options = {}) {
       audit(ws.slug,'user','device.deleted',{deviceId,name:row.name});
       return { id:deviceId, name:row.name, deleted:true };
     },
+    createDevicePairing(slug, input = {}) {
+      const ws = workspace(slug); if (!ws) throw new Error('Workspace not found');
+      const requestedTtl = Number(input.ttlMs ?? input.ttl_ms ?? 10 * 60 * 1000);
+      const ttlMs = Number.isFinite(requestedTtl) ? Math.min(30 * 60 * 1000, Math.max(60 * 1000, requestedTtl)) : 10 * 60 * 1000;
+      const createdAt = now();
+      const expiresAt = new Date(Date.parse(createdAt) + ttlMs).toISOString();
+      const code = `zwi-${crypto.randomBytes(4).toString('hex')}-${crypto.randomBytes(4).toString('hex')}`;
+      db.prepare('INSERT INTO device_pairing_codes(id,workspace_id,code_hash,code_prefix,expires_at,created_at,created_by,consumed_at) VALUES(?,?,?,?,?,?,?,NULL)')
+        .run(id('pairing'), ws.id, hashSecret(code), code.slice(0, 12), expiresAt, createdAt, String(input.createdBy || input.created_by || 'user'));
+      audit(slug, 'user', 'device.pairing.created', { codePrefix: code.slice(0, 12), expiresAt });
+      return { code, code_prefix: code.slice(0, 12), workspace: slug, expires_at: expiresAt };
+    },
+    claimDevicePairing(input = {}) {
+      const code = String(input.code || '').trim().toLowerCase();
+      if (!code) throw new Error('设备配对码不能为空');
+      const row = db.prepare(`SELECT p.*,w.slug AS workspace_slug FROM device_pairing_codes p JOIN workspaces w ON w.id=p.workspace_id WHERE p.code_hash=?`).get(hashSecret(code));
+      if (!row || row.consumed_at || Date.parse(row.expires_at) <= Date.now()) throw new Error('设备配对码无效、已使用或已过期');
+      const timestamp = now();
+      const deviceId = id('device');
+      const deviceToken = `zwd_${crypto.randomBytes(32).toString('base64url')}`;
+      const deviceName = String(input.name || input.deviceName || '远程设备').trim() || '远程设备';
+      const osName = String(input.os || process.platform).trim() || process.platform;
+      // Pairing is a credential hand-off. Consume the one-time code and create
+      // both durable records in one transaction so an insertion failure can
+      // never strand a code without issuing a usable device credential.
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        const claim = db.prepare('UPDATE device_pairing_codes SET consumed_at=? WHERE id=? AND consumed_at IS NULL').run(timestamp, row.id);
+        if (claim.changes !== 1) throw new Error('设备配对码已被使用');
+        db.prepare('INSERT INTO devices(id,workspace_id,name,os,status,last_seen,ip_hint,version,pid,bridge_name,bridge_version,bridge_status,heartbeat_at,heartbeat_interval_ms) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+          .run(deviceId, row.workspace_id, deviceName, osName, 'pending', null, null, null, null, 'ziwei_user', null, 'pending', null, null);
+        db.prepare('INSERT INTO device_credentials(id,device_id,workspace_id,token_hash,token_prefix,created_at,last_seen_at,revoked_at) VALUES(?,?,?,?,?,?,?,NULL)')
+          .run(id('device-credential'), deviceId, row.workspace_id, hashSecret(deviceToken), deviceToken.slice(0, 12), timestamp, null);
+        db.exec('COMMIT');
+      } catch (error) {
+        try { db.exec('ROLLBACK'); } catch {}
+        throw error;
+      }
+      audit(row.workspace_slug, 'ziwei_user', 'device.pairing.claimed', { deviceId, codePrefix: row.code_prefix });
+      return { deviceId, deviceToken, workspace: row.workspace_slug, agentId: 'ziwei_user', serviceName: 'ziwei_user' };
+    },
+    authenticateDeviceToken(token, { workspaceSlug = null, deviceId = null } = {}) {
+      const candidate = String(token || '').trim(); if (!candidate) return null;
+      const row = db.prepare(`SELECT c.id AS credential_id,c.device_id,c.workspace_id,c.revoked_at,d.status AS device_status,w.slug AS workspace_slug
+        FROM device_credentials c JOIN devices d ON d.id=c.device_id AND d.workspace_id=c.workspace_id
+        JOIN workspaces w ON w.id=c.workspace_id WHERE c.token_hash=?`).get(hashSecret(candidate));
+      if (!row || row.revoked_at || row.device_status === 'disabled') return null;
+      if (workspaceSlug && String(workspaceSlug) !== row.workspace_slug) return null;
+      if (deviceId && String(deviceId) !== row.device_id) return null;
+      db.prepare('UPDATE device_credentials SET last_seen_at=? WHERE id=?').run(now(), row.credential_id);
+      return { credentialId: row.credential_id, deviceId: row.device_id, workspaceId: row.workspace_id, workspace: row.workspace_slug };
+    },
+    revokeDeviceCredential(deviceId) {
+      const row = db.prepare('SELECT * FROM device_credentials WHERE device_id=?').get(String(deviceId));
+      if (!row) return null;
+      const timestamp = now();
+      db.prepare('UPDATE device_credentials SET revoked_at=? WHERE device_id=?').run(timestamp, String(deviceId));
+      db.prepare("UPDATE devices SET status='disabled',bridge_status='disabled',last_seen=NULL,heartbeat_at=NULL WHERE id=?").run(String(deviceId));
+      const ws = db.prepare('SELECT slug FROM workspaces WHERE id=?').get(row.workspace_id);
+      if (ws) audit(ws.slug, 'user', 'device.credential.revoked', { deviceId: String(deviceId) });
+      return { deviceId: String(deviceId), revoked: true };
+    },
     resourcePermissions() {
       return {
         owner: { read:['workspace','tasks','runtimes','skills','documents','automations','calendar','members','invitations','devices','employees','audit','notifications','conversations','settings','api_keys'], write:['tasks','skills','documents','automations','members','invitations','devices','employees','notifications','conversations','settings','api_keys'] },
@@ -1187,6 +1260,10 @@ export function createRepository(options = {}) {
     createConversation(slug,input={}) { const ws=workspace(slug); if(!ws) throw new Error('Workspace not found'); const employeeId=input.employeeId || input.employee_id || null; if(employeeId && !db.prepare('SELECT 1 FROM employees WHERE id=? AND workspace_id=?').get(employeeId,ws.id)) throw new Error('数字员工不存在'); const timestamp=now(); const conversation={id:id('conv'),workspace_id:ws.id,employee_id:employeeId,title:String(input.title || '新对话').trim() || '新对话',status:'active',created_at:timestamp,updated_at:timestamp}; db.prepare('INSERT INTO conversations(id,workspace_id,employee_id,title,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?)').run(conversation.id,ws.id,employeeId,conversation.title,'active',timestamp,timestamp); audit(slug,'user','conversation.created',{conversationId:conversation.id,employeeId}); return {...conversation,messages:[]}; },
     addConversationMessage(conversationId,input={}) { const conversation=db.prepare('SELECT * FROM conversations WHERE id=?').get(conversationId); if(!conversation) throw new Error('Conversation not found'); const message={id:id('convmsg'),conversation_id:conversationId,role:['user','assistant','system'].includes(input.role) ? input.role : 'user',content:String(input.content || '').trim(),attachments:Array.isArray(input.attachments) ? input.attachments : [],created_at:now()}; if(!message.content && !message.attachments.length) throw new Error('消息内容不能为空'); db.prepare('INSERT INTO conversation_messages(id,conversation_id,role,content,attachment_json,created_at) VALUES(?,?,?,?,?,?)').run(message.id,conversationId,message.role,message.content,JSON.stringify(message.attachments),message.created_at); db.prepare('UPDATE conversations SET updated_at=? WHERE id=?').run(message.created_at,conversationId); const ws=db.prepare('SELECT slug FROM workspaces WHERE id=?').get(conversation.workspace_id); const employee=conversation.employee_id ? db.prepare('SELECT * FROM employees WHERE id=? AND workspace_id=?').get(conversation.employee_id,conversation.workspace_id) : null; audit(ws.slug,message.role,'conversation.message.created',{conversationId,messageId:message.id,dispatch:input.dispatch !== false}); if (message.role === 'user' && input.dispatch !== false) { const payload=executionPayload({prompt:message.content,employee,runtime:input.runtime || null,model:input.model || input.modelId || null,profile:input.profile ?? input.runtimeProfile ?? input.runtime_profile ?? input.hermesProfile ?? input.hermes_profile,conversationId}); payload.messageId=message.id; this.createA2AAction(ws.slug,{type:'conversation.execute',payload,dedupeKey:`conversation:${conversationId}:${message.id}`}); } return {...message,execution:conversationExecution(conversationId)}; },
     archiveConversation(conversationId, archived = true) { const row=db.prepare('SELECT * FROM conversations WHERE id=?').get(conversationId); if(!row) throw new Error('Conversation not found'); db.prepare('UPDATE conversations SET status=? WHERE id=?').run(archived ? 'archived' : 'active',conversationId); return this.getConversation(conversationId); },
+    workspaceSlugForA2AAction(actionId) {
+      const row = db.prepare('SELECT w.slug FROM a2a_actions a JOIN workspaces w ON w.id=a.workspace_id WHERE a.id=?').get(String(actionId || ''));
+      return row?.slug || null;
+    },
     registerA2AAgent(slug, input = {}) { const ws = workspace(slug); if (!ws) throw new Error('Workspace not found'); const agentId = String(input.agentId || input.agent_id || 'ziwei_user'); if (agentId !== 'ziwei_user') throw new Error('Only ziwei_user agent is accepted'); return this.heartbeatDevice(slug, { ...input, agentId, serviceName:'ziwei_user' }); },
     createA2AAction(slug, input = {}) {
       const ws = workspace(slug); if (!ws) throw new Error('Workspace not found');
@@ -1206,11 +1283,14 @@ export function createRepository(options = {}) {
       // result, the acked action must be delivered again after restart.
       const includeAcked = input.includeAcked === true || input.includeAcked === 1 || String(input.includeAcked || '').toLowerCase() === 'true';
       const statuses = requestedStatus === 'all' ? ['pending','acked','succeeded','failed','expired'] : (requestedStatus === 'pending' && includeAcked ? ['pending','acked'] : [requestedStatus]); const placeholders=statuses.map(()=>'?').join(',');
+      const deviceId = String(input.deviceId || input.device_id || '').trim();
       const rows=db.prepare(`SELECT * FROM a2a_actions WHERE workspace_id=? AND agent_id=? AND status IN (${placeholders}) ORDER BY created_at`).all(ws.id,agentId,...statuses);
-      return rows.map(row => ({...row,payload:parse(row.payload_json),result:parse(row.result_json)}));
+      return rows.filter(row => !deviceId || !actionTargetDevice(row) || actionTargetDevice(row) === deviceId)
+        .map(row => ({...row,payload:parse(row.payload_json),result:parse(row.result_json)}));
     },
     ackA2AAction(actionId, input = {}) {
       const row=db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId); if (!row) throw new Error('A2A action not found'); if (input.agentId && String(input.agentId) !== row.agent_id) throw new Error('A2A agent mismatch'); if (row.status === 'expired') throw new Error('A2A action expired'); if (row.status === 'succeeded' || row.status === 'failed') return {...row,duplicate:true,payload:parse(row.payload_json),result:parse(row.result_json)};
+      assertActionDevice(row, input);
       const timestamp=now(); const timestampMs=Date.parse(timestamp); const payload=parse(row.payload_json); const originalExpiryMs=Date.parse(row.expires_at || '');
       if (row.status === 'pending' && Number.isFinite(originalExpiryMs) && originalExpiryMs <= timestampMs) {
         db.prepare("UPDATE a2a_actions SET status='expired',completed_at=? WHERE id=? AND status='pending'").run(timestamp,actionId);
@@ -1222,10 +1302,10 @@ export function createRepository(options = {}) {
       db.prepare("UPDATE a2a_actions SET status='acked',acked_at=?,expires_at=? WHERE id=? AND status='pending'").run(timestamp,expiresAt,actionId);
       markTaskRunning(row.task_id); const updated=db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId); return {...updated,duplicate:updated.acked_at !== timestamp,payload:parse(updated.payload_json),result:parse(updated.result_json)};
     },
-    recordA2AEvent(actionId, input = {}) { const row=db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId); if(!row) throw new Error('A2A action not found'); if(input.agentId && String(input.agentId)!==row.agent_id) throw new Error('A2A agent mismatch'); if (['succeeded','failed','expired'].includes(row.status)) throw new Error('A2A action is already terminal'); const event={id:id('action-event'),action_id:actionId,type:String(input.type || 'progress').slice(0,80),message:String(input.message || '').slice(0,4000),data:input.data ?? null,created_at:now()}; db.prepare('INSERT INTO a2a_action_events(id,action_id,type,message,data_json,created_at) VALUES(?,?,?,?,?,?)').run(event.id,event.action_id,event.type,event.message,JSON.stringify(event.data),event.created_at); const ws=db.prepare('SELECT slug FROM workspaces WHERE id=?').get(row.workspace_id); audit(ws?.slug || 'test-111','ziwei_user','a2a.action.event',{actionId,type:event.type,message:event.message}); return event; },
+    recordA2AEvent(actionId, input = {}) { const row=db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId); if(!row) throw new Error('A2A action not found'); if(input.agentId && String(input.agentId)!==row.agent_id) throw new Error('A2A agent mismatch'); assertActionDevice(row, input); if (['succeeded','failed','expired'].includes(row.status)) throw new Error('A2A action is already terminal'); const event={id:id('action-event'),action_id:actionId,type:String(input.type || 'progress').slice(0,80),message:String(input.message || '').slice(0,4000),data:input.data ?? null,created_at:now()}; db.prepare('INSERT INTO a2a_action_events(id,action_id,type,message,data_json,created_at) VALUES(?,?,?,?,?,?)').run(event.id,event.action_id,event.type,event.message,JSON.stringify(event.data),event.created_at); const ws=db.prepare('SELECT slug FROM workspaces WHERE id=?').get(row.workspace_id); audit(ws?.slug || 'test-111','ziwei_user','a2a.action.event',{actionId,type:event.type,message:event.message}); return event; },
     listA2AEvents(actionId) { const row=db.prepare('SELECT id FROM a2a_actions WHERE id=?').get(actionId); if (!row) throw new Error('A2A action not found'); return db.prepare('SELECT id,action_id,type,message,data_json,created_at FROM a2a_action_events WHERE action_id=? ORDER BY created_at,id').all(actionId).map(item => ({...item,data:parse(item.data_json)})); },
     resultA2AAction(actionId, input = {}) {
-      const row=db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId); if (!row) throw new Error('A2A action not found'); if (input.agentId && String(input.agentId) !== row.agent_id) throw new Error('A2A agent mismatch'); if (row.status === 'succeeded' || row.status === 'failed' || row.status === 'expired') return {...row,duplicate:true,payload:parse(row.payload_json),result:parse(row.result_json)}; const status=String(input.status || (input.error ? 'failed' : 'succeeded')); if (!['succeeded','failed'].includes(status)) throw new Error('A2A result status must be succeeded or failed'); const timestamp=now(); db.prepare('UPDATE a2a_actions SET status=?,completed_at=?,result_json=?,error=? WHERE id=?').run(status,timestamp,input.result === undefined ? null : JSON.stringify(input.result),input.error ? String(input.error) : null,actionId); const updated=db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId); const payload=parse(updated.payload_json); const ws=db.prepare('SELECT slug FROM workspaces WHERE id=?').get(updated.workspace_id); audit(ws.slug,'ziwei_user',`a2a.action.${status}`,{actionId, type:updated.type, error:input.error || null}); if (updated.task_id) taskExecutionMessage(updated.task_id, status, input.error || null, input.result); if (updated.task_id && payload.conversationId) { const content = input.error ? `执行失败：${input.error}` : (typeof input.result === 'string' ? input.result : (input.result?.output || input.result?.text || input.result?.result?.output || input.result?.result?.text || '执行完成')); if (content) this.addConversationMessage(payload.conversationId,{role:'assistant',content,dispatch:false}); } if(updated.type === 'automation.execute' && payload.runId) this.completeAutomationRun(payload.runId,{status:status==='succeeded'?'completed':'failed',result:input.result,error:input.error}); if (updated.type === 'conversation.execute' && payload.conversationId) { const content = input.error ? `执行失败：${input.error}` : (typeof input.result === 'string' ? input.result : (input.result?.output || input.result?.text || input.result?.result?.output || input.result?.result?.text || '执行完成')); if (content) this.addConversationMessage(payload.conversationId,{role:'assistant',content,dispatch:false}); } return {...updated,payload,result:parse(updated.result_json)};
+      const row=db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId); if (!row) throw new Error('A2A action not found'); if (input.agentId && String(input.agentId) !== row.agent_id) throw new Error('A2A agent mismatch'); assertActionDevice(row, input); if (row.status === 'succeeded' || row.status === 'failed' || row.status === 'expired') return {...row,duplicate:true,payload:parse(row.payload_json),result:parse(row.result_json)}; const status=String(input.status || (input.error ? 'failed' : 'succeeded')); if (!['succeeded','failed'].includes(status)) throw new Error('A2A result status must be succeeded or failed'); const timestamp=now(); db.prepare('UPDATE a2a_actions SET status=?,completed_at=?,result_json=?,error=? WHERE id=?').run(status,timestamp,input.result === undefined ? null : JSON.stringify(input.result),input.error ? String(input.error) : null,actionId); const updated=db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId); const payload=parse(updated.payload_json); const ws=db.prepare('SELECT slug FROM workspaces WHERE id=?').get(updated.workspace_id); audit(ws.slug,'ziwei_user',`a2a.action.${status}`,{actionId, type:updated.type, error:input.error || null}); if (updated.task_id) taskExecutionMessage(updated.task_id, status, input.error || null, input.result); if (updated.task_id && payload.conversationId) { const content = input.error ? `执行失败：${input.error}` : (typeof input.result === 'string' ? input.result : (input.result?.output || input.result?.text || input.result?.result?.output || input.result?.result?.text || '执行完成')); if (content) this.addConversationMessage(payload.conversationId,{role:'assistant',content,dispatch:false}); } if(updated.type === 'automation.execute' && payload.runId) this.completeAutomationRun(payload.runId,{status:status==='succeeded'?'completed':'failed',result:input.result,error:input.error}); if (updated.type === 'conversation.execute' && payload.conversationId) { const content = input.error ? `执行失败：${input.error}` : (typeof input.result === 'string' ? input.result : (input.result?.output || input.result?.text || input.result?.result?.output || input.result?.result?.text || '执行完成')); if (content) this.addConversationMessage(payload.conversationId,{role:'assistant',content,dispatch:false}); } return {...updated,payload,result:parse(updated.result_json)};
     }
   };
 }

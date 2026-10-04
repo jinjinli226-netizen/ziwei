@@ -7,18 +7,20 @@ import { createLocalActionExecutor } from '../src/local-action.mjs';
 import { redactSecrets } from '../src/redaction.mjs';
 import { discoverInstalledRuntimes } from '../src/runtime-adapters.mjs';
 import { readA2AToken } from '../backend/a2a-auth.mjs';
+import { defaultUserDir, resolveConfigPath } from './config.mjs';
 
 const ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const packageMeta = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
 const VERSION = process.env.ZIWEI_USER_VERSION || packageMeta.version;
 if (process.argv.includes('--version')) { console.log(`ziwei_user ${VERSION}`); process.exit(0); }
-const dataDir = path.join(ROOT, 'data');
-const logDir = path.join(ROOT, '.local', 'logs');
-const runtimeDir = path.join(ROOT, '.local', 'runtime');
+const standaloneHome = process.env.ZIWEI_USER_HOME ? defaultUserDir({ env: process.env }) : null;
+const dataDir = standaloneHome || path.join(ROOT, 'data');
+const logDir = standaloneHome ? path.join(standaloneHome, 'logs') : path.join(ROOT, '.local', 'logs');
+const runtimeDir = standaloneHome ? path.join(standaloneHome, 'runtime') : path.join(ROOT, '.local', 'runtime');
 fs.mkdirSync(dataDir, { recursive: true });
 fs.mkdirSync(logDir, { recursive: true });
 fs.mkdirSync(runtimeDir, { recursive: true });
-const configPath = process.env.ZIWEI_CONFIG || path.join(dataDir, 'ziwei_user.json');
+const configPath = resolveConfigPath({ root: ROOT, env: process.env });
 const config = fs.existsSync(configPath)
   ? JSON.parse(fs.readFileSync(configPath, 'utf8'))
   : { agentId: 'ziwei_user', serviceName: 'ziwei_user', workspace: 'test-111', apiBase: process.env.ZIWEI_API_BASE || 'http://127.0.0.1:4178', healthHost: '127.0.0.1', healthPort: 20242, heartbeatMs: 15000, pollMs: 5000 };
@@ -37,10 +39,10 @@ const localExecutor = createLocalActionExecutor({
   defaultRuntime: config.defaultRuntime || process.env.ZIWEI_DEFAULT_RUNTIME || null
 });
 const dispatcher = new ActionDispatcher({
-  // Runtime state stays private under .local/runtime, while local CLI agents
-  // should start in the checked-out project so they can inspect and modify the
-  // user's real workspace with the permissions of this Windows account.
-  workdir: ROOT,
+  // Runtime state stays private under the daemon profile. A paired daemon
+  // executes Agent actions in the directory where the user connected it (or
+  // the explicit configured workdir), never inside the npm package cache.
+  workdir: config.workdir || process.cwd() || ROOT,
   stateFile: path.join(runtimeDir, 'action-state.json'),
   execute: localExecutor,
   onEvent: (event, extra) => {
@@ -79,7 +81,7 @@ async function heartbeat() {
   };
   try {
     const response = await fetch(`${config.apiBase}/api/workspaces/${encodeURIComponent(config.workspace)}/heartbeat`, {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload), signal: AbortSignal.timeout(3000)
+      method: 'POST', headers: daemonHeaders({ json: true }), body: JSON.stringify(payload), signal: AbortSignal.timeout(3000)
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok || body.ok !== true) throw new Error(body.error || `heartbeat HTTP ${response.status}`);
@@ -89,7 +91,7 @@ async function heartbeat() {
     // may not expose this endpoint; a heartbeat remains sufficient for them.
     try {
       await fetch(`${config.apiBase}/api/workspaces/${encodeURIComponent(config.workspace)}/runtimes/register`, {
-        method: 'POST', headers: { 'content-type': 'application/json' },
+        method: 'POST', headers: daemonHeaders({ json: true }),
         body: JSON.stringify({ agentId: 'ziwei_user', deviceId: payload.deviceId, runtimes: runtimeDiscovery.runtimes }),
         signal: AbortSignal.timeout(3000)
       });
@@ -97,10 +99,17 @@ async function heartbeat() {
     log('heartbeat', { ok: true, apiBase: config.apiBase, deviceId: body.device?.id || payload.deviceId, status: body.device?.status || 'online', runtimes: Object.fromEntries(Object.entries(runtimeDiscovery.runtimes).map(([name, item]) => [name, item.version || item.status])) });
   } catch (error) { log('heartbeat_failed', { error: error.message, apiBase: config.apiBase }); } finally { rotate(); }
 }
+function daemonHeaders({ json = false, a2a = false } = {}) {
+  const headers = json ? { 'content-type': 'application/json' } : {};
+  if (config.deviceToken) headers['x-ziwei-device-token'] = String(config.deviceToken);
+  else if (a2a) {
+    const token = readA2AToken({ create: false });
+    if (token) headers.authorization = `Bearer ${token}`;
+  }
+  return headers;
+}
 async function postAction(pathname, body) {
-  const token = readA2AToken({ create: false });
-  const headers = { 'content-type':'application/json' };
-  if (token) headers.authorization = `Bearer ${token}`;
+  const headers = daemonHeaders({ json: true, a2a: true });
   const response = await fetch(`${config.apiBase}${pathname}`, { method:'POST', headers, body:JSON.stringify(body), signal:AbortSignal.timeout(3000) });
   const payload=await response.json().catch(() => ({})); if (!response.ok) throw new Error(payload.error || `A2A HTTP ${response.status}`); return payload;
 }
@@ -115,8 +124,7 @@ async function postActionEvent(actionId, event, data = {}) {
 }
 async function poll() {
   try {
-    const token = readA2AToken({ create: false });
-    const headers = token ? { authorization: `Bearer ${token}` } : {};
+    const headers = daemonHeaders({ a2a: true });
     const response = await fetch(`${config.apiBase}/a2a/v1/actions?workspace=${encodeURIComponent(config.workspace)}&agent=ziwei_user&status=pending&includeAcked=1`, { headers, signal: AbortSignal.timeout(3000) });
     if (!response.ok) throw new Error(`A2A poll HTTP ${response.status}`);
     const payload = await response.json().catch(() => ({ actions: [] }));

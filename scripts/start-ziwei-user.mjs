@@ -4,9 +4,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { resolveConfigFile, resolveConfigPath } from '../daemon/config.mjs';
 
 const ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
-const configPath = path.resolve(process.env.ZIWEI_CONFIG || path.join(ROOT, 'data', 'ziwei_user.json'));
+const configPath = resolveConfigPath({ root: ROOT, env: process.env });
 let config = {};
 let configError = null;
 try { config = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch (error) {
@@ -41,9 +42,7 @@ function childEnvironment() {
   const env = { ...process.env };
   const configuredCa = config.tlsCaFile || process.env.ZIWEI_TLS_CA_FILE;
   if (!configuredCa) return env;
-  const caFile = path.isAbsolute(String(configuredCa))
-    ? String(configuredCa)
-    : path.resolve(ROOT, String(configuredCa));
+  const caFile = resolveConfigFile(configuredCa, { configPath, root: ROOT });
   if (!fs.existsSync(caFile)) {
     throw new Error(`TLS CA 文件不存在：${caFile}`);
   }
