@@ -17,6 +17,7 @@
 - SQLite 新增 `device_pairing_codes`、`device_credentials` 及索引；配对消费和设备/凭证写入在同一事务中完成，撤销或停用设备后凭证立即失效。成员可以配对自己控制的电脑，但设备删除、停用和其它管理操作仍需 owner/admin。
 - CLI 增加用户目录模式和 npm `bin`：`npm install --global github:jinjinli226-netizen/ziwei` 后使用 `ziwei_user connect` / `ziwei_user start`；配置、日志、动作状态写入用户目录，执行工作目录取配对时的当前目录，不落到 npm 包缓存。项目 checkout 模式仍保留给本地开发。
 - 前端设备弹窗已改为通用四 Agent 配对引导，移除依赖当前项目路径的 `install-ziwei-user.ps1` 命令；正式域名证书无需额外 CA，私有证书仍可通过 `--tls-ca-file` 指定。
+- 新建数字员工时不再把 Hermes 设为默认运行时；页面会优先选择当前 `ziwei_user` 发现的第一个 Agent，四个运行时仍可在同一选择器中分别配置，Hermes profile 只在选择 Hermes 时出现。
 - 本地证据：配对/API 鉴权、四 runtime 心跳、CLI、引导契约和真实子进程 daemon→HTTP heartbeat/A2A 链路均有测试；`test/daemon-link.test.mjs` 使用临时 API、临时用户目录和真实 daemon 进程，确认设备 online 且四类 runtime 均回报。服务器尚未替换，必须完成全量门槛后再部署。
 - 当前未覆盖：多设备对同一工作区的 runtime metadata 聚合和按设备的员工调度仍需后续设计；本轮不把第二台电脑的状态伪装成第一台，也不以全局 A2A token 代替新设备凭证。回滚方式是恢复本节涉及的代码提交并保留/恢复部署前 SQLite 备份；未部署前不会触碰服务器数据。
 
@@ -27,7 +28,7 @@
 当前通过的本地质量门槛：
 
 ```text
-npm test       124 passed
+npm test       125 passed
 npm run lint   passed
 npm run build  passed
 ```

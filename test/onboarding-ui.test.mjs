@@ -54,3 +54,8 @@ test('device onboarding provisions a generic ziwei_user daemon with a one-time p
   assert.match(appSource, /--code/);
   assert.doesNotMatch(appSource, /install-ziwei-user\.ps1/);
 });
+
+test('employee creation keeps the four-agent runtime choice generic', () => {
+  assert.doesNotMatch(appSource, /employeeForm = ref\(\{name:'',runtime:'Hermes'/);
+  assert.match(appSource, /runtime:runtimes\.value\[0\]\?\.name \|\| 'Codex'/);
+});
