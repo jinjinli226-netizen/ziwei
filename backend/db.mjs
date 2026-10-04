@@ -43,7 +43,7 @@ export function openDatabase({ memory = false, filename = path.join(ROOT, 'data'
     );
     CREATE TABLE IF NOT EXISTS runtime_metadata (
       id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, runtime_name TEXT NOT NULL,
-      version TEXT, binary TEXT, status TEXT, models_json TEXT NOT NULL DEFAULT '[]',
+      version TEXT, binary TEXT, status TEXT, models_json TEXT NOT NULL DEFAULT '[]', profiles_json TEXT NOT NULL DEFAULT '[]',
       last_seen TEXT NOT NULL, UNIQUE(workspace_id,runtime_name),
       FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
     );
@@ -131,6 +131,22 @@ export function openDatabase({ memory = false, filename = path.join(ROOT, 'data'
       created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
       FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS employee_environment_variables (
+      id TEXT PRIMARY KEY, employee_id TEXT NOT NULL, key TEXT NOT NULL,
+      value_ciphertext TEXT NOT NULL, sensitive INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+      UNIQUE(employee_id,key),
+      FOREIGN KEY(employee_id) REFERENCES employees(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_employee_environment_employee ON employee_environment_variables(employee_id,key);
+    CREATE TABLE IF NOT EXISTS employee_custom_params (
+      id TEXT PRIMARY KEY, employee_id TEXT NOT NULL, key TEXT NOT NULL,
+      value_json TEXT NOT NULL, value_type TEXT NOT NULL,
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+      UNIQUE(employee_id,key),
+      FOREIGN KEY(employee_id) REFERENCES employees(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_employee_custom_params_employee ON employee_custom_params(employee_id,key);
     CREATE TABLE IF NOT EXISTS calendar_events (
       id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, name TEXT NOT NULL,
       description TEXT NOT NULL DEFAULT '', start_at TEXT NOT NULL, end_at TEXT,
@@ -210,6 +226,7 @@ export function openDatabase({ memory = false, filename = path.join(ROOT, 'data'
     "ALTER TABLE employees ADD COLUMN skills_json TEXT NOT NULL DEFAULT '[]'",
     "ALTER TABLE employees ADD COLUMN runtime_profile TEXT",
     "ALTER TABLE employees ADD COLUMN avatar TEXT",
+    "ALTER TABLE runtime_metadata ADD COLUMN profiles_json TEXT NOT NULL DEFAULT '[]'",
     "ALTER TABLE skills ADD COLUMN scope TEXT NOT NULL DEFAULT 'platform'",
     "ALTER TABLE skills ADD COLUMN recommended INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE skills ADD COLUMN install_count INTEGER NOT NULL DEFAULT 0",

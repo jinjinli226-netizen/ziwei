@@ -6,7 +6,7 @@ import { RealtimeHub } from './realtime.mjs';
 import { exportDocumentsToGit, importDocumentsFromGit } from './git-sync.mjs';
 import { createAuthService } from './auth.mjs';
 import { readA2AToken, safeTokenEqual, tokenFromRequest } from './a2a-auth.mjs';
-import { mcpTokenRequired } from './mcp-auth.mjs';
+import { mcpTokenRequired, readMCPCredential, mcpWorkspaceAllowed } from './mcp-auth.mjs';
 
 const allowedOrigin = process.env.FRONTEND_ORIGIN || 'http://127.0.0.1:5178';
 
@@ -16,7 +16,7 @@ function cors(req, res, next) {
   res.setHeader('Vary', 'Origin');
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Workspace-Id, X-Workspace-Role, X-Ziwei-Api-Key, X-Ziwei-Mcp-Token');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,PUT,DELETE,OPTIONS');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 }
@@ -306,6 +306,28 @@ export function createApp(options = {}) {
   app.delete('/api/employees/:id', requireRole('owner','admin'), (req, res) => res.json(repo.deleteEmployee(req.params.id)));
   app.patch('/api/workspaces/:slug/employees/:id', requireRole('owner','admin','member'), (req, res) => res.json(repo.updateEmployee(req.params.id, req.body || {})));
   app.delete('/api/workspaces/:slug/employees/:id', requireRole('owner','admin'), (req, res) => res.json(repo.deleteEmployee(req.params.id)));
+  // Employee configuration is kept separate from the ordinary employee list.
+  // Environment values are encrypted at rest and returned only as metadata or
+  // a mask; custom parameters are JSON values validated by the repository.
+  const ensureEmployeeInWorkspace = (slug, idValue) => {
+    const employee = repo.listEmployees(slug).find(item => item.id === idValue);
+    if (!employee) { const error = new Error('数字员工不存在'); error.status = 404; throw error; }
+    return employee;
+  };
+  app.get('/api/workspaces/:slug/employees/:id/environment', requireRole('owner','admin','member'), (req, res) => { ensureEmployeeInWorkspace(req.params.slug, req.params.id); res.json(repo.listEmployeeEnvironment(req.params.id)); });
+  app.post('/api/workspaces/:slug/employees/:id/environment', requireRole('owner','admin'), (req, res) => { ensureEmployeeInWorkspace(req.params.slug, req.params.id); res.status(201).json(repo.upsertEmployeeEnvironment(req.params.id, req.body || {})); });
+  app.patch('/api/workspaces/:slug/employees/:id/environment/:key', requireRole('owner','admin'), (req, res) => { ensureEmployeeInWorkspace(req.params.slug, req.params.id); res.json(repo.upsertEmployeeEnvironment(req.params.id, { ...(req.body || {}), key: req.params.key })); });
+  app.delete('/api/workspaces/:slug/employees/:id/environment/:key', requireRole('owner','admin'), (req, res) => { ensureEmployeeInWorkspace(req.params.slug, req.params.id); res.json(repo.deleteEmployeeEnvironment(req.params.id, req.params.key)); });
+  app.get('/api/workspaces/:slug/employees/:id/custom-params', requireRole('owner','admin','member'), (req, res) => { ensureEmployeeInWorkspace(req.params.slug, req.params.id); res.json(repo.getEmployeeCustomParams(req.params.id)); });
+  app.put('/api/workspaces/:slug/employees/:id/custom-params', requireRole('owner','admin','member'), (req, res) => { ensureEmployeeInWorkspace(req.params.slug, req.params.id); res.json(repo.replaceEmployeeCustomParams(req.params.id, req.body || {})); });
+  app.patch('/api/workspaces/:slug/employees/:id/custom-params', requireRole('owner','admin','member'), (req, res) => { ensureEmployeeInWorkspace(req.params.slug, req.params.id); res.json(repo.replaceEmployeeCustomParams(req.params.id, req.body || {})); });
+  app.get('/api/employees/:id/environment', requireRole('owner','admin','member'), (req, res) => res.json(repo.listEmployeeEnvironment(req.params.id)));
+  app.post('/api/employees/:id/environment', requireRole('owner','admin'), (req, res) => res.status(201).json(repo.upsertEmployeeEnvironment(req.params.id, req.body || {})));
+  app.patch('/api/employees/:id/environment/:key', requireRole('owner','admin'), (req, res) => res.json(repo.upsertEmployeeEnvironment(req.params.id, { ...(req.body || {}), key: req.params.key })));
+  app.delete('/api/employees/:id/environment/:key', requireRole('owner','admin'), (req, res) => res.json(repo.deleteEmployeeEnvironment(req.params.id, req.params.key)));
+  app.get('/api/employees/:id/custom-params', requireRole('owner','admin','member'), (req, res) => res.json(repo.getEmployeeCustomParams(req.params.id)));
+  app.put('/api/employees/:id/custom-params', requireRole('owner','admin','member'), (req, res) => res.json(repo.replaceEmployeeCustomParams(req.params.id, req.body || {})));
+  app.patch('/api/employees/:id/custom-params', requireRole('owner','admin','member'), (req, res) => res.json(repo.replaceEmployeeCustomParams(req.params.id, req.body || {})));
   app.get('/api/workspaces/:slug/audit', (req, res) => res.json({ events: repo.listAudit(req.params.slug) }));
   app.get('/api/workspaces/:slug/notifications', (req, res) => res.json({ notifications: repo.listNotifications(req.params.slug, Number(req.query.limit) || 50, { unread: req.query.unread === '1' || req.query.unread === 'true', archived: req.query.archived === '1' || req.query.archived === 'true' }), stats: repo.notificationStats(req.params.slug) }));
   app.post('/api/workspaces/:slug/notifications/read', (req, res) => res.json({ ok:true, stats:repo.markNotificationsRead(req.params.slug, req.body?.ids) }));
@@ -348,6 +370,21 @@ export function createApp(options = {}) {
     role: options.mcpOptions?.role ?? options.mcpRole,
     create: options.mcpOptions?.create ?? false
   };
+  app.get('/api/workspaces/:slug/hermes/profiles', requireRole('owner','admin','member'), (req, res) => {
+    res.json(repo.listHermesProfiles(req.params.slug));
+  });
+  app.get('/api/workspaces/:slug/mcp/status', requireRole('owner','admin','member'), (req, res) => {
+    const credential = readMCPCredential({ ...mcpOptions, create: false });
+    const scoped = Boolean(credential.token) && mcpWorkspaceAllowed(credential.workspaces, req.params.slug);
+    let health = 'unconfigured';
+    if (credential.token && !scoped) health = 'scope_denied';
+    else if (scoped) {
+      try { repo.listEmployees(req.params.slug); health = 'healthy'; } catch { health = 'unavailable'; }
+    }
+    const protocol = String(req.get('x-forwarded-proto') || req.protocol || 'http').split(',')[0].trim();
+    const endpoint = `${protocol}://${req.get('x-forwarded-host') || req.get('host')}/mcp/v1/workspaces/${encodeURIComponent(req.params.slug)}`;
+    res.json({ configured: Boolean(credential.token), health, workspace: req.params.slug, workspaces: credential.workspaces, scope_allowed: scoped, endpoint, transport: 'https_api', client: 'scripts/ziwei-mcp.mjs', capabilities: ['employees', 'tasks', 'documents'], boundary: '仅提供当前工作区的员工、任务和文档窄管理面；不会直接打开 SQLite，也不代表全功能 MCP 已连接。' });
+  });
   const mcpGuard = mcpTokenRequired(mcpOptions);
   const mcpResourceGuard = table => (req, res, next) => {
     if (table !== 'documents') return res.status(400).json({ error: '不支持的 MCP 资源' });
@@ -355,6 +392,10 @@ export function createApp(options = {}) {
     if (!row) return res.status(404).json({ error: '文档不存在' });
     next();
   };
+  app.get('/mcp/v1/workspaces/:slug/health', mcpGuard, (req, res) => {
+    try { repo.listEmployees(req.params.slug); res.json({ ok: true, workspace: req.params.slug, capabilities: ['employees', 'tasks', 'documents'], boundary: '窄管理面：员工、任务和文档；客户端通过 HTTPS API，不直接访问 SQLite。' }); }
+    catch (error) { res.status(503).json({ ok: false, error: error.message }); }
+  });
   app.get('/mcp/v1/workspaces/:slug/employees', mcpGuard, (req, res) => res.json({ employees: repo.listEmployees(req.params.slug) }));
   app.post('/mcp/v1/workspaces/:slug/employees', mcpGuard, (req, res) => res.status(201).json(repo.createEmployee(req.params.slug, req.body || {})));
   app.patch('/mcp/v1/workspaces/:slug/employees/:id', mcpGuard, (req, res, next) => {

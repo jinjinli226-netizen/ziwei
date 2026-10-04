@@ -17,7 +17,7 @@
 当前通过的本地质量门槛：
 
 ```text
-npm test       98 passed
+npm test       104 passed
 npm run lint   passed
 npm run build  passed
 ```
@@ -146,6 +146,8 @@ ziwei_user daemon（daemon/ziwei_user.mjs）
 - `ziwei_user` 首次安装引导、心跳、就绪状态、设备和 Agent CLI 版本发现。
 - Codex/Claude/Gemini/Hermes 本机 CLI 适配；Codex 使用真实本机配置和系统代理，不使用伪造输出。
 - Hermes 独立人格：数字员工可绑定本机 Hermes profile；执行时隔离 `HERMES_HOME`，并把岗位说明注入真实 task/conversation prompt。profile 不存在时明确失败，不回退主 profile。服务器当前运行 `codex/hermes-independent-profile`，已用真实 A2A action 验证 `runtime=Hermes`、`profile=ziwei-aigc` 和独立输出。
+- 数字员工配置页已接入员工级环境变量、自定义 JSON 参数、MCP 状态/健康检查和 Hermes profile 发现；敏感变量使用 AES-256-GCM 加密存储，列表与审计不暴露原值。
+- MCP 客户端继续通过 HTTPS /mcp/v1 窄管理面调用 repository，不直接打开 SQLite；开放能力明确限定为员工、任务和文档。
 - 数字伙伴岗位说明页支持内联编辑；保存只更新岗位说明，不再打开完整的数字伙伴配置弹窗。
 - A2A action 的创建、去重、ACK、事件、执行租约、结果、失败和过期处理。
 - 公开推理摘要、命令/工具安全摘要、CLI 输出量和阶段状态；不展示模型原始私有思维链。
@@ -153,6 +155,11 @@ ziwei_user daemon（daemon/ziwei_user.mjs）
 - Skills 的文本、文件、URL、ZIP 和在线工位导入，校验、版本、停用、卸载和回滚。
 - 邀请生命周期、设备管理、成员管理、API Key、Webhook、自动化、日历和通知实时通道。
 - 浅色品牌主题、统一蓝色主色、跨页面快捷“数字伙伴创建”入口和运行状态展示。
+
+### 2026-10-04 数字员工配置页验证
+
+- 本地 `npm test` 104/104、`npm run lint`、`npm run build` 通过；隔离 HTTP 链路使用真实 `scripts/ziwei-mcp.mjs` 客户端验证 health、员工列表和窄管理面能力。
+- 未启动或修改 5178/4178/20242 生产入口，未写入生产 SQLite；既有 `tmp_gzgov.html` 保持未跟踪。
 
 ### 明确延期或有边界的能力
 

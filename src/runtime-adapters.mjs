@@ -213,7 +213,13 @@ export function discoverInstalledRuntimes({ force = false } = {}) {
   for (const [runtime, definition] of Object.entries(DEFINITIONS)) {
     const binary = resolveExecutable(definition.aliases[0]);
     const found = versionFor(binary, definition);
-    runtimes[runtime] = { runtime, ...found, models: discoveredModels(runtime), modelSource: found.version ? 'cli-installed' : 'manual' };
+    runtimes[runtime] = {
+      runtime,
+      ...found,
+      models: discoveredModels(runtime),
+      ...(runtime === 'Hermes' ? { profiles: listHermesProfiles() } : {}),
+      modelSource: found.version ? 'cli-installed' : 'manual'
+    };
   }
   const value = {
     bridge: { name: 'ziwei_user', version: process.env.ZIWEI_USER_VERSION || null, host: os.hostname() },
@@ -244,6 +250,46 @@ export function hermesProfileHome(profile, { baseHome = null } = {}) {
   const relative = path.relative(profilesRoot, candidate);
   if (relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('Hermes profile 路径无效');
   return candidate;
+}
+
+/**
+ * Discover Hermes profiles from the isolated Hermes home.  Only profile names
+ * and capability metadata leave the bridge; filesystem paths stay local.
+ */
+export function listHermesProfiles({ baseHome = null } = {}) {
+  const configuredHome = String(baseHome || process.env.HERMES_HOME || (process.platform === 'win32'
+    ? path.join(os.homedir(), 'AppData', 'Local', 'hermes')
+    : path.join(os.homedir(), '.hermes')));
+  const root = path.resolve(configuredHome);
+  if (!fs.existsSync(root)) return [];
+  const profiles = [{ name: 'default', configured: true, valid: true }];
+  const profilesRoot = path.join(root, 'profiles');
+  try {
+    for (const entry of fs.readdirSync(profilesRoot, { withFileTypes: true })) {
+      if (!entry.isDirectory() || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(entry.name)) continue;
+      const profileRoot = path.join(profilesRoot, entry.name);
+      profiles.push({
+        name: entry.name,
+        configured: true,
+        valid: true,
+        hasSoul: fs.existsSync(path.join(profileRoot, 'SOUL.md')),
+      });
+    }
+  } catch {
+    // A missing profiles directory is an empty configured profile set.
+  }
+  return profiles;
+}
+
+export function validateHermesProfile(profile, { baseHome = null } = {}) {
+  const normalized = normalizeRuntimeProfile(profile);
+  if (!normalized || normalized === 'default') return { valid: true, name: normalized || 'default', reason: null };
+  const profiles = listHermesProfiles({ baseHome });
+  if (!profiles.length) return { valid: false, name: normalized, reason: '本机尚未发现 Hermes profile 目录' };
+  const found = profiles.find(item => item.name === normalized);
+  return found
+    ? { valid: true, name: normalized, reason: null }
+    : { valid: false, name: normalized, reason: `Hermes profile 不存在: ${normalized}` };
 }
 
 function appendOutput(state, chunk, onOutput) {

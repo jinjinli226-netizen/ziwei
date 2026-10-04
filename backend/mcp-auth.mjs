@@ -30,7 +30,8 @@ function parseCredential(raw, fallbackWorkspaces = []) {
 
 export function readMCPCredential({ create = true, file = defaultMCPTokenPath(), token = '', workspaces = [] } = {}) {
   const configuredToken = String(token || process.env.ZIWEI_MCP_TOKEN || '').trim();
-  const configuredWorkspaces = normalizeWorkspaces(workspaces.length ? workspaces : (process.env.ZIWEI_MCP_WORKSPACES || process.env.ZIWEI_MCP_WORKSPACE));
+  const suppliedWorkspaces = Array.isArray(workspaces) ? workspaces : (workspaces ? [workspaces] : []);
+  const configuredWorkspaces = normalizeWorkspaces(suppliedWorkspaces.length ? suppliedWorkspaces : (process.env.ZIWEI_MCP_WORKSPACES || process.env.ZIWEI_MCP_WORKSPACE));
   if (configuredToken) return { token: configuredToken, workspaces: configuredWorkspaces, source: 'configuration' };
   try {
     const credential = parseCredential(fs.readFileSync(file, 'utf8'), configuredWorkspaces);

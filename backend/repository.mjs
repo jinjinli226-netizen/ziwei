@@ -1,4 +1,6 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import { openDatabase } from './db.mjs';
 import { transitionTask } from '../src/domain.mjs';
 import { listModels } from './models.mjs';
@@ -8,6 +10,7 @@ import { extractSkillMarkdownArchive } from './skills/archive.mjs';
 import { objectStoreFromOptions } from './storage.mjs';
 import { sanitizeHtml } from './sanitize.mjs';
 import { composeEmployeePrompt, normalizeRuntimeProfile } from '../src/employee-runtime.mjs';
+import { listHermesProfiles, validateHermesProfile } from '../src/runtime-adapters.mjs';
 
 const now = () => new Date().toISOString();
 const id = prefix => `${prefix}_${crypto.randomUUID()}`;
@@ -138,6 +141,61 @@ const automationView = (row, runCount = 0) => {
 };
 
 const employeeView = row => row ? ({ ...row, skills: parse(row.skills_json) }) : null;
+const validateEmployeeProfile = (runtime, profile) => {
+  const normalizedRuntime = String(runtime || '').trim().toLowerCase();
+  const normalizedProfile = normalizeRuntimeProfile(profile);
+  if (normalizedRuntime !== 'hermes' || !normalizedProfile || normalizedProfile === 'default') return normalizedProfile;
+  const available = listHermesProfiles();
+  // A remote API process may not share the local Hermes home. In that case the
+  // daemon remains the source of truth; when profiles are discoverable locally,
+  // reject typos before they can silently fall back to the primary profile.
+  if (available.length && !validateHermesProfile(normalizedProfile).valid) throw new Error(`Hermes profile 不存在: ${normalizedProfile}`);
+  return normalizedProfile;
+};
+
+const ENV_KEY_PATTERN = /^[A-Z][A-Z0-9_]{0,127}$/;
+const PARAM_KEY_PATTERN = /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/;
+const LOCAL_RUNTIME_VARIABLES = ['ZIWEI_WORKSPACE', 'ZIWEI_AGENT_ID', 'ZIWEI_RUNTIME', 'HERMES_HOME'];
+const encryptionKey = options => {
+  const configured = String(options.envEncryptionKey || process.env.ZIWEI_ENV_ENCRYPTION_KEY || process.env.ZIWEI_SECRET_KEY || '').trim();
+  if (configured) return crypto.createHash('sha256').update(configured).digest();
+  // Keep the key outside SQLite and source control. A deployed process should
+  // set ZIWEI_ENV_ENCRYPTION_KEY so it can be rotated and shared explicitly.
+  const file = path.join(process.cwd(), '.local', 'employee-env.key');
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    if (fs.existsSync(file)) {
+      const value = fs.readFileSync(file);
+      if (value.length >= 32) return value.subarray(0, 32);
+    }
+    const value = crypto.randomBytes(32);
+    fs.writeFileSync(file, value, { mode: 0o600 });
+    return value;
+  } catch {
+    return crypto.createHash('sha256').update(`${process.cwd()}:ziwei:employee-env`).digest();
+  }
+};
+const encryptEmployeeValue = (value, key) => {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const encrypted = Buffer.concat([cipher.update(String(value), 'utf8'), cipher.final()]);
+  return `v1:${iv.toString('base64url')}:${cipher.getAuthTag().toString('base64url')}:${encrypted.toString('base64url')}`;
+};
+const decryptEmployeeValue = (value, key) => {
+  const parts = String(value || '').split(':');
+  if (parts.length !== 4 || parts[0] !== 'v1') return String(value || '');
+  try {
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(parts[1], 'base64url'));
+    decipher.setAuthTag(Buffer.from(parts[2], 'base64url'));
+    return Buffer.concat([decipher.update(Buffer.from(parts[3], 'base64url')), decipher.final()]).toString('utf8');
+  } catch { throw new Error('环境变量密文无法解密，请检查本机密钥配置'); }
+};
+const environmentView = (row, key) => {
+  if (!row) return null;
+  const item = { id: row.id, employee_id: row.employee_id, key: row.key, sensitive: Boolean(row.sensitive), masked_value: '••••••••', created_at: row.created_at, updated_at: row.updated_at };
+  if (!item.sensitive) item.value = decryptEmployeeValue(row.value_ciphertext, key);
+  return item;
+};
 
 const calendarEventView = row => row ? ({
   ...row,
@@ -170,6 +228,7 @@ const ownDevice = devices => {
 
 export function createRepository(options = {}) {
   const db = openDatabase(options);
+  const employeeEnvKey = encryptionKey(options);
   const objectStore = objectStoreFromOptions(options);
   const discover = options.discoverLocalVersions || discoverLocalVersions;
   const workspace = slug => db.prepare('SELECT * FROM workspaces WHERE slug = ?').get(slug);
@@ -404,6 +463,7 @@ export function createRepository(options = {}) {
         cli_version: online ? (discovery?.agents?.[row.name]?.version || metadata[row.name]?.version || null) : null,
         cli_binary: online ? (discovery?.agents?.[row.name]?.binary || metadata[row.name]?.binary || null) : null,
         cli_status: online ? ((discovery?.agents?.[row.name]?.status === 'available' || metadata[row.name]?.status === 'available') ? 'available' : 'unavailable') : 'offline',
+        profiles: row.name.toLowerCase() === 'hermes' ? (() => { try { return JSON.parse(metadata[row.name]?.profiles_json || '[]'); } catch { return []; } })() : [],
         bridge_name: device?.bridge_name || 'ziwei_user',
         bridge_version: device?.bridge_version || null,
         bridge_status: online ? (device.bridge_status || 'online') : 'offline'
@@ -427,9 +487,10 @@ export function createRepository(options = {}) {
         const binary = raw.binary ? String(raw.binary) : null;
         const status = raw.status ? String(raw.status) : (version ? 'available' : 'unavailable');
         const models = Array.isArray(raw.models) ? raw.models.filter(item => item && typeof item === 'object').slice(0, 100) : [];
+        const profiles = name.toLowerCase() === 'hermes' && Array.isArray(raw.profiles) ? raw.profiles.filter(item => item && typeof item === 'object' && /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(String(item.name || ''))).slice(0, 100) : [];
         const existing = db.prepare('SELECT id FROM runtime_metadata WHERE workspace_id=? AND runtime_name=?').get(ws.id, name);
-        if (existing) db.prepare('UPDATE runtime_metadata SET version=?,binary=?,status=?,models_json=?,last_seen=? WHERE id=?').run(version,binary,status,JSON.stringify(models),timestamp,existing.id);
-        else db.prepare('INSERT INTO runtime_metadata(id,workspace_id,runtime_name,version,binary,status,models_json,last_seen) VALUES(?,?,?,?,?,?,?,?)').run(id('runtime-meta'),ws.id,name,version,binary,status,JSON.stringify(models),timestamp);
+        if (existing) db.prepare('UPDATE runtime_metadata SET version=?,binary=?,status=?,models_json=?,profiles_json=?,last_seen=? WHERE id=?').run(version,binary,status,JSON.stringify(models),JSON.stringify(profiles),timestamp,existing.id);
+        else db.prepare('INSERT INTO runtime_metadata(id,workspace_id,runtime_name,version,binary,status,models_json,profiles_json,last_seen) VALUES(?,?,?,?,?,?,?,?,?)').run(id('runtime-meta'),ws.id,name,version,binary,status,JSON.stringify(models),JSON.stringify(profiles),timestamp);
         const runtime = db.prepare('SELECT id FROM runtimes WHERE workspace_id=? AND name=?').get(ws.id,name);
         if (runtime) {
           db.prepare('UPDATE runtimes SET version=?,last_seen=? WHERE id=?').run(version,timestamp,runtime.id);
@@ -443,6 +504,16 @@ export function createRepository(options = {}) {
         }
       }
       return this.listRuntimes(slug);
+    },
+    listHermesProfiles(slug) {
+      const ws = workspace(slug); if (!ws) throw new Error('Workspace not found');
+      const device = ownDevice(this.listDevices(slug));
+      const metadata = db.prepare("SELECT profiles_json FROM runtime_metadata WHERE workspace_id=? AND lower(runtime_name)='hermes' ORDER BY last_seen DESC LIMIT 1").get(ws.id);
+      let profiles = [];
+      try { profiles = JSON.parse(metadata?.profiles_json || '[]'); } catch { profiles = []; }
+      if (!profiles.length) profiles = listHermesProfiles();
+      const source = device?.status === 'online' ? 'ziwei_user' : (profiles.length ? 'local_runtime_home' : 'unavailable');
+      return { runtime: 'Hermes', source, independent_home: true, profiles: Array.isArray(profiles) ? profiles : [], validation: { rejects_unknown: Boolean(profiles.length) } };
     },
     listModels(slug, filters = {}) {
       const ws = workspace(slug); if (!ws) throw new Error('Workspace not found');
@@ -935,7 +1006,7 @@ export function createRepository(options = {}) {
       };
     },
     listEmployees(slug) { const ws=workspace(slug); if (!ws) throw new Error('Workspace not found'); return db.prepare('SELECT * FROM employees WHERE workspace_id=? ORDER BY created_at DESC').all(ws.id).map(employeeView); },
-    createEmployee(slug, input = {}) { const ws=workspace(slug); if (!ws) throw new Error('Workspace not found'); const timestamp=now(); const name=String(input.name || '未命名数字员工').trim(); if (!name) throw new Error('数字员工名称不能为空'); const requestedStatus=String(input.status || 'active'); const status=new Set(['draft','active','paused','archived']).has(requestedStatus) ? requestedStatus : 'active'; const runtimeProfile=normalizeRuntimeProfile(input.runtimeProfile ?? input.runtime_profile ?? input.profile ?? input.hermesProfile ?? input.hermes_profile); const employee={id:id('employee'),workspace_id:ws.id,name,runtime:String(input.runtime || 'Codex'),model_id:input.model || input.modelId || input.model_id || null,description:String(input.description || ''),visibility:input.visibility === 'personal' ? 'personal' : 'workspace',skills:Array.isArray(input.skills) ? input.skills : [],instructions:String(input.instructions || ''),runtime_profile:runtimeProfile,avatar:input.avatar ? String(input.avatar) : null,status,created_at:timestamp,updated_at:timestamp}; db.prepare('INSERT INTO employees(id,workspace_id,name,runtime,model_id,description,visibility,skills_json,instructions,runtime_profile,avatar,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(employee.id,ws.id,employee.name,employee.runtime,employee.model_id,employee.description,employee.visibility,JSON.stringify(employee.skills),employee.instructions,employee.runtime_profile,employee.avatar,employee.status,timestamp,timestamp); audit(slug,'user','employee.created',{employeeId:employee.id,modelId:employee.model_id,runtimeProfile:employee.runtime_profile,status}); return employee; },
+    createEmployee(slug, input = {}) { const ws=workspace(slug); if (!ws) throw new Error('Workspace not found'); const timestamp=now(); const name=String(input.name || '未命名数字员工').trim(); if (!name) throw new Error('数字员工名称不能为空'); const requestedStatus=String(input.status || 'active'); const status=new Set(['draft','active','paused','archived']).has(requestedStatus) ? requestedStatus : 'active'; const runtime=String(input.runtime || 'Codex').trim() || 'Codex'; const runtimeProfile=validateEmployeeProfile(runtime, input.runtimeProfile ?? input.runtime_profile ?? input.profile ?? input.hermesProfile ?? input.hermes_profile); const employee={id:id('employee'),workspace_id:ws.id,name,runtime,model_id:input.model || input.modelId || input.model_id || null,description:String(input.description || ''),visibility:input.visibility === 'personal' ? 'personal' : 'workspace',skills:Array.isArray(input.skills) ? input.skills : [],instructions:String(input.instructions || ''),runtime_profile:runtimeProfile,avatar:input.avatar ? String(input.avatar) : null,status,created_at:timestamp,updated_at:timestamp}; db.prepare('INSERT INTO employees(id,workspace_id,name,runtime,model_id,description,visibility,skills_json,instructions,runtime_profile,avatar,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(employee.id,ws.id,employee.name,employee.runtime,employee.model_id,employee.description,employee.visibility,JSON.stringify(employee.skills),employee.instructions,employee.runtime_profile,employee.avatar,employee.status,timestamp,timestamp); audit(slug,'user','employee.created',{employeeId:employee.id,modelId:employee.model_id,runtimeProfile:employee.runtime_profile,status}); return employee; },
     updateEmployee(employeeId, input = {}) {
       const row = db.prepare('SELECT * FROM employees WHERE id=?').get(employeeId); if (!row) throw new Error('数字员工不存在');
       const ws = db.prepare('SELECT * FROM workspaces WHERE id=?').get(row.workspace_id); if (!ws) throw new Error('Workspace not found');
@@ -946,7 +1017,7 @@ export function createRepository(options = {}) {
       const visibility=input.visibility === undefined ? row.visibility : (input.visibility === 'personal' ? 'personal' : 'workspace');
       const skills=input.skills === undefined ? parse(row.skills_json) : (Array.isArray(input.skills) ? input.skills : []);
       const instructions=input.instructions === undefined ? row.instructions : String(input.instructions || '');
-      const runtimeProfile=input.runtimeProfile === undefined && input.runtime_profile === undefined && input.profile === undefined && input.hermesProfile === undefined && input.hermes_profile === undefined ? row.runtime_profile : normalizeRuntimeProfile(input.runtimeProfile ?? input.runtime_profile ?? input.profile ?? input.hermesProfile ?? input.hermes_profile);
+      const runtimeProfile=input.runtimeProfile === undefined && input.runtime_profile === undefined && input.profile === undefined && input.hermesProfile === undefined && input.hermes_profile === undefined ? row.runtime_profile : validateEmployeeProfile(runtime, input.runtimeProfile ?? input.runtime_profile ?? input.profile ?? input.hermesProfile ?? input.hermes_profile);
       const avatar=input.avatar === undefined ? row.avatar : (input.avatar ? String(input.avatar) : null);
       const statuses=new Set(['draft','active','paused','archived']); const status=input.status === undefined ? row.status : String(input.status); if (!statuses.has(status)) throw new Error('数字员工状态无效');
       const updated=now(); db.prepare('UPDATE employees SET name=?,runtime=?,model_id=?,description=?,visibility=?,skills_json=?,instructions=?,runtime_profile=?,avatar=?,status=?,updated_at=? WHERE id=?').run(name,runtime,modelId,description,visibility,JSON.stringify(skills),instructions,runtimeProfile,avatar,status,updated,employeeId);
@@ -957,6 +1028,56 @@ export function createRepository(options = {}) {
       const row=db.prepare('SELECT * FROM employees WHERE id=?').get(employeeId); if (!row) throw new Error('数字员工不存在');
       const ws=db.prepare('SELECT * FROM workspaces WHERE id=?').get(row.workspace_id); if (!ws) throw new Error('Workspace not found');
       db.prepare('DELETE FROM employees WHERE id=?').run(employeeId); audit(ws.slug,'user','employee.deleted',{employeeId,name:row.name}); return {id:employeeId,name:row.name,deleted:true};
+    },
+    listEmployeeEnvironment(employeeId) {
+      const employee = db.prepare('SELECT id,workspace_id FROM employees WHERE id=?').get(employeeId);
+      if (!employee) throw new Error('数字员工不存在');
+      const rows = db.prepare('SELECT * FROM employee_environment_variables WHERE employee_id=? ORDER BY key').all(employeeId);
+      return { employee_id: employeeId, variables: rows.map(row => environmentView(row, employeeEnvKey)), local_source: { source: 'ziwei_user', scope: 'runtime', variables: [...LOCAL_RUNTIME_VARIABLES] } };
+    },
+    upsertEmployeeEnvironment(employeeId, input = {}) {
+      const employee = db.prepare('SELECT id,workspace_id FROM employees WHERE id=?').get(employeeId);
+      if (!employee) throw new Error('数字员工不存在');
+      const key = String(input.key || '').trim().toUpperCase();
+      if (!ENV_KEY_PATTERN.test(key)) throw new Error('环境变量名无效：必须是大写字母、数字或下划线，且以字母开头');
+      if (input.value === undefined || input.value === null) throw new Error('环境变量值不能为空');
+      const value = String(input.value); if (value.length > 16 * 1024) throw new Error('环境变量值过长');
+      const sensitive = input.sensitive === undefined ? true : Boolean(input.sensitive); const timestamp = now();
+      const existing = db.prepare('SELECT id FROM employee_environment_variables WHERE employee_id=? AND key=?').get(employeeId, key);
+      const ciphertext = encryptEmployeeValue(value, employeeEnvKey);
+      if (existing) db.prepare('UPDATE employee_environment_variables SET value_ciphertext=?,sensitive=?,updated_at=? WHERE id=?').run(ciphertext, sensitive ? 1 : 0, timestamp, existing.id);
+      else db.prepare('INSERT INTO employee_environment_variables(id,employee_id,key,value_ciphertext,sensitive,created_at,updated_at) VALUES(?,?,?,?,?,?,?)').run(id('employee-env'),employeeId,key,ciphertext,sensitive ? 1 : 0,timestamp,timestamp);
+      const saved = db.prepare('SELECT * FROM employee_environment_variables WHERE employee_id=? AND key=?').get(employeeId,key);
+      const ws = db.prepare('SELECT slug FROM workspaces WHERE id=?').get(employee.workspace_id);
+      audit(ws.slug, 'user', existing ? 'employee.environment.updated' : 'employee.environment.created', { employeeId, key, sensitive });
+      return environmentView(saved, employeeEnvKey);
+    },
+    deleteEmployeeEnvironment(employeeId, keyValue) {
+      const employee = db.prepare('SELECT id,workspace_id FROM employees WHERE id=?').get(employeeId); if (!employee) throw new Error('数字员工不存在');
+      const key = String(keyValue || '').trim().toUpperCase(); const row = db.prepare('SELECT * FROM employee_environment_variables WHERE employee_id=? AND key=?').get(employeeId, key); if (!row) throw new Error('环境变量不存在');
+      db.prepare('DELETE FROM employee_environment_variables WHERE id=?').run(row.id); const ws = db.prepare('SELECT slug FROM workspaces WHERE id=?').get(employee.workspace_id); audit(ws.slug, 'user', 'employee.environment.deleted', { employeeId, key }); return { id: row.id, employee_id: employeeId, key, deleted: true };
+    },
+    getEmployeeCustomParams(employeeId) {
+      if (!db.prepare('SELECT id FROM employees WHERE id=?').get(employeeId)) throw new Error('数字员工不存在');
+      const rows = db.prepare('SELECT key,value_json FROM employee_custom_params WHERE employee_id=? ORDER BY key').all(employeeId); const values = {};
+      for (const row of rows) { try { values[row.key] = JSON.parse(row.value_json); } catch { values[row.key] = null; } }
+      const updated = db.prepare('SELECT MAX(updated_at) AS updated_at FROM employee_custom_params WHERE employee_id=?').get(employeeId);
+      return { employee_id: employeeId, values, updated_at: updated?.updated_at || null };
+    },
+    replaceEmployeeCustomParams(employeeId, input = {}) {
+      const employee = db.prepare('SELECT id,workspace_id FROM employees WHERE id=?').get(employeeId); if (!employee) throw new Error('数字员工不存在');
+      const values = input && typeof input === 'object' && !Array.isArray(input) && input.values && typeof input.values === 'object' && !Array.isArray(input.values) ? input.values : input;
+      if (!values || typeof values !== 'object' || Array.isArray(values)) throw new Error('自定义参数必须是 JSON 对象');
+      const entries = Object.entries(values); if (entries.length > 100) throw new Error('自定义参数不能超过 100 项'); const normalized = [];
+      for (const [rawKey, rawValue] of entries) {
+        const key = String(rawKey).trim(); if (!PARAM_KEY_PATTERN.test(key) || ['__proto__', 'constructor', 'prototype'].includes(key.toLowerCase())) throw new Error(`自定义参数名无效: ${key}`); if (rawValue === undefined) throw new Error('自定义参数值必须是有效 JSON');
+        let valueJson; try { valueJson = JSON.stringify(rawValue); } catch { throw new Error(`自定义参数 ${key} 不是有效 JSON`); }
+        if (valueJson === undefined || Buffer.byteLength(valueJson, 'utf8') > 64 * 1024) throw new Error(`自定义参数 ${key} 不是有效 JSON 或过大`);
+        normalized.push({ key, valueJson, valueType: Array.isArray(rawValue) ? 'array' : (rawValue === null ? 'null' : typeof rawValue) });
+      }
+      const timestamp = now(); db.exec('BEGIN');
+      try { db.prepare('DELETE FROM employee_custom_params WHERE employee_id=?').run(employeeId); const insert = db.prepare('INSERT INTO employee_custom_params(id,employee_id,key,value_json,value_type,created_at,updated_at) VALUES(?,?,?,?,?,?,?)'); for (const item of normalized) insert.run(id('employee-param'), employeeId, item.key, item.valueJson, item.valueType, timestamp, timestamp); db.exec('COMMIT'); } catch (error) { try { db.exec('ROLLBACK'); } catch {} throw error; }
+      const ws = db.prepare('SELECT slug FROM workspaces WHERE id=?').get(employee.workspace_id); audit(ws.slug, 'user', 'employee.custom_params.updated', { employeeId, keys: normalized.map(item => item.key) }); return this.getEmployeeCustomParams(employeeId);
     },
     listCalendarEvents(slug) {
       const ws = workspace(slug); if (!ws) throw new Error('Workspace not found');

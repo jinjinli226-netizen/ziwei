@@ -42,3 +42,25 @@
 - 完成本地工作区与远端服务器的真实部署验证：服务器由 systemd 管理 API，Nginx 提供 HTTPS，Windows `ziwei_user` 通过出站 A2A 轮询连接服务器并成功执行回传。
 - 当前服务器证书按 IP 使用临时自签名证书；接入正式域名后应替换为受信任证书。
 
+## Unreleased（2026-10-04）
+
+### Added
+
+- 数字员工详情页的环境变量已接入 repository/API/SQLite：员工级变量采用 AES-256-GCM 加密存储，敏感值列表和 UI 只返回掩码；本机 `ziwei_user` 变量仅展示名称与来源，不进入普通列表或日志。环境变量写入仅限 Owner/Admin，读取仍遵循工作区成员权限。
+- 自定义参数支持 JSON 对象读取、编辑、校验、全量替换和持久化；新增表使用 `CREATE TABLE IF NOT EXISTS` 与迁移兼容旧数据库。
+- MCP 详情页接入真实状态、工作区范围、HTTPS 管理端点、健康检查和窄管理面边界；`scripts/ziwei-mcp.mjs` 新增 `ziwei_mcp_health`，继续只通过 `/mcp/v1` 管理员工、任务、文档。
+- Hermes profile 发现、profile 名称校验和独立 `HERMES_HOME` 说明已接入；已发现 profile 之外的名称会给出明确失败，远程 API 无法看到本机 profile 时仍由 `ziwei_user` 作为运行时来源。
+
+### Verification
+
+- 新增 repository、API、UI contract、Hermes profile discovery 测试；专项测试和现有 MCP/runtime 测试通过。
+- `npm test`：104 passed；`npm run lint`：passed；`npm run build`：passed；本轮未对生产服务器或生产 SQLite 做写入。
+- 隔离 HTTP 验证：实际 `scripts/ziwei-mcp.mjs` 客户端通过 `/mcp/v1` 返回 health、员工列表和窄管理面能力；本机 Hermes profile 发现 5 个，`ziwei-aigc` 校验通过。
+
+### Deferred
+
+- 伙伴市场、帮助中心和邮件发送保持现状并延期；本轮未用假页面标记为完成。远端 Git、生产外部存储/队列、OAuth、计费、沙箱和完整浏览器逐页截图验收仍延期。
+
+### Rollback
+
+- 本轮代码未触碰 `tmp_gzgov.html`、生产服务或生产 SQLite。审查前可用 `git diff` 保存补丁；若已提交，按提交粒度执行 `git revert <commit>`，并保留数据库迁移表以兼容旧库。

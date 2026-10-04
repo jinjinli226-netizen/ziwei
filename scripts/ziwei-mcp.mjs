@@ -35,6 +35,7 @@ function objectArguments(value) {
 }
 
 const toolDefinitions = [
+  { name: 'ziwei_mcp_health', description: '检查当前紫薇工作区 MCP 管理入口状态与窄管理面边界。', inputSchema: { type: 'object', properties: {} } },
   { name: 'ziwei_list_employees', description: '列出指定紫薇工作区的数字员工。', inputSchema: { type: 'object', properties: {} } },
   { name: 'ziwei_create_employee', description: '通过紫薇管理 API 创建数字员工。', inputSchema: { type: 'object', required: ['name'], properties: { name: { type: 'string' }, runtime: { type: 'string' }, runtimeProfile: { type: 'string' }, description: { type: 'string' }, instructions: { type: 'string' }, visibility: { type: 'string', enum: ['workspace', 'personal'] }, skills: { type: 'array', items: { type: 'string' } } } } },
   { name: 'ziwei_update_employee', description: '通过紫薇管理 API 更新已有数字员工。', inputSchema: { type: 'object', required: ['id'], properties: { id: { type: 'string' }, name: { type: 'string' }, runtime: { type: 'string' }, runtimeProfile: { type: 'string' }, description: { type: 'string' }, instructions: { type: 'string' }, status: { type: 'string' }, visibility: { type: 'string' }, skills: { type: 'array', items: { type: 'string' } } } } },
@@ -64,6 +65,7 @@ export function createMcpClient(options = {}) {
     return payload;
   }
   return {
+    async health() { return request('GET', `${workspacePath}/health`); },
     async listEmployees() { return request('GET', `${workspacePath}/employees`); },
     async createEmployee(input) { return request('POST', `${workspacePath}/employees`, input); },
     async updateEmployee(input) { const { id, ...patch } = input; return request('PATCH', `${workspacePath}/employees/${encodeURIComponent(id)}`, patch); },
@@ -84,6 +86,7 @@ function textResult(value) {
 
 export function createMcpHandler(client) {
   const calls = {
+    ziwei_mcp_health: args => client.health(args),
     ziwei_list_employees: args => client.listEmployees(args),
     ziwei_create_employee: args => client.createEmployee(args),
     ziwei_update_employee: args => client.updateEmployee(args),

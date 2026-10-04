@@ -525,3 +525,24 @@
 .task-execution[data-status="acked"] { color:#2f6fca; }
 .task-execution[data-status="succeeded"] { color:#23845a; }
 .task-execution[data-status="failed"], .task-execution[data-status="expired"] { color:#c45c5c; }
+.employee-config-section { display:grid; gap:16px; }
+.employee-runtime-source { display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:12px 14px; border:1px solid #dbe7f2; border-radius:10px; color:#526174; background:#f5f9fd; font-size:12px; }
+.employee-runtime-source strong { margin-right:4px; color:#365879; }
+.employee-config-list { display:grid; gap:8px; }
+.employee-config-row { display:grid; grid-template-columns:minmax(0,1fr) auto auto; align-items:center; gap:12px; padding:12px 14px; border:1px solid #e1e7ef; border-radius:9px; background:#fff; }
+.employee-config-row strong { display:block; color:#2f435b; font-size:13px; }
+.employee-config-row small { display:block; margin-top:4px; color:#8895a5; font-size:11px; }
+.employee-config-value { max-width:240px; overflow:hidden; color:#526174; font-family:ui-monospace,SFMono-Regular,Consolas,monospace; text-overflow:ellipsis; white-space:nowrap; }
+.employee-config-actions { display:flex; gap:6px; }
+.employee-config-editor { display:grid; gap:10px; padding:14px; border:1px dashed #c9d8e8; border-radius:10px; background:#fbfdff; }
+.employee-config-editor h4 { margin:0; color:#365879; font-size:13px; }
+.employee-config-editor label { display:grid; gap:6px; color:#617188; font-size:12px; }
+.employee-config-editor input { min-height:36px; padding:0 10px; border:1px solid #d7e0ea; border-radius:7px; color:#33465c; background:#fff; }
+.employee-checkbox { display:flex !important; align-items:center; gap:7px; }
+.employee-checkbox input { min-height:auto; }
+.employee-params-editor { width:100%; box-sizing:border-box; padding:12px; border:1px solid #d7e0ea; border-radius:9px; color:#33465c; background:#fbfdff; font:12px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace; resize:vertical; }
+.employee-mcp-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+.employee-mcp-grid > div { display:grid; gap:4px; padding:12px; border:1px solid #e1e7ef; border-radius:9px; background:#fff; }
+.employee-mcp-grid span { color:#8895a5; font-size:11px; }
+.employee-mcp-grid strong { color:#2f435b; font-size:13px; overflow-wrap:anywhere; }
+@media (max-width:760px) { .employee-config-row { grid-template-columns:1fr; }.employee-config-actions { justify-content:flex-end; }.employee-mcp-grid { grid-template-columns:1fr; } }
