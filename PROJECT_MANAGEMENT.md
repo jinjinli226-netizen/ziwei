@@ -65,7 +65,7 @@ npm run build  passed
 - 问题归属：前端 onboarding 状态。新注册后页面会立即加载工作区数据并检查真实 `ziwei_user` 心跳；此前“稍后”标记使用全浏览器共享 key，旧账号关闭过引导会抑制新账号的首次提示。
 - 修复内容：引导关闭标记改为按认证用户和工作区隔离；`load()` 检测到离线且当前账号未关闭过时，会打开包含 API 地址、工作区、证书下载和安装命令的连接引导。没有伪造在线状态，也不依赖 AuraBaba daemon。
 - 本地验证：`npm test` 115/115、`npm run lint`、`npm run build` 全部通过；UI contract 覆盖新账号登录后加载与引导 key 隔离。
-- 生产状态：修复待推送并替换服务器；部署后需用新账号刷新 `https://qzelynth.top`，看到“连接本机 ziwei_user”弹窗后再标记为 `verified`。
+- 生产验证：服务器已快进到 `bb92a98`，部署前 SQLite 备份为 `/opt/ziwei-backups/ziwei.sqlite.20261004T160039Z.before-bb92a98`；前端构建成功，`ziwei-api` 保持 active，公网页面构建产物已包含按账号和工作区隔离的引导 key。新账号需刷新 `https://qzelynth.top` 才会加载新前端；引导弹窗本身仍以该账号对应工作区的真实离线心跳为触发条件。
 
 ## 2. 60 秒启动和验收
 
