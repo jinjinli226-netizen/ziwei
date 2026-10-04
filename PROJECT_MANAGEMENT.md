@@ -33,7 +33,7 @@ npm run build  passed
 - 本机 `data/ziwei_user.json` 以 `bjc-ops` 为工作区，A2A 令牌与服务器已重新同步；本机 `/readyz` 为 ready，daemon 日志持续记录 `heartbeat` 和 `a2a_poll` 成功。
 - 真实服务器动作已完成两次独立验收：`runtime=Hermes`、`profile=ziwei-aigc`，分别返回 `HERMES_PROD_PROFILE_OK` 和 `HERMES_PROD_PROFILE_RECHECK_OK`，结果均为 `succeeded`。服务器返回结果包含独立 profile，profile 不存在时仍会明确失败。
 - 本机和服务器 `bjc-ops` 均已创建数字员工“调研大师”：本机 ID 为 `employee_53dae986-9446-4e05-b474-3e0c000472a6`，服务器 ID 为 `employee_f5deedce-1404-4764-86ae-835c4f219bc6`，两者都绑定 `runtime=Hermes`、`profile=ziwei-research`。该 profile 拥有独立的 `SOUL.md`、记忆、会话和技能目录；本机 `executeRuntime` 返回 `RESEARCH_PROFILE_OK`，服务器真实 A2A 链路返回 `SERVER_RESEARCH_PROFILE_OK`。服务器 SQLite 备份为 `/opt/ziwei-backups/ziwei.sqlite.20261004T021917Z.before-research-master`；生产 `main` 未修改。
-- MCP 管理入口已加入本地代码：`/mcp/v1/workspaces/:slug/employees`、`/tasks`、`/documents` 由独立 bearer 文件和显式工作区白名单保护，MCP 客户端只调用 HTTPS API，repository 负责所有持久化。用 `npm run mcp:token -- --workspace <slug>` 生成 `data/mcp.token`；真实服务器部署和 MCP 客户端联调仍待执行。
+- MCP 管理入口已部署：`/mcp/v1/workspaces/:slug/employees`、`/tasks`、`/documents` 由独立 bearer 文件和显式工作区白名单保护，MCP 客户端只调用 HTTPS API，repository 负责所有持久化。服务器 Nginx 已为 `/mcp/` 增加反代；本机 `ziwei-research` profile 已注册 `ziwei_management`，通过服务器真实 MCP 链路完成员工列表、描述更新回读与原值恢复，确认没有直接打开 SQLite。令牌文件和服务器自签 CA 仅保存在被忽略的 `data/` 文件中。
 - 本轮代码验证：`npm test` 98/98、`npm run lint`、`npm run build` 均通过。
 
 ## 2. 60 秒启动和验收
