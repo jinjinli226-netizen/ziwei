@@ -58,7 +58,7 @@ npm run build  passed
 - 问题归属：API/auth 与登录前端。生产复现证据是已有账号时 `POST /api/auth/setup` 返回 `400 本机已经完成初始化，请直接登录`，页面“首次使用，创建账号”因此无法创建第二个账号。
 - 修复内容：新增 `POST /api/auth/register`，前端登录页增加“注册新账号”；注册成功会建立真实 `local_users`、工作区成员关系和会话，不直接操作 SQLite 文件。若存在同邮箱的待接受邀请，会在注册事务中绑定原成员记录。
 - 本地验证：`npm test` 113/113、`npm run lint`、`npm run build` 全部通过；注册成功、加入已有工作区、自动登录和重复邮箱错误均有 HTTP 测试覆盖。
-- 部署状态：代码已在本地分支实现，推送和服务器替换必须在本节记录生产提交、数据库备份和公网注册链路复测后才标记为 `verified`。
+- 生产验证：服务器 `/opt/ziwei` 已快进到 `7fa17dd`，部署前 SQLite 备份为 `/opt/ziwei-backups/ziwei.sqlite.20261004T151310Z.before-7fa17dd`；构建成功并重启 `ziwei-api`，服务保持 active。公网 `GET /api/auth/status=200`、已有邮箱注册返回预期 `400`、注册预检 `OPTIONS=204`，正式页面构建产物包含“注册新账号”。
 
 ## 2. 60 秒启动和验收
 
