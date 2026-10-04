@@ -44,6 +44,13 @@ npm run build  passed
 - 继续申请前需将 Cloudflare 中 `@` 和 `www` 临时切换为 DNS only（灰云），或改用 Cloudflare DNS-01。解析切回服务器 `154.202.118.5` 后再重试；签发成功才会切换 Nginx/systemd 到 `/etc/letsencrypt/live/qzelynth.top/`。
 - 本轮服务器 Nginx 配置备份：`/etc/nginx/sites-available/ziwei.20261004T121751Z.before-qzelynth-acme.bak`。重复的旧备份 symlink 已移出 `sites-enabled`，当前 `nginx -t` 无重复 `server_name` 警告。
 
+### 2026-10-04 主域名正式证书已切换
+
+- `qzelynth.top` 的 A 记录已直连腾讯云服务器 `154.202.118.5`；真实 Let’s Encrypt webroot 申请成功，证书位于 `/etc/letsencrypt/live/qzelynth.top/`，有效期至 2027-01-02。Certbot 自动续期任务已启用，并配置 deploy hook 自动 reload Nginx。
+- Nginx 已切换到 `fullchain.pem` / `privkey.pem`，systemd `ziwei-api` 的 `ZIWEI_TLS_CERT_FILE` 已同步到公开 fullchain；切换前备份为 `/etc/nginx/sites-available/ziwei.20261004T141659Z.before-letsencrypt.bak` 和 `/etc/systemd/system/ziwei-api.service.d/onboarding.conf.20261004T141659Z.before-letsencrypt.bak`。
+- 真实验证：使用正常 TLS 校验连接 `qzelynth.top`，Node 报告 `authorized=true`，证书主题为 `qzelynth.top`、签发者为 Let’s Encrypt YR1；直连源站 `/healthz=200`、`/server.crt=200`，下载证书 SHA-256 与服务器 fullchain 一致；Nginx 与 `ziwei-api` 均 active。
+- `www.qzelynth.top` 当前仍解析到 Cloudflare 代理 IP，未纳入本次证书 SAN；需要把 `www` 也设为灰云并直连 `154.202.118.5` 后，再重新申请包含 `www` 的证书。当前正式可用入口是 `https://qzelynth.top`。
+
 ## 2. 60 秒启动和验收
 
 在项目根目录打开 PowerShell：
