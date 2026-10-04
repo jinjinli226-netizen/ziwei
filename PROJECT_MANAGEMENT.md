@@ -30,6 +30,7 @@ npm run build  passed
 
 - 服务器 `154.202.118.5` 已部署分支 `codex/hermes-independent-profile` 的提交 `8a95ac8`；服务器 `main` 未被改写。部署前 SQLite 备份为 `/opt/ziwei-backups/ziwei.sqlite.20261004T104845Z.before-8a95ac8`。
 - 服务器 `ziwei-api` 重启后保持 active；本地和公网 `/healthz` 均返回 200。服务器前端构建产物包含岗位说明内联编辑入口。
+- 最新服务器替换已快进到 `59f0715`；部署前 SQLite 备份为 `/opt/ziwei-backups/ziwei.sqlite.20261004T114756Z.before-59f0715`。systemd 已配置 `ZIWEI_TLS_CERT_FILE=/etc/ziwei/server.crt`，Nginx 已增加精确 `/server.crt` 反代并通过语法检查。
 - 本机 `data/ziwei_user.json` 以 `bjc-ops` 为工作区，A2A 令牌与服务器已重新同步；本机 `/readyz` 为 ready，daemon 日志持续记录 `heartbeat` 和 `a2a_poll` 成功。
 - 真实服务器动作已完成两次独立验收：`runtime=Hermes`、`profile=ziwei-aigc`，分别返回 `HERMES_PROD_PROFILE_OK` 和 `HERMES_PROD_PROFILE_RECHECK_OK`，结果均为 `succeeded`。服务器返回结果包含独立 profile，profile 不存在时仍会明确失败。
 - 本机和服务器 `bjc-ops` 均已创建数字员工“调研大师”：本机 ID 为 `employee_53dae986-9446-4e05-b474-3e0c000472a6`，服务器 ID 为 `employee_f5deedce-1404-4764-86ae-835c4f219bc6`，两者都绑定 `runtime=Hermes`、`profile=ziwei-research`。该 profile 拥有独立的 `SOUL.md`、记忆、会话和技能目录；本机 `executeRuntime` 返回 `RESEARCH_PROFILE_OK`，服务器真实 A2A 链路返回 `SERVER_RESEARCH_PROFILE_OK`。服务器 SQLite 备份为 `/opt/ziwei-backups/ziwei.sqlite.20261004T021917Z.before-research-master`；生产 `main` 未修改。
@@ -161,12 +162,14 @@ ziwei_user daemon（daemon/ziwei_user.mjs）
 - 本地 `npm test` 104/104、`npm run lint`、`npm run build` 通过；隔离 HTTP 链路使用真实 `scripts/ziwei-mcp.mjs` 客户端验证 health、员工列表和窄管理面能力。
 - 未启动或修改 5178/4178/20242 生产入口，未写入生产 SQLite；既有 `tmp_gzgov.html` 保持未跟踪。
 
-### 2026-10-04 新用户服务器连接引导（本地已验证，待生产替换）
+### 2026-10-04 新用户服务器连接引导（本地与服务器已验证）
 
 - 归属层：前端引导 + CLI 配置 + API 公开证书入口；不直接写 SQLite，不依赖 AuraBaba daemon。
 - 首次账号页要求明确填写工作区标识；设备连接弹窗显示当前 API 地址、工作区和证书下载入口。Windows、macOS、Linux 命令都携带明确的 `--api` 与 `--tls-ca-file`，不会通过关闭 TLS 校验来掩盖证书问题。
 - `GET /server.crt` 只返回配置的公开 PEM 证书；缺失、格式错误或包含私钥时拒绝服务。CLI 会校验证书文件存在并把路径写入本机 `data/ziwei_user.json`，启动器继续通过 `NODE_EXTRA_CA_CERTS` 注入 daemon 子进程。
-- 本地证据：`npm test` 111/111、`npm run lint`、`npm run build` 通过；隔离 HTTP 链路验证 `/healthz=200`、证书下载 `200`、首次账号创建 `201` 且工作区标识持久化。当前服务器尚未替换，待提交推送后再部署并验证 Nginx `/server.crt` 反代和公网证书内容。
+- 本地证据：`npm test` 111/111、`npm run lint`、`npm run build` 通过；隔离 HTTP 链路验证 `/healthz=200`、证书下载 `200`、首次账号创建 `201` 且工作区标识持久化；另以临时配置跑过真实本地 daemon 心跳，`/readyz` ready 且设备 online。
+- 服务器证据：`/opt/ziwei` 已部署 `59f0715` 并重启 `ziwei-api`；公网 `/healthz=200`、前端 `200`、`/api/auth/status=200`、未授权 MCP `401`；公网 `/server.crt=200`，`application/x-x509-ca-cert`，下载 SHA-256 与 `/etc/ziwei/server.crt` 一致。Nginx 既有重复 `server_name` 警告仍存在，但配置语法检查成功。
+- 回滚：代码执行 `git revert 59f0715` 后重新构建/重启；数据库恢复 `/opt/ziwei-backups/ziwei.sqlite.20261004T114756Z.before-59f0715`；Nginx 与 systemd 原文件备份在同一部署时间戳下的 `.bak` 文件中。未验证边界仍包括真实新用户浏览器下载自签证书后的跨平台安装体验，以及正式域名证书替换。
 
 ### 明确延期或有边界的能力
 
