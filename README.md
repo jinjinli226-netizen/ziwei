@@ -28,6 +28,8 @@ npm run ziwei:setup -- --workspace test-111 --api http://127.0.0.1:4178 --health
 npm run ziwei:status # 查看本机 ziwei_user 配置和健康状态
 npm run ziwei:version
 npm run ziwei:start  # 已配置时复用现有进程，否则后台启动 ziwei_user
+npm run mcp:token -- --workspace bjc-ops  # 生成工作区限定的 MCP bearer 文件
+npm run mcp:manage -- --api-base http://127.0.0.1:4178 --workspace bjc-ops --token-file data/mcp.token  # 以 stdio MCP 服务运行
 npm run diagnose  # 单次健康检查
 ```
 
@@ -67,6 +69,8 @@ scripts\install-ziwei-user.bat --workspace test-111 --api http://127.0.0.1:4178 
 - `GET|POST /api/workspaces/test-111/skills`、`PATCH /api/skills/:id`
 - `POST /api/skills/:id/uninstall`、`GET /api/skills/:id/versions`、`POST /api/skills/:id/rollback`
 - `GET|POST /api/workspaces/test-111/employees`
+- `GET|POST /mcp/v1/workspaces/<slug>/employees`、`PATCH /mcp/v1/workspaces/<slug>/employees/:id`（独立 MCP bearer 令牌）
+- `GET|POST /mcp/v1/workspaces/<slug>/tasks`、`GET|POST /mcp/v1/workspaces/<slug>/documents`（同一工作区限定令牌）
 - `GET /a2a/v1/agents`
 - `POST /a2a/v1/register`
 - `GET|POST /a2a/v1/actions`、`POST /a2a/v1/actions/:id/ack`、`POST /a2a/v1/actions/:id/result`
@@ -75,6 +79,8 @@ scripts\install-ziwei-user.bat --workspace test-111 --api http://127.0.0.1:4178 
 - `POST /a2a/v1/tasks/:id/messages`
 
 设备与运行时在线状态只由 `ziwei_user` daemon 的心跳决定。超过心跳有效期的设备和运行时会自动显示为离线；AuraBaba 或其他参考 daemon 的进程状态不会参与紫薇页面健康判断。
+
+MCP 管理入口使用独立的 `data/mcp.token` 凭据文件（可用 `ZIWEI_MCP_TOKEN_FILE` 指定路径），文件内必须同时保存 bearer token 和 `workspaces` 工作区白名单。`npm run mcp:token -- --workspace <slug>` 会生成权限最小化的文件；文件和 token 不提交到 Git，也不写入日志。MCP 客户端通过 HTTPS 调用 `/mcp/v1`，服务器路由只调用 repository，不向客户端暴露 SQLite。
 
 ## 命名约定
 

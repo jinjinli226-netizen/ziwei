@@ -17,6 +17,8 @@
     "ziwei:setup": "node scripts/ziwei-cli.mjs setup",
     "ziwei:status": "node scripts/ziwei-cli.mjs status",
     "ziwei:version": "node scripts/ziwei-cli.mjs version",
+    "mcp:manage": "node scripts/ziwei-mcp.mjs",
+    "mcp:token": "node scripts/create-mcp-token.mjs",
     "run:backend": "node scripts/run-backend.mjs",
     "run:frontend": "node scripts/run-frontend.mjs",
     "diagnose": "node scripts/diagnose.mjs --once",

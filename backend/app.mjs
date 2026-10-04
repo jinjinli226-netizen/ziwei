@@ -6,6 +6,7 @@ import { RealtimeHub } from './realtime.mjs';
 import { exportDocumentsToGit, importDocumentsFromGit } from './git-sync.mjs';
 import { createAuthService } from './auth.mjs';
 import { readA2AToken, safeTokenEqual, tokenFromRequest } from './a2a-auth.mjs';
+import { mcpTokenRequired } from './mcp-auth.mjs';
 
 const allowedOrigin = process.env.FRONTEND_ORIGIN || 'http://127.0.0.1:5178';
 
@@ -14,7 +15,7 @@ function cors(req, res, next) {
   if (origin === allowedOrigin || !origin) res.setHeader('Access-Control-Allow-Origin', origin || allowedOrigin);
   res.setHeader('Vary', 'Origin');
   res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Workspace-Id, X-Workspace-Role, X-Ziwei-Api-Key');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Workspace-Id, X-Workspace-Role, X-Ziwei-Api-Key, X-Ziwei-Mcp-Token');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
@@ -333,6 +334,42 @@ export function createApp(options = {}) {
   app.get('/api/external/workspaces/:slug/summary', assertApiKeyWorkspace, (req, res) => res.json(repo.getSummary(req.params.slug)));
   app.get('/api/external/workspaces/:slug/tasks', assertApiKeyWorkspace, (req, res) => res.json({ tasks: repo.listTasks(req.params.slug, req.query) }));
   app.post('/api/external/workspaces/:slug/tasks', assertApiKeyWorkspace, (req, res) => res.status(201).json(repo.createTask(req.params.slug, req.body)));
+
+  // MCP management API. This namespace is intentionally separate from the
+  // browser session API and the broad external API-key namespace. A stdio MCP
+  // client sends one dedicated, workspace-scoped token and reaches these
+  // routes over HTTPS; the client never opens the SQLite file.
+  const mcpOptions = {
+    ...(options.mcpOptions || {}),
+    token: options.mcpOptions?.token ?? options.mcpToken,
+    tokenFile: options.mcpOptions?.tokenFile ?? options.mcpTokenFile,
+    workspace: options.mcpOptions?.workspace ?? options.mcpWorkspace,
+    workspaces: options.mcpOptions?.workspaces ?? (options.mcpWorkspace ? [options.mcpWorkspace] : undefined),
+    role: options.mcpOptions?.role ?? options.mcpRole,
+    create: options.mcpOptions?.create ?? false
+  };
+  const mcpGuard = mcpTokenRequired(mcpOptions);
+  const mcpResourceGuard = table => (req, res, next) => {
+    if (table !== 'documents') return res.status(400).json({ error: '不支持的 MCP 资源' });
+    const row = repo.listDocuments(req.mcpCredential.workspace).find(item => item.id === req.params.id);
+    if (!row) return res.status(404).json({ error: '文档不存在' });
+    next();
+  };
+  app.get('/mcp/v1/workspaces/:slug/employees', mcpGuard, (req, res) => res.json({ employees: repo.listEmployees(req.params.slug) }));
+  app.post('/mcp/v1/workspaces/:slug/employees', mcpGuard, (req, res) => res.status(201).json(repo.createEmployee(req.params.slug, req.body || {})));
+  app.patch('/mcp/v1/workspaces/:slug/employees/:id', mcpGuard, (req, res, next) => {
+    try {
+      const row = repo.listEmployees(req.params.slug).find(item => item.id === req.params.id);
+      if (!row) return res.status(404).json({ error: '数字员工不存在' });
+      return res.json(repo.updateEmployee(req.params.id, req.body || {}));
+    } catch (error) { return next(error); }
+  });
+  app.get('/mcp/v1/workspaces/:slug/tasks', mcpGuard, (req, res) => res.json({ tasks: repo.listTasks(req.params.slug, req.query) }));
+  app.post('/mcp/v1/workspaces/:slug/tasks', mcpGuard, (req, res) => res.status(201).json(repo.createTask(req.params.slug, req.body || {})));
+  app.get('/mcp/v1/workspaces/:slug/documents', mcpGuard, (req, res) => res.json({ documents: repo.listDocuments(req.params.slug) }));
+  app.post('/mcp/v1/workspaces/:slug/documents', mcpGuard, (req, res) => res.status(201).json(repo.createDocument(req.params.slug, req.body || {})));
+  app.get('/mcp/v1/documents/:id', mcpGuard, mcpResourceGuard('documents'), (req, res) => res.json(repo.getDocument(req.params.id)));
+  app.patch('/mcp/v1/documents/:id', mcpGuard, mcpResourceGuard('documents'), (req, res) => res.json(repo.updateDocument(req.params.id, req.body || {})));
 
   // A2A v1: agent cards + task/message primitives. The executor is intentionally local-first;
   // daemon adapters can claim tasks later without changing this contract.

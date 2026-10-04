@@ -4,6 +4,7 @@ node_modules/
 **/node_modules/
 data/ziwei_user.json
 data/a2a.token
+data/mcp.token
 data/*.sqlite
 data/git-sync/
 data/objects/
