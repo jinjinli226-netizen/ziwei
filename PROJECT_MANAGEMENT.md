@@ -17,10 +17,12 @@
 当前通过的本地质量门槛：
 
 ```text
-npm test       111 passed
+npm test       113 passed
 npm run lint   passed
 npm run build  passed
 ```
+
+本轮在已有初始化账号的实例上补充了公开注册入口：`POST /api/auth/register` 会创建新的本地账号并自动登录；填写已有工作区标识时以 `member` 身份加入，填写不存在的标识时创建新工作区并成为 Owner。`/api/auth/setup` 仍只用于空数据库的首次初始化，避免把后续注册误判成重复初始化。
 
 最近一次验证环境为 Windows、Node v24.13.0、npm 11.6.2；当前分支为 `codex/hermes-independent-profile`，工作区只保留既有未跟踪临时文件。接手时先运行 `git status --short`，把这些修改视为现有工作，不要重置、清理或覆盖。
 
@@ -50,6 +52,13 @@ npm run build  passed
 - Nginx 已切换到 `fullchain.pem` / `privkey.pem`，systemd `ziwei-api` 的 `ZIWEI_TLS_CERT_FILE` 已同步到公开 fullchain；切换前备份为 `/etc/nginx/sites-available/ziwei.20261004T141659Z.before-letsencrypt.bak` 和 `/etc/systemd/system/ziwei-api.service.d/onboarding.conf.20261004T141659Z.before-letsencrypt.bak`。
 - 真实验证：使用正常 TLS 校验连接 `qzelynth.top`，Node 报告 `authorized=true`，证书主题为 `qzelynth.top`、签发者为 Let’s Encrypt YR1；直连源站 `/healthz=200`、`/server.crt=200`，下载证书 SHA-256 与服务器 fullchain 一致；Nginx 与 `ziwei-api` 均 active。
 - `www.qzelynth.top` 当前仍解析到 Cloudflare 代理 IP，未纳入本次证书 SAN；需要把 `www` 也设为灰云并直连 `154.202.118.5` 后，再重新申请包含 `www` 的证书。当前正式可用入口是 `https://qzelynth.top`。
+
+### 2026-10-04 已有工作区的注册入口
+
+- 问题归属：API/auth 与登录前端。生产复现证据是已有账号时 `POST /api/auth/setup` 返回 `400 本机已经完成初始化，请直接登录`，页面“首次使用，创建账号”因此无法创建第二个账号。
+- 修复内容：新增 `POST /api/auth/register`，前端登录页增加“注册新账号”；注册成功会建立真实 `local_users`、工作区成员关系和会话，不直接操作 SQLite 文件。若存在同邮箱的待接受邀请，会在注册事务中绑定原成员记录。
+- 本地验证：`npm test` 113/113、`npm run lint`、`npm run build` 全部通过；注册成功、加入已有工作区、自动登录和重复邮箱错误均有 HTTP 测试覆盖。
+- 部署状态：代码已在本地分支实现，推送和服务器替换必须在本节记录生产提交、数据库备份和公网注册链路复测后才标记为 `verified`。
 
 ## 2. 60 秒启动和验收
 

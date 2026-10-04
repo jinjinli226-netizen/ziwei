@@ -193,6 +193,14 @@ export function createApp(options = {}) {
       res.status(201).json({ ...safe, session: { expires_at: result.session.expires_at } });
     } catch (error) { next(error); }
   });
+  app.post('/api/auth/register', (req, res, next) => {
+    try {
+      const result = auth.register(req.body || {});
+      auth.setCookie(res, result.session);
+      const { session: _session, ...safe } = result;
+      res.status(201).json({ ...safe, session: { expires_at: result.session.expires_at } });
+    } catch (error) { next(error); }
+  });
   app.post('/api/auth/login', (req, res, next) => {
     try {
       const result = auth.login(req.body || {});

@@ -25,6 +25,7 @@ async function request(path, options = {}) {
 export const api = {
   authStatus: () => request('/api/auth/status'),
   authSetup: body => request('/api/auth/setup', { method:'POST', body:JSON.stringify(body) }),
+  authRegister: body => request('/api/auth/register', { method:'POST', body:JSON.stringify(body) }),
   authLogin: body => request('/api/auth/login', { method:'POST', body:JSON.stringify(body) }),
   authLogout: () => request('/api/auth/logout', { method:'POST', body:'{}' }),
   authMe: () => request('/api/auth/me'),

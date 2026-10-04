@@ -222,13 +222,16 @@ async function refreshAuth() {
 }
 async function submitAuth() {
   if (!authForm.value.password) return notify('请输入密码');
-  if (authMode.value === 'setup' && authForm.value.password !== authForm.value.confirmPassword) return notify('两次密码不一致');
-  if (authMode.value === 'setup' && !authWorkspaceSlug.value.trim()) return notify('请输入工作区标识');
+  const creatingAccount = authMode.value === 'setup' || authMode.value === 'register';
+  if (creatingAccount && authForm.value.password !== authForm.value.confirmPassword) return notify('两次密码不一致');
+  if (creatingAccount && !authWorkspaceSlug.value.trim()) return notify('请输入工作区标识');
   authBusy.value = true;
   try {
     const result = authMode.value === 'setup'
       ? await api.authSetup({ name:authForm.value.name || '紫薇用户', email:authForm.value.email, password:authForm.value.password, workspaceSlug:authWorkspaceSlug.value.trim() })
-      : await api.authLogin({ email:authForm.value.email, password:authForm.value.password });
+      : authMode.value === 'register'
+        ? await api.authRegister({ name:authForm.value.name || '紫薇用户', email:authForm.value.email, password:authForm.value.password, workspaceSlug:authWorkspaceSlug.value.trim() })
+        : await api.authLogin({ email:authForm.value.email, password:authForm.value.password });
     authState.value = { ...authState.value, ...result, setup_required:false, configured:true, authenticated:true, loading:false };
     if (result.memberships?.length) setWorkspaceSlug(result.memberships[0].workspace_slug || result.memberships[0].slug);
     authForm.value = { name:'', email:'', password:'', confirmPassword:'' };
@@ -740,7 +743,7 @@ onMounted(async () => { applyDisplayPreferences(); await refreshAuth(); if (auth
 
 <template>
   <section v-if="authState.loading" class="auth-screen"><div class="auth-card"><img src="/ziwei-logo.png" alt="紫薇"/><p>正在连接紫薇工作区…</p></div></section>
-  <section v-else-if="!authState.authenticated" class="auth-screen"><div class="auth-card"><img src="/ziwei-logo.png" alt="紫薇"/><h1>{{ authMode==='setup' ? '创建紫薇账号' : '登录紫薇' }}</h1><p>{{ authMode==='setup' ? '首次使用请设置本地账号密码。' : '使用本机账号进入工作区。' }}</p><div class="form-stack"><ZiFormField v-if="authMode==='setup'" label="姓名"><ZiInput v-model="authForm.name" placeholder="紫薇用户"/></ZiFormField><ZiFormField v-if="authMode==='setup'" label="工作区标识" hint="用于服务器 API 和本机 ziwei_user 连接"><ZiInput v-model="authWorkspaceSlug" placeholder="例如：bjc-ops"/></ZiFormField><ZiFormField label="邮箱"><ZiInput v-model="authForm.email" type="email" placeholder="name@example.com"/></ZiFormField><ZiFormField label="密码"><ZiInput v-model="authForm.password" type="password" placeholder="至少 8 位"/></ZiFormField><ZiFormField v-if="authMode==='setup'" label="确认密码"><ZiInput v-model="authForm.confirmPassword" type="password"/></ZiFormField><ZiButton :disabled="authBusy" @click="submitAuth">{{ authBusy ? '处理中…' : (authMode==='setup' ? '创建账号并登录' : '登录') }}</ZiButton></div><button class="link-button" @click="authMode=authMode==='setup'?'login':'setup'">{{ authMode==='setup' ? '已有账号，登录' : '首次使用，创建账号' }}</button></div></section>
+  <section v-else-if="!authState.authenticated" class="auth-screen"><div class="auth-card"><img src="/ziwei-logo.png" alt="紫薇"/><h1>{{ authMode==='login' ? '登录紫薇' : authMode==='setup' ? '创建紫薇账号' : '注册紫薇账号' }}</h1><p>{{ authMode==='login' ? '使用本机账号进入工作区。' : authMode==='setup' ? '首次使用请设置本地账号密码。' : '创建账号后加入当前工作区。' }}</p><div class="form-stack"><ZiFormField v-if="authMode!=='login'" label="姓名"><ZiInput v-model="authForm.name" placeholder="紫薇用户"/></ZiFormField><ZiFormField v-if="authMode!=='login'" label="工作区标识" hint="用于服务器 API 和本机 ziwei_user 连接"><ZiInput v-model="authWorkspaceSlug" placeholder="例如：bjc-ops"/></ZiFormField><ZiFormField label="邮箱"><ZiInput v-model="authForm.email" type="email" placeholder="name@example.com"/></ZiFormField><ZiFormField label="密码"><ZiInput v-model="authForm.password" type="password" placeholder="至少 8 位"/></ZiFormField><ZiFormField v-if="authMode!=='login'" label="确认密码"><ZiInput v-model="authForm.confirmPassword" type="password"/></ZiFormField><ZiButton :disabled="authBusy" @click="submitAuth">{{ authBusy ? '处理中…' : authMode==='login' ? '登录' : '创建账号并登录' }}</ZiButton></div><button class="link-button" @click="authMode=authMode==='login'?'register':'login'">{{ authMode==='login' ? '注册新账号' : '已有账号，登录' }}</button></div></section>
   <WorkspaceShell v-else :page="page" :account="currentAccount" :workspace="summary.workspace" :workspaces="authState.memberships" :language="workspaceLanguage" @navigate="navigate" @workspace="switchWorkspace" @create-workspace="createWorkspace" @language="changeLanguage" @logout="logout">
     <section class="content">
         <Transition name="toast">

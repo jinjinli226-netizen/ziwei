@@ -148,6 +148,37 @@ export function createAuthService(db, { sessionTtlMs = SESSION_TTL_MS } = {}) {
       const session = issueSession(userId);
       return { ...principal(db.prepare('SELECT * FROM local_users WHERE id=?').get(userId)), session };
     },
+    register(input = {}) {
+      const email = normalizeEmail(input.email);
+      if (db.prepare('SELECT 1 FROM local_users WHERE email=?').get(email)) throw new Error('该邮箱已注册，请直接登录');
+      const name = String(input.name || email.split('@')[0]).trim().slice(0, 120) || email.split('@')[0];
+      const passwordHash = hashPassword(input.password);
+      const timestamp = now();
+      const userId = id('user');
+      const requestedSlug = String(input.workspaceSlug || input.workspace_slug || 'test-111').trim() || 'test-111';
+      let workspace = db.prepare('SELECT * FROM workspaces WHERE slug=?').get(requestedSlug);
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        db.prepare('INSERT INTO local_users(id,email,name,password_hash,created_at,last_login_at) VALUES(?,?,?,?,?,?)').run(userId,email,name,passwordHash,timestamp,timestamp);
+        if (!workspace) {
+          const workspaceId = id('ws');
+          const workspaceName = String(input.workspaceName || input.workspace_name || requestedSlug).trim() || requestedSlug;
+          db.prepare('INSERT INTO workspaces(id,slug,name,plan,timezone,created_at) VALUES(?,?,?,?,?,?)').run(workspaceId, requestedSlug, workspaceName, 'free', 'Asia/Shanghai', timestamp);
+          workspace = db.prepare('SELECT * FROM workspaces WHERE id=?').get(workspaceId);
+        }
+        const pendingMember = db.prepare('SELECT * FROM members WHERE workspace_id=? AND lower(email)=?').get(workspace.id, email);
+        if (pendingMember && !pendingMember.user_id) {
+          db.prepare('UPDATE members SET user_id=?,name=?,email=? WHERE id=?').run(userId, name, email, pendingMember.id);
+        } else if (!pendingMember) {
+          db.prepare('INSERT INTO members(id,user_id,workspace_id,name,email,role,avatar,joined_at) VALUES(?,?,?,?,?,?,?,?)').run(id('member'), userId, workspace.id, name, email, 'member', null, timestamp);
+        } else {
+          throw new Error('该邮箱已属于当前工作区成员');
+        }
+        db.exec('COMMIT');
+      } catch (error) { try { db.exec('ROLLBACK'); } catch {} throw error; }
+      const session = issueSession(userId);
+      return { ...principal(db.prepare('SELECT * FROM local_users WHERE id=?').get(userId)), session };
+    },
     login(input = {}) {
       const email = normalizeEmail(input.email);
       const user = db.prepare('SELECT * FROM local_users WHERE email=?').get(email);
