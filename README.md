@@ -35,21 +35,17 @@ npm run diagnose  # 单次健康检查
 
 `npm run dev` 启动前端 `5178` 和后端 `4178`；daemon 健康接口使用 `20242`。参考 AuraBaba daemon 已占用 `20241`，紫薇不会抢占它。
 
-## ziwei_user 安装引导
+## ziwei_user 设备连接
 
-紫薇提供本地安装脚本，安装脚本只调用当前项目里的 npm 和 Node.js，不下载或启动 AuraBaba CLI。配置完成后会检查已有的 `ziwei_user`，没有在线进程时自动后台启动本机 daemon，并等待首次心跳：
+创建工作区和管理项目不需要先连接设备。只有要让某台电脑运行数字员工时，才在网页的“添加设备”里生成一次性配对码，在目标电脑安装独立的 `ziwei_user` CLI 并配对：
 
 ```powershell
-# PowerShell
-.\scripts\install-ziwei-user.ps1 --workspace <workspace-slug> --api http://127.0.0.1:4178 --health-port 20242
-
-# Windows cmd
-scripts\install-ziwei-user.bat --workspace <workspace-slug> --api http://127.0.0.1:4178 --health-port 20242
+npm install --global "https://github.com/jinjinli226-netizen/ziwei/archive/refs/heads/codex/hermes-independent-profile.tar.gz"
+ziwei_user connect --api "https://qzelynth.top" --code "<网页生成的一次性配对码>" --name "我的电脑"
+ziwei_user start
 ```
 
-引导会把不含令牌的配置写到 `data/ziwei_user.json`（也可用 `ZIWEI_CONFIG` 指定路径），再调用 `scripts/start-ziwei-user.mjs` 复用或后台启动 daemon。`ziwei:status` 同时检查本机 `ziwei_user` 的 `/healthz` 存活和 `/readyz` 就绪状态；只有最近心跳已接入当前工作区才报告在线。配置命令拒绝 `--token`、`--auth`、`--secret` 等凭据参数，也会清理 API 地址中的查询串、凭据和片段，避免把敏感值写入配置或日志。
-
-服务器使用自签名 HTTPS 证书时，首次使用的设备引导会显示当前页面的 API 地址和工作区标识，并提供 `GET /server.crt` 公钥下载入口。先把证书保存为项目内的 `data/ziwei-server.crt`，再运行引导命令；命令会把 `--api` 和 `--tls-ca-file data/ziwei-server.crt` 写入 `data/ziwei_user.json`，由 `ziwei_user` 通过 `NODE_EXTRA_CA_CERTS` 校验证书。不要关闭 TLS 校验，也不要把私钥放入证书文件。生产部署必须让 `/server.crt` 反代到 API，并将 `ZIWEI_TLS_CERT_FILE` 指向 HTTPS 服务器使用的公钥证书。
+配置、日志和运行时状态写入用户目录，不依赖项目源码目录，也不会安装网页前端依赖。配对码只使用一次，连接成功后设备会真实回报 Codex、Claude、Gemini、Hermes 等 Agent 的心跳。正式 HTTPS 域名不需要下载证书；只有私有证书或本地地址才需要在 `ziwei_user setup` 中通过 `--tls-ca-file` 指定公钥证书。
 
 ## API 入口
 

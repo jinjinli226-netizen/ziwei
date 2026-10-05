@@ -29,7 +29,12 @@ test('successful authentication loads workspace state so device onboarding can r
 test('device setup dismissal is scoped to the authenticated workspace', () => {
   assert.match(appSource, /deviceSetupDismissedKey/);
   assert.match(appSource, /localStorage\.setItem\(deviceSetupDismissedKey\(\), '1'\)/);
-  assert.match(appSource, /localStorage\.getItem\(deviceSetupDismissedKey\(\)/);
+  assert.match(appSource, /ziwei\.deviceSetupDismissed:/);
+});
+
+test('creating or opening a workspace does not force a device connection modal', () => {
+  assert.doesNotMatch(appSource, /const needsDeviceSetup = !s\.device[\s\S]*openDeviceModal\(true\)/);
+  assert.match(appSource, /连接设备是可选的/);
 });
 
 test('member workspace loading does not let admin-only settings block device onboarding', () => {
@@ -41,10 +46,11 @@ test('member workspace loading does not let admin-only settings block device onb
 test('device onboarding shows the API origin and optional certificate steps', () => {
   assert.match(appSource, /deviceApiBase/);
   assert.match(appSource, /deviceServerCertificateUrl/);
+  assert.match(appSource, /deviceCertificateRequired/);
   assert.match(appSource, /下载服务器证书/);
   assert.match(appSource, /--api/);
   assert.match(appSource, /--tls-ca-file/);
-  assert.match(appSource, /正式域名证书无需额外文件/);
+  assert.match(appSource, /正式 HTTPS 地址已验证，无需下载额外证书/);
 });
 
 test('device onboarding provisions a generic ziwei_user daemon with a one-time pairing code', () => {
