@@ -16,6 +16,7 @@
 - 网页设备入口通过 `POST /api/workspaces/:slug/devices/pairing` 生成短时一次性配对码；目标电脑执行 `ziwei_user connect --api ... --code ...`，服务器只返回一次 workspace 绑定的设备凭证，心跳、runtime 注册和 A2A 请求使用该设备凭证。配对码和完整凭证不会写入审计日志。
 - SQLite 新增 `device_pairing_codes`、`device_credentials` 及索引；配对消费和设备/凭证写入在同一事务中完成，撤销或停用设备后凭证立即失效。成员可以配对自己控制的电脑，但设备删除、停用和其它管理操作仍需 owner/admin。
 - CLI 增加用户目录模式和 npm `bin`：`npm install --global github:jinjinli226-netizen/ziwei#codex/hermes-independent-profile` 后使用 `ziwei_user connect` / `ziwei_user start`；配置、日志、动作状态写入用户目录，执行工作目录取配对时的当前目录，不落到 npm 包缓存。项目 checkout 模式仍保留给本地开发。
+- daemon 全局包不再安装网页前端依赖：`@ziwei/ui`、Vite、Vue 等只留在 `devDependencies`，API 的 Express/WS 运行依赖仍保留；本地打包后以 `npm install --omit=dev` 安装并执行 `ziwei_user version` 已通过。
 - 前端设备弹窗已改为通用四 Agent 配对引导，移除依赖当前项目路径的 `install-ziwei-user.ps1` 命令；正式域名证书无需额外 CA，私有证书仍可通过 `--tls-ca-file` 指定。
 - Windows 安装命令使用 `cmd.exe` 兼容的双引号；PowerShell 和 macOS/Linux 保留各自 shell 的引号规则，避免把 GitHub 包地址当成本地路径。
 - 新建数字员工时不再把 Hermes 设为默认运行时；页面会优先选择当前 `ziwei_user` 发现的第一个 Agent，四个运行时仍可在同一选择器中分别配置，Hermes profile 只在选择 Hermes 时出现。
@@ -31,7 +32,7 @@
 当前通过的本地质量门槛：
 
 ```text
-npm test       125 passed
+npm test       127 passed
 npm run lint   passed
 npm run build  passed
 ```
