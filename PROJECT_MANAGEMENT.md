@@ -449,6 +449,15 @@ Copy-Item data/ziwei.sqlite "data/ziwei.sqlite.$stamp.bak"
 - 对失败的 A2A action 使用重试/新 dedupe key，不直接改写旧终态。
 - 回滚后重新执行健康检查和最小真实任务。
 
+### 2026-10-06 前端控件样式统一发布
+
+- 问题归属：前端交互与样式。复现确认主页“通过数字伙伴创建”、任务状态、日历筛选、会话目标设备和工作区创建等位置仍会落回浏览器原生下拉控件，创建数字伙伴弹窗也缺少完整的焦点与键盘行为。
+- 修复内容：统一改用 `@ziwei/ui` 的 `ZiSelect`，补齐输入框、文本域、复选框、按钮、tab/listbox 的紫薇令牌和状态样式；数字伙伴弹窗增加 Escape 关闭、Tab 焦点循环、自动聚焦和关闭后焦点恢复。数据来源和 API 调度保持真实设备/员工数据，不新增静态成功状态。
+- 本地验收：`npm test` 145 passed、`npm run lint` 通过（30 source files）、`npm run build` 通过；源码检索确认 `frontend/src` 已无原生 `<select>`；`git diff --check` 通过。
+- GitHub：提交 `b67ad15` 已推送到 `origin/codex/hermes-independent-profile`。
+- 服务器发布：`/opt/ziwei` 已快进到 `b67ad15`，部署前 SQLite 备份为 `/opt/ziwei-backups/ziwei.sqlite.20261005T135324Z.before-b67ad15`；`npm ci --ignore-scripts`、`npm run build` 成功，`ziwei-api` active。重启后立即探测曾处于监听尚未完成阶段，随后日志确认 4178 已监听；复测本机和公网 `/healthz` 均返回 200，公网页面和新构建资源均返回 200。
+- 回滚方式：前端代码使用 `git revert b67ad15` 后重新构建/重启；本轮没有数据库结构或数据写入，保留上述 SQLite 备份用于异常时恢复。未跟踪的 `tmp_gzgov.html` 未修改。
+
 ## 10. 给其他 AI 的接手顺序
 
 `HANDOFF-CLAUDE-进度记录.md` 是一次历史接手记录，保留用于追溯，不是当前事实来源。任何新 AI 接手本项目时，按下面顺序执行：
