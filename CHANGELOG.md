@@ -6,6 +6,11 @@
 
 ### Fixed
 
+- 修复 Windows `ziwei_user` 执行 Codex 时通过 PowerShell `.ps1` 传递标准输入标记 `-` 导致参数绑定失败的问题；daemon 会优先发现用户目录中的新版 `codex.exe`，旧包装器则直接调用其 Node 入口，避免把任务交给 PowerShell 参数解析。
+- 全站控件视觉统一：主页加号“通过数字伙伴创建”弹窗、收件箱会话、任务状态、日历筛选和工作区创建等入口改用 `@ziwei/ui` 的 `ZiSelect`，移除前端模板中的原生 `<select>` 残留；目标设备下拉不再显示浏览器默认控件。
+- 为原生输入框、文本域、复选框、按钮和自定义 tab/listbox 补齐紫薇蓝色令牌、hover/active/focus-visible/disabled 状态；设备/技能/设置/数字伙伴页 tab 增加 `role="tablist"`、`role="tab"` 和 `aria-selected`。
+- 数字伙伴创建弹窗新增 Escape 关闭、Tab 焦点循环、打开时聚焦和关闭后焦点恢复；创建者与目标设备选择器保留真实设备/员工数据和 API 调度逻辑。
+
 - 分离账号、成员关系、工作区类型和设备归属：无邀请注册创建个人工作区，加入团队必须匹配有效邀请；设备配对记录 `owner_user_id`，个人设备查询隔离，团队成员可查看和定向使用团队设备，普通成员不能管理他人设备。
 - 增加 `workspaces.kind` 与 `devices.owner_user_id` 兼容迁移；历史设备归属未知时保留空值，不伪造主人。
 - 清理前端角色/工作区默认文案和 daemon/CLI/A2A 的 `test-111` 用户数据默认；数据库种子和测试兼容 fixture 保留并记录边界。
@@ -15,6 +20,10 @@
 
 ### Verification
 
+- `npm test`：145 passed
+- `npm run lint`：passed（30 source files）
+- `npm run build`：passed（Vite production build）
+- 源码复现确认：前端 Vue 模板已无原生 `<select>`；未启动或重启现有 20242 daemon，未改数据库或 API 数据逻辑。
 - `npm test`：140 passed
 - `npm run lint`：passed（30 source files）
 - `npm run build`：passed（Vite production build）

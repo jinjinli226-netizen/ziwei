@@ -1,7 +1,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue';
 import { ListTodo, GitBranch, CalendarDays, BookOpenText, UsersRound, Share2, Settings, Puzzle, House, Languages, CircleHelp, ChevronUp, ChevronDown, LayoutDashboard, Check, Plus, LogOut } from 'lucide-vue-next';
-import { ZiButton, ZiFormField, ZiInput, ZiModal } from '@ziwei/ui';
+import { ZiButton, ZiFormField, ZiInput, ZiModal, ZiSelect } from '@ziwei/ui';
 const props = defineProps({ page: String, account: Object, workspace: Object, workspaces: { type: Array, default: () => [] }, language: { type: String, default: 'zh-CN' } });
 const emit = defineEmits(['navigate','workspace','language','create-workspace','logout']);
 const sectionKeys = [
@@ -66,6 +66,6 @@ function requestLogout() { menu.value=''; emit('logout'); }
       <main class="workspace-panel" :class="{'issues-panel':page==='issues','docs-panel':page==='docs','members-panel':page==='members','runtime-panel':page==='runtimes'}"><slot/></main>
     </div>
     <ZiModal v-if="help" :title="t.helpTitle" @close="help=false"><div class="shell-help"><p>{{ t.helpTask }}</p><p>{{ t.helpTeam }}</p><button @click="help=false;go('issues')">{{ t.openTask }}</button></div></ZiModal>
-    <ZiModal v-if="workspaceCreateOpen" title="新建工作区" @close="workspaceCreateOpen=false"><div class="form-stack"><p class="modal-copy">创建后会生成独立工作区和路由。团队工作区可邀请成员共享设备与数字员工。</p><ZiFormField label="名称" required><ZiInput v-model="workspaceCreateForm.name" autofocus placeholder="例如：内容运营团队"/></ZiFormField><ZiFormField label="标识" hint="仅使用小写字母、数字、下划线或短横线"><ZiInput v-model="workspaceCreateForm.slug" placeholder="例如：content-ops"/></ZiFormField><ZiFormField label="类型"><select v-model="workspaceCreateForm.kind" class="workspace-kind-select"><option value="personal">个人工作区</option><option value="team">团队工作区</option></select></ZiFormField><div class="form-actions"><ZiButton variant="secondary" @click="workspaceCreateOpen=false">取消</ZiButton><ZiButton :disabled="!workspaceCreateForm.name.trim()" @click="submitWorkspaceCreate">创建工作区</ZiButton></div></div></ZiModal>
+    <ZiModal v-if="workspaceCreateOpen" title="新建工作区" @close="workspaceCreateOpen=false"><div class="form-stack"><p class="modal-copy">创建后会生成独立工作区和路由。团队工作区可邀请成员共享设备与数字员工。</p><ZiFormField label="名称" required><ZiInput v-model="workspaceCreateForm.name" autofocus placeholder="例如：内容运营团队"/></ZiFormField><ZiFormField label="标识" hint="仅使用小写字母、数字、下划线或短横线"><ZiInput v-model="workspaceCreateForm.slug" placeholder="例如：content-ops"/></ZiFormField><ZiFormField label="类型"><ZiSelect v-model="workspaceCreateForm.kind" class="workspace-kind-select" :options="[{label:'个人工作区',value:'personal'},{label:'团队工作区',value:'team'}]"/></ZiFormField><div class="form-actions"><ZiButton variant="secondary" @click="workspaceCreateOpen=false">取消</ZiButton><ZiButton :disabled="!workspaceCreateForm.name.trim()" @click="submitWorkspaceCreate">创建工作区</ZiButton></div></div></ZiModal>
   </div>
 </template>

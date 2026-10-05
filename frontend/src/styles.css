@@ -269,3 +269,80 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 }
 .nav-item.active .nav-icon,
 .nav-item:hover .nav-icon { color: #2f6fca; opacity: 1; }
+
+/* Unified native control layer: raw controls keep the same tokens and interaction states as @ziwei/ui. */
+:where(button, input, textarea, select) { font: inherit; }
+:where(button):not(:disabled) { cursor: pointer; }
+:where(button):disabled { cursor: not-allowed; }
+:where(button, input, textarea, select):focus-visible,
+:where([role="tab"], [role="option"]):focus-visible {
+  outline: 3px solid var(--ziwei-focus-ring);
+  outline-offset: 2px;
+}
+:where(button):not(:disabled):active { transform: translateY(1px); }
+
+:where(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="hidden"]):not(.ziwei-input),
+textarea:not(.ziwei-textarea),
+select:not(.ziwei-select)) {
+  width: 100%;
+  min-height: 36px;
+  box-sizing: border-box;
+  border: 1px solid var(--ziwei-line-strong);
+  border-radius: var(--ziwei-radius-sm);
+  color: var(--ziwei-ink-soft);
+  background: var(--ziwei-surface);
+  transition: border-color .15s ease, box-shadow .15s ease, background-color .15s ease;
+}
+:where(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="hidden"]):not(.ziwei-input),
+select:not(.ziwei-select)) { padding: 0 11px; }
+:where(textarea:not(.ziwei-textarea)) { min-height: 90px; padding: 10px 11px; resize: vertical; line-height: 1.65; }
+:where(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="hidden"]):not(.ziwei-input), textarea:not(.ziwei-textarea), select:not(.ziwei-select)):hover:not(:disabled) { border-color: color-mix(in srgb, var(--ziwei-violet) 42%, var(--ziwei-line-strong)); }
+:where(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="hidden"]):not(.ziwei-input), textarea:not(.ziwei-textarea), select:not(.ziwei-select)):focus { border-color: var(--ziwei-accent-line); box-shadow: 0 0 0 3px var(--ziwei-focus-ring); outline: 0; }
+:where(select:not(.ziwei-select)) {
+  appearance: none;
+  padding-right: 35px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='m3 4.5 3 3 3-3' fill='none' stroke='%23647788' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 11px center;
+}
+:where(input)::placeholder, :where(textarea)::placeholder { color: var(--ziwei-muted); opacity: .85; }
+:where(input[type="checkbox"], input[type="radio"]) { accent-color: var(--ziwei-violet); }
+
+:where([role="tablist"]) { display: flex; align-items: center; gap: 4px; }
+:where([role="tab"]) { position: relative; min-height: 32px; border: 1px solid transparent; border-radius: var(--ziwei-radius-sm); color: var(--ziwei-muted); background: transparent; transition: color .15s ease, background-color .15s ease, border-color .15s ease, box-shadow .15s ease; }
+:where([role="tab"]):hover { color: var(--ziwei-violet); background: var(--ziwei-violet-soft); }
+:where([role="tab"][aria-selected="true"], [role="tab"].active) { color: var(--ziwei-violet); border-color: var(--ziwei-accent-line); background: var(--ziwei-violet-soft); font-weight: 600; }
+:where([role="tab"]):active { transform: translateY(1px); }
+:where([role="listbox"]) { outline: 0; }
+:where([role="option"]) { transition: color .15s ease, background-color .15s ease; }
+:where([role="option"]):hover, :where([role="option"][aria-selected="true"]) { color: var(--ziwei-violet); background: var(--ziwei-violet-soft); }
+
+:root[data-theme="dark"] :where(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="hidden"]):not(.ziwei-input), textarea:not(.ziwei-textarea), select:not(.ziwei-select)) { border-color: var(--ziwei-line-strong); color: var(--ziwei-ink); background: var(--ziwei-surface); }
+:root[data-theme="dark"] :where([role="tab"][aria-selected="true"], [role="tab"].active) { color: var(--ziwei-violet); background: var(--ziwei-violet-soft); }
+
+/* Bring @ziwei/ui form primitives onto the workspace blue token set. */
+.ziwei-input,
+.ziwei-select,
+.ziwei-textarea {
+  border-color: var(--ziwei-line-strong);
+  color: var(--ziwei-ink-soft);
+  background: var(--ziwei-surface);
+}
+.ziwei-input:hover:not(:disabled),
+.ziwei-select:hover:not(:disabled),
+.ziwei-textarea:hover:not(:disabled) { border-color: color-mix(in srgb, var(--ziwei-violet) 42%, var(--ziwei-line-strong)); }
+.ziwei-input:focus,
+.ziwei-select:focus,
+.ziwei-textarea:focus { border-color: var(--ziwei-accent-line); box-shadow: 0 0 0 3px var(--ziwei-focus-ring); }
+:root[data-theme="dark"] .ziwei-input,
+:root[data-theme="dark"] .ziwei-select,
+:root[data-theme="dark"] .ziwei-textarea { border-color: var(--ziwei-line-strong); color: var(--ziwei-ink); background: var(--ziwei-surface); }
+:where(button):not(:disabled) { transition: color .15s ease, background-color .15s ease, border-color .15s ease, box-shadow .15s ease, transform .15s ease; }
+:where(button):not(:disabled):hover { color: var(--ziwei-violet); }
+.ziwei-select {
+  appearance: none;
+  padding-right: 35px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='m3 4.5 3 3 3-3' fill='none' stroke='%23647788' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 11px center;
+}

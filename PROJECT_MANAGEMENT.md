@@ -517,3 +517,10 @@ Copy-Item data/ziwei.sqlite "data/ziwei.sqlite.$stamp.bak"
 - 任务和会话执行 payload 可携带 `targetDeviceId`，团队成员可以将动作定向到工作区内的设备；设备凭证仍按单设备校验。
 - 硬编码审计：前端用户/角色/工作区默认值已移除；daemon/CLI 和 A2A 路由在没有 workspace 配置时都会明确报错。数据库种子、测试夹具和历史文档中的 `test-111` 仅用于兼容/示例，不能作为认证或权限决策来源。
 - 回滚方式：使用 `git revert` 回滚本节对应代码提交；数据库新增列为兼容迁移，保留列不会破坏旧记录。未修改既有未跟踪 `tmp_gzgov.html`。
+
+### 2026-10-05 Windows Codex CLI 启动适配
+
+- 根因：Windows daemon 发现旧的 `codex.ps1` 后，用 `powershell -File` 传递 Codex 的标准输入参数 `-`；PowerShell 会把它解释为脚本参数并在 CLI 启动前报 `argument "name" is not valid`。
+- 变更：运行时发现优先扫描用户目录中的新版 OpenAI `codex.exe`；对 npm 包装器在可用时直接调用 `@openai/codex/bin/codex.js`，否则使用 PowerShell `-Command` 兼容调用，避免 `-File` 参数绑定。
+- 验证：新增 Windows 运行时发现与包装器回归测试；`npm test`（145 passed）、`npm run lint`（30 source files）、`npm run build` 均通过；真实本机 Codex smoke test 已进入 CLI 并输出运行时日志，15 秒后按测试超时取消，未再出现 PowerShell 参数绑定错误。
+- 回滚方式：回滚本节对应代码提交即可；不改数据库、不改既有设备凭证，重启 daemon 后重新发现本机 CLI。
