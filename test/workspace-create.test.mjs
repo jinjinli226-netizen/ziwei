@@ -17,11 +17,12 @@ test('authenticated users can create a workspace and receive an independent rout
     const cookie = String(setup.headers.get('set-cookie')).split(';')[0];
     const created = await fetch(`${base}/api/workspaces`, {
       method: 'POST', headers: { 'content-type': 'application/json', cookie },
-      body: JSON.stringify({ name: '内容运营', slug: 'content-ops' })
+      body: JSON.stringify({ name: '内容运营', slug: 'content-ops', kind: 'team' })
     });
     assert.equal(created.status, 201);
     const body = await created.json();
     assert.equal(body.workspace.slug, 'content-ops');
+    assert.equal(body.workspace.kind, 'team');
     assert.equal(body.membership.role, 'owner');
     const listed = await fetch(`${base}/api/workspaces`, { headers: { cookie } }).then(response => response.json());
     assert.ok(listed.workspaces.some(item => item.slug === 'content-ops'));

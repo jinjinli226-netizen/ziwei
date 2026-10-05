@@ -129,7 +129,7 @@ function writeConfig(input) {
 async function probeLocal(config = {}) {
   const host = config.healthHost || process.env.ZIWEI_HEALTH_HOST || '127.0.0.1';
   const port = config.healthPort || process.env.ZIWEI_HEALTH_PORT || 20242;
-  const expectedWorkspace = String(config.workspace || process.env.ZIWEI_WORKSPACE || 'test-111');
+  const expectedWorkspace = String(config.workspace || process.env.ZIWEI_WORKSPACE || '').trim();
   const expectedAgent = String(config.agentId || 'ziwei_user');
   const healthUrl = `http://${host}:${port}/healthz`;
   const readyUrl = `http://${host}:${port}/readyz`;
@@ -161,7 +161,7 @@ async function probeLocal(config = {}) {
 }
 
 function makeConfig(args, previous = {}) {
-  const workspace = String(args.workspace || previous.workspace || 'test-111').trim();
+  const workspace = String(args.workspace || previous.workspace || process.env.ZIWEI_WORKSPACE || '').trim();
   if (!workspace) throw new Error('--workspace 不能为空');
   const healthPort = args['health-port'] !== undefined
     ? parsePort(args['health-port'])

@@ -15,7 +15,7 @@ try { config = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch (error) 
 }
 const host = config.healthHost || process.env.ZIWEI_HEALTH_HOST || '127.0.0.1';
 const port = Number(config.healthPort || process.env.ZIWEI_HEALTH_PORT || 20242);
-const expectedWorkspace = String(config.workspace || process.env.ZIWEI_WORKSPACE || 'test-111');
+const expectedWorkspace = String(config.workspace || process.env.ZIWEI_WORKSPACE || '').trim();
 const expectedAgent = String(config.agentId || 'ziwei_user');
 const healthUrl = `http://${host}:${port}/healthz`;
 const readyUrl = `http://${host}:${port}/readyz`;

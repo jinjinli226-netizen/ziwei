@@ -6,11 +6,11 @@ import test from 'node:test';
 const root = path.resolve(import.meta.dirname, '..');
 const appSource = fs.readFileSync(path.join(root, 'frontend', 'src', 'App.vue'), 'utf8');
 
-test('first-run onboarding keeps the server workspace explicit', () => {
-  assert.match(appSource, /label="工作区标识"/);
-  assert.match(appSource, /v-model="authWorkspaceSlug"/);
-  assert.match(appSource, /workspaceSlug:authWorkspaceSlug\.value\.trim\(\)/);
-  assert.match(appSource, /workspaceSlugFromPath/);
+test('first-run onboarding does not infer a workspace from the URL', () => {
+  assert.match(appSource, /首次使用先创建账号，登录后再建立你的第一个工作区/);
+  assert.match(appSource, /const authWorkspaceSlug = ref\(inviteQuery\.get\('workspace'\) \|\| ''\)/);
+  assert.doesNotMatch(appSource, /if \(status\.setup_required .*workspaceSlugFromPath/);
+  assert.match(appSource, /workspaceCreateRequired/);
 });
 
 test('configured workspaces expose a real registration path instead of reusing first-run setup', () => {
@@ -18,6 +18,8 @@ test('configured workspaces expose a real registration path instead of reusing f
   assert.match(apiSource, /authRegister: body => request\('\/api\/auth\/register'/);
   assert.match(appSource, /api\.authRegister/);
   assert.match(appSource, /authMode==='login'\s*\?\s*'注册新账号'/);
+  assert.match(appSource, /v-model="authForm\.invitationCode"/);
+  assert.match(appSource, /invitationCode:authForm\.value\.invitationCode/);
 });
 
 test('successful authentication loads workspace state so device onboarding can run immediately', () => {
@@ -62,6 +64,13 @@ test('device management exposes real metadata and a rename action', () => {
   assert.match(appSource, /openDeviceEditor\(device\)/);
   assert.match(appSource, /api\.updateDevice\(draft\.id/);
   assert.doesNotMatch(appSource, /创建时间 2026\/9\/28/);
+});
+
+test('tasks and conversations expose a target device contract', () => {
+  assert.match(appSource, /agentComposerDeviceId/);
+  assert.match(appSource, /targetDeviceId:agentComposerDeviceId\.value/);
+  assert.match(appSource, /conversationDeviceId/);
+  assert.match(appSource, /targetDeviceId:conversationDeviceId\.value/);
 });
 
 test('employee creation keeps the four-agent runtime choice generic', () => {

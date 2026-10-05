@@ -24,6 +24,17 @@ function normalizeWorkspaceSlug(value, fallbackName = '') {
   return normalized || `workspace-${crypto.randomBytes(4).toString('hex')}`;
 }
 
+function availableWorkspaceSlug(db, value, fallbackName = '') {
+  const base = normalizeWorkspaceSlug(value, fallbackName);
+  let slug = base;
+  let suffix = 2;
+  while (db.prepare('SELECT 1 FROM workspaces WHERE slug=?').get(slug)) {
+    const tail = `-${suffix++}`;
+    slug = `${base.slice(0, 63 - tail.length)}${tail}`;
+  }
+  return slug;
+}
+
 function parseCookies(value) {
   const result = {};
   for (const pair of String(value || '').split(';')) {
@@ -85,9 +96,9 @@ export function createAuthService(db, { sessionTtlMs = SESSION_TTL_MS } = {}) {
   try { db.exec('CREATE INDEX IF NOT EXISTS idx_members_user_workspace ON members(user_id,workspace_id)'); } catch {}
 
   function memberships(userId) {
-    return db.prepare(`SELECT m.id,m.workspace_id,m.name,m.email,m.role,m.avatar,m.joined_at,w.slug,w.name AS workspace_name,w.timezone
+    return db.prepare(`SELECT m.id,m.workspace_id,m.name,m.email,m.role,m.avatar,m.joined_at,w.slug,w.name AS workspace_name,w.kind,w.timezone
       FROM members m JOIN workspaces w ON w.id=m.workspace_id WHERE m.user_id=? ORDER BY m.joined_at`).all(userId)
-      .map(row => ({ id: row.id, workspace_id: row.workspace_id, slug: row.slug, name: row.workspace_name, timezone: row.timezone, role: row.role, member_name: row.name, email: row.email, avatar: row.avatar, joined_at: row.joined_at }));
+      .map(row => ({ id: row.id, workspace_id: row.workspace_id, slug: row.slug, name: row.workspace_name, kind: row.kind || 'personal', timezone: row.timezone, role: row.role, member_name: row.name, email: row.email, avatar: row.avatar, joined_at: row.joined_at }));
   }
 
   function principal(user) {
@@ -129,20 +140,11 @@ export function createAuthService(db, { sessionTtlMs = SESSION_TTL_MS } = {}) {
       const passwordHash = hashPassword(input.password);
       const timestamp = now();
       const userId = id('user');
-      const requestedSlug = String(input.workspaceSlug || input.workspace_slug || 'test-111').trim() || 'test-111';
-      let workspace = db.prepare('SELECT * FROM workspaces WHERE slug=?').get(requestedSlug);
+      const requestedSlug = String(input.workspaceSlug || input.workspace_slug || '').trim();
+      if (requestedSlug || input.workspaceName || input.workspace_name || input.workspaceKind || input.workspace_kind) throw new Error('首次初始化只创建账号，请登录后新建工作区');
       db.exec('BEGIN IMMEDIATE');
       try {
         db.prepare('INSERT INTO local_users(id,email,name,password_hash,created_at,last_login_at) VALUES(?,?,?,?,?,?)').run(userId,email,name,passwordHash,timestamp,timestamp);
-        if (!workspace) {
-          const workspaceId = id('ws');
-          const workspaceName = String(input.workspaceName || input.workspace_name || requestedSlug).trim() || requestedSlug;
-          db.prepare('INSERT INTO workspaces(id,slug,name,plan,timezone,created_at) VALUES(?,?,?,?,?,?)').run(workspaceId, requestedSlug, workspaceName, 'free', 'Asia/Shanghai', timestamp);
-          workspace = db.prepare('SELECT * FROM workspaces WHERE id=?').get(workspaceId);
-        }
-        const owner = db.prepare('SELECT id FROM members WHERE workspace_id=? AND role=? ORDER BY joined_at LIMIT 1').get(workspace.id, 'owner');
-        if (owner) db.prepare('UPDATE members SET user_id=?,name=?,email=? WHERE id=?').run(userId,name,email,owner.id);
-        else db.prepare('INSERT INTO members(id,user_id,workspace_id,name,email,role,avatar,joined_at) VALUES(?,?,?,?,?,?,?,?)').run(id('member'),userId,workspace.id,name,email,'owner',null,timestamp);
         db.exec('COMMIT');
       } catch (error) { try { db.exec('ROLLBACK'); } catch {} throw error; }
       const session = issueSession(userId);
@@ -155,22 +157,38 @@ export function createAuthService(db, { sessionTtlMs = SESSION_TTL_MS } = {}) {
       const passwordHash = hashPassword(input.password);
       const timestamp = now();
       const userId = id('user');
-      const requestedSlug = String(input.workspaceSlug || input.workspace_slug || 'test-111').trim() || 'test-111';
+      const requestedSlug = String(input.workspaceSlug || input.workspace_slug || '').trim();
       let workspace = db.prepare('SELECT * FROM workspaces WHERE slug=?').get(requestedSlug);
       db.exec('BEGIN IMMEDIATE');
       try {
         db.prepare('INSERT INTO local_users(id,email,name,password_hash,created_at,last_login_at) VALUES(?,?,?,?,?,?)').run(userId,email,name,passwordHash,timestamp,timestamp);
         if (!workspace) {
           const workspaceId = id('ws');
-          const workspaceName = String(input.workspaceName || input.workspace_name || requestedSlug).trim() || requestedSlug;
-          db.prepare('INSERT INTO workspaces(id,slug,name,plan,timezone,created_at) VALUES(?,?,?,?,?,?)').run(workspaceId, requestedSlug, workspaceName, 'free', 'Asia/Shanghai', timestamp);
+          const workspaceName = String(input.workspaceName || input.workspace_name || '个人工作区').trim() || '个人工作区';
+          const slug = requestedSlug || availableWorkspaceSlug(db, '', workspaceName);
+          db.prepare('INSERT INTO workspaces(id,slug,name,kind,plan,timezone,created_at) VALUES(?,?,?,?,?,?,?)').run(workspaceId, slug, workspaceName, 'personal', 'free', 'Asia/Shanghai', timestamp);
           workspace = db.prepare('SELECT * FROM workspaces WHERE id=?').get(workspaceId);
         }
-        const pendingMember = db.prepare('SELECT * FROM members WHERE workspace_id=? AND lower(email)=?').get(workspace.id, email);
+        const invitationCode = String(input.invitationCode || input.invitation_code || '').trim();
+        let invitation = null;
+        if (requestedSlug) {
+          if (workspace.kind !== 'team') throw new Error('个人工作区不能直接加入');
+          invitation = invitationCode
+            ? db.prepare('SELECT * FROM invitations WHERE workspace_id=? AND code_hash=? AND lower(email)=?').get(workspace.id, hashToken(invitationCode), email)
+            : db.prepare("SELECT * FROM invitations WHERE workspace_id=? AND lower(email)=? AND status='pending' AND expires_at>? ORDER BY created_at DESC LIMIT 1").get(workspace.id, email, timestamp);
+          if (!invitation || !['pending', 'accepted'].includes(invitation.status) || (invitation.status === 'pending' && Date.parse(invitation.expires_at) <= Date.now())) throw new Error('加入团队需要有效邀请');
+          if (invitation.status === 'accepted' && invitation.member_id && db.prepare('SELECT user_id FROM members WHERE id=?').get(invitation.member_id)?.user_id) throw new Error('邀请已经被其他账号使用');
+        }
+        const pendingMember = invitation?.member_id
+          ? db.prepare('SELECT * FROM members WHERE id=?').get(invitation.member_id)
+          : null;
         if (pendingMember && !pendingMember.user_id) {
           db.prepare('UPDATE members SET user_id=?,name=?,email=? WHERE id=?').run(userId, name, email, pendingMember.id);
         } else if (!pendingMember) {
-          db.prepare('INSERT INTO members(id,user_id,workspace_id,name,email,role,avatar,joined_at) VALUES(?,?,?,?,?,?,?,?)').run(id('member'), userId, workspace.id, name, email, 'member', null, timestamp);
+          const memberRole = workspace.kind === 'personal' ? 'owner' : (invitation?.role === 'admin' ? 'admin' : 'member');
+          const memberId = id('member');
+          db.prepare('INSERT INTO members(id,user_id,workspace_id,name,email,role,avatar,joined_at) VALUES(?,?,?,?,?,?,?,?)').run(memberId, userId, workspace.id, name, email, memberRole, null, timestamp);
+          if (invitation) db.prepare("UPDATE invitations SET status='accepted',accepted_at=?,member_id=? WHERE id=?").run(timestamp, memberId, invitation.id);
         } else {
           throw new Error('该邮箱已属于当前工作区成员');
         }
@@ -200,19 +218,20 @@ export function createAuthService(db, { sessionTtlMs = SESSION_TTL_MS } = {}) {
       const slug = normalizeWorkspaceSlug(input.slug, name);
       if (!/^[a-z0-9][a-z0-9-_-]{1,62}$/.test(slug)) throw new Error('项目标识需使用 2-63 位字母、数字、下划线或短横线');
       if (db.prepare('SELECT 1 FROM workspaces WHERE slug=?').get(slug)) throw new Error('项目标识已存在，请换一个');
+      const kind = input.kind === 'team' || input.workspaceKind === 'team' || input.workspace_kind === 'team' ? 'team' : 'personal';
       const timestamp = now();
       const workspaceId = id('ws');
       const memberId = id('member');
       db.exec('BEGIN IMMEDIATE');
       try {
-        db.prepare('INSERT INTO workspaces(id,slug,name,plan,timezone,created_at) VALUES(?,?,?,?,?,?)')
-          .run(workspaceId, slug, name, 'free', String(input.timezone || 'Asia/Shanghai'), timestamp);
+        db.prepare('INSERT INTO workspaces(id,slug,name,kind,plan,timezone,created_at) VALUES(?,?,?,?,?,?,?)')
+          .run(workspaceId, slug, name, kind, 'free', String(input.timezone || 'Asia/Shanghai'), timestamp);
         db.prepare('INSERT INTO members(id,user_id,workspace_id,name,email,role,avatar,joined_at) VALUES(?,?,?,?,?,?,?,?)')
           .run(memberId, user.id, workspaceId, user.name, user.email, 'owner', null, timestamp);
         db.exec('COMMIT');
       } catch (error) { try { db.exec('ROLLBACK'); } catch {} throw error; }
       const membership = memberships(user.id).find(item => item.slug === slug);
-      return { workspace: { id: workspaceId, slug, name, plan: 'free', timezone: String(input.timezone || 'Asia/Shanghai'), created_at: timestamp }, membership };
+      return { workspace: { id: workspaceId, slug, name, kind, plan: 'free', timezone: String(input.timezone || 'Asia/Shanghai'), created_at: timestamp }, membership };
     },
     logout(req) {
       const token = parseCookies(req.headers.cookie)[SESSION_COOKIE] || req.headers['x-ziwei-session'];

@@ -1,6 +1,6 @@
 # 紫薇
 
-紫薇是一个前后端分离的智能工作区原型，复刻了 AuraBaba `test-111` 的核心工作区、任务、文档、运行时、技能、自动化和连接器流程。项目中的本机 daemon 由我们自己实现，服务名称是 `ziwei_user`。
+紫薇是一个前后端分离的智能工作区原型，复刻了 AuraBaba 示例工作区的核心流程、任务、文档、运行时、技能、自动化和连接器流程。项目中的本机 daemon 由我们自己实现，服务名称是 `ziwei_user`。
 
 ## 维护与 AI 接手
 
@@ -24,7 +24,7 @@ npm test
 npm run build
 npm run dev       # 前端 + 后端
 npm run daemon    # 单独启动 ziwei_user daemon
-npm run ziwei:setup -- --workspace test-111 --api http://127.0.0.1:4178 --health-port 20242
+npm run ziwei:setup -- --workspace <workspace-slug> --api http://127.0.0.1:4178 --health-port 20242
 npm run ziwei:status # 查看本机 ziwei_user 配置和健康状态
 npm run ziwei:version
 npm run ziwei:start  # 已配置时复用现有进程，否则后台启动 ziwei_user
@@ -41,10 +41,10 @@ npm run diagnose  # 单次健康检查
 
 ```powershell
 # PowerShell
-.\scripts\install-ziwei-user.ps1 --workspace test-111 --api http://127.0.0.1:4178 --health-port 20242
+.\scripts\install-ziwei-user.ps1 --workspace <workspace-slug> --api http://127.0.0.1:4178 --health-port 20242
 
 # Windows cmd
-scripts\install-ziwei-user.bat --workspace test-111 --api http://127.0.0.1:4178 --health-port 20242
+scripts\install-ziwei-user.bat --workspace <workspace-slug> --api http://127.0.0.1:4178 --health-port 20242
 ```
 
 引导会把不含令牌的配置写到 `data/ziwei_user.json`（也可用 `ZIWEI_CONFIG` 指定路径），再调用 `scripts/start-ziwei-user.mjs` 复用或后台启动 daemon。`ziwei:status` 同时检查本机 `ziwei_user` 的 `/healthz` 存活和 `/readyz` 就绪状态；只有最近心跳已接入当前工作区才报告在线。配置命令拒绝 `--token`、`--auth`、`--secret` 等凭据参数，也会清理 API 地址中的查询串、凭据和片段，避免把敏感值写入配置或日志。
@@ -56,22 +56,22 @@ scripts\install-ziwei-user.bat --workspace test-111 --api http://127.0.0.1:4178 
 - `GET /healthz`
 - `GET /server.crt`（下载配置的公开服务器证书，不需要登录）
 - `GET /api/workspaces`、`POST /api/workspaces`（登录用户列出/创建项目；创建后访问 `/<slug>/<page>`）
-- `GET /api/workspaces/test-111/summary`
-- `GET|POST /api/workspaces/test-111/tasks`
+- `GET /api/workspaces/<workspace-slug>/summary`
+- `GET|POST /api/workspaces/<workspace-slug>/tasks`
 - `PATCH /api/tasks/:id`、`GET|POST /api/tasks/:id/messages`
 - `POST /api/tasks/:id/state`
-- `GET|POST|PATCH|DELETE /api/workspaces/test-111/automations`（模板、运行记录和执行接口见 `/api/automations/:id/*`）
-- `GET|POST|PATCH|DELETE /api/workspaces/test-111/documents`（单文档操作使用 `/api/documents/:id`）
-- `GET|POST /api/workspaces/test-111/members`
-- `GET|POST /api/workspaces/test-111/devices`
-- `POST /api/workspaces/test-111/heartbeat`（仅接受 `ziwei_user`，用于设备与运行时健康链路）
-- `GET|POST /api/workspaces/test-111/api-keys`、`POST /api/api-keys/:id/revoke`、`POST /api/api-keys/:id/rotate`
+- `GET|POST|PATCH|DELETE /api/workspaces/<workspace-slug>/automations`（模板、运行记录和执行接口见 `/api/automations/:id/*`）
+- `GET|POST|PATCH|DELETE /api/workspaces/<workspace-slug>/documents`（单文档操作使用 `/api/documents/:id`）
+- `GET|POST /api/workspaces/<workspace-slug>/members`
+- `GET|POST /api/workspaces/<workspace-slug>/devices`
+- `POST /api/workspaces/<workspace-slug>/heartbeat`（仅接受 `ziwei_user`，用于设备与运行时健康链路）
+- `GET|POST /api/workspaces/<workspace-slug>/api-keys`、`POST /api/api-keys/:id/revoke`、`POST /api/api-keys/:id/rotate`
 - `GET|POST /api/external/workspaces/:slug/*`（需要 `Authorization: Bearer zwi_...` 或 `X-Ziwei-Api-Key`）
-- `GET|POST /api/workspaces/test-111/notifications`（支持 `unread`/`archived`、未读统计和已读；`/notifications/ws` 优先使用 WebSocket，`/notifications/stream` 提供 SSE fallback）
-- `GET|POST /api/workspaces/test-111/conversations`、`GET|POST /api/conversations/:id/messages`（新对话、消息和附件元数据）
-- `GET|POST /api/workspaces/test-111/skills`、`PATCH /api/skills/:id`
+- `GET|POST /api/workspaces/<workspace-slug>/notifications`（支持 `unread`/`archived`、未读统计和已读；`/notifications/ws` 优先使用 WebSocket，`/notifications/stream` 提供 SSE fallback）
+- `GET|POST /api/workspaces/<workspace-slug>/conversations`、`GET|POST /api/conversations/:id/messages`（新对话、消息和附件元数据）
+- `GET|POST /api/workspaces/<workspace-slug>/skills`、`PATCH /api/skills/:id`
 - `POST /api/skills/:id/uninstall`、`GET /api/skills/:id/versions`、`POST /api/skills/:id/rollback`
-- `GET|POST /api/workspaces/test-111/employees`
+- `GET|POST /api/workspaces/<workspace-slug>/employees`
 - `GET|POST /mcp/v1/workspaces/<slug>/employees`、`PATCH /mcp/v1/workspaces/<slug>/employees/:id`（独立 MCP bearer 令牌）
 - `GET|POST /mcp/v1/workspaces/<slug>/tasks`、`GET|POST /mcp/v1/workspaces/<slug>/documents`（同一工作区限定令牌）
 - `GET /a2a/v1/agents`
@@ -81,13 +81,17 @@ scripts\install-ziwei-user.bat --workspace test-111 --api http://127.0.0.1:4178 
 - `GET /a2a/v1/tasks/:id`
 - `POST /a2a/v1/tasks/:id/messages`
 
+A2A 注册、轮询和任务接口都要求显式传入 workspace；服务端不会把请求落到历史示例工作区。
+
+首次初始化只创建本地账号，不会自动创建或加入 `test-111`。登录后必须在页面选择“新建工作区”，显式创建个人或团队工作区；普通注册则会自动创建独立个人工作区，加入已有团队必须使用有效邀请。
+
 设备与运行时在线状态只由 `ziwei_user` daemon 的心跳决定。超过心跳有效期的设备和运行时会自动显示为离线；AuraBaba 或其他参考 daemon 的进程状态不会参与紫薇页面健康判断。
 
 MCP 管理入口使用独立的 `data/mcp.token` 凭据文件（可用 `ZIWEI_MCP_TOKEN_FILE` 指定路径），文件内必须同时保存 bearer token 和 `workspaces` 工作区白名单。`npm run mcp:token -- --workspace <slug>` 会生成权限最小化的文件；文件和 token 不提交到 Git，也不写入日志。MCP 客户端通过 HTTPS 调用 `/mcp/v1`，服务器路由只调用 repository，不向客户端暴露 SQLite。
 
 ## 命名约定
 
-产品/工作区叫“紫薇”，本机连接 daemon 服务叫 `ziwei_user`，工作区兼容 slug 保留为 `test-111`。任何访问令牌、Cookie、Authorization 和密码都不能写入日志或提交到仓库。
+产品/工作区叫“紫薇”，本机连接 daemon 服务叫 `ziwei_user`，`test-111` 仅作为历史/测试兼容工作区示例，账号注册不会默认加入它；实际工作区必须来自当前会话与成员关系。任何访问令牌、Cookie、Authorization 和密码都不能写入日志或提交到仓库。
 
 ## 界面约定
 

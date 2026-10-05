@@ -19,6 +19,7 @@ test('A2A action endpoints require the machine token while agent card stays disc
     assert.equal((await fetch(`${base}/a2a/v1/actions`, { headers: { accept: 'application/json' } })).status, 401);
     const token = fs.readFileSync(tokenFile, 'utf8').trim();
     assert.ok(token.length >= 40);
+    assert.equal((await fetch(`${base}/a2a/v1/actions`, { headers: { authorization: `Bearer ${token}` } })).status, 400);
     const response = await fetch(`${base}/a2a/v1/actions`, {
       headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
       method: 'POST', body: JSON.stringify({ workspace: 'test-111', agentId: 'ziwei_user', type: 'task.execute', payload: { prompt: 'auth test' } })

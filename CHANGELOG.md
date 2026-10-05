@@ -6,6 +6,20 @@
 
 ### Fixed
 
+- 分离账号、成员关系、工作区类型和设备归属：无邀请注册创建个人工作区，加入团队必须匹配有效邀请；设备配对记录 `owner_user_id`，个人设备查询隔离，团队成员可查看和定向使用团队设备，普通成员不能管理他人设备。
+- 增加 `workspaces.kind` 与 `devices.owner_user_id` 兼容迁移；历史设备归属未知时保留空值，不伪造主人。
+- 清理前端角色/工作区默认文案和 daemon/CLI/A2A 的 `test-111` 用户数据默认；数据库种子和测试兼容 fixture 保留并记录边界。
+- 工作区创建入口支持个人/团队选择；普通团队成员仍可添加并使用自己的设备，但成员邀请、成员编辑和成员移除操作只在 Owner/Admin 页面显示。
+- 首次初始化改为只创建本地账号，不创建或接管任何工作区；登录后由用户显式创建第一个个人/团队工作区，初始化页面不再从 URL 推断 `test-111`。
+- 个人数字员工记录创建者归属，团队成员无法通过列表、任务、会话或配置接口绕过 `visibility='personal'`；个人工作区任务/会话目标设备在带身份的 API 路径强制校验设备主人。
+
+### Verification
+
+- `npm test`：140 passed
+- `npm run lint`：passed（30 source files）
+- `npm run build`：passed（Vite production build）
+### Fixed
+
 - 修复设备目录硬编码创建日期和静态“最后在线”状态，改为读取 SQLite 设备创建时间与心跳时间。
 - 增加设备显示名称编辑入口；配对流程保存名称并把名称传给目标电脑，避免所有设备都显示为 `ziwei_user`。
 - 允许清理历史种子设备，删除时撤销对应设备凭证。
@@ -24,6 +38,16 @@
 - 新增代理解析与继承：`ziwei_user` 在没有显式代理环境变量时，可读取 Windows Internet Settings 的启用代理并传递给本机 CLI。
 - Codex CLI 调用使用 ephemeral 会话，避免桥接器复用遗留 CLI 会话状态。
 
+### Fixed
+
+- 分离账号、成员关系、工作区类型和设备归属：无邀请注册创建个人工作区，加入团队必须匹配有效邀请；设备配对记录 `owner_user_id`，个人设备查询隔离，团队成员可查看和定向使用团队设备，普通成员不能管理他人设备。
+- 增加 `workspaces.kind` 与 `devices.owner_user_id` 兼容迁移；历史设备归属未知时保留空值，不伪造主人。
+- 清理前端角色/工作区默认文案和 daemon/CLI 的 `test-111` 用户数据默认；保留 A2A/测试兼容 fixture 并记录边界。
+
+### Verification
+
+- `npm test`：133 passed
+- `npm run lint`、`npm run build`：待本轮最终验证
 ### Fixed
 
 - 修复 Codex CLI 因 daemon 未继承本机代理而持续等待并最终报告 `A2A action timed out after 600000ms` 的问题。

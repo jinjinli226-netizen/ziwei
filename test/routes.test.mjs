@@ -74,6 +74,7 @@ test('global shell contract exposes cross-page navigation and controls', () => {
   assert.match(appSource, /新建 Markdown/);
   assert.match(appSource, /title="添加设备"|>添加设备</);
   assert.match(appSource, /function createWorkspace\(payload\)/);
+  assert.match(appSource, /const workspaceRole = activeMembership\?\.role \|\| authState\.value\.role/);
   assert.match(shellSource, /emit\('logout'\)/);
   assert.match(appSource, /@logout="logout"/);
   assert.match(appSource, /routePath\(page\.value\)/);

@@ -10,6 +10,7 @@ export function openDatabase({ memory = false, filename = path.join(ROOT, 'data'
   db.exec(`PRAGMA foreign_keys = ON;
     CREATE TABLE IF NOT EXISTS workspaces (
       id TEXT PRIMARY KEY, slug TEXT UNIQUE NOT NULL, name TEXT NOT NULL,
+      kind TEXT NOT NULL DEFAULT 'personal',
       plan TEXT NOT NULL DEFAULT 'free', timezone TEXT NOT NULL DEFAULT 'Asia/Shanghai',
       created_at TEXT NOT NULL
     );
@@ -30,7 +31,7 @@ export function openDatabase({ memory = false, filename = path.join(ROOT, 'data'
     );
     CREATE INDEX IF NOT EXISTS idx_invitations_workspace_status ON invitations(workspace_id,status,created_at);
     CREATE TABLE IF NOT EXISTS devices (
-      id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, name TEXT NOT NULL,
+      id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, owner_user_id TEXT, name TEXT NOT NULL,
       os TEXT NOT NULL, status TEXT NOT NULL, last_seen TEXT, ip_hint TEXT,
       version TEXT, pid INTEGER, bridge_name TEXT, bridge_version TEXT,
       bridge_status TEXT, heartbeat_at TEXT, heartbeat_interval_ms INTEGER,
@@ -141,7 +142,7 @@ export function openDatabase({ memory = false, filename = path.join(ROOT, 'data'
     );
     CREATE INDEX IF NOT EXISTS idx_webhook_delivery_due ON webhook_deliveries(status,next_retry_at);
     CREATE TABLE IF NOT EXISTS employees (
-      id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, name TEXT NOT NULL,
+      id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, owner_user_id TEXT, name TEXT NOT NULL,
       runtime TEXT NOT NULL, model_id TEXT, description TEXT NOT NULL DEFAULT '', visibility TEXT NOT NULL DEFAULT 'workspace',
       skills_json TEXT NOT NULL DEFAULT '[]', instructions TEXT NOT NULL DEFAULT '', runtime_profile TEXT, avatar TEXT, status TEXT NOT NULL DEFAULT 'draft',
       created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
@@ -227,6 +228,8 @@ export function openDatabase({ memory = false, filename = path.join(ROOT, 'data'
       FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
     );`);
   for (const statement of [
+    "ALTER TABLE workspaces ADD COLUMN kind TEXT NOT NULL DEFAULT 'personal'",
+    "ALTER TABLE devices ADD COLUMN owner_user_id TEXT",
     "ALTER TABLE tasks ADD COLUMN description_format TEXT NOT NULL DEFAULT 'plain'",
     "ALTER TABLE tasks ADD COLUMN created_by TEXT NOT NULL DEFAULT 'user'",
     "ALTER TABLE devices ADD COLUMN version TEXT",
@@ -239,6 +242,7 @@ export function openDatabase({ memory = false, filename = path.join(ROOT, 'data'
     "ALTER TABLE devices ADD COLUMN created_at TEXT",
     "ALTER TABLE device_pairing_codes ADD COLUMN device_name TEXT",
     "ALTER TABLE device_pairing_codes ADD COLUMN device_os TEXT",
+    "ALTER TABLE employees ADD COLUMN owner_user_id TEXT",
     "ALTER TABLE employees ADD COLUMN model_id TEXT",
     "ALTER TABLE employees ADD COLUMN description TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE employees ADD COLUMN visibility TEXT NOT NULL DEFAULT 'workspace'",
@@ -295,6 +299,10 @@ export function openDatabase({ memory = false, filename = path.join(ROOT, 'data'
   // created by the remote onboarding flow. Older seed rows intentionally stay
   // null so the UI can label them as historical instead of inventing a date.
   try { db.exec("UPDATE devices SET created_at=(SELECT created_at FROM device_credentials WHERE device_credentials.device_id=devices.id) WHERE created_at IS NULL AND EXISTS (SELECT 1 FROM device_credentials WHERE device_credentials.device_id=devices.id)"); } catch {}
+  // Databases created before workspace kinds existed may already contain real
+  // team members. Preserve that shared scope instead of treating those
+  // workspaces as personal merely because the migration default is personal.
+  try { db.exec("UPDATE workspaces SET kind='team' WHERE kind='personal' AND id IN (SELECT workspace_id FROM members GROUP BY workspace_id HAVING COUNT(*) > 1 OR SUM(CASE WHEN role IN ('member','admin') THEN 1 ELSE 0 END) > 0)"); } catch {}
   seed(db);
   return db;
 }
@@ -305,16 +313,27 @@ function seed(db) {
   // that predates the notifications table.
   db.exec(`INSERT OR IGNORE INTO notifications(id,workspace_id,event_id,actor,action,payload_json,created_at,read_at,archived_at)
     SELECT 'notice_' || id,workspace_id,id,actor,action,payload_json,created_at,NULL,NULL FROM audit_events`);
-  db.prepare(`INSERT OR IGNORE INTO workspaces(id,slug,name,plan,timezone,created_at) VALUES(?,?,?,?,?,?)`)
-    .run('ws-test-111', 'test-111', '紫薇', 'free', 'Asia/Shanghai', now);
+  db.prepare(`INSERT OR IGNORE INTO workspaces(id,slug,name,kind,plan,timezone,created_at) VALUES(?,?,?,?,?,?,?)`)
+    .run('ws-test-111', 'test-111', '紫薇', 'team', 'free', 'Asia/Shanghai', now);
+  // test-111 is a historical/example team workspace. Existing databases may
+  // have been created before workspace kind existed; preserve that identity
+  // explicitly without assigning a kind to any user-created workspace.
+  db.prepare("UPDATE workspaces SET kind='team' WHERE slug='test-111' AND (kind IS NULL OR kind='personal')").run();
+  // A legacy personal workspace with exactly one known owner can safely adopt
+  // its unowned device rows. Team and ambiguous historical rows stay NULL.
+  try { db.exec("UPDATE devices SET owner_user_id=(SELECT m.user_id FROM members m WHERE m.workspace_id=devices.workspace_id AND m.role='owner' AND m.user_id IS NOT NULL LIMIT 1) WHERE owner_user_id IS NULL AND workspace_id IN (SELECT w.id FROM workspaces w WHERE w.kind='personal') AND (SELECT COUNT(*) FROM members m WHERE m.workspace_id=devices.workspace_id AND m.role='owner' AND m.user_id IS NOT NULL)=1"); } catch {}
+  // Personal employees created before ownership was persisted can be safely
+  // attributed only when the workspace has one known owner. Ambiguous/team
+  // history stays NULL and is therefore visible to team admins only.
+  try { db.exec("UPDATE employees SET owner_user_id=(SELECT m.user_id FROM members m WHERE m.workspace_id=employees.workspace_id AND m.role='owner' AND m.user_id IS NOT NULL LIMIT 1) WHERE owner_user_id IS NULL AND workspace_id IN (SELECT w.id FROM workspaces w WHERE w.kind='personal') AND (SELECT COUNT(*) FROM members m WHERE m.workspace_id=employees.workspace_id AND m.role='owner' AND m.user_id IS NOT NULL)=1"); } catch {}
   db.prepare(`INSERT OR IGNORE INTO members(id,workspace_id,name,email,role,avatar,joined_at) VALUES(?,?,?,?,?,?,?)`)
     .run('member-owner', 'ws-test-111', '紫薇用户', 'owner@example.com', 'owner', '25', now);
   // A database seed is a registration record, not proof that the local bridge
   // is running.  The daemon must send the first heartbeat before this device
   // becomes online.  Keeping last_seen NULL also lets a fresh installation
   // render the honest "未连接" state instead of a fabricated current time.
-  db.prepare(`INSERT OR IGNORE INTO devices(id,workspace_id,name,os,status,last_seen,ip_hint,version,pid,bridge_name,bridge_version,bridge_status,heartbeat_at,heartbeat_interval_ms,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .run('device-ziwei-user', 'ws-test-111', '本机设备', 'Windows', 'offline', null, '127.0.0.1', process.env.ZIWEI_USER_VERSION || '0.1.0', null, 'ziwei_user', process.env.ZIWEI_USER_VERSION || '0.1.0', 'offline', null, 15000, now);
+  db.prepare(`INSERT OR IGNORE INTO devices(id,workspace_id,owner_user_id,name,os,status,last_seen,ip_hint,version,pid,bridge_name,bridge_version,bridge_status,heartbeat_at,heartbeat_interval_ms,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .run('device-ziwei-user', 'ws-test-111', null, '本机设备', 'Windows', 'offline', null, '127.0.0.1', process.env.ZIWEI_USER_VERSION || '0.1.0', null, 'ziwei_user', process.env.ZIWEI_USER_VERSION || '0.1.0', 'offline', null, 15000, now);
   db.prepare(`UPDATE devices SET bridge_name=COALESCE(bridge_name,'ziwei_user'), bridge_version=COALESCE(bridge_version,?), bridge_status=COALESCE(bridge_status,'seeded'), heartbeat_at=COALESCE(heartbeat_at,last_seen), version=COALESCE(version,?) WHERE id='device-ziwei-user'`)
     .run(process.env.ZIWEI_USER_VERSION || '0.1.0', process.env.ZIWEI_USER_VERSION || '0.1.0');
   // Databases created by an earlier build used bridge_status=seeded and a

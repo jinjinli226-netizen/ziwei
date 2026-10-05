@@ -1,7 +1,7 @@
 {
   "serviceName": "ziwei_user",
   "agentId": "ziwei_user",
-  "workspace": "test-111",
+  "workspace": "your-workspace",
   "apiBase": "http://127.0.0.1:4178",
   "healthHost": "127.0.0.1",
   "healthPort": 20242,

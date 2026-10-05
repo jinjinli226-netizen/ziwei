@@ -8,7 +8,12 @@ export const API_BASE = resolveApiBase({
 });
 const WORKSPACE_KEY = 'ziwei.workspace';
 export function workspaceSlug() {
-  try { return localStorage.getItem(WORKSPACE_KEY) || 'test-111'; } catch { return 'test-111'; }
+  try {
+    const stored = localStorage.getItem(WORKSPACE_KEY);
+    if (stored) return stored;
+  } catch {}
+  const first = typeof window !== 'undefined' ? window.location.pathname.split('/').filter(Boolean)[0] : '';
+  return first && !['invite', 'me'].includes(first) ? decodeURIComponent(first) : '';
 }
 export function setWorkspaceSlug(slug) {
   const value = String(slug || '').trim();

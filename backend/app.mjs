@@ -39,9 +39,20 @@ function requireRole(...allowed) {
     // one by also sending X-Workspace-Role; first-party session requests may
     // use the header because the local UI has no session middleware yet.
     const headerRole = String(req.headers['x-workspace-role'] || '').toLowerCase();
-    const role = String(req.apiKey ? req.workspaceRole : (req.auth?.role || req.workspaceRole || (req.auth ? '' : headerRole) || 'owner')).toLowerCase();
+    const role = String(req.apiKey ? req.workspaceRole : (req.workspaceRole || req.auth?.role || (req.auth ? '' : headerRole) || 'owner')).toLowerCase();
     if (!allowed.includes(role)) return res.status(403).json({ error: '当前角色没有执行该操作的权限', role, required: allowed });
     req.workspaceRole = role; next();
+  };
+}
+
+function requireDeviceManager(repo) {
+  return (req, res, next) => {
+    const role = String(req.apiKey ? req.workspaceRole : (req.workspaceRole || req.auth?.role || (req.auth ? '' : req.headers['x-workspace-role'] || ''))).toLowerCase();
+    const deviceId = req.params?.id || req.body?.deviceId || req.body?.device_id;
+    if (!deviceId) return requireRole('owner', 'admin', 'member')(req, res, next);
+    const workspaceSlug = req.params?.slug || null;
+    if (repo.canManageDevice?.(deviceId, req.auth?.user_id, role, workspaceSlug) || (!req.auth && ['owner','admin'].includes(role))) { req.workspaceRole = role; return next(); }
+    return res.status(403).json({ error: '只能管理自己拥有的设备，Owner/Admin 可管理团队全部设备' });
   };
 }
 
@@ -53,6 +64,10 @@ function resourceRoleGuard(req, res, next) {
   if (path.startsWith('/auth') || path.startsWith('/external/') || path.startsWith('/daemon/') || path.startsWith('/invitations/lookup/') || path.endsWith('/accept') || path === '/devices/heartbeat' || path.endsWith('/heartbeat') || path.endsWith('/devices/pairing')) return next();
   const sensitiveAdminPath = /(?:settings|api-keys|members|invitations|devices)(?:\/|$)/i.test(path);
   const adminReadPath = /(?:settings|api-keys)(?:\/|$)/i.test(path);
+  if (/(?:^|\/)devices(?:\/|$)/i.test(path)) {
+    if (req.method === 'GET' || req.method === 'HEAD') return requireRole(...READ_ROLES)(req, res, next);
+    return next();
+  }
   const allowed = adminReadPath || (req.method !== 'GET' && req.method !== 'HEAD' && sensitiveAdminPath) ? MANAGE_ROLES : (req.method === 'GET' || req.method === 'HEAD' ? READ_ROLES : WRITE_ROLES);
   return requireRole(...allowed)(req, res, next);
 }
@@ -276,9 +291,9 @@ export function createApp(options = {}) {
   const scheduler = options.memory || options.enableScheduler === false ? null : setInterval(() => { try { repo.tickAutomations(); } catch {} }, Number(process.env.ZIWEI_SCHEDULER_MS || 15000));
   scheduler?.unref?.();
 
-  app.get('/api/workspaces/:slug/summary', (req, res) => res.json(repo.getSummary(req.params.slug)));
+  app.get('/api/workspaces/:slug/summary', (req, res) => res.json(repo.getSummary(req.params.slug, { userId: req.auth?.user_id })));
   app.get('/api/workspaces/:slug/tasks', (req, res) => res.json({ tasks: repo.listTasks(req.params.slug, req.query) }));
-  app.post('/api/workspaces/:slug/tasks', (req, res) => res.status(201).json(repo.createTask(req.params.slug, req.body)));
+  app.post('/api/workspaces/:slug/tasks', (req, res) => res.status(201).json(repo.createTask(req.params.slug, { ...(req.body || {}), actorUserId: req.auth?.user_id, actorRole: req.workspaceRole, enforceDeviceOwnership: true, enforceEmployeeVisibility: true, createdBy: req.auth?.user_id || req.body?.createdBy })));
   app.patch('/api/tasks/:id', (req, res) => res.json(repo.updateTask(req.params.id, req.body)));
   app.post('/api/tasks/:id/state', (req, res) => res.json(repo.transitionTask(req.params.id, req.body.state)));
   app.get('/api/tasks/:id', (req, res) => { const task = repo.getTask(req.params.id); if (!task) return res.status(404).json({error:'Task not found'}); res.json({...task, messages:repo.getTaskMessages(req.params.id)}); });
@@ -293,7 +308,7 @@ export function createApp(options = {}) {
   app.get('/api/tasks/:taskId/attachments/:attachmentId/download', (req, res) => { const attachment = repo.getTaskAttachment(req.params.attachmentId); if (!attachment || attachment.task_id !== req.params.taskId) return res.status(404).json({ error:'Attachment not found' }); res.setHeader('Content-Type', attachment.mime_type || 'application/octet-stream'); res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(attachment.name)}`); res.end(Buffer.from(attachment.content, 'base64')); });
   app.delete('/api/tasks/:taskId/attachments/:attachmentId', (req, res) => { const attachment = repo.getTaskAttachment(req.params.attachmentId); if (!attachment || attachment.task_id !== req.params.taskId) return res.status(404).json({ error:'Attachment not found' }); return res.json({ ok:true, attachment:repo.deleteTaskAttachment(req.params.attachmentId) }); });
 
-  app.get('/api/workspaces/:slug/runtimes', (req, res) => res.json({ runtimes: repo.listRuntimes(req.params.slug) }));
+  app.get('/api/workspaces/:slug/runtimes', (req, res) => res.json({ runtimes: repo.listRuntimes(req.params.slug, { userId: req.auth?.user_id }) }));
   // ziwei_user reports the exact CLI path/version it discovered locally.
   // This endpoint is intentionally heartbeat-equivalent and is only exposed
   // on the local API; it does not accept an Aura bridge identity.
@@ -361,7 +376,7 @@ export function createApp(options = {}) {
   app.post('/api/invitations/:id/revoke', requireRole('owner','admin'), (req, res) => res.json(repo.revokeInvitation(req.params.id)));
   app.get('/api/invitations/lookup/:code', (req, res) => { const invitation = repo.getInvitationByCode(req.params.code); if (!invitation) return res.status(404).json({ error: 'Invitation not found' }); res.json(invitation); });
   app.post('/api/invitations/:code/accept', (req, res) => res.json(repo.acceptInvitation(req.params.code, req.body)));
-  app.get('/api/workspaces/:slug/devices', (req, res) => res.json({ devices: repo.listDevices(req.params.slug) }));
+  app.get('/api/workspaces/:slug/devices', (req, res) => res.json({ devices: repo.listDevices(req.params.slug, { userId: req.auth?.user_id }) }));
   // Any workspace member may pair the computer they control. The short-lived
   // code is scoped to this workspace and can only create one credential; it
   // does not grant administrative access to the workspace.
@@ -371,60 +386,66 @@ export function createApp(options = {}) {
       res.status(201).json(result);
     } catch (error) { next(error); }
   });
-  app.post('/api/workspaces/:slug/devices', requireRole('owner','admin'), (req, res) => res.status(201).json(repo.createDevice(req.params.slug, req.body)));
-  app.patch('/api/devices/:id', requireRole('owner','admin'), (req, res) => res.json(repo.updateDevice(req.params.id, req.body || {})));
-  app.post('/api/devices/:id/disable', requireRole('owner','admin'), (req, res) => res.json(repo.setDeviceStatus(req.params.id, 'disabled')));
-  app.post('/api/devices/:id/enable', requireRole('owner','admin'), (req, res) => res.json(repo.setDeviceStatus(req.params.id, 'pending')));
-  app.delete('/api/devices/:id', requireRole('owner','admin'), (req, res) => res.json(repo.deleteDevice(req.params.id)));
+  app.post('/api/workspaces/:slug/devices', requireRole('owner','admin','member'), (req, res) => res.status(201).json(repo.createDevice(req.params.slug, { ...(req.body || {}), ownerUserId: req.auth?.user_id })));
+  app.patch('/api/devices/:id', requireDeviceManager(repo), (req, res) => res.json(repo.updateDevice(req.params.id, req.body || {})));
+  app.post('/api/devices/:id/disable', requireDeviceManager(repo), (req, res) => res.json(repo.setDeviceStatus(req.params.id, 'disabled')));
+  app.post('/api/devices/:id/enable', requireDeviceManager(repo), (req, res) => res.json(repo.setDeviceStatus(req.params.id, 'pending')));
+  app.delete('/api/devices/:id', requireDeviceManager(repo), (req, res) => res.json(repo.deleteDevice(req.params.id)));
   // Workspace-scoped aliases keep the device API consistent with collection
   // routes while the id-based forms remain convenient for the UI.
-  app.patch('/api/workspaces/:slug/devices/:id', requireRole('owner','admin'), (req, res) => res.json(repo.updateDevice(req.params.id, req.body || {})));
-  app.post('/api/workspaces/:slug/devices/:id/disable', requireRole('owner','admin'), (req, res) => res.json(repo.setDeviceStatus(req.params.id, 'disabled')));
-  app.post('/api/workspaces/:slug/devices/:id/enable', requireRole('owner','admin'), (req, res) => res.json(repo.setDeviceStatus(req.params.id, 'pending')));
-  app.delete('/api/workspaces/:slug/devices/:id', requireRole('owner','admin'), (req, res) => res.json(repo.deleteDevice(req.params.id)));
+  app.patch('/api/workspaces/:slug/devices/:id', requireDeviceManager(repo), (req, res) => res.json(repo.updateDevice(req.params.id, req.body || {})));
+  app.post('/api/workspaces/:slug/devices/:id/disable', requireDeviceManager(repo), (req, res) => res.json(repo.setDeviceStatus(req.params.id, 'disabled')));
+  app.post('/api/workspaces/:slug/devices/:id/enable', requireDeviceManager(repo), (req, res) => res.json(repo.setDeviceStatus(req.params.id, 'pending')));
+  app.delete('/api/workspaces/:slug/devices/:id', requireDeviceManager(repo), (req, res) => res.json(repo.deleteDevice(req.params.id)));
   // The only liveness signal used by the workspace is the local ziwei_user daemon.
   // AuraBaba or any other bridge is deliberately ignored by this endpoint.
   app.post('/api/workspaces/:slug/heartbeat', requireDeviceCredential(repo), (req, res) => res.json({ ok: true, device: repo.heartbeatDevice(req.params.slug, req.body) }));
   app.post('/api/workspaces/:slug/devices/:id/heartbeat', requireDeviceCredential(repo), (req, res) => res.json({ ok: true, device: repo.heartbeatDevice(req.params.slug, { ...req.body, deviceId: req.params.id }) }));
-  app.post('/api/daemon/heartbeat', requireDeviceCredential(repo), (req, res) => { const slug = String(req.body.workspace || req.body.workspace_slug || 'test-111'); res.json({ ok: true, device: repo.heartbeatDevice(slug, req.body) }); });
-  app.post('/api/devices/heartbeat', requireDeviceCredential(repo), (req, res) => { const slug = String(req.body.workspace || req.body.workspace_slug || 'test-111'); res.json({ ok: true, device: repo.heartbeatDevice(slug, req.body) }); });
-  app.get('/api/workspaces/:slug/employees', (req, res) => res.json({ employees: repo.listEmployees(req.params.slug) }));
-  app.post('/api/workspaces/:slug/employees', requireRole('owner','admin','member'), (req, res) => res.status(201).json(repo.createEmployee(req.params.slug, req.body)));
-  app.patch('/api/employees/:id', requireRole('owner','admin','member'), (req, res) => res.json(repo.updateEmployee(req.params.id, req.body || {})));
+  app.post('/api/daemon/heartbeat', requireDeviceCredential(repo), (req, res, next) => { const slug = String(req.body.workspace || req.body.workspace_slug || '').trim(); if (!slug) return res.status(400).json({ error: 'heartbeat 必须明确 workspace' }); try { return res.json({ ok: true, device: repo.heartbeatDevice(slug, req.body) }); } catch (error) { return next(error); } });
+  app.post('/api/devices/heartbeat', requireDeviceCredential(repo), (req, res, next) => { const slug = String(req.body.workspace || req.body.workspace_slug || '').trim(); if (!slug) return res.status(400).json({ error: 'heartbeat 必须明确 workspace' }); try { return res.json({ ok: true, device: repo.heartbeatDevice(slug, req.body) }); } catch (error) { return next(error); } });
+  app.get('/api/workspaces/:slug/employees', (req, res) => res.json({ employees: repo.listEmployees(req.params.slug, { actorUserId: req.auth?.user_id, actorRole: req.workspaceRole, enforceEmployeeVisibility: true }) }));
+  app.post('/api/workspaces/:slug/employees', requireRole('owner','admin','member'), (req, res) => res.status(201).json(repo.createEmployee(req.params.slug, { ...(req.body || {}), ownerUserId: req.auth?.user_id })));
+  const ensureEmployeeVisibleById = (req, idValue) => {
+    const employee = repo.getEmployee(idValue, employeeContext(req));
+    if (!employee) { const error = new Error('数字员工不存在'); error.status = 404; throw error; }
+    return employee;
+  };
+  app.patch('/api/employees/:id', requireRole('owner','admin','member'), (req, res) => { ensureEmployeeVisibleById(req, req.params.id); res.json(repo.updateEmployee(req.params.id, req.body || {})); });
   app.delete('/api/employees/:id', requireRole('owner','admin'), (req, res) => res.json(repo.deleteEmployee(req.params.id)));
-  app.patch('/api/workspaces/:slug/employees/:id', requireRole('owner','admin','member'), (req, res) => res.json(repo.updateEmployee(req.params.id, req.body || {})));
+  app.patch('/api/workspaces/:slug/employees/:id', requireRole('owner','admin','member'), (req, res) => { ensureEmployeeInWorkspace(req.params.slug, req.params.id, req); res.json(repo.updateEmployee(req.params.id, req.body || {})); });
   app.delete('/api/workspaces/:slug/employees/:id', requireRole('owner','admin'), (req, res) => res.json(repo.deleteEmployee(req.params.id)));
   // Employee configuration is kept separate from the ordinary employee list.
   // Environment values are encrypted at rest and returned only as metadata or
   // a mask; custom parameters are JSON values validated by the repository.
-  const ensureEmployeeInWorkspace = (slug, idValue) => {
-    const employee = repo.listEmployees(slug).find(item => item.id === idValue);
+  const employeeContext = req => ({ actorUserId: req.auth?.user_id, actorRole: req.workspaceRole, enforceEmployeeVisibility: true });
+  const ensureEmployeeInWorkspace = (slug, idValue, req) => {
+    const employee = repo.listEmployees(slug, employeeContext(req)).find(item => item.id === idValue);
     if (!employee) { const error = new Error('数字员工不存在'); error.status = 404; throw error; }
     return employee;
   };
-  app.get('/api/workspaces/:slug/employees/:id/environment', requireRole('owner','admin','member'), (req, res) => { ensureEmployeeInWorkspace(req.params.slug, req.params.id); res.json(repo.listEmployeeEnvironment(req.params.id)); });
-  app.post('/api/workspaces/:slug/employees/:id/environment', requireRole('owner','admin'), (req, res) => { ensureEmployeeInWorkspace(req.params.slug, req.params.id); res.status(201).json(repo.upsertEmployeeEnvironment(req.params.id, req.body || {})); });
-  app.patch('/api/workspaces/:slug/employees/:id/environment/:key', requireRole('owner','admin'), (req, res) => { ensureEmployeeInWorkspace(req.params.slug, req.params.id); res.json(repo.upsertEmployeeEnvironment(req.params.id, { ...(req.body || {}), key: req.params.key })); });
-  app.delete('/api/workspaces/:slug/employees/:id/environment/:key', requireRole('owner','admin'), (req, res) => { ensureEmployeeInWorkspace(req.params.slug, req.params.id); res.json(repo.deleteEmployeeEnvironment(req.params.id, req.params.key)); });
-  app.get('/api/workspaces/:slug/employees/:id/custom-params', requireRole('owner','admin','member'), (req, res) => { ensureEmployeeInWorkspace(req.params.slug, req.params.id); res.json(repo.getEmployeeCustomParams(req.params.id)); });
-  app.put('/api/workspaces/:slug/employees/:id/custom-params', requireRole('owner','admin','member'), (req, res) => { ensureEmployeeInWorkspace(req.params.slug, req.params.id); res.json(repo.replaceEmployeeCustomParams(req.params.id, req.body || {})); });
-  app.patch('/api/workspaces/:slug/employees/:id/custom-params', requireRole('owner','admin','member'), (req, res) => { ensureEmployeeInWorkspace(req.params.slug, req.params.id); res.json(repo.replaceEmployeeCustomParams(req.params.id, req.body || {})); });
-  app.get('/api/employees/:id/environment', requireRole('owner','admin','member'), (req, res) => res.json(repo.listEmployeeEnvironment(req.params.id)));
+  app.get('/api/workspaces/:slug/employees/:id/environment', requireRole('owner','admin','member'), (req, res) => { ensureEmployeeInWorkspace(req.params.slug, req.params.id, req); res.json(repo.listEmployeeEnvironment(req.params.id)); });
+  app.post('/api/workspaces/:slug/employees/:id/environment', requireRole('owner','admin'), (req, res) => { ensureEmployeeInWorkspace(req.params.slug, req.params.id, req); res.status(201).json(repo.upsertEmployeeEnvironment(req.params.id, req.body || {})); });
+  app.patch('/api/workspaces/:slug/employees/:id/environment/:key', requireRole('owner','admin'), (req, res) => { ensureEmployeeInWorkspace(req.params.slug, req.params.id, req); res.json(repo.upsertEmployeeEnvironment(req.params.id, { ...(req.body || {}), key: req.params.key })); });
+  app.delete('/api/workspaces/:slug/employees/:id/environment/:key', requireRole('owner','admin'), (req, res) => { ensureEmployeeInWorkspace(req.params.slug, req.params.id, req); res.json(repo.deleteEmployeeEnvironment(req.params.id, req.params.key)); });
+  app.get('/api/workspaces/:slug/employees/:id/custom-params', requireRole('owner','admin','member'), (req, res) => { ensureEmployeeInWorkspace(req.params.slug, req.params.id, req); res.json(repo.getEmployeeCustomParams(req.params.id)); });
+  app.put('/api/workspaces/:slug/employees/:id/custom-params', requireRole('owner','admin','member'), (req, res) => { ensureEmployeeInWorkspace(req.params.slug, req.params.id, req); res.json(repo.replaceEmployeeCustomParams(req.params.id, req.body || {})); });
+  app.patch('/api/workspaces/:slug/employees/:id/custom-params', requireRole('owner','admin','member'), (req, res) => { ensureEmployeeInWorkspace(req.params.slug, req.params.id, req); res.json(repo.replaceEmployeeCustomParams(req.params.id, req.body || {})); });
+  app.get('/api/employees/:id/environment', requireRole('owner','admin','member'), (req, res) => { ensureEmployeeVisibleById(req, req.params.id); res.json(repo.listEmployeeEnvironment(req.params.id)); });
   app.post('/api/employees/:id/environment', requireRole('owner','admin'), (req, res) => res.status(201).json(repo.upsertEmployeeEnvironment(req.params.id, req.body || {})));
   app.patch('/api/employees/:id/environment/:key', requireRole('owner','admin'), (req, res) => res.json(repo.upsertEmployeeEnvironment(req.params.id, { ...(req.body || {}), key: req.params.key })));
   app.delete('/api/employees/:id/environment/:key', requireRole('owner','admin'), (req, res) => res.json(repo.deleteEmployeeEnvironment(req.params.id, req.params.key)));
-  app.get('/api/employees/:id/custom-params', requireRole('owner','admin','member'), (req, res) => res.json(repo.getEmployeeCustomParams(req.params.id)));
-  app.put('/api/employees/:id/custom-params', requireRole('owner','admin','member'), (req, res) => res.json(repo.replaceEmployeeCustomParams(req.params.id, req.body || {})));
-  app.patch('/api/employees/:id/custom-params', requireRole('owner','admin','member'), (req, res) => res.json(repo.replaceEmployeeCustomParams(req.params.id, req.body || {})));
+  app.get('/api/employees/:id/custom-params', requireRole('owner','admin','member'), (req, res) => { ensureEmployeeVisibleById(req, req.params.id); res.json(repo.getEmployeeCustomParams(req.params.id)); });
+  app.put('/api/employees/:id/custom-params', requireRole('owner','admin','member'), (req, res) => { ensureEmployeeVisibleById(req, req.params.id); res.json(repo.replaceEmployeeCustomParams(req.params.id, req.body || {})); });
+  app.patch('/api/employees/:id/custom-params', requireRole('owner','admin','member'), (req, res) => { ensureEmployeeVisibleById(req, req.params.id); res.json(repo.replaceEmployeeCustomParams(req.params.id, req.body || {})); });
   app.get('/api/workspaces/:slug/audit', (req, res) => res.json({ events: repo.listAudit(req.params.slug) }));
   app.get('/api/workspaces/:slug/notifications', (req, res) => res.json({ notifications: repo.listNotifications(req.params.slug, Number(req.query.limit) || 50, { unread: req.query.unread === '1' || req.query.unread === 'true', archived: req.query.archived === '1' || req.query.archived === 'true' }), stats: repo.notificationStats(req.params.slug) }));
   app.post('/api/workspaces/:slug/notifications/read', (req, res) => res.json({ ok:true, stats:repo.markNotificationsRead(req.params.slug, req.body?.ids) }));
   app.post('/api/notifications/:id/archive', (req, res) => res.json(repo.archiveNotification(req.params.id, req.body?.archived !== false)));
   app.get('/api/workspaces/:slug/notifications/stream', (req, res) => { res.statusCode=200; res.setHeader('Content-Type','text/event-stream'); res.setHeader('Cache-Control','no-cache'); res.setHeader('Connection','keep-alive'); res.flushHeaders?.(); const send=event=>res.write(`event: notification\ndata: ${JSON.stringify(event)}\n\n`); const unsubscribe=realtime.subscribe(req.params.slug,send); const timer=setInterval(()=>res.write(': heartbeat\n\n'),15000); req.on('close',()=>{clearInterval(timer);unsubscribe();}); send({type:'ready',workspace:req.params.slug}); });
-  app.get('/api/workspaces/:slug/conversations', (req, res) => res.json({ conversations: repo.listConversations(req.params.slug) }));
-  app.post('/api/workspaces/:slug/conversations', (req, res) => res.status(201).json(repo.createConversation(req.params.slug, req.body || {})));
-  app.get('/api/conversations/:id', (req, res) => { const conversation=repo.getConversation(req.params.id); if(!conversation) return res.status(404).json({error:'Conversation not found'}); res.json(conversation); });
-  app.post('/api/conversations/:id/messages', (req, res) => res.status(201).json(repo.addConversationMessage(req.params.id, req.body || {})));
+  app.get('/api/workspaces/:slug/conversations', (req, res) => res.json({ conversations: repo.listConversations(req.params.slug, employeeContext(req)) }));
+  app.post('/api/workspaces/:slug/conversations', (req, res) => res.status(201).json(repo.createConversation(req.params.slug, { ...(req.body || {}), ...employeeContext(req) })));
+  app.get('/api/conversations/:id', (req, res) => { const conversation=repo.getConversation(req.params.id, employeeContext(req)); if(!conversation) return res.status(404).json({error:'Conversation not found'}); res.json(conversation); });
+  app.post('/api/conversations/:id/messages', (req, res) => res.status(201).json(repo.addConversationMessage(req.params.id, { ...(req.body || {}), actorUserId: req.auth?.user_id, actorRole: req.workspaceRole, enforceDeviceOwnership: true, enforceEmployeeVisibility: true })));
   app.post('/api/conversations/:id/archive', (req, res) => res.json(repo.archiveConversation(req.params.id, req.body?.archived !== false)));
   app.get('/api/workspaces/:slug/settings', (req, res) => res.json({ workspace: repo.getWorkspaceSettings(req.params.slug), security: { accessKeys: repo.listApiKeys(req.params.slug) } }));
   app.get('/api/workspaces/:slug/permissions', (req, res) => res.json({ role: req.workspaceRole || 'owner', roles: repo.resourcePermissions() }));
@@ -443,7 +464,7 @@ export function createApp(options = {}) {
   app.use('/api/external', assertApiKeyWorkspace);
   app.get('/api/external/workspaces/:slug/summary', assertApiKeyWorkspace, (req, res) => res.json(repo.getSummary(req.params.slug)));
   app.get('/api/external/workspaces/:slug/tasks', assertApiKeyWorkspace, (req, res) => res.json({ tasks: repo.listTasks(req.params.slug, req.query) }));
-  app.post('/api/external/workspaces/:slug/tasks', assertApiKeyWorkspace, (req, res) => res.status(201).json(repo.createTask(req.params.slug, req.body)));
+  app.post('/api/external/workspaces/:slug/tasks', assertApiKeyWorkspace, (req, res) => res.status(201).json(repo.createTask(req.params.slug, { ...(req.body || {}), actorRole: req.workspaceRole, enforceDeviceOwnership: true, enforceEmployeeVisibility: true })));
 
   // MCP management API. This namespace is intentionally separate from the
   // browser session API and the broad external API-key namespace. A stdio MCP
@@ -484,17 +505,17 @@ export function createApp(options = {}) {
     try { repo.listEmployees(req.params.slug); res.json({ ok: true, workspace: req.params.slug, capabilities: ['employees', 'tasks', 'documents'], boundary: '窄管理面：员工、任务和文档；客户端通过 HTTPS API，不直接访问 SQLite。' }); }
     catch (error) { res.status(503).json({ ok: false, error: error.message }); }
   });
-  app.get('/mcp/v1/workspaces/:slug/employees', mcpGuard, (req, res) => res.json({ employees: repo.listEmployees(req.params.slug) }));
+  app.get('/mcp/v1/workspaces/:slug/employees', mcpGuard, (req, res) => res.json({ employees: repo.listEmployees(req.params.slug, { actorRole: 'owner', enforceEmployeeVisibility: true }) }));
   app.post('/mcp/v1/workspaces/:slug/employees', mcpGuard, (req, res) => res.status(201).json(repo.createEmployee(req.params.slug, req.body || {})));
   app.patch('/mcp/v1/workspaces/:slug/employees/:id', mcpGuard, (req, res, next) => {
     try {
-      const row = repo.listEmployees(req.params.slug).find(item => item.id === req.params.id);
+      const row = repo.listEmployees(req.params.slug, { actorRole: 'owner', enforceEmployeeVisibility: true }).find(item => item.id === req.params.id);
       if (!row) return res.status(404).json({ error: '数字员工不存在' });
       return res.json(repo.updateEmployee(req.params.id, req.body || {}));
     } catch (error) { return next(error); }
   });
   app.get('/mcp/v1/workspaces/:slug/tasks', mcpGuard, (req, res) => res.json({ tasks: repo.listTasks(req.params.slug, req.query) }));
-  app.post('/mcp/v1/workspaces/:slug/tasks', mcpGuard, (req, res) => res.status(201).json(repo.createTask(req.params.slug, req.body || {})));
+  app.post('/mcp/v1/workspaces/:slug/tasks', mcpGuard, (req, res) => res.status(201).json(repo.createTask(req.params.slug, { ...(req.body || {}), actorRole: 'owner', enforceDeviceOwnership: true, enforceEmployeeVisibility: true })));
   app.get('/mcp/v1/workspaces/:slug/documents', mcpGuard, (req, res) => res.json({ documents: repo.listDocuments(req.params.slug) }));
   app.post('/mcp/v1/workspaces/:slug/documents', mcpGuard, (req, res) => res.status(201).json(repo.createDocument(req.params.slug, req.body || {})));
   app.get('/mcp/v1/documents/:id', mcpGuard, mcpResourceGuard('documents'), (req, res) => res.json(repo.getDocument(req.params.id)));
@@ -508,15 +529,15 @@ export function createApp(options = {}) {
     deviceVerifier: req => verifyDeviceRequest(repo, req)
   }));
   app.get('/a2a/v1/agents', (_req, res) => res.json({ agents: [{ id:'ziwei_user', name:'ziwei_user', description:'紫薇工作区本机 daemon，负责心跳、轮询和 A2A 任务', url:'/a2a/v1', capabilities:['tasks','messages','heartbeat','actions','ack','result'] }] }));
-  app.post('/a2a/v1/register', (req, res) => { const workspace = String(req.body.workspace || req.body.workspace_slug || 'test-111'); res.json({ ok:true, agent:repo.registerA2AAgent(workspace, req.body), card:{id:'ziwei_user',capabilities:['tasks','messages','heartbeat','actions','ack','result']} }); });
-  app.post('/a2a/v1/actions', (req, res) => { const action=repo.createA2AAction(String(req.body.workspace || req.body.workspace_slug || 'test-111'), req.body); res.status(action.duplicate ? 200 : 201).json(action); });
-  app.get('/a2a/v1/actions', (req, res) => { const workspace=String(req.query.workspace || 'test-111'); res.json({ actions:repo.listA2AActions(workspace,{agentId:req.query.agent || req.query.agent_id,status:req.query.status || 'pending',includeAcked:req.query.includeAcked || req.query.include_acked,deviceId:req.deviceCredential?.deviceId}) }); });
+  app.post('/a2a/v1/register', (req, res, next) => { const workspace = String(req.body.workspace || req.body.workspace_slug || '').trim(); if (!workspace) return res.status(400).json({ error: 'A2A register 必须明确 workspace' }); try { return res.json({ ok:true, agent:repo.registerA2AAgent(workspace, req.body), card:{id:'ziwei_user',capabilities:['tasks','messages','heartbeat','actions','ack','result']} }); } catch (error) { return next(error); } });
+  app.post('/a2a/v1/actions', (req, res, next) => { const workspace = String(req.body.workspace || req.body.workspace_slug || '').trim(); if (!workspace) return res.status(400).json({ error: 'A2A action 必须明确 workspace' }); try { const action=repo.createA2AAction(workspace, req.body); return res.status(action.duplicate ? 200 : 201).json(action); } catch (error) { return next(error); } });
+  app.get('/a2a/v1/actions', (req, res, next) => { const workspace=String(req.query.workspace || '').trim(); if (!workspace) return res.status(400).json({ error: 'A2A poll 必须明确 workspace' }); try { return res.json({ actions:repo.listA2AActions(workspace,{agentId:req.query.agent || req.query.agent_id,status:req.query.status || 'pending',includeAcked:req.query.includeAcked || req.query.include_acked,deviceId:req.deviceCredential?.deviceId}) }); } catch (error) { return next(error); } });
   app.post('/a2a/v1/actions/:id/ack', (req, res) => res.json(repo.ackA2AAction(req.params.id, { ...(req.body || {}), deviceId:req.deviceCredential?.deviceId })));
   app.post('/a2a/v1/actions/:id/events', (req, res) => res.status(202).json(repo.recordA2AEvent(req.params.id, { ...(req.body || {}), deviceId:req.deviceCredential?.deviceId })));
   app.get('/a2a/v1/actions/:id/events', (req, res) => res.json({ events: repo.listA2AEvents(req.params.id) }));
   app.post('/a2a/v1/actions/:id/result', (req, res) => res.json(repo.resultA2AAction(req.params.id, { ...(req.body || {}), deviceId:req.deviceCredential?.deviceId })));
-  app.post('/a2a/v1/tasks', (req, res) => { const task = repo.createA2ATask(req.body.workspace || 'test-111', req.body); res.status(201).json({ id:task.id, status:{state:'submitted', timestamp:task.created_at}, task }); });
-  app.get('/a2a/v1/tasks', (req, res) => { const workspace = String(req.query.workspace || 'test-111'); const tasks = repo.listTasks(workspace, { state: req.query.state, q: req.query.q }); res.json({ tasks: tasks.map(task => ({ id: task.id, status: { state: task.state, timestamp: task.updated_at }, task })) }); });
+  app.post('/a2a/v1/tasks', (req, res, next) => { const workspace = String(req.body.workspace || req.body.workspace_slug || '').trim(); if (!workspace) return res.status(400).json({ error: 'A2A task 必须明确 workspace' }); try { const task = repo.createA2ATask(workspace, req.body); return res.status(201).json({ id:task.id, status:{state:'submitted', timestamp:task.created_at}, task }); } catch (error) { return next(error); } });
+  app.get('/a2a/v1/tasks', (req, res, next) => { const workspace = String(req.query.workspace || '').trim(); if (!workspace) return res.status(400).json({ error: 'A2A tasks 必须明确 workspace' }); try { const tasks = repo.listTasks(workspace, { state: req.query.state, q: req.query.q }); return res.json({ tasks: tasks.map(task => ({ id: task.id, status: { state: task.state, timestamp: task.updated_at }, task })) }); } catch (error) { return next(error); } });
   app.get('/a2a/v1/tasks/:id', (req, res) => { const task=repo.getTask(req.params.id); if(!task) return res.status(404).json({error:'Task not found'}); res.json({id:task.id,status:{state:task.state,timestamp:task.updated_at},task,messages:repo.getTaskMessages(task.id)}); });
   app.post('/a2a/v1/tasks/:id/messages', (req, res) => res.status(201).json({ message:repo.addTaskMessage(req.params.id,req.body), accepted:true }));
 

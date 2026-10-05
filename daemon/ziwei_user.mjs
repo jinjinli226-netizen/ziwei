@@ -23,7 +23,7 @@ fs.mkdirSync(runtimeDir, { recursive: true });
 const configPath = resolveConfigPath({ root: ROOT, env: process.env });
 const config = fs.existsSync(configPath)
   ? JSON.parse(fs.readFileSync(configPath, 'utf8'))
-  : { agentId: 'ziwei_user', serviceName: 'ziwei_user', workspace: 'test-111', apiBase: process.env.ZIWEI_API_BASE || 'http://127.0.0.1:4178', healthHost: '127.0.0.1', healthPort: 20242, heartbeatMs: 15000, pollMs: 5000 };
+  : { agentId: 'ziwei_user', serviceName: 'ziwei_user', workspace: process.env.ZIWEI_WORKSPACE || '', apiBase: process.env.ZIWEI_API_BASE || 'http://127.0.0.1:4178', healthHost: '127.0.0.1', healthPort: 20242, heartbeatMs: 15000, pollMs: 5000 };
 const logPath = path.join(logDir, 'daemon.log');
 function log(event, extra = {}) {
   const line = redactSecrets(JSON.stringify({ at: new Date().toISOString(), pid: process.pid, event, service: 'ziwei_user', version: VERSION, agentId: 'ziwei_user', ...extra }));
@@ -53,6 +53,7 @@ const dispatcher = new ActionDispatcher({
 const processing = new Set();
 let lastHeartbeat = null;
 let lastHeartbeatAt = 0;
+let missingWorkspaceLogged = false;
 let lastPoll = null;
 let runtimeDiscovery = discoverInstalledRuntimes({ force: true });
 let heartbeatTimer;
@@ -60,6 +61,10 @@ let pollTimer;
 process.on('uncaughtException', error => log('uncaught_exception', { error: error.stack || error.message }));
 process.on('unhandledRejection', error => log('unhandled_rejection', { error: error?.stack || String(error) }));
 async function heartbeat() {
+  if (!String(config.workspace || '').trim()) {
+    if (!missingWorkspaceLogged) { log('configuration_error', { error: '未配置 workspace，已停止发送心跳' }); missingWorkspaceLogged = true; }
+    return;
+  }
   runtimeDiscovery = discoverInstalledRuntimes({ force: true });
   const payload = {
     workspace: config.workspace,
@@ -123,6 +128,7 @@ async function postActionEvent(actionId, event, data = {}) {
   }
 }
 async function poll() {
+  if (!String(config.workspace || '').trim()) return;
   try {
     const headers = daemonHeaders({ a2a: true });
     const response = await fetch(`${config.apiBase}/a2a/v1/actions?workspace=${encodeURIComponent(config.workspace)}&agent=ziwei_user&status=pending&includeAcked=1`, { headers, signal: AbortSignal.timeout(3000) });

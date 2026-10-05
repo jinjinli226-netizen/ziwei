@@ -15,13 +15,25 @@ test('registered users can create an account after first-run setup and join the 
   try {
     const setup = await fetch(`${base}/api/auth/setup`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name: '首个用户', email: 'owner@example.com', password: 'password-123', workspaceSlug: 'bjc-ops' })
+      body: JSON.stringify({ name: '首个用户', email: 'owner@example.com', password: 'password-123' })
     });
     assert.equal(setup.status, 201);
+    const ownerCookie = String(setup.headers.get('set-cookie')).split(';')[0];
+    const workspace = await fetch(`${base}/api/workspaces`, {
+      method: 'POST', headers: { 'content-type': 'application/json', cookie: ownerCookie },
+      body: JSON.stringify({ name: 'BJC Ops', slug: 'bjc-ops', kind: 'team' })
+    });
+    assert.equal(workspace.status, 201);
+    const invitation = await fetch(`${base}/api/workspaces/bjc-ops/invitations`, {
+      method: 'POST', headers: { 'content-type': 'application/json', cookie: ownerCookie },
+      body: JSON.stringify({ email: 'new@example.com' })
+    });
+    assert.equal(invitation.status, 201);
+    const invitationBody = await invitation.json();
 
     const registered = await fetch(`${base}/api/auth/register`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name: '新用户', email: 'new@example.com', password: 'password-456', workspaceSlug: 'bjc-ops' })
+      body: JSON.stringify({ name: '新用户', email: 'new@example.com', password: 'password-456', workspaceSlug: 'bjc-ops', invitationCode: invitationBody.code })
     });
     assert.equal(registered.status, 201);
     const body = await registered.json();
