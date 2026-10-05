@@ -4,11 +4,11 @@
 >
 > **项目目录**：`D:\灵光爸爸拆解`
 >
-> **文档状态**：以 2026-10-05 工作区实际代码为准；每次结构、运行方式或功能边界发生变化时必须更新本文。
+> **文档状态**：以 2026-10-06 工作区实际代码和服务器发布状态为准；每次结构、运行方式或功能边界发生变化时必须更新本文。
 
 > **当前本机运行态**：项目配置 `data/ziwei_user.json` 指向 `bjc-ops`；已安装全局 CLI 当前用户配置与 `/readyz` 实际显示为 `test-111`，两者必须分别核对，不能把示例工作区当成目标工作区。
 
-> **版本事实**：通用四 Agent daemon 配对改动位于分支 `codex/hermes-independent-profile`（分支名沿用历史命名）；服务器当前已部署提交 `8efd283`，生产 Git `main` 仍保持不变。工作树仍保留既有未跟踪临时文件 `tmp_gzgov.html`。不要在未审查 `git status --short` 前执行 reset、clean 或覆盖式 checkout。
+> **版本事实**：通用四 Agent daemon 配对改动位于分支 `codex/hermes-independent-profile`（分支名沿用历史命名）；服务器当前已部署提交 `a4f4652`（前端代码变更提交 `b67ad15`），生产 Git `main` 仍保持不变。工作树仍保留既有未跟踪临时文件 `tmp_gzgov.html`。不要在未审查 `git status --short` 前执行 reset、clean 或覆盖式 checkout。
 
 ### 2026-10-05 设备安装方式按钮样式（已发布）
 
