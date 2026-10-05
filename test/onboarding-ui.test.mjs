@@ -59,3 +59,9 @@ test('employee creation keeps the four-agent runtime choice generic', () => {
   assert.doesNotMatch(appSource, /employeeForm = ref\(\{name:'',runtime:'Hermes'/);
   assert.match(appSource, /runtime:runtimes\.value\[0\]\?\.name \|\| 'Codex'/);
 });
+
+test('Windows device instructions are valid for cmd.exe quoting', () => {
+  assert.match(appSource, /function cmdLiteral\(value\)/);
+  assert.match(appSource, /windows: `npm install --global \$\{cmdLiteral\(/);
+  assert.doesNotMatch(appSource, /windows: `npm install --global \$\{powerShellLiteral\(/);
+});

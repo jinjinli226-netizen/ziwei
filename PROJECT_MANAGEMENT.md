@@ -17,6 +17,7 @@
 - SQLite 新增 `device_pairing_codes`、`device_credentials` 及索引；配对消费和设备/凭证写入在同一事务中完成，撤销或停用设备后凭证立即失效。成员可以配对自己控制的电脑，但设备删除、停用和其它管理操作仍需 owner/admin。
 - CLI 增加用户目录模式和 npm `bin`：`npm install --global github:jinjinli226-netizen/ziwei#codex/hermes-independent-profile` 后使用 `ziwei_user connect` / `ziwei_user start`；配置、日志、动作状态写入用户目录，执行工作目录取配对时的当前目录，不落到 npm 包缓存。项目 checkout 模式仍保留给本地开发。
 - 前端设备弹窗已改为通用四 Agent 配对引导，移除依赖当前项目路径的 `install-ziwei-user.ps1` 命令；正式域名证书无需额外 CA，私有证书仍可通过 `--tls-ca-file` 指定。
+- Windows 安装命令使用 `cmd.exe` 兼容的双引号；PowerShell 和 macOS/Linux 保留各自 shell 的引号规则，避免把 GitHub 包地址当成本地路径。
 - 新建数字员工时不再把 Hermes 设为默认运行时；页面会优先选择当前 `ziwei_user` 发现的第一个 Agent，四个运行时仍可在同一选择器中分别配置，Hermes profile 只在选择 Hermes 时出现。
 - 本地证据：配对/API 鉴权、四 runtime 心跳、CLI、引导契约和真实子进程 daemon→HTTP heartbeat/A2A 链路均有测试；`test/daemon-link.test.mjs` 使用临时 API、临时用户目录和真实 daemon 进程，确认设备 online 且四类 runtime 均回报。
 - 服务器部署证据：`154.202.118.5:/opt/ziwei` 已快进到 `8c84bb1`，`npm ci --omit=dev`、前端构建和 `ziwei-api` 重启成功；本次部署前 SQLite 备份为 `/opt/ziwei-backups/ziwei.sqlite.20261005T050337Z.before-8c84bb1`，公网 `/healthz=200`，`device_pairing_codes` 与 `device_credentials` 已创建。服务器只运行 API，不代替目标电脑运行 Agent daemon。

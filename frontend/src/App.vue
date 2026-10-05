@@ -407,13 +407,13 @@ const deviceServerCertificateUrl = computed(() => {
   try { return new URL('/server.crt', deviceApiBase.value).toString(); } catch { return `${location.origin}/server.crt`; }
 });
 const deviceWorkspaceSlug = computed(() => String(workspaceSlugValue.value || '').trim() || 'test-111');
-function powerShellLiteral(value) { return `'${String(value).replace(/'/g, "''")}'`; }
+function cmdLiteral(value) { return `"${String(value).replace(/"/g, '\\"')}"`; }
 function shellLiteral(value) { return `'${String(value).replace(/'/g, "'\\''")}'`; }
 const deviceInstallCommands = computed(() => {
   const apiBase = deviceApiBase.value;
   const pairingCode = devicePairing.value?.code || '<页面生成的一次性配对码>';
   return {
-    windows: `npm install --global ${powerShellLiteral('github:jinjinli226-netizen/ziwei#codex/hermes-independent-profile')}\nziwei_user connect --api ${powerShellLiteral(apiBase)} --code ${powerShellLiteral(pairingCode)}\nziwei_user start`,
+    windows: `npm install --global ${cmdLiteral('github:jinjinli226-netizen/ziwei#codex/hermes-independent-profile')}\nziwei_user connect --api ${cmdLiteral(apiBase)} --code ${cmdLiteral(pairingCode)}\nziwei_user start`,
     macos: `npm install --global ${shellLiteral('github:jinjinli226-netizen/ziwei#codex/hermes-independent-profile')}\nziwei_user connect --api ${shellLiteral(apiBase)} --code ${shellLiteral(pairingCode)}\nziwei_user start`,
     linux: `npm install --global ${shellLiteral('github:jinjinli226-netizen/ziwei#codex/hermes-independent-profile')}\nziwei_user connect --api ${shellLiteral(apiBase)} --code ${shellLiteral(pairingCode)}\nziwei_user start`
   };
