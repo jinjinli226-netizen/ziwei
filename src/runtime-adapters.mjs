@@ -15,7 +15,7 @@ import { normalizeRuntimeProfile } from './employee-runtime.mjs';
  */
 
 const WINDOWS_SHELL = process.platform === 'win32' ? 'powershell.exe' : null;
-const PS_ARGS = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File'];
+const PS_ARGS = ['-NoProfile', '-ExecutionPolicy', 'Bypass'];
 const MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
 const VERSION_TIMEOUT_MS = 3000;
 const DISCOVERY_TTL_MS = 30_000;
@@ -105,6 +105,22 @@ export function proxyUrlForChild(env = {}) {
   return configured || windowsInternetProxyUrl();
 }
 
+export function windowsRuntimeCandidates(name, { home = os.homedir() } = {}) {
+  if (process.platform !== 'win32' || String(name || '').toLowerCase() !== 'codex') return [];
+  const root = path.join(home, 'AppData', 'Local', 'OpenAI', 'Codex', 'bin');
+  try {
+    return fs.readdirSync(root, { withFileTypes: true })
+      .filter(entry => entry.isDirectory())
+      .map(entry => path.join(root, entry.name, 'codex.exe'))
+      .filter(candidate => fs.existsSync(candidate))
+      .sort((left, right) => {
+        try { return fs.statSync(right).mtimeMs - fs.statSync(left).mtimeMs; } catch { return 0; }
+      });
+  } catch {
+    return [];
+  }
+}
+
 function commandCandidates(name) {
   // `where.exe` returns the .ps1 path for Codex/Gemini on Windows only when the
   // PowerShell shim is on PATH.  Looking for a same-name .ps1 beside a normal
@@ -115,7 +131,7 @@ function commandCandidates(name) {
     ? String(result.stdout || '').split(/\r?\n/).map(item => item.trim()).filter(Boolean)
     : [];
   const expanded = [];
-  for (const item of paths) {
+  for (const item of [...windowsRuntimeCandidates(name), ...paths]) {
     expanded.push(item);
     if (process.platform === 'win32' && !/\.ps1$/i.test(item) && fs.existsSync(`${item}.ps1`)) expanded.push(`${item}.ps1`);
   }
@@ -133,9 +149,19 @@ function resolveExecutable(name) {
     || null;
 }
 
-function spawnSpec(binary, args) {
-  if (process.platform === 'win32' && /\.ps1$/i.test(binary)) return { command: WINDOWS_SHELL, args: [...PS_ARGS, binary, ...args] };
-  return { command: binary, args };
+function powershellQuote(value) {
+  return `'${String(value).replaceAll("'", "''")}'`;
+}
+
+export function runtimeSpawnSpec(binary, args) {
+  const normalizedArgs = Array.isArray(args) ? args.map(String) : [];
+  if (process.platform === 'win32' && /\.(?:ps1|cmd|bat)$/i.test(binary)) {
+    const entrypoint = path.join(path.dirname(binary), 'node_modules', '@openai', 'codex', 'bin', 'codex.js');
+    if (fs.existsSync(entrypoint)) return { command: process.execPath, args: [entrypoint, ...normalizedArgs] };
+    const command = `& ${powershellQuote(binary)} ${normalizedArgs.map(powershellQuote).join(' ')}`.trim();
+    return { command: WINDOWS_SHELL, args: [...PS_ARGS, '-Command', command] };
+  }
+  return { command: binary, args: normalizedArgs };
 }
 
 function discoveredModels(runtime) {
@@ -174,7 +200,7 @@ function firstLine(value) {
 
 function versionFor(binary, definition) {
   if (!binary) return { version: null, binary: null, status: 'unavailable' };
-  const spec = spawnSpec(binary, definition.versionArgs);
+  const spec = runtimeSpawnSpec(binary, definition.versionArgs);
   try {
     const output = execFileSync(spec.command, spec.args, { encoding: 'utf8', timeout: VERSION_TIMEOUT_MS, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     return { version: firstLine(output), binary, status: firstLine(output) ? 'available' : 'unknown' };
@@ -407,7 +433,7 @@ export function executeRuntime({ runtime, prompt, model = null, profile = null, 
   const content = String(prompt ?? '').trim();
   if (!content) return Promise.reject(new Error('agent.execute 需要非空 prompt'));
   const invocation = definition.invoke({ prompt: content, model: model ? String(model) : null });
-  const spec = spawnSpec(discovered.binary, invocation.args);
+  const spec = runtimeSpawnSpec(discovered.binary, invocation.args);
   const childEnv = { ...process.env, ...env };
   delete childEnv.ZIWEI_CONFIG;
   if (resolvedRuntime === 'Hermes' && profile) {

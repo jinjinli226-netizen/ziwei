@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { hermesProfileHome, normalizeProxyUrl, parseRuntimeStreamLine, proxyUrlForChild, runtimeInvocation } from '../src/runtime-adapters.mjs';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { hermesProfileHome, normalizeProxyUrl, parseRuntimeStreamLine, proxyUrlForChild, runtimeInvocation, runtimeSpawnSpec, windowsRuntimeCandidates } from '../src/runtime-adapters.mjs';
 
 test('Codex nested agent messages become the runtime response', () => {
   const state = { output: '', response: '', bytes: 0, truncated: false, lineBuffer: '' };
@@ -54,6 +57,37 @@ test('Codex invocation opts into provider public reasoning summaries', () => {
   assert.equal(invocation.args.includes('--ephemeral'), true);
   assert.equal(invocation.args.includes('model_reasoning_summary="auto"'), true);
   assert.equal(invocation.args.includes('model_supports_reasoning_summaries=true'), false);
+});
+
+test('Windows Codex discovery includes the current OpenAI app executable outside PATH', () => {
+  if (process.platform !== 'win32') return;
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ziwei-codex-home-'));
+  try {
+    const versioned = path.join(home, 'AppData', 'Local', 'OpenAI', 'Codex', 'bin', 'current-build');
+    fs.mkdirSync(versioned, { recursive: true });
+    const executable = path.join(versioned, 'codex.exe');
+    fs.writeFileSync(executable, 'test');
+    assert.deepEqual(windowsRuntimeCandidates('Codex', { home }), [executable]);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('Windows Codex wrappers bypass PowerShell when stdin marker is required', () => {
+  if (process.platform !== 'win32') return;
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ziwei-codex-wrapper-'));
+  try {
+    const binary = path.join(home, 'codex.ps1');
+    const entrypoint = path.join(home, 'node_modules', '@openai', 'codex', 'bin', 'codex.js');
+    fs.mkdirSync(path.dirname(entrypoint), { recursive: true });
+    fs.writeFileSync(binary, '# test wrapper');
+    fs.writeFileSync(entrypoint, '// test entrypoint');
+    const spec = runtimeSpawnSpec(binary, ['exec', '-']);
+    assert.equal(spec.command, process.execPath);
+    assert.deepEqual(spec.args, [entrypoint, 'exec', '-']);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
 });
 
 test('proxy settings normalize the Windows host:port and protocol-map forms', () => {
