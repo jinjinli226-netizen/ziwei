@@ -34,12 +34,13 @@ export function openDatabase({ memory = false, filename = path.join(ROOT, 'data'
       os TEXT NOT NULL, status TEXT NOT NULL, last_seen TEXT, ip_hint TEXT,
       version TEXT, pid INTEGER, bridge_name TEXT, bridge_version TEXT,
       bridge_status TEXT, heartbeat_at TEXT, heartbeat_interval_ms INTEGER,
+      created_at TEXT,
       FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
     );
     CREATE TABLE IF NOT EXISTS device_pairing_codes (
       id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, code_hash TEXT NOT NULL UNIQUE,
       code_prefix TEXT NOT NULL, expires_at TEXT NOT NULL, created_at TEXT NOT NULL,
-      created_by TEXT, consumed_at TEXT,
+      created_by TEXT, consumed_at TEXT, device_name TEXT, device_os TEXT,
       FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_device_pairing_codes_workspace ON device_pairing_codes(workspace_id, expires_at, consumed_at);
@@ -235,6 +236,9 @@ export function openDatabase({ memory = false, filename = path.join(ROOT, 'data'
     "ALTER TABLE devices ADD COLUMN bridge_status TEXT",
     "ALTER TABLE devices ADD COLUMN heartbeat_at TEXT",
     "ALTER TABLE devices ADD COLUMN heartbeat_interval_ms INTEGER",
+    "ALTER TABLE devices ADD COLUMN created_at TEXT",
+    "ALTER TABLE device_pairing_codes ADD COLUMN device_name TEXT",
+    "ALTER TABLE device_pairing_codes ADD COLUMN device_os TEXT",
     "ALTER TABLE employees ADD COLUMN model_id TEXT",
     "ALTER TABLE employees ADD COLUMN description TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE employees ADD COLUMN visibility TEXT NOT NULL DEFAULT 'workspace'",
@@ -287,6 +291,10 @@ export function openDatabase({ memory = false, filename = path.join(ROOT, 'data'
     ,"ALTER TABLE automations ADD COLUMN executor TEXT NOT NULL DEFAULT 'ziwei_user'"
     ,"ALTER TABLE automations ADD COLUMN webhook_secret TEXT"
   ]) { try { db.exec(statement); } catch {} }
+  // Pairing credentials are the authoritative creation timestamp for devices
+  // created by the remote onboarding flow. Older seed rows intentionally stay
+  // null so the UI can label them as historical instead of inventing a date.
+  try { db.exec("UPDATE devices SET created_at=(SELECT created_at FROM device_credentials WHERE device_credentials.device_id=devices.id) WHERE created_at IS NULL AND EXISTS (SELECT 1 FROM device_credentials WHERE device_credentials.device_id=devices.id)"); } catch {}
   seed(db);
   return db;
 }
@@ -305,8 +313,8 @@ function seed(db) {
   // is running.  The daemon must send the first heartbeat before this device
   // becomes online.  Keeping last_seen NULL also lets a fresh installation
   // render the honest "未连接" state instead of a fabricated current time.
-  db.prepare(`INSERT OR IGNORE INTO devices(id,workspace_id,name,os,status,last_seen,ip_hint,version,pid,bridge_name,bridge_version,bridge_status,heartbeat_at,heartbeat_interval_ms) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .run('device-ziwei-user', 'ws-test-111', 'ziwei_user', 'Windows', 'offline', null, '127.0.0.1', process.env.ZIWEI_USER_VERSION || '0.1.0', null, 'ziwei_user', process.env.ZIWEI_USER_VERSION || '0.1.0', 'offline', null, 15000);
+  db.prepare(`INSERT OR IGNORE INTO devices(id,workspace_id,name,os,status,last_seen,ip_hint,version,pid,bridge_name,bridge_version,bridge_status,heartbeat_at,heartbeat_interval_ms,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .run('device-ziwei-user', 'ws-test-111', '本机设备', 'Windows', 'offline', null, '127.0.0.1', process.env.ZIWEI_USER_VERSION || '0.1.0', null, 'ziwei_user', process.env.ZIWEI_USER_VERSION || '0.1.0', 'offline', null, 15000, now);
   db.prepare(`UPDATE devices SET bridge_name=COALESCE(bridge_name,'ziwei_user'), bridge_version=COALESCE(bridge_version,?), bridge_status=COALESCE(bridge_status,'seeded'), heartbeat_at=COALESCE(heartbeat_at,last_seen), version=COALESCE(version,?) WHERE id='device-ziwei-user'`)
     .run(process.env.ZIWEI_USER_VERSION || '0.1.0', process.env.ZIWEI_USER_VERSION || '0.1.0');
   // Databases created by an earlier build used bridge_status=seeded and a

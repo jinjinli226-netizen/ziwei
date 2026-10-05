@@ -2,6 +2,20 @@
 
 本文件只记录可追溯的项目级变更摘要；详细设计、验证命令和未完成边界见 [PROJECT_MANAGEMENT.md](PROJECT_MANAGEMENT.md)。
 
+## Unreleased（2026-10-05）
+
+### Fixed
+
+- 修复设备目录硬编码创建日期和静态“最后在线”状态，改为读取 SQLite 设备创建时间与心跳时间。
+- 增加设备显示名称编辑入口；配对流程保存名称并把名称传给目标电脑，避免所有设备都显示为 `ziwei_user`。
+- 允许清理历史种子设备，删除时撤销对应设备凭证。
+
+### Verification
+
+- `npm test`：129 passed
+- `npm run lint`：passed
+- `npm run build`：passed
+
 ## Unreleased（2026-10-03）
 
 ### Added

@@ -10,6 +10,14 @@
 
 > **版本事实**：通用四 Agent daemon 配对改动位于分支 `codex/hermes-independent-profile`（分支名沿用历史命名）；服务器当前已部署提交 `9cd62b5`，生产 Git `main` 仍保持不变。工作树仍保留既有未跟踪临时文件 `tmp_gzgov.html`。不要在未审查 `git status --short` 前执行 reset、clean 或覆盖式 checkout。
 
+### 2026-10-05 设备记录可管理性与真实时间
+
+- 问题归属：前端设备目录、SQLite/repository 设备元数据和设备删除 API。复现确认设备目录把“创建时间 2026/9/28”写死在 `frontend/src/App.vue`，`devices` 表没有创建时间字段，且页面没有重命名入口。
+- 修复内容：为设备和配对记录增加创建时间/显示名元数据；配对码保存用户输入的设备名，目标电脑即使不传 `--name` 也会沿用；设备目录显示真实创建时间和最后心跳时间，增加设备编辑入口；历史种子设备可由 owner/admin 删除，删除时同步撤销设备凭证。
+- 本地验证：`npm test` 129/129、`npm run lint`、`npm run build` 均通过；内存 SQLite 验证历史设备删除、配对自定义名称和创建时间持久化。服务器尚未替换本轮代码，当前部署提交仍为 `9cd62b5`。
+- 未验证边界：旧数据库历史种子设备没有可靠的原始创建时间，页面显示“历史设备”；已配对设备会从 `device_credentials.created_at` 回填真实时间。设备删除后目标 daemon 凭证失效，需要重新配对才能恢复连接。
+- 回滚方式：代码使用 `git revert` 回滚本节对应提交；数据库新增列为兼容迁移，保留即可，不需要删除。保留既有 `tmp_gzgov.html` 未跟踪文件。
+
 ### 2026-10-05 通用 ziwei_user daemon 配对（本地与服务器已验证）
 
 - 归属层：daemon、API/A2A 鉴权、SQLite/repository、CLI 和前端设备引导；目标是让任意远程电脑安装同一个 `ziwei_user`，一次配对后发现并连接该电脑上的 Claude、Codex、Gemini、Hermes 四类 Agent。

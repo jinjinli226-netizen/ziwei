@@ -946,12 +946,12 @@ export function createRepository(options = {}) {
       if (row && row.bridge_name && row.bridge_name !== 'ziwei_user') throw new Error('Device is not registered to ziwei_user');
       if (row?.status === 'disabled') return this.listDevices(slug).find(device => device.id === row.id) || null;
       if (!row) {
-        db.prepare('INSERT INTO devices(id,workspace_id,name,os,status,last_seen,ip_hint,version,pid,bridge_name,bridge_version,bridge_status,heartbeat_at,heartbeat_interval_ms) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(deviceId, ws.id, 'ziwei_user', String(input.os || 'Windows'), 'online', timestamp, String(input.ipHint || input.ip_hint || '127.0.0.1'), String(input.version || input.daemon_version || ownVersion()), Number(input.pid) || null, 'ziwei_user', String(input.bridgeVersion || input.bridge_version || input.version || input.daemon_version || ownVersion()), 'online', timestamp, Number(input.heartbeatMs || input.heartbeat_ms) || null);
+        db.prepare('INSERT INTO devices(id,workspace_id,name,os,status,last_seen,ip_hint,version,pid,bridge_name,bridge_version,bridge_status,heartbeat_at,heartbeat_interval_ms,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(deviceId, ws.id, String(input.name || 'ziwei_user').trim() || 'ziwei_user', String(input.os || 'Windows'), 'online', timestamp, String(input.ipHint || input.ip_hint || '127.0.0.1'), String(input.version || input.daemon_version || ownVersion()), Number(input.pid) || null, 'ziwei_user', String(input.bridgeVersion || input.bridge_version || input.version || input.daemon_version || ownVersion()), 'online', timestamp, Number(input.heartbeatMs || input.heartbeat_ms) || null, timestamp);
         row = db.prepare('SELECT * FROM devices WHERE id=?').get(deviceId);
       } else {
         const requestedName = String(input.name || '').trim();
         const heartbeatName = requestedName && requestedName !== 'ziwei_user' ? requestedName : (row.name || 'ziwei_user');
-        db.prepare('UPDATE devices SET name=?,os=?,status=?,last_seen=?,ip_hint=?,version=?,pid=?,bridge_name=?,bridge_version=?,bridge_status=?,heartbeat_at=?,heartbeat_interval_ms=? WHERE id=?').run(heartbeatName, String(input.os || row.os || 'Windows'), 'online', timestamp, String(input.ipHint || input.ip_hint || row.ip_hint || '127.0.0.1'), String(input.version || input.daemon_version || ownVersion()), Number(input.pid) || null, 'ziwei_user', String(input.bridgeVersion || input.bridge_version || input.version || input.daemon_version || ownVersion()), 'online', timestamp, Number(input.heartbeatMs || input.heartbeat_ms) || row.heartbeat_interval_ms || null, row.id);
+        db.prepare('UPDATE devices SET name=?,os=?,status=?,last_seen=?,ip_hint=?,version=?,pid=?,bridge_name=?,bridge_version=?,bridge_status=?,heartbeat_at=?,heartbeat_interval_ms=?,created_at=COALESCE(created_at,?) WHERE id=?').run(heartbeatName, String(input.os || row.os || 'Windows'), 'online', timestamp, String(input.ipHint || input.ip_hint || row.ip_hint || '127.0.0.1'), String(input.version || input.daemon_version || ownVersion()), Number(input.pid) || null, 'ziwei_user', String(input.bridgeVersion || input.bridge_version || input.version || input.daemon_version || ownVersion()), 'online', timestamp, Number(input.heartbeatMs || input.heartbeat_ms) || row.heartbeat_interval_ms || null, timestamp, row.id);
       }
       ensureRuntimeCatalog(ws.id, timestamp);
       db.prepare("UPDATE runtimes SET status='online',last_seen=? WHERE workspace_id=?").run(timestamp, ws.id);
@@ -980,8 +980,8 @@ export function createRepository(options = {}) {
     createDevice(slug, input = {}) {
       const ws=workspace(slug); if (!ws) throw new Error('Workspace not found');
       const name=String(input.name || '新设备').trim() || '新设备';
-      const device={id:id('device'),workspace_id:ws.id,name,os:String(input.os || 'Windows'),status:'pending',last_seen:null,ip_hint:null,version:null,pid:null,bridge_name:null,bridge_version:null,bridge_status:'pending',heartbeat_at:null,heartbeat_interval_ms:null};
-      db.prepare('INSERT INTO devices(id,workspace_id,name,os,status,last_seen,ip_hint,version,pid,bridge_name,bridge_version,bridge_status,heartbeat_at,heartbeat_interval_ms) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(device.id,ws.id,device.name,device.os,device.status,null,null,null,null,null,null,'pending',null,null);
+      const device={id:id('device'),workspace_id:ws.id,name,os:String(input.os || 'Windows'),status:'pending',last_seen:null,ip_hint:null,version:null,pid:null,bridge_name:null,bridge_version:null,bridge_status:'pending',heartbeat_at:null,heartbeat_interval_ms:null,created_at:now()};
+      db.prepare('INSERT INTO devices(id,workspace_id,name,os,status,last_seen,ip_hint,version,pid,bridge_name,bridge_version,bridge_status,heartbeat_at,heartbeat_interval_ms,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(device.id,ws.id,device.name,device.os,device.status,null,null,null,null,null,null,'pending',null,null,device.created_at);
       audit(slug,'user','device.created',{deviceId:device.id}); return device;
     },
     updateDevice(deviceId, input = {}) {
@@ -1004,7 +1004,10 @@ export function createRepository(options = {}) {
     deleteDevice(deviceId) {
       const row=db.prepare('SELECT * FROM devices WHERE id=?').get(deviceId); if (!row) throw new Error('Device not found');
       const ws=db.prepare('SELECT * FROM workspaces WHERE id=?').get(row.workspace_id); if (!ws) throw new Error('Workspace not found');
-      if (row.id === 'device-ziwei-user' && row.status === 'online') throw new Error('在线 ziwei_user 设备不能直接删除，请先停止心跳或停用设备');
+      // Removing a device also revokes its credential through the foreign-key
+      // cascade. This lets an owner clean up stale canonical registrations;
+      // the daemon must pair again before it can reconnect.
+      db.prepare('DELETE FROM device_credentials WHERE device_id=?').run(deviceId);
       db.prepare('DELETE FROM devices WHERE id=?').run(deviceId);
       audit(ws.slug,'user','device.deleted',{deviceId,name:row.name});
       return { id:deviceId, name:row.name, deleted:true };
@@ -1016,8 +1019,10 @@ export function createRepository(options = {}) {
       const createdAt = now();
       const expiresAt = new Date(Date.parse(createdAt) + ttlMs).toISOString();
       const code = `zwi-${crypto.randomBytes(4).toString('hex')}-${crypto.randomBytes(4).toString('hex')}`;
-      db.prepare('INSERT INTO device_pairing_codes(id,workspace_id,code_hash,code_prefix,expires_at,created_at,created_by,consumed_at) VALUES(?,?,?,?,?,?,?,NULL)')
-        .run(id('pairing'), ws.id, hashSecret(code), code.slice(0, 12), expiresAt, createdAt, String(input.createdBy || input.created_by || 'user'));
+      const deviceName = String(input.name || input.deviceName || '远程设备').trim() || '远程设备';
+      const deviceOs = String(input.os || process.platform).trim() || process.platform;
+      db.prepare('INSERT INTO device_pairing_codes(id,workspace_id,code_hash,code_prefix,expires_at,created_at,created_by,consumed_at,device_name,device_os) VALUES(?,?,?,?,?,?,?,NULL,?,?)')
+        .run(id('pairing'), ws.id, hashSecret(code), code.slice(0, 12), expiresAt, createdAt, String(input.createdBy || input.created_by || 'user'), deviceName, deviceOs);
       audit(slug, 'user', 'device.pairing.created', { codePrefix: code.slice(0, 12), expiresAt });
       return { code, code_prefix: code.slice(0, 12), workspace: slug, expires_at: expiresAt };
     },
@@ -1029,8 +1034,8 @@ export function createRepository(options = {}) {
       const timestamp = now();
       const deviceId = id('device');
       const deviceToken = `zwd_${crypto.randomBytes(32).toString('base64url')}`;
-      const deviceName = String(input.name || input.deviceName || '远程设备').trim() || '远程设备';
-      const osName = String(input.os || process.platform).trim() || process.platform;
+      const deviceName = String(input.name || input.deviceName || row.device_name || '远程设备').trim() || '远程设备';
+      const osName = String(input.os || row.device_os || process.platform).trim() || process.platform;
       // Pairing is a credential hand-off. Consume the one-time code and create
       // both durable records in one transaction so an insertion failure can
       // never strand a code without issuing a usable device credential.
@@ -1038,8 +1043,8 @@ export function createRepository(options = {}) {
       try {
         const claim = db.prepare('UPDATE device_pairing_codes SET consumed_at=? WHERE id=? AND consumed_at IS NULL').run(timestamp, row.id);
         if (claim.changes !== 1) throw new Error('设备配对码已被使用');
-        db.prepare('INSERT INTO devices(id,workspace_id,name,os,status,last_seen,ip_hint,version,pid,bridge_name,bridge_version,bridge_status,heartbeat_at,heartbeat_interval_ms) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
-          .run(deviceId, row.workspace_id, deviceName, osName, 'pending', null, null, null, null, 'ziwei_user', null, 'pending', null, null);
+        db.prepare('INSERT INTO devices(id,workspace_id,name,os,status,last_seen,ip_hint,version,pid,bridge_name,bridge_version,bridge_status,heartbeat_at,heartbeat_interval_ms,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+          .run(deviceId, row.workspace_id, deviceName, osName, 'pending', null, null, null, null, 'ziwei_user', null, 'pending', null, null, timestamp);
         db.prepare('INSERT INTO device_credentials(id,device_id,workspace_id,token_hash,token_prefix,created_at,last_seen_at,revoked_at) VALUES(?,?,?,?,?,?,?,NULL)')
           .run(id('device-credential'), deviceId, row.workspace_id, hashSecret(deviceToken), deviceToken.slice(0, 12), timestamp, null);
         db.exec('COMMIT');

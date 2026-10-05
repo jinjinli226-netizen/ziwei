@@ -52,7 +52,16 @@ test('device onboarding provisions a generic ziwei_user daemon with a one-time p
   assert.match(appSource, /devicePairing/);
   assert.match(appSource, /ziwei_user connect/);
   assert.match(appSource, /--code/);
+  assert.match(appSource, /--name/);
   assert.doesNotMatch(appSource, /install-ziwei-user\.ps1/);
+});
+
+test('device management exposes real metadata and a rename action', () => {
+  assert.match(appSource, /formatDeviceDate\(device\.created_at\)/);
+  assert.match(appSource, /deviceLastSeenLabel\(device\)/);
+  assert.match(appSource, /openDeviceEditor\(device\)/);
+  assert.match(appSource, /api\.updateDevice\(draft\.id/);
+  assert.doesNotMatch(appSource, /创建时间 2026\/9\/28/);
 });
 
 test('employee creation keeps the four-agent runtime choice generic', () => {

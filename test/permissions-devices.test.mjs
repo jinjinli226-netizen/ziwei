@@ -6,12 +6,24 @@ import { createApp } from '../backend/app.mjs';
 test('repository supports device rename, disable, enable and delete without reviving disabled heartbeats', () => {
   const repo = createRepository({ memory: true });
   const device = repo.createDevice('test-111', { name: '办公室电脑', os: 'Windows' });
+  assert.match(device.created_at, /^\d{4}-\d{2}-\d{2}T/);
   assert.equal(repo.updateDevice(device.id, { name: '会议室电脑' }).name, '会议室电脑');
   assert.equal(repo.setDeviceStatus(device.id, 'disabled').status, 'disabled');
   assert.equal(repo.heartbeatDevice('test-111', { deviceId: device.id }).status, 'disabled');
   assert.equal(repo.setDeviceStatus(device.id, 'pending').status, 'offline');
   assert.equal(repo.deleteDevice(device.id).deleted, true);
   assert.equal(repo.listDevices('test-111').some(item => item.id === device.id), false);
+});
+
+test('historical seed device can be removed and paired devices keep their custom name', () => {
+  const repo = createRepository({ memory: true });
+  const seed = repo.listDevices('test-111').find(item => item.id === 'device-ziwei-user');
+  assert.equal(repo.deleteDevice(seed.id).deleted, true);
+  const pairing = repo.createDevicePairing('test-111', { name: '研发工作站', os: 'Windows' });
+  const claimed = repo.claimDevicePairing({ code: pairing.code });
+  const paired = repo.listDevices('test-111').find(item => item.id === claimed.deviceId);
+  assert.equal(paired.name, '研发工作站');
+  assert.match(paired.created_at, /^\d{4}-\d{2}-\d{2}T/);
 });
 
 test('workspace resource matrix protects device and API key mutations by role', async () => {
