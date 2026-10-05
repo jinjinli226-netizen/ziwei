@@ -42,10 +42,10 @@ npm run diagnose  # 单次健康检查
 ```powershell
 npm install --global "https://github.com/jinjinli226-netizen/ziwei/archive/refs/heads/codex/hermes-independent-profile.tar.gz"
 ziwei_user connect --api "https://qzelynth.top" --code "<网页生成的一次性配对码>" --name "我的电脑"
-ziwei_user start
+ziwei_user change
 ```
 
-上面第一行只在这台电脑第一次安装时执行；如果 `ziwei_user version` 已经能返回版本号，就跳过第一行。`--name` 是网页设备目录中的显示名称，例如“办公室电脑”，不代表远程账号或新的 Agent。配置、日志和运行时状态写入用户目录，不依赖项目源码目录，也不会安装网页前端依赖。每个工作区都要使用自己的网页一次性配对码；当前 daemon 配置同时只激活一个工作区，切换工作区前应先在网页确认目标工作区，避免把心跳发到错误工作区。正式 HTTPS 域名不需要下载证书；只有私有证书或本地地址才需要在 `ziwei_user setup` 中通过 `--tls-ca-file` 指定公钥证书。
+上面第一行只在这台电脑第一次安装时执行；如果 `ziwei_user version` 已经能返回版本号，就跳过第一行。`--name` 是网页设备目录中的显示名称，例如“办公室电脑”，不代表远程账号或新的 Agent。`connect` 会保存新工作区的配对凭证；`change` 会检查 20242 上是否有旧的 `ziwei_user`，在确认它是本 daemon 后停止旧进程，再启动当前配置，因此切换工作区不需要手动找 PID，也不需要重新安装 npm 包。第一次没有旧 daemon 时，`change` 也可以直接启动；`ziwei_user start` 仍可作为只启动命令。配置、日志和运行时状态写入用户目录，不依赖项目源码目录，也不会安装网页前端依赖。每个工作区都要使用自己的网页一次性配对码；当前 daemon 配置同时只激活一个工作区，切换工作区前应先在网页确认目标工作区，避免把心跳发到错误工作区。正式 HTTPS 域名不需要下载证书；只有私有证书或本地地址才需要在 `ziwei_user setup` 中通过 `--tls-ca-file` 指定公钥证书。
 
 ## API 入口
 

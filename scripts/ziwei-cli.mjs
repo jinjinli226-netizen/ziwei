@@ -18,6 +18,7 @@ function usage() {
   npm run ziwei:setup -- [--workspace <slug>] [--api <url>] [--health-port <port>] [--tls-ca-file <path>]
   ziwei_user connect --api <url> --code <一次性配对码> [--name <设备名>]
   ziwei_user start
+  ziwei_user change
   npm run ziwei:status [--json]
   npm run ziwei:version
 
@@ -237,7 +238,7 @@ async function connect(args) {
   console.log(`设备已连接：${config.workspace}`);
   console.log(`设备 ID：${config.deviceId}`);
   console.log(`配置文件：${file}`);
-  console.log('下一步：启动 ziwei_user daemon，然后在网页刷新设备状态。');
+  console.log('下一步：运行 ziwei_user change 切换并启动当前配置，然后在网页刷新设备状态。');
 }
 
 async function status(args) {
@@ -281,6 +282,54 @@ async function start() {
   await import('./start-ziwei-user.mjs');
 }
 
+function wait(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function waitForDaemonExit(config, pid) {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const health = await probeLocal(config);
+    const observedPid = Number(health.liveness?.pid || health.pid || 0);
+    if (observedPid !== pid) return true;
+    await wait(100);
+  }
+  return false;
+}
+
+async function change() {
+  const current = readConfig();
+  if (!current) throw new Error('change 需要先运行 ziwei_user connect，当前没有本机配置');
+  const config = current.value;
+  const health = await probeLocal(config);
+  const live = health.liveness || {};
+  const liveService = String(live.service || health.service || '').trim();
+  const livePid = Number(live.pid || health.pid || 0);
+
+  if (liveService && liveService !== 'ziwei_user') {
+    throw new Error(`端口 ${config.healthPort || 20242} 已被其他服务占用，未停止该服务`);
+  }
+  if (liveService === 'ziwei_user' && health.ok && String(live.workspace || '') === String(config.workspace || '')) {
+    console.log(`ziwei_user 已是当前工作区：${config.workspace}`);
+    return;
+  }
+  if (liveService === 'ziwei_user' && livePid > 0 && livePid !== process.pid) {
+    try {
+      process.kill(livePid, 'SIGTERM');
+    } catch (error) {
+      if (error?.code !== 'ESRCH') throw new Error(`无法停止旧 ziwei_user 进程（PID ${livePid}）：${error.message}`);
+    }
+    if (!await waitForDaemonExit(config, livePid)) {
+      throw new Error(`旧 ziwei_user 进程（PID ${livePid}）未在 5 秒内退出，请手动结束后重试`);
+    }
+    console.log(`已停止旧 ziwei_user（PID ${livePid}）`);
+  } else if (liveService === 'ziwei_user' && (live.ok || health.processAlive)) {
+    throw new Error(`检测到 ziwei_user 正在运行，但没有可安全停止的 PID；请手动释放端口 ${config.healthPort || 20242}`);
+  }
+
+  console.log(`正在切换到工作区：${config.workspace}`);
+  return start();
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const command = args._[0] || 'help';
@@ -291,6 +340,7 @@ async function main() {
   if (command === 'setup') return setup(args);
   if (command === 'connect') return connect(args);
   if (command === 'start') return start();
+  if (command === 'change') return change();
   if (command === 'status') return status(args);
   if (command === 'help' || command === '--help' || command === '-h') return usage();
   throw new Error(`未知命令: ${command}`);
