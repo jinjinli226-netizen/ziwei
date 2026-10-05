@@ -8,7 +8,7 @@
 
 > **当前本机运行态**：项目配置 `data/ziwei_user.json` 指向 `bjc-ops`；已安装全局 CLI 当前用户配置与 `/readyz` 实际显示为 `test-111`，两者必须分别核对，不能把示例工作区当成目标工作区。
 
-> **版本事实**：通用四 Agent daemon 配对改动位于分支 `codex/hermes-independent-profile`（分支名沿用历史命名）；服务器当前已部署提交 `744fed2`，生产 Git `main` 仍保持不变。工作树仍保留既有未跟踪临时文件 `tmp_gzgov.html`。不要在未审查 `git status --short` 前执行 reset、clean 或覆盖式 checkout。
+> **版本事实**：通用四 Agent daemon 配对改动位于分支 `codex/hermes-independent-profile`（分支名沿用历史命名）；服务器当前已部署提交 `1fe9df7`，生产 Git `main` 仍保持不变。工作树仍保留既有未跟踪临时文件 `tmp_gzgov.html`。不要在未审查 `git status --short` 前执行 reset、clean 或覆盖式 checkout。
 
 ### 2026-10-05 账号、团队与设备可见性架构验收（本地未发布）
 
@@ -17,7 +17,8 @@
 - 设备行为：配对码创建者写入 `devices.owner_user_id`。个人工作区按当前用户过滤设备；团队成员可以查看团队全部设备并在任务/会话中选择目标设备。只有设备主人或团队 Owner/Admin 能编辑、停用和删除设备；后端同时校验设备所属工作区，前端隐藏普通成员的成员管理操作。
 - 兼容迁移：已有多成员工作区自动标记为团队；只有一个明确 Owner 的个人工作区历史设备会回填主人，归属不明确的历史设备保留 `NULL`。不会把 `test-111` 或固定 Owner 写入新账号默认值。
 - 数字员工行为：`visibility='personal'` 的员工写入创建者 `owner_user_id`；个人员工在团队工作区对普通成员不可见，任务、会话和配置读取也由后端校验，不能只靠前端隐藏。个人工作区的任务/会话目标设备在有身份的 API 路径强制匹配设备主人；Owner/Admin 或 MCP 管理入口才可使用管理级目标。
-- 本地验证：`npm test` 140/140、`npm run lint`、`npm run build` 均通过；新增首次初始化无工作区、拒绝领取历史示例工作区、注册、邀请、个人隔离、团队定向设备、个人数字员工可见性和匿名设备目标拒绝断言。当前改动尚未提交、推送 GitHub 或部署服务器。
+- 本地验证：`npm test` 140/140、`npm run lint`、`npm run build` 均通过；新增首次初始化无工作区、拒绝领取历史示例工作区、注册、邀请、个人隔离、团队定向设备、个人数字员工可见性和匿名设备目标拒绝断言。
+- 服务器发布：提交 `1fe9df7` 已推送 `origin/codex/hermes-independent-profile` 并快进 `/opt/ziwei`；部署前 SQLite 备份为 `/opt/ziwei-backups/ziwei.sqlite.20261005T102338Z.before-1fe9df7`。服务器 `npm ci`、`npm run build` 成功，`ziwei-api` active，`employees.owner_user_id` 迁移列已确认；公网 `/healthz=200`、页面 `200`、未授权 MCP `401`。本次没有重启目标电脑上的 ziwei_user daemon。
 - 回滚方式：发布前先将本轮代码形成独立提交，随后使用 `git revert <commit>` 回滚代码；SQLite 新增列是兼容迁移，不删除既有数据。保留未跟踪的 `tmp_gzgov.html`。
 
 ### 2026-10-05 设备记录可管理性与真实时间

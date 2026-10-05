@@ -18,6 +18,7 @@
 - `npm test`：140 passed
 - `npm run lint`：passed（30 source files）
 - `npm run build`：passed（Vite production build）
+- 已推送 `1fe9df7` 到 `codex/hermes-independent-profile` 并部署服务器；SQLite 备份为 `/opt/ziwei-backups/ziwei.sqlite.20261005T102338Z.before-1fe9df7`，公网 `/healthz` 和前端入口均返回 200。
 ### Fixed
 
 - 修复设备目录硬编码创建日期和静态“最后在线”状态，改为读取 SQLite 设备创建时间与心跳时间。
