@@ -10,6 +10,12 @@
 
 > **版本事实**：通用四 Agent daemon 配对改动位于分支 `codex/hermes-independent-profile`（分支名沿用历史命名）；服务器当前已部署提交 `0a174e1`，生产 Git `main` 仍保持不变。工作树仍保留既有未跟踪临时文件 `tmp_gzgov.html`。不要在未审查 `git status --short` 前执行 reset、clean 或覆盖式 checkout。
 
+### 2026-10-05 设备安装方式按钮样式（待发布）
+
+- 问题归属：前端设备 onboarding 样式。安装方式按钮缺少专用 CSS，浏览器显示成原生按钮；已选状态没有视觉反馈，容易误以为点击无效。
+- 修复内容：为“电脑已安装 ziwei_user / 这台电脑第一次安装”增加分段按钮、hover、active、focus 和说明文字样式；不改配对逻辑或 daemon 行为。
+- 本地验证：`npm test` 141/141、`npm run lint`、`npm run build` 均通过。
+
 ### 2026-10-05 同一台电脑重复配对说明（已发布）
 
 - 问题归属：前端设备 onboarding 与 CLI 使用说明。复现确认设备弹窗默认把首次安装命令和每次工作区配对命令放在一起，容易让用户在同一台电脑切换工作区时重复执行 `npm install`；默认名称“远程设备”也没有说明其只是网页显示名称。
