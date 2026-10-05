@@ -8,19 +8,21 @@
 
 > **当前本机运行态**：项目配置 `data/ziwei_user.json` 指向 `bjc-ops`；已安装全局 CLI 当前用户配置与 `/readyz` 实际显示为 `test-111`，两者必须分别核对，不能把示例工作区当成目标工作区。
 
-> **版本事实**：通用四 Agent daemon 配对改动位于分支 `codex/hermes-independent-profile`（分支名沿用历史命名）；服务器当前已部署提交 `0a174e1`，生产 Git `main` 仍保持不变。工作树仍保留既有未跟踪临时文件 `tmp_gzgov.html`。不要在未审查 `git status --short` 前执行 reset、clean 或覆盖式 checkout。
+> **版本事实**：通用四 Agent daemon 配对改动位于分支 `codex/hermes-independent-profile`（分支名沿用历史命名）；服务器当前已部署提交 `8efd283`，生产 Git `main` 仍保持不变。工作树仍保留既有未跟踪临时文件 `tmp_gzgov.html`。不要在未审查 `git status --short` 前执行 reset、clean 或覆盖式 checkout。
 
-### 2026-10-05 设备安装方式按钮样式（待发布）
+### 2026-10-05 设备安装方式按钮样式（已发布）
 
 - 问题归属：前端设备 onboarding 样式。安装方式按钮缺少专用 CSS，浏览器显示成原生按钮；已选状态没有视觉反馈，容易误以为点击无效。
 - 修复内容：为“电脑已安装 ziwei_user / 这台电脑第一次安装”增加分段按钮、hover、active、focus 和说明文字样式；不改配对逻辑或 daemon 行为。
 - 本地验证：`npm test` 141/141、`npm run lint`、`npm run build` 均通过。
+- 服务器发布：随提交 `8efd283` 推送并快进 `/opt/ziwei`；服务器构建成功并重启 `ziwei-api`，本机和公网 `/healthz` 均 200。
 
-### 2026-10-05 daemon 工作区切换命令（待发布）
+### 2026-10-05 daemon 工作区切换命令（已发布）
 
 - 问题归属：CLI/daemon 生命周期。`connect` 更新了新工作区凭证，但旧 daemon 仍占用 20242，`start` 只能拒绝启动，用户需要手动找 PID。
 - 修复内容：新增 `ziwei_user change`；它只在本地健康接口确认端口属于 `ziwei_user` 且能读取 PID 时停止旧进程，然后启动当前配置。没有旧进程时直接启动；其他服务占用端口时明确拒绝处理。不会重复安装 npm 包，也不改服务器数据库。
 - 验证：CLI 测试覆盖“已是当前工作区”和“停止冲突 daemon 后启动新工作区”的真实本地链路。
+- 服务器发布：CLI、README 与前端样式已随提交 `8efd283` 同步；服务器仅提供网页/API，目标电脑上的全局 CLI 需更新一次安装包后才有 `change` 子命令。
 
 ### 2026-10-05 同一台电脑重复配对说明（已发布）
 
