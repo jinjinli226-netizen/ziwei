@@ -56,6 +56,8 @@ test('ziwei_user CLI persists and validates the pinned TLS CA file', async () =>
 test('ziwei_user CLI reports its version', async () => {
   const { stdout } = await run(process.execPath, [cli, 'version'], { cwd: root });
   assert.match(stdout.trim(), /^ziwei_user \d+\.\d+\.\d+$/);
+  const flag = await run(process.execPath, [cli, '--version'], { cwd: root });
+  assert.match(flag.stdout.trim(), /^ziwei_user \d+\.\d+\.\d+$/);
 });
 
 test('ziwei_user CLI exchanges a pairing code without requiring the project database', async t => {

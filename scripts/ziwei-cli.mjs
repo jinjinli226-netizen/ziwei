@@ -284,7 +284,7 @@ async function start() {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const command = args._[0] || 'help';
-  if (command === 'version' || command === '--version' || command === '-v') {
+  if (command === 'version' || command === '--version' || command === '-v' || args.version === true || args.v === true) {
     console.log(`ziwei_user ${VERSION}`);
     return;
   }

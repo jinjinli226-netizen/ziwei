@@ -409,13 +409,14 @@ const deviceServerCertificateUrl = computed(() => {
 const deviceWorkspaceSlug = computed(() => String(workspaceSlugValue.value || '').trim() || 'test-111');
 function cmdLiteral(value) { return `"${String(value).replace(/"/g, '\\"')}"`; }
 function shellLiteral(value) { return `'${String(value).replace(/'/g, "'\\''")}'`; }
+const daemonPackageSource = 'https://github.com/jinjinli226-netizen/ziwei/archive/refs/heads/codex/hermes-independent-profile.tar.gz';
 const deviceInstallCommands = computed(() => {
   const apiBase = deviceApiBase.value;
   const pairingCode = devicePairing.value?.code || '<页面生成的一次性配对码>';
   return {
-    windows: `npm install --global ${cmdLiteral('github:jinjinli226-netizen/ziwei#codex/hermes-independent-profile')}\nziwei_user connect --api ${cmdLiteral(apiBase)} --code ${cmdLiteral(pairingCode)}\nziwei_user start`,
-    macos: `npm install --global ${shellLiteral('github:jinjinli226-netizen/ziwei#codex/hermes-independent-profile')}\nziwei_user connect --api ${shellLiteral(apiBase)} --code ${shellLiteral(pairingCode)}\nziwei_user start`,
-    linux: `npm install --global ${shellLiteral('github:jinjinli226-netizen/ziwei#codex/hermes-independent-profile')}\nziwei_user connect --api ${shellLiteral(apiBase)} --code ${shellLiteral(pairingCode)}\nziwei_user start`
+    windows: `npm install --global ${cmdLiteral(daemonPackageSource)}\nziwei_user connect --api ${cmdLiteral(apiBase)} --code ${cmdLiteral(pairingCode)}\nziwei_user start`,
+    macos: `npm install --global ${shellLiteral(daemonPackageSource)}\nziwei_user connect --api ${shellLiteral(apiBase)} --code ${shellLiteral(pairingCode)}\nziwei_user start`,
+    linux: `npm install --global ${shellLiteral(daemonPackageSource)}\nziwei_user connect --api ${shellLiteral(apiBase)} --code ${shellLiteral(pairingCode)}\nziwei_user start`
   };
 });
 async function copyDeviceCommand() { const command = deviceInstallCommands.value[deviceInstallTab.value]; try { await navigator.clipboard?.writeText(command); } catch {} copiedDeviceCommand.value=deviceInstallTab.value; notify('安装命令已复制'); }

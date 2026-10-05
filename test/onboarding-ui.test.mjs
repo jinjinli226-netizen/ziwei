@@ -63,5 +63,6 @@ test('employee creation keeps the four-agent runtime choice generic', () => {
 test('Windows device instructions are valid for cmd.exe quoting', () => {
   assert.match(appSource, /function cmdLiteral\(value\)/);
   assert.match(appSource, /windows: `npm install --global \$\{cmdLiteral\(/);
+  assert.match(appSource, /archive\/refs\/heads\/codex\/hermes-independent-profile\.tar\.gz/);
   assert.doesNotMatch(appSource, /windows: `npm install --global \$\{powerShellLiteral\(/);
 });
