@@ -4,17 +4,17 @@
 >
 > **项目目录**：`D:\灵光爸爸拆解`
 >
-> **文档状态**：以 2026-10-04 工作区实际代码为准；每次结构、运行方式或功能边界发生变化时必须更新本文。
+> **文档状态**：以 2026-10-05 工作区实际代码为准；每次结构、运行方式或功能边界发生变化时必须更新本文。
 
-> **当前本机运行态**：当前 `ziwei_user` 已接入工作区 `bjc-ops`。文中的 `test-111` 是默认示例和历史验收 fixture；接手时必须先读取 `data/ziwei_user.json` 与 `/readyz`，不要把示例工作区当成当前运行工作区。
+> **当前本机运行态**：项目配置 `data/ziwei_user.json` 指向 `bjc-ops`；已安装全局 CLI 当前用户配置与 `/readyz` 实际显示为 `test-111`，两者必须分别核对，不能把示例工作区当成目标工作区。
 
-> **版本事实**：通用四 Agent daemon 配对改动位于分支 `codex/hermes-independent-profile`（分支名沿用历史命名）；服务器当前已部署提交 `9cd62b5`，生产 Git `main` 仍保持不变。工作树仍保留既有未跟踪临时文件 `tmp_gzgov.html`。不要在未审查 `git status --short` 前执行 reset、clean 或覆盖式 checkout。
+> **版本事实**：通用四 Agent daemon 配对改动位于分支 `codex/hermes-independent-profile`（分支名沿用历史命名）；服务器当前已部署提交 `744fed2`，生产 Git `main` 仍保持不变。工作树仍保留既有未跟踪临时文件 `tmp_gzgov.html`。不要在未审查 `git status --short` 前执行 reset、clean 或覆盖式 checkout。
 
 ### 2026-10-05 设备记录可管理性与真实时间
 
 - 问题归属：前端设备目录、SQLite/repository 设备元数据和设备删除 API。复现确认设备目录把“创建时间 2026/9/28”写死在 `frontend/src/App.vue`，`devices` 表没有创建时间字段，且页面没有重命名入口。
 - 修复内容：为设备和配对记录增加创建时间/显示名元数据；配对码保存用户输入的设备名，目标电脑即使不传 `--name` 也会沿用；设备目录显示真实创建时间和最后心跳时间，增加设备编辑入口；历史种子设备可由 owner/admin 删除，删除时同步撤销设备凭证。
-- 本地验证：`npm test` 129/129、`npm run lint`、`npm run build` 均通过；内存 SQLite 验证历史设备删除、配对自定义名称和创建时间持久化。服务器尚未替换本轮代码，当前部署提交仍为 `9cd62b5`。
+- 本地验证：`npm test` 129/129、`npm run lint`、`npm run build` 均通过；内存 SQLite 验证历史设备删除、配对自定义名称和创建时间持久化。服务器已快进到 `744fed2`，SQLite 备份为 `/opt/ziwei-backups/ziwei.sqlite.20261005T063349Z.before-744fed2`，`ziwei-api` active，公网 `/healthz=200`，数据库迁移列已确认。
 - 未验证边界：旧数据库历史种子设备没有可靠的原始创建时间，页面显示“历史设备”；已配对设备会从 `device_credentials.created_at` 回填真实时间。设备删除后目标 daemon 凭证失效，需要重新配对才能恢复连接。
 - 回滚方式：代码使用 `git revert` 回滚本节对应提交；数据库新增列为兼容迁移，保留即可，不需要删除。保留既有 `tmp_gzgov.html` 未跟踪文件。
 
@@ -29,7 +29,7 @@
 - Windows 安装命令使用 `cmd.exe` 兼容的双引号；PowerShell 和 macOS/Linux 保留各自 shell 的引号规则，避免把 GitHub 包地址当成本地路径。
 - 新建数字员工时不再把 Hermes 设为默认运行时；页面会优先选择当前 `ziwei_user` 发现的第一个 Agent，四个运行时仍可在同一选择器中分别配置，Hermes profile 只在选择 Hermes 时出现。
 - 本地证据：配对/API 鉴权、四 runtime 心跳、CLI、引导契约和真实子进程 daemon→HTTP heartbeat/A2A 链路均有测试；`test/daemon-link.test.mjs` 使用临时 API、临时用户目录和真实 daemon 进程，确认设备 online 且四类 runtime 均回报。
-- 服务器部署证据：`154.202.118.5:/opt/ziwei` 已快进到 `9cd62b5`，前端构建和 `ziwei-api` 重启成功；本次部署前 SQLite 备份为 `/opt/ziwei-backups/ziwei.sqlite.20261005T054829Z.before-9cd62b5`，公网 `/healthz=200`，`device_pairing_codes` 与 `device_credentials` 已创建。服务器只运行 API，不代替目标电脑运行 Agent daemon。
+- 服务器部署证据：`154.202.118.5:/opt/ziwei` 曾快进到 `9cd62b5` 完成通用 daemon 发布；随后设备元数据修复已快进到 `744fed2`，前端构建和 `ziwei-api` 重启成功，服务器只运行 API，不代替目标电脑运行 Agent daemon。
 - 兼容边界：生产 API 默认要求设备凭证，已有电脑上的旧 `data/ziwei_user.json` 没有 `deviceToken` 时会保持离线；必须从网页生成一次性配对码，在目标电脑安装当前分支的 `ziwei_user` 后执行 `ziwei_user connect` 再 `ziwei_user start`。当前服务器部署已验证服务健康和数据库迁移，真实目标电脑重新配对仍需在该电脑上完成。
 - 当前未覆盖：多设备对同一工作区的 runtime metadata 聚合和按设备的员工调度仍需后续设计；本轮不把第二台电脑的状态伪装成第一台，也不以全局 A2A token 代替新设备凭证。回滚方式是恢复本节涉及的代码提交并恢复 `/opt/ziwei-backups/ziwei.sqlite.20261005T050337Z.before-8c84bb1`。
 
@@ -40,7 +40,7 @@
 当前通过的本地质量门槛：
 
 ```text
-npm test       127 passed
+npm test       129 passed
 npm run lint   passed
 npm run build  passed
 ```
