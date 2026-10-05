@@ -37,7 +37,7 @@ npm run diagnose  # 单次健康检查
 
 ## ziwei_user 设备连接
 
-创建工作区和管理项目不需要先连接设备。只有要让某台电脑运行数字员工时，才在网页的“添加设备”里生成一次性配对码，在目标电脑安装独立的 `ziwei_user` CLI 并配对：
+创建工作区和管理项目不需要先连接设备。只有要让某台电脑运行数字员工时，才在网页的“添加设备”里生成一次性配对码。`ziwei_user` 在每台电脑上只需安装一次；后续给同一台电脑连接新的工作区时，直接运行 `connect` 和 `start`，不要重复执行 `npm install`。
 
 ```powershell
 npm install --global "https://github.com/jinjinli226-netizen/ziwei/archive/refs/heads/codex/hermes-independent-profile.tar.gz"
@@ -45,7 +45,7 @@ ziwei_user connect --api "https://qzelynth.top" --code "<网页生成的一次�
 ziwei_user start
 ```
 
-配置、日志和运行时状态写入用户目录，不依赖项目源码目录，也不会安装网页前端依赖。配对码只使用一次，连接成功后设备会真实回报 Codex、Claude、Gemini、Hermes 等 Agent 的心跳。正式 HTTPS 域名不需要下载证书；只有私有证书或本地地址才需要在 `ziwei_user setup` 中通过 `--tls-ca-file` 指定公钥证书。
+上面第一行只在这台电脑第一次安装时执行；如果 `ziwei_user version` 已经能返回版本号，就跳过第一行。`--name` 是网页设备目录中的显示名称，例如“办公室电脑”，不代表远程账号或新的 Agent。配置、日志和运行时状态写入用户目录，不依赖项目源码目录，也不会安装网页前端依赖。每个工作区都要使用自己的网页一次性配对码；当前 daemon 配置同时只激活一个工作区，切换工作区前应先在网页确认目标工作区，避免把心跳发到错误工作区。正式 HTTPS 域名不需要下载证书；只有私有证书或本地地址才需要在 `ziwei_user setup` 中通过 `--tls-ca-file` 指定公钥证书。
 
 ## API 入口
 
