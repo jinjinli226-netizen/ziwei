@@ -10,11 +10,12 @@
 
 > **版本事实**：通用四 Agent daemon 配对改动位于分支 `codex/hermes-independent-profile`（分支名沿用历史命名）；服务器当前已部署提交 `8153b36`，生产 Git `main` 仍保持不变。工作树仍保留既有未跟踪临时文件 `tmp_gzgov.html`。不要在未审查 `git status --short` 前执行 reset、clean 或覆盖式 checkout。
 
-### 2026-10-05 新工作区设备引导降噪（本地待发布）
+### 2026-10-05 新工作区设备引导降噪（已发布）
 
 - 问题归属：前端 onboarding。复现确认 `load()` 在任何没有在线设备的工作区自动打开“连接本机 ziwei_user”弹窗，把可选的设备接入误当成创建项目的前置步骤；正式 HTTPS 页面仍把证书下载入口放在主要信息区，增加了不必要的操作。
 - 修复内容：创建或打开工作区不再自动弹出设备连接窗口；用户需要运行数字员工时，再从“添加设备”主动生成一次性配对码。设备弹窗明确说明连接是可选的，并仅在本地地址、IP 或非 HTTPS 地址显示额外证书下载；正式 HTTPS 域名直接提示无需下载证书。CLI 配对命令和真实在线状态保持不变。
 - 本地验证：新增 onboarding 回归断言后，`npm test` 141/141、`npm run lint`、`npm run build` 均通过；构建产物不再包含项目路径安装脚本。
+- 服务器发布：提交 `88d217e` 已推送到 `origin/codex/hermes-independent-profile` 并快进 `/opt/ziwei`；部署前 SQLite 备份为 `/opt/ziwei-backups/ziwei.sqlite.before-88d217e`。服务器构建成功并重启 `ziwei-api`，本机回环 `/healthz=200`；公网 `https://qzelynth.top/healthz=200`，正式构建资源确认包含可选设备说明、正式 HTTPS 证书提示和通用 `ziwei_user connect`，不包含旧项目路径安装脚本。
 - 回滚方式：使用 `git revert <本轮提交>` 回滚前端与文档；本轮不改 SQLite schema 或设备凭证，不需要数据库回滚。保留既有未跟踪 `tmp_gzgov.html`。
 
 ### 2026-10-05 账号、团队与设备可见性架构验收（本地未发布）
