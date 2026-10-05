@@ -8,18 +8,20 @@
 
 > **当前本机运行态**：当前 `ziwei_user` 已接入工作区 `bjc-ops`。文中的 `test-111` 是默认示例和历史验收 fixture；接手时必须先读取 `data/ziwei_user.json` 与 `/readyz`，不要把示例工作区当成当前运行工作区。
 
-> **版本事实**：本次 Hermes 独立人格改动位于分支 `codex/hermes-independent-profile`；服务器已按该分支部署，生产 Git `main` 仍保持不变。工作树仍保留既有未跟踪临时文件 `tmp_gzgov.html`。不要在未审查 `git status --short` 前执行 reset、clean 或覆盖式 checkout。
+> **版本事实**：通用四 Agent daemon 配对改动位于分支 `codex/hermes-independent-profile`（分支名沿用历史命名）；服务器当前已部署提交 `8c84bb1`，生产 Git `main` 仍保持不变。工作树仍保留既有未跟踪临时文件 `tmp_gzgov.html`。不要在未审查 `git status --short` 前执行 reset、clean 或覆盖式 checkout。
 
-### 2026-10-05 通用 ziwei_user daemon 配对（本地已验证，服务器未部署）
+### 2026-10-05 通用 ziwei_user daemon 配对（本地与服务器已验证）
 
 - 归属层：daemon、API/A2A 鉴权、SQLite/repository、CLI 和前端设备引导；目标是让任意远程电脑安装同一个 `ziwei_user`，一次配对后发现并连接该电脑上的 Claude、Codex、Gemini、Hermes 四类 Agent。
 - 网页设备入口通过 `POST /api/workspaces/:slug/devices/pairing` 生成短时一次性配对码；目标电脑执行 `ziwei_user connect --api ... --code ...`，服务器只返回一次 workspace 绑定的设备凭证，心跳、runtime 注册和 A2A 请求使用该设备凭证。配对码和完整凭证不会写入审计日志。
 - SQLite 新增 `device_pairing_codes`、`device_credentials` 及索引；配对消费和设备/凭证写入在同一事务中完成，撤销或停用设备后凭证立即失效。成员可以配对自己控制的电脑，但设备删除、停用和其它管理操作仍需 owner/admin。
-- CLI 增加用户目录模式和 npm `bin`：`npm install --global github:jinjinli226-netizen/ziwei` 后使用 `ziwei_user connect` / `ziwei_user start`；配置、日志、动作状态写入用户目录，执行工作目录取配对时的当前目录，不落到 npm 包缓存。项目 checkout 模式仍保留给本地开发。
+- CLI 增加用户目录模式和 npm `bin`：`npm install --global github:jinjinli226-netizen/ziwei#codex/hermes-independent-profile` 后使用 `ziwei_user connect` / `ziwei_user start`；配置、日志、动作状态写入用户目录，执行工作目录取配对时的当前目录，不落到 npm 包缓存。项目 checkout 模式仍保留给本地开发。
 - 前端设备弹窗已改为通用四 Agent 配对引导，移除依赖当前项目路径的 `install-ziwei-user.ps1` 命令；正式域名证书无需额外 CA，私有证书仍可通过 `--tls-ca-file` 指定。
 - 新建数字员工时不再把 Hermes 设为默认运行时；页面会优先选择当前 `ziwei_user` 发现的第一个 Agent，四个运行时仍可在同一选择器中分别配置，Hermes profile 只在选择 Hermes 时出现。
-- 本地证据：配对/API 鉴权、四 runtime 心跳、CLI、引导契约和真实子进程 daemon→HTTP heartbeat/A2A 链路均有测试；`test/daemon-link.test.mjs` 使用临时 API、临时用户目录和真实 daemon 进程，确认设备 online 且四类 runtime 均回报。服务器尚未替换，必须完成全量门槛后再部署。
-- 当前未覆盖：多设备对同一工作区的 runtime metadata 聚合和按设备的员工调度仍需后续设计；本轮不把第二台电脑的状态伪装成第一台，也不以全局 A2A token 代替新设备凭证。回滚方式是恢复本节涉及的代码提交并保留/恢复部署前 SQLite 备份；未部署前不会触碰服务器数据。
+- 本地证据：配对/API 鉴权、四 runtime 心跳、CLI、引导契约和真实子进程 daemon→HTTP heartbeat/A2A 链路均有测试；`test/daemon-link.test.mjs` 使用临时 API、临时用户目录和真实 daemon 进程，确认设备 online 且四类 runtime 均回报。
+- 服务器部署证据：`154.202.118.5:/opt/ziwei` 已快进到 `8c84bb1`，`npm ci --omit=dev`、前端构建和 `ziwei-api` 重启成功；本次部署前 SQLite 备份为 `/opt/ziwei-backups/ziwei.sqlite.20261005T050337Z.before-8c84bb1`，公网 `/healthz=200`，`device_pairing_codes` 与 `device_credentials` 已创建。服务器只运行 API，不代替目标电脑运行 Agent daemon。
+- 兼容边界：生产 API 默认要求设备凭证，已有电脑上的旧 `data/ziwei_user.json` 没有 `deviceToken` 时会保持离线；必须从网页生成一次性配对码，在目标电脑安装当前分支的 `ziwei_user` 后执行 `ziwei_user connect` 再 `ziwei_user start`。当前服务器部署已验证服务健康和数据库迁移，真实目标电脑重新配对仍需在该电脑上完成。
+- 当前未覆盖：多设备对同一工作区的 runtime metadata 聚合和按设备的员工调度仍需后续设计；本轮不把第二台电脑的状态伪装成第一台，也不以全局 A2A token 代替新设备凭证。回滚方式是恢复本节涉及的代码提交并恢复 `/opt/ziwei-backups/ziwei.sqlite.20261005T050337Z.before-8c84bb1`。
 
 ## 1. 先看结论
 
