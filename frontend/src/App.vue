@@ -467,7 +467,7 @@ async function createDevicePairing() {
   devicePairingBusy.value = true;
   devicePairing.value = null;
   try {
-  devicePairing.value = await api.createDevicePairing({ name: deviceForm.value.name || '远程设备', os: navigator.platform || 'unknown', ttlMs: 10 * 60 * 1000 });
+  devicePairing.value = await api.createDevicePairing({ name: deviceForm.value.name || '这台电脑', os: navigator.platform || 'unknown', ttlMs: 10 * 60 * 1000 });
   } catch (error) {
     notify(error.message);
   } finally {

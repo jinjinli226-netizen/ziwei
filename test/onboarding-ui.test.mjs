@@ -62,6 +62,8 @@ test('device onboarding provisions a generic ziwei_user daemon with a one-time p
   assert.match(appSource, /电脑已安装 ziwei_user/);
   assert.match(appSource, /这台电脑第一次安装/);
   assert.match(appSource, /deviceForm = ref\(\{name:'这台电脑'/);
+  assert.match(appSource, /api\.createDevicePairing\(\{ name: deviceForm\.value\.name \|\| '这台电脑'/);
+  assert.doesNotMatch(appSource, /api\.createDevicePairing\(\{ name: deviceForm\.value\.name \|\| '远程设备'/);
   assert.match(appSource, /ziwei_user connect/);
   assert.match(appSource, /--code/);
   assert.match(appSource, /--name/);

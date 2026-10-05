@@ -8,12 +8,13 @@
 
 > **当前本机运行态**：项目配置 `data/ziwei_user.json` 指向 `bjc-ops`；已安装全局 CLI 当前用户配置与 `/readyz` 实际显示为 `test-111`，两者必须分别核对，不能把示例工作区当成目标工作区。
 
-> **版本事实**：通用四 Agent daemon 配对改动位于分支 `codex/hermes-independent-profile`（分支名沿用历史命名）；服务器当前已部署提交 `3e1ac91`，生产 Git `main` 仍保持不变。工作树仍保留既有未跟踪临时文件 `tmp_gzgov.html`。不要在未审查 `git status --short` 前执行 reset、clean 或覆盖式 checkout。
+> **版本事实**：通用四 Agent daemon 配对改动位于分支 `codex/hermes-independent-profile`（分支名沿用历史命名）；服务器当前已部署提交 `0a174e1`，生产 Git `main` 仍保持不变。工作树仍保留既有未跟踪临时文件 `tmp_gzgov.html`。不要在未审查 `git status --short` 前执行 reset、clean 或覆盖式 checkout。
 
 ### 2026-10-05 同一台电脑重复配对说明（已发布）
 
 - 问题归属：前端设备 onboarding 与 CLI 使用说明。复现确认设备弹窗默认把首次安装命令和每次工作区配对命令放在一起，容易让用户在同一台电脑切换工作区时重复执行 `npm install`；默认名称“远程设备”也没有说明其只是网页显示名称。
 - 修复内容：命令区默认显示“电脑已安装 ziwei_user”，只复制 `connect` 与 `start`；首次使用时显式切换“这台电脑第一次安装”才附加一次性 npm 安装命令。默认设备名改为“这台电脑”，并在页面解释 `--name` 只影响设备目录显示。当前 CLI 每次配对都会更新本机用户目录中的活动凭证，因此同一 daemon 同时只激活一个工作区，切换前需确认目标工作区。
+- 补强：名称留空时配对接口也统一回退为“这台电脑”，避免网页命令与设备记录出现“这台电脑/远程设备”不一致。
 - 本地验证：`npm test` 141/141、`npm run lint`、`npm run build` 均通过；新增 onboarding 断言覆盖已安装/首次安装命令切换和显示名称说明。
 - 服务器发布：提交 `3e1ac91` 已推送到 `origin/codex/hermes-independent-profile` 并快进 `/opt/ziwei`；部署前 SQLite 备份为 `/opt/ziwei-backups/ziwei.sqlite.before-3e1ac91`。服务器构建成功并重启 `ziwei-api`，回环 `/healthz=200`；公网资源确认包含两种安装模式和设备显示名称说明。
 - 回滚方式：使用 `git revert <本轮提交>` 回滚前端、README 和本节文档；不改 SQLite schema 或设备凭证。
