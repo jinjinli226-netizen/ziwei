@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
-import {executeRuntime, discoverInstalledRuntimes} from './runtime-adapters.mjs';
+import {executeRuntime, discoverInstalledRuntimes, hermesHome, hermesProfileHome} from './runtime-adapters.mjs';
+import {normalizeRuntimeProfile} from './employee-runtime.mjs';
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_OUTPUT_BYTES = 1024 * 1024;
@@ -49,6 +50,118 @@ function decodeContent(payload) {
 function safeFileName(value) {
   const normalized = String(value || 'action').replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 120);
   return normalized || 'action';
+}
+
+function profileText(value, fallback = '') {
+  return String(value ?? fallback).replace(/^\uFEFF/, '');
+}
+
+function attachmentFileName(value, index) {
+  const candidate = path.basename(String(value || '').trim()).replace(/[^A-Za-z0-9._\-\u0080-\uFFFF]/g, '_').replace(/^\.+/, '').slice(0, 180);
+  return candidate || `attachment-${index + 1}`;
+}
+
+function decodeAttachmentContent(attachment) {
+  let value = attachment?.content ?? attachment?.data ?? attachment?.contentBase64 ?? '';
+  let encoding = String(attachment?.contentEncoding ?? attachment?.content_encoding ?? 'base64').toLowerCase();
+  if (typeof value !== 'string') value = Buffer.from(value || '').toString('base64');
+  if (value.startsWith('data:')) {
+    const match = value.match(/^data:([^;,]+)?;base64,(.*)$/s);
+    if (!match) throw new Error('附件 data URL 无效');
+    value = match[2]; encoding = 'base64';
+  }
+  if (encoding === 'utf8' || encoding === 'utf-8' || encoding === 'text') return Buffer.from(value, 'utf8');
+  const normalized = String(value).replace(/\s+/g, '');
+  if (normalized && (!/^[A-Za-z0-9+/]*={0,2}$/.test(normalized) || normalized.length % 4 === 1)) throw new Error('附件必须是有效的 Base64 内容');
+  return Buffer.from(normalized, 'base64');
+}
+
+/**
+ * Materialize browser-uploaded attachments below the selected workstation
+ * directory. The CLI receives paths in its prompt, while the original bytes
+ * stay local to the paired computer and never get written by the server.
+ */
+export function materializeRuntimeAttachments({attachments = [], cwd, actionId = 'action'} = {}) {
+  if (!Array.isArray(attachments) || !attachments.length) return [];
+  const root = path.resolve(String(cwd || process.cwd()));
+  const folder = path.join(root, '.ziwei', 'attachments', safeFileName(actionId));
+  const paths = [];
+  let total = 0;
+  const used = new Set();
+  for (let index = 0; index < Math.min(attachments.length, 20); index += 1) {
+    const attachment = attachments[index];
+    if (!attachment || typeof attachment !== 'object') continue;
+    const bytes = decodeAttachmentContent(attachment);
+    if (bytes.length > MAX_FILE_BYTES || (total += bytes.length) > MAX_FILE_BYTES) throw new Error('会话附件总大小不能超过 10 MiB');
+    let name = attachmentFileName(attachment.name || attachment.filename, index);
+    const base = name; let suffix = 1;
+    while (used.has(name)) name = `${base}-${suffix++}`;
+    used.add(name);
+    fs.mkdirSync(folder, {recursive: true});
+    const target = path.join(folder, name);
+    if (fs.existsSync(target)) {
+      if (!fs.statSync(target).isFile() || !fs.readFileSync(target).equals(bytes)) throw new Error(`附件目标已存在且内容不同: ${name}`);
+    } else fs.writeFileSync(target, bytes, {flag: 'wx', mode: 0o600});
+    paths.push({name, path: target, bytes: bytes.length, mimeType: String(attachment.mimeType || attachment.mime_type || 'application/octet-stream')});
+  }
+  return paths;
+}
+
+/**
+ * Create a Hermes profile on the paired computer.  Profile contents are
+ * deliberately written below the daemon user's Hermes home; the API server
+ * only queues this action and never receives a filesystem path to write.
+ */
+function createHermesProfile({payload = {}, hermesHomePath = null} = {}) {
+  const profile = normalizeRuntimeProfile(payload.profile || payload.profileName || payload.profile_name || payload.runtimeProfile || payload.runtime_profile || payload.name);
+  if (!profile || profile.toLowerCase() === 'default') throw new Error('不能创建 Hermes default profile');
+  const root = hermesHome({baseHome: hermesHomePath});
+  const target = hermesProfileHome(profile, {baseHome: root});
+  const profilesRoot = path.join(root, 'profiles');
+  if (!isInside(profilesRoot, target)) throw new Error('Hermes profile 路径无效');
+  const files = {'SOUL.md': profileText(payload.soul ?? payload.soulMd ?? payload.soul_md ?? payload.instructions ?? payload.files?.['SOUL.md'], `# ${profile}\n`)};
+  // Keep the initial profile contract small and deterministic. Optional files
+  // are restricted to markdown names so a server payload cannot escape the
+  // profile directory or replace executable/configuration files.
+  if (payload.files && typeof payload.files === 'object' && !Array.isArray(payload.files)) {
+    for (const [name, value] of Object.entries(payload.files)) {
+      if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,80}\.md$/i.test(name) || name.toUpperCase() === 'SOUL.MD') continue;
+      files[name] = profileText(value);
+    }
+  }
+  if (payload.memory ?? payload.memoryMd ?? payload.memory_md) files['MEMORY.md'] = profileText(payload.memory ?? payload.memoryMd ?? payload.memory_md);
+  if (payload.identity ?? payload.identityMd ?? payload.identity_md) files['IDENTITY.md'] = profileText(payload.identity ?? payload.identityMd ?? payload.identity_md);
+  const totalBytes = Object.values(files).reduce((sum, value) => sum + Buffer.byteLength(value, 'utf8'), 0);
+  if (totalBytes > MAX_FILE_BYTES) throw new Error('Hermes profile 内容超过 10 MiB');
+  fs.mkdirSync(profilesRoot, {recursive: true});
+  const rootReal = fs.realpathSync.native(root);
+  const profilesRootReal = fs.realpathSync.native(profilesRoot);
+  if (!isInside(rootReal, profilesRootReal)) throw new Error('Hermes profile 目录解析到受保护目录之外');
+  if (fs.existsSync(target)) {
+    const targetReal = fs.realpathSync.native(target);
+    if (!isInside(profilesRootReal, targetReal)) throw new Error('Hermes profile 目标解析到受保护目录之外');
+    if (!fs.statSync(targetReal).isDirectory()) throw new Error('Hermes profile 目标不是目录');
+    const same = Object.entries(files).every(([name, value]) => {
+      const file = path.join(target, name);
+      return fs.existsSync(file) && fs.statSync(file).isFile() && fs.readFileSync(file, 'utf8') === value;
+    });
+    if (!same) throw new Error(`Hermes profile 已存在且内容不同: ${profile}`);
+    return {profile, path: path.relative(root, target), files: Object.keys(files), duplicate: true};
+  }
+  const temporary = path.join(profilesRoot, `.${profile}.${process.pid}.${Date.now()}.tmp`);
+  fs.mkdirSync(temporary, {recursive: true});
+  try {
+    for (const [name, value] of Object.entries(files)) fs.writeFileSync(path.join(temporary, name), value, {encoding: 'utf8', mode: 0o600});
+    try { fs.renameSync(temporary, target); }
+    catch (error) {
+      if (fs.existsSync(target)) {
+        const same = Object.entries(files).every(([name, value]) => fs.existsSync(path.join(target, name)) && fs.readFileSync(path.join(target, name), 'utf8') === value);
+        if (same) return {profile, path: path.relative(root, target), files: Object.keys(files), duplicate: true};
+      }
+      throw error;
+    }
+  } finally { try { fs.rmSync(temporary, {recursive: true, force: true}); } catch {} }
+  return {profile, path: path.relative(root, target), files: Object.keys(files), duplicate: false};
 }
 
 function messagePayload(action) {
@@ -146,11 +259,14 @@ function runCommand({runtimeDir, action, executable, baseArgs = [], allowedExecu
  * Unknown/unsupported actions fail loudly so the cloud never sees a fake
  * success merely because an action was accepted by the daemon.
  */
-export function createLocalActionExecutor({runtimeDir, allowedExecutables = [], executorCommand = null, executorArgs = [], defaultRuntime = null} = {}) {
+export function createLocalActionExecutor({runtimeDir, allowedExecutables = [], executorCommand = null, executorArgs = [], defaultRuntime = null, hermesHomePath = null} = {}) {
   if (!runtimeDir) throw new TypeError('runtimeDir is required');
   fs.mkdirSync(runtimeDir, {recursive: true});
   return async (action, context = {}) => {
     const type = String(action?.type || '');
+    if (type === 'hermes.profile.create' || type === 'profile.create') {
+      return {status: 'succeeded', result: createHermesProfile({payload: action.payload || {}, hermesHomePath})};
+    }
     // Native model calls intentionally use the installed local CLI.  This is
     // the one action family with full local permissions; the ordinary file and
     // command actions below remain bounded to the bridge runtime directory.
@@ -160,11 +276,16 @@ export function createLocalActionExecutor({runtimeDir, allowedExecutables = [], 
       const runtime = payload.runtime || payload.agent || payload.runtimeName || defaultRuntime
         || Object.values(discoverInstalledRuntimes().runtimes).find(item => item.status === 'available')?.runtime;
       const prompt = payload.prompt ?? payload.message ?? payload.content ?? payload.instructions;
+      const attachmentPaths = materializeRuntimeAttachments({attachments: payload.attachments, cwd: payload.cwd || payload.workingDirectory || payload.workdir || process.cwd(), actionId: action.id});
+      const promptWithAttachments = attachmentPaths.length
+        ? `${String(prompt || '').trim()}\n\n[本机附件]\n${attachmentPaths.map(item => `- ${item.name}: ${item.path}`).join('\n')}`
+        : prompt;
       return executeRuntime({
         runtime,
         model: payload.model || payload.modelId || payload.model_id || null,
         profile: payload.profile || payload.runtimeProfile || payload.runtime_profile || payload.hermesProfile || payload.hermes_profile || null,
-        prompt,
+        prompt: promptWithAttachments,
+        attachments: attachmentPaths,
         cwd: payload.cwd || payload.workingDirectory || payload.workdir || process.cwd(),
         env: payload.env,
         signal: context.signal,

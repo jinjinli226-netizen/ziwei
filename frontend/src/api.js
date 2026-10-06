@@ -109,7 +109,9 @@ export const api = {
   saveEmployeeCustomParams: (id, values) => request(`/api/workspaces/${encodeURIComponent(workspaceSlug())}/employees/${encodeURIComponent(id)}/custom-params`, { method:'PUT', body:JSON.stringify({ values }) }),
   employeeMcp: () => request(`/api/workspaces/${encodeURIComponent(workspaceSlug())}/mcp/status`),
   employeeMcpHealth: () => request(`/api/workspaces/${encodeURIComponent(workspaceSlug())}/mcp/status`),
-  hermesProfiles: () => request(`/api/workspaces/${encodeURIComponent(workspaceSlug())}/hermes/profiles`),
+  hermesProfiles: (deviceId = '') => request(`/api/workspaces/${encodeURIComponent(workspaceSlug())}/hermes/profiles${deviceId ? `?deviceId=${encodeURIComponent(deviceId)}` : ''}`),
+  createHermesProfile: (body, idempotencyKey = '') => request(`/api/workspaces/${encodeURIComponent(workspaceSlug())}/hermes/profiles/requests`, { method:'POST', body:JSON.stringify({ ...(body || {}), ...(idempotencyKey ? { idempotencyKey } : {}) }) }),
+  hermesProfileAction: id => request(`/api/workspaces/${encodeURIComponent(workspaceSlug())}/hermes/profiles/requests/${encodeURIComponent(id)}`),
   deleteEmployee: id => request(`/api/workspaces/${encodeURIComponent(workspaceSlug())}/employees/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   calendar: () => request(`/api/workspaces/${encodeURIComponent(workspaceSlug())}/calendar`),
   calendarEvents: () => request(`/api/workspaces/${encodeURIComponent(workspaceSlug())}/calendar/events`),
@@ -135,6 +137,7 @@ export const api = {
     return request(`/api/workspaces/${encodeURIComponent(workspaceSlug())}/conversations${query}`);
   },
   createConversation: body => request(`/api/workspaces/${encodeURIComponent(workspaceSlug())}/conversations`, { method:'POST', body:JSON.stringify(body) }),
+  updateConversation: (id, body) => request(`/api/conversations/${encodeURIComponent(id)}`, { method:'PATCH', body:JSON.stringify(body) }),
   conversation: id => request(`/api/conversations/${id}`),
   addConversationMessage: (id, body) => request(`/api/conversations/${id}/messages`, { method:'POST', body:JSON.stringify(body) }),
   archiveConversation: (id, archived = true) => request(`/api/conversations/${id}/archive`, { method:'POST', body:JSON.stringify({archived}) }),

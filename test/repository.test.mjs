@@ -127,6 +127,23 @@ test('conversation lists are isolated by employee and legacy rows stay explicitl
   assert.equal(legacyRows[0].requires_employee_assignment, true);
 });
 
+test('conversation settings persist target device, model, directory and attachment dispatch metadata', () => {
+  const repo = createRepository({ memory: true });
+  const device = repo.heartbeatDevice('test-111', { agentId: 'ziwei_user', deviceId: 'conversation-device', name: '研究电脑', workdir: 'C:/research' });
+  const employee = repo.createEmployee('test-111', { name: '调研员', runtime: 'Codex', model: 'openai:gpt-6' });
+  const conversation = repo.createConversation('test-111', { employeeId: employee.id, deviceId: device.id, modelId: 'openai:gpt-6', workingDirectory: 'C:/research' });
+  const updated = repo.updateConversationSettings(conversation.id, { deviceId: device.id, modelId: 'openai:gpt-6.1', workingDirectory: 'C:/research/reports' });
+  assert.equal(updated.device_id, device.id);
+  assert.equal(updated.model_id, 'openai:gpt-6.1');
+  assert.equal(updated.working_directory, 'C:/research/reports');
+  repo.addConversationMessage(conversation.id, { content: '读取附件', runtime: 'Codex', attachments: [{ name: 'brief.txt', content: Buffer.from('brief').toString('base64'), contentEncoding: 'base64' }] });
+  const action = repo.listA2AActions('test-111', { status: 'pending' }).find(item => item.payload.conversationId === conversation.id);
+  assert.equal(action.payload.deviceId, device.id);
+  assert.equal(action.payload.cwd, 'C:/research/reports');
+  assert.equal(action.payload.model, 'openai:gpt-6.1');
+  assert.equal(action.payload.attachments[0].name, 'brief.txt');
+});
+
 test('repository updates task details and stores task messages', () => {
   const repo = createRepository({ memory: true });
   const task = repo.createTask('test-111', { title: '初始标题', description: '初始描述' });

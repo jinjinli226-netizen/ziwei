@@ -4,6 +4,22 @@
 
 ## Unreleased（2026-10-05）
 
+### Added
+
+- Hermes Profile 创建改为网页发起、目标设备上的 `ziwei_user` 本地落盘；Profile 按设备隔离并支持幂等重试。
+- 持久会话增加目标设备、模型和工作目录设置；会话附件通过 A2A 传递并在目标电脑工作目录的 `.ziwei/attachments` 下落盘后交给本机 CLI。
+
+### Verification
+
+- `npm test`：152 passed
+- `npm run lint`：passed
+- `npm run build`：passed
+- 真实本地 A2A Profile 派发链路：passed
+
+### Deferred
+
+- 本轮未推送 GitHub 或部署服务器；浏览器逐项附件选择和四种真实 CLI 的附件读取仍待手工验收。
+
 ### Fixed
 
 - 修复 Windows `ziwei_user` 执行 Codex 时通过 PowerShell `.ps1` 传递标准输入标记 `-` 导致参数绑定失败的问题；daemon 会优先发现用户目录中的新版 `codex.exe`，旧包装器则直接调用其 Node 入口，避免把任务交给 PowerShell 参数解析。

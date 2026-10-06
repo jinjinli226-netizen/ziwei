@@ -24,6 +24,7 @@ const configPath = resolveConfigPath({ root: ROOT, env: process.env });
 const config = fs.existsSync(configPath)
   ? JSON.parse(fs.readFileSync(configPath, 'utf8'))
   : { agentId: 'ziwei_user', serviceName: 'ziwei_user', workspace: process.env.ZIWEI_WORKSPACE || '', apiBase: process.env.ZIWEI_API_BASE || 'http://127.0.0.1:4178', healthHost: '127.0.0.1', healthPort: 20242, heartbeatMs: 15000, pollMs: 5000 };
+if (config.hermesHome) process.env.HERMES_HOME = String(config.hermesHome);
 const logPath = path.join(logDir, 'daemon.log');
 function log(event, extra = {}) {
   const line = redactSecrets(JSON.stringify({ at: new Date().toISOString(), pid: process.pid, event, service: 'ziwei_user', version: VERSION, agentId: 'ziwei_user', ...extra }));
@@ -36,7 +37,8 @@ const localExecutor = createLocalActionExecutor({
   allowedExecutables: Array.isArray(config.allowedExecutables) ? config.allowedExecutables : [],
   executorCommand: config.executorCommand || process.env.ZIWEI_EXECUTOR_COMMAND || null,
   executorArgs: Array.isArray(config.executorArgs) ? config.executorArgs : [],
-  defaultRuntime: config.defaultRuntime || process.env.ZIWEI_DEFAULT_RUNTIME || null
+  defaultRuntime: config.defaultRuntime || process.env.ZIWEI_DEFAULT_RUNTIME || null,
+  hermesHomePath: config.hermesHome || process.env.HERMES_HOME || null
 });
 const dispatcher = new ActionDispatcher({
   // Runtime state stays private under the daemon profile. A paired daemon
@@ -77,6 +79,7 @@ async function heartbeat() {
     bridge: 'ziwei_user',
     bridgeVersion: VERSION,
     pid: process.pid,
+    workdir: config.workdir || process.cwd() || ROOT,
     ipHint: '127.0.0.1',
     heartbeatMs: Number(config.heartbeatMs) || 15000,
     status: 'online',
@@ -127,6 +130,17 @@ async function postActionEvent(actionId, event, data = {}) {
     if (!/404|A2A HTTP 404/.test(String(error?.message || error))) log('a2a_event_failed', { actionId, event, error: error.message });
   }
 }
+async function refreshRuntimeDiscovery() {
+  runtimeDiscovery = discoverInstalledRuntimes({ force: true });
+  if (!String(config.workspace || '').trim()) return;
+  try {
+    await fetch(`${config.apiBase}/api/workspaces/${encodeURIComponent(config.workspace)}/runtimes/register`, {
+      method: 'POST', headers: daemonHeaders({ json: true }),
+      body: JSON.stringify({ agentId: 'ziwei_user', deviceId: config.deviceId || 'device-ziwei-user', runtimes: runtimeDiscovery.runtimes }),
+      signal: AbortSignal.timeout(3000)
+    });
+  } catch (error) { log('runtime_discovery_refresh_failed', { error: error.message }); }
+}
 async function poll() {
   if (!String(config.workspace || '').trim()) return;
   try {
@@ -144,6 +158,7 @@ async function poll() {
         await postAction(`/a2a/v1/actions/${encodeURIComponent(action.id)}/ack`, { agentId:'ziwei_user' });
         const result=await dispatcher.dispatch(action);
         const terminalStatus = result.status === 'succeeded' || (result.status === 'duplicate' && result.originalStatus === 'succeeded') ? 'succeeded' : 'failed';
+        if (terminalStatus === 'succeeded' && action.type === 'hermes.profile.create') await refreshRuntimeDiscovery();
         await postActionEvent(action.id, terminalStatus, { result: result.result ?? null, error: terminalStatus === 'failed' ? (result.error || 'ziwei_user execution failed') : null });
         await postAction(`/a2a/v1/actions/${encodeURIComponent(action.id)}/result`, { status:terminalStatus, result:result.result ?? result, error:terminalStatus === 'failed' ? (result.error || 'ziwei_user execution failed') : null });
         log('a2a_result', { actionId:action.id, status:terminalStatus, dispatcherStatus:result.status });

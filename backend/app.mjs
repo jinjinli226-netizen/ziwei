@@ -314,7 +314,7 @@ export function createApp(options = {}) {
   // on the local API; it does not accept an Aura bridge identity.
   app.post('/api/workspaces/:slug/runtimes/register', requireDeviceCredential(repo), (req, res) => {
     if (req.body?.agentId && String(req.body.agentId) !== 'ziwei_user') return res.status(403).json({ error: 'Only ziwei_user runtime registration is accepted' });
-    res.json({ runtimes: repo.registerRuntimes(req.params.slug, req.body || {}) });
+    res.json({ runtimes: repo.registerRuntimes(req.params.slug, { ...(req.body || {}), ...(req.deviceCredential?.deviceId ? { deviceId: req.deviceCredential.deviceId } : {}) }) });
   });
   app.get('/api/workspaces/:slug/models', (req, res) => res.json({ models: repo.listModels(req.params.slug, { runtime: req.query.runtime, q: req.query.q }) }));
   app.get('/api/workspaces/:slug/skills', (req, res) => res.json({ skills: repo.listSkills(req.params.slug, { category: req.query.category, scope: req.query.scope, q: req.query.q }) }));
@@ -446,9 +446,10 @@ export function createApp(options = {}) {
   app.post('/api/workspaces/:slug/conversations', (req, res) => {
     const employeeId = String(req.body?.employeeId ?? req.body?.employee_id ?? '').trim();
     if (!employeeId) return res.status(400).json({ error: '新建会话必须绑定数字员工' });
-    return res.status(201).json(repo.createConversation(req.params.slug, { ...(req.body || {}), employeeId, ...employeeContext(req) }));
+    return res.status(201).json(repo.createConversation(req.params.slug, { ...(req.body || {}), employeeId, ...employeeContext(req), enforceDeviceOwnership: true }));
   });
   app.get('/api/conversations/:id', (req, res) => { const conversation=repo.getConversation(req.params.id, employeeContext(req)); if(!conversation) return res.status(404).json({error:'Conversation not found'}); res.json(conversation); });
+  app.patch('/api/conversations/:id', (req, res) => { const context=employeeContext(req); const conversation=repo.getConversation(req.params.id, context); if(!conversation) return res.status(404).json({error:'Conversation not found'}); res.json(repo.updateConversationSettings(req.params.id, { ...(req.body || {}), ...context })); });
   app.post('/api/conversations/:id/messages', (req, res) => res.status(201).json(repo.addConversationMessage(req.params.id, { ...(req.body || {}), actorUserId: req.auth?.user_id, actorRole: req.workspaceRole, enforceDeviceOwnership: true, enforceEmployeeVisibility: true })));
   app.post('/api/conversations/:id/archive', (req, res) => {
     const conversation = repo.getConversation(req.params.id, employeeContext(req));
@@ -488,8 +489,48 @@ export function createApp(options = {}) {
     create: options.mcpOptions?.create ?? false
   };
   app.get('/api/workspaces/:slug/hermes/profiles', requireRole('owner','admin','member'), (req, res) => {
-    res.json(repo.listHermesProfiles(req.params.slug));
+    res.json(repo.listHermesProfiles(req.params.slug, { deviceId: req.query.deviceId || req.query.device_id }));
   });
+  app.post('/api/workspaces/:slug/hermes/profiles/requests', requireRole('owner','admin','member'), (req, res, next) => {
+    try {
+      const request = repo.createHermesProfileAction(req.params.slug, {
+        ...(req.body || {}),
+        userId: req.auth?.user_id || null,
+        actorUserId: req.auth?.user_id,
+        actorRole: req.workspaceRole || req.auth?.role || (app.locals.authBypass ? 'owner' : ''),
+        idempotencyKey: req.get('Idempotency-Key') || req.body?.idempotencyKey || req.body?.idempotency_key,
+      });
+      return res.status(request.status === 'succeeded' || request.duplicate ? 200 : 202).json(request);
+    } catch (error) { return next(error); }
+  });
+  app.get('/api/workspaces/:slug/hermes/profiles/requests/:id', requireRole('owner','admin','member'), (req, res, next) => {
+    try {
+      const action = repo.getA2AAction(req.params.id, { workspaceSlug: req.params.slug, actorUserId: req.auth?.user_id });
+      if (!action || action.type !== 'hermes.profile.create') return res.status(404).json({ error: 'Hermes profile request not found' });
+      return res.json(action);
+    } catch (error) { return next(error); }
+  });
+  app.post('/api/workspaces/:slug/hermes/profiles', requireRole('owner','admin','member'), (req, res, next) => {
+    try {
+      const action = repo.createHermesProfileAction(req.params.slug, {
+        ...(req.body || {}),
+        userId: req.auth?.user_id || req.body?.userId || req.body?.user_id || null,
+        actorUserId: req.auth?.user_id,
+        actorRole: req.workspaceRole || req.auth?.role || 'owner',
+        idempotencyKey: req.get('Idempotency-Key') || req.body?.idempotencyKey || req.body?.idempotency_key
+      });
+      return res.status(action.status === 'succeeded' ? 200 : (action.duplicate ? 200 : 202)).json({ accepted: action.status !== 'succeeded', duplicate: Boolean(action.duplicate), action });
+    } catch (error) { return next(error); }
+  });
+  const hermesProfileAction = (req, res, next) => {
+    try {
+      const action = repo.getA2AAction(req.params.id, { workspaceSlug: req.params.slug, actorUserId: req.auth?.user_id });
+      if (!action || action.type !== 'hermes.profile.create') return res.status(404).json({ error: 'Hermes profile 创建请求不存在' });
+      return res.json({ action });
+    } catch (error) { return next(error); }
+  };
+  app.get('/api/workspaces/:slug/hermes/profile-actions/:id', requireRole('owner','admin','member'), hermesProfileAction);
+  app.get('/api/workspaces/:slug/hermes/profiles/actions/:id', requireRole('owner','admin','member'), hermesProfileAction);
   app.get('/api/workspaces/:slug/mcp/status', requireRole('owner','admin','member'), (req, res) => {
     const credential = readMCPCredential({ ...mcpOptions, create: false });
     const scoped = Boolean(credential.token) && mcpWorkspaceAllowed(credential.workspaces, req.params.slug);
@@ -549,7 +590,7 @@ export function createApp(options = {}) {
   app.get('/a2a/v1/tasks/:id', (req, res) => { const task=repo.getTask(req.params.id); if(!task) return res.status(404).json({error:'Task not found'}); res.json({id:task.id,status:{state:task.state,timestamp:task.updated_at},task,messages:repo.getTaskMessages(task.id)}); });
   app.post('/a2a/v1/tasks/:id/messages', (req, res) => res.status(201).json({ message:repo.addTaskMessage(req.params.id,req.body), accepted:true }));
 
-  app.use((err, _req, res, _next) => { const status = /not found|不存在/i.test(err.message || '') ? 404 : 400; res.status(status).json({ error: err.message || 'Bad request' }); });
+  app.use((err, _req, res, _next) => { const status = Number(err?.status) || (/not found|不存在/i.test(err.message || '') ? 404 : 400); res.status(status).json({ error: err.message || 'Bad request' }); });
   return app;
 }
 

@@ -48,6 +48,23 @@ const normalizeEmail = value => String(value || '').trim().toLowerCase();
 const jsonObject = value => { try { const parsed = JSON.parse(value); return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}; } catch { return {}; } };
 const normalizeDescriptionFormat = value => ['plain', 'markdown', 'html'].includes(String(value || '').toLowerCase()) ? String(value).toLowerCase() : 'plain';
 const taskAttachmentView = row => row ? ({ id:row.id, task_id:row.task_id, name:row.name, mime_type:row.mime_type, size:Number(row.size || 0), content_encoding:row.content_encoding, storage_key:row.storage_key, checksum:row.checksum, created_at:row.created_at }) : null;
+const normalizeConversationAttachments = value => {
+  if (!Array.isArray(value) || !value.length) return [];
+  let total = 0;
+  return value.slice(0, 20).map((item, index) => {
+    if (!item || typeof item !== 'object') throw new Error('会话附件格式无效');
+    const name = path.basename(String(item.name || item.filename || `attachment-${index + 1}`)).slice(0, 255) || `attachment-${index + 1}`;
+    const supplied = item.content ?? item.data ?? item.contentBase64;
+    if (supplied === undefined || supplied === null || supplied === '') return { ...item, name };
+    const encoding = String(item.contentEncoding ?? item.content_encoding ?? 'base64').toLowerCase();
+    const bytes = encoding === 'utf8' || encoding === 'utf-8' || encoding === 'text'
+      ? Buffer.from(String(supplied), 'utf8')
+      : decodeDocumentBase64(String(supplied).replace(/-/g, '+').replace(/_/g, '/'));
+    total += bytes.length;
+    if (bytes.length > 10 * 1024 * 1024 || total > 10 * 1024 * 1024) throw new Error('会话附件总大小不能超过 10 MiB');
+    return { ...item, name, content: bytes.toString('base64'), contentEncoding: 'base64', size: bytes.length, mimeType: String(item.mimeType || item.mime_type || 'application/octet-stream').slice(0, 255) };
+  });
+};
 const decodeDocumentBase64 = value => {
   const input = String(value ?? '').trim();
   if (!input) return Buffer.alloc(0);
@@ -526,6 +543,8 @@ export function createRepository(options = {}) {
     },
     registerRuntimes(slug, input = {}) {
       const ws = workspace(slug); if (!ws) throw new Error('Workspace not found');
+      const deviceId = String(input.deviceId ?? input.device_id ?? '').trim() || null;
+      if (deviceId && !db.prepare('SELECT 1 FROM devices WHERE id=? AND workspace_id=?').get(deviceId, ws.id)) throw new Error('运行时设备不属于当前工作区');
       const source = input.runtimes || input.runtimeMetadata || input.runtime_metadata || {};
       const entries = Array.isArray(source) ? source.map(item => [item.runtime || item.name, item]) : Object.entries(source);
       const timestamp = now();
@@ -546,6 +565,11 @@ export function createRepository(options = {}) {
         const existing = db.prepare('SELECT id FROM runtime_metadata WHERE workspace_id=? AND runtime_name=?').get(ws.id, name);
         if (existing) db.prepare('UPDATE runtime_metadata SET version=?,binary=?,status=?,models_json=?,profiles_json=?,last_seen=? WHERE id=?').run(version,binary,status,JSON.stringify(models),JSON.stringify(profiles),timestamp,existing.id);
         else db.prepare('INSERT INTO runtime_metadata(id,workspace_id,runtime_name,version,binary,status,models_json,profiles_json,last_seen) VALUES(?,?,?,?,?,?,?,?,?)').run(id('runtime-meta'),ws.id,name,version,binary,status,JSON.stringify(models),JSON.stringify(profiles),timestamp);
+        if (deviceId) {
+          const deviceExisting = db.prepare('SELECT id FROM runtime_device_metadata WHERE device_id=? AND runtime_name=?').get(deviceId, name);
+          if (deviceExisting) db.prepare('UPDATE runtime_device_metadata SET version=?,binary=?,status=?,models_json=?,profiles_json=?,last_seen=? WHERE id=?').run(version,binary,status,JSON.stringify(models),JSON.stringify(profiles),timestamp,deviceExisting.id);
+          else db.prepare('INSERT INTO runtime_device_metadata(id,workspace_id,device_id,runtime_name,version,binary,status,models_json,profiles_json,last_seen) VALUES(?,?,?,?,?,?,?,?,?,?)').run(id('runtime-device-meta'),ws.id,deviceId,name,version,binary,status,JSON.stringify(models),JSON.stringify(profiles),timestamp);
+        }
         const runtime = db.prepare('SELECT id FROM runtimes WHERE workspace_id=? AND name=?').get(ws.id,name);
         if (runtime) {
           db.prepare('UPDATE runtimes SET version=?,last_seen=? WHERE id=?').run(version,timestamp,runtime.id);
@@ -560,15 +584,57 @@ export function createRepository(options = {}) {
       }
       return this.listRuntimes(slug);
     },
-    listHermesProfiles(slug) {
+    listHermesProfiles(slug, options = {}) {
       const ws = workspace(slug); if (!ws) throw new Error('Workspace not found');
-      const device = ownDevice(this.listDevices(slug));
-      const metadata = db.prepare("SELECT profiles_json FROM runtime_metadata WHERE workspace_id=? AND lower(runtime_name)='hermes' ORDER BY last_seen DESC LIMIT 1").get(ws.id);
+      const requestedDeviceId = String(options.deviceId ?? options.device_id ?? '').trim();
+      const listedDevices = this.listDevices(slug);
+      const device = requestedDeviceId ? listedDevices.find(item => item.id === requestedDeviceId) : ownDevice(listedDevices);
+      const metadata = requestedDeviceId
+        ? db.prepare("SELECT profiles_json FROM runtime_device_metadata WHERE workspace_id=? AND device_id=? AND lower(runtime_name)='hermes' ORDER BY last_seen DESC LIMIT 1").get(ws.id, requestedDeviceId)
+        : db.prepare("SELECT profiles_json FROM runtime_metadata WHERE workspace_id=? AND lower(runtime_name)='hermes' ORDER BY last_seen DESC LIMIT 1").get(ws.id);
       let profiles = [];
       try { profiles = JSON.parse(metadata?.profiles_json || '[]'); } catch { profiles = []; }
-      if (!profiles.length) profiles = listHermesProfiles();
+      if (!profiles.length && !requestedDeviceId) profiles = listHermesProfiles();
       const source = device?.status === 'online' ? 'ziwei_user' : (profiles.length ? 'local_runtime_home' : 'unavailable');
       return { runtime: 'Hermes', source, independent_home: true, profiles: Array.isArray(profiles) ? profiles : [], validation: { rejects_unknown: Boolean(profiles.length) } };
+    },
+    createHermesProfileAction(slug, input = {}) {
+      const ws = workspace(slug); if (!ws) throw new Error('Workspace not found');
+      const profile = normalizeRuntimeProfile(input.profile ?? input.profileName ?? input.profile_name ?? input.runtimeProfile ?? input.runtime_profile ?? input.name);
+      if (!profile || profile.toLowerCase() === 'default') throw new Error('不能创建 Hermes default profile');
+      const deviceId = String(input.deviceId ?? input.device_id ?? input.targetDeviceId ?? input.target_device_id ?? '').trim();
+      if (!deviceId) throw new Error('创建 Hermes profile 必须绑定 deviceId');
+      const device = db.prepare('SELECT * FROM devices WHERE id=? AND workspace_id=?').get(deviceId, ws.id);
+      if (!device) throw new Error('目标设备不属于当前工作区');
+      const status = device.status === 'disabled' ? 'disabled' : (isFresh(device.last_seen) ? 'online' : 'offline');
+      if (status !== 'online') throw new Error('目标设备当前离线，无法创建 Hermes profile');
+      const actorUserId = String(input.userId ?? input.user_id ?? input.actorUserId ?? input.actor_user_id ?? '').trim() || null;
+      const actorRole = String(input.actorRole ?? input.actor_role ?? '').trim().toLowerCase();
+      const teamMember = ws.kind === 'team' && actorUserId
+        ? Boolean(db.prepare('SELECT 1 FROM members WHERE workspace_id=? AND user_id=?').get(ws.id, actorUserId))
+        : false;
+      if (!['owner', 'admin'].includes(actorRole) && !teamMember && !this.canManageDevice(deviceId, actorUserId, actorRole, slug)) { const error = new Error('当前用户无权在该设备创建 Hermes profile'); error.status = 403; throw error; }
+      const soul = String(input.soul ?? input.soulMd ?? input.soul_md ?? input.instructions ?? input.files?.['SOUL.md'] ?? `# ${profile}\n`);
+      if (Buffer.byteLength(soul, 'utf8') > 10 * 1024 * 1024) throw new Error('Hermes profile 内容超过 10 MiB');
+      const files = input.files && typeof input.files === 'object' && !Array.isArray(input.files)
+        ? Object.fromEntries(Object.entries(input.files).filter(([name]) => /^[A-Za-z0-9][A-Za-z0-9._-]{0,80}\.md$/i.test(name) && String(name).toUpperCase() !== 'SOUL.MD').map(([name, value]) => [name, String(value ?? '')]))
+        : {};
+      if (input.memory ?? input.memoryMd ?? input.memory_md) files['MEMORY.md'] = String(input.memory ?? input.memoryMd ?? input.memory_md);
+      if (input.identity ?? input.identityMd ?? input.identity_md) files['IDENTITY.md'] = String(input.identity ?? input.identityMd ?? input.identity_md);
+      if (Object.values(files).some(value => Buffer.byteLength(String(value), 'utf8') > 10 * 1024 * 1024) || Buffer.byteLength(soul, 'utf8') + Object.values(files).reduce((total, value) => total + Buffer.byteLength(String(value), 'utf8'), 0) > 10 * 1024 * 1024) throw new Error('Hermes profile 内容超过 10 MiB');
+      const requestKey = String(input.idempotencyKey ?? input.idempotency_key ?? '').trim();
+      const memory = String(input.memory ?? input.memoryMd ?? input.memory_md ?? '');
+      const identity = String(input.identity ?? input.identityMd ?? input.identity_md ?? '');
+      const fingerprint = hashSecret(JSON.stringify({ profile, soul, files, memory, identity }));
+      const dedupeKey = `hermes.profile.create:${ws.id}:${deviceId}:${actorUserId || 'anonymous'}:${profile}:${requestKey || fingerprint}`;
+      const action = this.createA2AAction(slug, {
+        agentId: 'ziwei_user',
+        type: 'hermes.profile.create',
+        dedupeKey,
+        payload: { workspace: slug, workspaceId: ws.id, deviceId, userId: actorUserId, profile, soul, files, ...(memory ? { memory } : {}), ...(identity ? { identity } : {}) }
+      });
+      const row = db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(action.id);
+      return { ...actionView(row, { includeEvents: true }), duplicate: Boolean(action.duplicate) };
     },
     listModels(slug, filters = {}) {
       const ws = workspace(slug); if (!ws) throw new Error('Workspace not found');
@@ -995,12 +1061,12 @@ export function createRepository(options = {}) {
       if (row && row.bridge_name && row.bridge_name !== 'ziwei_user') throw new Error('Device is not registered to ziwei_user');
       if (row?.status === 'disabled') return this.listDevices(slug).find(device => device.id === row.id) || null;
       if (!row) {
-        db.prepare('INSERT INTO devices(id,workspace_id,name,os,status,last_seen,ip_hint,version,pid,bridge_name,bridge_version,bridge_status,heartbeat_at,heartbeat_interval_ms,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(deviceId, ws.id, String(input.name || 'ziwei_user').trim() || 'ziwei_user', String(input.os || 'Windows'), 'online', timestamp, String(input.ipHint || input.ip_hint || '127.0.0.1'), String(input.version || input.daemon_version || ownVersion()), Number(input.pid) || null, 'ziwei_user', String(input.bridgeVersion || input.bridge_version || input.version || input.daemon_version || ownVersion()), 'online', timestamp, Number(input.heartbeatMs || input.heartbeat_ms) || null, timestamp);
+        db.prepare('INSERT INTO devices(id,workspace_id,name,os,status,last_seen,ip_hint,version,pid,bridge_name,bridge_version,bridge_status,heartbeat_at,heartbeat_interval_ms,workdir,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(deviceId, ws.id, String(input.name || 'ziwei_user').trim() || 'ziwei_user', String(input.os || 'Windows'), 'online', timestamp, String(input.ipHint || input.ip_hint || '127.0.0.1'), String(input.version || input.daemon_version || ownVersion()), Number(input.pid) || null, 'ziwei_user', String(input.bridgeVersion || input.bridge_version || input.version || input.daemon_version || ownVersion()), 'online', timestamp, Number(input.heartbeatMs || input.heartbeat_ms) || null, String(input.workdir || input.workingDirectory || input.cwd || '').trim() || null, timestamp);
         row = db.prepare('SELECT * FROM devices WHERE id=?').get(deviceId);
       } else {
         const requestedName = String(input.name || '').trim();
         const heartbeatName = requestedName && requestedName !== 'ziwei_user' ? requestedName : (row.name || 'ziwei_user');
-        db.prepare('UPDATE devices SET name=?,os=?,status=?,last_seen=?,ip_hint=?,version=?,pid=?,bridge_name=?,bridge_version=?,bridge_status=?,heartbeat_at=?,heartbeat_interval_ms=?,created_at=COALESCE(created_at,?) WHERE id=?').run(heartbeatName, String(input.os || row.os || 'Windows'), 'online', timestamp, String(input.ipHint || input.ip_hint || row.ip_hint || '127.0.0.1'), String(input.version || input.daemon_version || ownVersion()), Number(input.pid) || null, 'ziwei_user', String(input.bridgeVersion || input.bridge_version || input.version || input.daemon_version || ownVersion()), 'online', timestamp, Number(input.heartbeatMs || input.heartbeat_ms) || row.heartbeat_interval_ms || null, timestamp, row.id);
+        db.prepare('UPDATE devices SET name=?,os=?,status=?,last_seen=?,ip_hint=?,version=?,pid=?,bridge_name=?,bridge_version=?,bridge_status=?,heartbeat_at=?,heartbeat_interval_ms=?,workdir=?,created_at=COALESCE(created_at,?) WHERE id=?').run(heartbeatName, String(input.os || row.os || 'Windows'), 'online', timestamp, String(input.ipHint || input.ip_hint || row.ip_hint || '127.0.0.1'), String(input.version || input.daemon_version || ownVersion()), Number(input.pid) || null, 'ziwei_user', String(input.bridgeVersion || input.bridge_version || input.version || input.daemon_version || ownVersion()), 'online', timestamp, Number(input.heartbeatMs || input.heartbeat_ms) || row.heartbeat_interval_ms || null, String(input.workdir || input.workingDirectory || input.cwd || row.workdir || '').trim() || null, timestamp, row.id);
       }
       ensureRuntimeCatalog(ws.id, timestamp);
       db.prepare("UPDATE runtimes SET status='online',last_seen=? WHERE workspace_id=?").run(timestamp, ws.id);
@@ -1009,7 +1075,7 @@ export function createRepository(options = {}) {
       // a transient follow-up failure cannot leave a fresh workspace without
       // versions/models.
       const runtimePayload = input.runtimes || input.runtimeMetadata || input.runtime_metadata;
-      if (runtimePayload && typeof runtimePayload === 'object') this.registerRuntimes(slug, { runtimes: runtimePayload });
+      if (runtimePayload && typeof runtimePayload === 'object') this.registerRuntimes(slug, { runtimes: runtimePayload, deviceId });
       return this.listDevices(slug).find(device => device.id === row.id) || null;
     },
     registerRuntimeDiscovery(slug, input = {}) {
@@ -1029,8 +1095,8 @@ export function createRepository(options = {}) {
     createDevice(slug, input = {}) {
       const ws=workspace(slug); if (!ws) throw new Error('Workspace not found');
       const name=String(input.name || '新设备').trim() || '新设备';
-      const device={id:id('device'),workspace_id:ws.id,owner_user_id:String(input.ownerUserId || input.owner_user_id || '').trim() || null,name,os:String(input.os || 'Windows'),status:'pending',last_seen:null,ip_hint:null,version:null,pid:null,bridge_name:null,bridge_version:null,bridge_status:'pending',heartbeat_at:null,heartbeat_interval_ms:null,created_at:now()};
-      db.prepare('INSERT INTO devices(id,workspace_id,owner_user_id,name,os,status,last_seen,ip_hint,version,pid,bridge_name,bridge_version,bridge_status,heartbeat_at,heartbeat_interval_ms,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(device.id,ws.id,device.owner_user_id,device.name,device.os,device.status,null,null,null,null,null,null,'pending',null,null,device.created_at);
+      const device={id:id('device'),workspace_id:ws.id,owner_user_id:String(input.ownerUserId || input.owner_user_id || '').trim() || null,name,os:String(input.os || 'Windows'),status:'pending',last_seen:null,ip_hint:null,version:null,pid:null,bridge_name:null,bridge_version:null,bridge_status:'pending',heartbeat_at:null,heartbeat_interval_ms:null,workdir:String(input.workdir || input.workingDirectory || input.cwd || '').trim() || null,created_at:now()};
+      db.prepare('INSERT INTO devices(id,workspace_id,owner_user_id,name,os,status,last_seen,ip_hint,version,pid,bridge_name,bridge_version,bridge_status,heartbeat_at,heartbeat_interval_ms,workdir,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(device.id,ws.id,device.owner_user_id,device.name,device.os,device.status,null,null,null,null,null,null,'pending',null,null,device.workdir,device.created_at);
       audit(slug,'user','device.created',{deviceId:device.id}); return device;
     },
     updateDevice(deviceId, input = {}) {
@@ -1357,8 +1423,9 @@ export function createRepository(options = {}) {
         messages:db.prepare('SELECT * FROM conversation_messages WHERE conversation_id=? ORDER BY created_at').all(conversationId).map(item=>({...item,attachments:parse(item.attachment_json)}))
       };
     },
-    createConversation(slug,input={}) { const ws=workspace(slug); if(!ws) throw new Error('Workspace not found'); const employeeId=input.employeeId || input.employee_id || null; const employee=employeeId ? assertEmployeeVisible(db.prepare('SELECT * FROM employees WHERE id=? AND workspace_id=?').get(employeeId,ws.id), input) : null; const timestamp=now(); const conversation={id:id('conv'),workspace_id:ws.id,employee_id:employeeId,title:String(input.title || '新对话').trim() || '新对话',status:'active',created_at:timestamp,updated_at:timestamp}; db.prepare('INSERT INTO conversations(id,workspace_id,employee_id,title,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?)').run(conversation.id,ws.id,employeeId,conversation.title,'active',timestamp,timestamp); audit(slug,'user','conversation.created',{conversationId:conversation.id,employeeId}); return {...conversation,employee:conversationEmployeeView(employee),employee_binding:employee ? 'bound' : 'unassigned_legacy',requires_employee_assignment:!employee,messages:[]}; },
-    addConversationMessage(conversationId,input={}) { const conversation=db.prepare('SELECT * FROM conversations WHERE id=?').get(conversationId); if(!conversation) throw new Error('Conversation not found'); const ws=db.prepare('SELECT * FROM workspaces WHERE id=?').get(conversation.workspace_id); const employee=conversation.employee_id ? assertEmployeeVisible(db.prepare('SELECT * FROM employees WHERE id=? AND workspace_id=?').get(conversation.employee_id,conversation.workspace_id), input) : null; const targetDeviceId=String(input.targetDeviceId || input.target_device_id || input.deviceId || input.device_id || '').trim() || null; if (targetDeviceId) { const device=db.prepare('SELECT * FROM devices WHERE id=? AND workspace_id=?').get(targetDeviceId,conversation.workspace_id); if (!device) throw new Error('目标设备不属于当前工作区'); if (device.status === 'disabled') throw new Error('目标设备已停用'); const privilegedDeviceRole = ['owner', 'admin'].includes(String(input.actorRole || '').toLowerCase()); if (ws.kind === 'personal' && input.enforceDeviceOwnership && !privilegedDeviceRole && (!input.actorUserId || device.owner_user_id !== input.actorUserId)) throw new Error('个人工作区只能使用本人的设备'); } const message={id:id('convmsg'),conversation_id:conversationId,role:['user','assistant','system'].includes(input.role) ? input.role : 'user',content:String(input.content || '').trim(),attachments:Array.isArray(input.attachments) ? input.attachments : [],created_at:now()}; if(!message.content && !message.attachments.length) throw new Error('消息内容不能为空'); db.prepare('INSERT INTO conversation_messages(id,conversation_id,role,content,attachment_json,created_at) VALUES(?,?,?,?,?,?)').run(message.id,conversationId,message.role,message.content,JSON.stringify(message.attachments),message.created_at); db.prepare('UPDATE conversations SET updated_at=? WHERE id=?').run(message.created_at,conversationId); audit(ws.slug,message.role,'conversation.message.created',{conversationId,messageId:message.id,dispatch:input.dispatch !== false}); if (message.role === 'user' && input.dispatch !== false) { const payload=executionPayload({prompt:message.content,employee,runtime:input.runtime || null,model:input.model || input.modelId || null,profile:input.profile ?? input.runtimeProfile ?? input.runtime_profile ?? input.hermesProfile ?? input.hermes_profile,conversationId,targetDeviceId}); payload.messageId=message.id; this.createA2AAction(ws.slug,{type:'conversation.execute',payload,dedupeKey:`conversation:${conversationId}:${message.id}`}); } return {...message,execution:conversationExecution(conversationId)}; },
+    createConversation(slug,input={}) { const ws=workspace(slug); if(!ws) throw new Error('Workspace not found'); const employeeId=input.employeeId || input.employee_id || null; const employee=employeeId ? assertEmployeeVisible(db.prepare('SELECT * FROM employees WHERE id=? AND workspace_id=?').get(employeeId,ws.id), input) : null; const deviceId=String(input.deviceId ?? input.device_id ?? input.targetDeviceId ?? input.target_device_id ?? '').trim() || null; if (deviceId) { const device=db.prepare('SELECT * FROM devices WHERE id=? AND workspace_id=?').get(deviceId,ws.id); if (!device) throw new Error('目标设备不属于当前工作区'); if (device.status === 'disabled') throw new Error('目标设备已停用'); const privilegedDeviceRole=['owner','admin'].includes(String(input.actorRole || '').toLowerCase()); if (ws.kind === 'personal' && input.enforceDeviceOwnership && !privilegedDeviceRole && (!input.actorUserId || device.owner_user_id !== input.actorUserId)) throw new Error('个人工作区只能使用本人的设备'); } const timestamp=now(); const modelId=String(input.modelId ?? input.model_id ?? input.model ?? '').trim() || null; const workingDirectory=String(input.workingDirectory ?? input.working_directory ?? input.cwd ?? input.workdir ?? '').trim().slice(0,4096) || null; const conversation={id:id('conv'),workspace_id:ws.id,employee_id:employeeId,title:String(input.title || '新对话').trim() || '新对话',status:'active',model_id:modelId,working_directory:workingDirectory,device_id:deviceId,created_at:timestamp,updated_at:timestamp}; db.prepare('INSERT INTO conversations(id,workspace_id,employee_id,title,status,model_id,working_directory,device_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)').run(conversation.id,ws.id,employeeId,conversation.title,'active',modelId,workingDirectory,deviceId,timestamp,timestamp); audit(slug,'user','conversation.created',{conversationId:conversation.id,employeeId,modelId,workingDirectory,deviceId}); return {...conversation,employee:conversationEmployeeView(employee),employee_binding:employee ? 'bound' : 'unassigned_legacy',requires_employee_assignment:!employee,messages:[]}; },
+    updateConversationSettings(conversationId,input={}) { const row=db.prepare('SELECT * FROM conversations WHERE id=?').get(conversationId); if(!row) throw new Error('Conversation not found'); const employee = row.employee_id ? db.prepare('SELECT * FROM employees WHERE id=? AND workspace_id=?').get(row.employee_id,row.workspace_id) : null; if (row.employee_id && !employeeVisible(employee, employeeAccessContext(input))) throw new Error('Conversation not found'); const deviceId=input.deviceId === undefined && input.device_id === undefined && input.targetDeviceId === undefined && input.target_device_id === undefined ? row.device_id || null : (String(input.deviceId ?? input.device_id ?? input.targetDeviceId ?? input.target_device_id ?? '').trim() || null); if (deviceId) { const device=db.prepare('SELECT * FROM devices WHERE id=? AND workspace_id=?').get(deviceId,row.workspace_id); if (!device) throw new Error('目标设备不属于当前工作区'); if (device.status === 'disabled') throw new Error('目标设备已停用'); } const modelId=input.modelId === undefined && input.model_id === undefined && input.model === undefined ? row.model_id || null : (String(input.modelId ?? input.model_id ?? input.model ?? '').trim() || null); const workingDirectory=input.workingDirectory === undefined && input.working_directory === undefined && input.cwd === undefined && input.workdir === undefined ? row.working_directory || null : (String(input.workingDirectory ?? input.working_directory ?? input.cwd ?? input.workdir ?? '').trim().slice(0,4096) || null); db.prepare('UPDATE conversations SET model_id=?,working_directory=?,device_id=?,updated_at=? WHERE id=?').run(modelId,workingDirectory,deviceId,now(),conversationId); return this.getConversation(conversationId, input); },
+    addConversationMessage(conversationId,input={}) { const conversation=db.prepare('SELECT * FROM conversations WHERE id=?').get(conversationId); if(!conversation) throw new Error('Conversation not found'); const ws=db.prepare('SELECT * FROM workspaces WHERE id=?').get(conversation.workspace_id); const employee=conversation.employee_id ? assertEmployeeVisible(db.prepare('SELECT * FROM employees WHERE id=? AND workspace_id=?').get(conversation.employee_id,conversation.workspace_id), input) : null; const targetDeviceId=String(input.targetDeviceId || input.target_device_id || input.deviceId || input.device_id || conversation.device_id || '').trim() || null; if (targetDeviceId) { const device=db.prepare('SELECT * FROM devices WHERE id=? AND workspace_id=?').get(targetDeviceId,conversation.workspace_id); if (!device) throw new Error('目标设备不属于当前工作区'); if (device.status === 'disabled') throw new Error('目标设备已停用'); const privilegedDeviceRole = ['owner', 'admin'].includes(String(input.actorRole || '').toLowerCase()); if (ws.kind === 'personal' && input.enforceDeviceOwnership && !privilegedDeviceRole && (!input.actorUserId || device.owner_user_id !== input.actorUserId)) throw new Error('个人工作区只能使用本人的设备'); } const message={id:id('convmsg'),conversation_id:conversationId,role:['user','assistant','system'].includes(input.role) ? input.role : 'user',content:String(input.content || '').trim(),attachments:normalizeConversationAttachments(input.attachments),created_at:now()}; if(!message.content && !message.attachments.length) throw new Error('消息内容不能为空'); db.prepare('INSERT INTO conversation_messages(id,conversation_id,role,content,attachment_json,created_at) VALUES(?,?,?,?,?,?)').run(message.id,conversationId,message.role,message.content,JSON.stringify(message.attachments),message.created_at); db.prepare('UPDATE conversations SET updated_at=? WHERE id=?').run(message.created_at,conversationId); audit(ws.slug,message.role,'conversation.message.created',{conversationId,messageId:message.id,dispatch:input.dispatch !== false}); if (message.role === 'user' && input.dispatch !== false) { const payload=executionPayload({prompt:message.content,employee,runtime:input.runtime || employee?.runtime || null,model:input.model || input.modelId || conversation.model_id || employee?.model_id || null,profile:input.profile ?? input.runtimeProfile ?? input.runtime_profile ?? input.hermesProfile ?? input.hermes_profile ?? employee?.runtime_profile,conversationId,targetDeviceId,cwd:input.cwd || input.workingDirectory || input.working_directory || input.workdir || conversation.working_directory || null}); payload.messageId=message.id; if (message.attachments.length) payload.attachments=message.attachments; this.createA2AAction(ws.slug,{type:'conversation.execute',payload,dedupeKey:`conversation:${conversationId}:${message.id}`}); } return {...message,execution:conversationExecution(conversationId)}; },
     archiveConversation(conversationId, archived = true) { const row=db.prepare('SELECT * FROM conversations WHERE id=?').get(conversationId); if(!row) throw new Error('Conversation not found'); db.prepare('UPDATE conversations SET status=? WHERE id=?').run(archived ? 'archived' : 'active',conversationId); return this.getConversation(conversationId); },
     workspaceSlugForA2AAction(actionId) {
       const row = db.prepare('SELECT w.slug FROM a2a_actions a JOIN workspaces w ON w.id=a.workspace_id WHERE a.id=?').get(String(actionId || ''));
@@ -1406,6 +1473,15 @@ export function createRepository(options = {}) {
     listA2AEvents(actionId) { const row=db.prepare('SELECT id FROM a2a_actions WHERE id=?').get(actionId); if (!row) throw new Error('A2A action not found'); return db.prepare('SELECT id,action_id,type,message,data_json,created_at FROM a2a_action_events WHERE action_id=? ORDER BY created_at,id').all(actionId).map(item => ({...item,data:parse(item.data_json)})); },
     resultA2AAction(actionId, input = {}) {
       const row=db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId); if (!row) throw new Error('A2A action not found'); if (input.agentId && String(input.agentId) !== row.agent_id) throw new Error('A2A agent mismatch'); assertActionDevice(row, input); if (row.status === 'succeeded' || row.status === 'failed' || row.status === 'expired') return {...row,duplicate:true,payload:parse(row.payload_json),result:parse(row.result_json)}; const status=String(input.status || (input.error ? 'failed' : 'succeeded')); if (!['succeeded','failed'].includes(status)) throw new Error('A2A result status must be succeeded or failed'); const timestamp=now(); db.prepare('UPDATE a2a_actions SET status=?,completed_at=?,result_json=?,error=? WHERE id=?').run(status,timestamp,input.result === undefined ? null : JSON.stringify(input.result),input.error ? String(input.error) : null,actionId); const updated=db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId); const payload=parse(updated.payload_json); const ws=db.prepare('SELECT slug FROM workspaces WHERE id=?').get(updated.workspace_id); audit(ws.slug,'ziwei_user',`a2a.action.${status}`,{actionId, type:updated.type, error:input.error || null}); if (updated.task_id) taskExecutionMessage(updated.task_id, status, input.error || null, input.result); if (updated.task_id && payload.conversationId) { const content = input.error ? `执行失败：${input.error}` : (typeof input.result === 'string' ? input.result : (input.result?.output || input.result?.text || input.result?.result?.output || input.result?.result?.text || '执行完成')); if (content) this.addConversationMessage(payload.conversationId,{role:'assistant',content,dispatch:false}); } if(updated.type === 'automation.execute' && payload.runId) this.completeAutomationRun(payload.runId,{status:status==='succeeded'?'completed':'failed',result:input.result,error:input.error}); if (updated.type === 'conversation.execute' && payload.conversationId) { const content = input.error ? `执行失败：${input.error}` : (typeof input.result === 'string' ? input.result : (input.result?.output || input.result?.text || input.result?.result?.output || input.result?.result?.text || '执行完成')); if (content) this.addConversationMessage(payload.conversationId,{role:'assistant',content,dispatch:false}); } return {...updated,payload,result:parse(updated.result_json)};
+    },
+    getA2AAction(actionId, { workspaceSlug = null, actorUserId = null } = {}) {
+      const row = db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(String(actionId || ''));
+      if (!row) return null;
+      const ws = db.prepare('SELECT slug FROM workspaces WHERE id=?').get(row.workspace_id);
+      if (workspaceSlug && ws?.slug !== String(workspaceSlug)) throw new Error('A2A action 不属于当前工作区');
+      const payload = parse(row.payload_json);
+      if (actorUserId && payload.userId && String(payload.userId) !== String(actorUserId)) throw new Error('无权查看该 A2A action');
+      return actionView(row, { includeEvents: true });
     }
   };
 }

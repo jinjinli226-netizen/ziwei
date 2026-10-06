@@ -35,6 +35,7 @@ export function openDatabase({ memory = false, filename = path.join(ROOT, 'data'
       os TEXT NOT NULL, status TEXT NOT NULL, last_seen TEXT, ip_hint TEXT,
       version TEXT, pid INTEGER, bridge_name TEXT, bridge_version TEXT,
       bridge_status TEXT, heartbeat_at TEXT, heartbeat_interval_ms INTEGER,
+      workdir TEXT,
       created_at TEXT,
       FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
     );
@@ -64,6 +65,14 @@ export function openDatabase({ memory = false, filename = path.join(ROOT, 'data'
       last_seen TEXT NOT NULL, UNIQUE(workspace_id,runtime_name),
       FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS runtime_device_metadata (
+      id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, device_id TEXT NOT NULL, runtime_name TEXT NOT NULL,
+      version TEXT, binary TEXT, status TEXT, models_json TEXT NOT NULL DEFAULT '[]', profiles_json TEXT NOT NULL DEFAULT '[]',
+      last_seen TEXT NOT NULL, UNIQUE(device_id,runtime_name),
+      FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
+      FOREIGN KEY(device_id) REFERENCES devices(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_runtime_device_metadata_workspace ON runtime_device_metadata(workspace_id,device_id,runtime_name);
     CREATE TABLE IF NOT EXISTS tasks (
       id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, title TEXT NOT NULL,
       description TEXT NOT NULL DEFAULT '', description_format TEXT NOT NULL DEFAULT 'plain', state TEXT NOT NULL, priority TEXT NOT NULL DEFAULT 'medium',
@@ -207,7 +216,8 @@ export function openDatabase({ memory = false, filename = path.join(ROOT, 'data'
     CREATE INDEX IF NOT EXISTS idx_notifications_workspace_state ON notifications(workspace_id, archived_at, read_at, created_at);
     CREATE TABLE IF NOT EXISTS conversations (
       id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, employee_id TEXT, title TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'active', created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active', model_id TEXT, working_directory TEXT, device_id TEXT,
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
       FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
       FOREIGN KEY(employee_id) REFERENCES employees(id) ON DELETE SET NULL
     );
@@ -239,6 +249,7 @@ export function openDatabase({ memory = false, filename = path.join(ROOT, 'data'
     "ALTER TABLE devices ADD COLUMN bridge_status TEXT",
     "ALTER TABLE devices ADD COLUMN heartbeat_at TEXT",
     "ALTER TABLE devices ADD COLUMN heartbeat_interval_ms INTEGER",
+    "ALTER TABLE devices ADD COLUMN workdir TEXT",
     "ALTER TABLE devices ADD COLUMN created_at TEXT",
     "ALTER TABLE device_pairing_codes ADD COLUMN device_name TEXT",
     "ALTER TABLE device_pairing_codes ADD COLUMN device_os TEXT",
@@ -249,6 +260,9 @@ export function openDatabase({ memory = false, filename = path.join(ROOT, 'data'
     "ALTER TABLE employees ADD COLUMN skills_json TEXT NOT NULL DEFAULT '[]'",
     "ALTER TABLE employees ADD COLUMN runtime_profile TEXT",
     "ALTER TABLE employees ADD COLUMN avatar TEXT",
+    "ALTER TABLE conversations ADD COLUMN model_id TEXT",
+    "ALTER TABLE conversations ADD COLUMN working_directory TEXT",
+    "ALTER TABLE conversations ADD COLUMN device_id TEXT",
     "ALTER TABLE runtime_metadata ADD COLUMN profiles_json TEXT NOT NULL DEFAULT '[]'",
     "ALTER TABLE skills ADD COLUMN scope TEXT NOT NULL DEFAULT 'platform'",
     "ALTER TABLE skills ADD COLUMN recommended INTEGER NOT NULL DEFAULT 0",
