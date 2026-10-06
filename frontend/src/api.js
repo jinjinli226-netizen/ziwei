@@ -139,6 +139,8 @@ export const api = {
   createConversation: body => request(`/api/workspaces/${encodeURIComponent(workspaceSlug())}/conversations`, { method:'POST', body:JSON.stringify(body) }),
   updateConversation: (id, body) => request(`/api/conversations/${encodeURIComponent(id)}`, { method:'PATCH', body:JSON.stringify(body) }),
   conversation: id => request(`/api/conversations/${id}`),
+  inspectConversationDirectory: (id, body = {}) => request(`/api/conversations/${encodeURIComponent(id)}/workdir/inspect`, { method:'POST', body:JSON.stringify(body) }),
+  conversationDirectoryAction: (id, actionId) => request(`/api/conversations/${encodeURIComponent(id)}/workdir/actions/${encodeURIComponent(actionId)}`),
   addConversationMessage: (id, body) => request(`/api/conversations/${id}/messages`, { method:'POST', body:JSON.stringify(body) }),
   archiveConversation: (id, archived = true) => request(`/api/conversations/${id}/archive`, { method:'POST', body:JSON.stringify({archived}) }),
   streamUrl: () => `${API_BASE}/api/workspaces/${encodeURIComponent(workspaceSlug())}/notifications/stream`,

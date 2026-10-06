@@ -6,6 +6,56 @@ import {normalizeRuntimeProfile} from './employee-runtime.mjs';
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_OUTPUT_BYTES = 1024 * 1024;
+const MAX_DIRECTORY_ENTRIES = 200;
+
+function localDirectoryRoots() {
+  if (process.platform !== 'win32') return ['/'];
+  const roots = [];
+  for (let code = 65; code <= 90; code += 1) {
+    const root = `${String.fromCharCode(code)}:\\`;
+    try { if (fs.statSync(root).isDirectory()) roots.push(root); } catch {}
+  }
+  return roots;
+}
+
+/**
+ * Inspect a real directory on the paired workstation. This deliberately
+ * returns directory names only; file contents never cross the A2A boundary.
+ * A missing path is reported to the UI so creation remains an explicit user
+ * action instead of silently creating a typo.
+ */
+export function inspectLocalDirectory({directoryPath = '', basePath = process.cwd(), createIfMissing = false, includeRoots = true, includeChildren = true, maxEntries = MAX_DIRECTORY_ENTRIES} = {}) {
+  const raw = String(directoryPath || '').trim();
+  const base = path.resolve(String(basePath || process.cwd()));
+  const target = raw ? path.resolve(base, raw) : base;
+  const limit = Math.min(MAX_DIRECTORY_ENTRIES, Math.max(1, Number(maxEntries) || MAX_DIRECTORY_ENTRIES));
+  const result = {
+    path: target,
+    currentPath: base,
+    exists: false,
+    created: false,
+    isDirectory: false,
+    roots: includeRoots ? localDirectoryRoots() : [],
+    entries: []
+  };
+  if (!fs.existsSync(target)) {
+    if (!createIfMissing) return result;
+    fs.mkdirSync(target, { recursive: true });
+    result.created = true;
+  }
+  const stats = fs.statSync(target);
+  if (!stats.isDirectory()) throw new Error(`工作目录不是目录: ${target}`);
+  result.exists = true;
+  result.isDirectory = true;
+  if (includeChildren) {
+    result.entries = fs.readdirSync(target, { withFileTypes: true })
+      .filter(entry => entry.isDirectory())
+      .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: 'base' }))
+      .slice(0, limit)
+      .map(entry => ({ name: entry.name, path: path.join(target, entry.name), type: 'directory' }));
+  }
+  return result;
+}
 
 function isInside(root, candidate) {
   const relative = path.relative(root, candidate);
@@ -264,6 +314,20 @@ export function createLocalActionExecutor({runtimeDir, allowedExecutables = [], 
   fs.mkdirSync(runtimeDir, {recursive: true});
   return async (action, context = {}) => {
     const type = String(action?.type || '');
+    if (type === 'directory.inspect' || type === 'device.directory.inspect') {
+      const payload = action.payload || {};
+      return {
+        status: 'succeeded',
+        result: inspectLocalDirectory({
+          directoryPath: payload.path || payload.directory || payload.workingDirectory || payload.working_directory || '',
+          basePath: payload.workdir || process.cwd(),
+          createIfMissing: payload.createIfMissing === true || payload.create_if_missing === true,
+          includeRoots: payload.includeRoots !== false && payload.include_roots !== false,
+          includeChildren: payload.includeChildren !== false && payload.include_children !== false,
+          maxEntries: payload.maxEntries || payload.max_entries
+        })
+      };
+    }
     if (type === 'hermes.profile.create' || type === 'profile.create') {
       return {status: 'succeeded', result: createHermesProfile({payload: action.payload || {}, hermesHomePath})};
     }

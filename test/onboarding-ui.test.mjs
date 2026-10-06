@@ -83,6 +83,10 @@ test('tasks and conversations expose a target device contract', () => {
   assert.match(appSource, /targetDeviceId:agentComposerDeviceId\.value/);
   assert.match(appSource, /conversationDeviceId/);
   assert.match(appSource, /targetDeviceId:conversationDeviceId\.value/);
+  assert.match(appSource, /选择目录/);
+  assert.match(appSource, /conversationDirectoryPickerOpen/);
+  assert.match(appSource, /inspectConversationDirectory/);
+  assert.match(appSource, /创建并使用/);
 });
 
 test('employee creation keeps the four-agent runtime choice generic', () => {

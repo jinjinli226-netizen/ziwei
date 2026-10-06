@@ -450,6 +450,21 @@ export function createApp(options = {}) {
   });
   app.get('/api/conversations/:id', (req, res) => { const conversation=repo.getConversation(req.params.id, employeeContext(req)); if(!conversation) return res.status(404).json({error:'Conversation not found'}); res.json(conversation); });
   app.patch('/api/conversations/:id', (req, res) => { const context=employeeContext(req); const conversation=repo.getConversation(req.params.id, context); if(!conversation) return res.status(404).json({error:'Conversation not found'}); res.json(repo.updateConversationSettings(req.params.id, { ...(req.body || {}), ...context })); });
+  app.post('/api/conversations/:id/workdir/inspect', requireRole('owner','admin','member'), (req, res, next) => {
+    try {
+      const context=employeeContext(req); const conversation=repo.getConversation(req.params.id, context); if(!conversation) return res.status(404).json({error:'Conversation not found'});
+      const action=repo.createConversationDirectoryAction(req.params.id, { ...(req.body || {}), ...context, actorUserId:req.auth?.user_id, actorRole:req.workspaceRole || req.auth?.role || '' });
+      return res.status(action.status === 'succeeded' || action.duplicate ? 200 : 202).json({ action });
+    } catch (error) { return next(error); }
+  });
+  app.get('/api/conversations/:id/workdir/actions/:actionId', requireRole('owner','admin','member'), (req, res, next) => {
+    try {
+      const context=employeeContext(req); const conversation=repo.getConversation(req.params.id, context); if(!conversation) return res.status(404).json({error:'Conversation not found'});
+      const action=repo.getConversationDirectoryAction(req.params.id, req.params.actionId, { ...context, actorUserId:req.auth?.user_id });
+      if(!action) return res.status(404).json({error:'工作目录检查请求不存在'});
+      return res.json({ action });
+    } catch (error) { return next(error); }
+  });
   app.post('/api/conversations/:id/messages', (req, res) => res.status(201).json(repo.addConversationMessage(req.params.id, { ...(req.body || {}), actorUserId: req.auth?.user_id, actorRole: req.workspaceRole, enforceDeviceOwnership: true, enforceEmployeeVisibility: true })));
   app.post('/api/conversations/:id/archive', (req, res) => {
     const conversation = repo.getConversation(req.params.id, employeeContext(req));

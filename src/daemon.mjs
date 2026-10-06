@@ -68,7 +68,7 @@ export class ActionDispatcher {
     return {status: 'failed', actionId: action?.id, error: message, completedAt: this.#now(), ...extra};
   }
   async #run(action) {
-    const actionId = action?.id; const controller = new AbortController(); this.#controllers.set(String(actionId), controller);
+    const actionId = action?.id; const controller = new AbortController(); let timeoutHandle = null; this.#controllers.set(String(actionId), controller);
     try {
       if (!action || typeof action !== 'object') throw new Error('A2A action must be an object');
       const actionType = String(action.type || '').toLowerCase();
@@ -82,7 +82,7 @@ export class ActionDispatcher {
       const executableAction = action.payload && typeof action.payload === 'object' ? {...action, payload: {...action.payload, workdir}} : action;
       this.#onEvent('action.started', {actionId, type: action.type});
       const timeoutMs = Math.min(60 * 60 * 1000, Math.max(100, Number(action.payload?.timeoutMs ?? action.payload?.timeout_ms ?? 10 * 60 * 1000)));
-      let timeoutHandle; let timedOut = false;
+      let timedOut = false;
       const timeout = new Promise(resolve => { timeoutHandle = setTimeout(() => { timedOut = true; controller.abort(); resolve({status: 'failed', code: 'action_timeout', error: `A2A action timed out after ${timeoutMs}ms`}); }, timeoutMs); });
       const execution = Promise.resolve().then(() => this.#execute(executableAction, {
         signal: controller.signal,
@@ -127,7 +127,7 @@ export class ActionDispatcher {
       const output = executorStatus === 'succeeded' && Object.prototype.hasOwnProperty.call(result, 'result') ? result.result : result;
       const completed = {status: 'succeeded', actionId, result: output, completedAt: this.#now()}; this.#onEvent('action.succeeded', {actionId, type: action.type}); return completed;
     } catch (error) { const failed = this.#failure(action, error); this.#onEvent('action.failed', {actionId, type: action?.type, error: failed.error}); return failed; }
-    finally { this.#controllers.delete(String(actionId)); }
+    finally { if (timeoutHandle) clearTimeout(timeoutHandle); this.#controllers.delete(String(actionId)); }
   }
   async dispatch(action) {
     const key = String(action?.dedupeKey ?? action?.dedupe_key ?? action?.id ?? ''); if (!key) return this.#failure(action, 'A2A action requires id or dedupeKey');

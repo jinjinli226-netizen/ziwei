@@ -52,6 +52,34 @@ test('conversation API requires an employee and filters each employee workspace'
   } finally { server.close(); }
 });
 
+test('conversation workdir inspection is dispatched to the target device and exposes the real result', async () => {
+  const app = createApp({ memory: true });
+  const server = app.listen(0);
+  await new Promise(resolve => server.once('listening', resolve));
+  const port = server.address().port;
+  try {
+    const headers = { 'content-type': 'application/json' };
+    const device = app.locals.repo.heartbeatDevice('test-111', {
+      agentId: 'ziwei_user', deviceId: 'directory-device', name: '目录电脑', workdir: 'C:/Users/test', version: '0.1.0'
+    });
+    const employee = await fetch(`http://127.0.0.1:${port}/api/workspaces/test-111/employees`, { method:'POST', headers, body:JSON.stringify({ name:'目录助手', runtime:'Codex' }) }).then(r => r.json());
+    const conversation = await fetch(`http://127.0.0.1:${port}/api/workspaces/test-111/conversations`, { method:'POST', headers, body:JSON.stringify({ title:'目录选择', employeeId:employee.id, deviceId:device.id }) }).then(r => r.json());
+    const submitted = await fetch(`http://127.0.0.1:${port}/api/conversations/${conversation.id}/workdir/inspect`, { method:'POST', headers, body:JSON.stringify({ deviceId:device.id, path:'C:/research/reports', createIfMissing:true }) });
+    assert.equal(submitted.status, 202);
+    const body = await submitted.json();
+    assert.equal(body.action.type, 'directory.inspect');
+    assert.equal(body.action.payload.deviceId, device.id);
+    assert.equal(body.action.payload.path, 'C:/research/reports');
+    assert.equal(body.action.payload.createIfMissing, true);
+    const pending = await fetch(`http://127.0.0.1:${port}/api/conversations/${conversation.id}/workdir/actions/${body.action.id}`).then(r => r.json());
+    assert.equal(pending.action.status, 'pending');
+    app.locals.repo.resultA2AAction(body.action.id, { agentId:'ziwei_user', deviceId:device.id, status:'succeeded', result:{ path:'C:/research/reports', exists:true, isDirectory:true, created:true } });
+    const complete = await fetch(`http://127.0.0.1:${port}/api/conversations/${conversation.id}/workdir/actions/${body.action.id}`).then(r => r.json());
+    assert.equal(complete.action.status, 'succeeded');
+    assert.equal(complete.action.result.path, 'C:/research/reports');
+  } finally { server.close(); }
+});
+
 test('external API requires a live Ziwei API key', async () => {
   const app = createApp({ memory: true });
   const server = app.listen(0);
