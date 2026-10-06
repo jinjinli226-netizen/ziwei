@@ -10,6 +10,13 @@
 
 > **版本事实**：通用四 Agent daemon 配对改动位于分支 `codex/hermes-independent-profile`（分支名沿用历史命名）；服务器当前已部署提交 `ab525b4`（包含实现提交 `3a8455a`），生产 Git `main` 仍保持不变。工作树仍保留既有未跟踪临时文件 `tmp_gzgov.html`。不要在未审查 `git status --short` 前执行 reset、clean 或覆盖式 checkout。
 
+### 2026-10-06 本机 ziwei_user 更新（已完成）
+
+- 问题归属：本机 CLI/daemon。原 20242 进程来自全局旧包，不能执行新的 `directory.inspect` A2A 动作；更新前已读取配置并确认工作区为 `test_222`，没有切换工作区或覆盖设备凭证。
+- 更新操作：先备份 `C:\Users\25941\AppData\Local\Ziwei\ziwei_user\ziwei_user.json`，确认 PID 35992 的命令行确实属于 `ziwei_user` 后停止；使用当前 checkout 执行 `npm install --global --omit=dev --force .`，再运行 `ziwei_user start`。当前 daemon PID 22660，监听 20242。
+- 真实验证：`/readyz` 返回 `ready=true`、工作区 `test_222`、4 个 Agent 环境在线；通过服务器 A2A 发起真实 `directory.inspect`，目标电脑返回 `C:\Users\25941` 存在、盘符 `C:\`/`D:\` 和目录项，动作状态为 `succeeded`。
+- 回滚依据：配置备份为 `C:\Users\25941\AppData\Local\Ziwei\ziwei_user\ziwei_user.json.before-update-20261006180005.bak`。恢复时先停止当前 daemon，再恢复配置并重新安装需要的旧 CLI 包；本次没有改服务器数据库。
+
 ### 2026-10-06 目标设备真实工作目录选择（已发布）
 
 - 问题归属：会话前端、会话 API/SQLite、A2A 动作和目标电脑上的 `ziwei_user` daemon。此前工作目录只是文本输入框，网页无法确认路径是否存在，也不能区分“选择已有目录”和“创建新目录”。
