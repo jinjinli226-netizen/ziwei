@@ -8,17 +8,17 @@
 
 > **当前本机运行态**：项目配置 `data/ziwei_user.json` 指向 `bjc-ops`；已安装全局 CLI 当前用户配置与 `/readyz` 实际显示为 `test-111`，两者必须分别核对，不能把示例工作区当成目标工作区。
 
-> **版本事实**：通用四 Agent daemon 配对改动位于分支 `codex/hermes-independent-profile`（分支名沿用历史命名）；服务器当前已部署提交 `d18121e`，生产 Git `main` 仍保持不变。工作树仍保留既有未跟踪临时文件 `tmp_gzgov.html`。不要在未审查 `git status --short` 前执行 reset、clean 或覆盖式 checkout。
+> **版本事实**：通用四 Agent daemon 配对改动位于分支 `codex/hermes-independent-profile`（分支名沿用历史命名）；服务器当前已部署提交 `3a8455a`，生产 Git `main` 仍保持不变。工作树仍保留既有未跟踪临时文件 `tmp_gzgov.html`。不要在未审查 `git status --short` 前执行 reset、clean 或覆盖式 checkout。
 
-### 2026-10-06 目标设备真实工作目录选择（本地完成，未发布）
+### 2026-10-06 目标设备真实工作目录选择（已发布）
 
 - 问题归属：会话前端、会话 API/SQLite、A2A 动作和目标电脑上的 `ziwei_user` daemon。此前工作目录只是文本输入框，网页无法确认路径是否存在，也不能区分“选择已有目录”和“创建新目录”。
 - 修复内容：会话配置新增“选择目录”弹窗。网页先向当前会话的目标设备排队 `directory.inspect` action；目标 daemon 在自己的 Windows 电脑上扫描真实盘符、检查当前路径并只返回目录名，不读取文件内容。已有目录可直接选择；缺失路径只在用户点击“创建并使用”后由目标电脑显式递归创建；普通输入检查不会静默创建目录。目录结果回读前校验会话、工作区、用户和 action 类型，服务器不直接操作远程文件系统。
 - API/实现：新增 `POST /api/conversations/:id/workdir/inspect` 和对应 action 查询接口；`src/local-action.mjs` 提供盘符、子目录和显式创建动作；目录 action 沿用设备凭证和 A2A ACK/结果回传链路。保存工作目录失败时弹窗保持打开，不显示静态成功。
-- 本地验证：`test/directory-inspection.test.mjs` 覆盖真实临时目录、已有目录、缺失目录显式创建和文件路径拒绝；API 测试覆盖入队、目标设备、pending 到 succeeded 的结果回读；前端契约测试覆盖选择器和创建按钮。完整 `npm test` 154/154、`npm run lint`、`npm run build` 均已通过。
-- 未验证边界：尚未在浏览器中逐项点击真实 Windows 多盘符选择；不同目标电脑的权限、网络中断和路径 ACL 仍由目标操作系统决定。目录名之外的文件内容不会跨 A2A 返回。
-- 发布状态：本节代码尚未推送 GitHub 或更新服务器，用户明确要求部署后再进行发布；既有服务器版本和 `tmp_gzgov.html` 不变。
-- 回滚方式：使用本轮代码提交的 `git revert <commit>` 回滚前端、API、repository、daemon 和测试；本轮不改 SQLite schema，不需要数据库降级。保留既有未跟踪 `tmp_gzgov.html`。
+- 本地验证：`test/directory-inspection.test.mjs` 覆盖真实临时目录、已有目录、缺失目录显式创建和文件路径拒绝；API 测试覆盖入队、目标设备、pending 到 succeeded 的结果回读；前端契约测试覆盖选择器和创建按钮。完整 `npm test` 154/154、`npm run lint`、`npm run build` 均已通过。浏览器验收使用真实 Windows 目标 daemon：确认 `D:\灵光爸爸拆解` 的盘符/子目录、缺失目录状态，并点击“创建并使用”后由目标电脑创建目录且重新打开仍显示已存在。
+- 发布状态：提交 `3a8455a` 已推送到 `origin/codex/hermes-independent-profile` 并快进 `/opt/ziwei`；部署前 SQLite 备份为 `/opt/ziwei-backups/ziwei.sqlite.20261006T095244Z.before-3a8455a`。服务器执行 `npm ci --ignore-scripts`、`npm run build` 成功，`ziwei-api` active；本机回环 `http://127.0.0.1:4178/healthz`、公网 `https://qzelynth.top/healthz` 和首页均返回 200。
+- 未验证边界：不同目标电脑的权限、网络中断和路径 ACL 仍由目标操作系统决定；目录名之外的文件内容不会跨 A2A 返回。旧版全局 `ziwei_user` 会明确拒绝 `directory.inspect`，各目标电脑需要安装/更新到包含该动作的当前 daemon 后才能使用目录选择器；本机原有 20242 daemon 未被本轮切换。
+- 回滚方式：使用本轮代码提交的 `git revert <commit>` 回滚前端、API、repository、daemon 和测试；本轮不改 SQLite schema，不需要数据库降级。服务器保留备份 `/opt/ziwei-backups/ziwei.sqlite.20261006T095244Z.before-3a8455a`；保留既有未跟踪 `tmp_gzgov.html`。
 
 ### 2026-10-06 Hermes Profile 与 Codex 风格会话工作区（已发布）
 
