@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { hermesProfileHome, normalizeProxyUrl, parseRuntimeStreamLine, proxyUrlForChild, runtimeInvocation, runtimeSpawnSpec, windowsRuntimeCandidates } from '../src/runtime-adapters.mjs';
+import { formatRuntimeFailure, hermesProfileHome, normalizeProxyUrl, parseRuntimeStreamLine, proxyUrlForChild, runtimeInvocation, runtimeSpawnSpec, windowsRuntimeCandidates } from '../src/runtime-adapters.mjs';
 
 test('Codex nested agent messages become the runtime response', () => {
   const state = { output: '', response: '', bytes: 0, truncated: false, lineBuffer: '' };
@@ -105,4 +105,10 @@ test('Hermes profile home is isolated beneath the configured Hermes home', () =>
   assert.equal(hermesProfileHome('default', { baseHome: 'C:\\hermes' }), 'C:\\hermes');
   assert.equal(hermesProfileHome('ziwei-aigc', { baseHome: 'C:\\hermes' }), 'C:\\hermes\\profiles\\ziwei-aigc');
   assert.throws(() => hermesProfileHome('../outside', { baseHome: 'C:\\hermes' }), /profile 名称无效/);
+});
+
+test('runtime failures preserve a safe actionable CLI diagnostic', () => {
+  const message = formatRuntimeFailure('Hermes', 1, "Profile 'test333' is not connected to any AI provider yet.\nOPENROUTER_API_KEY=secret-value");
+  assert.match(message, /Hermes CLI exited with code 1: Profile 'test333' is not connected/);
+  assert.doesNotMatch(message, /secret-value/);
 });

@@ -405,7 +405,7 @@ Get-Content .local/logs/daemon.log -Tail 80
 
 ### 任务显示 `A2A action timed out after 600000ms`
 
-这代表动作在 daemon 的 10 分钟执行窗口内没有终态结果，常见根因是 CLI 网络不可达、CLI 进程卡住、工作目录错误或 daemon 未回传结果。不要先把前端提示改成成功。
+这条历史错误曾代表 daemon 的固定 10 分钟计时器先于 CLI 终态结果中止动作。不要先把前端提示改成成功；应先确认 daemon 是否仍在输出、CLI 是否真的退出，以及 A2A action 的租约是否持续有效。
 
 排查顺序：
 
@@ -417,7 +417,20 @@ reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings" /v 
 reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings" /v ProxyServer
 ```
 
-当前 Codex 适配器会自动继承显式 `HTTP_PROXY`/`HTTPS_PROXY`，没有显式变量时读取启用的 Windows Internet Settings 代理。原有失败记录会继续显示失败；修复后需要重新发送任务，不会篡改历史结果。
+当前 Codex 适配器会自动继承显式 `HTTP_PROXY`/`HTTPS_PROXY`，没有显式变量时读取启用的 Windows Internet Settings 代理。运行时动作默认不设固定总时长上限，只在超过无活动 watchdog 时失败；显式传入 `timeoutMs` 时仍按调用方要求设置硬上限。daemon 的输出、阶段和进度事件会刷新无活动计时，服务端也会据此续 A2A 执行租约。原有失败记录会继续显示失败；修复后需要重新发送任务，不会篡改历史结果。
+
+### 任务持续有输出却在 10 分钟后失败（已修复）
+
+2026-10-06 的实证记录 `action_10891d73-60d5-4223-be18-3a9d7c732d27` 在 `10:04:52Z` ACK 后持续产生阶段、输出和进度，最后一条进度在 `10:13:57Z`，但 daemon 在 `10:14:53Z` 以 `A2A action timed out after 600000ms` 结束。问题属于 daemon 超时策略和 API 执行租约续期，不是前端状态渲染。
+
+修复包括：
+
+- daemon 默认只使用无活动 watchdog；收到 `action.output`、`action.stage` 或 `action.progress` 就刷新计时，不再用默认 10 分钟总时长截断持续工作的 CLI。
+- 显式 `timeoutMs` 仍可作为调用方硬上限，避免调用方需要严格截止时间时失去控制。
+- API 在活动事件写入时把 ACK action 的 `expires_at` 延长到新的执行租约，daemon 持续回传时不会被服务端误判过期。
+- Hermes profile 创建默认从本机主 Hermes home 继承 `auth.json`、`config.yaml` 和 `.env`（仅 daemon 本机文件操作），因此新 profile 默认继承 provider；profile 仍保留独立目录和独立 `SOUL.md`。如果主 profile 尚未连接 provider，创建动作不会伪造连接，Hermes 会返回可操作的 provider 提示。
+
+回归验证覆盖无活动超时、活动续时、A2A 租约续期、Hermes provider 继承，以及 `test333` profile 的真实本机调用。历史已失败 action 不会被篡改，需要更新 daemon 后重新发送。
 
 ### 任务执行了但对话没有回复
 

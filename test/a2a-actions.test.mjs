@@ -42,3 +42,20 @@ test('acked A2A actions keep an execution lease after the original expiry', asyn
   assert.equal(repo.resultA2AAction(action.id, { agentId: 'ziwei_user', status: 'succeeded', result: { ok: true } }).status, 'succeeded');
   assert.equal(repo.listA2AActions('test-111', { status: 'all' })[0].status, 'succeeded');
 });
+
+test('A2A progress events renew the execution lease while an action is active', () => {
+  const repo = createRepository({ memory: true });
+  const action = repo.createA2AAction('test-111', {
+    agentId: 'ziwei_user', type: 'task.execute', dedupeKey: 'task-lease-renewal',
+    payload: { timeoutMs: 15 * 60 * 1000 }
+  });
+  repo.ackA2AAction(action.id, { agentId: 'ziwei_user' });
+  const nearExpiry = new Date(Date.now() + 1_000).toISOString();
+  repo.db.prepare('UPDATE a2a_actions SET expires_at=? WHERE id=?').run(nearExpiry, action.id);
+
+  repo.recordA2AEvent(action.id, {
+    agentId: 'ziwei_user', type: 'action.progress', message: '仍在执行', data: {bytes: 2048}
+  });
+  const renewed = repo.listA2AActions('test-111', { status: 'acked' })[0];
+  assert.ok(Date.parse(renewed.expires_at) > Date.parse(nearExpiry));
+});

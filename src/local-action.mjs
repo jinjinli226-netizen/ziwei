@@ -106,6 +106,24 @@ function profileText(value, fallback = '') {
   return String(value ?? fallback).replace(/^\uFEFF/, '');
 }
 
+const HERMES_PROVIDER_FILES = ['auth.json', 'config.yaml', '.env'];
+
+function inheritedHermesProviderFiles(root, payload = {}) {
+  if (payload.inheritProvider === false || payload.inherit_provider === false) return [];
+  return HERMES_PROVIDER_FILES.flatMap(name => {
+    const source = path.join(root, name);
+    try {
+      if (!fs.existsSync(source) || !fs.statSync(source).isFile()) return [];
+      const bytes = fs.readFileSync(source);
+      if (bytes.length > MAX_FILE_BYTES) throw new Error(`Hermes provider 配置超过 10 MiB: ${name}`);
+      return [{name, bytes}];
+    } catch (error) {
+      if (error?.code === 'ENOENT') return [];
+      throw error;
+    }
+  });
+}
+
 function attachmentFileName(value, index) {
   const candidate = path.basename(String(value || '').trim()).replace(/[^A-Za-z0-9._\-\u0080-\uFFFF]/g, '_').replace(/^\.+/, '').slice(0, 180);
   return candidate || `attachment-${index + 1}`;
@@ -181,6 +199,7 @@ function createHermesProfile({payload = {}, hermesHomePath = null} = {}) {
   }
   if (payload.memory ?? payload.memoryMd ?? payload.memory_md) files['MEMORY.md'] = profileText(payload.memory ?? payload.memoryMd ?? payload.memory_md);
   if (payload.identity ?? payload.identityMd ?? payload.identity_md) files['IDENTITY.md'] = profileText(payload.identity ?? payload.identityMd ?? payload.identity_md);
+  const inheritedProviderFiles = inheritedHermesProviderFiles(root, payload);
   const totalBytes = Object.values(files).reduce((sum, value) => sum + Buffer.byteLength(value, 'utf8'), 0);
   if (totalBytes > MAX_FILE_BYTES) throw new Error('Hermes profile 内容超过 10 MiB');
   fs.mkdirSync(profilesRoot, {recursive: true});
@@ -196,22 +215,27 @@ function createHermesProfile({payload = {}, hermesHomePath = null} = {}) {
       return fs.existsSync(file) && fs.statSync(file).isFile() && fs.readFileSync(file, 'utf8') === value;
     });
     if (!same) throw new Error(`Hermes profile 已存在且内容不同: ${profile}`);
-    return {profile, path: path.relative(root, target), files: Object.keys(files), duplicate: true};
+    for (const item of inheritedProviderFiles) {
+      const destination = path.join(target, item.name);
+      if (!fs.existsSync(destination)) fs.writeFileSync(destination, item.bytes, {flag: 'wx', mode: 0o600});
+    }
+    return {profile, path: path.relative(root, target), files: [...Object.keys(files), ...inheritedProviderFiles.map(item => item.name)], duplicate: true};
   }
   const temporary = path.join(profilesRoot, `.${profile}.${process.pid}.${Date.now()}.tmp`);
   fs.mkdirSync(temporary, {recursive: true});
   try {
     for (const [name, value] of Object.entries(files)) fs.writeFileSync(path.join(temporary, name), value, {encoding: 'utf8', mode: 0o600});
+    for (const item of inheritedProviderFiles) fs.writeFileSync(path.join(temporary, item.name), item.bytes, {flag: 'wx', mode: 0o600});
     try { fs.renameSync(temporary, target); }
     catch (error) {
       if (fs.existsSync(target)) {
         const same = Object.entries(files).every(([name, value]) => fs.existsSync(path.join(target, name)) && fs.readFileSync(path.join(target, name), 'utf8') === value);
-        if (same) return {profile, path: path.relative(root, target), files: Object.keys(files), duplicate: true};
+        if (same) return {profile, path: path.relative(root, target), files: [...Object.keys(files), ...inheritedProviderFiles.map(item => item.name)], duplicate: true};
       }
       throw error;
     }
   } finally { try { fs.rmSync(temporary, {recursive: true, force: true}); } catch {} }
-  return {profile, path: path.relative(root, target), files: Object.keys(files), duplicate: false};
+  return {profile, path: path.relative(root, target), files: [...Object.keys(files), ...inheritedProviderFiles.map(item => item.name)], inheritedProvider: inheritedProviderFiles.length > 0, duplicate: false};
 }
 
 function messagePayload(action) {

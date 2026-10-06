@@ -48,12 +48,17 @@ test('Hermes discovery stays scoped to the selected device', () => {
 test('ziwei_user writes Hermes profile files locally and repeats safely', async () => {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'ziwei-hermes-profile-'));
   try {
+    fs.mkdirSync(path.join(temp, 'hermes'), { recursive: true });
+    fs.writeFileSync(path.join(temp, 'hermes', 'auth.json'), '{"active_provider":"openai-codex"}', { mode: 0o600 });
+    fs.writeFileSync(path.join(temp, 'hermes', 'config.yaml'), 'model:\n  provider: openai-codex\n', { mode: 0o600 });
     const executor = createLocalActionExecutor({ runtimeDir: path.join(temp, 'runtime'), hermesHomePath: path.join(temp, 'hermes') });
     const action = { id: 'action-hermes-profile', type: 'hermes.profile.create', payload: { profile: 'researcher', soul: '# Researcher', memory: 'Keep sources.', deviceId: 'device-1' } };
     const result = await executor(action);
     assert.equal(result.status, 'succeeded');
     assert.equal(fs.readFileSync(path.join(temp, 'hermes', 'profiles', 'researcher', 'SOUL.md'), 'utf8'), '# Researcher');
     assert.equal(fs.readFileSync(path.join(temp, 'hermes', 'profiles', 'researcher', 'MEMORY.md'), 'utf8'), 'Keep sources.');
+    assert.equal(fs.readFileSync(path.join(temp, 'hermes', 'profiles', 'researcher', 'auth.json'), 'utf8'), '{"active_provider":"openai-codex"}');
+    assert.equal(fs.readFileSync(path.join(temp, 'hermes', 'profiles', 'researcher', 'config.yaml'), 'utf8'), 'model:\n  provider: openai-codex\n');
     const duplicate = await executor(action);
     assert.equal(duplicate.result.duplicate, true);
     await assert.rejects(() => executor({ ...action, payload: { ...action.payload, soul: '# Changed' } }), /内容不同/);

@@ -198,6 +198,12 @@ function firstLine(value) {
   return String(value || '').split(/\r?\n/).map(item => item.trim()).find(Boolean) || null;
 }
 
+export function formatRuntimeFailure(runtime, code, diagnostics = '') {
+  const base = `${String(runtime || 'Runtime')} CLI exited with code ${code ?? 'unknown'}`;
+  const detail = firstLine(redactSecrets(diagnostics));
+  return detail ? `${base}: ${detail.slice(0, 600)}` : base;
+}
+
 function versionFor(binary, definition) {
   if (!binary) return { version: null, binary: null, status: 'unavailable' };
   const spec = runtimeSpawnSpec(binary, definition.versionArgs);
@@ -491,7 +497,7 @@ export function executeRuntime({ runtime, prompt, model = null, profile = null, 
       if (state.lineBuffer) parseRuntimeStreamLine(state.lineBuffer, state, onOutput, onStage);
       if (signal?.aborted) return finish({ status: 'failed', code: 'cancelled', error: 'runtime execution cancelled', result: { runtime: resolvedRuntime, code, signal: childSignal, output: state.output, truncated: state.truncated } });
     const result = { runtime: resolvedRuntime, model: model || null, profile: profile || null, binary: discovered.binary, code, signal: childSignal, output: state.response.trim() || state.output, diagnostics: state.response.trim() ? state.output : null, truncated: state.truncated, ...(attachments.length ? {attachments} : {}) };
-      if (code !== 0) return finish({ status: 'failed', code: 'runtime_failed', error: `${resolvedRuntime} CLI exited with code ${code ?? 'unknown'}`, result });
+      if (code !== 0) return finish({ status: 'failed', code: 'runtime_failed', error: formatRuntimeFailure(resolvedRuntime, code, state.output), result });
       finish({ status: 'succeeded', result });
     });
     if (invocation.stdin !== null && invocation.stdin !== undefined) child.stdin.end(String(invocation.stdin));

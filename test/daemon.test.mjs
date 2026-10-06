@@ -68,3 +68,35 @@ test('forwards the provider public reasoning summary without exposing raw reason
   assert.equal(reasoning?.payload?.detail, '公开推理摘要');
   assert.equal(reasoning?.payload?.summary, '先检查任务状态，再运行验证。 token=[REDACTED]');
 });
+
+test('fails an action after the configured idle timeout even before the hard deadline', async () => {
+  const dispatcher = new ActionDispatcher({
+    execute: async () => new Promise(resolve => setTimeout(() => resolve({ok: true}), 180)),
+    now: () => Date.now()
+  });
+  const result = await dispatcher.dispatch({
+    id: 'a-idle-timeout', dedupeKey: 'idle-timeout', type: 'agent.execute',
+    payload: {prompt: 'wait', timeoutMs: 400, idleTimeoutMs: 100}
+  });
+  assert.equal(result.status, 'failed');
+  assert.equal(result.code, 'action_timeout');
+  assert.match(result.error, /no activity/i);
+});
+
+test('keeps an active action alive when progress arrives before the idle timeout', async () => {
+  const dispatcher = new ActionDispatcher({
+    execute: async (_action, context) => {
+      for (let index = 0; index < 4; index += 1) {
+        await new Promise(resolve => setTimeout(resolve, 60));
+        context.onProgress({runtime: 'Codex', bytes: index + 1});
+      }
+      return {ok: true};
+    },
+    now: () => Date.now()
+  });
+  const result = await dispatcher.dispatch({
+    id: 'a-active-timeout', dedupeKey: 'active-timeout', type: 'agent.execute',
+    payload: {prompt: 'progress', timeoutMs: 400, idleTimeoutMs: 100}
+  });
+  assert.equal(result.status, 'succeeded');
+});

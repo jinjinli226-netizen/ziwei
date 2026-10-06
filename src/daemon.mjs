@@ -68,7 +68,7 @@ export class ActionDispatcher {
     return {status: 'failed', actionId: action?.id, error: message, completedAt: this.#now(), ...extra};
   }
   async #run(action) {
-    const actionId = action?.id; const controller = new AbortController(); let timeoutHandle = null; this.#controllers.set(String(actionId), controller);
+    const actionId = action?.id; const controller = new AbortController(); let hardTimeoutHandle = null; let idleTimeoutHandle = null; this.#controllers.set(String(actionId), controller);
     try {
       if (!action || typeof action !== 'object') throw new Error('A2A action must be an object');
       const actionType = String(action.type || '').toLowerCase();
@@ -81,12 +81,42 @@ export class ActionDispatcher {
       const workdir = this.#validateWorkdir(action);
       const executableAction = action.payload && typeof action.payload === 'object' ? {...action, payload: {...action.payload, workdir}} : action;
       this.#onEvent('action.started', {actionId, type: action.type});
-      const timeoutMs = Math.min(60 * 60 * 1000, Math.max(100, Number(action.payload?.timeoutMs ?? action.payload?.timeout_ms ?? 10 * 60 * 1000)));
+      const requestedTimeout = action.payload?.timeoutMs ?? action.payload?.timeout_ms;
+      const hasHardTimeout = requestedTimeout !== undefined && requestedTimeout !== null && String(requestedTimeout).trim() !== '' && Number.isFinite(Number(requestedTimeout));
+      const hardTimeoutMs = hasHardTimeout ? Math.max(100, Number(requestedTimeout)) : null;
+      const requestedIdleTimeout = action.payload?.idleTimeoutMs ?? action.payload?.idle_timeout_ms;
+      const idleTimeoutMs = Math.max(100, Number.isFinite(Number(requestedIdleTimeout)) ? Number(requestedIdleTimeout) : 2 * 60 * 1000);
       let timedOut = false;
-      const timeout = new Promise(resolve => { timeoutHandle = setTimeout(() => { timedOut = true; controller.abort(); resolve({status: 'failed', code: 'action_timeout', error: `A2A action timed out after ${timeoutMs}ms`}); }, timeoutMs); });
+      let resolveTimeout;
+      const failForTimeout = (reason) => {
+        if (timedOut) return;
+        timedOut = true;
+        controller.abort();
+        const message = reason === 'idle'
+          ? `A2A action timed out after no activity for ${idleTimeoutMs}ms`
+          : `A2A action timed out after ${hardTimeoutMs}ms`;
+        resolveTimeout?.({status: 'failed', code: 'action_timeout', error: message});
+      };
+      const refreshIdleTimeout = () => {
+        if (timedOut) return;
+        if (idleTimeoutHandle) clearTimeout(idleTimeoutHandle);
+        idleTimeoutHandle = setTimeout(() => failForTimeout('idle'), idleTimeoutMs);
+      };
+      const clearTimeouts = () => {
+        if (hardTimeoutHandle) clearTimeout(hardTimeoutHandle);
+        if (idleTimeoutHandle) clearTimeout(idleTimeoutHandle);
+        hardTimeoutHandle = null;
+        idleTimeoutHandle = null;
+      };
+      const timeout = new Promise(resolve => {
+        resolveTimeout = resolve;
+        if (hardTimeoutMs !== null) hardTimeoutHandle = setTimeout(() => failForTimeout('hard'), hardTimeoutMs);
+        refreshIdleTimeout();
+      });
       const execution = Promise.resolve().then(() => this.#execute(executableAction, {
         signal: controller.signal,
         onOutput: chunk => {
+          refreshIdleTimeout();
           const bytes = Buffer.byteLength(String(chunk || ''));
           const stage = classifyOutputStage(chunk);
           this.#onEvent('action.output', {
@@ -99,7 +129,7 @@ export class ActionDispatcher {
             progress: { phase: 'output', bytes, detail: stage.detail }
           });
         },
-        onStage: stage => this.#onEvent('action.stage', {
+        onStage: stage => { refreshIdleTimeout(); this.#onEvent('action.stage', {
           actionId,
           type: action.type,
           stage: stage?.stage || 'output',
@@ -107,16 +137,16 @@ export class ActionDispatcher {
           detail: stage?.detail || '结构化运行时活动',
           ...(stage?.summary ? { summary: stage.summary } : {}),
           progress: { phase: 'stage', ...stage }
-        }),
-        onProgress: progress => this.#onEvent('action.progress', {
+        }); },
+        onProgress: progress => { refreshIdleTimeout(); this.#onEvent('action.progress', {
           actionId,
           type: action.type,
           message: progress?.runtime ? `${progress.runtime} 正在执行` : 'CLI 正在执行',
           detail: Number(progress?.bytes) > 0 ? `已接收 ${Number(progress.bytes).toLocaleString()} B 输出` : '正在接收 CLI 输出',
           progress: { phase: 'running', ...progress }
-        }),
+        }); },
       }));
-      const result = await Promise.race([execution, timeout]); if (timeoutHandle) clearTimeout(timeoutHandle);
+      const result = await Promise.race([execution, timeout]); clearTimeouts();
       if (timedOut) return {...result, actionId, completedAt: this.#now()};
       if (controller.signal.aborted) return {status: 'failed', actionId, code: 'cancelled', error: 'A2A action cancelled', completedAt: this.#now()};
       const executorStatus = result && typeof result === 'object' ? String(result.status || '') : '';
@@ -127,7 +157,7 @@ export class ActionDispatcher {
       const output = executorStatus === 'succeeded' && Object.prototype.hasOwnProperty.call(result, 'result') ? result.result : result;
       const completed = {status: 'succeeded', actionId, result: output, completedAt: this.#now()}; this.#onEvent('action.succeeded', {actionId, type: action.type}); return completed;
     } catch (error) { const failed = this.#failure(action, error); this.#onEvent('action.failed', {actionId, type: action?.type, error: failed.error}); return failed; }
-    finally { if (timeoutHandle) clearTimeout(timeoutHandle); this.#controllers.delete(String(actionId)); }
+    finally { if (hardTimeoutHandle) clearTimeout(hardTimeoutHandle); if (idleTimeoutHandle) clearTimeout(idleTimeoutHandle); this.#controllers.delete(String(actionId)); }
   }
   async dispatch(action) {
     const key = String(action?.dedupeKey ?? action?.dedupe_key ?? action?.id ?? ''); if (!key) return this.#failure(action, 'A2A action requires id or dedupeKey');
