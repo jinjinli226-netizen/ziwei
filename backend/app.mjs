@@ -77,11 +77,51 @@ function authExempt(pathname) {
     || pathname.startsWith('/daemon/') || pathname === '/devices/heartbeat' || pathname.endsWith('/heartbeat') || pathname.endsWith('/runtimes/register');
 }
 
+function resourceIdFromPath(req, segment) {
+  const match = String(req.path || '').match(new RegExp(`^/${segment}/([^/]+)`));
+  if (!match) return null;
+  try { return decodeURIComponent(match[1]); } catch { return match[1]; }
+}
+
 function deviceWorkspaceForRequest(repo, req) {
   const direct = req.params?.slug || req.body?.workspace || req.body?.workspace_slug || req.query?.workspace || req.query?.workspace_slug;
   if (direct) return String(direct).trim();
-  if (req.params?.id && typeof repo.workspaceSlugForA2AAction === 'function') return repo.workspaceSlugForA2AAction(req.params.id);
+  if (req.params?.id && typeof repo.workspaceSlugForA2AAction === 'function') {
+    const actionWorkspace = repo.workspaceSlugForA2AAction(req.params.id);
+    if (actionWorkspace) return actionWorkspace;
+  }
+  if (req.params?.id && String(req.path || '').startsWith('/tasks/') && typeof repo.workspaceSlugForA2ATask === 'function') return repo.workspaceSlugForA2ATask(req.params.id);
+  const actionId = resourceIdFromPath(req, 'actions');
+  if (actionId && typeof repo.workspaceSlugForA2AAction === 'function') return repo.workspaceSlugForA2AAction(actionId);
+  const taskId = resourceIdFromPath(req, 'tasks');
+  if (taskId && typeof repo.workspaceSlugForA2ATask === 'function') return repo.workspaceSlugForA2ATask(taskId);
   return null;
+}
+
+function assertA2ATaskWorkspace(repo, req, res) {
+  const taskWorkspace = repo.workspaceSlugForA2ATask?.(req.params?.id);
+  if (!taskWorkspace) { res.status(404).json({ error: 'Task not found' }); return null; }
+  const requestedWorkspace = String(req.query?.workspace || req.body?.workspace || req.body?.workspace_slug || '').trim();
+  if (requestedWorkspace && requestedWorkspace !== taskWorkspace) {
+    res.status(403).json({ error: 'A2A task 不属于当前工作区' }); return null;
+  }
+  if (req.deviceCredential?.workspace && req.deviceCredential.workspace !== taskWorkspace) {
+    res.status(403).json({ error: '设备凭证不属于该任务工作区' }); return null;
+  }
+  return taskWorkspace;
+}
+
+function assertA2AActionWorkspace(repo, req, res) {
+  const actionWorkspace = repo.workspaceSlugForA2AAction?.(req.params?.id);
+  if (!actionWorkspace) { res.status(404).json({ error: 'A2A action not found' }); return null; }
+  const requestedWorkspace = String(req.query?.workspace || req.body?.workspace || req.body?.workspace_slug || '').trim();
+  if (requestedWorkspace && requestedWorkspace !== actionWorkspace) {
+    res.status(403).json({ error: 'A2A action 不属于当前工作区' }); return null;
+  }
+  if (req.deviceCredential?.workspace && req.deviceCredential.workspace !== actionWorkspace) {
+    res.status(403).json({ error: '设备凭证不属于该 action 工作区' }); return null;
+  }
+  return actionWorkspace;
 }
 
 function verifyDeviceRequest(repo, req) {
@@ -199,6 +239,12 @@ export function createApp(options = {}) {
   app.locals.realtime = realtime;
   app.locals.auth = auth;
   app.use(cors);
+  app.use((_req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    next();
+  });
   // Task attachments are sent as Base64 JSON; allow the 10 MiB attachment
   // limit plus encoding and envelope overhead without accepting unbounded
   // request bodies.
@@ -250,7 +296,7 @@ export function createApp(options = {}) {
   app.post('/api/auth/setup', (req, res, next) => {
     try {
       const result = auth.setup(req.body || {});
-      auth.setCookie(res, result.session);
+      auth.setCookie(res, result.session, req);
       const { session: _session, ...safe } = result;
       res.status(201).json({ ...safe, session: { expires_at: result.session.expires_at } });
     } catch (error) { next(error); }
@@ -258,7 +304,7 @@ export function createApp(options = {}) {
   app.post('/api/auth/register', (req, res, next) => {
     try {
       const result = auth.register(req.body || {});
-      auth.setCookie(res, result.session);
+      auth.setCookie(res, result.session, req);
       const { session: _session, ...safe } = result;
       res.status(201).json({ ...safe, session: { expires_at: result.session.expires_at } });
     } catch (error) { next(error); }
@@ -266,12 +312,12 @@ export function createApp(options = {}) {
   app.post('/api/auth/login', (req, res, next) => {
     try {
       const result = auth.login(req.body || {});
-      auth.setCookie(res, result.session);
+      auth.setCookie(res, result.session, req);
       const { session: _session, ...safe } = result;
       res.json({ ...safe, session: { expires_at: result.session.expires_at } });
     } catch (error) { next(error); }
   });
-  app.post('/api/auth/logout', (req, res) => { auth.logout(req); auth.clearCookie(res); res.json({ ok: true }); });
+  app.post('/api/auth/logout', (req, res) => { auth.logout(req); auth.clearCookie(res, req); res.json({ ok: true }); });
   app.get('/api/auth/me', (req, res) => { const principal = auth.authenticate(req); if (!principal) return res.status(401).json({ error: '请先登录紫薇' }); res.json(principal); });
   app.get('/healthz', (_req, res) => res.json({ ok: true, service: 'ziwei-api', cli: 'ziwei_user', time: new Date().toISOString() }));
   app.get('/api/workspaces', (req, res) => {
@@ -596,14 +642,14 @@ export function createApp(options = {}) {
   app.post('/a2a/v1/register', (req, res, next) => { const workspace = String(req.body.workspace || req.body.workspace_slug || '').trim(); if (!workspace) return res.status(400).json({ error: 'A2A register 必须明确 workspace' }); try { return res.json({ ok:true, agent:repo.registerA2AAgent(workspace, req.body), card:{id:'ziwei_user',capabilities:['tasks','messages','heartbeat','actions','ack','result']} }); } catch (error) { return next(error); } });
   app.post('/a2a/v1/actions', (req, res, next) => { const workspace = String(req.body.workspace || req.body.workspace_slug || '').trim(); if (!workspace) return res.status(400).json({ error: 'A2A action 必须明确 workspace' }); try { const action=repo.createA2AAction(workspace, req.body); return res.status(action.duplicate ? 200 : 201).json(action); } catch (error) { return next(error); } });
   app.get('/a2a/v1/actions', (req, res, next) => { const workspace=String(req.query.workspace || '').trim(); if (!workspace) return res.status(400).json({ error: 'A2A poll 必须明确 workspace' }); try { return res.json({ actions:repo.listA2AActions(workspace,{agentId:req.query.agent || req.query.agent_id,status:req.query.status || 'pending',includeAcked:req.query.includeAcked || req.query.include_acked,deviceId:req.deviceCredential?.deviceId}) }); } catch (error) { return next(error); } });
-  app.post('/a2a/v1/actions/:id/ack', (req, res) => res.json(repo.ackA2AAction(req.params.id, { ...(req.body || {}), deviceId:req.deviceCredential?.deviceId })));
-  app.post('/a2a/v1/actions/:id/events', (req, res) => res.status(202).json(repo.recordA2AEvent(req.params.id, { ...(req.body || {}), deviceId:req.deviceCredential?.deviceId })));
-  app.get('/a2a/v1/actions/:id/events', (req, res) => res.json({ events: repo.listA2AEvents(req.params.id) }));
-  app.post('/a2a/v1/actions/:id/result', (req, res) => res.json(repo.resultA2AAction(req.params.id, { ...(req.body || {}), deviceId:req.deviceCredential?.deviceId })));
+  app.post('/a2a/v1/actions/:id/ack', (req, res) => { if (!assertA2AActionWorkspace(repo, req, res)) return; return res.json(repo.ackA2AAction(req.params.id, { ...(req.body || {}), deviceId:req.deviceCredential?.deviceId })); });
+  app.post('/a2a/v1/actions/:id/events', (req, res) => { if (!assertA2AActionWorkspace(repo, req, res)) return; return res.status(202).json(repo.recordA2AEvent(req.params.id, { ...(req.body || {}), deviceId:req.deviceCredential?.deviceId })); });
+  app.get('/a2a/v1/actions/:id/events', (req, res) => { if (!assertA2AActionWorkspace(repo, req, res)) return; return res.json({ events: repo.listA2AEvents(req.params.id) }); });
+  app.post('/a2a/v1/actions/:id/result', (req, res) => { if (!assertA2AActionWorkspace(repo, req, res)) return; return res.json(repo.resultA2AAction(req.params.id, { ...(req.body || {}), deviceId:req.deviceCredential?.deviceId })); });
   app.post('/a2a/v1/tasks', (req, res, next) => { const workspace = String(req.body.workspace || req.body.workspace_slug || '').trim(); if (!workspace) return res.status(400).json({ error: 'A2A task 必须明确 workspace' }); try { const task = repo.createA2ATask(workspace, req.body); return res.status(201).json({ id:task.id, status:{state:'submitted', timestamp:task.created_at}, task }); } catch (error) { return next(error); } });
   app.get('/a2a/v1/tasks', (req, res, next) => { const workspace = String(req.query.workspace || '').trim(); if (!workspace) return res.status(400).json({ error: 'A2A tasks 必须明确 workspace' }); try { const tasks = repo.listTasks(workspace, { state: req.query.state, q: req.query.q }); return res.json({ tasks: tasks.map(task => ({ id: task.id, status: { state: task.state, timestamp: task.updated_at }, task })) }); } catch (error) { return next(error); } });
-  app.get('/a2a/v1/tasks/:id', (req, res) => { const task=repo.getTask(req.params.id); if(!task) return res.status(404).json({error:'Task not found'}); res.json({id:task.id,status:{state:task.state,timestamp:task.updated_at},task,messages:repo.getTaskMessages(task.id)}); });
-  app.post('/a2a/v1/tasks/:id/messages', (req, res) => res.status(201).json({ message:repo.addTaskMessage(req.params.id,req.body), accepted:true }));
+  app.get('/a2a/v1/tasks/:id', (req, res) => { if (!assertA2ATaskWorkspace(repo, req, res)) return; const task=repo.getTask(req.params.id); if(!task) return res.status(404).json({error:'Task not found'}); res.json({id:task.id,status:{state:task.state,timestamp:task.updated_at},task,messages:repo.getTaskMessages(task.id)}); });
+  app.post('/a2a/v1/tasks/:id/messages', (req, res) => { if (!assertA2ATaskWorkspace(repo, req, res)) return; return res.status(201).json({ message:repo.addTaskMessage(req.params.id,req.body), accepted:true }); });
 
   app.use((err, _req, res, _next) => { const status = Number(err?.status) || (/not found|不存在/i.test(err.message || '') ? 404 : 400); res.status(status).json({ error: err.message || 'Bad request' }); });
   return app;

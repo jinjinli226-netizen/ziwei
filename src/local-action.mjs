@@ -26,8 +26,8 @@ function localDirectoryRoots() {
  */
 export function inspectLocalDirectory({directoryPath = '', basePath = process.cwd(), createIfMissing = false, includeRoots = true, includeChildren = true, maxEntries = MAX_DIRECTORY_ENTRIES} = {}) {
   const raw = String(directoryPath || '').trim();
-  const base = path.resolve(String(basePath || process.cwd()));
-  const target = raw ? path.resolve(base, raw) : base;
+  const base = resolveApprovedPath(basePath, '.');
+  const target = resolveApprovedPath(base, raw || '.');
   const limit = Math.min(MAX_DIRECTORY_ENTRIES, Math.max(1, Number(maxEntries) || MAX_DIRECTORY_ENTRIES));
   const result = {
     path: target,
@@ -70,6 +70,16 @@ function realPathForExistingParent(candidate) {
     existing = parent;
   }
   return fs.realpathSync.native(existing);
+}
+
+function resolveApprovedPath(basePath, requested = '.') {
+  const root = path.resolve(String(basePath || process.cwd()));
+  if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) throw new Error('已批准的工作目录不存在或不是目录');
+  const candidate = path.resolve(root, String(requested || '.'));
+  if (!isInside(root, candidate)) throw new Error('工作目录超出已批准根目录');
+  const rootReal = fs.realpathSync.native(root);
+  if (!isInside(rootReal, realPathForExistingParent(candidate))) throw new Error('工作目录解析到已批准根目录之外');
+  return candidate;
 }
 
 /**
@@ -151,8 +161,8 @@ function decodeAttachmentContent(attachment) {
  */
 export function materializeRuntimeAttachments({attachments = [], cwd, actionId = 'action'} = {}) {
   if (!Array.isArray(attachments) || !attachments.length) return [];
-  const root = path.resolve(String(cwd || process.cwd()));
-  const folder = path.join(root, '.ziwei', 'attachments', safeFileName(actionId));
+  const root = resolveApprovedPath(cwd || process.cwd(), '.');
+  const folder = resolveApprovedPath(root, path.join('.ziwei', 'attachments', safeFileName(actionId)));
   const paths = [];
   let total = 0;
   const used = new Set();
@@ -166,9 +176,10 @@ export function materializeRuntimeAttachments({attachments = [], cwd, actionId =
     while (used.has(name)) name = `${base}-${suffix++}`;
     used.add(name);
     fs.mkdirSync(folder, {recursive: true});
+    if (!isInside(fs.realpathSync.native(root), fs.realpathSync.native(folder))) throw new Error('附件目录解析到已批准根目录之外');
     const target = path.join(folder, name);
     if (fs.existsSync(target)) {
-      if (!fs.statSync(target).isFile() || !fs.readFileSync(target).equals(bytes)) throw new Error(`附件目标已存在且内容不同: ${name}`);
+      if (fs.lstatSync(target).isSymbolicLink() || !fs.statSync(target).isFile() || !fs.readFileSync(target).equals(bytes)) throw new Error(`附件目标已存在且内容不同: ${name}`);
     } else fs.writeFileSync(target, bytes, {flag: 'wx', mode: 0o600});
     paths.push({name, path: target, bytes: bytes.length, mimeType: String(attachment.mimeType || attachment.mime_type || 'application/octet-stream')});
   }
@@ -361,10 +372,13 @@ export function createLocalActionExecutor({runtimeDir, allowedExecutables = [], 
     if (['agent.execute', 'conversation.execute', 'runtime.execute', 'automation.execute'].includes(type)
       || (type === 'task.execute' && (action.payload?.runtime || action.payload?.agent || action.payload?.modelId || action.payload?.prompt))) {
       const payload = action.payload || {};
+      const approvedWorkdir = payload.workdir || payload.workingDirectory || payload.working_directory || process.cwd();
+      const requestedCwd = payload.cwd || payload.workingDirectory || payload.working_directory || payload.workdir || '.';
+      const safeCwd = resolveApprovedPath(approvedWorkdir, requestedCwd);
       const runtime = payload.runtime || payload.agent || payload.runtimeName || defaultRuntime
         || Object.values(discoverInstalledRuntimes().runtimes).find(item => item.status === 'available')?.runtime;
       const prompt = payload.prompt ?? payload.message ?? payload.content ?? payload.instructions;
-      const attachmentPaths = materializeRuntimeAttachments({attachments: payload.attachments, cwd: payload.cwd || payload.workingDirectory || payload.workdir || process.cwd(), actionId: action.id});
+      const attachmentPaths = materializeRuntimeAttachments({attachments: payload.attachments, cwd: safeCwd, actionId: action.id});
       const promptWithAttachments = attachmentPaths.length
         ? `${String(prompt || '').trim()}\n\n[本机附件]\n${attachmentPaths.map(item => `- ${item.name}: ${item.path}`).join('\n')}`
         : prompt;
@@ -374,7 +388,7 @@ export function createLocalActionExecutor({runtimeDir, allowedExecutables = [], 
         profile: payload.profile || payload.runtimeProfile || payload.runtime_profile || payload.hermesProfile || payload.hermes_profile || null,
         prompt: promptWithAttachments,
         attachments: attachmentPaths,
-        cwd: payload.cwd || payload.workingDirectory || payload.workdir || process.cwd(),
+        cwd: safeCwd,
         env: payload.env,
         signal: context.signal,
         onOutput: context.onOutput,

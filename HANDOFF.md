@@ -2,7 +2,7 @@
 
 > **当前维护入口**：请先阅读根目录 [PROJECT_MANAGEMENT.md](PROJECT_MANAGEMENT.md)。本文保留阶段性交接时间线；其中较早的验证数字和“待完成”描述可能已经过时，当前状态以项目管理手册、代码和最近一次真实验证为准。
 
-> **当前接管状态（2026-10-03）**：核心本地功能和真实 `ziwei_user`/A2A/CLI 链路已落地；最新工作区验证为 `npm test` 87/87、lint 和 build 通过。生产前端已修复 API 地址误指向本机 `127.0.0.1:4178` 的问题，默认使用当前 HTTPS 页面 origin，并保留显式 `VITE_API_URL` 覆盖。Codex CLI 已补上 Windows 系统代理自动继承，真实短请求验证成功。当前本机运行工作区是 `bjc-ops`，示例和历史验收仍可能使用 `test-111`，接手时以 `data/ziwei_user.json` 与 `/readyz` 为准。远端 Git、生产外部存储/队列、OAuth/计费/沙箱和完整浏览器截图验收仍延期。详细维护约定统一见 `PROJECT_MANAGEMENT.md`。
+> **当前接管状态（2026-10-06）**：本地 checkout、5178 前端、4178 API 和项目 `data/ziwei_user.json` 是 `bjc-ops` 的本地代码验收环境；真实本机 `ziwei_user` daemon 由全局命令启动，使用用户目录配置连接 `https://qzelynth.top` 的服务器工作区 `test_222`。不要把项目配置或项目 daemon 当成服务器 daemon；接手时分别核对用户目录配置、项目配置和各自 `/readyz`。详细维护约定统一见 `PROJECT_MANAGEMENT.md`。
 
 这份文档用于把当前工作交给 Claude 继续。项目根目录是：
 
@@ -31,7 +31,7 @@ D:\灵光爸爸拆解\.local\logs\daemon.log
 D:\灵光爸爸拆解\.local\logs\health.log
 ```
 
-`data/ziwei_user.json` 是本机配置，当前 workspace 是 `test-111`，API 指向 `http://127.0.0.1:4178`，健康端口是 `20242`。不要把 token、Cookie 或认证头写入日志。
+`data/ziwei_user.json` 只代表本地项目验收配置，workspace 是 `bjc-ops`。真实服务器 daemon 使用 `C:\Users\25941\AppData\Local\Ziwei\ziwei_user\ziwei_user.json`，workspace 是 `test_222`，API 是 `https://qzelynth.top`，健康端口仍为 `20242`。不要把 token、Cookie 或认证头写入日志。
 
 ## 启动和检查
 

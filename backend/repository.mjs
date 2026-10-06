@@ -11,6 +11,7 @@ import { objectStoreFromOptions } from './storage.mjs';
 import { sanitizeHtml } from './sanitize.mjs';
 import { composeEmployeePrompt, normalizeRuntimeProfile } from '../src/employee-runtime.mjs';
 import { listHermesProfiles, validateHermesProfile } from '../src/runtime-adapters.mjs';
+import { fetchSafeUrl, validateSafeUrl } from './ssrf.mjs';
 
 const now = () => new Date().toISOString();
 const id = prefix => `${prefix}_${crypto.randomUUID()}`;
@@ -255,6 +256,7 @@ const ownDevice = devices => {
 
 export function createRepository(options = {}) {
   const db = openDatabase(options);
+  const allowLocalNetwork = options.memory === true;
   const employeeEnvKey = encryptionKey(options);
   const objectStore = objectStoreFromOptions(options);
   const discover = options.discoverLocalVersions || discoverLocalVersions;
@@ -692,12 +694,11 @@ export function createRepository(options = {}) {
       }
       if (!content && sourceUrl) {
         let parsedUrl;
-        try { parsedUrl = new URL(sourceUrl); } catch { throw new Error('技能 URL 无效'); }
-        if (!['http:', 'https:'].includes(parsedUrl.protocol)) throw new Error('技能 URL 只支持 HTTP 或 HTTPS');
+        try { parsedUrl = validateSafeUrl(sourceUrl, { allowLocal: allowLocalNetwork }); } catch (error) { throw new Error(`技能 URL 无效：${error.message}`); }
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 10_000);
         try {
-          const response = await fetch(parsedUrl, { signal: controller.signal, redirect: 'follow' });
+          const response = await fetchSafeUrl(parsedUrl, { signal: controller.signal, allowLocal: allowLocalNetwork });
           if (!response.ok) throw new Error(`技能 URL 返回 HTTP ${response.status}`);
           content = await response.text();
         } catch (error) {
@@ -866,7 +867,7 @@ export function createRepository(options = {}) {
       const maxRetries=Math.max(0,Math.min(10,Number(input.maxRetries ?? input.max_retries ?? 3) || 0));
       const item={id:id('auto'),workspace_id:ws.id,name:String(input.name || template?.name || '未命名自动化').trim(),schedule,prompt:String(input.prompt || template?.prompt || '').trim(),status:'active',last_run:null,next_run:nextRun,timezone,webhook_url:input.webhookUrl || input.webhook_url || null,webhook_secret:input.webhookSecret || input.webhook_secret || (input.webhookUrl || input.webhook_url ? crypto.randomBytes(32).toString('hex') : null),output_mode:String(input.outputMode || input.output_mode || 'notification'),max_retries:maxRetries,retry_backoff_ms:Math.max(100,Number(input.retryBackoffMs || input.retry_backoff_ms || 1000)),executor:'ziwei_user'};
       if (!item.name) throw new Error('自动化名称不能为空');
-      if (item.webhook_url) { try { const url=new URL(item.webhook_url); if (!['http:','https:'].includes(url.protocol)) throw new Error(); } catch { throw new Error('Webhook URL 无效'); } }
+      if (item.webhook_url) { try { validateSafeUrl(item.webhook_url, { allowLocal: allowLocalNetwork }); } catch { throw new Error('Webhook URL 无效或目标地址被安全策略阻止'); } }
       db.prepare('INSERT INTO automations(id,workspace_id,name,schedule,prompt,status,last_run,next_run,timezone,webhook_url,webhook_secret,output_mode,max_retries,retry_backoff_ms,executor) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(item.id,ws.id,item.name,item.schedule,item.prompt,item.status,null,item.next_run,item.timezone,item.webhook_url,item.webhook_secret,item.output_mode,item.max_retries,item.retry_backoff_ms,item.executor);
       audit(slug,'user','automation.created',{automationId:item.id,templateId:template?.id || null}); const view=automationView(item, 0); if (item.webhook_secret) view.webhook_secret=item.webhook_secret; return view;
     },
@@ -879,7 +880,7 @@ export function createRepository(options = {}) {
       const schedule = input.schedule === undefined ? row.schedule : String(input.schedule).trim() || '手动';
       const prompt = input.prompt === undefined ? row.prompt : String(input.prompt).trim();
       const timezone = String(input.timezone || row.timezone || 'Asia/Shanghai'); const nextRun = status === 'active' ? (parseSchedule(schedule, new Date(), timezone) || row.next_run) : null; const webhook = input.webhookUrl === undefined && input.webhook_url === undefined ? row.webhook_url : (input.webhookUrl || input.webhook_url || null); const secret = input.webhookSecret === undefined && input.webhook_secret === undefined ? row.webhook_secret : (input.webhookSecret || input.webhook_secret || (webhook ? crypto.randomBytes(32).toString('hex') : null)); const maxRetries = input.maxRetries === undefined && input.max_retries === undefined ? row.max_retries : Math.max(0,Math.min(10,Number(input.maxRetries ?? input.max_retries) || 0));
-      if (webhook) { try { const url=new URL(webhook); if (!['http:','https:'].includes(url.protocol)) throw new Error(); } catch { throw new Error('Webhook URL 无效'); } }
+      if (webhook) { try { validateSafeUrl(webhook, { allowLocal: allowLocalNetwork }); } catch { throw new Error('Webhook URL 无效或目标地址被安全策略阻止'); } }
       db.prepare('UPDATE automations SET name=?,schedule=?,prompt=?,status=?,next_run=?,timezone=?,webhook_url=?,webhook_secret=?,output_mode=?,max_retries=?,retry_backoff_ms=? WHERE id=?').run(name,schedule,prompt,status,nextRun,timezone,webhook,secret,input.outputMode || input.output_mode || row.output_mode || 'notification',maxRetries,Math.max(100,Number(input.retryBackoffMs || input.retry_backoff_ms || row.retry_backoff_ms || 1000)),automationId);
       return this.getAutomationById(automationId);
     },
@@ -917,7 +918,7 @@ export function createRepository(options = {}) {
       for (const row of rows) {
         const attempts=Number(row.attempts || 0)+1; db.prepare('UPDATE webhook_deliveries SET status=\'sending\',attempts=? WHERE id=?').run(attempts,row.id);
         try {
-          const response=await fetch(row.url,{method:'POST',headers:{'content-type':'application/json','x-ziwei-event':row.event,'x-ziwei-delivery':row.id,'x-ziwei-signature':row.signature,'x-webhook-signature':row.signature},body:row.payload_json,signal:AbortSignal.timeout(5000)});
+          const response=await fetchSafeUrl(row.url,{method:'POST',headers:{'content-type':'application/json','x-ziwei-event':row.event,'x-ziwei-delivery':row.id,'x-ziwei-signature':row.signature,'x-webhook-signature':row.signature},body:row.payload_json,allowLocal:allowLocalNetwork,signal:AbortSignal.timeout(5000)});
           const text=await response.text(); if (!response.ok) throw new Error(`Webhook HTTP ${response.status}: ${text.slice(0,256)}`);
           db.prepare('UPDATE webhook_deliveries SET status=\'delivered\',response_status=?,response_body=?,sent_at=?,error=NULL WHERE id=?').run(response.status,text.slice(0,2000),now(),row.id);
         } catch (error) {
@@ -1460,6 +1461,10 @@ export function createRepository(options = {}) {
     },
     addConversationMessage(conversationId,input={}) { const conversation=db.prepare('SELECT * FROM conversations WHERE id=?').get(conversationId); if(!conversation) throw new Error('Conversation not found'); const ws=db.prepare('SELECT * FROM workspaces WHERE id=?').get(conversation.workspace_id); const employee=conversation.employee_id ? assertEmployeeVisible(db.prepare('SELECT * FROM employees WHERE id=? AND workspace_id=?').get(conversation.employee_id,conversation.workspace_id), input) : null; const targetDeviceId=String(input.targetDeviceId || input.target_device_id || input.deviceId || input.device_id || conversation.device_id || '').trim() || null; if (targetDeviceId) { const device=db.prepare('SELECT * FROM devices WHERE id=? AND workspace_id=?').get(targetDeviceId,conversation.workspace_id); if (!device) throw new Error('目标设备不属于当前工作区'); if (device.status === 'disabled') throw new Error('目标设备已停用'); const privilegedDeviceRole = ['owner', 'admin'].includes(String(input.actorRole || '').toLowerCase()); if (ws.kind === 'personal' && input.enforceDeviceOwnership && !privilegedDeviceRole && (!input.actorUserId || device.owner_user_id !== input.actorUserId)) throw new Error('个人工作区只能使用本人的设备'); } const message={id:id('convmsg'),conversation_id:conversationId,role:['user','assistant','system'].includes(input.role) ? input.role : 'user',content:String(input.content || '').trim(),attachments:normalizeConversationAttachments(input.attachments),created_at:now()}; if(!message.content && !message.attachments.length) throw new Error('消息内容不能为空'); db.prepare('INSERT INTO conversation_messages(id,conversation_id,role,content,attachment_json,created_at) VALUES(?,?,?,?,?,?)').run(message.id,conversationId,message.role,message.content,JSON.stringify(message.attachments),message.created_at); db.prepare('UPDATE conversations SET updated_at=? WHERE id=?').run(message.created_at,conversationId); audit(ws.slug,message.role,'conversation.message.created',{conversationId,messageId:message.id,dispatch:input.dispatch !== false}); if (message.role === 'user' && input.dispatch !== false) { const payload=executionPayload({prompt:message.content,employee,runtime:input.runtime || employee?.runtime || null,model:input.model || input.modelId || conversation.model_id || employee?.model_id || null,profile:input.profile ?? input.runtimeProfile ?? input.runtime_profile ?? input.hermesProfile ?? input.hermes_profile ?? employee?.runtime_profile,conversationId,targetDeviceId,cwd:input.cwd || input.workingDirectory || input.working_directory || input.workdir || conversation.working_directory || null}); payload.messageId=message.id; if (message.attachments.length) payload.attachments=message.attachments; this.createA2AAction(ws.slug,{type:'conversation.execute',payload,dedupeKey:`conversation:${conversationId}:${message.id}`}); } return {...message,execution:conversationExecution(conversationId)}; },
     archiveConversation(conversationId, archived = true) { const row=db.prepare('SELECT * FROM conversations WHERE id=?').get(conversationId); if(!row) throw new Error('Conversation not found'); db.prepare('UPDATE conversations SET status=? WHERE id=?').run(archived ? 'archived' : 'active',conversationId); return this.getConversation(conversationId); },
+    workspaceSlugForA2ATask(taskId) {
+      const row = db.prepare('SELECT w.slug FROM tasks t JOIN workspaces w ON w.id=t.workspace_id WHERE t.id=?').get(String(taskId || ''));
+      return row?.slug || null;
+    },
     workspaceSlugForA2AAction(actionId) {
       const row = db.prepare('SELECT w.slug FROM a2a_actions a JOIN workspaces w ON w.id=a.workspace_id WHERE a.id=?').get(String(actionId || ''));
       return row?.slug || null;

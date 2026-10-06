@@ -7,13 +7,21 @@ export const API_BASE = resolveApiBase({
   origin: runtimeOrigin,
 });
 const WORKSPACE_KEY = 'ziwei.workspace';
+function workspaceSlugFromPathname(pathname = typeof window === 'undefined' ? '' : window.location.pathname) {
+  const first = String(pathname || '').split('/').filter(Boolean)[0] || '';
+  if (!first || ['invite', 'me', 'api'].includes(first)) return '';
+  try { return decodeURIComponent(first).trim(); } catch { return ''; }
+}
 export function workspaceSlug() {
+  // The URL is the navigation authority.  A stale tab-local value must never
+  // redirect `/new-workspace/...` API calls back to a previous workspace.
+  const fromPath = workspaceSlugFromPathname();
+  if (fromPath) return fromPath;
   try {
     const stored = localStorage.getItem(WORKSPACE_KEY);
     if (stored) return stored;
   } catch {}
-  const first = typeof window !== 'undefined' ? window.location.pathname.split('/').filter(Boolean)[0] : '';
-  return first && !['invite', 'me'].includes(first) ? decodeURIComponent(first) : '';
+  return '';
 }
 export function setWorkspaceSlug(slug) {
   const value = String(slug || '').trim();

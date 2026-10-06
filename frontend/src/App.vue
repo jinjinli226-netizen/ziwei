@@ -1,9 +1,10 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
-import { ZiAvatar, ZiButton, ZiCard, ZiEmptyState, ZiFormField, ZiIcon, ZiInput, ZiMetricCard, ZiModal, ZiProgress, ZiSelect, ZiStatusTag, ZiSwitch, ZiTabs, ZiTextarea } from '@ziwei/ui';
+import { ZiAvatar, ZiButton, ZiCard, ZiEmptyState, ZiFormField, ZiIcon, ZiInput, ZiMetricCard, ZiModal, ZiProgress, ZiStatusTag, ZiSwitch, ZiTabs, ZiTextarea } from '@ziwei/ui';
 import { API_BASE, api, setWorkspaceSlug, workspaceSlug } from './api.js';
 import { connectWorkspaceRealtime } from './realtime.js';
 import WorkspaceShell from './components/WorkspaceShell.vue';
+import ZiSelect from './components/ZiSelect.vue';
 import { Search, Plus, Inbox, Grip, SlidersHorizontal, ArrowDownUp, Kanban, List, MoreHorizontal, CircleDashed, Circle, CircleDot, CheckCircle2, CircleAlert, Zap, ChevronDown, RotateCcw, LayoutList, Tag, UserRound, CalendarClock, CalendarDays, ChevronLeft, ChevronRight, Maximize2, Mic, Paperclip, X, Folder, FolderOpen, FolderPlus, FileText, Upload, RefreshCw, HardDrive, Network, Server, Monitor, Crown, Trash2, ClipboardList, Settings2 } from 'lucide-vue-next';
 
 const nav = [
@@ -646,6 +647,11 @@ async function load() {
   loading.value = true;
   try {
     const activeWorkspace = workspaceSlug();
+    // Keep stale response data from a previous workspace from rendering while
+    // the URL-scoped requests are in flight.
+    if (activeWorkspace && summary.value.workspace?.slug !== activeWorkspace) {
+      summary.value = { ...summary.value, workspace: { ...summary.value.workspace, slug: activeWorkspace } };
+    }
     const activeMembership = (authState.value.memberships || []).find(item => item?.slug === activeWorkspace) || authState.value.memberships?.[0];
     // The active workspace membership is authoritative. A user may own one
     // personal workspace while only being a member of a different team.
@@ -987,7 +993,14 @@ function selectEmployeeModel(value) { employeeModel.value=value; employeeModelOp
 function toggleEmployeeSkill(id) { employeeSkillIds.value = employeeSkillIds.value.includes(id) ? employeeSkillIds.value.filter(item => item !== id) : [...employeeSkillIds.value, id]; }
 async function addEmployee() { if(!employeeForm.value.name.trim()) return notify('请填写数字员工名称'); try { if (employeeForm.value.runtime === 'Hermes' && employeeRuntimeProfile.value.trim() && !hermesProfiles.value.some(item => item.name === employeeRuntimeProfile.value.trim())) { const provisioned = await createHermesProfile(); if (!provisioned) return; } const body={...employeeForm.value,model:employeeModel.value === 'default' ? null : employeeModel.value,runtimeProfile:employeeForm.value.runtime === 'Hermes' ? (employeeRuntimeProfile.value.trim() || null) : null,description:employeeDescription.value,visibility:employeeVisibility.value,skills:employeeSkillIds.value,instructions:employeeRole.value || employeeForm.value.instructions,avatar:employeeAvatar.value || null,status:'active'}; if (employeeEditId.value) { await api.updateEmployee(employeeEditId.value,body); } else { await api.createEmployee(body); } showEmployee.value=false; await load(); notify(employeeEditId.value ? '数字员工已更新' : '数字员工已创建'); employeeEditId.value=''; employeeForm.value={name:'',runtime:runtimes.value[0]?.name || 'Codex',instructions:''}; employeeModel.value='default'; employeeModelSearch.value=''; employeeDescription.value=''; employeeRole.value=''; employeeRuntimeProfile.value=''; hermesProfileDeviceId.value=''; employeeAvatar.value=''; } catch (error) { notify(error.message); } }
 async function removeEmployee(employee) { if (!employee?.id || !window.confirm(`确定删除数字员工“${employee.name || employee.id}”？`)) return; try { await api.deleteEmployee(employee.id); await load(); notify('数字员工已删除'); } catch (error) { notify(error.message); } }
-window.addEventListener('popstate', () => { page.value=routeFromPath(location.pathname); conversationRouteId.value=conversationIdFromPath(); conversationEmployeeId.value=conversationEmployeeFromPath() || conversationEmployeeId.value; employeeRouteId.value=employeeIdFromPath(); employeeActionId.value=''; inviteCode.value=new URLSearchParams(location.search).get('code') || ''; if (page.value==='invite-accept') loadInvite(); if (page.value==='inbox') loadConversations(); });
+window.addEventListener('popstate', () => {
+  const urlWorkspace = workspaceSlug();
+  if (urlWorkspace) setWorkspaceSlug(urlWorkspace);
+  page.value=routeFromPath(location.pathname); conversationRouteId.value=conversationIdFromPath(); conversationEmployeeId.value=conversationEmployeeFromPath() || conversationEmployeeId.value; employeeRouteId.value=employeeIdFromPath(); employeeActionId.value=''; inviteCode.value=new URLSearchParams(location.search).get('code') || '';
+  if (page.value==='invite-accept') loadInvite();
+  if (page.value==='inbox') loadConversations();
+  if (urlWorkspace && authState.value.authenticated && !['invite','invite-accept'].includes(page.value)) void load();
+});
 window.addEventListener('ziwei:auth-required', () => { authState.value={...authState.value,authenticated:false}; closeRealtime(); });
 onMounted(async () => { applyDisplayPreferences(); await refreshAuth(); if (authState.value.authenticated) { await load(); if (page.value==='invite') await loadInvitations(); if (page.value==='invite-accept') await loadInvite(); if (page.value==='open') await loadApiKeys(); } });
 </script>

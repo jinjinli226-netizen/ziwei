@@ -53,14 +53,17 @@ export class ActionDispatcher {
   }
   #validateWorkdir(action) {
     const requested = action?.payload?.workdir ?? action?.payload?.workingDirectory ?? action?.payload?.cwd;
-    if (isAgentAction(action)) return path.resolve(String(requested || this.#workdir));
-    if (requested === undefined || requested === null || requested === '') return this.#workdir;
-    const candidate = path.resolve(this.#workdir, String(requested));
+    const candidate = path.resolve(this.#workdir, String(requested || this.#workdir));
     if (!this.#inside(this.#workdir, candidate)) throw new Error('A2A action workdir is outside the registered runtime directory');
-    const rootReal = fs.realpathSync.native(this.#workdir); let existing = candidate;
-    while (!fs.existsSync(existing)) { const parent = path.dirname(existing); if (parent === existing) break; existing = parent; }
-    const existingReal = fs.realpathSync.native(existing);
-    if (!this.#inside(rootReal, existingReal)) throw new Error('A2A action workdir resolves outside the registered runtime directory');
+    // Realpath containment closes junction/symlink escapes for existing roots.
+    // A configured root may be created by the target workstation later; keep
+    // lexical containment for that compatibility case until it exists.
+    if (fs.existsSync(this.#workdir)) {
+      const rootReal = fs.realpathSync.native(this.#workdir); let existing = candidate;
+      while (!fs.existsSync(existing)) { const parent = path.dirname(existing); if (parent === existing) break; existing = parent; }
+      const existingReal = fs.realpathSync.native(existing);
+      if (!this.#inside(rootReal, existingReal)) throw new Error('A2A action workdir resolves outside the registered runtime directory');
+    }
     return candidate;
   }
   #failure(action, error, extra = {}) {
@@ -68,7 +71,7 @@ export class ActionDispatcher {
     return {status: 'failed', actionId: action?.id, error: message, completedAt: this.#now(), ...extra};
   }
   async #run(action) {
-    const actionId = action?.id; const controller = new AbortController(); let hardTimeoutHandle = null; let idleTimeoutHandle = null; this.#controllers.set(String(actionId), controller);
+    const actionId = action?.id; const controller = new AbortController(); let hardTimeoutHandle = null; let idleWatchdogHandle = null; this.#controllers.set(String(actionId), controller);
     try {
       if (!action || typeof action !== 'object') throw new Error('A2A action must be an object');
       const actionType = String(action.type || '').toLowerCase();
@@ -79,7 +82,9 @@ export class ActionDispatcher {
       const expiresAt = action.expiresAt ?? action.expires_at;
       if (expiresAt && Number.isFinite(Date.parse(String(expiresAt))) && Date.parse(String(expiresAt)) <= Date.now()) throw new Error('A2A action expired');
       const workdir = this.#validateWorkdir(action);
-      const executableAction = action.payload && typeof action.payload === 'object' ? {...action, payload: {...action.payload, workdir}} : action;
+      const executableAction = action.payload && typeof action.payload === 'object'
+        ? {...action, payload: {...action.payload, workdir, ...(isAgentAction(action) ? { cwd: workdir } : {})}}
+        : action;
       this.#onEvent('action.started', {actionId, type: action.type});
       const requestedTimeout = action.payload?.timeoutMs ?? action.payload?.timeout_ms;
       const hasHardTimeout = requestedTimeout !== undefined && requestedTimeout !== null && String(requestedTimeout).trim() !== '' && Number.isFinite(Number(requestedTimeout));
@@ -97,21 +102,21 @@ export class ActionDispatcher {
           : `A2A action timed out after ${hardTimeoutMs}ms`;
         resolveTimeout?.({status: 'failed', code: 'action_timeout', error: message});
       };
-      const refreshIdleTimeout = () => {
-        if (timedOut) return;
-        if (idleTimeoutHandle) clearTimeout(idleTimeoutHandle);
-        idleTimeoutHandle = setTimeout(() => failForTimeout('idle'), idleTimeoutMs);
-      };
+      let lastActivityAt = this.#now();
+      const refreshIdleTimeout = () => { if (!timedOut) lastActivityAt = this.#now(); };
       const clearTimeouts = () => {
         if (hardTimeoutHandle) clearTimeout(hardTimeoutHandle);
-        if (idleTimeoutHandle) clearTimeout(idleTimeoutHandle);
+        if (idleWatchdogHandle) clearInterval(idleWatchdogHandle);
         hardTimeoutHandle = null;
-        idleTimeoutHandle = null;
+        idleWatchdogHandle = null;
       };
       const timeout = new Promise(resolve => {
         resolveTimeout = resolve;
         if (hardTimeoutMs !== null) hardTimeoutHandle = setTimeout(() => failForTimeout('hard'), hardTimeoutMs);
-        refreshIdleTimeout();
+        const intervalMs = Math.max(25, Math.min(1000, Math.floor(idleTimeoutMs / 4)));
+        idleWatchdogHandle = setInterval(() => {
+          if (!timedOut && this.#now() - lastActivityAt >= idleTimeoutMs) failForTimeout('idle');
+        }, intervalMs);
       });
       const execution = Promise.resolve().then(() => this.#execute(executableAction, {
         signal: controller.signal,
@@ -157,7 +162,7 @@ export class ActionDispatcher {
       const output = executorStatus === 'succeeded' && Object.prototype.hasOwnProperty.call(result, 'result') ? result.result : result;
       const completed = {status: 'succeeded', actionId, result: output, completedAt: this.#now()}; this.#onEvent('action.succeeded', {actionId, type: action.type}); return completed;
     } catch (error) { const failed = this.#failure(action, error); this.#onEvent('action.failed', {actionId, type: action?.type, error: failed.error}); return failed; }
-    finally { if (hardTimeoutHandle) clearTimeout(hardTimeoutHandle); if (idleTimeoutHandle) clearTimeout(idleTimeoutHandle); this.#controllers.delete(String(actionId)); }
+    finally { if (hardTimeoutHandle) clearTimeout(hardTimeoutHandle); if (idleWatchdogHandle) clearInterval(idleWatchdogHandle); this.#controllers.delete(String(actionId)); }
   }
   async dispatch(action) {
     const key = String(action?.dedupeKey ?? action?.dedupe_key ?? action?.id ?? ''); if (!key) return this.#failure(action, 'A2A action requires id or dedupeKey');

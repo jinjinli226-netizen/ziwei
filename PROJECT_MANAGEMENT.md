@@ -6,7 +6,7 @@
 >
 > **文档状态**：以 2026-10-06 工作区实际代码和服务器发布状态为准；每次结构、运行方式或功能边界发生变化时必须更新本文。
 
-> **当前本机运行态**：项目配置 `data/ziwei_user.json` 指向 `bjc-ops`；已安装全局 CLI 当前用户配置与 `/readyz` 实际显示为 `test-111`，两者必须分别核对，不能把示例工作区当成目标工作区。
+> **当前工作区边界（2026-10-06）**：本地 checkout、本地 API/前端和项目 `data/ziwei_user.json` 属于 `bjc-ops` 的本地代码验收环境。真实本机 daemon 由全局 `D:\\work\\nodejs\\node_global\\ziwei_user` 启动，使用用户目录配置 `C:\\Users\\25941\\AppData\\Local\\Ziwei\\ziwei_user\\ziwei_user.json`，连接服务器 API `https://qzelynth.top` 的 `test_222` 工作区。不要把项目 `data/ziwei_user.json` 的 `bjc-ops` 配置或项目 daemon 当成服务器 daemon；开始操作前分别核对对应配置、端口和 `/readyz`。
 
 > **版本事实**：通用四 Agent daemon 配对改动位于分支 `codex/hermes-independent-profile`（分支名沿用历史命名）；服务器当前已部署提交 `d67d890`，生产 Git `main` 仍保持不变。工作树仍保留既有未跟踪临时文件 `tmp_gzgov.html`。不要在未审查 `git status --short` 前执行 reset、clean 或覆盖式 checkout。
 
@@ -16,6 +16,13 @@
 - 更新操作：确认旧 PID 22660 的命令行确实属于 `ziwei_user` 后停止；使用当前 checkout 执行 `npm install --global --omit=dev --force .`，再运行 `ziwei_user start`。当前 daemon PID 33960，监听 20242，配置和工作区仍为 `test_222`。
 - 真实验证：`/readyz` 返回 `ready=true`、工作区 `test_222`、4 个 Agent 环境在线；通过服务器 A2A 发起真实 `directory.inspect`，目标电脑返回 `C:\Users\25941` 存在，动作状态为 `succeeded`。随后通过同一链路执行 `hermes.profile.create`，结果为 `succeeded`。
 - 回滚依据：本次只替换全局 daemon 包，未改本机配置文件；回滚时停止当前 daemon，重新安装旧提交的 daemon 包并启动原配置。服务器数据库备份和代码回滚记录见下方发布条目。
+
+### 2026-10-06 当前本地代码与服务器 daemon 验收边界
+
+- 本地代码环境：checkout、5178 前端、4178 API 和项目 `data/ziwei_user.json` 固定使用 `bjc-ops`，本地单元/API 测试也以此环境为边界。
+- 真实服务器 daemon：使用全局 `ziwei_user` 命令、用户目录配置和已有设备凭证，工作区为 `test_222`，API 为 `https://qzelynth.top`，健康端口仍为本机 `20242`；不得改写项目配置、重新配对或把凭证写入日志。
+- 当前真实链路：`ziwei_user status --json` 报告 `test_222`、`ready=true`；服务器 heartbeat 和 A2A poll 成功。`directory.inspect` 元数据动作返回 `succeeded`，目标 `C:\Users\25941` 存在且为目录，未读取文件内容。第一次带根盘扫描的验收动作超时后明确标记为 `failed`，没有改报成功。
+- 远程 workspace 隔离：使用 `test_222` 设备凭证查询正确工作区任务详情返回 200，改用 `bjc-ops` 返回 401；action 事件读取同样为正确工作区 200、错误工作区 401。
 
 ### 2026-10-06 A2A 活动超时与 Hermes provider 继承（已发布）
 

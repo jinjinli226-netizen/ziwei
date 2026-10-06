@@ -69,9 +69,9 @@ function verifyPassword(password, encoded) {
 }
 
 function hashToken(token) { return crypto.createHash('sha256').update(String(token || '')).digest('hex'); }
-function sessionCookie(value, maxAgeSeconds = SESSION_TTL_MS / 1000) {
+function sessionCookie(value, maxAgeSeconds = SESSION_TTL_MS / 1000, { secure = false } = {}) {
   const maxAge = Math.max(0, Math.floor(maxAgeSeconds));
-  return `${SESSION_COOKIE}=${encodeURIComponent(value)}; Max-Age=${maxAge}; Path=/; HttpOnly; SameSite=Lax`;
+  return `${SESSION_COOKIE}=${encodeURIComponent(value)}; Max-Age=${maxAge}; Path=/; HttpOnly; SameSite=Lax${secure ? '; Secure' : ''}`;
 }
 
 function userView(row) {
@@ -245,8 +245,16 @@ export function createAuthService(db, { sessionTtlMs = SESSION_TTL_MS } = {}) {
       const row = db.prepare('SELECT m.role FROM members m JOIN workspaces w ON w.id=m.workspace_id WHERE m.user_id=? AND w.slug=?').get(userId, slug);
       return row ? { role: row.role } : null;
     },
-    setCookie(res, session) { res.setHeader('Set-Cookie', sessionCookie(session.token, sessionTtlMs / 1000)); },
-    clearCookie(res) { res.setHeader('Set-Cookie', sessionCookie('', 0)); },
+    setCookie(res, session, req = null) {
+      const forwardedProto = String(req?.headers?.['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase();
+      const secure = forwardedProto === 'https' || req?.secure === true || process.env.NODE_ENV === 'production';
+      res.setHeader('Set-Cookie', sessionCookie(session.token, sessionTtlMs / 1000, { secure }));
+    },
+    clearCookie(res, req = null) {
+      const forwardedProto = String(req?.headers?.['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase();
+      const secure = forwardedProto === 'https' || req?.secure === true || process.env.NODE_ENV === 'production';
+      res.setHeader('Set-Cookie', sessionCookie('', 0, { secure }));
+    },
     memberships,
     verifyPassword
   };
