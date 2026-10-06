@@ -8,14 +8,22 @@
 
 > **当前本机运行态**：项目配置 `data/ziwei_user.json` 指向 `bjc-ops`；已安装全局 CLI 当前用户配置与 `/readyz` 实际显示为 `test-111`，两者必须分别核对，不能把示例工作区当成目标工作区。
 
-> **版本事实**：通用四 Agent daemon 配对改动位于分支 `codex/hermes-independent-profile`（分支名沿用历史命名）；服务器当前已部署提交 `3d8c5a7`，生产 Git `main` 仍保持不变。工作树仍保留既有未跟踪临时文件 `tmp_gzgov.html`。不要在未审查 `git status --short` 前执行 reset、clean 或覆盖式 checkout。
+> **版本事实**：通用四 Agent daemon 配对改动位于分支 `codex/hermes-independent-profile`（分支名沿用历史命名）；服务器当前已部署提交 `d67d890`，生产 Git `main` 仍保持不变。工作树仍保留既有未跟踪临时文件 `tmp_gzgov.html`。不要在未审查 `git status --short` 前执行 reset、clean 或覆盖式 checkout。
 
 ### 2026-10-06 本机 ziwei_user 更新（已完成）
 
 - 问题归属：本机 CLI/daemon。原 20242 进程来自全局旧包，不能执行新的 `directory.inspect` A2A 动作；更新前已读取配置并确认工作区为 `test_222`，没有切换工作区或覆盖设备凭证。
-- 更新操作：先备份 `C:\Users\25941\AppData\Local\Ziwei\ziwei_user\ziwei_user.json`，确认 PID 35992 的命令行确实属于 `ziwei_user` 后停止；使用当前 checkout 执行 `npm install --global --omit=dev --force .`，再运行 `ziwei_user start`。当前 daemon PID 22660，监听 20242。
-- 真实验证：`/readyz` 返回 `ready=true`、工作区 `test_222`、4 个 Agent 环境在线；通过服务器 A2A 发起真实 `directory.inspect`，目标电脑返回 `C:\Users\25941` 存在、盘符 `C:\`/`D:\` 和目录项，动作状态为 `succeeded`。
-- 回滚依据：配置备份为 `C:\Users\25941\AppData\Local\Ziwei\ziwei_user\ziwei_user.json.before-update-20261006180005.bak`。恢复时先停止当前 daemon，再恢复配置并重新安装需要的旧 CLI 包；本次没有改服务器数据库。
+- 更新操作：确认旧 PID 22660 的命令行确实属于 `ziwei_user` 后停止；使用当前 checkout 执行 `npm install --global --omit=dev --force .`，再运行 `ziwei_user start`。当前 daemon PID 33960，监听 20242，配置和工作区仍为 `test_222`。
+- 真实验证：`/readyz` 返回 `ready=true`、工作区 `test_222`、4 个 Agent 环境在线；通过服务器 A2A 发起真实 `directory.inspect`，目标电脑返回 `C:\Users\25941` 存在，动作状态为 `succeeded`。随后通过同一链路执行 `hermes.profile.create`，结果为 `succeeded`。
+- 回滚依据：本次只替换全局 daemon 包，未改本机配置文件；回滚时停止当前 daemon，重新安装旧提交的 daemon 包并启动原配置。服务器数据库备份和代码回滚记录见下方发布条目。
+
+### 2026-10-06 A2A 活动超时与 Hermes provider 继承（已发布）
+
+- 问题归属：daemon 超时策略、A2A 执行租约、Hermes 本机 profile 初始化和运行时错误可读性。实证 action `action_10891d73-60d5-4223-be18-3a9d7c732d27` 持续产生 20,544 B 输出后仍被固定 600000ms 计时器中止；`test333` 失败的直接原因是 profile 没有连接任何 provider。
+- 修复内容：默认运行时动作取消固定总时长，只保留无活动 watchdog；进度/阶段/输出会刷新 daemon watchdog 和服务器 `expires_at`。显式 `timeoutMs` 仍可设置硬上限。新 Hermes profile 默认在目标电脑本机继承主 profile 的 `auth.json`、`config.yaml` 和 `.env`，保持独立 `SOUL.md` 和 profile 目录；CLI 非零退出会附带经过脱敏的首条诊断。
+- 验证：完整 `npm test` 159/159、`npm run lint`、`npm run build` 均通过；本机真实 Hermes 调用返回 `PROFILE_PROVIDER_OK`，服务器 A2A `directory.inspect` 和 `hermes.profile.create` 均返回 `succeeded`。没有把旧失败记录改成成功。
+- 服务器发布：提交 `d67d890` 已推送到 `origin/codex/hermes-independent-profile` 并快进 `/opt/ziwei`；部署前 SQLite 备份为 `/opt/ziwei-backups/ziwei.sqlite.20261006T104830Z.before-d67d890`。补齐构建依赖后 `npm run build` 成功，`ziwei-api` active，公网 `https://qzelynth.top/healthz` 返回 200。
+- 回滚方式：代码使用 `git revert d67d890` 后重新构建/重启；若需恢复数据，先停止 `ziwei-api`，恢复上述 SQLite 备份，再启动并检查 `/healthz`。本轮没有数据库 schema 变更。
 
 ### 2026-10-06 持久会话执行状态误报（已发布）
 
