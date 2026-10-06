@@ -17,6 +17,14 @@
 - 真实验证：`/readyz` 返回 `ready=true`、工作区 `test_222`、4 个 Agent 环境在线；通过服务器 A2A 发起真实 `directory.inspect`，目标电脑返回 `C:\Users\25941` 存在、盘符 `C:\`/`D:\` 和目录项，动作状态为 `succeeded`。
 - 回滚依据：配置备份为 `C:\Users\25941\AppData\Local\Ziwei\ziwei_user\ziwei_user.json.before-update-20261006180005.bak`。恢复时先停止当前 daemon，再恢复配置并重新安装需要的旧 CLI 包；本次没有改服务器数据库。
 
+### 2026-10-06 持久会话执行状态误报（本地已修复，待发布）
+
+- 问题归属：会话 API/repository 的 A2A 执行状态选择。目录检查等辅助 action 也携带 `conversationId`，旧查询会把最新的 `directory.inspect` 成功结果误显示为“数字员工已完成”，而关联任务的 `task.execute` 仍在执行。
+- 修复内容：会话执行状态只从 `task.execute` 或 `conversation.execute` 中选择最新 action；`directory.inspect`、Hermes profile 等辅助 action 不再覆盖主执行状态。任务板原有状态链路未改动。
+- 验证：新增回归测试模拟“任务 action 为 acked、后续目录 action 为 succeeded”，会话仍返回任务 action 的 `acked` 状态；完整 `npm test` 155/155、`npm run lint`、`npm run build` 均通过。
+- 发布状态：代码修复尚未更新服务器，等待按发布流程备份 SQLite、构建并重启 `ziwei-api` 后再验收公网会话状态。
+- 回滚方式：使用本节对应提交的 `git revert <commit>`；本轮不改 SQLite schema，无需数据库降级。
+
 ### 2026-10-06 目标设备真实工作目录选择（已发布）
 
 - 问题归属：会话前端、会话 API/SQLite、A2A 动作和目标电脑上的 `ziwei_user` daemon。此前工作目录只是文本输入框，网页无法确认路径是否存在，也不能区分“选择已有目录”和“创建新目录”。

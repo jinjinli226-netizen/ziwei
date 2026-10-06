@@ -46,6 +46,28 @@ test('notifications, conversations, binary documents, skills and key rotation pe
   assert.ok(repo.verifyApiKey(rotated.token));
 });
 
+test('conversation execution ignores unrelated A2A actions that share its conversation id', () => {
+  const repo = createRepository({ memory: true });
+  const conversation = repo.createConversation('test-111', { title: '执行状态隔离' });
+  const taskAction = repo.createA2AAction('test-111', {
+    type: 'task.execute',
+    taskId: 'task-execution-state',
+    payload: { conversationId: conversation.id, prompt: '持续执行' }
+  });
+  repo.ackA2AAction(taskAction.id);
+  const directoryAction = repo.createA2AAction('test-111', {
+    type: 'directory.inspect',
+    payload: { conversationId: conversation.id, path: 'C:\\Users\\25941' }
+  });
+  repo.ackA2AAction(directoryAction.id);
+  repo.resultA2AAction(directoryAction.id, { status: 'succeeded', result: { exists: true } });
+
+  const execution = repo.getConversation(conversation.id).execution;
+  assert.equal(execution.id, taskAction.id);
+  assert.equal(execution.type, 'task.execute');
+  assert.equal(execution.status, 'acked');
+});
+
 test('settings role guard and notification API expose durable state', async () => {
   const app = createApp({ memory: true });
   const server = app.listen(0);

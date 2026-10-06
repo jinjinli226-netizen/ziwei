@@ -364,7 +364,7 @@ export function createRepository(options = {}) {
     // `conversation.execute`, or through a task created for a digital
     // employee (`task.execute`).  Both payloads carry conversationId.  The
     // UI needs the latest one regardless of which dispatch path was used.
-    const candidates = db.prepare("SELECT * FROM a2a_actions WHERE payload_json LIKE ? ORDER BY created_at DESC").all(`%${String(conversationId)}%`);
+    const candidates = db.prepare("SELECT * FROM a2a_actions WHERE payload_json LIKE ? AND type IN ('task.execute','conversation.execute') ORDER BY created_at DESC, rowid DESC").all(`%${String(conversationId)}%`);
     const row = candidates.find(candidate => parse(candidate.payload_json)?.conversationId === conversationId);
     if (!row) return null;
     let current = row;
