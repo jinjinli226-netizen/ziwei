@@ -254,7 +254,7 @@ const employeeProfileTasks = computed(() => { const employee = employeeProfile.v
 const employeeProfileConversations = computed(() => { const employee = employeeProfile.value; if (!employee) return []; return conversations.value.filter(item => item.employee_id === employee.id); });
 const pageTitle = computed(() => ({home:'首页',issues:'问题与任务',calendar:'日历',docs:'项目文档',members:'成员与设备',runtimes:'运行时',skills:'技能中心',settings:'工作区设置',invite:'邀请加入紫薇',open:'开放平台',automations:'自动化',inbox:focusedConversation.value ? '持久会话' : '收件箱',employee:employeeProfile.value?.name || '数字伙伴'}[page.value] || '紫薇'));
 
-function navigate(key) { if (key === 'workflow') key='automations'; if (key === 'skills') { search.value=''; skillScope.value='platform'; skillTab.value='all'; } if (key === 'inbox') { selectedConversation.value=null; conversationExecution.value=null; conversationDraft.value=''; conversationRouteId.value=''; stopConversationPolling(); } if (key !== 'employee') { employeeRouteId.value=''; employeeActionId.value=''; } page.value = key; history.pushState({},'',routePath(key)); if (key === 'open') loadApiKeys(); }
+function navigate(key) { if (key === 'workflow') key='automations'; if (key === 'skills') { search.value=''; skillScope.value='platform'; skillTab.value='all'; } if (key === 'inbox') { selectedConversation.value=null; conversationExecution.value=null; conversationDraft.value=''; conversationRouteId.value=''; clearConversationAttachment(); stopConversationPolling(); } if (key !== 'employee') { employeeRouteId.value=''; employeeActionId.value=''; } page.value = key; history.pushState({},'',routePath(key)); if (key === 'open') loadApiKeys(); }
 async function switchWorkspace(slug) { if (!slug || slug === workspaceSlug()) return; setWorkspaceSlug(slug); history.pushState({},'',routePath(page.value)); await load(); }
 async function createWorkspace(payload) {
   try {
@@ -383,6 +383,7 @@ function startConversationPolling() {
 async function openConversation(item, { push=true } = {}) {
   const id = typeof item === 'string' ? item : item?.id;
   if (!id) return;
+  clearConversationAttachment();
   try {
     selectedConversation.value=await api.conversation(id);
     conversationModelId.value=selectedConversation.value.model_id || '';
@@ -429,7 +430,7 @@ async function selectConversationEmployee(employeeId) {
   const value=String(employeeId || '').trim();
   if (!value || value === conversationEmployeeId.value) return;
   conversationEmployeeId.value=value;
-  selectedConversation.value=null; conversationExecution.value=null; conversationDraft.value=''; stopConversationPolling();
+  selectedConversation.value=null; conversationExecution.value=null; conversationDraft.value=''; clearConversationAttachment(); stopConversationPolling();
   history.pushState({},'',`${routePath('inbox')}?employee=${encodeURIComponent(value)}`);
   await loadConversations({ autoSelect:true });
 }
@@ -440,6 +441,7 @@ async function archiveSelectedConversation() {
     selectedConversation.value = null;
     conversationExecution.value = null;
     conversationRouteId.value = '';
+    clearConversationAttachment();
     stopConversationPolling();
     history.pushState({},'',routePath('inbox'));
     await loadConversations({ autoSelect:false });

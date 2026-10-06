@@ -57,3 +57,9 @@ test('oversized conversation requests expose a readable 413 error', () => {
   assert.match(apiSource, /response\.status === 413/);
   assert.match(appSource, /error\.status === 413 \? '附件太大，请选择 10 MB 以内的图片后重试'/);
 });
+
+test('conversation changes clear a pending attachment before it can leak across threads', () => {
+  assert.match(appSource, /conversationRouteId\.value=''; clearConversationAttachment\(\); stopConversationPolling\(\)/);
+  assert.match(appSource, /async function openConversation\(item, \{ push=true \} = \{\}\) \{[\s\S]*?clearConversationAttachment\(\);/);
+  assert.match(appSource, /conversationDraft\.value=''; clearConversationAttachment\(\); stopConversationPolling\(\)/);
+});
