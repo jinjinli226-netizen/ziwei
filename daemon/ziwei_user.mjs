@@ -176,12 +176,28 @@ function heartbeatFresh() {
   return Date.now() >= lastHeartbeatAt && Date.now() - lastHeartbeatAt <= timeout;
 }
 const health = http.createServer((req, res) => { if (req.url === '/healthz') { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ ok: true, service: 'ziwei_user', version: VERSION, bridge: 'ziwei_user', agentId: 'ziwei_user', workspace: config.workspace, runtimes: runtimeDiscovery.runtimes, lastHeartbeat, lastHeartbeatAgeMs: lastHeartbeatAt ? Math.max(0, Date.now() - lastHeartbeatAt) : null, lastPoll, pid: process.pid })); return; } if (req.url === '/readyz') { const ready = heartbeatFresh(); res.writeHead(ready ? 200 : 503, { 'content-type': 'application/json' }); res.end(JSON.stringify({ ready, service: 'ziwei_user', version: VERSION, agentId: 'ziwei_user', workspace: config.workspace, runtimes: runtimeDiscovery.runtimes, lastHeartbeat, lastHeartbeatAgeMs: lastHeartbeatAt ? Math.max(0, Date.now() - lastHeartbeatAt) : null, pid: process.pid })); return; } res.writeHead(404); res.end(); });
-health.on('error', error => log('health_server_error', { error: error.message }));
+let stopping = false;
+health.on('error', error => {
+  log('health_server_error', { error: error.message, code: error.code || null });
+  // A second ziwei_user must fail closed. Leaving a duplicate process alive
+  // would make its heartbeat and A2A poll indistinguishable from the owner.
+  if (error.code === 'EADDRINUSE') {
+    process.exitCode = 1;
+    setImmediate(() => process.exit(1));
+  }
+});
 health.listen(config.healthPort, config.healthHost, () => log('started', { health: `http://${config.healthHost}:${config.healthPort}`, apiBase: config.apiBase, heartbeatMs: config.heartbeatMs, pollMs: config.pollMs }));
 await heartbeat();
 await poll();
 heartbeatTimer = setInterval(heartbeat, Math.max(1000, Number(config.heartbeatMs) || 15000));
 pollTimer = setInterval(poll, Math.max(1000, Number(config.pollMs) || 5000));
-function stop(signal) { clearInterval(heartbeatTimer); clearInterval(pollTimer); health.close(() => { log('stopped', { signal }); process.exit(0); }); }
+function stop(signal) {
+  if (stopping) return;
+  stopping = true;
+  clearInterval(heartbeatTimer); clearInterval(pollTimer);
+  const finish = () => { log('stopped', { signal }); process.exit(0); };
+  if (health.listening) health.close(finish); else finish();
+}
 process.on('SIGINT', () => stop('SIGINT'));
 process.on('SIGTERM', () => stop('SIGTERM'));
+process.on('exit', code => { try { log('exited', { code }); } catch {} });

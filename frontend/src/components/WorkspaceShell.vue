@@ -1,7 +1,8 @@
 <script setup>
 import { computed, ref, watch } from 'vue';
 import { ListTodo, GitBranch, CalendarDays, BookOpenText, UsersRound, Share2, Settings, Puzzle, House, Languages, CircleHelp, ChevronUp, ChevronDown, LayoutDashboard, Check, Plus, LogOut } from 'lucide-vue-next';
-import { ZiButton, ZiFormField, ZiInput, ZiModal, ZiSelect } from '@ziwei/ui';
+import { ZiButton, ZiFormField, ZiInput, ZiModal } from '@ziwei/ui';
+import ZiSelect from './ZiSelect.vue';
 const props = defineProps({ page: String, account: Object, workspace: Object, workspaces: { type: Array, default: () => [] }, language: { type: String, default: 'zh-CN' } });
 const emit = defineEmits(['navigate','workspace','language','create-workspace','logout']);
 const sectionKeys = [

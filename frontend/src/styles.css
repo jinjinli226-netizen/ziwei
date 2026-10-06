@@ -376,10 +376,6 @@ select:not(.ziwei-select)) { padding: 0 11px; }
 :root[data-theme="dark"] .ziwei-textarea { border-color: var(--ziwei-line-strong); color: var(--ziwei-ink); background: var(--ziwei-surface); }
 :where(button):not(:disabled) { transition: color .15s ease, background-color .15s ease, border-color .15s ease, box-shadow .15s ease, transform .15s ease; }
 :where(button):not(:disabled):hover { color: var(--ziwei-violet); }
-.ziwei-select {
-  appearance: none;
-  padding-right: 35px;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='m3 4.5 3 3 3-3' fill='none' stroke='%23647788' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 11px center;
-}
+.ziwei-select__trigger { min-height: 38px; }
+.ziwei-select__trigger:focus-visible { border-color: var(--ziwei-accent-line); box-shadow: 0 0 0 3px var(--ziwei-focus-ring); outline: 0; }
+.ziwei-select--invalid .ziwei-select__trigger { border-color: #d77c84; }
