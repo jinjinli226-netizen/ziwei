@@ -6,6 +6,7 @@ import test from 'node:test';
 const root = path.resolve(import.meta.dirname, '..');
 const shellSource = fs.readFileSync(path.join(root, 'frontend', 'src', 'components', 'WorkspaceShell.vue'), 'utf8');
 const shellCss = fs.readFileSync(path.join(root, 'frontend', 'src', 'workspace-shell.css'), 'utf8');
+const appCss = fs.readFileSync(path.join(root, 'frontend', 'src', 'styles.css'), 'utf8');
 
 test('workspace shell closes popups on outside pointer interactions', () => {
   assert.match(shellSource, /onMounted/);
@@ -23,4 +24,17 @@ test('member and employee role copy wraps instead of being visually truncated', 
   assert.match(shellCss, /\.members-panel \.org-employee-copy em\s*\{[^}]*white-space:\s*normal/);
   assert.match(shellCss, /\.members-panel \.employee-tree-row \.entity-main small\.employee-role-summary\s*\{[^}]*white-space:\s*normal/);
   assert.match(shellCss, /\.employee-profile-card > p\s*\{[^}]*overflow-wrap:\s*anywhere/);
+});
+
+test('directory picker keeps its actions inside the modal at desktop and narrow widths', () => {
+  assert.match(appCss, /\.ziwei-modal:has\(\.conversation-directory-picker\)\s*\{[^}]*max-width:\s*100%[^}]*overflow-x:\s*hidden/);
+  assert.match(appCss, /\.conversation-directory-picker\s*\{[^}]*width:\s*100%[^}]*min-width:\s*0[^}]*max-width:\s*100%/);
+  assert.match(appCss, /\.conversation-directory-picker \.form-actions\s*\{[^}]*flex-wrap:\s*wrap/);
+  assert.match(appCss, /@media\s*\(max-width:760px\)[\s\S]*?\.conversation-directory-browser\s*\{[^}]*grid-template-columns:\s*1fr/);
+});
+
+test('quick tray menus keep menu actions horizontal instead of inheriting icon sizing', () => {
+  assert.match(shellCss, /\.issue-quick-tray\s*>\s*button\s*\{/);
+  assert.doesNotMatch(shellCss, /\.issue-quick-tray\s+button\s*\{/);
+  assert.match(shellCss, /\.quick-tray-menu button\s*\{[^}]*width:\s*100%[^}]*white-space:\s*nowrap[^}]*word-break:\s*keep-all/);
 });
