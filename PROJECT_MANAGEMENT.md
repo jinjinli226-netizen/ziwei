@@ -23,6 +23,12 @@
 - 真实服务器 daemon：使用全局 `ziwei_user` 命令、用户目录配置和已有设备凭证，工作区为 `test_222`，API 为 `https://qzelynth.top`，健康端口仍为本机 `20242`；不得改写项目配置、重新配对或把凭证写入日志。
 - 当前真实链路：`ziwei_user status --json` 报告 `test_222`、`ready=true`；服务器 heartbeat 和 A2A poll 成功。`directory.inspect` 元数据动作返回 `succeeded`，目标 `C:\Users\25941` 存在且为目录，未读取文件内容。第一次带根盘扫描的验收动作超时后明确标记为 `failed`，没有改报成功。
 - 远程 workspace 隔离：使用 `test_222` 设备凭证查询正确工作区任务详情返回 200，改用 `bjc-ops` 返回 401；action 事件读取同样为正确工作区 200、错误工作区 401。
+- SSRF 重定向单元测试使用 `.test` 本地夹具主机和注入解析器，不访问公共 DNS；生产 `fetchSafeUrl` 仍使用系统 DNS，并在每一跳重定向前重新校验目标。
+
+### 2026-10-06 T3 验收证据边界
+
+- 本地证据：checkout、`5178/4178` 和项目 `bjc-ops` 配置；真实浏览器在 `1280x720` 与 `390x844` 验证任务看板、成员目录、主路由、菜单外部点击/Escape、焦点保持和控制台无错误。任务看板与页面 `scrollWidth` 不超过可视宽度，成员目录内容高度不再被固定卡片裁切。
+- 服务器证据：仅使用全局 `D:\work\nodejs\node_global\ziwei_user`、用户目录配置、`test_222` 和 `https://qzelynth.top`；只读 `/readyz`、A2A agent card 与 pending poll 均返回 200，未启动项目 daemon、切换配置或创建远程动作。
 
 ### 2026-10-06 A2A 活动超时与 Hermes provider 继承（已发布）
 

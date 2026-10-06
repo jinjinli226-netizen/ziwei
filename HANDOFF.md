@@ -33,15 +33,19 @@ D:\灵光爸爸拆解\.local\logs\health.log
 
 `data/ziwei_user.json` 只代表本地项目验收配置，workspace 是 `bjc-ops`。真实服务器 daemon 使用 `C:\Users\25941\AppData\Local\Ziwei\ziwei_user\ziwei_user.json`，workspace 是 `test_222`，API 是 `https://qzelynth.top`，健康端口仍为 `20242`。不要把 token、Cookie 或认证头写入日志。
 
+环境边界必须保持清晰：本地 checkout、前端/API、单元/API 测试和浏览器回归属于 `bjc-ops`；服务器 daemon/A2A 证据只来自全局 `D:\work\nodejs\node_global\ziwei_user` 及用户目录配置。`npm run daemon` 和 `npm run ziwei:start` 只能在明确的本地 `bjc-ops` 验收中使用，不能用于服务器验收或代替 `test_222` 结果。服务器验收前分别核对项目配置、用户配置、端口和 `/readyz`，不得切换配置或把凭据写入日志。
+
 ## 启动和检查
 
-在项目根目录运行：
+本地 `bjc-ops` 代码验收时，在项目根目录运行：
 
 ```powershell
 npm run dev
 npm run ziwei:start
 npm run ziwei:status
 ```
+
+上述项目 daemon 命令不属于服务器验收流程；服务器 daemon/A2A 证据只用全局 `ziwei_user status --json`、用户目录配置和 `test_222` 工作区核对。
 
 状态检查：
 

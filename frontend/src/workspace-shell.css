@@ -451,6 +451,49 @@
 .members-panel .directory-device > div strong,.members-panel .directory-device > div .soft-tag { justify-self:start; }
 .members-panel .team-scroll { scrollbar-width:thin; }
 
+/* Keep the board usable at desktop widths and let compact screens scroll
+   through complete lanes instead of clipping the right hand columns. */
+@media (min-width:901px) {
+  .faithful-board { grid-template-columns:repeat(6,minmax(0,1fr)); gap:10px; overflow:auto; }
+  .task-lane { min-width:0; }
+  .task-lane-header { gap:4px; padding-inline:8px; }
+  .lane-heading { min-width:0; flex:1; }
+  .lane-heading strong { min-width:0; overflow-wrap:anywhere; }
+  .lane-actions { flex:none; }
+  .task-lane-body { padding-inline:8px; }
+  .task-card-title-link { min-width:0; flex:1; text-align:left; }
+  .task-card-title strong { display:block; overflow-wrap:anywhere; }
+  .task-card p { overflow-wrap:anywhere; }
+  .task-card .task-meta { flex-wrap:wrap; }
+}
+@media (max-width:900px) and (min-width:701px) {
+  .faithful-board { grid-template-columns:repeat(2,minmax(240px,1fr)); overflow:auto; }
+}
+@media (max-width:700px) {
+  .workspace-panel.issues-panel { overflow:auto; }
+  .workspace-panel.issues-panel > .content { height:auto; min-height:100%; overflow:visible; }
+  .tasks-page { height:auto; min-height:100%; }
+  .faithful-board { grid-template-columns:1fr; height:auto; overflow:auto; }
+  .task-lane { min-height:260px; }
+}
+
+/* Long member descriptions remain readable and determine their row height. */
+.members-panel .org-chart { height:auto; min-height:390px; padding-bottom:24px; }
+.members-panel .org-chart.has-employees { min-height:500px; }
+.members-panel .org-employee-list { position:relative; top:auto; left:auto; right:auto; margin:365px 16px 0; }
+.members-panel .org-employee-card { align-items:flex-start; height:auto; min-height:76px; }
+.members-panel .org-employee-copy em { overflow:visible; overflow-wrap:anywhere; line-height:1.45; text-overflow:clip; white-space:normal; }
+.members-panel .employee-tree-row { align-items:flex-start; min-height:46px; }
+.members-panel .employee-tree-row .entity-main small.employee-role-summary { max-width:none; overflow:visible; overflow-wrap:anywhere; line-height:1.45; text-overflow:clip; white-space:normal; }
+.members-panel .directory-card { width:min(736px,100%); height:auto; overflow:visible; }
+.members-panel .directory-row-copy { min-width:0; overflow-wrap:anywhere; }
+.members-panel .directory-row-copy strong,.members-panel .directory-row-copy span { white-space:normal; overflow-wrap:anywhere; }
+.members-panel .directory-member-group,.members-panel .directory-agent-group { height:auto; min-height:76px; }
+.members-panel .directory-member-summary,.members-panel .directory-agent-heading { height:auto; min-height:33px; padding-block:7px; }
+.members-panel .directory-owner-row { height:auto; min-height:43px; padding-block:8px; }
+.members-panel .directory-device { height:auto; min-height:56px; align-items:flex-start; padding-block:8px; }
+.employee-profile-card > p { overflow-wrap:anywhere; white-space:normal; }
+
 /* Model discovery dropdown: provider grouped, searchable, and sourced from the API catalog. */
 .employee-model-menu { top:calc(100% + 7px); max-height:365px; overflow:auto; padding:8px; }
 .employee-model-search { position:sticky; top:0; z-index:2; display:flex !important; align-items:center; gap:8px !important; min-height:42px; box-sizing:border-box; margin:0 0 7px; padding:0 10px; border:2px solid #a9c7e8; border-radius:9px; color:#657487; background:#fff; box-shadow:0 0 0 3px rgba(47,111,202,.12); }

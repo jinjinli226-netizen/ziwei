@@ -76,21 +76,21 @@ export function validateSafeUrl(value, { allowLocal = false } = {}) {
   return parsed;
 }
 
-async function assertResolvable(parsed, { allowLocal = false } = {}) {
+async function assertResolvable(parsed, { allowLocal = false, lookupImpl = dns.lookup } = {}) {
   const hostname = parsed.hostname.replace(/^\[|\]$/g, '').toLowerCase();
   if (net.isIP(hostname)) {
     if (!allowLocal && isBlockedIp(hostname)) throw new Error('URL 目标地址被安全策略阻止');
     return;
   }
-  const records = await dns.lookup(hostname, { all: true, verbatim: true });
+  const records = await lookupImpl(hostname, { all: true, verbatim: true });
   if (!records.length) throw new Error('URL 域名无法解析');
   if (!allowLocal && records.some(record => isBlockedIp(record.address))) throw new Error('URL 目标地址解析到受保护网络');
 }
 
-export async function fetchSafeUrl(value, { allowLocal = false, fetchImpl = globalThis.fetch, signal, maxRedirects = MAX_REDIRECTS, ...options } = {}) {
+export async function fetchSafeUrl(value, { allowLocal = false, fetchImpl = globalThis.fetch, lookupImpl = dns.lookup, signal, maxRedirects = MAX_REDIRECTS, ...options } = {}) {
   let current = validateSafeUrl(value, { allowLocal });
   for (let redirects = 0; redirects <= maxRedirects; redirects += 1) {
-    await assertResolvable(current, { allowLocal });
+    await assertResolvable(current, { allowLocal, lookupImpl });
     const response = await fetchImpl(current, { ...options, redirect: 'manual', signal });
     if (![301, 302, 303, 307, 308].includes(response.status)) return response;
     const location = response.headers?.get?.('location');

@@ -1,0 +1,26 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import test from 'node:test';
+
+const root = path.resolve(import.meta.dirname, '..');
+const shellSource = fs.readFileSync(path.join(root, 'frontend', 'src', 'components', 'WorkspaceShell.vue'), 'utf8');
+const shellCss = fs.readFileSync(path.join(root, 'frontend', 'src', 'workspace-shell.css'), 'utf8');
+
+test('workspace shell closes popups on outside pointer interactions', () => {
+  assert.match(shellSource, /onMounted/);
+  assert.match(shellSource, /onUnmounted/);
+  assert.match(shellSource, /addEventListener\(['"]pointerdown['"]/);
+  assert.match(shellSource, /closest\(['"]\.shell-menu-anchor['"]\)/);
+});
+
+test('task board fits desktop columns without clipping important lanes', () => {
+  assert.match(shellCss, /@media\s*\(min-width:\s*901px\)[\s\S]*?\.faithful-board\s*\{[^}]*grid-template-columns:\s*repeat\(6,\s*minmax\(0,\s*1fr\)/);
+  assert.match(shellCss, /\.task-card-title-link\s*\{[^}]*min-width:\s*0/);
+});
+
+test('member and employee role copy wraps instead of being visually truncated', () => {
+  assert.match(shellCss, /\.members-panel \.org-employee-copy em\s*\{[^}]*white-space:\s*normal/);
+  assert.match(shellCss, /\.members-panel \.employee-tree-row \.entity-main small\.employee-role-summary\s*\{[^}]*white-space:\s*normal/);
+  assert.match(shellCss, /\.employee-profile-card > p\s*\{[^}]*overflow-wrap:\s*anywhere/);
+});

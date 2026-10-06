@@ -15,7 +15,38 @@ test('SSRF guard blocks loopback, private, link-local and metadata addresses', (
 });
 
 test('SSRF guard validates every redirect target', async () => {
-  const headers = new Headers({ location: 'http://127.0.0.1/private' });
-  const fakeFetch = async () => new Response(null, { status: 302, headers });
-  await assert.rejects(() => fetchSafeUrl('https://example.com/start', { fetchImpl: fakeFetch }), /阻止/);
+  const lookups = [];
+  const lookupImpl = async (hostname, options) => {
+    lookups.push({ hostname, options });
+    if (hostname === 'safe.test') return [{ address: '198.51.100.7', family: 4 }];
+    if (hostname === 'redirect.test') return [{ address: '203.0.113.8', family: 4 }];
+    if (hostname === 'private.test') return [{ address: '127.0.0.1', family: 4 }];
+    throw new Error(`unexpected test hostname: ${hostname}`);
+  };
+  const fetches = [];
+  const fakeFetch = async (url) => {
+    fetches.push(url.hostname);
+    if (url.hostname === 'safe.test') {
+      return new Response(null, {
+        status: 302,
+        headers: new Headers({ location: 'http://redirect.test/step-1' }),
+      });
+    }
+    assert.equal(url.hostname, 'redirect.test');
+    return new Response(null, {
+      status: 302,
+      headers: new Headers({ location: 'http://private.test/private' }),
+    });
+  };
+
+  await assert.rejects(
+    () => fetchSafeUrl('https://safe.test/start', { fetchImpl: fakeFetch, lookupImpl }),
+    /受保护网络/,
+  );
+  assert.deepEqual(lookups, [
+    { hostname: 'safe.test', options: { all: true, verbatim: true } },
+    { hostname: 'redirect.test', options: { all: true, verbatim: true } },
+    { hostname: 'private.test', options: { all: true, verbatim: true } },
+  ]);
+  assert.deepEqual(fetches, ['safe.test', 'redirect.test']);
 });

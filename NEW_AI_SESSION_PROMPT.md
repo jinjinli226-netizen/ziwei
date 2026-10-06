@@ -19,11 +19,11 @@ D:\灵光爸爸拆解
 2. 阅读 README.md 和 HANDOFF.md，了解启动方式、历史变更和明确延期项。
 3. 如果存在 AGENTS.md，读取其中的项目约束。
 4. 执行 git status --short。工作区已有修改不要 reset、clean、checkout 覆盖或删除。
-5. 检查服务：
+5. 检查本地代码服务：
    - 前端 http://127.0.0.1:5178
    - 后端 http://127.0.0.1:4178/healthz
-   - ziwei_user http://127.0.0.1:20242/readyz
-6. 当前本机运行工作区以 data/ziwei_user.json 和 /readyz 为准；test-111 只是默认示例，不能假定它是当前工作区。
+   - 项目 `data/ziwei_user.json` 仅代表本地 `bjc-ops`；只有明确进行本地 daemon 验收时才核对项目入口和对应 `/readyz`。
+6. 真实服务器 daemon/A2A 验收必须单独使用全局 `D:\work\nodejs\node_global\ziwei_user`、用户配置 `C:\Users\25941\AppData\Local\Ziwei\ziwei_user\ziwei_user.json`、服务器 `https://qzelynth.top` 和 `test_222` 工作区，再核对 `ziwei_user status --json` 与 `http://127.0.0.1:20242/readyz`；不要用项目 daemon 或本地 `bjc-ops` 结果冒充服务器证据。test-111 只是默认示例，不能假定它是当前工作区。
 7. 修改前先说明：问题属于前端、API、SQLite/repository、A2A、daemon 还是 CLI 层；先复现并记录证据，再做最小修改。
 8. 不要使用伪数据、静态成功状态或扩大超时掩盖执行失败；不要依赖 AuraBaba daemon。
 9. 完成修改后至少运行：npm test、npm run lint、npm run build；涉及 daemon/A2A/CLI 时还要做一次真实本地链路验证。

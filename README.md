@@ -35,6 +35,12 @@ npm run diagnose  # 单次健康检查
 
 `npm run dev` 启动前端 `5178` 和后端 `4178`；daemon 健康接口使用 `20242`。参考 AuraBaba daemon 已占用 `20241`，紫薇不会抢占它。
 
+## 验收环境边界
+
+- **本地代码验收**：项目 checkout、本地前端 `5178`、本地 API `4178`、单元/API 测试和浏览器回归使用项目 `data/ziwei_user.json` 的 `bjc-ops` 工作区。需要运行项目 daemon 时，只使用项目入口并先核对该配置；它代表本地代码环境。
+- **真实服务器 daemon/A2A 验收**：使用全局 `D:\work\nodejs\node_global\ziwei_user`，读取用户配置 `C:\Users\25941\AppData\Local\Ziwei\ziwei_user\ziwei_user.json`，目标服务器 API 为 `https://qzelynth.top`，工作区为 `test_222`。先核对 `ziwei_user status --json` 和 `http://127.0.0.1:20242/readyz` 的工作区身份。
+- `npm run daemon`、`npm run ziwei:start` 和项目 `data/ziwei_user.json` 不得用于冒充或替代 `test_222` 的服务器证据；不要为了服务器验收启动项目 daemon、切换项目配置或把令牌写入日志。
+
 ## ziwei_user 设备连接
 
 创建工作区和管理项目不需要先连接设备。只有要让某台电脑运行数字员工时，才在网页的“添加设备”里生成一次性配对码。`ziwei_user` 在每台电脑上只需安装一次；后续给同一台电脑连接新的工作区时，直接运行 `connect` 和 `start`，不要重复执行 `npm install`。

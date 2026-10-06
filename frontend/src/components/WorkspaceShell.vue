@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { ListTodo, GitBranch, CalendarDays, BookOpenText, UsersRound, Share2, Settings, Puzzle, House, Languages, CircleHelp, ChevronUp, ChevronDown, LayoutDashboard, Check, Plus, LogOut } from 'lucide-vue-next';
 import { ZiButton, ZiFormField, ZiInput, ZiModal } from '@ziwei/ui';
 import ZiSelect from './ZiSelect.vue';
@@ -27,6 +27,25 @@ const languageOptions = [{ code:'en-US', label:'English' }, { code:'zh-CN', labe
 const workspaceCreateOpen = ref(false);
 const workspaceCreateForm = ref({ name:'', slug:'', kind:'personal' });
 watch(() => props.language, value => { if (value && translations[value]) language.value=value; });
+function closeShellMenus(event) {
+  const target = event?.target;
+  if (target && typeof target.closest === 'function' && target.closest('.shell-menu-anchor')) return;
+  menu.value='';
+}
+function handleShellKeydown(event) {
+  if (event.key !== 'Escape') return;
+  menu.value='';
+  help.value=false;
+  workspaceCreateOpen.value=false;
+}
+onMounted(() => {
+  document.addEventListener('pointerdown', closeShellMenus, true);
+  document.addEventListener('keydown', handleShellKeydown, true);
+});
+onUnmounted(() => {
+  document.removeEventListener('pointerdown', closeShellMenus, true);
+  document.removeEventListener('keydown', handleShellKeydown, true);
+});
 function go(page) { menu.value=''; emit('navigate',page); }
 function selectWorkspace(item) { menu.value=''; if (item?.slug) emit('workspace', item.slug); }
 function selectLanguage(value) { language.value=value; try { localStorage.setItem('ziwei.language', value); } catch {} menu.value=''; emit('language', value); }
@@ -35,11 +54,11 @@ function submitWorkspaceCreate() { if (!workspaceCreateForm.value.name.trim()) r
 function requestLogout() { menu.value=''; emit('logout'); }
 </script>
 <template>
-  <div class="workspace-shell" @keydown.esc="menu='';help=false">
+  <div class="workspace-shell" @keydown.esc="handleShellKeydown">
     <header class="workspace-topbar">
       <button class="product-brand" @click="go('home')" aria-label="紫薇主页"><img src="/ziwei-logo.png" alt=""/><strong>紫薇</strong></button>
       <div class="shell-menu-anchor">
-        <button class="workspace-picker" :aria-expanded="menu==='workspace'" @click="menu=menu==='workspace'?'':'workspace'"><span class="workspace-initial">{{ workspace.name?.slice(0,1) || '紫' }}</span>{{ workspace.slug || workspace.name }}<ChevronDown :size="14"/></button>
+        <button class="workspace-picker" aria-haspopup="menu" :aria-expanded="menu==='workspace'" @click="menu=menu==='workspace'?'':'workspace'"><span class="workspace-initial">{{ workspace.name?.slice(0,1) || '紫' }}</span>{{ workspace.slug || workspace.name }}<ChevronDown :size="14"/></button>
         <div v-if="menu==='workspace'" class="shell-popup workspace-popup"><small>{{ t.workspace }}</small><button v-for="item in (props.workspaces.length ? props.workspaces : [workspace])" :key="item.slug" :class="{selected:item.slug===workspace.slug}" @click="selectWorkspace(item)"><span class="workspace-initial">{{ item.name?.slice(0,1) || '紫' }}</span>{{ item.slug || item.name }}<Check v-if="item.slug===workspace.slug" :size="15"/></button><button @click="openWorkspaceCreate"><Plus :size="17"/>新建项目</button><button @click="go('settings')"><Settings :size="17"/>{{ t.workspaceSettings }}</button></div>
       </div>
       <button class="shell-home" @click="go('home')"><LayoutDashboard :size="16"/>{{ t.home }}</button>
@@ -54,12 +73,12 @@ function requestLogout() { menu.value=''; emit('logout'); }
         </section>
         <footer class="sidebar-footer">
           <div class="shell-menu-anchor">
-            <button class="sidebar-account" @click="menu=menu==='account'?'':'account'" :aria-expanded="menu==='account'"><span class="account-initial">{{ user.name?.slice(0,1) || '?' }}</span><span class="account-info"><strong>{{ user.name || '当前账号' }}</strong><small>{{ user.email || (user.role ? (user.role==='owner' ? t.owner : t.member) : '') }}</small></span><ChevronUp :size="17"/></button>
+            <button class="sidebar-account" aria-haspopup="menu" @click="menu=menu==='account'?'':'account'" :aria-expanded="menu==='account'"><span class="account-initial">{{ user.name?.slice(0,1) || '?' }}</span><span class="account-info"><strong>{{ user.name || '当前账号' }}</strong><small>{{ user.email || (user.role ? (user.role==='owner' ? t.owner : t.member) : '') }}</small></span><ChevronUp :size="17"/></button>
             <div v-if="menu==='account'" class="shell-popup account-popup"><strong>{{ user.name || '当前账号' }}</strong><small>{{ user.email }}</small><span>{{ user.role==='owner'?t.owner:user.role==='admin'?'管理员':t.member }}</span><button @click="go('settings')"><Settings :size="17"/>{{ t.workspaceSettings }}</button><button @click="requestLogout"><LogOut :size="17"/>{{ t.logout }}</button></div>
           </div>
           <div class="sidebar-utilities">
             <button aria-label="主页" title="主页" @click="go('home')"><House :size="19"/></button>
-            <div class="shell-menu-anchor"><button aria-label="语言" :title="t.interfaceLanguage" @click="menu=menu==='language'?'':'language'" :aria-expanded="menu==='language'"><Languages :size="19"/></button><div v-if="menu==='language'" class="shell-popup language-popup"><small>{{ t.interfaceLanguage }}</small><button v-for="item in languageOptions" :key="item.code" @click="selectLanguage(item.code)">{{ item.label }}<Check v-if="language===item.code" :size="16"/></button></div></div>
+            <div class="shell-menu-anchor"><button aria-label="语言" :title="t.interfaceLanguage" aria-haspopup="menu" @click="menu=menu==='language'?'':'language'" :aria-expanded="menu==='language'"><Languages :size="19"/></button><div v-if="menu==='language'" class="shell-popup language-popup"><small>{{ t.interfaceLanguage }}</small><button v-for="item in languageOptions" :key="item.code" @click="selectLanguage(item.code)">{{ item.label }}<Check v-if="language===item.code" :size="16"/></button></div></div>
             <button aria-label="帮助" title="帮助" @click="help=true"><CircleHelp :size="19"/></button>
           </div>
         </footer>
