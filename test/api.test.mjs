@@ -33,6 +33,25 @@ test('http api exposes summary and creates tasks', async () => {
   } finally { server.close(); }
 });
 
+test('conversation API requires an employee and filters each employee workspace', async () => {
+  const app = createApp({ memory: true });
+  const server = app.listen(0);
+  await new Promise(resolve => server.once('listening', resolve));
+  const port = server.address().port;
+  try {
+    const headers = { 'content-type': 'application/json' };
+    const codex = await fetch(`http://127.0.0.1:${port}/api/workspaces/test-111/employees`, { method:'POST', headers, body:JSON.stringify({ name:'Codex', runtime:'Codex' }) }).then(r => r.json());
+    const claude = await fetch(`http://127.0.0.1:${port}/api/workspaces/test-111/employees`, { method:'POST', headers, body:JSON.stringify({ name:'Claude', runtime:'Claude' }) }).then(r => r.json());
+    const rejected = await fetch(`http://127.0.0.1:${port}/api/workspaces/test-111/conversations`, { method:'POST', headers, body:JSON.stringify({ title:'没有归属' }) });
+    assert.equal(rejected.status, 400);
+    const first = await fetch(`http://127.0.0.1:${port}/api/workspaces/test-111/conversations`, { method:'POST', headers, body:JSON.stringify({ title:'Codex 对话', employeeId:codex.id }) }).then(r => r.json());
+    await fetch(`http://127.0.0.1:${port}/api/workspaces/test-111/conversations`, { method:'POST', headers, body:JSON.stringify({ title:'Claude 对话', employeeId:claude.id }) });
+    const isolated = await fetch(`http://127.0.0.1:${port}/api/workspaces/test-111/conversations?employeeId=${encodeURIComponent(codex.id)}`).then(r => r.json());
+    assert.deepEqual(isolated.conversations.map(item => item.id), [first.id]);
+    assert.equal(isolated.conversations[0].employee.name, 'Codex');
+  } finally { server.close(); }
+});
+
 test('external API requires a live Ziwei API key', async () => {
   const app = createApp({ memory: true });
   const server = app.listen(0);

@@ -442,11 +442,19 @@ export function createApp(options = {}) {
   app.post('/api/workspaces/:slug/notifications/read', (req, res) => res.json({ ok:true, stats:repo.markNotificationsRead(req.params.slug, req.body?.ids) }));
   app.post('/api/notifications/:id/archive', (req, res) => res.json(repo.archiveNotification(req.params.id, req.body?.archived !== false)));
   app.get('/api/workspaces/:slug/notifications/stream', (req, res) => { res.statusCode=200; res.setHeader('Content-Type','text/event-stream'); res.setHeader('Cache-Control','no-cache'); res.setHeader('Connection','keep-alive'); res.flushHeaders?.(); const send=event=>res.write(`event: notification\ndata: ${JSON.stringify(event)}\n\n`); const unsubscribe=realtime.subscribe(req.params.slug,send); const timer=setInterval(()=>res.write(': heartbeat\n\n'),15000); req.on('close',()=>{clearInterval(timer);unsubscribe();}); send({type:'ready',workspace:req.params.slug}); });
-  app.get('/api/workspaces/:slug/conversations', (req, res) => res.json({ conversations: repo.listConversations(req.params.slug, employeeContext(req)) }));
-  app.post('/api/workspaces/:slug/conversations', (req, res) => res.status(201).json(repo.createConversation(req.params.slug, { ...(req.body || {}), ...employeeContext(req) })));
+  app.get('/api/workspaces/:slug/conversations', (req, res) => res.json({ conversations: repo.listConversations(req.params.slug, { ...employeeContext(req), conversationEmployeeId: req.query.employeeId ?? req.query.employee_id ?? null }) }));
+  app.post('/api/workspaces/:slug/conversations', (req, res) => {
+    const employeeId = String(req.body?.employeeId ?? req.body?.employee_id ?? '').trim();
+    if (!employeeId) return res.status(400).json({ error: '新建会话必须绑定数字员工' });
+    return res.status(201).json(repo.createConversation(req.params.slug, { ...(req.body || {}), employeeId, ...employeeContext(req) }));
+  });
   app.get('/api/conversations/:id', (req, res) => { const conversation=repo.getConversation(req.params.id, employeeContext(req)); if(!conversation) return res.status(404).json({error:'Conversation not found'}); res.json(conversation); });
   app.post('/api/conversations/:id/messages', (req, res) => res.status(201).json(repo.addConversationMessage(req.params.id, { ...(req.body || {}), actorUserId: req.auth?.user_id, actorRole: req.workspaceRole, enforceDeviceOwnership: true, enforceEmployeeVisibility: true })));
-  app.post('/api/conversations/:id/archive', (req, res) => res.json(repo.archiveConversation(req.params.id, req.body?.archived !== false)));
+  app.post('/api/conversations/:id/archive', (req, res) => {
+    const conversation = repo.getConversation(req.params.id, employeeContext(req));
+    if (!conversation) return res.status(404).json({ error: 'Conversation not found' });
+    return res.json(repo.archiveConversation(req.params.id, req.body?.archived !== false));
+  });
   app.get('/api/workspaces/:slug/settings', (req, res) => res.json({ workspace: repo.getWorkspaceSettings(req.params.slug), security: { accessKeys: repo.listApiKeys(req.params.slug) } }));
   app.get('/api/workspaces/:slug/permissions', (req, res) => res.json({ role: req.workspaceRole || 'owner', roles: repo.resourcePermissions() }));
   app.get('/api/workspaces/:slug/api-keys', (req, res) => res.json({ keys: repo.listApiKeys(req.params.slug) }));

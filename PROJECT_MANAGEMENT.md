@@ -10,6 +10,14 @@
 
 > **版本事实**：通用四 Agent daemon 配对改动位于分支 `codex/hermes-independent-profile`（分支名沿用历史命名）；服务器当前已部署提交 `a4f4652`（前端代码变更提交 `b67ad15`），生产 Git `main` 仍保持不变。工作树仍保留既有未跟踪临时文件 `tmp_gzgov.html`。不要在未审查 `git status --short` 前执行 reset、clean 或覆盖式 checkout。
 
+### 2026-10-06 数字员工独立对话隔离（本地完成，待验收发布）
+
+- 问题归属：会话 API/repository 与收件箱前端。此前会话虽保存 `employee_id`，工作区列表仍把不同员工会话混在一起，响应也没有员工头像、运行时和执行归属信息。
+- 修复内容：会话列表支持按 `employeeId` 查询并在 repository 层执行隔离；会话详情和列表返回明确的员工元数据（名称、头像、运行时、模型、profile）及执行活动关联。新建会话 API 必须绑定数字员工，发送消息始终使用会话持久绑定的员工。收件箱增加当前员工选择器，切换后重新加载独立列表；历史 `employee_id` 为空或指向已删除员工的记录进入“未绑定员工（历史会话）”隔离区，不能猜测归属、不能新建或发送消息。
+- 本地验证：`npm test` 147/147、`npm run lint`、`npm run build`、`node --test test/daemon-link.test.mjs` 和 `git diff --check` 均通过；新增 API/repository 测试覆盖员工列表隔离、元数据、未绑定历史记录和缺少员工绑定时拒绝创建。
+- 未验证边界：尚未在浏览器中逐页点击验收员工切换、头像渲染和窄窗口布局；未部署服务器，生产数据库中的历史空归属记录仍需发布后只读盘点。A2A 真实本地 daemon 链路已通过，未做跨设备生产链路。
+- 回滚方式：发布前将本轮代码形成独立提交，使用 `git revert <commit>` 回滚 API、repository、前端和测试；本轮未修改 SQLite schema，回滚无需数据库降级。保留既有未跟踪 `tmp_gzgov.html`。
+
 ### 2026-10-05 设备安装方式按钮样式（已发布）
 
 - 问题归属：前端设备 onboarding 样式。安装方式按钮缺少专用 CSS，浏览器显示成原生按钮；已选状态没有视觉反馈，容易误以为点击无效。
@@ -82,7 +90,7 @@
 当前通过的本地质量门槛：
 
 ```text
-npm test       140 passed
+npm test       147 passed
 npm run lint   passed
 npm run build  passed
 ```

@@ -130,7 +130,10 @@ export const api = {
   notifications: (query = '') => request(`/api/workspaces/${encodeURIComponent(workspaceSlug())}/notifications${query ? `?${query}` : ''}`),
   markNotificationsRead: ids => request(`/api/workspaces/${encodeURIComponent(workspaceSlug())}/notifications/read`, { method:'POST', body:JSON.stringify(ids ? {ids} : {}) }),
   archiveNotification: (id, archived = true) => request(`/api/notifications/${id}/archive`, { method:'POST', body:JSON.stringify({archived}) }),
-  conversations: () => request(`/api/workspaces/${encodeURIComponent(workspaceSlug())}/conversations`),
+  conversations: (employeeId = '') => {
+    const query = employeeId ? `?employeeId=${encodeURIComponent(employeeId)}` : '';
+    return request(`/api/workspaces/${encodeURIComponent(workspaceSlug())}/conversations${query}`);
+  },
   createConversation: body => request(`/api/workspaces/${encodeURIComponent(workspaceSlug())}/conversations`, { method:'POST', body:JSON.stringify(body) }),
   conversation: id => request(`/api/conversations/${id}`),
   addConversationMessage: (id, body) => request(`/api/conversations/${id}/messages`, { method:'POST', body:JSON.stringify(body) }),

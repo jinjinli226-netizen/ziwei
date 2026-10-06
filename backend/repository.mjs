@@ -142,6 +142,16 @@ const automationView = (row, runCount = 0) => {
 };
 
 const employeeView = row => row ? ({ ...row, skills: parse(row.skills_json) }) : null;
+const conversationEmployeeView = row => row ? ({
+  id: row.id,
+  name: row.name,
+  avatar: row.avatar || '',
+  runtime: row.runtime || null,
+  runtime_name: row.runtime || null,
+  model_id: row.model_id || null,
+  runtime_profile: row.runtime_profile || null,
+  status: row.status || 'active'
+}) : null;
 const validateEmployeeProfile = (runtime, profile) => {
   const normalizedRuntime = String(runtime || '').trim().toLowerCase();
   const normalizedProfile = normalizeRuntimeProfile(profile);
@@ -1309,9 +1319,45 @@ export function createRepository(options = {}) {
     deleteTaskAttachment(attachmentId) { const row = db.prepare('SELECT a.*,t.workspace_id FROM task_attachments a JOIN tasks t ON t.id=a.task_id WHERE a.id=?').get(attachmentId); if (!row) throw new Error('附件不存在'); db.prepare('DELETE FROM task_attachments WHERE id=?').run(attachmentId); if (objectStore && row.storage_key) { const refs = db.prepare('SELECT COUNT(*) AS count FROM task_attachments WHERE storage_key=?').get(row.storage_key).count; if (!refs) objectStore.delete(row.storage_key); } const ws = db.prepare('SELECT slug FROM workspaces WHERE id=?').get(row.workspace_id); audit(ws.slug,'user','task.attachment.deleted',{taskId:row.task_id,attachmentId}); return taskAttachmentView(row); },
     addTaskMessage(taskId, input={}) { const message={id:id('msg'),task_id:taskId,role:input.role||'user',content:String(input.content||''),created_at:now()}; db.prepare('INSERT INTO task_messages(id,task_id,role,content,created_at) VALUES(?,?,?,?,?)').run(message.id,message.task_id,message.role,message.content,message.created_at); return message; },
     getTaskMessages(taskId) { return db.prepare('SELECT * FROM task_messages WHERE task_id=? ORDER BY created_at').all(taskId); },
-    listConversations(slug, input = {}) { const ws=workspace(slug); if(!ws) throw new Error('Workspace not found'); const context=employeeAccessContext(input); return db.prepare('SELECT * FROM conversations WHERE workspace_id=? ORDER BY updated_at DESC').all(ws.id).filter(row => { if (!row.employee_id) return true; return employeeVisible(db.prepare('SELECT visibility,owner_user_id FROM employees WHERE id=? AND workspace_id=?').get(row.employee_id, ws.id), context); }).map(row=>({...row,message_count:db.prepare('SELECT COUNT(*) AS count FROM conversation_messages WHERE conversation_id=?').get(row.id).count,execution:conversationExecution(row.id)})); },
-    getConversation(conversationId, input = {}) { const row=db.prepare('SELECT * FROM conversations WHERE id=?').get(conversationId); if(!row) return null; if (row.employee_id && !employeeVisible(db.prepare('SELECT visibility,owner_user_id FROM employees WHERE id=? AND workspace_id=?').get(row.employee_id,row.workspace_id), employeeAccessContext(input))) return null; return {...row,execution:conversationExecution(conversationId),messages:db.prepare('SELECT * FROM conversation_messages WHERE conversation_id=? ORDER BY created_at').all(conversationId).map(item=>({...item,attachments:parse(item.attachment_json)}))}; },
-    createConversation(slug,input={}) { const ws=workspace(slug); if(!ws) throw new Error('Workspace not found'); const employeeId=input.employeeId || input.employee_id || null; if(employeeId) assertEmployeeVisible(db.prepare('SELECT * FROM employees WHERE id=? AND workspace_id=?').get(employeeId,ws.id), input); const timestamp=now(); const conversation={id:id('conv'),workspace_id:ws.id,employee_id:employeeId,title:String(input.title || '新对话').trim() || '新对话',status:'active',created_at:timestamp,updated_at:timestamp}; db.prepare('INSERT INTO conversations(id,workspace_id,employee_id,title,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?)').run(conversation.id,ws.id,employeeId,conversation.title,'active',timestamp,timestamp); audit(slug,'user','conversation.created',{conversationId:conversation.id,employeeId}); return {...conversation,messages:[]}; },
+    listConversations(slug, input = {}) {
+      const ws=workspace(slug); if(!ws) throw new Error('Workspace not found');
+      const context=employeeAccessContext(input);
+      const requestedEmployee = input.conversationEmployeeId ?? input.conversation_employee_id ?? input.employeeFilter ?? input.employee_filter;
+      const employeeFilter = requestedEmployee === undefined || requestedEmployee === null ? null : String(requestedEmployee).trim();
+      return db.prepare('SELECT * FROM conversations WHERE workspace_id=? ORDER BY updated_at DESC').all(ws.id)
+        .filter(row => {
+          const employee = row.employee_id ? db.prepare('SELECT * FROM employees WHERE id=? AND workspace_id=?').get(row.employee_id, ws.id) : null;
+          if (row.employee_id && !employeeVisible(employee, context)) return false;
+          if (employeeFilter === null || employeeFilter === '') return true;
+          if (employeeFilter === 'unassigned') return !row.employee_id;
+          return row.employee_id === employeeFilter;
+        })
+        .map(row => {
+          const employee = row.employee_id ? db.prepare('SELECT * FROM employees WHERE id=? AND workspace_id=?').get(row.employee_id, ws.id) : null;
+          return {
+            ...row,
+            employee: conversationEmployeeView(employee),
+            employee_binding: employee ? 'bound' : 'unassigned_legacy',
+            requires_employee_assignment: !employee,
+            message_count:db.prepare('SELECT COUNT(*) AS count FROM conversation_messages WHERE conversation_id=?').get(row.id).count,
+            execution:conversationExecution(row.id)
+          };
+        });
+    },
+    getConversation(conversationId, input = {}) {
+      const row=db.prepare('SELECT * FROM conversations WHERE id=?').get(conversationId); if(!row) return null;
+      const employee = row.employee_id ? db.prepare('SELECT * FROM employees WHERE id=? AND workspace_id=?').get(row.employee_id,row.workspace_id) : null;
+      if (row.employee_id && !employeeVisible(employee, employeeAccessContext(input))) return null;
+      return {
+        ...row,
+        employee: conversationEmployeeView(employee),
+        employee_binding: employee ? 'bound' : 'unassigned_legacy',
+        requires_employee_assignment: !employee,
+        execution:conversationExecution(conversationId),
+        messages:db.prepare('SELECT * FROM conversation_messages WHERE conversation_id=? ORDER BY created_at').all(conversationId).map(item=>({...item,attachments:parse(item.attachment_json)}))
+      };
+    },
+    createConversation(slug,input={}) { const ws=workspace(slug); if(!ws) throw new Error('Workspace not found'); const employeeId=input.employeeId || input.employee_id || null; const employee=employeeId ? assertEmployeeVisible(db.prepare('SELECT * FROM employees WHERE id=? AND workspace_id=?').get(employeeId,ws.id), input) : null; const timestamp=now(); const conversation={id:id('conv'),workspace_id:ws.id,employee_id:employeeId,title:String(input.title || '新对话').trim() || '新对话',status:'active',created_at:timestamp,updated_at:timestamp}; db.prepare('INSERT INTO conversations(id,workspace_id,employee_id,title,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?)').run(conversation.id,ws.id,employeeId,conversation.title,'active',timestamp,timestamp); audit(slug,'user','conversation.created',{conversationId:conversation.id,employeeId}); return {...conversation,employee:conversationEmployeeView(employee),employee_binding:employee ? 'bound' : 'unassigned_legacy',requires_employee_assignment:!employee,messages:[]}; },
     addConversationMessage(conversationId,input={}) { const conversation=db.prepare('SELECT * FROM conversations WHERE id=?').get(conversationId); if(!conversation) throw new Error('Conversation not found'); const ws=db.prepare('SELECT * FROM workspaces WHERE id=?').get(conversation.workspace_id); const employee=conversation.employee_id ? assertEmployeeVisible(db.prepare('SELECT * FROM employees WHERE id=? AND workspace_id=?').get(conversation.employee_id,conversation.workspace_id), input) : null; const targetDeviceId=String(input.targetDeviceId || input.target_device_id || input.deviceId || input.device_id || '').trim() || null; if (targetDeviceId) { const device=db.prepare('SELECT * FROM devices WHERE id=? AND workspace_id=?').get(targetDeviceId,conversation.workspace_id); if (!device) throw new Error('目标设备不属于当前工作区'); if (device.status === 'disabled') throw new Error('目标设备已停用'); const privilegedDeviceRole = ['owner', 'admin'].includes(String(input.actorRole || '').toLowerCase()); if (ws.kind === 'personal' && input.enforceDeviceOwnership && !privilegedDeviceRole && (!input.actorUserId || device.owner_user_id !== input.actorUserId)) throw new Error('个人工作区只能使用本人的设备'); } const message={id:id('convmsg'),conversation_id:conversationId,role:['user','assistant','system'].includes(input.role) ? input.role : 'user',content:String(input.content || '').trim(),attachments:Array.isArray(input.attachments) ? input.attachments : [],created_at:now()}; if(!message.content && !message.attachments.length) throw new Error('消息内容不能为空'); db.prepare('INSERT INTO conversation_messages(id,conversation_id,role,content,attachment_json,created_at) VALUES(?,?,?,?,?,?)').run(message.id,conversationId,message.role,message.content,JSON.stringify(message.attachments),message.created_at); db.prepare('UPDATE conversations SET updated_at=? WHERE id=?').run(message.created_at,conversationId); audit(ws.slug,message.role,'conversation.message.created',{conversationId,messageId:message.id,dispatch:input.dispatch !== false}); if (message.role === 'user' && input.dispatch !== false) { const payload=executionPayload({prompt:message.content,employee,runtime:input.runtime || null,model:input.model || input.modelId || null,profile:input.profile ?? input.runtimeProfile ?? input.runtime_profile ?? input.hermesProfile ?? input.hermes_profile,conversationId,targetDeviceId}); payload.messageId=message.id; this.createA2AAction(ws.slug,{type:'conversation.execute',payload,dedupeKey:`conversation:${conversationId}:${message.id}`}); } return {...message,execution:conversationExecution(conversationId)}; },
     archiveConversation(conversationId, archived = true) { const row=db.prepare('SELECT * FROM conversations WHERE id=?').get(conversationId); if(!row) throw new Error('Conversation not found'); db.prepare('UPDATE conversations SET status=? WHERE id=?').run(archived ? 'archived' : 'active',conversationId); return this.getConversation(conversationId); },
     workspaceSlugForA2AAction(actionId) {

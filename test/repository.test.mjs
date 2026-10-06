@@ -109,6 +109,24 @@ test('employee conversation dispatch injects the configured role personality', (
   assert.match(action.payload.prompt, /CONVERSATION_PERSONA_OK/);
 });
 
+test('conversation lists are isolated by employee and legacy rows stay explicitly unassigned', () => {
+  const repo = createRepository({ memory: true });
+  const codex = repo.createEmployee('test-111', { name: 'Codex 助手', runtime: 'Codex', avatar: 'data:image/png;base64,codex' });
+  const claude = repo.createEmployee('test-111', { name: 'Claude 助手', runtime: 'Claude' });
+  const codexConversation = repo.createConversation('test-111', { employeeId: codex.id, title: 'Codex 独立会话' });
+  const claudeConversation = repo.createConversation('test-111', { employeeId: claude.id, title: 'Claude 独立会话' });
+  const legacyConversation = repo.createConversation('test-111', { title: '历史未归属会话' });
+  const codexRows = repo.listConversations('test-111', { conversationEmployeeId: codex.id });
+  assert.deepEqual(codexRows.map(row => row.id), [codexConversation.id]);
+  assert.equal(codexRows[0].employee.name, 'Codex 助手');
+  assert.equal(codexRows[0].employee.runtime, 'Codex');
+  assert.equal(repo.listConversations('test-111', { conversationEmployeeId: claude.id })[0].id, claudeConversation.id);
+  const legacyRows = repo.listConversations('test-111', { conversationEmployeeId: 'unassigned' });
+  assert.equal(legacyRows[0].id, legacyConversation.id);
+  assert.equal(legacyRows[0].employee_binding, 'unassigned_legacy');
+  assert.equal(legacyRows[0].requires_employee_assignment, true);
+});
+
 test('repository updates task details and stores task messages', () => {
   const repo = createRepository({ memory: true });
   const task = repo.createTask('test-111', { title: '初始标题', description: '初始描述' });
