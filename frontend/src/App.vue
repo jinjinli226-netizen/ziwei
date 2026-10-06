@@ -464,12 +464,12 @@ async function sendConversationMessage() {
   } catch(error) { notify(error.message); }
 }
 async function saveConversationSettings({ notifyUser = true } = {}) {
-  if (!selectedConversation.value?.id) return;
+  if (!selectedConversation.value?.id) return false;
   try {
     selectedConversation.value=await api.updateConversation(selectedConversation.value.id,{modelId:conversationModelId.value || null,deviceId:conversationDeviceId.value || null,workingDirectory:conversationWorkingDirectory.value || null});
     if (notifyUser) notify('会话配置已保存');
-    return selectedConversation.value;
-  } catch (error) { notify(error.message); }
+    return true;
+  } catch (error) { notify(error.message); return false; }
 }
 function selectConversationDevice(deviceId) {
   conversationDeviceId.value=String(deviceId || '');
@@ -514,14 +514,19 @@ function openConversationDirectoryPicker() {
   conversationDirectoryPickerOpen.value=true;
   conversationDirectoryPathDraft.value=conversationWorkingDirectory.value || selectedConversationDevice.value.workdir || '';
   conversationDirectoryInspection.value=null;
-  void inspectConversationDirectory('');
+  void inspectConversationDirectory(conversationDirectoryPathDraft.value);
 }
 async function useConversationDirectory(result = conversationDirectoryInspection.value) {
   if (!result?.exists || !result.isDirectory || !result.path) return notify('请先选择一个存在的目录，或创建缺失目录', 'error');
   conversationWorkingDirectory.value=result.path;
-  await saveConversationSettings({ notifyUser:false });
+  const saved=await saveConversationSettings({ notifyUser:false });
+  if (!saved) return;
   closeConversationDirectoryPicker();
   notify(`工作目录已切换为 ${result.path}`);
+}
+async function createAndUseConversationDirectory() {
+  const result=await inspectConversationDirectory(conversationDirectoryPathDraft.value, true);
+  if (result?.exists) await useConversationDirectory(result);
 }
 function openConversationAttachmentPicker() { conversationAttachmentInput.value?.click(); }
 async function handleConversationAttachment(event) {
