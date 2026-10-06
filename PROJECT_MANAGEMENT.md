@@ -8,16 +8,17 @@
 
 > **当前本机运行态**：项目配置 `data/ziwei_user.json` 指向 `bjc-ops`；已安装全局 CLI 当前用户配置与 `/readyz` 实际显示为 `test-111`，两者必须分别核对，不能把示例工作区当成目标工作区。
 
-> **版本事实**：通用四 Agent daemon 配对改动位于分支 `codex/hermes-independent-profile`（分支名沿用历史命名）；服务器当前已部署提交 `0568cbd`，生产 Git `main` 仍保持不变。工作树仍保留既有未跟踪临时文件 `tmp_gzgov.html`。不要在未审查 `git status --short` 前执行 reset、clean 或覆盖式 checkout。
+> **版本事实**：通用四 Agent daemon 配对改动位于分支 `codex/hermes-independent-profile`（分支名沿用历史命名）；服务器当前已部署提交 `d18121e`，生产 Git `main` 仍保持不变。工作树仍保留既有未跟踪临时文件 `tmp_gzgov.html`。不要在未审查 `git status --short` 前执行 reset、clean 或覆盖式 checkout。
 
-### 2026-10-06 Hermes Profile 与 Codex 风格会话工作区（本地已验证，未发布）
+### 2026-10-06 Hermes Profile 与 Codex 风格会话工作区（已发布）
 
 - 问题归属：前端会话配置、会话 API/SQLite、A2A/ziwei_user daemon 和 Hermes 本机 profile 写入。网页创建 Hermes profile 只提交一个带目标设备的 A2A action，由目标电脑上的 `ziwei_user` 写入自己的 `HERMES_HOME/profiles/<name>`；服务器不会直接写目标电脑文件，也不会把其他设备的 profile 混入当前设备。
 - 修复内容：Hermes profile 创建支持设备选择、幂等请求、独立 `SOUL.md`/`MEMORY.md`/`IDENTITY.md` 文件，并按设备保存 runtime metadata；Profile 创建完成后 daemon 刷新本机发现结果。会话现在持久保存数字员工、目标设备、模型和工作目录，收件箱可切换目标设备/模型、使用设备当前目录或输入子目录，并可上传单个不超过 10 MiB 的附件。
 - 附件链路：浏览器将附件作为真实 Base64 payload 发送到 A2A；目标 daemon 在所选工作目录下的 `.ziwei/attachments/<action>` 写入本地文件，再把真实路径提供给本机 CLI。未知 action、非法 Base64、超限内容和目标设备越权均明确失败，不返回静态成功。
 - 本地验证：`npm test` 152/152、`npm run lint`、`npm run build`、真实内存 SQLite + `ActionDispatcher` + `createLocalActionExecutor` 的 Hermes Profile A2A 派发均通过；新增覆盖目标设备 profile 隔离、会话设备/模型/目录/附件 payload、附件落盘幂等和 profile 文件落盘。
-- 未验证边界：未在浏览器中逐项点击验证文件选择器和真实四种 CLI 的附件读取；当前工作目录输入由用户提供，daemon 会按目标电脑权限执行；本轮未推送 GitHub、未替换服务器，现有服务器仍为 `0568cbd`。验收时前端 `5178` 和后端 `4178` 未监听；`data/ziwei_user.json` 指向 `bjc-ops`，但现有 `/readyz` 返回 `test_222`，没有在本轮擅自重启或切换 daemon。
-- 回滚方式：代码使用 `git diff` 审核后可用 `git revert <本轮提交>` 回滚；SQLite 新增列和 `runtime_device_metadata` 表采用兼容迁移，不删除既有数据。保留未跟踪 `tmp_gzgov.html`，不得用 reset/clean 覆盖。
+- 未验证边界：未在浏览器中逐项点击验证文件选择器和真实四种 CLI 的附件读取；当前工作目录输入由用户提供，daemon 会按目标电脑权限执行。验收时本机前端 `5178` 和后端 `4178` 未监听；`data/ziwei_user.json` 指向 `bjc-ops`，但现有 `/readyz` 返回 `test_222`，没有在本轮擅自重启或切换本机 daemon。
+- 服务器发布：提交 `d18121e` 已推送到 `origin/codex/hermes-independent-profile` 并快进 `/opt/ziwei`；部署前 SQLite 备份为 `/opt/ziwei-backups/ziwei.sqlite.20261006T073416Z.before-d18121e`。服务器 `npm ci --ignore-scripts`、`npm run build` 成功，`ziwei-api` active；本机回环和公网 `/healthz` 均返回 200。
+- 回滚方式：使用 `git revert d18121e` 回滚本轮 API、repository、daemon、前端和测试代码后重新构建/重启；SQLite 新增列和 `runtime_device_metadata` 表采用兼容迁移，不删除既有数据，异常时可先恢复上述备份。保留未跟踪 `tmp_gzgov.html`，不得用 reset/clean 覆盖。
 
 ### 2026-10-06 数字员工独立对话隔离（已发布）
 

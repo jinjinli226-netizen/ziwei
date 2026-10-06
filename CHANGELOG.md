@@ -2,7 +2,7 @@
 
 本文件只记录可追溯的项目级变更摘要；详细设计、验证命令和未完成边界见 [PROJECT_MANAGEMENT.md](PROJECT_MANAGEMENT.md)。
 
-## Unreleased（2026-10-05）
+## 2026-10-06 Hermes Profile 与 Codex 风格会话工作区（已发布）
 
 ### Added
 
@@ -16,9 +16,14 @@
 - `npm run build`：passed
 - 真实本地 A2A Profile 派发链路：passed
 
+### Release
+
+- GitHub：`codex/hermes-independent-profile` 已推送提交 `d18121e`
+- 服务器：`/opt/ziwei` 已快进到 `d18121e`，SQLite 备份为 `/opt/ziwei-backups/ziwei.sqlite.20261006T073416Z.before-d18121e`，`ziwei-api` active，公网 `/healthz=200`
+
 ### Deferred
 
-- 本轮未推送 GitHub 或部署服务器；浏览器逐项附件选择和四种真实 CLI 的附件读取仍待手工验收。
+- 浏览器逐项附件选择和四种真实 CLI 的附件读取仍待手工验收。
 
 ### Fixed
 
