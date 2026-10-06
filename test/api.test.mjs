@@ -52,6 +52,20 @@ test('conversation API requires an employee and filters each employee workspace'
   } finally { server.close(); }
 });
 
+test('conversation API accepts the 10 MiB attachment envelope behind the 16 MiB parser limit', async () => {
+  const app = createApp({ memory: true });
+  const server = app.listen(0);
+  await new Promise(resolve => server.once('listening', resolve));
+  const port = server.address().port;
+  try {
+    const bytes = Buffer.alloc(10 * 1024 * 1024, 7);
+    const body = JSON.stringify({ content: '图片说明', attachments: [{ name:'photo.png', mimeType:'image/png', content:bytes.toString('base64'), contentEncoding:'base64' }] });
+    const response = await fetch(`http://127.0.0.1:${port}/api/conversations/unknown/messages`, { method:'POST', headers:{'content-type':'application/json'}, body });
+    assert.equal(response.status, 404, 'the body must reach the route after JSON parsing');
+    assert.notEqual(response.status, 413);
+  } finally { server.close(); }
+});
+
 test('conversation workdir inspection is dispatched to the target device and exposes the real result', async () => {
   const app = createApp({ memory: true });
   const server = app.listen(0);

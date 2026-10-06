@@ -7,6 +7,8 @@ const root = path.resolve(import.meta.dirname, '..');
 const shellSource = fs.readFileSync(path.join(root, 'frontend', 'src', 'components', 'WorkspaceShell.vue'), 'utf8');
 const shellCss = fs.readFileSync(path.join(root, 'frontend', 'src', 'workspace-shell.css'), 'utf8');
 const appCss = fs.readFileSync(path.join(root, 'frontend', 'src', 'styles.css'), 'utf8');
+const appSource = fs.readFileSync(path.join(root, 'frontend', 'src', 'App.vue'), 'utf8');
+const apiSource = fs.readFileSync(path.join(root, 'frontend', 'src', 'api.js'), 'utf8');
 
 test('workspace shell closes popups on outside pointer interactions', () => {
   assert.match(shellSource, /onMounted/);
@@ -37,4 +39,21 @@ test('quick tray menus keep menu actions horizontal instead of inheriting icon s
   assert.match(shellCss, /\.issue-quick-tray\s*>\s*button\s*\{/);
   assert.doesNotMatch(shellCss, /\.issue-quick-tray\s+button\s*\{/);
   assert.match(shellCss, /\.quick-tray-menu button\s*\{[^}]*width:\s*100%[^}]*white-space:\s*nowrap[^}]*word-break:\s*keep-all/);
+});
+
+test('team quick tray reserves its own row and does not cover the title or org chart', () => {
+  assert.match(shellCss, /\.members-panel \.team-quick-tray\s*\{[^}]*position:\s*relative[^}]*top:\s*auto[^}]*left:\s*auto[^}]*margin:\s*8px auto 0/);
+  assert.match(shellCss, /\.members-panel \.org-employee-list\s*\{[^}]*position:\s*absolute[^}]*top:\s*365px/);
+});
+
+test('conversation messages render safe image previews and attachment metadata', () => {
+  assert.match(appSource, /conversationAttachmentPreviewSrc\(attachment\)/);
+  assert.match(appSource, /class="conversation-message-attachments"/);
+  assert.match(appSource, /\['image\/png','image\/jpeg','image\/gif','image\/webp'\]/);
+  assert.match(appCss, /\.conversation-message-attachment img\s*\{/);
+});
+
+test('oversized conversation requests expose a readable 413 error', () => {
+  assert.match(apiSource, /response\.status === 413/);
+  assert.match(appSource, /error\.status === 413 \? '附件太大，请选择 10 MB 以内的图片后重试'/);
 });

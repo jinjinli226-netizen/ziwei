@@ -32,7 +32,11 @@ async function request(path, options = {}) {
   const response = await fetch(`${API_BASE}${path}`, { credentials: 'include', headers: { 'content-type': 'application/json', ...(options.headers || {}) }, ...options });
   const data = await response.json().catch(() => ({}));
   if (response.status === 401) { window.dispatchEvent(new CustomEvent('ziwei:auth-required')); }
-  if (!response.ok) throw new Error(data.error || `请求失败 ${response.status}`);
+  if (!response.ok) {
+    const error = new Error(data.error || (response.status === 413 ? '请求内容超过服务器限制，请选择更小的附件后重试' : `请求失败 ${response.status}`));
+    error.status = response.status;
+    throw error;
+  }
   return data;
 }
 export const api = {
