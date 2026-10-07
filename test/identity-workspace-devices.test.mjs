@@ -31,8 +31,11 @@ test('first-run setup creates an account without a default workspace', async () 
     const createdBody = await created.json();
     assert.notEqual(createdBody.workspace.slug, 'test-111');
     assert.equal(createdBody.workspace.kind, 'personal');
-    const invitation = await post(base, `/api/workspaces/${createdBody.workspace.slug}/invitations`, { email: 'should-not-join@example.com' }, cookie);
-    assert.equal(invitation.status, 400);
+    const invitation = await post(base, `/api/workspaces/${createdBody.workspace.slug}/invitations`, { email: 'personal-invite@example.com' }, cookie);
+    assert.equal(invitation.status, 201);
+    const invitationBody = await invitation.json();
+    assert.equal(invitationBody.workspace, createdBody.workspace.slug);
+    assert.equal(invitationBody.status, 'pending');
   } finally { await new Promise(resolve => server.close(resolve)); }
 });
 

@@ -976,7 +976,6 @@ export function createRepository(options = {}) {
     },
     createInvitation(slug, input = {}) {
       const ws=workspace(slug); if (!ws) throw new Error('Workspace not found');
-      if (ws.kind !== 'team') throw new Error('个人工作区不能邀请成员');
       const email=normalizeEmail(input.email);
       if (email && !/^\S+@\S+\.\S+$/.test(email)) throw new Error('请输入有效的成员邮箱');
       const role=input.role === 'admin' ? 'admin' : 'member';
