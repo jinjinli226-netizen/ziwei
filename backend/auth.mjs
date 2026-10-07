@@ -173,9 +173,12 @@ export function createAuthService(db, { sessionTtlMs = SESSION_TTL_MS } = {}) {
         let invitation = null;
         if (requestedSlug) {
           if (workspace.kind !== 'team') throw new Error('个人工作区不能直接加入');
-          invitation = invitationCode
-            ? db.prepare('SELECT * FROM invitations WHERE workspace_id=? AND code_hash=? AND lower(email)=?').get(workspace.id, hashToken(invitationCode), email)
-            : db.prepare("SELECT * FROM invitations WHERE workspace_id=? AND lower(email)=? AND status='pending' AND expires_at>? ORDER BY created_at DESC LIMIT 1").get(workspace.id, email, timestamp);
+          if (invitationCode) {
+            invitation = db.prepare('SELECT * FROM invitations WHERE workspace_id=? AND code_hash=?').get(workspace.id, hashToken(invitationCode));
+            if (invitation?.email && String(invitation.email).toLowerCase() !== email) invitation = null;
+          } else {
+            invitation = db.prepare("SELECT * FROM invitations WHERE workspace_id=? AND lower(email)=? AND status='pending' AND expires_at>? ORDER BY created_at DESC LIMIT 1").get(workspace.id, email, timestamp);
+          }
           if (!invitation || !['pending', 'accepted'].includes(invitation.status) || (invitation.status === 'pending' && Date.parse(invitation.expires_at) <= Date.now())) throw new Error('加入团队需要有效邀请');
           if (invitation.status === 'accepted' && invitation.member_id && db.prepare('SELECT user_id FROM members WHERE id=?').get(invitation.member_id)?.user_id) throw new Error('邀请已经被其他账号使用');
         }

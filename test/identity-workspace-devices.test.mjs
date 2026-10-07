@@ -85,6 +85,45 @@ test('registration can join an existing team only with a valid invitation', asyn
   } finally { await new Promise(resolve => server.close(resolve)); }
 });
 
+test('link-only invitations bind to the registering email while email-bound invites stay scoped', async () => {
+  const { server, base } = await start();
+  try {
+    const owner = await post(base, '/api/auth/setup', { name: '链接邀请所有者', email: 'link-owner@example.com', password: 'password-123' });
+    const ownerCookie = cookieOf(owner);
+    const workspace = await post(base, '/api/workspaces', { name: '链接邀请团队', slug: 'link-invite-team', kind: 'team' }, ownerCookie);
+    assert.equal(workspace.status, 201);
+
+    const linkInvite = await post(base, '/api/workspaces/link-invite-team/invitations', {}, ownerCookie);
+    assert.equal(linkInvite.status, 201);
+    const linkBody = await linkInvite.json();
+    const linkRegistration = await post(base, '/api/auth/register', { name: '链接成员', email: 'link-member@example.com', password: 'password-456', workspaceSlug: 'link-invite-team', invitationCode: linkBody.code });
+    assert.equal(linkRegistration.status, 201);
+
+    const boundInvite = await post(base, '/api/workspaces/link-invite-team/invitations', { email: 'bound-member@example.com' }, ownerCookie);
+    assert.equal(boundInvite.status, 201);
+    const boundBody = await boundInvite.json();
+    const mismatched = await post(base, '/api/auth/register', { name: '错误邮箱', email: 'other-member@example.com', password: 'password-789', workspaceSlug: 'link-invite-team', invitationCode: boundBody.code });
+    assert.equal(mismatched.status, 400);
+    assert.match((await mismatched.json()).error, /有效邀请/);
+  } finally { await new Promise(resolve => server.close(resolve)); }
+});
+
+test('personal workspace invitations remain unable to create a second workspace member through registration', async () => {
+  const { server, base } = await start();
+  try {
+    const owner = await post(base, '/api/auth/setup', { name: '个人所有者', email: 'personal-owner@example.com', password: 'password-123' });
+    const ownerCookie = cookieOf(owner);
+    const workspace = await post(base, '/api/workspaces', { name: '个人邀请工作区', slug: 'personal-invite-workspace', kind: 'personal' }, ownerCookie);
+    assert.equal(workspace.status, 201);
+    const invitation = await post(base, '/api/workspaces/personal-invite-workspace/invitations', { email: 'personal-member@example.com' }, ownerCookie);
+    assert.equal(invitation.status, 201);
+    const body = await invitation.json();
+    const registration = await post(base, '/api/auth/register', { name: '个人成员', email: 'personal-member@example.com', password: 'password-456', workspaceSlug: 'personal-invite-workspace', invitationCode: body.code });
+    assert.equal(registration.status, 400);
+    assert.match((await registration.json()).error, /个人工作区不能直接加入/);
+  } finally { await new Promise(resolve => server.close(resolve)); }
+});
+
 test('paired devices keep the creating account owner and are isolated in personal workspaces', () => {
   const repo = createRepository({ memory: true });
   const userA = 'user_a'; const userB = 'user_b';
