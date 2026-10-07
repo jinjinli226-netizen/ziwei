@@ -61,6 +61,13 @@ test('App route parser and navigation paths contain every baseline route', () =>
   }
 });
 
+test('workspace switching keeps the URL and scoped invite page on the selected slug', () => {
+  assert.match(appSource, /parts\[1\] === 'me' && parts\[2\] === 'invite'/);
+  assert.match(appSource, /function routePath\(key, detailId = '', workspaceOverride = ''\)/);
+  assert.match(appSource, /if \(key === 'invite'\) return `\$\{prefix\}\/me\/invite`/);
+  assert.match(appSource, /setWorkspaceSlug\(nextSlug\); history\.pushState\(\{\},'',routePath\(page\.value,'',nextSlug\)\); await load\(\)/);
+});
+
 test('global shell contract exposes cross-page navigation and controls', () => {
   for (const key of ['issues', 'calendar', 'docs', 'members', 'skills', 'settings']) {
     assert.match(shellSource, new RegExp(`\\['${key}',`), `${key} navigation`);
