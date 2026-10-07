@@ -13,11 +13,11 @@ const nav = [
   { key:'settings', label:'工作区设置', icon:'shield' }
 ];
 function routeParts(pathname = location.pathname) { return pathname.split('/').filter(Boolean); }
-function routeFromPath(pathname) { const parts = routeParts(pathname); if (!parts.length) return 'home'; if (parts[0] === 'invite' && new URLSearchParams(location.search).has('code')) return 'invite-accept'; if ((parts[0] === 'me' && parts[1] === 'invite') || (parts[1] === 'me' && parts[2] === 'invite')) return 'invite'; if (parts.length > 1) return ({home:'home',issues:'issues',calendar:'calendar','project-docs':'docs',members:'members',skills:'skills',settings:'settings','open-platform':'open',autopilots:'automations',runtimes:'runtimes',inbox:'inbox',employee:'employee'}[parts[1] || 'home'] || 'home'); if (parts.length === 1) return 'home'; return 'home'; }
+function routeFromPath(pathname) { const parts = routeParts(pathname); if (!parts.length) return 'home'; if (parts[0] === 'invite' && new URLSearchParams(location.search).has('code')) return 'invite-accept'; if ((parts[0] === 'me' && parts[1] === 'invite') || (parts[1] === 'me' && parts[2] === 'invite')) return 'invite'; if (parts.length > 1) return ({home:'home',issues:'issues',calendar:'calendar','project-docs':'docs',members:'members',skills:'skills',settings:'settings','open-platform':'open',autopilots:'automations',runtimes:'runtimes',inbox:'inbox',employee:'employee','ziwei-connect':'ziwei-connect'}[parts[1] || 'home'] || 'home'); if (parts.length === 1) return 'home'; return 'home'; }
 function conversationIdFromPath(pathname = location.pathname) { const parts = routeParts(pathname); return parts[1] === 'inbox' ? (parts[2] || '') : ''; }
 function conversationEmployeeFromPath() { return new URLSearchParams(location.search).get('employee') || ''; }
 function employeeIdFromPath(pathname = location.pathname) { const parts = routeParts(pathname); return parts[1] === 'employee' ? (parts[2] || '') : ''; }
-function routePath(key, detailId = '', workspaceOverride = '') { const activeSlug = String(workspaceOverride || workspaceSlug()).trim(); const prefix = activeSlug ? `/${encodeURIComponent(activeSlug)}` : ''; if (key === 'invite') return `${prefix}/me/invite` || '/me/invite'; const map = {home:'home',issues:'issues',calendar:'calendar',docs:'project-docs',members:'members',runtimes:'runtimes',skills:'skills',settings:'settings',open:'open-platform',automations:'autopilots',inbox:'inbox',employee:'employee'}; const base = `${prefix}/${map[key] || key}`; return (key === 'inbox' || key === 'employee') && detailId ? `${base}/${encodeURIComponent(detailId)}` : base; }
+function routePath(key, detailId = '', workspaceOverride = '') { const activeSlug = String(workspaceOverride || workspaceSlug()).trim(); const prefix = activeSlug ? `/${encodeURIComponent(activeSlug)}` : ''; if (key === 'invite') return `${prefix}/me/invite` || '/me/invite'; const map = {home:'home',issues:'issues',calendar:'calendar',docs:'project-docs',members:'members',runtimes:'runtimes',skills:'skills',settings:'settings',open:'open-platform',automations:'autopilots',inbox:'inbox',employee:'employee','ziwei-connect':'ziwei-connect'}; const base = `${prefix}/${map[key] || key}`; return (key === 'inbox' || key === 'employee') && detailId ? `${base}/${encodeURIComponent(detailId)}` : base; }
 const page = ref(routeFromPath(location.pathname));
 const authState = ref({ loading:true, configured:false, setup_required:false, authenticated:false, user:null, workspaces:[] });
 const inviteQuery = new URLSearchParams(location.search);
@@ -45,6 +45,7 @@ const summary = ref({ workspace:{name:'',slug:workspaceSlug(),kind:null}, counts
 const isTeamWorkspace = computed(() => summary.value.workspace?.kind === 'team');
 const deviceSectionLabel = computed(() => isTeamWorkspace.value ? '团队设备' : '我的设备');
 const tasks = ref([]); const runtimes = ref([]); const models = ref([]); const skills = ref([]); const documents = ref([]); const automations = ref([]); const members = ref([]); const devices = ref([]); const employees = ref([]); const calendar = ref([]); const settings = ref(null); const agents = ref([]);
+const ziweiConnectStatus = ref({ devices:[], diagnostics:[], bindings:[] }); const ziweiConnectBindings = ref([]); const ziweiConnectLoading = ref(false); const ziweiConnectBusy = ref(''); const ziweiConnectSelection = ref({ employeeId:'', deviceId:'' }); const ziweiConnectRuns = ref({}); let ziweiConnectRunTimer = null;
 const ownDeviceOnline = computed(() => summary.value.device?.status === 'online');
 const ownDeviceLabel = computed(() => ownDeviceOnline.value ? '在线' : '离线');
 const loading = ref(true); const toast = ref(''); const toastTone = ref('success'); let toastTimer = null; const search = ref('');
@@ -252,10 +253,10 @@ const focusedConversation = computed(() => page.value === 'inbox' && Boolean(con
 const employeeProfile = computed(() => employees.value.find(item => item.id === employeeRouteId.value) || null);
 const employeeProfileTasks = computed(() => { const employee = employeeProfile.value; if (!employee) return []; const assignee = String(employee.name || '').toLowerCase(); return tasks.value.filter(task => String(task.assignee || '').toLowerCase() === assignee || String(task.assignee || '').toLowerCase().includes(assignee)); });
 const employeeProfileConversations = computed(() => { const employee = employeeProfile.value; if (!employee) return []; return conversations.value.filter(item => item.employee_id === employee.id); });
-const pageTitle = computed(() => ({home:'首页',issues:'问题与任务',calendar:'日历',docs:'项目文档',members:'成员与设备',runtimes:'运行时',skills:'技能中心',settings:'工作区设置',invite:'邀请加入紫薇',open:'开放平台',automations:'自动化',inbox:focusedConversation.value ? '持久会话' : '收件箱',employee:employeeProfile.value?.name || '数字伙伴'}[page.value] || '紫薇'));
+const pageTitle = computed(() => ({home:'首页',issues:'问题与任务',calendar:'日历',docs:'项目文档',members:'成员与设备',runtimes:'运行时',skills:'技能中心',settings:'工作区设置',invite:'邀请加入紫薇',open:'开放平台',automations:'自动化',inbox:focusedConversation.value ? '持久会话' : '收件箱',employee:employeeProfile.value?.name || '数字伙伴','ziwei-connect':'紫薇·互联'}[page.value] || '紫薇'));
 
-function navigate(key) { if (key === 'workflow') key='automations'; if (key === 'skills') { search.value=''; skillScope.value='platform'; skillTab.value='all'; } if (key === 'inbox') { selectedConversation.value=null; conversationExecution.value=null; conversationDraft.value=''; conversationRouteId.value=''; clearConversationAttachment(); stopConversationPolling(); } if (key !== 'employee') { employeeRouteId.value=''; employeeActionId.value=''; } page.value = key; history.pushState({},'',routePath(key)); if (key === 'open') loadApiKeys(); }
-async function switchWorkspace(slug) { const nextSlug=String(slug || '').trim(); if (!nextSlug || nextSlug === workspaceSlug()) return; setWorkspaceSlug(nextSlug); history.pushState({},'',routePath(page.value,'',nextSlug)); await load(); }
+function navigate(key) { if (key === 'workflow') key='automations'; if (key === 'skills') { search.value=''; skillScope.value='platform'; skillTab.value='all'; } if (key === 'inbox') { selectedConversation.value=null; conversationExecution.value=null; conversationDraft.value=''; conversationRouteId.value=''; clearConversationAttachment(); stopConversationPolling(); } if (key !== 'employee') { employeeRouteId.value=''; employeeActionId.value=''; } page.value = key; history.pushState({},'',routePath(key)); if (key === 'open') loadApiKeys(); if (key === 'ziwei-connect') void loadZiweiConnect(); }
+async function switchWorkspace(slug) { const nextSlug=String(slug || '').trim(); if (!nextSlug || nextSlug === workspaceSlug()) return; setWorkspaceSlug(nextSlug); history.pushState({},'',routePath(page.value,'',nextSlug)); await load(); if (page.value === 'ziwei-connect') await loadZiweiConnect(); }
 async function createWorkspace(payload) {
   try {
     const result = await api.createWorkspace(payload);
@@ -324,7 +325,7 @@ function openRealtime() {
     onEvent: () => { loadNotifications(); refreshTasks(); if (selectedConversation.value) refreshSelectedConversation(); }
   });
 }
-onUnmounted(() => { closeRealtime(); stopConversationPolling(); stopVoiceInput(); dismissToast(); });
+onUnmounted(() => { closeRealtime(); stopConversationPolling(); stopVoiceInput(); if (ziweiConnectRunTimer) clearTimeout(ziweiConnectRunTimer); ziweiConnectRunTimer=null; dismissToast(); });
 async function loadNotifications() { try { const result=await api.notifications(); notifications.value=result.notifications || []; notificationStats.value=result.stats || {}; } catch {} }
 async function refreshTasks() { try { const result=await api.tasks(); tasks.value=result.tasks || []; } catch {} }
 async function markAllNotificationsRead() { try { await api.markNotificationsRead(); await loadNotifications(); notify('已全部标记为已读'); } catch(error) { notify(error.message); } }
@@ -683,6 +684,85 @@ async function load() {
     openRealtime();
   } catch (error) { notify(error.message); } finally { loading.value=false; }
 }
+function connectRows(result, key) {
+  if (Array.isArray(result?.[key])) return result[key].filter(item => item && typeof item === 'object');
+  return Array.isArray(result) ? result.filter(item => item && typeof item === 'object') : [];
+}
+function connectDiagnosticRows(value) {
+  if (Array.isArray(value)) return value.filter(item => item && typeof item === 'object');
+  if (!value || typeof value !== 'object') return [];
+  return [{ id:'ziwei-connect-summary', name:'控制 API', status:value.ok === false ? 'error' : 'ok', message:`在线设备 ${value.onlineDevices ?? 0} / ${value.totalDevices ?? 0}${value.sampledAt ? ` · ${value.sampledAt}` : ''}` }];
+}
+function connectDeviceOnline(device) { return device?.online === true || ['online','ready','connected'].includes(String(device?.status || '').toLowerCase()); }
+function connectRunStatus(run) {
+  return String(run?.status || run?.state || 'pending').toLowerCase();
+}
+function connectRunLabel(run) {
+  const status = connectRunStatus(run);
+  return status === 'succeeded' || status === 'success' || status === 'completed' || status === 'dry_run' ? '已完成' : status === 'failed' || status === 'error' ? '失败' : status === 'expired' ? '已过期' : '执行中';
+}
+function connectSnapshotSrc(run) {
+  const snapshot = run?.snapshot || run?.result?.snapshot || run?.result?.screenshot || run?.result?.image;
+  if (!snapshot) return '';
+  if (typeof snapshot === 'string') return snapshot;
+  const data = snapshot.data || snapshot.base64 || snapshot.content;
+  if (data) return String(data).startsWith('data:') ? String(data) : `data:${snapshot.mime || snapshot.mimeType || snapshot.mime_type || 'image/png'};base64,${data}`;
+  return '';
+}
+async function loadZiweiConnect() {
+  if (!authState.value.authenticated || ziweiConnectLoading.value) return;
+  ziweiConnectLoading.value = true;
+  try {
+    const [status, bindings, runs] = await Promise.all([api.ziweiConnectStatus(), api.ziweiConnectBindings(), api.ziweiConnectRuns()]);
+    ziweiConnectStatus.value = { devices:connectRows(status, 'devices'), diagnostics:connectDiagnosticRows(status?.diagnostics), bindings:connectRows(status, 'bindings') };
+    ziweiConnectBindings.value = connectRows(bindings, 'bindings').length ? connectRows(bindings, 'bindings') : ziweiConnectStatus.value.bindings;
+    const historicalRuns = connectRows(runs, 'runs');
+    ziweiConnectRuns.value = Object.fromEntries(historicalRuns.map(run => [connectRunId(run), run]).filter(([id]) => id));
+    const firstBinding = ziweiConnectBindings.value[0];
+    const preferredDevice = ziweiConnectStatus.value.devices.find(item => ['online','ready','connected'].includes(String(item.status || '').toLowerCase())) || ziweiConnectStatus.value.devices[0];
+    if (!ziweiConnectSelection.value.employeeId) ziweiConnectSelection.value.employeeId = firstBinding?.employee_id || firstBinding?.employeeId || employees.value[0]?.id || '';
+    if (!ziweiConnectSelection.value.deviceId) ziweiConnectSelection.value.deviceId = firstBinding?.device_id || firstBinding?.deviceId || preferredDevice?.id || '';
+  } catch (error) { notify(error.message, 'error'); }
+  finally { ziweiConnectLoading.value = false; }
+}
+async function saveZiweiConnectBinding() {
+  const employeeId = ziweiConnectSelection.value.employeeId;
+  const deviceId = ziweiConnectSelection.value.deviceId;
+  if (!employeeId || !deviceId) return notify('请选择数字员工和目标设备', 'error');
+  ziweiConnectBusy.value = 'binding';
+  try { await api.ziweiConnectBind({ employeeId, deviceId }); await loadZiweiConnect(); notify('绑定已保存'); }
+  catch (error) { notify(error.message, 'error'); }
+  finally { ziweiConnectBusy.value = ''; }
+}
+function connectRunId(run) { return run?.id || run?.run_id || run?.command_id || run?.commandId || ''; }
+async function pollZiweiConnectRun(run) {
+  const id = connectRunId(run);
+  if (!id) return run;
+  try {
+    const fresh = await api.ziweiConnectRun(id);
+    const next = fresh?.run || fresh;
+    ziweiConnectRuns.value = { ...ziweiConnectRuns.value, [id]: next };
+    if (['pending','queued','running','dispatched','acked'].includes(connectRunStatus(next))) {
+      ziweiConnectRunTimer = setTimeout(() => void pollZiweiConnectRun(next), 1200);
+    }
+    return next;
+  } catch (error) { notify(error.message, 'error'); return run; }
+}
+async function runZiweiConnectAction(action) {
+  const employeeId = ziweiConnectSelection.value.employeeId;
+  const deviceId = ziweiConnectSelection.value.deviceId || undefined;
+  if (!employeeId) return notify('请选择数字员工', 'error');
+  ziweiConnectBusy.value = action;
+  try {
+    const response = await api.ziweiConnectAction({ employeeId, ...(deviceId ? { deviceId } : {}), action });
+    const run = response?.run || response;
+    const id = connectRunId(run);
+    if (id) ziweiConnectRuns.value = { ...ziweiConnectRuns.value, [id]: run };
+    if (['pending','queued','running','dispatched','acked'].includes(connectRunStatus(run))) void pollZiweiConnectRun(run);
+    notify(`${action === 'health' ? '健康检查' : action === 'screenshot' ? '截图' : '演练'}已提交`);
+  } catch (error) { notify(error.message, 'error'); }
+  finally { ziweiConnectBusy.value = ''; }
+}
 async function createTask() { if (!taskForm.value.title.trim()) return notify('请填写任务标题'); await api.createTask({...taskForm.value, descriptionFormat:taskForm.value.descriptionFormat || 'plain'}); showTask.value=false; taskForm.value={title:'',description:'',descriptionFormat:'plain',priority:'medium',dueDate:'',state:'planned'}; await load(); notify('任务已创建'); }
 async function createFromAgentComposer() {
   const description = agentComposerText.value.trim();
@@ -1015,10 +1095,11 @@ window.addEventListener('popstate', () => {
   page.value=routeFromPath(location.pathname); conversationRouteId.value=conversationIdFromPath(); conversationEmployeeId.value=conversationEmployeeFromPath() || conversationEmployeeId.value; employeeRouteId.value=employeeIdFromPath(); employeeActionId.value=''; inviteCode.value=new URLSearchParams(location.search).get('code') || '';
   if (page.value==='invite-accept') loadInvite();
   if (page.value==='inbox') loadConversations();
+  if (page.value==='ziwei-connect') loadZiweiConnect();
   if (urlWorkspace && authState.value.authenticated && !['invite','invite-accept'].includes(page.value)) void load();
 });
 window.addEventListener('ziwei:auth-required', () => { authState.value={...authState.value,authenticated:false}; closeRealtime(); });
-onMounted(async () => { applyDisplayPreferences(); await refreshAuth(); if (authState.value.authenticated) { await load(); if (page.value==='invite') await loadInvitations(); if (page.value==='invite-accept') await loadInvite(); if (page.value==='open') await loadApiKeys(); } });
+onMounted(async () => { applyDisplayPreferences(); await refreshAuth(); if (authState.value.authenticated) { await load(); if (page.value==='invite') await loadInvitations(); if (page.value==='invite-accept') await loadInvite(); if (page.value==='open') await loadApiKeys(); if (page.value==='ziwei-connect') await loadZiweiConnect(); } });
 </script>
 
 <template>
@@ -1041,6 +1122,16 @@ onMounted(async () => { applyDisplayPreferences(); await refreshAuth(); if (auth
           <div class="home-section-title"><h2>工作区概览</h2><button class="link-button" @click="navigate('settings')">管理工作区 →</button></div>
           <div class="grid-4"><ZiMetricCard label="待处理任务" :value="summary.taskStates.todo || 0" note="需要你的关注" tone="default"/><ZiMetricCard label="在线运行时" :value="summary.counts.runtimes" note="A2A 可调度" tone="positive"/><ZiMetricCard label="项目文档" :value="summary.counts.documents" note="持续沉淀中" tone="default"/><ZiMetricCard label="自动化" :value="summary.counts.automations" note="已配置流程" tone="positive"/></div>
           <div class="grid-2" style="margin-top:16px"><ZiCard><div class="card-heading"><h3>本机连接</h3><ZiStatusTag :status="ownDeviceOnline?'online':'neutral'" :label="ownDeviceLabel" dot/></div><div class="runtime-row"><ZiAvatar name="ziwei_user" size="sm" :status="ownDeviceOnline?'online':'neutral'"/><div class="row-main"><strong>{{ summary.device?.name || 'ziwei_user' }}</strong><small>ziwei_user · {{ summary.device?.bridge_version ? `v${summary.device.bridge_version}` : '等待心跳' }} · {{ summary.device?.bridge_host || '127.0.0.1' }}</small></div><span class="row-end">{{ ownDeviceOnline ? '刚刚' : '—' }}</span></div><ZiProgress :value="ownDeviceOnline ? 100 : 0" label="ziwei_user 心跳健康度" :tone="ownDeviceOnline?'positive':'neutral'"/></ZiCard><ZiCard><div class="card-heading"><h3>运行时</h3><button class="icon-button" @click="navigate('members')">全部 →</button></div><div v-for="runtime in runtimes.slice(0,3)" :key="runtime.id" class="runtime-row"><ZiAvatar :name="runtime.name" size="sm"/><div class="row-main"><strong>{{ runtime.name }}</strong><small>{{ runtime.provider }} · {{ runtime.cli_version || '等待 ziwei_user 心跳' }}</small></div><ZiStatusTag :status="runtime.cli_status==='available'?'online':'neutral'" :label="runtime.cli_status==='available'?'在线':'离线'" dot/></div></ZiCard></div>
+        </div>
+
+        <div v-else-if="page==='ziwei-connect'" class="ziwei-connect-page">
+          <div class="page-header"><div><span class="eyebrow">DEVICE CONTROL</span><h1>紫薇·互联</h1><p>查看可用设备，为数字员工绑定目标设备并执行健康检查、截图和演练。</p></div><div class="header-actions"><ZiButton variant="secondary" :disabled="ziweiConnectLoading" @click="loadZiweiConnect"><RefreshCw :size="15"/>刷新</ZiButton></div></div>
+          <div class="ziwei-connect-grid">
+            <ZiCard class="ziwei-connect-card ziwei-connect-status-card"><div class="card-heading"><h3>设备状态</h3><span class="work-count">{{ ziweiConnectStatus.devices.length }} 台</span></div><div v-if="!ziweiConnectStatus.devices.length" class="empty-wrap compact"><ZiEmptyState icon="▣" title="暂无可用设备" description="设备上线后会出现在这里。"/></div><div v-for="device in ziweiConnectStatus.devices" :key="device.id" class="ziwei-connect-device" :class="{selected:ziweiConnectSelection.deviceId===device.id}" @click="ziweiConnectSelection.deviceId=device.id"><span class="online-dot" :class="{offline:!connectDeviceOnline(device)}"></span><div class="row-main"><strong>{{ device.alias || device.name || device.label || device.id }}</strong><small>{{ device.model || device.os || device.platform || '设备' }} · {{ device.status || (device.online ? 'online' : 'offline') }}</small></div><span class="soft-tag">{{ device.id }}</span></div></ZiCard>
+            <ZiCard class="ziwei-connect-card"><div class="card-heading"><h3>绑定数字员工</h3><span class="work-count">{{ ziweiConnectBindings.length }} 条</span></div><div class="form-stack"><label class="ziwei-connect-field"><span>数字员工</span><ZiSelect v-model="ziweiConnectSelection.employeeId" :options="employees.map(item => ({label:item.name || item.id,value:item.id}))" aria-label="选择数字员工"/></label><label class="ziwei-connect-field"><span>目标设备</span><ZiSelect v-model="ziweiConnectSelection.deviceId" :options="ziweiConnectStatus.devices.map(item => ({label:item.alias || item.name || item.label || item.id,value:item.id}))" aria-label="选择目标设备"/></label><div class="form-actions"><ZiButton :disabled="ziweiConnectBusy==='binding'" @click="saveZiweiConnectBinding">{{ ziweiConnectBusy==='binding' ? '保存中…' : '保存绑定' }}</ZiButton></div></div><div v-if="ziweiConnectBindings.length" class="ziwei-connect-binding-list"><div v-for="binding in ziweiConnectBindings" :key="binding.id || `${binding.employee_id || binding.employeeId}-${binding.device_id || binding.deviceId}`" class="runtime-row"><div class="row-main"><strong>{{ employees.find(item => item.id === (binding.employee_id || binding.employeeId))?.name || binding.employee_name || binding.employeeName || binding.employee_id || binding.employeeId }}</strong><small>→ {{ ziweiConnectStatus.devices.find(item => item.id === (binding.device_id || binding.deviceId))?.alias || ziweiConnectStatus.devices.find(item => item.id === (binding.device_id || binding.deviceId))?.name || binding.device_name || binding.deviceId || binding.device_id }}</small></div></div></div></ZiCard>
+          </div>
+          <ZiCard class="ziwei-connect-actions-card"><div class="card-heading"><div><h3>连接动作</h3><p class="modal-copy">动作会排队到目标设备，结果返回后会自动刷新。</p></div><span class="soft-tag">{{ ziweiConnectSelection.deviceId || '未选设备' }}</span></div><div class="ziwei-connect-action-buttons"><ZiButton variant="secondary" :disabled="Boolean(ziweiConnectBusy)" @click="runZiweiConnectAction('health')">{{ ziweiConnectBusy==='health' ? '提交中…' : '健康检查' }}</ZiButton><ZiButton variant="secondary" :disabled="Boolean(ziweiConnectBusy)" @click="runZiweiConnectAction('screenshot')">{{ ziweiConnectBusy==='screenshot' ? '提交中…' : '获取截图' }}</ZiButton><ZiButton :disabled="Boolean(ziweiConnectBusy)" @click="runZiweiConnectAction('dry-run')">{{ ziweiConnectBusy==='dry-run' ? '提交中…' : '演练动作' }}</ZiButton></div><div v-if="Object.keys(ziweiConnectRuns).length" class="ziwei-connect-runs"><article v-for="run in Object.values(ziweiConnectRuns).slice().reverse()" :key="connectRunId(run)" class="ziwei-connect-run" :data-status="connectRunStatus(run)"><div class="card-heading"><strong>{{ run.action || run.command || '连接动作' }}</strong><ZiStatusTag :status="['succeeded','success','completed','dry_run'].includes(connectRunStatus(run)) ? 'online' : connectRunStatus(run)==='failed' ? 'failed' : 'neutral'" :label="connectRunLabel(run)" dot/></div><p v-if="connectRunId(run)" class="ziwei-connect-command">command_id: <code>{{ run.command_id || run.commandId || connectRunId(run) }}</code></p><p v-if="run.error" class="ziwei-connect-error">{{ run.error }}</p><img v-if="connectSnapshotSrc(run)" class="ziwei-connect-screenshot" :src="connectSnapshotSrc(run)" alt="设备截图"/><pre v-if="run.result && !connectSnapshotSrc(run)">{{ JSON.stringify(run.result, null, 2) }}</pre></article></div></ZiCard>
+          <ZiCard v-if="ziweiConnectStatus.diagnostics.length" class="ziwei-connect-diagnostics"><div class="card-heading"><h3>诊断信息</h3></div><div v-for="item in ziweiConnectStatus.diagnostics" :key="item.id || item.key || item.name" class="runtime-row"><div class="row-main"><strong>{{ item.name || item.key || '诊断' }}</strong><small>{{ item.message || item.detail || item.status || '' }}</small></div><ZiStatusTag :status="['ok','healthy','online','passed'].includes(String(item.status || '').toLowerCase()) ? 'online' : ['error','failed'].includes(String(item.status || '').toLowerCase()) ? 'failed' : 'neutral'" :label="item.status || 'info'"/></div></ZiCard>
         </div>
 
         <div v-else-if="page==='issues'" class="tasks-page">

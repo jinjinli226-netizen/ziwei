@@ -8,6 +8,7 @@ import { exportDocumentsToGit, importDocumentsFromGit } from './git-sync.mjs';
 import { createAuthService } from './auth.mjs';
 import { deviceTokenFromRequest, readA2AToken, safeTokenEqual, tokenFromRequest } from './a2a-auth.mjs';
 import { mcpTokenRequired, readMCPCredential, mcpWorkspaceAllowed } from './mcp-auth.mjs';
+import { createZiweiConnect } from './ziwei-connect.mjs';
 
 const allowedOrigin = process.env.FRONTEND_ORIGIN || 'http://127.0.0.1:5178';
 
@@ -234,10 +235,17 @@ export function createApp(options = {}) {
   const app = express();
   const realtime = new RealtimeHub();
   const repo = options.repository || createRepository({ ...options, onEvent: event => realtime.publish(event) });
+  const ziweiConnect = createZiweiConnect(repo, {
+    apiBase: options.ziweiConnectApiBase,
+    auth: options.ziweiConnectAuth,
+    cookie: options.ziweiConnectCookie,
+    origin: options.ziweiConnectOrigin,
+  });
   const auth = options.auth || createAuthService(repo.db, options.authOptions);
   app.locals.repo = repo;
   app.locals.realtime = realtime;
   app.locals.auth = auth;
+  app.locals.ziweiConnect = ziweiConnect;
   app.use(cors);
   app.use((_req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -630,6 +638,37 @@ export function createApp(options = {}) {
   app.post('/mcp/v1/workspaces/:slug/documents', mcpGuard, (req, res) => res.status(201).json(repo.createDocument(req.params.slug, req.body || {})));
   app.get('/mcp/v1/documents/:id', mcpGuard, mcpResourceGuard('documents'), (req, res) => res.json(repo.getDocument(req.params.id)));
   app.patch('/mcp/v1/documents/:id', mcpGuard, mcpResourceGuard('documents'), (req, res) => res.json(repo.updateDocument(req.params.id, req.body || {})));
+
+  // 紫薇·互联 is the authoritative phone/MCP control plane.  灵光爸爸 only
+  // persists employee↔phone/account bindings and execution receipts here.
+  const ziweiConnectGuard = requireRole('owner', 'admin', 'member');
+  app.get('/api/workspaces/:slug/ziwei-connect/status', ziweiConnectGuard, async (req, res, next) => {
+    try { return res.json(await ziweiConnect.status(req.params.slug)); } catch (error) { return next(error); }
+  });
+  app.get('/api/workspaces/:slug/ziwei-connect/devices', ziweiConnectGuard, async (req, res, next) => {
+    try { return res.json({ devices: await ziweiConnect.listDevices() }); } catch (error) { return next(error); }
+  });
+  app.get('/api/workspaces/:slug/ziwei-connect/bindings', ziweiConnectGuard, (req, res, next) => {
+    try { return res.json({ bindings: ziweiConnect.listBindings(req.params.slug) }); } catch (error) { return next(error); }
+  });
+  app.post('/api/workspaces/:slug/ziwei-connect/bindings', ziweiConnectGuard, async (req, res, next) => {
+    try { return res.status(201).json(await ziweiConnect.bind(req.params.slug, req.body || {})); } catch (error) { return next(error); }
+  });
+  app.get('/api/workspaces/:slug/ziwei-connect/runs', ziweiConnectGuard, (req, res, next) => {
+    try { return res.json({ runs: ziweiConnect.listRuns(req.params.slug, req.query.limit) }); } catch (error) { return next(error); }
+  });
+  app.get('/api/workspaces/:slug/ziwei-connect/runs/:id', ziweiConnectGuard, async (req, res, next) => {
+    try { return res.json(await ziweiConnect.refresh(req.params.slug, req.params.id)); } catch (error) { return next(error); }
+  });
+  app.post('/api/workspaces/:slug/ziwei-connect/actions', ziweiConnectGuard, async (req, res, next) => {
+    try {
+      const run = await ziweiConnect.run(req.params.slug, req.body || {});
+      return res.status(run.status === 'dry_run' ? 200 : 202).json({ run });
+    } catch (error) {
+      if (error.run) return res.status(error.status && error.status < 500 ? error.status : 502).json({ run: error.run, error: error.message });
+      return next(error);
+    }
+  });
 
   // A2A v1: agent cards + task/message primitives. The executor is intentionally local-first;
   // daemon adapters can claim tasks later without changing this contract.
