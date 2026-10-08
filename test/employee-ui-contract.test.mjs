@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-const app = fs.readFileSync(new URL('../frontend/src/App.vue', import.meta.url), 'utf8');
+const app = fs.readFileSync(new URL('../frontend/src/App.vue', import.meta.url), 'utf8') + fs.readFileSync(new URL('../frontend/src/components/ManagementMcpPanel.vue', import.meta.url), 'utf8');
 const api = fs.readFileSync(new URL('../frontend/src/api.js', import.meta.url), 'utf8');
 
 test('digital employee configuration UI is wired to real API contracts', () => {

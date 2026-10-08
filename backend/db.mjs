@@ -73,6 +73,12 @@ export function openDatabase({ memory = false, filename = path.join(ROOT, 'data'
       FOREIGN KEY(device_id) REFERENCES devices(id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_runtime_device_metadata_workspace ON runtime_device_metadata(workspace_id,device_id,runtime_name);
+    CREATE TABLE IF NOT EXISTS management_requests (
+      workspace_id TEXT NOT NULL, kind TEXT NOT NULL, request_key TEXT NOT NULL,
+      fingerprint TEXT NOT NULL, resource_id TEXT NOT NULL, created_at TEXT NOT NULL,
+      PRIMARY KEY(workspace_id,kind,request_key),
+      FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+    );
     CREATE TABLE IF NOT EXISTS tasks (
       id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, title TEXT NOT NULL,
       description TEXT NOT NULL DEFAULT '', description_format TEXT NOT NULL DEFAULT 'plain', state TEXT NOT NULL, priority TEXT NOT NULL DEFAULT 'medium',
@@ -260,6 +266,12 @@ export function openDatabase({ memory = false, filename = path.join(ROOT, 'data'
     "ALTER TABLE employees ADD COLUMN skills_json TEXT NOT NULL DEFAULT '[]'",
     "ALTER TABLE employees ADD COLUMN runtime_profile TEXT",
     "ALTER TABLE employees ADD COLUMN avatar TEXT",
+    "ALTER TABLE employees ADD COLUMN persona TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE employees ADD COLUMN target_device_id TEXT",
+    "ALTER TABLE employees ADD COLUMN management_mcp_enabled INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE devices ADD COLUMN management_mcp_json TEXT NOT NULL DEFAULT '{}'",
+    "ALTER TABLE runtime_metadata ADD COLUMN readiness_json TEXT NOT NULL DEFAULT '{}'",
+    "ALTER TABLE runtime_device_metadata ADD COLUMN readiness_json TEXT NOT NULL DEFAULT '{}'",
     "ALTER TABLE conversations ADD COLUMN model_id TEXT",
     "ALTER TABLE conversations ADD COLUMN working_directory TEXT",
     "ALTER TABLE conversations ADD COLUMN device_id TEXT",

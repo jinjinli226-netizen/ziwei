@@ -21,7 +21,8 @@ function parseCredential(raw, fallbackWorkspaces = []) {
     if (parsed && typeof parsed === 'object') {
       return {
         token: String(parsed.token || parsed.bearerToken || '').trim(),
-        workspaces: normalizeWorkspaces(parsed.workspaces ?? parsed.workspace ?? fallbackWorkspaces)
+        workspaces: normalizeWorkspaces(parsed.workspaces ?? parsed.workspace ?? fallbackWorkspaces),
+        credentials: Array.isArray(parsed.credentials) ? parsed.credentials.map(item => ({ token: String(item?.token || item?.bearerToken || '').trim(), workspaces: normalizeWorkspaces(item?.workspaces ?? item?.workspace) })).filter(item => item.token && item.workspaces.length) : []
       };
     }
   } catch {}
@@ -35,7 +36,7 @@ export function readMCPCredential({ create = true, file = defaultMCPTokenPath(),
   if (configuredToken) return { token: configuredToken, workspaces: configuredWorkspaces, source: 'configuration' };
   try {
     const credential = parseCredential(fs.readFileSync(file, 'utf8'), configuredWorkspaces);
-    if (credential.token) return { ...credential, source: file };
+    if (credential.token || credential.credentials?.length) return { ...credential, source: file };
   } catch {}
   if (!create) return { token: '', workspaces: configuredWorkspaces, source: file };
   const generated = crypto.randomBytes(32).toString('base64url');
@@ -79,15 +80,17 @@ export function mcpTokenRequired(options = {}) {
   const load = () => readMCPCredential({ ...configured, create: configured.create ?? false });
   return (req, res, next) => {
     const credential = load();
-    if (!credential.token) return res.status(503).json({ error: 'MCP 管理入口尚未配置 bearer token' });
-    if (!safeTokenEqualCompat(mcpTokenFromRequest(req), credential.token)) {
+    const credentials = [...(credential.token ? [{ token: credential.token, workspaces: credential.workspaces }] : []), ...(credential.credentials || [])];
+    if (!credentials.length) return res.status(503).json({ error: 'MCP 管理入口尚未配置 bearer token' });
+    const matched = credentials.find(item => safeTokenEqualCompat(mcpTokenFromRequest(req), item.token));
+    if (!matched) {
       res.setHeader('WWW-Authenticate', 'Bearer realm="ziwei-mcp"');
       return res.status(401).json({ error: '需要有效的 MCP 管理令牌' });
     }
     const slug = String(req.params.slug || '').trim();
-    if (slug && !mcpWorkspaceAllowed(credential.workspaces, slug)) return res.status(403).json({ error: 'MCP 令牌没有该工作区权限' });
-    if (!slug && credential.workspaces.length !== 1) return res.status(403).json({ error: 'MCP 令牌需要明确的单一工作区权限' });
-    req.mcpCredential = { ...credential, workspace: slug || credential.workspaces[0] };
+    if (slug && !mcpWorkspaceAllowed(matched.workspaces, slug)) return res.status(403).json({ error: 'MCP 令牌没有该工作区权限' });
+    if (!slug && matched.workspaces.length !== 1) return res.status(403).json({ error: 'MCP 令牌需要明确的单一工作区权限' });
+    req.mcpCredential = { workspaces: matched.workspaces, workspace: slug || matched.workspaces[0] };
     next();
   };
 }

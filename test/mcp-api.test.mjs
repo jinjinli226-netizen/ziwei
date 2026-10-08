@@ -27,9 +27,10 @@ test('MCP management API requires its dedicated bearer token and workspace scope
 test('MCP management API delegates employee and task changes to the repository', async () => {
   const { app, server, base } = await start();
   try {
+    app.locals.repo.heartbeatDevice('test-111', { deviceId: 'mcp-test-pc', runtimes: { Hermes: { status: 'available', profiles: [{ name: 'ziwei-research' }] } } });
     const created = await fetch(`${base}/mcp/v1/workspaces/test-111/employees`, {
       method: 'POST', headers: auth,
-      body: JSON.stringify({ name: '调研大师', runtime: 'Hermes', runtimeProfile: 'ziwei-research', instructions: '保留来源和证据链' })
+      body: JSON.stringify({ name: '调研大师', runtime: 'Hermes', targetDeviceId: 'mcp-test-pc', runtimeProfile: 'ziwei-research', instructions: '保留来源和证据链' })
     });
     assert.equal(created.status, 201);
     const employee = await created.json();
@@ -74,4 +75,24 @@ test('MCP credential files carry an explicit workspace allow-list', () => {
     assert.deepEqual(readMCPCredential({ file, create: false }).workspaces, ['bjc-ops']);
     if (process.platform !== 'win32') assert.equal(fs.statSync(file).mode & 0o077, 0);
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('additional per-workspace credentials preserve the original bearer and document scope', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ziwei-mcp-multi-'));
+  const file = path.join(directory, 'mcp.token');
+  fs.writeFileSync(file, JSON.stringify({ token: 'original-bearer', workspaces: ['test-111'], credentials: [{ token: 'separate-bearer', workspaces: ['test-111'] }, { token: 'foreign-bearer', workspaces: ['some-other-workspace'] }] }));
+  const app = createApp({ memory: true, enableScheduler: false, mcpOptions: { tokenFile: file } });
+  const server = app.listen(0); await new Promise(resolve => server.once('listening', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const document = app.locals.repo.createDocument('test-111', { name: 'scoped.md', content: 'scoped document' });
+    for (const bearer of ['original-bearer', 'separate-bearer']) {
+      const response = await fetch(`${base}/mcp/v1/workspaces/test-111/documents/${document.id}`, { headers: { authorization: `Bearer ${bearer}` } });
+      assert.equal(response.status, 200); assert.equal((await response.json()).content, 'scoped document');
+    }
+    assert.equal((await fetch(`${base}/mcp/v1/workspaces/test-111/documents/${document.id}`, { headers: { authorization: 'Bearer foreign-bearer' } })).status, 403);
+    const status = await fetch(`${base}/api/workspaces/test-111/mcp/status`).then(response => response.json());
+    assert.equal(status.scope_allowed, true); assert.equal(status.transport, 'stdio');
+    assert.doesNotMatch(JSON.stringify(status), /original-bearer|separate-bearer|foreign-bearer|some-other-workspace/);
+  } finally { await new Promise(resolve => server.close(resolve)); fs.rmSync(directory, { recursive: true, force: true }); }
 });

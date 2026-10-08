@@ -406,4 +406,6 @@ select:not(.ziwei-select)) { padding: 0 11px; }
 .terminal-employee-actions { margin-top:20px; border:1px solid var(--ziwei-line); border-radius:10px; background:var(--ziwei-surface); }
 .terminal-employee-actions > summary { padding:16px 20px; color:var(--ziwei-ink-soft); font-size:13px; cursor:pointer; }
 .terminal-employee-actions > .ziwei-connect-actions-card { border:0; border-radius:0; margin:0; }
+.employee-readiness-error { padding:12px 14px; border:1px solid #f0d1d4; border-radius:8px; color:#a43142; background:#fff8f8; font-size:12px; line-height:1.8; }
+.employee-readiness-error ul { margin:6px 0 0; padding-left:18px; }
 @media (max-width:800px) { .terminal-binding-form { grid-template-columns:minmax(0,1fr); } .terminal-employee-binding { padding:14px; } }

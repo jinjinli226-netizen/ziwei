@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { Readable, PassThrough } from 'node:stream';
 import { createApp } from '../backend/app.mjs';
-import { createMcpClient, createMcpHandler } from '../scripts/ziwei-mcp.mjs';
+import { createMcpClient, createMcpHandler, runStdio } from '../scripts/ziwei-mcp.mjs';
 
 const TOKEN = 'mcp-test-token-012345678901234567';
 
@@ -19,13 +20,14 @@ test('MCP management API requires the dedicated token and stays workspace scoped
   const server = await listen(app);
   const base = `http://127.0.0.1:${server.address().port}`;
   try {
+    app.locals.repo.heartbeatDevice('test-111', { deviceId: 'mcp-test-pc', runtimes: { Hermes: { status: 'available', profiles: [{ name: 'ziwei-research' }] } } });
     assert.equal((await fetch(`${base}/mcp/v1/workspaces/test-111/employees`)).status, 401);
     const list = await fetch(`${base}/mcp/v1/workspaces/test-111/employees`, { headers: { authorization: `Bearer ${TOKEN}` } });
     assert.equal(list.status, 200);
     assert.ok(Array.isArray((await list.json()).employees));
     const created = await fetch(`${base}/mcp/v1/workspaces/test-111/employees`, {
       method: 'POST', headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ name: '调研大师', runtime: 'Hermes', runtimeProfile: 'ziwei-research', instructions: '保留证据链' })
+      body: JSON.stringify({ name: '调研大师', runtime: 'Hermes', targetDeviceId: 'mcp-test-pc', runtimeProfile: 'ziwei-research', instructions: '保留证据链' })
     });
     assert.equal(created.status, 201);
     const employee = await created.json();
@@ -96,5 +98,23 @@ test('MCP client reads the generated plural workspace scope from its token file'
     await client.listEmployees();
     assert.equal(requests[0].init.headers.authorization, `Bearer ${TOKEN}`);
     assert.match(requests[0].url, /\/mcp\/v1\/workspaces\/test-111\/employees$/);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('stdio private audit proves handshake and tool calls without logging tool inputs or bearer', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ziwei-mcp-audit-'));
+  const auditFile = path.join(directory, 'calls.jsonl');
+  const output = new PassThrough(); output.resume();
+  try {
+    await runStdio({ workspace: 'test-111', auditFile, output, client: { createEmployee: async () => ({ id: 'employee_qa-created' }) }, input: Readable.from([
+      JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize' }) + '\n',
+      JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' }) + '\n',
+      JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'ziwei_create_employee', arguments: { name: 'private-persona', instructions: 'PRIVATE_PROMPT', token: TOKEN } } }) + '\n'
+    ]) });
+    const raw = fs.readFileSync(auditFile, 'utf8');
+    assert.doesNotMatch(raw, /PRIVATE_PROMPT|private-persona|mcp-test-token/);
+    const rows = raw.trim().split('\n').map(line => JSON.parse(line));
+    assert.deepEqual(rows.map(item => item.method), ['initialize', 'tools/list', 'tools/call']);
+    assert.equal(rows[2].ok, true); assert.equal(rows[2].resourceId, 'employee_qa-created');
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });

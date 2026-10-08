@@ -5,9 +5,9 @@ import { fileURLToPath } from 'node:url';
 import { ActionDispatcher } from '../src/daemon.mjs';
 import { createLocalActionExecutor } from '../src/local-action.mjs';
 import { redactSecrets } from '../src/redaction.mjs';
-import { discoverInstalledRuntimes } from '../src/runtime-adapters.mjs';
+import { discoverInstalledRuntimes, managementMcpStatus } from '../src/runtime-adapters.mjs';
 import { readA2AToken } from '../backend/a2a-auth.mjs';
-import { defaultUserDir, resolveConfigPath } from './config.mjs';
+import { defaultUserDir, resolveConfigPath, resolveConfigFile } from './config.mjs';
 
 const ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const packageMeta = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
@@ -25,6 +25,8 @@ const config = fs.existsSync(configPath)
   ? JSON.parse(fs.readFileSync(configPath, 'utf8'))
   : { agentId: 'ziwei_user', serviceName: 'ziwei_user', workspace: process.env.ZIWEI_WORKSPACE || '', apiBase: process.env.ZIWEI_API_BASE || 'http://127.0.0.1:4178', healthHost: '127.0.0.1', healthPort: 20242, heartbeatMs: 15000, pollMs: 5000 };
 if (config.hermesHome) process.env.HERMES_HOME = String(config.hermesHome);
+const managementMcpConfig = { ...(config.managementMcp || {}), ...(config.managementMcp?.tokenFile ? { tokenFile: resolveConfigFile(config.managementMcp.tokenFile, { configPath, root: ROOT }) } : {}) };
+let managementStatus = managementMcpStatus({ config: managementMcpConfig, workspace: config.workspace, apiBase: config.apiBase });
 const logPath = path.join(logDir, 'daemon.log');
 function log(event, extra = {}) {
   const line = redactSecrets(JSON.stringify({ at: new Date().toISOString(), pid: process.pid, event, service: 'ziwei_user', version: VERSION, agentId: 'ziwei_user', ...extra }));
@@ -38,7 +40,11 @@ const localExecutor = createLocalActionExecutor({
   executorCommand: config.executorCommand || process.env.ZIWEI_EXECUTOR_COMMAND || null,
   executorArgs: Array.isArray(config.executorArgs) ? config.executorArgs : [],
   defaultRuntime: config.defaultRuntime || process.env.ZIWEI_DEFAULT_RUNTIME || null,
-  hermesHomePath: config.hermesHome || process.env.HERMES_HOME || null
+  hermesHomePath: config.hermesHome || process.env.HERMES_HOME || null,
+  managementMcpConfig,
+  workspace: config.workspace,
+  apiBase: config.apiBase,
+  deviceId: config.deviceId || 'device-ziwei-user'
 });
 const dispatcher = new ActionDispatcher({
   // Runtime state stays private under the daemon profile. A paired daemon
@@ -68,6 +74,7 @@ async function heartbeat() {
     return;
   }
   runtimeDiscovery = discoverInstalledRuntimes({ force: true });
+  managementStatus = managementMcpStatus({ config: managementMcpConfig, workspace: config.workspace, apiBase: config.apiBase });
   const payload = {
     workspace: config.workspace,
     agentId: 'ziwei_user',
@@ -85,6 +92,7 @@ async function heartbeat() {
     status: 'online',
     runtimes: runtimeDiscovery.runtimes,
     runtimeMetadata: runtimeDiscovery.runtimes,
+    managementMcp: managementStatus,
     agentVersions: Object.fromEntries(Object.entries(runtimeDiscovery.runtimes).map(([name, item]) => [name, item.version || null]))
   };
   try {
@@ -175,7 +183,7 @@ function heartbeatFresh() {
   const timeout = Math.max(interval * 3, Number(config.heartbeatTimeoutMs) || 45000);
   return Date.now() >= lastHeartbeatAt && Date.now() - lastHeartbeatAt <= timeout;
 }
-const health = http.createServer((req, res) => { if (req.url === '/healthz') { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ ok: true, service: 'ziwei_user', version: VERSION, bridge: 'ziwei_user', agentId: 'ziwei_user', workspace: config.workspace, runtimes: runtimeDiscovery.runtimes, lastHeartbeat, lastHeartbeatAgeMs: lastHeartbeatAt ? Math.max(0, Date.now() - lastHeartbeatAt) : null, lastPoll, pid: process.pid })); return; } if (req.url === '/readyz') { const ready = heartbeatFresh(); res.writeHead(ready ? 200 : 503, { 'content-type': 'application/json' }); res.end(JSON.stringify({ ready, service: 'ziwei_user', version: VERSION, agentId: 'ziwei_user', workspace: config.workspace, runtimes: runtimeDiscovery.runtimes, lastHeartbeat, lastHeartbeatAgeMs: lastHeartbeatAt ? Math.max(0, Date.now() - lastHeartbeatAt) : null, pid: process.pid })); return; } res.writeHead(404); res.end(); });
+const health = http.createServer((req, res) => { if (req.url === '/healthz') { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ ok: true, service: 'ziwei_user', version: VERSION, bridge: 'ziwei_user', agentId: 'ziwei_user', workspace: config.workspace, runtimes: runtimeDiscovery.runtimes, managementMcp: managementStatus, lastHeartbeat, lastHeartbeatAgeMs: lastHeartbeatAt ? Math.max(0, Date.now() - lastHeartbeatAt) : null, lastPoll, pid: process.pid })); return; } if (req.url === '/readyz') { const ready = heartbeatFresh(); res.writeHead(ready ? 200 : 503, { 'content-type': 'application/json' }); res.end(JSON.stringify({ ready, service: 'ziwei_user', version: VERSION, agentId: 'ziwei_user', workspace: config.workspace, runtimes: runtimeDiscovery.runtimes, managementMcp: managementStatus, lastHeartbeat, lastHeartbeatAgeMs: lastHeartbeatAt ? Math.max(0, Date.now() - lastHeartbeatAt) : null, pid: process.pid })); return; } res.writeHead(404); res.end(); });
 let stopping = false;
 health.on('error', error => {
   log('health_server_error', { error: error.message, code: error.code || null });

@@ -2,6 +2,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { randomUUID } from 'node:crypto';
+import { parseDocument, parse as parseYaml } from 'yaml';
 import { redactSecrets } from './redaction.mjs';
 import { normalizeRuntimeProfile } from './employee-runtime.mjs';
 
@@ -20,6 +23,118 @@ const MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
 const VERSION_TIMEOUT_MS = 3000;
 const DISCOVERY_TTL_MS = 30_000;
 const WINDOWS_INTERNET_SETTINGS = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings';
+const MANAGEMENT_ADAPTER = fileURLToPath(new URL('../scripts/ziwei-mcp.mjs', import.meta.url));
+const MANAGEMENT_ENV_KEYS = ['ZIWEI_API_BASE', 'ZIWEI_MCP_WORKSPACE', 'ZIWEI_MCP_TOKEN_FILE', 'ZIWEI_MCP_TOKEN', 'ZIWEI_MCP_AUDIT_FILE'];
+
+function localManagementConfiguration({ config = {}, workspace = '', apiBase = '', env = process.env } = {}) {
+  if (config.enabled !== true) throw new Error('本机尚未启用紫薇管理 MCP；请配置 daemon managementMcp.enabled 和安全 tokenFile');
+  if (!/^[a-z0-9][a-z0-9_-]{1,62}$/i.test(workspace)) throw new Error('管理 MCP 工作区未配置或无效');
+  const tokenFile = String(config.tokenFile || env.ZIWEI_MCP_TOKEN_FILE || '').trim();
+  let credentialEnv;
+  if (tokenFile) {
+    let credentials;
+    try { credentials = JSON.parse(fs.readFileSync(tokenFile, 'utf8')); }
+    catch { throw new Error('管理 MCP 凭据文件不存在、不可读取或不是 JSON；请在本机配置安全 tokenFile'); }
+    const scopes = Array.isArray(credentials.workspaces) ? credentials.workspaces : [credentials.workspace];
+    if (!String(credentials.token || credentials.bearerToken || '').trim()) throw new Error('管理 MCP 凭据文件没有 bearer token');
+    if (!scopes.includes(workspace)) throw new Error(`管理 MCP 凭据未授权当前工作区 ${workspace}；请更新本机与服务器的工作区范围`);
+    credentialEnv = { ZIWEI_MCP_TOKEN_FILE: path.resolve(tokenFile) };
+  } else {
+    if (!String(env.ZIWEI_MCP_TOKEN || '').trim() || env.ZIWEI_MCP_WORKSPACE !== workspace) throw new Error('管理 MCP 缺少当前工作区的本机凭据；请配置安全 tokenFile');
+    credentialEnv = { ZIWEI_MCP_TOKEN: env.ZIWEI_MCP_TOKEN };
+  }
+  let base;
+  try { base = new URL(config.baseUrl || apiBase || env.ZIWEI_API_BASE || ''); }
+  catch { throw new Error('管理 MCP API 地址未配置或无效'); }
+  if ((base.protocol !== 'https:' && !(base.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(base.hostname))) || base.username || base.password || base.search || base.hash || !['', '/'].includes(base.pathname)) throw new Error('管理 MCP API 必须使用无凭据的 HTTPS 根地址（本机验收允许 loopback HTTP）');
+  if (!fs.existsSync(MANAGEMENT_ADAPTER)) throw new Error('本机安装包缺少 scripts/ziwei-mcp.mjs；请升级 ziwei_user');
+  return { workspace, baseUrl: base.toString().replace(/\/$/, ''), credentialEnv };
+}
+
+export function managementMcpStatus(options = {}) {
+  const status = { configured: false, workspace: options.workspace || null, transport: 'stdio', supportedRuntimes: ['Codex', 'Hermes'] };
+  try { localManagementConfiguration(options); return { ...status, configured: true }; }
+  catch (error) { return { ...status, reason: error.message }; }
+}
+
+/** Configure a native stdio server without placing bearer credentials in argv or profile files. */
+export function prepareManagementMcpLaunch({ runtime, profile, config = {}, workspace, apiBase, request, auditDirectory, actionId = 'runtime', invocation, env = {} } = {}) {
+  if (request?.enabled !== true) return { invocation, env, receipt: null };
+  if (request.workspace && request.workspace !== workspace) throw new Error('管理 MCP 请求工作区与已配对工作区不一致');
+  if (!['Codex', 'Hermes'].includes(runtime)) throw new Error(`${runtime} 尚不支持紫薇管理 MCP 启动注入；请显式选择 Codex 或 Hermes`);
+  const local = localManagementConfiguration({ config, workspace, apiBase });
+  if (!auditDirectory) throw new Error('管理 MCP 缺少本机私有验收目录');
+  fs.mkdirSync(auditDirectory, { recursive: true, mode: 0o700 });
+  const safeId = String(actionId).replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120);
+  const auditFile = path.join(auditDirectory, `${safeId}-${randomUUID()}.jsonl`);
+  const childEnv = { ...env };
+  for (const key of MANAGEMENT_ENV_KEYS) delete childEnv[key];
+  Object.assign(childEnv, local.credentialEnv, { ZIWEI_API_BASE: local.baseUrl, ZIWEI_MCP_WORKSPACE: workspace, ZIWEI_MCP_AUDIT_FILE: auditFile });
+  const injectedEnvKeys = ['ZIWEI_API_BASE', 'ZIWEI_MCP_WORKSPACE', ...Object.keys(local.credentialEnv), 'ZIWEI_MCP_AUDIT_FILE'];
+  const args = [...invocation.args];
+  if (runtime === 'Codex') {
+    const overrides = {
+      command: process.execPath,
+      args: [MANAGEMENT_ADAPTER],
+      env_vars: injectedEnvKeys,
+      enabled: true,
+      startup_timeout_sec: 30,
+      tool_timeout_sec: 300,
+    };
+    const flags = Object.entries(overrides).flatMap(([key, value]) => ['--config', `mcp_servers.ziwei_management.${key}=${JSON.stringify(value)}`]);
+    const stdinIndex = args.lastIndexOf('-');
+    args.splice(stdinIndex >= 0 ? stdinIndex : args.length, 0, ...flags);
+  } else {
+    const normalized = normalizeRuntimeProfile(profile);
+    if (!normalized || normalized === 'default') throw new Error('Hermes 管理 MCP 需要明确的独立 profile；请先创建独立 Hermes profile，不能修改主 profile');
+    const selectedHome = hermesProfileHome(normalized, { baseHome: env.HERMES_HOME });
+    if (!fs.existsSync(selectedHome)) throw new Error(`Hermes profile 不存在: ${normalized}；请先在目标设备准备该 profile`);
+    const configPath = path.join(selectedHome, 'config.yaml');
+    const original = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf8') : '';
+    const document = parseDocument(original || '{}');
+    if (document.errors.length || !document.toJSON() || typeof document.toJSON() !== 'object' || Array.isArray(document.toJSON())) throw new Error(`Hermes profile ${normalized} 的 config.yaml 无效；请先修复配置，未修改原文件`);
+    const entry = { command: process.execPath, args: [MANAGEMENT_ADAPTER], enabled: true, env: Object.fromEntries(injectedEnvKeys.map(key => [key, '${' + key + '}'])) };
+    const existing = document.getIn(['mcp_servers', 'ziwei_management'], true)?.toJSON();
+    if (JSON.stringify(existing) !== JSON.stringify(entry)) {
+      const servers = document.get('mcp_servers', true);
+      if (servers && (typeof servers.toJSON() !== 'object' || Array.isArray(servers.toJSON()))) throw new Error('Hermes mcp_servers 必须为映射；请先修复原配置');
+      document.setIn(['mcp_servers', 'ziwei_management'], entry);
+      if (original) fs.copyFileSync(configPath, `${configPath}.ziwei-backup-${Date.now()}`);
+      const temporary = `${configPath}.ziwei-${process.pid}.tmp`;
+      fs.writeFileSync(temporary, document.toString(), { mode: 0o600 });
+      fs.renameSync(temporary, configPath);
+    }
+    childEnv.HERMES_HOME = selectedHome;
+    // Hermes -z validates native MCP names; `all` includes the configured server
+    // and retains the employee's other native toolsets.
+    args.push('--toolsets', 'all');
+  }
+  return { invocation: { ...invocation, args }, env: childEnv, receipt: { configured: true, injected: true, loaded: false, transport: 'stdio', workspace, runtime, auditFile } };
+}
+
+export function managementMcpReceipt(receipt) {
+  if (!receipt) return null;
+  const { auditFile, ...safe } = receipt;
+  let events = [];
+  try { events = fs.readFileSync(auditFile, 'utf8').split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line)); } catch {}
+  const toolCalls = events.filter(item => item.method === 'tools/call').map(item => {
+    const ids = Object.fromEntries(['resourceId', 'employeeId', 'taskId', 'actionId', 'documentId'].map(key => [key, item.ids?.[key] || item[key]]).filter(([, value]) => typeof value === 'string' && /^(employee|task|action|doc)[_-][A-Za-z0-9_-]{1,100}$/.test(value)));
+    return { toolName: item.toolName || item.tool, ok: item.ok === true, ...ids, ...(Object.keys(ids).length ? { ids } : {}) };
+  });
+  const loaded = events.some(item => ['initialize', 'tools/list'].includes(item.method) && item.ok === true);
+  return { ...safe, loaded, status: loaded ? 'loaded' : 'not_loaded', toolCalls, tool_calls: toolCalls };
+}
+
+export function managementMcpExecutionFailure(receipt) {
+  if (!receipt) return null;
+  if (!receipt.loaded) return { code: 'management_mcp_not_loaded', error: `${receipt.runtime} 已退出但未收到管理 MCP 握手；请检查员工 profile、MCP 配置及本机 MCP 日志` };
+  const calls = receipt.toolCalls || receipt.tool_calls || [];
+  if (calls.length && !calls.some(item => item.ok === true)) {
+    const tools = [...new Set(calls.map(item => item.toolName).filter(Boolean))].join('、');
+    return { code: 'management_mcp_tools_failed', error: `${receipt.runtime} 管理 MCP 已加载，但实际尝试的管理工具全部失败${tools ? `（${tools}）` : ''}；请查看工具返回错误，核对工作区授权、目标设备及 runtime/profile 配置后重试` };
+  }
+  return null;
+}
 
 const DEFINITIONS = {
   Claude: {
@@ -248,8 +363,10 @@ export function discoverInstalledRuntimes({ force = false } = {}) {
     runtimes[runtime] = {
       runtime,
       ...found,
+      readiness: runtimeReadiness(runtime),
       models: discoveredModels(runtime),
       ...(runtime === 'Hermes' ? { profiles: listHermesProfiles() } : {}),
+      ...(runtime === 'Codex' ? { profiles: listCodexProfiles() } : {}),
       modelSource: found.version ? 'cli-installed' : 'manual'
     };
   }
@@ -284,7 +401,67 @@ export function hermesProfileHome(profile, { baseHome = null } = {}) {
   const candidate = path.resolve(profilesRoot, normalized);
   const relative = path.relative(profilesRoot, candidate);
   if (relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('Hermes profile 路径无效');
+  if (fs.existsSync(root) && fs.existsSync(candidate)) {
+    const rootReal = fs.realpathSync.native(root);
+    const targetReal = fs.realpathSync.native(candidate);
+    const realRelative = path.relative(rootReal, targetReal);
+    if (!realRelative || realRelative === '..' || realRelative.startsWith(`..${path.sep}`) || path.isAbsolute(realRelative)) throw new Error('Hermes profile 解析到独立 profile 根目录之外');
+  }
   return candidate;
+}
+
+function readPrivateJson(file) {
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return {}; }
+}
+
+function hasCredential(value) {
+  if (!value || typeof value !== 'object') return false;
+  return Object.entries(value).some(([key, item]) => {
+    if (/(?:access[_-]?token|refresh[_-]?token|api[_-]?key|runtime[_-]?api[_-]?key)$/i.test(key) && typeof item === 'string' && item.trim()) return true;
+    return item && typeof item === 'object' && hasCredential(item);
+  });
+}
+
+export function hermesProfileReadiness(profile, { baseHome = null } = {}) {
+  const name = normalizeRuntimeProfile(profile) || 'default';
+  const selectedHome = hermesProfileHome(name, { baseHome });
+  const base = { authentication: 'missing', provider: 'missing', ready: false, source: 'profile-files' };
+  if (!fs.existsSync(selectedHome)) return { ...base, code: 'profile_missing', reason: `Hermes profile 不存在: ${name}；请先在目标设备创建该 profile` };
+  let config;
+  try { config = parseYaml(fs.readFileSync(path.join(selectedHome, 'config.yaml'), 'utf8')) || {}; }
+  catch (error) { return { ...base, code: error.code === 'ENOENT' ? 'provider_missing' : 'profile_config_invalid', reason: `Hermes profile ${name} 缺少有效 provider 配置；请在该 profile 运行 hermes setup` }; }
+  const provider = String(config.model?.provider || config.provider || '').trim();
+  if (!provider || ['auto', 'none'].includes(provider)) return { ...base, code: 'provider_missing', reason: `Hermes profile ${name} 未指定 provider；请在该 profile 运行 hermes setup` };
+  const auth = readPrivateJson(path.join(selectedHome, 'auth.json'));
+  const providerAuth = auth.providers?.[provider] || auth.credential_pool?.[provider];
+  let dotEnv = '';
+  try { dotEnv = fs.readFileSync(path.join(selectedHome, '.env'), 'utf8'); } catch {}
+  const knownKeys = { 'openai-codex': [], openai: ['OPENAI_API_KEY'], openrouter: ['OPENROUTER_API_KEY'], anthropic: ['ANTHROPIC_API_KEY'], google: ['GEMINI_API_KEY', 'GOOGLE_API_KEY'], deepseek: ['DEEPSEEK_API_KEY'], nous: ['NOUS_API_KEY'], custom: ['CUSTOM_API_KEY'] }[provider];
+  const envCredential = (knownKeys || []).some(key => String(process.env[key] || '').trim() || new RegExp(`^\\s*(?:export\\s+)?${key}\\s*=\\s*["']?[^\\s"'#]+`, 'm').test(dotEnv));
+  const localProvider = ['ollama', 'lm-studio', 'vllm'].includes(provider);
+  const authenticated = hasCredential(providerAuth) || envCredential || localProvider;
+  return { ...base, provider: 'configured', authentication: authenticated ? 'configured' : (knownKeys ? 'missing' : 'unknown'), ready: authenticated, providerName: provider, ...(!authenticated ? { code: knownKeys ? 'authentication_missing' : 'authentication_unknown', reason: `Hermes profile ${name} 的 provider ${provider} 尚未确认认证；请在该独立 profile 配置或登录 provider，不能回退主 profile` } : {}) };
+}
+
+export function runtimeReadiness(runtime, { codexHome = process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), baseHome = null } = {}) {
+  if (runtime === 'Hermes') return hermesProfileReadiness('default', { baseHome });
+  if (runtime === 'Codex') {
+    const configured = hasCredential(readPrivateJson(path.join(codexHome, 'auth.json'))) || Boolean(String(process.env.OPENAI_API_KEY || '').trim());
+    return { authentication: configured ? 'configured' : 'missing', provider: 'configured', ready: configured, source: 'local-cli-auth', ...(!configured ? { code: 'authentication_missing', reason: 'Codex 尚未发现本机认证；请在目标设备运行 codex login 后重试' } : {}) };
+  }
+  return { authentication: 'unknown', provider: 'unknown', ready: false, source: 'cli-discovery', reason: `${runtime} 仅发现 CLI，尚未验证 provider 与认证` };
+}
+
+export function listCodexProfiles({ codexHome = process.env.CODEX_HOME || path.join(os.homedir(), '.codex') } = {}) {
+  const readiness = runtimeReadiness('Codex', { codexHome });
+  const profiles = [{ name: 'default', configured: true, valid: true, readiness }];
+  try {
+    for (const file of fs.readdirSync(codexHome)) {
+      const match = file.match(/^([A-Za-z0-9][A-Za-z0-9._-]{0,63})\.config\.toml$/);
+      if (match) profiles.push({ name: match[1], configured: true, valid: true, source: 'config-profile-v2', readiness });
+    }
+  } catch {}
+  return profiles;
 }
 
 /**
@@ -297,18 +474,17 @@ export function listHermesProfiles({ baseHome = null } = {}) {
     : path.join(os.homedir(), '.hermes')));
   const root = path.resolve(configuredHome);
   if (!fs.existsSync(root)) return [];
-  const profiles = [{ name: 'default', configured: true, valid: true }];
+  const entryFor = (name, profileRoot) => {
+    const readiness = hermesProfileReadiness(name, { baseHome: root });
+    return { name, configured: true, valid: true, hasSoul: fs.existsSync(path.join(profileRoot, 'SOUL.md')), provider_configured: readiness.provider === 'configured', authentication_configured: readiness.authentication === 'configured', readiness };
+  };
+  const profiles = [entryFor('default', root)];
   const profilesRoot = path.join(root, 'profiles');
   try {
     for (const entry of fs.readdirSync(profilesRoot, { withFileTypes: true })) {
       if (!entry.isDirectory() || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(entry.name)) continue;
       const profileRoot = path.join(profilesRoot, entry.name);
-      profiles.push({
-        name: entry.name,
-        configured: true,
-        valid: true,
-        hasSoul: fs.existsSync(path.join(profileRoot, 'SOUL.md')),
-      });
+      profiles.push(entryFor(entry.name, profileRoot));
     }
   } catch {
     // A missing profiles directory is an empty configured profile set.
@@ -433,25 +609,40 @@ export function parseRuntimeStreamLine(line, state, onOutput = () => {}, onStage
 }
 
 /** Execute an installed CLI using an explicit argv, with full local approval. */
-export function executeRuntime({ runtime, prompt, model = null, profile = null, cwd = process.cwd(), env = {}, attachments = [], signal, onOutput, onProgress, onStage } = {}) {
+export function executeRuntime({ runtime, prompt, model = null, profile = null, cwd = process.cwd(), env = {}, attachments = [], managementMcp = null, signal, onOutput, onProgress, onStage } = {}) {
   const resolvedRuntime = normalizeRuntime(runtime);
   if (!resolvedRuntime) return Promise.reject(new Error(`未知本机运行时: ${runtime || '(empty)'}`));
   const definition = DEFINITIONS[resolvedRuntime];
   const discovered = discoverInstalledRuntimes().runtimes[resolvedRuntime];
-  if (!discovered?.binary) return Promise.reject(new Error(`${resolvedRuntime} CLI 未安装或不在 PATH 中`));
+  if (!discovered?.binary || discovered.status === 'unavailable') return Promise.reject(new Error(`${resolvedRuntime} CLI 未安装、不可运行或不在 PATH 中；请在目标设备安装并检查该 CLI`));
   const content = String(prompt ?? '').trim();
   if (!content) return Promise.reject(new Error('agent.execute 需要非空 prompt'));
-  const invocation = definition.invoke({ prompt: content, model: model ? String(model) : null });
-  const spec = runtimeSpawnSpec(discovered.binary, invocation.args);
-  const childEnv = { ...process.env, ...env };
+  let invocation = definition.invoke({ prompt: content, model: model ? String(model) : null });
+  let childEnv = { ...process.env, ...env };
   delete childEnv.ZIWEI_CONFIG;
-  if (resolvedRuntime === 'Hermes' && profile) {
-    const selectedHome = hermesProfileHome(profile, { baseHome: childEnv.HERMES_HOME });
-    if (String(profile).trim() !== 'default' && !fs.existsSync(selectedHome)) {
-      return Promise.reject(new Error(`Hermes profile 不存在: ${String(profile).trim()}`));
+  // An employee with MCP disabled must not inherit daemon management credentials.
+  for (const key of MANAGEMENT_ENV_KEYS) delete childEnv[key];
+  if (resolvedRuntime === 'Hermes') {
+    const readiness = hermesProfileReadiness(profile || 'default', { baseHome: childEnv.HERMES_HOME });
+    if (!readiness.ready) return Promise.reject(new Error(readiness.reason));
+  } else if (resolvedRuntime === 'Codex') {
+    const readiness = runtimeReadiness('Codex', { codexHome: childEnv.CODEX_HOME || path.join(os.homedir(), '.codex') });
+    if (readiness.authentication === 'missing') return Promise.reject(new Error(readiness.reason));
+    if (profile && profile !== 'default') {
+      const normalized = normalizeRuntimeProfile(profile);
+      if (!listCodexProfiles({ codexHome: childEnv.CODEX_HOME || path.join(os.homedir(), '.codex') }).some(item => item.name === normalized)) return Promise.reject(new Error(`Codex profile 不存在: ${normalized}；请在目标设备准备 ${normalized}.config.toml，不会回退默认配置`));
+      invocation.args.splice(1, 0, '--profile', normalized);
     }
-    childEnv.HERMES_HOME = selectedHome;
+  } else if (profile && profile !== 'default') {
+    return Promise.reject(new Error(`${resolvedRuntime} 尚未支持显式 profile；不会忽略或回退该配置`));
   }
+  let receipt = null;
+  try {
+    const launch = prepareManagementMcpLaunch({ runtime: resolvedRuntime, profile, invocation, env: childEnv, ...(managementMcp || {}) });
+    invocation = launch.invocation; childEnv = launch.env; receipt = launch.receipt;
+    if (resolvedRuntime === 'Hermes' && !receipt) childEnv.HERMES_HOME = hermesProfileHome(profile || 'default', { baseHome: childEnv.HERMES_HOME });
+  } catch (error) { return Promise.reject(error); }
+  const spec = runtimeSpawnSpec(discovered.binary, invocation.args);
   // The desktop user session may have a proxy configured in Windows Internet
   // Settings while the daemon process has no proxy variables in its service
   // environment. Propagate that proxy to each local CLI child, preserving any
@@ -496,7 +687,9 @@ export function executeRuntime({ runtime, prompt, model = null, profile = null, 
     child.once('close', (code, childSignal) => {
       if (state.lineBuffer) parseRuntimeStreamLine(state.lineBuffer, state, onOutput, onStage);
       if (signal?.aborted) return finish({ status: 'failed', code: 'cancelled', error: 'runtime execution cancelled', result: { runtime: resolvedRuntime, code, signal: childSignal, output: state.output, truncated: state.truncated } });
-    const result = { runtime: resolvedRuntime, model: model || null, profile: profile || null, binary: discovered.binary, code, signal: childSignal, output: state.response.trim() || state.output, diagnostics: state.response.trim() ? state.output : null, truncated: state.truncated, ...(attachments.length ? {attachments} : {}) };
+    const result = { runtime: resolvedRuntime, model: model || null, profile: profile || null, binary: discovered.binary, code, signal: childSignal, output: state.response.trim() || state.output, diagnostics: state.response.trim() ? state.output : null, truncated: state.truncated, ...(receipt ? { managementMcp: managementMcpReceipt(receipt) } : {}), ...(attachments.length ? {attachments} : {}) };
+      const mcpFailure = code === 0 ? managementMcpExecutionFailure(result.managementMcp) : null;
+      if (mcpFailure) return finish({ status: 'failed', ...mcpFailure, result });
       if (code !== 0) return finish({ status: 'failed', code: 'runtime_failed', error: formatRuntimeFailure(resolvedRuntime, code, state.output), result });
       finish({ status: 'succeeded', result });
     });

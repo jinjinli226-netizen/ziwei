@@ -224,6 +224,18 @@ test('personal task target validation does not allow an anonymous repository cal
   assert.doesNotThrow(() => repo.createTask('test-111', { title: '本人目标', runtime: 'Codex', execute: true, targetDeviceId: first.id, actorUserId: 'user_a', enforceDeviceOwnership: true }));
 });
 
+test('employee default device cannot bypass personal task and conversation ownership checks', () => {
+  const repo = createRepository({ memory: true });
+  repo.db.prepare("UPDATE workspaces SET kind='personal' WHERE slug='test-111'").run();
+  const other = repo.createDevice('test-111', { name: '他人电脑', ownerUserId: 'user_b' });
+  const employee = repo.createEmployee('test-111', { name: '绑定他人电脑的员工', runtime: 'Codex', targetDeviceId: other.id });
+  const context = { actorUserId: 'user_a', actorRole: 'member', enforceDeviceOwnership: true, enforceEmployeeVisibility: true };
+  assert.throws(() => repo.createTask('test-111', { title: '默认员工目标', employeeId: employee.id, execute: true, ...context }), /个人工作区只能使用本人的设备/);
+  assert.throws(() => repo.createConversation('test-111', { title: '默认员工会话', employeeId: employee.id, ...context }), /个人工作区只能使用本人的设备/);
+  const legacy = repo.createConversation('test-111', { employeeId: employee.id });
+  assert.throws(() => repo.addConversationMessage(legacy.id, { content: '不能通过默认目标发起执行', ...context }), /个人工作区只能使用本人的设备/);
+});
+
 test('identity-facing defaults do not fabricate the historical workspace or owner account', () => {
   const read = relative => fs.readFileSync(path.join(ROOT, relative), 'utf8');
   assert.doesNotMatch(read('frontend/src/api.js'), /test-111/);

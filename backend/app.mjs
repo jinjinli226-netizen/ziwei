@@ -9,6 +9,8 @@ import { createAuthService } from './auth.mjs';
 import { deviceTokenFromRequest, readA2AToken, safeTokenEqual, tokenFromRequest } from './a2a-auth.mjs';
 import { mcpTokenRequired, readMCPCredential, mcpWorkspaceAllowed } from './mcp-auth.mjs';
 import { createZiweiConnect } from './ziwei-connect.mjs';
+import { createManagementService } from './management.mjs';
+import { toolDefinitions as managementTools } from '../scripts/ziwei-mcp.mjs';
 
 const allowedOrigin = process.env.FRONTEND_ORIGIN || 'http://127.0.0.1:5178';
 
@@ -462,15 +464,15 @@ export function createApp(options = {}) {
   app.post('/api/daemon/heartbeat', requireDeviceCredential(repo), (req, res, next) => { const slug = String(req.body.workspace || req.body.workspace_slug || '').trim(); if (!slug) return res.status(400).json({ error: 'heartbeat 必须明确 workspace' }); try { return res.json({ ok: true, device: repo.heartbeatDevice(slug, req.body) }); } catch (error) { return next(error); } });
   app.post('/api/devices/heartbeat', requireDeviceCredential(repo), (req, res, next) => { const slug = String(req.body.workspace || req.body.workspace_slug || '').trim(); if (!slug) return res.status(400).json({ error: 'heartbeat 必须明确 workspace' }); try { return res.json({ ok: true, device: repo.heartbeatDevice(slug, req.body) }); } catch (error) { return next(error); } });
   app.get('/api/workspaces/:slug/employees', (req, res) => res.json({ employees: repo.listEmployees(req.params.slug, { actorUserId: req.auth?.user_id, actorRole: req.workspaceRole, enforceEmployeeVisibility: true }) }));
-  app.post('/api/workspaces/:slug/employees', requireRole('owner','admin','member'), (req, res) => res.status(201).json(repo.createEmployee(req.params.slug, { ...(req.body || {}), ownerUserId: req.auth?.user_id })));
+  app.post('/api/workspaces/:slug/employees', requireRole('owner','admin','member'), (req, res) => { const input = { ...(req.body || {}), ownerUserId: req.auth?.user_id }; if (input.targetDeviceId || input.target_device_id || input.deviceId || input.device_id || input.managementMcpEnabled || input.managementMcp?.enabled) { const saved = management.createEmployee(req.params.slug, { ...input, idempotencyKey: req.get('Idempotency-Key') || input.idempotencyKey || input.idempotency_key }); return res.status(saved.duplicate ? 200 : 201).json(saved); } return res.status(201).json(repo.createEmployee(req.params.slug, input)); });
   const ensureEmployeeVisibleById = (req, idValue) => {
     const employee = repo.getEmployee(idValue, employeeContext(req));
     if (!employee) { const error = new Error('数字员工不存在'); error.status = 404; throw error; }
     return employee;
   };
-  app.patch('/api/employees/:id', requireRole('owner','admin','member'), (req, res) => { ensureEmployeeVisibleById(req, req.params.id); res.json(repo.updateEmployee(req.params.id, req.body || {})); });
+  app.patch('/api/employees/:id', requireRole('owner','admin','member'), (req, res) => { const employee = ensureEmployeeVisibleById(req, req.params.id); const slug = repo.db.prepare('SELECT slug FROM workspaces WHERE id=?').get(employee.workspace_id)?.slug; res.json(management.updateEmployee(slug, req.params.id, req.body || {})); });
   app.delete('/api/employees/:id', requireRole('owner','admin'), (req, res) => res.json(repo.deleteEmployee(req.params.id)));
-  app.patch('/api/workspaces/:slug/employees/:id', requireRole('owner','admin','member'), (req, res) => { ensureEmployeeInWorkspace(req.params.slug, req.params.id, req); res.json(repo.updateEmployee(req.params.id, req.body || {})); });
+  app.patch('/api/workspaces/:slug/employees/:id', requireRole('owner','admin','member'), (req, res) => { ensureEmployeeInWorkspace(req.params.slug, req.params.id, req); res.json(management.updateEmployee(req.params.slug, req.params.id, req.body || {})); });
   app.delete('/api/workspaces/:slug/employees/:id', requireRole('owner','admin'), (req, res) => res.json(repo.deleteEmployee(req.params.id)));
   // Employee configuration is kept separate from the ordinary employee list.
   // Environment values are encrypted at rest and returned only as metadata or
@@ -561,6 +563,9 @@ export function createApp(options = {}) {
     role: options.mcpOptions?.role ?? options.mcpRole,
     create: options.mcpOptions?.create ?? false
   };
+  const management = createManagementService(repo);
+  app.get('/api/workspaces/:slug/mcp/discovery', requireRole('owner','admin','member'), (req, res) => res.json(management.discovery(req.params.slug, { ...req.query, userId: req.auth?.user_id })));
+  app.get('/api/workspaces/:slug/employees/:id/mcp/status', requireRole('owner','admin','member'), (req, res) => { ensureEmployeeInWorkspace(req.params.slug, req.params.id, req); res.json(management.employeeStatus(req.params.slug, req.params.id)); });
   app.get('/api/workspaces/:slug/hermes/profiles', requireRole('owner','admin','member'), (req, res) => {
     res.json(repo.listHermesProfiles(req.params.slug, { deviceId: req.query.deviceId || req.query.device_id }));
   });
@@ -605,43 +610,44 @@ export function createApp(options = {}) {
   app.get('/api/workspaces/:slug/hermes/profile-actions/:id', requireRole('owner','admin','member'), hermesProfileAction);
   app.get('/api/workspaces/:slug/hermes/profiles/actions/:id', requireRole('owner','admin','member'), hermesProfileAction);
   app.get('/api/workspaces/:slug/mcp/status', requireRole('owner','admin','member'), (req, res) => {
-    const credential = readMCPCredential({ ...mcpOptions, create: false });
-    const scoped = Boolean(credential.token) && mcpWorkspaceAllowed(credential.workspaces, req.params.slug);
+    const credential = readMCPCredential({ ...mcpOptions, file: mcpOptions.file || mcpOptions.tokenFile, create: false });
+    const credentials = [...(credential.token ? [{ token: credential.token, workspaces: credential.workspaces }] : []), ...(credential.credentials || [])];
+    const configured = credentials.length > 0;
+    const scoped = credentials.some(item => mcpWorkspaceAllowed(item.workspaces, req.params.slug));
     let health = 'unconfigured';
-    if (credential.token && !scoped) health = 'scope_denied';
-    else if (scoped) {
-      try { repo.listEmployees(req.params.slug); health = 'healthy'; } catch { health = 'unavailable'; }
-    }
-    const protocol = String(req.get('x-forwarded-proto') || req.protocol || 'http').split(',')[0].trim();
-    const endpoint = `${protocol}://${req.get('x-forwarded-host') || req.get('host')}/mcp/v1/workspaces/${encodeURIComponent(req.params.slug)}`;
-    res.json({ configured: Boolean(credential.token), health, workspace: req.params.slug, workspaces: credential.workspaces, scope_allowed: scoped, endpoint, transport: 'https_api', client: 'scripts/ziwei-mcp.mjs', capabilities: ['employees', 'tasks', 'documents'], boundary: '仅提供当前工作区的员工、任务和文档窄管理面；不会直接打开 SQLite，也不代表全功能 MCP 已连接。' });
+    if (configured && !scoped) health = 'scope_denied';
+    else if (scoped) { try { repo.listEmployees(req.params.slug); health = 'healthy'; } catch { health = 'unavailable'; } }
+    const apiBase = 'https://qzelynth.top';
+    const endpoint = apiBase + '/mcp/v1/workspaces/' + encodeURIComponent(req.params.slug);
+    const employees = repo.listEmployees(req.params.slug, employeeContext(req)).map(item => management.employeeStatus(req.params.slug, item.id));
+    res.json({ configured, health, workspace: req.params.slug, workspaces: scoped ? [req.params.slug] : [], scope_allowed: scoped, endpoint, api_endpoint: endpoint, transport: 'stdio', api_transport: 'https', client: 'scripts/ziwei-mcp.mjs', capabilities: ['employees', 'tasks', 'documents'], tools: managementTools, credential: { configured, scope_allowed: scoped, masked: configured ? '••••••••' : '' }, config_template: { mcpServers: { 'ziwei-management': { command: 'node', args: ['<ZIWEI_INSTALL_DIR>/scripts/ziwei-mcp.mjs'], env: { ZIWEI_API_BASE: apiBase, ZIWEI_MCP_WORKSPACE: req.params.slug, ZIWEI_MCP_TOKEN_FILE: '<PRIVATE_MCP_TOKEN_FILE>' } } } }, employees, boundary: 'stdio MCP 适配器经 HTTPS 调用当前工作区管理 API；API 地址不能直接作为远程 MCP URL。不直接访问 SQLite，HTTP 健康也不代表员工已加载或实际调用。' });
   });
   const mcpGuard = mcpTokenRequired(mcpOptions);
-  const mcpResourceGuard = table => (req, res, next) => {
-    if (table !== 'documents') return res.status(400).json({ error: '不支持的 MCP 资源' });
+  const mcpResourceGuard = (req, res, next) => {
     const row = repo.listDocuments(req.mcpCredential.workspace).find(item => item.id === req.params.id);
-    if (!row) return res.status(404).json({ error: '文档不存在' });
-    next();
+    if (!row) return res.status(404).json({ error: '文档不存在' }); next();
   };
   app.get('/mcp/v1/workspaces/:slug/health', mcpGuard, (req, res) => {
-    try { repo.listEmployees(req.params.slug); res.json({ ok: true, workspace: req.params.slug, capabilities: ['employees', 'tasks', 'documents'], boundary: '窄管理面：员工、任务和文档；客户端通过 HTTPS API，不直接访问 SQLite。' }); }
+    try { repo.listEmployees(req.params.slug); res.json({ ok: true, workspace: req.params.slug, transport: 'stdio', api_transport: 'https', tools: managementTools.map(item => item.name), capabilities: ['employees', 'tasks', 'documents'], boundary: '窄管理面：员工、任务和文档；stdio 客户端通过 HTTPS API，不直接访问 SQLite。' }); }
     catch (error) { res.status(503).json({ ok: false, error: error.message }); }
   });
+  app.get('/mcp/v1/workspaces/:slug/discovery', mcpGuard, (req, res) => res.json(management.discovery(req.params.slug, req.query)));
+  app.get('/mcp/v1/workspaces/:slug/employees/:id', mcpGuard, (req, res) => res.json(management.employee(req.params.slug, req.params.id)));
+  app.get('/mcp/v1/workspaces/:slug/employees/:id/mcp/status', mcpGuard, (req, res) => res.json(management.employeeStatus(req.params.slug, req.params.id)));
+  app.get('/mcp/v1/workspaces/:slug/tasks/:id', mcpGuard, (req, res) => res.json(management.task(req.params.slug, req.params.id)));
+  app.get('/mcp/v1/workspaces/:slug/actions/:id', mcpGuard, (req, res) => res.json(management.action(req.params.slug, req.params.id)));
+  app.post('/mcp/v1/workspaces/:slug/hermes/profiles/requests', mcpGuard, (req, res) => { const action = management.createProfile(req.params.slug, { ...(req.body || {}), idempotencyKey: req.get('Idempotency-Key') || req.body?.idempotencyKey || req.body?.idempotency_key }); res.status(action.duplicate ? 200 : 202).json(action); });
   app.get('/mcp/v1/workspaces/:slug/employees', mcpGuard, (req, res) => res.json({ employees: repo.listEmployees(req.params.slug, { actorRole: 'owner', enforceEmployeeVisibility: true }) }));
-  app.post('/mcp/v1/workspaces/:slug/employees', mcpGuard, (req, res) => res.status(201).json(repo.createEmployee(req.params.slug, req.body || {})));
-  app.patch('/mcp/v1/workspaces/:slug/employees/:id', mcpGuard, (req, res, next) => {
-    try {
-      const row = repo.listEmployees(req.params.slug, { actorRole: 'owner', enforceEmployeeVisibility: true }).find(item => item.id === req.params.id);
-      if (!row) return res.status(404).json({ error: '数字员工不存在' });
-      return res.json(repo.updateEmployee(req.params.id, req.body || {}));
-    } catch (error) { return next(error); }
-  });
+  app.post('/mcp/v1/workspaces/:slug/employees', mcpGuard, (req, res) => { const saved = management.createEmployee(req.params.slug, { ...(req.body || {}), idempotencyKey: req.get('Idempotency-Key') || req.body?.idempotencyKey || req.body?.idempotency_key }); res.status(saved.duplicate ? 200 : 201).json(saved); });
+  app.patch('/mcp/v1/workspaces/:slug/employees/:id', mcpGuard, (req, res) => res.json(management.updateEmployee(req.params.slug, req.params.id, req.body || {})));
   app.get('/mcp/v1/workspaces/:slug/tasks', mcpGuard, (req, res) => res.json({ tasks: repo.listTasks(req.params.slug, req.query) }));
-  app.post('/mcp/v1/workspaces/:slug/tasks', mcpGuard, (req, res) => res.status(201).json(repo.createTask(req.params.slug, { ...(req.body || {}), actorRole: 'owner', enforceDeviceOwnership: true, enforceEmployeeVisibility: true })));
+  app.post('/mcp/v1/workspaces/:slug/tasks', mcpGuard, (req, res) => { const saved = management.createTask(req.params.slug, { ...(req.body || {}), idempotencyKey: req.get('Idempotency-Key') || req.body?.idempotencyKey || req.body?.idempotency_key }); res.status(saved.duplicate ? 200 : 201).json(saved); });
   app.get('/mcp/v1/workspaces/:slug/documents', mcpGuard, (req, res) => res.json({ documents: repo.listDocuments(req.params.slug) }));
   app.post('/mcp/v1/workspaces/:slug/documents', mcpGuard, (req, res) => res.status(201).json(repo.createDocument(req.params.slug, req.body || {})));
-  app.get('/mcp/v1/documents/:id', mcpGuard, mcpResourceGuard('documents'), (req, res) => res.json(repo.getDocument(req.params.id)));
-  app.patch('/mcp/v1/documents/:id', mcpGuard, mcpResourceGuard('documents'), (req, res) => res.json(repo.updateDocument(req.params.id, req.body || {})));
+  app.get('/mcp/v1/workspaces/:slug/documents/:id', mcpGuard, mcpResourceGuard, (req, res) => res.json(repo.getDocument(req.params.id)));
+  app.patch('/mcp/v1/workspaces/:slug/documents/:id', mcpGuard, mcpResourceGuard, (req, res) => res.json(repo.updateDocument(req.params.id, req.body || {})));
+  app.get('/mcp/v1/documents/:id', mcpGuard, mcpResourceGuard, (req, res) => res.json(repo.getDocument(req.params.id)));
+  app.patch('/mcp/v1/documents/:id', mcpGuard, mcpResourceGuard, (req, res) => res.json(repo.updateDocument(req.params.id, req.body || {})));
 
   // 紫薇·互联 is the authoritative phone/MCP control plane.  灵光爸爸 only
   // persists employee↔phone/account bindings and execution receipts here.
@@ -708,7 +714,7 @@ export function createApp(options = {}) {
   app.get('/a2a/v1/tasks/:id', (req, res) => { if (!assertA2ATaskWorkspace(repo, req, res)) return; const task=repo.getTask(req.params.id); if(!task) return res.status(404).json({error:'Task not found'}); res.json({id:task.id,status:{state:task.state,timestamp:task.updated_at},task,messages:repo.getTaskMessages(task.id)}); });
   app.post('/a2a/v1/tasks/:id/messages', (req, res) => { if (!assertA2ATaskWorkspace(repo, req, res)) return; return res.status(201).json({ message:repo.addTaskMessage(req.params.id,req.body), accepted:true }); });
 
-  app.use((err, _req, res, _next) => { const status = Number(err?.status) || (/not found|不存在/i.test(err.message || '') ? 404 : 400); res.status(status).json({ error: err.message || 'Bad request' }); });
+  app.use((err, _req, res, _next) => { const status = Number(err?.status) || (/not found|不存在/i.test(err.message || '') ? 404 : 400); res.status(status).json({ error: err.message || 'Bad request', ...(err.code ? { code: err.code } : {}) }); });
   return app;
 }
 

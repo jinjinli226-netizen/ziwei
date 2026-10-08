@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import readline from 'node:readline';
 
 const PROTOCOL_VERSION = '2024-11-05';
-const DEFAULT_API_BASE = process.env.ZIWEI_API_BASE || 'http://127.0.0.1:4178';
+const DEFAULT_API_BASE = process.env.ZIWEI_API_BASE || 'https://qzelynth.top';
 
 function readTokenFile(file) {
   const raw = fs.readFileSync(file, 'utf8').trim();
@@ -24,7 +24,7 @@ function configFromEnv(options = {}) {
   if (!token) throw new Error('未配置 MCP 管理令牌，请设置 ZIWEI_MCP_TOKEN 或 ZIWEI_MCP_TOKEN_FILE');
   if (!/^[a-z0-9][a-z0-9_-]{1,62}$/i.test(workspace)) throw new Error('MCP 工作区标识无效');
   const baseUrl = new URL(String(options.baseUrl ?? process.env.ZIWEI_API_BASE ?? DEFAULT_API_BASE));
-  if (!['http:', 'https:'].includes(baseUrl.protocol)) throw new Error('MCP API 地址必须使用 HTTP(S)');
+  if ((baseUrl.protocol !== 'https:' && !(baseUrl.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(baseUrl.hostname))) || baseUrl.username || baseUrl.password || baseUrl.search || baseUrl.hash || !['', '/'].includes(baseUrl.pathname)) throw new Error('MCP API 必须使用无凭据的 HTTPS 根地址；本机验收允许 loopback HTTP');
   return { token, workspace, baseUrl: baseUrl.toString().replace(/\/$/, '') };
 }
 
@@ -34,13 +34,19 @@ function objectArguments(value) {
   return value;
 }
 
-const toolDefinitions = [
+export const toolDefinitions = [
   { name: 'ziwei_mcp_health', description: '检查当前紫薇工作区 MCP 管理入口状态与窄管理面边界。', inputSchema: { type: 'object', properties: {} } },
+  { name: 'ziwei_discover_environment', description: '先调用本工具：查询当前工作区真实目标电脑、在线状态、已发现的 CLI/runtime、模型、Hermes profiles、认证/provider 就绪信息及技能。不得猜测或替换运行时。', inputSchema: { type: 'object', properties: { deviceId: { type: 'string' } } } },
+  { name: 'ziwei_get_employee', description: '按 ID 回读员工职责、人格、技能、runtime/profile 和绑定电脑。', inputSchema: { type: 'object', required: ['id'], properties: { id: { type: 'string' } } } },
+  { name: 'ziwei_get_employee_mcp_status', description: '查询员工管理 MCP 的配置和最近真实执行调用证据；HTTP 健康不代表员工已经加载。', inputSchema: { type: 'object', required: ['id'], properties: { id: { type: 'string' } } } },
+  { name: 'ziwei_create_hermes_profile', description: '在指定在线电脑创建独立 Hermes profile（本地继承 provider，主 profile 不变）。返回异步 action，必须使用 ziwei_get_action 等待 succeeded，再发现 profile 后创建 Hermes 员工。', inputSchema: { type: 'object', required: ['profile', 'deviceId', 'soul'], properties: { profile: { type: 'string' }, deviceId: { type: 'string' }, soul: { type: 'string' }, memory: { type: 'string' }, identity: { type: 'string' }, inheritProvider: { type: 'boolean', default: true }, idempotencyKey: { type: 'string' } } } },
+  { name: 'ziwei_get_action', description: '回读当前工作区异步 profile 或员工执行 action 的真实状态、结果、错误和事件。pending/acked 不表示成功。', inputSchema: { type: 'object', required: ['id'], properties: { id: { type: 'string' } } } },
+  { name: 'ziwei_get_task', description: '回读任务、员工真实执行 action 与结果。用本工具验证试运行，不可把创建成功当成执行成功。', inputSchema: { type: 'object', required: ['id'], properties: { id: { type: 'string' } } } },
   { name: 'ziwei_list_employees', description: '列出指定紫薇工作区的数字员工。', inputSchema: { type: 'object', properties: {} } },
-  { name: 'ziwei_create_employee', description: '通过紫薇管理 API 创建数字员工。', inputSchema: { type: 'object', required: ['name'], properties: { name: { type: 'string' }, runtime: { type: 'string' }, runtimeProfile: { type: 'string' }, description: { type: 'string' }, instructions: { type: 'string' }, visibility: { type: 'string', enum: ['workspace', 'personal'] }, skills: { type: 'array', items: { type: 'string' } } } } },
-  { name: 'ziwei_update_employee', description: '通过紫薇管理 API 更新已有数字员工。', inputSchema: { type: 'object', required: ['id'], properties: { id: { type: 'string' }, name: { type: 'string' }, runtime: { type: 'string' }, runtimeProfile: { type: 'string' }, description: { type: 'string' }, instructions: { type: 'string' }, status: { type: 'string' }, visibility: { type: 'string' }, skills: { type: 'array', items: { type: 'string' } } } } },
+  { name: 'ziwei_create_employee', description: '发现环境后，按用户明确选择的 runtime、目标电脑和 profile 创建员工。职责 description、人格 persona、岗位指令 instructions、技能 skills 分别保存；指定 Codex/Hermes 不会回退。使用稳定 idempotencyKey 安全重试。', inputSchema: { type: 'object', required: ['name', 'runtime', 'targetDeviceId'], properties: { name: { type: 'string' }, runtime: { type: 'string' }, targetDeviceId: { type: 'string' }, runtimeProfile: { type: 'string' }, model: { type: 'string' }, description: { type: 'string' }, persona: { type: 'string' }, instructions: { type: 'string' }, managementMcpEnabled: { type: 'boolean' }, idempotencyKey: { type: 'string' }, visibility: { type: 'string', enum: ['workspace', 'personal'] }, skills: { type: 'array', items: { type: 'string' } } } } },
+  { name: 'ziwei_update_employee', description: '更新已有数字员工的职责、人格、技能、目标电脑和明确的运行时配置。', inputSchema: { type: 'object', required: ['id'], properties: { id: { type: 'string' }, name: { type: 'string' }, runtime: { type: 'string' }, targetDeviceId: { type: 'string' }, runtimeProfile: { type: 'string' }, model: { type: 'string' }, persona: { type: 'string' }, managementMcpEnabled: { type: 'boolean' }, description: { type: 'string' }, instructions: { type: 'string' }, status: { type: 'string' }, visibility: { type: 'string' }, skills: { type: 'array', items: { type: 'string' } } } } },
   { name: 'ziwei_list_tasks', description: '列出指定紫薇工作区的任务。', inputSchema: { type: 'object', properties: { state: { type: 'string' }, assignee: { type: 'string' }, q: { type: 'string' } } } },
-  { name: 'ziwei_create_task', description: '通过紫薇管理 API 创建任务，可指定数字员工执行。', inputSchema: { type: 'object', required: ['title'], properties: { title: { type: 'string' }, description: { type: 'string' }, assignee: { type: 'string' }, runtime: { type: 'string' }, runtimeProfile: { type: 'string' }, execute: { type: 'boolean' }, priority: { type: 'string' }, labels: { type: 'array', items: { type: 'string' } } } } },
+  { name: 'ziwei_create_task', description: '创建任务；试运行时 employeeId + execute:true，沿用员工明确配置并校验目标电脑、CLI 和 profile。回读 ziwei_get_task/ziwei_get_action 确认真正执行结果。使用稳定 idempotencyKey 避免重复任务。', inputSchema: { type: 'object', required: ['title'], properties: { title: { type: 'string' }, description: { type: 'string' }, employeeId: { type: 'string' }, assignee: { type: 'string' }, targetDeviceId: { type: 'string' }, runtime: { type: 'string' }, runtimeProfile: { type: 'string' }, execute: { type: 'boolean' }, idempotencyKey: { type: 'string' }, priority: { type: 'string' }, labels: { type: 'array', items: { type: 'string' } } } } },
   { name: 'ziwei_list_documents', description: '列出指定紫薇工作区的文档。', inputSchema: { type: 'object', properties: {} } },
   { name: 'ziwei_read_document', description: '读取紫薇工作区内的文档。', inputSchema: { type: 'object', required: ['id'], properties: { id: { type: 'string' } } } },
   { name: 'ziwei_write_document', description: '在紫薇工作区创建文档，或更新已有文档。', inputSchema: { type: 'object', required: ['name'], properties: { id: { type: 'string' }, name: { type: 'string' }, type: { type: 'string' }, content: { type: 'string' }, mimeType: { type: 'string' }, parentId: { type: 'string' } } } }
@@ -55,7 +61,7 @@ export function createMcpClient(options = {}) {
     const url = new URL(`${config.baseUrl}${route}`);
     for (const [key, value] of Object.entries(query || {})) if (value !== undefined && value !== null && value !== '') url.searchParams.set(key, String(value));
     const headers = { authorization: `Bearer ${config.token}`, accept: 'application/json' };
-    const init = { method, headers };
+    const init = { method, headers, redirect: 'error', signal: AbortSignal.timeout(30_000) };
     if (body !== undefined) { headers['content-type'] = 'application/json'; init.body = JSON.stringify(body); }
     const response = await fetchImpl(url, init);
     const text = await response.text();
@@ -66,15 +72,21 @@ export function createMcpClient(options = {}) {
   }
   return {
     async health() { return request('GET', `${workspacePath}/health`); },
+    async discoverEnvironment(input) { return request('GET', `${workspacePath}/discovery`, undefined, input); },
+    async getEmployee(input) { return request('GET', `${workspacePath}/employees/${encodeURIComponent(input.id)}`); },
+    async getEmployeeMcpStatus(input) { return request('GET', `${workspacePath}/employees/${encodeURIComponent(input.id)}/mcp/status`); },
+    async createHermesProfile(input) { return request('POST', `${workspacePath}/hermes/profiles/requests`, input); },
+    async getAction(input) { return request('GET', `${workspacePath}/actions/${encodeURIComponent(input.id)}`); },
+    async getTask(input) { return request('GET', `${workspacePath}/tasks/${encodeURIComponent(input.id)}`); },
     async listEmployees() { return request('GET', `${workspacePath}/employees`); },
     async createEmployee(input) { return request('POST', `${workspacePath}/employees`, input); },
     async updateEmployee(input) { const { id, ...patch } = input; return request('PATCH', `${workspacePath}/employees/${encodeURIComponent(id)}`, patch); },
     async listTasks(input) { return request('GET', `${workspacePath}/tasks`, undefined, input); },
     async createTask(input) { return request('POST', `${workspacePath}/tasks`, input); },
     async listDocuments() { return request('GET', `${workspacePath}/documents`); },
-    async readDocument(input) { return request('GET', `/mcp/v1/documents/${encodeURIComponent(input.id)}`); },
+    async readDocument(input) { return request('GET', `${workspacePath}/documents/${encodeURIComponent(input.id)}`); },
     async writeDocument(input) {
-      if (input.id) { const { id, ...patch } = input; return request('PATCH', `/mcp/v1/documents/${encodeURIComponent(id)}`, patch); }
+      if (input.id) { const { id, ...patch } = input; return request('PATCH', `${workspacePath}/documents/${encodeURIComponent(id)}`, patch); }
       return request('POST', `${workspacePath}/documents`, input);
     }
   };
@@ -87,6 +99,12 @@ function textResult(value) {
 export function createMcpHandler(client) {
   const calls = {
     ziwei_mcp_health: args => client.health(args),
+    ziwei_discover_environment: args => client.discoverEnvironment(args),
+    ziwei_get_employee: args => client.getEmployee(args),
+    ziwei_get_employee_mcp_status: args => client.getEmployeeMcpStatus(args),
+    ziwei_create_hermes_profile: args => client.createHermesProfile(args),
+    ziwei_get_action: args => client.getAction(args),
+    ziwei_get_task: args => client.getTask(args),
     ziwei_list_employees: args => client.listEmployees(args),
     ziwei_create_employee: args => client.createEmployee(args),
     ziwei_update_employee: args => client.updateEmployee(args),
@@ -122,12 +140,29 @@ export async function runStdio(options = {}) {
   const handler = createMcpHandler(options.client || createMcpClient(options));
   const input = options.input || process.stdin;
   const output = options.output || process.stdout;
+  const auditFile = options.auditFile || process.env.ZIWEI_MCP_AUDIT_FILE;
+  if (auditFile && !path.isAbsolute(auditFile)) throw new Error('MCP 审计路径必须是本机绝对路径');
   const rl = readline.createInterface({ input, crlfDelay: Infinity });
   for await (const line of rl) {
     if (!line.trim()) continue;
     let message;
     try { message = JSON.parse(line); } catch { output.write(`${JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: -32700, message: '无效 JSON' } })}\n`); continue; }
     const response = await handler(message);
+    if (auditFile && ['initialize', 'tools/list', 'tools/call'].includes(message.method)) {
+      // Private runtime receipts contain protocol metadata and resource IDs only.
+      // Never persist arguments, prompts, authorization or arbitrary tool output.
+      let value = {};
+      try { value = JSON.parse(response?.result?.content?.find(item => item.type === 'text')?.text || '{}'); } catch {}
+      const ids = {};
+      const safeId = item => typeof item === 'string' && /^(employee|task|action|doc)[_-][A-Za-z0-9_-]{1,100}$/.test(item);
+      if (safeId(value.id)) ids.resourceId = value.id;
+      if (safeId(value.execution?.id)) ids.actionId = value.execution.id;
+      if (safeId(value.employee_id)) ids.employeeId = value.employee_id;
+      const event = { at: new Date().toISOString(), method: message.method, ...(message.method === 'tools/call' ? { toolName: String(message.params?.name || '').slice(0, 100) } : {}), ok: Boolean(response && !response.error && !response.result?.isError), requestId: typeof message.id === 'number' ? message.id : String(message.id ?? '').slice(0, 100), workspace: options.workspace || process.env.ZIWEI_MCP_WORKSPACE || '', ...ids };
+      fs.mkdirSync(path.dirname(auditFile), { recursive: true });
+      fs.appendFileSync(auditFile, `${JSON.stringify(event)}\n`, { mode: 0o600 });
+      try { fs.chmodSync(auditFile, 0o600); } catch {}
+    }
     if (response) output.write(`${JSON.stringify(response)}\n`);
   }
 }

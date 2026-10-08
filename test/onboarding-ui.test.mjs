@@ -89,9 +89,15 @@ test('tasks and conversations expose a target device contract', () => {
   assert.match(appSource, /创建并使用/);
 });
 
-test('employee creation keeps the four-agent runtime choice generic', () => {
+test('employee creation keeps runtime discovery generic and preserves an explicit runtime choice', () => {
   assert.doesNotMatch(appSource, /employeeForm = ref\(\{name:'',runtime:'Hermes'/);
-  assert.match(appSource, /runtime:runtimes\.value\[0\]\?\.name \|\| 'Codex'/);
+  assert.match(appSource, /employeeRuntimeChoices = computed\(\(\) => employeeSelectedDevice\.value\?\.runtimes/);
+  assert.match(appSource, /v-for="runtime in employeeRuntimeChoices"/);
+  assert.match(appSource, /function selectEmployeeRuntime\(name\) \{[\s\S]*?employeeForm\.value\.runtime=name/);
+  assert.match(appSource, /runtime:employee\?\.runtime \|\| 'Codex'/);
+  assert.doesNotMatch(appSource, /employeeForm\.value\.runtime\s*=\s*runtimes\.value\[0\]/);
+  assert.match(appSource, /employeeReadiness\(managementDiscovery\.value,[\s\S]*?runtime:employeeForm\.value\.runtime/);
+  assert.match(appSource, /if \(!employeeReady\.value\.ready\) return notify/);
 });
 
 test('Windows device instructions are valid for cmd.exe quoting', () => {

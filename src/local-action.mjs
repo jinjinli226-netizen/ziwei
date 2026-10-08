@@ -344,11 +344,13 @@ function runCommand({runtimeDir, action, executable, baseArgs = [], allowedExecu
  * Unknown/unsupported actions fail loudly so the cloud never sees a fake
  * success merely because an action was accepted by the daemon.
  */
-export function createLocalActionExecutor({runtimeDir, allowedExecutables = [], executorCommand = null, executorArgs = [], defaultRuntime = null, hermesHomePath = null} = {}) {
+export function createLocalActionExecutor({runtimeDir, allowedExecutables = [], executorCommand = null, executorArgs = [], defaultRuntime = null, hermesHomePath = null, managementMcpConfig = {}, workspace = null, apiBase = null, deviceId = null} = {}) {
   if (!runtimeDir) throw new TypeError('runtimeDir is required');
   fs.mkdirSync(runtimeDir, {recursive: true});
   return async (action, context = {}) => {
     const type = String(action?.type || '');
+    if (action?.payload?.deviceId && deviceId && action.payload.deviceId !== deviceId) throw new Error('执行目标设备与本机已配对设备不一致；不会回退其他设备');
+    if (action?.workspace && workspace && action.workspace !== workspace) throw new Error('执行工作区与本机已配对工作区不一致');
     if (type === 'directory.inspect' || type === 'device.directory.inspect') {
       const payload = action.payload || {};
       return {
@@ -389,7 +391,8 @@ export function createLocalActionExecutor({runtimeDir, allowedExecutables = [], 
         prompt: promptWithAttachments,
         attachments: attachmentPaths,
         cwd: safeCwd,
-        env: payload.env,
+        env: { ...(payload.env || {}), ...(hermesHomePath ? { HERMES_HOME: hermesHomePath } : {}) },
+        managementMcp: { request: payload.managementMcp, config: managementMcpConfig, workspace, apiBase, auditDirectory: path.join(runtimeDir, 'management-mcp-audit'), actionId: action.id },
         signal: context.signal,
         onOutput: context.onOutput,
         onProgress: context.onProgress,
