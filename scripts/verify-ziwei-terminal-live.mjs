@@ -113,9 +113,10 @@ try {
         assert.equal(await register.evaluate(element => document.activeElement === element), true, 'modal did not restore trigger focus');
         await register.click(); dialog = page.getByRole('dialog', { name: '登记手机', exact: true }); await dialog.getByRole('button', { name: '关闭', exact: true }).click(); await poll(async () => await page.getByRole('dialog').count() === 0, 'close button did not close register modal');
         const navigation = page.getByRole('complementary', { name: '工作区导航' });
-        // Narrow sidebar hides labels visually, while buttons retain their names.
-        await navigation.getByRole('button', { name: '团队管理', exact: true }).click(); await poll(() => page.url().endsWith(`/${session.workspace}/members`), 'members navigation failed');
-        await navigation.getByRole('button', { name: '紫薇·互联', exact: true }).click(); await page.getByTestId('android-devices').waitFor(); await page.getByTestId('enrollment-empty').waitFor();
+        // The existing narrow sidebar hides its text spans; locate their real
+        // parent buttons by DOM text and click the visible icon buttons.
+        await navigation.getByRole('button').filter({ hasText: /^团队管理$/ }).click(); await poll(() => page.url().endsWith(`/${session.workspace}/members`), 'members navigation failed');
+        await navigation.getByRole('button').filter({ hasText: /^紫薇·互联$/ }).click(); await page.getByTestId('android-devices').waitFor(); await page.getByTestId('enrollment-empty').waitFor();
         await capture(page, `terminal-return-${viewport.label}.png`);
       } catch (error) { await capture(page, `failure-${viewport.label}.png`).catch(() => {}); throw error; }
       finally { await context.close(); }

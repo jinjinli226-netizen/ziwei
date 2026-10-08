@@ -2,6 +2,37 @@
 
 本文件只记录可追溯的项目级变更摘要；详细设计、验证命令和未完成边界见 [PROJECT_MANAGEMENT.md](PROJECT_MANAGEMENT.md)。
 
+## 2026-10-08 紫薇·互联完整终端管理（主站与源归档兼容均已发布）
+
+### Added
+
+- 主站“紫薇·互联”复用原完整终端页面，提供左右手机列表与详情、待审批准/拒绝及加载/提交/成功/失败/空/过期态、双端健康、手动登记和配置下载、原像素截图操控、控制端切换/暂停、回执核实、APK 选择及双端升级、归档。
+- 当前手机绑定已有数字员工和外部账号；保留原员工动作、执行记录和诊断。主站工作区代理使用原登录与 Owner/Admin 权限，管理凭据留服务端，复用原手机配对、状态数据库和 MCP/设备协议。
+
+### Fixed
+
+- summary 省略终态回执造成历史消失和升级预检超时：刷新后读取完整详情，升级预检按捕获手机 ID 校验成功截图；离页后停止后续升级提交。
+- delivered/executing 不再提前停止员工运行轮询；acknowledged 保持人工核实语义，终端核实会同步旧运行记录；批准与归档成功提示、首条其他手机绑定混入当前账号等问题同时修复。
+
+### Verification
+
+- `npm test -- --test-concurrency=1`：189/189；lint/build 通过。
+- 源归档兼容 Android/terminal-console 测试 36/36、生产 build 通过；覆盖旧 schema 迁移、归档安全阻断、双角色凭据失效及历史保留。
+- 默认并发运行在构建 CPU 负载下曾触发既有 daemon 60 ms/100 ms 计时测试失败；隔离 daemon 7/7、完整串行 189/189 通过，没有修改 daemon。
+- 隔离真实 HTTP/SQLite 协议验证 6 组、合成浏览器 6/6；覆盖原管理页面、审批状态、完整回执、精确 summary 契约、升级预检/离页停止、员工绑定隔离和窄屏弹窗。
+- 真实域名只读浏览器使用主站 Owner cookie 验证 1440/390 px、匿名 401/登录 200、无需源登录、页面/弹窗/导航；0 page/console/request 错误、0 真实设备动作。证据 `.local/terminal-live-evidence/results.json`，真实手机 0/待审 0。
+
+### Release
+
+- 主站提交 `a625350b23926597810fe5181741937933303170` 已推送 `origin/codex/ziwei-terminal-console`，服务器 `/opt/ziwei/current -> /opt/ziwei/releases/a625350`；旧版本 `f88d6f8`，前端 `index-noIbPxU1.js`。
+- 部署前双 SQLite/config 备份 `/opt/ziwei-backups/terminal-console/20261008T122923Z`，integrity 检查通过；原数据 symlink、凭据、APK/`dist/downloads` 保留。
+- 源归档兼容提交 `8a4fe59f0b2486fb584962fd3006e9a47418037a` 已推送 `origin/codex/phone-archive-compat` 并于 `2026-10-08T12:47:46Z` 部署，`current -> releases/8a4fe59`，服务 active/health 200，兼容列真实存在、手机 0。第二备份 `/opt/ziwei-backups/terminal-console/20261008T124627Z` 含 12 配置与两份 SQLite，integrity 均通过。增量仅 `archived_at` 兼容迁移及原归档行为，保留历史、撤销双角色凭据并隐藏手机；原下载/数据/依赖目录继续链接，旧 `af63071` 兼容额外列，可用于代码回滚。
+- 源更新后最终生产复核（`2026-10-08T12:49:03Z`）：真实域名 6 检查/5 探针全部通过；两端 health=true，主站/控制/Nginx 三服务 active，归档列存在、手机 0。1440/390 px 无溢出，0 page/console/request 错误、0 设备动作。APK manifest 与双端下载 200，815470/815474 bytes，SHA-256 均匹配；临时 QA 会话已撤销，服务器/本机临时 token 文件已删除。证据 `.local/terminal-live-evidence/deployment.json`。
+
+### Deferred
+
+- 实机 APK 安装、申请获批后自动领取配置、双端心跳、真实屏幕操作与升级仍待手机验收。未改 DNS/子域名或本机 daemon/配置/数据；本机 `20242` PID `33260`、工作区 `test_222` 本轮仅只读核对。
+
 ## 2026-10-06 Hermes Profile 与 Codex 风格会话工作区（已发布）
 
 ### Added

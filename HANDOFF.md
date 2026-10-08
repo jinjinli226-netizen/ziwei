@@ -2,7 +2,21 @@
 
 > **当前维护入口**：请先阅读根目录 [PROJECT_MANAGEMENT.md](PROJECT_MANAGEMENT.md)。本文保留阶段性交接时间线；其中较早的验证数字和“待完成”描述可能已经过时，当前状态以项目管理手册、代码和最近一次真实验证为准。
 
-> **当前接管状态（2026-10-06）**：本地 checkout、5178 前端、4178 API 和项目 `data/ziwei_user.json` 是 `bjc-ops` 的本地代码验收环境；真实本机 `ziwei_user` daemon 由全局命令启动，使用用户目录配置连接 `https://qzelynth.top` 的服务器工作区 `test_222`。不要把项目配置或项目 daemon 当成服务器 daemon；接手时分别核对用户目录配置、项目配置和各自 `/readyz`。详细维护约定统一见 `PROJECT_MANAGEMENT.md`。
+> **当前接管状态（2026-10-08）**：本地 checkout、5178 前端、4178 API 和项目 `data/ziwei_user.json` 是 `bjc-ops` 的本地代码验收环境；真实本机 `ziwei_user` daemon 由全局命令启动，使用用户目录配置连接 `https://qzelynth.top` 的服务器工作区 `test_222`。不要把项目配置或项目 daemon 当成服务器 daemon；接手时分别核对用户目录配置、项目配置和各自 `/readyz`。详细维护约定统一见 `PROJECT_MANAGEMENT.md`。
+
+## 2026-10-08 接手续记：主站完整终端控制台
+
+- 主站功能提交 `a625350b23926597810fe5181741937933303170` 已推送 `origin/codex/ziwei-terminal-console` 并上线；`/opt/ziwei/current -> /opt/ziwei/releases/a625350`，上一个发布为 `f88d6f8`。前端 `index-noIbPxU1.js`。原控制服务提交 `8a4fe59f0b2486fb584962fd3006e9a47418037a` 已推送 `origin/codex/phone-archive-compat` 并于 `2026-10-08T12:47:46Z` 部署至 `/opt/ziwei-control/releases/8a4fe59`；第二次部署前备份为 `/opt/ziwei-backups/terminal-console/20261008T124627Z`（12 配置、两份 SQLite，integrity 均通过；mainBefore=`a625350`、sourceBefore=`af63071`）。
+- 用户登录主站后，进入左侧“系统 → 紫薇·互联”；手机工作区为 `https://qzelynth.top/phone_ai/ziwei-connect`。Owner/Admin 可以在“待审核入网”直接批准/拒绝手机，无需再登录原中控。手机连接页填本站 HTTPS 根地址后提交申请，获批后沿原配对协议自动取 Agent/Updater 配置。
+- `frontend/src/components/terminal/TerminalConsole.vue` 实质复用原完整手机管理页：列表/详情、双端健康、手动登记配置、截图操控、控制端、回执核实、升级和归档；App 内的当前手机插槽绑定已有员工与账号，原员工运行记录及诊断保留。API 通过主站工作区身份代理，管理员凭据不发给浏览器，手机状态与命令仍由原控制服务保存。
+- 重点维护：不要把列表 summary 当完整回执；它会省略成功命令与结果。当前刷新串行读取完整详情，升级预检直接按捕获的手机 ID 读取成功截图与新画面，离页后不再提交升级。acknowledged 表示人工核实，不能标成 succeeded 或重放；delivered/executing 需继续轮询。
+- 发布前双 SQLite 与配置备份：`/opt/ziwei-backups/terminal-console/20261008T122923Z`，integrity 检查通过。真实数据及原 `data/.local/node_modules` symlink、服务端凭据、既有 APK/`dist/downloads` 均保留；不改 DNS/子域名，不启停本机 daemon、不切换配置、不新增本机业务实例。
+- 源 `af63071` 复核缺少归档 API 和 `archived_at`。源增量只补归档与兼容列，保留历史、撤销双角色凭据和配对授权、从列表隐藏。源 `8a4fe59` 已 active/health 200，兼容列真实存在，手机数 0；只重启原控制服务，主站/Nginx 未为此重启，源 `node_modules/.local/data/dist/downloads` 链接原目录以保留 APK/CLI。旧 `af63071` 可兼容额外列，代码回滚不会自动恢复撤销的凭据。
+- 验证：主站完整串行测试 189/189、lint/build 通过；隔离真实 HTTP/SQLite 6 组、合成浏览器 6/6 通过。默认并发运行在构建 CPU 负载下曾触发既有 daemon 60 ms/100 ms 计时测试失败，隔离 daemon 7/7 与全套串行复核通过，未改 daemon。
+- 真实域名只读浏览器：`.local/terminal-live-evidence/results.json`，1440/390 px、主站 Owner cookie、匿名 401/登录 200/直接源管理 401，无源登录，0 page/console/request 错误、0 设备动作；真实手机和待审均为 0。实机 APK 安装、自动领取配置、双端心跳、屏幕控制和升级仍未验证。
+- 源更新后的最终生产复核已完成（`2026-10-08T12:49:03Z`）：真实域名 6 检查/5 探针全部通过，Owner 200/匿名 401/源直接 API 401，1440/390 px 无溢出，0 page/console/request 错误、设备动作 0。`.local/terminal-live-evidence/deployment.json` 记录两端 health=true、三服务 active、归档兼容列存在、手机 0；v0.4.4/code 15 manifest 与 Agent/Updater APK GET 均 200，APK 分别 815470/815474 bytes，SHA-256 匹配清单。临时 QA 会话已撤销，服务器/本机临时 token 文件已删除，没有额外登录残留。
+- 当前本机 daemon 只读事实：`20242`、PID `33260`、工作区 `test_222`。下文旧 PID/部署条目仅是历史记录。原有 dirty 文件和 `tmp_gzgov.html` 保留，禁止 reset/clean 覆盖。
+- 回滚：主站切回 `f88d6f8` 发布 symlink，源端需要时切回 `af63071`，仅重启对应既有服务；恢复数据库前核对对应备份和发布后的有效数据。详细版本、协议、证据和边界见 [PROJECT_MANAGEMENT.md](PROJECT_MANAGEMENT.md) 与 [本轮实施记录](docs/plans/2026-10-08-ziwei-terminal-integration.md)。
 
 这份文档用于把当前工作交给 Claude 继续。项目根目录是：
 
