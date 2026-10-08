@@ -9,7 +9,7 @@ export const API_BASE = resolveApiBase({
 const WORKSPACE_KEY = 'ziwei.workspace';
 function workspaceSlugFromPathname(pathname = typeof window === 'undefined' ? '' : window.location.pathname) {
   const first = String(pathname || '').split('/').filter(Boolean)[0] || '';
-  if (!first || ['invite', 'me', 'api'].includes(first)) return '';
+  if (!first || ['invite', 'me', 'api', 'android-install'].includes(first)) return '';
   try { return decodeURIComponent(first).trim(); } catch { return ''; }
 }
 export function workspaceSlug() {

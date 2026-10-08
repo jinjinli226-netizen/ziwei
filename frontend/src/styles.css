@@ -43,6 +43,9 @@
 }
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 1060px; background: var(--ziwei-bg); }
+.ziwei-connect-install-link { display:inline-flex; align-items:center; justify-content:center; gap:7px; min-height:38px; padding:8px 14px; border:1px solid #2f6fca; border-radius:8px; background:#2f6fca; color:#fff; text-decoration:none; font-size:13px; font-weight:600; white-space:nowrap; }
+.ziwei-connect-install-link:hover { background:#255fac; }
+.ziwei-connect-install-link:focus-visible { outline:3px solid #a8c3e9; outline-offset:3px; }
 :root[data-theme="dark"] body,
 :root[data-theme="dark"] .workspace-shell { background: var(--ziwei-bg); color: var(--ziwei-ink); }
 :root[data-theme="dark"] .workspace-topbar,

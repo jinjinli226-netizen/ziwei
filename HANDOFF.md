@@ -4,6 +4,15 @@
 
 > **当前接管状态（2026-10-08）**：本地 checkout、5178 前端、4178 API 和项目 `data/ziwei_user.json` 是 `bjc-ops` 的本地代码验收环境；真实本机 `ziwei_user` daemon 由全局命令启动，使用用户目录配置连接 `https://qzelynth.top` 的服务器工作区 `test_222`。不要把项目配置或项目 daemon 当成服务器 daemon；接手时分别核对用户目录配置、项目配置和各自 `/readyz`。详细维护约定统一见 `PROJECT_MANAGEMENT.md`。
 
+## 2026-10-08 接手续记：公开 Android 安装页（开发验收通过，未由本会话发布）
+
+- 基于 `c91f331`（包含 `a625350` 完整终端管理）在 `codex/ziwei-android-install` 增量开发，工作树为 `C:\Users\25941\.codex\worktrees\android-install\灵光爸爸拆解`。保留下文全部部署历史；交付提交号以分支 Git 历史为准，线上发布由 T6 单独记录。
+- 公开安装路径为 `https://qzelynth.top/android-install`，无需登录；主站“紫薇·互联”标题栏提供“安装手机端”。安装页独立于认证初始化，并保留安全工作区返回链接。未修改后端认证、工作区权限或手机管理 API 的登录保护。
+- Agent/Updater 两个下载入口读取真实 `/downloads/android/index.json` 与对应 manifest，选择当前最大 `versionCode`，显示真实版本与大小，不固定 `v0.4.4`。所有发布路径限制在正式 HTTPS 域名下；二维码本地生成，固定指向不含工作区凭据的公开安装地址。
+- 首次安装两个应用，在手机确认安装来源及必要系统权限；两应用“连接配置”的“HTTPS 中控根地址”填 `https://qzelynth.top`，填相同手机名分别申请入网；管理员回主站“待审核入网”批准，在线后绑定已有数字员工。后续更新沿用原中控，不增加角色 token/JSON 手工导入作为默认步骤。
+- 最终开发验证：helper 18/18、完整串行测试 207/207、lint/build、安装页浏览器 9/9 与原终端浏览器回归 6/6 均通过。390/1440px 无横向溢出，复制成功/拒绝回退、二维码实际像素解码、错误/重试/空包/缺角色/iOS及主站登录边界通过；真实公开两 APK 由浏览器点击下载，大小与 SHA-256 与当次清单一致。安装页证据 `.local/android-install-evidence/results.json`、4 张截图，终端回归 `.local/android-install-terminal-regression/results.json`。这些验证不代表新页面已经上线或真实手机安装/授权成功；没有未知设备动作或审批。
+- **T6 是本轮唯一发布执行方**，本会话不独立部署、不改 Nginx、不切 release。T6 发布必须保留既有 `/downloads/android/` 及下载代理，核实 `/android-install` 与尾斜杠通过 SPA fallback 返回 HTML；不要用主站新构建覆盖已有 APK。无需改控制数据库或手机/升级协议。详见 [安装页实施记录](docs/plans/2026-10-08-android-install.md)。
+
 ## 2026-10-08 接手续记：主站完整终端控制台
 
 - 主站功能提交 `a625350b23926597810fe5181741937933303170` 已推送 `origin/codex/ziwei-terminal-console` 并上线；`/opt/ziwei/current -> /opt/ziwei/releases/a625350`，上一个发布为 `f88d6f8`。前端 `index-noIbPxU1.js`。原控制服务提交 `8a4fe59f0b2486fb584962fd3006e9a47418037a` 已推送 `origin/codex/phone-archive-compat` 并于 `2026-10-08T12:47:46Z` 部署至 `/opt/ziwei-control/releases/8a4fe59`；第二次部署前备份为 `/opt/ziwei-backups/terminal-console/20261008T124627Z`（12 配置、两份 SQLite，integrity 均通过；mainBefore=`a625350`、sourceBefore=`af63071`）。

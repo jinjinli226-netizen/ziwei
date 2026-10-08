@@ -14,6 +14,16 @@
 >
 > **工作树保护**：本轮在 `C:\Users\25941\.codex\worktrees\2884\灵光爸爸拆解` 接续原有前端修改；已有 `.domain-occurrences.txt`、`.local-ziwei-readonly-evidence.json` 和 `tmp_gzgov.html` 均保留。不要执行 reset、clean 或覆盖式 checkout。未改 DNS、未新建子域名，也没有为了验收新增本机业务服务实例。
 
+### 2026-10-08 紫薇·互联公开 Android 安装页（开发验收通过，待 T6 统一发布）
+
+- **基线与工作树**：在 `codex/ziwei-android-install` 上基于 `c91f331` 开发，包含已发布的 `a625350` 完整终端控制台；工作树为 `C:\Users\25941\.codex\worktrees\android-install\灵光爸爸拆解`。本节记录安装页增量，不覆盖下方既有发布历史或假定线上已切换版本。
+- **入口与认证**：公开地址为 `https://qzelynth.top/android-install`（同时识别尾斜杠），不要求登录；主站“系统 → 紫薇·互联”标题栏提供“安装手机端”入口并保留安全工作区上下文。安装页在登录展示之前独立渲染，跳过该页认证与工作区加载；`android-install` 是工作区保留路径。返回手机管理仍由原主站登录流程接管，未修改 `backend/auth.mjs`、API 认证白名单、工作区成员或 Owner/Admin 权限。
+- **发布数据与下载**：两个大按钮分别下载“紫薇 Agent（手机操作）”与“紫薇 Updater（更新与维护）”。数据来自实际 `/downloads/android/index.json` 及对应 manifest，按 `versionCode` 选当前最新发布并显示版本与包大小，不永久写死 `v0.4.4`。仅接受正式 HTTPS 域名下的 Android 发布路径；显示加载中、读取失败/重试、无包、缺角色包与平台不支持状态。Android User-Agent 可能隐藏真实系统版本，页面不会仅因其中出现 `Android 10` 而禁用安卓下载。
+- **二维码与首次接入**：二维码由 `scripts/generate-android-install-qr.mjs` 在本地生成，内容固定为不带凭据的 `https://qzelynth.top/android-install`。首次在同一手机安装双应用，确认安装来源及必要无障碍/通知/后台权限；两应用“连接配置”的“HTTPS 中控根地址”填 `https://qzelynth.top`，同名分别点“申请入网权限”；管理员回“待审核入网”批准，在线后绑定已有数字员工。复制反馈不替换必要操作说明。后续更新仍用原中控，网页不会代替用户确认安卓授权。
+- **已验证与交付边界**：下载数据 helper 18/18、完整串行测试 207/207、lint/build 通过。安装页构建产物浏览器 9/9、原完整终端浏览器回归 6/6；匿名页面无认证/工作区 API 请求，主站/相似路由仍登录保护。390/1440px 无横向溢出，剪贴板成功及拒绝回退、二维码像素解码、动态发布切换和异常状态通过。浏览器真实下载公开 code15/v0.4.4 两 APK，大小 815470/815474 B，SHA-256 与清单一致。证据为 `.local/android-install-evidence/results.json`、4 张截图及 `.local/android-install-terminal-regression/results.json`。只读公开下载不代表新页面上线或真实手机安装；无实机授权、入网、升级和生产数据写入。最终结果见 [本轮实施记录](docs/plans/2026-10-08-android-install.md)，交付版本按本分支 Git 历史核对。
+- **发布唯一执行方**：本会话只开发、验证、推送，T6 负责唯一服务器发布，避免并发切换 release；本轮未独立部署、修改 Nginx 或切换运行服务。T6 发布时保留原 `/downloads/android/` 资源与下载代理，并确认 `/android-install`、`/android-install/` 经既有 SPA fallback 返回 HTML；不能用新主站 `dist` 覆盖已有 APK。无需修改控制服务、手机协议、升级协议或数据库。
+- **回滚边界**：本轮没有数据库迁移。需要回滚时回退安装页前端与新增资源，保留 APK、原控制服务、认证规则及既有数据；最终上线版本、备份和服务证据由 T6 发布后补记。
+
 ### 2026-10-08 紫薇·互联完整终端管理（主站与源归档兼容均已发布）
 
 - **用户入口**：登录 `https://qzelynth.top`，在工作区左侧“系统 → 紫薇·互联”打开；手机工作区正式地址为 `https://qzelynth.top/phone_ai/ziwei-connect`。主站 Owner/Admin 使用同一登录即可审批和管理手机，不需要再登录原中控。
