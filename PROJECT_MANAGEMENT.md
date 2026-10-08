@@ -4,11 +4,20 @@
 >
 > **当前发布接续工作树**：`C:\Users\25941\.codex\worktrees\2884\灵光爸爸拆解`。原 `D:\灵光爸爸拆解` 保留用户修改，不作为本轮发布来源。
 >
-> **文档状态**：以 2026-10-09 管理 MCP 最终验收及发布状态为准；每次结构、运行方式或功能边界发生变化时必须更新本文。
+> **文档状态**：以 2026-10-09 团队卡片修复与管理 MCP 验收状态为准；每次结构、运行方式或功能边界发生变化时必须更新本文。
 
-### 2026-10-09 当前发布与管理 MCP
+### 2026-10-09 当前发布：团队员工卡片重叠修复
 
-- 主站 `4db30ce6d5cca2955d4e2a09103c55b53271ee36` 已推送 `origin/codex/ziwei-terminal-console` 并于北京时间 00:28:55 上线 `/opt/ziwei/releases/4db30ce`；管理 MCP 后端/daemon 实现来自 `bef1944d67d62be1b316ef1a9533d53a13a4bb63`，此前于 00:03:50 发布并仅重启主 API。后续 Escape（4acfeb4，00:14:28）和窄屏标题前端修复均核对 backend/daemon/src/package 逐字节不变，未重启服务。控制端保持 `/opt/ziwei-control/releases/8a4fe59`，前端为 `index-Bebxc5Te.js` / `index-DejeXhlj.css`，旧 hash 与 APK 均保留。
+- 主站当前为 `dc3917341cd801d4e83bda8da24fe794d35f23f2`，已推送 `origin/codex/ziwei-terminal-console`，北京时间 00:50:22 发布 `/opt/ziwei/releases/dc39173`；前端 `index-PEvi9Z0Z.js` / `index-DyDgRE0D.css`。控制端仍为 `8a4fe59`。
+- 用户截图中的长指令卡片已在旧生产复现：最高 787px，组织区固定 500px，下方设备表从卡片中间开始。修复让两处员工列表使用最多两行岗位摘要，完整 instructions 保留在详情和编辑；组织图按卡片排数自然增长，末排菜单有预留空间，390px 环境员工行文字不再被挤到 0px。
+- 完整串行 235/235、lint 43 files、build、隔离卡片 12/12、MCP UI 6/6，以及真实 HTTPS 四视口 8/8 通过。真实三卡高度统一 126px，环境区与末卡间距 32px，布局/详情检查无页面、控制台、请求错误和写请求。390px 顶部四个管理按钮仍有既有裁切，未包含在此次卡片修复结论中。
+- 发布前备份 `/opt/ziwei-backups/terminal-console/20261008T164821Z` 含 12 配置和双 SQLite（integrity=ok）。后端、daemon、src 和 runtime package 逐字节一致，服务未重启，主 API PID52196、控制 PID44591、Nginx PID737；真实 daemon test_222/20242/PID49296/ready/MCP configured 保持正常。旧 hash、数据目录、APK 保留。当前前端回滚到 `4db30ce` 无需重启 API。
+- 后续团队页发布门槛：至少覆盖三名长指令员工、12 名多排员工、缺 description 的长指令和390px；必须测卡片边界、组织区高度、与环境区的间距及菜单实际命中，并核对完整指令。控制台无错误不能代替布局验收。此前合同测试对绝对定位/完整展开文本的错误约束已删除。
+- 完整证据、范围和临时 QA 清理见[团队卡片修复记录](docs/operations/2026-10-09-team-card-layout-fix.md)。下节管理 MCP 发布与更早版本均为历史快照。
+
+### 2026-10-09 管理 MCP 发布快照
+
+- 本节主站发布快照 `4db30ce6d5cca2955d4e2a09103c55b53271ee36` 已于北京时间 00:28:55 上线 `/opt/ziwei/releases/4db30ce`；管理 MCP 后端/daemon 实现来自 `bef1944d67d62be1b316ef1a9533d53a13a4bb63`，此前于 00:03:50 发布并仅重启主 API。后续 Escape（4acfeb4，00:14:28）和窄屏标题前端修复均核对 backend/daemon/src/package 逐字节不变，未重启服务。控制端保持 `/opt/ziwei-control/releases/8a4fe59`，当时前端为 `index-Bebxc5Te.js` / `index-DejeXhlj.css`，旧 hash 与 APK 均保留。
 - 全局客户端已从指向旧 D checkout 的 npm link 更新为实际打包安装 `D:\work\nodejs\node_global\node_modules\ziwei`。真实用户配置、API/workspace/device 凭据、工作目录和 `20242` 保留，仅新增私有 `managementMcp` 配置；独立刷新 `1700 → 49296` 后配置哈希不变、ready=true、工作区仍 `test_222`。不要用项目 `bjc-ops` daemon 替代这些证据。
 - 正式员工“紫薇员工搭建师”ID `employee_eddccbcf-3faa-4f55-a2f9-a12de9c679fe`，Codex / gpt-6.1-sol / zheng，职责与人格、真实技能、目标电脑、管理 MCP 均已保存。它的真实模型调用管理 MCP 创建两名 QA 员工和独立 Hermes profile；相同请求重试返回同 ID。两种 runtime 的首次任务及刷新后任务共 4 项实际 succeeded，握手、工具调用和结果标记齐全。QA 仅用于本轮验证，正式搭建师保留可用。
 - 开放平台 `/:workspace/open-platform` 展示 15 工具、API 健康、真实设备/运行环境和 stdio 接入。员工表单显式选择 runtime/device/profile，不静默回退；Hermes 管理 MCP 员工要求独立且 provider/auth 就绪的 profile。员工 MCP 页签按当前配置和实际 execution 证据展示状态，配置注入与 API 健康不能冒充加载或工具成功。

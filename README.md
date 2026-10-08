@@ -6,9 +6,13 @@
 
 开发、启动、架构、真实完成边界、扩展规范、故障排查、发布门槛和接手顺序统一维护在 [PROJECT_MANAGEMENT.md](PROJECT_MANAGEMENT.md)；项目级变更摘要见 [CHANGELOG.md](CHANGELOG.md)。需要把项目交给新 AI 时，直接使用 [NEW_AI_SESSION_PROMPT.md](NEW_AI_SESSION_PROMPT.md) 中的提示词。任何 AI 接手项目时先读维护手册，再读本文件和 `HANDOFF.md`；不要只依据旧截图或历史计划判断当前状态。
 
+## 团队员工卡片重叠修复（2026-10-09 已上线）
+
+当前主站发布为 `dc39173`。团队卡片和设备下员工行展示两行岗位摘要，完整指令保留在员工详情与编辑表单；多排卡片会撑高组织图，避免覆盖下方 Agent 环境。覆盖 1440/2048/2549/390px 的 12 组隔离布局测试、真实线上 8 项检查，以及完整串行 235/235 均通过。本次仅更新前端，服务未重启。原因、发布与回滚见[修复验收记录](docs/operations/2026-10-09-team-card-layout-fix.md)。
+
 ## 管理 MCP 与正式员工搭建师（2026-10-09 已上线）
 
-当前主站发布为 `4db30ce`（管理 MCP 实现 `bef1944`、profile 下拉框 Escape 与员工页窄屏标题修复），控制服务仍为 `8a4fe59`。登录后打开 [`test_222 / 开放平台`](https://qzelynth.top/test_222/open-platform)，可以查看真实的 15 项管理工具、工作区、设备发现与安全 stdio 接入示例；员工详情的 MCP 页签显示该员工实际执行的握手及工具调用回执。
+管理 MCP 实现为 `bef1944`，后续包含 profile 下拉框 Escape、员工页窄屏标题与团队卡片修复，控制服务仍为 `8a4fe59`。登录后打开 [`test_222 / 开放平台`](https://qzelynth.top/test_222/open-platform)，可以查看真实的 15 项管理工具、工作区、设备发现与安全 stdio 接入示例；员工详情的 MCP 页签显示该员工实际执行的握手及工具调用回执。
 
 正式员工 **紫薇员工搭建师** 已在 `test_222` 创建并接入管理 MCP，runtime 为 Codex，模型 `gpt-6.1-sol`，绑定电脑 `zheng`，挂载真实的“员工搭建与只读验收”技能。可在[员工详情](https://qzelynth.top/test_222/employee/employee_eddccbcf-3faa-4f55-a2f9-a12de9c679fe)进入对话，例如：“在 zheng 创建一个 Codex 员工，职责是只读检查工作区状态，人格严谨直白，挂载员工搭建与只读验收技能，启用管理 MCP，安排一次只读验收并回读结果。”如需 Hermes，将 runtime 明确写为 Hermes 并要求新建独立 profile；搭建师会先发现设备、CLI、认证/provider、profile 和技能，条件缺失时返回具体错误。
 

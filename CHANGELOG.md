@@ -2,12 +2,18 @@
 
 本文件只记录可追溯的项目级变更摘要；详细设计、验证命令和未完成边界见 [PROJECT_MANAGEMENT.md](PROJECT_MANAGEMENT.md)。
 
+## 2026-10-09 团队员工卡片重叠修复（已发布）
+
+- `dc39173` 修复完整 instructions 把组织卡片撑高并覆盖设备表的问题；卡片与环境员工行使用两行岗位摘要，完整指令保留在详情与编辑。组织列表按实际排数撑高，最后一排菜单仍可点击，390px 环境员工行文字恢复可读宽度。
+- 235/235、lint/build、1440/2048/2549/390px × 三员工/12员工/缺描述共 12 组隔离布局，MCP UI 回归 6/6，以及真实线上 8/8 均通过。线上卡片 787px → 126px，环境与末卡保持 32px 间距；0 写请求、0 设备动作。
+- 北京时间 00:50:22 发布，备份 `/opt/ziwei-backups/terminal-console/20261008T164821Z` 双库 integrity=ok、12 配置。runtime 字节一致，三服务及本机 daemon 均未重启。390px 顶部四管理按钮的既有裁切仍保留为范围边界。详见[修复记录](docs/operations/2026-10-09-team-card-layout-fix.md)。
+
 ## 2026-10-09 管理 MCP 与正式员工搭建师（已发布）
 
 - 管理实现 `bef1944`：15 项工作区管理 MCP 工具、持久幂等、真实设备/CLI/profile/认证发现、独立 bearer 作用域及 Codex/Hermes stdio 启动注入；凭据保存在 daemon 私有配置，真实握手/工具调用按 execution 审计并反馈到员工页。
 - 开放平台展示安全 stdio 接入、真实工具与配置状态；员工配置显式选择电脑/runtime/profile、独立人格和真实技能，Hermes 使用独立 profile，不静默回退。`4acfeb4` 修复 profile 下拉 Escape 关闭整个员工弹窗，`4db30ce` 修复窄屏员工标题被横向按钮挤成竖排。
 - 正式“紫薇员工搭建师”已在 test_222 接入；真实模型创建两名 QA 员工、独立 Hermes profile，各重复创建返回同 ID。首次及 daemon 刷新后共 4 项任务 succeeded、实际管理 MCP 工具成功。235/235、lint/build、隔离 UI 6/6、真实 HTTPS 1440/390 通过。
-- 当前主站 `/opt/ziwei/releases/4db30ce`，控制端仍 8a4fe59；原用户配置和 20242 保留，全局客户端已替换旧源码 link。双 SQLite/配置备份、旧 hash 与 APK 保留，未执行手机动作。完整 IDs、证据和限制见 [最终验收记录](docs/operations/2026-10-09-management-mcp-acceptance.md)。
+- 该轮主站 `/opt/ziwei/releases/4db30ce`，控制端仍 8a4fe59；原用户配置和 20242 保留，全局客户端已替换旧源码 link。双 SQLite/配置备份、旧 hash 与 APK 保留，未执行手机动作。完整 IDs、证据和限制见 [最终验收记录](docs/operations/2026-10-09-management-mcp-acceptance.md)。
 
 ## 2026-10-08 紫薇·互联公开 Android 安装页（已发布）
 
