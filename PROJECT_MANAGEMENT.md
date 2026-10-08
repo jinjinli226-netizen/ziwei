@@ -8,23 +8,25 @@
 
 > **当前工作区边界（2026-10-08）**：本地 checkout、本地 API/前端和项目 `data/ziwei_user.json` 属于 `bjc-ops` 的本地代码验收环境。真实本机 daemon 由全局 `D:\\work\\nodejs\\node_global\\ziwei_user` 启动，使用用户目录配置 `C:\\Users\\25941\\AppData\\Local\\Ziwei\\ziwei_user\\ziwei_user.json`，连接服务器 API `https://qzelynth.top` 的 `test_222` 工作区。不要把项目 `data/ziwei_user.json` 的 `bjc-ops` 配置或项目 daemon 当成服务器 daemon；开始操作前分别核对对应配置、端口和 `/readyz`。
 
-> **当前版本事实（2026-10-08）**：主站功能提交 `a625350b23926597810fe5181741937933303170` 已推送至 `origin/codex/ziwei-terminal-console` 并部署，`/opt/ziwei/current -> /opt/ziwei/releases/a625350`，发布前版本为 `f88d6f8`。完整终端管理页已在主站启用。原控制服务归档兼容提交 `8a4fe59f0b2486fb584962fd3006e9a47418037a` 已推送 `origin/codex/phone-archive-compat` 并部署，`/opt/ziwei-control/current -> /opt/ziwei-control/releases/8a4fe59`，发布前为 `af63071`；第二次部署前备份为 `/opt/ziwei-backups/terminal-console/20261008T124627Z`。
+> **当前版本事实（2026-10-08，北京时间 22:26:46 核验）**：主站安装页提交 `81b6ec8d0eb5693f3faf5eab88cd7ff2aeabdb00` 已快进合入并推送 `origin/codex/ziwei-terminal-console`，北京时间 22:23 切换 `/opt/ziwei/current -> /opt/ziwei/releases/81b6ec8`，上一个发布为 `a625350`。前端为 `index-BUxdmKav.js` / `index-C8foC8Iv.css`。原控制服务保持 `8a4fe59f0b2486fb584962fd3006e9a47418037a`，`/opt/ziwei-control/current -> /opt/ziwei-control/releases/8a4fe59`。最新发布前备份 `/opt/ziwei-backups/terminal-console/20261008T142230Z`；下方 `a625350/f88d6f8` 及旧验证记录均为分阶段历史，不能作为当前线上版本。
 >
-> **本机 daemon 当前只读核对**：全局 `ziwei_user` 仍使用 `test_222`，监听 `20242`、PID `33260`。本轮没有启动、停止、重装或切换 daemon，没有改它的配置与凭据。下方 2026-10-06 等旧条目中的 PID、版本和“当前”描述都是当时的历史记录，不代表本轮状态。
+> **本机 daemon 当前只读核对**：全局 `ziwei_user` 仍使用 `test_222`，监听 `20242`、PID `33260`，最新只读 `/readyz` 为 `ready=true`。本轮没有启动、停止、重装或切换 daemon，没有改它的配置与凭据。下方 2026-10-06 等旧条目中的 PID、版本和“当前”描述都是当时的历史记录，不代表本轮状态。
 >
-> **工作树保护**：本轮在 `C:\Users\25941\.codex\worktrees\2884\灵光爸爸拆解` 接续原有前端修改；已有 `.domain-occurrences.txt`、`.local-ziwei-readonly-evidence.json` 和 `tmp_gzgov.html` 均保留。不要执行 reset、clean 或覆盖式 checkout。未改 DNS、未新建子域名，也没有为了验收新增本机业务服务实例。
+> **工作树保护**：本轮在 `C:\Users\25941\.codex\worktrees\2884\灵光爸爸拆解` 接续原有前端修改；已有 `.domain-occurrences.txt`、`.local-ziwei-readonly-evidence.json` 和 `tmp_gzgov.html` 均保留。不要执行 reset、clean 或覆盖式 checkout。未改 DNS、未新建子域名，也没有为了验收新增本机业务服务实例。原 `D:\灵光爸爸拆解` 及源中控目录的 dirty/untracked 文件仍原样保留。
 
-### 2026-10-08 紫薇·互联公开 Android 安装页（开发验收通过，待 T6 统一发布）
+### 2026-10-08 紫薇·互联公开 Android 安装页（已发布并完成生产验收）
 
-- **基线与工作树**：在 `codex/ziwei-android-install` 上基于 `c91f331` 开发，包含已发布的 `a625350` 完整终端控制台；工作树为 `C:\Users\25941\.codex\worktrees\android-install\灵光爸爸拆解`。本节记录安装页增量，不覆盖下方既有发布历史或假定线上已切换版本。
-- **入口与认证**：公开地址为 `https://qzelynth.top/android-install`（同时识别尾斜杠），不要求登录；主站“系统 → 紫薇·互联”标题栏提供“安装手机端”入口并保留安全工作区上下文。安装页在登录展示之前独立渲染，跳过该页认证与工作区加载；`android-install` 是工作区保留路径。返回手机管理仍由原主站登录流程接管，未修改 `backend/auth.mjs`、API 认证白名单、工作区成员或 Owner/Admin 权限。
-- **发布数据与下载**：两个大按钮分别下载“紫薇 Agent（手机操作）”与“紫薇 Updater（更新与维护）”。数据来自实际 `/downloads/android/index.json` 及对应 manifest，按 `versionCode` 选当前最新发布并显示版本与包大小，不永久写死 `v0.4.4`。仅接受正式 HTTPS 域名下的 Android 发布路径；显示加载中、读取失败/重试、无包、缺角色包与平台不支持状态。Android User-Agent 可能隐藏真实系统版本，页面不会仅因其中出现 `Android 10` 而禁用安卓下载。
-- **二维码与首次接入**：二维码由 `scripts/generate-android-install-qr.mjs` 在本地生成，内容固定为不带凭据的 `https://qzelynth.top/android-install`。首次在同一手机安装双应用，确认安装来源及必要无障碍/通知/后台权限；两应用“连接配置”的“HTTPS 中控根地址”填 `https://qzelynth.top`，同名分别点“申请入网权限”；管理员回“待审核入网”批准，在线后绑定已有数字员工。复制反馈不替换必要操作说明。后续更新仍用原中控，网页不会代替用户确认安卓授权。
-- **已验证与交付边界**：下载数据 helper 18/18、完整串行测试 207/207、lint/build 通过。安装页构建产物浏览器 9/9、原完整终端浏览器回归 6/6；匿名页面无认证/工作区 API 请求，主站/相似路由仍登录保护。390/1440px 无横向溢出，剪贴板成功及拒绝回退、二维码像素解码、动态发布切换和异常状态通过。浏览器真实下载公开 code15/v0.4.4 两 APK，大小 815470/815474 B，SHA-256 与清单一致。证据为 `.local/android-install-evidence/results.json`、4 张截图及 `.local/android-install-terminal-regression/results.json`。只读公开下载不代表新页面上线或真实手机安装；无实机授权、入网、升级和生产数据写入。最终结果见 [本轮实施记录](docs/plans/2026-10-08-android-install.md)，交付版本按本分支 Git 历史核对。
-- **发布唯一执行方**：本会话只开发、验证、推送，T6 负责唯一服务器发布，避免并发切换 release；本轮未独立部署、修改 Nginx 或切换运行服务。T6 发布时保留原 `/downloads/android/` 资源与下载代理，并确认 `/android-install`、`/android-install/` 经既有 SPA fallback 返回 HTML；不能用新主站 `dist` 覆盖已有 APK。无需修改控制服务、手机协议、升级协议或数据库。
-- **回滚边界**：本轮没有数据库迁移。需要回滚时回退安装页前端与新增资源，保留 APK、原控制服务、认证规则及既有数据；最终上线版本、备份和服务证据由 T6 发布后补记。
+- **实现与入口**：T4 在 `codex/ziwei-android-install` 基于 `c91f331/a625350` 完成安装页，提交 `81b6ec8d0eb5693f3faf5eab88cd7ff2aeabdb00` 已由 T6 快进合入并推送主发布分支。公开地址 `https://qzelynth.top/android-install` 和尾斜杠均 200、无需登录；主站“系统 → 紫薇·互联”标题栏增加“安装手机端”，带安全工作区上下文。只放行精确安装路径，未修改后端认证、API 白名单、成员与 Owner/Admin 权限；返回手机管理仍要求主站登录。
+- **发布数据与首次接入**：Agent/Updater 两按钮从实际 `/downloads/android/index.json` 和对应 manifest 按最大 `versionCode` 选当前发布，显示真实版本、大小及包路径；拒绝外域、私网、路径穿越和带凭据参数的下载地址。覆盖加载、错误重试、空发布、缺角色及平台提示；Chromium 简化 UA 中的 `Android 10` 不会误禁安卓下载。二维码本地生成并固定指向无凭据公开安装页，复制中控根地址为 `https://qzelynth.top`。指引要求同一手机安装双应用、确认必要权限、两应用填写同一根地址和手机名后分别申请，再由管理员在原完整终端控制台批准并绑定已有数字员工；实机步骤仍待验收。
+- **发布与备份**：北京时间 22:23 发布 `/opt/ziwei/releases/81b6ec8`，备份 `/opt/ziwei-backups/terminal-console/20261008T142230Z` 记录 mainBefore=`a625350`、sourceBefore=`8a4fe59`，12 份配置与两份 SQLite integrity 均通过。backend 目录及 69 个运行时 lock 条目无变化；`jsqr`、`qrcode-generator` 仅为开发构建/QA 依赖，生产继续复用原 node_modules。不重启任何服务，不修改 Nginx、DNS、本机 daemon、控制端、数据或原 APK。
+- **缓存资产兼容**：新 dist 保留 `a625350` assets，并额外恢复 `f88d6f8` 的 `index-DI4MTrjS.js` / `index-Dh14YCcE.css`。旧首页文档合成重放曾因模块资源被 SPA fallback 返回 HTML 而白屏；发布后相同旧文档从生产真实 GET 旧 JS 333563 B、`application/javascript`，旧 CSS 172282 B、`text/css`，登录表单可见且无错误。该实验只证明并修复旧文档兼容缺陷，不能据此认定本次用户短暂白屏的根因。详见 [白屏只读排查记录](docs/operations/2026-10-08-white-screen-investigation.md)。后续前端发布继续保留缓存 HTML 引用的旧 hash 资产。
+- **开发验证**：下载 helper 18/18、T4 完整串行测试 207/207、安装页浏览器 9/9、原完整终端回归 6/6；本轮发布前 fresh lint 为 39 files、build 通过。覆盖复制成功/回退、二维码像素解码、动态发布与异常状态、390/1440 px 布局及原主站认证边界。开发记录 `.local/android-install-evidence/results.json`、`.local/android-install-terminal-regression/results.json` 保留。
+- **真实生产安装页**：`.local/install-live/results.json` 记录匿名 1440/390 px 两组通过；最新公开 code 15/v0.4.4、双包 815470/815474 B，HEAD/GET 与下载 SHA-256 均匹配清单；QR 实际渲染解码为 `https://qzelynth.top/android-install`，复制地址正确，返回管理受 401/登录保护。0 page/console/request 错误、无溢出、设备动作 0。`.local/install-live/main-entry.json` 另验证真实 Owner 主站点击安装入口→`/android-install?workspace=phone_ai`→返回同一 `phone_ai` 终端。
+- **真实生产终端与服务**：`.local/install-live/terminal/results.json` 记录 Owner 主站会话 6 检查/5 探针通过，手机 0、待审 0、错误 0；无需原中控登录。最终 `.local/install-live/deployment.json` 于北京时间 22:26:46 记录主站/控制端 health=true、主站/控制/Nginx 三服务 active，NRestarts 均 0；进程启动时间仍为主站当日 20:35、控制端当日 20:47、Nginx 北京时间当日 00:13:39（UTC 2026-10-07 16:13:39），安装页发布未重启服务。临时 QA 会话已撤销、剩余 0，服务器和本机 token 文件已删除。
+- **白屏事故边界**：用户恢复后才开始只读排查；当时当前 HTML/JS/CSS/API 与服务正常，无用户事故复现或直接关联证据，根因仍未证实。没有无依据重启、回退、改 DNS 或要求用户切网络。独立旧文档重放缺陷和修复证据见 `.local/outage-20261008/`、`.local/install-live/stale-assets/results.json`。
+- **回滚与未完成边界**：backend 未变，可只将前端 current symlink 切回 `/opt/ziwei/releases/a625350`，无需重启 API。保留原 data、控制服务、APK 与缓存旧 hash 资产；本轮无数据库迁移。实机安装、系统权限、申请/领取配置、双端心跳、真实操控及升级仍未验收。详细记录见 [安装页实施记录](docs/plans/2026-10-08-android-install.md)。
 
-### 2026-10-08 紫薇·互联完整终端管理（主站与源归档兼容均已发布）
+### 2026-10-08 紫薇·互联完整终端管理（较早阶段发布记录，当前版本见顶部）
 
 - **用户入口**：登录 `https://qzelynth.top`，在工作区左侧“系统 → 紫薇·互联”打开；手机工作区正式地址为 `https://qzelynth.top/phone_ai/ziwei-connect`。主站 Owner/Admin 使用同一登录即可审批和管理手机，不需要再登录原中控。
 - **审批流程**：手机 Agent/Updater 的“连接”页填写 `https://qzelynth.top`、名称并点击“申请入网”；网页“待审核入网”显示名称、角色、版本、申请和过期时间，管理员点击批准或拒绝。批准沿用原 `pairing_hash` 配对和双角色凭据，下发配置仍由手机自动领取。界面覆盖读取中、空申请、提交中、成功、错误和过期；响应实际为 rejected/expired 时不误报批准。

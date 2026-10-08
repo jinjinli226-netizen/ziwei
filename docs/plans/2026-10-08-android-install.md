@@ -1,8 +1,8 @@
 # 紫薇·互联 Android 安装页
 
-状态：页面与下载 helper 已实现，代码回归及构建后浏览器验收通过；本会话只开发验证并推送，T6 是唯一发布执行方，尚未由本会话上线。
+状态：已实现、推送、合入主发布分支并于北京时间 2026-10-08 22:23 上线；真实生产安装页、主站往返、完整终端与旧缓存资源兼容验收完成。实机手机安装及操作另待验收。
 
-基线：`c91f331`，包含 `a625350` 完整终端控制台；分支 `codex/ziwei-android-install`。提交号以该分支 Git 历史及交付记录为准。
+开发基线：`c91f331`，包含 `a625350` 完整终端控制台；T4 开发分支 `codex/ziwei-android-install`。最终提交 `81b6ec8d0eb5693f3faf5eab88cd7ff2aeabdb00` 已由 T6 快进合入并推送 `codex/ziwei-terminal-console`。
 
 ## 目标与边界
 
@@ -19,7 +19,7 @@
 
 ## 验收与交付
 
-验收日期为 2026-10-08。以下验证构建产物和现有公开 APK，不作为新页面已经上线或真实手机安装成功的证据。
+验收日期为 2026-10-08。下表为开发阶段构建产物和公开 APK 验证；页面实际上线与生产结果单列在后面的发布记录。任何浏览器下载验证均不代表真实手机安装或权限授权成功。
 
 | 项目 | 当前状态 | 最终结果 / 证据 |
 | --- | --- | --- |
@@ -29,8 +29,8 @@
 | 安装页浏览器验收 / 截图 | 9/9 通过 | `.local/android-install-evidence/results.json` 与 4 张截图 |
 | 原终端控制台浏览器回归 | 6/6 通过 | `.local/android-install-terminal-regression/results.json`，无 page error；3 个预期错误响应 |
 | 公网索引 / manifest / APK 只读验证 | 通过 | code15 / v0.4.4；Agent 815470 B，Updater 815474 B；真实浏览器下载 SHA-256 与清单一致 |
-| Git commit / push | 交付时按本分支 Git 历史核对 | `codex/ziwei-android-install` |
-| T6 统一服务器发布 | 本会话未执行 | T6 发布后回填版本、路由与服务证据 |
+| Git commit / push | 已完成 | `81b6ec8d0eb5693f3faf5eab88cd7ff2aeabdb00` 已快进进入并推送主发布分支 |
+| T6 统一服务器发布 | 已完成 | 北京时间 22:23 发布 `81b6ec8`；最终生产证据见下文 |
 
 已执行的验证范围与复验命令：
 
@@ -39,10 +39,42 @@
 - Chromium 的原生 `download` 请求可能绕过 Playwright 路由；默认不带 `--public-downloads` 时只核对下载链接与属性，不点击 APK。该参数明确允许真实匿名下载验证，并根据当次公开索引/manifest 核对内容，不能把真实下载误记为 fixture 文件。
 - 二维码本地生成：`node scripts/generate-android-install-qr.mjs`，实际像素解码为 `https://qzelynth.top/android-install`。
 - `node scripts/verify-ziwei-terminal-ui.mjs --output .local/android-install-terminal-regression` 复验完整终端；使用独立临时测试静态服务和合成 API，不连接真实手机。
-- 公网验证不写生产数据；页面/API 的 fixture 验收不等于新页面已经发布。没有执行真实手机安装、授权、入网或升级。
+- 开发阶段公网验证不写生产数据；fixture 验收与后面的生产上线记录分开，未执行真实手机安装、授权、入网或升级。
 - 提交并推送到 `codex/ziwei-android-install`，基于 `c91f331`（包含 `a625350` 完整终端）；不从旧分支覆盖当前终端功能。
-- **T6 唯一负责发布**：保留既有 `/downloads/android/` 静态资源、下载代理与 SPA fallback，确认 `/android-install` 和 `/android-install/` 返回安装页 HTML，不能被 API/认证规则拦截；新主站 `dist` 不覆盖 APK。当前会话不独立部署、不改 Nginx、不切 release、不启动或接管业务服务。
+- **发布协调已完成**：T4 开发与验证完成后，由 T6 统一发布，保留既有 `/downloads/android/`、下载代理及 SPA fallback；公开安装路径及尾斜杠均 200，新主站 dist 没有覆盖 APK。此次未改 Nginx、未重启或接管业务服务。
 
-## 风险与回滚
+## 实际发布与生产验收
 
-公开发布索引与 manifest 短暂不同步时不显示假下载按钮，显示可重试错误。页面无数据库迁移；回滚只回退本轮前端代码与资源，保留 APK 与原控制服务。
+| 项目 | 最终事实 |
+| --- | --- |
+| 主站 commit / release | `81b6ec8d0eb5693f3faf5eab88cd7ff2aeabdb00`；`/opt/ziwei/current -> /opt/ziwei/releases/81b6ec8` |
+| 发布时间 | 北京时间 2026-10-08 22:23；最终生产记录 22:26:46 |
+| 前端资源 | `index-BUxdmKav.js` / `index-C8foC8Iv.css` |
+| 原控制服务 | 保持 `8a4fe59`；不改 source/data/APK |
+| 发布前备份 | `/opt/ziwei-backups/terminal-console/20261008T142230Z`，mainBefore=`a625350`、sourceBefore=`8a4fe59`，12 配置、两份 SQLite integrity 均通过 |
+| 运行时兼容 | backend 目录和 69 个 runtime lock 条目无变化；jsqr/qrcode-generator 仅 dev 构建/QA，生产复用原 modules |
+| 服务操作 | 不重启任何服务，不改 Nginx/DNS/daemon；三服务 active/NRestarts 0，主站/控制 health=true |
+| 公开地址 | `https://qzelynth.top/android-install` 与尾斜杠均 200 |
+| 生产 APK | 最新 code15/v0.4.4；Agent 815470 B、Updater 815474 B；HEAD/GET/SHA-256 均匹配清单 |
+| QA 清理 | 临时 Owner 会话撤销，remaining 0，服务器/本机 token 文件删除 |
+
+真实生产证据：
+
+- `.local/install-live/results.json`：匿名安装页 1440/390 px 两组 passed，最新索引与清单/双 APK 大小正确、QR 实际渲染解码 canonical 安装 URL、复制根地址正确、返回管理 401/登录保护；0 page/console/request errors、无 overflow、真实设备动作 0。
+- `.local/install-live/main-entry.json`：真实 Owner 从完整终端点击“安装手机端”→`/android-install?workspace=phone_ai`→返回同一 `phone_ai/ziwei-connect`，实际 passed。
+- `.local/install-live/terminal/results.json`：主站 Owner 终端 6 检查/5 探针通过，手机 0、待审 0、错误 0，无源管理员二次登录和真实设备动作。
+- `.local/install-live/stale-assets/results.json`：合成旧 f88d6f8 HTML 配合生产未 mock GET，旧 JS 333563 B、application/javascript，CSS 172282 B、text/css；登录可见、0 errors。
+- `.local/install-live/deployment.json`：北京时间 22:26:46，两端 health=true、三服务 active、归档列存在、手机 0，服务未重启；主站启动仍当日 20:35、source 当日 20:47，Nginx UTC 10-07 16:13:39（北京时间 10-08 00:13:39），QA session remaining 0。
+- root fresh lint 39 files 与 build 通过；T4 完整测试 207/207、安装 UI 9/9、原终端 UI 6/6。
+
+## 白屏调查与缓存资产兼容
+
+用户先报告短暂白屏并自行恢复；之后只读排查没有复现实际用户事故，当前版本、服务、入口和资源正常，无直接根因证据。未为诊断无依据重启、回退或修改 DNS/网络。
+
+独立合成旧文档重放确认 f88d6f8 的 hash JS/CSS 在当时 a625 dist 中缺失，SPA fallback 返回 200 text/html，造成模块 MIME 白屏。安装页新发布保留 a625 assets，并补回 f88 的这两个旧 hash；发布后同一旧 HTML 从生产读取正确资源、登录可见且零错误。该实验仅证明兼容缺陷及修复，不能认定其就是用户事故根因。详见 [只读调查记录](../operations/2026-10-08-white-screen-investigation.md)。后续前端发布继续保留缓存 HTML 引用的旧 hash 资产，并复验旧文档，不以刷新用户缓存替代发布兼容。
+
+## 风险、回滚与实机边界
+
+公开索引和 manifest 短暂不同步时显示可重试错误，不生成假下载按钮。本次 backend 未变、无数据库迁移，前端需要时只切 current symlink 回 `/opt/ziwei/releases/a625350`，无需重启 API；保留所有原 data/source/APK 和已有旧 hash 资源。原 source 的归档版本保持 `8a4fe59`。
+
+尚未在真实手机完成 APK 安装、系统权限、申请/自动配置、双端心跳、真实操控和升级验收；公开下载、模拟 UI 和只读生产页面通过不等于实机链路通过。

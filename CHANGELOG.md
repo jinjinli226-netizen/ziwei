@@ -2,12 +2,15 @@
 
 本文件只记录可追溯的项目级变更摘要；详细设计、验证命令和未完成边界见 [PROJECT_MANAGEMENT.md](PROJECT_MANAGEMENT.md)。
 
-## 2026-10-08 紫薇·互联公开 Android 安装页（开发验收通过，待统一发布）
+## 2026-10-08 紫薇·互联公开 Android 安装页（已发布）
 
-- 新增无需登录的 `/android-install`，主站“紫薇·互联”增加“安装手机端”。Agent/Updater 两按钮从实际公开 index 与 manifest 读取最新版本、包大小和具体 APK，提供本地生成二维码、复制中控地址与首次安装/授权/申请/审批/员工绑定指引。
-- 限定公开下载地址与安全工作区返回路径；处理加载、错误重试、空发布、缺角色和 iOS 等状态。Android 下载不受 Chromium 简化 UA 中旧版本号误阻断；复制反馈始终保留申请操作说明。
-- 完整串行测试 207/207、lint/build、安装页浏览器 9/9、原终端浏览器回归 6/6；真实公开 APK 下载大小/SHA-256 与清单一致，二维码像素解码正确，390/1440px 无横向溢出。
-- 基于 `c91f331/a625350` 增量交付，后端认证和手机协议未修改。T6 唯一负责服务器发布，保留 `/downloads/android/` 与 SPA fallback；本会话未部署或执行真实手机动作。详见 [实施记录](docs/plans/2026-10-08-android-install.md)。
+- 新增无需登录的精确 `/android-install`（含尾斜杠），主站完整“紫薇·互联”增加安装入口和安全工作区返回链接；双 APK 从真实 index/manifest 选最新版本及大小，本地 QR、复制中控地址与双应用安装/权限/入网/审批/绑定指引完整，原主站认证与手机协议保留。
+- T4 提交 `81b6ec8d0eb5693f3faf5eab88cd7ff2aeabdb00` 已快进主发布分支并推送，北京时间 22:23 切 `/opt/ziwei/current -> releases/81b6ec8`，source 保持 `8a4fe59`；前端 `index-BUxdmKav.js` / `index-C8foC8Iv.css`。备份 `/opt/ziwei-backups/terminal-console/20261008T142230Z` 保存 mainBefore=`a625350`、sourceBefore=`8a4fe59`、12 配置与两份 integrity 通过的 SQLite。
+- backend 和 69 个 runtime lock 条目无变化，新增 jsqr/qrcode-generator 仅 dev 构建/QA；生产复用原 modules。此次未重启服务、未改 Nginx/DNS/daemon/数据/APK，回滚前端 symlink 到 `a625350` 无需重启 API。
+- 保留 a625 assets 并补回 f88 的旧 hash JS/CSS，修复独立合成旧文档重放中确认的模块 MIME 白屏：旧 JS 333563 B application/javascript、CSS 172282 B text/css，生产重放登录可见、0 errors。用户已恢复的事故未复现，根因仍未证实，不把此独立缺陷直接归因为用户事故。详见 [白屏调查记录](docs/operations/2026-10-08-white-screen-investigation.md)。后续发布继续保留缓存 HTML 引用的 hash 资产。
+- T4 全套 207/207、安装 UI 9/9、终端 UI 6/6，root fresh lint 39 files/build 通过。生产匿名安装页 1440/390 两组通过，QR 像素解码、复制、真实版本/大小及双端 HEAD/GET/SHA-256 匹配，返回管理受登录保护，无 errors/overflow/设备动作；Owner 主站安装入口→安装页→同工作区终端通过，终端 6 checks/5 probes 通过。
+- 北京时间 22:26:46 最终生产记录：主站/控制 health=true、三服务 active/NRestarts 0，手机 0/待审 0；临时 QA 会话已撤销、remaining 0，临时 token 文件已删除。证据 `.local/install-live/` 下 results、main-entry、terminal/results、stale-assets/results、deployment JSON。
+- 实机安装、权限授权、入网自动配置、真实操控和升级仍未验收。详见 [安装页实施记录](docs/plans/2026-10-08-android-install.md)。
 
 ## 2026-10-08 紫薇·互联完整终端管理（主站与源归档兼容均已发布）
 
