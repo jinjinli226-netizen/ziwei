@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { closeSync, fstatSync, openSync, readFileSync } from 'node:fs';
 
 const now = () => new Date().toISOString();
 const id = prefix => `${prefix}-${randomUUID()}`;
@@ -15,6 +16,62 @@ function externalError(message, status = 502, details = null) {
   return error;
 }
 
+const terminalActions = new Set(['health', 'screenshot', 'tap', 'swipe', 'text', 'global', 'launch']);
+const commandStatuses = new Set(['queued', 'delivered', 'executing', 'succeeded', 'failed', 'cancelled', 'expired', 'uncertain', 'acknowledged']);
+const settledCommandStatuses = new Set(['succeeded', 'failed', 'cancelled', 'expired', 'acknowledged']);
+const commandStatus = command => commandStatuses.has(command?.status) ? command.status : 'queued';
+const terminalId = value => {
+  let decoded;
+  try { decoded = decodeURIComponent(value); } catch { throw externalError('终端标识无效', 400); }
+  if (!/^[A-Za-z0-9_-][A-Za-z0-9._:-]{0,199}$/.test(decoded)) throw externalError('终端标识无效', 400);
+  return encodeURIComponent(decoded);
+};
+
+function terminalRequest(method, path, body) {
+  if (!['GET', 'POST'].includes(method)) throw externalError('终端管理仅支持 GET、POST', 405);
+  const [pathname, queryString = '', ...extra] = String(path).split('?');
+  if (extra.length) throw externalError('终端请求路径无效', 400);
+  const query = new URLSearchParams(queryString);
+  let target;
+  let keys;
+  let queryKeys = [];
+  if (pathname === '/android-devices') {
+    target = pathname;
+    if (method === 'GET') queryKeys = ['summary'];
+    else keys = ['alias'];
+  } else if (method === 'GET' && pathname === '/android-devices/enrollment-requests') {
+    target = pathname;
+  } else {
+    let match;
+    if (method === 'POST' && (match = pathname.match(/^\/android-devices\/enrollment-requests\/([^/]+)\/(approve|reject)$/))) {
+      target = `/android-devices/enrollment-requests/${terminalId(match[1])}/${match[2]}`;
+      keys = [];
+    } else if (method === 'GET' && (match = pathname.match(/^\/android-devices\/([^/]+)(?:\/(status|snapshot))?$/))) {
+      target = `/android-devices/${terminalId(match[1])}${match[2] ? `/${match[2]}` : ''}`;
+      if (match[2] === 'status') queryKeys = ['commandId', 'updateId'];
+    } else if (method === 'POST' && (match = pathname.match(/^\/android-devices\/([^/]+)\/(control|commands|updates|archive)(?:\/([^/]+)\/resolve)?$/))) {
+      const [, deviceId, operation, receiptId] = match;
+      if (receiptId && !['commands', 'updates'].includes(operation)) throw externalError('终端管理接口不存在', 404);
+      target = `/android-devices/${terminalId(deviceId)}/${operation}${receiptId ? `/${terminalId(receiptId)}/resolve` : ''}`;
+      keys = operation === 'commands' ? (receiptId ? ['resolution', 'note'] : ['action', 'args'])
+        : operation === 'updates' ? (receiptId ? ['resolution'] : ['targetRole', 'apkUrl', 'sha256', 'signerSha256', 'versionCode', 'preflightCommandId', 'replacesUpdateId'])
+          : operation === 'control' ? ['role'] : ['confirm'];
+      if (operation === 'commands' && !receiptId && !terminalActions.has(body?.action)) throw externalError('不支持该手机动作', 400);
+    }
+  }
+  if (!target) throw externalError('终端管理接口不存在', 404);
+  for (const [key, value] of query) {
+    if (!queryKeys.includes(key) || query.getAll(key).length !== 1) throw externalError('终端查询参数无效', 400);
+    if (key === 'summary' ? !['0', '1'].includes(value) : !/^[A-Za-z0-9_-][A-Za-z0-9._:-]{0,199}$/.test(value)) throw externalError('终端查询参数无效', 400);
+  }
+  if (method === 'POST') {
+    if (!body || typeof body !== 'object' || Array.isArray(body)) throw externalError('请求体必须是 JSON 对象', 400);
+    if (Buffer.byteLength(JSON.stringify(body)) > 64 * 1024) throw externalError('终端请求体过大', 413);
+    if (Object.keys(body).some(key => !keys.includes(key))) throw externalError('终端请求含有不支持的字段', 400);
+  }
+  return `${target}${query.size ? `?${query.toString()}` : ''}`;
+}
+
 /**
  * The main workspace app owns only the binding/run records. Device identity,
  * online state, commands and screenshots remain authoritative in 紫薇·互联.
@@ -22,16 +79,116 @@ function externalError(message, status = 502, details = null) {
 export function createZiweiConnect(repo, options = {}) {
   const db = repo.db;
   const apiBase = String(options.apiBase || process.env.ZIWEI_CONNECT_API_BASE || 'http://127.0.0.1:5191/api').replace(/\/$/, '');
-  const apiOrigin = new URL(apiBase).origin;
-  const apiHost = new URL(apiBase).hostname;
+  let endpoint;
+  try { endpoint = new URL(apiBase); } catch { throw externalError('紫薇·互联 API 地址配置无效', 503); }
+  const apiOrigin = endpoint.origin;
+  const apiHost = endpoint.hostname;
   const isLoopback = ['127.0.0.1', 'localhost', '[::1]'].includes(apiHost);
-  // The local API intentionally has no admin login. A public Caddy entry does
-  // require the same session/Authorization material as the terminal-console
-  // MCP bridge. Keep that material in process configuration only; never persist
-  // or include it in bindings, runs, notifications, or responses.
+  if ((!isLoopback && endpoint.protocol !== 'https:') || !['https:', 'http:'].includes(endpoint.protocol)
+      || endpoint.username || endpoint.password || endpoint.search || endpoint.hash || endpoint.pathname !== '/api') {
+    throw externalError('紫薇·互联 API 地址配置无效', 503);
+  }
+  // The original loopback management API is private and does not require the
+  // independent browser login enforced by its public gateway. Main-site
+  // session/Owner/Admin checks protect the workspace proxy. Optional upstream
+  // credentials are server-only for deployments using the authenticated gateway.
   const auth = options.auth || process.env.ZIWEI_CONNECT_AUTH || process.env.ZIWEI_CONTROL_AUTH || '';
-  const cookie = options.cookie || process.env.ZIWEI_CONNECT_COOKIE || process.env.ZIWEI_CONTROL_COOKIE || '';
+  let cookie = options.cookie || process.env.ZIWEI_CONNECT_COOKIE || process.env.ZIWEI_CONTROL_COOKIE || '';
   const origin = options.origin || process.env.ZIWEI_CONNECT_ORIGIN || apiOrigin;
+  const credentialsFile = options.credentialsFile || process.env.ZIWEI_CONNECT_CREDENTIALS_FILE;
+  const username = options.username || process.env.ZIWEI_CONNECT_USERNAME;
+  const password = options.password || process.env.ZIWEI_CONNECT_PASSWORD;
+  const canLogin = Boolean(credentialsFile || username || password);
+  const secrets = new Set([auth, cookie, password].filter(Boolean));
+  const rememberCookie = value => {
+    cookie = value;
+    secrets.add(value);
+    const token = value.slice(value.indexOf('=') + 1);
+    if (token) secrets.add(token);
+  };
+  if (cookie) rememberCookie(cookie);
+  const redact = value => {
+    if (typeof value === 'string') {
+      for (const secret of secrets) value = value.split(secret).join('[已隐藏]');
+      return value;
+    }
+    if (Array.isArray(value)) return value.map(redact);
+    if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, redact(item)]));
+    return value;
+  };
+  const credentials = () => {
+    let value = { username, password };
+    if (credentialsFile) {
+      let descriptor;
+      try {
+        descriptor = openSync(credentialsFile, 'r');
+        const stat = fstatSync(descriptor);
+        if (!stat.isFile() || stat.size > 4096 || (process.platform !== 'win32' && (stat.mode & 0o027))) throw new Error('invalid credentials file');
+        value = JSON.parse(readFileSync(descriptor, 'utf8'));
+      } catch { throw externalError('紫薇·互联服务端登录凭据配置无效', 503); }
+      finally { if (descriptor !== undefined) closeSync(descriptor); }
+    }
+    if (!value || Array.isArray(value) || typeof value.username !== 'string' || !value.username.length || value.username.length > 80
+        || typeof value.password !== 'string' || !value.password.length || value.password.length > 128 || value.passwordHash) {
+      throw externalError('紫薇·互联服务端登录凭据配置无效；原密码哈希文件不能用于登录', 503);
+    }
+    secrets.add(value.password);
+    return { username: value.username, password: value.password };
+  };
+  const readPayload = async response => {
+    const limit = 16 * 1024 * 1024; // includes Base64 encoding of original 2 MiB screenshots and receipts
+    if (Number(response.headers.get('content-length')) > limit) {
+      await response.body?.cancel();
+      throw externalError('紫薇·互联响应过大', 502);
+    }
+    const chunks = [];
+    let size = 0;
+    try {
+      for await (const chunk of response.body || []) {
+        size += chunk.length;
+        if (size > limit) throw externalError('紫薇·互联响应过大', 502);
+        chunks.push(chunk);
+      }
+    } catch (error) {
+      if (error.status) throw error;
+      throw externalError('紫薇·互联响应读取失败或超时，请刷新回执后核对结果', 502);
+    }
+    try {
+      const value = size ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {};
+      if (!value || typeof value !== 'object') throw new Error('invalid JSON');
+      return redact(value);
+    } catch { throw externalError('紫薇·互联返回了无效 JSON 响应', 502); }
+  };
+  const send = async (path, init = {}, sessionCookie = cookie) => {
+    try {
+      return await fetch(`${apiBase}${path}`, {
+        ...init,
+        headers: {
+          accept: 'application/json', 'content-type': 'application/json',
+          ...(auth ? { authorization: auth } : {}),
+          ...(sessionCookie ? { cookie: sessionCookie } : {}),
+          ...(!isLoopback ? { origin } : {}),
+          ...(init.headers || {}),
+        },
+        redirect: 'manual',
+        signal: AbortSignal.timeout(Number(options.timeoutMs || 10000)),
+      });
+    } catch { throw externalError('紫薇·互联控制 API 不可达，请核对服务状态和连接配置'); }
+  };
+  let loginPromise;
+  const login = async () => {
+    if (!loginPromise) loginPromise = (async () => {
+      const value = credentials();
+      const response = await send('/admin-auth/login', { method: 'POST', body: JSON.stringify(value), headers: { origin } }, '');
+      await readPayload(response);
+      if (!response.ok) throw externalError('紫薇·互联服务端登录失败，请核对服务端私密凭据配置', response.status === 429 ? 503 : 502);
+      const cookies = response.headers.getSetCookie?.() || [response.headers.get('set-cookie') || ''];
+      const session = cookies.map(item => item.split(';', 1)[0]).find(item => /^__Host-ziwei_session=[A-Za-z0-9_-]+$/.test(item));
+      if (!session) throw externalError('紫薇·互联登录未返回有效会话', 502);
+      rememberCookie(session);
+    })().finally(() => { loginPromise = null; });
+    await loginPromise;
+  };
   db.exec(`
     CREATE TABLE IF NOT EXISTS ziwei_connect_bindings (
       id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, employee_id TEXT NOT NULL,
@@ -67,28 +224,30 @@ export function createZiweiConnect(repo, options = {}) {
     if (!row) throw Object.assign(new Error('数字员工不存在或不属于当前工作区'), { status: 404 });
     return row;
   };
-  const request = async (path, init = {}) => {
+  const requestResponse = async (path, init = {}) => {
+    if (canLogin && !cookie) await login();
     if (!isLoopback && !auth && !cookie) {
-      throw externalError('紫薇·互联远程控制 API 需要认证：请配置 ZIWEI_CONNECT_AUTH 或 ZIWEI_CONNECT_COOKIE；未认证远程调用已阻止', 401);
+      throw externalError('紫薇·互联远程控制 API 需要认证：请配置服务端凭据或 ZIWEI_CONNECT_COOKIE；未认证远程调用已阻止', 401);
     }
-    let response;
-    try {
-      response = await fetch(`${apiBase}${path}`, {
-        ...init,
-        headers: {
-          accept: 'application/json', 'content-type': 'application/json',
-          ...(auth ? { authorization: auth } : {}),
-          ...(cookie ? { cookie, origin } : {}),
-          ...(init.headers || {}),
-        },
-        signal: AbortSignal.timeout(Number(options.timeoutMs || 10000)),
-      });
-    } catch (error) {
-      throw externalError(`紫薇·互联控制 API 不可达：${error?.message || String(error)}`);
+    const usedCookie = cookie;
+    let response = await send(path, init, usedCookie);
+    if (response.status === 401 && canLogin) {
+      await response.body?.cancel();
+      if (cookie === usedCookie) await login();
+      // Retry only a confirmed authentication failure, never a timeout or an
+      // uncertain action result. The original command protocol owns execution.
+      response = await send(path, init);
     }
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw externalError(payload.message || payload.error || `紫薇·互联控制 API 返回 ${response.status}`, response.status >= 500 ? 502 : response.status, payload);
-    return payload;
+    if (response.status >= 300 && response.status < 400) {
+      await response.body?.cancel();
+      throw externalError('紫薇·互联控制 API 返回了不支持的重定向', 502);
+    }
+    return { status: response.status, body: await readPayload(response) };
+  };
+  const request = async (path, init = {}) => {
+    const response = await requestResponse(path, init);
+    if (response.status >= 400) throw externalError(response.body.message || response.body.error || `紫薇·互联控制 API 返回 ${response.status}`, response.status >= 500 ? 502 : response.status, response.body);
+    return response.body;
   };
   const normalizeDevice = item => {
     const nodes = Array.isArray(item.nodes) ? item.nodes : [];
@@ -161,7 +320,20 @@ export function createZiweiConnect(repo, options = {}) {
       };
     },
     async listDevices() { return listExternalDevices({ detailed: false }); },
+    async terminal(slug, method, path, body = {}) {
+      workspace(slug);
+      const target = terminalRequest(method, path, body);
+      return requestResponse(target, { method, ...(method === 'POST' ? { body: JSON.stringify(body) } : {}) });
+    },
     listBindings: bindings,
+    deleteBinding(slug, bindingId) {
+      const ws = workspace(slug);
+      const binding = db.prepare('SELECT * FROM ziwei_connect_bindings WHERE id=? AND workspace_id=?').get(bindingId, ws.id);
+      if (!binding) throw externalError('当前工作区的手机绑定不存在', 404);
+      db.prepare('DELETE FROM ziwei_connect_bindings WHERE id=? AND workspace_id=?').run(bindingId, ws.id);
+      notify(slug, 'ziwei_connect.binding.deleted', { bindingId, employeeId: binding.employee_id, deviceId: binding.device_id });
+      return { deleted: true, id: bindingId };
+    },
     async bind(slug, input = {}) {
       const ws = workspace(slug); const employeeId = text(input.employeeId || input.employee_id, 'employeeId'); const deviceId = text(input.deviceId || input.device_id, 'deviceId');
       employee(ws, employeeId);
@@ -205,7 +377,7 @@ export function createZiweiConnect(repo, options = {}) {
           const snap = await request(`/android-devices/${encodeURIComponent(deviceId)}/snapshot`);
           result.snapshot = snap.snapshot || null;
         }
-        const status = command?.status === 'succeeded' ? 'succeeded' : (['failed', 'cancelled', 'expired', 'uncertain'].includes(command?.status) ? command.status : 'queued');
+        const status = commandStatus(command);
         row = updateRun(row, { status, result, error: command?.error || null });
         notify(slug, `ziwei_connect.run.${status}`, { runId, employeeId, deviceId, accountId: binding.account_id, commandId, status, error: command?.error || null, screenshotAvailable: Boolean(result.snapshot?.data) });
         return outputRun(row);
@@ -218,13 +390,13 @@ export function createZiweiConnect(repo, options = {}) {
     },
     async refresh(slug, runId) {
       const { row } = getRun(slug, runId);
-      if (!row.command_id || row.action === 'dry-run' || ['succeeded', 'failed', 'cancelled', 'expired'].includes(row.status)) return outputRun(row);
+      if (!row.command_id || row.action === 'dry-run' || settledCommandStatuses.has(row.status)) return outputRun(row);
       try {
         const payload = await request(`/android-devices/${encodeURIComponent(row.device_id)}/status?commandId=${encodeURIComponent(row.command_id)}`);
         const command = payload.device?.commands?.find(item => item.id === row.command_id);
         const result = { command, device: payload.device || null };
         if (row.action === 'screenshot' && command?.status === 'succeeded') result.snapshot = (await request(`/android-devices/${encodeURIComponent(row.device_id)}/snapshot`)).snapshot || null;
-        const status = command?.status === 'succeeded' ? 'succeeded' : (['failed', 'cancelled', 'expired', 'uncertain'].includes(command?.status) ? command.status : 'queued');
+        const status = commandStatus(command);
         const next = updateRun(row, { status, result, error: command?.error || null });
         return outputRun(next);
       } catch (error) {

@@ -125,6 +125,7 @@ export const api = {
   ziweiConnectDevices: () => request(`/api/workspaces/${encodeURIComponent(workspaceSlug())}/ziwei-connect/devices`),
   ziweiConnectBindings: () => request(`/api/workspaces/${encodeURIComponent(workspaceSlug())}/ziwei-connect/bindings`),
   ziweiConnectBind: body => request(`/api/workspaces/${encodeURIComponent(workspaceSlug())}/ziwei-connect/bindings`, { method:'POST', body:JSON.stringify(body) }),
+  ziweiConnectDeleteBinding: id => request(`/api/workspaces/${encodeURIComponent(workspaceSlug())}/ziwei-connect/bindings/${encodeURIComponent(id)}`, { method:'DELETE' }),
   ziweiConnectRuns: (limit = 50) => request(`/api/workspaces/${encodeURIComponent(workspaceSlug())}/ziwei-connect/runs?limit=${encodeURIComponent(limit)}`),
   ziweiConnectRun: id => request(`/api/workspaces/${encodeURIComponent(workspaceSlug())}/ziwei-connect/runs/${encodeURIComponent(id)}`),
   ziweiConnectAction: body => request(`/api/workspaces/${encodeURIComponent(workspaceSlug())}/ziwei-connect/actions`, { method:'POST', body:JSON.stringify(body) }),

@@ -103,6 +103,16 @@ MCP 管理入口使用独立的 `data/mcp.token` 凭据文件（可用 `ZIWEI_MC
 
 生产 PostgreSQL/Redis、云端 OAuth、外部对象存储、真正的任务执行沙箱、队列、计费和伙伴市场仍保留在适配边界中；本地 SQLite 已支持 API Key 轮换、A2A action 重试、通知 WebSocket（SSE fallback）、Webhook HMAC 签名与重试、文档回收站和技能回滚。远端 Git 同步按当前范围保留本地 Git 导入/导出，暂不连接远端仓库。
 
+## 紫薇·互联手机终端管理
+
+登录主站后，在目标工作区左侧“系统 → 紫薇·互联”进入完整终端控制台；手机工作区的正式入口为 `https://qzelynth.top/phone_ai/ziwei-connect`。Owner/Admin 使用现有主站登录即可审批手机，不需要另登录原中控。
+
+- 手机双端填写 `https://qzelynth.top` 并申请入网后，在页面上方“待审核入网”查看名称、Agent/Updater 角色、版本和有效期，批准或拒绝；批准后双端通过原配对协议自动取得各自配置。
+- 左侧选择手机，右侧查看双端健康、心跳与错误、截图及原尺寸坐标操控、控制端切换/暂停、完整命令回执与人工核实、已发布 APK 和升级事务、归档。
+- “登记手机”保留手动登记和双角色 JSON 配置下载；当前手机详情可绑定工作区内已有数字员工与外部账号，不创建额外数字员工。
+- 主站代理入口为 `/api/workspaces/:slug/ziwei-connect/terminal/android-devices/*`。生产默认经 `http://127.0.0.1:5191/api` 连接原服务；手机状态、入网申请、命令、升级和截图仍由原服务持久保存，主站只保存员工绑定和运行记录。
+- 隔离回归：构建后运行 `node scripts/verify-ziwei-terminal-ui.mjs`；真实源协议回归运行 `node scripts/verify-ziwei-terminal-protocol.mjs <原中控源码目录>`。两者均不操作真实手机；域名只读浏览器验收使用 `scripts/verify-ziwei-terminal-live.mjs --session-file <私密短期主站会话文件>`。
+
 ## 许可证
 
 本项目以 MIT 许可证发布，详见 [LICENSE](LICENSE)。

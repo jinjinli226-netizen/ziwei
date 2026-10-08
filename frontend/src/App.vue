@@ -5,6 +5,7 @@ import { API_BASE, api, setWorkspaceSlug, workspaceSlug } from './api.js';
 import { connectWorkspaceRealtime } from './realtime.js';
 import WorkspaceShell from './components/WorkspaceShell.vue';
 import ZiSelect from './components/ZiSelect.vue';
+import TerminalConsole from './components/terminal/TerminalConsole.vue';
 import { Search, Plus, Inbox, Grip, SlidersHorizontal, ArrowDownUp, Kanban, List, MoreHorizontal, CircleDashed, Circle, CircleDot, CheckCircle2, CircleAlert, Zap, ChevronDown, RotateCcw, LayoutList, Tag, UserRound, CalendarClock, CalendarDays, ChevronLeft, ChevronRight, Maximize2, Mic, Paperclip, X, Folder, FolderOpen, FolderPlus, FileText, Upload, RefreshCw, HardDrive, Network, Server, Monitor, Crown, Trash2, ClipboardList, Settings2 } from 'lucide-vue-next';
 
 const nav = [
@@ -45,7 +46,7 @@ const summary = ref({ workspace:{name:'',slug:workspaceSlug(),kind:null}, counts
 const isTeamWorkspace = computed(() => summary.value.workspace?.kind === 'team');
 const deviceSectionLabel = computed(() => isTeamWorkspace.value ? '团队设备' : '我的设备');
 const tasks = ref([]); const runtimes = ref([]); const models = ref([]); const skills = ref([]); const documents = ref([]); const automations = ref([]); const members = ref([]); const devices = ref([]); const employees = ref([]); const calendar = ref([]); const settings = ref(null); const agents = ref([]);
-const ziweiConnectStatus = ref({ devices:[], diagnostics:[], bindings:[] }); const ziweiConnectBindings = ref([]); const ziweiConnectLoading = ref(false); const ziweiConnectBusy = ref(''); const ziweiConnectSelection = ref({ employeeId:'', deviceId:'' }); const ziweiConnectRuns = ref({}); let ziweiConnectRunTimer = null;
+const ziweiConnectStatus = ref({ source:null, devices:[], diagnostics:[], bindings:[] }); const ziweiConnectBindings = ref([]); const ziweiConnectLoading = ref(false); const ziweiConnectState = ref('idle'); const ziweiConnectError = ref(''); const ziweiConnectBusy = ref(''); const ziweiConnectSelection = ref({ employeeId:'', deviceId:'', accountId:'', accountLabel:'' }); const ziweiConnectRuns = ref({}); let ziweiConnectRunTimer = null;
 const ownDeviceOnline = computed(() => summary.value.device?.status === 'online');
 const ownDeviceLabel = computed(() => ownDeviceOnline.value ? '在线' : '离线');
 const loading = ref(true); const toast = ref(''); const toastTone = ref('success'); let toastTimer = null; const search = ref('');
@@ -699,8 +700,13 @@ function connectRunStatus(run) {
 }
 function connectRunLabel(run) {
   const status = connectRunStatus(run);
-  return status === 'succeeded' || status === 'success' || status === 'completed' || status === 'dry_run' ? '已完成' : status === 'failed' || status === 'error' ? '失败' : status === 'expired' ? '已过期' : '执行中';
+  return status === 'succeeded' || status === 'success' || status === 'completed' || status === 'dry_run' ? '已完成' : status === 'acknowledged' ? '已人工核实' : status === 'cancelled' ? '已取消' : status === 'accepted' || status === 'acked' ? '已受理' : status === 'failed' || status === 'error' ? '失败' : status === 'uncertain' ? '待核验' : status === 'expired' ? '已过期' : '执行中';
 }
+function connectCommandId(run) { return run?.command_id || run?.commandId || ''; }
+function connectRunTagStatus(run) { const status = connectRunStatus(run); return ['succeeded','success','completed','dry_run'].includes(status) ? 'online' : ['failed','error','uncertain'].includes(status) ? 'failed' : 'neutral'; }
+function connectRunError(run) { return run?.error || run?.result?.error || ''; }
+function connectRunVerificationError(run) { const value = run?.verificationError || run?.verification_error || run?.result?.verificationError || run?.result?.verification_error; return value ? (typeof value === 'string' ? value : JSON.stringify(value)) : ''; }
+function connectRunReceipt(run) { const value = run?.receipt || run?.result?.receipt || run?.result?.acknowledgedReceipt || run?.result?.acknowledged; return value ? (typeof value === 'string' ? value : JSON.stringify(value)) : ''; }
 function connectSnapshotSrc(run) {
   const snapshot = run?.snapshot || run?.result?.snapshot || run?.result?.screenshot || run?.result?.image;
   if (!snapshot) return '';
@@ -712,29 +718,60 @@ function connectSnapshotSrc(run) {
 async function loadZiweiConnect() {
   if (!authState.value.authenticated || ziweiConnectLoading.value) return;
   ziweiConnectLoading.value = true;
+  ziweiConnectState.value = 'loading'; ziweiConnectError.value = '';
   try {
     const [status, bindings, runs] = await Promise.all([api.ziweiConnectStatus(), api.ziweiConnectBindings(), api.ziweiConnectRuns()]);
-    ziweiConnectStatus.value = { devices:connectRows(status, 'devices'), diagnostics:connectDiagnosticRows(status?.diagnostics), bindings:connectRows(status, 'bindings') };
+    ziweiConnectStatus.value = { source:status?.source || null, devices:connectRows(status, 'devices'), diagnostics:connectDiagnosticRows(status?.diagnostics), bindings:connectRows(status, 'bindings') };
     ziweiConnectBindings.value = connectRows(bindings, 'bindings').length ? connectRows(bindings, 'bindings') : ziweiConnectStatus.value.bindings;
     const historicalRuns = connectRows(runs, 'runs');
     ziweiConnectRuns.value = Object.fromEntries(historicalRuns.map(run => [connectRunId(run), run]).filter(([id]) => id));
     const firstBinding = ziweiConnectBindings.value[0];
     const preferredDevice = ziweiConnectStatus.value.devices.find(item => ['online','ready','connected'].includes(String(item.status || '').toLowerCase())) || ziweiConnectStatus.value.devices[0];
-    if (!ziweiConnectSelection.value.employeeId) ziweiConnectSelection.value.employeeId = firstBinding?.employee_id || firstBinding?.employeeId || employees.value[0]?.id || '';
     if (!ziweiConnectSelection.value.deviceId) ziweiConnectSelection.value.deviceId = firstBinding?.device_id || firstBinding?.deviceId || preferredDevice?.id || '';
-  } catch (error) { notify(error.message, 'error'); }
+    const selectedBinding = ziweiConnectBindings.value.find(binding => (binding.device_id || binding.deviceId) === ziweiConnectSelection.value.deviceId);
+    if (!ziweiConnectSelection.value.employeeId) ziweiConnectSelection.value.employeeId = selectedBinding?.employee_id || selectedBinding?.employeeId || employees.value[0]?.id || '';
+    if (selectedBinding && !ziweiConnectSelection.value.accountId) ziweiConnectSelection.value.accountId = selectedBinding.account_id || selectedBinding.accountId || '';
+    if (selectedBinding && !ziweiConnectSelection.value.accountLabel) ziweiConnectSelection.value.accountLabel = selectedBinding.account_label || selectedBinding.accountLabel || '';
+    ziweiConnectState.value = 'ready';
+  } catch (error) { ziweiConnectState.value = 'error'; ziweiConnectError.value = error?.message || '紫薇·互联控制 API 暂时不可达'; notify(ziweiConnectError.value, 'error'); }
   finally { ziweiConnectLoading.value = false; }
 }
+function updateTerminalDevices(deviceRows) {
+  ziweiConnectStatus.value = { ...ziweiConnectStatus.value, devices:deviceRows };
+}
+function selectTerminalDevice(device) {
+  const deviceId = device?.id || '';
+  if (deviceId === ziweiConnectSelection.value.deviceId) return;
+  const binding = ziweiConnectBindings.value.find(item => (item.device_id || item.deviceId) === deviceId);
+  ziweiConnectSelection.value = { employeeId:binding?.employee_id || binding?.employeeId || employees.value[0]?.id || '', deviceId, accountId:binding?.account_id || binding?.accountId || '', accountLabel:binding?.account_label || binding?.accountLabel || '' };
+}
+async function refreshResolvedTerminalRun({ commandId }) {
+  const matching = Object.values(ziweiConnectRuns.value).filter(run => connectCommandId(run) === commandId);
+  await Promise.all(matching.map(run => pollZiweiConnectRun(run)));
+}
+function terminalDeviceBindings(deviceId) { return ziweiConnectBindings.value.filter(item => (item.device_id || item.deviceId) === deviceId); }
+function selectZiweiConnectBinding(binding) {
+  ziweiConnectSelection.value = { employeeId:binding?.employee_id || binding?.employeeId || '', deviceId:binding?.device_id || binding?.deviceId || '', accountId:binding?.account_id || binding?.accountId || '', accountLabel:binding?.account_label || binding?.accountLabel || '' };
+}
 async function saveZiweiConnectBinding() {
+  if (!canManageWorkspace.value) return;
   const employeeId = ziweiConnectSelection.value.employeeId;
   const deviceId = ziweiConnectSelection.value.deviceId;
   if (!employeeId || !deviceId) return notify('请选择数字员工和目标设备', 'error');
   ziweiConnectBusy.value = 'binding';
-  try { await api.ziweiConnectBind({ employeeId, deviceId }); await loadZiweiConnect(); notify('绑定已保存'); }
+  try { await api.ziweiConnectBind({ employeeId, deviceId, accountId:ziweiConnectSelection.value.accountId.trim() || null, accountLabel:ziweiConnectSelection.value.accountLabel.trim() || null }); await loadZiweiConnect(); notify('绑定已保存'); }
   catch (error) { notify(error.message, 'error'); }
   finally { ziweiConnectBusy.value = ''; }
 }
-function connectRunId(run) { return run?.id || run?.run_id || run?.command_id || run?.commandId || ''; }
+async function deleteZiweiConnectBinding(binding) {
+  if (!canManageWorkspace.value || !binding?.id) return;
+  if (typeof api.ziweiConnectDeleteBinding !== 'function') return notify('删除绑定接口尚未接入', 'error');
+  ziweiConnectBusy.value = `delete:${binding.id}`;
+  try { await api.ziweiConnectDeleteBinding(binding.id); await loadZiweiConnect(); notify('绑定已删除'); }
+  catch (error) { notify(error?.message || '删除绑定失败', 'error'); }
+  finally { ziweiConnectBusy.value = ''; }
+}
+function connectRunId(run) { return run?.id || run?.run_id || ''; }
 async function pollZiweiConnectRun(run) {
   const id = connectRunId(run);
   if (!id) return run;
@@ -742,13 +779,14 @@ async function pollZiweiConnectRun(run) {
     const fresh = await api.ziweiConnectRun(id);
     const next = fresh?.run || fresh;
     ziweiConnectRuns.value = { ...ziweiConnectRuns.value, [id]: next };
-    if (['pending','queued','running','dispatched','acked'].includes(connectRunStatus(next))) {
+    if (['pending','queued','delivered','executing','running','dispatched','acked','accepted'].includes(connectRunStatus(next))) {
       ziweiConnectRunTimer = setTimeout(() => void pollZiweiConnectRun(next), 1200);
     }
     return next;
   } catch (error) { notify(error.message, 'error'); return run; }
 }
 async function runZiweiConnectAction(action) {
+  if (!canManageWorkspace.value) return;
   const employeeId = ziweiConnectSelection.value.employeeId;
   const deviceId = ziweiConnectSelection.value.deviceId || undefined;
   if (!employeeId) return notify('请选择数字员工', 'error');
@@ -758,7 +796,7 @@ async function runZiweiConnectAction(action) {
     const run = response?.run || response;
     const id = connectRunId(run);
     if (id) ziweiConnectRuns.value = { ...ziweiConnectRuns.value, [id]: run };
-    if (['pending','queued','running','dispatched','acked'].includes(connectRunStatus(run))) void pollZiweiConnectRun(run);
+    if (['pending','queued','delivered','executing','running','dispatched','acked','accepted'].includes(connectRunStatus(run))) void pollZiweiConnectRun(run);
     notify(`${action === 'health' ? '健康检查' : action === 'screenshot' ? '截图' : '演练'}已提交`);
   } catch (error) { notify(error.message, 'error'); }
   finally { ziweiConnectBusy.value = ''; }
@@ -1125,12 +1163,27 @@ onMounted(async () => { applyDisplayPreferences(); await refreshAuth(); if (auth
         </div>
 
         <div v-else-if="page==='ziwei-connect'" class="ziwei-connect-page">
-          <div class="page-header"><div><span class="eyebrow">DEVICE CONTROL</span><h1>紫薇·互联</h1><p>查看可用设备，为数字员工绑定目标设备并执行健康检查、截图和演练。</p></div><div class="header-actions"><ZiButton variant="secondary" :disabled="ziweiConnectLoading" @click="loadZiweiConnect"><RefreshCw :size="15"/>刷新</ZiButton></div></div>
-          <div class="ziwei-connect-grid">
-            <ZiCard class="ziwei-connect-card ziwei-connect-status-card"><div class="card-heading"><h3>设备状态</h3><span class="work-count">{{ ziweiConnectStatus.devices.length }} 台</span></div><div v-if="!ziweiConnectStatus.devices.length" class="empty-wrap compact"><ZiEmptyState icon="▣" title="暂无可用设备" description="设备上线后会出现在这里。"/></div><div v-for="device in ziweiConnectStatus.devices" :key="device.id" class="ziwei-connect-device" :class="{selected:ziweiConnectSelection.deviceId===device.id}" @click="ziweiConnectSelection.deviceId=device.id"><span class="online-dot" :class="{offline:!connectDeviceOnline(device)}"></span><div class="row-main"><strong>{{ device.alias || device.name || device.label || device.id }}</strong><small>{{ device.model || device.os || device.platform || '设备' }} · {{ device.status || (device.online ? 'online' : 'offline') }}</small></div><span class="soft-tag">{{ device.id }}</span></div></ZiCard>
-            <ZiCard class="ziwei-connect-card"><div class="card-heading"><h3>绑定数字员工</h3><span class="work-count">{{ ziweiConnectBindings.length }} 条</span></div><div class="form-stack"><label class="ziwei-connect-field"><span>数字员工</span><ZiSelect v-model="ziweiConnectSelection.employeeId" :options="employees.map(item => ({label:item.name || item.id,value:item.id}))" aria-label="选择数字员工"/></label><label class="ziwei-connect-field"><span>目标设备</span><ZiSelect v-model="ziweiConnectSelection.deviceId" :options="ziweiConnectStatus.devices.map(item => ({label:item.alias || item.name || item.label || item.id,value:item.id}))" aria-label="选择目标设备"/></label><div class="form-actions"><ZiButton :disabled="ziweiConnectBusy==='binding'" @click="saveZiweiConnectBinding">{{ ziweiConnectBusy==='binding' ? '保存中…' : '保存绑定' }}</ZiButton></div></div><div v-if="ziweiConnectBindings.length" class="ziwei-connect-binding-list"><div v-for="binding in ziweiConnectBindings" :key="binding.id || `${binding.employee_id || binding.employeeId}-${binding.device_id || binding.deviceId}`" class="runtime-row"><div class="row-main"><strong>{{ employees.find(item => item.id === (binding.employee_id || binding.employeeId))?.name || binding.employee_name || binding.employeeName || binding.employee_id || binding.employeeId }}</strong><small>→ {{ ziweiConnectStatus.devices.find(item => item.id === (binding.device_id || binding.deviceId))?.alias || ziweiConnectStatus.devices.find(item => item.id === (binding.device_id || binding.deviceId))?.name || binding.device_name || binding.deviceId || binding.device_id }}</small></div></div></div></ZiCard>
-          </div>
-          <ZiCard class="ziwei-connect-actions-card"><div class="card-heading"><div><h3>连接动作</h3><p class="modal-copy">动作会排队到目标设备，结果返回后会自动刷新。</p></div><span class="soft-tag">{{ ziweiConnectSelection.deviceId || '未选设备' }}</span></div><div class="ziwei-connect-action-buttons"><ZiButton variant="secondary" :disabled="Boolean(ziweiConnectBusy)" @click="runZiweiConnectAction('health')">{{ ziweiConnectBusy==='health' ? '提交中…' : '健康检查' }}</ZiButton><ZiButton variant="secondary" :disabled="Boolean(ziweiConnectBusy)" @click="runZiweiConnectAction('screenshot')">{{ ziweiConnectBusy==='screenshot' ? '提交中…' : '获取截图' }}</ZiButton><ZiButton :disabled="Boolean(ziweiConnectBusy)" @click="runZiweiConnectAction('dry-run')">{{ ziweiConnectBusy==='dry-run' ? '提交中…' : '演练动作' }}</ZiButton></div><div v-if="Object.keys(ziweiConnectRuns).length" class="ziwei-connect-runs"><article v-for="run in Object.values(ziweiConnectRuns).slice().reverse()" :key="connectRunId(run)" class="ziwei-connect-run" :data-status="connectRunStatus(run)"><div class="card-heading"><strong>{{ run.action || run.command || '连接动作' }}</strong><ZiStatusTag :status="['succeeded','success','completed','dry_run'].includes(connectRunStatus(run)) ? 'online' : connectRunStatus(run)==='failed' ? 'failed' : 'neutral'" :label="connectRunLabel(run)" dot/></div><p v-if="connectRunId(run)" class="ziwei-connect-command">command_id: <code>{{ run.command_id || run.commandId || connectRunId(run) }}</code></p><p v-if="run.error" class="ziwei-connect-error">{{ run.error }}</p><img v-if="connectSnapshotSrc(run)" class="ziwei-connect-screenshot" :src="connectSnapshotSrc(run)" alt="设备截图"/><pre v-if="run.result && !connectSnapshotSrc(run)">{{ JSON.stringify(run.result, null, 2) }}</pre></article></div></ZiCard>
+          <div class="page-header"><div><span class="eyebrow">DEVICE CONTROL</span><h1>紫薇·互联</h1><p>审批手机入网、管理双端和操控画面，并为每台手机绑定工作区内的数字员工。</p></div><div class="header-actions"><ZiButton variant="secondary" :disabled="ziweiConnectLoading" @click="loadZiweiConnect"><RefreshCw :size="15"/>刷新员工绑定</ZiButton></div></div>
+          <div v-if="ziweiConnectState==='error'" class="ziwei-connect-error-banner" role="alert"><CircleAlert :size="17"/><div><strong>员工绑定与执行记录读取失败</strong><p>{{ ziweiConnectError }}</p></div><button type="button" class="pill" @click="loadZiweiConnect">重试</button></div>
+          <TerminalConsole :key="workspaceSlugValue" :can-manage="canManageWorkspace" :selected-device-id="ziweiConnectSelection.deviceId" @devices-change="updateTerminalDevices" @select-device="selectTerminalDevice" @command-resolved="refreshResolvedTerminalRun">
+            <template #device-binding="{ device }">
+              <section class="terminal-employee-binding" data-testid="terminal-employee-binding">
+                <div class="card-heading"><div><h3>绑定数字员工</h3><p class="modal-copy">{{ device.alias }} 使用已有数字员工；账号映射随这台手机保存。</p></div><span class="work-count">{{ terminalDeviceBindings(device.id).length }} 条</span></div>
+                <div v-if="canManageWorkspace" class="terminal-binding-form">
+                  <label class="ziwei-connect-field"><span>数字员工</span><ZiSelect v-model="ziweiConnectSelection.employeeId" :options="employees.map(item => ({label:item.name || item.id,value:item.id}))" aria-label="选择手机数字员工"/></label>
+                  <label class="ziwei-connect-field"><span>外部账号 ID（可选）</span><ZiInput v-model="ziweiConnectSelection.accountId" placeholder="例如 douyin-main"/></label>
+                  <label class="ziwei-connect-field"><span>账号显示名（可选）</span><ZiInput v-model="ziweiConnectSelection.accountLabel" placeholder="例如 抖音主号"/></label>
+                  <div class="form-actions"><ZiButton :disabled="ziweiConnectBusy==='binding' || !ziweiConnectSelection.employeeId" @click="saveZiweiConnectBinding">{{ ziweiConnectBusy==='binding' ? '保存中…' : '保存绑定' }}</ZiButton></div>
+                  <p v-if="!employees.length" class="terminal-binding-empty">工作区还没有数字员工。<button type="button" class="link-button" @click="navigate('members')">前往成员与设备</button></p>
+                </div>
+                <div v-if="terminalDeviceBindings(device.id).length" class="ziwei-connect-binding-list"><div v-for="binding in terminalDeviceBindings(device.id)" :key="binding.id" class="runtime-row"><button type="button" class="terminal-binding-select row-main" @click="selectZiweiConnectBinding(binding)"><strong>{{ employees.find(item => item.id === (binding.employee_id || binding.employeeId))?.name || binding.employee_name || binding.employeeName || binding.employee_id || binding.employeeId }}</strong><small>{{ binding.accountLabel || binding.account_label || binding.accountId || binding.account_id || '未映射外部账号' }}</small></button><button v-if="canManageWorkspace" type="button" class="pill" :disabled="ziweiConnectBusy===`delete:${binding.id}`" @click="deleteZiweiConnectBinding(binding)">{{ ziweiConnectBusy===`delete:${binding.id}` ? '删除中…' : '删除绑定' }}</button></div></div>
+                <p v-else class="terminal-binding-empty">这台手机尚未绑定数字员工。</p>
+              </section>
+            </template>
+          </TerminalConsole>
+          <details class="terminal-employee-actions"><summary>数字员工动作与执行记录</summary>
+          <ZiCard class="ziwei-connect-actions-card"><div class="card-heading"><div><h3>数字员工动作</h3><p class="modal-copy">动作会排队到目标设备，结果返回后会自动刷新。</p></div><span class="soft-tag">{{ ziweiConnectSelection.deviceId || '未选设备' }}</span></div><div class="ziwei-connect-action-buttons"><ZiButton variant="secondary" :disabled="!canManageWorkspace || !ziweiConnectSelection.deviceId || !ziweiConnectSelection.employeeId || Boolean(ziweiConnectBusy)" @click="runZiweiConnectAction('health')">{{ ziweiConnectBusy==='health' ? '提交中…' : '健康检查' }}</ZiButton><ZiButton variant="secondary" :disabled="!canManageWorkspace || !ziweiConnectSelection.deviceId || !ziweiConnectSelection.employeeId || Boolean(ziweiConnectBusy)" @click="runZiweiConnectAction('screenshot')">{{ ziweiConnectBusy==='screenshot' ? '提交中…' : '获取截图' }}</ZiButton><ZiButton :disabled="!canManageWorkspace || !ziweiConnectSelection.deviceId || !ziweiConnectSelection.employeeId || Boolean(ziweiConnectBusy)" @click="runZiweiConnectAction('dry-run')">{{ ziweiConnectBusy==='dry-run' ? '提交中…' : '演练动作' }}</ZiButton></div><div v-if="Object.keys(ziweiConnectRuns).length" class="ziwei-connect-runs"><article v-for="run in Object.values(ziweiConnectRuns).slice().reverse()" :key="connectRunId(run)" class="ziwei-connect-run" :data-status="connectRunStatus(run)"><div class="card-heading"><strong>{{ run.action || run.command || '连接动作' }}</strong><ZiStatusTag :status="connectRunTagStatus(run)" :label="connectRunLabel(run)" dot/></div><p v-if="connectCommandId(run)" class="ziwei-connect-command">command_id: <code>{{ connectCommandId(run) }}</code></p><p v-else-if="connectRunStatus(run)==='dry_run'" class="ziwei-connect-command">演练记录：未创建 command_id</p><p v-if="run.taskId || run.task_id || run.conversationId || run.conversation_id" class="ziwei-connect-command">关联：{{ run.taskId || run.task_id ? `任务 ${run.taskId || run.task_id}` : '' }}{{ run.conversationId || run.conversation_id ? ` 会话 ${run.conversationId || run.conversation_id}` : '' }}</p><p v-if="connectRunVerificationError(run)" class="ziwei-connect-error">回执校验：{{ connectRunVerificationError(run) }}</p><p v-if="connectRunError(run)" class="ziwei-connect-error">{{ connectRunError(run) }}</p><p v-if="connectRunReceipt(run)" class="ziwei-connect-receipt">回执：{{ connectRunReceipt(run) }}</p><img v-if="connectSnapshotSrc(run)" class="ziwei-connect-screenshot" :src="connectSnapshotSrc(run)" alt="设备截图"/><pre v-if="run.result && !connectSnapshotSrc(run)">{{ JSON.stringify(run.result, null, 2) }}</pre></article></div></ZiCard>
+          </details>
           <ZiCard v-if="ziweiConnectStatus.diagnostics.length" class="ziwei-connect-diagnostics"><div class="card-heading"><h3>诊断信息</h3></div><div v-for="item in ziweiConnectStatus.diagnostics" :key="item.id || item.key || item.name" class="runtime-row"><div class="row-main"><strong>{{ item.name || item.key || '诊断' }}</strong><small>{{ item.message || item.detail || item.status || '' }}</small></div><ZiStatusTag :status="['ok','healthy','online','passed'].includes(String(item.status || '').toLowerCase()) ? 'online' : ['error','failed'].includes(String(item.status || '').toLowerCase()) ? 'failed' : 'neutral'" :label="item.status || 'info'"/></div></ZiCard>
         </div>
 

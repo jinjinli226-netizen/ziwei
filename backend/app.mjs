@@ -240,6 +240,10 @@ export function createApp(options = {}) {
     auth: options.ziweiConnectAuth,
     cookie: options.ziweiConnectCookie,
     origin: options.ziweiConnectOrigin,
+    username: options.ziweiConnectUsername,
+    password: options.ziweiConnectPassword,
+    credentialsFile: options.ziweiConnectCredentialsFile,
+    timeoutMs: options.ziweiConnectTimeoutMs,
   });
   const auth = options.auth || createAuthService(repo.db, options.authOptions);
   app.locals.repo = repo;
@@ -642,6 +646,17 @@ export function createApp(options = {}) {
   // 紫薇·互联 is the authoritative phone/MCP control plane.  灵光爸爸 only
   // persists employee↔phone/account bindings and execution receipts here.
   const ziweiConnectGuard = requireRole('owner', 'admin', 'member');
+  const ziweiTerminalGuard = requireRole('owner', 'admin');
+  app.use('/api/workspaces/:slug/ziwei-connect/terminal', ziweiTerminalGuard, async (req, res, next) => {
+    try {
+      const upstream = await ziweiConnect.terminal(req.params.slug, req.method, req.url, req.body || {});
+      res.setHeader('Cache-Control', 'no-store');
+      return res.status(upstream.status).json(upstream.body);
+    } catch (error) {
+      res.setHeader('Cache-Control', 'no-store');
+      return next(error);
+    }
+  });
   app.get('/api/workspaces/:slug/ziwei-connect/status', ziweiConnectGuard, async (req, res, next) => {
     try { return res.json(await ziweiConnect.status(req.params.slug)); } catch (error) { return next(error); }
   });
@@ -653,6 +668,9 @@ export function createApp(options = {}) {
   });
   app.post('/api/workspaces/:slug/ziwei-connect/bindings', ziweiConnectGuard, async (req, res, next) => {
     try { return res.status(201).json(await ziweiConnect.bind(req.params.slug, req.body || {})); } catch (error) { return next(error); }
+  });
+  app.delete('/api/workspaces/:slug/ziwei-connect/bindings/:id', ziweiTerminalGuard, (req, res, next) => {
+    try { return res.json(ziweiConnect.deleteBinding(req.params.slug, req.params.id)); } catch (error) { return next(error); }
   });
   app.get('/api/workspaces/:slug/ziwei-connect/runs', ziweiConnectGuard, (req, res, next) => {
     try { return res.json({ runs: ziweiConnect.listRuns(req.params.slug, req.query.limit) }); } catch (error) { return next(error); }
