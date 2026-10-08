@@ -231,7 +231,8 @@
 
 /* Organization chart */
 .members-panel .org-chart { position:relative; flex:none; width:100%; height:390px; box-sizing:border-box; }
-.members-panel .org-chart.has-employees { height:500px; }
+.members-panel .org-chart.has-employees { height:auto; min-height:500px; padding:365px 16px 32px; }
+.members-panel .org-chart.has-employees:has(.org-employee-actions) { padding-bottom:124px; }
 .members-panel .org-workspace-card { position:absolute; top:40px; left:50%; transform:translateX(-50%); display:flex; flex-direction:column; align-items:center; justify-content:center; width:99px; height:101px; box-sizing:border-box; border:1px solid #dce3eb; border-radius:11px; color:#39485a; background:#fff; box-shadow:0 2px 5px rgba(47,63,82,.10); }
 .members-panel .org-workspace-card svg { margin-bottom:8px; color:#6e7d8e; }
 .members-panel .org-workspace-card strong { font-size:13px; line-height:18px; }
@@ -249,16 +250,16 @@
 .members-panel .org-owner-role svg { color:#6f7c8d; }
 .members-panel .org-add-employee { position:absolute; top:320px; left:50%; transform:translateX(-50%); display:inline-flex; align-items:center; justify-content:center; gap:6px; height:30px; padding:0 12px; border:1px dashed #d9e1eb; border-radius:7px; color:#8290a0; background:#fff; font-size:12px; }
 .members-panel .org-add-employee:hover { color:#2f6fca; border-color:#a9c7e8; background:#edf4fb; }
-.members-panel .org-employee-list { position:absolute; top:365px; left:16px; right:16px; display:flex; justify-content:center; align-items:flex-start; gap:12px; flex-wrap:wrap; }
-.members-panel .org-employee-item { position:relative; display:flex; flex:0 0 210px; flex-direction:column; align-items:stretch; }
-.members-panel .org-employee-card { display:flex; align-items:center; gap:9px; width:210px; min-height:76px; box-sizing:border-box; padding:11px 12px; border:1px solid #dce3eb; border-radius:10px; color:#39485a; background:#fff; box-shadow:0 2px 5px rgba(47,63,82,.10); text-align:left; cursor:pointer; }
+.members-panel .org-employee-list { display:flex; justify-content:center; align-items:flex-start; gap:12px; flex-wrap:wrap; }
+.members-panel .org-employee-item { position:relative; display:flex; flex:0 1 240px; min-width:0; max-width:100%; flex-direction:column; align-items:stretch; }
+.members-panel .org-employee-card { display:grid; grid-template-columns:1fr auto; align-items:start; gap:8px 10px; width:100%; min-height:120px; box-sizing:border-box; padding:11px 12px; border:1px solid #dce3eb; border-radius:10px; color:#39485a; background:#fff; box-shadow:0 2px 5px rgba(47,63,82,.10); text-align:left; cursor:pointer; }
 .members-panel .org-employee-card:hover { border-color:#a9c7e8; background:#f7fbff; }
-.members-panel .org-employee-card .ziwei-avatar { flex:none; }
-.members-panel .org-employee-copy { display:flex; flex:1; min-width:0; flex-direction:column; gap:4px; }
+.members-panel .org-employee-card .ziwei-avatar { grid-column:1; grid-row:1; }
+.members-panel .org-employee-copy { display:flex; grid-column:1 / -1; grid-row:2; min-width:0; flex-direction:column; gap:4px; }
 .members-panel .org-employee-copy strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; }
 .members-panel .org-employee-copy small { overflow:hidden; color:#8290a0; text-overflow:ellipsis; white-space:nowrap; font-size:11px; }
-.members-panel .org-employee-copy em { display:block; overflow:hidden; color:#9aa5b2; font-size:10px; font-style:normal; line-height:14px; text-overflow:ellipsis; white-space:nowrap; }
-.members-panel .org-employee-card .ziwei-status-tag { flex:none; }
+.members-panel .org-employee-copy em { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; overflow-wrap:anywhere; color:#9aa5b2; font-size:10px; font-style:normal; line-height:14px; white-space:normal; }
+.members-panel .org-employee-card .ziwei-status-tag { grid-column:2; grid-row:1; justify-self:end; }
 .members-panel .org-employee-actions { position:absolute; z-index:8; top:calc(100% + 4px); left:6px; right:6px; display:grid; gap:2px; padding:5px; border:1px solid #d9e2ec; border-radius:9px; background:#fff; box-shadow:0 12px 28px rgba(47,63,82,.16),0 2px 5px rgba(47,63,82,.08); }
 .members-panel .org-employee-actions button { display:flex; align-items:center; gap:9px; min-height:36px; padding:7px 9px; border:0; border-radius:6px; color:#526174; background:#fff; font:inherit; font-size:12px; text-align:left; cursor:pointer; }
 .members-panel .org-employee-actions button:hover { color:#2f6fca; background:#edf4fb; }
@@ -457,8 +458,13 @@
 .workspace-shell:has(.members-panel) .workspace-sidebar button.selected { color:#5f7085; background:#fff; box-shadow:0 1px 2px rgba(47,63,82,.06); }
 .members-panel .directory-device > div strong,.members-panel .directory-device > div .soft-tag { justify-self:start; }
 .members-panel .team-scroll { scrollbar-width:thin; }
-.members-panel .org-employee-copy em { overflow:visible; overflow-wrap:anywhere; line-height:1.45; text-overflow:clip; white-space:normal; }
-.members-panel .employee-tree-row .entity-main small.employee-role-summary { max-width:none; overflow:visible; overflow-wrap:anywhere; line-height:1.45; text-overflow:clip; white-space:normal; }
+.members-panel .employee-tree-row .entity-main small.employee-role-summary { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; overflow-wrap:anywhere; line-height:1.45; white-space:normal; }
+@media (max-width:640px) {
+  .members-panel .employee-tree-row { flex-wrap:wrap; gap:8px; padding-left:18px; }
+  .members-panel .employee-tree-row > .online-dot { margin:9px 0 0; }
+  .members-panel .employee-tree-row > .ziwei-avatar, .members-panel .employee-tree-avatar { flex:none; }
+  .members-panel .employee-tree-row .entity-main { flex:1 1 calc(100% - 70px); }
+}
 .employee-profile-card > p { overflow-wrap:anywhere; white-space:normal; }
 
 /* Keep the board usable at desktop widths and let compact screens scroll

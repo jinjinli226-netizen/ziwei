@@ -22,10 +22,18 @@ test('task board fits desktop columns without clipping important lanes', () => {
   assert.match(shellCss, /\.task-card-title-link\s*\{[^}]*min-width:\s*0/);
 });
 
-test('member and employee role copy wraps instead of being visually truncated', () => {
-  assert.match(shellCss, /\.members-panel \.org-employee-copy em\s*\{[^}]*white-space:\s*normal/);
-  assert.match(shellCss, /\.members-panel \.employee-tree-row \.entity-main small\.employee-role-summary\s*\{[^}]*white-space:\s*normal/);
-  assert.match(shellCss, /\.employee-profile-card > p\s*\{[^}]*overflow-wrap:\s*anywhere/);
+test('team employee previews use summaries while details and editing retain full instructions', () => {
+  const orgCardCopy = appSource.match(/class="org-employee-copy">([\s\S]*?)<\/span>/)?.[1];
+  assert.ok(orgCardCopy, 'the organization card exposes employee copy');
+  assert.match(orgCardCopy, /employeeRoleSummary\(employee\)/);
+  assert.doesNotMatch(orgCardCopy, /employee\.instructions/);
+  assert.match(appSource, /class="employee-role-summary"[^>]*>岗位摘要：\s*\{\{\s*employeeRoleSummary\(employee\)\s*\}\}/);
+
+  const roleDetails = appSource.match(/v-else-if="employeeProfileTab==='role'"([\s\S]*?)v-else-if="employeeProfileTab==='skills'"/)?.[1];
+  assert.ok(roleDetails, 'the employee profile has a role detail view');
+  assert.match(roleDetails, /\{\{\s*employeeProfile\.instructions\s*\|\|\s*employeeProfile\.description/);
+  assert.match(appSource, /employeeRole\.value\s*=\s*employee\?\.instructions\s*\|\|\s*''/);
+  assert.match(appSource, /employeeRoleDraft\.value\s*=\s*employee\.instructions\s*\|\|\s*employee\.description/);
 });
 
 test('directory picker keeps its actions inside the modal at desktop and narrow widths', () => {
@@ -43,7 +51,6 @@ test('quick tray menus keep menu actions horizontal instead of inheriting icon s
 
 test('team quick tray reserves its own row and does not cover the title or org chart', () => {
   assert.match(shellCss, /\.members-panel \.team-quick-tray\s*\{[^}]*position:\s*relative[^}]*top:\s*auto[^}]*left:\s*auto[^}]*margin:\s*8px auto 0/);
-  assert.match(shellCss, /\.members-panel \.org-employee-list\s*\{[^}]*position:\s*absolute[^}]*top:\s*365px/);
 });
 
 test('conversation messages render safe image previews and attachment metadata', () => {
