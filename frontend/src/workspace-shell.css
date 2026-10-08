@@ -305,6 +305,13 @@
 .employee-profile-task-row:hover { border-color:#a9c7e8; background:#f5f9fd; }
 .employee-profile-task-row span { color:#8997a8; font-size:12px; }
 @media (max-width:900px) { .employee-profile-layout { grid-template-columns:1fr; } .employee-profile-card { min-height:0; } }
+@media (max-width:640px) {
+  .employee-profile-header { flex-direction:column; align-items:flex-start; gap:12px; }
+  .employee-profile-breadcrumb { width:100%; flex-wrap:wrap; gap:6px 8px; }
+  .employee-profile-breadcrumb > button, .employee-profile-breadcrumb > span { flex:none; white-space:nowrap; }
+  .employee-profile-breadcrumb strong { flex:1 1 160px; min-width:0; overflow-wrap:anywhere; }
+  .employee-profile-header .header-actions { width:100%; flex-wrap:wrap; gap:8px; }
+}
 
 /* Agent environment list shown below the organization chart. */
 .members-panel .team-environment-section { flex:none; width:896px; box-sizing:border-box; margin:0 auto; padding:24px 16px 0; border-top:1px solid #dfe4eb; }
