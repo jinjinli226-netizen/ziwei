@@ -2,9 +2,22 @@
 
 > **唯一维护入口**：本文是紫薇项目的当前状态、开发约定、运维流程和 AI 接手说明。
 >
-> **项目目录**：`D:\灵光爸爸拆解`
+> **当前发布接续工作树**：`C:\Users\25941\.codex\worktrees\2884\灵光爸爸拆解`。原 `D:\灵光爸爸拆解` 保留用户修改，不作为本轮发布来源。
 >
-> **文档状态**：以 2026-10-08 工作区实际代码和服务器发布状态为准；每次结构、运行方式或功能边界发生变化时必须更新本文。
+> **文档状态**：以 2026-10-09 管理 MCP 最终验收及发布状态为准；每次结构、运行方式或功能边界发生变化时必须更新本文。
+
+### 2026-10-09 当前发布与管理 MCP
+
+- 主站 `4db30ce6d5cca2955d4e2a09103c55b53271ee36` 已推送 `origin/codex/ziwei-terminal-console` 并于北京时间 00:28:55 上线 `/opt/ziwei/releases/4db30ce`；管理 MCP 后端/daemon 实现来自 `bef1944d67d62be1b316ef1a9533d53a13a4bb63`，此前于 00:03:50 发布并仅重启主 API。后续 Escape（4acfeb4，00:14:28）和窄屏标题前端修复均核对 backend/daemon/src/package 逐字节不变，未重启服务。控制端保持 `/opt/ziwei-control/releases/8a4fe59`，前端为 `index-Bebxc5Te.js` / `index-DejeXhlj.css`，旧 hash 与 APK 均保留。
+- 全局客户端已从指向旧 D checkout 的 npm link 更新为实际打包安装 `D:\work\nodejs\node_global\node_modules\ziwei`。真实用户配置、API/workspace/device 凭据、工作目录和 `20242` 保留，仅新增私有 `managementMcp` 配置；独立刷新 `1700 → 49296` 后配置哈希不变、ready=true、工作区仍 `test_222`。不要用项目 `bjc-ops` daemon 替代这些证据。
+- 正式员工“紫薇员工搭建师”ID `employee_eddccbcf-3faa-4f55-a2f9-a12de9c679fe`，Codex / gpt-6.1-sol / zheng，职责与人格、真实技能、目标电脑、管理 MCP 均已保存。它的真实模型调用管理 MCP 创建两名 QA 员工和独立 Hermes profile；相同请求重试返回同 ID。两种 runtime 的首次任务及刷新后任务共 4 项实际 succeeded，握手、工具调用和结果标记齐全。QA 仅用于本轮验证，正式搭建师保留可用。
+- 开放平台 `/:workspace/open-platform` 展示 15 工具、API 健康、真实设备/运行环境和 stdio 接入。员工表单显式选择 runtime/device/profile，不静默回退；Hermes 管理 MCP 员工要求独立且 provider/auth 就绪的 profile。员工 MCP 页签按当前配置和实际 execution 证据展示状态，配置注入与 API 健康不能冒充加载或工具成功。
+- API Key、MCP bearer 和设备凭据分离。管理工具覆盖健康、发现、员工、任务、独立 profile、action、工作区文档；管理请求持久幂等，相同 key 改变意图返回 409。token 文件仅保存在服务端/用户私有目录；test_222 bearer 实测本工作区 200、bjc-ops/phone_ai 403，匿名或 Owner cookie 直接 MCP 请求仍 401。
+- 发布前备份 `/opt/ziwei-backups/terminal-console/20261008T160342Z`；两次前端补丁备份分别为 `/opt/ziwei-backups/terminal-console/20261008T161330Z`、`/opt/ziwei-backups/terminal-console/20261008T162818Z`。三次均有 12 配置和双 SQLite，integrity=ok。完整管理代码回滚需要重启原主 API；最新前端补丁回滚至 4acfeb4 不需重启。新增员工/profile/专用 bearer 是持久资源，代码回滚不自动撤销；不得直接恢复数据库覆盖后续数据。
+- 最终验证：235/235 串行测试、43 files lint、build、隔离 UI 6/6；真实 1440/390 开放平台及 employee/task/conversation 页面验证，截图和错误记录保留。仅 Codex/Hermes 通过本轮真实管理 MCP；不宣称其他 CLI 或旧手机 MCP 已通过。phone_ai 员工/绑定/运行记录仍 0，未执行手机动作、未改控制源或手机配置。
+- [最终验收与运维记录](docs/operations/2026-10-09-management-mcp-acceptance.md) 是本轮 IDs、证据和限制的完整来源。下方 2026-10-08 的“当前版本/PID/员工 MCP 未验收”描述均是当时历史，不能替代本节。
+
+### 2026-10-08 发布与手机验收历史快照
 
 > **当前工作区边界（2026-10-08）**：本地 checkout、本地 API/前端和项目 `data/ziwei_user.json` 属于 `bjc-ops` 的本地代码验收环境。真实本机 daemon 由全局 `D:\\work\\nodejs\\node_global\\ziwei_user` 启动，使用用户目录配置 `C:\\Users\\25941\\AppData\\Local\\Ziwei\\ziwei_user\\ziwei_user.json`，连接服务器 API `https://qzelynth.top` 的 `test_222` 工作区。不要把项目 `data/ziwei_user.json` 的 `bjc-ops` 配置或项目 daemon 当成服务器 daemon；开始操作前分别核对对应配置、端口和 `/readyz`。
 
@@ -12,7 +25,7 @@
 >
 > **最新真实手机技术验收（2026-10-08，北京时间 23:25 完成后验）**：本次在 `phone_ai` 管理入口唯一可见的目标手机来自源中控全局设备目录，尚无员工绑定，不能据此认定独占归属该工作区。Agent/Updater v0.4.4/code15 双端 online，当前 Agent 控制；主站 Owner 代理完成 33 条真实命令（17 截图、9 点击、5 返回、2 启动应用），全部 succeeded，已打开系统设置并返回原应用。23:24:47 最终状态为无升级/待审、三服务 active，主站/控制端仍 `81b6ec8/8a4fe59`。23:25:04–23:25:26 网页只读后验通过，真实截图与最近 20 条成功回执正常显示，页面/控制台/请求/响应体读取/告警错误均 0，后验设备动作 0。短期 Owner QA 会话已撤销，服务器与本机私有会话文件均已删除。工作区员工 0、员工绑定 0；终端 MCP 实际 list/status 失败，旧 IP 配置触发 `ERR_TLS_CERT_ALTNAME_INVALID`，本轮未改配置，员工/MCP 链路尚未通过。两次大响应读取 20 秒超时保留记录，命令成功且未重放，最终网页后验未再现。详见 [脱敏技术验收记录](docs/operations/2026-10-08-real-phone-acceptance.md)；账号、作品与指标只保存在 ignored `.local/real-phone-acceptance/report.md` 及截图/结构化结果。下方“手机 0/待实机”是此前发布阶段历史；真实双端升级、业务消息仍未验收。
 >
-> **本机 daemon 当前只读核对**：全局 `ziwei_user` 仍使用 `test_222`，监听 `20242`、PID `33260`，最新只读 `/readyz` 为 `ready=true`。本轮没有启动、停止、重装或切换 daemon，没有改它的配置与凭据。下方 2026-10-06 等旧条目中的 PID、版本和“当前”描述都是当时的历史记录，不代表本轮状态。
+> **2026-10-08 手机验收时的 daemon 历史快照**：当时 `test_222`、`20242`、PID `33260`、ready=true；手机验收没有更新 daemon。该进程现已由顶部管理 MCP 客户端升级与刷新记录取代。
 >
 > **工作树保护**：本轮在 `C:\Users\25941\.codex\worktrees\2884\灵光爸爸拆解` 接续原有前端修改；已有 `.domain-occurrences.txt`、`.local-ziwei-readonly-evidence.json` 和 `tmp_gzgov.html` 均保留。不要执行 reset、clean 或覆盖式 checkout。未改 DNS、未新建子域名，也没有为了验收新增本机业务服务实例。原 `D:\灵光爸爸拆解` 及源中控目录的 dirty/untracked 文件仍原样保留。
 

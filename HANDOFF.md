@@ -4,7 +4,17 @@
 
 > **当前接管状态（2026-10-08）**：本地 checkout、5178 前端、4178 API 和项目 `data/ziwei_user.json` 是 `bjc-ops` 的本地代码验收环境；真实本机 `ziwei_user` daemon 由全局命令启动，使用用户目录配置连接 `https://qzelynth.top` 的服务器工作区 `test_222`。不要把项目配置或项目 daemon 当成服务器 daemon；接手时分别核对用户目录配置、项目配置和各自 `/readyz`。详细维护约定统一见 `PROJECT_MANAGEMENT.md`。
 
-## 2026-10-08 当前真实手机技术验收补记
+## 2026-10-09 当前接手续记：管理 MCP 真实员工链路
+
+- 当前开发/发布接续目录为 `C:\Users\25941\.codex\worktrees\2884\灵光爸爸拆解`。原 D checkout 的用户 dirty/untracked 文件和本工作树 `.domain-occurrences.txt`、`.local-ziwei-readonly-evidence.json`、`tmp_gzgov.html` 均保留，不执行 reset/clean。
+- 主站当前发布 `4db30ce`，管理实现 `bef1944`，前端 `index-Bebxc5Te.js` / `index-DejeXhlj.css`；控制端 `8a4fe59` 未变。00:03:50 管理代码上线仅重启主 API；00:14:28 Escape 与 00:28:55 窄屏标题前端补丁均未重启服务，运行时代码逐字节一致。最新备份 `/opt/ziwei-backups/terminal-console/20261008T162818Z` 双 SQLite integrity=ok、12 配置。
+- 全局客户端已用验证后的 tgz 替换旧 D checkout link，真实 package 在 `D:\work\nodejs\node_global\node_modules\ziwei`。原用户配置及设备凭据保留，工作区 `test_222`、canonical API、工作目录和 `20242` 不变。daemon 实际刷新 `1700 → 49296`，配置哈希不变、ready/MCP 正常。项目 `bjc-ops` 配置只供隔离代码验收。
+- 正式“紫薇员工搭建师”ID `employee_eddccbcf-3faa-4f55-a2f9-a12de9c679fe` 已可在网页对话，Codex / gpt-6.1-sol / zheng，挂载真实“员工搭建与只读验收”技能。模型实际 stdio MCP 发现→独立 Hermes profile→两名 QA 员工→真实任务→回读链路已通过；每名 QA 相同创建请求重试返回同 ID。
+- Codex `employee_20f5a646-025c-4e05-aed9-d08ba60edd72`、Hermes `employee_748360a3-a0e4-444b-9125-5fe96f943d39` 都仅一名；Hermes 使用独立 `ziwei-qa-mgmt-20261008`。首次与刷新后共 4 个 task/action succeeded，均 loaded=true、实际管理工具成功，并有两轮各自结果标记。不要把宿主工具或直接管理员创建当成这些真实员工证据。
+- 开放平台展示真实 15 工具和安全 stdio 配置，员工 MCP 页签展示实际证据。HTTP `/mcp/v1` 不是远程 MCP URL；专用 bearer 与 API Key/设备凭据隔离。作用域实测 test_222 200、bjc-ops/phone_ai 403，Owner cookie 不能替代 bearer。
+- 235/235 串行测试、lint/build、隔离 UI 6/6、真实 HTTPS 桌面/移动宽度验证已完成。完整资源 IDs、临时会话清理、浏览器截图/错误记录、客户端与服务证据、限制和回滚见 [最终验收记录](docs/operations/2026-10-09-management-mcp-acceptance.md)。旧手机 MCP 的 TLS 配置问题仍属单独历史边界；本轮未操作手机或绑定。
+
+## 2026-10-08 真实手机技术验收历史补记
 
 - 本轮在 `phone_ai` 管理入口唯一可见的目标手机来自源中控全局设备目录；员工绑定 0，不代表手机独占归属该工作区。Agent/Updater v0.4.4/code15 双端 online、无障碍 true、亮屏未锁、peerBound/canInstall true、无 pending，当前 Agent 控制。下文手机 0 和未实机验收记录是较早阶段历史。
 - 设备动作由主任务独占，经真实域名主站 Owner 代理完成 33 条命令：17 截图、9 点击、5 系统返回、2 启动应用，全部 succeeded；系统设置启动后已通过截图确认，并成功返回原应用。23:24:47 最终记录 updates/pending 0、三服务 active，主站/控制端仍 `81b6ec8/8a4fe59`。

@@ -6,6 +6,16 @@
 
 开发、启动、架构、真实完成边界、扩展规范、故障排查、发布门槛和接手顺序统一维护在 [PROJECT_MANAGEMENT.md](PROJECT_MANAGEMENT.md)；项目级变更摘要见 [CHANGELOG.md](CHANGELOG.md)。需要把项目交给新 AI 时，直接使用 [NEW_AI_SESSION_PROMPT.md](NEW_AI_SESSION_PROMPT.md) 中的提示词。任何 AI 接手项目时先读维护手册，再读本文件和 `HANDOFF.md`；不要只依据旧截图或历史计划判断当前状态。
 
+## 管理 MCP 与正式员工搭建师（2026-10-09 已上线）
+
+当前主站发布为 `4db30ce`（管理 MCP 实现 `bef1944`、profile 下拉框 Escape 与员工页窄屏标题修复），控制服务仍为 `8a4fe59`。登录后打开 [`test_222 / 开放平台`](https://qzelynth.top/test_222/open-platform)，可以查看真实的 15 项管理工具、工作区、设备发现与安全 stdio 接入示例；员工详情的 MCP 页签显示该员工实际执行的握手及工具调用回执。
+
+正式员工 **紫薇员工搭建师** 已在 `test_222` 创建并接入管理 MCP，runtime 为 Codex，模型 `gpt-6.1-sol`，绑定电脑 `zheng`，挂载真实的“员工搭建与只读验收”技能。可在[员工详情](https://qzelynth.top/test_222/employee/employee_eddccbcf-3faa-4f55-a2f9-a12de9c679fe)进入对话，例如：“在 zheng 创建一个 Codex 员工，职责是只读检查工作区状态，人格严谨直白，挂载员工搭建与只读验收技能，启用管理 MCP，安排一次只读验收并回读结果。”如需 Hermes，将 runtime 明确写为 Hermes 并要求新建独立 profile；搭建师会先发现设备、CLI、认证/provider、profile 和技能，条件缺失时返回具体错误。
+
+本轮由搭建师的真实模型通过 MCP 创建两名带 QA 名称的员工，各重试一次返回相同 ID；Codex 与独立 Hermes profile 的首次任务和 daemon 刷新后任务均真实 `succeeded`，都有本次 stdio 握手、health/list 工具成功及结果标记。全套串行测试 235/235、lint/build、隔离 UI 6/6、真实域名 1440/390 px 验收通过。完整 IDs、版本、证据、边界及回滚见[最终验收记录](docs/operations/2026-10-09-management-mcp-acceptance.md)。
+
+管理 MCP 以 `scripts/ziwei-mcp.mjs` 提供 **stdio** 服务，内部经 HTTPS 请求 `/mcp/v1`；该 HTTP 管理 API 地址不能填作远程 MCP transport URL。MCP bearer、普通 API Key、设备凭据相互独立。真实 daemon 的私有 `managementMcp` 配置保存专用 token 文件路径，凭据不进入员工人格、提示词、命令行参数、前端或 Git。仅 Codex/Hermes 完成本轮实际管理 MCP 验收；其他 CLI 的发现状态不代表已完成认证或工具调用验收。手机执行、绑定和旧手机 MCP 配置不属于本轮通过范围。
+
 ## 紫薇·互联 Android 安装页（已上线并完成真实域名验收）
 
 安装页公开路径为 [`https://qzelynth.top/android-install`](https://qzelynth.top/android-install)，无需登录；登录主站后，“系统 → 紫薇·互联”标题栏新增“安装手机端”入口。安装页可以返回当前工作区的手机管理，扫码入口则使用不含会话或凭据的固定公开地址。
@@ -54,7 +64,7 @@ npm run diagnose  # 单次健康检查
 创建工作区和管理项目不需要先连接设备。只有要让某台电脑运行数字员工时，才在网页的“添加设备”里生成一次性配对码。`ziwei_user` 在每台电脑上只需安装一次；后续给同一台电脑连接新的工作区时，直接运行 `connect` 和 `start`，不要重复执行 `npm install`。
 
 ```powershell
-npm install --global "https://github.com/jinjinli226-netizen/ziwei/archive/refs/heads/codex/hermes-independent-profile.tar.gz"
+npm install --global "https://github.com/jinjinli226-netizen/ziwei/archive/refs/heads/codex/ziwei-terminal-console.tar.gz"
 ziwei_user connect --api "https://qzelynth.top" --code "<网页生成的一次性配对码>" --name "我的电脑"
 ziwei_user change
 ```

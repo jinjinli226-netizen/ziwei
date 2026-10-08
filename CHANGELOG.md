@@ -2,6 +2,13 @@
 
 本文件只记录可追溯的项目级变更摘要；详细设计、验证命令和未完成边界见 [PROJECT_MANAGEMENT.md](PROJECT_MANAGEMENT.md)。
 
+## 2026-10-09 管理 MCP 与正式员工搭建师（已发布）
+
+- 管理实现 `bef1944`：15 项工作区管理 MCP 工具、持久幂等、真实设备/CLI/profile/认证发现、独立 bearer 作用域及 Codex/Hermes stdio 启动注入；凭据保存在 daemon 私有配置，真实握手/工具调用按 execution 审计并反馈到员工页。
+- 开放平台展示安全 stdio 接入、真实工具与配置状态；员工配置显式选择电脑/runtime/profile、独立人格和真实技能，Hermes 使用独立 profile，不静默回退。`4acfeb4` 修复 profile 下拉 Escape 关闭整个员工弹窗，`4db30ce` 修复窄屏员工标题被横向按钮挤成竖排。
+- 正式“紫薇员工搭建师”已在 test_222 接入；真实模型创建两名 QA 员工、独立 Hermes profile，各重复创建返回同 ID。首次及 daemon 刷新后共 4 项任务 succeeded、实际管理 MCP 工具成功。235/235、lint/build、隔离 UI 6/6、真实 HTTPS 1440/390 通过。
+- 当前主站 `/opt/ziwei/releases/4db30ce`，控制端仍 8a4fe59；原用户配置和 20242 保留，全局客户端已替换旧源码 link。双 SQLite/配置备份、旧 hash 与 APK 保留，未执行手机动作。完整 IDs、证据和限制见 [最终验收记录](docs/operations/2026-10-09-management-mcp-acceptance.md)。
+
 ## 2026-10-08 紫薇·互联公开 Android 安装页（已发布）
 
 - 新增无需登录的精确 `/android-install`（含尾斜杠），主站完整“紫薇·互联”增加安装入口和安全工作区返回链接；双 APK 从真实 index/manifest 选最新版本及大小，本地 QR、复制中控地址与双应用安装/权限/入网/审批/绑定指引完整，原主站认证与手机协议保留。
