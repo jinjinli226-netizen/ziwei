@@ -161,6 +161,7 @@ try {
     const modal = page.locator('.employee-create-modal');
     await page.getByTestId('employee-ready').waitFor();
     assert.match(await page.getByRole('combobox', { name: '运行配置 Profile', exact: true }).innerText(), /qa-codex/);
+    await page.getByRole('combobox', { name: '运行配置 Profile', exact: true }).click(); await page.keyboard.press('Escape'); assert(await modal.isVisible(), 'Escape from profile listbox closed employee editor');
     await modal.getByRole('button', { name: '保存', exact: true }).click(); await modal.waitFor({ state: 'hidden' });
     assert.equal(f.state.posts.at(-1).runtimeProfile, 'qa-codex');
     await page.getByRole('button', { name: '编辑伙伴', exact: true }).click(); await page.getByTestId('employee-ready').waitFor();
@@ -184,3 +185,4 @@ try {
   process.stdout.write(`${JSON.stringify({ passed: evidence.passed, tests: evidence.tests.length, pageErrors: evidence.pageErrors.length, consoleErrors: evidence.consoleErrors.length, failedRequests: evidence.failedRequests.length, output })}\n`);
   if (!evidence.passed) process.exitCode = 1;
 }
+

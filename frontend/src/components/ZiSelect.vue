@@ -103,14 +103,14 @@ function onTriggerKeydown(event) {
     event.preventDefault();
     if (!open.value) { void openMenu({ focusListbox: false }); setActive(selectedIndex.value + (event.key === 'ArrowDown' ? 1 : -1)); }
     else setActive(activeIndex.value + (event.key === 'ArrowDown' ? 1 : -1));
-  } else if (event.key === 'Escape') closeMenu();
+  } else if (event.key === 'Escape' && open.value) { event.preventDefault(); event.stopPropagation(); closeMenu(); }
 }
 function onListboxKeydown(event) {
   if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); setActive(activeIndex.value + (event.key === 'ArrowDown' ? 1 : -1)); }
   else if (event.key === 'Home') { event.preventDefault(); setActive(0); }
   else if (event.key === 'End') { event.preventDefault(); setActive(props.options.length - 1); }
   else if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); if (activeIndex.value >= 0) selectOption(props.options[activeIndex.value]); }
-  else if (event.key === 'Escape') { event.preventDefault(); closeMenu(); }
+  else if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeMenu(); }
   else if (event.key === 'Tab') closeMenu({ restore: false });
 }
 watch(() => props.modelValue, () => { if (!open.value) activeIndex.value = selectedIndex.value; });
