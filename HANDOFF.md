@@ -4,6 +4,15 @@
 
 > **当前接管状态（2026-10-08）**：本地 checkout、5178 前端、4178 API 和项目 `data/ziwei_user.json` 是 `bjc-ops` 的本地代码验收环境；真实本机 `ziwei_user` daemon 由全局命令启动，使用用户目录配置连接 `https://qzelynth.top` 的服务器工作区 `test_222`。不要把项目配置或项目 daemon 当成服务器 daemon；接手时分别核对用户目录配置、项目配置和各自 `/readyz`。详细维护约定统一见 `PROJECT_MANAGEMENT.md`。
 
+## 2026-10-08 当前真实手机技术验收补记
+
+- 本轮在 `phone_ai` 管理入口唯一可见的目标手机来自源中控全局设备目录；员工绑定 0，不代表手机独占归属该工作区。Agent/Updater v0.4.4/code15 双端 online、无障碍 true、亮屏未锁、peerBound/canInstall true、无 pending，当前 Agent 控制。下文手机 0 和未实机验收记录是较早阶段历史。
+- 设备动作由主任务独占，经真实域名主站 Owner 代理完成 33 条命令：17 截图、9 点击、5 系统返回、2 启动应用，全部 succeeded；系统设置启动后已通过截图确认，并成功返回原应用。23:24:47 最终记录 updates/pending 0、三服务 active，主站/控制端仍 `81b6ec8/8a4fe59`。
+- 两次大响应读取 20 秒超时，命令已 succeeded，未重放；17 readback 为只读补取。04 点击虽回执成功但首次页面未切换，观察后 06 新点击才进入目标页，不将命令成功等同导航成功。
+- 北京时间 23:25:04–23:25:26 动作后网页只读后验通过：真实 JPEG 720×1612 正常渲染，详情 33 条 succeeded、DOM 最近 20 条均成功且有完整回执入口；双端 online、待审/绑定 0，页面/控制台/请求失败/响应体读取失败/告警/阻止写请求均 0，后验设备动作 0。短期主站 Owner QA 会话已撤销，服务器与本机私有会话文件已删除；未创建员工或手机设备令牌。
+- 员工 0、员工绑定 0；宿主 Codex 可用不代表员工手机执行链路已通过。终端 MCP 实际 list/status 失败，旧 IP 配置触发 ERR_TLS_CERT_ALTNAME_INVALID；正式域名健康 200，本轮未修配置，也未改 test_222 daemon。员工/MCP 链路、真实双端升级、业务消息仍未验收。
+- 提交文档仅保留技术状态，见 [脱敏验收记录](docs/operations/2026-10-08-real-phone-acceptance.md)。完整账号、作品与指标只保存在 ignored `.local/real-phone-acceptance/report.md`；本地结构化总结果 `result.json`、`final-state.json` 和截图保留，不推送私人数据。
+
 ## 2026-10-08 接手续记：公开 Android 安装页已上线
 
 - **当前生产版本**：T4 提交 `81b6ec8d0eb5693f3faf5eab88cd7ff2aeabdb00` 已快进进入并推送 `codex/ziwei-terminal-console`；北京时间 22:23 切 `/opt/ziwei/current -> /opt/ziwei/releases/81b6ec8`，前端 `index-BUxdmKav.js` / `index-C8foC8Iv.css`。source 保持 `8a4fe59`；下文完整终端的 `a625350` 发布是较早阶段历史，当前状态以本节与维护手册顶部为准。

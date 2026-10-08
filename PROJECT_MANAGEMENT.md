@@ -10,6 +10,8 @@
 
 > **当前版本事实（2026-10-08，北京时间 22:26:46 核验）**：主站安装页提交 `81b6ec8d0eb5693f3faf5eab88cd7ff2aeabdb00` 已快进合入并推送 `origin/codex/ziwei-terminal-console`，北京时间 22:23 切换 `/opt/ziwei/current -> /opt/ziwei/releases/81b6ec8`，上一个发布为 `a625350`。前端为 `index-BUxdmKav.js` / `index-C8foC8Iv.css`。原控制服务保持 `8a4fe59f0b2486fb584962fd3006e9a47418037a`，`/opt/ziwei-control/current -> /opt/ziwei-control/releases/8a4fe59`。最新发布前备份 `/opt/ziwei-backups/terminal-console/20261008T142230Z`；下方 `a625350/f88d6f8` 及旧验证记录均为分阶段历史，不能作为当前线上版本。
 >
+> **最新真实手机技术验收（2026-10-08，北京时间 23:25 完成后验）**：本次在 `phone_ai` 管理入口唯一可见的目标手机来自源中控全局设备目录，尚无员工绑定，不能据此认定独占归属该工作区。Agent/Updater v0.4.4/code15 双端 online，当前 Agent 控制；主站 Owner 代理完成 33 条真实命令（17 截图、9 点击、5 返回、2 启动应用），全部 succeeded，已打开系统设置并返回原应用。23:24:47 最终状态为无升级/待审、三服务 active，主站/控制端仍 `81b6ec8/8a4fe59`。23:25:04–23:25:26 网页只读后验通过，真实截图与最近 20 条成功回执正常显示，页面/控制台/请求/响应体读取/告警错误均 0，后验设备动作 0。短期 Owner QA 会话已撤销，服务器与本机私有会话文件均已删除。工作区员工 0、员工绑定 0；终端 MCP 实际 list/status 失败，旧 IP 配置触发 `ERR_TLS_CERT_ALTNAME_INVALID`，本轮未改配置，员工/MCP 链路尚未通过。两次大响应读取 20 秒超时保留记录，命令成功且未重放，最终网页后验未再现。详见 [脱敏技术验收记录](docs/operations/2026-10-08-real-phone-acceptance.md)；账号、作品与指标只保存在 ignored `.local/real-phone-acceptance/report.md` 及截图/结构化结果。下方“手机 0/待实机”是此前发布阶段历史；真实双端升级、业务消息仍未验收。
+>
 > **本机 daemon 当前只读核对**：全局 `ziwei_user` 仍使用 `test_222`，监听 `20242`、PID `33260`，最新只读 `/readyz` 为 `ready=true`。本轮没有启动、停止、重装或切换 daemon，没有改它的配置与凭据。下方 2026-10-06 等旧条目中的 PID、版本和“当前”描述都是当时的历史记录，不代表本轮状态。
 >
 > **工作树保护**：本轮在 `C:\Users\25941\.codex\worktrees\2884\灵光爸爸拆解` 接续原有前端修改；已有 `.domain-occurrences.txt`、`.local-ziwei-readonly-evidence.json` 和 `tmp_gzgov.html` 均保留。不要执行 reset、clean 或覆盖式 checkout。未改 DNS、未新建子域名，也没有为了验收新增本机业务服务实例。原 `D:\灵光爸爸拆解` 及源中控目录的 dirty/untracked 文件仍原样保留。
