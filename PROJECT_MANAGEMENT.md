@@ -4,7 +4,7 @@
 >
 > **当前发布接续工作树**：`C:\Users\25941\.codex\worktrees\2884\灵光爸爸拆解`。原 `D:\灵光爸爸拆解` 保留用户修改，不作为本轮发布来源。
 >
-> **文档状态**：以 2026-10-09 邀请注册修复发布及已保留的手机技能状态为准；每次结构、运行方式或功能边界发生变化时必须更新本文。
+> **文档状态**：以 2026-10-09 邀请注册修复发布及手机平台技能验收边界为准；每次结构、运行方式或功能边界发生变化时必须更新本文。
 
 ### 2026-10-09 当前发布：邀请注册修复
 
@@ -13,11 +13,23 @@
 - 表单显示持续、可见的具体错误；已有账号可登录后继续接受邀请，立即进入目标工作区。296/296 串行测试、lint49/build、邀请隔离6/6与线上6/6、手机/卡片/管理隔离30/30通过。线上验证使用全新无登录上下文与独立 QA 邀请，覆盖个人 link-only注册→自动登录→正确角色/权限→刷新、邮箱不匹配修正、已有账号接受以及390px无效/过期/撤销错误；Mac场景为Chromium Mac UA，非实体Mac。
 - 备份 `/opt/ziwei-backups/invite-registration/20261009T030846Z` 保存双 SQLite integrity=ok 与13份配置。仅主API重启（PID80617）；控制44591、Nginx737不变，`/terminal-mcp/v1/`配置哈希不变，匿名手机/管理MCP仍401 JSON，原APK code15与旧hash资源校验通过。未操作全局客户端或手机。
 - QA4账号/3工作区与会话已清理，失败注册无残留；真实bjc邀请在发布及清理后只读检查仍pending/link-only/未绑定，到期2026-10-16T02:25:42.973Z，未被本轮验收消费。用户刷新原邀请链接即可重试；邮箱已注册则登录后接受。代码回滚切回628482d并只重启主API，不恢复旧数据库覆盖后续数据。
-- 当前发布由独立工作树 `C:\Users\25941\.codex\worktrees\invite-registration-fix\灵光爸爸拆解` 完成；原D目录与2884树的T8文档/验收增量及untracked文件均未覆盖。T8文档可在共同发布分支上接续合并，后续主站发布必须同时保留手机与邀请修复。详细证据、范围与回滚见[邀请注册发布记录](docs/operations/2026-10-09-invitation-registration-fix.md)。
+- 当前发布由独立工作树 `C:\Users\25941\.codex\worktrees\invite-registration-fix\灵光爸爸拆解` 完成；原D目录与2884树的T8文档/验收增量及untracked文件均未覆盖。T8手机文档与验收增量已合并到共同发布分支，后续主站发布必须同时保留手机与邀请修复。详细证据、范围与回滚见[邀请注册发布记录](docs/operations/2026-10-09-invitation-registration-fix.md)。
+
+### 2026-10-09 手机 MCP 平台技能接续快照
+
+- **最新主站版本接续**：邀请注册修复 `82c4f8e1f26ab5493e67e2a0c52856b3b5aa2bf6` 于北京时间11:12:26发布，前端 `index-C8RY6SXs.js`；包含下方手机功能发布 `628482d`，Nginx手机MCP路由保留。本工作树已快进包含邀请增量，本轮文档提交不再切release或重启API；邀请具体行为/验收以T7独立记录为准。
+- 主站手机技能实现 `628482dfa1dc98db8d8531e8def200cc1b6cf636` 已推送并于北京时间 10:05:25 发布 `/opt/ziwei/releases/628482d`；前端 `index-DL3srw7J.js` / `index-F195zgZe.css`。控制端仍 `8a4fe59`，Android v0.4.4/code15 未改变。仅主 API 因新后端代码重启；Nginx 后续补充手机 MCP 转发并 reload，原控制服务未重启。
+- 平台目录 `ziwei-phone-control` v1.0.0 使用既有安装/版本机制和结构化 integration；统一向导覆盖技能中心、员工技能/MCP、互联绑定，支持原表单新增员工后继续配置。分开显示保存、API、设备发现、注入、实际握手/工具结果与当前执行手机回执。完整十工具受工作区/员工/电脑/profile/执行/配置修订/精确手机限定，原中控继续拥有设备状态、命令队列、凭据和截图。
+- 同一全局客户端 `D:\work\nodejs\node_global\node_modules\ziwei` 保留原用户目录配置、主设备和 `test_222/20242`。真实双 Owner grant 建立 `phone_ai/device_f9568c06-d932-4264-9d4c-acc5122097ea` 独立凭据连接；原生重载后 PID29976 同时恢复两连接且配置字节不变，主 token 不得跨区替代新身份。管理搭建师原 bearer 仅精确增加 `phone_ai`，保留本机 tokenFile 单默认 `test_222`；实际 stdio 21 工具与服务器 `test_222/phone_ai=200`、`bjc-ops=403` 已验证。
+- 正式“紫薇手机运营-Codex” `employee_b723a169-826a-4a27-8cf5-2e50747432ab` 由真实网页创建并绑定；“紫薇手机运营-Hermes” `employee_e60938a6-0d9a-4e77-a6a8-27939ab1c853` 与独立 `ziwei-phone-ops-20261009` 由正式搭建师真实模型经管理 MCP 创建/配置，profile 先 succeeded 再回读发现。两员工均精确绑定“小饱饱” `android-6378b05a-dff0-4dc3-8f88-ea37616949c1`，无外部账号；管理 MCP 未挂载到手机运营员工。
+- 公网初次员工检测真实暴露 Nginx 未转发 `/terminal-mcp/v1/`，两 runtime 工具已加载但 list/status 返回 HTML405，均如实 failed。已备份配置并补 `location ^~ /terminal-mcp/v1/` 到原 `127.0.0.1:4178`、nginx -t/reload，匿名 phone/management 分别 401 JSON、health200；新增 `scripts/verify-phone-mcp-transport.mjs` 为后续发布门槛。失败执行已结束，复验使用新只读 action，不重放旧 capability。
+- 完整串行 276/276、lint/build、隔离手机 UI12/12、卡片12/12、管理 UI6/6、真实域名配置9/9、实际加载后最终只读复验9/9均通过；两员工真实MCP loaded/list/status成功，搭建师最终持久会话复验succeeded。真实配置 1440/390 初次与刷新均准确等待手机，0页面/console/request错误。手机当前离线，用户明确暂不能操作，不能执行截图/有限动作验收或宣称业务通过；实际员工复验、清理、版本和全部IDs见[手机技能发布记录](docs/operations/2026-10-09-phone-platform-skill-acceptance.md)，操作见[使用指南](docs/PHONE_MCP.md)。
+- 备份 `/opt/ziwei-backups/terminal-console/20261009T020417Z` 含双 SQLite integrity=ok、12 配置；另有 canonical MCP scope 与 Nginx 原配置备份。旧 hash、APK、数据及用户三份 untracked 保留。客户端私有完整备份位于 ignored `.local/phone-skill/client-before-20261009T020900595Z`。不能恢复旧数据库覆盖后续邀请或员工数据；邀请注册 T7 已独立接续发布，后续先核对最新 Git/release 并保留两边增量及手机 Nginx 路由。本轮临时Owner QA会话已撤销且实测401、执行capability文件0；本机三份临时私有文件因自动审批阻止删除仍待清理，详见发布记录。
+- 客户端 PID53712 曾在02:28:09Z最后成功轮询后无退出记录消失，原因 unknown；已原生恢复，不宣称根因修复。独立只读退出观察脚本持久保存在用户目录 `diagnostics/client-exit-watch.mjs`，追加 `logs/client-exit-watch.jsonl`（5MiB×5轮转），当前观察 PID29976；其隔离退出/健康/身份/轮转测试4/4，真实原生重载已记录旧PID退出。它不接管、重启或终止业务进程。
 
 ### 2026-10-09 历史发布：团队员工卡片重叠修复
 
-- 主站当前为 `dc3917341cd801d4e83bda8da24fe794d35f23f2`，已推送 `origin/codex/ziwei-terminal-console`，北京时间 00:50:22 发布 `/opt/ziwei/releases/dc39173`；前端 `index-PEvi9Z0Z.js` / `index-DyDgRE0D.css`。控制端仍为 `8a4fe59`。
+- 该历史发布主站为 `dc3917341cd801d4e83bda8da24fe794d35f23f2`，已推送 `origin/codex/ziwei-terminal-console`，北京时间 00:50:22 发布 `/opt/ziwei/releases/dc39173`；前端 `index-PEvi9Z0Z.js` / `index-DyDgRE0D.css`。控制端仍为 `8a4fe59`。
 - 用户截图中的长指令卡片已在旧生产复现：最高 787px，组织区固定 500px，下方设备表从卡片中间开始。修复让两处员工列表使用最多两行岗位摘要，完整 instructions 保留在详情和编辑；组织图按卡片排数自然增长，末排菜单有预留空间，390px 环境员工行文字不再被挤到 0px。
 - 完整串行 235/235、lint 43 files、build、隔离卡片 12/12、MCP UI 6/6，以及真实 HTTPS 四视口 8/8 通过。真实三卡高度统一 126px，环境区与末卡间距 32px，布局/详情检查无页面、控制台、请求错误和写请求。390px 顶部四个管理按钮仍有既有裁切，未包含在此次卡片修复结论中。
 - 发布前备份 `/opt/ziwei-backups/terminal-console/20261008T164821Z` 含 12 配置和双 SQLite（integrity=ok）。后端、daemon、src 和 runtime package 逐字节一致，服务未重启，主 API PID52196、控制 PID44591、Nginx PID737；真实 daemon test_222/20242/PID49296/ready/MCP configured 保持正常。旧 hash、数据目录、APK 保留。当前前端回滚到 `4db30ce` 无需重启 API。
