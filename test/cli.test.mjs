@@ -65,6 +65,18 @@ test('ziwei_user CLI persists and validates the pinned TLS CA file', async () =>
   );
 });
 
+test('setup preserves explicit shared workspaces and private MCP settings on the primary connection', async () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'ziwei-cli-preserve-'));
+  const config = path.join(temp, 'config.json');
+  const previous = { workspace: 'test_222', deviceId: 'device_primary', deviceToken: 'private-primary', apiBase: 'https://example.test', healthPort: 20242, workdir: temp, managementMcp: { enabled: true, tokenFile: 'management-private.json' }, terminalMcp: { enabled: true }, sharedWorkspaces: [{ workspace: 'phone_ai', deviceId: 'device_shared', deviceTokenFile: 'shared-private.json', grantId: 'grant_explicit' }], futureSetting: 'keep' };
+  fs.writeFileSync(config, JSON.stringify(previous));
+  try {
+    await run(process.execPath, [cli, 'setup', '--workspace', 'test_222'], { cwd: root, env: { ...process.env, ZIWEI_CONFIG: config } });
+    const saved = JSON.parse(fs.readFileSync(config, 'utf8'));
+    for (const [key, value] of Object.entries(previous)) assert.deepEqual(saved[key], value, `setup discarded ${key}`);
+  } finally { fs.rmSync(temp, { recursive: true, force: true }); }
+});
+
 test('ziwei_user CLI reports its version', async () => {
   const { stdout } = await run(process.execPath, [cli, 'version'], { cwd: root });
   assert.match(stdout.trim(), /^ziwei_user \d+\.\d+\.\d+$/);

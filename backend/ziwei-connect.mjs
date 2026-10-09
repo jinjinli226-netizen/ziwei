@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { closeSync, fstatSync, openSync, readFileSync } from 'node:fs';
+import { setTimeout as sleep } from 'node:timers/promises';
 
 const now = () => new Date().toISOString();
 const id = prefix => `${prefix}-${randomUUID()}`;
@@ -209,6 +210,7 @@ export function createZiweiConnect(repo, options = {}) {
     );
     CREATE INDEX IF NOT EXISTS idx_ziwei_connect_runs_workspace ON ziwei_connect_runs(workspace_id, created_at);
   `);
+  for (const statement of ["ALTER TABLE ziwei_connect_runs ADD COLUMN configuration_revision TEXT", "ALTER TABLE ziwei_connect_runs ADD COLUMN execution_id TEXT"]) try { db.exec(statement); } catch(error) { if(!/duplicate column name/.test(error.message)) throw error; }
 
   const parse = (value, fallback = null) => {
     if (value == null) return fallback;
@@ -291,6 +293,7 @@ export function createZiweiConnect(repo, options = {}) {
     id: row.id, employeeId: row.employee_id, bindingId: row.binding_id, deviceId: row.device_id,
     accountId: row.account_id, action: row.action, commandId: row.command_id, status: row.status,
     result: parse(row.result_json), error: row.error || null, createdAt: row.created_at, updatedAt: row.updated_at,
+    configurationRevision: row.configuration_revision || null, executionId: row.execution_id || null,
   });
   const getRun = (slug, runId) => {
     const ws = workspace(slug);
@@ -302,6 +305,15 @@ export function createZiweiConnect(repo, options = {}) {
     const next = { status: values.status ?? row.status, result_json: values.result === undefined ? row.result_json : JSON.stringify(values.result), error: values.error === undefined ? row.error : (values.error || null), updated_at: now() };
     db.prepare('UPDATE ziwei_connect_runs SET status=?,result_json=?,error=?,updated_at=? WHERE id=?').run(next.status, next.result_json, next.error, next.updated_at, row.id);
     return db.prepare('SELECT * FROM ziwei_connect_runs WHERE id=?').get(row.id);
+  };
+  const bindVerified = (slug,input,devices) => {
+    const ws=workspace(slug);const employeeId=text(input.employeeId || input.employee_id,'employeeId');const deviceId=text(input.deviceId || input.device_id,'deviceId');employee(ws,employeeId);
+    if(!devices.some(row=>row.id===deviceId)) throw externalError('手机不在紫薇·互联设备目录中',404);
+    const accountId=input.accountId == null || input.accountId==='' ? null : text(input.accountId,'accountId');const accountLabel=input.accountLabel == null || input.accountLabel==='' ? null : text(input.accountLabel,'accountLabel');
+    const timestamp=now();const existing=db.prepare('SELECT id FROM ziwei_connect_bindings WHERE workspace_id=? AND employee_id=?').get(ws.id,employeeId);const bindingId=existing?.id || id('ziwei-binding');
+    if(existing) db.prepare('UPDATE ziwei_connect_bindings SET device_id=?,account_id=?,account_label=?,updated_at=? WHERE id=?').run(deviceId,accountId,accountLabel,timestamp,bindingId);
+    else db.prepare('INSERT INTO ziwei_connect_bindings(id,workspace_id,employee_id,device_id,account_id,account_label,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)').run(bindingId,ws.id,employeeId,deviceId,accountId,accountLabel,timestamp,timestamp);
+    notify(slug,'ziwei_connect.binding.updated',{bindingId,employeeId,deviceId,accountId,accountLabel});return bindings(slug).find(row=>row.id===bindingId);
   };
 
   return {
@@ -326,6 +338,7 @@ export function createZiweiConnect(repo, options = {}) {
       return requestResponse(target, { method, ...(method === 'POST' ? { body: JSON.stringify(body) } : {}) });
     },
     listBindings: bindings,
+    bindVerified,
     deleteBinding(slug, bindingId) {
       const ws = workspace(slug);
       const binding = db.prepare('SELECT * FROM ziwei_connect_bindings WHERE id=? AND workspace_id=?').get(bindingId, ws.id);
@@ -335,29 +348,19 @@ export function createZiweiConnect(repo, options = {}) {
       return { deleted: true, id: bindingId };
     },
     async bind(slug, input = {}) {
-      const ws = workspace(slug); const employeeId = text(input.employeeId || input.employee_id, 'employeeId'); const deviceId = text(input.deviceId || input.device_id, 'deviceId');
-      employee(ws, employeeId);
       const devices = await listExternalDevices({ detailed: false });
-      const device = devices.find(item => item.id === deviceId);
-      if (!device) throw Object.assign(new Error('手机不在紫薇·互联设备目录中'), { status: 404 });
-      const accountId = input.accountId == null || input.accountId === '' ? null : text(input.accountId, 'accountId');
-      const accountLabel = input.accountLabel == null || input.accountLabel === '' ? null : text(input.accountLabel, 'accountLabel');
-      const at = now(); const existing = db.prepare('SELECT id FROM ziwei_connect_bindings WHERE workspace_id=? AND employee_id=?').get(ws.id, employeeId);
-      const bindingId = existing?.id || id('ziwei-binding');
-      if (existing) db.prepare('UPDATE ziwei_connect_bindings SET device_id=?,account_id=?,account_label=?,updated_at=? WHERE id=?').run(deviceId, accountId, accountLabel, at, bindingId);
-      else db.prepare('INSERT INTO ziwei_connect_bindings(id,workspace_id,employee_id,device_id,account_id,account_label,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)').run(bindingId, ws.id, employeeId, deviceId, accountId, accountLabel, at, at);
-      notify(slug, 'ziwei_connect.binding.updated', { bindingId, employeeId, deviceId, accountId, accountLabel });
-      return bindings(slug).find(item => item.id === bindingId);
+      return bindVerified(slug,input,devices);
     },
-    async run(slug, input = {}) {
+    async run(slug, input = {}, { fullToolset = false, configurationRevision = null, executionId = null } = {}) {
       const ws = workspace(slug); const employeeId = text(input.employeeId || input.employee_id, 'employeeId'); employee(ws, employeeId);
       const action = text(input.action, 'action', 32).toLowerCase();
-      if (!['health', 'screenshot', 'dry-run'].includes(action)) throw Object.assign(new Error('仅支持 health、screenshot、dry-run 安全只读动作'), { status: 400 });
+      if (!(fullToolset ? terminalActions.has(action) : ['health', 'screenshot', 'dry-run'].includes(action))) throw Object.assign(new Error('不支持该手机动作'), { status: 400 });
       const binding = db.prepare('SELECT * FROM ziwei_connect_bindings WHERE workspace_id=? AND employee_id=?').get(ws.id, employeeId);
       const deviceId = text(input.deviceId || input.device_id || binding?.device_id, 'deviceId');
       if (!binding || binding.device_id !== deviceId) throw Object.assign(new Error('请先在灵光爸爸中绑定数字员工与手机'), { status: 400 });
       const runId = id('ziwei-run'); const at = now();
       db.prepare('INSERT INTO ziwei_connect_runs(id,workspace_id,employee_id,binding_id,device_id,account_id,action,command_id,status,result_json,error,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)').run(runId, ws.id, employeeId, binding.id, deviceId, binding.account_id, action, null, action === 'dry-run' ? 'dry_run' : 'queued', null, null, at, at);
+      db.prepare('UPDATE ziwei_connect_runs SET configuration_revision=?,execution_id=? WHERE id=?').run(configurationRevision,executionId,runId);
       let row = db.prepare('SELECT * FROM ziwei_connect_runs WHERE id=?').get(runId);
       if (action === 'dry-run') {
         row = updateRun(row, { status: 'dry_run', result: { planned: true, deviceId, action: 'screenshot/health', accountId: binding.account_id } });
@@ -382,11 +385,48 @@ export function createZiweiConnect(repo, options = {}) {
         notify(slug, `ziwei_connect.run.${status}`, { runId, employeeId, deviceId, accountId: binding.account_id, commandId, status, error: command?.error || null, screenshotAvailable: Boolean(result.snapshot?.data) });
         return outputRun(row);
       } catch (error) {
-        row = updateRun(row, { status: 'failed', error: error.message });
-        notify(slug, 'ziwei_connect.run.failed', { runId, employeeId, deviceId, accountId: binding.account_id, commandId: null, status: 'failed', error: error.message });
+        row=db.prepare('SELECT * FROM ziwei_connect_runs WHERE id=?').get(runId);
+        const uncertain=Boolean(row.command_id) || !error.status || error.status>=500;
+        if(uncertain && !row.command_id) error.message=`手机命令提交结果不确定，勿重复提交；运行记录 ${runId}，请读取手机状态核对：${error.message}`;
+        row = updateRun(row, { status: uncertain?'uncertain':'failed', error: error.message });
+        notify(slug, `ziwei_connect.run.${row.status}`, { runId, employeeId, deviceId, accountId: binding.account_id, commandId: row.command_id, status: row.status, error: error.message });
         error.run = outputRun(row);
         throw error;
       }
+    },
+    async toolCall(slug,scope,name,args={}) {
+      const phoneId=scope.phoneDeviceId;const path=`/android-devices/${encodeURIComponent(phoneId)}`;
+      const terminal=async(method,suffix,body={})=>{const result=await this.terminal(slug,method,suffix,body);if(result.status>=400) throw externalError(result.body.error || result.body.message || '手机工具请求失败',result.status);return result.body;};
+      const syncReceipt=async device=>{
+        const rows=db.prepare('SELECT * FROM ziwei_connect_runs WHERE workspace_id=? AND employee_id=? AND device_id=? AND execution_id=? AND command_id IS NOT NULL').all(workspace(slug).id,scope.employeeId,phoneId,scope.actionId);
+        for(const row of rows){const command=device?.commands?.find(item=>item.id===row.command_id);if(!command)continue;const previous=parse(row.result_json,{});let snapshot=previous.snapshot || previous.device?.snapshot || null;if(row.action==='screenshot'&&command.status==='succeeded'&&!snapshot?.data) snapshot=(await terminal('GET',`${path}/snapshot`)).snapshot || null;updateRun(row,{status:commandStatus(command),result:{command,device,snapshot},error:command.error || null});}
+        return device;
+      };
+      const detail=async()=>syncReceipt((await terminal('GET',`${path}/status${args.commandId || args.updateId ? `?${new URLSearchParams({...args.commandId?{commandId:args.commandId}:{},...args.updateId?{updateId:args.updateId}:{}})}`:''}`)).device);
+      const wait=async(commandId,updateId,seconds)=>{const deadline=Date.now()+Math.min(30,seconds || 0)*1000;let device;do{device=await syncReceipt((await terminal('GET',`${path}/status?${new URLSearchParams({...commandId?{commandId}:{},...updateId?{updateId}:{}})}`)).device);const record=commandId?device?.commands?.find(row=>row.id===commandId):device?.updates?.find(row=>row.id===updateId);if(record && ['succeeded','committed','failed','cancelled','expired','uncertain','acknowledged'].includes(record.status || record.state)) break;if(Date.now()>=deadline) break;await sleep(500);}while(true);return device;};
+      const action=async(action,argsValue={},seconds=0)=>{let run;try{run=await this.run(slug,{employeeId:scope.employeeId,deviceId:phoneId,action,args:argsValue},{fullToolset:true,configurationRevision:scope.configurationRevision,executionId:scope.actionId});}catch(error){if(error.run?.commandId) return{command:{id:error.run.commandId,status:error.run.status},device:{id:phoneId},runId:error.run.id,verificationError:'命令已受理但读取失败，请查询原 commandId，勿重复提交'};throw error;}let device=run.result?.device || {id:phoneId};let command=run.result?.command || {id:run.commandId,status:run.status};if(seconds && !settledCommandStatuses.has(command.status)){device=await wait(run.commandId,null,seconds);command=device?.commands?.find(row=>row.id===run.commandId)||command;}if(action==='screenshot'&&command.status==='succeeded') device={...device,snapshot:run.result?.snapshot || (await terminal('GET',`${path}/snapshot`)).snapshot};const row=db.prepare('SELECT * FROM ziwei_connect_runs WHERE id=?').get(run.id);updateRun(row,{status:commandStatus(command),result:{command,device,snapshot:device.snapshot || null},error:command.error || null});return{command,device,runId:run.id};};
+      if(name==='ziwei_phone_list') return {devices:(await listExternalDevices()).filter(row=>row.id===phoneId)};
+      if(name==='ziwei_phone_status') return detail();
+      if(name==='ziwei_phone_receipt'){const device=await detail();const command=device?.commands?.find(row=>row.id===args.commandId);if(!command) throw externalError('未找到该手机的命令回执',404);return{deviceId:phoneId,command};}
+      if(name==='ziwei_phone_action') return action(args.action,args.args || {},args.waitSeconds || 0);
+      if(name==='ziwei_phone_screenshot') return action('screenshot',{},args.waitSeconds ?? 8);
+      if(name==='ziwei_phone_control') return (await terminal('POST',`${path}/control`,{role:args.role})).device;
+      if(name==='ziwei_phone_wait'){if(!args.commandId&&!args.updateId) throw externalError('commandId 与 updateId 至少提供一个',400);return wait(args.commandId,args.updateId,args.waitSeconds ?? 10);}
+      if(name==='ziwei_enrollment_pending'||name==='ziwei_enrollment_approve'){
+        const pending=await terminal('GET','/android-devices/enrollment-requests');const requests=(pending.requests || pending.enrollmentRequests || []).filter(row=>(row.deviceId || row.device_id)===phoneId);
+        if(name==='ziwei_enrollment_pending') return{requests};
+        if(!requests.some(row=>row.id===args.requestId)) throw externalError('入网申请不属于当前员工绑定手机，无法批准',403);
+        return terminal('POST',`/android-devices/enrollment-requests/${encodeURIComponent(args.requestId)}/approve`,{});
+      }
+      if(name==='ziwei_phone_upgrade'){
+        const before=await detail();const preflight=await action('screenshot',{},8);if(preflight.command?.status!=='succeeded'||!preflight.device?.snapshot?.data) throw externalError('升级前截图检查尚未成功，请回读原commandId',409);
+        const releaseIndex=String(options.releaseIndex || process.env.ZIWEI_ANDROID_RELEASE_INDEX || 'https://qzelynth.top/downloads/android/index.json');
+        const response=await fetch(releaseIndex,{redirect:'error',signal:AbortSignal.timeout(10000)});if(!response.ok) throw externalError('无法读取已发布安装包索引');const manifest=await response.json();const current=before?.nodes?.find(row=>row.role===args.targetRole)?.versionCode || 0;const release=(manifest.releases || []).find(row=>args.versionCode ? row.versionCode===args.versionCode : row.versionCode>current);const pkg=release?.packages?.[args.targetRole];
+        if(!pkg || release.versionCode<=current) throw externalError('没有符合要求的已发布更新版本',409);
+        const apkUrl=new URL(pkg.path || pkg.file,releaseIndex).toString();const result=await terminal('POST',`${path}/updates`,{targetRole:args.targetRole,apkUrl,sha256:pkg.sha256,signerSha256:pkg.signerSha256,versionCode:release.versionCode,preflightCommandId:preflight.command.id});
+        const device=await wait(null,result.update?.id,args.waitSeconds ?? 5);return{update:device?.updates?.find(row=>row.id===result.update?.id)||result.update,release:{versionName:release.versionName,versionCode:release.versionCode,apkUrl},before:{targetRole:args.targetRole,versionCode:current}};
+      }
+      throw externalError('未知手机工具',400);
     },
     async refresh(slug, runId) {
       const { row } = getRun(slug, runId);

@@ -237,6 +237,20 @@ export function openDatabase({ memory = false, filename = path.join(ROOT, 'data'
       content_hash TEXT, metadata_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL,
       FOREIGN KEY(skill_id) REFERENCES skills(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS employee_phone_mcp (
+      employee_id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 0,
+      revision TEXT NOT NULL, updated_at TEXT NOT NULL,
+      FOREIGN KEY(employee_id) REFERENCES employees(id) ON DELETE CASCADE,
+      FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS device_workspace_grants (
+      id TEXT PRIMARY KEY, source_workspace_id TEXT NOT NULL, source_device_id TEXT NOT NULL,
+      target_workspace_id TEXT NOT NULL, target_device_id TEXT NOT NULL, created_by TEXT,
+      action_id TEXT, secret_json TEXT, created_at TEXT NOT NULL, expires_at TEXT NOT NULL, claimed_at TEXT, revoked_at TEXT,
+      UNIQUE(source_device_id,target_workspace_id),
+      FOREIGN KEY(source_device_id) REFERENCES devices(id) ON DELETE CASCADE,
+      FOREIGN KEY(target_device_id) REFERENCES devices(id) ON DELETE CASCADE
+    );
     CREATE TABLE IF NOT EXISTS workspace_preferences (
       workspace_id TEXT PRIMARY KEY, description TEXT NOT NULL DEFAULT '', context TEXT NOT NULL DEFAULT '',
       visibility TEXT NOT NULL DEFAULT 'workspace', prefix TEXT NOT NULL DEFAULT '', quota_json TEXT NOT NULL DEFAULT '{}',
@@ -294,6 +308,10 @@ export function openDatabase({ memory = false, filename = path.join(ROOT, 'data'
     "ALTER TABLE skills ADD COLUMN validation_status TEXT NOT NULL DEFAULT 'unvalidated'",
     "ALTER TABLE skills ADD COLUMN validation_error TEXT",
     "ALTER TABLE skills ADD COLUMN imported_at TEXT"
+    ,"ALTER TABLE skills ADD COLUMN catalog_id TEXT"
+    ,"ALTER TABLE skills ADD COLUMN integration_json TEXT NOT NULL DEFAULT '{}'"
+    ,"ALTER TABLE skills ADD COLUMN catalog_release_hash TEXT"
+    ,"ALTER TABLE devices ADD COLUMN terminal_mcp_json TEXT NOT NULL DEFAULT '{}'"
     ,"ALTER TABLE documents ADD COLUMN mime_type TEXT NOT NULL DEFAULT 'text/markdown'"
     ,"ALTER TABLE documents ADD COLUMN storage_key TEXT"
     ,"ALTER TABLE documents ADD COLUMN checksum TEXT"

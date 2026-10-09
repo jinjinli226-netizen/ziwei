@@ -12,6 +12,7 @@
     "scripts/ziwei-user.mjs",
     "scripts/start-ziwei-user.mjs",
     "scripts/ziwei-mcp.mjs",
+    "scripts/ziwei-terminal-mcp.mjs",
     "src"
   ],
   "type": "module",

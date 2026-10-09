@@ -36,9 +36,9 @@ export function createManagementService(repo) {
         if (!Number.isFinite(seenAt) || Date.now() - seenAt > Math.max(45000, age * 4)) issues.push({ code: 'DISCOVERY_STALE', message: 'CLI 发现证据已过期，请等待目标电脑新的运行时发现心跳。' });
         return { name: row.runtime_name, version: row.version, binary: row.binary, cli_status: item.status === 'online' ? row.status : 'offline', models: parse(row.models_json, []), profiles: parse(row.profiles_json, []), readiness, last_seen: row.last_seen, available: issues.length === 0, verified: readiness.authentication === 'configured' && readiness.provider === 'configured' && issues.length === 0, issues };
       });
-      return { id: item.id, name: item.name, os: item.os, status: item.status, healthy: item.healthy, last_seen: item.last_seen, heartbeat_age_ms: item.heartbeat_age_ms, workdir: item.workdir, management_mcp: parse(item.management_mcp_json), runtimes };
+      return { id: item.id, name: item.name, os: item.os, status: item.status, healthy: item.healthy, last_seen: item.last_seen, heartbeat_age_ms: item.heartbeat_age_ms, workdir: item.workdir, management_mcp: parse(item.management_mcp_json), terminal_mcp:parse(item.terminal_mcp_json), runtimes };
     });
-    return { workspace: slug, source: 'device_heartbeat', discovered_at: new Date().toISOString(), devices, skills: repo.listSkills(slug).map(skill => ({ id: skill.id, name: skill.name, description: skill.description, installed: skill.installed, validation_status: skill.validation_status })) };
+    return { workspace: slug, source: 'device_heartbeat', discovered_at: new Date().toISOString(), devices, skills: repo.listSkills(slug).map(skill => ({ id: skill.id, name: skill.name, description: skill.description, installed: skill.installed, validation_status: skill.validation_status,version:skill.version,catalog_id:skill.catalog_id,integration:skill.integration })) };
   };
   const validateSelection = (slug, input, { requireProfile = true, allowUnknownReadiness = true } = {}) => {
     const runtimeName = String(input.runtime || '').trim();

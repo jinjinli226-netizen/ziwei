@@ -1,0 +1,22 @@
+{
+  "id": "ziwei-phone-control",
+  "catalog_id": "ziwei-phone-control",
+  "name": "紫薇·互联手机操控",
+  "description": "通过员工专属 MCP 观察、操控已绑定的真实手机，并按原命令回执核对结果。",
+  "version": "1.0.0",
+  "category": "automation",
+  "scope": "platform",
+  "author": "紫薇平台团队",
+  "icon": "📱",
+  "tags": ["手机", "MCP", "Codex", "Hermes", "紫薇·互联"],
+  "integration": {
+    "kind": "phone_mcp",
+    "mcpServer": "ziwei-terminal",
+    "supportedRuntimes": ["Codex", "Hermes"],
+    "setupRequired": true,
+    "requiredBindings": ["workspace", "employee", "computer", "phone"],
+    "credentialMode": "employee_execution_capability",
+    "apiOrigin": "https://qzelynth.top",
+    "tools": ["ziwei_phone_list", "ziwei_phone_status", "ziwei_phone_receipt", "ziwei_phone_action", "ziwei_phone_screenshot", "ziwei_phone_control", "ziwei_phone_upgrade", "ziwei_phone_wait", "ziwei_enrollment_pending", "ziwei_enrollment_approve"]
+  }
+}

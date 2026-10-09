@@ -5,9 +5,9 @@ import { fileURLToPath } from 'node:url';
 import { ActionDispatcher } from '../src/daemon.mjs';
 import { createLocalActionExecutor } from '../src/local-action.mjs';
 import { redactSecrets } from '../src/redaction.mjs';
-import { discoverInstalledRuntimes, managementMcpStatus } from '../src/runtime-adapters.mjs';
+import { discoverInstalledRuntimes, managementMcpStatus, terminalMcpStatus } from '../src/runtime-adapters.mjs';
 import { readA2AToken } from '../backend/a2a-auth.mjs';
-import { defaultUserDir, resolveConfigPath, resolveConfigFile } from './config.mjs';
+import { defaultUserDir, resolveConfigPath, resolveConfigFile, resolveWorkspaceConnections, claimWorkspaceGrant } from './config.mjs';
 
 const ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const packageMeta = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
@@ -26,7 +26,6 @@ const config = fs.existsSync(configPath)
   : { agentId: 'ziwei_user', serviceName: 'ziwei_user', workspace: process.env.ZIWEI_WORKSPACE || '', apiBase: process.env.ZIWEI_API_BASE || 'http://127.0.0.1:4178', healthHost: '127.0.0.1', healthPort: 20242, heartbeatMs: 15000, pollMs: 5000 };
 if (config.hermesHome) process.env.HERMES_HOME = String(config.hermesHome);
 const managementMcpConfig = { ...(config.managementMcp || {}), ...(config.managementMcp?.tokenFile ? { tokenFile: resolveConfigFile(config.managementMcp.tokenFile, { configPath, root: ROOT }) } : {}) };
-let managementStatus = managementMcpStatus({ config: managementMcpConfig, workspace: config.workspace, apiBase: config.apiBase });
 const logPath = path.join(logDir, 'daemon.log');
 function log(event, extra = {}) {
   const line = redactSecrets(JSON.stringify({ at: new Date().toISOString(), pid: process.pid, event, service: 'ziwei_user', version: VERSION, agentId: 'ziwei_user', ...extra }));
@@ -34,31 +33,55 @@ function log(event, extra = {}) {
   console.log(line);
 }
 function rotate() { try { if (fs.statSync(logPath).size > 5 * 1024 * 1024) fs.renameSync(logPath, `${logPath}.${Date.now()}`); } catch {} }
-const localExecutor = createLocalActionExecutor({
-  runtimeDir,
-  allowedExecutables: Array.isArray(config.allowedExecutables) ? config.allowedExecutables : [],
-  executorCommand: config.executorCommand || process.env.ZIWEI_EXECUTOR_COMMAND || null,
-  executorArgs: Array.isArray(config.executorArgs) ? config.executorArgs : [],
-  defaultRuntime: config.defaultRuntime || process.env.ZIWEI_DEFAULT_RUNTIME || null,
-  hermesHomePath: config.hermesHome || process.env.HERMES_HOME || null,
-  managementMcpConfig,
-  workspace: config.workspace,
-  apiBase: config.apiBase,
-  deviceId: config.deviceId || 'device-ziwei-user'
-});
-const dispatcher = new ActionDispatcher({
-  // Runtime state stays private under the daemon profile. A paired daemon
-  // executes Agent actions in the directory where the user connected it (or
-  // the explicit configured workdir), never inside the npm package cache.
-  workdir: config.workdir || process.cwd() || ROOT,
-  stateFile: path.join(runtimeDir, 'action-state.json'),
-  execute: localExecutor,
-  onEvent: (event, extra) => {
-    log(event, extra);
-    if (extra?.actionId && ['action.started', 'action.output', 'action.progress', 'action.stage'].includes(event)) void postActionEvent(extra.actionId, event, extra);
+const connections = new Map();
+let connectionErrors = [];
+function installConnections() {
+  const resolved = resolveWorkspaceConnections(config, { configPath, root: ROOT });
+  connectionErrors = resolved.errors;
+  for (const error of connectionErrors) log('workspace_connection_invalid', error);
+  for (const config of resolved.connections) {
+    if (connections.has(config.workspace)) continue;
+    const connectionRuntimeDir = config.primary ? runtimeDir : path.join(runtimeDir, 'shared-workspaces', config.workspace, config.deviceId);
+    const state = { config, processing: new Set(), polling: false, lastHeartbeat: null, lastHeartbeatAt: 0, lastPoll: null };
+    const localExecutor = createLocalActionExecutor({
+      runtimeDir: connectionRuntimeDir,
+      allowedExecutables: Array.isArray(config.allowedExecutables) ? config.allowedExecutables : [],
+      executorCommand: config.executorCommand || process.env.ZIWEI_EXECUTOR_COMMAND || null,
+      executorArgs: Array.isArray(config.executorArgs) ? config.executorArgs : [],
+      defaultRuntime: config.defaultRuntime || process.env.ZIWEI_DEFAULT_RUNTIME || null,
+      hermesHomePath: config.hermesHome || process.env.HERMES_HOME || null,
+      managementMcpConfig,
+      terminalMcpConfig: config.terminalMcp || {},
+      workspace: config.workspace, apiBase: config.apiBase,
+      deviceId: config.deviceId || 'device-ziwei-user', deviceToken: config.deviceToken,
+      onWorkspaceConnect: config.primary ? async (grantId, context) => {
+        const result = await claimWorkspaceGrant({ config, configPath, grantId, privateDirectory: path.join(dataDir, 'workspace-credentials'), signal: context.signal });
+        const saved = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+        // The shared list is the only configuration field changed by claiming a grant.
+        globalConfigSharedWorkspaces(saved.sharedWorkspaces);
+        installConnections();
+        const added = connections.get(result.workspace);
+        if (added) await heartbeatConnection(added);
+        return result;
+      } : null,
+    });
+    state.dispatcher = new ActionDispatcher({
+      // Keep primary state in place and isolate every explicitly shared workspace.
+      workdir: config.workdir || process.cwd() || ROOT,
+      stateFile: path.join(connectionRuntimeDir, 'action-state.json'), execute: localExecutor,
+      onEvent: (event, extra) => {
+        log(event, { workspace: config.workspace, ...extra });
+        if (extra?.actionId && ['action.started', 'action.output', 'action.progress', 'action.stage'].includes(event)) void postActionEvent(state, extra.actionId, event, extra);
+      },
+    });
+    state.managementStatus = managementMcpStatus({ config: managementMcpConfig, workspace: config.workspace, apiBase: config.apiBase });
+    state.terminalStatus = terminalMcpStatus({ config: config.terminalMcp, workspace: config.workspace, apiBase: config.apiBase, deviceToken: config.deviceToken });
+    connections.set(config.workspace, state);
   }
-});
-const processing = new Set();
+}
+function globalConfigSharedWorkspaces(sharedWorkspaces) { config.sharedWorkspaces = sharedWorkspaces; }
+installConnections();
+const primaryConnection = connections.get(config.workspace);
 let lastHeartbeat = null;
 let lastHeartbeatAt = 0;
 let missingWorkspaceLogged = false;
@@ -74,7 +97,12 @@ async function heartbeat() {
     return;
   }
   runtimeDiscovery = discoverInstalledRuntimes({ force: true });
-  managementStatus = managementMcpStatus({ config: managementMcpConfig, workspace: config.workspace, apiBase: config.apiBase });
+  await Promise.allSettled([...connections.values()].map(heartbeatConnection));
+}
+async function heartbeatConnection(connection) {
+  const config = connection.config;
+  connection.managementStatus = managementMcpStatus({ config: managementMcpConfig, workspace: config.workspace, apiBase: config.apiBase });
+  connection.terminalStatus = terminalMcpStatus({ config: config.terminalMcp, workspace: config.workspace, apiBase: config.apiBase, deviceToken: config.deviceToken });
   const payload = {
     workspace: config.workspace,
     agentId: 'ziwei_user',
@@ -92,90 +120,102 @@ async function heartbeat() {
     status: 'online',
     runtimes: runtimeDiscovery.runtimes,
     runtimeMetadata: runtimeDiscovery.runtimes,
-    managementMcp: managementStatus,
+    managementMcp: connection.managementStatus,
+    terminalMcp: connection.terminalStatus,
     agentVersions: Object.fromEntries(Object.entries(runtimeDiscovery.runtimes).map(([name, item]) => [name, item.version || null]))
   };
   try {
     const response = await fetch(`${config.apiBase}/api/workspaces/${encodeURIComponent(config.workspace)}/heartbeat`, {
-      method: 'POST', headers: daemonHeaders({ json: true }), body: JSON.stringify(payload), signal: AbortSignal.timeout(3000)
+      method: 'POST', headers: daemonHeaders(connection, { json: true }), body: JSON.stringify(payload), signal: AbortSignal.timeout(3000)
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok || body.ok !== true) throw new Error(body.error || `heartbeat HTTP ${response.status}`);
-    lastHeartbeat = new Date().toISOString();
-    lastHeartbeatAt = Date.now();
+    connection.lastHeartbeat = new Date().toISOString();
+    connection.lastHeartbeatAt = Date.now();
+    if (config.primary) { lastHeartbeat = connection.lastHeartbeat; lastHeartbeatAt = connection.lastHeartbeatAt; }
     // New servers persist runtime discovery separately. Older local servers
     // may not expose this endpoint; a heartbeat remains sufficient for them.
     try {
       await fetch(`${config.apiBase}/api/workspaces/${encodeURIComponent(config.workspace)}/runtimes/register`, {
-        method: 'POST', headers: daemonHeaders({ json: true }),
+        method: 'POST', headers: daemonHeaders(connection, { json: true }),
         body: JSON.stringify({ agentId: 'ziwei_user', deviceId: payload.deviceId, runtimes: runtimeDiscovery.runtimes }),
         signal: AbortSignal.timeout(3000)
       });
     } catch {}
-    log('heartbeat', { ok: true, apiBase: config.apiBase, deviceId: body.device?.id || payload.deviceId, status: body.device?.status || 'online', runtimes: Object.fromEntries(Object.entries(runtimeDiscovery.runtimes).map(([name, item]) => [name, item.version || item.status])) });
-  } catch (error) { log('heartbeat_failed', { error: error.message, apiBase: config.apiBase }); } finally { rotate(); }
+    log('heartbeat', { ok: true, workspace: config.workspace, apiBase: config.apiBase, deviceId: body.device?.id || payload.deviceId, status: body.device?.status || 'online', runtimes: Object.fromEntries(Object.entries(runtimeDiscovery.runtimes).map(([name, item]) => [name, item.version || item.status])) });
+  } catch (error) { log('heartbeat_failed', { workspace: config.workspace, error: error.message, apiBase: config.apiBase }); } finally { rotate(); }
 }
-function daemonHeaders({ json = false, a2a = false } = {}) {
+function daemonHeaders(connection, { json = false, a2a = false } = {}) {
+  const config = connection.config;
   const headers = json ? { 'content-type': 'application/json' } : {};
   if (config.deviceToken) headers['x-ziwei-device-token'] = String(config.deviceToken);
-  else if (a2a) {
+  else if (a2a && config.primary) {
     const token = readA2AToken({ create: false });
     if (token) headers.authorization = `Bearer ${token}`;
   }
   return headers;
 }
-async function postAction(pathname, body) {
-  const headers = daemonHeaders({ json: true, a2a: true });
+async function postAction(connection, pathname, body) {
+  const config = connection.config;
+  const headers = daemonHeaders(connection, { json: true, a2a: true });
   const response = await fetch(`${config.apiBase}${pathname}`, { method:'POST', headers, body:JSON.stringify(body), signal:AbortSignal.timeout(3000) });
   const payload=await response.json().catch(() => ({})); if (!response.ok) throw new Error(payload.error || `A2A HTTP ${response.status}`); return payload;
 }
-async function postActionEvent(actionId, event, data = {}) {
+async function postActionEvent(connection, actionId, event, data = {}) {
   try {
-    await postAction(`/a2a/v1/actions/${encodeURIComponent(actionId)}/events`, { agentId: 'ziwei_user', type: event, message: data?.message || '', data });
+    await postAction(connection, `/a2a/v1/actions/${encodeURIComponent(actionId)}/events`, { agentId: 'ziwei_user', type: event, message: data?.message || '', data });
   } catch (error) {
     // Event streaming was added after the initial local bridge API. A 404 is
     // expected against an older server and must not interrupt execution.
     if (!/404|A2A HTTP 404/.test(String(error?.message || error))) log('a2a_event_failed', { actionId, event, error: error.message });
   }
 }
-async function refreshRuntimeDiscovery() {
+async function refreshRuntimeDiscovery(connection) {
+  const config = connection.config;
   runtimeDiscovery = discoverInstalledRuntimes({ force: true });
   if (!String(config.workspace || '').trim()) return;
   try {
     await fetch(`${config.apiBase}/api/workspaces/${encodeURIComponent(config.workspace)}/runtimes/register`, {
-      method: 'POST', headers: daemonHeaders({ json: true }),
+      method: 'POST', headers: daemonHeaders(connection, { json: true }),
       body: JSON.stringify({ agentId: 'ziwei_user', deviceId: config.deviceId || 'device-ziwei-user', runtimes: runtimeDiscovery.runtimes }),
       signal: AbortSignal.timeout(3000)
     });
   } catch (error) { log('runtime_discovery_refresh_failed', { error: error.message }); }
 }
 async function poll() {
+  await Promise.allSettled([...connections.values()].map(pollConnection));
+}
+async function pollConnection(connection) {
+  const config = connection.config;
   if (!String(config.workspace || '').trim()) return;
+  if (connection.polling) return;
+  connection.polling = true;
   try {
-    const headers = daemonHeaders({ a2a: true });
+    const headers = daemonHeaders(connection, { a2a: true });
     const response = await fetch(`${config.apiBase}/a2a/v1/actions?workspace=${encodeURIComponent(config.workspace)}&agent=ziwei_user&status=pending&includeAcked=1`, { headers, signal: AbortSignal.timeout(3000) });
     if (!response.ok) throw new Error(`A2A poll HTTP ${response.status}`);
     const payload = await response.json().catch(() => ({ actions: [] }));
-    lastPoll = new Date().toISOString();
+    connection.lastPoll = new Date().toISOString();
+    if (config.primary) lastPoll = connection.lastPoll;
     const actions=payload.actions || [];
-    log('a2a_poll', { ok: response.ok, pending: actions.length });
+    log('a2a_poll', { ok: response.ok, workspace: config.workspace, pending: actions.length });
     for (const action of actions) {
-      if (processing.has(action.id)) continue;
-      processing.add(action.id);
+      if (connection.processing.has(action.id)) continue;
+      connection.processing.add(action.id);
       try {
-        await postAction(`/a2a/v1/actions/${encodeURIComponent(action.id)}/ack`, { agentId:'ziwei_user' });
-        const result=await dispatcher.dispatch(action);
+        await postAction(connection, `/a2a/v1/actions/${encodeURIComponent(action.id)}/ack`, { agentId:'ziwei_user' });
+        const result=await connection.dispatcher.dispatch(action);
         const terminalStatus = result.status === 'succeeded' || (result.status === 'duplicate' && result.originalStatus === 'succeeded') ? 'succeeded' : 'failed';
-        if (terminalStatus === 'succeeded' && action.type === 'hermes.profile.create') await refreshRuntimeDiscovery();
-        await postActionEvent(action.id, terminalStatus, { result: result.result ?? null, error: terminalStatus === 'failed' ? (result.error || 'ziwei_user execution failed') : null });
-        await postAction(`/a2a/v1/actions/${encodeURIComponent(action.id)}/result`, { status:terminalStatus, result:result.result ?? result, error:terminalStatus === 'failed' ? (result.error || 'ziwei_user execution failed') : null });
+        if (terminalStatus === 'succeeded' && action.type === 'hermes.profile.create') await refreshRuntimeDiscovery(connection);
+        await postActionEvent(connection, action.id, terminalStatus, { result: result.result ?? null, error: terminalStatus === 'failed' ? (result.error || 'ziwei_user execution failed') : null });
+        await postAction(connection, `/a2a/v1/actions/${encodeURIComponent(action.id)}/result`, { status:terminalStatus, result:result.result ?? result, error:terminalStatus === 'failed' ? (result.error || 'ziwei_user execution failed') : null });
         log('a2a_result', { actionId:action.id, status:terminalStatus, dispatcherStatus:result.status });
       } catch (error) { log('a2a_action_failed', { actionId:action.id, error:error.message }); }
-      finally { processing.delete(action.id); }
+      finally { connection.processing.delete(action.id); }
     }
   } catch (error) {
     log('a2a_poll_failed', { error: error.message });
-  }
+  } finally { connection.polling = false; }
 }
 function heartbeatFresh() {
   if (!lastHeartbeatAt) return false;
@@ -183,7 +223,16 @@ function heartbeatFresh() {
   const timeout = Math.max(interval * 3, Number(config.heartbeatTimeoutMs) || 45000);
   return Date.now() >= lastHeartbeatAt && Date.now() - lastHeartbeatAt <= timeout;
 }
-const health = http.createServer((req, res) => { if (req.url === '/healthz') { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ ok: true, service: 'ziwei_user', version: VERSION, bridge: 'ziwei_user', agentId: 'ziwei_user', workspace: config.workspace, runtimes: runtimeDiscovery.runtimes, managementMcp: managementStatus, lastHeartbeat, lastHeartbeatAgeMs: lastHeartbeatAt ? Math.max(0, Date.now() - lastHeartbeatAt) : null, lastPoll, pid: process.pid })); return; } if (req.url === '/readyz') { const ready = heartbeatFresh(); res.writeHead(ready ? 200 : 503, { 'content-type': 'application/json' }); res.end(JSON.stringify({ ready, service: 'ziwei_user', version: VERSION, agentId: 'ziwei_user', workspace: config.workspace, runtimes: runtimeDiscovery.runtimes, managementMcp: managementStatus, lastHeartbeat, lastHeartbeatAgeMs: lastHeartbeatAt ? Math.max(0, Date.now() - lastHeartbeatAt) : null, pid: process.pid })); return; } res.writeHead(404); res.end(); });
+function healthPayload() {
+  return { service: 'ziwei_user', version: VERSION, bridge: 'ziwei_user', agentId: 'ziwei_user', workspace: config.workspace, runtimes: runtimeDiscovery.runtimes, managementMcp: primaryConnection?.managementStatus, terminalMcp: primaryConnection?.terminalStatus, lastHeartbeat, lastHeartbeatAgeMs: lastHeartbeatAt ? Math.max(0, Date.now() - lastHeartbeatAt) : null, lastPoll, pid: process.pid,
+    connections: [...connections.values()].map(connection => ({ workspace: connection.config.workspace, deviceId: connection.config.deviceId, primary: connection.config.primary, configured: true, ready: connection.lastHeartbeatAt > 0 && Date.now() - connection.lastHeartbeatAt <= Math.max(45_000, (Number(config.heartbeatMs) || 15_000) * 3), lastHeartbeat: connection.lastHeartbeat, managementMcp: connection.managementStatus, terminalMcp: connection.terminalStatus })), connectionErrors,
+  };
+}
+const health = http.createServer((req, res) => {
+  if (req.url === '/healthz') { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ ok: true, ...healthPayload() })); return; }
+  if (req.url === '/readyz') { const ready = heartbeatFresh(); res.writeHead(ready ? 200 : 503, { 'content-type': 'application/json' }); res.end(JSON.stringify({ ready, ...healthPayload() })); return; }
+  res.writeHead(404); res.end();
+});
 let stopping = false;
 health.on('error', error => {
   log('health_server_error', { error: error.message, code: error.code || null });

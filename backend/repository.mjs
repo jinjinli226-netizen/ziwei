@@ -12,6 +12,7 @@ import { sanitizeHtml } from './sanitize.mjs';
 import { composeEmployeePrompt, normalizeRuntimeProfile } from '../src/employee-runtime.mjs';
 import { listHermesProfiles, validateHermesProfile } from '../src/runtime-adapters.mjs';
 import { fetchSafeUrl, validateSafeUrl } from './ssrf.mjs';
+import { syncPhoneSkill } from './skills/catalog.mjs';
 
 const now = () => new Date().toISOString();
 const id = prefix => `${prefix}_${crypto.randomUUID()}`;
@@ -19,7 +20,7 @@ const hashSecret = value => crypto.createHash('sha256').update(String(value || '
 const parse = value => { try { return JSON.parse(value); } catch { return []; } };
 function toSkillRecord(row) {
   if (!row) return null;
-  return { ...row, installed: Boolean(row.installed), recommended: Boolean(row.recommended), tags: parse(row.tags_json) };
+  return { ...row, installed: Boolean(row.installed), recommended: Boolean(row.recommended), tags: parse(row.tags_json), integration: jsonObject(row.integration_json) };
 }
 const configuredHeartbeatTimeout = Number(process.env.ZIWEI_HEARTBEAT_TIMEOUT_MS);
 const HEARTBEAT_TIMEOUT_MS = Number.isFinite(configuredHeartbeatTimeout) && configuredHeartbeatTimeout > 0 ? configuredHeartbeatTimeout : 45_000;
@@ -292,6 +293,8 @@ export function createRepository(options = {}) {
     const skillIds = employee ? (Array.isArray(employee.skills) ? employee.skills : parse(employee.skills_json)) : [];
     const skillText = skillIds.map(skillId => db.prepare('SELECT name,content,description FROM skills WHERE workspace_id=? AND (id=? OR name=?)').get(employee.workspace_id, String(skillId), String(skillId))).filter(Boolean).map(skill => `技能：${skill.name}\n${String(skill.content || skill.description || '').slice(0, 100000)}`).join('\n\n');
     const instructions = [employee?.description ? `岗位职责：${employee.description}` : '', employee?.persona ? `人格：${employee.persona}` : '', employee?.instructions, skillText].filter(Boolean).join('\n\n');
+    const phoneConfig = employee && db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='ziwei_connect_bindings'").get() ? db.prepare(`SELECT p.enabled,b.device_id,b.account_id,s.id AS skill_id,s.version FROM employee_phone_mcp p JOIN ziwei_connect_bindings b ON b.employee_id=p.employee_id AND b.workspace_id=p.workspace_id JOIN skills s ON s.workspace_id=p.workspace_id AND s.catalog_id='ziwei-phone-control' AND s.installed=1 WHERE p.employee_id=?`).get(employee.id) : null;
+    const phoneRevision = phoneConfig ? hashSecret(JSON.stringify([Boolean(phoneConfig.enabled && skillIds.includes(phoneConfig.skill_id)),phoneConfig.skill_id,phoneConfig.version,employee.target_device_id,employee.runtime,employee.runtime_profile,phoneConfig.device_id,phoneConfig.account_id || null])) : null;
     return {
       ...(taskId ? { taskId } : {}),
       prompt: composeEmployeePrompt({ prompt, name: employee?.name, instructions }),
@@ -303,6 +306,7 @@ export function createRepository(options = {}) {
       ...(conversationId ? { conversationId } : {}),
       ...((targetDeviceId || employee?.target_device_id) ? { deviceId: targetDeviceId || employee.target_device_id } : {}),
       ...(employee?.management_mcp_enabled ? { managementMcp: { enabled: true, workspace: employeeWorkspace } } : {}),
+      ...(phoneConfig?.enabled && skillIds.includes(phoneConfig.skill_id) ? { terminalMcp: { enabled:true, workspace:employeeWorkspace, employeeId:employee.id, deviceId:phoneConfig.device_id,configurationRevision:phoneRevision } } : {}),
     };
   };
   // A workspace can be created after the database seed has run.  Keep the
@@ -668,6 +672,7 @@ export function createRepository(options = {}) {
     listSkills(slug, filters = {}) {
       const ws = workspace(slug);
       if (!ws) throw new Error('Workspace not found');
+      syncPhoneSkill(db, ws.id);
       const normalized = typeof filters === 'string' ? { category: filters } : (filters || {});
       const clauses = ['workspace_id=?']; const params = [ws.id];
       if (normalized.category && normalized.category !== 'all') { clauses.push('category=?'); params.push(String(normalized.category)); }
@@ -790,7 +795,7 @@ export function createRepository(options = {}) {
         db.prepare('UPDATE skills SET installed=1,install_count=install_count+1,updated_at=? WHERE id=?').run(now(), skillId);
       } else if (!installed) {
         db.prepare('UPDATE skills SET installed=0,updated_at=? WHERE id=?').run(now(), skillId);
-        db.prepare('UPDATE employees SET skills_json=REPLACE(skills_json,?,?) WHERE skills_json LIKE ?').run(`"${skillId}"`, '""', `%"${skillId}"%`);
+        for (const employee of db.prepare('SELECT id,skills_json FROM employees WHERE workspace_id=?').all(row.workspace_id)) db.prepare('UPDATE employees SET skills_json=? WHERE id=?').run(JSON.stringify(parse(employee.skills_json).filter(value => value !== skillId)),employee.id);
       }
       const updated = db.prepare('SELECT * FROM skills WHERE id=?').get(skillId);
       return toSkillRecord(updated);
@@ -1089,6 +1094,7 @@ export function createRepository(options = {}) {
         const safe = { configured: metadata.configured === true, workspace: String(metadata.workspace || slug), transport: 'stdio', supportedRuntimes: Array.isArray(metadata.supportedRuntimes) ? metadata.supportedRuntimes.map(String).slice(0, 20) : [], ...(metadata.reason ? { reason: String(metadata.reason).slice(0, 400) } : {}) };
         db.prepare('UPDATE devices SET management_mcp_json=? WHERE id=? AND workspace_id=?').run(JSON.stringify(safe), deviceId, ws.id);
       }
+      if(input.terminalMcp && typeof input.terminalMcp==='object') {const metadata=input.terminalMcp;const safe={configured:metadata.configured===true,workspace:String(metadata.workspace || slug),transport:'stdio',serverName:'ziwei-terminal',supportedRuntimes:Array.isArray(metadata.supportedRuntimes)?metadata.supportedRuntimes.map(String).slice(0,20):[],...(metadata.reason?{reason:String(metadata.reason).slice(0,400)}:{})};db.prepare('UPDATE devices SET terminal_mcp_json=? WHERE id=? AND workspace_id=?').run(JSON.stringify(safe),deviceId,ws.id);}
       return this.listDevices(slug).find(device => device.id === row.id) || null;
     },
     registerRuntimeDiscovery(slug, input = {}) {

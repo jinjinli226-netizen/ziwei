@@ -49,8 +49,14 @@ export const toolDefinitions = [
   { name: 'ziwei_create_task', description: '创建任务；试运行时 employeeId + execute:true，沿用员工明确配置并校验目标电脑、CLI 和 profile。回读 ziwei_get_task/ziwei_get_action 确认真正执行结果。使用稳定 idempotencyKey 避免重复任务。', inputSchema: { type: 'object', required: ['title'], properties: { title: { type: 'string' }, description: { type: 'string' }, employeeId: { type: 'string' }, assignee: { type: 'string' }, targetDeviceId: { type: 'string' }, runtime: { type: 'string' }, runtimeProfile: { type: 'string' }, execute: { type: 'boolean' }, idempotencyKey: { type: 'string' }, priority: { type: 'string' }, labels: { type: 'array', items: { type: 'string' } } } } },
   { name: 'ziwei_list_documents', description: '列出指定紫薇工作区的文档。', inputSchema: { type: 'object', properties: {} } },
   { name: 'ziwei_read_document', description: '读取紫薇工作区内的文档。', inputSchema: { type: 'object', required: ['id'], properties: { id: { type: 'string' } } } },
-  { name: 'ziwei_write_document', description: '在紫薇工作区创建文档，或更新已有文档。', inputSchema: { type: 'object', required: ['name'], properties: { id: { type: 'string' }, name: { type: 'string' }, type: { type: 'string' }, content: { type: 'string' }, mimeType: { type: 'string' }, parentId: { type: 'string' } } } }
-];
+  { name: 'ziwei_write_document', description: '在紫薇工作区创建文档，或更新已有文档。', inputSchema: { type: 'object', required: ['name'], properties: { id: { type: 'string' }, name: { type: 'string' }, type: { type: 'string' }, content: { type: 'string' }, mimeType: { type: 'string' }, parentId: { type: 'string' } } } },
+  {name:'ziwei_phone_mcp_setup',description:'发现工作区手机平台技能实际版本/安装状态、电脑runtime/profile与原中控手机。员工绑定手机后才会获得完整十工具。',inputSchema:{type:'object',properties:{}}},
+  {name:'ziwei_install_skill',description:'安装或卸载当前工作区已发现的真实平台技能ID，并保留版本记录；卸载手机技能不删除员工人格、其他技能或手机绑定。',inputSchema:{type:'object',required:['id'],properties:{id:{type:'string'},installed:{type:'boolean',default:true}}}},
+  {name:'ziwei_configure_phone_mcp',description:'为当前工作区员工配置已安装手机技能、精确电脑/runtime/profile和手机绑定。不会复制管理员凭据。',inputSchema:{type:'object',required:['id','enabled'],properties:{id:{type:'string'},enabled:{type:'boolean'},phoneDeviceId:{type:'string'},targetDeviceId:{type:'string'},runtime:{type:'string'},runtimeProfile:{type:['string','null']},accountId:{type:'string'},accountLabel:{type:'string'}}}},
+  {name:'ziwei_get_phone_mcp_status',description:'回读员工手机技能保存、API、实际MCP加载和本配置手机命令/截图验收结果；不能把配置成功当成实机成功。',inputSchema:{type:'object',required:['id'],properties:{id:{type:'string'}}}},
+  {name:'ziwei_check_phone_mcp',description:'创建员工持久会话实际加载手机MCP并读取list/status。此次capability只准只读检测，返回action需回读。',inputSchema:{type:'object',required:['id'],properties:{id:{type:'string'},idempotencyKey:{type:'string'}}}},
+  {name:'ziwei_trial_phone_mcp',description:'创建真实员工持久会话执行已绑定手机health或screenshot，返回action需回读commandId/状态/截图；幂等键避免重复试运行。',inputSchema:{type:'object',required:['id'],properties:{id:{type:'string'},action:{type:'string',enum:['health','screenshot']},idempotencyKey:{type:'string'}}}}
+].map(tool=>({...tool,inputSchema:{...tool.inputSchema,properties:{...tool.inputSchema.properties,workspace:{type:'string',description:'可选的明确目标工作区；必须已经在本MCP bearer授权scope中，省略沿用当前工作区。'}}}}));
 
 export function createMcpClient(options = {}) {
   const config = configFromEnv(options);
@@ -58,6 +64,11 @@ export function createMcpClient(options = {}) {
   if (typeof fetchImpl !== 'function') throw new Error('当前 Node 环境没有 fetch');
   const workspacePath = `/mcp/v1/workspaces/${encodeURIComponent(config.workspace)}`;
   async function request(method, route, body, query) {
+    const selectedWorkspace=String(body?.workspace || query?.workspace || config.workspace).trim();
+    if(!/^[a-z0-9][a-z0-9_-]{1,62}$/i.test(selectedWorkspace)) throw new Error('MCP 工作区标识无效');
+    route=route.replace(/^\/mcp\/v1\/workspaces\/[^/]+/,`/mcp/v1/workspaces/${encodeURIComponent(selectedWorkspace)}`);
+    if(body && Object.hasOwn(body,'workspace')) {const {workspace:_workspace,...value}=body;body=value;}
+    if(query && Object.hasOwn(query,'workspace')) {const {workspace:_workspace,...value}=query;query=value;}
     const url = new URL(`${config.baseUrl}${route}`);
     for (const [key, value] of Object.entries(query || {})) if (value !== undefined && value !== null && value !== '') url.searchParams.set(key, String(value));
     const headers = { authorization: `Bearer ${config.token}`, accept: 'application/json' };
@@ -71,20 +82,26 @@ export function createMcpClient(options = {}) {
     return payload;
   }
   return {
-    async health() { return request('GET', `${workspacePath}/health`); },
+    async health(input={}) { return request('GET', `${workspacePath}/health`,undefined,input); },
     async discoverEnvironment(input) { return request('GET', `${workspacePath}/discovery`, undefined, input); },
-    async getEmployee(input) { return request('GET', `${workspacePath}/employees/${encodeURIComponent(input.id)}`); },
-    async getEmployeeMcpStatus(input) { return request('GET', `${workspacePath}/employees/${encodeURIComponent(input.id)}/mcp/status`); },
+    async getEmployee(input) { return request('GET', `${workspacePath}/employees/${encodeURIComponent(input.id)}`,undefined,{workspace:input.workspace}); },
+    async getEmployeeMcpStatus(input) { return request('GET', `${workspacePath}/employees/${encodeURIComponent(input.id)}/mcp/status`,undefined,{workspace:input.workspace}); },
     async createHermesProfile(input) { return request('POST', `${workspacePath}/hermes/profiles/requests`, input); },
-    async getAction(input) { return request('GET', `${workspacePath}/actions/${encodeURIComponent(input.id)}`); },
-    async getTask(input) { return request('GET', `${workspacePath}/tasks/${encodeURIComponent(input.id)}`); },
-    async listEmployees() { return request('GET', `${workspacePath}/employees`); },
+    async getAction(input) { return request('GET', `${workspacePath}/actions/${encodeURIComponent(input.id)}`,undefined,{workspace:input.workspace}); },
+    async getTask(input) { return request('GET', `${workspacePath}/tasks/${encodeURIComponent(input.id)}`,undefined,{workspace:input.workspace}); },
+    async listEmployees(input={}) { return request('GET', `${workspacePath}/employees`,undefined,input); },
     async createEmployee(input) { return request('POST', `${workspacePath}/employees`, input); },
     async updateEmployee(input) { const { id, ...patch } = input; return request('PATCH', `${workspacePath}/employees/${encodeURIComponent(id)}`, patch); },
     async listTasks(input) { return request('GET', `${workspacePath}/tasks`, undefined, input); },
     async createTask(input) { return request('POST', `${workspacePath}/tasks`, input); },
-    async listDocuments() { return request('GET', `${workspacePath}/documents`); },
-    async readDocument(input) { return request('GET', `${workspacePath}/documents/${encodeURIComponent(input.id)}`); },
+    async listDocuments(input={}) { return request('GET', `${workspacePath}/documents`,undefined,input); },
+    async readDocument(input) { return request('GET', `${workspacePath}/documents/${encodeURIComponent(input.id)}`,undefined,{workspace:input.workspace}); },
+    async phoneMcpSetup(input={}) {return request('GET',`${workspacePath}/phone-mcp/setup`,undefined,input);},
+    async installSkill(input) {return request('POST',`${workspacePath}/skills/${encodeURIComponent(input.id)}/install`,input);},
+    async configurePhoneMcp(input) {const{id,...body}=input;return request('PUT',`${workspacePath}/employees/${encodeURIComponent(id)}/phone-mcp`,body);},
+    async getPhoneMcpStatus(input) {return request('GET',`${workspacePath}/employees/${encodeURIComponent(input.id)}/phone-mcp/status`,undefined,{workspace:input.workspace});},
+    async checkPhoneMcp(input) {return request('POST',`${workspacePath}/employees/${encodeURIComponent(input.id)}/phone-mcp/check`,input);},
+    async trialPhoneMcp(input) {return request('POST',`${workspacePath}/employees/${encodeURIComponent(input.id)}/phone-mcp/trial`,input);},
     async writeDocument(input) {
       if (input.id) { const { id, ...patch } = input; return request('PATCH', `${workspacePath}/documents/${encodeURIComponent(id)}`, patch); }
       return request('POST', `${workspacePath}/documents`, input);
@@ -112,7 +129,13 @@ export function createMcpHandler(client) {
     ziwei_create_task: args => client.createTask(args),
     ziwei_list_documents: args => client.listDocuments(args),
     ziwei_read_document: args => client.readDocument(args),
-    ziwei_write_document: args => client.writeDocument(args)
+    ziwei_write_document: args => client.writeDocument(args),
+    ziwei_phone_mcp_setup: args=>client.phoneMcpSetup(args),
+    ziwei_install_skill: args=>client.installSkill(args),
+    ziwei_configure_phone_mcp: args=>client.configurePhoneMcp(args),
+    ziwei_get_phone_mcp_status: args=>client.getPhoneMcpStatus(args),
+    ziwei_check_phone_mcp: args=>client.checkPhoneMcp(args),
+    ziwei_trial_phone_mcp: args=>client.trialPhoneMcp(args)
   };
   return async message => {
     if (!message || typeof message !== 'object' || Array.isArray(message)) return null;

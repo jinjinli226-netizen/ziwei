@@ -10,6 +10,7 @@ import { deviceTokenFromRequest, readA2AToken, safeTokenEqual, tokenFromRequest 
 import { mcpTokenRequired, readMCPCredential, mcpWorkspaceAllowed } from './mcp-auth.mjs';
 import { createZiweiConnect } from './ziwei-connect.mjs';
 import { createManagementService } from './management.mjs';
+import { createPhoneMcpService } from './phone-mcp.mjs';
 import { toolDefinitions as managementTools } from '../scripts/ziwei-mcp.mjs';
 
 const allowedOrigin = process.env.FRONTEND_ORIGIN || 'http://127.0.0.1:5178';
@@ -248,10 +249,13 @@ export function createApp(options = {}) {
     timeoutMs: options.ziweiConnectTimeoutMs,
   });
   const auth = options.auth || createAuthService(repo.db, options.authOptions);
+  const management = createManagementService(repo);
+  const phoneMcp = createPhoneMcpService(repo,ziweiConnect,management,options);
   app.locals.repo = repo;
   app.locals.realtime = realtime;
   app.locals.auth = auth;
   app.locals.ziweiConnect = ziweiConnect;
+  app.locals.phoneMcp = phoneMcp;
   app.use(cors);
   app.use((_req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -298,6 +302,15 @@ export function createApp(options = {}) {
       const result = repo.claimDevicePairing(req.body || {});
       res.json({ ...result, apiBase: String(req.body?.apiBase || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '') });
     } catch (error) { next(error); }
+  });
+  app.post('/api/daemon/workspace-grants/:grantId/claim', (req,res,next)=>{
+    try {const credential=repo.authenticateDeviceToken(deviceTokenFromRequest(req));res.setHeader('Cache-Control','no-store');res.json(phoneMcp.claim(req.params.grantId,credential));}catch(error){next(error);}
+  });
+  app.post('/api/workspaces/:slug/terminal-mcp/bootstrap', (req,res,next)=>{
+    try {const credential=repo.authenticateDeviceToken(deviceTokenFromRequest(req),{workspaceSlug:req.params.slug});res.setHeader('Cache-Control','no-store');res.json(phoneMcp.bootstrap(req.params.slug,req.body || {},credential));}catch(error){next(error);}
+  });
+  app.post('/terminal-mcp/v1/workspaces/:slug/employees/:id/call', async(req,res,next)=>{
+    try{res.setHeader('Cache-Control','no-store');res.json(await phoneMcp.call(req.params.slug,req.params.id,tokenFromRequest(req),req.body || {}));}catch(error){next(error);}
   });
   app.use('/api', sessionMiddleware(auth, { bypass: authBypass }));
   app.use('/api/workspaces/:slug', workspaceMembershipGuard(auth, { bypass: authBypass }));
@@ -563,8 +576,22 @@ export function createApp(options = {}) {
     role: options.mcpOptions?.role ?? options.mcpRole,
     create: options.mcpOptions?.create ?? false
   };
-  const management = createManagementService(repo);
   app.get('/api/workspaces/:slug/mcp/discovery', requireRole('owner','admin','member'), (req, res) => res.json(management.discovery(req.params.slug, { ...req.query, userId: req.auth?.user_id })));
+  app.get('/api/workspaces/:slug/phone-mcp/setup',requireRole('owner','admin','member'),async(req,res,next)=>{try{res.json(await phoneMcp.setup(req.params.slug,{...employeeContext(req),userId:req.auth?.user_id}));}catch(error){next(error);}});
+  app.put('/api/workspaces/:slug/employees/:id/phone-mcp',requireRole('owner','admin'),async(req,res,next)=>{
+    try {ensureEmployeeInWorkspace(req.params.slug,req.params.id,req);res.json(await phoneMcp.save(req.params.slug,req.params.id,req.body || {}));} catch(error) {next(error);}
+  });
+  app.get('/api/workspaces/:slug/employees/:id/phone-mcp/status',requireRole('owner','admin','member'),async(req,res,next)=>{try{ensureEmployeeInWorkspace(req.params.slug,req.params.id,req);res.json(await phoneMcp.status(req.params.slug,req.params.id));}catch(error){next(error);}});
+  for(const kind of ['check','trial']) app.post(`/api/workspaces/:slug/employees/:id/phone-mcp/${kind}`,requireRole('owner','admin','member'),(req,res,next)=>{try{ensureEmployeeInWorkspace(req.params.slug,req.params.id,req);res.status(202).json(phoneMcp.trial(req.params.slug,req.params.id,req.body || {},kind==='check'));}catch(error){next(error);}});
+  app.get('/api/workspaces/:slug/phone-mcp/actions/:actionId',requireRole('owner','admin','member'),(req,res,next)=>{try{const action=management.action(req.params.slug,req.params.actionId);ensureEmployeeInWorkspace(req.params.slug,action.payload.employeeId,req);res.json({action});}catch(error){next(error);}});
+  app.get('/api/workspaces/:slug/device-workspace-grants',requireRole('owner','admin'),(req,res)=>res.json({grants:phoneMcp.grants(req.params.slug)}));
+  app.post('/api/workspaces/:slug/device-workspace-grants',requireRole('owner'),(req,res,next)=>{
+    try {
+      if(req.auth) {const sourceMembership=auth.canAccess(req.auth.user_id,String(req.body?.sourceWorkspace || ''));if(sourceMembership?.role!=='owner') return res.status(403).json({error:'需要源工作区与目标工作区的Owner明确授权'});}
+      if(req.apiKey) return res.status(403).json({error:'工作区API Key不能授予跨工作区电脑共享'});
+      const result=phoneMcp.grant(req.params.slug,req.body || {},req.auth?.user_id);res.status(result.duplicate?200:201).json(result);
+    } catch(error) {next(error);}
+  });
   app.get('/api/workspaces/:slug/employees/:id/mcp/status', requireRole('owner','admin','member'), (req, res) => { ensureEmployeeInWorkspace(req.params.slug, req.params.id, req); res.json(management.employeeStatus(req.params.slug, req.params.id)); });
   app.get('/api/workspaces/:slug/hermes/profiles', requireRole('owner','admin','member'), (req, res) => {
     res.json(repo.listHermesProfiles(req.params.slug, { deviceId: req.query.deviceId || req.query.device_id }));
@@ -632,6 +659,11 @@ export function createApp(options = {}) {
     catch (error) { res.status(503).json({ ok: false, error: error.message }); }
   });
   app.get('/mcp/v1/workspaces/:slug/discovery', mcpGuard, (req, res) => res.json(management.discovery(req.params.slug, req.query)));
+  app.get('/mcp/v1/workspaces/:slug/phone-mcp/setup',mcpGuard,async(req,res,next)=>{try{res.json(await phoneMcp.setup(req.params.slug,{actorRole:'owner'}));}catch(error){next(error);}});
+  app.post('/mcp/v1/workspaces/:slug/skills/:id/install',mcpGuard,(req,res)=>{if(!repo.listSkills(req.params.slug).some(row=>row.id===req.params.id))return res.status(404).json({error:'技能不属于当前工作区'});res.json(repo.setSkillInstalled(req.params.id,req.body?.installed!==false));});
+  app.put('/mcp/v1/workspaces/:slug/employees/:id/phone-mcp',mcpGuard,async(req,res,next)=>{try{res.json(await phoneMcp.save(req.params.slug,req.params.id,req.body || {}));}catch(error){next(error);}});
+  app.get('/mcp/v1/workspaces/:slug/employees/:id/phone-mcp/status',mcpGuard,async(req,res,next)=>{try{res.json(await phoneMcp.status(req.params.slug,req.params.id));}catch(error){next(error);}});
+  for(const kind of ['check','trial']) app.post(`/mcp/v1/workspaces/:slug/employees/:id/phone-mcp/${kind}`,mcpGuard,(req,res,next)=>{try{res.status(202).json(phoneMcp.trial(req.params.slug,req.params.id,req.body || {},kind==='check'));}catch(error){next(error);}});
   app.get('/mcp/v1/workspaces/:slug/employees/:id', mcpGuard, (req, res) => res.json(management.employee(req.params.slug, req.params.id)));
   app.get('/mcp/v1/workspaces/:slug/employees/:id/mcp/status', mcpGuard, (req, res) => res.json(management.employeeStatus(req.params.slug, req.params.id)));
   app.get('/mcp/v1/workspaces/:slug/tasks/:id', mcpGuard, (req, res) => res.json(management.task(req.params.slug, req.params.id)));
@@ -664,28 +696,29 @@ export function createApp(options = {}) {
     }
   });
   app.get('/api/workspaces/:slug/ziwei-connect/status', ziweiConnectGuard, async (req, res, next) => {
-    try { return res.json(await ziweiConnect.status(req.params.slug)); } catch (error) { return next(error); }
+    try {const result=await ziweiConnect.status(req.params.slug);const visible=new Set(repo.listEmployees(req.params.slug,employeeContext(req)).map(row=>row.id));result.bindings=result.bindings.filter(row=>visible.has(row.employeeId));return res.json(result); } catch (error) { return next(error); }
   });
   app.get('/api/workspaces/:slug/ziwei-connect/devices', ziweiConnectGuard, async (req, res, next) => {
     try { return res.json({ devices: await ziweiConnect.listDevices() }); } catch (error) { return next(error); }
   });
   app.get('/api/workspaces/:slug/ziwei-connect/bindings', ziweiConnectGuard, (req, res, next) => {
-    try { return res.json({ bindings: ziweiConnect.listBindings(req.params.slug) }); } catch (error) { return next(error); }
+    try { const visible=new Set(repo.listEmployees(req.params.slug,employeeContext(req)).map(row=>row.id));return res.json({ bindings: ziweiConnect.listBindings(req.params.slug).filter(row=>visible.has(row.employeeId)) }); } catch (error) { return next(error); }
   });
-  app.post('/api/workspaces/:slug/ziwei-connect/bindings', ziweiConnectGuard, async (req, res, next) => {
-    try { return res.status(201).json(await ziweiConnect.bind(req.params.slug, req.body || {})); } catch (error) { return next(error); }
+  app.post('/api/workspaces/:slug/ziwei-connect/bindings', requireRole('owner','admin'), async (req, res, next) => {
+    try { ensureEmployeeInWorkspace(req.params.slug,req.body?.employeeId || req.body?.employee_id,req);return res.status(201).json(await ziweiConnect.bind(req.params.slug, req.body || {})); } catch (error) { return next(error); }
   });
   app.delete('/api/workspaces/:slug/ziwei-connect/bindings/:id', ziweiTerminalGuard, (req, res, next) => {
     try { return res.json(ziweiConnect.deleteBinding(req.params.slug, req.params.id)); } catch (error) { return next(error); }
   });
   app.get('/api/workspaces/:slug/ziwei-connect/runs', ziweiConnectGuard, (req, res, next) => {
-    try { return res.json({ runs: ziweiConnect.listRuns(req.params.slug, req.query.limit) }); } catch (error) { return next(error); }
+    try {const visible=new Set(repo.listEmployees(req.params.slug,employeeContext(req)).map(row=>row.id));return res.json({ runs: ziweiConnect.listRuns(req.params.slug, req.query.limit).filter(row=>visible.has(row.employeeId)) }); } catch (error) { return next(error); }
   });
   app.get('/api/workspaces/:slug/ziwei-connect/runs/:id', ziweiConnectGuard, async (req, res, next) => {
-    try { return res.json(await ziweiConnect.refresh(req.params.slug, req.params.id)); } catch (error) { return next(error); }
+    try {const run=ziweiConnect.listRuns(req.params.slug,100).find(row=>row.id===req.params.id);ensureEmployeeInWorkspace(req.params.slug,run?.employeeId,req);return res.json(await ziweiConnect.refresh(req.params.slug, req.params.id)); } catch (error) { return next(error); }
   });
   app.post('/api/workspaces/:slug/ziwei-connect/actions', ziweiConnectGuard, async (req, res, next) => {
     try {
+      ensureEmployeeInWorkspace(req.params.slug,req.body?.employeeId || req.body?.employee_id,req);
       const run = await ziweiConnect.run(req.params.slug, req.body || {});
       return res.status(run.status === 'dry_run' ? 200 : 202).json({ run });
     } catch (error) {

@@ -296,6 +296,7 @@
 .employee-profile-panels h3 span, .employee-profile-section h3 span { color:#97a3b2; font-size:12px; font-weight:400; }
 .employee-profile-panels p, .employee-profile-copy { margin:0; color:#9aa6b4; font-size:13px; line-height:1.6; }
 .employee-profile-section { min-height:420px; padding:22px; }
+.employee-profile-section.employee-phone-skill-entry { min-height:0; }
 .employee-profile-role-editor { max-width:760px; }
 .employee-profile-role-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:12px; }
 .employee-profile-role-save { color:#fff; border-color:#2f6fca; background:#2f6fca; }

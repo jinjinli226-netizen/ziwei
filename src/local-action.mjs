@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
-import {executeRuntime, discoverInstalledRuntimes, hermesHome, hermesProfileHome} from './runtime-adapters.mjs';
+import {executeRuntime, bootstrapTerminalMcp, discoverInstalledRuntimes, hermesHome, hermesProfileHome} from './runtime-adapters.mjs';
 import {normalizeRuntimeProfile} from './employee-runtime.mjs';
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
@@ -344,13 +344,17 @@ function runCommand({runtimeDir, action, executable, baseArgs = [], allowedExecu
  * Unknown/unsupported actions fail loudly so the cloud never sees a fake
  * success merely because an action was accepted by the daemon.
  */
-export function createLocalActionExecutor({runtimeDir, allowedExecutables = [], executorCommand = null, executorArgs = [], defaultRuntime = null, hermesHomePath = null, managementMcpConfig = {}, workspace = null, apiBase = null, deviceId = null} = {}) {
+export function createLocalActionExecutor({runtimeDir, allowedExecutables = [], executorCommand = null, executorArgs = [], defaultRuntime = null, hermesHomePath = null, managementMcpConfig = {}, terminalMcpConfig = {}, workspace = null, apiBase = null, deviceId = null, deviceToken = null, onWorkspaceConnect = null} = {}) {
   if (!runtimeDir) throw new TypeError('runtimeDir is required');
   fs.mkdirSync(runtimeDir, {recursive: true});
   return async (action, context = {}) => {
     const type = String(action?.type || '');
     if (action?.payload?.deviceId && deviceId && action.payload.deviceId !== deviceId) throw new Error('执行目标设备与本机已配对设备不一致；不会回退其他设备');
     if (action?.workspace && workspace && action.workspace !== workspace) throw new Error('执行工作区与本机已配对工作区不一致');
+    if (type === 'device.workspace.connect') {
+      if (!onWorkspaceConnect) throw new Error('本机连接不允许接收共享工作区授权');
+      return { status: 'succeeded', result: await onWorkspaceConnect(action.payload?.grantId, context) };
+    }
     if (type === 'directory.inspect' || type === 'device.directory.inspect') {
       const payload = action.payload || {};
       return {
@@ -384,7 +388,9 @@ export function createLocalActionExecutor({runtimeDir, allowedExecutables = [], 
       const promptWithAttachments = attachmentPaths.length
         ? `${String(prompt || '').trim()}\n\n[本机附件]\n${attachmentPaths.map(item => `- ${item.name}: ${item.path}`).join('\n')}`
         : prompt;
-      return executeRuntime({
+      if (payload.terminalMcp?.enabled === true && terminalMcpConfig.enabled === false) throw new Error('本机手机 MCP 已明确禁用');
+      const phoneSession = await bootstrapTerminalMcp({ request: payload.terminalMcp, workspace, actionId: action.id, apiBase, deviceToken, privateDirectory: path.join(runtimeDir, 'terminal-mcp-credentials'), signal: context.signal });
+      try { return await executeRuntime({
         runtime,
         model: payload.model || payload.modelId || payload.model_id || null,
         profile: payload.profile || payload.runtimeProfile || payload.runtime_profile || payload.hermesProfile || payload.hermes_profile || null,
@@ -393,11 +399,12 @@ export function createLocalActionExecutor({runtimeDir, allowedExecutables = [], 
         cwd: safeCwd,
         env: { ...(payload.env || {}), ...(hermesHomePath ? { HERMES_HOME: hermesHomePath } : {}) },
         managementMcp: { request: payload.managementMcp, config: managementMcpConfig, workspace, apiBase, auditDirectory: path.join(runtimeDir, 'management-mcp-audit'), actionId: action.id },
+        terminalMcp: { request: payload.terminalMcp, config: phoneSession.config, workspace, auditDirectory: path.join(runtimeDir, 'terminal-mcp-audit'), actionId: action.id },
         signal: context.signal,
         onOutput: context.onOutput,
         onProgress: context.onProgress,
         onStage: context.onStage,
-      });
+      }); } finally { phoneSession.cleanup(); }
     }
     if (type === 'message.deliver' || type === 'local.message' || type === 'task.execute') {
       return {status: 'succeeded', result: await writeMessage(runtimeDir, action)};

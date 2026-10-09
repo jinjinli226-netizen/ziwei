@@ -25,6 +25,181 @@ const DISCOVERY_TTL_MS = 30_000;
 const WINDOWS_INTERNET_SETTINGS = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings';
 const MANAGEMENT_ADAPTER = fileURLToPath(new URL('../scripts/ziwei-mcp.mjs', import.meta.url));
 const MANAGEMENT_ENV_KEYS = ['ZIWEI_API_BASE', 'ZIWEI_MCP_WORKSPACE', 'ZIWEI_MCP_TOKEN_FILE', 'ZIWEI_MCP_TOKEN', 'ZIWEI_MCP_AUDIT_FILE'];
+const TERMINAL_ADAPTER = fileURLToPath(new URL('../scripts/ziwei-terminal-mcp.mjs', import.meta.url));
+const TERMINAL_ENV_KEYS = ['ZIWEI_TERMINAL_API_BASE', 'ZIWEI_TERMINAL_WORKSPACE', 'ZIWEI_TERMINAL_TOKEN_FILE', 'ZIWEI_TERMINAL_AUDIT_FILE', 'ZIWEI_TERMINAL_EMPLOYEE_ID', 'ZIWEI_TERMINAL_DEVICE_ID'];
+const LEGACY_TERMINAL_ENV_KEYS = ['ZIWEI_CONTROL_API', 'ZIWEI_CONTROL_AUTH', 'ZIWEI_CONTROL_CREDENTIALS_FILE', 'ZIWEI_CONTROL_SESSION_FILE', 'CONTROL_MCP_API_URL', 'CONTROL_MCP_AUTH'];
+
+function trustedApiUrl(value) {
+  let url;
+  try { url = new URL(value); } catch { throw new Error('手机 MCP API 地址未配置或无效'); }
+  if ((url.protocol !== 'https:' && !(url.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname))) || url.username || url.password || url.search || url.hash) throw new Error('手机 MCP API 必须使用无凭据的 HTTPS 地址（隔离验收允许 loopback HTTP）');
+  return url;
+}
+
+/** Exchange the paired workstation identity for one execution's phone capability. */
+export async function bootstrapTerminalMcp({ request, workspace, actionId, apiBase, deviceToken, privateDirectory, signal } = {}) {
+  if (request?.enabled !== true) return { config: {}, cleanup() {} };
+  if (request.workspace !== workspace) throw new Error('手机 MCP 请求工作区与本机连接工作区不一致');
+  if (!deviceToken) throw new Error('手机 MCP 缺少当前工作区的已配对设备凭据');
+  if (!request.employeeId || !request.deviceId || !actionId) throw new Error('手机 MCP 需要明确员工、绑定手机及执行 actionId');
+  if (!privateDirectory) throw new Error('手机 MCP 缺少本机私有凭据目录');
+  const base = trustedApiUrl(apiBase);
+  if (!['', '/'].includes(base.pathname)) throw new Error('手机 MCP bootstrap 必须使用主站根地址');
+  let response;
+  try {
+    response = await fetch(`${base.origin}/api/workspaces/${encodeURIComponent(workspace)}/terminal-mcp/bootstrap`, {
+      method: 'POST', headers: { 'content-type': 'application/json', 'x-ziwei-device-token': deviceToken },
+      body: JSON.stringify({ employeeId: request.employeeId, deviceId: request.deviceId, actionId }),
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10_000)]) : AbortSignal.timeout(10_000), redirect: 'error',
+    });
+  } catch { throw new Error('手机 MCP 执行授权服务无法连接；未启动手机工具'); }
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(`手机 MCP 执行授权失败（HTTP ${response.status}）：${redactSecrets(String(body.error || '请核对技能安装、员工绑定和当前设备授权')).slice(0, 400)}`);
+  const capabilityBase = trustedApiUrl(body.baseUrl);
+  const expectedPath = `/terminal-mcp/v1/workspaces/${encodeURIComponent(workspace)}/employees/${encodeURIComponent(request.employeeId)}`;
+  if (!body.token || body.workspace !== workspace || body.employeeId !== request.employeeId || body.deviceId !== request.deviceId || body.actionId !== actionId || capabilityBase.origin !== base.origin || capabilityBase.pathname !== expectedPath || !(Date.parse(body.expiresAt) > Date.now())) throw new Error('手机 MCP 执行授权范围、有效期或 API 地址不匹配');
+  fs.mkdirSync(privateDirectory, { recursive: true, mode: 0o700 });
+  const tokenFile = path.join(privateDirectory, `${randomUUID()}.json`);
+  fs.writeFileSync(tokenFile, JSON.stringify({ token: body.token, workspace, employeeId: body.employeeId, deviceId: body.deviceId, actionId, expiresAt: body.expiresAt, baseUrl: capabilityBase.toString().replace(/\/$/, '') }), { mode: 0o600, flag: 'wx' });
+  return { config: { enabled: true, tokenFile, baseUrl: capabilityBase.toString().replace(/\/$/, '') }, cleanup() { try { fs.rmSync(tokenFile, { force: true }); } catch {} } };
+}
+
+export function terminalMcpStatus({ config = {}, workspace = '', apiBase = '', deviceToken = '' } = {}) {
+  const status = { configured: false, workspace, transport: 'stdio', serverName: 'ziwei-terminal', supportedRuntimes: ['Codex', 'Hermes'], credentialMode: 'execution-bootstrap' };
+  try {
+    if (config.enabled === false) throw new Error('本机手机 MCP 已明确禁用');
+    if (!workspace || !deviceToken) throw new Error('手机 MCP 缺少当前工作区的已配对设备凭据');
+    trustedApiUrl(apiBase);
+    if (!fs.existsSync(TERMINAL_ADAPTER)) throw new Error('本机安装包缺少 scripts/ziwei-terminal-mcp.mjs；请升级 ziwei_user');
+    return { ...status, configured: true };
+  } catch (error) { return { ...status, reason: error.message }; }
+}
+
+function updateHermesTerminalServer({ profile, env, entry, profileBaseHome }) {
+  const normalized = normalizeRuntimeProfile(profile);
+  if (!normalized || normalized === 'default') {
+    if (entry) throw new Error('Hermes 手机 MCP 需要明确的独立 profile；不能修改主 profile');
+    // Do not let employees inherit an administrator's global phone service.
+    let main;
+    try { main = parseYaml(fs.readFileSync(path.join(hermesHome({ baseHome: profileBaseHome || env.HERMES_HOME }), 'config.yaml'), 'utf8')); } catch {}
+    if (main?.mcp_servers?.['ziwei-terminal']?.enabled !== false && main?.mcp_servers?.['ziwei-terminal']) throw new Error('Hermes 主 profile 含宿主手机 MCP；请为员工选择独立 profile，不能继承管理员入口');
+    return null;
+  }
+  const selectedHome = hermesProfileHome(normalized, { baseHome: profileBaseHome || env.HERMES_HOME });
+  if (!fs.existsSync(selectedHome)) throw new Error(`Hermes profile 不存在: ${normalized}`);
+  const configPath = path.join(selectedHome, 'config.yaml');
+  const original = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf8') : '{}';
+  const document = parseDocument(original);
+  const value = document.toJSON();
+  if (document.errors.length || !value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`Hermes profile ${normalized} 的 config.yaml 无效；未修改原文件`);
+  if (value.mcp_servers && (typeof value.mcp_servers !== 'object' || Array.isArray(value.mcp_servers))) throw new Error('Hermes mcp_servers 必须为映射；未修改原文件');
+  const existing = value.mcp_servers?.['ziwei-terminal'];
+  if (entry) document.setIn(['mcp_servers', 'ziwei-terminal'], entry);
+  else if (existing?.args?.includes(TERMINAL_ADAPTER)) document.deleteIn(['mcp_servers', 'ziwei-terminal']);
+  else if (existing) document.setIn(['mcp_servers', 'ziwei-terminal', 'enabled'], false);
+  if (document.toString() !== original && (entry || existing)) {
+    if (original) fs.copyFileSync(configPath, `${configPath}.ziwei-backup-${Date.now()}-${randomUUID()}`);
+    const temporary = `${configPath}.ziwei-${randomUUID()}.tmp`;
+    fs.writeFileSync(temporary, document.toString(), { mode: 0o600 });
+    fs.renameSync(temporary, configPath);
+  }
+  return selectedHome;
+}
+
+export function prepareTerminalMcpLaunch({ runtime, profile, config = {}, workspace, request, auditDirectory, actionId, invocation, env = {}, profileBaseHome } = {}) {
+  const args = [...invocation.args];
+  const childEnv = { ...env };
+  for (const key of [...TERMINAL_ENV_KEYS, ...LEGACY_TERMINAL_ENV_KEYS]) delete childEnv[key];
+  // Override the user's global Codex phone server for every employee invocation.
+  if (runtime === 'Codex') {
+    const index = args.lastIndexOf('-');
+    args.splice(index < 0 ? args.length : index, 0, '--config', 'mcp_servers.ziwei-terminal.enabled=false');
+  }
+  if (request?.enabled !== true) {
+    if (runtime === 'Hermes') {
+      const home = updateHermesTerminalServer({ profile, env: childEnv, profileBaseHome });
+      if (home) childEnv.HERMES_HOME = home;
+    }
+    return { invocation: { ...invocation, args }, env: childEnv, receipt: null };
+  }
+  if (!['Codex', 'Hermes'].includes(runtime)) throw new Error(`${runtime} 尚不支持手机 MCP；请显式选择 Codex 或 Hermes`);
+  if (request.workspace !== workspace) throw new Error('手机 MCP 请求工作区与本机连接工作区不一致');
+  let scope;
+  try { scope = JSON.parse(fs.readFileSync(config.tokenFile, 'utf8')); } catch { throw new Error('手机 MCP 缺少本次执行的私有授权文件'); }
+  if (config.enabled !== true || !scope.token || scope.workspace !== workspace || scope.employeeId !== request.employeeId || scope.deviceId !== request.deviceId || scope.actionId !== actionId || !(Date.parse(scope.expiresAt) > Date.now())) throw new Error('手机 MCP 凭据未授权当前员工、手机或执行范围，或授权已过期');
+  const base = trustedApiUrl(scope.baseUrl);
+  if (base.toString().replace(/\/$/, '') !== config.baseUrl) throw new Error('手机 MCP 执行 API 与授权文件不一致');
+  if (!fs.existsSync(TERMINAL_ADAPTER)) throw new Error('本机安装包缺少 scripts/ziwei-terminal-mcp.mjs；请升级 ziwei_user');
+  if (!auditDirectory) throw new Error('手机 MCP 缺少本机私有验收目录');
+  fs.mkdirSync(auditDirectory, { recursive: true, mode: 0o700 });
+  const auditFile = path.join(auditDirectory, `${String(actionId).replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120)}-${randomUUID()}.jsonl`);
+  Object.assign(childEnv, { ZIWEI_TERMINAL_API_BASE: config.baseUrl, ZIWEI_TERMINAL_WORKSPACE: workspace, ZIWEI_TERMINAL_TOKEN_FILE: path.resolve(config.tokenFile), ZIWEI_TERMINAL_AUDIT_FILE: auditFile, ZIWEI_TERMINAL_EMPLOYEE_ID: request.employeeId, ZIWEI_TERMINAL_DEVICE_ID: request.deviceId });
+  if (runtime === 'Codex') {
+    // Codex merges override tables with global configuration; an empty table
+    // does not remove the host's administrator credential file settings.
+    const overrides = { command: process.execPath, args: [TERMINAL_ADAPTER], env_vars: TERMINAL_ENV_KEYS, enabled: true, startup_timeout_sec: 30, tool_timeout_sec: 300 };
+    const flags = [...Object.entries(overrides).flatMap(([key, value]) => ['--config', `mcp_servers.ziwei-terminal.${key}=${JSON.stringify(value)}`]), ...LEGACY_TERMINAL_ENV_KEYS.flatMap(key => ['--config', `mcp_servers.ziwei-terminal.env.${key}=""`])];
+    const index = args.lastIndexOf('-');
+    args.splice(index < 0 ? args.length : index, 0, ...flags);
+  } else {
+    const entry = { command: process.execPath, args: [TERMINAL_ADAPTER], enabled: true, env: Object.fromEntries(TERMINAL_ENV_KEYS.map(key => [key, '${' + key + '}'])) };
+    childEnv.HERMES_HOME = updateHermesTerminalServer({ profile, env: childEnv, entry, profileBaseHome });
+    if (!args.includes('--toolsets')) args.push('--toolsets', 'all');
+  }
+  return { invocation: { ...invocation, args }, env: childEnv, receipt: { configured: true, injected: true, loaded: false, transport: 'stdio', serverName: 'ziwei-terminal', workspace, runtime, profile: profile || null, runtimeProfile: profile || null, employeeId: request.employeeId, targetDeviceId: request.deviceId, actionId, auditFile } };
+}
+
+export function terminalMcpReceipt(receipt) {
+  if (!receipt) return null;
+  const { auditFile, ...safe } = receipt;
+  let events = [];
+  try { events = fs.readFileSync(auditFile, 'utf8').split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line)); } catch {}
+  const toolCalls = events.filter(item => item.method === 'tools/call').map(item => {
+    const ids = Object.fromEntries(['deviceId', 'commandId', 'updateId', 'requestId'].map(key => [key, item.ids?.[key] || item[key]]).filter(([, value]) => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/.test(value)));
+    const status = String(item.status || item.commandStatus || item.state || '');
+    const receipts = (Array.isArray(item.receipts) ? item.receipts : []).slice(0, 200).flatMap(value => {
+      const safeIds = Object.fromEntries(['commandId', 'updateId'].map(key => [key, value?.[key]]).filter(([, id]) => typeof id === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/.test(id)));
+      return Object.keys(safeIds).length && /^[a-z_]{1,40}$/.test(value.status || '') ? [{ ...safeIds, status: value.status }] : [];
+    });
+    const specificStatuses = Object.fromEntries(['commandStatus', 'updateStatus'].map(key => [key, item[key]]).filter(([, value]) => typeof value === 'string' && /^[a-z_]{1,40}$/.test(value)));
+    return { toolName: item.toolName || item.tool, ok: item.ok === true, ...ids, ...(Object.keys(ids).length ? { ids } : {}), ...(/^[a-z_]{1,40}$/.test(status) ? { status } : {}), ...specificStatuses, ...(receipts.length ? { receipts } : {}) };
+  });
+  const loaded = events.some(item => ['initialize', 'tools/list'].includes(item.method) && item.ok === true);
+  return { ...safe, loaded, status: loaded ? 'loaded' : 'not_loaded', toolCalls, tool_calls: toolCalls };
+}
+
+export function terminalMcpExecutionFailure(receipt) {
+  if (!receipt) return null;
+  if (!receipt.loaded) return { code: 'terminal_mcp_not_loaded', error: `${receipt.runtime} 已退出但未收到手机 MCP 实际握手；请检查独立 profile、工具配置和本机 MCP 日志` };
+  const calls = receipt.toolCalls || receipt.tool_calls || [];
+  const issued = new Map();
+  for (const call of calls) {
+    const submits = ['ziwei_phone_action', 'ziwei_phone_screenshot', 'ziwei_phone_upgrade'].includes(call.toolName);
+    for (const kind of ['command', 'update']) {
+      const id = call[`${kind}Id`] || call.ids?.[`${kind}Id`];
+      if (!id) continue;
+      const key = `${kind}:${id}`;
+      if (submits && !issued.has(key)) issued.set(key, { kind, id, status: null });
+      const item = issued.get(key);
+      if (item && call.ok === true && (call[`${kind}Status`] || call.status)) item.status = call[`${kind}Status`] || call.status;
+    }
+    if (call.ok === true) for (const original of call.receipts || []) {
+      for (const kind of ['command', 'update']) {
+        const item = issued.get(`${kind}:${original[`${kind}Id`]}`);
+        if (item && original.status) item.status = original.status;
+      }
+    }
+  }
+  const failed = [...issued.values()].filter(item => ['failed', 'expired', 'cancelled', 'superseded', 'aborted', 'rejected', 'timed_out'].includes(item.status));
+  const incomplete = [...issued.values()].filter(item => item.status !== (item.kind === 'update' ? 'committed' : 'succeeded'));
+  if (incomplete.length) {
+    const items = failed.length ? failed : incomplete;
+    const ids = { commandIds: items.filter(item => item.kind === 'command').map(item => item.id), updateIds: items.filter(item => item.kind === 'update').map(item => item.id) };
+    return { code: failed.length ? 'terminal_mcp_receipt_failed' : 'terminal_mcp_receipt_incomplete', error: `${receipt.runtime} 手机 MCP 已下发动作，但原回执${failed.length ? '确认失败' : '尚未全部成功或升级尚未 committed'}（${items.map(item => `${item.id}: ${item.status || 'unknown'}`).join('、')}）；请查询原回执，不要重放动作`, ...ids };
+  }
+  if (calls.length && !calls.some(item => item.ok === true)) return { code: 'terminal_mcp_tools_failed', error: `${receipt.runtime} 手机 MCP 已加载，但实际尝试的工具全部失败；请核对手机绑定、技能安装和执行授权` };
+  return null;
+}
 
 function localManagementConfiguration({ config = {}, workspace = '', apiBase = '', env = process.env } = {}) {
   if (config.enabled !== true) throw new Error('本机尚未启用紫薇管理 MCP；请配置 daemon managementMcp.enabled 和安全 tokenFile');
@@ -609,7 +784,7 @@ export function parseRuntimeStreamLine(line, state, onOutput = () => {}, onStage
 }
 
 /** Execute an installed CLI using an explicit argv, with full local approval. */
-export function executeRuntime({ runtime, prompt, model = null, profile = null, cwd = process.cwd(), env = {}, attachments = [], managementMcp = null, signal, onOutput, onProgress, onStage } = {}) {
+export function executeRuntime({ runtime, prompt, model = null, profile = null, cwd = process.cwd(), env = {}, attachments = [], managementMcp = null, terminalMcp = null, signal, onOutput, onProgress, onStage } = {}) {
   const resolvedRuntime = normalizeRuntime(runtime);
   if (!resolvedRuntime) return Promise.reject(new Error(`未知本机运行时: ${runtime || '(empty)'}`));
   const definition = DEFINITIONS[resolvedRuntime];
@@ -621,7 +796,8 @@ export function executeRuntime({ runtime, prompt, model = null, profile = null, 
   let childEnv = { ...process.env, ...env };
   delete childEnv.ZIWEI_CONFIG;
   // An employee with MCP disabled must not inherit daemon management credentials.
-  for (const key of MANAGEMENT_ENV_KEYS) delete childEnv[key];
+  for (const key of [...MANAGEMENT_ENV_KEYS, ...TERMINAL_ENV_KEYS, ...LEGACY_TERMINAL_ENV_KEYS]) delete childEnv[key];
+  const profileBaseHome = childEnv.HERMES_HOME || hermesHome();
   if (resolvedRuntime === 'Hermes') {
     const readiness = hermesProfileReadiness(profile || 'default', { baseHome: childEnv.HERMES_HOME });
     if (!readiness.ready) return Promise.reject(new Error(readiness.reason));
@@ -637,10 +813,13 @@ export function executeRuntime({ runtime, prompt, model = null, profile = null, 
     return Promise.reject(new Error(`${resolvedRuntime} 尚未支持显式 profile；不会忽略或回退该配置`));
   }
   let receipt = null;
+  let phoneReceipt = null;
   try {
     const launch = prepareManagementMcpLaunch({ runtime: resolvedRuntime, profile, invocation, env: childEnv, ...(managementMcp || {}) });
     invocation = launch.invocation; childEnv = launch.env; receipt = launch.receipt;
-    if (resolvedRuntime === 'Hermes' && !receipt) childEnv.HERMES_HOME = hermesProfileHome(profile || 'default', { baseHome: childEnv.HERMES_HOME });
+    const phoneLaunch = prepareTerminalMcpLaunch({ runtime: resolvedRuntime, profile, invocation, env: childEnv, profileBaseHome, ...(terminalMcp || {}) });
+    invocation = phoneLaunch.invocation; childEnv = phoneLaunch.env; phoneReceipt = phoneLaunch.receipt;
+    if (resolvedRuntime === 'Hermes' && !receipt && !phoneReceipt) childEnv.HERMES_HOME = hermesProfileHome(profile || 'default', { baseHome: profileBaseHome });
   } catch (error) { return Promise.reject(error); }
   const spec = runtimeSpawnSpec(discovered.binary, invocation.args);
   // The desktop user session may have a proxy configured in Windows Internet
@@ -687,8 +866,8 @@ export function executeRuntime({ runtime, prompt, model = null, profile = null, 
     child.once('close', (code, childSignal) => {
       if (state.lineBuffer) parseRuntimeStreamLine(state.lineBuffer, state, onOutput, onStage);
       if (signal?.aborted) return finish({ status: 'failed', code: 'cancelled', error: 'runtime execution cancelled', result: { runtime: resolvedRuntime, code, signal: childSignal, output: state.output, truncated: state.truncated } });
-    const result = { runtime: resolvedRuntime, model: model || null, profile: profile || null, binary: discovered.binary, code, signal: childSignal, output: state.response.trim() || state.output, diagnostics: state.response.trim() ? state.output : null, truncated: state.truncated, ...(receipt ? { managementMcp: managementMcpReceipt(receipt) } : {}), ...(attachments.length ? {attachments} : {}) };
-      const mcpFailure = code === 0 ? managementMcpExecutionFailure(result.managementMcp) : null;
+    const result = { runtime: resolvedRuntime, model: model || null, profile: profile || null, binary: discovered.binary, code, signal: childSignal, output: state.response.trim() || state.output, diagnostics: state.response.trim() ? state.output : null, truncated: state.truncated, ...(receipt ? { managementMcp: managementMcpReceipt(receipt) } : {}), ...(phoneReceipt ? { terminalMcp: terminalMcpReceipt(phoneReceipt) } : {}), ...(attachments.length ? {attachments} : {}) };
+      const mcpFailure = code === 0 ? managementMcpExecutionFailure(result.managementMcp) || terminalMcpExecutionFailure(result.terminalMcp) : null;
       if (mcpFailure) return finish({ status: 'failed', ...mcpFailure, result });
       if (code !== 0) return finish({ status: 'failed', code: 'runtime_failed', error: formatRuntimeFailure(resolvedRuntime, code, state.output), result });
       finish({ status: 'succeeded', result });

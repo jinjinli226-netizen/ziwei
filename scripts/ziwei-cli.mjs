@@ -171,6 +171,7 @@ function makeConfig(args, previous = {}) {
     ? cleanTlsCaFile(args['tls-ca-file'])
     : (previous.tlsCaFile ? String(previous.tlsCaFile) : undefined);
   return {
+    ...previous,
     agentId: 'ziwei_user',
     serviceName: 'ziwei_user',
     workspace,
