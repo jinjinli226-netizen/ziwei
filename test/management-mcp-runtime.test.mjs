@@ -57,18 +57,21 @@ test('Hermes MCP uses the explicit isolated profile and preserves provider and e
     const first = runtime.prepareManagementMcpLaunch(options);
     assert.equal(first.env.HERMES_HOME, profile);
     assert.ok(first.invocation.args.includes('--toolsets'));
-    const modified = fs.readFileSync(path.join(profile, 'config.yaml'), 'utf8');
+    const modified = fs.readFileSync(path.join(first.env.HERMES_MANAGED_DIR, 'config.yaml'), 'utf8');
     assert.match(modified, /ziwei_management:/);
-    assert.match(modified, /other:/);
-    assert.match(modified, /openai-codex/);
-    assert.match(modified, /\$\{ZIWEI_MCP_TOKEN_FILE\}/);
+    assert.match(modified, /ZIWEI_MCP_TOKEN_FILE:/);
+    assert.doesNotMatch(modified, /other:|openai-codex/);
     assert.doesNotMatch(modified, /\$\{ZIWEI_MCP_TOKEN\}/);
     assert.doesNotMatch(modified, /test-private-bearer/);
     const second = runtime.prepareManagementMcpLaunch(options);
-    assert.equal(fs.readFileSync(path.join(profile, 'config.yaml'), 'utf8'), modified);
+    assert.equal(fs.readFileSync(path.join(profile, 'config.yaml'), 'utf8'), original);
     assert.equal(second.env.HERMES_HOME, profile);
+    assert.notEqual(second.env.HERMES_MANAGED_DIR, first.env.HERMES_MANAGED_DIR);
+    assert.equal(fs.readFileSync(path.join(second.env.HERMES_MANAGED_DIR, 'config.yaml'), 'utf8').replace(second.receipt.auditFile, 'AUDIT'), modified.replace(first.receipt.auditFile, 'AUDIT'));
     assert.equal(fs.readFileSync(path.join(hermes, 'config.yaml'), 'utf8'), 'model:\n  provider: root-untouched\n');
-    assert.throws(() => runtime.prepareManagementMcpLaunch({ ...options, profile: 'default' }), /独立.*profile/);
+    const main = runtime.prepareManagementMcpLaunch({ ...options, profile: 'default' });
+    assert.equal(fs.readFileSync(path.join(hermes, 'config.yaml'), 'utf8'), 'model:\n  provider: root-untouched\n');
+    first.cleanup(); second.cleanup(); main.cleanup();
     assert.throws(() => runtime.prepareManagementMcpLaunch({ ...options, profile: 'missing' }), /不存在/);
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });
@@ -89,6 +92,23 @@ test('Hermes discovery distinguishes profile existence from provider and authent
     assert.equal(ready.readiness.ready, true);
     assert.doesNotMatch(JSON.stringify(profiles), /local-secret/);
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('legacy environment-only management auth remains an env reference in Hermes overlay', () => {
+  const f = fixture();
+  const previous = { token: process.env.ZIWEI_MCP_TOKEN, workspace: process.env.ZIWEI_MCP_WORKSPACE };
+  try {
+    fs.writeFileSync(path.join(f.root, 'config.yaml'), 'model:\n  provider: fixture-provider\n');
+    process.env.ZIWEI_MCP_TOKEN = 'private-environment-bearer'; process.env.ZIWEI_MCP_WORKSPACE = 'runtime-test';
+    const launch = runtime.prepareManagementMcpLaunch({ runtime: 'Hermes', profile: 'default', config: { enabled: true, baseUrl: 'https://example.test' }, workspace: 'runtime-test', auditDirectory: f.root, invocation: { args: [] }, env: { HERMES_HOME: f.root } });
+    assert.equal(launch.env.ZIWEI_MCP_TOKEN, 'private-environment-bearer');
+    const text = fs.readFileSync(path.join(launch.overlayHome, 'config.yaml'), 'utf8');
+    assert.match(text, /\$\{ZIWEI_MCP_TOKEN\}/); assert.doesNotMatch(text, /private-environment-bearer/);
+    launch.cleanup();
+  } finally {
+    for (const [key, value] of [['ZIWEI_MCP_TOKEN', previous.token], ['ZIWEI_MCP_WORKSPACE', previous.workspace]]) if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
 });
 
 test('management MCP receipt requires an actual successful handshake and preserves safe tool IDs', () => {

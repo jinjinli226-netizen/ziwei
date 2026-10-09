@@ -8,6 +8,7 @@ export function phoneRuntimeReadiness(setup, form) {
   const readiness = employeeReadiness({ workspace:setup?.workspace,devices:setup?.computers || [] }, { deviceId:form.targetDeviceId,runtime:form.runtime,profile:form.runtimeProfile });
   const terminal = readiness.device?.terminal_mcp;
   const issues = [...readiness.issues];
+  if (form.runtime === 'Hermes' && (!form.runtimeProfile || form.runtimeProfile === 'default')) issues.push('手机 MCP 请选择独立 Hermes profile，保留原主 profile。');
   if (readiness.device && (!terminal?.configured || terminal.workspace !== setup?.workspace || !terminal.supportedRuntimes?.includes(form.runtime))) issues.push(terminal?.reason || '目标电脑尚未报告当前工作区的手机 MCP 适配，请等待原客户端更新并重新报告心跳。');
   return { ...readiness,issues:[...new Set(issues)],ready:issues.length === 0 };
 }

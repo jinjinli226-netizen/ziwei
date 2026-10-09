@@ -11,7 +11,7 @@ function issueText(value) { return typeof value === 'string' ? value : String(va
 export function profileAfterRuntimeChange(currentRuntime, nextRuntime, profile = '') {
   return currentRuntime === nextRuntime ? String(profile || '') : '';
 }
-export function employeeReadiness(discovery, { deviceId, runtime, profile = '', mcpEnabled = false } = {}) {
+export function employeeReadiness(discovery, { deviceId, runtime, profile = '' } = {}) {
   const issues = [];
   const device = discovery?.devices?.find(item => item.id === deviceId);
   if (!device) return { ready: false, issues: ['请选择当前工作区发现的目标电脑，并刷新环境。'], device: null, runtime: null };
@@ -30,7 +30,7 @@ export function employeeReadiness(discovery, { deviceId, runtime, profile = '', 
       if (selected.readiness?.provider === 'missing') issues.push(`${runtime} provider 未配置，请在目标电脑配置后刷新。`);
     }
     if (runtime === 'Hermes') {
-      if (!profile || profile === 'default') issues.push('请选择或创建独立 Hermes profile。');
+      if (!profile) issues.push('请选择目标电脑已发现的 Hermes profile。');
       else {
         const found = selected.profiles?.find(item => (typeof item === 'string' ? item : item.name) === profile);
         if (!found) issues.push(`目标电脑未发现 profile「${profile}」，请先在此电脑创建并刷新。`);
@@ -43,16 +43,24 @@ export function employeeReadiness(discovery, { deviceId, runtime, profile = '', 
     }
   }
   const managementMcp = device.management_mcp || device.managementMcp;
-  if (mcpEnabled && managementMcp?.configured !== true) issues.push(managementMcp?.reason || '目标电脑尚未报告管理 MCP 配置，请更新 ziwei_user 并配置工作区 MCP bearer。');
-  if (mcpEnabled && discovery.workspace && managementMcp?.configured && managementMcp.workspace !== discovery.workspace) issues.push('目标电脑的管理 MCP 工作区与当前工作区不同，请在该电脑核对安全配置。');
-  if (mcpEnabled && managementMcp?.configured && !managementMcp.supportedRuntimes?.includes(runtime)) issues.push(`目标电脑尚未报告支持 ${runtime} 管理 MCP 注入，请升级对应客户端适配器。`);
+  const reportedWorkspace = device.workspace_slug || device.workspace || managementMcp?.workspace;
+  if (discovery.workspace && reportedWorkspace && reportedWorkspace !== discovery.workspace) issues.push('目标电脑的工作区与当前工作区不同，请刷新当前工作区设备发现。');
   return { ready: issues.length === 0, issues: [...new Set(issues)], device, runtime: selected || null };
+}
+
+export function managementPreparation(config) {
+  const state = config?.state || (config?.configured ? 'ready' : 'pending');
+  const labels = { pending: '正在自动接入', ready: '自动接入已准备', failed: '自动接入失败', client_required: '客户端需要更新' };
+  return { state, label: labels[state] || '等待自动接入', tone: state === 'ready' ? 'online' : state === 'failed' ? 'failed' : 'neutral', reason: String(config?.reason || ''), reasonCode: String(config?.reasonCode || ''), retryable: state === 'failed' || state === 'pending', updateRequired: state === 'client_required' };
 }
 
 export function employeeMcpEvidence(status) {
   const receipt = status?.receipt;
   if (receipt?.status === 'failed' || receipt?.error) return { label: '加载或执行失败', tone: 'failed' };
-  if (receipt?.loaded === true && receipt?.tool_calls?.length) return { label: '已加载并调用工具', tone: 'online' };
+  const calls = receipt?.tool_calls || [];
+  if (receipt?.loaded === true && calls.length && calls.every(call => call.ok === false)) return { label: '已加载，工具调用失败', tone: 'failed' };
+  if (receipt?.loaded === true && calls.some(call => call.ok === true)) return { label: '已加载并调用工具', tone: 'online' };
+  if (receipt?.loaded === true && calls.length) return { label: '已加载，工具结果待确认', tone: 'neutral' };
   if (receipt?.loaded === true) return { label: '已加载，尚无工具调用', tone: 'online' };
   if (receipt?.injected === true) return { label: '已注入，等待加载回执', tone: 'neutral' };
   if (receipt?.status === 'pending') return { label: '等待执行回执', tone: 'neutral' };

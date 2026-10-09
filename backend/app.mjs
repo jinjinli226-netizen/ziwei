@@ -7,10 +7,11 @@ import { RealtimeHub } from './realtime.mjs';
 import { exportDocumentsToGit, importDocumentsFromGit } from './git-sync.mjs';
 import { createAuthService } from './auth.mjs';
 import { deviceTokenFromRequest, readA2AToken, safeTokenEqual, tokenFromRequest } from './a2a-auth.mjs';
-import { mcpTokenRequired, readMCPCredential, mcpWorkspaceAllowed } from './mcp-auth.mjs';
+import { mcpTokenRequired } from './mcp-auth.mjs';
 import { createZiweiConnect } from './ziwei-connect.mjs';
 import { createManagementService } from './management.mjs';
 import { createPhoneMcpService } from './phone-mcp.mjs';
+import { createManagementBootstrap } from './management-bootstrap.mjs';
 import { toolDefinitions as managementTools } from '../scripts/ziwei-mcp.mjs';
 
 const allowedOrigin = process.env.FRONTEND_ORIGIN || 'http://127.0.0.1:5178';
@@ -250,12 +251,14 @@ export function createApp(options = {}) {
   });
   const auth = options.auth || createAuthService(repo.db, options.authOptions);
   const management = createManagementService(repo);
+  const managementBootstrap = createManagementBootstrap(repo, options);
   const phoneMcp = createPhoneMcpService(repo,ziweiConnect,management,options);
   app.locals.repo = repo;
   app.locals.realtime = realtime;
   app.locals.auth = auth;
   app.locals.ziweiConnect = ziweiConnect;
   app.locals.phoneMcp = phoneMcp;
+  app.locals.managementBootstrap = managementBootstrap;
   app.use(cors);
   app.use((_req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -305,6 +308,13 @@ export function createApp(options = {}) {
   });
   app.post('/api/daemon/workspace-grants/:grantId/claim', (req,res,next)=>{
     try {const credential=repo.authenticateDeviceToken(deviceTokenFromRequest(req));res.setHeader('Cache-Control','no-store');res.json(phoneMcp.claim(req.params.grantId,credential));}catch(error){next(error);}
+  });
+  app.post('/api/workspaces/:slug/mcp/bootstrap', (req,res,next)=>{
+    try {
+      const credential = repo.authenticateDeviceToken(deviceTokenFromRequest(req), { workspaceSlug: req.params.slug });
+      res.setHeader('Cache-Control', 'no-store');
+      res.json(managementBootstrap.bootstrap(req.params.slug, credential));
+    } catch (error) { next(error); }
   });
   app.post('/api/workspaces/:slug/terminal-mcp/bootstrap', (req,res,next)=>{
     try {const credential=repo.authenticateDeviceToken(deviceTokenFromRequest(req),{workspaceSlug:req.params.slug});res.setHeader('Cache-Control','no-store');res.json(phoneMcp.bootstrap(req.params.slug,req.body || {},credential));}catch(error){next(error);}
@@ -477,15 +487,15 @@ export function createApp(options = {}) {
   app.post('/api/daemon/heartbeat', requireDeviceCredential(repo), (req, res, next) => { const slug = String(req.body.workspace || req.body.workspace_slug || '').trim(); if (!slug) return res.status(400).json({ error: 'heartbeat 必须明确 workspace' }); try { return res.json({ ok: true, device: repo.heartbeatDevice(slug, req.body) }); } catch (error) { return next(error); } });
   app.post('/api/devices/heartbeat', requireDeviceCredential(repo), (req, res, next) => { const slug = String(req.body.workspace || req.body.workspace_slug || '').trim(); if (!slug) return res.status(400).json({ error: 'heartbeat 必须明确 workspace' }); try { return res.json({ ok: true, device: repo.heartbeatDevice(slug, req.body) }); } catch (error) { return next(error); } });
   app.get('/api/workspaces/:slug/employees', (req, res) => res.json({ employees: repo.listEmployees(req.params.slug, { actorUserId: req.auth?.user_id, actorRole: req.workspaceRole, enforceEmployeeVisibility: true }) }));
-  app.post('/api/workspaces/:slug/employees', requireRole('owner','admin','member'), (req, res) => { const input = { ...(req.body || {}), ownerUserId: req.auth?.user_id }; if (input.targetDeviceId || input.target_device_id || input.deviceId || input.device_id || input.managementMcpEnabled || input.managementMcp?.enabled) { const saved = management.createEmployee(req.params.slug, { ...input, idempotencyKey: req.get('Idempotency-Key') || input.idempotencyKey || input.idempotency_key }); return res.status(saved.duplicate ? 200 : 201).json(saved); } return res.status(201).json(repo.createEmployee(req.params.slug, input)); });
+  app.post('/api/workspaces/:slug/employees', requireRole('owner','admin','member'), (req, res) => { const input = { ...(req.body || {}), ownerUserId: req.auth?.user_id }; if (input.targetDeviceId || input.target_device_id || input.deviceId || input.device_id || input.managementMcpEnabled || input.managementMcp?.enabled) { const saved = management.createEmployee(req.params.slug, { ...input, idempotencyKey: req.get('Idempotency-Key') || input.idempotencyKey || input.idempotency_key }, employeeContext(req)); return res.status(saved.duplicate ? 200 : 201).json(saved); } return res.status(201).json(repo.createEmployee(req.params.slug, input)); });
   const ensureEmployeeVisibleById = (req, idValue) => {
     const employee = repo.getEmployee(idValue, employeeContext(req));
     if (!employee) { const error = new Error('数字员工不存在'); error.status = 404; throw error; }
     return employee;
   };
-  app.patch('/api/employees/:id', requireRole('owner','admin','member'), (req, res) => { const employee = ensureEmployeeVisibleById(req, req.params.id); const slug = repo.db.prepare('SELECT slug FROM workspaces WHERE id=?').get(employee.workspace_id)?.slug; res.json(management.updateEmployee(slug, req.params.id, req.body || {})); });
+  app.patch('/api/employees/:id', requireRole('owner','admin','member'), (req, res) => { const employee = ensureEmployeeVisibleById(req, req.params.id); const slug = repo.db.prepare('SELECT slug FROM workspaces WHERE id=?').get(employee.workspace_id)?.slug; res.json(management.updateEmployee(slug, req.params.id, req.body || {}, employeeContext(req))); });
   app.delete('/api/employees/:id', requireRole('owner','admin'), (req, res) => res.json(repo.deleteEmployee(req.params.id)));
-  app.patch('/api/workspaces/:slug/employees/:id', requireRole('owner','admin','member'), (req, res) => { ensureEmployeeInWorkspace(req.params.slug, req.params.id, req); res.json(management.updateEmployee(req.params.slug, req.params.id, req.body || {})); });
+  app.patch('/api/workspaces/:slug/employees/:id', requireRole('owner','admin','member'), (req, res) => { ensureEmployeeInWorkspace(req.params.slug, req.params.id, req); res.json(management.updateEmployee(req.params.slug, req.params.id, req.body || {}, employeeContext(req))); });
   app.delete('/api/workspaces/:slug/employees/:id', requireRole('owner','admin'), (req, res) => res.json(repo.deleteEmployee(req.params.id)));
   // Employee configuration is kept separate from the ordinary employee list.
   // Environment values are encrypted at rest and returned only as metadata or
@@ -592,7 +602,7 @@ export function createApp(options = {}) {
       const result=phoneMcp.grant(req.params.slug,req.body || {},req.auth?.user_id);res.status(result.duplicate?200:201).json(result);
     } catch(error) {next(error);}
   });
-  app.get('/api/workspaces/:slug/employees/:id/mcp/status', requireRole('owner','admin','member'), (req, res) => { ensureEmployeeInWorkspace(req.params.slug, req.params.id, req); res.json(management.employeeStatus(req.params.slug, req.params.id)); });
+  app.get('/api/workspaces/:slug/employees/:id/mcp/status', requireRole('owner','admin','member'), (req, res) => { ensureEmployeeInWorkspace(req.params.slug, req.params.id, req); res.json(management.employeeStatus(req.params.slug, req.params.id, employeeContext(req))); });
   app.get('/api/workspaces/:slug/hermes/profiles', requireRole('owner','admin','member'), (req, res) => {
     res.json(repo.listHermesProfiles(req.params.slug, { deviceId: req.query.deviceId || req.query.device_id }));
   });
@@ -637,19 +647,28 @@ export function createApp(options = {}) {
   app.get('/api/workspaces/:slug/hermes/profile-actions/:id', requireRole('owner','admin','member'), hermesProfileAction);
   app.get('/api/workspaces/:slug/hermes/profiles/actions/:id', requireRole('owner','admin','member'), hermesProfileAction);
   app.get('/api/workspaces/:slug/mcp/status', requireRole('owner','admin','member'), (req, res) => {
-    const credential = readMCPCredential({ ...mcpOptions, file: mcpOptions.file || mcpOptions.tokenFile, create: false });
-    const credentials = [...(credential.token ? [{ token: credential.token, workspaces: credential.workspaces }] : []), ...(credential.credentials || [])];
-    const configured = credentials.length > 0;
-    const scoped = credentials.some(item => mcpWorkspaceAllowed(item.workspaces, req.params.slug));
-    let health = 'unconfigured';
-    if (configured && !scoped) health = 'scope_denied';
-    else if (scoped) { try { repo.listEmployees(req.params.slug); health = 'healthy'; } catch { health = 'unavailable'; } }
-    const apiBase = 'https://qzelynth.top';
+    const apiBase = managementBootstrap.apiBase;
     const endpoint = apiBase + '/mcp/v1/workspaces/' + encodeURIComponent(req.params.slug);
-    const employees = repo.listEmployees(req.params.slug, employeeContext(req)).map(item => management.employeeStatus(req.params.slug, item.id));
-    res.json({ configured, health, workspace: req.params.slug, workspaces: scoped ? [req.params.slug] : [], scope_allowed: scoped, endpoint, api_endpoint: endpoint, transport: 'stdio', api_transport: 'https', client: 'scripts/ziwei-mcp.mjs', capabilities: ['employees', 'tasks', 'documents'], tools: managementTools, credential: { configured, scope_allowed: scoped, masked: configured ? '••••••••' : '' }, config_template: { mcpServers: { 'ziwei-management': { command: 'node', args: ['<ZIWEI_INSTALL_DIR>/scripts/ziwei-mcp.mjs'], env: { ZIWEI_API_BASE: apiBase, ZIWEI_MCP_WORKSPACE: req.params.slug, ZIWEI_MCP_TOKEN_FILE: '<PRIVATE_MCP_TOKEN_FILE>' } } } }, employees, boundary: 'stdio MCP 适配器经 HTTPS 调用当前工作区管理 API；API 地址不能直接作为远程 MCP URL。不直接访问 SQLite，HTTP 健康也不代表员工已加载或实际调用。' });
+    const context = employeeContext(req);
+    const employees = repo.listEmployees(req.params.slug, context).map(item => management.employeeStatus(req.params.slug, item.id, context));
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ configured: true, health: 'healthy', managed: true, default_enabled: true, workspace: req.params.slug, workspaces: [req.params.slug], scope_allowed: true, endpoint, api_endpoint: endpoint, transport: 'stdio', api_transport: 'https', client: 'scripts/ziwei-mcp.mjs', capabilities: ['employees', 'tasks', 'documents'], tools: managementTools, credential: { configured: true, managed: true, mode: 'device-bootstrap', scope_allowed: true, masked: '' }, connections: managementBootstrap.connections(req.params.slug, context), employees, boundary: '管理能力默认开启，已认证电脑连接按工作区自动准备短期凭据；准备就绪与员工实际工具加载回执分别记录。手机能力仍需单独选择和配置。stdio 适配器通过 HTTPS API，不直接访问 SQLite。' });
   });
-  const mcpGuard = mcpTokenRequired(mcpOptions);
+  app.post('/api/workspaces/:slug/mcp/retry', requireRole('owner','admin','member'), (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(repo.requestManagementMcpRetry(req.params.slug, String(req.body?.deviceId || ''), employeeContext(req)));
+  });
+  const mcpGuard = mcpTokenRequired({ ...mcpOptions, authorize: managementBootstrap.authorize });
+  const mcpContext = req => ({ actorUserId: req.mcpCredential.actorUserId, actorRole: req.mcpCredential.actorRole, deviceScope: req.mcpCredential.deviceScope, deviceCredentialDeviceId: req.mcpCredential.deviceId, enforceEmployeeVisibility: true, enforceDeviceOwnership: true });
+  const mcpEmployeeGuard = (req, _res, next) => {
+    try {
+      const context = mcpContext(req);
+      const employee = management.employee(req.params.slug, req.params.id, context);
+      const deviceId = req.body?.targetDeviceId || employee.target_device_id;
+      if (deviceId && !management.discovery(req.params.slug, { deviceId, userId: context.actorUserId, deviceScope: context.deviceScope }).devices.length) throw Object.assign(new Error('目标电脑不在当前身份的设备范围内'), { status: 404, code: 'DEVICE_NOT_IN_WORKSPACE' });
+      next();
+    } catch (error) { next(error); }
+  };
   const mcpResourceGuard = (req, res, next) => {
     const row = repo.listDocuments(req.mcpCredential.workspace).find(item => item.id === req.params.id);
     if (!row) return res.status(404).json({ error: '文档不存在' }); next();
@@ -658,22 +677,22 @@ export function createApp(options = {}) {
     try { repo.listEmployees(req.params.slug); res.json({ ok: true, workspace: req.params.slug, transport: 'stdio', api_transport: 'https', tools: managementTools.map(item => item.name), capabilities: ['employees', 'tasks', 'documents'], boundary: '窄管理面：员工、任务和文档；stdio 客户端通过 HTTPS API，不直接访问 SQLite。' }); }
     catch (error) { res.status(503).json({ ok: false, error: error.message }); }
   });
-  app.get('/mcp/v1/workspaces/:slug/discovery', mcpGuard, (req, res) => res.json(management.discovery(req.params.slug, req.query)));
-  app.get('/mcp/v1/workspaces/:slug/phone-mcp/setup',mcpGuard,async(req,res,next)=>{try{res.json(await phoneMcp.setup(req.params.slug,{actorRole:'owner'}));}catch(error){next(error);}});
+  app.get('/mcp/v1/workspaces/:slug/discovery', mcpGuard, (req, res) => res.json(management.discovery(req.params.slug, { ...req.query, userId: req.mcpCredential.actorUserId, deviceScope: req.mcpCredential.deviceScope })));
+  app.get('/mcp/v1/workspaces/:slug/phone-mcp/setup',mcpGuard,async(req,res,next)=>{try{res.json(await phoneMcp.setup(req.params.slug,{...mcpContext(req),userId:req.mcpCredential.actorUserId}));}catch(error){next(error);}});
   app.post('/mcp/v1/workspaces/:slug/skills/:id/install',mcpGuard,(req,res)=>{if(!repo.listSkills(req.params.slug).some(row=>row.id===req.params.id))return res.status(404).json({error:'技能不属于当前工作区'});res.json(repo.setSkillInstalled(req.params.id,req.body?.installed!==false));});
-  app.put('/mcp/v1/workspaces/:slug/employees/:id/phone-mcp',mcpGuard,async(req,res,next)=>{try{res.json(await phoneMcp.save(req.params.slug,req.params.id,req.body || {}));}catch(error){next(error);}});
-  app.get('/mcp/v1/workspaces/:slug/employees/:id/phone-mcp/status',mcpGuard,async(req,res,next)=>{try{res.json(await phoneMcp.status(req.params.slug,req.params.id));}catch(error){next(error);}});
-  for(const kind of ['check','trial']) app.post(`/mcp/v1/workspaces/:slug/employees/:id/phone-mcp/${kind}`,mcpGuard,(req,res,next)=>{try{res.status(202).json(phoneMcp.trial(req.params.slug,req.params.id,req.body || {},kind==='check'));}catch(error){next(error);}});
-  app.get('/mcp/v1/workspaces/:slug/employees/:id', mcpGuard, (req, res) => res.json(management.employee(req.params.slug, req.params.id)));
-  app.get('/mcp/v1/workspaces/:slug/employees/:id/mcp/status', mcpGuard, (req, res) => res.json(management.employeeStatus(req.params.slug, req.params.id)));
-  app.get('/mcp/v1/workspaces/:slug/tasks/:id', mcpGuard, (req, res) => res.json(management.task(req.params.slug, req.params.id)));
-  app.get('/mcp/v1/workspaces/:slug/actions/:id', mcpGuard, (req, res) => res.json(management.action(req.params.slug, req.params.id)));
-  app.post('/mcp/v1/workspaces/:slug/hermes/profiles/requests', mcpGuard, (req, res) => { const action = management.createProfile(req.params.slug, { ...(req.body || {}), idempotencyKey: req.get('Idempotency-Key') || req.body?.idempotencyKey || req.body?.idempotency_key }); res.status(action.duplicate ? 200 : 202).json(action); });
-  app.get('/mcp/v1/workspaces/:slug/employees', mcpGuard, (req, res) => res.json({ employees: repo.listEmployees(req.params.slug, { actorRole: 'owner', enforceEmployeeVisibility: true }) }));
-  app.post('/mcp/v1/workspaces/:slug/employees', mcpGuard, (req, res) => { const saved = management.createEmployee(req.params.slug, { ...(req.body || {}), idempotencyKey: req.get('Idempotency-Key') || req.body?.idempotencyKey || req.body?.idempotency_key }); res.status(saved.duplicate ? 200 : 201).json(saved); });
-  app.patch('/mcp/v1/workspaces/:slug/employees/:id', mcpGuard, (req, res) => res.json(management.updateEmployee(req.params.slug, req.params.id, req.body || {})));
-  app.get('/mcp/v1/workspaces/:slug/tasks', mcpGuard, (req, res) => res.json({ tasks: repo.listTasks(req.params.slug, req.query) }));
-  app.post('/mcp/v1/workspaces/:slug/tasks', mcpGuard, (req, res) => { const saved = management.createTask(req.params.slug, { ...(req.body || {}), idempotencyKey: req.get('Idempotency-Key') || req.body?.idempotencyKey || req.body?.idempotency_key }); res.status(saved.duplicate ? 200 : 201).json(saved); });
+  app.put('/mcp/v1/workspaces/:slug/employees/:id/phone-mcp',mcpGuard,mcpEmployeeGuard,async(req,res,next)=>{try{res.json(await phoneMcp.save(req.params.slug,req.params.id,req.body || {}));}catch(error){next(error);}});
+  app.get('/mcp/v1/workspaces/:slug/employees/:id/phone-mcp/status',mcpGuard,mcpEmployeeGuard,async(req,res,next)=>{try{res.json(await phoneMcp.status(req.params.slug,req.params.id));}catch(error){next(error);}});
+  for(const kind of ['check','trial']) app.post(`/mcp/v1/workspaces/:slug/employees/:id/phone-mcp/${kind}`,mcpGuard,mcpEmployeeGuard,(req,res,next)=>{try{res.status(202).json(phoneMcp.trial(req.params.slug,req.params.id,req.body || {},kind==='check'));}catch(error){next(error);}});
+  app.get('/mcp/v1/workspaces/:slug/employees/:id', mcpGuard, (req, res) => res.json(management.employee(req.params.slug, req.params.id, mcpContext(req))));
+  app.get('/mcp/v1/workspaces/:slug/employees/:id/mcp/status', mcpGuard, (req, res) => res.json(management.employeeStatus(req.params.slug, req.params.id, mcpContext(req))));
+  app.get('/mcp/v1/workspaces/:slug/tasks/:id', mcpGuard, (req, res) => res.json(management.task(req.params.slug, req.params.id, mcpContext(req))));
+  app.get('/mcp/v1/workspaces/:slug/actions/:id', mcpGuard, (req, res) => res.json(management.action(req.params.slug, req.params.id, mcpContext(req))));
+  app.post('/mcp/v1/workspaces/:slug/hermes/profiles/requests', mcpGuard, (req, res) => { const action = management.createProfile(req.params.slug, { ...(req.body || {}), idempotencyKey: req.get('Idempotency-Key') || req.body?.idempotencyKey || req.body?.idempotency_key }, mcpContext(req)); res.status(action.duplicate ? 200 : 202).json(action); });
+  app.get('/mcp/v1/workspaces/:slug/employees', mcpGuard, (req, res) => res.json({ employees: repo.listEmployees(req.params.slug, mcpContext(req)) }));
+  app.post('/mcp/v1/workspaces/:slug/employees', mcpGuard, (req, res) => { const saved = management.createEmployee(req.params.slug, { ...(req.body || {}), idempotencyKey: req.get('Idempotency-Key') || req.body?.idempotencyKey || req.body?.idempotency_key }, mcpContext(req)); res.status(saved.duplicate ? 200 : 201).json(saved); });
+  app.patch('/mcp/v1/workspaces/:slug/employees/:id', mcpGuard, (req, res) => res.json(management.updateEmployee(req.params.slug, req.params.id, req.body || {}, mcpContext(req))));
+  app.get('/mcp/v1/workspaces/:slug/tasks', mcpGuard, (req, res) => res.json({ tasks: management.tasks(req.params.slug, req.query, mcpContext(req)) }));
+  app.post('/mcp/v1/workspaces/:slug/tasks', mcpGuard, (req, res) => { const saved = management.createTask(req.params.slug, { ...(req.body || {}), idempotencyKey: req.get('Idempotency-Key') || req.body?.idempotencyKey || req.body?.idempotency_key }, mcpContext(req)); res.status(saved.duplicate ? 200 : 201).json(saved); });
   app.get('/mcp/v1/workspaces/:slug/documents', mcpGuard, (req, res) => res.json({ documents: repo.listDocuments(req.params.slug) }));
   app.post('/mcp/v1/workspaces/:slug/documents', mcpGuard, (req, res) => res.status(201).json(repo.createDocument(req.params.slug, req.body || {})));
   app.get('/mcp/v1/workspaces/:slug/documents/:id', mcpGuard, mcpResourceGuard, (req, res) => res.json(repo.getDocument(req.params.id)));

@@ -13,6 +13,20 @@ const run = promisify(execFile);
 const root = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const cli = path.join(root, 'scripts', 'ziwei-cli.mjs');
 
+test('native pairing preserves shared identities, phone settings and original workdir', async t => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'ziwei-connect-preserve-'));
+  const server = http.createServer((_req, res) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ workspace: 'test_222', deviceId: 'device_renewed', deviceToken: 'test-device-renewed' })); });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => { await new Promise(resolve => server.close(resolve)); fs.rmSync(temp, { recursive: true, force: true }); });
+  const config = path.join(temp, 'config.json');
+  const previous = { workspace: 'test_222', healthPort: 20242, workdir: 'original-workdir', terminalMcp: { enabled: true }, managementMcp: { tokenFile: 'legacy-private.json' }, sharedWorkspaces: [{ workspace: 'phone_ai', deviceId: 'device_shared', deviceTokenFile: 'shared-private.json' }], futureSetting: 'preserve' };
+  fs.writeFileSync(config, JSON.stringify(previous));
+  await run(process.execPath, [cli, 'connect', '--api', `http://127.0.0.1:${server.address().port}`, '--code', 'isolated-pairing-code'], { cwd: root, env: { ...process.env, ZIWEI_CONFIG: config } });
+  const saved = JSON.parse(fs.readFileSync(config, 'utf8'));
+  for (const key of ['workdir', 'healthPort', 'terminalMcp', 'managementMcp', 'sharedWorkspaces', 'futureSetting']) assert.deepEqual(saved[key], previous[key]);
+  assert.equal(saved.deviceId, 'device_renewed'); assert.equal(saved.deviceToken, 'test-device-renewed');
+});
+
 async function waitForHttp(url, predicate = response => response.ok, timeoutMs = 5000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {

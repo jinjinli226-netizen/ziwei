@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
 import {executeRuntime, bootstrapTerminalMcp, discoverInstalledRuntimes, hermesHome, hermesProfileHome} from './runtime-adapters.mjs';
+import { createManagementBootstrap } from './management-bootstrap.mjs';
 import {normalizeRuntimeProfile} from './employee-runtime.mjs';
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
@@ -344,9 +345,10 @@ function runCommand({runtimeDir, action, executable, baseArgs = [], allowedExecu
  * Unknown/unsupported actions fail loudly so the cloud never sees a fake
  * success merely because an action was accepted by the daemon.
  */
-export function createLocalActionExecutor({runtimeDir, allowedExecutables = [], executorCommand = null, executorArgs = [], defaultRuntime = null, hermesHomePath = null, managementMcpConfig = {}, terminalMcpConfig = {}, workspace = null, apiBase = null, deviceId = null, deviceToken = null, onWorkspaceConnect = null} = {}) {
+export function createLocalActionExecutor({runtimeDir, allowedExecutables = [], executorCommand = null, executorArgs = [], defaultRuntime = null, hermesHomePath = null, managementMcpConfig = {}, managementBootstrap = null, terminalMcpConfig = {}, workspace = null, apiBase = null, deviceId = null, deviceToken = null, onWorkspaceConnect = null} = {}) {
   if (!runtimeDir) throw new TypeError('runtimeDir is required');
   fs.mkdirSync(runtimeDir, {recursive: true});
+  const automaticManagement = managementBootstrap || (workspace && deviceToken ? createManagementBootstrap({ workspace, apiBase, deviceId, deviceToken, cacheDirectory: path.join(runtimeDir, 'management-mcp-credentials') }) : null);
   return async (action, context = {}) => {
     const type = String(action?.type || '');
     if (action?.payload?.deviceId && deviceId && action.payload.deviceId !== deviceId) throw new Error('执行目标设备与本机已配对设备不一致；不会回退其他设备');
@@ -389,6 +391,7 @@ export function createLocalActionExecutor({runtimeDir, allowedExecutables = [], 
         ? `${String(prompt || '').trim()}\n\n[本机附件]\n${attachmentPaths.map(item => `- ${item.name}: ${item.path}`).join('\n')}`
         : prompt;
       if (payload.terminalMcp?.enabled === true && terminalMcpConfig.enabled === false) throw new Error('本机手机 MCP 已明确禁用');
+      const preparedManagement = automaticManagement ? await automaticManagement.prepare({ signal: context.signal }) : managementMcpConfig;
       const phoneSession = await bootstrapTerminalMcp({ request: payload.terminalMcp, workspace, actionId: action.id, apiBase, deviceToken, privateDirectory: path.join(runtimeDir, 'terminal-mcp-credentials'), signal: context.signal });
       try { return await executeRuntime({
         runtime,
@@ -398,7 +401,7 @@ export function createLocalActionExecutor({runtimeDir, allowedExecutables = [], 
         attachments: attachmentPaths,
         cwd: safeCwd,
         env: { ...(payload.env || {}), ...(hermesHomePath ? { HERMES_HOME: hermesHomePath } : {}) },
-        managementMcp: { request: payload.managementMcp, config: managementMcpConfig, workspace, apiBase, auditDirectory: path.join(runtimeDir, 'management-mcp-audit'), actionId: action.id },
+        managementMcp: { request: workspace ? { ...(payload.managementMcp || {}), enabled: true } : payload.managementMcp, config: preparedManagement, workspace, apiBase, auditDirectory: path.join(runtimeDir, 'management-mcp-audit'), actionId: action.id },
         terminalMcp: { request: payload.terminalMcp, config: phoneSession.config, workspace, auditDirectory: path.join(runtimeDir, 'terminal-mcp-audit'), actionId: action.id },
         signal: context.signal,
         onOutput: context.onOutput,

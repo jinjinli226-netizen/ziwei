@@ -41,6 +41,9 @@ test('a running isolated daemon accepts a grant and serves two identities withou
     if (req.url === '/api/daemon/workspace-grants/grant_dynamic/claim') {
       claimed = true;
       response = { workspace: 'phone_ai', deviceId: 'device_shared', deviceToken: 'test-shared-private-token', apiBase: `http://127.0.0.1:${server.address().port}` };
+    } else if (req.url?.endsWith('/mcp/bootstrap')) {
+      const workspace = req.url.split('/')[3];
+      response = { token: `test-management-${workspace}`, workspace, deviceId: workspace === 'test_222' ? 'device_primary' : 'device_shared', credentialId: `credential_${workspace}`, expiresAt: new Date(Date.now() + 3600000).toISOString(), apiBase: `http://127.0.0.1:${server.address().port}`, audience: 'ziwei-management', managed: true };
     } else if (req.url?.startsWith('/a2a/v1/actions?')) {
       const workspace = new URL(req.url, 'http://localhost').searchParams.get('workspace');
       response = { actions: workspace === 'test_222' && !delivered ? [{ id: 'action_share', workspace: 'test_222', type: 'device.workspace.connect', payload: { grantId: 'grant_dynamic', deviceId: 'device_primary' } }] : [] };
@@ -72,6 +75,9 @@ test('a running isolated daemon accepts a grant and serves two identities withou
     assert.equal(health.pid, child.pid);
     assert.equal(health.ready, true);
     assert.ok(health.connections.some(item => item.workspace === 'phone_ai' && item.deviceId === 'device_shared'));
+    assert.ok(health.connections.every(item => item.managementMcp.managed && item.managementMcp.state === 'ready'), 'Each connected workspace must automatically prepare its own management MCP');
+    assert.ok(calls.some(call => call.url === '/api/workspaces/test_222/mcp/bootstrap' && call.token === 'test-primary-private-token'));
+    assert.ok(calls.some(call => call.url === '/api/workspaces/phone_ai/mcp/bootstrap' && call.token === 'test-shared-private-token'));
     assert.doesNotMatch(output + JSON.stringify(health), /test-primary-private-token|test-shared-private-token/);
     const saved = JSON.parse(fs.readFileSync(configPath, 'utf8'));
     assert.equal(saved.workspace, 'test_222');

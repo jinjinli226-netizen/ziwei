@@ -5,13 +5,15 @@ import { fileURLToPath } from 'node:url';
 import { ActionDispatcher } from '../src/daemon.mjs';
 import { createLocalActionExecutor } from '../src/local-action.mjs';
 import { redactSecrets } from '../src/redaction.mjs';
-import { discoverInstalledRuntimes, managementMcpStatus, terminalMcpStatus } from '../src/runtime-adapters.mjs';
+import { discoverInstalledRuntimes, terminalMcpStatus } from '../src/runtime-adapters.mjs';
 import { readA2AToken } from '../backend/a2a-auth.mjs';
-import { defaultUserDir, resolveConfigPath, resolveConfigFile, resolveWorkspaceConnections, claimWorkspaceGrant } from './config.mjs';
+import { createManagementBootstrap, clientBuildIdentity } from '../src/management-bootstrap.mjs';
+import { defaultUserDir, resolveConfigPath, resolveWorkspaceConnections, claimWorkspaceGrant } from './config.mjs';
 
 const ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const packageMeta = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
 const VERSION = process.env.ZIWEI_USER_VERSION || packageMeta.version;
+const CLIENT_BUILD = clientBuildIdentity(ROOT);
 if (process.argv.includes('--version')) { console.log(`ziwei_user ${VERSION}`); process.exit(0); }
 const standaloneHome = process.env.ZIWEI_USER_HOME ? defaultUserDir({ env: process.env }) : null;
 const dataDir = standaloneHome || path.join(ROOT, 'data');
@@ -25,7 +27,6 @@ const config = fs.existsSync(configPath)
   ? JSON.parse(fs.readFileSync(configPath, 'utf8'))
   : { agentId: 'ziwei_user', serviceName: 'ziwei_user', workspace: process.env.ZIWEI_WORKSPACE || '', apiBase: process.env.ZIWEI_API_BASE || 'http://127.0.0.1:4178', healthHost: '127.0.0.1', healthPort: 20242, heartbeatMs: 15000, pollMs: 5000 };
 if (config.hermesHome) process.env.HERMES_HOME = String(config.hermesHome);
-const managementMcpConfig = { ...(config.managementMcp || {}), ...(config.managementMcp?.tokenFile ? { tokenFile: resolveConfigFile(config.managementMcp.tokenFile, { configPath, root: ROOT }) } : {}) };
 const logPath = path.join(logDir, 'daemon.log');
 function log(event, extra = {}) {
   const line = redactSecrets(JSON.stringify({ at: new Date().toISOString(), pid: process.pid, event, service: 'ziwei_user', version: VERSION, agentId: 'ziwei_user', ...extra }));
@@ -43,6 +44,7 @@ function installConnections() {
     if (connections.has(config.workspace)) continue;
     const connectionRuntimeDir = config.primary ? runtimeDir : path.join(runtimeDir, 'shared-workspaces', config.workspace, config.deviceId);
     const state = { config, processing: new Set(), polling: false, lastHeartbeat: null, lastHeartbeatAt: 0, lastPoll: null };
+    state.managementBootstrap = createManagementBootstrap({ workspace: config.workspace, deviceId: config.deviceId, deviceToken: config.deviceToken, apiBase: config.apiBase, cacheDirectory: path.join(dataDir, 'management-mcp-credentials') });
     const localExecutor = createLocalActionExecutor({
       runtimeDir: connectionRuntimeDir,
       allowedExecutables: Array.isArray(config.allowedExecutables) ? config.allowedExecutables : [],
@@ -50,7 +52,7 @@ function installConnections() {
       executorArgs: Array.isArray(config.executorArgs) ? config.executorArgs : [],
       defaultRuntime: config.defaultRuntime || process.env.ZIWEI_DEFAULT_RUNTIME || null,
       hermesHomePath: config.hermesHome || process.env.HERMES_HOME || null,
-      managementMcpConfig,
+      managementBootstrap: state.managementBootstrap,
       terminalMcpConfig: config.terminalMcp || {},
       workspace: config.workspace, apiBase: config.apiBase,
       deviceId: config.deviceId || 'device-ziwei-user', deviceToken: config.deviceToken,
@@ -74,7 +76,7 @@ function installConnections() {
         if (extra?.actionId && ['action.started', 'action.output', 'action.progress', 'action.stage'].includes(event)) void postActionEvent(state, extra.actionId, event, extra);
       },
     });
-    state.managementStatus = managementMcpStatus({ config: managementMcpConfig, workspace: config.workspace, apiBase: config.apiBase });
+    state.managementStatus = state.managementBootstrap.status();
     state.terminalStatus = terminalMcpStatus({ config: config.terminalMcp, workspace: config.workspace, apiBase: config.apiBase, deviceToken: config.deviceToken });
     connections.set(config.workspace, state);
   }
@@ -101,7 +103,8 @@ async function heartbeat() {
 }
 async function heartbeatConnection(connection) {
   const config = connection.config;
-  connection.managementStatus = managementMcpStatus({ config: managementMcpConfig, workspace: config.workspace, apiBase: config.apiBase });
+  try { await connection.managementBootstrap.prepare(); } catch {}
+  connection.managementStatus = connection.managementBootstrap.status();
   connection.terminalStatus = terminalMcpStatus({ config: config.terminalMcp, workspace: config.workspace, apiBase: config.apiBase, deviceToken: config.deviceToken });
   const payload = {
     workspace: config.workspace,
@@ -130,6 +133,10 @@ async function heartbeatConnection(connection) {
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok || body.ok !== true) throw new Error(body.error || `heartbeat HTTP ${response.status}`);
+    if (connection.managementBootstrap.noteRetry(body.device?.management_mcp_retry_at)) {
+      try { await connection.managementBootstrap.prepare(); } catch {}
+      connection.managementStatus = connection.managementBootstrap.status();
+    }
     connection.lastHeartbeat = new Date().toISOString();
     connection.lastHeartbeatAt = Date.now();
     if (config.primary) { lastHeartbeat = connection.lastHeartbeat; lastHeartbeatAt = connection.lastHeartbeatAt; }
@@ -224,8 +231,8 @@ function heartbeatFresh() {
   return Date.now() >= lastHeartbeatAt && Date.now() - lastHeartbeatAt <= timeout;
 }
 function healthPayload() {
-  return { service: 'ziwei_user', version: VERSION, bridge: 'ziwei_user', agentId: 'ziwei_user', workspace: config.workspace, runtimes: runtimeDiscovery.runtimes, managementMcp: primaryConnection?.managementStatus, terminalMcp: primaryConnection?.terminalStatus, lastHeartbeat, lastHeartbeatAgeMs: lastHeartbeatAt ? Math.max(0, Date.now() - lastHeartbeatAt) : null, lastPoll, pid: process.pid,
-    connections: [...connections.values()].map(connection => ({ workspace: connection.config.workspace, deviceId: connection.config.deviceId, primary: connection.config.primary, configured: true, ready: connection.lastHeartbeatAt > 0 && Date.now() - connection.lastHeartbeatAt <= Math.max(45_000, (Number(config.heartbeatMs) || 15_000) * 3), lastHeartbeat: connection.lastHeartbeat, managementMcp: connection.managementStatus, terminalMcp: connection.terminalStatus })), connectionErrors,
+  return { service: 'ziwei_user', version: VERSION, clientBuild: CLIENT_BUILD, bridge: 'ziwei_user', agentId: 'ziwei_user', workspace: config.workspace, deviceId: config.deviceId, runtimes: runtimeDiscovery.runtimes, managementMcp: primaryConnection?.managementBootstrap.status(), terminalMcp: primaryConnection?.terminalStatus, lastHeartbeat, lastHeartbeatAgeMs: lastHeartbeatAt ? Math.max(0, Date.now() - lastHeartbeatAt) : null, lastPoll, pid: process.pid,
+    connections: [...connections.values()].map(connection => ({ workspace: connection.config.workspace, deviceId: connection.config.deviceId, primary: connection.config.primary, configured: true, ready: connection.lastHeartbeatAt > 0 && Date.now() - connection.lastHeartbeatAt <= Math.max(45_000, (Number(config.heartbeatMs) || 15_000) * 3), lastHeartbeat: connection.lastHeartbeat, managementMcp: connection.managementBootstrap.status(), terminalMcp: connection.terminalStatus })), connectionErrors,
   };
 }
 const health = http.createServer((req, res) => {

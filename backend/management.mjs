@@ -11,15 +11,16 @@ const profileInput = input => { for (const key of ['runtimeProfile','runtime_pro
 export function createManagementService(repo) {
   const db = repo.db;
   const ws = slug => { const value = db.prepare('SELECT * FROM workspaces WHERE slug=?').get(slug); if (!value) fail('工作区不存在', 'WORKSPACE_NOT_FOUND', 404); return value; };
-  const employee = (slug, id) => {
-    const item = repo.listEmployees(slug, { actorRole: 'owner', enforceEmployeeVisibility: true }).find(row => row.id === id);
+  const trustedContext = context => ({ actorRole: 'owner', ...context, userId: context?.actorUserId || null, user_id: context?.actorUserId || null, actor_user_id: context?.actorUserId || null, actor_role: context?.actorRole || 'owner', enforceEmployeeVisibility: true, enforceDeviceOwnership: true });
+  const employee = (slug, id, context = {}) => {
+    const item = repo.listEmployees(slug, trustedContext(context)).find(row => row.id === id);
     if (!item) fail('数字员工不存在于当前工作区', 'EMPLOYEE_NOT_FOUND', 404);
     return item;
   };
   const discovery = (slug, options = {}) => {
     const workspace = ws(slug);
     const requestedId = deviceInput(options);
-    const devices = repo.listDevices(slug, { userId: options.userId }).filter(item => !requestedId || item.id === requestedId).map(item => {
+    const devices = repo.listDevices(slug, { userId: options.userId }).filter(item => (!requestedId || item.id === requestedId) && (!options.deviceScope || item.id === options.deviceScope)).map(item => {
       const metadata = db.prepare('SELECT * FROM runtime_device_metadata WHERE workspace_id=? AND device_id=? ORDER BY runtime_name').all(workspace.id, item.id);
       const runtimes = metadata.map(row => {
         const readiness = parse(row.readiness_json);
@@ -40,12 +41,12 @@ export function createManagementService(repo) {
     });
     return { workspace: slug, source: 'device_heartbeat', discovered_at: new Date().toISOString(), devices, skills: repo.listSkills(slug).map(skill => ({ id: skill.id, name: skill.name, description: skill.description, installed: skill.installed, validation_status: skill.validation_status,version:skill.version,catalog_id:skill.catalog_id,integration:skill.integration })) };
   };
-  const validateSelection = (slug, input, { requireProfile = true, allowUnknownReadiness = true } = {}) => {
+  const validateSelection = (slug, input, { requireProfile = true, allowUnknownReadiness = true, context = {} } = {}) => {
     const runtimeName = String(input.runtime || '').trim();
     if (!runtimeName) fail('必须明确 runtime，例如 Codex 或 Hermes；不会自动替换运行时。', 'RUNTIME_REQUIRED');
     const deviceId = deviceInput(input);
     if (!deviceId) fail('必须选择当前工作区的目标电脑 targetDeviceId，请先调用 ziwei_discover_environment。', 'DEVICE_REQUIRED');
-    const device = discovery(slug, { deviceId }).devices[0];
+    const device = discovery(slug, { deviceId, userId: context.actorUserId, deviceScope: context.deviceScope }).devices[0];
     if (!device) fail('目标设备不属于当前工作区，请重新发现并选择工作区电脑。', 'DEVICE_NOT_IN_WORKSPACE');
     if (device.status !== 'online') fail('目标设备当前离线，请在该电脑启动已有 ziwei_user 并等待心跳。', 'DEVICE_OFFLINE');
     const runtime = device.runtimes.find(row => row.name.toLowerCase() === runtimeName.toLowerCase());
@@ -65,10 +66,8 @@ export function createManagementService(repo) {
       if (!selected) fail(`${runtime.name} 未在目标电脑发现 profile ${profile}，请创建有效运行配置；不会静默忽略。`, 'PROFILE_NOT_FOUND');
       if (selected.readiness?.ready === false) fail(selected.readiness.reason || `${runtime.name} profile ${profile} 尚未就绪。`, selected.readiness.code || 'PROFILE_NOT_READY');
     }
-    const mcpEnabled = input.managementMcpEnabled === true || input.management_mcp_enabled === true || input.managementMcp?.enabled === true;
-    if (mcpEnabled && (!device.management_mcp.configured || device.management_mcp.workspace !== slug)) fail('目标电脑尚未配置当前工作区管理 MCP，请配置安全 tokenFile 后刷新 ziwei_user。', 'MANAGEMENT_MCP_UNCONFIGURED');
-    if (mcpEnabled && !device.management_mcp.supportedRuntimes?.includes(runtime.name)) fail(`目标电脑尚未支持给 ${runtime.name} 注入管理 MCP，请升级对应适配器。`, 'MANAGEMENT_MCP_RUNTIME_UNSUPPORTED');
-    if (mcpEnabled && runtime.name.toLowerCase() === 'hermes' && profile === 'default') fail('Hermes 管理 MCP 必须使用独立 profile，以保留主 profile 配置。', 'INDEPENDENT_PROFILE_REQUIRED');
+    // Management is a platform default prepared at connect/execute time.
+    // Missing preparation must stay visible without deadlocking employee save.
     return { runtime: runtime.name, targetDeviceId: deviceId, runtimeProfile: profile, readiness: runtime.readiness };
   };
   const idempotent = (slug, kind, input, create, read) => {
@@ -89,19 +88,36 @@ export function createManagementService(repo) {
       db.exec('RELEASE management_create'); return value;
     } catch (error) { db.exec('ROLLBACK TO management_create'); db.exec('RELEASE management_create'); throw error; }
   };
-  const task = (slug, taskId) => {
-    const item = repo.listTasks(slug).find(row => row.id === taskId);
+  const actionVisible = (slug, item, context = {}) => {
+    if (!item) return false;
+    const actor = trustedContext(context);
+    const payload = item.payload || {};
+    if (!['owner', 'admin'].includes(actor.actorRole) && payload.userId && payload.userId !== actor.actorUserId) return false;
+    const linkedEmployeeId = payload.employeeId || (payload.conversationId ? db.prepare('SELECT employee_id FROM conversations WHERE id=? AND workspace_id=?').get(payload.conversationId, ws(slug).id)?.employee_id : null);
+    if (linkedEmployeeId && !repo.listEmployees(slug, actor).some(row => row.id === linkedEmployeeId)) return false;
+    const deviceId = payload.deviceId || (linkedEmployeeId ? db.prepare('SELECT target_device_id FROM employees WHERE id=? AND workspace_id=?').get(linkedEmployeeId, ws(slug).id)?.target_device_id : null);
+    if (context.deviceScope && deviceId && deviceId !== context.deviceScope) return false;
+    if (deviceId && actor.actorUserId && !['owner', 'admin'].includes(actor.actorRole) && ws(slug).kind === 'personal' && !repo.listDevices(slug, { userId: actor.actorUserId }).some(row => row.id === deviceId)) return false;
+    return true;
+  };
+  const tasks = (slug, filters = {}, context = {}) => {
+    const visible = new Set(repo.listEmployees(slug, trustedContext(context)).map(row => row.id));
+    const hidden = repo.listEmployees(slug).filter(row => !visible.has(row.id));
+    return repo.listTasks(slug, filters).filter(row => !hidden.some(item => row.assignee === item.id || row.assignee === item.name) && (!row.execution || actionVisible(slug, row.execution, context)));
+  };
+  const task = (slug, taskId, context = {}) => {
+    const item = tasks(slug, {}, context).find(row => row.id === taskId);
     if (!item) fail('任务不存在于当前工作区', 'TASK_NOT_FOUND', 404);
     return { ...item, messages: repo.getTaskMessages(taskId) };
   };
-  const action = (slug, actionId) => {
+  const action = (slug, actionId, context = {}) => {
     const item = repo.getA2AAction(actionId, { workspaceSlug: slug });
-    if (!item) fail('执行请求不存在于当前工作区', 'ACTION_NOT_FOUND', 404);
+    if (!actionVisible(slug, item, context)) fail('执行请求不存在于当前工作区', 'ACTION_NOT_FOUND', 404);
     return item;
   };
-  const employeeStatus = (slug, employeeId) => {
-    const item = employee(slug, employeeId);
-    const device = discovery(slug, { deviceId: item.target_device_id || '__none__' }).devices[0] || null;
+  const employeeStatus = (slug, employeeId, context = {}) => {
+    const item = employee(slug, employeeId, context);
+    const device = discovery(slug, { deviceId: item.target_device_id || '__none__', userId: context.actorUserId, deviceScope: context.deviceScope }).devices[0] || null;
     const rows = db.prepare('SELECT * FROM a2a_actions WHERE workspace_id=? ORDER BY created_at DESC,rowid DESC').all(item.workspace_id);
     const latest = item.management_mcp_enabled ? rows.find(row => {
       const payload = parse(row.payload_json);
@@ -113,44 +129,49 @@ export function createManagementService(repo) {
     return { employee_id: item.id, enabled: item.management_mcp_enabled, target_device_id: item.target_device_id, runtime: item.runtime, runtime_profile: item.runtime_profile, device, receipt: { status: !latest ? 'never_run' : (latest.status === 'failed' || latest.status === 'expired' || missingReceipt ? 'failed' : (receipt.loaded ? 'loaded' : (receipt.injected ? 'injected' : 'pending'))), loaded: receipt.loaded === true, injected: receipt.injected === true, action_id: latest?.id || null, completed_at: latest?.completed_at || null, error: latest?.error || (missingReceipt ? '员工执行已退出，但缺少实际管理 MCP 握手与加载回执，请检查本机配置后重试。' : null), tool_calls: receipt.toolCalls || receipt.tool_calls || [] } };
   };
   return {
-    discovery, validateSelection, employee, task, action, employeeStatus,
-    createEmployee(slug, input) {
+    discovery, validateSelection, employee, tasks, task, action, employeeStatus,
+    createEmployee(slug, input, context = {}) {
       return idempotent(slug, 'employee', input, body => {
-        const selection = validateSelection(slug, body);
+        const selection = validateSelection(slug, body, { context });
         const skills = repo.listSkills(slug);
         if (Array.isArray(body.skills)) for (const skillId of body.skills) if (!skills.some(skill => skill.id === skillId || skill.name === skillId)) fail(`当前工作区没有技能 ${String(skillId)}，请先发现真实技能或导入后重试。`, 'SKILL_NOT_FOUND');
-        return repo.createEmployee(slug, { ...body, ...selection });
-      }, id => employee(slug, id));
+        const ownerUserId = ['owner', 'admin'].includes(trustedContext(context).actorRole) ? body.ownerUserId ?? body.owner_user_id ?? context.actorUserId : context.actorUserId;
+        return repo.createEmployee(slug, { ...body, ...selection, ownerUserId, owner_user_id: ownerUserId, ...trustedContext(context) });
+      }, id => employee(slug, id, context));
     },
-    updateEmployee(slug, id, input) {
-      const previous = employee(slug, id);
+    updateEmployee(slug, id, input, context = {}) {
+      const previous = employee(slug, id, context);
       const configChanged = ['runtime', 'targetDeviceId','target_device_id','deviceId','device_id','runtimeProfile','runtime_profile','profile','hermesProfile','hermes_profile','managementMcpEnabled','management_mcp_enabled','managementMcp'].some(key => Object.hasOwn(input, key));
       const targetSpecified = ['targetDeviceId','target_device_id','deviceId','device_id'].some(key => Object.hasOwn(input, key));
       const profileSpecified = ['runtimeProfile','runtime_profile','profile','hermesProfile','hermes_profile'].some(key => Object.hasOwn(input, key));
       const merged = { ...previous, ...input, runtime: input.runtime ?? previous.runtime, targetDeviceId: targetSpecified ? deviceInput(input) : previous.target_device_id, runtimeProfile: profileSpecified ? profileInput(input) : previous.runtime_profile, managementMcpEnabled: input.managementMcpEnabled ?? input.management_mcp_enabled ?? input.managementMcp?.enabled ?? previous.management_mcp_enabled };
-      if (configChanged && (merged.targetDeviceId || merged.managementMcpEnabled)) validateSelection(slug, merged);
+      if (configChanged && merged.targetDeviceId) validateSelection(slug, merged, { context });
       return repo.updateEmployee(id, input);
     },
-    createTask(slug, input) {
+    createTask(slug, input, context = {}) {
       return idempotent(slug, 'task', input, body => {
-        if (body.execute !== true && !body.runtime && !body.model) return repo.createTask(slug, body);
+        const reference = body.employeeId || body.employee_id || body.assignee;
+        const matching = repo.listEmployees(slug).filter(row => row.id === reference || row.name === reference);
+        if (matching.some(row => !repo.listEmployees(slug, trustedContext(context)).some(visible => visible.id === row.id))) fail('员工不存在于当前身份范围内', 'EMPLOYEE_NOT_FOUND', 404);
+        if (body.execute !== true && !body.runtime && !body.model) return repo.createTask(slug, { ...body, ...trustedContext(context) });
         const assignee = String(body.employeeId || body.employee_id || body.assignee || '').trim();
-        const candidates = repo.listEmployees(slug).filter(row => row.id === assignee || row.name === assignee);
+        const candidates = repo.listEmployees(slug, trustedContext(context)).filter(row => row.id === assignee || row.name === assignee);
         if (candidates.length !== 1) fail('执行任务必须明确指定当前工作区唯一 employeeId，请先查询员工。', 'EMPLOYEE_REQUIRED');
         const selected = candidates[0];
         if (selected.status !== 'active') fail('该员工当前不是 active，请先启用再试运行。', 'EMPLOYEE_INACTIVE');
         if (body.runtime && String(body.runtime).toLowerCase() !== selected.runtime.toLowerCase()) fail('任务 runtime 与员工配置不同；请先明确更新员工，不能静默替换运行时。', 'RUNTIME_MISMATCH');
         if (profileInput(body) && profileInput(body) !== selected.runtime_profile) fail('任务 profile 与员工配置不同；请先明确更新员工。', 'PROFILE_MISMATCH');
         const targetDeviceId = deviceInput(body) || selected.target_device_id;
-        const selection = validateSelection(slug, { runtime: selected.runtime, runtimeProfile: selected.runtime_profile, targetDeviceId, managementMcpEnabled: selected.management_mcp_enabled });
-        return task(slug, repo.createTask(slug, { ...body, ...selection, employeeId: selected.id, assignee: selected.id, execute: true, actorRole: 'owner', enforceEmployeeVisibility: true, enforceDeviceOwnership: true }).id);
-      }, id => task(slug, id));
+        const selection = validateSelection(slug, { runtime: selected.runtime, runtimeProfile: selected.runtime_profile, targetDeviceId, managementMcpEnabled: selected.management_mcp_enabled }, { context });
+        const ownLegacyDevice = Boolean(context.deviceScope && context.deviceScope === selection.targetDeviceId && context.deviceCredentialDeviceId === selection.targetDeviceId);
+        return task(slug, repo.createTask(slug, { ...body, ...selection, employeeId: selected.id, assignee: selected.id, execute: true, ...trustedContext(context), enforceDeviceOwnership: !ownLegacyDevice }).id, context);
+      }, id => task(slug, id, context));
     },
-    createProfile(slug, input) {
+    createProfile(slug, input, context = {}) {
       return idempotent(slug, 'hermes-profile', input, body => {
-        validateSelection(slug, { ...body, runtime: 'Hermes' }, { requireProfile: false });
-        return repo.createHermesProfileAction(slug, { ...body, actorRole: 'owner' });
-      }, id => action(slug, id));
+        validateSelection(slug, { ...body, runtime: 'Hermes' }, { requireProfile: false, context });
+        return repo.createHermesProfileAction(slug, { ...body, ...trustedContext(context) }, { deviceCredentialDeviceId: context.deviceCredentialDeviceId });
+      }, id => action(slug, id, context));
     }
   };
 }

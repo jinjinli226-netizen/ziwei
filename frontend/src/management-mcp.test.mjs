@@ -22,18 +22,31 @@ test('employee readiness requires the exact discovered device and runtime', () =
   assert.match(employeeReadiness({ devices: [{ ...device, runtimes: [{ name: 'Codex', cli_status: 'unavailable', issues: ['请安装 Codex CLI'] }] }] }, { deviceId: device.id, runtime: 'Codex' }).issues.join(' '), /请安装 Codex CLI/);
 });
 
-test('Hermes requires a discovered independent profile with provider readiness', () => {
+test('Hermes requires an explicitly selected discovered profile with provider readiness', () => {
   assert.equal(employeeReadiness({ devices: [device] }, { deviceId: device.id, runtime: 'Hermes', profile: 'qa' }).ready, true);
-  assert.match(employeeReadiness({ devices: [device] }, { deviceId: device.id, runtime: 'Hermes', profile: '' }).issues.join(' '), /独立.*profile/);
-  assert.match(employeeReadiness({ devices: [device] }, { deviceId: device.id, runtime: 'Hermes', profile: 'default' }).issues.join(' '), /独立.*profile/);
+  assert.match(employeeReadiness({ devices: [device] }, { deviceId: device.id, runtime: 'Hermes', profile: '' }).issues.join(' '), /请选择.*profile/);
+  assert.match(employeeReadiness({ devices: [device] }, { deviceId: device.id, runtime: 'Hermes', profile: 'default' }).issues.join(' '), /未发现.*default/);
   assert.match(employeeReadiness({ devices: [device] }, { deviceId: device.id, runtime: 'Hermes', profile: 'missing' }).issues.join(' '), /未发现.*missing/);
   const missingProvider = { ...device, runtimes: [{ ...device.runtimes[1], profiles: [{ name: 'qa', hasProvider: false }] }] };
   assert.match(employeeReadiness({ devices: [missingProvider] }, { deviceId: device.id, runtime: 'Hermes', profile: 'qa' }).issues.join(' '), /provider/);
 });
 
+test('a discovered ready Hermes default profile supports automatic management without changing identity', () => {
+  const defaultDevice={...device,runtimes:[{...device.runtimes[1],profiles:[{name:'default',readiness:{ready:true,authentication:'configured',provider:'configured'}}]}]};
+  assert.equal(employeeReadiness({workspace:'test_222',devices:[defaultDevice]},{deviceId:device.id,runtime:'Hermes',profile:'default'}).ready,true);
+});
+
 test('management MCP readiness enforces workspace and supported runtime evidence', () => {
   assert.match(employeeReadiness({ workspace: 'other', devices: [device] }, { deviceId: device.id, runtime: 'Codex', mcpEnabled: true }).issues.join(' '), /工作区.*不同/);
-  assert.match(employeeReadiness({ devices: [{ ...device, management_mcp: { configured: true, supportedRuntimes: ['Hermes'] } }] }, { deviceId: device.id, runtime: 'Codex', mcpEnabled: true }).issues.join(' '), /Codex.*注入/);
+  assert.equal(employeeReadiness({ devices: [{ ...device, management_mcp: { managed: true, state: 'pending', configured: false, workspace: 'test_222' } }] }, { deviceId: device.id, runtime: 'Codex' }).ready, true);
+});
+
+test('automatic management preparation failure does not prevent saving valid employee runtime settings', () => {
+  for (const state of ['pending', 'failed', 'client_required']) {
+    const managed = { ...device, management_mcp: { managed: true, configured: false, state, workspace: 'test_222', reason: '自动接入待恢复' } };
+    assert.equal(employeeReadiness({ workspace: 'test_222', devices: [managed] }, { deviceId: device.id, runtime: 'Codex', mcpEnabled: true }).ready, true);
+    assert.equal(employeeReadiness({ workspace: 'test_222', devices: [{ ...managed, status: 'offline' }] }, { deviceId: device.id, runtime: 'Codex' }).ready, false);
+  }
 });
 
 test('Hermes independent profile readiness is not replaced by main profile provider state', () => {
@@ -53,6 +66,14 @@ test('HTTP health and injection alone cannot claim actual employee MCP load', ()
   assert.equal(employeeMcpEvidence({ receipt: { status: 'injected', injected: true }, health: 'healthy' }).label, '已注入，等待加载回执');
   assert.equal(employeeMcpEvidence({ receipt: { status: 'never_run' } }).label, '尚无运行回执');
   assert.equal(employeeMcpEvidence({ receipt: { status: 'loaded', loaded: true, tool_calls: [] } }).label, '已加载，尚无工具调用');
-  assert.equal(employeeMcpEvidence({ receipt: { status: 'loaded', loaded: true, tool_calls: [{ name: 'ziwei_list_employees' }] } }).label, '已加载并调用工具');
+  assert.equal(employeeMcpEvidence({ receipt: { status: 'loaded', loaded: true, tool_calls: [{ name: 'ziwei_list_employees', ok: true }] } }).label, '已加载并调用工具');
   assert.equal(employeeMcpEvidence({ receipt: { status: 'failed', error: 'provider unavailable' } }).tone, 'failed');
+});
+
+test('loaded management MCP with only failed tools is never labelled successful', () => {
+  const failed = employeeMcpEvidence({ receipt: { status: 'loaded', loaded: true, tool_calls: [{ toolName: 'ziwei_list_employees', ok: false }] } });
+  assert.equal(failed.tone, 'failed');
+  assert.match(failed.label, /失败/);
+  const unknown = employeeMcpEvidence({ receipt: { status: 'loaded', loaded: true, tool_calls: [{ toolName: 'ziwei_list_employees' }] } });
+  assert.doesNotMatch(unknown.label, /已加载并调用工具/);
 });

@@ -13,19 +13,21 @@ function readTokenFile(file) {
   if (!raw.startsWith('{')) return { token: raw };
   const parsed = JSON.parse(raw);
   const scoped = Array.isArray(parsed.workspaces) ? parsed.workspaces : (parsed.workspace ? [parsed.workspace] : []);
-  return { token: String(parsed.token || parsed.bearerToken || '').trim(), workspace: scoped.length === 1 ? String(scoped[0]).trim() : '' };
+  return { token: String(parsed.token || parsed.bearerToken || '').trim(), workspace: scoped.length === 1 ? String(scoped[0]).trim() : '', managed: parsed.managed === true, expiresAt: parsed.expiresAt, audience: parsed.audience, apiBase: parsed.apiBase, deviceId: parsed.deviceId };
 }
 
 function configFromEnv(options = {}) {
   const file = options.tokenFile || process.env.ZIWEI_MCP_TOKEN_FILE;
   const fileConfig = file ? readTokenFile(file) : {};
-  const token = String(options.token ?? process.env.ZIWEI_MCP_TOKEN ?? fileConfig.token ?? '').trim();
+  const token = String(fileConfig.managed ? fileConfig.token : ((options.token ?? process.env.ZIWEI_MCP_TOKEN) || fileConfig.token || '')).trim();
   const workspace = String(options.workspace ?? process.env.ZIWEI_MCP_WORKSPACE ?? fileConfig.workspace ?? '').trim();
   if (!token) throw new Error('未配置 MCP 管理令牌，请设置 ZIWEI_MCP_TOKEN 或 ZIWEI_MCP_TOKEN_FILE');
   if (!/^[a-z0-9][a-z0-9_-]{1,62}$/i.test(workspace)) throw new Error('MCP 工作区标识无效');
   const baseUrl = new URL(String(options.baseUrl ?? process.env.ZIWEI_API_BASE ?? DEFAULT_API_BASE));
   if ((baseUrl.protocol !== 'https:' && !(baseUrl.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(baseUrl.hostname))) || baseUrl.username || baseUrl.password || baseUrl.search || baseUrl.hash || !['', '/'].includes(baseUrl.pathname)) throw new Error('MCP API 必须使用无凭据的 HTTPS 根地址；本机验收允许 loopback HTTP');
-  return { token, workspace, baseUrl: baseUrl.toString().replace(/\/$/, '') };
+  const base = baseUrl.toString().replace(/\/$/, '');
+  if (fileConfig.managed && (fileConfig.workspace !== workspace || fileConfig.audience !== 'ziwei-management' || fileConfig.apiBase !== base || !fileConfig.deviceId || !(Date.parse(fileConfig.expiresAt) > Date.now()))) throw new Error('自动管理 MCP 凭据的工作区、有效期或服务范围不匹配');
+  return { token, workspace, baseUrl: base, managed: fileConfig.managed };
 }
 
 function objectArguments(value) {
@@ -64,14 +66,18 @@ export function createMcpClient(options = {}) {
   if (typeof fetchImpl !== 'function') throw new Error('当前 Node 环境没有 fetch');
   const workspacePath = `/mcp/v1/workspaces/${encodeURIComponent(config.workspace)}`;
   async function request(method, route, body, query) {
+    // The daemon renews this file atomically while a long-running CLI session is alive.
+    const current = configFromEnv(options);
+    if (current.workspace !== config.workspace || current.baseUrl !== config.baseUrl) throw new Error('管理 MCP 凭据配置变化，请重新建立本次会话');
     const selectedWorkspace=String(body?.workspace || query?.workspace || config.workspace).trim();
     if(!/^[a-z0-9][a-z0-9_-]{1,62}$/i.test(selectedWorkspace)) throw new Error('MCP 工作区标识无效');
+    if (current.managed && selectedWorkspace !== current.workspace) throw new Error('自动管理 MCP 只能访问当前已连接工作区');
     route=route.replace(/^\/mcp\/v1\/workspaces\/[^/]+/,`/mcp/v1/workspaces/${encodeURIComponent(selectedWorkspace)}`);
     if(body && Object.hasOwn(body,'workspace')) {const {workspace:_workspace,...value}=body;body=value;}
     if(query && Object.hasOwn(query,'workspace')) {const {workspace:_workspace,...value}=query;query=value;}
     const url = new URL(`${config.baseUrl}${route}`);
     for (const [key, value] of Object.entries(query || {})) if (value !== undefined && value !== null && value !== '') url.searchParams.set(key, String(value));
-    const headers = { authorization: `Bearer ${config.token}`, accept: 'application/json' };
+    const headers = { authorization: `Bearer ${current.token}`, accept: 'application/json' };
     const init = { method, headers, redirect: 'error', signal: AbortSignal.timeout(30_000) };
     if (body !== undefined) { headers['content-type'] = 'application/json'; init.body = JSON.stringify(body); }
     const response = await fetchImpl(url, init);

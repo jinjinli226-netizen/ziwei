@@ -5,6 +5,7 @@ node_modules/
 data/ziwei_user.json
 data/a2a.token
 data/mcp.token
+data/management-mcp-signing.key
 data/ziwei-server.crt
 data/*.sqlite
 data/git-sync/

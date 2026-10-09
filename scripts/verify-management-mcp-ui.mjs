@@ -34,22 +34,24 @@ const evidence = { mode: 'isolated-headless-api-fixtures', observedAt: new Date(
 const ws = { id: 'workspace-fixture', slug: 'test_222', name: 'MCP 隔离测试工作区', kind: 'team', timezone: 'Asia/Shanghai', preferences: {} };
 const prefix = '/api/workspaces/test_222';
 const ready = { authentication: 'configured', provider: 'configured', ready: true };
-function fixture() {
+function fixture(workspace = 'test_222') {
+  const ws = { id:`workspace-${workspace}`, slug:workspace, name:`QA ${workspace}`, kind:'team', timezone:'Asia/Shanghai', preferences:{} };
+  const prefix = `/api/workspaces/${workspace}`;
   const state = {
-    statusFailure: false, createFailure: false, posts: [], calls: [],
+    statusFailure: false, createFailure: false, posts: [], calls: [], retries: [], role: 'owner',
     receipt: { status: 'injected', injected: true, loaded: false, action_id: 'action-ui-injected', tool_calls: [] },
     employees: [{ id: 'builder-fixture', name: 'QA 员工搭建师', runtime: 'Codex', runtime_profile: 'qa-codex', instructions: '构建员工并验证交付', persona: '清楚准确', skills: [], status: 'active', target_device_id: 'pc-ready', management_mcp_enabled: true }],
-    devices: [{ id: 'pc-ready', name: 'QA 在线电脑', status: 'online', healthy: true, bridge_name: 'ziwei_user', last_seen: new Date().toISOString(), management_mcp: { configured: true, workspace: ws.slug, supportedRuntimes: ['Codex', 'Hermes'] }, runtimes: [{ name: 'Codex', cli_status: 'available', version: 'fixture-codex', available: true, readiness: ready, profiles: [{ name: 'default', readiness: ready }, { name: 'qa-codex', readiness: ready }] }, { name: 'Hermes', cli_status: 'available', version: 'fixture-hermes', available: true, readiness: ready, profiles: [{ name: 'qa-independent', provider_configured: true, authentication_configured: true, readiness: ready }] }] }, { id: 'pc-offline', name: 'QA 离线电脑', status: 'offline', management_mcp: { configured: false }, runtimes: [{ name: 'Codex', cli_status: 'offline', available: false, readiness: { ready: false, reason: '电脑离线，等待原 ziwei_user 心跳' } }] }]
+    devices: [{ id: 'pc-ready', name: 'QA 在线电脑', status: 'online', healthy: true, bridge_name: 'ziwei_user', last_seen: new Date().toISOString(), management_mcp: { managed: true, state: 'ready', configured: true, workspace: ws.slug, supportedRuntimes: ['Codex', 'Hermes'] }, runtimes: [{ name: 'Codex', cli_status: 'available', version: 'fixture-codex', available: true, readiness: ready, profiles: [{ name: 'default', readiness: ready }, { name: 'qa-codex', readiness: ready }] }, { name: 'Hermes', cli_status: 'available', version: 'fixture-hermes', available: true, readiness: ready, profiles: [{ name: 'qa-independent', provider_configured: true, authentication_configured: true, readiness: ready }] }] }, { id: 'pc-offline', name: 'QA 离线电脑', status: 'offline', management_mcp: { managed: true, state: 'pending', configured: false, workspace: ws.slug }, runtimes: [{ name: 'Codex', cli_status: 'offline', available: false, readiness: { ready: false, reason: '电脑离线，等待原 ziwei_user 心跳' } }] }]
   };
   const json = (body, status = 200) => ({ status, contentType: 'application/json', body: JSON.stringify(body) });
   async function handle(request) {
     const path = new URL(request.url()).pathname; const method = request.method(); const body = request.postDataJSON?.() || {};
     state.calls.push({ path, method });
-    if (path === '/api/auth/status' || path === '/api/auth/me') return json({ authenticated: true, configured: true, user: { id: 'qa-owner', name: '隔离 QA', email: 'qa@example.test' }, role: 'owner', memberships: [{ ...ws, role: 'owner' }] });
+    if (path === '/api/auth/status' || path === '/api/auth/me') return json({ authenticated: true, configured: true, user: { id: 'qa-user', name: '隔离 QA', email: 'qa@example.test' }, role: state.role, memberships: state.memberships || [{ ...ws, role: state.role }] });
     if (path === `${prefix}/summary`) return json({ workspace: ws, counts: {}, taskStates: {}, device: { status: 'online', name: 'fixture' } });
     if (path === `${prefix}/settings`) return json({ workspace: ws });
     if (path === `${prefix}/devices`) return json({ devices: state.devices });
-    if (path === `${prefix}/runtimes`) return json({ runtimes: state.devices[0].runtimes.map(runtime => ({ ...runtime, id: runtime.name })) });
+    if (path === `${prefix}/runtimes`) return json({ runtimes: (state.devices[0]?.runtimes || []).map(runtime => ({ ...runtime, id: runtime.name })) });
     if (path === `${prefix}/employees`) {
       if (method === 'POST') {
         state.posts.push(body);
@@ -61,9 +63,10 @@ function fixture() {
       return json({ employees: state.employees });
     }
     if (path === `${prefix}/employees/builder-fixture` && method === 'PATCH') { state.posts.push(body); Object.assign(state.employees[0], body, { runtime_profile: body.runtimeProfile, target_device_id: body.targetDeviceId }); return json(state.employees[0]); }
-    if (path === `${prefix}/mcp/status`) return state.statusFailure ? json({ error: '隔离 QA：管理状态暂时不可达' }, 503) : json({ workspace: ws.slug, workspaces: [ws.slug], health: 'healthy', transport: 'stdio', api_endpoint: `https://qzelynth.top/mcp/v1/workspaces/${ws.slug}`, credential: { configured: true, scope_allowed: true, masked: '••••••••' }, tools: [{ name: 'ziwei_discover_environment', description: '来自心跳的目标电脑、CLI 和 profile 发现', inputSchema: { type: 'object', properties: {} } }, { name: 'ziwei_create_employee', description: '按明确 runtime 和电脑创建员工', inputSchema: { type: 'object', required: ['name', 'runtime', 'targetDeviceId'] } }], config_template: { mcpServers: { 'ziwei-management': { command: 'node', args: ['C:/Ziwei/scripts/ziwei-mcp.mjs'], env: { ZIWEI_MCP_TOKEN: 'must-never-render-fixture-secret' } } } } });
+    if (path === `${prefix}/mcp/status`) return state.statusFailure ? json({ error: '隔离 QA：管理状态暂时不可达' }, 503) : json({ workspace: ws.slug, workspaces: [ws.slug], health: 'healthy', transport: 'stdio', api_endpoint: `https://qzelynth.top/mcp/v1/workspaces/${ws.slug}`, managed: true, default_enabled: true, configured: true, scope_allowed: true, connections: state.devices.map(device => ({ device_id:device.id, name:device.name, status:device.status, ...device.management_mcp })), credential: { configured:true, managed:true, mode:'device-bootstrap', scope_allowed:true, masked:'' }, tools: [{ name: 'ziwei_discover_environment', description: '来自心跳的目标电脑、CLI 和 profile 发现', inputSchema: { type: 'object', properties: {} } }, { name: 'ziwei_create_employee', description: '按明确 runtime 和电脑创建员工', inputSchema: { type: 'object', required: ['name', 'runtime', 'targetDeviceId'] } }], config_template: { mcpServers: { 'ziwei-management': { command: 'node', args: ['C:/Ziwei/scripts/ziwei-mcp.mjs'], env: { ZIWEI_MCP_TOKEN: 'must-never-render-fixture-secret' } } } } });
     if (path === `${prefix}/mcp/discovery`) return json({ workspace: ws.slug, source: 'device_heartbeat', devices: state.devices });
-    if (/\/employees\/[^/]+\/mcp\/status$/.test(path)) return json({ employee_id: 'builder-fixture', enabled: true, target_device_id: 'pc-ready', runtime: 'Codex', receipt: state.receipt });
+    if (path === `${prefix}/mcp/retry` && method === 'POST') { const device=state.devices.find(device=>device.id===body.deviceId);if(!device)return json({error:'当前工作区未发现此电脑'},404);state.retries.push(body);device.management_mcp={...device.management_mcp,state:'pending',configured:false,reason:'等待下一次电脑心跳'};return json({accepted:true,deviceId:device.id,state:'pending',retryRequestedAt:new Date().toISOString()}); }
+    if (/\/employees\/[^/]+\/mcp\/status$/.test(path)) return json({ employee_id: 'builder-fixture', enabled: true, managed:true, target_device_id: 'pc-ready', runtime: 'Codex', receipt: state.receipt });
     if (path.endsWith('/environment')) return json({ variables: [], local_source: { source: 'ziwei_user', variables: [] } });
     if (path.endsWith('/custom-params')) return json({ values: {} });
     if (path === `${prefix}/hermes/profiles`) return json({ profiles: state.devices[0].runtimes[1].profiles });
@@ -73,8 +76,8 @@ function fixture() {
   }
   return { state, handle };
 }
-async function open(path, state, width = 1440) {
-  const context = await browser.newContext({ viewport: { width, height: 1000 } });
+async function open(path, state, width = 1440, height = 900) {
+  const context = await browser.newContext({ viewport: { width, height } });
   await context.addInitScript(() => { Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async text => { window.__qaCopied = text; } } }); });
   await context.route('**/*', async route => {
     const url = new URL(route.request().url());
@@ -95,11 +98,14 @@ async function screenshot(page, name) { const file = join(output, name); await p
 async function chooseDevice(page, label) { await page.getByRole('combobox', { name: '目标电脑', exact: true }).click(); await page.getByRole('option', { name: label, exact: true }).click(); }
 try {
   await run('open platform exposes real tools, stdio configuration, credential boundary and mobile layout', async () => {
-    for (const width of [1440, 390]) {
-      const f = fixture(); const { page, context } = await open('/test_222/open-platform', f, width);
+    for (const [width,height] of [[1440,900],[390,844],[720,450]]) {
+      const f = fixture(); const { page, context } = await open('/test_222/open-platform', f, width,height);
       const panel = page.getByTestId('management-mcp-panel'); await panel.getByText('ziwei_discover_environment', { exact: true }).waitFor();
+      assert.match(await panel.innerText(), /默认自动接入/);
       assert.match(await panel.innerText(), /API 健康/); assert.match(await panel.innerText(), /不是.*远程 MCP/);
       assert.doesNotMatch(await panel.innerText(), /must-never-render-fixture-secret/);
+      assert.doesNotMatch(await panel.innerText(), /由管理员生成|开启员工管理|关闭员工管理/);
+      await panel.locator('.management-mcp-setup summary').click();
       await panel.getByRole('button', { name: '复制 stdio 配置', exact: true }).click();
       const copied = await page.evaluate(() => window.__qaCopied); const config = JSON.parse(copied);
       assert.equal(config.mcpServers['ziwei-management'].env.ZIWEI_MCP_WORKSPACE, 'test_222');
@@ -117,11 +123,35 @@ try {
     assert.doesNotMatch(await panel.innerText(), /已加载并调用工具/);
     f.state.receipt = { status: 'loaded', loaded: true, injected: true, action_id: 'action-ui-loaded', tool_calls: [{ toolName: 'ziwei_discover_environment', ok: true }] };
     await panel.getByRole('button', { name: '刷新真实状态' }).click(); await panel.getByText('已加载并调用工具', { exact: true }).waitFor();
-    await screenshot(page, 'employee-loaded.png');
+    await panel.getByTestId('employee-mcp-evidence').scrollIntoViewIfNeeded();await screenshot(page, 'employee-loaded.png');
     f.state.receipt = { status: 'failed', error: '隔离 QA：profile provider 未配置', action_id: 'action-ui-failed', tool_calls: [] };
     await panel.getByRole('button', { name: '刷新真实状态' }).click(); await panel.getByText('加载或执行失败', { exact: true }).waitFor();
     assert.match(await panel.innerText(), /API 健康/); assert.match(await panel.innerText(), /provider 未配置/);
-    await screenshot(page, 'employee-failed.png'); await context.close();
+    await panel.getByTestId('employee-mcp-evidence').scrollIntoViewIfNeeded();await screenshot(page, 'employee-failed.png'); await context.close();
+  });
+  await run('old disabled employee stays default managed; failed tool calls do not become success',async()=>{
+    const f=fixture();f.state.employees[0].management_mcp_enabled=false;
+    f.state.receipt={status:'loaded',loaded:true,action_id:'all-tools-failed',tool_calls:[{toolName:'ziwei_list_employees',ok:false}]};
+    const original=JSON.stringify(f.state.employees[0]);const {page,context}=await open('/test_222/employee/builder-fixture',f);
+    try{await page.getByRole('tab',{name:'♧ MCP',exact:true}).click();const panel=page.getByTestId('management-mcp-panel');await panel.getByText('已加载，工具调用失败',{exact:true}).waitFor();assert.match(await panel.innerText(),/默认自动接入/);assert.doesNotMatch(await panel.innerText(),/关闭员工管理|开启员工管理/);await panel.getByRole('button',{name:'刷新真实状态',exact:true}).click();await panel.getByText('已加载，工具调用失败',{exact:true}).waitFor();assert.equal(f.state.posts.length,0);assert.equal(JSON.stringify(f.state.employees[0]),original);await panel.getByTestId('employee-mcp-evidence').scrollIntoViewIfNeeded();await screenshot(page,'old-disabled-all-tools-failed.png');}finally{await context.close();}
+  });
+  await run('member connection preparation failure retries without employee tasks and recovers after reload',async()=>{
+    for(const[width,height]of[[1440,900],[390,844],[720,450]]){
+      const f=fixture();f.state.role='member';f.state.devices[0].management_mcp={managed:true,configured:false,state:'failed',workspace:ws.slug,reasonCode:'BOOTSTRAP_UNAVAILABLE',reason:'隔离 QA：接入服务暂时不可达'};
+      const {page,context}=await open('/test_222/open-platform',f,width,height);
+      try{const panel=page.getByTestId('management-mcp-panel');const connection=panel.locator('[data-device-id="pc-ready"]');await connection.getByText('自动接入失败',{exact:true}).waitFor();assert.match(await connection.innerText(),/接入服务暂时不可达/);assert.doesNotMatch(await panel.innerText(),/已加载并调用工具/);await connection.scrollIntoViewIfNeeded();await screenshot(page,`managed-failure-${width}x${height}.png`);await connection.getByRole('button',{name:'重试自动接入',exact:true}).click();await connection.getByText('正在自动接入',{exact:true}).waitFor();assert.deepEqual(f.state.retries,[{deviceId:'pc-ready'}]);assert.equal(f.state.posts.length,0);f.state.devices[0].management_mcp={managed:true,configured:true,state:'ready',workspace:ws.slug};await panel.getByRole('button',{name:'刷新真实状态',exact:true}).click();await connection.getByText('自动接入已准备',{exact:true}).waitFor();await page.reload({waitUntil:'networkidle'});await page.getByTestId('management-mcp-panel').locator('[data-device-id="pc-ready"]').getByText('自动接入已准备',{exact:true}).waitFor();assert.equal(f.state.retries.length,1);assert.equal(f.state.posts.length,0);assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await connection.scrollIntoViewIfNeeded();await screenshot(page,`managed-recovery-${width}x${height}.png`);}finally{await context.close();}
+    }
+  });
+  await run('no computer waits for existing connection and old client shows native update entry',async()=>{
+    const f=fixture();f.state.devices=[];const {page,context}=await open('/test_222/open-platform',f,390,844);
+    try{const panel=page.getByTestId('management-mcp-panel');await panel.getByText(/等待当前工作区电脑连接/).waitFor();assert.match(await panel.innerText(),/API 健康/);f.state.devices=[{id:'old-client',name:'旧客户端电脑',management_mcp:{managed:true,state:'client_required',workspace:ws.slug,reason:'请更新原 ziwei_user 客户端'},runtimes:[]}];await panel.getByRole('button',{name:'刷新真实状态',exact:true}).click();const connection=panel.locator('[data-device-id="old-client"]');await connection.getByText('客户端需要更新',{exact:true}).waitFor();await connection.locator('summary').click();assert.match(await connection.innerText(),/原安装方式/);assert.equal(await connection.getByRole('link',{name:'查看设备与安装入口'}).getAttribute('href'),'/test_222/members');assert.equal(f.state.posts.length,0);assert.equal(f.state.retries.length,0);await connection.scrollIntoViewIfNeeded();await screenshot(page,'managed-client-update-mobile.png');}finally{await context.close();}
+  });
+  await run('late workspace response cannot replace the active workspace status',async()=>{
+    const a=fixture('test_222'),b=fixture('workspace-b');a.state.memberships=[{...ws,role:'owner'},{id:'workspace-b',slug:'workspace-b',name:'QA B',kind:'team',role:'member'}];
+    let delay=false,release,started;const gate=new Promise(resolve=>release=resolve),begun=new Promise(resolve=>started=resolve);
+    const combined={handle:async request=>{const path=new URL(request.url()).pathname;if(path.startsWith('/api/workspaces/workspace-b/'))return b.handle(request);if(delay&&path==='/api/workspaces/test_222/mcp/status'){delay=false;started();await gate;}return a.handle(request);}};
+    const {page,context}=await open('/test_222/open-platform',combined);
+    try{const panel=page.getByTestId('management-mcp-panel');await panel.getByTestId('mcp-workspace').getByText('test_222',{exact:true}).waitFor();delay=true;await panel.getByRole('button',{name:'刷新真实状态',exact:true}).click();await begun;await page.locator('.workspace-picker').click();await page.locator('.workspace-popup').getByRole('button',{name:/workspace-b/}).click();await panel.getByTestId('mcp-workspace').getByText('workspace-b',{exact:true}).waitFor();const response=page.waitForResponse(response=>new URL(response.url()).pathname==='/api/workspaces/test_222/mcp/status');release();await response;await page.waitForTimeout(100);assert.equal(await panel.getByTestId('mcp-workspace').innerText(),'workspace-b');assert.ok(b.state.calls.some(call=>call.path==='/api/workspaces/workspace-b/mcp/discovery'));assert.equal(a.state.posts.length+b.state.posts.length,0);assert.equal(a.state.retries.length+b.state.retries.length,0);await screenshot(page,'managed-workspace-race.png');}finally{release();await context.close();}
   });
   await run('explicit Codex runtime and target device persist across failed create retry', async () => {
     const f = fixture(); const { page, context } = await open('/test_222/members', f);
@@ -133,7 +163,7 @@ try {
     await chooseDevice(page, 'QA 在线电脑 · 在线');
     await page.getByLabel('人格与协作方式', { exact: true }).fill('QA：核对事实，回传证据');
     await page.getByLabel('岗位说明', { exact: true }).fill('QA：负责无副作用试运行');
-    await page.getByLabel('启用紫薇管理 MCP', { exact: true }).check();
+    assert.equal(await page.getByLabel('启用紫薇管理 MCP', { exact: true }).count(),0);
     await page.getByTestId('employee-ready').waitFor();
     f.state.createFailure = true; await submit.click(); await page.getByText('隔离 QA：暂时不可用，请重试', { exact: true }).waitFor();
     f.state.createFailure = false; await submit.click(); await modal.waitFor({ state: 'hidden' });
@@ -141,19 +171,29 @@ try {
     assert.equal(f.state.posts[1].runtime, 'Codex'); assert.equal(f.state.posts[1].targetDeviceId, 'pc-ready'); assert.equal(f.state.posts[1].managementMcpEnabled, true); assert.match(f.state.posts[1].persona, /核对事实/);
     await screenshot(page, 'codex-created.png'); await context.close();
   });
-  await run('Hermes blocks default and missing profile, provisions independent profile on the same exact device', async () => {
+  await run('Hermes blocks undiscovered profiles and provisions a real profile on the same exact device', async () => {
     const f = fixture(); const { page, context } = await open('/test_222/members', f, 390);
     await page.getByRole('button', { name: '添加数字员工', exact: true }).first().click();
     const modal = page.locator('.employee-create-modal'); await page.getByLabel('名称', { exact: true }).fill('QA Hermes 员工');
     await chooseDevice(page, 'QA 在线电脑 · 在线');
     await page.locator('#employee-runtime').click(); await page.getByRole('option', { name: /Hermes/ }).click();
     const profile = page.getByLabel('Hermes Profile', { exact: true }); const submit = modal.getByRole('button', { name: '创建', exact: true });
-    await profile.fill('default'); assert(await submit.isDisabled()); assert.match(await modal.innerText(), /请选择或创建独立 Hermes profile/);
+    await profile.fill('default'); assert(await submit.isDisabled()); assert.match(await modal.innerText(), /未发现.*default/);
     await profile.fill('qa-new-independent'); assert(await submit.isDisabled());
     await modal.getByRole('button', { name: '在此设备创建 Profile', exact: true }).click();
     await page.getByTestId('employee-ready').waitFor(); await submit.click(); await modal.waitFor({ state: 'hidden' });
     const [profilePost, employeePost] = f.state.posts; assert.equal(profilePost.deviceId, 'pc-ready'); assert.equal(profilePost.profile, 'qa-new-independent'); assert.equal(employeePost.runtime, 'Hermes'); assert.equal(employeePost.runtimeProfile, 'qa-new-independent'); assert.equal(employeePost.targetDeviceId, 'pc-ready');
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)); await screenshot(page, 'hermes-created-mobile.png'); await context.close();
+  });
+  await run('new workspace employee defaults to automatic management without manual credentials',async()=>{
+    const f=fixture('fresh-workspace');f.state.employees=[];f.state.devices[0].management_mcp={managed:true,state:'pending',configured:false,workspace:'fresh-workspace'};
+    const {page,context}=await open('/fresh-workspace/members',f,390,844);
+    try{await page.getByRole('button',{name:'添加数字员工',exact:true}).first().click();const modal=page.locator('.employee-create-modal');await page.getByLabel('名称',{exact:true}).fill('新工作区默认员工');await chooseDevice(page,'QA 在线电脑 · 在线');await page.getByTestId('employee-ready').waitFor();assert.equal(await page.getByLabel('启用紫薇管理 MCP',{exact:true}).count(),0);assert.match(await modal.innerText(),/正在自动接入/);await modal.getByRole('button',{name:'创建',exact:true}).click();await modal.waitFor({state:'hidden'});assert.equal(f.state.posts.length,1);assert.equal(f.state.posts[0].managementMcpEnabled,true);assert.equal(f.state.posts[0].targetDeviceId,'pc-ready');assert.equal(f.state.posts[0].runtime,'Codex');assert.equal(f.state.retries.length,0);assert.ok(!f.state.calls.some(call=>call.path.endsWith('/mcp/bootstrap')));await screenshot(page,'new-workspace-default-employee.png');}finally{await context.close();}
+  });
+  await run('legacy Hermes default profile remains explicit and unchanged while management prepares',async()=>{
+    const f=fixture();Object.assign(f.state.employees[0],{runtime:'Hermes',runtime_profile:'default',management_mcp_enabled:null});f.state.devices[0].runtimes[1].profiles.push({name:'default',readiness:ready});f.state.devices[0].management_mcp={managed:true,configured:false,state:'pending',workspace:ws.slug};
+    const {page,context}=await open('/test_222/employee/builder-fixture',f,720,450);
+    try{await page.getByRole('button',{name:'编辑伙伴',exact:true}).click();const modal=page.locator('.employee-create-modal');await page.getByTestId('employee-ready').waitFor();assert.equal(await page.getByLabel('Hermes Profile',{exact:true}).inputValue(),'default');await modal.getByRole('button',{name:'保存',exact:true}).click();await modal.waitFor({state:'hidden'});assert.equal(f.state.posts.length,1);assert.equal(f.state.posts[0].runtime,'Hermes');assert.equal(f.state.posts[0].runtimeProfile,'default');assert.equal(f.state.posts[0].targetDeviceId,'pc-ready');assert.equal(f.state.posts[0].managementMcpEnabled,true);assert.equal(f.state.retries.length,0);await screenshot(page,'legacy-hermes-default-preserved.png');}finally{await context.close();}
   });
   await run('editing preserves explicit Codex profile and runtime switch clears incompatible Hermes profile', async () => {
     const f = fixture(); const { page, context } = await open('/test_222/employee/builder-fixture', f);

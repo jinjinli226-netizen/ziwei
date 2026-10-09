@@ -29,3 +29,9 @@ test('phone MCP adapter must report the exact workspace and selected runtime bef
   }
   assert.equal(phoneRuntimeReadiness(setup,form).ready,true);
 });
+
+test('automatic management default does not remove phone MCP independent Hermes profile requirement', () => {
+  const discovery={...setup,computers:[{...setup.computers[0],runtimes:[{name:'Hermes',cli_status:'available',profiles:[{name:'default',readiness:{ready:true}},{name:'phone-independent',readiness:{ready:true}}]}]}]};
+  assert.equal(phoneRuntimeReadiness(discovery,{...form,runtime:'Hermes',runtimeProfile:'default'}).ready,false);
+  assert.equal(phoneRuntimeReadiness(discovery,{...form,runtime:'Hermes',runtimeProfile:'phone-independent'}).ready,true);
+});

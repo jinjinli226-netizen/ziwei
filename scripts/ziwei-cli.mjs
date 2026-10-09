@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resolveConfigPath } from '../daemon/config.mjs';
+import { clientBuildIdentity, clientBuildMismatch } from '../src/management-bootstrap.mjs';
 
 const ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const PACKAGE_PATH = path.join(ROOT, 'package.json');
@@ -222,6 +223,7 @@ async function connect(args) {
   }
   const previous = readConfig()?.value || {};
   const config = {
+    ...previous,
     agentId: 'ziwei_user',
     serviceName: 'ziwei_user',
     workspace: String(body.workspace),
@@ -310,6 +312,7 @@ async function change() {
     throw new Error(`端口 ${config.healthPort || 20242} 已被其他服务占用，未停止该服务`);
   }
   if (liveService === 'ziwei_user' && health.ok && String(live.workspace || '') === String(config.workspace || '')) {
+    if (clientBuildMismatch(live, VERSION, clientBuildIdentity(ROOT))) return start();
     console.log(`ziwei_user 已是当前工作区：${config.workspace}`);
     return;
   }

@@ -2,6 +2,23 @@ import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+
+/** A health response alone must never authorize terminating an unrelated PID. */
+export function isNativeDaemonProcess(pid, root) {
+  if (!Number.isSafeInteger(pid) || pid <= 0 || pid === process.pid) return false;
+  const entry = path.join(path.resolve(root), 'daemon', 'ziwei_user.mjs');
+  try {
+    let command;
+    if (process.platform === 'win32') {
+      const record = JSON.parse(execFileSync('powershell.exe', ['-NoProfile', '-Command', `Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}' | Select-Object ExecutablePath,CommandLine | ConvertTo-Json -Compress`], { encoding: 'utf8', timeout: 4000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] }));
+      if (path.normalize(record.ExecutablePath || '').toLowerCase() !== path.normalize(process.execPath).toLowerCase()) return false;
+      command = record.CommandLine || '';
+    } else command = execFileSync('ps', ['-p', String(pid), '-o', 'command='], { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] });
+    const escaped = entry.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`(^|["\\s])${escaped}(["\\s]|$)`, process.platform === 'win32' ? 'i' : '').test(command);
+  } catch { return false; }
+}
 
 /**
  * Resolve files for a daemon installation. Project mode deliberately keeps

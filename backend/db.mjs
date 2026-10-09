@@ -79,6 +79,9 @@ export function openDatabase({ memory = false, filename = path.join(ROOT, 'data'
       PRIMARY KEY(workspace_id,kind,request_key),
       FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      version TEXT PRIMARY KEY, applied_at TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS tasks (
       id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, title TEXT NOT NULL,
       description TEXT NOT NULL DEFAULT '', description_format TEXT NOT NULL DEFAULT 'plain', state TEXT NOT NULL, priority TEXT NOT NULL DEFAULT 'medium',
@@ -160,6 +163,7 @@ export function openDatabase({ memory = false, filename = path.join(ROOT, 'data'
       id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, owner_user_id TEXT, name TEXT NOT NULL,
       runtime TEXT NOT NULL, model_id TEXT, description TEXT NOT NULL DEFAULT '', visibility TEXT NOT NULL DEFAULT 'workspace',
       skills_json TEXT NOT NULL DEFAULT '[]', instructions TEXT NOT NULL DEFAULT '', runtime_profile TEXT, avatar TEXT, status TEXT NOT NULL DEFAULT 'draft',
+      management_mcp_enabled INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
       FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
     );
@@ -282,8 +286,9 @@ export function openDatabase({ memory = false, filename = path.join(ROOT, 'data'
     "ALTER TABLE employees ADD COLUMN avatar TEXT",
     "ALTER TABLE employees ADD COLUMN persona TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE employees ADD COLUMN target_device_id TEXT",
-    "ALTER TABLE employees ADD COLUMN management_mcp_enabled INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE employees ADD COLUMN management_mcp_enabled INTEGER NOT NULL DEFAULT 1",
     "ALTER TABLE devices ADD COLUMN management_mcp_json TEXT NOT NULL DEFAULT '{}'",
+    "ALTER TABLE devices ADD COLUMN management_mcp_retry_at TEXT",
     "ALTER TABLE runtime_metadata ADD COLUMN readiness_json TEXT NOT NULL DEFAULT '{}'",
     "ALTER TABLE runtime_device_metadata ADD COLUMN readiness_json TEXT NOT NULL DEFAULT '{}'",
     "ALTER TABLE conversations ADD COLUMN model_id TEXT",
@@ -339,6 +344,17 @@ export function openDatabase({ memory = false, filename = path.join(ROOT, 'data'
     ,"ALTER TABLE automations ADD COLUMN executor TEXT NOT NULL DEFAULT 'ziwei_user'"
     ,"ALTER TABLE automations ADD COLUMN webhook_secret TEXT"
   ]) { try { db.exec(statement); } catch {} }
+  // Management is a default platform capability. Upgrade historical switches
+  // once, preserving employee timestamps, phone configuration and receipts.
+  const managementMigration = '2026-10-09-default-management-mcp';
+  if (!db.prepare('SELECT 1 FROM schema_migrations WHERE version=?').get(managementMigration)) {
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      db.prepare('UPDATE employees SET management_mcp_enabled=1 WHERE management_mcp_enabled IS NULL OR management_mcp_enabled=0').run();
+      db.prepare('INSERT INTO schema_migrations(version,applied_at) VALUES(?,?)').run(managementMigration, new Date().toISOString());
+      db.exec('COMMIT');
+    } catch (error) { db.exec('ROLLBACK'); throw error; }
+  }
   // Pairing credentials are the authoritative creation timestamp for devices
   // created by the remote onboarding flow. Older seed rows intentionally stay
   // null so the UI can label them as historical instead of inventing a date.

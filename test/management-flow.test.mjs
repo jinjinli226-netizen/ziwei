@@ -94,7 +94,9 @@ test('browser creation shares idempotency and supports discovered Codex profiles
   assert.equal(saved.runtime, 'Codex'); assert.equal(saved.runtime_profile, 'qa-codex-profile');
   assert.equal(repo.listEmployees('test-111').filter(item => item.name === input.name).length, 1);
   assert.equal((await request('/employees', { ...input, runtimeProfile: 'not-discovered', idempotencyKey: 'bad-profile' })).body.code, 'PROFILE_NOT_FOUND');
-  assert.equal((await request('/employees', { ...input, runtime: 'Hermes', runtimeProfile: 'default', managementMcpEnabled: true, idempotencyKey: 'bad-main' })).body.code, 'INDEPENDENT_PROFILE_REQUIRED');
+  const defaultProfile = await request('/employees', { ...input, runtime: 'Hermes', runtimeProfile: 'default', managementMcpEnabled: true, idempotencyKey: 'default-overlay' });
+  assert.equal(defaultProfile.status, 201);
+  assert.equal(defaultProfile.body.runtime_profile, 'default');
 });
 
 test('independent Hermes readiness is authoritative and profile retries reject changed intent', async t => {

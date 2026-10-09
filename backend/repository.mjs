@@ -14,6 +14,7 @@ import { listHermesProfiles, validateHermesProfile } from '../src/runtime-adapte
 import { fetchSafeUrl, validateSafeUrl } from './ssrf.mjs';
 import { acceptInvitationMembership } from './invitation-membership.mjs';
 import { syncPhoneSkill } from './skills/catalog.mjs';
+import { redactSecrets } from '../src/redaction.mjs';
 
 const now = () => new Date().toISOString();
 const id = prefix => `${prefix}_${crypto.randomUUID()}`;
@@ -160,7 +161,20 @@ const automationView = (row, runCount = 0) => {
   return view;
 };
 
-const employeeView = row => row ? ({ ...row, skills: Array.isArray(row.skills) ? row.skills : parse(row.skills_json), management_mcp_enabled: Boolean(row.management_mcp_enabled) }) : null;
+const employeeView = row => row ? ({ ...row, skills: Array.isArray(row.skills) ? row.skills : parse(row.skills_json), management_mcp_enabled: true }) : null;
+const safeManagementMcpMetadata = (metadata, slug) => {
+  const states = new Set(['managed', 'pending', 'ready', 'failed', 'client_required']);
+  const state = states.has(metadata.state) ? metadata.state : (metadata.configured === true ? 'ready' : 'pending');
+  const expires = Date.parse(metadata.expiresAt || '');
+  const reasonCode = String(metadata.reasonCode || '').trim();
+  return {
+    configured: metadata.configured === true, managed: true, state, workspace: slug, transport: 'stdio',
+    supportedRuntimes: Array.isArray(metadata.supportedRuntimes) ? metadata.supportedRuntimes.map(value => String(value).slice(0, 40)).slice(0, 20) : [],
+    ...(/^[A-Za-z0-9_.-]{1,80}$/.test(reasonCode) ? { reasonCode } : {}),
+    ...(metadata.reason ? { reason: redactSecrets(String(metadata.reason)).slice(0, 400) } : {}),
+    ...(Number.isFinite(expires) ? { expiresAt: new Date(expires).toISOString() } : {})
+  };
+};
 const conversationEmployeeView = row => row ? ({
   id: row.id,
   name: row.name,
@@ -306,7 +320,7 @@ export function createRepository(options = {}) {
       ...(cwd ? { cwd } : {}),
       ...(conversationId ? { conversationId } : {}),
       ...((targetDeviceId || employee?.target_device_id) ? { deviceId: targetDeviceId || employee.target_device_id } : {}),
-      ...(employee?.management_mcp_enabled ? { managementMcp: { enabled: true, workspace: employeeWorkspace } } : {}),
+      ...(employee && employeeWorkspace ? { managementMcp: { enabled: true, workspace: employeeWorkspace } } : {}),
       ...(phoneConfig?.enabled && skillIds.includes(phoneConfig.skill_id) ? { terminalMcp: { enabled:true, workspace:employeeWorkspace, employeeId:employee.id, deviceId:phoneConfig.device_id,configurationRevision:phoneRevision } } : {}),
     };
   };
@@ -339,13 +353,20 @@ export function createRepository(options = {}) {
     id:event.id, action_id:event.action_id, type:event.type, message:event.message,
     data:parse(event.data_json), created_at:event.created_at
   }));
+  const executionActionPayload = row => {
+    const payload = parse(row.payload_json);
+    if (!['pending', 'acked'].includes(row.status) || !['task.execute', 'conversation.execute', 'automation.execute'].includes(row.type) || !payload.employeeId) return payload;
+    const employeeWorkspace = db.prepare('SELECT w.slug FROM employees e JOIN workspaces w ON w.id=e.workspace_id WHERE e.id=? AND e.workspace_id=?').get(String(payload.employeeId), row.workspace_id)?.slug;
+    const { managementMcp: _oldManagement, ...rest } = payload;
+    return employeeWorkspace ? { ...rest, managementMcp: { enabled: true, workspace: employeeWorkspace } } : rest;
+  };
   const actionView = (row, { includeEvents = false } = {}) => row ? ({
     id: row.id,
     task_id: row.task_id,
     agent_id: row.agent_id,
     type: row.type,
     status: row.status,
-    payload: parse(row.payload_json),
+    payload: executionActionPayload(row),
     dedupe_key: row.dedupe_key,
     created_at: row.created_at,
     acked_at: row.acked_at,
@@ -612,7 +633,7 @@ export function createRepository(options = {}) {
       const source = device?.status === 'online' ? 'ziwei_user' : 'unavailable';
       return { runtime: 'Hermes', source, independent_home: true, profiles: Array.isArray(profiles) ? profiles : [], validation: { rejects_unknown: Boolean(profiles.length) } };
     },
-    createHermesProfileAction(slug, input = {}) {
+    createHermesProfileAction(slug, input = {}, trusted = {}) {
       const ws = workspace(slug); if (!ws) throw new Error('Workspace not found');
       const profile = normalizeRuntimeProfile(input.profile ?? input.profileName ?? input.profile_name ?? input.runtimeProfile ?? input.runtime_profile ?? input.name);
       if (!profile || profile.toLowerCase() === 'default') throw new Error('不能创建 Hermes default profile');
@@ -627,7 +648,10 @@ export function createRepository(options = {}) {
       const teamMember = ws.kind === 'team' && actorUserId
         ? Boolean(db.prepare('SELECT 1 FROM members WHERE workspace_id=? AND user_id=?').get(ws.id, actorUserId))
         : false;
-      if (!['owner', 'admin'].includes(actorRole) && !teamMember && !this.canManageDevice(deviceId, actorUserId, actorRole, slug)) { const error = new Error('当前用户无权在该设备创建 Hermes profile'); error.status = 403; throw error; }
+      // Only the authenticated service may grant the paired computer access to
+      // its own profile. A similarly named request-body field has no effect.
+      const pairedComputer = trusted?.deviceCredentialDeviceId === deviceId;
+      if (!['owner', 'admin'].includes(actorRole) && !teamMember && !pairedComputer && !this.canManageDevice(deviceId, actorUserId, actorRole, slug)) { const error = new Error('当前用户无权在该设备创建 Hermes profile'); error.status = 403; throw error; }
       const soul = String(input.soul ?? input.soulMd ?? input.soul_md ?? input.instructions ?? input.files?.['SOUL.md'] ?? `# ${profile}\n`);
       if (Buffer.byteLength(soul, 'utf8') > 10 * 1024 * 1024) throw new Error('Hermes profile 内容超过 10 MiB');
       const files = input.files && typeof input.files === 'object' && !Array.isArray(input.files)
@@ -1094,12 +1118,27 @@ export function createRepository(options = {}) {
       const runtimePayload = input.runtimes || input.runtimeMetadata || input.runtime_metadata;
       if (runtimePayload && typeof runtimePayload === 'object') this.registerRuntimes(slug, { runtimes: runtimePayload, deviceId });
       if (input.managementMcp && typeof input.managementMcp === 'object') {
-        const metadata = input.managementMcp;
-        const safe = { configured: metadata.configured === true, workspace: String(metadata.workspace || slug), transport: 'stdio', supportedRuntimes: Array.isArray(metadata.supportedRuntimes) ? metadata.supportedRuntimes.map(String).slice(0, 20) : [], ...(metadata.reason ? { reason: String(metadata.reason).slice(0, 400) } : {}) };
+        const safe = safeManagementMcpMetadata(input.managementMcp, slug);
         db.prepare('UPDATE devices SET management_mcp_json=? WHERE id=? AND workspace_id=?').run(JSON.stringify(safe), deviceId, ws.id);
       }
       if(input.terminalMcp && typeof input.terminalMcp==='object') {const metadata=input.terminalMcp;const safe={configured:metadata.configured===true,workspace:String(metadata.workspace || slug),transport:'stdio',serverName:'ziwei-terminal',supportedRuntimes:Array.isArray(metadata.supportedRuntimes)?metadata.supportedRuntimes.map(String).slice(0,20):[],...(metadata.reason?{reason:String(metadata.reason).slice(0,400)}:{})};db.prepare('UPDATE devices SET terminal_mcp_json=? WHERE id=? AND workspace_id=?').run(JSON.stringify(safe),deviceId,ws.id);}
       return this.listDevices(slug).find(device => device.id === row.id) || null;
+    },
+    requestManagementMcpRetry(slug, deviceId, context = {}) {
+      const role = String(context.actorRole || context.role || '').toLowerCase();
+      const userId = String(context.actorUserId || context.userId || '').trim() || null;
+      const fail = (message, status) => { const error = new Error(message); error.status = status; throw error; };
+      if (!['owner', 'admin', 'member'].includes(role)) fail('当前角色无权重试管理 MCP 准备', 403);
+      const ws = workspace(slug); if (!ws) fail('工作区不存在', 404);
+      if (ws.kind === 'personal' && !userId) fail('个人工作区重试需要当前用户身份', 403);
+      const device = this.listDevices(slug, { userId }).find(row => row.id === String(deviceId || ''));
+      if (!device) fail('目标设备不存在于当前可见工作区', 404);
+      if (device.status === 'disabled') fail('目标设备已停用，不能重试管理 MCP 准备', 409);
+      const previousTime = Date.parse(device.management_mcp_retry_at || '');
+      const retryRequestedAt = new Date(Math.max(Date.now(), Number.isFinite(previousTime) ? previousTime + 1 : 0)).toISOString();
+      const metadata = safeManagementMcpMetadata({ ...parse(device.management_mcp_json, {}), configured: false, state: 'pending', reasonCode: 'RETRY_REQUESTED', reason: '', expiresAt: '' }, slug);
+      db.prepare('UPDATE devices SET management_mcp_retry_at=?,management_mcp_json=? WHERE id=? AND workspace_id=?').run(retryRequestedAt, JSON.stringify(metadata), device.id, ws.id);
+      return { accepted: true, deviceId: device.id, retryRequestedAt, state: 'pending' };
     },
     registerRuntimeDiscovery(slug, input = {}) {
       const ws = workspace(slug); if (!ws) throw new Error('Workspace not found');
@@ -1242,7 +1281,7 @@ export function createRepository(options = {}) {
       if (targetDeviceId && !db.prepare('SELECT 1 FROM devices WHERE id=? AND workspace_id=?').get(targetDeviceId, ws.id)) throw new Error('目标设备不属于当前工作区');
       // A selected remote device is authoritative. Never validate its profile against the API host home.
       const runtimeProfile = targetDeviceId ? normalizeRuntimeProfile(profileInput) : validateEmployeeProfile(runtime, profileInput);
-      const employee = { id:id('employee'), workspace_id:ws.id, owner_user_id:String(input.ownerUserId || input.owner_user_id || '').trim() || null, name, runtime, model_id:input.model || input.modelId || input.model_id || null, description:String(input.description || ''), persona:String(input.persona || ''), visibility:input.visibility === 'personal' ? 'personal' : 'workspace', skills:Array.isArray(input.skills) ? input.skills : [], instructions:String(input.instructions || ''), runtime_profile:runtimeProfile, target_device_id:targetDeviceId, management_mcp_enabled: input.managementMcpEnabled === true || input.management_mcp_enabled === true || input.managementMcp?.enabled === true, avatar:input.avatar ? String(input.avatar) : null, status, created_at:timestamp, updated_at:timestamp };
+      const employee = { id:id('employee'), workspace_id:ws.id, owner_user_id:String(input.ownerUserId || input.owner_user_id || '').trim() || null, name, runtime, model_id:input.model || input.modelId || input.model_id || null, description:String(input.description || ''), persona:String(input.persona || ''), visibility:input.visibility === 'personal' ? 'personal' : 'workspace', skills:Array.isArray(input.skills) ? input.skills : [], instructions:String(input.instructions || ''), runtime_profile:runtimeProfile, target_device_id:targetDeviceId, management_mcp_enabled: true, avatar:input.avatar ? String(input.avatar) : null, status, created_at:timestamp, updated_at:timestamp };
       db.prepare('INSERT INTO employees(id,workspace_id,owner_user_id,name,runtime,model_id,description,visibility,skills_json,instructions,runtime_profile,avatar,status,created_at,updated_at,persona,target_device_id,management_mcp_enabled) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(employee.id,ws.id,employee.owner_user_id,employee.name,employee.runtime,employee.model_id,employee.description,employee.visibility,JSON.stringify(employee.skills),employee.instructions,employee.runtime_profile,employee.avatar,employee.status,timestamp,timestamp,employee.persona,employee.target_device_id,employee.management_mcp_enabled ? 1 : 0);
       audit(slug,'user','employee.created',{employeeId:employee.id,modelId:employee.model_id,runtimeProfile:employee.runtime_profile,targetDeviceId,status});
       return employee;
@@ -1260,7 +1299,7 @@ export function createRepository(options = {}) {
       const persona=input.persona === undefined ? row.persona : String(input.persona || '');
       const targetDeviceId=input.targetDeviceId === undefined && input.target_device_id === undefined && input.deviceId === undefined && input.device_id === undefined ? row.target_device_id : String(input.targetDeviceId ?? input.target_device_id ?? input.deviceId ?? input.device_id ?? '').trim() || null;
       if (targetDeviceId && !db.prepare('SELECT 1 FROM devices WHERE id=? AND workspace_id=?').get(targetDeviceId, ws.id)) throw new Error('目标设备不属于当前工作区');
-      const managementMcpEnabled=input.managementMcpEnabled === undefined && input.management_mcp_enabled === undefined && input.managementMcp?.enabled === undefined ? Boolean(row.management_mcp_enabled) : Boolean(input.managementMcpEnabled ?? input.management_mcp_enabled ?? input.managementMcp?.enabled);
+      const managementMcpEnabled = true;
       const runtimeProfile=input.runtimeProfile === undefined && input.runtime_profile === undefined && input.profile === undefined && input.hermesProfile === undefined && input.hermes_profile === undefined ? row.runtime_profile : (targetDeviceId ? normalizeRuntimeProfile : validateEmployeeProfile.bind(null, runtime))(input.runtimeProfile ?? input.runtime_profile ?? input.profile ?? input.hermesProfile ?? input.hermes_profile);
       const avatar=input.avatar === undefined ? row.avatar : (input.avatar ? String(input.avatar) : null);
       const statuses=new Set(['draft','active','paused','archived']); const status=input.status === undefined ? row.status : String(input.status); if (!statuses.has(status)) throw new Error('数字员工状态无效');
@@ -1533,7 +1572,7 @@ export function createRepository(options = {}) {
       const deviceId = String(input.deviceId || input.device_id || '').trim();
       const rows=db.prepare(`SELECT * FROM a2a_actions WHERE workspace_id=? AND agent_id=? AND status IN (${placeholders}) ORDER BY created_at`).all(ws.id,agentId,...statuses);
       return rows.filter(row => !deviceId || !actionTargetDevice(row) || actionTargetDevice(row) === deviceId)
-        .map(row => ({...row,payload:parse(row.payload_json),result:parse(row.result_json)}));
+        .map(row => ({...row,payload:executionActionPayload(row),result:parse(row.result_json)}));
     },
     ackA2AAction(actionId, input = {}) {
       const row=db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId); if (!row) throw new Error('A2A action not found'); if (input.agentId && String(input.agentId) !== row.agent_id) throw new Error('A2A agent mismatch'); if (row.status === 'expired') throw new Error('A2A action expired'); if (row.status === 'succeeded' || row.status === 'failed') return {...row,duplicate:true,payload:parse(row.payload_json),result:parse(row.result_json)};

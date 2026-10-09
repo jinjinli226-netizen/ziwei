@@ -185,14 +185,17 @@ test('management and phone MCP coexist in the same selected Hermes profile witho
   fs.writeFileSync(managementToken, JSON.stringify({ token: 'local-management-test-token', workspaces: ['phone_ai'] }));
   try {
     const management = runtime.prepareManagementMcpLaunch({ runtime: 'Hermes', profile: 'combined', config: { enabled: true, tokenFile: managementToken, baseUrl: 'https://example.test' }, workspace: 'phone_ai', request: { enabled: true, workspace: 'phone_ai' }, auditDirectory: f.root, invocation: runtime.runtimeInvocation('Hermes', { prompt: 'hello' }), env: { HERMES_HOME: hermes } });
-    const phone = runtime.prepareTerminalMcpLaunch({ runtime: 'Hermes', profile: 'combined', config: f.config, workspace: 'phone_ai', request: f.request, actionId: 'action_phone', auditDirectory: f.root, invocation: management.invocation, env: management.env, profileBaseHome: hermes });
+    const phone = runtime.prepareTerminalMcpLaunch({ runtime: 'Hermes', profile: 'combined', config: f.config, workspace: 'phone_ai', request: f.request, actionId: 'action_phone', auditDirectory: f.root, invocation: management.invocation, env: management.env, profileBaseHome: hermes, hermesOverlayHome: management.overlayHome });
     assert.equal(phone.env.HERMES_HOME, profile);
+    assert.equal(phone.env.HERMES_MANAGED_DIR, management.overlayHome);
     assert.equal(phone.env.ZIWEI_MCP_TOKEN_FILE, managementToken);
     assert.equal(phone.invocation.args.filter(item => item === '--toolsets').length, 1);
-    const config = fs.readFileSync(path.join(profile, 'config.yaml'), 'utf8');
+    const config = fs.readFileSync(path.join(phone.env.HERMES_MANAGED_DIR, 'config.yaml'), 'utf8');
     assert.match(config, /ziwei_management:/);
     assert.match(config, /ziwei-terminal:/);
     assert.doesNotMatch(config, /local-management-test-token|private-phone-capability/);
+    assert.equal(fs.readFileSync(path.join(profile, 'config.yaml'), 'utf8'), 'model:\n  provider: openai-codex\n');
+    management.cleanup();
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });
 
@@ -241,6 +244,7 @@ test('local executor removes the execution capability even when an explicit runt
   const f = fixture();
   const server = http.createServer((req, res) => {
     res.writeHead(200, { 'content-type': 'application/json' });
+    if (req.url === '/api/workspaces/phone_ai/mcp/bootstrap') return res.end(JSON.stringify({ token: 'management-private', workspace: 'phone_ai', deviceId: 'device_workstation', credentialId: 'credential_workstation', managed: true, audience: 'ziwei-management', expiresAt: new Date(Date.now() + 3600000).toISOString(), apiBase: `http://127.0.0.1:${server.address().port}` }));
     res.end(JSON.stringify({ ...f.scope, baseUrl: `http://127.0.0.1:${server.address().port}/terminal-mcp/v1/workspaces/phone_ai/employees/employee_phone` }));
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));

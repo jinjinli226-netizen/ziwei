@@ -79,18 +79,25 @@ export function mcpTokenRequired(options = {}) {
   };
   const load = () => readMCPCredential({ ...configured, create: configured.create ?? false });
   return (req, res, next) => {
+    const token = mcpTokenFromRequest(req);
+    const slug = String(req.params.slug || '').trim();
+    if (options.authorize) {
+      try {
+        const managed = options.authorize(token, slug);
+        if (managed) { req.mcpCredential = managed; return next(); }
+      } catch (error) { return next(error); }
+    }
     const credential = load();
     const credentials = [...(credential.token ? [{ token: credential.token, workspaces: credential.workspaces }] : []), ...(credential.credentials || [])];
-    if (!credentials.length) return res.status(503).json({ error: 'MCP 管理入口尚未配置 bearer token' });
-    const matched = credentials.find(item => safeTokenEqualCompat(mcpTokenFromRequest(req), item.token));
+    if (!credentials.length && !options.authorize) return res.status(503).json({ error: 'MCP 管理入口尚未配置 bearer token' });
+    const matched = credentials.find(item => safeTokenEqualCompat(token, item.token));
     if (!matched) {
       res.setHeader('WWW-Authenticate', 'Bearer realm="ziwei-mcp"');
       return res.status(401).json({ error: '需要有效的 MCP 管理令牌' });
     }
-    const slug = String(req.params.slug || '').trim();
     if (slug && !mcpWorkspaceAllowed(matched.workspaces, slug)) return res.status(403).json({ error: 'MCP 令牌没有该工作区权限' });
     if (!slug && matched.workspaces.length !== 1) return res.status(403).json({ error: 'MCP 令牌需要明确的单一工作区权限' });
-    req.mcpCredential = { workspaces: matched.workspaces, workspace: slug || matched.workspaces[0] };
+    req.mcpCredential = { workspaces: matched.workspaces, workspace: slug || matched.workspaces[0], actorRole: configured.role || 'owner', enforceEmployeeVisibility: true, enforceDeviceOwnership: true };
     next();
   };
 }
