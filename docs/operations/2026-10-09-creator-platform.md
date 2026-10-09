@@ -2,14 +2,14 @@
 
 ## 当前状态
 
-2026-10-09：本功能已完成本地实现和下述指定范围测试，**尚未部署**。本记录先保存实现、验收与回滚骨架；正式发布、真实实例、Hermes 自然语言任务和清理结果均待 root 上线后填写，不能据本地测试宣称生产已通过。
+**已发布并完成本轮验收。** 生产代码 `db0aa68b0735c30c65acdf342c3080655892a286`，发布时间 UTC `2026-10-09T16:08:06Z`，北京时间 **2026-10-10 00:08:06**。正式 `phone_ai` Creator 与首个用户对话保留；真实 Hermes 四阶段、两个子任务、历史追问、精确清理、保护数据和线上布局通过。本文文件名沿用任务开始的 UTC 日期。
 
-用户最新要求取消 Codex 真机排障与验收，不恢复该项；模板继续支持明确选择 Codex。当前真实验收计划使用已有验证证据的 Hermes，仍须重新记录本轮 Creator 实际执行结果。手机动作、真实手机业务、邀请消费和新设备配对不属于本轮验收。
+用户最新要求取消 Codex 真机排障与验收，不恢复该项；模板继续支持明确选择 Codex。本轮实际使用原生 Hermes，实际证据如下。用户暂时无法操作手机，手机实机验收暂缓；手机动作、邀请消费和新设备配对均为 0。
 
 ## 用户操作
 
 1. 登录并切到目标工作区，让实际选定电脑原有的 `ziwei_user` 保持在线。
-2. “成员与设备 → 添加数字员工 → 从伙伴市场创建 → 数字员工·Creator”。
+2. “团队管理（成员与设备）→ 添加数字员工 → 从伙伴市场创建 → 数字员工·Creator”。
 3. 明确选择在线电脑和 Codex/Hermes。Hermes 优先使用真实发现且认证/provider 已就绪的 `default`，否则仅在唯一就绪 profile 时自动选择；多个独立就绪 profile 时明确选择。显式 profile 不回退。模型默认沿用 CLI/profile。
 4. “创建并开始对话”返回绑定员工及所选电脑的持久聊天；市场默认创建个人可见实例。已有实例直接打开，同成员、同工作区、同模板重复创建复用原实例，不覆盖定制配置。
 5. 明确请求创建或维护岗位员工。Creator 应实际发现环境、配置并回读员工，再执行低影响小任务，回读 task/action、管理 MCP 工具回执和业务结果。只有真实执行成功且结果满足要求才能报告完成；失败保留原 ID 和上下文，不以更换标识盲目重建。
@@ -46,7 +46,7 @@ POST 返回 `{employee, conversation, template, duplicate}`。`template` 包含 
 
 ## 已完成的本地验证
 
-2026-10-10 本地验证：代码已本地提交，尚未发布。以下结果使用内存、合成数据或安装的 Hermes launcher 搭配合成 HOME/auth；不代表真实模型、生产域名、正式实例或生产客户端执行通过。最后 `.env` reserved routing 补丁已完成独立原生复核，并重新通过完整 398/398、skip 0、exit 0 验证。
+2026-10-10 本地验证：以下结果使用内存、合成数据或安装的 Hermes launcher 搭配合成 HOME/auth；生产域名和实际模型的独立结果见下文。最后 `.env` reserved routing 补丁已完成独立原生复核，并重新通过完整 398/398、skip 0、exit 0 验证。
 
 | 范围 | 结果 | 说明 |
 | --- | --- | --- |
@@ -70,62 +70,68 @@ POST 返回 `{employee, conversation, template, duplicate}`。`template` 包含 
 
 旧 workspace load 覆盖新 workspace、切区残留旧发送目标、同区迟到旧对话、未知 Hermes 认证/provider 被视作 ready、同区刷新改成第一台电脑等审查项均已本地修复并通过行为与浏览器回归。独立只读 scope/helper/API 复核通过；持久 HOME/native auth/ordinary env/stderr receipt/手机边界也已只读复核。本地证据中的“成功”仅适用于各行明确的测试环境。
 
-运行时 reserved routing 补丁完整复验已通过。真实生产、正式实例、实际 Hermes 模型和客户端验收由 root 后续填写；下述生产记录保持待验证，不借用上一轮默认管理 MCP 或本轮无模型 native fixture 结果代替。
+运行时 reserved routing 补丁完整复验已通过。下述生产记录来自本轮实际执行，不借用上一轮默认管理 MCP 或本轮无模型 native fixture 结果代替。
 
-## 发布与正式实例：待验证
+## 发布与正式实例
 
 | 证据 | 本轮实际值 |
 | --- | --- |
-| Git full SHA / 推送时间 | 待验证、待填写 |
-| 生产 release 目录 / 原子切换时间 / 时区 | 待验证、待填写 |
-| 前端 JS/CSS hash 与旧资源保留 | 待验证、待填写 |
-| 主 API 健康 / Nginx 管理与手机路由 | 待验证、待填写 |
-| 控制服务版本、APK 与其他服务是否变化 | 待验证、待填写 |
-| 发布前 DB/config/Nginx 备份路径 | 待验证、待填写；只记录路径及安全 hash，不记录凭据值 |
-| 客户端官方包 URL/hash / 原全局入口 / PID / build | 待验证、待填写 |
-| 原工作区、设备身份、端口 20242 与持续 ready | 待验证、待填写；不得为验收启动替代业务实例 |
-| `phone_ai` 正式 Creator employee ID / owner / visibility | 待验证、待填写；可见性须记录实际明确选择 |
-| 正式实例 template/version/origin | 待验证、待填写 |
-| Hermes runtime/profile/model/精确电脑 | 待验证、待填写；不输出 auth/provider 私有配置 |
-| 首个正式持久 conversation ID / 刷新后复用 | 待验证、待填写；正式员工和首个用户聊天保留 |
+| Git full SHA | `db0aa68b0735c30c65acdf342c3080655892a286`，已推送 `codex/ziwei-terminal-console`；文档收口另行提交，不重发业务代码。 |
+| 生产 release / 时间 | `/opt/ziwei/releases/db0aa68`；UTC `2026-10-09T16:08:06Z` / 北京时间 `2026-10-10 00:08:06`；原版本 `/opt/ziwei/releases/1ca9c6b`。 |
+| 前端与旧资源 | `index-DRTDY7kv.js` / `index-CJMLdFH9.css`；旧 `index-Caqrwk2Y.js` / `index-C30xBdgl.css` 及更早资源保留；新旧 HEAD 均 200。 |
+| 健康 / Nginx | API、控制、Nginx 三服务 active；主 healthz 200；Nginx SHA `faf170c39866d8c307ed68cc49d96cf7cc28dfac442e979d3f3d8c35cf494967` 不变；保留 `/terminal-mcp/v1/` 与 `/downloads/android/`。 |
+| 服务与 APK | 本次只重启 `ziwei-api.service`；控制保持 `8a4fe59`；APK versionCode 15、两个下载 HEAD 200。本轮未下载校验 APK hash，也未操作手机。 |
+| 发布前备份 | `/opt/ziwei-backups/creator-platform/20261009T144859Z`，main/control DB integrity ok、14 个配置备份；签名 key 仍为私有原文件。正式创建后独立保护基线 `/opt/ziwei/.local/creator-platform/formal-baseline.sqlite`。 |
+| 官方客户端包 | [ziwei-latest.tgz](https://qzelynth.top/downloads/cli/ziwei-latest.tgz)，24 文件、73936 bytes，SHA-256 `355aef510a8d52d43308e73d580a7aa93a9390bfd14be2a57d3288fc8c4c04ee`；公开 GET/HEAD、metadata、实际本地包一致。包从 Git archive 独立目录生成，未包含工作树 ignored 字节码缓存。 |
+| 原安装与持续诊断 | 原入口 `D:\work\nodejs\node_global\ziwei_user.cmd`；只替换核实的原 PID48208 后沿原入口启动，PID48624 ready；build `ca0807e0a3f3ace0fa9184c58886dd5e14e76191aae97982865d27caa0800068`，原 config hash 一致、20242 不变。外部 observer PID33376 记录 target48624 周期 heartbeat/health/ready。 |
+| 客户端备份 / 日志 | `C:\Users\25941\.codex\worktrees\2884\灵光爸爸拆解\.local\creator-platform\client-before-20261009T160831233Z`；日志 `C:\Users\25941\AppData\Local\Ziwei\ziwei_user\logs\daemon.log`、`client-upgrade.jsonl`、`client-exit-watch.jsonl`（后两者同绝对父目录）。日志保留启动/升级停止请求/ready/独立心跳历史。 |
+| 正式员工 / actor | `employee_743801eb-189d-4a57-bb57-64adebf7b571`；owner `user_c6deeadf-d2b3-43c2-820d-644d5829acf2`；workspace `phone_ai`；默认 personal 可见性。 |
+| 模板来源 | `ziwei-employee-creator` / `1.0.0` / `origin: template` / `customized: false` / `templateApplied: true`。 |
+| 实际运行环境 | zheng Windows，`device_f9568c06-d932-4264-9d4c-acc5122097ea`；Hermes `default`；保存的 model 为继承默认，本次 Creator 四次实际结果均 `gpt-6.1-sol`、exitCode 0。普通子员工 result.model 为 null，表示 CLI 默认，不把它冒充已回执的模型名。 |
+| 正式首个聊天 | `conv_3c72ac45-1551-44d2-a1ed-c0900adc137a`；[打开对话](https://qzelynth.top/phone_ai/inbox/conv_3c72ac45-1551-44d2-a1ed-c0900adc137a?employee=employee_743801eb-189d-4a57-bb57-64adebf7b571)。三个视口刷新复用同会话；POST `{}` 实测 200 duplicate、配置与原 ID 保持。 |
 
-## 真实 Hermes 验收：待验证
+## 真实 Hermes 验收
 
 | 场景 | 通过条件 | 实际证据 |
 | --- | --- | --- |
-| 市场创建并打开对话 | 实际所选电脑持久绑定，刷新后直接打开同实例/会话 | 待验证、待填写 |
-| 默认管理 MCP | 本次执行实际握手 `loaded: true` 且所需工具真实成功 | 待验证、待填写 action ID/安全回执 |
-| 自然语言创建岗位子员工 | Creator 经真实工具发现环境、创建并 get 回读精确配置 | 待验证、待填写 employee ID 与工具结果 |
-| 低影响任务 | 原子任务/task 与 action 回读 succeeded，真实产物满足请求 | 待验证、待填写 task/action ID、结果；父任务不因等待子任务堵住轮询 |
-| 安全失败及恢复 | 明确报告原错误，保留原意图/ID，按修正参数完成可核实结果 | 待验证、待填写 |
-| 重复与定制保留 | 同实例重试复用，保存的人格、指令、技能及未请求配置不被覆盖 | 待验证、待填写 |
-| 桌面、390px、短窗口、键盘与切区竞争 | 创建、刷新、已有对话、错误重试可用，无旧 scope/旧对话回写 | 待验证、待填写 |
+| 市场与持久对话 | 实际选电脑、刷新复用同实例/会话 | 线上 1440×900 / 390×844 / 720×450 三场景通过；原正式对话保留。首次脚本等待 networkidle 超时，改用实际 DOM 就绪后通过，无员工重复创建。 |
+| 默认管理 MCP 与独立状态 | 同次原 action 的 loaded/工具/native 路由回执 | 四个 Creator action 与两个子任务均 succeeded/exit0/loaded；四个 Creator 的 `creatorIsolation` key 为 `e04bb6b8c9ba7ec9f36a13adf8f07d67b090d521ada065509e0531a05b8a9cd1`，workspace/employee/default 均一致。实际私有 HOME 有 state.db/SOUL，无复制 auth.json/.env。 |
+| 自然语言创建 | discover/list/create/get 实际回读 | 两名 child 名称 `QA-Creator-20261009-Hermes-A/B`；ID `employee_c2865d71-dc26-4f68-90ff-c9064b4ceccf`、`employee_7134fb87-7f52-4c15-91ba-e875683084e6`；Hermes/default/精确电脑/owner/personal/描述与人格回读正确。由模型经工具创建，宿主未代建。 |
+| 两个子任务 | 原 task/action succeeded，工具和结果匹配 | `task_05072f39-409a-462a-ae5a-1b2eb576e782` → `action_494a6413-2da7-42fb-91e0-1eb73bb4f6ac` 输出 `CREATOR_CHILD_0_OK`；`task_5530b589-8189-4cc1-be08-35b19b0701b7` → `action_2b310f1a-801d-4031-8979-71dfd9e96733` 输出 `CREATOR_CHILD_1_OK`；各自实际 `ziwei_mcp_health` ok，MCP receipt.action_id 精确匹配。父任务等待期间子任务持续执行。 |
+| 安全失败与修正 | 原失败真实报告、正确意图继续 | phase-create 首次 get 明确不存在的 QA 标识实际失败，未创建该名字；随后 discover/list/create/get 两名正确岗位成功。 |
+| 幂等与配置保持 | 同 key 重试回原 ID | phase-repeat 两次真实 createEmployee 复用相同参数/key 返回原两员工；仍仅两名、两任务。正式模板 POST `{}` 复用原员工/首会话且配置 hash 不变；将来模板升级不覆盖定制另有 API 单测，未实际发布第二模板版本。 |
+| 历史追问 | 当前请求无资源 ID，由历史取原 ID 并回读 | phase-history 同 QA convo、前轮已完成，初始 payload 实际 assistant 历史包含两员工/两任务/两子 action；6 条、7185 JSON 字符。模型只调用 getEmployee/getTask/getAction 成功覆盖六原 ID，无 list/create。历史是在派发时取快照，提前排队的新问不包含随后才完成的助手回复。 |
+| 实际布局与本地交互 | 卡片不重叠、三个视口/两工作区 | 线上 `test_222`、`phone_ai` 共 6/6 场景、18 截图，card 126px、摘要两行、org→environment 32px；无横向溢出，page/console/requestfailed/unexpectedResponse 均 0，6 contexts 全关闭。键盘、错误重试与切区/第二电脑竞争由上文 fixture/单测覆盖。 |
+
+四个 parent 原 ID：create `action_d7b9d61b-428b-4369-b436-dc56e5ae65ca`；verify `action_4f1cd7fd-9f12-4f5d-8e0c-be03bce431c5`；repeat `action_1df56645-af5f-46dc-9ca2-ee48c4ddef70`；history `action_96be383d-2c6e-4bc5-a2f6-005b247fb0ff`。安全回执留在 `.local/creator-platform/native-creator-qa-result.json` 与 `native-execution-detail.json`；上述临时 action/员工/任务已按精确计划清理，生产 get 不再返回这些 QA 记录。
 
 Codex 本轮真机任务已按用户要求取消，不列作待完成项。手机本轮不执行动作，也不把旧手机 MCP 的加载证据写成手机业务通过。
 
-## 精确 QA 清理与保护复验：待验证
+## 精确 QA 清理与保护复验
 
 清理基线须在正式 Creator 和首个正式持久聊天创建后捕获，把它们及全部非 QA template metadata 纳入保护范围。验收使用独立临时 QA 对话及枚举的子员工、任务、actions；临时对话可以绑定被保留的正式 Creator，清理必须按对话 ID 精确检查，不能按 parent 员工 ID 扩大删除。
 
 | 项目 | 实际值 |
 | --- | --- |
-| 本轮 QA manifest 路径、精确 ID 和 counts | 待验证、待填写；不复用上一轮清理计划 |
-| dry-run 计划 SHA / 精确主资源与子记录 counts | 待验证、待填写；计划变化即停止，不扩大范围 |
-| 删除前无进行中 action / 正式资源仍受保护 | 待验证、待填写 |
-| 本轮 cleanup helper / 执行结果 / 外键检查 | 待验证、待填写 |
-| 发布前原保护表计数/hash 和原员工对照 | 待验证、待填写；heartbeat 活动字段可按既定规则变化 |
-| 正式 Creator 创建后的非 QA 来源/会话保护对照 | 待验证、待填写 |
-| 手机配置/绑定、邀请、原设备与 credential identities、控制表 | 待验证、待填写；仅安全计数/hash，不输出秘密或执行手机 API 动作 |
-| 最终 ready、queue、真实域名及只读 scope 检查 | 待验证、待填写 |
-| 临时 QA 会话撤销及凭据清理 | 待验证、待填写；不打印凭据，不绕过已拒绝的清理动作 |
+| 本轮 manifest | `.local/creator-platform/qa-resources.json`，固定 phone_ai + `QA-Creator-20261009`，2 employees / 1 QA convo `conv_045e2ec1-ca76-435a-a52f-507ed993b19a` / 2 tasks / 6 actions。保留 formal ID 单独列出，0 profile 清理。 |
+| 审过的计划 | SHA-256 `ade946133e3b71e950643ff9fab26b68a88f8b223a3177bc2ed6d918ee9a6e70`；准确删除上述主资源及 8 conversation_messages、23 action_events、2 task_messages、4 management_requests；0 attachments / template_instances。 |
+| 删除前保护 | 两 scope pending/acked queue 均 0；每个 QA owner 与 formal/template owner 相同且 personal；正式员工、首会话与来源记录纳入 baseline。 |
+| 实际精确清理 | UTC `2026-10-09T16:22:00.053027Z`（北京时间 00:22:00），BEGIN IMMEDIATE 重建计划 hash 再精确删除、保护复验、FK 检查后提交；counts 一致，QAremainder 0。fixture 16/16 含 owner/visibility 负例。 |
+| 原员工与保护表 | 发布前 7 原员工逐行不变，仅加入 1 formal；清理后对 formal-baseline main8 + 发布前 control10，共18表 count/stablehash 一致；8员工 managementMcp 全 enabled。 |
+| 来源与首会话 | 正式 employee、conversation、employee_template_instances 整行与 baseline 一致，非 QA 会话/消息/任务/actions 保护通过。 |
+| 手机/邀请/设备 | employee_phone_mcp、connect_bindings、invitations、设备/credential/grant/配对身份、控制10表均保持；无邀请消费、新配对或手机动作。 |
+| 最终只读与健康 | `client-final-readonly.json` 18/18：两区自身200/匿名401/跨区403，PID48624/20242 ready；`health-final.log` UTC16:23:14 全通过；匿名 terminal MCP POST 401 JSON，0 action。 |
+| QA session | UTC `2026-10-09T16:25:24.933Z`，精确撤销 `session_creator_platform_20261009`、删除服务器私有文件，本机 token 清除；旧 cookie 实际401。 |
 
-正式 Creator、首个正式用户聊天、用户已有员工/定制、真实配对、邀请和手机数据不得作为 QA 清理对象。安全证据只保存 IDs、版本、状态、计数/hash 和脱敏回执。
+正式 Creator、首个正式用户聊天、用户已有员工/定制、真实配对、邀请和手机数据均未作为 QA 清理对象。安全证据只保存 IDs、版本、状态、计数/hash 和脱敏回执；审计/通知及原生 Hermes 会话/诊断历史保留，没有宣称清空底层 CLI 历史。普通 QA 子员工不启用 Creator HOME 隔离，不能把其执行证据扩为普通员工状态已隔离。
 
-## 回滚骨架：待验证
+## 回滚方案（已准备，未执行）
 
 1. 记录待回滚版本、上一可用 release/前端/客户端及各备份的实际路径与 hash，核对正在运行的任务，保留完整失败证据。
 2. 优先回滚本次应用代码、前端与官方客户端到匹配版本，沿用原服务和原端口。保留旧 hash 资源、Nginx 手机转发、控制服务、APK 和持久化诊断日志，不启动替代实例。
 3. 新来源表为增量结构，代码回滚时保留表与正式员工/聊天。不要为恢复代码直接用整库旧备份覆盖发布后的真实业务数据；只有确认数据损坏并形成精确恢复范围后，才按实际备份实施数据恢复。
 4. 回滚后复验主 API/客户端健康、匿名与跨区拒绝、原员工/手机/邀请/设备数据和保护表。旧串行客户端可能无法完成 Creator 等待子任务的流程，不能把代码启动成功当作 Creator 工作流已恢复。
 
-**本轮实际回滚命令、路径、版本、执行记录与复验结果：待验证、待填写。**
+主站代码回滚目标 `/opt/ziwei/releases/1ca9c6b`。在确认没有运行任务后，可在生产以独立临时 symlink 指向该目录，再 `os.replace` 原子替换 `/opt/ziwei/current`，仅 `systemctl restart ziwei-api.service` 并检查三服务/healthz/新旧 assets。控制端 `8a4fe59`、Nginx、APK 和数据不回滚。DB/config 原始备份为上表目录；正式 Creator 与新的来源表保留，不整库覆盖。
+
+客户端回滚先复核正在监听20242的当前PID、安装路径与队列，停止核实的原客户端，恢复上表私有 `client-before-20261009T160831233Z/package` 和 `entries`，保持原 config 后沿 `D:\work\nodejs\node_global\ziwei_user.cmd start` 启动并重新验证身份/build/ready及外部 observer。官方包的旧版本和 metadata 位于服务器发布前备份的 `cli-before-ziwei-latest.tgz` / `cli-before-release.json`，恢复时核对它们的配套 hash。**本轮健康发布未触发回滚，没有把准备方案写成回滚已实跑。**

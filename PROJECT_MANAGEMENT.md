@@ -4,9 +4,26 @@
 >
 > **当前发布接续工作树**：`C:\Users\25941\.codex\worktrees\2884\灵光爸爸拆解`。原 `D:\灵光爸爸拆解` 保留用户修改，不作为本轮发布来源。
 >
-> **文档状态**：以 2026-10-09 默认自动管理 MCP 当前发布及下列待验边界为准；每次结构、运行方式或功能边界发生变化时必须更新本文。历史记录保留，较早的版本/PID、逐员工 MCP 开关或独立 bearer 操作不能替代当前规则。
+> **文档状态**：以 2026-10-10 内置 Creator 当前发布、完成事实及下列支持范围为准；每次结构、运行方式或功能边界发生变化时必须更新本文。历史记录保留，较早的版本/PID、逐员工 MCP 开关或独立 bearer 操作不能替代当前规则。
 
-### 2026-10-09 当前发布：默认自动管理 MCP
+### 2026-10-10 当前发布：内置数字员工 Creator（已部署，真实 Hermes 验收与精确清理完成）
+
+- 主站生产代码 `db0aa68b0735c30c65acdf342c3080655892a286` 于北京时间 **00:08:06**（`2026-10-09T16:08:06Z`）发布，`/opt/ziwei/current -> /opt/ziwei/releases/db0aa68`；前一版 `1ca9c6b`，部署备份 `/opt/ziwei-backups/creator-platform/20261009T144859Z`。只重启 `ziwei-api.service`；控制端仍为 `8a4fe59`，Nginx 配置 SHA `faf170c39866d8c307ed68cc49d96cf7cc28dfac442e979d3f3d8c35cf494967` 不变。原邀请、手机、默认管理 MCP、卡片与弹窗功能继续保留。
+- 前端为 `index-DRTDY7kv.js` / `index-CJMLdFH9.css`，新资源和原 `1ca9c6b` hash 资源 HEAD 均 200，主站健康与三服务 active 已确认。Android 仍为 code15，双 APK HEAD 200；本次该检查没有重新验证 APK 下载 hash，不据此扩大手机实机结论。
+- “添加数字伙伴 → 员工市场”提供 `ziwei-employee-creator` / **数字员工·Creator** 模板 1.0.0，使用原员工、管理创建校验及持久会话流程。每 workspace/owner/template 幂等保留一个实例，默认 personal；重复添加复用已有实例和会话，不覆盖用户人格、指令、技能、电脑或模型。同 owner 旧同名实例仅在配置兼容时复用，来源标为 `adopted-existing`，不把未应用过模板的定制内容声称为模板 1.0.0。
+- 正式 `phone_ai` 实例已通过网页创建并保留：员工 `employee_743801eb-189d-4a57-bb57-64adebf7b571`，首个会话 `conv_3c72ac45-1551-44d2-a1ed-c0900adc137a`；Hermes / `default`、电脑 `device_f9568c06-d932-4264-9d4c-acc5122097ea`、personal、template 1.0.0、origin `template`。1440×900、390×844、720×450 三组真实浏览器均确认模板可见、持久会话打开及刷新保留，pageErrors 为 0；这些界面结果不替代实际模型/工具验收。
+- 内置 Creator 会话执行附带同 workspace/employee/conversation 最近 user/assistant 文本，排除当前消息，最多 16 条、历史 JSON 最多 12,000 字符；历史仅作引用，不构成新的执行授权，当前请求在最后。普通员工保持原行为。历史在派发时取快照，提前排队的下一问不会包含之后才写入的上一轮助手回复。
+- Creator Hermes 持久 HOME 按 origin/workspace/employee 绑定，实例使用已保存的职责、人格和指令；原 source profile 的认证存储、锁和刷新保持，不复制 auth、`.env` 或原 YAML 中的凭据。当前隔离范围只验证 `openai-codex` 与本地 memory，其他 provider/远程 memory/更换 source profile 需要明确支持或迁移并会安全拒绝。无模型 native fixture 已验证 MEMORY/state/SOUL 路由隔离；不能用独立会话或准备回执代替真实模型结果。
+- 本地完整测试 **398/398**、0 skip，lint **60** 文件及 build 通过；runtime 隔离新 fixture 9/9、focused 47/47，模型调用/手机动作均为 0。既有浏览器回归的具体范围与新生产界面结果分别留证，不能累计成全部生产模型通过。
+- 官方客户端公开包 24 文件 / 73,936 bytes，SHA `355aef510a8d52d43308e73d580a7aa93a9390bfd14be2a57d3288fc8c4c04ee`，公开 metadata 与本地 manifest 匹配；来源仍为 `https://qzelynth.top/downloads/cli/ziwei-latest.tgz`。原生全局客户端 PID **48624**、原端口 **20242**、build `ca0807e0a3f3ace0fa9184c58886dd5e14e76191aae97982865d27caa0800068` 已 ready，配置保持不变；主连接 `test_222` 与原 shared 身份保留。
+- 正式实例创建后的只读 baseline `/opt/ziwei/.local/creator-platform/formal-baseline.sqlite` 已捕获：7 个原员工不变、正式 Creator 新增 1、模板记录 1，原主站保护数据除正式实例外不变，控制 10 保护表不变。正式 Creator 与首个用户会话需保留；模型 QA 临时子资源必须另用当前精确 manifest/计划 SHA 清理，不能套用上次管理 MCP 的旧清理计划。
+- **真实 Hermes 四阶段已完成**：create/verify/repeat/history 四个 Creator parent 均 succeeded、MCP loaded，两个不同岗位/人格的临时 Hermes default 子员工、两个小任务及合计六个 action 全部 succeeded，子任务输出各自成功 marker。故意查询不存在员工真实返回失败后，Creator 完成修正创建；repeat 返回原两个员工 ID，未重复创建。history 当前请求没有任何资源 ID，只通过六次 get 成功回读历史中的两员工、两任务、两 action；派发历史为 6 条 / 7,185 字符，真实助手回复包含这六个原 ID。
+- `native-execution-detail.json` 确认四次 Creator 执行模型均为 `gpt-6.1-sol`，使用同一持久实例 HOME，并存在原生 state 数据库与 SOUL；auth/`.env` 未克隆，原 source 配置不变。普通子员工取得真实执行与 MCP 成功证据，但本轮没有声明其 HOME/memory 隔离。正式实例在最终 POST 复用检查中返回 200、`duplicate:true`，员工及首个会话 ID 不变、配置 hash 不变。
+- `2026-10-09T16:22:00Z`（北京时间 **00:22:00**）按批准计划 SHA `ade946133e3b71e950643ff9fab26b68a88f8b223a3177bc2ed6d918ee9a6e70` 精确清理 2 QA 员工、1 QA 会话、2 QA 任务、6 QA action，以及 8 条会话消息、23 条 action event、2 条 task message、4 条 management request；没有删除模板记录。清理后 18 张主/控制保护表 count/stablehash 全部一致，正式员工/首会话/模板记录保持 baseline，8 员工全部 enabled、disabled/null 为 0、FK 通过、QA 残留 0；手机配置、设备身份、配对及邀请均保持。
+- 最终两区管理 API 只读 **18/18**：`test_222` / `phone_ai` 的 health/discovery/employees 自身 200、匿名 401、跨区 403；PID48624 / 20242 持续 ready，另有先前两区 queue=0 留证。watcher33376 最新心跳指向同一 PID/端口且 ready=true。生产团队布局真实 **6/6**（两区各 1440×1000、390×844、720×450），18 张截图、6 个 context 全关闭；卡片高 126px、环境区间距 32px，page/console/request/unexpected 错误及业务写请求均为 0。
+- `16:23:14Z` 最终健康复验通过；`16:25:24Z`（北京时间 **00:25:24**）QA 登录会话已撤销，旧 cookie 真实 401，服务器私有文件及本机临时 token 已移除。用户取消本轮 Codex 真机验收，模板支持保留，实际 Codex 执行及手机动作均为 0；未扩展其他 provider/远程 memory/普通员工隔离或 APK hash 结论。完整安全结果在 `.local/creator-platform/` 的 `native-creator-qa-result.json`、`native-execution-detail.json`、`cleanup-execute-result.json`、`data-final-result.json`、`client-final-readonly.json`、`live-team-layout-final/results.json`、`formal-reuse-result.json`、`session-final-result.json` 与 `health-final.log`，详细流程见 [Creator 运维记录](docs/operations/2026-10-09-creator-platform.md)。
+
+### 2026-10-09 历史发布：默认自动管理 MCP
 
 - 主站 `1ca9c6b8761a8ee17adb2fd6d4fa92f385718c05` 已推送并于北京时间 **21:18:32**（13:18:32Z）发布；前一版1ac0395，备份 `/opt/ziwei-backups/management-default/20261009T130953Z`。前端仍为 `index-Caqrwk2Y.js` / `index-C30xBdgl.css`。包含邀请、手机技能、卡片、弹窗及安装页；控制8a4fe59、Android协议与手机独立授权保持。首次Hermes无握手问题已修复并取得真实模型结果，历史失败保留。
 - 所有工作区、新员工与旧员工默认有效启用管理 MCP，无需人工逐 MCP 授权、员工 checkbox 或手改 token 文件。服务已启用但没有有效电脑连接时显示等待电脑；准备中、自动失败或 client_required 不单独阻止保存有效配置。执行时仍须自动准备或返回真实失败，原 workspace/device/offline/CLI/auth/provider/显式 profile 检查不放宽。

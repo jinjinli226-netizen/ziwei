@@ -1,5 +1,20 @@
 # 变更记录
 
+## 2026-10-10 内置数字员工 Creator（已部署 db0aa68，真实 Hermes 验收与精确清理完成）
+
+- 员工市场增加 `ziwei-employee-creator` / 数字员工·Creator 1.0.0；复用原员工管理校验、创建及持久会话流程，按 workspace/owner/template 幂等复用，默认 personal。重复安装保留用户定制配置；兼容旧同名实例仅明确采用并标记原配置来源，不伪称已应用模板人格。
+- Creator payload 的模板来源及职责/人格/指令从数据库重建，新增同 workspace/employee/conversation 的有界 user/assistant 历史，排除当前消息、最多16条/12,000字符；历史只作引用，当前请求最后，普通员工保持旧行为。任务会话绑定不一致在入库前拒绝。
+- Hermes Creator 使用按 origin/workspace/employee 绑定的持久实例 HOME，MEMORY/state/SOUL 隔离；原认证存储、锁与刷新保持，配置白名单避免复制 source auth、`.env` 与内联秘密。当前支持范围为 openai-codex+本地 memory；其他provider、远程memory和source profile迁移会明确拒绝。可信 runtime 路由在原生 dotenv 重读后恢复，管理与手机用途隔离继续保持；缺 native 确认回执不能报告隔离成功。
+- 主站 `db0aa68b0735c30c65acdf342c3080655892a286` 于北京时间00:08:06（`2026-10-09T16:08:06Z`）部署，前一版1ca9c6b，备份 `/opt/ziwei-backups/creator-platform/20261009T144859Z`。仅主API重启；控制8a4fe59、Nginx原hash、Android code15及既有增量保留。新前端 `index-DRTDY7kv.js` / `index-CJMLdFH9.css` 与旧hash资源均200，主站healthy、三服务active；本次双APK仅HEAD200，未重做hash验收。
+- 本地最终 **398/398**、0 skip，lint60/build通过，native/runtime隔离新fixture9/9、focused47/47，fixture无模型/手机调用。正式生产市场三视口确认可见、持久会话打开、刷新保留、pageErrors0；不扩大为模型任务通过。
+- 公开 tgz 24文件/73,936B，SHA `355aef510a8d52d43308e73d580a7aa93a9390bfd14be2a57d3288fc8c4c04ee` 与metadata/local manifest一致；真实全局客户端PID48624、20242、build `ca0807e0a3f3ace0fa9184c58886dd5e14e76191aae97982865d27caa0800068` ready，原配置不变。
+- 正式phone_ai员工 `employee_743801eb-189d-4a57-bb57-64adebf7b571` 与首会话 `conv_3c72ac45-1551-44d2-a1ed-c0900adc137a` 已创建并保留：Hermes/default/原shared电脑/personal/template1.0.0。新只读baseline确认原7员工不变、模板记录1、原主站保护数据除正式实例外不变、控制10保护表不变。
+- 真实 Hermes create/verify/repeat/history 四个 Creator parent 全 succeeded / MCP loaded；两名不同岗位/人格的临时 Hermes default 子员工、两任务及共六个 action 全 succeeded，子任务实际输出各自成功 marker。故意 missing 查询真实失败后修正创建；repeat 返回原两员工 ID。history 当前请求不含 ID，仅六次 get 成功回读原两员工/两任务/两 action；历史6条/7,185字符，真实助手回复含六个原ID。
+- 四次 Creator 实际模型均为 `gpt-6.1-sol`，原生持久 HOME/state/SOUL 确认、auth/`.env` 未克隆、原配置不变；普通子员工仅确认执行/MCP成功，未宣称其HOME隔离。正式实例最终复用200、duplicate=true、原员工/首会话ID及配置不变。
+- `16:22:00Z` 按批准计划 SHA `ade946133e3b71e950643ff9fab26b68a88f8b223a3177bc2ed6d918ee9a6e70` 精确清理 QA 2员工/1会话/2任务/6action及8消息/23事件/2task message/4management request，0模板记录；18张主/控制保护表count/stablehash一致、正式三资源baseline保持、8员工全enabled、FK通过、QA残留0，既有设备/配对/手机/邀请保持。
+- 最终两区管理API只读18/18，自身200/匿名401/跨区403，PID48624/20242持续ready；watcher33376心跳ready，先前两区queue=0留证。团队布局两区三视口6/6、18截图、6context全关闭、卡片126px/间距32px，page/console/request/unexpected错误和业务写请求0。16:23:14Z健康通过，16:25:24Z QA登录会话撤销、旧cookie401、服务器私有文件及本机临时token清除。
+- Codex真机按用户要求取消、0Codex执行/0手机动作；模板支持保留，其他provider/远程memory/普通员工HOME隔离及APK hash不扩大结论。旧管理MCP发布历史继续保留；实际安全证据在 `.local/creator-platform/` 对应结果JSON/log，详情见 [Creator 运维记录](docs/operations/2026-10-09-creator-platform.md)。
+
 ## 2026-10-09 默认自动管理 MCP（已部署 1ca9c6b，真实 Hermes 分范围验收通过）
 
 - 所有工作区的新旧员工默认启用管理 MCP，取消逐员工授权开关和手工 bearer 步骤；准备中、自动接入失败或客户端需更新不会单独阻止保存有效员工配置。工作区、真实电脑在线、CLI、认证/provider 与显式 profile 检查继续保留。

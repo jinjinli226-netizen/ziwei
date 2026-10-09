@@ -2,9 +2,21 @@
 
 > **当前维护入口**：请先阅读根目录 [PROJECT_MANAGEMENT.md](PROJECT_MANAGEMENT.md)。本文保留阶段性交接时间线；其中较早的验证数字和“待完成”描述可能已经过时，当前状态以项目管理手册、代码和最近一次真实验证为准。
 
-> **当前接管状态（2026-10-08）**：本地 checkout、5178 前端、4178 API 和项目 `data/ziwei_user.json` 是 `bjc-ops` 的本地代码验收环境；真实本机 `ziwei_user` daemon 由全局命令启动，使用用户目录配置连接 `https://qzelynth.top` 的服务器工作区 `test_222`。不要把项目配置或项目 daemon 当成服务器 daemon；接手时分别核对用户目录配置、项目配置和各自 `/readyz`。详细维护约定统一见 `PROJECT_MANAGEMENT.md`。
+> **2026-10-08 历史环境区分说明**：本地 checkout、5178 前端、4178 API 和项目 `data/ziwei_user.json` 是 `bjc-ops` 的本地代码验收环境；真实本机 `ziwei_user` daemon 由全局命令启动，使用用户目录配置连接 `https://qzelynth.top` 的服务器工作区 `test_222`。不要把项目配置或项目 daemon 当成服务器 daemon；接手时分别核对用户目录配置、项目配置和各自 `/readyz`。详细维护约定统一见 `PROJECT_MANAGEMENT.md`。
 
-## 2026-10-09 当前接手续记：默认自动管理 MCP
+## 2026-10-10 当前接手续记：内置 Creator 发布、真实 Hermes 验收与清理已完成
+
+- 生产代码为 `db0aa68b0735c30c65acdf342c3080655892a286`，北京时间 **00:08:06**（`2026-10-09T16:08:06Z`）发布 `/opt/ziwei/releases/db0aa68`，前一版 `1ca9c6b`。备份 `/opt/ziwei-backups/creator-platform/20261009T144859Z`；仅主 API 重启，控制仍为 `8a4fe59`，Nginx 原 hash 不变。新前端 `index-DRTDY7kv.js` / `index-CJMLdFH9.css`，新/旧资源均 200，主站健康、三服务 active、Android code15 双 APK HEAD200 已证；此处没有新增 APK hash 或手机实机结论。
+- 市场模板 `ziwei-employee-creator` 1.0.0 使用现有员工、管理校验和会话系统，按 workspace/owner/template 幂等复用；默认 personal，不自动覆盖已定制实例。旧同名兼容实例采用时保留原配置并标记 `adopted-existing`，不假称已应用 v1。跨区/私有成员/伪造 actor 与真实电脑、CLI、auth/provider/profile 检查继续保留。
+- 正式 `phone_ai` Creator **保留**：员工 `employee_743801eb-189d-4a57-bb57-64adebf7b571`、首个会话 `conv_3c72ac45-1551-44d2-a1ed-c0900adc137a`，Hermes `default` / `device_f9568c06-d932-4264-9d4c-acc5122097ea` / personal / template 1.0.0。三组真实视口 1440×900、390×844、720×450 已确认市场可见、持久会话打开、刷新保留、pageErrors 0；原员工 7 个不变，正式实例与 1 条模板元数据已纳入新的只读 baseline。
+- Creator 每次会话执行只拼接本会话、本员工、本工作区最近 user/assistant 文本：排除当前消息，最多16条/12,000字符，历史是引用，当前请求最后作为执行依据。普通员工不扩历史；派发快照不包含之后才产生的前轮回复。Hermes 实例 MEMORY/state/SOUL 使用独立持久 HOME，原认证路径不复制；当前只验证 openai-codex+本地 memory，绑定 profile 迁移/其他 provider/远程 memory 安全拒绝。模型及工具调用仍需本次真实 action 结果与 MCP audit。
+- 发布前本地 **398/398** 测试、0 skip，lint60/build通过；runtime无模型 fixture 新9/9、focused47/47。公开客户端24文件/73,936B，SHA `355aef510a8d52d43308e73d580a7aa93a9390bfd14be2a57d3288fc8c4c04ee` 与公开metadata一致。原生全局 PID48624、20242、build `ca0807e0a3f3ace0fa9184c58886dd5e14e76191aae97982865d27caa0800068` ready；原配置保持，不重新配对。
+- **真实 Hermes 四阶段验收通过**：四个 Creator parent 的 create/verify/repeat/history 均 succeeded / MCP loaded；两名不同岗位/人格的 Hermes default 临时子员工、两任务及共六个 action 全部 succeeded，子任务返回各自成功 marker。故意 missing 查询真实失败后完成修正创建，repeat 返回原两员工 ID；history 当前请求无资源 ID，仅六次 get 回读原两员工/两任务/两 action，派发历史 6 条 / 7,185 字符且包含真实助手返回的六个 ID。四次 Creator 实际模型均为 `gpt-6.1-sol`，同一持久 HOME 的原生 state/SOUL 确认存在、auth/`.env` 未复制、原配置不变；普通子员工未宣称 HOME/memory 隔离。
+- `16:22:00Z`（北京时间00:22:00）批准计划 SHA `ade946133e3b71e950643ff9fab26b68a88f8b223a3177bc2ed6d918ee9a6e70` 已执行，精确删除 QA 2员工/1会话/2任务/6action，以及8消息/23事件/2task message/4management request，0模板记录；正式 Creator、首个用户会话与模板记录保持新 baseline `/opt/ziwei/.local/creator-platform/formal-baseline.sqlite`。清理后18张保护表count/stablehash一致、8员工全enabled、FK通过、QA残留0；旧management-default清理计划不适用，既有设备/配对/手机/邀请未改。正式 POST 复用最终200、duplicate=true、配置与原正式ID不变。
+- 最终两区 health/discovery/employees 只读18/18，自身200/匿名401/跨区403；PID48624/20242持续ready，先前两区queue=0留证，watcher33376最新心跳仍指向同一ready进程。团队布局两区三视口实际6/6、18截图、6 context全关闭，卡片126px/环境间距32px；page/console/request/unexpected错误与业务写请求为0。最终health在16:23:14Z通过；16:25:24Z QA登录会话撤销、旧cookie401、服务器私有文件删除及本机临时token清除均已完成。
+- Codex真机本轮按用户要求取消，实际0次Codex执行/0手机动作；模板支持保留，其他provider/远程memory/普通员工HOME隔离及APK hash不扩大结论。本机缓存/synthetic目录此前自动审批拒绝的清理不得绕过。安全证据集中在 `.local/creator-platform/` 的 `native-creator-qa-result.json`、`native-execution-detail.json`、`cleanup-execute-result.json`、`data-final-result.json`、`client-final-readonly.json`、`live-team-layout-final/results.json`、`formal-reuse-result.json`、`session-final-result.json` 和 `health-final.log`；详见 [Creator 运维记录](docs/operations/2026-10-09-creator-platform.md)。
+
+## 2026-10-09 历史接手续记：默认自动管理 MCP
 
 - 已推送/部署代码 `1ca9c6b8761a8ee17adb2fd6d4fa92f385718c05`，北京时间 21:18:32（13:18:32Z）；前一版 1ac0395，备份 `/opt/ziwei-backups/management-default/20261009T130953Z`。前端仍为 `index-Caqrwk2Y.js` / `index-C30xBdgl.css`，控制保持 8a4fe59。下面的 f790f09、82c4f8e、628482d 等保持为历史快照，功能均已包含，历史 PID、手工开关与 token 配置不作为当前操作指引。
 - 所有工作区新旧员工有效管理配置默认开启。每条已配对电脑连接用自己的设备身份领取单工作区、短期、management-only 凭据，按 origin/workspace/device 私有缓存并自动恢复/续期；跨区、匿名、撤销/过期及错误 audience 继续拒绝，不让浏览器或模型拿到设备凭据。新增 shared 连接仍需原双 Owner 授权，普通成员的网页角色及手机 capability/精确绑定规则不变。

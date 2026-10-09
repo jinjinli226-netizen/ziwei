@@ -4,7 +4,7 @@
 
 ## 数字员工·Creator：从伙伴市场开始协作
 
-**本功能当前为本地开发实现，尚未部署；以下是使用流程，上线状态与真实验收结果见[Creator 操作记录](docs/operations/2026-10-09-creator-platform.md)。**
+**已发布 `db0aa68`，北京时间 2026-10-10 00:08:06。** `phone_ai` 的正式 Creator 已创建并保留，[打开持久对话](https://qzelynth.top/phone_ai/inbox/conv_3c72ac45-1551-44d2-a1ed-c0900adc137a?employee=employee_743801eb-189d-4a57-bb57-64adebf7b571)。本轮真实 Hermes 创建、两个子任务、失败修正、幂等和历史 ID 追问均通过；完整证据、兼容范围与回滚见[Creator 操作记录](docs/operations/2026-10-09-creator-platform.md)。
 
 1. 登录并切到目标工作区，让所选电脑原有的 `ziwei_user` 在线。
 2. 打开“成员与设备 → 添加数字员工 → 从伙伴市场创建”，选择官方内置的“数字员工·Creator”。
@@ -14,7 +14,7 @@
 
 不需要复制提示词或密钥。模板版本更新只自动用于新实例，已有实例的定制配置继续保留；要变更已安装实例的运行时、电脑、profile、模型或可见性，应明确编辑原员工，重新安装不会覆盖这些字段。失败时保留原资源 ID 和上下文，根据具体错误修正后重试。
 
-Creator 的默认管理 MCP 只在当前身份有权访问的工作区内使用。安装模板不会自动分配手机、绑定手机技能或执行手机动作。本轮真实验收计划使用已经验证的 Hermes 环境；Codex 模板支持保留，Codex 真机排障与验收按用户最新要求取消。
+Creator 的默认管理 MCP 只在当前身份有权访问的工作区内使用。安装模板不会自动分配手机、绑定手机技能或执行手机动作。本轮正式实例使用 Hermes `default`，模型沿源 profile 默认值，本次实际为 `gpt-6.1-sol`。Creator 原生状态隔离目前验证 `openai-codex` provider 和本地 memory；其他 provider、远程 memory 或更换 source profile 需要兼容适配或明确迁移。Codex 模板支持保留，Codex 真机排障与验收按用户最新要求取消；手机实机暂缓，本轮 0 手机动作。
 
 ## 维护与 AI 接手
 
