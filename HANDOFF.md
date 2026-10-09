@@ -4,7 +4,15 @@
 
 > **当前接管状态（2026-10-08）**：本地 checkout、5178 前端、4178 API 和项目 `data/ziwei_user.json` 是 `bjc-ops` 的本地代码验收环境；真实本机 `ziwei_user` daemon 由全局命令启动，使用用户目录配置连接 `https://qzelynth.top` 的服务器工作区 `test_222`。不要把项目配置或项目 daemon 当成服务器 daemon；接手时分别核对用户目录配置、项目配置和各自 `/readyz`。详细维护约定统一见 `PROJECT_MANAGEMENT.md`。
 
-## 2026-10-09 当前接手续记：团队员工卡片重叠修复
+## 2026-10-09 当前接手续记：邀请注册修复
+
+- 主站已于北京时间11:12:26发布 `82c4f8e`，目录 `/opt/ziwei/releases/82c4f8e`；控制 `8a4fe59`。手机技能628482d、管理MCP、卡片与原Nginx手机路由保留，只有主API重启。文档Git头可晚于该代码发布。
+- 根因是个人工作区有效邀请被注册kind限制拒绝；共享事务校验现支持个人/团队邀请、即时user_id绑定、同邮箱legacy Owner保持与未知工作区无code拒绝。错误持续可见，已有账号登录接受后即时进入目标工作区；普通受邀者无owner权限。
+- 296/296、lint49/build、隔离邀请6/6、真实新上下文邀请6/6和原UI30/30通过。独立QA四账号三工作区已删除、session0、外键检查无新增问题；真实bjc邀请在清理后仍pending且未被验收消费。Mac场景为Chromium UA模拟，非实体Mac。
+- 备份 `/opt/ziwei-backups/invite-registration/20261009T030846Z` 双库ok、13配置；API PID80617，控制44591/nginx737未重启。APK code15双包hash、旧JS/CSS、手机/管理匿名401 JSON均通过。回滚628482d仅需切symlink并重启主API，不恢复旧库。
+- 独立邀请树发布，未覆盖原D与2884树任何dirty/untracked；T8正在接续的手机文档须合并保留。用户可刷新原邀请链接注册，已注册邮箱登录后接受。详细记录见[邀请注册发布记录](docs/operations/2026-10-09-invitation-registration-fix.md)。
+
+## 2026-10-09 历史接手续记：团队员工卡片重叠修复
 
 - 用户截图揭示此前未覆盖的团队页长指令布局：最高卡片 787px，组织区固定 500px，卡片与设备表重叠。`instructions` 优先展示、后置 CSS 取消截断、绝对定位列表不能撑高父容器共同导致问题。
 - 主站现为 `dc3917341cd801d4e83bda8da24fe794d35f23f2`，北京时间 00:50:22 发布；前端 `index-PEvi9Z0Z.js` / `index-DyDgRE0D.css`。岗位摘要优先 description，缺失时有界取指令首句；详情和编辑保留完整指令。组织列表随排数撑高，390px 员工文字列恢复可读宽度。
