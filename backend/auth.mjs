@@ -167,9 +167,10 @@ export function createAuthService(db, { sessionTtlMs = SESSION_TTL_MS } = {}) {
         if (invitationCode || workspace) {
           acceptInvitationMembership(db, { code: invitationCode, workspaceSlug: requestedSlug, userId, email, name });
         } else {
+          if (requestedSlug) throw new Error('工作区不存在，请使用有效邀请链接');
           const workspaceId = id('ws');
           const workspaceName = String(input.workspaceName || input.workspace_name || '个人工作区').trim() || '个人工作区';
-          const slug = requestedSlug || availableWorkspaceSlug(db, '', workspaceName);
+          const slug = availableWorkspaceSlug(db, '', workspaceName);
           db.prepare('INSERT INTO workspaces(id,slug,name,kind,plan,timezone,created_at) VALUES(?,?,?,?,?,?,?)').run(workspaceId, slug, workspaceName, 'personal', 'free', 'Asia/Shanghai', timestamp);
           const memberId = id('member');
           db.prepare('INSERT INTO members(id,user_id,workspace_id,name,email,role,avatar,joined_at) VALUES(?,?,?,?,?,?,?,?)').run(memberId, userId, workspaceId, name, email, 'owner', null, timestamp);

@@ -48,7 +48,8 @@ export function acceptInvitationMembership(db, { code = '', workspaceSlug = '', 
   const timestamp = new Date().toISOString();
   const memberName = String(name || recipientEmail.split('@')[0] || '新成员').trim();
   if (member && !member.user_id && userId) {
-    db.prepare('UPDATE members SET user_id=?,name=?,email=?,role=? WHERE id=?').run(userId, memberName, recipientEmail, invitedRole, member.id);
+    const memberRole = member.role === 'owner' && normalizeEmail(member.email) === recipientEmail ? 'owner' : invitedRole;
+    db.prepare('UPDATE members SET user_id=?,name=?,email=?,role=? WHERE id=?').run(userId, memberName, recipientEmail, memberRole, member.id);
   } else if (!member) {
     const memberId = `member_${crypto.randomUUID()}`;
     db.prepare('INSERT INTO members(id,user_id,workspace_id,name,email,role,avatar,joined_at) VALUES(?,?,?,?,?,?,?,?)')
