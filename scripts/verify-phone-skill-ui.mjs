@@ -93,7 +93,7 @@ async function open(path, state, width = 1440) {
   return { page, context };
 }
 async function run(name, action) { try { await action(); evidence.tests.push({ name, passed: true }); process.stdout.write(`PASS ${name}\n`); } catch (error) { evidence.tests.push({ name, passed: false, error: error.stack }); process.stderr.write(`FAIL ${name}: ${error.message}\n`); } }
-async function screenshot(page, name) { const file = join(output, name); await page.screenshot({ path: file, fullPage: true,mask:[page.locator('.sidebar-account')] }); evidence.screenshots.push(file); }
+async function screenshot(page, name) { const file = join(output, name); await page.screenshot({ path: file, fullPage: true,mask:[page.locator('.sidebar-account')],maskColor:'#ffffff' }); evidence.screenshots.push(file); }
 async function chooseDevice(page, label) { await page.getByRole('combobox', { name: '目标电脑', exact: true }).click(); await page.getByRole('option', { name: label, exact: true }).click(); }
 function phoneFixture() {
  const f=fixture(); const previous=f.handle;
