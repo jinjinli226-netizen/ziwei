@@ -231,6 +231,16 @@ export function openDatabase({ memory = false, filename = path.join(ROOT, 'data'
       FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
       FOREIGN KEY(employee_id) REFERENCES employees(id) ON DELETE SET NULL
     );
+    CREATE TABLE IF NOT EXISTS employee_template_instances (
+      id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, owner_user_id TEXT NOT NULL,
+      employee_id TEXT NOT NULL UNIQUE, template_id TEXT NOT NULL, template_version TEXT,
+      origin TEXT NOT NULL CHECK(origin IN ('template','adopted-existing')),
+      initial_config_hash TEXT NOT NULL, conversation_id TEXT, created_at TEXT NOT NULL,
+      UNIQUE(workspace_id,owner_user_id,template_id),
+      FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
+      FOREIGN KEY(employee_id) REFERENCES employees(id) ON DELETE CASCADE,
+      FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE SET NULL
+    );
     CREATE TABLE IF NOT EXISTS conversation_messages (
       id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, role TEXT NOT NULL,
       content TEXT NOT NULL, attachment_json TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL,

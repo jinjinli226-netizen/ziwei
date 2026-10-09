@@ -27,6 +27,12 @@ test('management reads and connection retry retain an explicit workspace while n
     assert.equal(requests.at(-1).url, 'https://qa.test/api/workspaces/workspace-a/mcp/retry');
     assert.equal(requests.at(-1).options.method, 'POST');
     assert.deepEqual(JSON.parse(requests.at(-1).options.body), { deviceId: 'computer-a' });
+    assert.equal(typeof api.employeeTemplates, 'function');
+    await api.employeeTemplates('workspace-a');
+    assert.equal(requests.at(-1).url, 'https://qa.test/api/workspaces/workspace-a/employee-templates');
+    await api.createEmployeeTemplateInstance('creator/id', {targetDeviceId:'computer-a',runtime:'Codex'}, 'workspace-a');
+    assert.equal(requests.at(-1).url, 'https://qa.test/api/workspaces/workspace-a/employee-templates/creator%2Fid/instances');
+    assert.deepEqual(JSON.parse(requests.at(-1).options.body), {targetDeviceId:'computer-a',runtime:'Codex'});
   } finally {
     globalThis.window = saved.window; globalThis.fetch = saved.fetch;
   }

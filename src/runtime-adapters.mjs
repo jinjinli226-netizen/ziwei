@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { parseDocument, parse as parseYaml } from 'yaml';
 import { redactSecrets } from './redaction.mjs';
 import { normalizeRuntimeProfile } from './employee-runtime.mjs';
+import { prepareCreatorRuntimeHome, CREATOR_RUNTIME_ENV_KEYS } from './creator-runtime-home.mjs';
 
 /**
  * Native local runtime adapters used by ziwei_user.
@@ -271,7 +272,7 @@ export function createHermesExecutionOverlay({ profile, baseHome, privateDirecto
 }
 
 /** Configure a native stdio server without placing bearer credentials in argv or profile files. */
-export function prepareManagementMcpLaunch({ runtime, profile, config = {}, workspace, apiBase, request, auditDirectory, actionId = 'runtime', invocation, env = {} } = {}) {
+export function prepareManagementMcpLaunch({ runtime, profile, model = null, config = {}, workspace, apiBase, request, auditDirectory, actionId = 'runtime', invocation, env = {}, creatorInstance, creatorInstanceDirectory } = {}) {
   if (!workspace && request?.enabled !== true) return { invocation, env, receipt: null };
   if (request?.workspace && request.workspace !== workspace) throw new Error('管理 MCP 请求工作区与已配对工作区不一致');
   if (!['Codex', 'Hermes'].includes(runtime)) throw new Error(`${runtime} 尚不支持紫薇管理 MCP 启动注入；请显式选择 Codex 或 Hermes`);
@@ -281,11 +282,13 @@ export function prepareManagementMcpLaunch({ runtime, profile, config = {}, work
   const safeId = String(actionId).replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120);
   const auditFile = path.join(auditDirectory, `${safeId}-${randomUUID()}.jsonl`);
   const childEnv = { ...env };
+  for (const key of CREATOR_RUNTIME_ENV_KEYS) delete childEnv[key];
   for (const key of MANAGEMENT_ENV_KEYS) delete childEnv[key];
   Object.assign(childEnv, local.credentialEnv, { ZIWEI_API_BASE: local.baseUrl, ZIWEI_MCP_WORKSPACE: workspace, ZIWEI_MCP_AUDIT_FILE: auditFile });
   const injectedEnvKeys = ['ZIWEI_API_BASE', 'ZIWEI_MCP_WORKSPACE', ...Object.keys(local.credentialEnv), 'ZIWEI_MCP_AUDIT_FILE'];
   const args = [...invocation.args];
   let overlay = null;
+  let creator = null;
   if (runtime === 'Codex') {
     const overrides = {
       command: process.execPath,
@@ -308,13 +311,21 @@ export function prepareManagementMcpLaunch({ runtime, profile, config = {}, work
     } catch (error) { overlay.cleanup(); throw error; }
     childEnv.HERMES_HOME = overlay.sourceHome;
     childEnv.HERMES_MANAGED_DIR = overlay.home;
+    try {
+      const modelIndex = args.indexOf('--model');
+      creator = prepareCreatorRuntimeHome({ context: creatorInstance, sourceHome: overlay.sourceHome, profile: normalizeRuntimeProfile(profile) || 'default', privateDirectory: creatorInstanceDirectory, workspace, apiBase: local.baseUrl, model: model ?? (modelIndex >= 0 ? args[modelIndex + 1] : null) });
+      if (creator) {
+        Object.assign(childEnv, creator.env);
+        if (modelIndex < 0) args.push('--model', creator.effectiveModel);
+      }
+    } catch (error) { overlay.cleanup(); throw error; }
     // Explicit native selection prevents sticky active_profile from changing the requested home.
     args.unshift('--profile', normalizeRuntimeProfile(profile) || 'default');
     // Hermes -z validates native MCP names; `all` includes the configured server
     // and retains the employee's other native toolsets.
     args.push('--toolsets', 'all');
   }
-  return { invocation: { ...invocation, args }, env: childEnv, overlayHome: overlay?.home, cleanup: overlay?.cleanup || (() => {}), receipt: { configured: true, managed: config.managed === true, injected: true, loaded: false, transport: 'stdio', workspace, runtime, runtimeProfile: profile || 'default', auditFile } };
+  return { invocation: { ...invocation, args }, env: childEnv, overlayHome: overlay?.home, creatorPrepared: creator?.receipt || null, effectiveModel: creator?.effectiveModel, cleanup: overlay?.cleanup || (() => {}), receipt: { configured: true, managed: config.managed === true, injected: true, loaded: false, transport: 'stdio', workspace, runtime, runtimeProfile: profile || 'default', auditFile } };
 }
 
 export function managementMcpReceipt(receipt) {
@@ -831,7 +842,7 @@ export function parseRuntimeStreamLine(line, state, onOutput = () => {}, onStage
 }
 
 /** Execute an installed CLI using an explicit argv, with full local approval. */
-export function executeRuntime({ runtime, prompt, model = null, profile = null, cwd = process.cwd(), env = {}, attachments = [], managementMcp = null, terminalMcp = null, signal, onOutput, onProgress, onStage } = {}) {
+export function executeRuntime({ runtime, prompt, model = null, profile = null, cwd = process.cwd(), env = {}, attachments = [], managementMcp = null, terminalMcp = null, creatorInstance, creatorInstanceDirectory, signal, onOutput, onProgress, onStage } = {}) {
   const resolvedRuntime = normalizeRuntime(runtime);
   if (!resolvedRuntime) return Promise.reject(new Error(`未知本机运行时: ${runtime || '(empty)'}`));
   const definition = DEFINITIONS[resolvedRuntime];
@@ -843,7 +854,7 @@ export function executeRuntime({ runtime, prompt, model = null, profile = null, 
   let childEnv = { ...process.env, ...env };
   delete childEnv.ZIWEI_CONFIG;
   // An employee with MCP disabled must not inherit daemon management credentials.
-  for (const key of [...MANAGEMENT_ENV_KEYS, ...TERMINAL_ENV_KEYS, ...LEGACY_TERMINAL_ENV_KEYS]) delete childEnv[key];
+  for (const key of [...MANAGEMENT_ENV_KEYS, ...TERMINAL_ENV_KEYS, ...LEGACY_TERMINAL_ENV_KEYS, ...CREATOR_RUNTIME_ENV_KEYS]) delete childEnv[key];
   delete childEnv.ZIWEI_DEVICE_TOKEN;
   delete childEnv.ZIWEI_DAEMON_DEVICE_TOKEN;
   const profileBaseHome = childEnv.HERMES_HOME || hermesHome();
@@ -864,9 +875,15 @@ export function executeRuntime({ runtime, prompt, model = null, profile = null, 
   let receipt = null;
   let phoneReceipt = null;
   let cleanupOverlay = () => {};
+  let creatorPrepared = null;
+  let creatorIsolation = null;
+  let selectedModel = model || null;
   try {
-    const launch = prepareManagementMcpLaunch({ runtime: resolvedRuntime, profile, invocation, env: childEnv, ...(managementMcp || {}) });
+    const launch = prepareManagementMcpLaunch({ runtime: resolvedRuntime, profile, model, invocation, env: childEnv, ...(managementMcp || {}), creatorInstance, creatorInstanceDirectory });
     invocation = launch.invocation; childEnv = launch.env; receipt = launch.receipt;
+    creatorPrepared = launch.creatorPrepared;
+    selectedModel = launch.effectiveModel || selectedModel;
+    if (resolvedRuntime === 'Hermes' && creatorInstance?.templateId === 'ziwei-employee-creator' && !creatorPrepared) throw new Error('Creator Hermes 缺少可信实例工作区或管理 MCP 连接；未启动模型');
     cleanupOverlay = launch.cleanup || cleanupOverlay;
     const phoneLaunch = prepareTerminalMcpLaunch({ runtime: resolvedRuntime, profile, invocation, env: childEnv, profileBaseHome, hermesOverlayHome: launch.overlayHome, ...(terminalMcp || {}) });
     invocation = phoneLaunch.invocation; childEnv = phoneLaunch.env; phoneReceipt = phoneLaunch.receipt;
@@ -886,6 +903,21 @@ export function executeRuntime({ runtime, prompt, model = null, profile = null, 
     }
   }
   const state = { output: '', response: '', bytes: 0, truncated: false, lineBuffer: '' };
+  let diagnosticBuffer = '';
+  const consumeDiagnostics = chunk => {
+    if (!creatorPrepared) { consume(chunk); return; }
+    diagnosticBuffer += String(chunk || '');
+    if (diagnosticBuffer.length > MAX_OUTPUT_BYTES) { consume(diagnosticBuffer.slice(0, MAX_OUTPUT_BYTES)); diagnosticBuffer = diagnosticBuffer.slice(MAX_OUTPUT_BYTES); }
+    const lines = diagnosticBuffer.split(/\r?\n/); diagnosticBuffer = lines.pop() || '';
+    for (const line of lines) {
+      if (creatorPrepared && line.startsWith('ZIWEI_CREATOR_ISOLATION:')) {
+        try {
+          const value = JSON.parse(line.slice('ZIWEI_CREATOR_ISOLATION:'.length));
+          if (Object.keys(value).length === Object.keys(creatorPrepared).length && Object.entries(creatorPrepared).every(([key, item]) => value[key] === item)) creatorIsolation = creatorPrepared;
+        } catch {}
+      } else consume(`${line}\n`);
+    }
+  };
   const consume = chunk => {
     if (invocation.format !== 'json-lines') { appendOutput(state, chunk, onOutput); return; }
     state.lineBuffer += String(chunk || '');
@@ -915,13 +947,15 @@ export function executeRuntime({ runtime, prompt, model = null, profile = null, 
     child.stderr?.on('data', chunk => {
       // stderr contains diagnostics and is deliberately streamed to the same
       // redacted event channel without writing it to the daemon log.
-      consume(chunk);
+      consumeDiagnostics(chunk);
     });
     child.once('error', error => finish(null, error));
     child.once('close', (code, childSignal) => {
+      if (diagnosticBuffer) consumeDiagnostics('\n');
       if (state.lineBuffer) parseRuntimeStreamLine(state.lineBuffer, state, onOutput, onStage);
       if (signal?.aborted) return finish({ status: 'failed', code: 'cancelled', error: 'runtime execution cancelled', result: { runtime: resolvedRuntime, code, signal: childSignal, output: state.output, truncated: state.truncated } });
-    const result = { runtime: resolvedRuntime, model: model || null, profile: profile || null, binary: discovered.binary, code, signal: childSignal, output: state.response.trim() || state.output, diagnostics: state.response.trim() ? state.output : null, truncated: state.truncated, ...(spec.nativeBinding ? { hermesBootstrap: spec.nativeBinding } : {}), ...(receipt ? { managementMcp: managementMcpReceipt(receipt) } : {}), ...(phoneReceipt ? { terminalMcp: terminalMcpReceipt(phoneReceipt) } : {}), ...(attachments.length ? {attachments} : {}) };
+    const result = { runtime: resolvedRuntime, model: selectedModel, profile: profile || null, binary: discovered.binary, code, signal: childSignal, output: state.response.trim() || state.output, diagnostics: state.response.trim() ? state.output : null, truncated: state.truncated, ...(spec.nativeBinding ? { hermesBootstrap: spec.nativeBinding } : {}), ...(creatorPrepared ? { creatorIsolation: creatorIsolation || { ...creatorPrepared, enabled: false, reasonCode: 'native_isolation_unconfirmed' } } : {}), ...(receipt ? { managementMcp: managementMcpReceipt(receipt) } : {}), ...(phoneReceipt ? { terminalMcp: terminalMcpReceipt(phoneReceipt) } : {}), ...(attachments.length ? {attachments} : {}) };
+      if (code === 0 && creatorPrepared && !creatorIsolation) return finish({ status: 'failed', code: 'creator_isolation_unconfirmed', error: 'Hermes 未确认 Creator 实例状态隔离；不能报告执行成功', result });
       const mcpFailure = code === 0 ? managementMcpExecutionFailure(result.managementMcp) || terminalMcpExecutionFailure(result.terminalMcp) : null;
       if (mcpFailure) return finish({ status: 'failed', ...mcpFailure, result });
       if (code !== 0) return finish({ status: 'failed', code: 'runtime_failed', error: formatRuntimeFailure(resolvedRuntime, code, state.output), result });

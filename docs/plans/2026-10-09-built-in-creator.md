@@ -38,9 +38,17 @@ The initial template is `ziwei-employee-creator` version `1.0.0`. It separates d
 
 ## Task 4: Production and real Creator acceptance
 
+Latest user steering: “codex这个不用管了”. Keep the catalog's supported runtime selection, but skip actual Codex execution/debugging in this acceptance. Use the verified native Hermes environment for the formal Creator and both QA children. The phone is currently inaccessible to the user; record phone execution as unverified with zero actions.
+
 - Confirm production 1ca9c6b, control 8a4fe59, actual global client PID/build, test_222 and phone_ai identities and original port 20242. Do not start a substitute daemon or perform Mac setup.
 - Run appropriate full tests/lint/build, inspect intended changes, push and deploy with database/config backup. Preserve original data, old hash assets, Nginx phone route, control/APK and diagnostic logs.
-- In real browser, create the phone_ai permanent 数字员工·Creator with actual Codex when usable, otherwise verified Hermes with explicit recorded configuration; confirm refresh and direct chat.
-- The real Creator must load management MCP, create Codex and Hermes QA employees from natural language, read back exact environment/profile, execute a small task, correct an intentional safe failure, and demonstrate idempotent reuse.
+- In real browser, create the phone_ai permanent 数字员工·Creator with verified Hermes and explicit recorded configuration; confirm refresh and direct chat.
+- The real Creator must load management MCP, create two distinct Hermes QA employees from natural language, read back exact environment/profile, execute a small task, correct an intentional safe failure, and demonstrate idempotent reuse.
 - Record actual tool/action/task receipts, preserve the formal Creator and its conversation, and precisely clean only enumerated QA children and temporary sessions. Never consume invitations or operate phones.
 - Recheck production/browser/data boundaries and update PROJECT_MANAGEMENT, README, HANDOFF, CHANGELOG and a release/rollback acceptance record with exact links and unverified limits.
+
+## Accepted persistence and dispatch safeguards
+
+- Only trusted built-in Creator instances receive their saved role fields and bounded conversation history. History is limited to the exact workspace/employee/conversation binding, up to 16 prior user/assistant messages and 12,000 serialized characters. The current user request remains last and is the authorization basis.
+- Native Hermes Creator homes are keyed by API origin/workspace/employee and persist their own SOUL, memory, sessions and state. The selected source profile's native authentication store and refresh locks remain authoritative; credentials are never cloned into instance homes. This release verifies the native openai-codex provider with local memory, and rejects unsupported providers, remote memory and changed source-profile bindings.
+- Daemon polling schedules work without blocking on a running parent. Bounded concurrency reserves child task capacity, serializes the same employee and deduplicates active action IDs. A Creator does not wait synchronously for another action that requires its own occupied employee lane.

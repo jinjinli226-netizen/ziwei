@@ -73,8 +73,8 @@ function fixture() {
   }
   return { state, handle };
 }
-async function open(path, state, width = 1440) {
-  const context = await browser.newContext({ viewport: { width, height: 1000 } });
+async function open(path, state, width = 1440, height = 1000) {
+  const context = await browser.newContext({ viewport: { width, height } });
   await context.addInitScript(() => { Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async text => { window.__qaCopied = text; } } }); });
   await context.route('**/*', async route => {
     const url = new URL(route.request().url());
@@ -125,11 +125,11 @@ async function teamShot(page, name) {
   const file = join(output, name); await page.screenshot({ path:file, fullPage:true, mask:[page.locator('.sidebar-account')], maskColor:'#edf3fa' }); evidence.screenshots.push(file);
 }
 try {
-  for (const width of [1440, 2048, 2549, 390]) for (const scenario of cases) await run(`${scenario.name} layout at ${width}`, async () => {
-    const f = teamFixture(scenario.employees); const { page, context } = await open('/test_222/members', f, width);
+  for (const {width,height} of [{width:1440,height:1000},{width:2048,height:1000},{width:2549,height:1000},{width:390,height:844},{width:720,height:450}]) for (const scenario of cases) await run(`${scenario.name} layout at ${width}x${height}`, async () => {
+    const f = teamFixture(scenario.employees); const { page, context } = await open('/test_222/members', f, width, height);
     try {
       await page.locator('.org-employee-card').first().waitFor();
-      const geometry = await teamGeometry(page); evidence.geometry.push({ width, scenario:scenario.name, ...geometry });
+      const geometry = await teamGeometry(page); evidence.geometry.push({ width, height, scenario:scenario.name, ...geometry });
       await page.locator('.team-scroll').evaluate(element => { element.scrollTop = 270; }); await teamShot(page, `${scenario.name}-${width}.png`);
       assert.equal(geometry.documentWidth <= geometry.viewport, true, 'page overflows viewport');
       assert.equal(geometry.cards.length, scenario.employees.length);

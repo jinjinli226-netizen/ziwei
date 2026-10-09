@@ -1,4 +1,5 @@
 :root {
+  --creator-market-card-radius: 16px;
   /* Layout follows the reference; visual tokens come from @ziwei/ui. */
   --ziwei-bg: var(--ziwei-canvas);
   --ziwei-panel: var(--ziwei-surface);
@@ -14,6 +15,23 @@
   color: var(--ziwei-text);
   background: var(--ziwei-bg);
 }
+
+.creator-market { min-width:0; color:var(--ziwei-text); }
+.creator-market-heading,.creator-template-heading { display:flex; align-items:center; gap:12px; }
+.creator-market-heading { justify-content:space-between; flex-wrap:wrap; margin-bottom:18px; }
+.creator-market h3 { margin:0; font-size:16px; color:var(--ziwei-text); }
+.creator-market p { font-size:13px; line-height:1.6; overflow-wrap:anywhere; }
+.creator-market-heading p { margin:6px 0 0; color:var(--ziwei-ink-soft); }
+.creator-template-card { min-width:0; border:1px solid var(--ziwei-border); border-radius:var(--creator-market-card-radius); padding:18px; background:var(--ziwei-panel); }
+.creator-template-icon { display:grid; place-items:center; width:42px; height:42px; flex:none; color:var(--ziwei-accent); background:var(--ziwei-accent-soft); border-radius:12px; font-size:23px; }
+.creator-template-heading>div { min-width:0; }.creator-template-heading span { color:var(--ziwei-muted); font-size:12px; }
+.creator-template-workflow,.creator-advanced { margin-top:14px; font-size:13px; line-height:1.7; }
+.creator-market summary { cursor:pointer; color:var(--ziwei-ink-soft); }
+.creator-template-workflow ol { padding-left:22px; overflow-wrap:anywhere; }
+.creator-market .employee-field { min-width:0; }.creator-market .creator-primary { margin-top:18px; background:var(--ziwei-accent); max-width:100%; height:auto; min-height:40px; padding:9px 16px; white-space:normal; }
+.creator-instance { border-top:1px solid var(--ziwei-border); margin-top:16px; padding-top:16px; }.creator-instance>p { overflow-wrap:anywhere; }
+.creator-market button:focus-visible,.creator-market summary:focus-visible { outline:3px solid var(--ziwei-accent-line); outline-offset:3px; }
+@media(max-width:640px) { .creator-template-card { padding:14px; }.creator-primary { width:100%; }.creator-market-heading { align-items:flex-start; } }
 /* Keep the light workspace surface readable across every active state. */
 :root {
   --ziwei-canvas: #f6f9fc;

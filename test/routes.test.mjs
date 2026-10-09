@@ -65,7 +65,7 @@ test('workspace switching keeps the URL and scoped invite page on the selected s
   assert.match(appSource, /parts\[1\] === 'me' && parts\[2\] === 'invite'/);
   assert.match(appSource, /function routePath\(key, detailId = '', workspaceOverride = ''\)/);
   assert.match(appSource, /if \(key === 'invite'\) return `\$\{prefix\}\/me\/invite`/);
-  assert.match(appSource, /setWorkspaceSlug\(nextSlug\); history\.pushState\(\{\},'',routePath\(page\.value,'',nextSlug\)\); await load\(\)/);
+  assert.match(appSource, /setWorkspaceSlug\(nextSlug\);\s*history\.pushState\(\{\},'',routePath\(page\.value,'',nextSlug\)\);\s*await load\(\)/);
 });
 
 test('global shell contract exposes cross-page navigation and controls', () => {

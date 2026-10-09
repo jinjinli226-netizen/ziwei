@@ -120,6 +120,8 @@ export const api = {
   employeeCustomParams: id => request(`/api/workspaces/${encodeURIComponent(workspaceSlug())}/employees/${encodeURIComponent(id)}/custom-params`),
   saveEmployeeCustomParams: (id, values) => request(`/api/workspaces/${encodeURIComponent(workspaceSlug())}/employees/${encodeURIComponent(id)}/custom-params`, { method:'PUT', body:JSON.stringify({ values }) }),
   employeeMcp: (slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/mcp/status`),
+  employeeTemplates: (slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/employee-templates`),
+  createEmployeeTemplateInstance: (id, body = {}, slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/employee-templates/${encodeURIComponent(id)}/instances`, {method:'POST',body:JSON.stringify(body)}),
   employeeMcpHealth: (slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/mcp/status`),
   managementMcpDiscovery: (slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/mcp/discovery`),
   employeeMcpStatus: (id, slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/employees/${encodeURIComponent(id)}/mcp/status`),

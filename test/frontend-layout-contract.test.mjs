@@ -67,6 +67,8 @@ test('oversized conversation requests expose a readable 413 error', () => {
 
 test('conversation changes clear a pending attachment before it can leak across threads', () => {
   assert.match(appSource, /conversationRouteId\.value=''; clearConversationAttachment\(\); stopConversationPolling\(\)/);
-  assert.match(appSource, /async function openConversation\(item, \{ push=true \} = \{\}\) \{[\s\S]*?clearConversationAttachment\(\);/);
+  assert.match(appSource, /async function openConversation\(item, \{ push=true, workspace=workspaceSlug\(\) \} = \{\}\) \{[\s\S]*?clearConversationAttachment\(\);/);
+  assert.match(appSource, /const current=\(\)=>workspace===workspaceSlug\(\) && generation===conversationOpenGeneration/);
+  assert.match(appSource, /const conversation=await api\.conversation\(id\);\s*if\(!current\(\)\)return false/);
   assert.match(appSource, /conversationDraft\.value=''; clearConversationAttachment\(\); stopConversationPolling\(\)/);
 });

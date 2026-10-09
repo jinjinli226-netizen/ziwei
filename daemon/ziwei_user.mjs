@@ -3,6 +3,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { ActionDispatcher } from '../src/daemon.mjs';
+import { createActionScheduler } from '../src/daemon-action-scheduler.mjs';
 import { createLocalActionExecutor } from '../src/local-action.mjs';
 import { redactSecrets } from '../src/redaction.mjs';
 import { discoverInstalledRuntimes, terminalMcpStatus } from '../src/runtime-adapters.mjs';
@@ -43,7 +44,7 @@ function installConnections() {
   for (const config of resolved.connections) {
     if (connections.has(config.workspace)) continue;
     const connectionRuntimeDir = config.primary ? runtimeDir : path.join(runtimeDir, 'shared-workspaces', config.workspace, config.deviceId);
-    const state = { config, processing: new Set(), polling: false, lastHeartbeat: null, lastHeartbeatAt: 0, lastPoll: null };
+    const state = { config, polling: false, lastHeartbeat: null, lastHeartbeatAt: 0, lastPoll: null };
     state.managementBootstrap = createManagementBootstrap({ workspace: config.workspace, deviceId: config.deviceId, deviceToken: config.deviceToken, apiBase: config.apiBase, cacheDirectory: path.join(dataDir, 'management-mcp-credentials') });
     const localExecutor = createLocalActionExecutor({
       runtimeDir: connectionRuntimeDir,
@@ -75,6 +76,10 @@ function installConnections() {
         log(event, { workspace: config.workspace, ...extra });
         if (extra?.actionId && ['action.started', 'action.output', 'action.progress', 'action.stage'].includes(event)) void postActionEvent(state, extra.actionId, event, extra);
       },
+    });
+    state.actionScheduler = createActionScheduler({
+      execute: action => executePolledAction(state, action),
+      onError: (error, action) => log('a2a_action_failed', { workspace: config.workspace, actionId: action.id, error: error.message }),
     });
     state.managementStatus = state.managementBootstrap.status();
     state.terminalStatus = terminalMcpStatus({ config: config.terminalMcp, workspace: config.workspace, apiBase: config.apiBase, deviceToken: config.deviceToken });
@@ -206,23 +211,19 @@ async function pollConnection(connection) {
     if (config.primary) lastPoll = connection.lastPoll;
     const actions=payload.actions || [];
     log('a2a_poll', { ok: response.ok, workspace: config.workspace, pending: actions.length });
-    for (const action of actions) {
-      if (connection.processing.has(action.id)) continue;
-      connection.processing.add(action.id);
-      try {
-        await postAction(connection, `/a2a/v1/actions/${encodeURIComponent(action.id)}/ack`, { agentId:'ziwei_user' });
-        const result=await connection.dispatcher.dispatch(action);
-        const terminalStatus = result.status === 'succeeded' || (result.status === 'duplicate' && result.originalStatus === 'succeeded') ? 'succeeded' : 'failed';
-        if (terminalStatus === 'succeeded' && action.type === 'hermes.profile.create') await refreshRuntimeDiscovery(connection);
-        await postActionEvent(connection, action.id, terminalStatus, { result: result.result ?? null, error: terminalStatus === 'failed' ? (result.error || 'ziwei_user execution failed') : null });
-        await postAction(connection, `/a2a/v1/actions/${encodeURIComponent(action.id)}/result`, { status:terminalStatus, result:result.result ?? result, error:terminalStatus === 'failed' ? (result.error || 'ziwei_user execution failed') : null });
-        log('a2a_result', { actionId:action.id, status:terminalStatus, dispatcherStatus:result.status });
-      } catch (error) { log('a2a_action_failed', { actionId:action.id, error:error.message }); }
-      finally { connection.processing.delete(action.id); }
-    }
+    connection.actionScheduler.schedule(actions);
   } catch (error) {
     log('a2a_poll_failed', { error: error.message });
   } finally { connection.polling = false; }
+}
+async function executePolledAction(connection, action) {
+  await postAction(connection, `/a2a/v1/actions/${encodeURIComponent(action.id)}/ack`, { agentId:'ziwei_user' });
+  const result=await connection.dispatcher.dispatch(action);
+  const terminalStatus = result.status === 'succeeded' || (result.status === 'duplicate' && result.originalStatus === 'succeeded') ? 'succeeded' : 'failed';
+  if (terminalStatus === 'succeeded' && action.type === 'hermes.profile.create') await refreshRuntimeDiscovery(connection);
+  await postActionEvent(connection, action.id, terminalStatus, { result: result.result ?? null, error: terminalStatus === 'failed' ? (result.error || 'ziwei_user execution failed') : null });
+  await postAction(connection, `/a2a/v1/actions/${encodeURIComponent(action.id)}/result`, { status:terminalStatus, result:result.result ?? result, error:terminalStatus === 'failed' ? (result.error || 'ziwei_user execution failed') : null });
+  log('a2a_result', { workspace: connection.config.workspace, actionId:action.id, status:terminalStatus, dispatcherStatus:result.status });
 }
 function heartbeatFresh() {
   if (!lastHeartbeatAt) return false;

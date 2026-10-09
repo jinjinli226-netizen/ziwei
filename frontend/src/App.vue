@@ -9,6 +9,7 @@ import TerminalConsole from './components/terminal/TerminalConsole.vue';
 import AndroidInstallPage from './components/AndroidInstallPage.vue';
 import ManagementMcpPanel from './components/ManagementMcpPanel.vue';
 import PhoneSkillSetup from './components/PhoneSkillSetup.vue';
+import CreatorMarket from './components/CreatorMarket.vue';
 import { employeeReadiness, managementPreparation, profileAfterRuntimeChange } from './management-mcp.js';
 import { installPageHref } from './android-install.js';
 import { Search, Plus, Inbox, Grip, SlidersHorizontal, ArrowDownUp, Kanban, List, MoreHorizontal, CircleDashed, Circle, CircleDot, CheckCircle2, CircleAlert, Zap, ChevronDown, RotateCcw, LayoutList, Tag, UserRound, CalendarClock, CalendarDays, ChevronLeft, ChevronRight, Maximize2, Mic, Paperclip, X, Folder, FolderOpen, FolderPlus, FileText, Upload, Download, RefreshCw, HardDrive, Network, Server, Monitor, Crown, Trash2, ClipboardList, Settings2 } from 'lucide-vue-next';
@@ -287,6 +288,9 @@ const docsUsedPercent = computed(() => Math.min(100, (docsUsedBytes.value / (10 
 // focused conversation id in Vue state so selecting/creating a conversation
 // immediately switches the inbox into the dedicated persistent-session view.
 const conversationRouteId = ref(conversationIdFromPath());
+let workspaceLoadGeneration = 0;
+let conversationOpenGeneration = 0;
+let conversationListGeneration = 0;
 const focusedConversation = computed(() => page.value === 'inbox' && Boolean(conversationRouteId.value));
 const employeeProfile = computed(() => employees.value.find(item => item.id === employeeRouteId.value) || null);
 const employeeProfileTasks = computed(() => { const employee = employeeProfile.value; if (!employee) return []; const assignee = String(employee.name || '').toLowerCase(); return tasks.value.filter(task => String(task.assignee || '').toLowerCase() === assignee || String(task.assignee || '').toLowerCase().includes(assignee)); });
@@ -294,7 +298,20 @@ const employeeProfileConversations = computed(() => { const employee = employeeP
 const pageTitle = computed(() => ({home:'首页',issues:'问题与任务',calendar:'日历',docs:'项目文档',members:'成员与设备',runtimes:'运行时',skills:'技能中心',settings:'工作区设置',invite:'邀请加入紫薇',open:'开放平台',automations:'自动化',inbox:focusedConversation.value ? '持久会话' : '收件箱',employee:employeeProfile.value?.name || '数字伙伴','ziwei-connect':'紫薇·互联'}[page.value] || '紫薇'));
 
 function navigate(key) { if (key === 'workflow') key='automations'; if (key === 'skills') { search.value=''; skillScope.value='platform'; skillTab.value='all'; } if (key === 'inbox') { selectedConversation.value=null; conversationExecution.value=null; conversationDraft.value=''; conversationRouteId.value=''; clearConversationAttachment(); stopConversationPolling(); } if (key !== 'employee') { employeeRouteId.value=''; employeeActionId.value=''; } page.value = key; history.pushState({},'',routePath(key)); if (key === 'open') loadApiKeys(); if (key === 'ziwei-connect') void loadZiweiConnect(); }
-async function switchWorkspace(slug) { const nextSlug=String(slug || '').trim(); if (!nextSlug || nextSlug === workspaceSlug()) return; setWorkspaceSlug(nextSlug); history.pushState({},'',routePath(page.value,'',nextSlug)); await load(); if (page.value === 'ziwei-connect') await loadZiweiConnect(); }
+async function switchWorkspace(slug) {
+  const nextSlug=String(slug || '').trim();
+  if (!nextSlug || nextSlug === workspaceSlug()) return;
+  ++conversationOpenGeneration; ++conversationListGeneration;
+  selectedConversation.value=null; conversationExecution.value=null; conversationDraft.value='';
+  conversationRouteId.value=''; clearConversationAttachment(); stopConversationPolling(); closeRealtime();
+  conversationEmployeeId.value=''; conversationDeviceId.value=''; conversations.value=[];
+  conversationModelId.value=''; conversationWorkingDirectory.value=''; conversationStatusLoading.value=false;
+  showEmployee.value=false; conversationDirectoryPickerOpen.value=false;
+  setWorkspaceSlug(nextSlug);
+  history.pushState({},'',routePath(page.value,'',nextSlug));
+  await load();
+  if (workspaceSlug() === nextSlug && page.value === 'ziwei-connect') await loadZiweiConnect();
+}
 async function createWorkspace(payload) {
   try {
     const result = await api.createWorkspace(payload);
@@ -371,12 +388,14 @@ function openRealtime() {
   });
 }
 onUnmounted(() => { closeRealtime(); stopConversationPolling(); stopVoiceInput(); if (ziweiConnectRunTimer) clearTimeout(ziweiConnectRunTimer); ziweiConnectRunTimer=null; dismissToast(); });
-async function loadNotifications() { try { const result=await api.notifications(); notifications.value=result.notifications || []; notificationStats.value=result.stats || {}; } catch {} }
-async function refreshTasks() { try { const result=await api.tasks(); tasks.value=result.tasks || []; } catch {} }
+async function loadNotifications() { const workspace=workspaceSlug(); try { const result=await api.notifications(); if(workspace!==workspaceSlug())return; notifications.value=result.notifications || []; notificationStats.value=result.stats || {}; } catch {} }
+async function refreshTasks() { const workspace=workspaceSlug(); try { const result=await api.tasks(); if(workspace!==workspaceSlug())return; tasks.value=result.tasks || []; } catch {} }
 async function markAllNotificationsRead() { try { await api.markNotificationsRead(); await loadNotifications(); notify('已全部标记为已读'); } catch(error) { notify(error.message); } }
 async function loadConversations({ autoSelect=true } = {}) {
+  const workspace=workspaceSlug(), generation=++conversationListGeneration, openGeneration=conversationOpenGeneration;
   try {
     const result=await api.conversations(conversationEmployeeId.value);
+    if(workspace!==workspaceSlug() || generation!==conversationListGeneration || openGeneration!==conversationOpenGeneration)return;
     conversations.value=result.conversations || [];
     const routeId = conversationIdFromPath();
     const routedItem = routeId && conversations.value.find(item => item.id === routeId);
@@ -408,11 +427,13 @@ async function loadConversationExecution({ silent=true } = {}) {
 }
 async function refreshSelectedConversation() {
   const conversationId=selectedConversation.value?.id;
+  const workspace=workspaceSlug(), generation=conversationOpenGeneration;
   if (!conversationId) return;
   try {
     const conversation=await api.conversation(conversationId);
-    if (selectedConversation.value?.id === conversationId) selectedConversation.value=conversation;
+    if (workspace===workspaceSlug() && generation===conversationOpenGeneration && selectedConversation.value?.id === conversationId) selectedConversation.value=conversation;
   } catch {}
+  if(workspace!==workspaceSlug() || generation!==conversationOpenGeneration)return;
   await loadConversationExecution();
 }
 function startConversationPolling() {
@@ -426,12 +447,16 @@ function startConversationPolling() {
     if (!conversationExecutionBusy.value) stopConversationPolling();
   }, 1500);
 }
-async function openConversation(item, { push=true } = {}) {
+async function openConversation(item, { push=true, workspace=workspaceSlug() } = {}) {
   const id = typeof item === 'string' ? item : item?.id;
-  if (!id) return;
+  if (!id || workspace!==workspaceSlug()) return false;
+  const generation=++conversationOpenGeneration;
+  const current=()=>workspace===workspaceSlug() && generation===conversationOpenGeneration;
   clearConversationAttachment();
   try {
-    selectedConversation.value=await api.conversation(id);
+    const conversation=await api.conversation(id);
+    if(!current())return false;
+    selectedConversation.value=conversation;
     conversationModelId.value=selectedConversation.value.model_id || '';
     conversationWorkingDirectory.value=selectedConversation.value.working_directory || '';
     conversationDeviceId.value=selectedConversation.value.device_id || devices.value.find(device => device.status === 'online')?.id || devices.value[0]?.id || '';
@@ -441,8 +466,10 @@ async function openConversation(item, { push=true } = {}) {
     conversationRouteId.value=id;
     if (push && page.value === 'inbox') history.pushState({},'',`${routePath('inbox', id)}?employee=${encodeURIComponent(conversationEmployeeId.value)}`);
     await loadConversationExecution({ silent:false });
+    if(!current())return false;
     if (conversationExecutionBusy.value) startConversationPolling(); else stopConversationPolling();
-  } catch(error) { notify(error.message); }
+    return true;
+  } catch(error) { if(current())notify(error.message); return false; }
 }
 async function createConversation() {
   try {
@@ -706,9 +733,10 @@ function deviceSetupDismissedKey() {
 function dismissDeviceSetup() { try { localStorage.setItem(deviceSetupDismissedKey(), '1'); } catch {} closeDeviceModal(); }
 function openSkillCatalog() { skillScope.value='platform'; skillTab.value='all'; notify('已打开平台技能目录'); }
 async function load() {
+  const activeWorkspace=workspaceSlug(), generation=++workspaceLoadGeneration;
+  const current=()=>activeWorkspace===workspaceSlug() && generation===workspaceLoadGeneration;
   loading.value = true;
   try {
-    const activeWorkspace = workspaceSlug();
     // Keep stale response data from a previous workspace from rendering while
     // the URL-scoped requests are in flight.
     if (activeWorkspace && summary.value.workspace?.slug !== activeWorkspace) {
@@ -723,11 +751,19 @@ async function load() {
       ? api.settings()
       : Promise.resolve({ workspace: { name: summary.value.workspace?.name || activeWorkspace, timezone: summary.value.workspace?.timezone || 'Asia/Shanghai', preferences: {} } });
     const [s,t,r,mo,sk,d,a,m,dev,e,c,st,ag] = await Promise.all([api.summary(),api.tasks(),api.runtimes(),api.models(),api.skills(),api.documents(),api.automations(),api.members(),api.devices(),api.employees(),api.calendar(),settingsRequest,api.agents()]);
+    if(!current())return;
     const runtimeRows = Array.isArray(r?.runtimes) ? r.runtimes.filter(item => item && typeof item === 'object') : [];
-    summary.value=s; tasks.value=t.tasks; runtimes.value=runtimeRows; models.value=mo.models; skills.value=sk.skills; documents.value=d.documents; automations.value=a.automations; members.value=m.members; devices.value=dev.devices; conversationDeviceId.value=devices.value.find(device => device.status === 'online')?.id || devices.value[0]?.id || ''; employees.value=Array.isArray(e?.employees) ? e.employees.filter(item => item && typeof item === 'object') : []; if (!conversationEmployeeId.value) conversationEmployeeId.value=employees.value[0]?.id || 'unassigned'; calendar.value=c.calendars; settings.value=st; workspaceName.value=st.workspace.name; workspaceTimezone.value=st.workspace.timezone; workspaceDescription.value=st.workspace.description || ''; workspaceContext.value=st.workspace.context || ''; workspaceVisibility.value=st.workspace.visibility || 'workspace'; workspacePrefix.value=st.workspace.prefix || ''; profileName.value=st.workspace.profile?.name || authState.value.user?.name || ''; workspaceLanguage.value=st.workspace.preferences?.language || 'zh-CN'; workspaceTheme.value=st.workspace.preferences?.theme || 'light'; workspaceWeekStart.value=st.workspace.preferences?.weekStart || 'monday'; switchValue.value = st.workspace.preferences?.daemonHeartbeat !== false; automationDefaultMode.value = st.workspace.preferences?.automationDefaultMode || 'notification'; agents.value=ag.agents;
+    summary.value=s; tasks.value=t.tasks; runtimes.value=runtimeRows; models.value=mo.models; skills.value=sk.skills; documents.value=d.documents; automations.value=a.automations; members.value=m.members; devices.value=dev.devices;
+    // Refreshing the workspace must not move an existing persistent conversation
+    // to the first online computer while its conversation list is still loading.
+    conversationDeviceId.value=selectedConversation.value
+      ? selectedConversation.value.device_id || conversationDeviceId.value || ''
+      : devices.value.find(device => device.status === 'online')?.id || devices.value[0]?.id || '';
+    employees.value=Array.isArray(e?.employees) ? e.employees.filter(item => item && typeof item === 'object') : []; if (!conversationEmployeeId.value) conversationEmployeeId.value=employees.value[0]?.id || 'unassigned'; calendar.value=c.calendars; settings.value=st; workspaceName.value=st.workspace.name; workspaceTimezone.value=st.workspace.timezone; workspaceDescription.value=st.workspace.description || ''; workspaceContext.value=st.workspace.context || ''; workspaceVisibility.value=st.workspace.visibility || 'workspace'; workspacePrefix.value=st.workspace.prefix || ''; profileName.value=st.workspace.profile?.name || authState.value.user?.name || ''; workspaceLanguage.value=st.workspace.preferences?.language || 'zh-CN'; workspaceTheme.value=st.workspace.preferences?.theme || 'light'; workspaceWeekStart.value=st.workspace.preferences?.weekStart || 'monday'; switchValue.value = st.workspace.preferences?.daemonHeartbeat !== false; automationDefaultMode.value = st.workspace.preferences?.automationDefaultMode || 'notification'; agents.value=ag.agents;
     await Promise.all([loadNotifications(),loadConversations()]);
+    if(!current())return;
     openRealtime();
-  } catch (error) { notify(error.message); } finally { loading.value=false; }
+  } catch (error) { if(current())notify(error.message); } finally { if(current())loading.value=false; }
 }
 function connectRows(result, key) {
   if (Array.isArray(result?.[key])) return result[key].filter(item => item && typeof item === 'object');
@@ -1123,6 +1159,14 @@ function openEmployeeModal(employee = null) {
   if (employeeForm.value.runtime === 'Hermes' && employeeTargetDeviceId.value) void refreshHermesProfilesForDevice();
 }
 function openEmployeeActions(employee) { employeeActionId.value = employeeActionId.value === employee?.id ? '' : (employee?.id || ''); }
+async function openCreatorConversation({employee,conversation,workspace,duplicate}) {
+  if(workspace!==workspaceSlug()||!conversation?.id)return;
+  if(employee?.id&&!employees.value.some(item=>item.id===employee.id))employees.value.push(employee);
+  if(!conversations.value.some(item=>item.id===conversation.id))conversations.value.push(conversation);
+  showEmployee.value=false;navigate('inbox');
+  const opened=await openConversation(conversation,{workspace});
+  if(opened && workspace===workspaceSlug())notify(duplicate?'已打开你的 Creator 持久对话，原配置保持':'Creator 已创建，可以开始持久对话');
+}
 async function loadEmployeeConfig(employee = employeeProfile.value) {
   if (!employee?.id) return;
   employeeConfigLoading.value = true;
@@ -1592,11 +1636,10 @@ onMounted(async () => { applyDisplayPreferences(); if (page.value==='android-ins
       </header>
       <nav class="employee-create-tabs" role="tablist" aria-label="创建方式">
         <button type="button" role="tab" :aria-selected="employeeModalTab==='manual'" :class="{active:employeeModalTab==='manual'}" @click="employeeModalTab='manual'"><span>手动创建</span></button>
-        <button type="button" role="tab" :aria-selected="employeeModalTab==='market'" :class="{active:employeeModalTab==='market'}" @click="employeeModalTab='market'"><FolderOpen :size="15"/><span>从伙伴市场创建</span></button>
+        <button v-if="!employeeEditId" type="button" role="tab" :aria-selected="employeeModalTab==='market'" :class="{active:employeeModalTab==='market'}" @click="employeeModalTab='market'"><FolderOpen :size="15"/><span>从伙伴市场创建</span></button>
       </nav>
-      <div v-if="employeeModalTab==='market'" class="employee-market-empty">
-        <div class="employee-market-icon">✦</div><h3>伙伴市场</h3><p>从工作区技能中心选择可复用的数字伙伴模板。</p>
-        <button type="button" class="employee-secondary-button" @click="navigate('skills');showEmployee=false">浏览技能中心</button>
+      <div v-if="employeeModalTab==='market'" class="employee-create-modal__body">
+        <CreatorMarket :workspace="workspaceSlugValue" :discovery="managementDiscovery" :discovery-loading="managementDiscoveryLoading" :discovery-error="managementDiscoveryError" :models="models" @refresh-discovery="refreshManagementDiscovery" @open="openCreatorConversation"/>
       </div>
       <div v-else class="employee-create-modal__body">
         <section class="employee-basic-grid">
@@ -1625,7 +1668,7 @@ onMounted(async () => { applyDisplayPreferences(); if (page.value==='android-ins
         <section class="employee-field" data-testid="employee-management-default"><label>紫薇管理 MCP · 默认自动接入</label><p class="employee-field-hint">新旧员工均通过所选电脑已连接的当前工作区身份自动接入，无需单独授权。员工运行时自动准备并加载，实际结果以执行回执为准。</p><p class="employee-field-hint" role="status">{{ employeeSelectedDevice ? employeeMcpPreparation.label : '等待选择当前工作区电脑' }}<span v-if="employeeMcpPreparation.reason"> · {{ employeeMcpPreparation.reason }}</span></p><button v-if="employeeSelectedDevice && employeeMcpPreparation.retryable" type="button" class="pill" :disabled="employeeMcpRetrying" @click="retryEmployeeManagementMcp">{{ employeeMcpRetrying ? '请求中…' : '重试自动接入' }}</button><details v-if="employeeMcpPreparation.updateRequired" class="employee-field-hint"><summary>更新 ziwei_user</summary><p>请在所选电脑沿原安装方式更新 ziwei_user，使用原生启动入口刷新客户端并保留已有工作区连接，然后点击“刷新电脑与 CLI”。</p><a :href="routePath('members')">查看设备与安装入口</a></details><p v-if="employeeMcpRetryMessage" class="employee-field-hint" role="status">{{ employeeMcpRetryMessage }}</p><div v-if="!managementDiscoveryLoading && !employeeReady.ready" class="employee-readiness-error" role="status"><strong>当前配置尚未就绪</strong><ul><li v-for="issue in employeeReady.issues" :key="issue">{{ issue }}</li></ul></div><p v-else-if="employeeReady.ready" class="employee-field-hint" data-testid="employee-ready">设备、CLI 与 profile 已通过发现检查，可以保存；管理 MCP 自动接入及实际加载分别以状态和运行回执为准。</p></section>
         <section v-if="!employeeEditId" class="employee-field"><label class="employee-checkbox"><input v-model="employeeContinuePhoneSetup" type="checkbox"/><span>保存后配置手机技能</span></label><p class="employee-field-hint">创建成功后继续选择精确手机、保存安全配置，并核对实际 MCP 回执。</p></section>
       </div>
-      <footer class="employee-create-modal__footer"><button type="button" class="employee-cancel-button" @click="showEmployee=false">取消</button><button type="button" class="employee-create-button" :disabled="!employeeForm.name.trim() || employeeCreating || managementDiscoveryLoading || !employeeReady.ready" @click="addEmployee">{{ employeeCreating ? '提交中…' : employeeEditId ? '保存' : '创建' }}</button></footer>
+      <footer class="employee-create-modal__footer"><button type="button" class="employee-cancel-button" @click="showEmployee=false">取消</button><button v-if="employeeModalTab==='manual'" type="button" class="employee-create-button" :disabled="!employeeForm.name.trim() || employeeCreating || managementDiscoveryLoading || !employeeReady.ready" @click="addEmployee">{{ employeeCreating ? '提交中…' : employeeEditId ? '保存' : '创建' }}</button></footer>
     </div>
   </ZiModal>
   <ZiModal v-if="showAutomation" :title="automationEditId ? '编辑自动化' : '新建自动化'" @close="showAutomation=false;automationEditId='' "><div class="form-stack"><ZiFormField label="名称" required><ZiInput v-model="automationForm.name" placeholder="例如：每日工作区摘要"/></ZiFormField><ZiFormField label="计划"><ZiInput v-model="automationForm.schedule" placeholder="每天 09:00，留空表示手动运行"/></ZiFormField><ZiFormField label="指令"><ZiTextarea v-model="automationForm.prompt" rows="5" placeholder="让 agent 做什么？"/></ZiFormField><ZiFormField label="Webhook 回调地址"><ZiInput v-model="automationForm.webhookUrl" type="url" placeholder="可选，https://example.com/ziwei-hook"/></ZiFormField><ZiFormField label="输出方式"><ZiSelect v-model="automationForm.outputMode" :options="[{label:'收件箱通知',value:'notification'},{label:'仅 Webhook',value:'webhook'},{label:'通知和 Webhook',value:'both'}]"/></ZiFormField><div class="form-actions"><ZiButton @click="createAutomation">{{ automationEditId ? '保存修改' : '保存自动化' }}</ZiButton></div></div></ZiModal>

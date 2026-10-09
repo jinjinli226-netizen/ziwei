@@ -10,6 +10,7 @@ import { deviceTokenFromRequest, readA2AToken, safeTokenEqual, tokenFromRequest 
 import { mcpTokenRequired } from './mcp-auth.mjs';
 import { createZiweiConnect } from './ziwei-connect.mjs';
 import { createManagementService } from './management.mjs';
+import { createEmployeeTemplateService } from './employees/templates.mjs';
 import { createPhoneMcpService } from './phone-mcp.mjs';
 import { createManagementBootstrap } from './management-bootstrap.mjs';
 import { toolDefinitions as managementTools } from '../scripts/ziwei-mcp.mjs';
@@ -251,6 +252,7 @@ export function createApp(options = {}) {
   });
   const auth = options.auth || createAuthService(repo.db, options.authOptions);
   const management = createManagementService(repo);
+  const employeeTemplates = createEmployeeTemplateService(repo, management);
   const managementBootstrap = createManagementBootstrap(repo, options);
   const phoneMcp = createPhoneMcpService(repo,ziweiConnect,management,options);
   app.locals.repo = repo;
@@ -259,6 +261,7 @@ export function createApp(options = {}) {
   app.locals.ziweiConnect = ziweiConnect;
   app.locals.phoneMcp = phoneMcp;
   app.locals.managementBootstrap = managementBootstrap;
+  app.locals.employeeTemplates = employeeTemplates;
   app.use(cors);
   app.use((_req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -501,6 +504,11 @@ export function createApp(options = {}) {
   // Environment values are encrypted at rest and returned only as metadata or
   // a mask; custom parameters are JSON values validated by the repository.
   const employeeContext = req => ({ actorUserId: req.auth?.user_id, actorRole: req.workspaceRole, enforceEmployeeVisibility: true });
+  app.get('/api/workspaces/:slug/employee-templates', requireRole('owner','admin','member'), (req, res) => res.json(employeeTemplates.list(req.params.slug, employeeContext(req))));
+  app.post('/api/workspaces/:slug/employee-templates/:id/instances', requireRole('owner','admin','member'), (req, res) => {
+    const saved=employeeTemplates.install(req.params.slug, req.params.id, req.body || {}, employeeContext(req));
+    return res.status(saved.duplicate ? 200 : 201).json(saved);
+  });
   const ensureEmployeeInWorkspace = (slug, idValue, req) => {
     const employee = repo.listEmployees(slug, employeeContext(req)).find(item => item.id === idValue);
     if (!employee) { const error = new Error('数字员工不存在'); error.status = 404; throw error; }
