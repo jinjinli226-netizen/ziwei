@@ -105,7 +105,8 @@ def prepare_creator_home(current):
     # Preserve only the authoritative runtime scope. The native dotenv loader
     # intentionally uses process HERMES_HOME while selecting the source profile,
     # and may otherwise reintroduce an old phone/controller bearer afterwards.
-    routing_keys = {'ZIWEI_API_BASE', 'ZIWEI_MCP_WORKSPACE', 'ZIWEI_MCP_TOKEN_FILE',
+    routing_keys = {'HERMES_MANAGED_DIR', 'PYTHONPATH', 'PYTHONHOME',
+                    'ZIWEI_API_BASE', 'ZIWEI_MCP_WORKSPACE', 'ZIWEI_MCP_TOKEN_FILE',
                     'ZIWEI_MCP_TOKEN', 'ZIWEI_MCP_AUDIT_FILE',
                     'ZIWEI_TERMINAL_API_BASE', 'ZIWEI_TERMINAL_WORKSPACE',
                     'ZIWEI_TERMINAL_TOKEN_FILE', 'ZIWEI_TERMINAL_AUDIT_FILE',
@@ -148,7 +149,7 @@ def confirm_creator_home(current, config, prepared):
         raise UnsupportedNativeHermes('creator profile')
     os.environ['HERMES_HOME'] = str(home)
     for key in tuple(os.environ):
-        if key.startswith('ZIWEI_') or key in {'CONTROL_MCP_API_URL', 'CONTROL_MCP_AUTH'}:
+        if key.startswith('ZIWEI_') or key in {'CONTROL_MCP_API_URL', 'CONTROL_MCP_AUTH', 'HERMES_MANAGED_DIR', 'PYTHONPATH', 'PYTHONHOME'}:
             os.environ.pop(key, None)
     os.environ.update(routing_env)
     constants = importlib.import_module('hermes_constants')

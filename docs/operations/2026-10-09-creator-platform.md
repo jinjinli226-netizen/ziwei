@@ -24,6 +24,11 @@
 - 创建员工、来源记录、会话和管理幂等记录在同一事务中提交。失败全部回滚；审计通知在提交后发布。明确不同安装配置返回 409；POST `{}` 复用已安装实例并保留原配置。
 - 历史采用：仅同 owner、同名且环境配置兼容的 Creator 可采用，不覆盖原职责、人格、指令和技能。返回 `origin: adopted-existing`、`customized: true`、`templateApplied: false`、应用版本 `null`，避免把未应用过的模板记作已套用。
 - 前端：`CreatorMarket.vue`、`creator-market.js` 和显式工作区 API，展示目录、实际电脑/运行时/profile、失败与重试、已有实例和持久聊天。目录不返回用户人格、指令、凭据或配置原文。
+- 工作区与聊天请求：`load()` 按请求代次和当前工作区提交结果；切区立即清空旧会话、执行状态、草稿、附件和路由并停止轮询。对话打开也按代次保留最新选择，打开失败不报告 Creator 已成功进入聊天。Hermes helper 只接受明确的认证/provider 就绪证据，未知状态不能启用创建。
+- 持久会话目标：同区刷新已有会话时保留其 `device_id`，旧会话没有保存该字段时保留当前绑定；仅未选定会话才使用第一台在线电脑。双设备、第二台绑定及延迟会话列表已验证，不在加载窗口切换发送目标。
+- 有界聊天历史：仅服务端可信 Creator 来源及同员工、同工作区的绑定会话附带历史；当前消息必须是该会话中的 user 消息。最多最近 16 条 user/assistant 文本，历史 JSON 序列化长度不超过 12,000 字符，按时间顺序呈现，排除当前消息和附件；历史明示为引用数据，不构成新增执行授权，不覆盖当前请求。
+- Hermes 实例状态：`creator-runtime-home.mjs`、原生 bootstrap 和运行时适配器按 API origin、workspace、employee 绑定持久私有 HOME，source profile 更改要求明确迁移。记忆、用户画像、state、SOUL、sessions/logs 使用实例目录；配置初始值使用白名单，认证和 `.env` 不复制或链接。原生认证仍使用所选 source 的单一存储及原锁、原子刷新路径，管理 MCP 保持执行 overlay，ordinary 执行清理 Creator 路由环境变量。实际 native 隔离确认从 stderr 精确匹配 `result.creatorIsolation`；缺少确认即使退出码为 0 也失败。
+- 当前隔离适配边界：Creator Hermes 仅支持已核实的 `openai-codex` 原生认证路径和本地 memory；其他 provider 或尚无独立 namespace 证据的外部 memory provider 在模型启动前明确失败。Codex 状态隔离本轮未实现或验收，用户取消的 Codex 实机任务保持取消。手机能力仍须独立安装、绑定和执行授权，管理 MCP 默认接入与 Creator 模板不改变此边界。
 - 调度：每 connection 最多 3 个动作，同员工互斥；聊天与具有服务端可信 Creator 来源的父任务共用一个管理槽，为普通岗位子任务保留容量。`employeeTemplateId` 从实例表生成，忽略请求体伪造；pending/acked 动作恢复可信标记，终态历史不改写。
 
 模板更新只自动用于新实例。已有实例仍显示自身应用版本和目录版本，用户定制保留；兼容的历史采用记录不伪称应用过目录版本。
@@ -41,22 +46,31 @@ POST 返回 `{employee, conversation, template, duplicate}`。`template` 包含 
 
 ## 已完成的本地验证
 
-以下结果来自本地隔离测试，使用内存或合成数据，不代表真实模型、生产域名或客户端执行通过：
+2026-10-10 本地验证：代码已本地提交，尚未发布。以下结果使用内存、合成数据或安装的 Hermes launcher 搭配合成 HOME/auth；不代表真实模型、生产域名、正式实例或生产客户端执行通过。最后 `.env` reserved routing 补丁已完成独立原生复核，并重新通过完整 398/398、skip 0、exit 0 验证。
 
 | 范围 | 结果 | 说明 |
 | --- | --- | --- |
-| 新模板 API `test/employee-templates-api.test.mjs` | 19/19 | 成员隔离、伪造身份、跨区与私有设备、重复并发、自定义保留、实际 profile、历史采用/冲突、版本保留、事务回滚、提交后通知和可信执行来源。 |
+| 新模板 API `test/employee-templates-api.test.mjs` | 23/23 | 成员隔离、伪造身份、跨区与私有设备、重复并发、自定义保留、实际 profile、历史采用/冲突、版本保留、事务回滚、提交后通知、可信执行来源及有界历史/会话绑定边界。 |
 | 静态目录 `test/creator-template.test.mjs` | 7/7 | 真实工具/schema、行为与授权、运行时/profile 保留、目录深拷贝和模板配置。 |
 | 调度 `test/daemon-action-scheduler.test.mjs` | 6/6 | 父任务等待普通员工子任务、管理槽预留、同员工串行、有界并发、重复轮询和失败释放。 |
-| 指定相关后端回归 | 126/126，exit 0 | 包含上述三组，以及现有员工/聊天、repository、API key、身份/设备、管理 MCP/auth、手机权限边界；不是完整项目测试总数。 |
-| 只读前端 helper/API 检查 | 5/5 | `frontend/src/creator-market.test.mjs` 和 `frontend/src/management-api.test.mjs`；不覆盖完整页面竞争。 |
+| 完整项目 `node --test` | 398/398，exit 0，skip 0 | `.local/creator-platform/full-test-final.log`；包含最后 reserved routing 补丁，涵盖相关 API、员工/聊天、repository、身份/设备、管理 MCP/auth、手机边界及新增隔离测试。 |
+| lint / 前端 build | 60 个源文件通过 / build 通过 | `.local/creator-platform/build-final.log`；当前资源 `index-DRTDY7kv.js` / `index-CJMLdFH9.css`。 |
+| Creator helper/API/scope | 11/11 | helper 5、显式工作区 API 1、实际 App 函数行为 5；包括旧区 load 迟到、同区旧对话迟到、切区禁止旧目标发送、打开失败无成功提示、第二台电脑绑定保留。 |
+| Creator headless fixture | 12/12 | `.local/creator-market-ui-device-final/results.json`；1440×900、390×844、720×450，创建/刷新/已有实例/键盘、default/歧义、失败恢复、重复、409、缺会话补建、未知认证与两类切区竞争。pageErrors/requestfailed 均 0；console 2 条为预期 503/409。 |
+| 组织卡片与设备列表 headless fixture | 15/15 | `.local/creator-platform/team-final/results.json`；包含 1440、2048、2549、390×844、720×450 和 3/12/无描述员工场景。三张长职责卡片在桌面/390/矮窗口均为 126px，摘要 28px 两行，组织列表与设备区域间隔 32px，无横向溢出；详情/编辑保留完整指令，所有错误统计为 0。 |
+| 创建/编辑弹窗 headless fixture | 12/12 | `.local/creator-platform/modal-final/results.json`；五种视口含 720×450，checkbox、label、键盘、正文滚动、footer、phone 继续与自动管理准备/恢复。pageErrors/console/requestfailed 均 0。 |
+| 手机技能界面 headless fixture | 12/12 | `.local/creator-platform/phone-final/results.json`；全部为合成 API/手机回执，未执行实际手机动作。pageErrors/非预期 console/requestfailed 均 0，另 1 条预期 HTTP 503。 |
+| 管理 MCP headless fixture | 13/13 | `.local/creator-platform/management-final/results.json`；官方安装入口、默认接入、状态/工具失败、重试、profile、scope 等回归。pageErrors/requestfailed 均 0；console 2 条均为预期 503 恢复场景。 |
+| 邀请 headless fixture | 6/6 | `.local/creator-platform/invitation-final/results.json`；独立 `:memory:` SQLite，页面错误/非预期响应均 0。该脚本未采集 console/requestfailed，不把未采集指标记为 0。 |
+| Creator Hermes native 无模型隔离 | 9/9，skip 0；相关 47/47 | `.local/creator-platform/runtime-isolation-fixture-result.json`；安装的 native launcher、3 个合成实例、default/selected 与两工作区，验证 memory/state/SOUL、原 source config/SOUL 不变、认证只在合成 source 原存储刷新、scope/profile/alias/provider/外部 memory 拒绝。native main/模型调用/真实手机动作均未执行。 |
+| exact cleanup synthetic SQLite | 16/16 | `.local/creator-platform/cleanup-qa-fixture-result.json`；QA owner 必须等于保留正式 Creator 和 provenance owner，visibility 必须 personal；其他成员同前缀或缺 owner 均拒绝。固定 phone_ai/前缀、正式实例/原聊天/metadata、exact IDs、计划 hash 和执行门保护仍通过。0 生产 DB/execute、网络、手机动作。 |
 | Git diff whitespace 检查 | 通过 | 无 whitespace 错误，Git 仅提示已有 CRLF 转换设置。 |
 
-19、7、6 已包含在 126 中，不能相加当作额外测试。新 API 先确认缺少入口的 RED，再实现 GREEN；提交前事件和可信模板标记也分别确认失败后修复。
+23、7、6、前端 helper/scope 和 native 单测已包含在完整项目快照中，不能相加当作额外单测。headless fixture 和 Python cleanup 是另行执行的验收，不与 398 相加。新 API 先确认缺少入口的 RED，再实现 GREEN；提交前事件、可信模板标记、请求竞争和第二台设备也分别观察失败后修复。清理 owner/visibility 新增 5 个负例在原 11 项基础上先产生 5 个 RED failure，再达到 16/16 GREEN。
 
-本轮独立只读审查已用当前 `App.vue` 函数和内存 fake API 复现旧 workspace load 结果覆盖新 workspace；发布前须补请求代次/当前 scope 守卫、切区即时清空旧聊天和相应竞争验收。Creator profile helper 对未知认证/provider 的就绪判断也须与服务端明确证据规则对齐。**这些审查项的最终修复与复验状态：待验证、待填写。**
+旧 workspace load 覆盖新 workspace、切区残留旧发送目标、同区迟到旧对话、未知 Hermes 认证/provider 被视作 ready、同区刷新改成第一台电脑等审查项均已本地修复并通过行为与浏览器回归。独立只读 scope/helper/API 复核通过；持久 HOME/native auth/ordinary env/stderr receipt/手机边界也已只读复核。本地证据中的“成功”仅适用于各行明确的测试环境。
 
-完整测试、lint/build、真实页面和客户端验收由 root 后续填写；本记录不借用上一轮默认管理 MCP 的结果代替本轮验证。
+运行时 reserved routing 补丁完整复验已通过。真实生产、正式实例、实际 Hermes 模型和客户端验收由 root 后续填写；下述生产记录保持待验证，不借用上一轮默认管理 MCP 或本轮无模型 native fixture 结果代替。
 
 ## 发布与正式实例：待验证
 

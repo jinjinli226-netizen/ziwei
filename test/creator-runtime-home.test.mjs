@@ -143,6 +143,7 @@ test('Only trusted Creator context sets native isolation env and disabled phone 
 const nativeProbe = String.raw`
 import importlib.util,json,os,sys
 from pathlib import Path
+sys.dont_write_bytecode=True
 args=json.loads(sys.argv[1]); helper=args.pop(0)
 spec=importlib.util.spec_from_file_location('ziwei_bootstrap',helper); module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
 sys.argv=[helper,*args]; result=module.run(); assert callable(result), 'native main was never called'
@@ -155,13 +156,13 @@ home=get_hermes_home(); memory=get_memory_dir();memory.mkdir(parents=True,exist_
 (memory/'MEMORY.md').write_text(os.environ['FIXTURE_MEMORY'],encoding='utf-8')
 db=SessionDB(); db.close()
 auth._save_auth_store({'active_provider':'openai-codex','fixture':'native-rotated'})
-print(json.dumps({'home':str(home),'memory':str(memory),'state':str(_default_db_path()),'soul':load_soul_md(),'authPath':str(auth._auth_file_path()),'provider':config.load_config()['model']['provider'],'phoneDisabled':config.load_config()['mcp_servers']['ziwei-terminal']['enabled'] is False,'policyPreserved':config.load_config()['security']['redact_secrets'],'sourceEnvLoaded':os.environ.get('SYNTHETIC_PROVIDER_TOKEN')=='synthetic-fixture-provider-value','legacyPhoneCredentialPresent':'CONTROL_MCP_AUTH' in os.environ,'deviceCredentialPresent':'ZIWEI_DEVICE_TOKEN' in os.environ,'runtimeScopePreserved':os.environ.get('ZIWEI_MCP_WORKSPACE')==os.environ['ZIWEI_CREATOR_WORKSPACE'],'models':0}))
+print(json.dumps({'home':str(home),'memory':str(memory),'state':str(_default_db_path()),'soul':load_soul_md(),'authPath':str(auth._auth_file_path()),'provider':config.load_config()['model']['provider'],'phoneDisabled':config.load_config()['mcp_servers']['ziwei-terminal']['enabled'] is False,'policyPreserved':config.load_config()['security']['redact_secrets'],'sourceEnvLoaded':os.environ.get('SYNTHETIC_PROVIDER_TOKEN')=='synthetic-fixture-provider-value','legacyPhoneCredentialPresent':'CONTROL_MCP_AUTH' in os.environ,'deviceCredentialPresent':'ZIWEI_DEVICE_TOKEN' in os.environ,'runtimeScopePreserved':os.environ.get('ZIWEI_MCP_WORKSPACE')==os.environ['ZIWEI_CREATOR_WORKSPACE'],'managedDirectoryPreserved':os.environ.get('HERMES_MANAGED_DIR')==os.environ['FIXTURE_MANAGED_DIR'],'pythonPathPreserved':os.environ.get('PYTHONPATH')==os.environ['FIXTURE_PYTHONPATH'],'pythonHomeAbsent':'PYTHONHOME' not in os.environ,'models':0}))
 `;
 
 test('Installed Hermes native memory/state/SOUL isolate two Creator instances while auth refresh stays in selected source', async t => {
   if (!fs.existsSync(python) || !fs.existsSync(launcher)) return t.skip('Installed native Hermes is required for the no-model integration fixture');
   const { prepareCreatorRuntimeHome } = await import(helperUrl); const f = fixture(t);
-  fs.writeFileSync(path.join(f.sourceHome, '.env'), 'SYNTHETIC_PROVIDER_TOKEN=synthetic-fixture-provider-value\nCONTROL_MCP_AUTH=synthetic-legacy-private-capability\nZIWEI_DEVICE_TOKEN=synthetic-daemon-identity-private\nZIWEI_MCP_WORKSPACE=foreign-source-workspace\n');
+  fs.writeFileSync(path.join(f.sourceHome, '.env'), 'SYNTHETIC_PROVIDER_TOKEN=synthetic-fixture-provider-value\nCONTROL_MCP_AUTH=synthetic-legacy-private-capability\nZIWEI_DEVICE_TOKEN=synthetic-daemon-identity-private\nZIWEI_MCP_WORKSPACE=foreign-source-workspace\nHERMES_MANAGED_DIR=/foreign-source-overlay\nPYTHONPATH=/foreign-source-python\nPYTHONHOME=/foreign-source-pythonhome\n');
   const sourceConfig = fs.readFileSync(path.join(f.sourceHome, 'config.yaml'));
   const managed = path.join(f.directory, 'managed'); fs.mkdirSync(managed);
   fs.writeFileSync(path.join(managed, 'config.yaml'), 'security:\n  redact_secrets: true\nmcp_servers:\n  ziwei_management:\n    enabled: true\n    command: fixture-no-discovery\n  ziwei-terminal:\n    enabled: false\n');
@@ -178,7 +179,7 @@ test('Installed Hermes native memory/state/SOUL isolate two Creator instances wh
     }
     const context = { ...f.context, workspace, employeeId: `employee_fixture_${name}`, persona: `Private persona ${index}`, instructions: `Private instructions ${index}` };
     const home = prepareCreatorRuntimeHome({ ...f.options, context, workspace, sourceHome, profile });
-    const env = { ...process.env, PYTHONPATH: nativeRoot, HERMES_HOME: sourceHome, HERMES_MANAGED_DIR: managed, ...home.env, ZIWEI_MCP_WORKSPACE: workspace, FIXTURE_MEMORY: `native memory ${index}` };
+    const env = { ...process.env, PYTHONPATH: nativeRoot, HERMES_HOME: sourceHome, HERMES_MANAGED_DIR: managed, ...home.env, ZIWEI_MCP_WORKSPACE: workspace, FIXTURE_MEMORY: `native memory ${index}`, FIXTURE_MANAGED_DIR: managed, FIXTURE_PYTHONPATH: nativeRoot }; delete env.PYTHONHOME;
     const spec = hermesMcpSpawnSpec(launcher, ['--profile', profile, '-z', 'no model fixture', '--toolsets', 'all'], { env });
     const output = spawnSync(spec.command, ['-c', nativeProbe, JSON.stringify(spec.args)], { env, cwd: f.directory, encoding: 'utf8', windowsHide: true, timeout: 30000 });
     assert.equal(output.status, 0, output.stderr);
@@ -193,6 +194,7 @@ test('Installed Hermes native memory/state/SOUL isolate two Creator instances wh
     assert.match(result.soul, new RegExp(`Private persona ${index}`));
     assert.equal(result.provider, 'openai-codex'); assert.equal(result.phoneDisabled, true); assert.equal(result.policyPreserved, true); assert.equal(result.models, 0);
     assert.equal(result.sourceEnvLoaded, true); assert.equal(result.legacyPhoneCredentialPresent, false); assert.equal(result.deviceCredentialPresent, false); assert.equal(result.runtimeScopePreserved, true);
+    assert.equal(result.managedDirectoryPreserved, true); assert.equal(result.pythonPathPreserved, true); assert.equal(result.pythonHomeAbsent, true);
     assert.equal(fs.existsSync(path.join(home.home, 'auth.json')), false);
     assert.equal(fs.readFileSync(path.join(home.home, 'memories', 'MEMORY.md'), 'utf8'), `native memory ${index}`);
     assert.equal(fs.existsSync(path.join(sourceHome, 'state.db')), false); assert.equal(fs.existsSync(path.join(sourceHome, 'memories')), false);
