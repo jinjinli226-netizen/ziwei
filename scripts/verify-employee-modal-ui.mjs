@@ -101,7 +101,16 @@ async function open(path, state, width = 1440, height = 900) {
   return { page, context };
 }
 async function run(name, action) { try { await action(); evidence.tests.push({ name, passed: true }); process.stdout.write(`PASS ${name}\n`); } catch (error) { evidence.tests.push({ name, passed: false, error: error.stack }); process.stderr.write(`FAIL ${name}: ${error.message}\n`); } }
-async function screenshot(page, name) { const file = join(output, name);const masks=live?[page.locator('.sidebar-account')]:[];await page.screenshot({ path: file, fullPage: true,mask:masks,maskColor:'#ffffff' }); evidence.screenshots.push(file); }
+async function screenshot(page, name) {
+  const file = join(output, name);
+  const privacyStyle = live ? await page.addStyleTag({ content: '.sidebar-account { visibility: hidden !important; }' }) : null;
+  try {
+    await page.screenshot({ path: file, fullPage: true });
+    evidence.screenshots.push(file);
+  } finally {
+    if (privacyStyle) await privacyStyle.evaluate(node => node.remove());
+  }
+}
 async function chooseDevice(page, label) { await page.getByRole('combobox', { name: '目标电脑', exact: true }).click(); await page.getByRole('option', { name: label, exact: true }).click(); }
 
 function employeeFixture() {

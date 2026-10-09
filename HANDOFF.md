@@ -4,7 +4,15 @@
 
 > **当前接管状态（2026-10-08）**：本地 checkout、5178 前端、4178 API 和项目 `data/ziwei_user.json` 是 `bjc-ops` 的本地代码验收环境；真实本机 `ziwei_user` daemon 由全局命令启动，使用用户目录配置连接 `https://qzelynth.top` 的服务器工作区 `test_222`。不要把项目配置或项目 daemon 当成服务器 daemon；接手时分别核对用户目录配置、项目配置和各自 `/readyz`。详细维护约定统一见 `PROJECT_MANAGEMENT.md`。
 
-## 2026-10-09 当前接手续记：邀请注册修复
+## 2026-10-09 当前接手续记：员工弹窗勾选框修复
+
+- 生产代码 `f790f099ae80b8cac8d272c9b260527f8c611e0b` 已于北京时间12:13:51发布，目录 `/opt/ziwei/releases/f790f09`，JS/CSS为 `index-Bxj_j2AJ.js` / `index-Du5DwJBi.css`。包含82c4f8e邀请及全部手机/管理/卡片增量；文档与截图helper后续提交不改变该生产代码版本。
+- 文本框规则排除checkbox/radio；共享原生18px勾选框保留label和键盘交互，SKILLS不缩小、敏感项同步回归。手机继续选项进入正文滚动区，编辑标题正确且不显示创建专属项。真实未授权管理MCP仍阻止提交，取消后按其他条件恢复可用。
+- 296/296、lint49/build、隔离弹窗11/11、原UI36/36、生产五视口创建/编辑10/10及独立footer/body最终5/5通过；生产15个checkbox均18×18/gap8、无错误和业务写请求、员工摘要hash及2→2数量不变。720×450为CSS视口而非真实200%缩放。手机动作仍待在线，不以UI验收代替实机结果。
+- 备份 `/opt/ziwei-backups/employee-modal/20261009T035856Z` 双库ok、13配置。服务PID80617/44591/737全不变、0重启；后端/runtime字节一致，Nginx手机路由与hash保留，六份旧hash HEAD200、Android最新code15。回滚只切回82c4f8e，不重启、不恢复旧库。
+- QA会话已撤销并用旧cookie验证401，服务器私有文件删除、本机token已移除。仅截图helper补充隐去背景账户区域，避免遮罩盖住前景。最终无遮挡截图、结构化结果、中间脚本和网络失败记录见[弹窗修复记录](docs/operations/2026-10-09-employee-modal-checkbox-fix.md)。
+
+## 2026-10-09 历史接手续记：邀请注册修复
 
 - 主站已于北京时间11:12:26发布 `82c4f8e`，目录 `/opt/ziwei/releases/82c4f8e`；控制 `8a4fe59`。手机技能628482d、管理MCP、卡片与原Nginx手机路由保留，只有主API重启。文档Git头可晚于该代码发布。
 - 根因是个人工作区有效邀请被注册kind限制拒绝；共享事务校验现支持个人/团队邀请、即时user_id绑定、同邮箱legacy Owner保持与未知工作区无code拒绝。错误持续可见，已有账号登录接受后即时进入目标工作区；普通受邀者无owner权限。
