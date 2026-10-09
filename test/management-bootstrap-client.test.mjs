@@ -159,5 +159,11 @@ test('client build identity detects upgraded code even when package version is u
     const second = bootstrapModule.clientBuildIdentity(directory); assert.notEqual(first, second);
     assert.equal(bootstrapModule.clientBuildMismatch({ version: '0.1.0', clientBuild: first }, '0.1.0', second), true);
     assert.equal(bootstrapModule.clientBuildMismatch({ version: '0.1.0', clientBuild: second }, '0.1.0', second), false);
+    fs.writeFileSync(path.join(directory, 'src', 'hermes-mcp-bootstrap.py'), 'first Python bootstrap');
+    const beforePythonChange = bootstrapModule.clientBuildIdentity(directory);
+    fs.writeFileSync(path.join(directory, 'src', 'hermes-mcp-bootstrap.py'), 'updated Python bootstrap only');
+    const afterPythonChange = bootstrapModule.clientBuildIdentity(directory);
+    assert.notEqual(beforePythonChange, afterPythonChange, 'Python-only startup fixes must trigger the same-version native upgrade');
+    assert.equal(bootstrapModule.clientBuildMismatch({ version: '0.1.0', clientBuild: beforePythonChange }, '0.1.0', afterPythonChange), true);
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });

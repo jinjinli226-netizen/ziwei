@@ -90,7 +90,7 @@ export function clientBuildIdentity(root) {
   const files = ['package.json', 'backend/a2a-auth.mjs', 'scripts/ziwei-user.mjs', 'scripts/ziwei-cli.mjs', 'scripts/start-ziwei-user.mjs', 'scripts/ziwei-mcp.mjs', 'scripts/ziwei-terminal-mcp.mjs'];
   function walk(directory) {
     if (!fs.existsSync(directory)) return [];
-    return fs.readdirSync(directory, { withFileTypes: true }).flatMap(entry => entry.isDirectory() ? walk(path.join(directory, entry.name)) : entry.name.endsWith('.mjs') ? [path.relative(root, path.join(directory, entry.name))] : []);
+    return fs.readdirSync(directory, { withFileTypes: true }).flatMap(entry => entry.isDirectory() ? walk(path.join(directory, entry.name)) : /\.(mjs|py)$/.test(entry.name) ? [path.relative(root, path.join(directory, entry.name))] : []);
   }
   files.push(...walk(path.join(root, 'daemon')), ...walk(path.join(root, 'src')));
   for (const file of [...new Set(files)].sort()) if (fs.existsSync(path.join(root, file))) hash.update(file.replaceAll('\\', '/')).update('\0').update(fs.readFileSync(path.join(root, file))).update('\0');

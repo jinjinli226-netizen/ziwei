@@ -24,6 +24,7 @@ const VERSION_TIMEOUT_MS = 3000;
 const DISCOVERY_TTL_MS = 30_000;
 const WINDOWS_INTERNET_SETTINGS = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings';
 const MANAGEMENT_ADAPTER = fileURLToPath(new URL('../scripts/ziwei-mcp.mjs', import.meta.url));
+const HERMES_MCP_BOOTSTRAP = fileURLToPath(new URL('./hermes-mcp-bootstrap.py', import.meta.url));
 const MANAGEMENT_ENV_KEYS = ['ZIWEI_API_BASE', 'ZIWEI_MCP_WORKSPACE', 'ZIWEI_MCP_TOKEN_FILE', 'ZIWEI_MCP_TOKEN', 'ZIWEI_MCP_AUDIT_FILE'];
 const TERMINAL_ADAPTER = fileURLToPath(new URL('../scripts/ziwei-terminal-mcp.mjs', import.meta.url));
 const TERMINAL_ENV_KEYS = ['ZIWEI_TERMINAL_API_BASE', 'ZIWEI_TERMINAL_WORKSPACE', 'ZIWEI_TERMINAL_TOKEN_FILE', 'ZIWEI_TERMINAL_AUDIT_FILE', 'ZIWEI_TERMINAL_EMPLOYEE_ID', 'ZIWEI_TERMINAL_DEVICE_ID'];
@@ -614,6 +615,23 @@ export function hermesProfileHome(profile, { baseHome = null } = {}) {
   return candidate;
 }
 
+/** Bind the actual native launcher interpreter, never a Python discovered separately on PATH. */
+export function hermesMcpSpawnSpec(binary, args, { env = process.env } = {}) {
+  let interpreter;
+  try {
+    const header = fs.readFileSync(binary).toString('latin1').match(/#!([^\r\n]+)/)?.[1]?.trim();
+    interpreter = header?.replace(/^"(.+)"$/, '$1');
+    if (!interpreter || !path.isAbsolute(interpreter) || /(?:^|[\\/])env(?:\s|$)/.test(interpreter) || !fs.statSync(interpreter).isFile()) throw new Error();
+  } catch { throw new Error('Hermes 原生入口未绑定可核实的绝对解释器；请更新 Hermes 安装，不会改用系统 Python'); }
+  let binding;
+  try {
+    const output = execFileSync(interpreter, [HERMES_MCP_BOOTSTRAP, '--probe', path.resolve(binary)], { env, encoding: 'utf8', timeout: 5000, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    binding = JSON.parse(output);
+    if (!binding.paths?.main || !binding.paths?.mcp_startup || !binding.paths?.managed_scope || !binding.fingerprint) throw new Error();
+  } catch { throw new Error('Hermes 原生入口不兼容 managed MCP discovery 或安装已变化；请更新 Hermes/ziwei_user，不会替代运行时'); }
+  return { command: interpreter, args: [HERMES_MCP_BOOTSTRAP, '--launcher', path.resolve(binary), '--binding', JSON.stringify(binding), '--', ...args.map(String)], nativeBinding: { binary, interpreter, entrypoint: binding.paths.main, mode: 'effective-mcp-gate' } };
+}
+
 function readPrivateJson(file) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return {}; }
 }
@@ -854,7 +872,9 @@ export function executeRuntime({ runtime, prompt, model = null, profile = null, 
     invocation = phoneLaunch.invocation; childEnv = phoneLaunch.env; phoneReceipt = phoneLaunch.receipt;
     if (resolvedRuntime === 'Hermes' && !receipt && !phoneReceipt) childEnv.HERMES_HOME = hermesProfileHome(profile || 'default', { baseHome: profileBaseHome });
   } catch (error) { cleanupOverlay(); return Promise.reject(error); }
-  const spec = runtimeSpawnSpec(discovered.binary, invocation.args);
+  let spec;
+  try { spec = resolvedRuntime === 'Hermes' && childEnv.HERMES_MANAGED_DIR && receipt ? hermesMcpSpawnSpec(discovered.binary, invocation.args, { env: childEnv }) : runtimeSpawnSpec(discovered.binary, invocation.args); }
+  catch (error) { cleanupOverlay(); return Promise.reject(error); }
   // The desktop user session may have a proxy configured in Windows Internet
   // Settings while the daemon process has no proxy variables in its service
   // environment. Propagate that proxy to each local CLI child, preserving any
@@ -901,7 +921,7 @@ export function executeRuntime({ runtime, prompt, model = null, profile = null, 
     child.once('close', (code, childSignal) => {
       if (state.lineBuffer) parseRuntimeStreamLine(state.lineBuffer, state, onOutput, onStage);
       if (signal?.aborted) return finish({ status: 'failed', code: 'cancelled', error: 'runtime execution cancelled', result: { runtime: resolvedRuntime, code, signal: childSignal, output: state.output, truncated: state.truncated } });
-    const result = { runtime: resolvedRuntime, model: model || null, profile: profile || null, binary: discovered.binary, code, signal: childSignal, output: state.response.trim() || state.output, diagnostics: state.response.trim() ? state.output : null, truncated: state.truncated, ...(receipt ? { managementMcp: managementMcpReceipt(receipt) } : {}), ...(phoneReceipt ? { terminalMcp: terminalMcpReceipt(phoneReceipt) } : {}), ...(attachments.length ? {attachments} : {}) };
+    const result = { runtime: resolvedRuntime, model: model || null, profile: profile || null, binary: discovered.binary, code, signal: childSignal, output: state.response.trim() || state.output, diagnostics: state.response.trim() ? state.output : null, truncated: state.truncated, ...(spec.nativeBinding ? { hermesBootstrap: spec.nativeBinding } : {}), ...(receipt ? { managementMcp: managementMcpReceipt(receipt) } : {}), ...(phoneReceipt ? { terminalMcp: terminalMcpReceipt(phoneReceipt) } : {}), ...(attachments.length ? {attachments} : {}) };
       const mcpFailure = code === 0 ? managementMcpExecutionFailure(result.managementMcp) || terminalMcpExecutionFailure(result.terminalMcp) : null;
       if (mcpFailure) return finish({ status: 'failed', ...mcpFailure, result });
       if (code !== 0) return finish({ status: 'failed', code: 'runtime_failed', error: formatRuntimeFailure(resolvedRuntime, code, state.output), result });

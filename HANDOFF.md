@@ -4,7 +4,17 @@
 
 > **当前接管状态（2026-10-08）**：本地 checkout、5178 前端、4178 API 和项目 `data/ziwei_user.json` 是 `bjc-ops` 的本地代码验收环境；真实本机 `ziwei_user` daemon 由全局命令启动，使用用户目录配置连接 `https://qzelynth.top` 的服务器工作区 `test_222`。不要把项目配置或项目 daemon 当成服务器 daemon；接手时分别核对用户目录配置、项目配置和各自 `/readyz`。详细维护约定统一见 `PROJECT_MANAGEMENT.md`。
 
-## 2026-10-09 当前接手续记：员工弹窗勾选框修复
+## 2026-10-09 当前接手续记：默认自动管理 MCP
+
+- 已推送/部署代码 `1ac03954836543d2d6af0881fcae8ff3d40b2acf`，北京时间 20:11；前端 `index-Caqrwk2Y.js` / `index-C30xBdgl.css`。下面的 f790f09、82c4f8e、628482d 等保持为历史快照，功能均已包含，历史 PID、手工开关与 token 配置不作为当前操作指引。
+- 所有工作区新旧员工有效管理配置默认开启。每条已配对电脑连接用自己的设备身份领取单工作区、短期、management-only 凭据，按 origin/workspace/device 私有缓存并自动恢复/续期；跨区、匿名、撤销/过期及错误 audience 继续拒绝，不让浏览器或模型拿到设备凭据。新增 shared 连接仍需原双 Owner 授权，普通成员的网页角色及手机 capability/精确绑定规则不变。
+- 表单不再提供管理 MCP 授权 checkbox；准备中或自动准备失败可先保存有效员工配置，原 device/workspace/offline/CLI/auth/provider/显式 profile 检查继续生效。页面显示准备进度、失败原因、重试与更新入口，workspace 切换/刷新有显式 slug 和 generation 防串区。重试仅请求指定连接在下一次心跳刷新管理配置，不创建任务、员工或手机动作。
+- Hermes 管理 MCP 支持真实发现的 default 或显式 profile。执行使用所选 profile 的原生临时 managed overlay，认证继续来自原 `HERMES_HOME`，不复制 auth、不改原配置；手机技能独立 profile 限制保留。官方客户端来源为 `https://qzelynth.top/downloads/cli/ziwei-latest.tgz`；已配对电脑升级只用 npm 全局安装与原生 start，不重新配对、不切工作区或端口。
+- 已发布 1ac0395 的 338/338 单测、真实域名开放平台/既有 Hermes 6/6、五视口创建/编辑只读 10/10、两工作区只读 18 项、缓存缺失恢复/临到期续期/主动重试已通过。本轮浏览器全部关闭，0 写请求、0 手机动作、员工摘要 hash 不变；只读 UI 中展示的旧独立 Hermes 成功回执不是本轮 default 链路成功证据。
+- **待处理：新 default Hermes QA 首次执行 failed、尚无 MCP 握手，后续 runtime 修复本地 341/341、无模型验证门槛真实 MCP 加载通过，但仍不能计作新员工模型 QA 成功；修复发布、最终版本/时间和本次模型工具回执待补。** 用户已表示“codex这个不用管了”，本轮不做 Codex 实机；“小饱饱”离线且用户暂不能操作，手机实机暂缓。准备 ready、注入、API 健康或历史 loaded 不得改写为本次成功。
+- 本次证据与接续入口见[默认管理 MCP 发布记录](docs/operations/2026-10-09-default-management-mcp.md)。私有 QA 会话、缓存和诊断原文只留 ignored 目录，发布负责人完成后续真实 QA 后按实际结果撤销/清理并回填；本节不预先声明清理完成。
+
+## 2026-10-09 历史接手续记：员工弹窗勾选框修复
 
 - 生产代码 `f790f099ae80b8cac8d272c9b260527f8c611e0b` 已于北京时间12:13:51发布，目录 `/opt/ziwei/releases/f790f09`，JS/CSS为 `index-Bxj_j2AJ.js` / `index-Du5DwJBi.css`。包含82c4f8e邀请及全部手机/管理/卡片增量；文档与截图helper后续提交不改变该生产代码版本。
 - 文本框规则排除checkbox/radio；共享原生18px勾选框保留label和键盘交互，SKILLS不缩小、敏感项同步回归。手机继续选项进入正文滚动区，编辑标题正确且不显示创建专属项。真实未授权管理MCP仍阻止提交，取消后按其他条件恢复可用。
@@ -21,6 +31,8 @@
 - 独立邀请树发布，未覆盖原D与2884树任何dirty/untracked；T8手机文档与验收增量已合并保留。用户可刷新原邀请链接注册，已注册邮箱登录后接受。详细记录见[邀请注册发布记录](docs/operations/2026-10-09-invitation-registration-fix.md)。
 
 ## 2026-10-09 手机 MCP 平台技能接续快照
+
+本节保留手机技能发布时的版本、客户端及验收记录；当前管理默认规则和待验边界以顶部为准。管理默认开启不替代手机授权；下文旧“两 runtime 顺序实机验收”计划已调整为 Codex 本轮取消、手机实机暂缓。
 
 - 最新主站已由邀请注册T7接续发布 `82c4f8e`（北京时间11:12:26），包含手机功能 `628482d`；前端 `index-C8RY6SXs.js`。本工作树已快进包含该邀请增量，本轮只提交文档与验证脚本、不再发布。邀请验收及其QA清理以T7独立记录为准。
 - 手机技能代码 `628482d` 已推送并发布 `/opt/ziwei/releases/628482d`，前端 `index-DL3srw7J.js/index-F195zgZe.css`，控制 `8a4fe59`、Android code15不变。仅主API重启；公网真实员工检测发现并补齐 Nginx `^~ /terminal-mcp/v1/ →4178`，后续发布必须保留并运行匿名 transport 门槛。

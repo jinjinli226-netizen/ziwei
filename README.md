@@ -6,21 +6,31 @@
 
 开发、启动、架构、真实完成边界、扩展规范、故障排查、发布门槛和接手顺序统一维护在 [PROJECT_MANAGEMENT.md](PROJECT_MANAGEMENT.md)；项目级变更摘要见 [CHANGELOG.md](CHANGELOG.md)。需要把项目交给新 AI 时，直接使用 [NEW_AI_SESSION_PROMPT.md](NEW_AI_SESSION_PROMPT.md) 中的提示词。任何 AI 接手项目时先读维护手册，再读本文件和 `HANDOFF.md`；不要只依据旧截图或历史计划判断当前状态。
 
-## 员工创建 / 编辑勾选框修复（2026-10-09 已上线）
+## 默认自动管理 MCP（2026-10-09 当前发布）
 
-当前主站 `f790f09` 于北京时间12:13:51发布，包含邀请、手机技能、管理MCP与团队卡片修复。创建/编辑窗口的原生勾选框恢复18×18、文字相邻且可点击，手机继续配置选项随正文滚动；短窗口和390px下底部按钮可达，编辑标题正确。未配置管理MCP时仍明确阻止提交，不需要时可取消该选项。
+当前主站代码为 `1ac03954836543d2d6af0881fcae8ff3d40b2acf`，已推送并于北京时间 20:11 发布；前端为 `index-Caqrwk2Y.js` / `index-C30xBdgl.css`。所有工作区的新旧员工默认使用管理 MCP，无需逐员工勾选、手工授权或复制 bearer。前提仍是该工作区已有有效的电脑连接；没有电脑时显示等待连接，不会自动取得其他工作区的电脑身份。
+
+`ziwei_user` 使用每条已配对连接自己的设备凭据，自动领取并续期仅限当前工作区、用途为管理 MCP 的短期凭据。主连接与 shared 连接分别准备，匿名、跨工作区、已撤销或过期身份继续拒绝；浏览器、员工人格、模型提示词和日志不接收设备凭据或管理 token。普通成员使用管理功能不会改变其网页角色；手机 MCP 的独立 capability、精确绑定与 Owner/Admin 授权规则保持。
+
+创建或编辑员工时显示自动准备进度、失败原因、“重试自动接入”和客户端更新入口。准备中或自动接入失败时可先保存有效员工配置；工作区、电脑在线、CLI、认证/provider 和显式 profile 缺失检查仍生效。Hermes 管理接入可使用真实发现的 `default` 或显式 profile，执行使用所选 profile 的原生临时配置 overlay，保留原配置与认证；手机技能的独立 profile 要求继续适用。API 健康、凭据就绪和配置注入均不等于实际 MCP 握手，工具结果须按本次执行回执判断，`ok:false` 不标成功。
+
+已发布 `1ac0395` 的 338/338 单测、真实域名开放平台/既有 Hermes 员工页 6/6、员工创建/编辑只读弹窗 10/10、两工作区只读 18 项，以及缓存缺失恢复、临到期续期和主动重试已通过。**本轮新 default Hermes QA 首次执行 failed，尚无实际握手，后续 runtime 修复本地已通过 341/341 与无模型验证门槛的真实 MCP 加载检查，但新员工真实模型链路仍待复验；修复版本尚待发布负责人最终回填。** 浏览器中的旧独立 Hermes 成功回执属于历史证据。用户已取消本轮 Codex 实机验收；手机“小饱饱”离线、用户暂时无法操作，手机实机验收暂缓。后续实际结果与最终版本由发布负责人补入[默认管理 MCP 发布记录](docs/operations/2026-10-09-default-management-mcp.md)。
+
+## 员工创建 / 编辑勾选框修复（2026-10-09 历史发布）
+
+该次主站 `f790f09` 于北京时间12:13:51发布，包含邀请、手机技能、管理MCP与团队卡片修复。创建/编辑窗口的原生勾选框恢复18×18、文字相邻且可点击，手机继续配置选项随正文滚动；短窗口和390px下底部按钮可达，编辑标题正确。当时未配置管理MCP会阻止提交，可取消该选项；此手工开关规则已由上方默认自动接入取代，勾选框布局修复继续保留。
 
 296/296、lint49/build、弹窗隔离11/11、原功能UI回归36/36与真实生产五视口创建/编辑10/10、独立footer/body最终5/5通过。仅前端原子切换，三服务未重启，线上员工数据未修改，未操作真实手机。证据、备份与回滚见[弹窗修复记录](docs/operations/2026-10-09-employee-modal-checkbox-fix.md)。
 
-## 邀请注册修复（2026-10-09 已上线）
+## 邀请注册修复（2026-10-09 历史发布）
 
-邀请修复 `82c4f8e` 已包含在当前 `f790f09`，同时保留手机技能 `628482d`、管理 MCP 和团队卡片修复。个人与团队工作区的有效邀请都可注册加入，普通受邀者按邀请获得 member/admin；历史 Owner 不被降权。已有账号可在原邀请页切换登录并接受，当前会话立即可访问目标工作区。页面持续显示无效、过期、撤销、邮箱不匹配等具体错误；未知工作区且无邀请码会明确拒绝，不创建误填的工作区。
+该次邀请修复发布为 `82c4f8e`，后续弹窗发布 `f790f09` 已包含它，同时保留手机技能 `628482d`、管理 MCP 和团队卡片修复；这些实现继续包含在顶部当前发布中。个人与团队工作区的有效邀请都可注册加入，普通受邀者按邀请获得 member/admin；历史 Owner 不被降权。已有账号可在原邀请页切换登录并接受，当前会话立即可访问目标工作区。页面持续显示无效、过期、撤销、邮箱不匹配等具体错误；未知工作区且无邀请码会明确拒绝，不创建误填的工作区。
 
 用户刷新原邀请链接即可重试。完整串行296/296、隔离邀请6/6、真实域名新上下文6/6和原手机/卡片/管理回归30/30通过；真实邀请未消费，独立QA已清理。仅主API重启，原数据、手机MCP路由、APK和旧hash资源保留。发布、备份与回滚见[邀请注册修复记录](docs/operations/2026-10-09-invitation-registration-fix.md)。
 
-## 手机 MCP 平台技能（2026-10-09 已上线）
+## 手机 MCP 平台技能（2026-10-09 历史发布，实机暂缓）
 
-手机技能首次发布实现为 `628482d`，当前主站 `f790f09` 包含该实现与邀请注册修复，控制服务保持 `8a4fe59`。在 [`phone_ai / 技能中心`](https://qzelynth.top/phone_ai/skills) 安装 **紫薇·互联手机操控 v1.0.0**，通过统一向导选择已有或新员工、真实电脑、Codex/Hermes 配置和精确手机，然后保存、检测并回读证据。员工的技能/MCP 页与紫薇·互联手机绑定共用此向导，无需手改配置或复制密钥。完整步骤见[手机技能使用指南](docs/PHONE_MCP.md)。
+该次手机技能首次发布实现为 `628482d`，后续邀请/弹窗发布 `82c4f8e`、`f790f09` 均保留该实现；这些功能继续包含在顶部当前发布中，控制服务保持 `8a4fe59`。在 [`phone_ai / 技能中心`](https://qzelynth.top/phone_ai/skills) 安装 **紫薇·互联手机操控 v1.0.0**，通过统一向导选择已有或新员工、真实电脑、Codex/Hermes 配置和精确手机，然后保存、检测并回读证据。员工的技能/MCP 页与紫薇·互联手机绑定共用此向导，无需手改配置或复制密钥。完整步骤见[手机技能使用指南](docs/PHONE_MCP.md)。
 
 同一本机客户端保留 `test_222` 主连接，通过双 Owner 明确授权新增 `phone_ai` 独立连接；端口仍为 `20242`。正式员工“紫薇手机运营-Codex”和“紫薇手机运营-Hermes”已在 `phone_ai` 配置，Hermes 使用独立 `ziwei-phone-ops-20261009`。管理 MCP 现提供 21 工具，正式搭建师可显式指定获授权的 `workspace: "phone_ai"` 发现、安装和配置手机技能。
 
@@ -40,7 +50,7 @@
 
 本轮由搭建师的真实模型通过 MCP 创建两名带 QA 名称的员工，各重试一次返回相同 ID；Codex 与独立 Hermes profile 的首次任务和 daemon 刷新后任务均真实 `succeeded`，都有本次 stdio 握手、health/list 工具成功及结果标记。全套串行测试 235/235、lint/build、隔离 UI 6/6、真实域名 1440/390 px 验收通过。完整 IDs、版本、证据、边界及回滚见[最终验收记录](docs/operations/2026-10-09-management-mcp-acceptance.md)。
 
-管理 MCP 以 `scripts/ziwei-mcp.mjs` 提供 **stdio** 服务，内部经 HTTPS 请求 `/mcp/v1`；该 HTTP 管理 API 地址不能填作远程 MCP transport URL。MCP bearer、普通 API Key、设备凭据相互独立。真实 daemon 的私有 `managementMcp` 配置保存专用 token 文件路径，凭据不进入员工人格、提示词、命令行参数、前端或 Git。仅 Codex/Hermes 完成首次发布的实际管理 MCP 验收；其他 CLI 的发现状态不代表已完成认证或工具调用验收。手机执行、绑定和旧手机 MCP 配置未包含在该次管理 MCP 发布的通过范围；后续手机技能的实际进展与边界见上方当前记录。
+管理 MCP 以 `scripts/ziwei-mcp.mjs` 提供 **stdio** 服务，内部经 HTTPS 请求 `/mcp/v1`；该 HTTP 管理 API 地址不能填作远程 MCP transport URL。MCP bearer、普通 API Key、设备凭据相互独立。该次真实 daemon 的私有 `managementMcp` 配置保存专用 token 文件路径；当前平台员工改为自动领取连接专属短期凭据，旧显式 scoped bearer 接入仍兼容。凭据不进入员工人格、提示词、命令行参数、前端或 Git。仅 Codex/Hermes 完成首次发布的实际管理 MCP 验收；其他 CLI 的发现状态不代表已完成认证或工具调用验收。手机执行、绑定和旧手机 MCP 配置未包含在该次管理 MCP 发布的通过范围；后续手机技能的实际进展与边界见上方当前记录。
 
 ## 紫薇·互联 Android 安装页（已上线并完成真实域名验收）
 
@@ -72,12 +82,14 @@ npm run ziwei:setup -- --workspace <workspace-slug> --api http://127.0.0.1:4178 
 npm run ziwei:status # 查看本机 ziwei_user 配置和健康状态
 npm run ziwei:version
 npm run ziwei:start  # 已配置时复用现有进程，否则后台启动 ziwei_user
-npm run mcp:token -- --workspace bjc-ops  # 生成工作区限定的 MCP bearer 文件
-npm run mcp:manage -- --api-base http://127.0.0.1:4178 --workspace bjc-ops --token-file data/mcp.token  # 以 stdio MCP 服务运行
+npm run mcp:token -- --workspace bjc-ops  # 可选：为显式外部集成生成 scoped bearer 文件
+npm run mcp:manage -- --api-base http://127.0.0.1:4178 --workspace bjc-ops --token-file data/mcp.token  # 可选：显式外部 stdio 接入
 npm run diagnose  # 单次健康检查
 ```
 
 `npm run dev` 启动前端 `5178` 和后端 `4178`；daemon 健康接口使用 `20242`。参考 AuraBaba daemon 已占用 `20241`，紫薇不会抢占它。
+
+普通平台员工自动接入管理 MCP，不需要执行 `mcp:token` 或编辑私有 token 文件。上述两个命令只保留给明确需要独立外部集成的开发场景。
 
 ## 验收环境边界
 
@@ -90,12 +102,19 @@ npm run diagnose  # 单次健康检查
 创建工作区和管理项目不需要先连接设备。只有要让某台电脑运行数字员工时，才在网页的“添加设备”里生成一次性配对码。`ziwei_user` 在每台电脑上只需安装一次；后续给同一台电脑连接新的工作区时，直接运行 `connect` 和 `start`，不要重复执行 `npm install`。
 
 ```powershell
-npm install --global "https://github.com/jinjinli226-netizen/ziwei/archive/refs/heads/codex/ziwei-terminal-console.tar.gz"
+npm install --global "https://qzelynth.top/downloads/cli/ziwei-latest.tgz"
 ziwei_user connect --api "https://qzelynth.top" --code "<网页生成的一次性配对码>" --name "我的电脑"
-ziwei_user change
+ziwei_user start
 ```
 
-上面第一行只在这台电脑第一次安装时执行；如果 `ziwei_user version` 已经能返回版本号，就跳过第一行。`--name` 是网页设备目录中的显示名称，例如“办公室电脑”，不代表远程账号或新的 Agent。`connect` 会保存新工作区的配对凭证；`change` 会检查 20242 上是否有旧的 `ziwei_user`，在确认它是本 daemon 后停止旧进程，再启动当前配置，因此切换工作区不需要手动找 PID，也不需要重新安装 npm 包。第一次没有旧 daemon 时，`change` 也可以直接启动；`ziwei_user start` 仍可作为只启动命令。配置、日志和运行时状态写入用户目录，不依赖项目源码目录，也不会安装网页前端依赖。普通 connect 配对保存并切换主连接，每个工作区使用自己的凭据；切换前应先在网页确认目标工作区。若需要同一电脑同时连接多个工作区，可由源、目标工作区双 Owner 明确授权新增 shared 连接；同一 daemon 会保留主连接，并使用独立设备身份、私有凭据和心跳运行获授权的连接，不把主 token 跨区复用。正式 HTTPS 域名不需要下载证书；只有私有证书或本地地址才需要在 `ziwei_user setup` 中通过 `--tls-ca-file` 指定公钥证书。
+上面第一行用于这台电脑第一次安装；已经安装当前客户端时可跳过。`--name` 是网页设备目录中的显示名称，例如“办公室电脑”，不代表远程账号或新的 Agent。`connect` 会保存新工作区的配对凭证；`change` 会检查 20242 上是否有旧的 `ziwei_user`，在确认它是本 daemon 后停止旧进程，再启动当前配置，因此切换工作区不需要手动找 PID，也不需要重新安装 npm 包。第一次没有旧 daemon 时，`change` 也可以直接启动；`ziwei_user start` 仍可作为只启动命令。配置、日志和运行时状态写入用户目录，不依赖项目源码目录，也不会安装网页前端依赖。普通 connect 配对保存并切换主连接，每个工作区使用自己的凭据；切换前应先在网页确认目标工作区。若需要同一电脑同时连接多个工作区，可由源、目标工作区双 Owner 明确授权新增 shared 连接；同一 daemon 会保留主连接，并使用独立设备身份、私有凭据和心跳运行获授权的连接，不把主 token 跨区复用。正式 HTTPS 域名不需要下载证书；只有私有证书或本地地址才需要在 `ziwei_user setup` 中通过 `--tls-ca-file` 指定公钥证书。
+
+已配对电脑需要更新客户端时，运行下面的官方包安装与原生启动命令，然后核对 `ziwei_user version`、`status` 和页面自动接入状态；保留原配置、设备身份、工作区、profile、工作目录与 `20242`。更新不会要求生成新配对码或重新 `connect`。
+
+```powershell
+npm install --global "https://qzelynth.top/downloads/cli/ziwei-latest.tgz"
+ziwei_user start
+```
 
 ## API 入口
 
@@ -118,7 +137,10 @@ ziwei_user change
 - `GET|POST /api/workspaces/<workspace-slug>/skills`、`PATCH /api/skills/:id`
 - `POST /api/skills/:id/uninstall`、`GET /api/skills/:id/versions`、`POST /api/skills/:id/rollback`
 - `GET|POST /api/workspaces/<workspace-slug>/employees`
-- `GET|POST /mcp/v1/workspaces/<slug>/employees`、`PATCH /mcp/v1/workspaces/<slug>/employees/:id`（独立 MCP bearer 令牌）
+- `POST /api/workspaces/<workspace-slug>/mcp/bootstrap`（仅该连接有效设备凭据，自动领取短期管理身份）
+- `GET /api/workspaces/<workspace-slug>/mcp/status`、`/mcp/discovery`、`/employees/:id/mcp/status`（安全准备状态与实际员工回执）
+- `POST /api/workspaces/<workspace-slug>/mcp/retry`，body 为 `{deviceId}`（成员请求精确连接下次心跳刷新；不创建员工任务）
+- `GET|POST /mcp/v1/workspaces/<slug>/employees`、`PATCH /mcp/v1/workspaces/<slug>/employees/:id`（自动短期管理身份或兼容的 scoped MCP bearer）
 - `GET|POST /mcp/v1/workspaces/<slug>/tasks`、`GET|POST /mcp/v1/workspaces/<slug>/documents`（同一工作区限定令牌）
 - `GET /a2a/v1/agents`
 - `POST /a2a/v1/register`
@@ -133,7 +155,7 @@ A2A 注册、轮询和任务接口都要求显式传入 workspace；服务端不
 
 设备与运行时在线状态只由 `ziwei_user` daemon 的心跳决定。超过心跳有效期的设备和运行时会自动显示为离线；AuraBaba 或其他参考 daemon 的进程状态不会参与紫薇页面健康判断。
 
-MCP 管理入口使用独立的 `data/mcp.token` 凭据文件（可用 `ZIWEI_MCP_TOKEN_FILE` 指定路径），文件内必须同时保存 bearer token 和 `workspaces` 工作区白名单。`npm run mcp:token -- --workspace <slug>` 会生成权限最小化的文件；文件和 token 不提交到 Git，也不写入日志。MCP 客户端通过 HTTPS 调用 `/mcp/v1`，服务器路由只调用 repository，不向客户端暴露 SQLite。
+普通平台员工的管理 MCP 凭据由当前工作区电脑连接自动 bootstrap，短期、单工作区且仅用于管理；客户端私有缓存自动续期，不要求用户编辑 token 文件。独立外部集成仍可使用显式 `data/mcp.token` 或 `ZIWEI_MCP_TOKEN_FILE`，必须携带工作区白名单；这不是普通员工的前置步骤。凭据不提交 Git、不进入日志、页面或人格。stdio MCP 服务内部经 HTTPS 调用 `/mcp/v1`，服务器路由只调用 repository，不向客户端暴露 SQLite。
 
 ## 命名约定
 
