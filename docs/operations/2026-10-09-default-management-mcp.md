@@ -1,22 +1,32 @@
 # 2026-10-09 默认自动管理 MCP 发布与验收记录
 
-本记录区分已经发布的默认接入实现、已完成的安全/客户端/网页检查，以及尚待修复复验的真实 default Hermes 员工链路。当前快照为主站 `1ac0395`；本轮不能声明真实 default Hermes MCP 验收成功，后续修复版本、时间及实际结果由发布负责人补录。此前独立 Hermes、Codex 和手机技能的成功记录保留其原发布版本与执行时间。
+当前主站已发布 `1ca9c6b`，真实 default Hermes 四工具创建/回读链路与独立 profile 三工具只读链路均通过实际加载验收。独立 profile 保留原 SOUL 的只读限制，没有完成请求的写入序列、没有第二个子员工。首次 failed/无握手属于修复前历史，继续留证。精确 QA 清理、18 项保护数据 count/stablehash 与最终健康检查已通过；两区最终只读18/18与QA会话精确撤销亦已完成；Codex 实机取消、手机离线实机暂缓。
 
 ## 当前发布与范围
 
 | 项目 | 当前事实 |
 | --- | --- |
-| 主站已推送/部署代码 | `1ac03954836543d2d6af0881fcae8ff3d40b2acf` |
-| 已知发布时点 | 2026-10-09 20:11，北京时间 |
+| 主站已推送/部署代码 | `1ca9c6b8761a8ee17adb2fd6d4fa92f385718c05` |
+| 发布时点 | `2026-10-09T13:18:32Z`，北京时间 21:18:32 |
+| 上一版与备份 | `/opt/ziwei/releases/1ac0395`；`/opt/ziwei-backups/management-default/20261009T130953Z` |
 | 前端资源 | `index-Caqrwk2Y.js` / `index-C30xBdgl.css` |
+| 控制服务 | `/opt/ziwei-control/releases/8a4fe59` 保持 |
 | 开发接续工作树 | `C:\Users\25941\.codex\worktrees\2884\灵光爸爸拆解` |
 | 当前来源分支 | `codex/ziwei-terminal-console` |
 | 默认行为 | 所有工作区的新旧员工管理 MCP 有效开启，无逐员工手动授权 |
 | 客户端正式包 | `https://qzelynth.top/downloads/cli/ziwei-latest.tgz` |
-| 实际运行时验收 | 新 default Hermes 首次 failed、无握手，后续 runtime 修复/无模型加载已通过，真实模型 QA 仍待复验 |
+| 客户端正式发布元数据 | `https://qzelynth.top/downloads/cli/release.json` |
+| 包文件与大小 | 22 文件，66542 bytes |
+| 包 SHA-256 | `ae27327bbcfcbcd9f7518cc9b74e357374c04a228189391e91ba4151360d5da4` |
+| 真实全局客户端 | PID 48208，ready=true，端口 20242，watcher PID 50908，原配置不变 |
+| 客户端 build 指纹 | `f26077c6abcb6479a63948439938097151888751b150780069eb714bf36348b4` |
+| 实际运行时验收 | default Hermes succeeded/loaded、四工具ok；独立 profile succeeded/loaded、只读三工具ok，未创建第二个子员工 |
+| 注入实现边界 | Codex/Hermes 支持；其他运行时缺适配明确失败，不宣称全部CLI真实验收 |
 | 用户取消/暂缓 | 本轮 Codex 实机不做；Mac 检测取消；手机离线，实机暂缓 |
 
-本轮保留 `f790f09` 弹窗勾选框与滚动修复、`82c4f8e` 邀请注册、`628482d` 手机平台技能、管理工具、团队卡片与公开 Android 安装页。默认管理 MCP 不更改手机控制协议、APK、现有手机授权或绑定，不消耗真实邀请。部署服务、客户端最终运行版本/PID、备份路径、包 hash、QA 清理与后续修复发布以发布负责人最终回填为准；这里不预先声明其全部完成。
+本轮保留 `f790f09` 弹窗勾选框与滚动修复、`82c4f8e` 邀请注册、`628482d` 手机平台技能、管理工具、团队卡片与公开 Android 安装页。默认管理 MCP 不更改手机控制协议、APK、现有手机授权或绑定，不消耗真实邀请。当前主站切换 `/opt/ziwei/releases/1ca9c6b`，只重启 `ziwei-api.service`；控制服务保持，Nginx 配置 hash 保持，六份旧 hash 资源保留。QA清理于13:22:32Z完成，随后18项保护数据复验通过；两区最终只读18/18及短期会话精确撤销/旧cookie401后验亦已完成，安全证据保留。
+
+客户端升级 ready 证据时间为 `2026-10-09T13:11:22.6854795Z`，原生模型验收汇总归档为 `13:17:47.941Z`；服务端发布于 `13:18:32Z`，正式包下载/hash/metadata 复核于 `13:19:50.487Z`。这组记录分别证明实际原生客户端、模型工具结果与正式部署/下载，不以网页历史回执替代。
 
 ## 用户操作与兼容行为
 
@@ -44,7 +54,7 @@ ziwei_user start
 
 正式入口不再使用旧 GitHub 开发分支 tarball。应核对实际客户端版本/状态与当前页面准备结果，不能仅凭 npm 安装完成就声称运行中的 daemon 已更新。Windows/macOS/Linux 安装命令的浏览器回归只验证命令展示与复制，不代表实体 Mac/Linux 安装；本轮 Mac 检测已取消。
 
-Hermes 管理接入支持真实发现的 `default` 或显式 profile，UI 继续要求明确选择真实 profile。执行使用所选 profile 的原生临时 managed overlay，原配置、人格与认证保留，认证仍来自原 `HERMES_HOME`，不复制 auth 或改写主 profile。管理授权不强迫独立 profile；**手机 MCP 的独立 profile 约束仍保留**。其他 CLI 的发现状态不代表已实际通过 MCP 握手与工具验收。
+Hermes 管理接入支持真实发现的 `default` 或显式 profile，UI 继续要求明确选择真实 profile。执行使用所选 profile 的原生临时 managed overlay，原配置、人格与认证保留，认证仍来自原 `HERMES_HOME`，不复制 auth 或改写主 profile。管理授权不强迫独立 profile；**手机 MCP 的独立 profile 约束仍保留**。原生管理 MCP 实际注入适配支持 Codex/Hermes，其他运行时缺适配会明确失败；本轮 Codex 实机已取消，其他 CLI 的发现状态不代表真实 MCP 握手/工具验收。
 
 历史显式 scoped bearer 外部客户端集成仍兼容。`mcp:token`、token 文件和开发者 stdio 模板属于可选外部集成，不是普通平台员工的前置步骤。`scripts/ziwei-mcp.mjs` 仍提供 stdio 服务并在内部经 HTTPS 请求 `/mcp/v1`；HTTP 管理 API 地址不能填作远程 MCP transport URL。
 
@@ -83,16 +93,22 @@ Hermes 管理接入支持真实发现的 `default` 或显式 profile，UI 继续
 
 | 验证 | 结果与范围 |
 | --- | --- |
-| 已发布代码单元/API 检查 | 1ac0395：338/338，lint/build 通过 |
+| 最终代码单元/API 检查 | 343/343，lint52/build通过；原1ac0395的338及中间341保留历史，不作为最终计数 |
 | scoped 前端单测 | 18/18，含默认值、缺失/失败允许保存、workspace 竞态与真实失败回执 |
 | 新安装入口 | onboarding 12/12；旧 GitHub 来源 RED 后官方 tgz GREEN；浏览器管理 13/13，含安装命令展示与复制 |
 | 隔离浏览器回归 | 员工弹窗 12/12、手机 12/12、团队 12/12、邀请 6/6、Android 安装 9/9，管理 13/13，共 64 项 |
 | 真实两个工作区只读 | 18 项；身份/工作区隔离与安全准备状态，详见发布负责人证据 |
 | 实际客户端自动恢复 | 缓存缺失恢复、临到期续领、主动重试通过；另一工作区缓存保持，详见发布负责人证据 |
-| 真实浏览器平台/既有 Hermes | 6/6；三视口 × 两入口，initial/refresh/reload 各读，36 截图 |
-| 真实浏览器创建/编辑弹窗 | 10/10；五视口 × 创建/编辑，仅打开/修改未提交表单与关闭，30 截图 |
-| 后续 runtime 修复本地 | 341/341；独立无模型验证门槛取得真实 MCP 加载，最终修复发布版本待回填 |
-| 本轮新 default Hermes 模型 QA | 首次 failed、无握手；后续模型复验待完成，不能计通过 |
+| 真实浏览器平台/既有 Hermes | 同一前端包于1ac0395测得6/6；三视口 × 两入口，initial/refresh/reload 各读，36 截图 |
+| 真实浏览器创建/编辑弹窗 | 同一前端包于1ac0395测得10/10；五视口 × 创建/编辑，仅打开/修改未提交表单与关闭，30 截图 |
+| 最终原生 default Hermes 模型 QA | succeeded/loaded，discover/list/create/get四工具全部ok，子员工精确default/电脑回读通过 |
+| 最终独立 Hermes 模型 QA | succeeded/loaded，discover/list/health三工具ok；遵守原SOUL只读，不创建第二个子员工 |
+| 原 profile 与业务动作 | 原config/SOUL不变；0phone动作、0Codex执行 |
+| 正式客户端与原生启动 | 22文件/66542bytes包及hash/metadata一致；PID48208/20242/ready，配置不变 |
+| 最终清理与保护数据 | 精确QA清理/FK通过，原18保护表count/stablehash保持；原7员工全enabled |
+| 最终健康 | 主站1ca9c6b/控制8a4fe59健康、三service active、前端两assets与APK双包HEAD200、Nginx hash保持、0phoneactions |
+| 最终两区客户端只读 | 13:29:09Z，18/18；test_222员工3/phone_ai员工2，自身API200/匿名401/跨区403，queue0、PID48208持续ready |
+| 最终QA会话撤销 | 13:29:51Z，精确撤销/服务器私有文件移除/本机token清除，旧cookie真实401 |
 
 隔离 management/install 用例主动制造 503 以验证失败恢复，预期 HTTP 错误保留在对应结果中；无非预期页面/控制台错误。隔离弹窗验证原生 skills/phone checkbox 的布局、label/点击、Tab 可见焦点与 Space，并验证保存后手机向导联动；这不等于生产提交员工或手机动作。
 
@@ -102,9 +118,30 @@ Hermes 管理接入支持真实发现的 `default` 或显式 profile，UI 继续
 
 截图前只临时隐藏背景 `.sidebar-account` 并在 finally 恢复，不使用会遮挡前景弹窗的白色 mask。所有自建隔离浏览器 context 已关闭，没有操作用户浏览器/profile。
 
+## 最终原生模型结果与历史失败
+
+| Profile | 本次员工/action | 实际结果 |
+| --- | --- | --- |
+| `default` | `employee_ee92c101-baeb-4bbe-987a-9e4062f5e1a1` / `action_4c1c1dd2-1fdf-4858-98f7-d72698a044c5` | succeeded、loaded=true；`ziwei_discover_environment`、`ziwei_list_employees`、`ziwei_create_employee`、`ziwei_get_employee`全部ok=true |
+| `ziwei-qa-mgmt-20261008` | `employee_f9867a4c-2e68-4a47-8bd6-f5efa9999847` / `action_d2d34adf-1646-4185-9c2d-4b5a260e1529` | succeeded、loaded=true；`ziwei_discover_environment`、`ziwei_list_employees`、`ziwei_mcp_health`全部ok=true |
+
+default 链路创建的子员工为 `employee_62e5c7e1-8486-47f2-88eb-606b2de22f47`，回读 `profile=default`，精确电脑 `device_ceb28133-2103-46c9-8720-b101d2e8acbc` 范围正确。独立 profile 原有 SOUL 明确仅允许只读 QA、禁止业务数据创建，因此原请求 discover/list/create/get 写序列没有完成，也没有第二个子员工。该 profile 的三项实际只读工具成功与写序列未完成分别记录；不能描述为两个 profile 都创建成功，也不能为了验收覆盖其原政策。
+
+安全汇总 `native-acceptance-result.json` 确认 `defaultWriteChainPassed=true`、`independentReadPassed=true`、`readOnlyPolicyConfirmed=true`、`independentRequestedWriteSequenceCompleted=false`、`originalConfigsUnchanged=true`、`phoneActions=0`、`codexExecutions=0`。这里的通过范围是默认写链与独立只读链，未扩大到独立 profile 的原始四工具写需求。
+
+首次失败保留在 `native-qa-first-failure.json`：`employee_e3c696be-1f01-4ba8-b209-6eac234d154f` / `action_1d9d3705-d6d7-4eeb-9f6b-c1e553a91c12`，profile default，failed/loaded=false，诊断为 Hermes 退出未收到管理 MCP 握手。后续原生 MCP 准备门槛补齐并取得上表新 action 实际成功；旧失败不改写成功，也不再当作当前待验结果。
+
+## 精确QA清理与最终健康
+
+`2026-10-09T13:22:32Z` 按已核对的精确计划清理4名QA员工、3个conversation、3个terminal action及6条conversation message、11条action event、4条management request引用；tasks删除数0，外键检查通过。审计/通知留痕、原生profile、电脑/手机数据保留，不按名称前缀广泛删除业务资源。
+
+与 `20261009T120235Z` 原baseline对照，18项保护表的count与stablehash全部保持，这是原数据保护验收依据。原7名员工全部management enabled，disabled/null均0；手机配置/绑定各2、邀请8、设备7、配对18、凭据身份5、shared grant1与控制端设备身份均保持。这些数量作为信息快照，不能单独替代稳定hash比较。
+
+最终 `health-final.json` 于 `2026-10-09T13:22:45Z` 通过：主站release1ca9c6b、控制release8a4fe59、三services active，Caq/C30两assets200，Nginx SHA保持原值，Android code15/双APK HEAD200，真实手机动作0。两区最终只读于 `2026-10-09T13:29:09Z` 18/18通过：test_222员工3、phone_ai员工2，自身API200、匿名401、跨区403，两区queue0，原PID48208持续ready。QA会话已精确撤销，服务器私有文件移除、本机token清除；`13:29:51Z` 旧cookie真实401，分别有独立安全证据，不由清理/健康推断。
+
 ## 本地证据索引
 
-以下路径均相对本接续工作树；`.local` 是 ignored 私有证据目录，不提交原始会话、缓存或诊断全文到 Git。结果与截图用于审计，不包含 token。发布负责人最后补齐真实 QA、发布备份/包 hash 与清理结果。
+以下路径均相对本接续工作树；`.local` 是 ignored 私有证据目录，不提交原始会话、缓存或诊断全文到 Git。以下安全汇总与截图用于审计，不包含 token。最终会话撤销与客户端两区只读结果均已归档。
 
 - 真实平台/既有员工：`.local/management-default/live-browser/results.json` 与同目录 36 PNG。
 - 真实五视口创建/编辑：`.local/management-default/live-modal/results.json` 与同目录 30 PNG；代表图 `live-create-390x844-bottom-ready.png`、`live-create-720x450-bottom-ready.png`。
@@ -112,14 +149,23 @@ Hermes 管理接入支持真实发现的 `default` 或显式 profile，UI 继续
 - 隔离管理默认合同：`.local/default-management-ui-final/results.json`；最新官方包场景以 `official-client-install-green` 为准。
 - 隔离弹窗：`.local/default-management-modal-final/results.json`。
 - 手机/团队/邀请/Android 安装回归：`.local/default-management-phone-regression/results.json`、`.local/default-management-team-regression/results.json`、`.local/default-management-invite-regression/results.json`、`.local/default-management-install-regression/results.json`。
-- 发布负责人客户端、安全及新 default Hermes QA 的最终证据：待其按实际结果补录；不得读取或复制 private-session、token/cache 文件内容到本记录。
+- 最终分范围原生验收：`.local/management-default/native-acceptance-result.json`；原始安全QA摘要 `.local/management-default/native-qa-result.json`。
+- 修复前首次失败：`.local/management-default/native-qa-first-failure.json`。
+- 原生全局客户端升级：`.local/management-default/client-native-upgrade-result.json`。
+- 主站runtime修复发布：`.local/management-default/deployment-hermes-result.json`。
+- 正式HTTPS包/hash/metadata只读核验：`.local/management-default/public-download-result.json`。
+- 精确QA清理：`.local/management-default/qa-cleanup-result.json`；18原保护表与默认状态复验：`.local/management-default/db-final-safe.json`。
+- 最终健康/资源/手机动作边界：`.local/management-default/health-final.json`。
+- 最终两区客户端只读18/18：`.local/management-default/client-final-readonly-result.json`。
+- QA会话精确撤销/旧cookie401与私有文件清理：`.local/management-default/session-final-result.json`。
+- 仅引用安全汇总，不读取或复制private-session、token/cache原文到本记录；QA本机token已清除。
 
-## 待完成与接续要求
+## 最终收尾与后续边界
 
-1. 新 default Hermes 首次模型执行 failed/无握手保留。后续 runtime 修复本地 341/341 与无模型验证门槛的真实 MCP 加载已通过，接续仍需取得新员工本次真实模型 initialize/tools/list、实际工具成功和服务端 execution 回读；补录实际 employee/action IDs、最终版本、时间及失败原因。完成模型复验前不将本轮真实模型链路标为完成。
+1. 本轮default Hermes四工具创建回读与独立profile三工具只读已完成实际加载验收；独立原请求写序列未完成，不自动追加写动作或修改其SOUL。精确QA清理、FK与原18项保护表count/stablehash保持已通过；会话精确撤销/旧cookie401及客户端最终两区18/18亦有独立证据，收尾完成。
 2. 本轮 Codex 实机按用户“codex这个不用管了”取消，Mac 检测同样保持取消；不为补齐表格另发任务或调整用户配置。
 3. 手机“小饱饱”仍 offline，用户暂时无法操作手机。手机配置/只读历史成功保留，截图、有限动作和手机业务实机继续暂缓，无手机 trial/动作提交，不能用管理 MCP 验证代替手机执行。
 4. 后续修复发布仍保留主/shared 连接身份、工作目录、`20242`、持久诊断日志、邀请修复、旧 hash 资源、Nginx `^~ /terminal-mcp/v1/` 与 APK/控制服务。不得用项目 `bjc-ops` daemon 冒充真实用户 `test_222/phone_ai` 证据。
-5. 发布负责人按真实资源归属完成 QA 资源及短期会话撤销/清理，验证实际拒绝与原业务数据保持后回填结果。代码回滚不自动撤销持久资源；不恢复旧库覆盖后续用户数据，不写入或公开秘密。最终备份/回滚步骤待负责人按实际发布目录补录。
+5. 发布备份为 `/opt/ziwei-backups/management-default/20261009T130953Z`，前一版 `/opt/ziwei/releases/1ac0395`；回滚需同时核对服务端与原生客户端运行代码，按原入口与备份执行。代码回滚不自动撤销持久资源；不恢复旧库覆盖后续用户数据，不写入或公开秘密。QA资源精确清理及原业务保护复验已完成，短期QA会话已精确撤销、服务器私有文件移除、本机token清除，旧cookie实测401；安全结果归档。
 
 设计合同见[默认管理 MCP 实施计划](../plans/2026-10-09-default-management-mcp.md)；手机独立配置与回执语义见[手机技能用户指南](../PHONE_MCP.md)，其历史发布边界见[手机平台技能验收](2026-10-09-phone-platform-skill-acceptance.md)。当前维护与交接以根目录 PROJECT_MANAGEMENT、README、HANDOFF 的当前默认管理条目为准。

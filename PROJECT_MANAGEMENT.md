@@ -8,15 +8,16 @@
 
 ### 2026-10-09 当前发布：默认自动管理 MCP
 
-- 主站 `1ac03954836543d2d6af0881fcae8ff3d40b2acf` 已推送并于北京时间 **20:11** 发布；前端 `index-Caqrwk2Y.js` / `index-C30xBdgl.css`。包含既有邀请、手机技能、卡片、弹窗及安装页实现；原控制端/Android 协议与手机授权继续保留。真实 default Hermes 尚待修复复验，后续最终运行版本与时间由发布负责人按实际结果更新。
+- 主站 `1ca9c6b8761a8ee17adb2fd6d4fa92f385718c05` 已推送并于北京时间 **21:18:32**（13:18:32Z）发布；前一版1ac0395，备份 `/opt/ziwei-backups/management-default/20261009T130953Z`。前端仍为 `index-Caqrwk2Y.js` / `index-C30xBdgl.css`。包含邀请、手机技能、卡片、弹窗及安装页；控制8a4fe59、Android协议与手机独立授权保持。首次Hermes无握手问题已修复并取得真实模型结果，历史失败保留。
 - 所有工作区、新员工与旧员工默认有效启用管理 MCP，无需人工逐 MCP 授权、员工 checkbox 或手改 token 文件。服务已启用但没有有效电脑连接时显示等待电脑；准备中、自动失败或 client_required 不单独阻止保存有效配置。执行时仍须自动准备或返回真实失败，原 workspace/device/offline/CLI/auth/provider/显式 profile 检查不放宽。
 - `POST /api/workspaces/:slug/mcp/bootstrap` 只接受该连接的有效设备凭据，服务端推导 workspace/device/credential 与 management-only audience、短期 scope，拒绝 cookie、API Key、全局 A2A、phone capability、匿名及伪造范围。每个管理请求继续校验身份、期限、撤销及工作区；主/shared 连接各自按 origin/workspace/device 缓存和续期，主 token 不跨区复用，凭据不进入浏览器、提示词或日志。
 - 普通成员可查看安全状态并对精确连接 `POST /api/workspaces/:slug/mcp/retry {deviceId}`；请求仅标记下一次心跳刷新管理配置，不创建任务、不改员工/profile、不下发手机动作。Member/Owner 网页权限、个人资源归属、新增 shared 连接的双 Owner 授权与手机独立 capability 保持。
 - 页面显示 pending/ready/failed/client_required、失败原因、重试及官方客户端更新入口；所有 status/discovery/employee-status 请求显式捕获当前 workspace 并以 generation 丢弃旧响应。配置准备 ready、API 健康、injected、实际 loaded 与本次 tool_calls 成功分开；`ok:false` 不标绿，缺少本次执行证据不声称握手成功。
-- Hermes 管理 MCP 可使用真实发现的 default 或显式 profile，使用所选 profile 原生临时 managed overlay，保留原配置、人格与认证，认证仍来自原 `HERMES_HOME`，不复制 auth。UI 继续要求明确选择真实 profile；手机技能的独立 profile 约束不变。其他 CLI 的发现状态不代表实际 MCP 验收通过。
+- Hermes 管理 MCP 可使用真实发现的 default 或显式 profile，使用所选 profile 原生临时 managed overlay，保留原配置、人格与认证，认证仍来自原 `HERMES_HOME`，不复制 auth。UI 继续要求明确选择真实 profile；手机技能的独立 profile 约束不变。实际管理注入支持 Codex/Hermes；其他运行时缺适配会明确失败，发现到CLI不代表完成实际MCP验收。本轮Codex实机取消。
 - 新安装与更新均使用 `https://qzelynth.top/downloads/cli/ziwei-latest.tgz`。首次连接仍沿用网页一次性码与 `connect/start`；已配对客户端更新仅 npm 全局安装加原生启动入口，不生成新配对码或重新 connect，保留原主/shared 身份、工作目录和 `20242`。旧显式 scoped bearer 外部集成保留兼容，不是普通平台员工步骤。
-- 已发布 1ac0395 的 338/338 单测、lint/build、真实开放平台/既有 Hermes 页 6/6、五视口只读弹窗 10/10、两工作区只读 18 项、缓存缺失恢复/临到期续期/主动重试通过。真实浏览器只用 GET/HEAD/OPTIONS，员工 hash/数量不变、0 错误/写请求/手机动作，全部 context 已关闭。此前独立 Hermes 的成功回执保留其原 execution 和时间，不视作本轮 default QA 的成功。
-- **本轮新 default Hermes QA 首次 failed、无实际握手，后续 runtime 修复本地已通过 341/341 与无模型验证门槛真实 MCP 加载，但新员工模型链路仍待复验，修复最终发布版本/时间待负责人回填。** 用户已取消本轮 Codex 实机验收；Mac 检测保持取消；手机“小饱饱”离线且用户暂无法操作，手机实机验收暂缓。不得把准备状态或历史成功扩大为新工作区/新员工真实工具链路已通过。具体证据、未完成项及后续最终结果见[默认管理 MCP 发布记录](docs/operations/2026-10-09-default-management-mcp.md)。
+- 最终343/343、lint52/build通过；同一前端包在1ac0395时测得的平台/既有Hermes页6/6、五视口弹窗10/10、两区只读18和缓存恢复/续期/主动重试证据保留。真实浏览器仅GET/HEAD/OPTIONS，员工hash/数量不变、0错误/写请求/手机动作，所有context关闭。当前真实模型结果另有新action证据，不由历史回执代替。
+- **default Hermes 本次 succeeded/loaded，discover/list/create/get全ok，子员工回读确认为default/精确电脑；独立ziwei-qa-mgmt-20261008本次succeeded/loaded，discover/list/health三工具ok。** 独立SOUL只读且禁止业务创建，写序列未完成、没有second child，原config/SOUL不变。首次failed/无握手保留历史；343门槛和新action不能扩大为两个profile都创建成功。Codex/Mac按用户要求取消，0Codex执行；手机离线实机暂缓，0手机动作。
+- 官方包22文件/66542bytes、SHA `ae27327bbcfcbcd9f7518cc9b74e357374c04a228189391e91ba4151360d5da4` 与公开metadata匹配。原生全局客户端PID48208、build `f26077c6abcb6479a63948439938097151888751b150780069eb714bf36348b4`、20242、watcher50908，配置不变。13:22:32Z精确QA4员工/3会话/3action及6消息/11事件/4管理引用已清理，0tasks；FK通过、原18保护表count/stablehash全部保持，7原员工均enabled，disabled/null为0；最终health通过。13:29:09Z两区最终只读18/18通过，test_222员工3/phone_ai员工2、自身API200/匿名401/跨区403、queue0、原PID48208持续ready。会话精确撤销及服务器私有文件移除/本机token清除，13:29:51Z旧cookie真实401。完整实际ID、证据和边界见[默认管理 MCP 发布记录](docs/operations/2026-10-09-default-management-mcp.md)。
 
 ### 2026-10-09 历史发布：员工弹窗勾选框修复
 
@@ -246,7 +247,7 @@
 截至顶部默认管理 MCP 发布，当前通过的本地质量门槛（较早记录见下文）：
 
 ```text
-npm test       341 passed（runtime 修复本地；已发布 1ac0395 为 338）
+npm test       343 passed
 npm run lint   passed
 npm run build  passed
 ```
@@ -405,7 +406,7 @@ ziwei_user daemon（daemon/ziwei_user.mjs）
 - 数字员工创建、运行时选择、任务安排、持久会话和对话收件箱。
 - `ziwei_user` 首次安装引导、心跳、就绪状态、设备和 Agent CLI 版本发现。
 - Codex/Claude/Gemini/Hermes 本机 CLI 适配；Codex 使用真实本机配置和系统代理，不使用伪造输出。
-- Hermes 人格与 profile：数字员工显式绑定真实发现的 profile，缺失时明确失败，不静默回退。管理 MCP 的临时 managed overlay 保留所选 profile 的原配置与认证，支持 default；手机技能仍要求独立 profile。历史独立 profile 真实 A2A 验收保留在对应日期记录，本轮新 default Hermes 首次 failed/无握手，尚待修复复验。
+- Hermes 人格与 profile：数字员工显式绑定真实发现的 profile，缺失时明确失败，不静默回退。管理 MCP 的临时 managed overlay 保留所选 profile 的原配置与认证，支持 default；手机技能仍要求独立 profile。历史独立profile验收保留在对应日期记录；本轮default Hermes四工具创建回读及独立profile三工具只读均实际成功，独立SOUL禁止业务创建的边界保持，首次无握手失败保留历史。
 - 数字员工配置页已接入员工级环境变量、自定义 JSON 参数、MCP 状态/健康检查和 Hermes profile 发现；敏感变量使用 AES-256-GCM 加密存储，列表与审计不暴露原值。当前环境变量和自定义参数完成配置持久化，尚未注入 A2A/CLI 执行环境；管理 MCP 的自动接入与执行回执边界见顶部，不把配置持久化当成真实 MCP 握手。
 - 管理 MCP 以 stdio 服务内部经 HTTPS `/mcp/v1` 调用 repository，不直接打开 SQLite；当前共 21 项管理工具，含环境发现、员工/profile、任务/action、文档及手机技能配置管理。所有工作区新旧员工默认自动接入，但手机实际执行仍要求独立 capability 与精确绑定；实际可用工具以服务发现为准。
 - 数字伙伴岗位说明页支持内联编辑；保存只更新岗位说明，不再打开完整的数字伙伴配置弹窗。
