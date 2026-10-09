@@ -12,6 +12,7 @@ import { sanitizeHtml } from './sanitize.mjs';
 import { composeEmployeePrompt, normalizeRuntimeProfile } from '../src/employee-runtime.mjs';
 import { listHermesProfiles, validateHermesProfile } from '../src/runtime-adapters.mjs';
 import { fetchSafeUrl, validateSafeUrl } from './ssrf.mjs';
+import { acceptInvitationMembership } from './invitation-membership.mjs';
 import { syncPhoneSkill } from './skills/catalog.mjs';
 
 const now = () => new Date().toISOString();
@@ -1027,20 +1028,23 @@ export function createRepository(options = {}) {
       if (row.status === 'pending' && Date.parse(row.expires_at) <= Date.now()) { db.prepare("UPDATE invitations SET status='expired' WHERE id=?").run(row.id); row.status='expired'; }
       return invitationView(row,ws.slug);
     },
-    acceptInvitation(code, input = {}) {
-      const value=String(code || '').trim(); if (!value) throw new Error('邀请链接无效');
-      const row=db.prepare('SELECT * FROM invitations WHERE code_hash=?').get(invitationHash(value)); if (!row) throw new Error('邀请链接无效');
-      const ws=db.prepare('SELECT * FROM workspaces WHERE id=?').get(row.workspace_id); if (!ws) throw new Error('Workspace not found');
-      if (row.status === 'accepted') { const member=row.member_id ? db.prepare('SELECT * FROM members WHERE id=?').get(row.member_id) : null; return { invitation:invitationView(row,ws.slug), member, duplicate:true }; }
-      if (row.status === 'revoked') throw new Error('邀请已撤销');
-      if (row.status === 'expired' || Date.parse(row.expires_at) <= Date.now()) { db.prepare("UPDATE invitations SET status='expired' WHERE id=?").run(row.id); throw new Error('邀请已过期'); }
-      const email=normalizeEmail(row.email || input.email); if (!email || !/^\S+@\S+\.\S+$/.test(email)) throw new Error('接受邀请需要有效邮箱');
-      const existing=db.prepare('SELECT * FROM members WHERE workspace_id=? AND lower(email)=?').get(ws.id,email);
-      if (existing) { db.prepare("UPDATE invitations SET status='accepted',accepted_at=?,member_id=? WHERE id=?").run(now(),existing.id,row.id); const updated=db.prepare('SELECT * FROM invitations WHERE id=?').get(row.id); return { invitation:invitationView(updated,ws.slug),member:existing,duplicate:true }; }
-      const member={id:id('member'),workspace_id:ws.id,name:String(input.name || email.split('@')[0] || '新成员').trim(),email,role:row.role === 'admin' ? 'admin' : 'member',avatar:null,joined_at:now()};
-      db.prepare('INSERT INTO members(id,workspace_id,name,email,role,avatar,joined_at) VALUES(?,?,?,?,?,?,?)').run(member.id,ws.id,member.name,member.email,member.role,null,member.joined_at);
-      db.prepare("UPDATE invitations SET status='accepted',accepted_at=?,member_id=? WHERE id=?").run(now(),member.id,row.id);
-      const updated=db.prepare('SELECT * FROM invitations WHERE id=?').get(row.id); audit(ws.slug,'user','invitation.accepted',{invitationId:row.id,memberId:member.id}); return { invitation:invitationView(updated,ws.slug),member };
+    acceptInvitation(code, input = {}, identity = null) {
+      if (!String(code || '').trim()) throw new Error('邀请链接无效');
+      db.exec('SAVEPOINT invitation_accept');
+      try {
+        const result = acceptInvitationMembership(db, {
+          code,
+          workspaceSlug: input.workspaceSlug || input.workspace_slug || input.workspace,
+          ...(identity ? { userId: identity.userId, email: identity.email, name: identity.name } : { email: input.email, name: input.name })
+        });
+        if (!result.duplicate) audit(result.workspace.slug, 'user', 'invitation.accepted', { invitationId: result.invitation.id, memberId: result.member.id });
+        db.exec('RELEASE invitation_accept');
+        return { invitation: invitationView(result.invitation, result.workspace.slug), member: result.member, ...(result.duplicate ? { duplicate: true } : {}) };
+      } catch (error) {
+        db.exec('ROLLBACK TO invitation_accept');
+        db.exec('RELEASE invitation_accept');
+        throw error;
+      }
     },
     listDevices(slug, options = {}) {
       const ws = workspace(slug); if (!ws) throw new Error('Workspace not found');

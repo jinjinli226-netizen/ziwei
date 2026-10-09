@@ -267,7 +267,7 @@ export function createApp(options = {}) {
   // limit plus encoding and envelope overhead without accepting unbounded
   // request bodies.
   app.use(express.json({ limit: '16mb' }));
-  const authBypass = options.memory === true || options.requireAuth === false;
+  const authBypass = options.requireAuth === false || (options.memory === true && options.requireAuth !== true);
   app.locals.authBypass = authBypass;
   app.locals.requireDeviceAuth = options.requireDeviceAuth === undefined ? !authBypass : Boolean(options.requireDeviceAuth);
   app.locals.a2aToken = () => readA2AToken({ create: !authBypass });
@@ -448,7 +448,7 @@ export function createApp(options = {}) {
   app.post('/api/invitations/:id/resend', requireRole('owner','admin'), (req, res) => res.json(repo.resendInvitation(req.params.id)));
   app.post('/api/invitations/:id/revoke', requireRole('owner','admin'), (req, res) => res.json(repo.revokeInvitation(req.params.id)));
   app.get('/api/invitations/lookup/:code', (req, res) => { const invitation = repo.getInvitationByCode(req.params.code); if (!invitation) return res.status(404).json({ error: 'Invitation not found' }); res.json(invitation); });
-  app.post('/api/invitations/:code/accept', (req, res) => res.json(repo.acceptInvitation(req.params.code, req.body)));
+  app.post('/api/invitations/:code/accept', (req, res) => res.json(repo.acceptInvitation(req.params.code, req.body || {}, req.auth ? { userId: req.auth.user_id, email: req.auth.user.email, name: req.auth.user.name } : null)));
   app.get('/api/workspaces/:slug/devices', (req, res) => res.json({ devices: repo.listDevices(req.params.slug, { userId: req.auth?.user_id }) }));
   // Any workspace member may pair the computer they control. The short-lived
   // code is scoped to this workspace and can only create one credential; it

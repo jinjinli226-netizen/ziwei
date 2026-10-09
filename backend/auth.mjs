@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { acceptInvitationMembership } from './invitation-membership.mjs';
 
 const SESSION_COOKIE = 'ziwei_session';
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -158,42 +159,20 @@ export function createAuthService(db, { sessionTtlMs = SESSION_TTL_MS } = {}) {
       const timestamp = now();
       const userId = id('user');
       const requestedSlug = String(input.workspaceSlug || input.workspace_slug || '').trim();
-      let workspace = db.prepare('SELECT * FROM workspaces WHERE slug=?').get(requestedSlug);
+      const invitationCode = String(input.invitationCode || input.invitation_code || '').trim();
+      const workspace = requestedSlug ? db.prepare('SELECT * FROM workspaces WHERE slug=?').get(requestedSlug) : null;
       db.exec('BEGIN IMMEDIATE');
       try {
         db.prepare('INSERT INTO local_users(id,email,name,password_hash,created_at,last_login_at) VALUES(?,?,?,?,?,?)').run(userId,email,name,passwordHash,timestamp,timestamp);
-        if (!workspace) {
+        if (invitationCode || workspace) {
+          acceptInvitationMembership(db, { code: invitationCode, workspaceSlug: requestedSlug, userId, email, name });
+        } else {
           const workspaceId = id('ws');
           const workspaceName = String(input.workspaceName || input.workspace_name || '个人工作区').trim() || '个人工作区';
           const slug = requestedSlug || availableWorkspaceSlug(db, '', workspaceName);
           db.prepare('INSERT INTO workspaces(id,slug,name,kind,plan,timezone,created_at) VALUES(?,?,?,?,?,?,?)').run(workspaceId, slug, workspaceName, 'personal', 'free', 'Asia/Shanghai', timestamp);
-          workspace = db.prepare('SELECT * FROM workspaces WHERE id=?').get(workspaceId);
-        }
-        const invitationCode = String(input.invitationCode || input.invitation_code || '').trim();
-        let invitation = null;
-        if (requestedSlug) {
-          if (workspace.kind !== 'team') throw new Error('个人工作区不能直接加入');
-          if (invitationCode) {
-            invitation = db.prepare('SELECT * FROM invitations WHERE workspace_id=? AND code_hash=?').get(workspace.id, hashToken(invitationCode));
-            if (invitation?.email && String(invitation.email).toLowerCase() !== email) invitation = null;
-          } else {
-            invitation = db.prepare("SELECT * FROM invitations WHERE workspace_id=? AND lower(email)=? AND status='pending' AND expires_at>? ORDER BY created_at DESC LIMIT 1").get(workspace.id, email, timestamp);
-          }
-          if (!invitation || !['pending', 'accepted'].includes(invitation.status) || (invitation.status === 'pending' && Date.parse(invitation.expires_at) <= Date.now())) throw new Error('加入团队需要有效邀请');
-          if (invitation.status === 'accepted' && invitation.member_id && db.prepare('SELECT user_id FROM members WHERE id=?').get(invitation.member_id)?.user_id) throw new Error('邀请已经被其他账号使用');
-        }
-        const pendingMember = invitation?.member_id
-          ? db.prepare('SELECT * FROM members WHERE id=?').get(invitation.member_id)
-          : null;
-        if (pendingMember && !pendingMember.user_id) {
-          db.prepare('UPDATE members SET user_id=?,name=?,email=? WHERE id=?').run(userId, name, email, pendingMember.id);
-        } else if (!pendingMember) {
-          const memberRole = workspace.kind === 'personal' ? 'owner' : (invitation?.role === 'admin' ? 'admin' : 'member');
           const memberId = id('member');
-          db.prepare('INSERT INTO members(id,user_id,workspace_id,name,email,role,avatar,joined_at) VALUES(?,?,?,?,?,?,?,?)').run(memberId, userId, workspace.id, name, email, memberRole, null, timestamp);
-          if (invitation) db.prepare("UPDATE invitations SET status='accepted',accepted_at=?,member_id=? WHERE id=?").run(timestamp, memberId, invitation.id);
-        } else {
-          throw new Error('该邮箱已属于当前工作区成员');
+          db.prepare('INSERT INTO members(id,user_id,workspace_id,name,email,role,avatar,joined_at) VALUES(?,?,?,?,?,?,?,?)').run(memberId, userId, workspaceId, name, email, 'owner', null, timestamp);
         }
         db.exec('COMMIT');
       } catch (error) { try { db.exec('ROLLBACK'); } catch {} throw error; }

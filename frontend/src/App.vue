@@ -37,6 +37,24 @@ const authMode = ref(inviteQuery.get('code') ? 'register' : 'login');
 // after authentication; invitation URLs may still prefill a team slug.
 const authWorkspaceSlug = ref(inviteQuery.get('workspace') || '');
 const authBusy = ref(false);
+const authError = ref('');
+const authErrorPanel = ref(null);
+const inviteAcceptError = ref('');
+const inviteAcceptBusy = ref(false);
+async function showAuthError(message) {
+  authError.value = String(message || '提交失败，请重试');
+  await nextTick();
+  authErrorPanel.value?.scrollIntoView({ block:'nearest' });
+  authErrorPanel.value?.focus({ preventScroll:true });
+}
+function switchAuthMode() { authError.value=''; authMode.value=authMode.value==='login'?'register':'login'; }
+async function enterWorkspace(slug) {
+  if (!slug) return;
+  setWorkspaceSlug(slug);
+  page.value='home';
+  history.replaceState({}, '', routePath('home', '', slug));
+  await load();
+}
 const currentAccount = computed(() => {
   if (!authState.value.user) return {name:'',email:'',role:null};
   const activeSlug = summary.value.workspace?.slug || workspaceSlug();
@@ -302,21 +320,28 @@ async function refreshAuth() {
   }
 }
 async function submitAuth() {
-  if (!authForm.value.password) return notify('请输入密码');
+  if (authBusy.value) return;
+  authError.value='';
+  if (!/^\S+@\S+\.\S+$/.test(authForm.value.email.trim())) return showAuthError('请输入有效的邮箱');
+  if (!authForm.value.password) return showAuthError('请输入密码');
   const creatingAccount = authMode.value === 'setup' || authMode.value === 'register';
-  if (creatingAccount && authForm.value.password !== authForm.value.confirmPassword) return notify('两次密码不一致');
+  if (creatingAccount && authForm.value.password.length < 8) return showAuthError('密码至少需要 8 位');
+  if (creatingAccount && authForm.value.password !== authForm.value.confirmPassword) return showAuthError('两次密码不一致，请重新确认后提交');
   authBusy.value = true;
   try {
+    const mode = authMode.value;
     const result = authMode.value === 'setup'
       ? await api.authSetup({ ...(authForm.value.name.trim() ? { name:authForm.value.name.trim() } : {}), email:authForm.value.email, password:authForm.value.password })
       : authMode.value === 'register'
         ? await api.authRegister({ ...(authForm.value.name.trim() ? { name:authForm.value.name.trim() } : {}), email:authForm.value.email, password:authForm.value.password, ...(authWorkspaceSlug.value.trim() ? { workspaceSlug:authWorkspaceSlug.value.trim() } : {}), ...(authForm.value.invitationCode.trim() ? { invitationCode:authForm.value.invitationCode.trim() } : {}) })
         : await api.authLogin({ email:authForm.value.email, password:authForm.value.password });
     authState.value = { ...authState.value, ...result, setup_required:false, configured:true, authenticated:true, loading:false };
-    if (result.memberships?.length) setWorkspaceSlug(result.memberships[0].workspace_slug || result.memberships[0].slug);
+    const targetSlug = result.memberships?.find(item => item.slug === authWorkspaceSlug.value.trim())?.slug || result.memberships?.[0]?.slug;
+    if (targetSlug) setWorkspaceSlug(targetSlug);
     authForm.value = { name:'', email:'', password:'', confirmPassword:'', invitationCode:'' };
-    await load();
-  } catch (error) { notify(error.message); } finally { authBusy.value=false; }
+    if (mode === 'login' && page.value === 'invite-accept') await loadInvite();
+    else if (targetSlug) await enterWorkspace(targetSlug);
+  } catch (error) { await showAuthError(error.message); } finally { authBusy.value=false; }
 }
 async function createFirstWorkspace() {
   if (!firstWorkspaceForm.value.name.trim() || firstWorkspaceBusy.value) return notify('请填写工作区名称');
@@ -933,8 +958,29 @@ async function revokeInvite(item) { try { await api.revokeInvitation(item.id); a
 function openMemberEditor(member) { memberEditForm.value={id:member.id,name:member.name || '',email:member.email || '',role:member.role || 'member'}; showMemberEditor.value=true; }
 async function saveMember() { if (!memberEditForm.value.id || !memberEditForm.value.name.trim() || !memberEditForm.value.email.trim()) return notify('请填写成员姓名和邮箱'); try { await api.updateMember(memberEditForm.value.id,{name:memberEditForm.value.name.trim(),email:memberEditForm.value.email.trim(),role:memberEditForm.value.role}); showMemberEditor.value=false; await load(); notify('成员信息已保存'); } catch (error) { notify(error.message); } }
 async function removeMember(member) { if (!member?.id || member.role === 'owner' || !window.confirm(`确定移除成员“${member.name || member.email}”？`)) return; try { await api.deleteMember(member.id); await load(); notify('成员已移除'); } catch (error) { notify(error.message); } }
-async function loadInvite() { if (!inviteCode.value) { inviteAcceptState.value='invalid'; return; } try { inviteInfo.value=await api.lookupInvitation(inviteCode.value); inviteAcceptForm.value.email=inviteInfo.value.email || ''; inviteAcceptState.value='ready'; } catch(error) { inviteAcceptState.value='invalid'; notify(error.message); } }
-async function acceptInvite() { if (!inviteAcceptForm.value.email.trim()) return notify('请填写邮箱'); try { await api.acceptInvitation(inviteCode.value, inviteAcceptForm.value); inviteAcceptState.value='accepted'; notify('已加入工作区'); } catch(error) { notify(error.message); } }
+async function loadInvite() {
+  inviteAcceptError.value='';
+  if (!inviteCode.value) { inviteAcceptState.value='invalid'; inviteAcceptError.value='邀请链接无效，请向邀请人索取新链接'; return; }
+  try {
+    inviteInfo.value=await api.lookupInvitation(inviteCode.value);
+    inviteAcceptForm.value={name:authState.value.user?.name || '',email:authState.value.user?.email || ''};
+    inviteAcceptState.value='ready';
+    if (inviteInfo.value.status==='revoked') inviteAcceptError.value='邀请已撤销，请联系邀请人重新邀请';
+    if (inviteInfo.value.status==='expired') inviteAcceptError.value='邀请已过期，请联系邀请人重新发送';
+    if (inviteInfo.value.email && inviteInfo.value.email.toLowerCase() !== inviteAcceptForm.value.email.toLowerCase()) inviteAcceptError.value='当前登录邮箱与邀请邮箱不匹配，请切换到受邀账号';
+  } catch(error) { inviteAcceptState.value='invalid'; inviteAcceptError.value=error.message; }
+}
+async function acceptInvite() {
+  if (inviteAcceptBusy.value) return;
+  inviteAcceptBusy.value=true; inviteAcceptError.value='';
+  try {
+    const result=await api.acceptInvitation(inviteCode.value, {});
+    await refreshAuth();
+    await enterWorkspace(result.invitation.workspace);
+    notify('已加入工作区');
+  } catch(error) { inviteAcceptError.value=error.message; }
+  finally { inviteAcceptBusy.value=false; }
+}
 async function addDevice() {
   await createDevicePairing();
   if (devicePairing.value?.code) notify('已生成新的设备配对码，请在目标电脑运行连接命令');
@@ -1209,13 +1255,42 @@ window.addEventListener('popstate', () => {
   if (urlWorkspace && authState.value.authenticated && !['invite','invite-accept'].includes(page.value)) void load();
 });
 window.addEventListener('ziwei:auth-required', () => { authState.value={...authState.value,authenticated:false}; closeRealtime(); });
-onMounted(async () => { applyDisplayPreferences(); if (page.value==='android-install') return; await refreshAuth(); if (authState.value.authenticated) { await load(); if (page.value==='invite') await loadInvitations(); if (page.value==='invite-accept') await loadInvite(); if (page.value==='open') await loadApiKeys(); if (page.value==='ziwei-connect') await loadZiweiConnect(); } });
+onMounted(async () => { applyDisplayPreferences(); if (page.value==='android-install') return; await refreshAuth(); if (authState.value.authenticated) { if (page.value==='invite-accept') { await loadInvite(); return; } await load(); if (page.value==='invite') await loadInvitations(); if (page.value==='open') await loadApiKeys(); if (page.value==='ziwei-connect') await loadZiweiConnect(); } });
 </script>
 
 <template>
   <AndroidInstallPage v-if="page==='android-install'"/>
   <section v-else-if="authState.loading" class="auth-screen"><div class="auth-card"><img src="/ziwei-logo.png" alt="紫薇"/><p>正在连接紫薇工作区…</p></div></section>
-  <section v-else-if="!authState.authenticated" class="auth-screen"><div class="auth-card"><img src="/ziwei-logo.png" alt="紫薇"/><h1>{{ authMode==='login' ? '登录紫薇' : authMode==='setup' ? '创建紫薇账号' : '注册紫薇账号' }}</h1><p>{{ authMode==='login' ? '使用本机账号进入工作区。' : authMode==='setup' ? '首次使用先创建账号，登录后再建立你的第一个工作区。' : '无有效邀请时会创建个人工作区；加入团队请填写受邀工作区。' }}</p><div class="form-stack"><ZiFormField v-if="authMode!=='login'" label="姓名"><ZiInput v-model="authForm.name" placeholder="你的姓名"/></ZiFormField><ZiFormField v-if="authMode==='register'" label="工作区标识" hint="可留空创建个人工作区；加入团队需使用有效邀请"><ZiInput v-model="authWorkspaceSlug" placeholder="可留空，或填写受邀工作区"/></ZiFormField><ZiFormField v-if="authMode==='register'" label="邀请码" hint="加入团队时填写邀请链接中的 code"><ZiInput v-model="authForm.invitationCode" placeholder="可留空，加入团队时必填"/></ZiFormField><ZiFormField label="邮箱"><ZiInput v-model="authForm.email" type="email" placeholder="name@example.com"/></ZiFormField><ZiFormField label="密码"><ZiInput v-model="authForm.password" type="password" placeholder="至少 8 位"/></ZiFormField><ZiFormField v-if="authMode!=='login'" label="确认密码"><ZiInput v-model="authForm.confirmPassword" type="password"/></ZiFormField><button type="button" class="ziwei-button ziwei-button--primary ziwei-button--md" :disabled="authBusy" :aria-busy="authBusy" @click="submitAuth">{{ authBusy ? '处理中…' : authMode==='login' ? '登录' : '创建账号并登录' }}</button></div><button class="link-button" @click="authMode=authMode==='login'?'register':'login'">{{ authMode==='login' ? '注册新账号' : '已有账号，登录' }}</button></div></section>
+  <section v-else-if="!authState.authenticated" class="auth-screen">
+    <div class="auth-card">
+      <img src="/ziwei-logo.png" alt="紫薇"/>
+      <h1>{{ authMode==='login' ? '登录紫薇' : authMode==='setup' ? '创建紫薇账号' : '注册紫薇账号' }}</h1>
+      <p>{{ authMode==='login' ? (inviteCode ? '登录受邀账号后，确认接受此邀请。' : '使用账号进入工作区。') : authMode==='setup' ? '首次使用先创建账号，登录后再建立你的第一个工作区。' : '使用有效邀请加入指定工作区；没有邀请时可留空创建个人工作区。' }}</p>
+      <form class="form-stack" novalidate @submit.prevent="submitAuth">
+        <ZiFormField v-if="authMode!=='login'" label="姓名"><ZiInput v-model="authForm.name" name="name" autocomplete="name" placeholder="你的姓名"/></ZiFormField>
+        <ZiFormField v-if="authMode==='register'" label="工作区标识" hint="邀请链接会自动填写，请保持与邀请一致"><ZiInput v-model="authWorkspaceSlug" name="workspace" autocomplete="off" placeholder="可留空，或填写受邀工作区"/></ZiFormField>
+        <ZiFormField v-if="authMode==='register'" label="邀请码" hint="使用邀请链接中的 code；无邀请时可留空"><ZiInput v-model="authForm.invitationCode" name="invitationCode" autocomplete="off" placeholder="可留空，加入工作区时填写"/></ZiFormField>
+        <ZiFormField label="邮箱"><ZiInput v-model="authForm.email" name="email" autocomplete="username" type="email" placeholder="name@example.com"/></ZiFormField>
+        <ZiFormField label="密码"><ZiInput v-model="authForm.password" name="password" :autocomplete="authMode==='login'?'current-password':'new-password'" type="password" placeholder="至少 8 位"/></ZiFormField>
+        <ZiFormField v-if="authMode!=='login'" label="确认密码"><ZiInput v-model="authForm.confirmPassword" name="confirmPassword" autocomplete="new-password" type="password"/></ZiFormField>
+        <div v-if="authError" ref="authErrorPanel" class="auth-error" data-auth-error role="alert" aria-live="assertive" tabindex="-1">{{ authError }}</div>
+        <button type="submit" class="ziwei-button ziwei-button--primary ziwei-button--md" :disabled="authBusy" :aria-busy="authBusy">{{ authBusy ? '处理中…' : authMode==='login' ? '登录' : '创建账号并登录' }}</button>
+      </form>
+      <button type="button" class="link-button" @click="switchAuthMode">{{ authMode==='login' ? '注册新账号' : '已有账号，登录' }}</button>
+    </div>
+  </section>
+  <section v-else-if="page==='invite-accept'" class="auth-screen">
+    <div class="auth-card invite-recipient-card">
+      <img src="/ziwei-logo.png" alt="紫薇"/>
+      <h1>加入紫薇工作区</h1>
+      <p v-if="inviteInfo">你正在接受 {{ inviteInfo.workspace }} 的邀请。</p>
+      <p>当前登录账号：{{ authState.user?.email }}</p>
+      <p v-if="inviteAcceptState==='idle'">正在读取邀请…</p>
+      <div v-if="inviteAcceptError" class="auth-error" role="alert">{{ inviteAcceptError }}</div>
+      <button v-if="inviteAcceptState==='ready'" type="button" class="ziwei-button ziwei-button--primary ziwei-button--md" :disabled="inviteAcceptBusy" @click="acceptInvite">{{ inviteAcceptBusy ? '正在加入…' : '接受邀请' }}</button>
+      <button type="button" class="link-button" @click="logout">切换账号</button>
+    </div>
+  </section>
   <section v-else-if="workspaceCreateRequired" class="auth-screen"><div class="auth-card workspace-first-card"><img src="/ziwei-logo.png" alt="紫薇"/><h1>创建你的第一个工作区</h1><p>账号已创建。先建立一个个人或团队工作区，之后才能开始使用任务、设备和数字员工。</p><div class="form-stack"><ZiFormField label="工作区名称" required><ZiInput v-model="firstWorkspaceForm.name" autofocus placeholder="例如：我的工作区"/></ZiFormField><ZiFormField label="工作区标识" hint="可留空自动生成"><ZiInput v-model="firstWorkspaceForm.slug" placeholder="例如：my-workspace"/></ZiFormField><ZiFormField label="类型"><ZiSelect v-model="firstWorkspaceForm.kind" class="workspace-kind-select" :options="[{label:'个人工作区',value:'personal'},{label:'团队工作区',value:'team'}]"/></ZiFormField><ZiButton :disabled="firstWorkspaceBusy || !firstWorkspaceForm.name.trim()" @click="createFirstWorkspace">{{ firstWorkspaceBusy ? '创建中…' : '创建工作区' }}</ZiButton></div><button class="link-button" @click="logout">退出登录</button></div></section>
   <WorkspaceShell v-else :page="page" :account="currentAccount" :workspace="summary.workspace" :workspaces="authState.memberships" :language="workspaceLanguage" @navigate="navigate" @workspace="switchWorkspace" @create-workspace="createWorkspace" @language="changeLanguage" @logout="logout">
     <section class="content">
@@ -1460,7 +1535,7 @@ onMounted(async () => { applyDisplayPreferences(); if (page.value==='android-ins
 
         <div v-else-if="page==='invite'"><div class="page-header"><div><h1>邀请加入紫薇</h1><p>把团队成员加入当前工作区。</p></div></div><div class="grid-2"><ZiCard><div class="form-stack"><h3>邀请成员</h3><ZiFormField label="成员邮箱" required><ZiInput v-model="inviteForm.email" type="email" placeholder="name@example.com"/></ZiFormField><ZiFormField label="角色"><ZiSelect v-model="inviteForm.role" :options="[{label:'成员',value:'member'},{label:'管理员',value:'admin'}]"/></ZiFormField><div class="form-actions"><ZiButton @click="invite">发送邀请</ZiButton></div></div></ZiCard><ZiCard><div class="card-heading"><h3>邀请链接</h3><ZiStatusTag :status="inviteLink?'online':'neutral'" :label="inviteLink?'已生成':'未生成'"/></div><p class="modal-copy">邀请链接会绑定当前工作区和角色，方便在团队内部快速加入。</p><div v-if="inviteLink" class="invite-link-box">{{ inviteLink }}</div><ZiButton variant="secondary" @click="createInviteLink">生成并复制链接</ZiButton></ZiCard></div><ZiCard v-if="invitations.length" style="margin-top:16px"><div class="card-heading"><h3>邀请记录</h3><button class="pill" @click="loadInvitations">刷新</button></div><div v-for="item in invitations" :key="item.id" class="runtime-row"><div class="row-main"><strong>{{ item.email || '链接邀请' }}</strong><small>{{ item.role }} · {{ item.status }} · {{ item.expires_at }}</small></div><button v-if="item.status==='pending'" class="pill" @click="resendInvite(item)">重发</button><button v-if="item.status==='pending'" class="pill" @click="revokeInvite(item)">撤销</button></div></ZiCard></div>
 
-        <div v-else-if="page==='invite-accept'" class="invite-accept-page"><ZiCard><div v-if="inviteAcceptState==='ready'" class="form-stack"><span class="eyebrow">INVITATION</span><h1>加入紫薇工作区</h1><p class="modal-copy">你正在接受 {{ inviteInfo?.workspace || '当前工作区' }} 的邀请。</p><ZiFormField label="姓名" required><ZiInput v-model="inviteAcceptForm.name" placeholder="你的姓名"/></ZiFormField><ZiFormField label="邮箱" required><ZiInput v-model="inviteAcceptForm.email" type="email" placeholder="name@example.com"/></ZiFormField><div class="form-actions"><ZiButton @click="acceptInvite">接受邀请</ZiButton></div></div><div v-else-if="inviteAcceptState==='accepted'" class="empty-wrap compact"><ZiEmptyState icon="✓" title="已加入工作区" description="邀请已确认，你现在可以返回紫薇继续工作。"/></div><div v-else class="empty-wrap compact"><ZiEmptyState icon="!" title="邀请链接不可用" description="链接可能已过期、撤销或不存在。"/></div></ZiCard></div>
+
 
         <div v-else-if="page==='open'"><div class="page-header"><div><h1>开放平台</h1><p>面向数字员工和开发者的 MCP、API、A2A 与 Webhook 能力。</p></div><ZiButton @click="openApiKeyModal">创建 API Key</ZiButton></div><ManagementMcpPanel :workspace="workspaceSlugValue" :can-manage="canManageWorkspace"/><div class="grid-3"><ZiCard><div class="card-heading"><h3>REST API</h3><ZiStatusTag status="online" label="可用" dot/></div><p class="modal-copy">工作区数据、任务、文档、技能和自动化的统一 HTTP 接口。</p><button class="pill" @click="copyTeamValue(API_BASE + '/api')">复制接口地址 →</button></ZiCard><ZiCard><div class="card-heading"><h3>A2A v1</h3><ZiStatusTag status="online" label="已启用" dot/></div><p class="modal-copy">Agent Card、Task、Message、状态查询和本机 ziwei_user 心跳。</p><button class="pill" @click="copyTeamValue(agents[0]?.id || 'ziwei_user')">{{ agents[0]?.id || 'ziwei_user' }} ↗</button></ZiCard><ZiCard><div class="card-heading"><h3>Webhook</h3><ZiStatusTag status="online" label="已启用" dot/></div><p class="modal-copy">自动化完成后向你的 HTTPS 地址发送带签名的事件，并记录投递和重试状态。</p><button class="pill" @click="page='automations';history.pushState({},'',routePath('automations'))">配置自动化回调 →</button></ZiCard></div><ZiCard style="margin-top:16px"><div class="card-heading"><div><h3>API Keys</h3><p class="modal-copy">REST API / A2A 专用密钥，只在创建或轮换时显示一次；不能用于管理 MCP。服务端只保存哈希。</p></div><button class="pill" @click="openApiKeyModal">管理密钥</button></div><div v-if="!apiKeys.length" class="empty-wrap compact"><ZiEmptyState icon="⌁" title="还没有 API Key" description="创建一个密钥连接紫薇 REST API 或 A2A。"/></div><div v-else v-for="key in apiKeys" :key="key.id" class="runtime-row"><div class="row-main"><strong>{{ key.name }}</strong><small>{{ key.prefix }}•••• · {{ key.role }} · {{ key.status }}</small></div><span class="row-end">{{ key.last_used_at ? `最近使用 ${key.last_used_at}` : '尚未使用' }}</span><button v-if="key.status==='active'" class="pill" @click="rotateApiKey(key)">轮换</button><button v-if="key.status==='active'" class="pill" @click="revokeApiKey(key)">撤销</button></div></ZiCard></div>
 
