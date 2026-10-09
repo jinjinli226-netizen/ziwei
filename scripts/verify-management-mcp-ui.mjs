@@ -38,7 +38,7 @@ function fixture(workspace = 'test_222') {
   const ws = { id:`workspace-${workspace}`, slug:workspace, name:`QA ${workspace}`, kind:'team', timezone:'Asia/Shanghai', preferences:{} };
   const prefix = `/api/workspaces/${workspace}`;
   const state = {
-    statusFailure: false, createFailure: false, posts: [], calls: [], retries: [], role: 'owner',
+    statusFailure: false, createFailure: false, posts: [], calls: [], retries: [], pairings: [], role: 'owner',
     receipt: { status: 'injected', injected: true, loaded: false, action_id: 'action-ui-injected', tool_calls: [] },
     employees: [{ id: 'builder-fixture', name: 'QA 员工搭建师', runtime: 'Codex', runtime_profile: 'qa-codex', instructions: '构建员工并验证交付', persona: '清楚准确', skills: [], status: 'active', target_device_id: 'pc-ready', management_mcp_enabled: true }],
     devices: [{ id: 'pc-ready', name: 'QA 在线电脑', status: 'online', healthy: true, bridge_name: 'ziwei_user', last_seen: new Date().toISOString(), management_mcp: { managed: true, state: 'ready', configured: true, workspace: ws.slug, supportedRuntimes: ['Codex', 'Hermes'] }, runtimes: [{ name: 'Codex', cli_status: 'available', version: 'fixture-codex', available: true, readiness: ready, profiles: [{ name: 'default', readiness: ready }, { name: 'qa-codex', readiness: ready }] }, { name: 'Hermes', cli_status: 'available', version: 'fixture-hermes', available: true, readiness: ready, profiles: [{ name: 'qa-independent', provider_configured: true, authentication_configured: true, readiness: ready }] }] }, { id: 'pc-offline', name: 'QA 离线电脑', status: 'offline', management_mcp: { managed: true, state: 'pending', configured: false, workspace: ws.slug }, runtimes: [{ name: 'Codex', cli_status: 'offline', available: false, readiness: { ready: false, reason: '电脑离线，等待原 ziwei_user 心跳' } }] }]
@@ -51,6 +51,7 @@ function fixture(workspace = 'test_222') {
     if (path === `${prefix}/summary`) return json({ workspace: ws, counts: {}, taskStates: {}, device: { status: 'online', name: 'fixture' } });
     if (path === `${prefix}/settings`) return json({ workspace: ws });
     if (path === `${prefix}/devices`) return json({ devices: state.devices });
+    if (path === `${prefix}/devices/pairing` && method === 'POST') { state.pairings.push(body);return json({code:'qa-pairing-code',expires_at:new Date(Date.now()+600000).toISOString()}); }
     if (path === `${prefix}/runtimes`) return json({ runtimes: (state.devices[0]?.runtimes || []).map(runtime => ({ ...runtime, id: runtime.name })) });
     if (path === `${prefix}/employees`) {
       if (method === 'POST') {
@@ -93,10 +94,19 @@ async function open(path, state, width = 1440, height = 900) {
   await page.goto(`${base}${path}`, { waitUntil: 'networkidle' });
   return { page, context };
 }
-async function run(name, action) { try { await action(); evidence.tests.push({ name, passed: true }); process.stdout.write(`PASS ${name}\n`); } catch (error) { evidence.tests.push({ name, passed: false, error: error.stack }); process.stderr.write(`FAIL ${name}: ${error.message}\n`); } }
+async function run(name, action) { if(process.argv.includes('--only-install')&&!name.startsWith('official client installation'))return;try { await action(); evidence.tests.push({ name, passed: true }); process.stdout.write(`PASS ${name}\n`); } catch (error) { evidence.tests.push({ name, passed: false, error: error.stack }); process.stderr.write(`FAIL ${name}: ${error.message}\n`); } }
 async function screenshot(page, name) { const file = join(output, name); await page.screenshot({ path: file, fullPage: true }); evidence.screenshots.push(file); }
 async function chooseDevice(page, label) { await page.getByRole('combobox', { name: '目标电脑', exact: true }).click(); await page.getByRole('option', { name: label, exact: true }).click(); }
 try {
+  await run('official client installation preserves existing connect/start and uses current HTTPS package on first install',async()=>{
+    for(const[width,height]of[[1440,900],[390,844],[720,450]]){
+      const f=fixture();const {page,context}=await open('/test_222/members',f,width,height);
+      try{await page.getByRole('button',{name:'添加设备',exact:true}).first().click();const modal=page.locator('.device-install-modal');await modal.getByText('qa-pairing-code',{exact:true}).waitFor();assert.equal(f.state.pairings.length,1);
+        for(const os of ['Windows','macOS','Linux']){await modal.getByRole('tab',{name:os,exact:true}).click();const existing=await modal.locator('.device-install-command pre').innerText();assert.match(existing,/^ziwei_user connect --api .*--code .*qa-pairing-code/);assert.equal(existing.split('\n').at(-1),'ziwei_user start');assert.doesNotMatch(existing,/npm install|github.com|ziwei-latest/);await modal.getByRole('tab',{name:'这台电脑第一次安装',exact:true}).click();const first=await modal.locator('.device-install-command pre').innerText();await modal.locator('.device-install-command').scrollIntoViewIfNeeded();await screenshot(page,`client-first-${os}-${width}x${height}.png`);assert.ok(first.includes('https://qzelynth.top/downloads/cli/ziwei-latest.tgz'),'First install must use official HTTPS client package');assert.match(first,/^npm install --global /);assert.doesNotMatch(first,/github.com|hermes-independent-profile/);assert.equal(first.slice(first.indexOf('\n')+1),existing);await modal.getByRole('button',{name:'复制命令',exact:true}).click();assert.equal(await page.evaluate(()=>window.__qaCopied),first);await modal.getByRole('tab',{name:'电脑已安装 ziwei_user',exact:true}).click();assert.equal(await modal.locator('.device-install-command pre').innerText(),existing);}
+        assert.equal(f.state.pairings.length,1,'Switching installation mode must not generate new pairing codes');assert.equal(f.state.posts.length,0);assert.equal(f.state.retries.length,0);assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+      }finally{await context.close();}
+    }
+  });
   await run('open platform exposes real tools, stdio configuration, credential boundary and mobile layout', async () => {
     for (const [width,height] of [[1440,900],[390,844],[720,450]]) {
       const f = fixture(); const { page, context } = await open('/test_222/open-platform', f, width,height);
@@ -144,7 +154,7 @@ try {
   });
   await run('no computer waits for existing connection and old client shows native update entry',async()=>{
     const f=fixture();f.state.devices=[];const {page,context}=await open('/test_222/open-platform',f,390,844);
-    try{const panel=page.getByTestId('management-mcp-panel');await panel.getByText(/等待当前工作区电脑连接/).waitFor();assert.match(await panel.innerText(),/API 健康/);f.state.devices=[{id:'old-client',name:'旧客户端电脑',management_mcp:{managed:true,state:'client_required',workspace:ws.slug,reason:'请更新原 ziwei_user 客户端'},runtimes:[]}];await panel.getByRole('button',{name:'刷新真实状态',exact:true}).click();const connection=panel.locator('[data-device-id="old-client"]');await connection.getByText('客户端需要更新',{exact:true}).waitFor();await connection.locator('summary').click();assert.match(await connection.innerText(),/原安装方式/);assert.equal(await connection.getByRole('link',{name:'查看设备与安装入口'}).getAttribute('href'),'/test_222/members');assert.equal(f.state.posts.length,0);assert.equal(f.state.retries.length,0);await connection.scrollIntoViewIfNeeded();await screenshot(page,'managed-client-update-mobile.png');}finally{await context.close();}
+    try{const panel=page.getByTestId('management-mcp-panel');await panel.getByText(/等待当前工作区电脑连接/).waitFor();assert.match(await panel.innerText(),/API 健康/);f.state.devices=[{id:'old-client',name:'旧客户端电脑',management_mcp:{managed:true,state:'client_required',workspace:ws.slug,reason:'请更新原 ziwei_user 客户端'},runtimes:[]}];await panel.getByRole('button',{name:'刷新真实状态',exact:true}).click();const connection=panel.locator('[data-device-id="old-client"]');await connection.getByText('客户端需要更新',{exact:true}).waitFor();await connection.locator('summary').click();assert.match(await connection.innerText(),/原安装方式/);assert.equal(await connection.getByRole('link',{name:'查看设备与安装入口'}).getAttribute('href'),'/test_222/members');assert.equal(f.state.posts.length,0);assert.equal(f.state.retries.length,0);assert.equal(f.state.pairings.length,0,'Client update instructions must not generate a pairing code');assert.doesNotMatch(await connection.innerText(),/ziwei_user connect/);await connection.scrollIntoViewIfNeeded();await screenshot(page,'managed-client-update-mobile.png');}finally{await context.close();}
   });
   await run('late workspace response cannot replace the active workspace status',async()=>{
     const a=fixture('test_222'),b=fixture('workspace-b');a.state.memberships=[{...ws,role:'owner'},{id:'workspace-b',slug:'workspace-b',name:'QA B',kind:'team',role:'member'}];

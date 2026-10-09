@@ -650,7 +650,7 @@ const deviceCertificateRequired = computed(() => {
 const deviceWorkspaceSlug = computed(() => String(workspaceSlugValue.value || '').trim());
 function cmdLiteral(value) { return `"${String(value).replace(/"/g, '\\"')}"`; }
 function shellLiteral(value) { return `'${String(value).replace(/'/g, "'\\''")}'`; }
-const daemonPackageSource = 'https://github.com/jinjinli226-netizen/ziwei/archive/refs/heads/codex/hermes-independent-profile.tar.gz';
+const daemonPackageSource = 'https://qzelynth.top/downloads/cli/ziwei-latest.tgz';
 const deviceInstallCommands = computed(() => {
   const apiBase = deviceApiBase.value;
   const pairingCode = devicePairing.value?.code || '<页面生成的一次性配对码>';
