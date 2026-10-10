@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { resolveConfigPath, disconnectedConfiguration, connectionCredentialFiles, isNativeDaemonProcess } from '../daemon/config.mjs';
+import { resolveConfigPath, resolveDaemonDataDirectory, disconnectedConfiguration, connectionCredentialFiles, isNativeDaemonProcess } from '../daemon/config.mjs';
 import { createHash } from 'node:crypto';
 import { clientBuildIdentity, clientBuildMismatch } from '../src/management-bootstrap.mjs';
 
@@ -360,7 +360,8 @@ async function forget(args) {
   const previousCleanup = alreadyDisconnected ? config.connectionCleanup : null;
   if (previousCleanup && (previousCleanup.version !== 1 || !Array.isArray(previousCleanup.identities) || !Array.isArray(previousCleanup.credentialFiles))) throw new Error('断开清理记录无效；未报告完成或停止进程');
   const identityConfig = previousCleanup ? { ...config, ...previousCleanup.identities[0], sharedWorkspaces: [...previousCleanup.identities.slice(1), ...previousCleanup.credentialFiles.map(item => ({ deviceTokenFile: item.file }))] } : config;
-  const credentials = connectionCredentialFiles(identityConfig, { configPath: file, root: ROOT });
+  const credentialOptions = { configPath: file, root: ROOT, dataDirectory: resolveDaemonDataDirectory({ root: ROOT, env: process.env }) };
+  const credentials = connectionCredentialFiles(identityConfig, credentialOptions);
   for (const credential of credentials) {
     const recorded = previousCleanup?.credentialFiles.find(item => item.file === credential.file);
     if (recorded && recorded.sha256 !== credential.sha256) throw new Error('残余连接凭据已变化；未删除或报告断开清理完成');
@@ -414,12 +415,12 @@ async function forget(args) {
     }
     let removed = 0;
     if (createHash('sha256').update(fs.readFileSync(file)).digest('hex') !== pendingHash) throw new Error('断开等待期间配置已被显式修改；未清除新连接或报告完成');
-    const finalCredentials = connectionCredentialFiles(identityConfig, { configPath: file, root: ROOT });
+    const finalCredentials = connectionCredentialFiles(identityConfig, credentialOptions);
     for (const credential of credentials) {
       if (!finalCredentials.some(item => item.file === credential.file && item.sha256 === credential.sha256)) throw new Error('停止后连接凭据路径或内容变化；清理仍pending');
       fs.unlinkSync(credential.file); removed++;
     }
-    if (connectionCredentialFiles(identityConfig, { configPath: file, root: ROOT }).length) throw new Error('断开期间新增本机管理凭据；清理仍pending，请重试 forget，不会恢复连接');
+    if (connectionCredentialFiles(identityConfig, credentialOptions).length) throw new Error('断开期间新增本机管理凭据；清理仍pending，请重试 forget，不会恢复连接');
     if (createHash('sha256').update(fs.readFileSync(file)).digest('hex') !== pendingHash) throw new Error('清理期间配置被显式修改；未覆盖新配置或报告完成');
     writeConfig({ ...pending, connectionCleanup: { ...cleanup, state: 'complete', completedAt: new Date().toISOString() } });
     const logDir = path.join(path.dirname(file), 'logs'); fs.mkdirSync(logDir, { recursive: true });

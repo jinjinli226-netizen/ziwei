@@ -10,7 +10,7 @@ import { redactSecrets } from '../src/redaction.mjs';
 import { discoverInstalledRuntimes, terminalMcpStatus } from '../src/runtime-adapters.mjs';
 import { readA2AToken } from '../backend/a2a-auth.mjs';
 import { createManagementBootstrap, clientBuildIdentity } from '../src/management-bootstrap.mjs';
-import { defaultUserDir, resolveConfigPath, resolveWorkspaceConnections, claimWorkspaceGrant } from './config.mjs';
+import { defaultUserDir, resolveConfigPath, resolveDaemonDataDirectory, resolveWorkspaceConnections, claimWorkspaceGrant } from './config.mjs';
 
 const ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const packageMeta = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
@@ -18,7 +18,7 @@ const VERSION = process.env.ZIWEI_USER_VERSION || packageMeta.version;
 const CLIENT_BUILD = clientBuildIdentity(ROOT);
 if (process.argv.includes('--version')) { console.log(`ziwei_user ${VERSION}`); process.exit(0); }
 const standaloneHome = process.env.ZIWEI_USER_HOME ? defaultUserDir({ env: process.env }) : null;
-const dataDir = standaloneHome || path.join(ROOT, 'data');
+const dataDir = resolveDaemonDataDirectory({ root: ROOT, env: process.env });
 const logDir = standaloneHome ? path.join(standaloneHome, 'logs') : path.join(ROOT, '.local', 'logs');
 const runtimeDir = standaloneHome ? path.join(standaloneHome, 'runtime') : path.join(ROOT, '.local', 'runtime');
 const configPath = resolveConfigPath({ root: ROOT, env: process.env });

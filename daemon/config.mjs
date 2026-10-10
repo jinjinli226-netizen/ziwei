@@ -46,6 +46,11 @@ export function resolveConfigFile(value, { configPath, root = process.cwd() } = 
   return path.resolve(base, candidate);
 }
 
+/** Config overrides do not relocate the daemon's native data/credential stores. */
+export function resolveDaemonDataDirectory({ root = process.cwd(), env = process.env } = {}) {
+  return env.ZIWEI_USER_HOME ? defaultUserDir({ env }) : path.join(path.resolve(root), 'data');
+}
+
 function checkedApiBase(value) {
   let url;
   try { url = new URL(value); } catch { throw new Error('共享工作区 API 地址无效'); }
@@ -84,12 +89,15 @@ export function disconnectedConfiguration(config = {}, at = new Date().toISOStri
 }
 
 /** Only owned connection credential stores may be removed by native forget. */
-export function connectionCredentialFiles(config = {}, { configPath, root = process.cwd() } = {}) {
-  const base = path.dirname(path.resolve(configPath || resolveConfigPath({ root })));
+export function connectionCredentialFiles(config = {}, { configPath, root = process.cwd(), dataDirectory = resolveDaemonDataDirectory({ root }) } = {}) {
+  // Native home is authoritative. The config neighbor is retained solely for
+  // historical connection-only stores; neither permits runtime/auth paths.
+  const bases = [...new Set([path.resolve(dataDirectory), path.dirname(path.resolve(configPath || resolveConfigPath({ root })))])];
   const files = new Set();
   function regularOwned(file) {
-    const resolved = path.resolve(file); const relative = path.relative(base, resolved);
-    if (relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative) || relative === '..' || !['mcp', 'workspace-credentials', 'management-mcp-credentials'].includes(relative.split(path.sep)[0])) throw new Error('连接凭据不在本机专用目录；未删除任何文件');
+    const resolved = path.resolve(file);
+    const allowed = bases.some(base => { const relative = path.relative(base, resolved); return !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative) && relative !== '..' && ['mcp', 'workspace-credentials', 'management-mcp-credentials'].includes(relative.split(path.sep)[0]); });
+    if (!allowed) throw new Error('连接凭据不在本机专用目录；未删除任何文件');
     for (let candidate = resolved; ; candidate = path.dirname(candidate)) {
       let stat; try { stat = fs.lstatSync(candidate); } catch (error) { if (error.code !== 'ENOENT') throw error; }
       if (stat?.isSymbolicLink()) throw new Error('连接凭据路径包含链接；未删除任何文件');
@@ -105,13 +113,15 @@ export function connectionCredentialFiles(config = {}, { configPath, root = proc
       const file = regularOwned(resolveConfigFile(reference, { configPath, root })); if (file) files.add(file);
     }
   }
-  const cache = path.join(base, 'management-mcp-credentials');
-  let cacheEntries = []; try { cacheEntries = fs.readdirSync(cache); } catch (error) { if (error.code !== 'ENOENT') throw error; }
-  for (const name of cacheEntries) {
-    if (!name.endsWith('.json')) continue;
-    const file = regularOwned(path.join(cache, name));
-    let credential; try { credential = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { continue; }
-    if (credential?.managed === true && credential.audience === 'ziwei-management' && identities.some(identity => identity.workspace === credential.workspace && identity.deviceId === credential.deviceId)) files.add(file);
+  for (const base of bases) {
+    const cache = path.join(base, 'management-mcp-credentials');
+    let cacheEntries = []; try { cacheEntries = fs.readdirSync(cache); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    for (const name of cacheEntries) {
+      if (!name.endsWith('.json')) continue;
+      const file = regularOwned(path.join(cache, name));
+      let credential; try { credential = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { continue; }
+      if (credential?.managed === true && credential.audience === 'ziwei-management' && identities.some(identity => identity.workspace === credential.workspace && identity.deviceId === credential.deviceId)) files.add(file);
+    }
   }
   return [...files].sort().map(file => ({ file, sha256: createHash('sha256').update(fs.readFileSync(file)).digest('hex') }));
 }

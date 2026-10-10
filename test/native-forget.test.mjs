@@ -107,6 +107,41 @@ test('forget refuses a credential reference outside its private connection store
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
 
+test('forget clears actual native data-directory bootstrap caches when config and user home are disjoint, retains foreign scope and all runtime auth', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ziwei-forget-disjoint-'));
+  const configDirectory = path.join(directory, 'configuration'); const userDirectory = path.join(directory, 'native-home');
+  fs.mkdirSync(path.join(configDirectory, 'workspace-credentials'), { recursive: true });
+  fs.mkdirSync(path.join(configDirectory, 'management-mcp-credentials'));
+  fs.mkdirSync(path.join(userDirectory, 'management-mcp-credentials'), { recursive: true });
+  fs.mkdirSync(path.join(userDirectory, 'runtime', 'creator-instances'), { recursive: true });
+  const file = path.join(configDirectory, 'ziwei_user.json');
+  const sharedCredential = path.join(configDirectory, 'workspace-credentials', 'shared.json');
+  fs.writeFileSync(sharedCredential, JSON.stringify({ workspace: 'phone_ai', deviceId: 'device_shared', deviceToken: 'test-shared-private-token' }));
+  const managed = (workspace, deviceId, audience = 'ziwei-management') => JSON.stringify({ managed: true, audience, workspace, deviceId, token: 'test-cache-private-token' });
+  const primaryCache = path.join(userDirectory, 'management-mcp-credentials', 'primary.json');
+  const sharedCache = path.join(userDirectory, 'management-mcp-credentials', 'shared.json');
+  const legacyCache = path.join(configDirectory, 'management-mcp-credentials', 'legacy.json');
+  const foreignCache = path.join(userDirectory, 'management-mcp-credentials', 'foreign-device.json');
+  const phoneCapability = path.join(userDirectory, 'management-mcp-credentials', 'phone-capability.json');
+  fs.writeFileSync(primaryCache, managed('fixture', 'device_primary')); fs.writeFileSync(sharedCache, managed('phone_ai', 'device_shared'));
+  fs.writeFileSync(legacyCache, managed('fixture', 'device_primary')); fs.writeFileSync(foreignCache, managed('fixture', 'device_other'));
+  fs.writeFileSync(phoneCapability, managed('fixture', 'device_primary', 'ziwei-terminal'));
+  const memory = path.join(userDirectory, 'runtime', 'creator-instances', 'MEMORY.md'); fs.writeFileSync(memory, 'preserve existing memory');
+  const auth = path.join(userDirectory, 'runtime', 'auth.json'); fs.writeFileSync(auth, 'preserve source authentication');
+  const original = { workspace: 'fixture', deviceId: 'device_primary', deviceToken: 'test-primary-private-token', healthPort: 1, workdir: 'keep-workdir', sharedWorkspaces: [{ workspace: 'phone_ai', deviceId: 'device_shared', deviceTokenFile: sharedCredential }] };
+  fs.writeFileSync(file, JSON.stringify(original));
+  try {
+    const result = await run(process.execPath, [path.join(root, 'scripts/ziwei-cli.mjs'), 'forget', '--json'], { env: { ...process.env, ZIWEI_CONFIG: file, ZIWEI_USER_HOME: userDirectory }, timeout: 5000, windowsHide: true });
+    for (const owned of [primaryCache, sharedCache, legacyCache, sharedCredential]) assert.equal(fs.existsSync(owned), false, 'Complete must mean both actual native and legacy neighbor credentials are gone');
+    assert.equal(JSON.parse(result.stdout).credentialFilesRemoved, 4);
+    for (const foreign of [foreignCache, phoneCapability]) assert.equal(fs.existsSync(foreign), true);
+    assert.equal(fs.readFileSync(memory, 'utf8'), 'preserve existing memory'); assert.equal(fs.readFileSync(auth, 'utf8'), 'preserve source authentication');
+    assert.equal(JSON.parse(fs.readFileSync(file)).connectionCleanup.state, 'complete');
+    assert.throws(() => configApi.connectionCredentialFiles({ ...original, managementMcp: { tokenFile: auth } }, { configPath: file, root, dataDirectory: userDirectory }), /专用目录/);
+    assert.doesNotMatch(result.stdout, /test-.*private-token/);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
 test('a disconnected tombstone with an unverified old listener fails without stopping or reporting cleanup complete', async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ziwei-forget-listener-'));
   const file = path.join(directory, 'ziwei_user.json'); let requests = 0;
