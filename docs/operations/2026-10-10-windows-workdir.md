@@ -39,6 +39,13 @@ Windows 专项 24 项覆盖真实 C/D 临时目录、中文空格、默认目录
 
 主站 `/opt/ziwei/releases/36d6bf1`、控制 `/opt/ziwei-control/releases/8a4fe59`、前端 index 与 Nginx/签名 key/共享路径/原 PowerShell 均保持。三服务 PID 分别 140116/134533/737、NRestarts=0，启动时间与备份一致，未重启。主站本地及公网健康为 200/ok。维护日志、Creator HOME/记忆、原认证和用户配置不属于本次 downloads 发布范围。
 
-用户终端 `ziwei_user status` 显示 bigtron 在线，20242 心跳持续更新；发布前实际 PID52440、运行 build 为旧包 `6d0709a2f20acb43d6887b9182937cc8020e25a178df16e1e5ad9fd80dad3df8`。维护工具进程读到同路径历史 disconnected 配置，与运行进程缓存身份不一致；不据此改写、重配对或停止用户连接。官方新包已核对完成，已请求用户在当前显示 bigtron 在线的同一终端运行 `ziwei_user update`，再贴 `ziwei_user update-status --json`；用户电脑真实更新及目录选择 after 验收仍待该结果。未更新前不能声称用户电脑已修复。
+用户终端 `ziwei_user status` 显示 bigtron 在线；发布前实际 PID52440、运行 build 为旧包 `6d0709a2f20acb43d6887b9182937cc8020e25a178df16e1e5ad9fd80dad3df8`。维护工具进程读到同路径历史 disconnected 配置，与运行进程缓存身份不一致；没有据此改写、重配对或停止用户连接。官方新包核对完成后，用户已在自己终端运行更新，实际安装已核实如下。
+
+- `update-9db8b625-5677-4d85-ad39-3674a74b4e0a` 于 `2026-10-10T10:22:00.737Z`（北京时间18:22:00）**complete**：旧build6d0709a2…→新build7c2d47ab…，SHA与官方一致，configurationPreserved=true、restoredRunning=true，原prefix仍 `D:\work\nodejs\node_global`。
+- 用户随后手动执行 `stop`，回执 PID34312 已停止；之后 `update-428d6602…`、`update-5728098a…` 分别于18:22:22/18:22:29 **complete**，均新build→同一新build、配置保持、restoredRunning=false，忠实保留停止状态。
+- `update-9f2681bc…`、`update-78717e0a…` 于18:22:25/18:22:27因另一任务仍在运行被维护锁拒绝。失败请求的结果和日志保留；`update-status` 的 latest 指针当前指到最后提交的787任务，因此显示该次失败，不代表此前成功安装被回退。未伪造成功结果、未手动删除锁或改latest指针。18:26排查时 operation.lock 已正常释放、无维护worker和20242 listener。
+- 直接校验实际全局安装目录的clientBuild为完整 `7c2d47abb3982eb31fbdd2245fe0550235efed9ec418848de901dfead8bdaf64`。从已安装模块实际检查 C/D 两盘均存在且可用；把同一24项专项仅改为导入实际全局安装模块后再次 **24/24、0fail**，含隔离CLI真实cwd、ACL、身份/私有边界，用户配置hash和安装build保持。该验证未启动daemon、真实模型或手机动作。
+
+用户电脑**新程序已安装，当前保持手动停止状态**。真实网页选择/保存/刷新 after 尚未执行，需用户恢复其原连接在线后才能做；不能把安装模块的24项专项或旧网页错误复现替代这项结果。配置、凭据和正式会话没有因排查被修改。
 
 回滚只还原本轮备份的官方包及 metadata；PowerShell、主站、控制、数据库和配置不需要回退。真实用户客户端是否已更新需单独核实，禁止用隔离安装的 build 替代它。
