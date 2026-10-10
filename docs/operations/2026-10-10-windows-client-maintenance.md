@@ -48,15 +48,44 @@ irm https://qzelynth.top/downloads/cli/update-windows.ps1 | iex
 npm install --global "https://qzelynth.top/downloads/cli/ziwei-latest.tgz"
 ```
 
-## 验证与发布记录
+## 验证与发布记录（已发布）
 
-发布验收进行中。初次安全备份 `/opt/ziwei-backups/windows-client/20261010T032015Z` 已通过两库 integrity / foreign-key 校验，读取使用 SQLite backup API 后离线检查，没有长在线读事务；发布前继续捕获最新正式数据。此时正式主站已有2工作区、3电脑、5登录账号，反映用户清理后的新使用；这些数量不能当作待删除清单。
+主站于 `2026-10-10T04:02:12Z`（北京时间12:02:12）发布 `36d6bf108002353bfcba96abb2a2663e63828bbc`，`/opt/ziwei/current -> /opt/ziwei/releases/36d6bf1`。只重启 `ziwei-api.service`，最终 PID140116、NRestarts0。控制服务保持 `8a4fe59` / PID134533，Nginx保持PID737；后两者未重启，Nginx配置SHA仍为 `faf170c39866d8c307ed68cc49d96cf7cc28dfac442e979d3f3d8c35cf494967`。手机路由、APK与签名身份保留。
 
-- 完整串行回归 `node --test --test-concurrency=1` **454/454、0 skip**，lint65通过，PowerShell入口语法检查通过。
+最终发布前备份为 `/opt/ziwei-backups/windows-client/20261010T035832Z`，两库 integrity通过、foreign-key问题0；早期 `20261010T032015Z` 备份也保留。检查使用 SQLite backup API 后离线快照，没有长在线读事务。04:23:14Z最终复核仍为2工作区、3电脑、5登录账号、4成员、4邀请、3员工、7技能、1正式会话/模板、3设备凭据、2手机MCP配置/绑定；保护资源精确ID、phone_ai三名员工完整记录及中控2手机/4节点保持。以上是用户清理后的正式使用，不能当作待删除清单或整库回滚目标。
+
+### 本人实际页面与布局
+
+最终静态前端来源 `4464bb5ea9504ef9c4508718578fc379fd7985d4`，04:22:16Z原子发布；资源 `index-BakqZA2_.js` / `index-DArH7kBc.css`，旧hash资源继续保留。该次仅修复元数据标签换行与窄窗口可达性，三服务PID/重启计数均未改变。favicon继续复用全局紫薇Logo，图片SHA为 `68452b1f4299b0af353ee35d3315302061fa64c72cc77ba66763ebb8ec81ca2c`。
+
+04:23:41Z本人实际页面 **24/24** 通过：李金晋电脑精确bfd设备显示Claude/Codex/Gemini/Hermes **4/4可用**；另一台791设备保持只有Codex **1/4可用**，状态与版本没有混用。1440×900、390×844、720×450共39张截图，所有元数据标签边界在卡片/行内、长版本换行、四项都能垂直滚动到达；3个浏览器context全部关闭，业务写、页面/console/请求/异常响应错误、外部请求、WebSocket发送、模型/手机/设备动作均0，三场景员工0→0且完整hash一致。结果与可展示截图在 `.local/client-maintenance/device-ui-live-wrap-final/results.json`、`1440x900-li-jinjin-four-CLI.png`。
+
+实际旧daemon仍是PID58720、20242在线、build `40af5811c95e3c251ddb0daa887eb60bf9f4135365b0afdea46f3bcb45a6b6d6`；04:24:09Z只读复核未被停止、升级或重连。旧心跳没有clientBuild字段且仍误报Gemini `codex-cli 0.159.2`；页面忠实展示该现有记录，不能把页面四绿当作客户端已升级。新版只读真实探测Gemini为0.51.0，更新实际旧客户端后才会按新探测上报。用户目录旧断开配置文件hash `A633F98812BDF96098AA42642A74FCAD2B73AAE233BF24BB1464D8200E6EED8E` 保持；磁盘历史配置状态不能替代正在运行实例的health事实。
+
+两次临时Owner QA会话均已精确撤销，最后一次04:24:07Z撤销、04:24:09Z旧cookie实测401，服务器私有文件和本机临时token已移除。证据为 `.local/client-maintenance/session-first-final-result.json` 与 `session-final-result.json`。
+
+### Windows公开包与真实升级入口
+
+官方包 `https://qzelynth.top/downloads/cli/ziwei-latest.tgz`：version0.1.0、93,329bytes、29项必需文件，SHA-256 `628976fc1edda7a0bbc7bfc8f665bee0f517aa2e280097a809d6369d3157ea08`。来源为36d6bf1的客户端程序。
+
+- Windows真实npm安装后的clientBuild：`6d0709a2f20acb43d6887b9182937cc8020e25a178df16e1e5ad9fd80dad3df8`。
+- 原归档sourceBuild：`cf30d9b6ac6c76f60af2798fc7e8e31c3c047a11f29d2ae296ac9bd435002109`。
+- 两者差异仅为npm bin-links将 `scripts/ziwei-user.mjs` 的shebang行CRLF归一为LF，其余文件字节一致。公开metadata已分别记为clientBuild/sourceBuild、clientBuildPlatform=win32，不能把解包hash当作安装运行hash。证据 `.local/client-maintenance/installed-build-publication.json`。
+
+最终PowerShell入口来源 `c5b720b6d7317ad384b7371600c17c65c0e6e75d`，4,093bytes、全ASCII无BOM，SHA-256 `e78e39f3e1eeb9808ecd4ed32f2f856a82947f81e4ee2ca60f20383c766c332a`。使用显式UTF-8读取JSON，临时设置并恢复Console.OutputEncoding，以.NET计算SHA。先前UTF-8无BOM在Windows PowerShell5 `-File`失败、加BOM又在octet-stream的实际 `irm` 解码失败；两份失败证据保留，最终以真实HTTP/WinPS5验证，不能只凭本地ParseFile通过。
+
+**实际纯 `irm … | iex` 综合验收11/11通过**：隔离的真实npm全局prefix中运行原116c1e7旧包与两个独立main/shared身份，先断言PowerShell npm root精确指向夹具prefix，再下载公开metadata/包/脚本执行旧版升级；结果actual complete、新PID/安装build/ready正确、身份/认证/记忆/工作目录/bin字节保持。随后stop、重复stop、同身份start、包外uninstall均通过，其他CLI及无关Node保持。04:14:05Z开始、04:14:41Z更新完成、04:19:27Z卸载完成；全部隔离进程已退出，没有更新本人实际global。证据 `.local/client-maintenance/windows-global-acceptance.json` / `windows-global-final.log`。
+
+04:23:17Z公开域名复核包、metadata、PowerShell、两前端资源均200，内容SHA匹配、主站health=true；证据 `.local/client-maintenance/public-release-verification.json`。程序升级必须在该台电脑原有Windows终端环境中执行上方命令，再查 `ziwei_user update-status --json` 的真实结果；缺少精确实例控制凭据或身份不符时安全失败，不自动重配对或扩大停止范围。
+
+### 代码验证与边界
+
+- 完整串行回归 `node --test --test-concurrency=1` **454/454、0 skip**，日志 `full-tests-final.log`；该完整运行在最终PowerShell编码与CSS修复前。编码修复后另增Windows PowerShell5真实HTTP解码/语法回归 **1/1**，不能合并声称完整455/455。
+- 最终lint65文件通过，构建通过；浏览器换行几何fixture先RED后GREEN **24/24**，实际线上独立 **24/24**，证据 `device-ui-wrap-red`、`device-ui-wrap-green`、`device-ui-live-wrap-final`。
 - `client-update.test.mjs` **6/6**：真实npm隔离prefix staging/目录替换、停机不自启、原连接/记忆/bin/其他CLI保留；坏包在停止前失败；更换后启动失败恢复原包、原运行入口和原配置字节。
-- 生命周期 **7/7**，native-refresh **2/2**；wrong-build夹具已去除目录名包含build造成的假通过，要求真正启动后返回准确的实际build不匹配诊断。
-- Windows完整旧包运行→包外更新→stop/start→包外卸载综合 **10/10**，真实npm全局布局，主/shared身份、认证、记忆、工作目录和其他CLI/无关Node保持。
-- Windows构建浏览器fixture **18/18**，1440×900、390×844、720×450，3context关闭、错误与业务写均0；前端 `index-Dajd_2io.js` / `index-D3d_EiaE.css`。
+- 生命周期 **7/7**，native-refresh **2/2**；wrong-build夹具已去除目录名包含build造成的假通过，要求真正启动后返回准确的实际build不匹配诊断。runtime重点 **67/67** 含真实native-forget **10/10**、心跳缓存回归。
 - Creator原HOME20持久文件、2 action-state、4源profile/config/SOUL hash只读复核不变。
 
-提交、公开包SHA/actualbuild、部署与本人真实网页回读在发布后补录；上述隔离测试不代表本人实际daemon已经升级，也不代表模型/provider或手机业务验收通过。
+本轮完成Windows发现、设备状态映射、页面布局及Windows程序维护的发布验收；本人现有daemon升级、模型/provider执行、手机业务实机及Mac适配没有执行。TTL到期仍可能触发同步冷探测，不宣称全异步发现或消除所有版本命令超时。
+
+回滚程序只切换对应代码/前端或公开包，保留现有data/.local和新正式数据；不得直接恢复整库覆盖用户新增资源。数据库schema新增字段保持兼容，需数据库恢复时另按明确目标与最新备份核实。最终生产只读证据在 `.local/client-maintenance/production-final.log`，服务器备份目录内也保留postdeploy-verification记录。

@@ -2,9 +2,9 @@
 
 ## Windows 客户端维护（2026-10-10）
 
-当前维护任务先支持 Windows：`ziwei_user stop` 保留连接并停止，`ziwei_user update` 按官方包升级，`ziwei_user update-status --json` 查看真实结果，`ziwei_user uninstall` / `remove` 卸载程序并保留用户配置、认证与记忆。旧版没有这些命令时使用纯 PowerShell 入口 `irm https://qzelynth.top/downloads/cli/update-windows.ps1 | iex`。实现与发布验收进度见 [Windows 运维记录](docs/operations/2026-10-10-windows-client-maintenance.md)。
+Windows客户端维护已发布：`ziwei_user stop` 保留连接并停止，`ziwei_user update` 按官方包升级，`ziwei_user update-status --json` 查看真实结果，`ziwei_user uninstall` / `remove` 卸载程序并保留用户配置、认证与记忆。旧版没有这些命令时使用纯PowerShell入口 `irm https://qzelynth.top/downloads/cli/update-windows.ps1 | iex`。每台电脑现在显示自己的CLI证据，李金晋电脑本人实际页面已确认4/4可用；新版Windows探测修复Gemini误读Codex版本，现有旧客户端更新后才按新探测上报。实现、真实升级验收、公开SHA与支持边界见 [Windows 运维记录](docs/operations/2026-10-10-windows-client-maintenance.md)。
 
-下方 test_222/PID 等属于历史验收。本机已按用户要求清空全部工作区连接并停止；用户后来新增的工作区、邀请和电脑连接是正式数据，继续保留，不自动重建已删除测试区。
+下方test_222/PID等属于历史验收。此前已按用户要求清空连接并停止；用户随后启动的实际李金晋电脑实例目前在线，本轮保持原实例。新增工作区、邀请和电脑连接是正式数据，继续保留，不重跑旧清理或自动重建已删除测试区。
 
 紫薇是一个前后端分离的智能工作区原型，复刻了 AuraBaba 示例工作区的核心流程、任务、文档、运行时、技能、自动化和连接器流程。项目中的本机 daemon 由我们自己实现，服务名称是 `ziwei_user`。
 

@@ -4,9 +4,13 @@
 
 > **2026-10-08 历史环境区分说明**：本地 checkout、5178 前端、4178 API 和项目 `data/ziwei_user.json` 是 `bjc-ops` 的本地代码验收环境；真实本机 `ziwei_user` daemon 由全局命令启动，使用用户目录配置连接 `https://qzelynth.top` 的服务器工作区 `test_222`。不要把项目配置或项目 daemon 当成服务器 daemon；接手时分别核对用户目录配置、项目配置和各自 `/readyz`。详细维护约定统一见 `PROJECT_MANAGEMENT.md`。
 
-## 2026-10-10 当前接续：Windows 客户端检测与维护（进行中）
+## 2026-10-10 当前发布：Windows 客户端检测与维护（已上线）
 
-最新范围仅 Windows：设备树与后端改为每台电脑自己的 runtime 元数据，CLI 区分未找到/检测失败/未上报/设备离线，新增安全 stop/update/uninstall 与旧版 PowerShell 官方升级入口。完整回归454/454、lint65、构建fixture18/18。用户已确认本人李金晋，精确目标bigtron/device_bfd9a3d2…自己的4CLI全available，旧workspace汇总受其他电脑覆盖；旧Gemini误读Codex入口已修。用户侧实际启动PID58720/旧build40af5811，不再引用历史“20242无监听”；本轮不改该实例或旧断开配置。清理后用户新工作区/账号/邀请/设备保留，不重跑旧清理。准确命令及发布进度见 [Windows 运维记录](docs/operations/2026-10-10-windows-client-maintenance.md)。
+最新范围仅Windows：设备树与后端读取每台电脑自身runtime元数据，CLI区分未找到/检测失败/未上报/设备离线，新增安全stop/update/uninstall与旧版PowerShell官方升级入口。主站36d6bf1于04:02:12Z部署、仅主API重启；最终静态前端4464bb5于04:22:16Z发布且服务PID不变，控制8a4fe59/Nginx/Android保持。用户本人bigtron/device_bfd9a3d2…实际页面4/4可用、另一台791独立1/4，三视口24/24、39截图、零业务写和正常错误；版本标签裁切已修。
+
+完整回归454/454、0skip，最终WinPS5编码新增回归1/1，lint65/build、布局fixture24/24；实际纯IRM|IEX隔离全局升级/停止/恢复/卸载11/11。公开包SHA628976fc…、93,329bytes、Windows真实npm安装build6d0709a2…，原归档sourceBuildcf30d9b6…（npm仅归一shebang换行），公开metadata已区分。最终ASCII无BOM脚本来源c5b720b，公开SHA与真实HTTP解码已验证；两次OwnerQA均撤销、旧cookie401、私有token文件清除。
+
+本人实际PID58720/旧build40af5811、20242在线，本轮未停止/升级/重连；Gemini旧误报Codex版本仍展示现有心跳，需更新原客户端才上报新探测。旧用户目录断开配置hash不变，不能把磁盘历史0连接当作当前运行状态。用户新正式工作区/账号/邀请/设备保留，不重跑清理；Creator/phone_ai/手机MCP/配对/认证/工作目录保持。最终备份 `/opt/ziwei-backups/windows-client/20261010T035832Z`，两库integrity/FK与保护资源复核通过，回滚仅代码不整库覆盖。Mac适配、本人daemon升级、模型/provider和手机实机未执行。完整证据、准确命令与限制见 [Windows 运维记录](docs/operations/2026-10-10-windows-client-maintenance.md)。
 
 ## 2026-10-10 历史接续：业务清理与本机全部断开（已完成）
 

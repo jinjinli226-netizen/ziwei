@@ -6,10 +6,12 @@
 >
 > **文档状态**：以 2026-10-10 当前 Windows 检测/维护与下列支持范围为准；每次结构、运行方式或功能边界发生变化时必须更新本文。历史清理、断开与favicon记录保留；用户随后新增的正式连接不能再被旧清理范围覆盖。较早的版本/PID、逐员工 MCP 开关或独立 bearer 操作不能替代当前规则。
 
-### 2026-10-10 当前接续：Windows CLI 检测与客户端维护（进行中）
+### 2026-10-10 当前发布：Windows CLI 检测与客户端维护（已上线）
 
-- 用户最新范围是“只适配 Windows”，不新增 Mac PATH/发现适配或 Mac 验收。修复共用设备元数据映射，补齐 Windows stop/update/uninstall；旧版官方 PowerShell 升级入口保留原 prefix 与身份，网页维护入口不生成配对码。进度和准确命令见 [Windows 客户端运维记录](docs/operations/2026-10-10-windows-client-maintenance.md)。
-- 用户清理后新增的 bigtron、邀请注册及新电脑是真实使用数据，保留，不使用下方历史清理数量/manifest覆盖。本人李金晋电脑=device_bfd9a3d2…/bigtron/Owner c6，自身四CLI已上报available，旧页面受服务器/另一电脑workspace汇总污染；Gemini旧误读Codex版本已修。用户侧现有实际PID58720/旧build40af5811，20242在线，本轮不停止/升级/重连；旧清理用户目录配置仍disconnected，Creator/phone_ai/手机MCP/配对/认证/工作目录保持。完整回归454/454、lint65、浏览器fixture18/18，发布实际SHA/build与本人页面回读见运维记录。
+- 用户最新范围是“只适配 Windows”。每台电脑读取自身runtime证据，区分未找到/检测失败/未上报/离线，补齐Windows stop/update/uninstall与旧版官方PowerShell升级入口，保留原prefix与身份。主站36d6bf1于04:02:12Z部署，只主API重启；最终静态前端4464bb5于04:22:16Z发布，无服务重启，资源BakqZA2_/DArH7kBc。控制8a4fe59、Nginx配置及APK保持。准确命令、SHA、备份与边界见 [Windows 客户端运维记录](docs/operations/2026-10-10-windows-client-maintenance.md)。
+- 本人李金晋电脑=device_bfd9a3d2…/bigtron/Owner c6。实际页面24/24确认本人4CLI全可用、另一电脑791仅Codex可用，三个视口39图确认标签未裁切，业务写/正常错误/模型/手机动作0。实际原PID58720/build40af5811仍在线且未升级，Gemini旧错误版本仍忠实展示；新程序修复其入口探测，更新实际客户端后才按新探测上报。旧清理用户目录配置仍disconnected，其hash不变，不可据此声称当前20242无监听。
+- 完整回归454/454、0skip，随后WinPS5编码新增回归1/1；最终lint65/build、布局fixture24/24、真实纯IRM|IEX隔离全局升级→stop/start→uninstall11/11。公开包SHA628976fc…/93,329bytes，Windows实际安装build6d0709a2…，原归档sourceBuildcf30d9b6…（仅npm shebang换行归一差异）；公开metadata已区分。最终ASCII无BOMPowerShell脚本来源c5b720b，两次QA会话均撤销/旧cookie401/临时token清除。
+- 清理后新增工作区、账号、邀请和电脑均为正式数据，不重跑旧清理或恢复整库。最终备份 `/opt/ziwei-backups/windows-client/20261010T035832Z`，两库integrity/FK通过，保护ID、phone_ai员工全记录、Creator HOME/源profile hash和手机MCP/绑定/配对保持。本轮Mac、本人实际daemon升级及模型/provider/手机实机未执行。
 
 ### 2026-10-10 历史状态：业务清理与本机全部断开（已完成）
 
