@@ -4,11 +4,14 @@
 
 > **2026-10-08 历史环境区分说明**：本地 checkout、5178 前端、4178 API 和项目 `data/ziwei_user.json` 是 `bjc-ops` 的本地代码验收环境；真实本机 `ziwei_user` daemon 由全局命令启动，使用用户目录配置连接 `https://qzelynth.top` 的服务器工作区 `test_222`。不要把项目配置或项目 daemon 当成服务器 daemon；接手时分别核对用户目录配置、项目配置和各自 `/readyz`。详细维护约定统一见 `PROJECT_MANAGEMENT.md`。
 
-## 2026-10-10 当前接续：业务清理与本机全部断开（执行中）
+## 2026-10-10 当前接续：业务清理与本机全部断开（已完成）
 
 - 最新用户授权覆盖下方历史“test_222 主连接保留”目标：删除 `test_222` 和其他无关工作区、员工及业务记录，保留 `phone_ai` Creator/手机 MCP；当前电脑 `ziwei_user` 最终清空所有主/shared 连接并停止，不自行重新配对或重新运行员工。
 - Creator 原 shared 持久 HOME、记忆、人格、profile、正式会话和模板，两个手机 MCP 宿主、技能/配置/绑定，以及手机配对/节点/控制服务均受保护。客户端程序、工作目录、CLI/provider 认证和其他项目数据不属于删除范围。
-- 已验证两库备份和独立恢复副本、Creator 本机私密备份；新实际只读 Creator action 已 succeeded/loaded/discover/list 成功。正在实施防止重启回填的 seed marker、原生 forget、精确事务清理与最终网页验收；尚未把计划数量记为清理结果。安全计划与后续实际结果见 [2026-10-10 运维记录](docs/operations/2026-10-10-business-cleanup.md)。
+- 生产主站 `3421046684a2ab1b484674500b803ea6dd1c14b7` / `/opt/ziwei/releases/3421046`，控制仍 `8a4fe59`，Nginx 不变。一次性 seed marker 和 native forget 已发布。`02:20:20Z` 按审核 SHA `b7077d642890aa6b4a691e23d0731958b8c4ecce6bce2d3101a5559f43aae7a2` 删除 6,665 行、迁移 5 项平台技能归属。真实剩余 phone_ai 1 区、Creator+2 手机宿主、f956 1 电脑/凭据、Owner 1、技能 6、正式会话/模板各 1；普通任务/消息/历史为 0，手机配置/绑定各 2、中控手机 2/节点 4（页面活跃 1/2）保留。
+- 本机全局包升级 PID48624→52780 后原生 forget 已完成：0 连接/4 对应缓存删除/20242 无监听，两个 daemon 与观察器均退出，不自行 start/connect。Creator 原 HOME 20 持久文件、2 action-state、4 源 config/SOUL 哈希不变，认证及用户目录保留。
+- 停写前备份 `/opt/ziwei-backups/launch-cleanup/20261010T021519Z-predelete`，本机最终备份 `C:\Users\25941\AppData\Local\Ziwei\backups\launch-cleanup-disconnect-20261010T021200Z`，双库及 Creator state 独立恢复校验通过。断开前实际 Creator 只读 succeeded/loaded；断开后不宣称可执行。桌面/390px 实际 18/18、34 图、正常错误与业务写请求 0；原图长摘要两行/卡高126/环境gap32，正式会话打开刷新正确。
+- 在线 SQL 验收长读锁曾使主服务短暂退出，systemd 于02:22:10Z恢复；保留首轮17/18及502证据，改用 backup API 离线快照后复验通过。最终85表仅接受既有登录last_seen变化、已撤销QA一行及控制启动单设备lease宽限这一精确例外，其余保留字段与删除后清单一致。临时QA已撤销/旧cookie401/两端token文件清除；原4账号保留。实际手机动作、Codex执行均0。完整结果见 [2026-10-10 运维记录](docs/operations/2026-10-10-business-cleanup.md)。
 
 ## 2026-10-10 历史接手续记：内置 Creator 发布、真实 Hermes 验收与清理已完成
 
