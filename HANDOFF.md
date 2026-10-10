@@ -13,6 +13,11 @@
 - 停写前备份 `/opt/ziwei-backups/launch-cleanup/20261010T021519Z-predelete`，本机最终备份 `C:\Users\25941\AppData\Local\Ziwei\backups\launch-cleanup-disconnect-20261010T021200Z`，双库及 Creator state 独立恢复校验通过。断开前实际 Creator 只读 succeeded/loaded；断开后不宣称可执行。桌面/390px 实际 18/18、34 图、正常错误与业务写请求 0；原图长摘要两行/卡高126/环境gap32，正式会话打开刷新正确。
 - 在线 SQL 验收长读锁曾使主服务短暂退出，systemd 于02:22:10Z恢复；保留首轮17/18及502证据，改用 backup API 离线快照后复验通过。最终85表仅接受既有登录last_seen变化、已撤销QA一行及控制启动单设备lease宽限这一精确例外，其余保留字段与删除后清单一致。临时QA已撤销/旧cookie401/两端token文件清除；原4账号保留。实际手机动作、Codex执行均0。完整结果见 [2026-10-10 运维记录](docs/operations/2026-10-10-business-cleanup.md)。
 
+## 2026-10-10 追加接续：紫薇 Logo favicon
+
+- `74cefd5485916614d8357e779fdb3f223b1d53e8` 仅增前端head PNG favicon声明，复用全局品牌原图与内容版本URL，构建/diff check通过；02:41:16Z以os.replace原子替换3421046的静态index，后端仍3421046、控制8a4，业务JS/CSS/53项旧assets、三服务PID/重启计数、CLI/APK与数据库均保持。
+- 正确图片URL为 `https://qzelynth.top/ziwei-logo.png?v=68452b1f4299`，实际200/image/png/hash与全局一致。五个无Cookie浏览器入口5/5、context全关闭、16/32px解码渲染通过，错误/业务写0；Headless自动标签图标未目视，证据边界如实记录。当前本机继续disconnected/0、20242无监听；旧HTML备份 `/opt/ziwei-backups/favicon/20261010T024116Z`，只恢复静态index即可回退。详见 [favicon运维记录](docs/operations/2026-10-10-favicon.md)。
+
 ## 2026-10-10 历史接手续记：内置 Creator 发布、真实 Hermes 验收与清理已完成
 
 - 生产代码为 `db0aa68b0735c30c65acdf342c3080655892a286`，北京时间 **00:08:06**（`2026-10-09T16:08:06Z`）发布 `/opt/ziwei/releases/db0aa68`，前一版 `1ca9c6b`。备份 `/opt/ziwei-backups/creator-platform/20261009T144859Z`；仅主 API 重启，控制仍为 `8a4fe59`，Nginx 原 hash 不变。新前端 `index-DRTDY7kv.js` / `index-CJMLdFH9.css`，新/旧资源均 200，主站健康、三服务 active、Android code15 双 APK HEAD200 已证；此处没有新增 APK hash 或手机实机结论。
