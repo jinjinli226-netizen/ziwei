@@ -20,6 +20,11 @@ function usage() {
   npm run ziwei:setup -- [--workspace <slug>] [--api <url>] [--health-port <port>] [--tls-ca-file <path>]
   ziwei_user connect --api <url> --code <一次性配对码> [--name <设备名>]
   ziwei_user start
+  ziwei_user stop [--expected-pid <PID>] [--json]    Windows：停止本客户端，保留所有连接与数据
+  ziwei_user update [--json]                      Windows：验证官方包后升级，保留连接和身份
+  ziwei_user update-status [--json]               查看包外升级任务的真实完成/失败结果
+  ziwei_user uninstall [--json]                   Windows：卸载本客户端，保留配置、认证和记忆
+  ziwei_user remove                              uninstall 的别名
   ziwei_user change
   ziwei_user forget [--expected-pid <PID>]
   npm run ziwei:status [--json]
@@ -442,6 +447,34 @@ async function main() {
   if (command === 'setup') return setup(args);
   if (command === 'connect') return connect(args);
   if (command === 'start') return start();
+  if (command === 'stop') {
+    rejectSecrets(args);
+    const { stopClient } = await import('./client-lifecycle.mjs');
+    const result = await stopClient({ root: ROOT, env: process.env, ...(args['expected-pid'] ? { expectedPid: Number(args['expected-pid']) } : {}) });
+    console.log(args.json ? JSON.stringify(result) : result.alreadyStopped ? 'ziwei_user 已停止；连接配置、身份和用户数据保留。' : `ziwei_user 已停止（PID ${result.pid}）；使用 start 可恢复原连接。`);
+    return;
+  }
+  if (command === 'update') {
+    rejectSecrets(args);
+    const { launchClientUpdate } = await import('./client-update.mjs');
+    const result = await launchClientUpdate({ codeRoot: ROOT, root: args.target ? path.resolve(String(args.target)) : ROOT, args, env: process.env });
+    console.log(args.json ? JSON.stringify(result) : `Windows 升级任务已提交，CLI 退出后开始。请运行 ziwei_user update-status 查看真实完成结果。\n维护日志: ${result.logFile}`);
+    return;
+  }
+  if (command === 'update-status') {
+    const { readUpdateResult } = await import('./client-update.mjs');
+    const result = readUpdateResult({ env: process.env });
+    console.log(args.json ? JSON.stringify(result) : JSON.stringify(result, null, 2));
+    if (result.state === 'failed') process.exitCode = 1;
+    return;
+  }
+  if (command === 'uninstall' || command === 'remove') {
+    rejectSecrets(args);
+    const { launchClientUninstall } = await import('./client-lifecycle.mjs');
+    const result = await launchClientUninstall({ root: ROOT, env: process.env });
+    console.log(args.json ? JSON.stringify(result) : `Windows 卸载任务已提交，CLI 退出后开始；用户配置、认证、工作目录和 Creator 记忆保留。\n维护结果: ${result.resultFile}`);
+    return;
+  }
   if (command === 'change') return change();
   if (command === 'forget' || command === 'reset') return forget(args);
   if (command === 'status') return status(args);

@@ -5,6 +5,7 @@ import { openDatabase } from './db.mjs';
 import { transitionTask } from '../src/domain.mjs';
 import { listModels } from './models.mjs';
 import { discoverLocalVersions } from './discovery.mjs';
+import {deviceRuntimeView,runtimeName,safeRuntimeDetection} from './runtime-status.mjs';
 import { MAX_SKILL_BYTES, hashSkillContent, parseSkillMarkdown, validateSkillDocument } from './skills/validator.mjs';
 import { extractSkillMarkdownArchive } from './skills/archive.mjs';
 import { objectStoreFromOptions } from './storage.mjs';
@@ -502,7 +503,7 @@ export function createRepository(options = {}) {
       const visibleDevices = this.listDevices(slug, options);
       const ownedDevices = options.userId ? visibleDevices.filter(item => item.owner_user_id === options.userId) : visibleDevices;
       const device = ownDevice(ownedDevices);
-      return { workspace: ws, counts: { tasks: count('tasks'), runtimes: device?.status === 'online' ? count('runtimes') : 0, members: count('members'), documents: count('documents'), automations: count('automations') }, taskStates: Object.fromEntries(tasks.map(row => [row.state, row.count])), device };
+      return { workspace: ws, counts: { tasks: count('tasks'), runtimes: this.listRuntimes(slug,options).filter(item=>item.cli_status==='available').length, members: count('members'), documents: count('documents'), automations: count('automations') }, taskStates: Object.fromEntries(tasks.map(row => [row.state, row.count])), device };
     },
     listTasks(slug, filters = {}) {
       const ws = workspace(slug); if (!ws) throw new Error('Workspace not found'); let sql = 'SELECT * FROM tasks WHERE workspace_id = ?'; const params = [ws.id];
@@ -594,36 +595,18 @@ export function createRepository(options = {}) {
     listRuntimes(slug, options = {}) {
       const ws = workspace(slug);
       const devices = this.listDevices(slug, options);
-      const ownedDevices = options.userId ? devices.filter(item => item.owner_user_id === options.userId) : devices;
-      const device = ownDevice(ownedDevices) || (ws.kind === 'team' ? ownDevice(devices) : null);
-      const onlineDeviceIds = devices.filter(item => item.status === 'online').map(item => item.id);
-      const online = device?.status === 'online';
-      // The bridge owns liveness; each agent keeps its own locally discovered
-      // CLI identity/version.  We never use an Aura daemon to infer either.
-      const discovery = online ? discover() : null;
-      db.prepare('UPDATE runtimes SET status=? WHERE workspace_id=?').run(online ? 'online' : 'offline', ws.id);
-      const metadata = Object.fromEntries(db.prepare('SELECT * FROM runtime_metadata WHERE workspace_id=?').all(ws.id).map(item => [item.runtime_name, item]));
-      return db.prepare('SELECT * FROM runtimes WHERE workspace_id = ? ORDER BY name').all(ws.id).map(row => ({
-        ...row,
-        // The runtime's version is the CLI probe result, never the old seed
-        // catalog value.  Keep the catalog value only as an internal legacy
-        // field so disconnected devices do not appear to have a live CLI.
-        version: online ? (discovery?.agents?.[row.name]?.version || metadata[row.name]?.version || null) : null,
-        status: online ? 'online' : 'offline',
-        last_seen: device?.last_seen || row.last_seen,
-        capabilities: parse(row.capabilities_json),
-        // Only a successful local probe may fill cli_version; bridge_version
-        // remains the ziwei_user version below.
-        cli_version: online ? (discovery?.agents?.[row.name]?.version || metadata[row.name]?.version || null) : null,
-        cli_binary: online ? (discovery?.agents?.[row.name]?.binary || metadata[row.name]?.binary || null) : null,
-        cli_status: online ? ((discovery?.agents?.[row.name]?.status === 'available' || metadata[row.name]?.status === 'available') ? 'available' : 'unavailable') : 'offline',
-        profiles: row.name.toLowerCase() === 'hermes' ? (() => { try { return JSON.parse(metadata[row.name]?.profiles_json || '[]'); } catch { return []; } })() : [],
-        bridge_name: device?.bridge_name || 'ziwei_user',
-        bridge_version: device?.bridge_version || null,
-        bridge_status: online ? (device.bridge_status || 'online') : 'offline',
-        available_device_ids: onlineDeviceIds,
-        available_device_count: onlineDeviceIds.length
-      }));
+      // Retain the workspace catalog API, but derive each summary from exact
+      // visible device evidence. The server's own CLI and last writer are not
+      // evidence about a user's computer.
+      return db.prepare('SELECT * FROM runtimes WHERE workspace_id=? ORDER BY name').all(ws.id).map(row=>{
+        const instances=devices.flatMap(device=>device.runtimes.filter(item=>item.name===row.name));
+        const available=instances.filter(item=>item.available);
+        const representative=available[0]||instances.find(item=>item.device_status==='online')||instances[0];
+        return {...row,...(representative||{}),id:row.id,capabilities:parse(row.capabilities_json),
+          ...(representative?{}:{status:'offline',version:null,cli_version:null,cli_binary:null,cli_status:'offline',available:false,discovery_state:'device_offline',profiles:[],detection:{state:'not_reported'}}),
+          available_device_ids:available.map(item=>item.device_id),available_device_count:available.length,
+          device_runtimes:instances};
+      });
     },
     registerRuntimes(slug, input = {}) {
       const ws = workspace(slug); if (!ws) throw new Error('Workspace not found');
@@ -640,10 +623,11 @@ export function createRepository(options = {}) {
         Hermes: ['orchestration', 'a2a', 'automation']
       };
       for (const [nameValue, raw] of entries) {
-        const name = String(nameValue || '').trim(); if (!name || !raw || typeof raw !== 'object') continue;
+        const name = runtimeName(nameValue); if (!name || !raw || typeof raw !== 'object') continue;
         const version = raw.version ? String(raw.version) : null;
         const binary = raw.binary ? String(raw.binary) : null;
         const status = raw.status ? String(raw.status) : (version ? 'available' : 'unavailable');
+        const detection = safeRuntimeDetection(raw.detection,status);
         const models = Array.isArray(raw.models) ? raw.models.filter(item => item && typeof item === 'object').slice(0, 100) : [];
         const profiles = Array.isArray(raw.profiles) ? raw.profiles.filter(item => item && typeof item === 'object' && /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(String(item.name || ''))).slice(0, 100).map(item => ({ name: String(item.name), ...Object.fromEntries(Object.entries(item).filter(([key, value]) => ['configured','valid','hasSoul','provider_configured','authentication_configured'].includes(key) && typeof value === 'boolean')), ...(item.readiness && typeof item.readiness === 'object' ? { readiness: Object.fromEntries(Object.entries(item.readiness).filter(([key, value]) => ['authentication','provider','ready','reason','code'].includes(key) && ['string','boolean'].includes(typeof value))) } : {}) })) : [];
         const readiness = raw.readiness && typeof raw.readiness === 'object' ? Object.fromEntries(Object.entries(raw.readiness).filter(([key, value]) => ['authentication','provider','ready','reason','code'].includes(key) && ['string','boolean'].includes(typeof value))) : {};
@@ -651,11 +635,13 @@ export function createRepository(options = {}) {
         if (existing) db.prepare('UPDATE runtime_metadata SET version=?,binary=?,status=?,models_json=?,profiles_json=?,last_seen=? WHERE id=?').run(version,binary,status,JSON.stringify(models),JSON.stringify(profiles),timestamp,existing.id);
         else db.prepare('INSERT INTO runtime_metadata(id,workspace_id,runtime_name,version,binary,status,models_json,profiles_json,last_seen) VALUES(?,?,?,?,?,?,?,?,?)').run(id('runtime-meta'),ws.id,name,version,binary,status,JSON.stringify(models),JSON.stringify(profiles),timestamp);
         db.prepare('UPDATE runtime_metadata SET readiness_json=? WHERE workspace_id=? AND runtime_name=?').run(JSON.stringify(readiness), ws.id, name);
+        db.prepare('UPDATE runtime_metadata SET detection_json=? WHERE workspace_id=? AND runtime_name=?').run(JSON.stringify(detection),ws.id,name);
         if (deviceId) {
           const deviceExisting = db.prepare('SELECT id FROM runtime_device_metadata WHERE device_id=? AND runtime_name=?').get(deviceId, name);
           if (deviceExisting) db.prepare('UPDATE runtime_device_metadata SET version=?,binary=?,status=?,models_json=?,profiles_json=?,last_seen=? WHERE id=?').run(version,binary,status,JSON.stringify(models),JSON.stringify(profiles),timestamp,deviceExisting.id);
           else db.prepare('INSERT INTO runtime_device_metadata(id,workspace_id,device_id,runtime_name,version,binary,status,models_json,profiles_json,last_seen) VALUES(?,?,?,?,?,?,?,?,?,?)').run(id('runtime-device-meta'),ws.id,deviceId,name,version,binary,status,JSON.stringify(models),JSON.stringify(profiles),timestamp);
           db.prepare('UPDATE runtime_device_metadata SET readiness_json=? WHERE workspace_id=? AND device_id=? AND runtime_name=?').run(JSON.stringify(readiness), ws.id, deviceId, name);
+          db.prepare('UPDATE runtime_device_metadata SET detection_json=? WHERE workspace_id=? AND device_id=? AND runtime_name=?').run(JSON.stringify(detection),ws.id,deviceId,name);
         }
         const runtime = db.prepare('SELECT id FROM runtimes WHERE workspace_id=? AND name=?').get(ws.id,name);
         if (runtime) {
@@ -1126,6 +1112,8 @@ export function createRepository(options = {}) {
       const cutoff = new Date(Date.now() - HEARTBEAT_TIMEOUT_MS).toISOString();
       db.prepare("UPDATE devices SET status='offline',bridge_status=CASE WHEN bridge_status IS NULL THEN 'offline' ELSE bridge_status END WHERE workspace_id=? AND (last_seen IS NULL OR last_seen < ?) AND status NOT IN ('disabled','offline')").run(ws.id, cutoff);
       const rows = db.prepare('SELECT * FROM devices WHERE workspace_id=? ORDER BY name').all(ws.id);
+      const catalog=db.prepare('SELECT * FROM runtimes WHERE workspace_id=? ORDER BY name').all(ws.id);
+      const metadata=db.prepare('SELECT * FROM runtime_device_metadata WHERE workspace_id=?').all(ws.id);
       const visible = ws.kind === 'personal' && options.userId
         ? rows.filter(device => device.owner_user_id === options.userId)
         : rows;
@@ -1135,7 +1123,8 @@ export function createRepository(options = {}) {
         const heartbeatAge = Number.isFinite(seenAt) && seenAt <= Date.now() ? Date.now() - seenAt : null;
         const isSeedDevice = device.id === 'device-ziwei-user';
         const status = device.status === 'disabled' ? 'disabled' : (online ? 'online' : 'offline');
-        return { ...device, status, bridge_name: device.bridge_name || (isSeedDevice ? 'ziwei_user' : null), bridge_version: device.bridge_version || (isSeedDevice ? device.version : null), bridge_status: status === 'disabled' ? 'disabled' : (online ? 'online' : 'offline'), bridge_host: device.ip_hint || '127.0.0.1', healthy: status === 'online', heartbeat_age_ms: heartbeatAge };
+        const view={ ...device, status, bridge_name: device.bridge_name || (isSeedDevice ? 'ziwei_user' : null), bridge_version: device.bridge_version || (isSeedDevice ? device.version : null), bridge_status: status === 'disabled' ? 'disabled' : (online ? 'online' : 'offline'), bridge_host: device.ip_hint || '127.0.0.1', healthy: status === 'online', heartbeat_age_ms: heartbeatAge };
+        return {...view,runtimes:catalog.map(row=>deviceRuntimeView(row,metadata.find(item=>item.device_id===device.id&&runtimeName(item.runtime_name)===row.name),view))};
       });
     },
     heartbeatDevice(slug, input = {}) {
@@ -1160,6 +1149,16 @@ export function createRepository(options = {}) {
         const heartbeatName = requestedName && requestedName !== 'ziwei_user' ? requestedName : (row.name || 'ziwei_user');
         db.prepare('UPDATE devices SET name=?,os=?,status=?,last_seen=?,ip_hint=?,version=?,pid=?,bridge_name=?,bridge_version=?,bridge_status=?,heartbeat_at=?,heartbeat_interval_ms=?,workdir=?,created_at=COALESCE(created_at,?) WHERE id=?').run(heartbeatName, String(input.os || row.os || 'Windows'), 'online', timestamp, String(input.ipHint || input.ip_hint || row.ip_hint || '127.0.0.1'), String(input.version || input.daemon_version || ownVersion()), Number(input.pid) || null, 'ziwei_user', String(input.bridgeVersion || input.bridge_version || input.version || input.daemon_version || ownVersion()), 'online', timestamp, Number(input.heartbeatMs || input.heartbeat_ms) || row.heartbeat_interval_ms || null, String(input.workdir || input.workingDirectory || input.cwd || row.workdir || '').trim() || null, timestamp, row.id);
       }
+      const rawDiscovery=input.runtimeDiscovery&&typeof input.runtimeDiscovery==='object'?input.runtimeDiscovery:{};
+      const build=String(input.clientBuild||rawDiscovery.clientBuild||'').trim();
+      const clientBuild=/^[a-f0-9]{64}$/i.test(build)?build.toLowerCase():null;
+      const architecture=String(input.arch||rawDiscovery.arch||'').trim();
+      const arch=/^[A-Za-z0-9_.-]{1,32}$/.test(architecture)?architecture:null;
+      const runtimeDiscovery={};
+      for(const key of ['platform','arch'])if(typeof rawDiscovery[key]==='string'&&/^[A-Za-z0-9_.-]{1,32}$/.test(rawDiscovery[key]))runtimeDiscovery[key]=rawDiscovery[key];
+      if(typeof rawDiscovery.checkedAt==='string'&&Number.isFinite(Date.parse(rawDiscovery.checkedAt)))runtimeDiscovery.checkedAt=rawDiscovery.checkedAt;
+      if(clientBuild)runtimeDiscovery.clientBuild=clientBuild;
+      db.prepare('UPDATE devices SET client_build=COALESCE(?,client_build),arch=COALESCE(?,arch),runtime_discovery_json=COALESCE(?,runtime_discovery_json) WHERE id=? AND workspace_id=?').run(clientBuild,arch,Object.keys(runtimeDiscovery).length?JSON.stringify(runtimeDiscovery):null,deviceId,ws.id);
       ensureRuntimeCatalog(ws.id, timestamp);
       db.prepare("UPDATE runtimes SET status='online',last_seen=? WHERE workspace_id=?").run(timestamp, ws.id);
       // The daemon includes its local CLI discovery in the heartbeat.  Persist

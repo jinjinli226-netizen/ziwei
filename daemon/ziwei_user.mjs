@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
-import { timingSafeEqual } from 'node:crypto';
+import { timingSafeEqual, randomBytes, createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { ActionDispatcher } from '../src/daemon.mjs';
 import { createActionScheduler } from '../src/daemon-action-scheduler.mjs';
@@ -22,6 +22,8 @@ const dataDir = resolveDaemonDataDirectory({ root: ROOT, env: process.env });
 const logDir = standaloneHome ? path.join(standaloneHome, 'logs') : path.join(ROOT, '.local', 'logs');
 const runtimeDir = standaloneHome ? path.join(standaloneHome, 'runtime') : path.join(ROOT, '.local', 'runtime');
 const configPath = resolveConfigPath({ root: ROOT, env: process.env });
+const lifecycleNonce = randomBytes(24).toString('hex');
+const lifecycleStartedAt = new Date().toISOString();
 const config = fs.existsSync(configPath)
   ? JSON.parse(fs.readFileSync(configPath, 'utf8'))
   : { agentId: 'ziwei_user', serviceName: 'ziwei_user', workspace: process.env.ZIWEI_WORKSPACE || '', apiBase: process.env.ZIWEI_API_BASE || 'http://127.0.0.1:4178', healthHost: '127.0.0.1', healthPort: 20242, heartbeatMs: 15000, pollMs: 5000 };
@@ -107,7 +109,9 @@ async function heartbeat() {
     if (!missingWorkspaceLogged) { log('configuration_error', { error: '未配置 workspace，已停止发送心跳' }); missingWorkspaceLogged = true; }
     return;
   }
-  runtimeDiscovery = discoverInstalledRuntimes({ force: true });
+  // Reuse the bounded discovery TTL on periodic heartbeats. Starting and
+  // explicit profile refresh still force probes; cached checkedAt stays real.
+  runtimeDiscovery = discoverInstalledRuntimes();
   await Promise.allSettled([...connections.values()].map(heartbeatConnection));
 }
 async function heartbeatConnection(connection) {
@@ -123,9 +127,11 @@ async function heartbeatConnection(connection) {
     deviceId: config.deviceId || 'device-ziwei-user',
     name: config.serviceName || 'ziwei_user',
     os: process.platform === 'win32' ? 'Windows' : process.platform,
+    arch: process.arch,
     version: VERSION,
     bridge: 'ziwei_user',
     bridgeVersion: VERSION,
+    clientBuild: CLIENT_BUILD,
     pid: process.pid,
     workdir: config.workdir || process.cwd() || ROOT,
     ipHint: '127.0.0.1',
@@ -133,9 +139,10 @@ async function heartbeatConnection(connection) {
     status: 'online',
     runtimes: runtimeDiscovery.runtimes,
     runtimeMetadata: runtimeDiscovery.runtimes,
+    runtimeDiscovery: { checkedAt: runtimeDiscovery.discoveredAt, platform: runtimeDiscovery.bridge.platform, arch: runtimeDiscovery.bridge.arch, clientBuild: CLIENT_BUILD },
     managementMcp: connection.managementStatus,
     terminalMcp: connection.terminalStatus,
-    agentVersions: Object.fromEntries(Object.entries(runtimeDiscovery.runtimes).map(([name, item]) => [name, item.version || null]))
+    agentVersions: Object.fromEntries(Object.entries(runtimeDiscovery.runtimes).map(([name, item]) => [name, item.status === 'available' ? item.version || null : null]))
   };
   try {
     const response = await fetch(`${config.apiBase}/api/workspaces/${encodeURIComponent(config.workspace)}/heartbeat`, {
@@ -155,11 +162,11 @@ async function heartbeatConnection(connection) {
     try {
       await fetch(`${config.apiBase}/api/workspaces/${encodeURIComponent(config.workspace)}/runtimes/register`, {
         method: 'POST', headers: daemonHeaders(connection, { json: true }),
-        body: JSON.stringify({ agentId: 'ziwei_user', deviceId: payload.deviceId, runtimes: runtimeDiscovery.runtimes }),
+        body: JSON.stringify({ agentId: 'ziwei_user', deviceId: payload.deviceId, clientBuild: CLIENT_BUILD, runtimeDiscovery: payload.runtimeDiscovery, runtimes: runtimeDiscovery.runtimes }),
         signal: AbortSignal.timeout(3000)
       });
     } catch {}
-    log('heartbeat', { ok: true, workspace: config.workspace, apiBase: config.apiBase, deviceId: body.device?.id || payload.deviceId, status: body.device?.status || 'online', runtimes: Object.fromEntries(Object.entries(runtimeDiscovery.runtimes).map(([name, item]) => [name, item.version || item.status])) });
+    log('heartbeat', { ok: true, workspace: config.workspace, apiBase: config.apiBase, deviceId: body.device?.id || payload.deviceId, status: body.device?.status || 'online', runtimes: Object.fromEntries(Object.entries(runtimeDiscovery.runtimes).map(([name, item]) => [name, item.status === 'available' ? item.version : item.detection?.reasonCode || item.status])) });
   } catch (error) { log('heartbeat_failed', { workspace: config.workspace, error: error.message, apiBase: config.apiBase }); } finally { rotate(); }
 }
 function daemonHeaders(connection, { json = false, a2a = false } = {}) {
@@ -194,7 +201,7 @@ async function refreshRuntimeDiscovery(connection) {
   try {
     await fetch(`${config.apiBase}/api/workspaces/${encodeURIComponent(config.workspace)}/runtimes/register`, {
       method: 'POST', headers: daemonHeaders(connection, { json: true }),
-      body: JSON.stringify({ agentId: 'ziwei_user', deviceId: config.deviceId || 'device-ziwei-user', runtimes: runtimeDiscovery.runtimes }),
+      body: JSON.stringify({ agentId: 'ziwei_user', deviceId: config.deviceId || 'device-ziwei-user', clientBuild: CLIENT_BUILD, runtimeDiscovery: { checkedAt: runtimeDiscovery.discoveredAt, platform: runtimeDiscovery.bridge.platform, arch: runtimeDiscovery.bridge.arch, clientBuild: CLIENT_BUILD }, runtimes: runtimeDiscovery.runtimes }),
       signal: AbortSignal.timeout(3000)
     });
   } catch (error) { log('runtime_discovery_refresh_failed', { error: error.message }); }
@@ -236,8 +243,10 @@ function heartbeatFresh() {
   const timeout = Math.max(interval * 3, Number(config.heartbeatTimeoutMs) || 45000);
   return Date.now() >= lastHeartbeatAt && Date.now() - lastHeartbeatAt <= timeout;
 }
+function lifecycleConfigurationHash() { try { return createHash('sha256').update(fs.readFileSync(configPath)).digest('hex'); } catch { return null; } }
 function healthPayload() {
   return { service: 'ziwei_user', version: VERSION, clientBuild: CLIENT_BUILD, bridge: 'ziwei_user', agentId: 'ziwei_user', workspace: config.workspace, deviceId: config.deviceId, runtimes: runtimeDiscovery.runtimes, managementMcp: primaryConnection?.managementBootstrap.status(), terminalMcp: primaryConnection?.terminalStatus, lastHeartbeat, lastHeartbeatAgeMs: lastHeartbeatAt ? Math.max(0, Date.now() - lastHeartbeatAt) : null, lastPoll, pid: process.pid,
+    lifecycle: { nonce: lifecycleNonce, root: ROOT, configPath, configSha256: lifecycleConfigurationHash(), startedAt: lifecycleStartedAt, managedAuxiliaryCount: 0 },
     connectionState: draining ? 'draining' : 'connected', activeActionCount: [...connections.values()].reduce((total, connection) => total + connection.actionScheduler.activeCount, 0), pollingCount: [...connections.values()].filter(connection => connection.polling).length,
     connections: [...connections.values()].map(connection => ({ workspace: connection.config.workspace, deviceId: connection.config.deviceId, primary: connection.config.primary, configured: true, ready: !draining && connection.lastHeartbeatAt > 0 && Date.now() - connection.lastHeartbeatAt <= Math.max(45_000, (Number(config.heartbeatMs) || 15_000) * 3), lastHeartbeat: connection.lastHeartbeat, managementMcp: connection.managementBootstrap.status(), terminalMcp: connection.terminalStatus })), connectionErrors,
   };
@@ -249,8 +258,18 @@ const health = http.createServer((req, res) => {
     if (req.method !== 'POST' || !local || !expected.length || supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) { res.writeHead(401); res.end(); return; }
     let body = ''; req.on('data', chunk => { body += chunk; if (body.length > 1024) req.destroy(); });
     req.on('end', () => {
-      let operation; try { operation = JSON.parse(body).operation; } catch {}
-      if (!['pause', 'resume'].includes(operation)) { res.writeHead(400); res.end(); return; }
+      let operation, nonce; try { ({ operation, nonce } = JSON.parse(body)); } catch {}
+      if (!['pause', 'resume', 'stop'].includes(operation)) { res.writeHead(400); res.end(); return; }
+      // Legacy pause/resume remains token authenticated. Stop always binds this
+      // boot; supplying a wrong nonce can never silently use legacy behavior.
+      if ((nonce !== undefined && nonce !== lifecycleNonce) || (operation === 'stop' && nonce !== lifecycleNonce)) { res.writeHead(409); res.end(); return; }
+      if (operation === 'stop') {
+        const state = healthPayload();
+        if (!draining || state.activeActionCount || state.pollingCount) { res.writeHead(409); res.end(); return; }
+        res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(state));
+        setImmediate(() => stop('local_maintenance'));
+        return;
+      }
       draining = operation === 'pause';
       log(draining ? 'connection_drain_requested' : 'connection_drain_cancelled', { activeActionCount: healthPayload().activeActionCount, connectionCount: connections.size });
       res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(healthPayload()));

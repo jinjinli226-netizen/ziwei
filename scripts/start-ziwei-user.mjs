@@ -4,7 +4,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { resolveConfigFile, resolveConfigPath, isNativeDaemonProcess } from '../daemon/config.mjs';
+import { resolveConfigFile, resolveConfigPath, isNativeDaemonProcess, resolveDaemonDataDirectory } from '../daemon/config.mjs';
+import { stopClient } from './client-lifecycle.mjs';
 import { clientBuildIdentity, clientBuildMismatch } from '../src/management-bootstrap.mjs';
 
 const ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -76,10 +77,16 @@ async function main() {
       console.error('已运行旧版本 ziwei_user，但无法核实当前安装目录的进程身份；未停止进程，请使用原安装入口完成客户端更新。');
       return 1;
     }
-    // Recheck immediately before signalling, without trusting a stale port/PID observation.
-    const current = await probe(healthUrl);
-    if (!current.ok || Number(current.body.pid) !== pid) { console.error('ziwei_user 进程身份已变化，未执行升级刷新。'); return 1; }
-    process.kill(pid, 'SIGTERM');
+    if (process.platform === 'win32') {
+      try { await stopClient({ root: ROOT, env: process.env, expectedPid: pid, expectedBuild: identity.body.clientBuild }); }
+      catch (error) { console.error(error.message); return 1; }
+    } else {
+      // Retain the existing non-Windows start behavior; new maintenance commands
+      // deliberately support Windows only.
+      const current = await probe(healthUrl);
+      if (!current.ok || Number(current.body.pid) !== pid) { console.error('ziwei_user 进程身份已变化，未执行升级刷新。'); return 1; }
+      process.kill(pid, 'SIGTERM');
+    }
     console.log(`已停止旧版本 ziwei_user（PID ${pid}），沿原生入口加载当前安装代码。`);
     let exited = false;
     for (let attempt = 0; attempt < 50; attempt++) {
@@ -113,7 +120,9 @@ async function main() {
   // Launch the daemon entrypoint directly.  Spawning npm.cmd with detached=true
   // raises EINVAL on some Windows installations and leaves the UI disconnected.
   // Using the current Node executable also avoids an extra npm shim process.
-  const child = spawn(process.execPath, [path.join(ROOT, 'daemon', 'ziwei_user.mjs')], { cwd: ROOT, env: childEnvironment(), detached: true, stdio: 'ignore', windowsHide: true });
+  const daemonCwd = resolveDaemonDataDirectory({ root: ROOT, env: process.env });
+  fs.mkdirSync(daemonCwd, { recursive: true });
+  const child = spawn(process.execPath, [path.join(ROOT, 'daemon', 'ziwei_user.mjs')], { cwd: daemonCwd, env: childEnvironment(), detached: true, stdio: 'ignore', windowsHide: true });
   child.unref();
   console.log(`已启动 ziwei_user（PID ${child.pid || '后台进程'}），等待首次心跳...`);
 

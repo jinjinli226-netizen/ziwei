@@ -33,7 +33,8 @@ test('ziwei_user heartbeat marks only its own device online', () => {
   assert.equal(heartbeat.id, 'device-ziwei-user');
   assert.equal(heartbeat.status, 'online');
   assert.equal(heartbeat.healthy, true);
-  assert.equal(repo.getSummary('test-111').counts.runtimes, 4);
+  assert.equal(repo.getSummary('test-111').counts.runtimes, 0, 'A bridge heartbeat alone is not four successful CLI probes');
+  assert.equal(heartbeat.runtimes.every(item=>item.discovery_state==='not_reported'),true);
 });
 
 test('one generic daemon reports all four installed Agent runtimes together', () => {

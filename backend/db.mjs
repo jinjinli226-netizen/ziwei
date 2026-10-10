@@ -65,13 +65,13 @@ export function openDatabase({ memory = false, filename = path.join(ROOT, 'data'
     CREATE TABLE IF NOT EXISTS runtime_metadata (
       id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, runtime_name TEXT NOT NULL,
       version TEXT, binary TEXT, status TEXT, models_json TEXT NOT NULL DEFAULT '[]', profiles_json TEXT NOT NULL DEFAULT '[]',
-      last_seen TEXT NOT NULL, UNIQUE(workspace_id,runtime_name),
+      last_seen TEXT NOT NULL, detection_json TEXT NOT NULL DEFAULT '{}', UNIQUE(workspace_id,runtime_name),
       FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
     );
     CREATE TABLE IF NOT EXISTS runtime_device_metadata (
       id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, device_id TEXT NOT NULL, runtime_name TEXT NOT NULL,
       version TEXT, binary TEXT, status TEXT, models_json TEXT NOT NULL DEFAULT '[]', profiles_json TEXT NOT NULL DEFAULT '[]',
-      last_seen TEXT NOT NULL, UNIQUE(device_id,runtime_name),
+      last_seen TEXT NOT NULL, detection_json TEXT NOT NULL DEFAULT '{}', UNIQUE(device_id,runtime_name),
       FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
       FOREIGN KEY(device_id) REFERENCES devices(id) ON DELETE CASCADE
     );
@@ -304,6 +304,11 @@ export function openDatabase({ memory = false, filename = path.join(ROOT, 'data'
     "ALTER TABLE devices ADD COLUMN management_mcp_retry_at TEXT",
     "ALTER TABLE runtime_metadata ADD COLUMN readiness_json TEXT NOT NULL DEFAULT '{}'",
     "ALTER TABLE runtime_device_metadata ADD COLUMN readiness_json TEXT NOT NULL DEFAULT '{}'",
+    "ALTER TABLE runtime_metadata ADD COLUMN detection_json TEXT NOT NULL DEFAULT '{}'",
+    "ALTER TABLE runtime_device_metadata ADD COLUMN detection_json TEXT NOT NULL DEFAULT '{}'",
+    "ALTER TABLE devices ADD COLUMN client_build TEXT",
+    "ALTER TABLE devices ADD COLUMN arch TEXT",
+    "ALTER TABLE devices ADD COLUMN runtime_discovery_json TEXT NOT NULL DEFAULT '{}'",
     "ALTER TABLE conversations ADD COLUMN model_id TEXT",
     "ALTER TABLE conversations ADD COLUMN working_directory TEXT",
     "ALTER TABLE conversations ADD COLUMN device_id TEXT",

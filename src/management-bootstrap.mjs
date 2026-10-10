@@ -87,7 +87,7 @@ export function createManagementBootstrap({ workspace, deviceId, deviceToken, ap
 /** Compare actual packaged source, because historical packages reused version 0.1.0. */
 export function clientBuildIdentity(root) {
   const hash = createHash('sha256');
-  const files = ['package.json', 'backend/a2a-auth.mjs', 'scripts/ziwei-user.mjs', 'scripts/ziwei-cli.mjs', 'scripts/start-ziwei-user.mjs', 'scripts/ziwei-mcp.mjs', 'scripts/ziwei-terminal-mcp.mjs'];
+  const files = ['package.json', 'backend/a2a-auth.mjs', 'scripts/ziwei-user.mjs', 'scripts/ziwei-cli.mjs', 'scripts/start-ziwei-user.mjs', 'scripts/ziwei-mcp.mjs', 'scripts/ziwei-terminal-mcp.mjs', 'scripts/client-lifecycle.mjs', 'scripts/client-maintenance-helper.mjs', 'scripts/client-update.mjs', 'scripts/client-update-worker.mjs'];
   function walk(directory) {
     if (!fs.existsSync(directory)) return [];
     return fs.readdirSync(directory, { withFileTypes: true }).flatMap(entry => entry.isDirectory() ? walk(path.join(directory, entry.name)) : /\.(mjs|py)$/.test(entry.name) ? [path.relative(root, path.join(directory, entry.name))] : []);

@@ -432,3 +432,5 @@ select:not(.ziwei-select)) { padding: 0 11px; }
 .employee-readiness-error { padding:12px 14px; border:1px solid #f0d1d4; border-radius:8px; color:#a43142; background:#fff8f8; font-size:12px; line-height:1.8; }
 .employee-readiness-error ul { margin:6px 0 0; padding-left:18px; }
 @media (max-width:800px) { .terminal-binding-form { grid-template-columns:minmax(0,1fr); } .terminal-employee-binding { padding:14px; } }
+
+.runtime-detection-reason { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; white-space:normal; overflow-wrap:anywhere; max-width:100%; }

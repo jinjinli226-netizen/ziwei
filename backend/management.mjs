@@ -23,10 +23,11 @@ export function createManagementService(repo) {
     const devices = repo.listDevices(slug, { userId: options.userId }).filter(item => (!requestedId || item.id === requestedId) && (!options.deviceScope || item.id === options.deviceScope)).map(item => {
       const metadata = db.prepare('SELECT * FROM runtime_device_metadata WHERE workspace_id=? AND device_id=? ORDER BY runtime_name').all(workspace.id, item.id);
       const runtimes = metadata.map(row => {
+        const deviceRuntime=item.runtimes.find(runtime=>runtime.name.toLowerCase()===row.runtime_name.toLowerCase());
         const readiness = parse(row.readiness_json);
         const issues = [];
         if (item.status !== 'online') issues.push({ code: 'DEVICE_OFFLINE', message: '目标电脑离线，请在这台电脑启动已有 ziwei_user 并等待心跳。' });
-        if (row.status !== 'available') issues.push({ code: 'CLI_UNAVAILABLE', message: `${row.runtime_name} CLI 不可用，请在目标电脑安装/修复该 CLI。` });
+        if (row.status !== 'available' || (deviceRuntime&&deviceRuntime.detection.state!=='available')) issues.push({ code: 'CLI_UNAVAILABLE', message: deviceRuntime?.detection.reason || `${row.runtime_name} CLI 不可用，请在目标电脑安装/修复该 CLI。` });
         if (row.runtime_name.toLowerCase() !== 'hermes') {
           if (readiness.authentication === 'missing') issues.push({ code: 'AUTHENTICATION_MISSING', message: `${row.runtime_name} 缺少认证，请在目标电脑登录对应 CLI。` });
           if (readiness.provider === 'missing') issues.push({ code: 'PROVIDER_MISSING', message: `${row.runtime_name} 缺少 provider，请在目标电脑配置模型服务。` });
@@ -35,7 +36,7 @@ export function createManagementService(repo) {
         const seenAt = Date.parse(row.last_seen || '');
         const age = Number(item.heartbeat_interval_ms || 10000);
         if (!Number.isFinite(seenAt) || Date.now() - seenAt > Math.max(45000, age * 4)) issues.push({ code: 'DISCOVERY_STALE', message: 'CLI 发现证据已过期，请等待目标电脑新的运行时发现心跳。' });
-        return { name: row.runtime_name, version: row.version, binary: row.binary, cli_status: item.status === 'online' ? row.status : 'offline', models: parse(row.models_json, []), profiles: parse(row.profiles_json, []), readiness, last_seen: row.last_seen, available: issues.length === 0, verified: readiness.authentication === 'configured' && readiness.provider === 'configured' && issues.length === 0, issues };
+        return { name: row.runtime_name, version: row.version, binary: row.binary, cli_status: deviceRuntime?.cli_status || (item.status === 'online' ? row.status : 'offline'), discovery_state:deviceRuntime?.discovery_state, detection:deviceRuntime?.detection, models: parse(row.models_json, []), profiles: parse(row.profiles_json, []), readiness, last_seen: row.last_seen, available: issues.length === 0, verified: readiness.authentication === 'configured' && readiness.provider === 'configured' && issues.length === 0, issues };
       });
       return { id: item.id, name: item.name, os: item.os, status: item.status, healthy: item.healthy, last_seen: item.last_seen, heartbeat_age_ms: item.heartbeat_age_ms, workdir: item.workdir, management_mcp: parse(item.management_mcp_json), terminal_mcp:parse(item.terminal_mcp_json), runtimes };
     });

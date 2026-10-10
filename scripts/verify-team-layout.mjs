@@ -112,6 +112,9 @@ function teamFixture(rows) {
   const f = fixture(); f.state.employees = structuredClone(rows);
   f.state.devices = [f.state.devices[0]]; f.state.devices[0].name = '隔离验收电脑';
   f.state.devices[0].id = rows[0]?.target_device_id || 'pc-ready';
+  // Synthetic employee fixtures need the same explicit binding as real API
+  // employees. Preserve all saved real employee fields without mutation.
+  if (!actualFixture) for (const employee of f.state.employees) if (!employee.target_device_id) employee.target_device_id=f.state.devices[0].id;
   return f;
 }
 async function teamGeometry(page) {

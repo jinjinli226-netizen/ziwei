@@ -8,7 +8,8 @@ test('repository seeds workspace and supports task lifecycle', () => {
   assert.equal(summary.workspace.slug, 'test-111');
   assert.equal(summary.counts.runtimes, 0);
   repo.heartbeatDevice('test-111', { agentId: 'ziwei_user', version: '0.1.0', bridgeVersion: '0.1.0' });
-  assert.equal(repo.getSummary('test-111').counts.runtimes, 4);
+  assert.equal(repo.getSummary('test-111').counts.runtimes, 0, 'A device heartbeat does not prove CLI availability');
+  assert.equal(repo.listRuntimes('test-111').length, 4, 'The built-in runtime catalog remains compatible');
   const task = repo.createTask('test-111', { title: '检查首页', description: '验证空状态', priority: 'high' });
   assert.equal(task.state, 'planned');
   const moved = repo.transitionTask(task.id, 'todo');
@@ -31,7 +32,9 @@ test('ziwei_user heartbeat creates the runtime catalog for a fresh workspace', (
   assert.equal(heartbeat.status, 'online');
   const runtimes = repo.listRuntimes('bjc-ops');
   assert.deepEqual(runtimes.map(item => item.name), ['Claude', 'Codex', 'Gemini', 'Hermes']);
-  assert.equal(runtimes.every(item => item.status === 'online'), true);
+  assert.equal(runtimes.find(item=>item.name==='Claude').cli_status,'available');
+  assert.equal(runtimes.filter(item=>item.name!=='Claude').every(item=>item.discovery_state==='not_reported'),true);
+  assert.equal(repo.getSummary('bjc-ops').counts.runtimes,1);
 });
 
 test('repository exposes A2A agent cards and documents', () => {

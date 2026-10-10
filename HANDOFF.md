@@ -4,7 +4,11 @@
 
 > **2026-10-08 历史环境区分说明**：本地 checkout、5178 前端、4178 API 和项目 `data/ziwei_user.json` 是 `bjc-ops` 的本地代码验收环境；真实本机 `ziwei_user` daemon 由全局命令启动，使用用户目录配置连接 `https://qzelynth.top` 的服务器工作区 `test_222`。不要把项目配置或项目 daemon 当成服务器 daemon；接手时分别核对用户目录配置、项目配置和各自 `/readyz`。详细维护约定统一见 `PROJECT_MANAGEMENT.md`。
 
-## 2026-10-10 当前接续：业务清理与本机全部断开（已完成）
+## 2026-10-10 当前接续：Windows 客户端检测与维护（进行中）
+
+最新范围仅 Windows：设备树与后端改为每台电脑自己的 runtime 元数据，CLI 区分未找到/检测失败/未上报/设备离线，新增安全 stop/update/uninstall 与旧版 PowerShell 官方升级入口。完整回归454/454、lint65、构建fixture18/18。用户已确认本人李金晋，精确目标bigtron/device_bfd9a3d2…自己的4CLI全available，旧workspace汇总受其他电脑覆盖；旧Gemini误读Codex入口已修。用户侧实际启动PID58720/旧build40af5811，不再引用历史“20242无监听”；本轮不改该实例或旧断开配置。清理后用户新工作区/账号/邀请/设备保留，不重跑旧清理。准确命令及发布进度见 [Windows 运维记录](docs/operations/2026-10-10-windows-client-maintenance.md)。
+
+## 2026-10-10 历史接续：业务清理与本机全部断开（已完成）
 
 - 最新用户授权覆盖下方历史“test_222 主连接保留”目标：删除 `test_222` 和其他无关工作区、员工及业务记录，保留 `phone_ai` Creator/手机 MCP；当前电脑 `ziwei_user` 最终清空所有主/shared 连接并停止，不自行重新配对或重新运行员工。
 - Creator 原 shared 持久 HOME、记忆、人格、profile、正式会话和模板，两个手机 MCP 宿主、技能/配置/绑定，以及手机配对/节点/控制服务均受保护。客户端程序、工作目录、CLI/provider 认证和其他项目数据不属于删除范围。

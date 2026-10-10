@@ -1,13 +1,14 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { parseDocument, parse as parseYaml } from 'yaml';
 import { redactSecrets } from './redaction.mjs';
 import { normalizeRuntimeProfile } from './employee-runtime.mjs';
 import { prepareCreatorRuntimeHome, CREATOR_RUNTIME_ENV_KEYS } from './creator-runtime-home.mjs';
+import { createCliDiscoveryContext, discoverRuntimeCli, carryRuntimeDiscoveryEnvironment, runtimeDiscoveryEnvironment } from './runtime-cli-discovery.mjs';
 
 /**
  * Native local runtime adapters used by ziwei_user.
@@ -21,7 +22,6 @@ import { prepareCreatorRuntimeHome, CREATOR_RUNTIME_ENV_KEYS } from './creator-r
 const WINDOWS_SHELL = process.platform === 'win32' ? 'powershell.exe' : null;
 const PS_ARGS = ['-NoProfile', '-ExecutionPolicy', 'Bypass'];
 const MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
-const VERSION_TIMEOUT_MS = 3000;
 const DISCOVERY_TTL_MS = 30_000;
 const WINDOWS_INTERNET_SETTINGS = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings';
 const MANAGEMENT_ADAPTER = fileURLToPath(new URL('../scripts/ziwei-mcp.mjs', import.meta.url));
@@ -452,34 +452,6 @@ export function windowsRuntimeCandidates(name, { home = os.homedir() } = {}) {
   }
 }
 
-function commandCandidates(name) {
-  // `where.exe` returns the .ps1 path for Codex/Gemini on Windows only when the
-  // PowerShell shim is on PATH.  Looking for a same-name .ps1 beside a normal
-  // result covers both that case and older Windows installations.
-  const locator = process.platform === 'win32' ? 'where.exe' : 'which';
-  const result = spawnSync(locator, [name], { encoding: 'utf8', timeout: 1500, windowsHide: true });
-  const paths = result.status === 0
-    ? String(result.stdout || '').split(/\r?\n/).map(item => item.trim()).filter(Boolean)
-    : [];
-  const expanded = [];
-  for (const item of [...windowsRuntimeCandidates(name), ...paths]) {
-    expanded.push(item);
-    if (process.platform === 'win32' && !/\.ps1$/i.test(item) && fs.existsSync(`${item}.ps1`)) expanded.push(`${item}.ps1`);
-  }
-  return [...new Set(expanded)];
-}
-
-function resolveExecutable(name) {
-  const candidates = commandCandidates(name);
-  // Prefer a real executable over a PowerShell shim when both exist.  The
-  // shims are still valid and are retained as a fallback.
-  const existing = candidates.filter(item => fs.existsSync(item));
-  return existing.find(item => /\.exe$/i.test(item))
-    || existing.find(item => /\.(ps1|cmd|bat)$/i.test(item))
-    || existing[0]
-    || null;
-}
-
 function powershellQuote(value) {
   return `'${String(value).replaceAll("'", "''")}'`;
 }
@@ -488,7 +460,7 @@ export function runtimeSpawnSpec(binary, args) {
   const normalizedArgs = Array.isArray(args) ? args.map(String) : [];
   if (process.platform === 'win32' && /\.(?:ps1|cmd|bat)$/i.test(binary)) {
     const entrypoint = path.join(path.dirname(binary), 'node_modules', '@openai', 'codex', 'bin', 'codex.js');
-    if (fs.existsSync(entrypoint)) return { command: process.execPath, args: [entrypoint, ...normalizedArgs] };
+    if (/^codex\.(?:ps1|cmd|bat)$/i.test(path.basename(binary)) && fs.existsSync(entrypoint)) return { command: process.execPath, args: [entrypoint, ...normalizedArgs] };
     const command = `& ${powershellQuote(binary)} ${normalizedArgs.map(powershellQuote).join(' ')}`.trim();
     return { command: WINDOWS_SHELL, args: [...PS_ARGS, '-Command', command] };
   }
@@ -535,19 +507,6 @@ export function formatRuntimeFailure(runtime, code, diagnostics = '') {
   return detail ? `${base}: ${detail.slice(0, 600)}` : base;
 }
 
-function versionFor(binary, definition) {
-  if (!binary) return { version: null, binary: null, status: 'unavailable' };
-  const spec = runtimeSpawnSpec(binary, definition.versionArgs);
-  try {
-    const output = execFileSync(spec.command, spec.args, { encoding: 'utf8', timeout: VERSION_TIMEOUT_MS, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
-    return { version: firstLine(output), binary, status: firstLine(output) ? 'available' : 'unknown' };
-  } catch (error) {
-    const metadataVersion = metadataVersionFor(binary);
-    if (metadataVersion) return { version: metadataVersion, binary, status: 'available', source: 'installed-metadata' };
-    return { version: null, binary, status: 'unavailable', error: error.code || error.message };
-  }
-}
-
 function metadataVersionFor(binary) {
   if (!binary) return null;
   const normalized = String(binary).toLowerCase();
@@ -570,28 +529,28 @@ function metadataVersionFor(binary) {
   return null;
 }
 
-export function discoverInstalledRuntimes({ force = false } = {}) {
-  if (!force && cached.value && cached.expiresAt > Date.now()) return cached.value;
+export function discoverInstalledRuntimes({ force = false, cliDiscovery = null } = {}) {
+  if (!cliDiscovery && !force && cached.value && cached.expiresAt > Date.now()) return cached.value;
+  const context = cliDiscovery || createCliDiscoveryContext({ spawnSpec: runtimeSpawnSpec, extraCandidates: windowsRuntimeCandidates, metadataVersion: metadataVersionFor });
   const runtimes = {};
   for (const [runtime, definition] of Object.entries(DEFINITIONS)) {
-    const binary = resolveExecutable(definition.aliases[0]);
-    const found = versionFor(binary, definition);
-    runtimes[runtime] = {
+    const found = discoverRuntimeCli({ runtime, ...definition }, context);
+    runtimes[runtime] = carryRuntimeDiscoveryEnvironment(found, {
       runtime,
       ...found,
       readiness: runtimeReadiness(runtime),
       models: discoveredModels(runtime),
       ...(runtime === 'Hermes' ? { profiles: listHermesProfiles() } : {}),
       ...(runtime === 'Codex' ? { profiles: listCodexProfiles() } : {}),
-      modelSource: found.version ? 'cli-installed' : 'manual'
-    };
+      modelSource: found.status === 'available' ? 'cli-installed' : 'manual'
+    });
   }
   const value = {
-    bridge: { name: 'ziwei_user', version: process.env.ZIWEI_USER_VERSION || null, host: os.hostname() },
+    bridge: { name: 'ziwei_user', version: process.env.ZIWEI_USER_VERSION || null, host: os.hostname(), platform: context.platform, arch: context.arch },
     runtimes,
     discoveredAt: new Date().toISOString(),
   };
-  cached = { value, expiresAt: Date.now() + DISCOVERY_TTL_MS };
+  if (!cliDiscovery) cached = { value, expiresAt: Date.now() + DISCOVERY_TTL_MS };
   return value;
 }
 
@@ -847,11 +806,18 @@ export function executeRuntime({ runtime, prompt, model = null, profile = null, 
   if (!resolvedRuntime) return Promise.reject(new Error(`未知本机运行时: ${runtime || '(empty)'}`));
   const definition = DEFINITIONS[resolvedRuntime];
   const discovered = discoverInstalledRuntimes().runtimes[resolvedRuntime];
-  if (!discovered?.binary || discovered.status === 'unavailable') return Promise.reject(new Error(`${resolvedRuntime} CLI 未安装、不可运行或不在 PATH 中；请在目标设备安装并检查该 CLI`));
+  if (!discovered?.binary || discovered.status === 'unavailable') return Promise.reject(new Error(`${resolvedRuntime} CLI 不可用：${discovered?.detection?.reason || '未安装、不可运行或不在 PATH 中'}${discovered?.detection?.reasonCode ? ` (${discovered.detection.reasonCode})` : ''}`));
   const content = String(prompt ?? '').trim();
   if (!content) return Promise.reject(new Error('agent.execute 需要非空 prompt'));
   let invocation = definition.invoke({ prompt: content, model: model ? String(model) : null });
   let childEnv = { ...process.env, ...env };
+  if (process.platform === 'win32' && !Object.keys(env).some(key => /^path$/i.test(key))) {
+    const detectedEnv = runtimeDiscoveryEnvironment(discovered);
+    if (detectedEnv.PATH) {
+      for (const key of Object.keys(childEnv)) if (/^path$/i.test(key)) delete childEnv[key];
+      Object.assign(childEnv, detectedEnv);
+    }
+  }
   delete childEnv.ZIWEI_CONFIG;
   // An employee with MCP disabled must not inherit daemon management credentials.
   for (const key of [...MANAGEMENT_ENV_KEYS, ...TERMINAL_ENV_KEYS, ...LEGACY_TERMINAL_ENV_KEYS, ...CREATOR_RUNTIME_ENV_KEYS]) delete childEnv[key];
