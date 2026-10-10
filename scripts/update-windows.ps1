@@ -1,4 +1,4 @@
-# Official bootstrap for older Windows clients which do not yet have update/stop.
+﻿# Official bootstrap for older Windows clients which do not yet have update/stop.
 # Run in a normal PowerShell terminal: irm https://qzelynth.top/downloads/cli/update-windows.ps1 | iex
 $ErrorActionPreference = 'Stop'
 if ($env:OS -ne 'Windows_NT') { throw '本次维护入口仅支持 Windows。' }
