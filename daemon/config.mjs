@@ -1,7 +1,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 
 /** A health response alone must never authorize terminating an unrelated PID. */
@@ -11,7 +11,7 @@ export function isNativeDaemonProcess(pid, root) {
   try {
     let command;
     if (process.platform === 'win32') {
-      const record = JSON.parse(execFileSync('powershell.exe', ['-NoProfile', '-Command', `Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}' | Select-Object ExecutablePath,CommandLine | ConvertTo-Json -Compress`], { encoding: 'utf8', timeout: 4000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] }));
+      const record = JSON.parse(execFileSync('powershell.exe', ['-NoProfile', '-Command', `[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}' | Select-Object ExecutablePath,CommandLine | ConvertTo-Json -Compress`], { encoding: 'utf8', timeout: 4000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] }));
       if (path.normalize(record.ExecutablePath || '').toLowerCase() !== path.normalize(process.execPath).toLowerCase()) return false;
       command = record.CommandLine || '';
     } else command = execFileSync('ps', ['-p', String(pid), '-o', 'command='], { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] });
@@ -55,6 +55,7 @@ function checkedApiBase(value) {
 
 /** Each workspace has its own paired device identity; invalid shares never stop the primary. */
 export function resolveWorkspaceConnections(config = {}, { configPath, root = process.cwd() } = {}) {
+  if (config.connectionState === 'disconnected') return { connections: [], errors: [] };
   const connections = [{ ...config, primary: true }];
   const errors = [];
   const seen = new Set([config.workspace]);
@@ -73,6 +74,46 @@ export function resolveWorkspaceConnections(config = {}, { configPath, root = pr
     } catch (error) { errors.push({ workspace: String(entry?.workspace || ''), configured: false, reason: error.message }); }
   }
   return { connections, errors };
+}
+
+/** Retain local runtime/provider state; only explicit connect can pair again. */
+export function disconnectedConfiguration(config = {}, at = new Date().toISOString()) {
+  const result = { ...config, connectionState: 'disconnected', disconnectedAt: at, workspace: '', deviceId: '', sharedWorkspaces: [] };
+  for (const key of ['deviceToken', 'deviceTokenFile', 'managementMcp', 'grantId', 'authorizedAt']) delete result[key];
+  return result;
+}
+
+/** Only owned connection credential stores may be removed by native forget. */
+export function connectionCredentialFiles(config = {}, { configPath, root = process.cwd() } = {}) {
+  const base = path.dirname(path.resolve(configPath || resolveConfigPath({ root })));
+  const files = new Set();
+  function regularOwned(file) {
+    const resolved = path.resolve(file); const relative = path.relative(base, resolved);
+    if (relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative) || relative === '..' || !['mcp', 'workspace-credentials', 'management-mcp-credentials'].includes(relative.split(path.sep)[0])) throw new Error('连接凭据不在本机专用目录；未删除任何文件');
+    for (let candidate = resolved; ; candidate = path.dirname(candidate)) {
+      let stat; try { stat = fs.lstatSync(candidate); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+      if (stat?.isSymbolicLink()) throw new Error('连接凭据路径包含链接；未删除任何文件');
+      if (candidate === path.dirname(candidate)) break;
+    }
+    let stat; try { stat = fs.lstatSync(resolved); } catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+    if (!stat.isFile()) throw new Error('连接凭据不是普通文件；未删除任何文件');
+    return resolved;
+  }
+  const identities = [config, ...(Array.isArray(config.sharedWorkspaces) ? config.sharedWorkspaces : [])];
+  for (const connection of identities) {
+    for (const reference of [connection.deviceTokenFile, connection.managementMcp?.tokenFile]) if (reference) {
+      const file = regularOwned(resolveConfigFile(reference, { configPath, root })); if (file) files.add(file);
+    }
+  }
+  const cache = path.join(base, 'management-mcp-credentials');
+  let cacheEntries = []; try { cacheEntries = fs.readdirSync(cache); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  for (const name of cacheEntries) {
+    if (!name.endsWith('.json')) continue;
+    const file = regularOwned(path.join(cache, name));
+    let credential; try { credential = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { continue; }
+    if (credential?.managed === true && credential.audience === 'ziwei-management' && identities.some(identity => identity.workspace === credential.workspace && identity.deviceId === credential.deviceId)) files.add(file);
+  }
+  return [...files].sort().map(file => ({ file, sha256: createHash('sha256').update(fs.readFileSync(file)).digest('hex') }));
 }
 
 /** Claim an explicit server grant using the primary identity, without leaking the new credential. */

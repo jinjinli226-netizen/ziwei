@@ -6,7 +6,14 @@
 >
 > **文档状态**：以 2026-10-10 内置 Creator 当前发布、完成事实及下列支持范围为准；每次结构、运行方式或功能边界发生变化时必须更新本文。历史记录保留，较早的版本/PID、逐员工 MCP 开关或独立 bearer 操作不能替代当前规则。
 
-### 2026-10-10 当前发布：内置数字员工 Creator（已部署，真实 Hermes 验收与精确清理完成）
+### 2026-10-10 当前任务：业务清理与本机全部断开（执行中）
+
+- 用户已明确要求删除 `test_222` 及无关工作区/普通员工/业务记录；保留 `phone_ai` 正式 Creator、首会话、模板、原持久 HOME/记忆和手机 MCP 必需的两个员工宿主、技能与绑定。用户随后明确要求清空当前 Windows 的 `ziwei_user` 全部工作区连接，最终应为未配对、未连接，不再做 shared→primary 迁移或自动重新接入。
+- 原四个用户账号与登录资料、CLI/provider 认证、用户工作目录、手机配对与原中控功能保留。最新追加“除了让你保留的全都删了”后，业务依赖仅保留 Creator/手机 MCP 实际目标电脑 f956 与 Owner 成员；其他电脑登记、成员和旧区凭据精确删除，不保留额外归档电脑。
+- 主站、中控与本机 Creator/连接资料已备份并恢复验证；断开前正式 Creator 已通过实际 Hermes 管理 MCP 只读 discover/list 验收，正式会话未触碰。本轮 Codex 执行/手机动作均为 0。
+- 正在部署一次性初始化修复并实施精确 hash/PK 清理及原生 `forget`。计划结果不视为已删；最终数量、客户端断开证据和桌面/390px 界面验收见 [本轮运维记录](docs/operations/2026-10-10-business-cleanup.md)，其下历史发布保留为时间线。
+
+### 2026-10-10 历史发布：内置数字员工 Creator（已部署，真实 Hermes 验收与精确清理完成）
 
 - 主站生产代码 `db0aa68b0735c30c65acdf342c3080655892a286` 于北京时间 **00:08:06**（`2026-10-09T16:08:06Z`）发布，`/opt/ziwei/current -> /opt/ziwei/releases/db0aa68`；前一版 `1ca9c6b`，部署备份 `/opt/ziwei-backups/creator-platform/20261009T144859Z`。只重启 `ziwei-api.service`；控制端仍为 `8a4fe59`，Nginx 配置 SHA `faf170c39866d8c307ed68cc49d96cf7cc28dfac442e979d3f3d8c35cf494967` 不变。原邀请、手机、默认管理 MCP、卡片与弹窗功能继续保留。
 - 前端为 `index-DRTDY7kv.js` / `index-CJMLdFH9.css`，新资源和原 `1ca9c6b` hash 资源 HEAD 均 200，主站健康与三服务 active 已确认。Android 仍为 code15，双 APK HEAD 200；本次该检查没有重新验证 APK 下载 hash，不据此扩大手机实机结论。

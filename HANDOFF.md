@@ -4,7 +4,13 @@
 
 > **2026-10-08 历史环境区分说明**：本地 checkout、5178 前端、4178 API 和项目 `data/ziwei_user.json` 是 `bjc-ops` 的本地代码验收环境；真实本机 `ziwei_user` daemon 由全局命令启动，使用用户目录配置连接 `https://qzelynth.top` 的服务器工作区 `test_222`。不要把项目配置或项目 daemon 当成服务器 daemon；接手时分别核对用户目录配置、项目配置和各自 `/readyz`。详细维护约定统一见 `PROJECT_MANAGEMENT.md`。
 
-## 2026-10-10 当前接手续记：内置 Creator 发布、真实 Hermes 验收与清理已完成
+## 2026-10-10 当前接续：业务清理与本机全部断开（执行中）
+
+- 最新用户授权覆盖下方历史“test_222 主连接保留”目标：删除 `test_222` 和其他无关工作区、员工及业务记录，保留 `phone_ai` Creator/手机 MCP；当前电脑 `ziwei_user` 最终清空所有主/shared 连接并停止，不自行重新配对或重新运行员工。
+- Creator 原 shared 持久 HOME、记忆、人格、profile、正式会话和模板，两个手机 MCP 宿主、技能/配置/绑定，以及手机配对/节点/控制服务均受保护。客户端程序、工作目录、CLI/provider 认证和其他项目数据不属于删除范围。
+- 已验证两库备份和独立恢复副本、Creator 本机私密备份；新实际只读 Creator action 已 succeeded/loaded/discover/list 成功。正在实施防止重启回填的 seed marker、原生 forget、精确事务清理与最终网页验收；尚未把计划数量记为清理结果。安全计划与后续实际结果见 [2026-10-10 运维记录](docs/operations/2026-10-10-business-cleanup.md)。
+
+## 2026-10-10 历史接手续记：内置 Creator 发布、真实 Hermes 验收与清理已完成
 
 - 生产代码为 `db0aa68b0735c30c65acdf342c3080655892a286`，北京时间 **00:08:06**（`2026-10-09T16:08:06Z`）发布 `/opt/ziwei/releases/db0aa68`，前一版 `1ca9c6b`。备份 `/opt/ziwei-backups/creator-platform/20261009T144859Z`；仅主 API 重启，控制仍为 `8a4fe59`，Nginx 原 hash 不变。新前端 `index-DRTDY7kv.js` / `index-CJMLdFH9.css`，新/旧资源均 200，主站健康、三服务 active、Android code15 双 APK HEAD200 已证；此处没有新增 APK hash 或手机实机结论。
 - 市场模板 `ziwei-employee-creator` 1.0.0 使用现有员工、管理校验和会话系统，按 workspace/owner/template 幂等复用；默认 personal，不自动覆盖已定制实例。旧同名兼容实例采用时保留原配置并标记 `adopted-existing`，不假称已应用 v1。跨区/私有成员/伪造 actor 与真实电脑、CLI、auth/provider/profile 检查继续保留。

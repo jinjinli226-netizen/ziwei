@@ -7,6 +7,9 @@ const ROOT = path.resolve(import.meta.dirname, '..');
 export function openDatabase({ memory = false, filename = path.join(ROOT, 'data', 'ziwei.sqlite') } = {}) {
   if (!memory) fs.mkdirSync(path.dirname(filename), { recursive: true });
   const db = new DatabaseSync(memory ? ':memory:' : filename);
+  // An emptied installation is still an installation. Inspect the schema
+  // before creating tables, rather than using the number of workspace rows.
+  const existingInstallation = Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='workspaces'").get());
   db.exec(`PRAGMA foreign_keys = ON;
     CREATE TABLE IF NOT EXISTS workspaces (
       id TEXT PRIMARY KEY, slug TEXT UNIQUE NOT NULL, name TEXT NOT NULL,
@@ -373,17 +376,23 @@ export function openDatabase({ memory = false, filename = path.join(ROOT, 'data'
   // team members. Preserve that shared scope instead of treating those
   // workspaces as personal merely because the migration default is personal.
   try { db.exec("UPDATE workspaces SET kind='team' WHERE kind='personal' AND id IN (SELECT workspace_id FROM members GROUP BY workspace_id HAVING COUNT(*) > 1 OR SUM(CASE WHEN role IN ('member','admin') THEN 1 ELSE 0 END) > 0)"); } catch {}
-  seed(db);
+  seed(db, { existingInstallation });
   return db;
 }
 
-function seed(db) {
+function seed(db, { existingInstallation }) {
   const now = new Date().toISOString();
+  const migration = '2026-10-10-initial-seed-once';
+  db.exec('BEGIN IMMEDIATE');
+  try {
+  const pending = !db.prepare('SELECT 1 FROM schema_migrations WHERE version=?').get(migration);
+  const initializeDemo = pending && !existingInstallation;
   // Preserve audit history in the durable inbox when upgrading a workspace
-  // that predates the notifications table.
-  db.exec(`INSERT OR IGNORE INTO notifications(id,workspace_id,event_id,actor,action,payload_json,created_at,read_at,archived_at)
+  // that predates the notifications table, without restoring cleared inboxes
+  // on later starts. Record this and demo initialization in one transaction.
+  if (pending) db.exec(`INSERT OR IGNORE INTO notifications(id,workspace_id,event_id,actor,action,payload_json,created_at,read_at,archived_at)
     SELECT 'notice_' || id,workspace_id,id,actor,action,payload_json,created_at,NULL,NULL FROM audit_events`);
-  db.prepare(`INSERT OR IGNORE INTO workspaces(id,slug,name,kind,plan,timezone,created_at) VALUES(?,?,?,?,?,?,?)`)
+  if (initializeDemo) db.prepare(`INSERT OR IGNORE INTO workspaces(id,slug,name,kind,plan,timezone,created_at) VALUES(?,?,?,?,?,?,?)`)
     .run('ws-test-111', 'test-111', '紫薇', 'team', 'free', 'Asia/Shanghai', now);
   // test-111 is a historical/example team workspace. Existing databases may
   // have been created before workspace kind existed; preserve that identity
@@ -396,13 +405,13 @@ function seed(db) {
   // attributed only when the workspace has one known owner. Ambiguous/team
   // history stays NULL and is therefore visible to team admins only.
   try { db.exec("UPDATE employees SET owner_user_id=(SELECT m.user_id FROM members m WHERE m.workspace_id=employees.workspace_id AND m.role='owner' AND m.user_id IS NOT NULL LIMIT 1) WHERE owner_user_id IS NULL AND workspace_id IN (SELECT w.id FROM workspaces w WHERE w.kind='personal') AND (SELECT COUNT(*) FROM members m WHERE m.workspace_id=employees.workspace_id AND m.role='owner' AND m.user_id IS NOT NULL)=1"); } catch {}
-  db.prepare(`INSERT OR IGNORE INTO members(id,workspace_id,name,email,role,avatar,joined_at) VALUES(?,?,?,?,?,?,?)`)
+  if (initializeDemo) db.prepare(`INSERT OR IGNORE INTO members(id,workspace_id,name,email,role,avatar,joined_at) VALUES(?,?,?,?,?,?,?)`)
     .run('member-owner', 'ws-test-111', '紫薇用户', 'owner@example.com', 'owner', '25', now);
   // A database seed is a registration record, not proof that the local bridge
   // is running.  The daemon must send the first heartbeat before this device
   // becomes online.  Keeping last_seen NULL also lets a fresh installation
   // render the honest "未连接" state instead of a fabricated current time.
-  db.prepare(`INSERT OR IGNORE INTO devices(id,workspace_id,owner_user_id,name,os,status,last_seen,ip_hint,version,pid,bridge_name,bridge_version,bridge_status,heartbeat_at,heartbeat_interval_ms,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+  if (initializeDemo) db.prepare(`INSERT OR IGNORE INTO devices(id,workspace_id,owner_user_id,name,os,status,last_seen,ip_hint,version,pid,bridge_name,bridge_version,bridge_status,heartbeat_at,heartbeat_interval_ms,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
     .run('device-ziwei-user', 'ws-test-111', null, '本机设备', 'Windows', 'offline', null, '127.0.0.1', process.env.ZIWEI_USER_VERSION || '0.1.0', null, 'ziwei_user', process.env.ZIWEI_USER_VERSION || '0.1.0', 'offline', null, 15000, now);
   db.prepare(`UPDATE devices SET bridge_name=COALESCE(bridge_name,'ziwei_user'), bridge_version=COALESCE(bridge_version,?), bridge_status=COALESCE(bridge_status,'seeded'), heartbeat_at=COALESCE(heartbeat_at,last_seen), version=COALESCE(version,?) WHERE id='device-ziwei-user'`)
     .run(process.env.ZIWEI_USER_VERSION || '0.1.0', process.env.ZIWEI_USER_VERSION || '0.1.0');
@@ -417,7 +426,7 @@ function seed(db) {
     ['runtime-hermes','Hermes','Hermes','0.3.71','offline',['orchestration','a2a','automation']]
   ];
   const stmt = db.prepare(`INSERT OR IGNORE INTO runtimes(id,workspace_id,name,provider,version,status,capabilities_json,last_seen) VALUES(?,?,?,?,?,?,?,?)`);
-  for (const [id,name,provider,version,status,caps] of runtimes) stmt.run(id,'ws-test-111',name,provider,version,status,JSON.stringify(caps),null);
+  if (initializeDemo) for (const [id,name,provider,version,status,caps] of runtimes) stmt.run(id,'ws-test-111',name,provider,version,status,JSON.stringify(caps),null);
   db.prepare("UPDATE runtimes SET provider='Hermes' WHERE provider='AuraBaba'").run();
   // Older seeds also stamped the catalog rows with the installation time.
   // Clear those timestamps while the own bridge has not reported a heartbeat;
@@ -431,7 +440,12 @@ function seed(db) {
     ['skill-a2a','A2A 协调','在智能体之间分派任务并同步状态','orchestration',1,'platform']
   ];
   const s = db.prepare(`INSERT OR IGNORE INTO skills(id,workspace_id,name,description,category,installed,source,scope,recommended,install_count,icon,author,tags_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
-  for (const skill of skills) s.run(skill[0],'ws-test-111',...skill.slice(1),'platform',skill[4] ? 1 : 0,skill[4] ? 18 : 0,'✦','紫薇平台团队','[]',now,now);
-  s.run('skill-team-brief','ws-test-111','团队日报模板','把团队任务和进展整理成可审阅的日报草稿','productivity',0,'team','team',0,0,'☰','紫薇团队','["团队","日报"]',now,now);
+  if (initializeDemo) {
+    for (const skill of skills) s.run(skill[0],'ws-test-111',...skill.slice(1),'platform',skill[4] ? 1 : 0,skill[4] ? 18 : 0,'✦','紫薇平台团队','[]',now,now);
+    s.run('skill-team-brief','ws-test-111','团队日报模板','把团队任务和进展整理成可审阅的日报草稿','productivity',0,'team','team',0,0,'☰','紫薇团队','["团队","日报"]',now,now);
+  }
   db.prepare("UPDATE skills SET scope=CASE WHEN source='team' THEN 'team' ELSE COALESCE(scope,'platform') END, created_at=COALESCE(created_at,?), updated_at=COALESCE(updated_at,?), icon=COALESCE(icon,'✦'), author=COALESCE(author,'紫薇团队'), tags_json=COALESCE(tags_json,'[]')").run(now,now);
+  if (pending) db.prepare('INSERT INTO schema_migrations(version,applied_at) VALUES(?,?)').run(migration, now);
+  db.exec('COMMIT');
+  } catch (error) { db.exec('ROLLBACK'); throw error; }
 }

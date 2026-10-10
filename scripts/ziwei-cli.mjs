@@ -4,7 +4,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { resolveConfigPath } from '../daemon/config.mjs';
+import { resolveConfigPath, disconnectedConfiguration, connectionCredentialFiles, isNativeDaemonProcess } from '../daemon/config.mjs';
+import { createHash } from 'node:crypto';
 import { clientBuildIdentity, clientBuildMismatch } from '../src/management-bootstrap.mjs';
 
 const ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -20,6 +21,7 @@ function usage() {
   ziwei_user connect --api <url> --code <一次性配对码> [--name <设备名>]
   ziwei_user start
   ziwei_user change
+  ziwei_user forget [--expected-pid <PID>]
   npm run ziwei:status [--json]
   npm run ziwei:version
 
@@ -224,6 +226,7 @@ async function connect(args) {
   const previous = readConfig()?.value || {};
   const config = {
     ...previous,
+    connectionState: 'connected',
     agentId: 'ziwei_user',
     serviceName: 'ziwei_user',
     workspace: String(body.workspace),
@@ -237,6 +240,7 @@ async function connect(args) {
     workdir: String(previous.workdir || process.cwd()),
     ...(previous.tlsCaFile ? { tlsCaFile: String(previous.tlsCaFile) } : {}),
   };
+  delete config.connectionCleanup; delete config.disconnectedAt;
   const file = writeConfig(config);
   console.log(`设备已连接：${config.workspace}`);
   console.log(`设备 ID：${config.deviceId}`);
@@ -256,6 +260,13 @@ async function status(args) {
     return;
   }
   const config = current.value;
+  if (config.connectionState === 'disconnected') {
+    const cleanupPending = config.connectionCleanup?.state === 'pending';
+    const result = { configured: false, connectionState: 'disconnected', connectionCount: 0, cleanupPending, service: 'ziwei_user', version: VERSION, config: current.file };
+    console.log(args.json ? JSON.stringify(result) : `ziwei_user 已断开全部工作区（0 个连接），未配对。${cleanupPending ? ' 原进程或凭据清理待完成，请重试 forget。' : ''}\n配置文件: ${current.file}`);
+    if (cleanupPending) process.exitCode = 1;
+    return;
+  }
   const health = await probeLocal(config);
   const result = {
     configured: true,
@@ -293,7 +304,8 @@ async function waitForDaemonExit(config, pid) {
   for (let attempt = 0; attempt < 50; attempt += 1) {
     const health = await probeLocal(config);
     const observedPid = Number(health.liveness?.pid || health.pid || 0);
-    if (observedPid !== pid) return true;
+    let alive = true; try { process.kill(pid, 0); } catch (error) { alive = error.code !== 'ESRCH'; }
+    if (!alive && observedPid !== pid) return true;
     await wait(100);
   }
   return false;
@@ -303,6 +315,7 @@ async function change() {
   const current = readConfig();
   if (!current) throw new Error('change 需要先运行 ziwei_user connect，当前没有本机配置');
   const config = current.value;
+  if (config.connectionState === 'disconnected') throw new Error('ziwei_user 已断开；请使用 connect 重新配对，不会恢复旧工作区');
   const health = await probeLocal(config);
   const live = health.liveness || {};
   const liveService = String(live.service || health.service || '').trim();
@@ -334,6 +347,90 @@ async function change() {
   return start();
 }
 
+async function forget(args) {
+  rejectSecrets(args);
+  const current = readConfig(); const config = current?.value || {};
+  const file = current?.file || configPath();
+  function report(extra = {}) {
+    const result = { connectionState: 'disconnected', connectionCount: 0, config: file, runtimePreserved: true, ...extra };
+    console.log(args.json ? JSON.stringify(result) : 'ziwei_user 已断开全部工作区（0 个连接）；本机 runtime、Creator 记忆、CLI 与认证均保留。');
+  }
+  if (current && fs.lstatSync(file).isSymbolicLink()) throw new Error('本机配置为链接；拒绝清除连接');
+  const alreadyDisconnected = config.connectionState === 'disconnected';
+  const previousCleanup = alreadyDisconnected ? config.connectionCleanup : null;
+  if (previousCleanup && (previousCleanup.version !== 1 || !Array.isArray(previousCleanup.identities) || !Array.isArray(previousCleanup.credentialFiles))) throw new Error('断开清理记录无效；未报告完成或停止进程');
+  const identityConfig = previousCleanup ? { ...config, ...previousCleanup.identities[0], sharedWorkspaces: [...previousCleanup.identities.slice(1), ...previousCleanup.credentialFiles.map(item => ({ deviceTokenFile: item.file }))] } : config;
+  const credentials = connectionCredentialFiles(identityConfig, { configPath: file, root: ROOT });
+  for (const credential of credentials) {
+    const recorded = previousCleanup?.credentialFiles.find(item => item.file === credential.file);
+    if (recorded && recorded.sha256 !== credential.sha256) throw new Error('残余连接凭据已变化；未删除或报告断开清理完成');
+  }
+  const previousHash = current ? createHash('sha256').update(fs.readFileSync(file)).digest('hex') : null;
+  const expectedPid = args['expected-pid'] === undefined ? null : Number(args['expected-pid']);
+  if (expectedPid !== null && (!Number.isSafeInteger(expectedPid) || expectedPid <= 0 || expectedPid === process.pid)) throw new Error('--expected-pid 必须是待断开的原生 daemon PID');
+  const host = config.healthHost || '127.0.0.1';
+  if (!['localhost', '127.0.0.1', '::1'].includes(host)) throw new Error('forget 仅接受本机 loopback 健康入口');
+  const health = await probeLocal(identityConfig); const live = health.liveness || {};
+  let pid = null, paused = false;
+  async function control(operation) {
+    const response = await fetch(`http://${host === '::1' ? '[::1]' : host}:${config.healthPort || 20242}/local/connection-control`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-ziwei-local-control': config.deviceToken || '' }, body: JSON.stringify({ operation }), signal: AbortSignal.timeout(3000), redirect: 'error' });
+    if (!response.ok) throw new Error('当前 daemon 尚不支持安全断开；请沿原安装入口更新/start 后重试，未停止进程');
+    const body = await response.json();
+    if (body.pid !== pid || body.service !== 'ziwei_user') throw new Error('断开控制响应 PID 身份不一致');
+    return body;
+  }
+  try {
+    if (live.service && live.service !== 'ziwei_user') throw new Error('健康端口由其他项目占用；未停止或修改该服务');
+    if (live.service === 'ziwei_user') {
+      pid = Number(live.pid);
+      if (live.workspace !== identityConfig.workspace || live.deviceId !== identityConfig.deviceId || (expectedPid !== null && pid !== expectedPid) || !isNativeDaemonProcess(pid, ROOT)) throw new Error('原生 daemon 工作区、设备、PID 或安装入口不匹配；未停止进程');
+      if (alreadyDisconnected) {
+        if (previousCleanup?.state !== 'pending' || previousCleanup.stoppedPid !== pid || live.connectionState !== 'draining') throw new Error('断开配置仍有未核实的旧 listener；未停止或报告清理完成');
+      } else { await control('pause'); paused = true; }
+      const deadline = Date.now() + 30_000;
+      let idle = false;
+      while (Date.now() < deadline) {
+        const observed = (await probeLocal(identityConfig)).liveness || {};
+        if (observed.pid !== pid || observed.workspace !== identityConfig.workspace || observed.deviceId !== identityConfig.deviceId) throw new Error('等待断开时 daemon 身份变化；未停止其他进程');
+        if (observed.connectionState === 'draining' && observed.activeActionCount === 0 && observed.pollingCount === 0) { idle = true; break; }
+        await wait(100);
+      }
+      if (!idle) throw new Error('在途任务尚未结束；连接已恢复，未停止 daemon，请等待任务终态后重试');
+      if (!isNativeDaemonProcess(pid, ROOT)) throw new Error('停止前原生进程身份已变化；未发送信号');
+    } else if (expectedPid !== null) {
+      let alive = true; try { process.kill(expectedPid, 0); } catch (error) { alive = error.code !== 'ESRCH'; }
+      if (alive) throw new Error('指定 PID 仍存活但无法核实健康身份；未停止进程或清除连接');
+    }
+    if (current && createHash('sha256').update(fs.readFileSync(file)).digest('hex') !== previousHash) throw new Error('有效配置已变化；未清除新连接');
+    for (const credential of credentials) if (createHash('sha256').update(fs.readFileSync(credential.file)).digest('hex') !== credential.sha256) throw new Error('连接凭据已变化；请重新核实备份后断开');
+    if (alreadyDisconnected && !pid && !credentials.length && (!previousCleanup || previousCleanup.state === 'complete')) { report({ alreadyDisconnected: true, credentialFilesRemoved: 0 }); return; }
+    const cleanup = { version: 1, state: 'pending', identities: previousCleanup?.identities || [config, ...(config.sharedWorkspaces || [])].map(({ workspace, deviceId }) => ({ workspace, deviceId })), credentialFiles: [...new Map([...(previousCleanup?.credentialFiles || []), ...credentials].map(item => [item.file, item])).values()], stoppedPid: pid ?? previousCleanup?.stoppedPid ?? null };
+    const pending = { ...disconnectedConfiguration(config), connectionCleanup: cleanup };
+    writeConfig(pending);
+    const pendingHash = createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+    if (pid !== null) {
+      process.kill(pid, 'SIGTERM'); paused = false;
+      if (!await waitForDaemonExit(identityConfig, pid)) throw new Error('断开配置已保存但原 PID 未退出；清理仍pending，未启动或停止其他进程');
+    }
+    let removed = 0;
+    if (createHash('sha256').update(fs.readFileSync(file)).digest('hex') !== pendingHash) throw new Error('断开等待期间配置已被显式修改；未清除新连接或报告完成');
+    const finalCredentials = connectionCredentialFiles(identityConfig, { configPath: file, root: ROOT });
+    for (const credential of credentials) {
+      if (!finalCredentials.some(item => item.file === credential.file && item.sha256 === credential.sha256)) throw new Error('停止后连接凭据路径或内容变化；清理仍pending');
+      fs.unlinkSync(credential.file); removed++;
+    }
+    if (connectionCredentialFiles(identityConfig, { configPath: file, root: ROOT }).length) throw new Error('断开期间新增本机管理凭据；清理仍pending，请重试 forget，不会恢复连接');
+    if (createHash('sha256').update(fs.readFileSync(file)).digest('hex') !== pendingHash) throw new Error('清理期间配置被显式修改；未覆盖新配置或报告完成');
+    writeConfig({ ...pending, connectionCleanup: { ...cleanup, state: 'complete', completedAt: new Date().toISOString() } });
+    const logDir = path.join(path.dirname(file), 'logs'); fs.mkdirSync(logDir, { recursive: true });
+    fs.appendFileSync(path.join(logDir, 'daemon.log'), JSON.stringify({ at: new Date().toISOString(), event: 'connections_forgotten', pid: process.pid, stoppedPid: pid, connectionCount: 0, credentialFilesRemoved: removed, runtimePreserved: true }) + '\n', { mode: 0o600 });
+    report({ stoppedPid: pid, credentialFilesRemoved: removed });
+  } catch (error) {
+    if (paused) { let saved; try { saved = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {} if (saved?.connectionState !== 'disconnected') await control('resume').catch(() => {}); }
+    throw error;
+  }
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const command = args._[0] || 'help';
@@ -345,6 +442,7 @@ async function main() {
   if (command === 'connect') return connect(args);
   if (command === 'start') return start();
   if (command === 'change') return change();
+  if (command === 'forget' || command === 'reset') return forget(args);
   if (command === 'status') return status(args);
   if (command === 'help' || command === '--help' || command === '-h') return usage();
   throw new Error(`未知命令: ${command}`);

@@ -58,6 +58,10 @@ function childEnvironment() {
 }
 
 async function main() {
+  if (config.connectionState === 'disconnected') {
+    console.error('ziwei_user 已明确断开全部工作区；请使用 connect 重新配对，环境变量不会恢复旧连接。');
+    return 1;
+  }
   if (configError) {
     console.error(`ziwei_user 配置文件无法读取：${configPath}`);
     console.error(configError?.message || String(configError));

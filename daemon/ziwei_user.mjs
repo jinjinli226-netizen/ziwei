@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
+import { timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { ActionDispatcher } from '../src/daemon.mjs';
 import { createActionScheduler } from '../src/daemon-action-scheduler.mjs';
@@ -20,13 +21,14 @@ const standaloneHome = process.env.ZIWEI_USER_HOME ? defaultUserDir({ env: proce
 const dataDir = standaloneHome || path.join(ROOT, 'data');
 const logDir = standaloneHome ? path.join(standaloneHome, 'logs') : path.join(ROOT, '.local', 'logs');
 const runtimeDir = standaloneHome ? path.join(standaloneHome, 'runtime') : path.join(ROOT, '.local', 'runtime');
-fs.mkdirSync(dataDir, { recursive: true });
-fs.mkdirSync(logDir, { recursive: true });
-fs.mkdirSync(runtimeDir, { recursive: true });
 const configPath = resolveConfigPath({ root: ROOT, env: process.env });
 const config = fs.existsSync(configPath)
   ? JSON.parse(fs.readFileSync(configPath, 'utf8'))
   : { agentId: 'ziwei_user', serviceName: 'ziwei_user', workspace: process.env.ZIWEI_WORKSPACE || '', apiBase: process.env.ZIWEI_API_BASE || 'http://127.0.0.1:4178', healthHost: '127.0.0.1', healthPort: 20242, heartbeatMs: 15000, pollMs: 5000 };
+if (config.connectionState === 'disconnected') { console.error('ziwei_user 已明确断开全部工作区；拒绝环境变量回退和轮询，请使用 connect 重新配对。'); process.exit(1); }
+fs.mkdirSync(dataDir, { recursive: true });
+fs.mkdirSync(logDir, { recursive: true });
+fs.mkdirSync(runtimeDir, { recursive: true });
 if (config.hermesHome) process.env.HERMES_HOME = String(config.hermesHome);
 const logPath = path.join(logDir, 'daemon.log');
 function log(event, extra = {}) {
@@ -96,9 +98,11 @@ let lastPoll = null;
 let runtimeDiscovery = discoverInstalledRuntimes({ force: true });
 let heartbeatTimer;
 let pollTimer;
+let draining = false;
 process.on('uncaughtException', error => log('uncaught_exception', { error: error.stack || error.message }));
 process.on('unhandledRejection', error => log('unhandled_rejection', { error: error?.stack || String(error) }));
 async function heartbeat() {
+  if (draining) return;
   if (!String(config.workspace || '').trim()) {
     if (!missingWorkspaceLogged) { log('configuration_error', { error: '未配置 workspace，已停止发送心跳' }); missingWorkspaceLogged = true; }
     return;
@@ -107,6 +111,7 @@ async function heartbeat() {
   await Promise.allSettled([...connections.values()].map(heartbeatConnection));
 }
 async function heartbeatConnection(connection) {
+  if (draining) return;
   const config = connection.config;
   try { await connection.managementBootstrap.prepare(); } catch {}
   connection.managementStatus = connection.managementBootstrap.status();
@@ -199,7 +204,7 @@ async function poll() {
 }
 async function pollConnection(connection) {
   const config = connection.config;
-  if (!String(config.workspace || '').trim()) return;
+  if (draining || !String(config.workspace || '').trim()) return;
   if (connection.polling) return;
   connection.polling = true;
   try {
@@ -211,7 +216,7 @@ async function pollConnection(connection) {
     if (config.primary) lastPoll = connection.lastPoll;
     const actions=payload.actions || [];
     log('a2a_poll', { ok: response.ok, workspace: config.workspace, pending: actions.length });
-    connection.actionScheduler.schedule(actions);
+    if (!draining) connection.actionScheduler.schedule(actions);
   } catch (error) {
     log('a2a_poll_failed', { error: error.message });
   } finally { connection.polling = false; }
@@ -233,12 +238,27 @@ function heartbeatFresh() {
 }
 function healthPayload() {
   return { service: 'ziwei_user', version: VERSION, clientBuild: CLIENT_BUILD, bridge: 'ziwei_user', agentId: 'ziwei_user', workspace: config.workspace, deviceId: config.deviceId, runtimes: runtimeDiscovery.runtimes, managementMcp: primaryConnection?.managementBootstrap.status(), terminalMcp: primaryConnection?.terminalStatus, lastHeartbeat, lastHeartbeatAgeMs: lastHeartbeatAt ? Math.max(0, Date.now() - lastHeartbeatAt) : null, lastPoll, pid: process.pid,
-    connections: [...connections.values()].map(connection => ({ workspace: connection.config.workspace, deviceId: connection.config.deviceId, primary: connection.config.primary, configured: true, ready: connection.lastHeartbeatAt > 0 && Date.now() - connection.lastHeartbeatAt <= Math.max(45_000, (Number(config.heartbeatMs) || 15_000) * 3), lastHeartbeat: connection.lastHeartbeat, managementMcp: connection.managementBootstrap.status(), terminalMcp: connection.terminalStatus })), connectionErrors,
+    connectionState: draining ? 'draining' : 'connected', activeActionCount: [...connections.values()].reduce((total, connection) => total + connection.actionScheduler.activeCount, 0), pollingCount: [...connections.values()].filter(connection => connection.polling).length,
+    connections: [...connections.values()].map(connection => ({ workspace: connection.config.workspace, deviceId: connection.config.deviceId, primary: connection.config.primary, configured: true, ready: !draining && connection.lastHeartbeatAt > 0 && Date.now() - connection.lastHeartbeatAt <= Math.max(45_000, (Number(config.heartbeatMs) || 15_000) * 3), lastHeartbeat: connection.lastHeartbeat, managementMcp: connection.managementBootstrap.status(), terminalMcp: connection.terminalStatus })), connectionErrors,
   };
 }
 const health = http.createServer((req, res) => {
+  if (req.url === '/local/connection-control') {
+    const supplied = Buffer.from(String(req.headers['x-ziwei-local-control'] || '')); const expected = Buffer.from(String(config.deviceToken || ''));
+    const local = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
+    if (req.method !== 'POST' || !local || !expected.length || supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) { res.writeHead(401); res.end(); return; }
+    let body = ''; req.on('data', chunk => { body += chunk; if (body.length > 1024) req.destroy(); });
+    req.on('end', () => {
+      let operation; try { operation = JSON.parse(body).operation; } catch {}
+      if (!['pause', 'resume'].includes(operation)) { res.writeHead(400); res.end(); return; }
+      draining = operation === 'pause';
+      log(draining ? 'connection_drain_requested' : 'connection_drain_cancelled', { activeActionCount: healthPayload().activeActionCount, connectionCount: connections.size });
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(healthPayload()));
+    });
+    return;
+  }
   if (req.url === '/healthz') { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ ok: true, ...healthPayload() })); return; }
-  if (req.url === '/readyz') { const ready = heartbeatFresh(); res.writeHead(ready ? 200 : 503, { 'content-type': 'application/json' }); res.end(JSON.stringify({ ready, ...healthPayload() })); return; }
+  if (req.url === '/readyz') { const ready = !draining && heartbeatFresh(); res.writeHead(ready ? 200 : 503, { 'content-type': 'application/json' }); res.end(JSON.stringify({ ready, ...healthPayload() })); return; }
   res.writeHead(404); res.end();
 });
 let stopping = false;
