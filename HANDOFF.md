@@ -1,8 +1,10 @@
 # 紫薇项目 HandOff
 
-## 2026-10-10 当前接续：Windows 本地工作目录
+## 2026-10-10 当前发布：Windows 本地工作目录
 
 目录 inspect 与原生执行不再把 config.workdir 当唯一批准根；用户可访问本地 C/D 等盘，默认目录仅作起点及相对基准。两层统一词法/真实路径解析，修复相对路径重复解析和盘符简写；Windows ACL、设备/工作区、runtimeDir/附件边界保留，非 Windows 原规则保持。24 项专项及隔离 CLI 实际 cwd、旧 bigtron 客户端 C/D 错误已有证据。源码/官方包发布及用户实际更新分别记录，见 [工作目录运维记录](docs/operations/2026-10-10-windows-workdir.md)；不得据历史 disconnected 磁盘配置停止或重配对当前在线 bigtron 实例。
+
+0349b91已从远端最新4c41c4a增量提交并推送，最新版检测/维护及ASCII脚本保持。完整479/479、lint66/build通过；北京时间18:20:38官方Windows包发布，SHAe2a446c6…、sourceBuild86228203…、Windows实际安装build7c2d47ab…，公开包/metadata/脚本均200。双库及原身份/保护行复核通过，主站36d6bf1/控制8a4fe59/三服务PID保持，无重启。用户电脑PID52440仍旧build6d0709a2…；已请求其在线终端升级，实际更新及目录after仍待核实。
 
 > **当前维护入口**：请先阅读根目录 [PROJECT_MANAGEMENT.md](PROJECT_MANAGEMENT.md)。本文保留阶段性交接时间线；其中较早的验证数字和“待完成”描述可能已经过时，当前状态以项目管理手册、代码和最近一次真实验证为准。
 

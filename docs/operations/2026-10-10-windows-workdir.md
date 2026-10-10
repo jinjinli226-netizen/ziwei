@@ -20,10 +20,25 @@ Windows 专项 24 项覆盖真实 C/D 临时目录、中文空格、默认目录
 
 ## 发布与实际安装状态
 
-源码提交、官方包 SHA/build、备份路径及发布后保护复核待写入。发布流程从精确 Git commit 归档打包，在新的隔离 npm prefix 实际安装并验证 Windows clientBuild；官方 metadata 分别记录 sourceBuild 与真实安装 build，保留既有 PowerShell 升级入口。
+源码修复提交 [`0349b919fef49471d061b63f8a23c1685d223a10`](https://github.com/jinjinli226-netizen/ziwei/commit/0349b919fef49471d061b63f8a23c1685d223a10) 已推送 `codex/ziwei-terminal-console`。修复起点为远端最新 `4c41c4adb279aa94fc7bafb344c4d6dae06178e3`；发布前重新 fetch 验证远端为新提交祖先、1 ahead/0 behind，没有遗漏远端新修改。最新版检测及维护 `36d6bf1`、ASCII PowerShell `c5b720b` 均为祖先；CLI 检测、外置 worker、防 EBUSY 更新、update/update-status、stop/start、uninstall 的实现与起点逐文件比较一致，479 项完整回归包含原维护测试。
 
-发布只原子更新官方 `ziwei-latest.tgz` 和 `release.json`。发布前使用 SQLite backup API 备份两库、检查 integrity/FK，并保存全部既有身份、正式员工/会话/Creator/phone MCP/绑定、配置及服务身份。发布后先关闭生产数据库读连接，再从离线快照复核；不整库恢复、不清理正式数据、不启动 T8。
+`2026-10-10T10:20:38.402350Z`（北京时间 **18:20:38**）仅更新官方 Windows 包和 metadata。精确 commit 归档打包后，在新的隔离 npm prefix 真正安装并校验所有文件；仅接受 npm 对 bin shebang 的 CRLF→LF 归一。版本仍为 `0.1.0`，不能用这个版本号判断本次修复是否安装。
 
-用户终端 `ziwei_user status` 显示 bigtron 在线，20242 心跳持续更新；实际运行 build 为旧包 `6d0709a2f20acb43d6887b9182937cc8020e25a178df16e1e5ad9fd80dad3df8`。维护工具进程读到同路径历史 disconnected 配置，与运行进程缓存身份不一致；不据此改写、重配对或停止用户连接。官方新包核对完成后，应在用户当前显示 bigtron 在线的同一终端运行 `ziwei_user update`，再以 `ziwei_user update-status --json` 及真实目录检查确认生效。未更新前不能声称用户电脑已修复。
+| 发布字段 | 实测值 |
+| --- | --- |
+| 源码 commit | `0349b919fef49471d061b63f8a23c1685d223a10` |
+| archive sourceBuild | `86228203ecf5aeb33fbc4422b4c4268f321c113862e0443933897a277fcd614a` |
+| Windows 实际安装 clientBuild | `7c2d47abb3982eb31fbdd2245fe0550235efed9ec418848de901dfead8bdaf64` |
+| 官方 tgz SHA256 | `e2a446c65def0f09cfb23d51142c2ca9666dc0d32c91d62d4a25bc71a9af377a` |
+| tgz 大小/文件数 | 95,626 bytes / 30 文件 |
+| 原 PowerShell SHA256（保持） | `e78e39f3e1eeb9808ecd4ed32f2f856a82947f81e4ee2ca60f20383c766c332a` |
+
+公开 metadata、tgz、ASCII 无 BOM PowerShell 均 HTTP 200，hash/sourceBuild/必需文件/维护命令及支持范围核对通过；Windows 实际安装 build 与归档 sourceBuild 分别记录。旧官方包 build 为 `6d0709a2…`，新包从当前源码增量出包，没有回退或用历史归档覆盖。
+
+发布只原子更新官方 `ziwei-latest.tgz` 和 `release.json`。发布前使用 SQLite backup API 备份两库至 `/opt/ziwei-backups/windows-workdir/20261010T102013Z-ad5d66cf`，检查 integrity/FK，并保存全部既有身份、正式员工/会话/Creator/phone MCP/绑定、配置及服务身份。发布后先关闭生产数据库读连接，再从离线快照复核；两库 integrity=ok、FK=0，全部既有表身份仍在，正式受保护行保持，未放宽自然到期门槛。无整库恢复、无正式数据清理，T8 未启动。
+
+主站 `/opt/ziwei/releases/36d6bf1`、控制 `/opt/ziwei-control/releases/8a4fe59`、前端 index 与 Nginx/签名 key/共享路径/原 PowerShell 均保持。三服务 PID 分别 140116/134533/737、NRestarts=0，启动时间与备份一致，未重启。主站本地及公网健康为 200/ok。维护日志、Creator HOME/记忆、原认证和用户配置不属于本次 downloads 发布范围。
+
+用户终端 `ziwei_user status` 显示 bigtron 在线，20242 心跳持续更新；发布前实际 PID52440、运行 build 为旧包 `6d0709a2f20acb43d6887b9182937cc8020e25a178df16e1e5ad9fd80dad3df8`。维护工具进程读到同路径历史 disconnected 配置，与运行进程缓存身份不一致；不据此改写、重配对或停止用户连接。官方新包已核对完成，已请求用户在当前显示 bigtron 在线的同一终端运行 `ziwei_user update`，再贴 `ziwei_user update-status --json`；用户电脑真实更新及目录选择 after 验收仍待该结果。未更新前不能声称用户电脑已修复。
 
 回滚只还原本轮备份的官方包及 metadata；PowerShell、主站、控制、数据库和配置不需要回退。真实用户客户端是否已更新需单独核实，禁止用隔离安装的 build 替代它。

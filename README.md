@@ -2,7 +2,7 @@
 
 ## Windows 本地工作目录（2026-10-10）
 
-Windows 客户端已实现本地跨盘目录选择及原生执行：默认 `workdir` 作为初始位置和相对路径基准，用户可以使用自己有权限的 C/D 等盘目录。目录检查与 CLI 实际 `cwd` 使用同一规则；缺失目录只在明确创建时建立，设备/工作区身份、私有 file/command 和附件边界继续校验。官方包发布与实际电脑更新需分别确认，详见 [工作目录运维记录](docs/operations/2026-10-10-windows-workdir.md)。
+官方 Windows 包 `0349b91` 已发布，支持本地跨盘目录选择及原生执行：默认 `workdir` 作为初始位置和相对路径基准，用户可以使用自己有权限的 C/D 等盘目录。目录检查与 CLI 实际 `cwd` 使用同一规则；缺失目录只在明确创建时建立，设备/工作区身份、私有 file/command 和附件边界继续校验。完整479/479、lint66/build通过，公开包及Windows真实安装build已核对。电脑需要通过 `ziwei_user update` 更新后才生效；版本仍为0.1.0，应查看 `ziwei_user update-status --json` 的真实build。详见 [工作目录运维记录](docs/operations/2026-10-10-windows-workdir.md)。
 
 ## Windows 客户端维护（2026-10-10）
 
