@@ -1,5 +1,9 @@
 # 紫薇项目 HandOff
 
+## 2026-10-10 当前接续：Windows 本地工作目录
+
+目录 inspect 与原生执行不再把 config.workdir 当唯一批准根；用户可访问本地 C/D 等盘，默认目录仅作起点及相对基准。两层统一词法/真实路径解析，修复相对路径重复解析和盘符简写；Windows ACL、设备/工作区、runtimeDir/附件边界保留，非 Windows 原规则保持。24 项专项及隔离 CLI 实际 cwd、旧 bigtron 客户端 C/D 错误已有证据。源码/官方包发布及用户实际更新分别记录，见 [工作目录运维记录](docs/operations/2026-10-10-windows-workdir.md)；不得据历史 disconnected 磁盘配置停止或重配对当前在线 bigtron 实例。
+
 > **当前维护入口**：请先阅读根目录 [PROJECT_MANAGEMENT.md](PROJECT_MANAGEMENT.md)。本文保留阶段性交接时间线；其中较早的验证数字和“待完成”描述可能已经过时，当前状态以项目管理手册、代码和最近一次真实验证为准。
 
 > **2026-10-08 历史环境区分说明**：本地 checkout、5178 前端、4178 API 和项目 `data/ziwei_user.json` 是 `bjc-ops` 的本地代码验收环境；真实本机 `ziwei_user` daemon 由全局命令启动，使用用户目录配置连接 `https://qzelynth.top` 的服务器工作区 `test_222`。不要把项目配置或项目 daemon 当成服务器 daemon；接手时分别核对用户目录配置、项目配置和各自 `/readyz`。详细维护约定统一见 `PROJECT_MANAGEMENT.md`。

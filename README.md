@@ -1,5 +1,9 @@
 # 紫薇
 
+## Windows 本地工作目录（2026-10-10）
+
+Windows 客户端已实现本地跨盘目录选择及原生执行：默认 `workdir` 作为初始位置和相对路径基准，用户可以使用自己有权限的 C/D 等盘目录。目录检查与 CLI 实际 `cwd` 使用同一规则；缺失目录只在明确创建时建立，设备/工作区身份、私有 file/command 和附件边界继续校验。官方包发布与实际电脑更新需分别确认，详见 [工作目录运维记录](docs/operations/2026-10-10-windows-workdir.md)。
+
 ## Windows 客户端维护（2026-10-10）
 
 Windows客户端维护已发布：`ziwei_user stop` 保留连接并停止，`ziwei_user update` 按官方包升级，`ziwei_user update-status --json` 查看真实结果，`ziwei_user uninstall` / `remove` 卸载程序并保留用户配置、认证与记忆。旧版没有这些命令时使用纯PowerShell入口 `irm https://qzelynth.top/downloads/cli/update-windows.ps1 | iex`。每台电脑现在显示自己的CLI证据，李金晋电脑本人实际页面已确认4/4可用；新版Windows探测修复Gemini误读Codex版本，现有旧客户端更新后才按新探测上报。实现、真实升级验收、公开SHA与支持边界见 [Windows 运维记录](docs/operations/2026-10-10-windows-client-maintenance.md)。

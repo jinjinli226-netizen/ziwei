@@ -8,6 +8,29 @@ import { discoverInstalledRuntimes, runtimeSpawnSpec } from '../src/runtime-adap
 import { discoverRuntimeCli as discover, createCliDiscoveryContext as contextFor, runtimeDiscoveryEnvironment as runtimeEnv } from '../src/runtime-cli-discovery.mjs';
 const definition = runtime => ({ runtime, aliases: [runtime.toLowerCase(), runtime], versionArgs: ['--version'] });
 
+function isolatedVersionEnvironment(root) {
+  // A plain spread of process.env can retain both Path and PATH on Windows.
+  // Keep only OS launch variables and fresh fixture-owned home/npm paths, so
+  // native executables or profiles installed on the host cannot win discovery.
+  return {
+    SystemRoot: process.env.SystemRoot,
+    WINDIR: process.env.WINDIR || process.env.SystemRoot,
+    PATH: [path.join(process.env.SystemRoot, 'System32'), path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0')].join(';'),
+    HOME: root,
+    USERPROFILE: root,
+    HOMEDRIVE: path.parse(root).root.slice(0, 2),
+    HOMEPATH: root.slice(2),
+    APPDATA: root,
+    LOCALAPPDATA: root,
+    CODEX_HOME: path.join(root, '.codex'),
+    HERMES_HOME: path.join(root, 'hermes'),
+    TEMP: root,
+    TMP: root,
+    npm_config_prefix: root,
+    NPM_CONFIG_USERCONFIG: path.join(root, 'fixture-empty.npmrc'),
+  };
+}
+
 function fixture({ paths = 'C:\\Windows\\System32', files = [], located = [], locatorError = null, version = null, env = {}, extraCandidates = [], metadataVersion = null, npmrc = '' } = {}) {
   const commands = [];
   const installed = new Set(files.map(file => file.toLowerCase()));
@@ -166,8 +189,9 @@ test('real isolated Windows npm cmd shim runs adjacent JS for version only', { s
   fs.mkdirSync(path.dirname(js), { recursive: true });
   fs.writeFileSync(binary, '@echo off\r\nexit /b 99\r\n');
   fs.writeFileSync(js, "if(process.argv.slice(2).join(' ')!=='--version')process.exit(4);else console.log('codex-cli 0.162.0-alpha.2');");
-  const context = contextFor({ spawnSpec: runtimeSpawnSpec, extraCandidates: () => [binary], env: { ...process.env, PATH: '' }, metadataVersion: () => null });
+  const context = contextFor({ home: root, spawnSpec: runtimeSpawnSpec, extraCandidates: () => [binary], env: isolatedVersionEnvironment(root), metadataVersion: () => null });
   const found = discover(definition('Codex'), context);
+  assert.equal(found.binary, binary);
   assert.equal(found.version, '0.162.0-alpha.2');
   assert.equal(found.detection.state, 'available');
 });
@@ -183,8 +207,9 @@ test('a Gemini npm shim cannot be substituted with adjacent Codex even when both
   const spec = runtimeSpawnSpec(binary, ['--version']);
   assert.equal(spec.command, 'powershell.exe');
   assert.equal(spec.args.includes(codex), false);
-  const context = contextFor({ home: root, spawnSpec: runtimeSpawnSpec, extraCandidates: () => [binary], metadataVersion: () => null });
+  const context = contextFor({ home: root, spawnSpec: runtimeSpawnSpec, extraCandidates: () => [binary], env: isolatedVersionEnvironment(root), metadataVersion: () => null });
   const found = discover(definition('Gemini'), context);
+  assert.equal(found.binary, binary);
   assert.equal(found.version, '0.61.0');
   assert.equal(found.detection.state, 'available');
 });

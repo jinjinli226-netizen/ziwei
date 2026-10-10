@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import {ActionDispatcher} from '../src/daemon.mjs';
 
 test('acknowledges an action once and deduplicates retries', async () => {
@@ -14,16 +17,18 @@ test('acknowledges an action once and deduplicates retries', async () => {
   assert.deepEqual(events, ['a-1']);
 });
 
-test('agent actions default to the registered project workdir for local CLI access', async () => {
+test('agent actions default to the registered project workdir for local CLI access', async t => {
   let received;
+  const workdir = fs.mkdtempSync(path.join(os.tmpdir(), 'ziwei-default-workdir-'));
+  t.after(() => fs.rmSync(workdir, { recursive: true, force: true }));
   const dispatcher = new ActionDispatcher({
-    workdir: 'C:/ziwei-project',
+    workdir,
     execute: async action => { received = action; return {ok: true}; },
     now: () => 1000
   });
   const result = await dispatcher.dispatch({ id:'a-project', dedupeKey:'project', type:'agent.execute', payload:{prompt:'inspect the project'} });
   assert.equal(result.status, 'succeeded');
-  assert.equal(received.payload.workdir, 'C:\\ziwei-project');
+  assert.equal(received.payload.workdir, fs.realpathSync.native(workdir));
 });
 
 test('rejects A2A workdirs outside the registered runtime directory', async () => {

@@ -6,7 +6,12 @@
 >
 > **文档状态**：以 2026-10-10 当前 Windows 检测/维护与下列支持范围为准；每次结构、运行方式或功能边界发生变化时必须更新本文。历史清理、断开与favicon记录保留；用户随后新增的正式连接不能再被旧清理范围覆盖。较早的版本/PID、逐员工 MCP 开关或独立 bearer 操作不能替代当前规则。
 
-### 2026-10-10 当前发布：Windows CLI 检测与客户端维护（已上线）
+### 2026-10-10 当前接续：Windows 本地工作目录
+
+- Windows 已配对用户可选择自己有权限的本地 C/D 等盘目录；config.workdir 只作初始位置和相对基准，目录检查与原生会话/任务/runtime 实际 cwd 同规则。相对路径只解析一次，C:/D: 简写为盘根，盘符相对输入、UNC/设备命名空间拒绝；Windows ACL、缺失目录显式创建、身份及私有文件/命令/附件边界保持。
+- 本轮发布层为官方 Windows 客户端包及 metadata；主 API、静态前端、控制及 Nginx无需重启。用户 bigtron 正式电脑当前在线，维护进程读到的历史 disconnected 配置不能覆盖真实状态。源码测试、隔离 npm 安装、公开包和实际用户更新分别留证；准确发布进度、异常测试证据和保护范围见 [工作目录运维记录](docs/operations/2026-10-10-windows-workdir.md)。
+
+### 2026-10-10 前一发布：Windows CLI 检测与客户端维护（已上线）
 
 - 用户最新范围是“只适配 Windows”。每台电脑读取自身runtime证据，区分未找到/检测失败/未上报/离线，补齐Windows stop/update/uninstall与旧版官方PowerShell升级入口，保留原prefix与身份。主站36d6bf1于04:02:12Z部署，只主API重启；最终静态前端4464bb5于04:22:16Z发布，无服务重启，资源BakqZA2_/DArH7kBc。控制8a4fe59、Nginx配置及APK保持。准确命令、SHA、备份与边界见 [Windows 客户端运维记录](docs/operations/2026-10-10-windows-client-maintenance.md)。
 - 本人李金晋电脑=device_bfd9a3d2…/bigtron/Owner c6。实际页面24/24确认本人4CLI全可用、另一电脑791仅Codex可用，三个视口39图确认标签未裁切，业务写/正常错误/模型/手机动作0。实际原PID58720/build40af5811仍在线且未升级，Gemini旧错误版本仍忠实展示；新程序修复其入口探测，更新实际客户端后才按新探测上报。旧清理用户目录配置仍disconnected，其hash不变，不可据此声称当前20242无监听。

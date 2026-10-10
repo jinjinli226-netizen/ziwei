@@ -1,5 +1,10 @@
 # 变更记录
 
+## 2026-10-10 Windows 本地跨盘工作目录
+
+- 目录检查和原生会话/任务/runtime 执行允许配对用户实际有权访问的本地 C/D 等盘目录；config.workdir 作为初始位置及相对路径基准。相对路径只解析一次，盘符简写一致规范化，缺失目录仅明确创建时建立，ACL及身份/私有文件/附件边界保持。
+- Windows专项24/24，完整479/479、0skip，lint66/build通过；版本探测测试改为隔离HOME和白名单PATH，并断言精确fixture binary。真实旧客户端C/D错误已复现，官方新包发布与用户电脑实际更新分别记录于[工作目录运维记录](docs/operations/2026-10-10-windows-workdir.md)。
+
 ## 2026-10-10 内置数字员工 Creator（已部署 db0aa68，真实 Hermes 验收与精确清理完成）
 
 - 员工市场增加 `ziwei-employee-creator` / 数字员工·Creator 1.0.0；复用原员工管理校验、创建及持久会话流程，按 workspace/owner/template 幂等复用，默认 personal。重复安装保留用户定制配置；兼容旧同名实例仅明确采用并标记原配置来源，不伪称已应用模板人格。

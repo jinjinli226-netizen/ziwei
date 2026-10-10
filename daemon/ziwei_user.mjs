@@ -52,6 +52,7 @@ function installConnections() {
     state.managementBootstrap = createManagementBootstrap({ workspace: config.workspace, deviceId: config.deviceId, deviceToken: config.deviceToken, apiBase: config.apiBase, cacheDirectory: path.join(dataDir, 'management-mcp-credentials') });
     const localExecutor = createLocalActionExecutor({
       runtimeDir: connectionRuntimeDir,
+      defaultWorkdir: config.workdir || process.cwd() || ROOT,
       allowedExecutables: Array.isArray(config.allowedExecutables) ? config.allowedExecutables : [],
       executorCommand: config.executorCommand || process.env.ZIWEI_EXECUTOR_COMMAND || null,
       executorArgs: Array.isArray(config.executorArgs) ? config.executorArgs : [],

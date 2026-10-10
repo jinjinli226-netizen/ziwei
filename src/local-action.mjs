@@ -4,6 +4,7 @@ import {spawn} from 'node:child_process';
 import {executeRuntime, bootstrapTerminalMcp, discoverInstalledRuntimes, hermesHome, hermesProfileHome} from './runtime-adapters.mjs';
 import { createManagementBootstrap } from './management-bootstrap.mjs';
 import {normalizeRuntimeProfile} from './employee-runtime.mjs';
+import { isNativeRuntimeAction, resolveWindowsWorkdir, resolveWindowsWorkdirPath, windowsDirectoryError } from './windows-workdir.mjs';
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_OUTPUT_BYTES = 1024 * 1024;
@@ -27,8 +28,9 @@ function localDirectoryRoots() {
  */
 export function inspectLocalDirectory({directoryPath = '', basePath = process.cwd(), createIfMissing = false, includeRoots = true, includeChildren = true, maxEntries = MAX_DIRECTORY_ENTRIES} = {}) {
   const raw = String(directoryPath || '').trim();
-  const base = resolveApprovedPath(basePath, '.');
-  const target = resolveApprovedPath(base, raw || '.');
+  const windows = process.platform === 'win32';
+  const base = windows ? resolveWindowsWorkdirPath(process.cwd(), basePath || '.') : resolveApprovedPath(basePath, '.');
+  const target = windows ? resolveWindowsWorkdir(base, raw || '.', { allowMissing: true }) : resolveApprovedPath(base, raw || '.');
   const limit = Math.min(MAX_DIRECTORY_ENTRIES, Math.max(1, Number(maxEntries) || MAX_DIRECTORY_ENTRIES));
   const result = {
     path: target,
@@ -39,18 +41,29 @@ export function inspectLocalDirectory({directoryPath = '', basePath = process.cw
     roots: includeRoots ? localDirectoryRoots() : [],
     entries: []
   };
-  if (!fs.existsSync(target)) {
+  let stats;
+  try { stats = fs.statSync(target); }
+  catch (error) { if (error?.code !== 'ENOENT') throw windows ? windowsDirectoryError(error, target) : error; }
+  if (!stats) {
     if (!createIfMissing) return result;
-    fs.mkdirSync(target, { recursive: true });
+    try { fs.mkdirSync(target, { recursive: true }); }
+    catch (error) { throw windows ? windowsDirectoryError(error, target) : error; }
     result.created = true;
+    stats = fs.statSync(target);
   }
-  const stats = fs.statSync(target);
   if (!stats.isDirectory()) throw new Error(`工作目录不是目录: ${target}`);
   result.exists = true;
   result.isDirectory = true;
   if (includeChildren) {
-    result.entries = fs.readdirSync(target, { withFileTypes: true })
-      .filter(entry => entry.isDirectory())
+    let entries;
+    try { entries = fs.readdirSync(target, { withFileTypes: true }); }
+    catch (error) { throw windows ? windowsDirectoryError(error, target) : error; }
+    result.entries = entries
+      .filter(entry => {
+        if (entry.isDirectory()) return true;
+        if (!windows || !entry.isSymbolicLink()) return false;
+        try { return fs.statSync(path.join(target, entry.name)).isDirectory(); } catch { return false; }
+      })
       .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: 'base' }))
       .slice(0, limit)
       .map(entry => ({ name: entry.name, path: path.join(target, entry.name), type: 'directory' }));
@@ -345,7 +358,7 @@ function runCommand({runtimeDir, action, executable, baseArgs = [], allowedExecu
  * Unknown/unsupported actions fail loudly so the cloud never sees a fake
  * success merely because an action was accepted by the daemon.
  */
-export function createLocalActionExecutor({runtimeDir, allowedExecutables = [], executorCommand = null, executorArgs = [], defaultRuntime = null, hermesHomePath = null, managementMcpConfig = {}, managementBootstrap = null, terminalMcpConfig = {}, workspace = null, apiBase = null, deviceId = null, deviceToken = null, onWorkspaceConnect = null} = {}) {
+export function createLocalActionExecutor({runtimeDir, defaultWorkdir = process.cwd(), allowedExecutables = [], executorCommand = null, executorArgs = [], defaultRuntime = null, hermesHomePath = null, managementMcpConfig = {}, managementBootstrap = null, terminalMcpConfig = {}, workspace = null, apiBase = null, deviceId = null, deviceToken = null, onWorkspaceConnect = null} = {}) {
   if (!runtimeDir) throw new TypeError('runtimeDir is required');
   fs.mkdirSync(runtimeDir, {recursive: true});
   const automaticManagement = managementBootstrap || (workspace && deviceToken ? createManagementBootstrap({ workspace, apiBase, deviceId, deviceToken, cacheDirectory: path.join(runtimeDir, 'management-mcp-credentials') }) : null);
@@ -363,7 +376,7 @@ export function createLocalActionExecutor({runtimeDir, allowedExecutables = [], 
         status: 'succeeded',
         result: inspectLocalDirectory({
           directoryPath: payload.path || payload.directory || payload.workingDirectory || payload.working_directory || '',
-          basePath: payload.workdir || process.cwd(),
+          basePath: process.platform === 'win32' ? resolveWindowsWorkdirPath(defaultWorkdir, payload.workdir || '.') : payload.workdir || process.cwd(),
           createIfMissing: payload.createIfMissing === true || payload.create_if_missing === true,
           includeRoots: payload.includeRoots !== false && payload.include_roots !== false,
           includeChildren: payload.includeChildren !== false && payload.include_children !== false,
@@ -377,12 +390,14 @@ export function createLocalActionExecutor({runtimeDir, allowedExecutables = [], 
     // Native model calls intentionally use the installed local CLI.  This is
     // the one action family with full local permissions; the ordinary file and
     // command actions below remain bounded to the bridge runtime directory.
-    if (['agent.execute', 'conversation.execute', 'runtime.execute', 'automation.execute'].includes(type)
-      || (type === 'task.execute' && (action.payload?.runtime || action.payload?.agent || action.payload?.modelId || action.payload?.prompt))) {
+    const nativeAction = process.platform === 'win32' ? isNativeRuntimeAction(action)
+      : ['agent.execute', 'conversation.execute', 'runtime.execute', 'automation.execute'].includes(type)
+        || (type === 'task.execute' && (action.payload?.runtime || action.payload?.agent || action.payload?.modelId || action.payload?.prompt));
+    if (nativeAction) {
       const payload = action.payload || {};
-      const approvedWorkdir = payload.workdir || payload.workingDirectory || payload.working_directory || process.cwd();
-      const requestedCwd = payload.cwd || payload.workingDirectory || payload.working_directory || payload.workdir || '.';
-      const safeCwd = resolveApprovedPath(approvedWorkdir, requestedCwd);
+      const approvedWorkdir = process.platform === 'win32' ? resolveWindowsWorkdirPath(defaultWorkdir, payload.workdir || '.') : payload.workdir || payload.workingDirectory || payload.working_directory || process.cwd();
+      const requestedCwd = payload.cwd || payload.workingDirectory || payload.working_directory || (process.platform === 'win32' ? '.' : payload.workdir || '.');
+      const safeCwd = process.platform === 'win32' ? resolveWindowsWorkdir(approvedWorkdir, requestedCwd) : resolveApprovedPath(approvedWorkdir, requestedCwd);
       const runtime = payload.runtime || payload.agent || payload.runtimeName || defaultRuntime
         || Object.values(discoverInstalledRuntimes().runtimes).find(item => item.status === 'available')?.runtime;
       const prompt = payload.prompt ?? payload.message ?? payload.content ?? payload.instructions;

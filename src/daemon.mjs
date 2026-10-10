@@ -1,9 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { isNativeRuntimeAction, resolveWindowsWorkdir, resolveWindowsWorkdirPath } from './windows-workdir.mjs';
 
-function isAgentAction(action) {
+function needsNativeCwd(action) {
+  if (process.platform === 'win32') return isNativeRuntimeAction(action);
   const type = String(action?.type || '').toLowerCase();
-  return type === 'agent.execute' || type === 'conversation.execute' || type === 'runtime.execute'
+  return ['agent.execute', 'conversation.execute', 'runtime.execute'].includes(type)
     || (type === 'task.execute' && (action?.payload?.runtime || action?.payload?.agent));
 }
 
@@ -28,7 +30,7 @@ export class ActionDispatcher {
   #stateFile;
   constructor({execute, now = () => Date.now(), workdir = process.cwd(), onEvent = () => {}, stateFile = null} = {}) {
     if (typeof execute !== 'function') throw new TypeError('ActionDispatcher requires an execute function');
-    this.#execute = execute; this.#now = now; this.#workdir = path.resolve(workdir); this.#onEvent = onEvent;
+    this.#execute = execute; this.#now = now; this.#workdir = process.platform === 'win32' ? resolveWindowsWorkdirPath(process.cwd(), workdir) : path.resolve(workdir); this.#onEvent = onEvent;
     this.#stateFile = stateFile ? path.resolve(stateFile) : null; this.#loadState();
   }
   #loadState() {
@@ -52,7 +54,17 @@ export class ActionDispatcher {
     return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
   }
   #validateWorkdir(action) {
-    const requested = action?.payload?.workdir ?? action?.payload?.workingDirectory ?? action?.payload?.cwd;
+    const requested = action?.payload?.workdir ?? action?.payload?.workingDirectory ?? (process.platform === 'win32' ? action?.payload?.working_directory : undefined) ?? action?.payload?.cwd;
+    if (process.platform === 'win32' && isNativeRuntimeAction(action)) {
+      const payload = action.payload || {};
+      const base = resolveWindowsWorkdirPath(this.#workdir, payload.workdir || '.');
+      return resolveWindowsWorkdir(base, payload.cwd ?? payload.workingDirectory ?? payload.working_directory ?? '.');
+    }
+    if (process.platform === 'win32' && ['directory.inspect', 'device.directory.inspect'].includes(String(action?.type || ''))) {
+      // The directory target is resolved by the inspector. Keep its explicit
+      // relative base even when the daemon process itself lives in user data.
+      return resolveWindowsWorkdirPath(this.#workdir, action?.payload?.workdir || '.');
+    }
     const candidate = path.resolve(this.#workdir, String(requested || this.#workdir));
     if (!this.#inside(this.#workdir, candidate)) throw new Error('A2A action workdir is outside the registered runtime directory');
     // Realpath containment closes junction/symlink escapes for existing roots.
@@ -82,9 +94,10 @@ export class ActionDispatcher {
       const expiresAt = action.expiresAt ?? action.expires_at;
       if (expiresAt && Number.isFinite(Date.parse(String(expiresAt))) && Date.parse(String(expiresAt)) <= Date.now()) throw new Error('A2A action expired');
       const workdir = this.#validateWorkdir(action);
-      const executableAction = action.payload && typeof action.payload === 'object'
-        ? {...action, payload: {...action.payload, workdir, ...(isAgentAction(action) ? { cwd: workdir } : {})}}
-        : action;
+      const executableAction = process.platform === 'win32' || (action.payload && typeof action.payload === 'object') ? {...action, payload: {
+        ...(action.payload && typeof action.payload === 'object' ? action.payload : {}),
+        workdir, ...(needsNativeCwd(action) ? { cwd: workdir } : {})
+      }} : action;
       this.#onEvent('action.started', {actionId, type: action.type});
       const requestedTimeout = action.payload?.timeoutMs ?? action.payload?.timeout_ms;
       const hasHardTimeout = requestedTimeout !== undefined && requestedTimeout !== null && String(requestedTimeout).trim() !== '' && Number.isFinite(Number(requestedTimeout));
