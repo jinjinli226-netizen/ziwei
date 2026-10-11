@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import crypto from 'node:crypto';
 import { createRepository } from '../backend/repository.mjs';
 import { createApp } from '../backend/app.mjs';
 import { normalizeConversationAttachments } from '../backend/conversation-attachments.mjs';
@@ -22,7 +23,9 @@ test('image-only messages dispatch an image analysis prompt without inventing sa
   assert.equal(submitted.content, '');
   assert.equal(submitted.attachments[0].size, Buffer.from(pngContent, 'base64').length);
   assert.match(submitted.execution.payload.prompt, /图片/);
-  assert.equal(submitted.execution.payload.attachments[0].content, pngContent);
+  assert.deepEqual(submitted.execution.payload.attachments[0], { name: 'image.png', mimeType: 'image/png', size: Buffer.from(pngContent, 'base64').length });
+  const pending = repo.listA2AActions('test-111').find(action => action.id === submitted.execution.id);
+  assert.equal(crypto.createHash('sha256').update(Buffer.from(pending.payload.attachments[0].content, 'base64')).digest('hex'), crypto.createHash('sha256').update(Buffer.from(pngContent, 'base64')).digest('hex'));
   assert.equal(repo.getConversation(conversation.id).messages.length, 1);
   assert.equal(repo.db.prepare('SELECT COUNT(*) AS count FROM tasks WHERE workspace_id=?').get(conversation.workspace_id).count, taskCount);
 });

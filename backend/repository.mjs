@@ -22,6 +22,22 @@ const now = () => new Date().toISOString();
 const id = prefix => `${prefix}_${crypto.randomUUID()}`;
 const hashSecret = value => crypto.createHash('sha256').update(String(value || '')).digest('hex');
 const parse = value => { try { return JSON.parse(value); } catch { return []; } };
+const conversationAttachmentMetadata = attachments => Array.isArray(attachments) ? attachments.map(item => ({ name:item?.name ?? item?.filename, mimeType:item?.mimeType ?? item?.mime_type, size:item?.size })) : [];
+const conversationResultView = result => {
+  if (!result || typeof result !== 'object' || Array.isArray(result)) return result;
+  const view = { ...result };
+  if (Object.hasOwn(view, 'outputArtifacts')) view.outputArtifacts = conversationAttachmentMetadata(view.outputArtifacts);
+  if (view.result && typeof view.result === 'object' && !Array.isArray(view.result)) view.result = conversationResultView(view.result);
+  return view;
+};
+const conversationMessageView = row => {
+  const { attachment_json: attachmentJson, ...view } = row;
+  return { ...view, attachments:parse(attachmentJson) };
+};
+const a2aResponseView = (row, { payload = parse(row.payload_json), includeResult = true } = {}) => {
+  const { payload_json: _payloadJson, result_json: _resultJson, ...view } = row;
+  return { ...view, payload, result:includeResult ? parse(row.result_json) : null };
+};
 function toSkillRecord(row) {
   if (!row) return null;
   return { ...row, installed: Boolean(row.installed), recommended: Boolean(row.recommended), tags: parse(row.tags_json), integration: jsonObject(row.integration_json) };
@@ -395,6 +411,14 @@ export function createRepository(options = {}) {
     error: row.error || null,
     ...(includeEvents ? { events: actionEvents(row.id) } : {})
   }) : null;
+  // Message attachments are the canonical image bytes. History/sidebar and
+  // send-status views retain execution metadata without retransmitting them.
+  const conversationActionView = (row, options) => {
+    const view = actionView(row, options);
+    if (!view) return null;
+    if (view.payload && Object.hasOwn(view.payload, 'attachments')) view.payload = { ...view.payload, attachments:conversationAttachmentMetadata(view.payload.attachments) };
+    return { ...view, result:conversationResultView(view.result) };
+  };
   const actionTargetDevice = row => {
     const payload = parse(row?.payload_json);
     return String(payload.deviceId || payload.device_id || payload.targetDeviceId || payload.target_device_id || '').trim() || null;
@@ -425,7 +449,7 @@ export function createRepository(options = {}) {
       db.prepare("UPDATE a2a_actions SET status='expired',completed_at=? WHERE id=? AND status IN ('pending','acked')").run(timestamp, current.id);
       current = { ...current, status:'expired', completed_at:timestamp };
     }
-    const view = actionView(current);
+    const view = conversationActionView(current);
     view.events = actionEvents(current.id);
     return view;
   };
@@ -1557,7 +1581,7 @@ export function createRepository(options = {}) {
         employee_binding: employee ? 'bound' : 'unassigned_legacy',
         requires_employee_assignment: !employee,
         execution:conversationExecution(conversationId),
-        messages:db.prepare('SELECT * FROM conversation_messages WHERE conversation_id=? ORDER BY created_at').all(conversationId).map(item=>({...item,attachments:parse(item.attachment_json)}))
+        messages:db.prepare('SELECT * FROM conversation_messages WHERE conversation_id=? ORDER BY created_at').all(conversationId).map(conversationMessageView)
       };
     },
     createConversation(slug,input={}) { const ws=workspace(slug); if(!ws) throw new Error('Workspace not found'); const employeeId=input.employeeId || input.employee_id || null; const employee=employeeId ? assertEmployeeVisible(db.prepare('SELECT * FROM employees WHERE id=? AND workspace_id=?').get(employeeId,ws.id), input) : null; const deviceId=String(input.deviceId ?? input.device_id ?? input.targetDeviceId ?? input.target_device_id ?? employee?.target_device_id ?? '').trim() || null; if (deviceId) { const device=db.prepare('SELECT * FROM devices WHERE id=? AND workspace_id=?').get(deviceId,ws.id); if (!device) throw new Error('目标设备不属于当前工作区'); if (device.status === 'disabled') throw new Error('目标设备已停用'); const privilegedDeviceRole=['owner','admin'].includes(String(input.actorRole || '').toLowerCase()); if (ws.kind === 'personal' && input.enforceDeviceOwnership && !privilegedDeviceRole && (!input.actorUserId || device.owner_user_id !== input.actorUserId)) throw new Error('个人工作区只能使用本人的设备'); } const timestamp=now(); const modelId=String(input.modelId ?? input.model_id ?? input.model ?? '').trim() || null; const workingDirectory=String(input.workingDirectory ?? input.working_directory ?? input.cwd ?? input.workdir ?? '').trim().slice(0,4096) || null; const conversation={id:id('conv'),workspace_id:ws.id,employee_id:employeeId,title:String(input.title || '新对话').trim() || '新对话',status:'active',model_id:modelId,working_directory:workingDirectory,device_id:deviceId,created_at:timestamp,updated_at:timestamp}; db.prepare('INSERT INTO conversations(id,workspace_id,employee_id,title,status,model_id,working_directory,device_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)').run(conversation.id,ws.id,employeeId,conversation.title,'active',modelId,workingDirectory,deviceId,timestamp,timestamp); audit(slug,'user','conversation.created',{conversationId:conversation.id,employeeId,modelId,workingDirectory,deviceId}); return {...conversation,employee:conversationEmployeeView(employee),employee_binding:employee ? 'bound' : 'unassigned_legacy',requires_employee_assignment:!employee,messages:[]}; },
@@ -1628,7 +1652,7 @@ export function createRepository(options = {}) {
           const saved = db.prepare('SELECT * FROM conversation_messages WHERE id=? AND conversation_id=?').get(existing.resource_id, conversationId);
           if (!saved) { const error = new Error('已提交消息无法读取，请刷新会话后重试'); error.status = 409; throw error; }
           const action = db.prepare('SELECT * FROM a2a_actions WHERE workspace_id=? AND dedupe_key=?').get(ws.id, `conversation:${conversationId}:${saved.id}`);
-          return { ...saved, attachments: parse(saved.attachment_json), clientMessageId, duplicate: true, execution: action ? actionView(action, { includeEvents: true }) : null };
+          return { ...conversationMessageView(saved), clientMessageId, duplicate: true, execution: conversationActionView(action, { includeEvents: true }) };
         }
       }
       // Creator history injection needs the new message to exist. Keep that
@@ -1685,10 +1709,10 @@ export function createRepository(options = {}) {
       const deviceId = String(input.deviceId || input.device_id || '').trim();
       const rows=db.prepare(`SELECT * FROM a2a_actions WHERE workspace_id=? AND agent_id=? AND status IN (${placeholders}) ORDER BY created_at`).all(ws.id,agentId,...statuses);
       return rows.filter(row => !deviceId || !actionTargetDevice(row) || actionTargetDevice(row) === deviceId)
-        .map(row => ({...row,payload:executionActionPayload(row),result:parse(row.result_json)}));
+        .map(row => a2aResponseView(row, { payload:executionActionPayload(row), includeResult:input.includeResult !== false }));
     },
     ackA2AAction(actionId, input = {}) {
-      const row=db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId); if (!row) throw new Error('A2A action not found'); if (input.agentId && String(input.agentId) !== row.agent_id) throw new Error('A2A agent mismatch'); if (row.status === 'expired') throw new Error('A2A action expired'); if (row.status === 'succeeded' || row.status === 'failed') return {...row,duplicate:true,payload:parse(row.payload_json),result:parse(row.result_json)};
+      const row=db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId); if (!row) throw new Error('A2A action not found'); if (input.agentId && String(input.agentId) !== row.agent_id) throw new Error('A2A agent mismatch'); if (row.status === 'expired') throw new Error('A2A action expired'); if (row.status === 'succeeded' || row.status === 'failed') return {...a2aResponseView(row),duplicate:true};
       assertActionDevice(row, input);
       const timestamp=now(); const timestampMs=Date.parse(timestamp); const payload=parse(row.payload_json); const originalExpiryMs=Date.parse(row.expires_at || '');
       if (row.status === 'pending' && Number.isFinite(originalExpiryMs) && originalExpiryMs <= timestampMs) {
@@ -1699,7 +1723,7 @@ export function createRepository(options = {}) {
       const leaseExpiry = new Date(timestampMs + executionLeaseMs).toISOString();
       const expiresAt = Number.isFinite(originalExpiryMs) && originalExpiryMs > Date.parse(leaseExpiry) ? row.expires_at : leaseExpiry;
       db.prepare("UPDATE a2a_actions SET status='acked',acked_at=?,expires_at=? WHERE id=? AND status='pending'").run(timestamp,expiresAt,actionId);
-      markTaskRunning(row.task_id); const updated=db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId); return {...updated,duplicate:updated.acked_at !== timestamp,payload:parse(updated.payload_json),result:parse(updated.result_json)};
+      markTaskRunning(row.task_id); const updated=db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId); return {...a2aResponseView(updated),duplicate:updated.acked_at !== timestamp};
     },
     recordA2AEvent(actionId, input = {}) { const row=db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId); if(!row) throw new Error('A2A action not found'); if(input.agentId && String(input.agentId)!==row.agent_id) throw new Error('A2A agent mismatch'); assertActionDevice(row, input); if (['succeeded','failed','expired'].includes(row.status)) throw new Error('A2A action is already terminal'); const event={id:id('action-event'),action_id:actionId,type:String(input.type || 'progress').slice(0,80),message:String(input.message || '').slice(0,4000),data:input.data ?? null,created_at:now()}; db.prepare('INSERT INTO a2a_action_events(id,action_id,type,message,data_json,created_at) VALUES(?,?,?,?,?,?)').run(event.id,event.action_id,event.type,event.message,JSON.stringify(event.data),event.created_at); const leaseExpiry=new Date(Date.parse(event.created_at)+a2aExecutionTimeoutMs(parse(row.payload_json))+A2A_EXECUTION_LEASE_BUFFER_MS).toISOString(); db.prepare("UPDATE a2a_actions SET expires_at=? WHERE id=? AND status IN ('pending','acked')").run(leaseExpiry,actionId); const ws=db.prepare('SELECT slug FROM workspaces WHERE id=?').get(row.workspace_id); if (ws) audit(ws.slug,'ziwei_user','a2a.action.event',{actionId,type:event.type,message:event.message}); return event; },
     listA2AEvents(actionId) { const row=db.prepare('SELECT id FROM a2a_actions WHERE id=?').get(actionId); if (!row) throw new Error('A2A action not found'); return db.prepare('SELECT id,action_id,type,message,data_json,created_at FROM a2a_action_events WHERE action_id=? ORDER BY created_at,id').all(actionId).map(item => ({...item,data:parse(item.data_json)})); },
@@ -1708,7 +1732,7 @@ export function createRepository(options = {}) {
       if (!row) throw new Error('A2A action not found');
       if (input.agentId && String(input.agentId) !== row.agent_id) throw new Error('A2A agent mismatch');
       assertActionDevice(row, input);
-      if (['succeeded', 'failed', 'expired'].includes(row.status)) return { ...row, duplicate: true, payload: parse(row.payload_json), result: parse(row.result_json) };
+      if (['succeeded', 'failed', 'expired'].includes(row.status)) return { ...a2aResponseView(row), duplicate: true };
       let status = String(input.status || (input.error ? 'failed' : 'succeeded'));
       if (!['succeeded', 'failed'].includes(status)) throw new Error('A2A result status must be succeeded or failed');
       const payload = parse(row.payload_json);
@@ -1762,7 +1786,7 @@ export function createRepository(options = {}) {
         throw writeError;
       }
       const updated = db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId);
-      return { ...updated, payload, result: parse(updated.result_json) };
+      return a2aResponseView(updated, { payload });
     },
     getA2AAction(actionId, { workspaceSlug = null, actorUserId = null } = {}) {
       const row = db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(String(actionId || ''));
