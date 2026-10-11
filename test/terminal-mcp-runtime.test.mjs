@@ -252,6 +252,7 @@ test('local executor removes the execution capability even when an explicit runt
     const runtimeDir = path.join(f.root, 'runtime');
     const executor = createLocalActionExecutor({ runtimeDir, workspace: 'phone_ai', deviceId: 'device_workstation', deviceToken: 'paired-workstation-secret', apiBase: `http://127.0.0.1:${server.address().port}` });
     await assert.rejects(() => executor({ id: 'action_phone', workspace: 'phone_ai', type: 'agent.execute', payload: { deviceId: 'device_workstation', runtime: 'UnknownExplicitRuntime', workdir: f.root, prompt: 'do not start a model', terminalMcp: f.request } }), /未知本机运行时/);
-    assert.deepEqual(fs.readdirSync(path.join(runtimeDir, 'terminal-mcp-credentials')), []);
+    const credentialDirectory=path.join(runtimeDir,'terminal-mcp-credentials');
+    assert.deepEqual(fs.existsSync(credentialDirectory)?fs.readdirSync(credentialDirectory):[], [], 'invalid runtime must leave no execution credentials');
   } finally { await new Promise(resolve => server.close(resolve)); fs.rmSync(f.root, { recursive: true, force: true }); }
 });

@@ -62,7 +62,8 @@ test('conversation messages render safe image previews and attachment metadata',
 
 test('oversized conversation requests expose a readable 413 error', () => {
   assert.match(apiSource, /response\.status === 413/);
-  assert.match(appSource, /error\.status === 413 \? '附件太大，请选择 10 MB 以内的图片后重试'/);
+  assert.match(appSource, /error\.status === 413/);
+  assert.match(appSource, /10 MB 以内的图片后重试（每条消息图片合计）/);
 });
 
 test('conversation changes clear a pending attachment before it can leak across threads', () => {

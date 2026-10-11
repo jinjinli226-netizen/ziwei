@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { ActionDispatcher } from '../src/daemon.mjs';
 import { createActionScheduler } from '../src/daemon-action-scheduler.mjs';
 import { createLocalActionExecutor } from '../src/local-action.mjs';
+import { imageArtifactEventResult, imageArtifactDeliveryBody } from '../src/conversation-image-artifacts.mjs';
 import { redactSecrets } from '../src/redaction.mjs';
 import { discoverInstalledRuntimes, terminalMcpStatus } from '../src/runtime-adapters.mjs';
 import { readA2AToken } from '../backend/a2a-auth.mjs';
@@ -234,9 +235,11 @@ async function executePolledAction(connection, action) {
   const result=await connection.dispatcher.dispatch(action);
   const terminalStatus = result.status === 'succeeded' || (result.status === 'duplicate' && result.originalStatus === 'succeeded') ? 'succeeded' : 'failed';
   if (terminalStatus === 'succeeded' && action.type === 'hermes.profile.create') await refreshRuntimeDiscovery(connection);
-  await postActionEvent(connection, action.id, terminalStatus, { result: result.result ?? null, error: terminalStatus === 'failed' ? (result.error || 'ziwei_user execution failed') : null });
-  await postAction(connection, `/a2a/v1/actions/${encodeURIComponent(action.id)}/result`, { status:terminalStatus, result:result.result ?? result, error:terminalStatus === 'failed' ? (result.error || 'ziwei_user execution failed') : null });
-  log('a2a_result', { workspace: connection.config.workspace, actionId:action.id, status:terminalStatus, dispatcherStatus:result.status });
+  const delivery=imageArtifactDeliveryBody({ status:terminalStatus, result:result.result ?? result, error:terminalStatus === 'failed' ? (result.error || 'ziwei_user execution failed') : null });
+  await postActionEvent(connection, action.id, delivery.status, { result: imageArtifactEventResult(delivery.result), error:delivery.error });
+  const receipt=await postAction(connection, `/a2a/v1/actions/${encodeURIComponent(action.id)}/result`, delivery);
+  const confirmedStatus=['succeeded','failed'].includes(receipt?.status)?receipt.status:delivery.status;
+  log('a2a_result', { workspace: connection.config.workspace, actionId:action.id, status:confirmedStatus, dispatcherStatus:result.status });
 }
 function heartbeatFresh() {
   if (!lastHeartbeatAt) return false;

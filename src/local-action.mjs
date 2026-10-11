@@ -1,10 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
-import {executeRuntime, bootstrapTerminalMcp, discoverInstalledRuntimes, hermesHome, hermesProfileHome} from './runtime-adapters.mjs';
+import {executeRuntime, runtimeInvocation, bootstrapTerminalMcp, discoverInstalledRuntimes, hermesHome, hermesProfileHome} from './runtime-adapters.mjs';
 import { createManagementBootstrap } from './management-bootstrap.mjs';
 import {normalizeRuntimeProfile} from './employee-runtime.mjs';
 import { isNativeRuntimeAction, resolveWindowsWorkdir, resolveWindowsWorkdirPath, windowsDirectoryError } from './windows-workdir.mjs';
+import { createImageArtifactSession } from './conversation-image-artifacts.mjs';
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_OUTPUT_BYTES = 1024 * 1024;
@@ -170,8 +171,8 @@ function decodeAttachmentContent(attachment) {
 
 /**
  * Materialize browser-uploaded attachments below the selected workstation
- * directory. The CLI receives paths in its prompt, while the original bytes
- * stay local to the paired computer and never get written by the server.
+ * directory. Supported images receive native vision arguments; non-image
+ * files receive prompt paths. Input paths are distinct from declared outputs.
  */
 export function materializeRuntimeAttachments({attachments = [], cwd, actionId = 'action'} = {}) {
   if (!Array.isArray(attachments) || !attachments.length) return [];
@@ -358,7 +359,7 @@ function runCommand({runtimeDir, action, executable, baseArgs = [], allowedExecu
  * Unknown/unsupported actions fail loudly so the cloud never sees a fake
  * success merely because an action was accepted by the daemon.
  */
-export function createLocalActionExecutor({runtimeDir, defaultWorkdir = process.cwd(), allowedExecutables = [], executorCommand = null, executorArgs = [], defaultRuntime = null, hermesHomePath = null, managementMcpConfig = {}, managementBootstrap = null, terminalMcpConfig = {}, workspace = null, apiBase = null, deviceId = null, deviceToken = null, onWorkspaceConnect = null} = {}) {
+export function createLocalActionExecutor({runtimeDir, defaultWorkdir = process.cwd(), allowedExecutables = [], executorCommand = null, executorArgs = [], defaultRuntime = null, hermesHomePath = null, codexMcpDisabledServers = [], managementMcpConfig = {}, managementBootstrap = null, terminalMcpConfig = {}, workspace = null, apiBase = null, deviceId = null, deviceToken = null, onWorkspaceConnect = null} = {}) {
   if (!runtimeDir) throw new TypeError('runtimeDir is required');
   fs.mkdirSync(runtimeDir, {recursive: true});
   const automaticManagement = managementBootstrap || (workspace && deviceToken ? createManagementBootstrap({ workspace, apiBase, deviceId, deviceToken, cacheDirectory: path.join(runtimeDir, 'management-mcp-credentials') }) : null);
@@ -405,6 +406,9 @@ export function createLocalActionExecutor({runtimeDir, defaultWorkdir = process.
       const promptWithAttachments = attachmentPaths.length
         ? `${String(prompt || '').trim()}\n\n[本机附件]\n${attachmentPaths.map(item => `- ${item.name}: ${item.path}`).join('\n')}`
         : prompt;
+      // Refuse unsupported vision combinations before preparing any MCP session.
+      runtimeInvocation(runtime,{prompt:promptWithAttachments,attachments:attachmentPaths});
+      const imageArtifacts = createImageArtifactSession({runtimeDir,actionId:action.id,conversationId:payload.conversationId || null});
       if (payload.terminalMcp?.enabled === true && terminalMcpConfig.enabled === false) throw new Error('本机手机 MCP 已明确禁用');
       const preparedManagement = automaticManagement ? await automaticManagement.prepare({ signal: context.signal }) : managementMcpConfig;
       const phoneSession = await bootstrapTerminalMcp({ request: payload.terminalMcp, workspace, actionId: action.id, apiBase, deviceToken, privateDirectory: path.join(runtimeDir, 'terminal-mcp-credentials'), signal: context.signal });
@@ -414,6 +418,8 @@ export function createLocalActionExecutor({runtimeDir, defaultWorkdir = process.
         profile: payload.profile || payload.runtimeProfile || payload.runtime_profile || payload.hermesProfile || payload.hermes_profile || null,
         prompt: promptWithAttachments,
         attachments: attachmentPaths,
+        imageArtifacts,
+        codexMcpDisabledServers,
         cwd: safeCwd,
         env: { ...(payload.env || {}), ...(hermesHomePath ? { HERMES_HOME: hermesHomePath } : {}) },
         ...(payload.employeeTemplateId === 'ziwei-employee-creator' ? {

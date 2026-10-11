@@ -9,6 +9,7 @@ import { redactSecrets } from './redaction.mjs';
 import { normalizeRuntimeProfile } from './employee-runtime.mjs';
 import { prepareCreatorRuntimeHome, CREATOR_RUNTIME_ENV_KEYS } from './creator-runtime-home.mjs';
 import { createCliDiscoveryContext, discoverRuntimeCli, carryRuntimeDiscoveryEnvironment, runtimeDiscoveryEnvironment } from './runtime-cli-discovery.mjs';
+import { imageArtifactInstructions, readImageArtifacts, validateImageBytes, imageArtifactDeliveryBody, MAX_CONVERSATION_IMAGE_BYTES, MAX_ACTION_RESULT_JSON_BYTES } from './conversation-image-artifacts.mjs';
 
 /**
  * Native local runtime adapters used by ziwei_user.
@@ -365,8 +366,8 @@ const DEFINITIONS = {
   Codex: {
     aliases: ['codex', 'Codex'],
     versionArgs: ['--version'],
-    invoke: ({ prompt, model }) => ({
-      args: ['exec', '--json', '--ephemeral', '--skip-git-repo-check', '--dangerously-bypass-approvals-and-sandbox', '--config', 'model_reasoning_summary="auto"', ...(model ? ['--model', model] : []), '-'],
+    invoke: ({ prompt, model, images = [] }) => ({
+      args: ['exec', '--json', '--ephemeral', '--skip-git-repo-check', '--dangerously-bypass-approvals-and-sandbox', '--config', 'model_reasoning_summary="auto"', ...(model ? ['--model', model] : []), ...images.flatMap(file=>['--image',file]), '-'],
       stdin: prompt,
       format: 'json-lines',
     }),
@@ -383,8 +384,8 @@ const DEFINITIONS = {
   Hermes: {
     aliases: ['hermes', 'Hermes'],
     versionArgs: ['--version'],
-    invoke: ({ prompt, model }) => ({
-      args: ['-z', prompt, '--yolo', ...(model ? ['--model', model] : [])],
+    invoke: ({ prompt, model, images = [] }) => ({
+      args: images.length ? ['--yolo','chat','-q',prompt,'-Q','--image',images[0],...(model ? ['--model',model] : [])] : ['-z', prompt, '--yolo', ...(model ? ['--model', model] : [])],
       stdin: null,
       format: 'text',
     }),
@@ -801,16 +802,30 @@ export function parseRuntimeStreamLine(line, state, onOutput = () => {}, onStage
 }
 
 /** Execute an installed CLI using an explicit argv, with full local approval. */
-export function executeRuntime({ runtime, prompt, model = null, profile = null, cwd = process.cwd(), env = {}, attachments = [], managementMcp = null, terminalMcp = null, creatorInstance, creatorInstanceDirectory, signal, onOutput, onProgress, onStage } = {}) {
+export function executeRuntime({ runtime, prompt, model = null, profile = null, cwd = process.cwd(), env = {}, attachments = [], imageArtifacts = null, codexMcpDisabledServers = [], managementMcp = null, terminalMcp = null, creatorInstance, creatorInstanceDirectory, signal, onOutput, onProgress, onStage } = {}) {
   const resolvedRuntime = normalizeRuntime(runtime);
   if (!resolvedRuntime) return Promise.reject(new Error(`未知本机运行时: ${runtime || '(empty)'}`));
-  const definition = DEFINITIONS[resolvedRuntime];
+  const imageInputs = attachments.filter(item=>/^image\//i.test(item?.mimeType || '') || /\.(?:png|jpe?g|gif|webp)$/i.test(item?.path || ''));
+  let content = String(prompt ?? '').trim();
+  if (!content && imageInputs.length) content = '请查看输入图片，并根据图片内容作答。';
+  if (!content) return Promise.reject(new Error('agent.execute 需要非空 prompt'));
+  if (imageArtifacts) content += imageArtifactInstructions(imageArtifacts);
+  let invocation;
+  try {
+    invocation = runtimeInvocation(resolvedRuntime,{prompt:content,model,attachments});
+    let total = 0;
+    for (const input of imageInputs) {
+      const stat = fs.lstatSync(input.path);
+      if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_CONVERSATION_IMAGE_BYTES) throw new Error('输入图片必须是普通文件，且不能超过 10 MiB');
+      const bytes = fs.readFileSync(input.path);
+      validateImageBytes(bytes,/^image\//i.test(input.mimeType || '') ? input.mimeType : null);
+      total += bytes.length;if (total > MAX_CONVERSATION_IMAGE_BYTES) throw new Error('输入图片总大小不能超过 10 MiB');
+    }
+  } catch (error) { return Promise.reject(error); }
   const discovered = discoverInstalledRuntimes().runtimes[resolvedRuntime];
   if (!discovered?.binary || discovered.status === 'unavailable') return Promise.reject(new Error(`${resolvedRuntime} CLI 不可用：${discovered?.detection?.reason || '未安装、不可运行或不在 PATH 中'}${discovered?.detection?.reasonCode ? ` (${discovered.detection.reasonCode})` : ''}`));
-  const content = String(prompt ?? '').trim();
-  if (!content) return Promise.reject(new Error('agent.execute 需要非空 prompt'));
-  let invocation = definition.invoke({ prompt: content, model: model ? String(model) : null });
   let childEnv = { ...process.env, ...env };
+  if (imageArtifacts) Object.assign(childEnv,{ZIWEI_IMAGE_OUTPUT_DIR:imageArtifacts.directory,ZIWEI_IMAGE_OUTPUT_MANIFEST:imageArtifacts.manifestPath,ZIWEI_IMAGE_OUTPUT_ACTION_ID:imageArtifacts.actionId,ZIWEI_IMAGE_OUTPUT_CONVERSATION_ID:imageArtifacts.conversationId || ''});
   if (process.platform === 'win32' && !Object.keys(env).some(key => /^path$/i.test(key))) {
     const detectedEnv = runtimeDiscoveryEnvironment(discovered);
     if (detectedEnv.PATH) {
@@ -853,6 +868,17 @@ export function executeRuntime({ runtime, prompt, model = null, profile = null, 
     cleanupOverlay = launch.cleanup || cleanupOverlay;
     const phoneLaunch = prepareTerminalMcpLaunch({ runtime: resolvedRuntime, profile, invocation, env: childEnv, profileBaseHome, hermesOverlayHome: launch.overlayHome, ...(terminalMcp || {}) });
     invocation = phoneLaunch.invocation; childEnv = phoneLaunch.env; phoneReceipt = phoneLaunch.receipt;
+    // Internal executor policy, never an A2A payload field. One-shot QA can
+    // disable host MCP servers without editing the native HOME configuration.
+    if (resolvedRuntime === 'Codex' && codexMcpDisabledServers.length) {
+      if (!Array.isArray(codexMcpDisabledServers) || codexMcpDisabledServers.some(name=>typeof name !== 'string' || !name || name.length > 200 || /[\u0000-\u001f\u007f]/.test(name))) throw new Error('Codex MCP 禁用名单必须是安全的服务名数组');
+      // Codex splits dotted override paths without parsing quoted segments.
+      // Quote server keys in a TOML inline-table value instead (also safe for
+      // literal names containing dots); merging preserves native transport.
+      const table=[...new Set(codexMcpDisabledServers)].map(name=>`${JSON.stringify(name)}={enabled=false}`).join(',');
+      const flags=['--config',`mcp_servers={${table}}`];
+      const index=invocation.args.lastIndexOf('-');invocation.args.splice(index<0?invocation.args.length:index,0,...flags);
+    }
     if (resolvedRuntime === 'Hermes' && !receipt && !phoneReceipt) childEnv.HERMES_HOME = hermesProfileHome(profile || 'default', { baseHome: profileBaseHome });
   } catch (error) { cleanupOverlay(); return Promise.reject(error); }
   let spec;
@@ -920,12 +946,16 @@ export function executeRuntime({ runtime, prompt, model = null, profile = null, 
       if (diagnosticBuffer) consumeDiagnostics('\n');
       if (state.lineBuffer) parseRuntimeStreamLine(state.lineBuffer, state, onOutput, onStage);
       if (signal?.aborted) return finish({ status: 'failed', code: 'cancelled', error: 'runtime execution cancelled', result: { runtime: resolvedRuntime, code, signal: childSignal, output: state.output, truncated: state.truncated } });
-    const result = { runtime: resolvedRuntime, model: selectedModel, profile: profile || null, binary: discovered.binary, code, signal: childSignal, output: state.response.trim() || state.output, diagnostics: state.response.trim() ? state.output : null, truncated: state.truncated, ...(spec.nativeBinding ? { hermesBootstrap: spec.nativeBinding } : {}), ...(creatorPrepared ? { creatorIsolation: creatorIsolation || { ...creatorPrepared, enabled: false, reasonCode: 'native_isolation_unconfirmed' } } : {}), ...(receipt ? { managementMcp: managementMcpReceipt(receipt) } : {}), ...(phoneReceipt ? { terminalMcp: terminalMcpReceipt(phoneReceipt) } : {}), ...(attachments.length ? {attachments} : {}) };
+    const result = { runtime: resolvedRuntime, model: selectedModel, profile: profile || null, binary: discovered.binary, code, signal: childSignal, output: state.response.trim() || state.output, diagnostics: state.response.trim() ? state.output : null, truncated: state.truncated, ...(spec.nativeBinding ? { hermesBootstrap: spec.nativeBinding } : {}), ...(creatorPrepared ? { creatorIsolation: creatorIsolation || { ...creatorPrepared, enabled: false, reasonCode: 'native_isolation_unconfirmed' } } : {}), ...(receipt ? { managementMcp: managementMcpReceipt(receipt) } : {}), ...(phoneReceipt ? { terminalMcp: terminalMcpReceipt(phoneReceipt) } : {}), ...(attachments.length ? {inputAttachments:attachments} : {}) };
       if (code === 0 && creatorPrepared && !creatorIsolation) return finish({ status: 'failed', code: 'creator_isolation_unconfirmed', error: 'Hermes 未确认 Creator 实例状态隔离；不能报告执行成功', result });
       const mcpFailure = code === 0 ? managementMcpExecutionFailure(result.managementMcp) || terminalMcpExecutionFailure(result.terminalMcp) : null;
       if (mcpFailure) return finish({ status: 'failed', ...mcpFailure, result });
       if (code !== 0) return finish({ status: 'failed', code: 'runtime_failed', error: formatRuntimeFailure(resolvedRuntime, code, state.output), result });
-      finish({ status: 'succeeded', result });
+      if (imageArtifacts) {
+        try { result.outputArtifacts = readImageArtifacts(imageArtifacts); }
+        catch (error) { return finish({status:'failed',code:error.code || 'image_artifact_invalid',error:error.message,result}); }
+      }
+      finish(imageArtifactDeliveryBody({ status: 'succeeded', result },{maxBytes:MAX_ACTION_RESULT_JSON_BYTES-64*1024}));
     });
     if (invocation.stdin !== null && invocation.stdin !== undefined) child.stdin.end(String(invocation.stdin));
     else child.stdin.end();
@@ -934,10 +964,14 @@ export function executeRuntime({ runtime, prompt, model = null, profile = null, 
 
 export function runtimeDefinitions() { return Object.keys(DEFINITIONS).map(runtime => ({ runtime, flags: ['full_local_permission'] })); }
 
-export function runtimeInvocation(runtime, { prompt, model = null } = {}) {
+export function runtimeInvocation(runtime, { prompt, model = null, attachments = [] } = {}) {
   const resolvedRuntime = normalizeRuntime(runtime);
   if (!resolvedRuntime) throw new Error(`未知本机运行时: ${runtime || '(empty)'}`);
-  return DEFINITIONS[resolvedRuntime].invoke({ prompt: String(prompt ?? ''), model: model ? String(model) : null });
+  const images = attachments.filter(item=>/^image\//i.test(item?.mimeType || '') || /\.(?:png|jpe?g|gif|webp)$/i.test(item?.path || '')).map(item=>String(item.path || ''));
+  if (images.length && !['Codex','Hermes'].includes(resolvedRuntime)) throw new Error(`${resolvedRuntime} 图片输入尚未实现原生视觉通道；不能把图片路径当作视觉输入`);
+  if (resolvedRuntime === 'Hermes' && images.length > 1) throw new Error('Hermes 原生单次查询仅支持一张输入图片；不会丢弃图片或伪装文字路径');
+  if (images.some(file=>!file)) throw new Error('图片输入缺少本机文件路径');
+  return DEFINITIONS[resolvedRuntime].invoke({ prompt: String(prompt ?? ''), model: model ? String(model) : null,images });
 }
 
 

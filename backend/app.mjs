@@ -556,7 +556,10 @@ export function createApp(options = {}) {
       return res.json({ action });
     } catch (error) { return next(error); }
   });
-  app.post('/api/conversations/:id/messages', (req, res) => res.status(201).json(repo.addConversationMessage(req.params.id, { ...(req.body || {}), actorUserId: req.auth?.user_id, actorRole: req.workspaceRole, enforceDeviceOwnership: true, enforceEmployeeVisibility: true })));
+  app.post('/api/conversations/:id/messages', (req, res) => {
+    const message = repo.addConversationMessage(req.params.id, { ...(req.body || {}), actorUserId: req.auth?.user_id, actorRole: req.workspaceRole, enforceDeviceOwnership: true, enforceEmployeeVisibility: true });
+    res.status(message.duplicate ? 200 : 201).json(message);
+  });
   app.post('/api/conversations/:id/archive', (req, res) => {
     const conversation = repo.getConversation(req.params.id, employeeContext(req));
     if (!conversation) return res.status(404).json({ error: 'Conversation not found' });

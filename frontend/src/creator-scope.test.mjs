@@ -38,6 +38,7 @@ test('same-workspace load preserves the selected conversation second device thro
 test('workspace switching immediately removes the old send target, draft and attachment while loading',async()=>{
   const switchSource=source('switchWorkspace'),sendSource=source('sendConversationMessage');
   const refs=Object.fromEntries([...`${switchSource}${sendSource}`.matchAll(/(\w+)\.value/g)].map(match=>[match[1],{value:[]} ]));
+  refs.conversationAttachment={value:null};
   refs.page.value='inbox';refs.selectedConversation.value={id:'old-a',employee_id:'worker-a'};refs.conversationDraft.value='old draft';refs.conversationAttachment.value={name:'old.png'};refs.employees.value=[{id:'worker-a'}];
   let slug='a',finishLoad,writes=0,stopped=0;const delayed=new Promise(resolve=>finishLoad=resolve);
   const change=implementation('switchWorkspace',{...refs,workspaceSlug:()=>slug,setWorkspaceSlug:value=>slug=value,history:{pushState(){}},routePath:()=>'',clearConversationAttachment:()=>refs.conversationAttachment.value=null,stopConversationPolling:()=>stopped++,closeRealtime:()=>{},load:()=>delayed,loadZiweiConnect:async()=>{}});

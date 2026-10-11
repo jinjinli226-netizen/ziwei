@@ -16,6 +16,7 @@ import { fetchSafeUrl, validateSafeUrl } from './ssrf.mjs';
 import { acceptInvitationMembership } from './invitation-membership.mjs';
 import { syncPhoneSkill } from './skills/catalog.mjs';
 import { redactSecrets } from '../src/redaction.mjs';
+import { normalizeConversationAttachments } from './conversation-attachments.mjs';
 
 const now = () => new Date().toISOString();
 const id = prefix => `${prefix}_${crypto.randomUUID()}`;
@@ -52,23 +53,6 @@ const normalizeEmail = value => String(value || '').trim().toLowerCase();
 const jsonObject = value => { try { const parsed = JSON.parse(value); return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}; } catch { return {}; } };
 const normalizeDescriptionFormat = value => ['plain', 'markdown', 'html'].includes(String(value || '').toLowerCase()) ? String(value).toLowerCase() : 'plain';
 const taskAttachmentView = row => row ? ({ id:row.id, task_id:row.task_id, name:row.name, mime_type:row.mime_type, size:Number(row.size || 0), content_encoding:row.content_encoding, storage_key:row.storage_key, checksum:row.checksum, created_at:row.created_at }) : null;
-const normalizeConversationAttachments = value => {
-  if (!Array.isArray(value) || !value.length) return [];
-  let total = 0;
-  return value.slice(0, 20).map((item, index) => {
-    if (!item || typeof item !== 'object') throw new Error('会话附件格式无效');
-    const name = path.basename(String(item.name || item.filename || `attachment-${index + 1}`)).slice(0, 255) || `attachment-${index + 1}`;
-    const supplied = item.content ?? item.data ?? item.contentBase64;
-    if (supplied === undefined || supplied === null || supplied === '') return { ...item, name };
-    const encoding = String(item.contentEncoding ?? item.content_encoding ?? 'base64').toLowerCase();
-    const bytes = encoding === 'utf8' || encoding === 'utf-8' || encoding === 'text'
-      ? Buffer.from(String(supplied), 'utf8')
-      : decodeDocumentBase64(String(supplied).replace(/-/g, '+').replace(/_/g, '/'));
-    total += bytes.length;
-    if (bytes.length > 10 * 1024 * 1024 || total > 10 * 1024 * 1024) throw new Error('会话附件总大小不能超过 10 MiB');
-    return { ...item, name, content: bytes.toString('base64'), contentEncoding: 'base64', size: bytes.length, mimeType: String(item.mimeType || item.mime_type || 'application/octet-stream').slice(0, 255) };
-  });
-};
 const decodeDocumentBase64 = value => {
   const input = String(value ?? '').trim();
   if (!input) return Buffer.alloc(0);
@@ -1611,7 +1595,64 @@ export function createRepository(options = {}) {
       if (!action || action.type !== 'directory.inspect' || String(action.payload?.conversationId || '') !== String(conversationId)) return null;
       return action;
     },
-    addConversationMessage(conversationId,input={}) { const conversation=db.prepare('SELECT * FROM conversations WHERE id=?').get(conversationId); if(!conversation) throw new Error('Conversation not found'); const ws=db.prepare('SELECT * FROM workspaces WHERE id=?').get(conversation.workspace_id); const employee=conversation.employee_id ? assertEmployeeVisible(db.prepare('SELECT * FROM employees WHERE id=? AND workspace_id=?').get(conversation.employee_id,conversation.workspace_id), input) : null; const targetDeviceId=String(input.targetDeviceId || input.target_device_id || input.deviceId || input.device_id || conversation.device_id || employee?.target_device_id || '').trim() || null; if (targetDeviceId) { const device=db.prepare('SELECT * FROM devices WHERE id=? AND workspace_id=?').get(targetDeviceId,conversation.workspace_id); if (!device) throw new Error('目标设备不属于当前工作区'); if (device.status === 'disabled') throw new Error('目标设备已停用'); const privilegedDeviceRole = ['owner', 'admin'].includes(String(input.actorRole || '').toLowerCase()); if (ws.kind === 'personal' && input.enforceDeviceOwnership && !privilegedDeviceRole && (!input.actorUserId || device.owner_user_id !== input.actorUserId)) throw new Error('个人工作区只能使用本人的设备'); } const message={id:id('convmsg'),conversation_id:conversationId,role:['user','assistant','system'].includes(input.role) ? input.role : 'user',content:String(input.content || '').trim(),attachments:normalizeConversationAttachments(input.attachments),created_at:now()}; if(!message.content && !message.attachments.length) throw new Error('消息内容不能为空'); db.prepare('INSERT INTO conversation_messages(id,conversation_id,role,content,attachment_json,created_at) VALUES(?,?,?,?,?,?)').run(message.id,conversationId,message.role,message.content,JSON.stringify(message.attachments),message.created_at); db.prepare('UPDATE conversations SET updated_at=? WHERE id=?').run(message.created_at,conversationId); audit(ws.slug,message.role,'conversation.message.created',{conversationId,messageId:message.id,dispatch:input.dispatch !== false}); if (message.role === 'user' && input.dispatch !== false) { const payload=executionPayload({prompt:message.content,employee,runtime:input.runtime || employee?.runtime || null,model:input.model || input.modelId || conversation.model_id || employee?.model_id || null,profile:input.profile ?? input.runtimeProfile ?? input.runtime_profile ?? input.hermesProfile ?? input.hermes_profile ?? employee?.runtime_profile,conversationId,targetDeviceId,cwd:input.cwd || input.workingDirectory || input.working_directory || input.workdir || conversation.working_directory || null,messageId:message.id}); payload.messageId=message.id; if (message.attachments.length) payload.attachments=message.attachments; this.createA2AAction(ws.slug,{type:'conversation.execute',payload,dedupeKey:`conversation:${conversationId}:${message.id}`}); } return {...message,execution:conversationExecution(conversationId)}; },
+    addConversationMessage(conversationId, input = {}) {
+      const conversation = db.prepare('SELECT * FROM conversations WHERE id=?').get(conversationId);
+      if (!conversation) throw new Error('Conversation not found');
+      const ws = db.prepare('SELECT * FROM workspaces WHERE id=?').get(conversation.workspace_id);
+      const employee = conversation.employee_id ? assertEmployeeVisible(db.prepare('SELECT * FROM employees WHERE id=? AND workspace_id=?').get(conversation.employee_id, conversation.workspace_id), input) : null;
+      const targetDeviceId = String(input.targetDeviceId || input.target_device_id || input.deviceId || input.device_id || conversation.device_id || employee?.target_device_id || '').trim() || null;
+      if (targetDeviceId) {
+        const device = db.prepare('SELECT * FROM devices WHERE id=? AND workspace_id=?').get(targetDeviceId, conversation.workspace_id);
+        if (!device) throw new Error('目标设备不属于当前工作区');
+        if (device.status === 'disabled') throw new Error('目标设备已停用');
+        const privilegedDeviceRole = ['owner', 'admin'].includes(String(input.actorRole || '').toLowerCase());
+        if (ws.kind === 'personal' && input.enforceDeviceOwnership && !privilegedDeviceRole && (!input.actorUserId || device.owner_user_id !== input.actorUserId)) throw new Error('个人工作区只能使用本人的设备');
+      }
+      const message = { id: id('convmsg'), conversation_id: conversationId, role: ['user', 'assistant', 'system'].includes(input.role) ? input.role : 'user', content: String(input.content || '').trim(), attachments: normalizeConversationAttachments(input.attachments), created_at: now() };
+      if (!message.content && !message.attachments.length) throw new Error('消息内容不能为空');
+      const dispatch = message.role === 'user' && input.dispatch !== false;
+      const executionSettings = {
+        runtime: input.runtime || employee?.runtime || null,
+        model: input.model || input.modelId || conversation.model_id || employee?.model_id || null,
+        profile: normalizeRuntimeProfile(input.profile ?? input.runtimeProfile ?? input.runtime_profile ?? input.hermesProfile ?? input.hermes_profile ?? employee?.runtime_profile),
+        cwd: input.cwd || input.workingDirectory || input.working_directory || input.workdir || conversation.working_directory || null,
+      };
+      const clientMessageId = String(input.clientMessageId ?? input.client_message_id ?? '').trim();
+      if (clientMessageId && !/^[A-Za-z0-9._:-]{1,128}$/.test(clientMessageId)) throw new Error('clientMessageId 必须是 1–128 位字母、数字或 . _ : -');
+      const requestKind = `conversation.message:${conversationId}:${String(input.actorUserId || 'legacy-user')}`;
+      const fingerprint = clientMessageId ? hashSecret(JSON.stringify({ role: message.role, content: message.content, attachments: message.attachments, dispatch, ...executionSettings, targetDeviceId })) : null;
+      if (clientMessageId) {
+        const existing = db.prepare('SELECT * FROM management_requests WHERE workspace_id=? AND kind=? AND request_key=?').get(ws.id, requestKind, clientMessageId);
+        if (existing) {
+          if (existing.fingerprint !== fingerprint) { const error = new Error('同一 clientMessageId 的消息内容或执行设置不一致，请使用新的消息标识'); error.status = 409; throw error; }
+          const saved = db.prepare('SELECT * FROM conversation_messages WHERE id=? AND conversation_id=?').get(existing.resource_id, conversationId);
+          if (!saved) { const error = new Error('已提交消息无法读取，请刷新会话后重试'); error.status = 409; throw error; }
+          const action = db.prepare('SELECT * FROM a2a_actions WHERE workspace_id=? AND dedupe_key=?').get(ws.id, `conversation:${conversationId}:${saved.id}`);
+          return { ...saved, attachments: parse(saved.attachment_json), clientMessageId, duplicate: true, execution: action ? actionView(action, { includeEvents: true }) : null };
+        }
+      }
+      // Creator history injection needs the new message to exist. Keep that
+      // validation and all writes in one savepoint so dispatch failures leave
+      // no saved message or audit claiming the upload succeeded.
+      db.exec('SAVEPOINT conversation_message');
+      try {
+        db.prepare('INSERT INTO conversation_messages(id,conversation_id,role,content,attachment_json,created_at) VALUES(?,?,?,?,?,?)').run(message.id, conversationId, message.role, message.content, JSON.stringify(message.attachments), message.created_at);
+        if (dispatch) {
+          const defaultPrompt = message.attachments.some(item => item.mimeType?.startsWith('image/')) ? '请分析所附图片，说明其中的内容并回复用户。' : '请阅读所附文件并回复用户。';
+          const payload = executionPayload({ prompt: message.content || defaultPrompt, employee, ...executionSettings, conversationId, targetDeviceId, messageId: message.id });
+          if (message.attachments.length) payload.attachments = message.attachments;
+          this.createA2AAction(ws.slug, { type: 'conversation.execute', payload, dedupeKey: `conversation:${conversationId}:${message.id}` });
+        }
+        db.prepare('UPDATE conversations SET updated_at=? WHERE id=?').run(message.created_at, conversationId);
+        audit(ws.slug, message.role, 'conversation.message.created', { conversationId, messageId: message.id, dispatch });
+        if (clientMessageId) db.prepare('INSERT INTO management_requests(workspace_id,kind,request_key,fingerprint,resource_id,created_at) VALUES(?,?,?,?,?,?)').run(ws.id, requestKind, clientMessageId, fingerprint, message.id, message.created_at);
+        db.exec('RELEASE conversation_message');
+      } catch (error) {
+        db.exec('ROLLBACK TO conversation_message; RELEASE conversation_message');
+        throw error;
+      }
+      return { ...message, ...(clientMessageId ? { clientMessageId } : {}), execution: conversationExecution(conversationId) };
+    },
     archiveConversation(conversationId, archived = true) { const row=db.prepare('SELECT * FROM conversations WHERE id=?').get(conversationId); if(!row) throw new Error('Conversation not found'); db.prepare('UPDATE conversations SET status=? WHERE id=?').run(archived ? 'archived' : 'active',conversationId); return this.getConversation(conversationId); },
     workspaceSlugForA2ATask(taskId) {
       const row = db.prepare('SELECT w.slug FROM tasks t JOIN workspaces w ON w.id=t.workspace_id WHERE t.id=?').get(String(taskId || ''));
@@ -1663,7 +1704,65 @@ export function createRepository(options = {}) {
     recordA2AEvent(actionId, input = {}) { const row=db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId); if(!row) throw new Error('A2A action not found'); if(input.agentId && String(input.agentId)!==row.agent_id) throw new Error('A2A agent mismatch'); assertActionDevice(row, input); if (['succeeded','failed','expired'].includes(row.status)) throw new Error('A2A action is already terminal'); const event={id:id('action-event'),action_id:actionId,type:String(input.type || 'progress').slice(0,80),message:String(input.message || '').slice(0,4000),data:input.data ?? null,created_at:now()}; db.prepare('INSERT INTO a2a_action_events(id,action_id,type,message,data_json,created_at) VALUES(?,?,?,?,?,?)').run(event.id,event.action_id,event.type,event.message,JSON.stringify(event.data),event.created_at); const leaseExpiry=new Date(Date.parse(event.created_at)+a2aExecutionTimeoutMs(parse(row.payload_json))+A2A_EXECUTION_LEASE_BUFFER_MS).toISOString(); db.prepare("UPDATE a2a_actions SET expires_at=? WHERE id=? AND status IN ('pending','acked')").run(leaseExpiry,actionId); const ws=db.prepare('SELECT slug FROM workspaces WHERE id=?').get(row.workspace_id); if (ws) audit(ws.slug,'ziwei_user','a2a.action.event',{actionId,type:event.type,message:event.message}); return event; },
     listA2AEvents(actionId) { const row=db.prepare('SELECT id FROM a2a_actions WHERE id=?').get(actionId); if (!row) throw new Error('A2A action not found'); return db.prepare('SELECT id,action_id,type,message,data_json,created_at FROM a2a_action_events WHERE action_id=? ORDER BY created_at,id').all(actionId).map(item => ({...item,data:parse(item.data_json)})); },
     resultA2AAction(actionId, input = {}) {
-      const row=db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId); if (!row) throw new Error('A2A action not found'); if (input.agentId && String(input.agentId) !== row.agent_id) throw new Error('A2A agent mismatch'); assertActionDevice(row, input); if (row.status === 'succeeded' || row.status === 'failed' || row.status === 'expired') return {...row,duplicate:true,payload:parse(row.payload_json),result:parse(row.result_json)}; const status=String(input.status || (input.error ? 'failed' : 'succeeded')); if (!['succeeded','failed'].includes(status)) throw new Error('A2A result status must be succeeded or failed'); const timestamp=now(); db.prepare('UPDATE a2a_actions SET status=?,completed_at=?,result_json=?,error=? WHERE id=?').run(status,timestamp,input.result === undefined ? null : JSON.stringify(input.result),input.error ? String(input.error) : null,actionId); const updated=db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId); const payload=parse(updated.payload_json); const ws=db.prepare('SELECT slug FROM workspaces WHERE id=?').get(updated.workspace_id); audit(ws.slug,'ziwei_user',`a2a.action.${status}`,{actionId, type:updated.type, error:input.error || null}); if (updated.task_id) taskExecutionMessage(updated.task_id, status, input.error || null, input.result); if (updated.task_id && payload.conversationId) { const content = input.error ? `执行失败：${input.error}` : (typeof input.result === 'string' ? input.result : (input.result?.output || input.result?.text || input.result?.result?.output || input.result?.result?.text || '执行完成')); if (content) this.addConversationMessage(payload.conversationId,{role:'assistant',content,dispatch:false}); } if(updated.type === 'automation.execute' && payload.runId) this.completeAutomationRun(payload.runId,{status:status==='succeeded'?'completed':'failed',result:input.result,error:input.error}); if (updated.type === 'conversation.execute' && payload.conversationId) { const content = input.error ? `执行失败：${input.error}` : (typeof input.result === 'string' ? input.result : (input.result?.output || input.result?.text || input.result?.result?.output || input.result?.result?.text || '执行完成')); if (content) this.addConversationMessage(payload.conversationId,{role:'assistant',content,dispatch:false}); } return {...updated,payload,result:parse(updated.result_json)};
+      const row = db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId);
+      if (!row) throw new Error('A2A action not found');
+      if (input.agentId && String(input.agentId) !== row.agent_id) throw new Error('A2A agent mismatch');
+      assertActionDevice(row, input);
+      if (['succeeded', 'failed', 'expired'].includes(row.status)) return { ...row, duplicate: true, payload: parse(row.payload_json), result: parse(row.result_json) };
+      let status = String(input.status || (input.error ? 'failed' : 'succeeded'));
+      if (!['succeeded', 'failed'].includes(status)) throw new Error('A2A result status must be succeeded or failed');
+      const payload = parse(row.payload_json);
+      const ws = db.prepare('SELECT slug FROM workspaces WHERE id=?').get(row.workspace_id);
+      const replyConversationId = (row.type === 'conversation.execute' || row.task_id) ? payload.conversationId : null;
+      const conversation = replyConversationId ? db.prepare('SELECT * FROM conversations WHERE id=? AND workspace_id=?').get(String(replyConversationId), row.workspace_id) : null;
+      if (replyConversationId && !conversation) throw new Error('执行结果的会话不属于当前工作区');
+      if (conversation && payload.employeeId && String(payload.employeeId) !== String(conversation.employee_id || '')) throw new Error('执行结果的员工与绑定会话不一致');
+      let error = input.error ? String(input.error) : null;
+      if (error) status = 'failed';
+      if (status === 'failed' && !error) error = '员工执行失败，未提供具体错误';
+      let result = input.result;
+      let outputArtifacts = [];
+      // `attachments` contains materialized user input paths in older CLI
+      // results. Only the explicit outputArtifacts contract can become a new
+      // assistant attachment, including the local-action result wrapper.
+      if (status === 'succeeded') {
+        try {
+          outputArtifacts = normalizeConversationAttachments(result?.outputArtifacts ?? result?.result?.outputArtifacts, { imagesOnly: true });
+          if (outputArtifacts.length && !conversation) throw new Error('图片回传缺少当前执行绑定的持久会话');
+          if (result && typeof result === 'object') {
+            if (Object.hasOwn(result, 'outputArtifacts')) result = { ...result, outputArtifacts };
+            else if (result.result && typeof result.result === 'object' && Object.hasOwn(result.result, 'outputArtifacts')) result = { ...result, result: { ...result.result, outputArtifacts } };
+          }
+        } catch (attachmentError) {
+          status = 'failed';
+          error = `图片回传失败：${attachmentError.message}`;
+          // Keep the concrete failure visible without retaining a rejected
+          // client payload or claiming that its image was saved.
+          result = { output: error };
+          outputArtifacts = [];
+        }
+      }
+      const timestamp = now();
+      db.exec('SAVEPOINT conversation_result');
+      try {
+        db.prepare('UPDATE a2a_actions SET status=?,completed_at=?,result_json=?,error=? WHERE id=?').run(status, timestamp, result === undefined ? null : JSON.stringify(result), error, actionId);
+        audit(ws.slug, 'ziwei_user', `a2a.action.${status}`, { actionId, type: row.type, error });
+        if (row.task_id) taskExecutionMessage(row.task_id, status, error, result);
+        if (conversation) {
+          const content = error ? `执行失败：${error}` : (typeof result === 'string' ? result : (result?.output || result?.text || result?.result?.output || result?.result?.text || (outputArtifacts.length ? '已返回图片' : '执行完成')));
+          const messageId = id('convmsg');
+          db.prepare('INSERT INTO conversation_messages(id,conversation_id,role,content,attachment_json,created_at) VALUES(?,?,?,?,?,?)').run(messageId, conversation.id, 'assistant', String(content), JSON.stringify(outputArtifacts), timestamp);
+          db.prepare('UPDATE conversations SET updated_at=? WHERE id=?').run(timestamp, conversation.id);
+          audit(ws.slug, 'assistant', 'conversation.message.created', { conversationId: conversation.id, messageId, actionId, dispatch: false });
+        }
+        if (row.type === 'automation.execute' && payload.runId) this.completeAutomationRun(payload.runId, { status: status === 'succeeded' ? 'completed' : 'failed', result, error });
+        db.exec('RELEASE conversation_result');
+      } catch (writeError) {
+        db.exec('ROLLBACK TO conversation_result; RELEASE conversation_result');
+        throw writeError;
+      }
+      const updated = db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId);
+      return { ...updated, payload, result: parse(updated.result_json) };
     },
     getA2AAction(actionId, { workspaceSlug = null, actorUserId = null } = {}) {
       const row = db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(String(actionId || ''));
