@@ -181,6 +181,8 @@ test('native forget authenticates loopback pause, drains an isolated in-flight a
     let body = { ok: true };
     if (req.url.endsWith('/mcp/bootstrap')) body = { managed: true, audience: 'ziwei-management', token: 'test-management-private-token', workspace: 'fixture', deviceId: 'device_fixture', credentialId: 'credential_fixture', apiBase: `http://127.0.0.1:${backend.address().port}`, expiresAt: new Date(Date.now() + 3600000).toISOString() };
     if (req.url.startsWith('/a2a/v1/actions?')) { body = { actions: delivered ? [] : [{ id: 'action_fixture', workspace: 'fixture', type: 'command.execute', payload: { executable: 'node', args: ['-e', "setTimeout(()=>console.log('isolated fixture done'),4000)"] } }] }; delivered = true; }
+    if (req.url === '/a2a/v1/actions/action_fixture/ack') body = { id:'action_fixture',status:'acked',expires_at:new Date(Date.now()+16*60*1000).toISOString(),deviceId:'device_fixture' };
+    if (req.url === '/a2a/v1/actions/action_fixture/result') body = { id:'action_fixture',status:'succeeded' };
     res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(body));
   });
   await new Promise(resolve => backend.listen(0, '127.0.0.1', resolve));

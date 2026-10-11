@@ -1,9 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
+import {createConversationRequestSequence,mergeConversationDetail,mergeConversationLists} from './conversation-execution-state.mjs';
 const app=await readFile(new URL('./App.vue',import.meta.url),'utf8');
-function source(name){const start=app.indexOf(`async function ${name}(`);assert.ok(start>=0);return app.slice(start,app.indexOf('\n}',start)+2);}
-function implementation(name,bindings){return new Function(...Object.keys(bindings),`let workspaceLoadGeneration=0,conversationOpenGeneration=0,conversationListGeneration=0;return (${source(name)});`)(...Object.values(bindings));}
+function source(name){const start=app.search(new RegExp(`(?:async )?function ${name}\\(`));assert.ok(start>=0);return app.slice(start,app.indexOf('\n}',start)+2);}
+function implementation(name,bindings){
+  const dependencies=name==='openConversation'?['conversationRequestScope','applyConversationDetail']:[];
+  const stateBindings=dependencies.length?{createConversationRequestSequence,mergeConversationDetail,mergeConversationLists}:{};
+  const allBindings={...stateBindings,...bindings};
+  return new Function(...Object.keys(allBindings),`let workspaceLoadGeneration=0,conversationOpenGeneration=0,conversationListGeneration=0;${dependencies.length?'const conversationRequests=createConversationRequestSequence();':''}${dependencies.map(source).join('\n')}\nreturn (${source(name)});`)(...Object.values(allBindings));
+}
 
 test('actual App load never commits a delayed previous workspace snapshot',async()=>{
   let slug='a',releaseA;const delayed=new Promise(resolve=>releaseA=resolve);
@@ -17,11 +23,14 @@ test('actual App load never commits a delayed previous workspace snapshot',async
   assert.equal(refs.summary.value.workspace.slug,'b');assert.equal(refs.devices.value[0].id,'b');assert.equal(refs.employees.value[0].id,'b');assert.equal(realtime,1);
 });
 test('actual conversation open preserves the latest same-workspace selection',async()=>{
-  let resolveOld;const old=new Promise(resolve=>resolveOld=resolve);const refs=Object.fromEntries([...source('openConversation').matchAll(/(\w+)\.value/g)].map(match=>[match[1],{value:[]}]));
+  let resolveOld;const old=new Promise(resolve=>resolveOld=resolve);const refs=Object.fromEntries([...['openConversation','conversationRequestScope','applyConversationDetail'].map(source).join('\n').matchAll(/(\w+)\.value/g)].map(match=>[match[1],{value:[]}]));
   refs.devices.value=[];refs.page.value='inbox';refs.conversationExecutionBusy.value=false;
-  const open=implementation('openConversation',{...refs,api:{conversation:id=>id==='old'?old:Promise.resolve({id,employee_id:'creator',messages:[]})},workspaceSlug:()=> 'qa',clearConversationAttachment:()=>{},loadConversationExecution:async()=>{},startConversationPolling:()=>{},stopConversationPolling:()=>{},notify:()=>{}});
-  const first=open({id:'old'},{push:false});await open({id:'creator'},{push:false});resolveOld({id:'old',employee_id:'old-worker',messages:[]});await first;
+  refs.selectedConversation.value=null;refs.conversationEmployeeId.value='creator';refs.conversations.value=[{id:'old',execution:null},{id:'creator',execution:null}];
+  const latestExecution={id:'creator-action',status:'pending',created_at:'2026-10-12T01:00:02.000Z'};
+  const open=implementation('openConversation',{...refs,api:{conversation:id=>id==='old'?old:Promise.resolve({id,employee_id:'creator',messages:[],execution:latestExecution})},workspaceSlug:()=> 'qa',clearConversationAttachment:()=>{},loadConversationExecution:async()=>{},startConversationPolling:()=>{},stopConversationPolling:()=>{},notify:()=>{}});
+  const first=open({id:'old'},{push:false});assert.equal(await open({id:'creator'},{push:false}),true);resolveOld({id:'old',employee_id:'old-worker',messages:[],execution:{id:'old-action',status:'succeeded',created_at:'2026-10-12T01:00:01.000Z'}});assert.equal(await first,false);
   assert.equal(refs.selectedConversation.value.id,'creator');assert.equal(refs.conversationRouteId.value,'creator');
+  assert.equal(refs.conversationEmployeeId.value,'creator');assert.equal(refs.conversationExecution.value.id,'creator-action');assert.equal(refs.conversations.value.find(item=>item.id==='creator').execution.id,'creator-action');
 });
 test('same-workspace load preserves the selected conversation second device throughout delayed list refresh',async()=>{
   for(const persistedDevice of ['second',null]){

@@ -5,8 +5,8 @@ import { timingSafeEqual, randomBytes, createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { ActionDispatcher } from '../src/daemon.mjs';
 import { createActionScheduler } from '../src/daemon-action-scheduler.mjs';
+import { createActionDelivery, ACTION_TRANSPORT_BUDGETS } from '../src/daemon-action-delivery.mjs';
 import { createLocalActionExecutor } from '../src/local-action.mjs';
-import { imageArtifactEventResult, imageArtifactDeliveryBody } from '../src/conversation-image-artifacts.mjs';
 import { redactSecrets } from '../src/redaction.mjs';
 import { discoverInstalledRuntimes, terminalMcpStatus } from '../src/runtime-adapters.mjs';
 import { readA2AToken } from '../backend/a2a-auth.mjs';
@@ -77,14 +77,23 @@ function installConnections() {
     state.dispatcher = new ActionDispatcher({
       // Keep primary state in place and isolate every explicitly shared workspace.
       workdir: config.workdir || process.cwd() || ROOT,
+      workspace: config.workspace, deviceId: config.deviceId,
       stateFile: path.join(connectionRuntimeDir, 'action-state.json'), execute: localExecutor,
       onEvent: (event, extra) => {
         log(event, { workspace: config.workspace, ...extra });
-        if (extra?.actionId && ['action.started', 'action.output', 'action.progress', 'action.stage'].includes(event)) void postActionEvent(state, extra.actionId, event, extra);
+        if (extra?.actionId && ['action.started', 'action.output', 'action.progress', 'action.stage'].includes(event)) state.actionDelivery?.recordEvent(extra.actionId, event, extra);
       },
     });
+    state.actionDelivery = createActionDelivery({
+      directory: path.join(connectionRuntimeDir, 'action-delivery'),
+      identity: { apiBase: config.apiBase, workspace: config.workspace, deviceId: config.deviceId },
+      post: (pathname, body, options) => postAction(state, pathname, body, options),
+      dispatch: action => state.dispatcher.dispatch(action),
+      onSuccess: async action => { if (action.type === 'hermes.profile.create') await refreshRuntimeDiscovery(state); },
+      onEvent: (event, extra) => log(event, { workspace: config.workspace, ...extra }),
+    });
     state.actionScheduler = createActionScheduler({
-      execute: action => executePolledAction(state, action),
+      execute: action => state.actionDelivery.execute(action),
       onError: (error, action) => log('a2a_action_failed', { workspace: config.workspace, actionId: action.id, error: error.message }),
     });
     state.managementStatus = state.managementBootstrap.status();
@@ -181,20 +190,13 @@ function daemonHeaders(connection, { json = false, a2a = false } = {}) {
   }
   return headers;
 }
-async function postAction(connection, pathname, body) {
+async function postAction(connection, pathname, body, { timeoutMs = ACTION_TRANSPORT_BUDGETS.ack } = {}) {
   const config = connection.config;
   const headers = daemonHeaders(connection, { json: true, a2a: true });
-  const response = await fetch(`${config.apiBase}${pathname}`, { method:'POST', headers, body:JSON.stringify(body), signal:AbortSignal.timeout(3000) });
-  const payload=await response.json().catch(() => ({})); if (!response.ok) throw new Error(payload.error || `A2A HTTP ${response.status}`); return payload;
-}
-async function postActionEvent(connection, actionId, event, data = {}) {
-  try {
-    await postAction(connection, `/a2a/v1/actions/${encodeURIComponent(actionId)}/events`, { agentId: 'ziwei_user', type: event, message: data?.message || '', data });
-  } catch (error) {
-    // Event streaming was added after the initial local bridge API. A 404 is
-    // expected against an older server and must not interrupt execution.
-    if (!/404|A2A HTTP 404/.test(String(error?.message || error))) log('a2a_event_failed', { actionId, event, error: error.message });
-  }
+  const response = await fetch(`${config.apiBase}${pathname}`, { method:'POST', headers, body:JSON.stringify(body), signal:AbortSignal.timeout(timeoutMs) });
+  let payload;try { payload=await response.json(); } catch { throw Object.assign(new Error(`Invalid A2A response (HTTP ${response.status})`), response.ok ? {} : {status:response.status}); }
+  if (!response.ok) throw Object.assign(new Error(payload.error || `A2A HTTP ${response.status}`), {status:response.status});
+  return payload;
 }
 async function refreshRuntimeDiscovery(connection) {
   const config = connection.config;
@@ -216,30 +218,25 @@ async function pollConnection(connection) {
   if (draining || !String(config.workspace || '').trim()) return;
   if (connection.polling) return;
   connection.polling = true;
+  connection.pollAbort = new AbortController();
   try {
     const headers = daemonHeaders(connection, { a2a: true });
-    const response = await fetch(`${config.apiBase}/a2a/v1/actions?workspace=${encodeURIComponent(config.workspace)}&agent=ziwei_user&status=pending&includeAcked=1`, { headers, signal: AbortSignal.timeout(3000) });
+    const response = await fetch(`${config.apiBase}/a2a/v1/actions?workspace=${encodeURIComponent(config.workspace)}&agent=ziwei_user&status=pending&includeAcked=1`, { headers, signal: AbortSignal.any([AbortSignal.timeout(ACTION_TRANSPORT_BUDGETS.poll), connection.pollAbort.signal]) });
     if (!response.ok) throw new Error(`A2A poll HTTP ${response.status}`);
-    const payload = await response.json().catch(() => ({ actions: [] }));
+    const payload = await response.json();
+    if (!Array.isArray(payload.actions)) throw new Error('Invalid A2A poll response');
     connection.lastPoll = new Date().toISOString();
     if (config.primary) lastPoll = connection.lastPoll;
     const actions=payload.actions || [];
     log('a2a_poll', { ok: response.ok, workspace: config.workspace, pending: actions.length });
-    if (!draining) connection.actionScheduler.schedule(actions);
+    if (!draining) {
+      const byId=new Map(actions.map(action=>[action.id,action]));
+      for (const action of connection.actionDelivery.recoverActions()) if (!byId.has(action.id)) byId.set(action.id,action);
+      connection.actionScheduler.schedule([...byId.values()]);
+    }
   } catch (error) {
     log('a2a_poll_failed', { error: error.message });
-  } finally { connection.polling = false; }
-}
-async function executePolledAction(connection, action) {
-  await postAction(connection, `/a2a/v1/actions/${encodeURIComponent(action.id)}/ack`, { agentId:'ziwei_user' });
-  const result=await connection.dispatcher.dispatch(action);
-  const terminalStatus = result.status === 'succeeded' || (result.status === 'duplicate' && result.originalStatus === 'succeeded') ? 'succeeded' : 'failed';
-  if (terminalStatus === 'succeeded' && action.type === 'hermes.profile.create') await refreshRuntimeDiscovery(connection);
-  const delivery=imageArtifactDeliveryBody({ status:terminalStatus, result:result.result ?? result, error:terminalStatus === 'failed' ? (result.error || 'ziwei_user execution failed') : null });
-  await postActionEvent(connection, action.id, delivery.status, { result: imageArtifactEventResult(delivery.result), error:delivery.error });
-  const receipt=await postAction(connection, `/a2a/v1/actions/${encodeURIComponent(action.id)}/result`, delivery);
-  const confirmedStatus=['succeeded','failed'].includes(receipt?.status)?receipt.status:delivery.status;
-  log('a2a_result', { workspace: connection.config.workspace, actionId:action.id, status:confirmedStatus, dispatcherStatus:result.status });
+  } finally { connection.polling = false; connection.pollAbort = null; }
 }
 function heartbeatFresh() {
   if (!lastHeartbeatAt) return false;
@@ -275,6 +272,7 @@ const health = http.createServer((req, res) => {
         return;
       }
       draining = operation === 'pause';
+      if (draining) for (const connection of connections.values()) connection.pollAbort?.abort();
       log(draining ? 'connection_drain_requested' : 'connection_drain_cancelled', { activeActionCount: healthPayload().activeActionCount, connectionCount: connections.size });
       res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(healthPayload()));
     });
@@ -296,9 +294,9 @@ health.on('error', error => {
 });
 health.listen(config.healthPort, config.healthHost, () => log('started', { health: `http://${config.healthHost}:${config.healthPort}`, apiBase: config.apiBase, heartbeatMs: config.heartbeatMs, pollMs: config.pollMs }));
 await heartbeat();
-await poll();
 heartbeatTimer = setInterval(heartbeat, Math.max(1000, Number(config.heartbeatMs) || 15000));
 pollTimer = setInterval(poll, Math.max(1000, Number(config.pollMs) || 5000));
+void poll();
 function stop(signal) {
   if (stopping) return;
   stopping = true;

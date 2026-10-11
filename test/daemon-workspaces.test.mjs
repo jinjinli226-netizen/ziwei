@@ -48,6 +48,10 @@ test('a running isolated daemon accepts a grant and serves two identities withou
       const workspace = new URL(req.url, 'http://localhost').searchParams.get('workspace');
       response = { actions: workspace === 'test_222' && !delivered ? [{ id: 'action_share', workspace: 'test_222', type: 'device.workspace.connect', payload: { grantId: 'grant_dynamic', deviceId: 'device_primary' } }] : [] };
       if (response.actions.length) delivered = true;
+    } else if (req.url === '/a2a/v1/actions/action_share/ack') {
+      response = { id:'action_share',status:'acked',expires_at:new Date(Date.now()+16*60*1000).toISOString(),deviceId:'device_primary' };
+    } else if (req.url === '/a2a/v1/actions/action_share/result') {
+      response = { id:'action_share',status:'succeeded' };
     }
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify(response));

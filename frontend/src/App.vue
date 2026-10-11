@@ -15,6 +15,7 @@ import { employeeReadiness, managementPreparation, profileAfterRuntimeChange } f
 import { installPageHref } from './android-install.js';
 import {deviceRuntimes,runtimePresentation} from './device-runtimes.js';
 import { createConversationComposerStore, readConversationImages, CONVERSATION_IMAGE_LIMIT } from './conversation-compose.js';
+import { createConversationRequestSequence, executionPresentation, mergeConversationDetail, mergeConversationLists } from './conversation-execution-state.mjs';
 import { Search, Plus, Inbox, Grip, SlidersHorizontal, ArrowDownUp, Kanban, List, MoreHorizontal, CircleDashed, Circle, CircleDot, CheckCircle2, CircleAlert, Zap, ChevronDown, RotateCcw, LayoutList, Tag, UserRound, CalendarClock, CalendarDays, ChevronLeft, ChevronRight, Maximize2, Mic, Paperclip, X, Folder, FolderOpen, FolderPlus, FileText, Upload, Download, RefreshCw, HardDrive, Network, Server, Monitor, Crown, Trash2, ClipboardList, Settings2 } from 'lucide-vue-next';
 
 const nav = [
@@ -171,13 +172,12 @@ let agentComposerRestoreFocus = null;
 const conversationExecutionLabel = computed(() => {
   const status = conversationExecution.value?.status;
   if (!status) return selectedConversation.value?.messages?.length ? '会话已同步' : '等待发送';
-  return ({ pending:'已提交，等待 ziwei_user 接收', acked:'数字伙伴执行中', succeeded:'数字伙伴已完成', failed:'执行失败', expired:'执行已超时' }[status] || `状态：${status}`);
+  return executionPresentation(conversationExecution.value).label;
 });
 const conversationExecutionTone = computed(() => {
-  const status = conversationExecution.value?.status;
-  return status === 'succeeded' ? 'success' : status === 'failed' || status === 'expired' ? 'error' : status === 'pending' || status === 'acked' ? 'running' : 'idle';
+  return executionPresentation(conversationExecution.value).tone;
 });
-const conversationExecutionBusy = computed(() => ['pending','acked'].includes(conversationExecution.value?.status));
+const conversationExecutionBusy = computed(() => executionPresentation(conversationExecution.value).busy);
 const conversationLatestEvent = computed(() => {
   const events = conversationExecution.value?.events;
   return Array.isArray(events) && events.length ? events[events.length - 1] : null;
@@ -304,6 +304,8 @@ const conversationRouteId = ref(conversationIdFromPath());
 let workspaceLoadGeneration = 0;
 let conversationOpenGeneration = 0;
 let conversationListGeneration = 0;
+const conversationRequests = createConversationRequestSequence();
+let conversationRefresh = null;
 const focusedConversation = computed(() => page.value === 'inbox' && Boolean(conversationRouteId.value));
 const employeeProfile = computed(() => employees.value.find(item => item.id === employeeRouteId.value) || null);
 const employeeProfileTasks = computed(() => { const employee = employeeProfile.value; if (!employee) return []; const assignee = String(employee.name || '').toLowerCase(); return tasks.value.filter(task => String(task.assignee || '').toLowerCase() === assignee || String(task.assignee || '').toLowerCase().includes(assignee)); });
@@ -397,27 +399,33 @@ function openRealtime() {
   if (!authState.value.authenticated) return;
   eventSource.value = connectWorkspaceRealtime({
     wsUrl: api.websocketUrl(), sseUrl: api.streamUrl(),
-    onReady: loadNotifications,
-    onEvent: () => { loadNotifications(); refreshTasks(); if (selectedConversation.value) refreshSelectedConversation(); }
+    onReady: () => { loadNotifications(); refreshTasks(); refreshConversationState(); },
+    onEvent: () => { loadNotifications(); refreshTasks(); refreshConversationState(); }
   });
 }
 onUnmounted(() => { closeRealtime(); stopConversationPolling(); stopVoiceInput(); if (ziweiConnectRunTimer) clearTimeout(ziweiConnectRunTimer); ziweiConnectRunTimer=null; dismissToast(); });
 async function loadNotifications() { const workspace=workspaceSlug(); try { const result=await api.notifications(); if(workspace!==workspaceSlug())return; notifications.value=result.notifications || []; notificationStats.value=result.stats || {}; } catch {} }
 async function refreshTasks() { const workspace=workspaceSlug(); try { const result=await api.tasks(); if(workspace!==workspaceSlug())return; tasks.value=result.tasks || []; } catch {} }
 async function markAllNotificationsRead() { try { await api.markNotificationsRead(); await loadNotifications(); notify('已全部标记为已读'); } catch(error) { notify(error.message); } }
+function conversationRequestScope() {
+  return { workspace:workspaceSlug(),employee:conversationEmployeeId.value,generation:conversationOpenGeneration };
+}
+function applyConversationDetail(conversation) {
+  selectedConversation.value=mergeConversationDetail(selectedConversation.value,conversation);
+  conversationExecution.value=selectedConversation.value?.execution || null;
+  conversations.value=mergeConversationLists(conversations.value,conversations.value,selectedConversation.value);
+}
 async function loadConversations({ autoSelect=true } = {}) {
-  const workspace=workspaceSlug(), generation=++conversationListGeneration, openGeneration=conversationOpenGeneration;
+  const workspace=workspaceSlug(), generation=++conversationListGeneration, employee=conversationEmployeeId.value;
+  const request=conversationRequests.begin(conversationRequestScope(),'list');
   try {
-    const result=await api.conversations(conversationEmployeeId.value);
-    if(workspace!==workspaceSlug() || generation!==conversationListGeneration || openGeneration!==conversationOpenGeneration)return;
-    conversations.value=result.conversations || [];
+    const result=await api.conversations(employee);
+    if(workspace!==workspaceSlug() || generation!==conversationListGeneration || !conversationRequests.isCurrent(request,conversationRequestScope()))return;
+    conversations.value=mergeConversationLists(conversations.value,result.conversations || [],selectedConversation.value);
     const routeId = conversationIdFromPath();
     const routedItem = routeId && conversations.value.find(item => item.id === routeId);
-    if (routedItem) await openConversation(routedItem, { push:false });
+    if (routedItem && selectedConversation.value?.id!==routeId) await openConversation(routedItem, { push:false });
     else if (autoSelect && !selectedConversation.value && conversations.value[0]) await openConversation(conversations.value[0], { push:false });
-    else if (!conversations.value.some(item => item.id === selectedConversation.value?.id)) {
-      selectedConversation.value=null; conversationExecution.value=null; stopConversationPolling();
-    }
   } catch {}
 }
 async function loadConversationExecution({ silent=true } = {}) {
@@ -441,42 +449,74 @@ async function loadConversationExecution({ silent=true } = {}) {
 }
 async function refreshSelectedConversation() {
   const conversationId=selectedConversation.value?.id;
-  const workspace=workspaceSlug(), generation=conversationOpenGeneration;
   if (!conversationId) return;
+  const request=conversationRequests.begin(conversationRequestScope(),'detail',conversationId);
   try {
     const conversation=await api.conversation(conversationId);
-    if (workspace===workspaceSlug() && generation===conversationOpenGeneration && selectedConversation.value?.id === conversationId) selectedConversation.value=conversation;
+    if (!conversationRequests.isCurrent(request,conversationRequestScope()) || selectedConversation.value?.id!==conversationId)return;
+    applyConversationDetail(conversation);
   } catch {}
-  if(workspace!==workspaceSlug() || generation!==conversationOpenGeneration)return;
+  if(!conversationRequests.isCurrent(request,conversationRequestScope()) || selectedConversation.value?.id!==conversationId)return;
   await loadConversationExecution();
+}
+function refreshConversationState({ force=false } = {}) {
+  const scope=()=>JSON.stringify([workspaceSlug(),conversationEmployeeId.value,conversationOpenGeneration,selectedConversation.value?.id || '']);
+  const key=scope();
+  // Accept the current slow response before one trailing refresh handles new
+  // background events. User opens and changed scopes can start immediately.
+  if (!force && conversationRefresh?.key===key) {
+    conversationRefresh.again=true;
+    return conversationRefresh.promise;
+  }
+  const refresh={key,again:false,promise:null};
+  conversationRefresh=refresh;
+  refresh.promise=(async()=>{
+    do {
+      refresh.again=false;
+      await Promise.all([loadConversations({autoSelect:false}),refreshSelectedConversation()]);
+      if (conversationRefresh!==refresh || scope()!==key) return;
+      if (conversationExecutionBusy.value) { if (!conversationPollTimer) startConversationPolling(); }
+      else stopConversationPolling();
+    } while (refresh.again);
+  })().finally(()=>{if(conversationRefresh===refresh)conversationRefresh=null;});
+  return refresh.promise;
 }
 function startConversationPolling() {
   stopConversationPolling();
   if (!selectedConversation.value) return;
   // Realtime is preferred, but polling keeps the status and reply visible when
   // the local daemon is busy or the browser's WebSocket/SSE is unavailable.
+  let polling=false;
   conversationPollTimer=setInterval(async () => {
     if (!selectedConversation.value || page.value !== 'inbox') return stopConversationPolling();
-    await refreshSelectedConversation();
-    if (!conversationExecutionBusy.value) stopConversationPolling();
+    if (polling) return;
+    const timer=conversationPollTimer,generation=conversationOpenGeneration;
+    polling=true;
+    try {
+      await refreshConversationState();
+      if (timer===conversationPollTimer && generation===conversationOpenGeneration && !conversationExecutionBusy.value) stopConversationPolling();
+    } finally { polling=false; }
   }, 1500);
 }
 async function openConversation(item, { push=true, workspace=workspaceSlug() } = {}) {
   const id = typeof item === 'string' ? item : item?.id;
   if (!id || workspace!==workspaceSlug()) return false;
+  if (selectedConversation.value?.id===id) { await refreshConversationState({force:true});return true; }
   const generation=++conversationOpenGeneration;
-  const current=()=>workspace===workspaceSlug() && generation===conversationOpenGeneration;
+  let request=conversationRequests.begin(conversationRequestScope(),'detail',id);
+  const current=()=>workspace===workspaceSlug() && generation===conversationOpenGeneration && conversationRequests.isCurrent(request,conversationRequestScope());
   clearConversationAttachment({preserve:true});
   try {
     const conversation=await api.conversation(id);
     if(!current())return false;
-    selectedConversation.value=conversation;
+    applyConversationDetail(conversation);
     conversationModelId.value=selectedConversation.value.model_id || '';
     conversationWorkingDirectory.value=selectedConversation.value.working_directory || '';
     conversationDeviceId.value=selectedConversation.value.device_id || devices.value.find(device => device.status === 'online')?.id || devices.value[0]?.id || '';
     if (!conversationWorkingDirectory.value && conversationDeviceId.value) conversationWorkingDirectory.value=devices.value.find(device => device.id === conversationDeviceId.value)?.workdir || '';
     if (selectedConversation.value.employee_id) conversationEmployeeId.value=selectedConversation.value.employee_id;
     else if (selectedConversation.value.employee_binding === 'unassigned_legacy') conversationEmployeeId.value='unassigned';
+    request=conversationRequests.begin(conversationRequestScope(),'detail',id);
     conversationRouteId.value=id;
     if (push && page.value === 'inbox') history.pushState({},'',`${routePath('inbox', id)}?employee=${encodeURIComponent(conversationEmployeeId.value)}`);
     await loadConversationExecution({ silent:false });
@@ -486,15 +526,18 @@ async function openConversation(item, { push=true, workspace=workspaceSlug() } =
   } catch(error) { if(current())notify(error.message); return false; }
 }
 async function createConversation() {
+  const workspace=workspaceSlug(),employeeId=conversationEmployeeId.value,generation=conversationOpenGeneration;
+  const current=()=>workspace===workspaceSlug() && employeeId===conversationEmployeeId.value && generation===conversationOpenGeneration;
   try {
     const employee=activeConversationEmployee.value;
     if (!employee?.id) return notify(conversationEmployeeId.value === 'unassigned' ? '历史未绑定会话不能新建消息，请先选择数字员工' : '请先选择数字员工');
     const defaultDevice=devices.value.find(device => device.id === conversationDeviceId.value) || devices.value.find(device => device.status === 'online') || devices.value[0];
     conversationDeviceId.value=defaultDevice?.id || '';
     const item=await api.createConversation({title:`${employee.name || '数字伙伴'} 对话`,employeeId:employee.id,modelId:employee.model_id || employee.modelId || null,deviceId:defaultDevice?.id || null,workingDirectory:defaultDevice?.workdir || null});
+    if(!current())return;
     conversations.value=[item,...conversations.value];
     await openConversation(item);
-  } catch(error) { notify(error.message); }
+  } catch(error) { if(current())notify(error.message); }
 }
 async function openEmployeeConversation(employee) {
   if (!employee?.id) return;
@@ -502,13 +545,17 @@ async function openEmployeeConversation(employee) {
     clearConversationAttachment({preserve:true});
     ++conversationOpenGeneration;
     conversationEmployeeId.value=employee.id;
+    const workspace=workspaceSlug(),generation=conversationOpenGeneration;
+    const current=()=>workspace===workspaceSlug() && generation===conversationOpenGeneration && conversationEmployeeId.value===employee.id;
     history.pushState({},'',`${routePath('inbox')}?employee=${encodeURIComponent(employee.id)}`);
     selectedConversation.value=null; conversationExecution.value=null; stopConversationPolling();
     await loadConversations({ autoSelect:false });
+    if(!current())return;
     let item=conversations.value.find(entry => entry.employee_id === employee.id);
     if (!item) {
       const defaultDevice=devices.value.find(device => device.status === 'online') || devices.value[0];
       item=await api.createConversation({title:`${employee.name || '数字伙伴'} 对话`,employeeId:employee.id,deviceId:defaultDevice?.id || null,workingDirectory:defaultDevice?.workdir || null,modelId:employee.model_id || employee.modelId || null});
+      if(!current())return;
       conversations.value=[item,...conversations.value];
     }
     page.value='inbox';
@@ -527,8 +574,12 @@ async function selectConversationEmployee(employeeId) {
 }
 async function archiveSelectedConversation() {
   if (!selectedConversation.value) return;
+  const id=selectedConversation.value.id,scope=conversationRequestScope();
+  const current=()=>scope.workspace===workspaceSlug() && scope.employee===conversationEmployeeId.value && scope.generation===conversationOpenGeneration && selectedConversation.value?.id===id;
   try {
-    await api.archiveConversation(selectedConversation.value.id);
+    await api.archiveConversation(id);
+    if(!current())return;
+    ++conversationOpenGeneration;
     selectedConversation.value = null;
     conversationExecution.value = null;
     conversationRouteId.value = '';
@@ -554,6 +605,7 @@ async function sendConversationMessage() {
     conversationComposer.completeSubmission(submission);
     if(!current())return;
     if(!selectedConversation.value.messages?.some(item=>item.id===message.id))selectedConversation.value.messages=[...(selectedConversation.value.messages||[]),message];
+    if(message.execution!==undefined)applyConversationDetail({...selectedConversation.value,execution:message.execution});
     await refreshSelectedConversation();
     if(!current())return;
     startConversationPolling();
@@ -567,10 +619,11 @@ async function sendConversationMessage() {
 async function saveConversationSettings({ notifyUser = true } = {}) {
   if (!selectedConversation.value?.id) return false;
   const id=selectedConversation.value.id,key=conversationComposeKey(),generation=conversationOpenGeneration;
+  const request=conversationRequests.begin(conversationRequestScope(),'detail',id);
   try {
     const updated=await api.updateConversation(id,{modelId:conversationModelId.value || null,deviceId:conversationDeviceId.value || null,workingDirectory:conversationWorkingDirectory.value || null});
-    if(key!==conversationComposeKey() || generation!==conversationOpenGeneration)return true;
-    selectedConversation.value=updated;
+    if(key!==conversationComposeKey() || generation!==conversationOpenGeneration || !conversationRequests.isCurrent(request,conversationRequestScope()))return true;
+    applyConversationDetail(updated);
     if (notifyUser) notify('会话配置已保存');
     return true;
   } catch (error) { if(key===conversationComposeKey() && generation===conversationOpenGeneration)notify(error.message,'error'); return false; }
@@ -1662,7 +1715,7 @@ onMounted(async () => { applyDisplayPreferences(); if (page.value==='android-ins
 
         <div v-else-if="page==='open'"><div class="page-header"><div><h1>开放平台</h1><p>面向数字员工和开发者的 MCP、API、A2A 与 Webhook 能力。</p></div><ZiButton @click="openApiKeyModal">创建 API Key</ZiButton></div><ManagementMcpPanel :workspace="workspaceSlugValue" :can-manage="canManageWorkspace"/><div class="grid-3"><ZiCard><div class="card-heading"><h3>REST API</h3><ZiStatusTag status="online" label="可用" dot/></div><p class="modal-copy">工作区数据、任务、文档、技能和自动化的统一 HTTP 接口。</p><button class="pill" @click="copyTeamValue(API_BASE + '/api')">复制接口地址 →</button></ZiCard><ZiCard><div class="card-heading"><h3>A2A v1</h3><ZiStatusTag status="online" label="已启用" dot/></div><p class="modal-copy">Agent Card、Task、Message、状态查询和本机 ziwei_user 心跳。</p><button class="pill" @click="copyTeamValue(agents[0]?.id || 'ziwei_user')">{{ agents[0]?.id || 'ziwei_user' }} ↗</button></ZiCard><ZiCard><div class="card-heading"><h3>Webhook</h3><ZiStatusTag status="online" label="已启用" dot/></div><p class="modal-copy">自动化完成后向你的 HTTPS 地址发送带签名的事件，并记录投递和重试状态。</p><button class="pill" @click="page='automations';history.pushState({},'',routePath('automations'))">配置自动化回调 →</button></ZiCard></div><ZiCard style="margin-top:16px"><div class="card-heading"><div><h3>API Keys</h3><p class="modal-copy">REST API / A2A 专用密钥，只在创建或轮换时显示一次；不能用于管理 MCP。服务端只保存哈希。</p></div><button class="pill" @click="openApiKeyModal">管理密钥</button></div><div v-if="!apiKeys.length" class="empty-wrap compact"><ZiEmptyState icon="⌁" title="还没有 API Key" description="创建一个密钥连接紫薇 REST API 或 A2A。"/></div><div v-else v-for="key in apiKeys" :key="key.id" class="runtime-row"><div class="row-main"><strong>{{ key.name }}</strong><small>{{ key.prefix }}•••• · {{ key.role }} · {{ key.status }}</small></div><span class="row-end">{{ key.last_used_at ? `最近使用 ${key.last_used_at}` : '尚未使用' }}</span><button v-if="key.status==='active'" class="pill" @click="rotateApiKey(key)">轮换</button><button v-if="key.status==='active'" class="pill" @click="revokeApiKey(key)">撤销</button></div></ZiCard></div>
 
-  <div v-else-if="page==='inbox'"><div class="page-header"><div><span v-if="focusedConversation" class="eyebrow">持久会话</span><h1>{{ focusedConversation ? (selectedConversation?.title || '持久会话') : '收件箱' }}</h1><p>{{ focusedConversation ? '与数字伙伴持续协作，消息和执行结果会保存在同一条会话中。' : '每个数字员工拥有独立的会话列表与执行记录。' }}</p></div><div class="header-actions"><ZiButton v-if="focusedConversation" variant="secondary" @click="navigate('inbox')">返回收件箱</ZiButton><ZiButton v-if="!focusedConversation" variant="secondary" @click="markAllNotificationsRead">全部已读</ZiButton></div></div><div class="inbox-layout" :class="{'conversation-focus-layout':focusedConversation}"><ZiCard v-if="!focusedConversation"><div class="card-heading"><h3>通知</h3><span class="work-count">{{ notificationStats.unread || 0 }} 未读</span></div><div v-if="!notifications.length" class="empty-wrap compact"><ZiEmptyState icon="✉" title="收件箱是空的" description="新的任务指派、运行时消息和自动化结果会出现在这里。"/></div><div v-else class="notification-list"><button v-for="item in notifications" :key="item.id" class="notification-row" :class="{unread:!item.read_at}" @click="api.markNotificationsRead([item.id]).then(loadNotifications)"><span class="notification-dot"/><span><strong>{{ item.action }}</strong><p>{{ item.actor }} · {{ item.created_at }}</p></span></button></div></ZiCard><ZiCard><div class="card-heading"><div><h3>对话</h3><p class="conversation-scope-caption">当前员工：{{ activeConversationEmployee?.name || (conversationEmployeeId === 'unassigned' ? '未绑定员工（历史会话）' : '未选择') }}</p></div><button class="pill" :disabled="conversationEmployeeId === 'unassigned'" @click="createConversation">新建</button></div><label class="conversation-employee-picker"><span>数字员工工作区</span><ZiSelect :model-value="conversationEmployeeId" :options="conversationEmployeeOptions" aria-label="选择数字员工" @update:model-value="selectConversationEmployee"/></label><div class="conversation-list"><button v-for="item in conversations" :key="item.id" class="conversation-row" :class="{selected:selectedConversation?.id===item.id}" @click="openConversation(item)"><div class="conversation-row-agent"><img v-if="item.employee?.avatar" :src="item.employee.avatar" class="conversation-row-agent-avatar" alt=""/><span v-else class="conversation-row-agent-fallback">{{ item.employee?.name?.slice(0,1) || '?' }}</span><strong>{{ item.title }}</strong></div><small>{{ item.employee?.name || '未绑定员工（历史记录）' }} · {{ item.employee?.runtime || '归属未知' }} · {{ item.message_count || 0 }} 条消息</small><span class="conversation-row-status" :data-status="item.execution?.status" v-if="item.execution?.status">{{ item.execution.status==='succeeded'?'已完成':item.execution.status==='failed'?'失败':item.execution.status==='acked'?'执行中':'等待执行' }}</span></button><p v-if="!conversations.length" class="task-detail-empty">还没有对话</p></div></ZiCard><ZiCard class="inbox-thread"><div v-if="selectedConversation" class="conversation-thread"><div class="card-heading conversation-thread-heading"><div><div class="conversation-agent-heading"><img v-if="selectedConversation.employee?.avatar" :src="selectedConversation.employee.avatar" class="conversation-agent-avatar" alt=""/><span v-else class="conversation-agent-fallback">{{ selectedConversation.employee?.name?.slice(0,1) || '?' }}</span><div><h3>{{ selectedConversation.title }}</h3><p>{{ selectedConversation.employee?.name || '未绑定员工（历史记录）' }} · {{ selectedConversation.employee?.runtime || '归属未知' }}</p></div></div><div class="conversation-status" :data-status="conversationExecutionTone" aria-live="polite"><span class="conversation-status-dot"/><strong>{{ conversationExecutionLabel }}</strong><small v-if="conversationStatusLoading">正在同步…</small><small v-else-if="conversationExecution?.completed_at">{{ conversationExecution.completed_at }}</small></div></div><button class="pill" @click="archiveSelectedConversation">归档</button></div><div v-if="conversationExecutionBusy" class="conversation-progress" aria-live="polite"><span class="conversation-progress-spinner"/>{{ (conversationLatestEvent ? executionEventLabel(conversationLatestEvent) : '') || '正在等待 ziwei_user 返回结果，页面会自动更新…' }}<small v-if="conversationLatestEvent">{{ executionEventDetail(conversationLatestEvent) }}</small></div><div v-else-if="conversationLatestEvent?.message" class="conversation-progress conversation-progress-terminal" :data-status="conversationExecutionTone">{{ conversationLatestEvent.message }}</div><details v-if="conversationExecution?.events?.length" class="execution-activity" open><summary><strong>执行活动</strong><span>{{ executionEventRows(conversationExecution.events).length }} 个阶段</span></summary><div ref="conversationExecutionList" class="execution-event-list" aria-label="执行进度"><div v-for="event in executionEventRows(conversationExecution.events)" :key="event.id" class="execution-event"><span class="execution-event-main"><i class="execution-event-dot" :data-stage="event.stage"></i><span class="execution-event-copy"><strong>{{ event.label }}</strong><small v-if="event.detail">{{ event.detail }}</small></span><b v-if="event.count > 1">×{{ event.count }}</b></span><time>{{ event.created_at }}</time></div></div></details><details v-if="executionReasoningSummaries(conversationExecution?.events).length" class="execution-reasoning-drawer conversation-reasoning-drawer"><summary><strong>思考摘要</strong><span>{{ executionReasoningSummaries(conversationExecution?.events).length }} 条可展开摘要</span></summary><article v-for="event in executionReasoningSummaries(conversationExecution?.events)" :key="`conversation-reasoning-${event.id}`" class="execution-reasoning-card"><div><strong>{{ event.label }}</strong><time>{{ event.created_at }}</time></div><p>{{ executionEventSummary(event) }}</p></article></details><div class="conversation-messages" aria-live="polite"><div v-for="message in selectedConversation.messages" :key="message.id" class="conversation-message" :class="message.role"><small>{{ message.role === 'user' ? '你' : message.role === 'assistant' ? '数字伙伴' : '系统' }}</small><p v-if="message.content">{{ message.content }}</p><button v-if="message.role==='user' && conversationExecution?.payload?.messageId===message.id && ['failed','expired'].includes(conversationExecution?.status)" type="button" class="pill" :disabled="conversationSendPending || conversationAttachmentReading" @click="restoreConversationMessage(message)">重新编辑并重试</button><div v-if="message.attachments?.length" class="conversation-message-attachments"><div v-for="(attachment,attachmentIndex) in message.attachments" :key="`${message.id}-${attachmentIndex}`" class="conversation-message-attachment"><button v-if="conversationAttachmentPreviewSrc(attachment)" type="button" class="conversation-image-thumb" :aria-label="'查看大图：'+attachment.name" @click="openConversationImage(attachment)"><img :src="conversationAttachmentPreviewSrc(attachment)" :alt="attachment.name || '会话图片'"/></button><div class="conversation-message-attachment-meta"><strong>{{ attachment.name || '会话附件' }}</strong><small>{{ conversationAttachmentSizeLabel(attachment) || '已附加' }}</small><button v-if="conversationAttachmentPreviewSrc(attachment)" type="button" class="conversation-image-download" :aria-label="'下载图片：'+attachment.name" @click="downloadConversationAttachment(attachment)"><Download :size="13"/>下载图片</button></div></div></div></div><p v-if="!selectedConversation.messages?.length" class="task-detail-empty">发送第一条消息给 ziwei_user</p></div><div class="conversation-compose"><div class="conversation-compose-settings"><label v-if="devices.length" class="conversation-device"><span>目标设备</span><ZiSelect v-model="conversationDeviceId" :options="deviceOptions" aria-label="选择会话目标设备" @update:model-value="selectConversationDevice"/></label><label class="conversation-device"><span>模型</span><ZiSelect v-model="conversationModelId" :options="conversationModelOptions" aria-label="选择会话模型" @update:model-value="saveConversationSettings"/></label><label class="conversation-device conversation-directory"><span>工作目录</span><div class="conversation-directory-control"><ZiInput v-model="conversationWorkingDirectory" placeholder="目标设备当前目录" @blur="saveConversationSettings"/><button type="button" class="pill" @click="openConversationDirectoryPicker">选择目录</button><button type="button" class="pill" @click="conversationWorkingDirectory=selectedConversationDevice?.workdir || '';saveConversationSettings()">使用当前目录</button></div></label></div><div class="conversation-compose-editor"><textarea v-model="conversationDraft" rows="3" placeholder="告诉数字伙伴要做什么..." @keydown.enter.exact.prevent="sendConversationMessage"/><div class="conversation-compose-actions"><button type="button" class="pill" :disabled="conversationSendPending || conversationAttachmentReading" @click="openConversationAttachmentPicker"><Paperclip :size="14"/>{{ conversationAttachmentReading ? '读取图片中…' : '添加图片' }}</button><input ref="conversationAttachmentInput" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden @change="handleConversationAttachment"/><ZiButton size="sm" :disabled="conversationStatusLoading || conversationSendPending || conversationAttachmentReading" @click="sendConversationMessage">{{ conversationSendPending ? '发送中…' : '发送' }}</ZiButton></div></div><div v-if="conversationAttachments.length" class="conversation-draft-images"><div v-for="(attachment,index) in conversationAttachments" :key="index" class="conversation-draft-image"><button type="button" :aria-label="'查看待发送图片：'+attachment.name" @click="openConversationImage(attachment)"><img :src="conversationAttachmentPreviewSrc(attachment)" :alt="attachment.name"/></button><span>{{ attachment.name }}</span><button type="button" :aria-label="'移除图片：'+attachment.name" @click="removeConversationAttachment(index)">×</button></div></div><p class="conversation-image-hint">PNG、JPEG、GIF、WebP，每条消息图片合计最多 10 MB。识图需要支持视觉的模型；Hermes 当前每条消息支持一张图片。</p><p v-if="conversationSendError" class="conversation-send-error" role="alert">{{ conversationSendError }} · 草稿已保留，可重新发送</p></div></div><ZiEmptyState v-else icon="⌁" title="选择一个对话" description="从左侧选择对话，或新建一个。"/></ZiCard></div></div>
+  <div v-else-if="page==='inbox'"><div class="page-header"><div><span v-if="focusedConversation" class="eyebrow">持久会话</span><h1>{{ focusedConversation ? (selectedConversation?.title || '持久会话') : '收件箱' }}</h1><p>{{ focusedConversation ? '与数字伙伴持续协作，消息和执行结果会保存在同一条会话中。' : '每个数字员工拥有独立的会话列表与执行记录。' }}</p></div><div class="header-actions"><ZiButton v-if="focusedConversation" variant="secondary" @click="navigate('inbox')">返回收件箱</ZiButton><ZiButton v-if="!focusedConversation" variant="secondary" @click="markAllNotificationsRead">全部已读</ZiButton></div></div><div class="inbox-layout" :class="{'conversation-focus-layout':focusedConversation}"><ZiCard v-if="!focusedConversation"><div class="card-heading"><h3>通知</h3><span class="work-count">{{ notificationStats.unread || 0 }} 未读</span></div><div v-if="!notifications.length" class="empty-wrap compact"><ZiEmptyState icon="✉" title="收件箱是空的" description="新的任务指派、运行时消息和自动化结果会出现在这里。"/></div><div v-else class="notification-list"><button v-for="item in notifications" :key="item.id" class="notification-row" :class="{unread:!item.read_at}" @click="api.markNotificationsRead([item.id]).then(loadNotifications)"><span class="notification-dot"/><span><strong>{{ item.action }}</strong><p>{{ item.actor }} · {{ item.created_at }}</p></span></button></div></ZiCard><ZiCard><div class="card-heading"><div><h3>对话</h3><p class="conversation-scope-caption">当前员工：{{ activeConversationEmployee?.name || (conversationEmployeeId === 'unassigned' ? '未绑定员工（历史会话）' : '未选择') }}</p></div><button class="pill" :disabled="conversationEmployeeId === 'unassigned'" @click="createConversation">新建</button></div><label class="conversation-employee-picker"><span>数字员工工作区</span><ZiSelect :model-value="conversationEmployeeId" :options="conversationEmployeeOptions" aria-label="选择数字员工" @update:model-value="selectConversationEmployee"/></label><div class="conversation-list"><button v-for="item in conversations" :key="item.id" class="conversation-row" :class="{selected:selectedConversation?.id===item.id}" @click="openConversation(item)"><div class="conversation-row-agent"><img v-if="item.employee?.avatar" :src="item.employee.avatar" class="conversation-row-agent-avatar" alt=""/><span v-else class="conversation-row-agent-fallback">{{ item.employee?.name?.slice(0,1) || '?' }}</span><strong>{{ item.title }}</strong></div><small>{{ item.employee?.name || '未绑定员工（历史记录）' }} · {{ item.employee?.runtime || '归属未知' }} · {{ item.message_count || 0 }} 条消息</small><span class="conversation-row-status" :data-status="item.execution?.status" v-if="item.execution?.status">{{ executionPresentation(item.execution).summary }}</span></button><p v-if="!conversations.length" class="task-detail-empty">还没有对话</p></div></ZiCard><ZiCard class="inbox-thread"><div v-if="selectedConversation" class="conversation-thread"><div class="card-heading conversation-thread-heading"><div><div class="conversation-agent-heading"><img v-if="selectedConversation.employee?.avatar" :src="selectedConversation.employee.avatar" class="conversation-agent-avatar" alt=""/><span v-else class="conversation-agent-fallback">{{ selectedConversation.employee?.name?.slice(0,1) || '?' }}</span><div><h3>{{ selectedConversation.title }}</h3><p>{{ selectedConversation.employee?.name || '未绑定员工（历史记录）' }} · {{ selectedConversation.employee?.runtime || '归属未知' }}</p></div></div><div class="conversation-status" :data-status="conversationExecutionTone" aria-live="polite"><span class="conversation-status-dot"/><strong>{{ conversationExecutionLabel }}</strong><small v-if="conversationStatusLoading">正在同步…</small><small v-else-if="conversationExecution?.completed_at">{{ conversationExecution.completed_at }}</small></div></div><button class="pill" @click="archiveSelectedConversation">归档</button></div><div v-if="conversationExecutionBusy" class="conversation-progress" aria-live="polite"><span class="conversation-progress-spinner"/>{{ (conversationLatestEvent ? executionEventLabel(conversationLatestEvent) : '') || '正在等待 ziwei_user 返回结果，页面会自动更新…' }}<small v-if="conversationLatestEvent">{{ executionEventDetail(conversationLatestEvent) }}</small></div><div v-else-if="conversationLatestEvent?.message" class="conversation-progress conversation-progress-terminal" :data-status="conversationExecutionTone">{{ conversationLatestEvent.message }}</div><details v-if="conversationExecution?.events?.length" class="execution-activity" open><summary><strong>执行活动</strong><span>{{ executionEventRows(conversationExecution.events).length }} 个阶段</span></summary><div ref="conversationExecutionList" class="execution-event-list" aria-label="执行进度"><div v-for="event in executionEventRows(conversationExecution.events)" :key="event.id" class="execution-event"><span class="execution-event-main"><i class="execution-event-dot" :data-stage="event.stage"></i><span class="execution-event-copy"><strong>{{ event.label }}</strong><small v-if="event.detail">{{ event.detail }}</small></span><b v-if="event.count > 1">×{{ event.count }}</b></span><time>{{ event.created_at }}</time></div></div></details><details v-if="executionReasoningSummaries(conversationExecution?.events).length" class="execution-reasoning-drawer conversation-reasoning-drawer"><summary><strong>思考摘要</strong><span>{{ executionReasoningSummaries(conversationExecution?.events).length }} 条可展开摘要</span></summary><article v-for="event in executionReasoningSummaries(conversationExecution?.events)" :key="`conversation-reasoning-${event.id}`" class="execution-reasoning-card"><div><strong>{{ event.label }}</strong><time>{{ event.created_at }}</time></div><p>{{ executionEventSummary(event) }}</p></article></details><div class="conversation-messages" aria-live="polite"><div v-for="message in selectedConversation.messages" :key="message.id" class="conversation-message" :class="message.role"><small>{{ message.role === 'user' ? '你' : message.role === 'assistant' ? '数字伙伴' : '系统' }}</small><p v-if="message.content">{{ message.content }}</p><button v-if="message.role==='user' && conversationExecution?.payload?.messageId===message.id && ['failed','expired'].includes(conversationExecution?.status)" type="button" class="pill" :disabled="conversationSendPending || conversationAttachmentReading" @click="restoreConversationMessage(message)">重新编辑并重试</button><div v-if="message.attachments?.length" class="conversation-message-attachments"><div v-for="(attachment,attachmentIndex) in message.attachments" :key="`${message.id}-${attachmentIndex}`" class="conversation-message-attachment"><button v-if="conversationAttachmentPreviewSrc(attachment)" type="button" class="conversation-image-thumb" :aria-label="'查看大图：'+attachment.name" @click="openConversationImage(attachment)"><img :src="conversationAttachmentPreviewSrc(attachment)" :alt="attachment.name || '会话图片'"/></button><div class="conversation-message-attachment-meta"><strong>{{ attachment.name || '会话附件' }}</strong><small>{{ conversationAttachmentSizeLabel(attachment) || '已附加' }}</small><button v-if="conversationAttachmentPreviewSrc(attachment)" type="button" class="conversation-image-download" :aria-label="'下载图片：'+attachment.name" @click="downloadConversationAttachment(attachment)"><Download :size="13"/>下载图片</button></div></div></div></div><p v-if="!selectedConversation.messages?.length" class="task-detail-empty">发送第一条消息给 ziwei_user</p></div><div class="conversation-compose"><div class="conversation-compose-settings"><label v-if="devices.length" class="conversation-device"><span>目标设备</span><ZiSelect v-model="conversationDeviceId" :options="deviceOptions" aria-label="选择会话目标设备" @update:model-value="selectConversationDevice"/></label><label class="conversation-device"><span>模型</span><ZiSelect v-model="conversationModelId" :options="conversationModelOptions" aria-label="选择会话模型" @update:model-value="saveConversationSettings"/></label><label class="conversation-device conversation-directory"><span>工作目录</span><div class="conversation-directory-control"><ZiInput v-model="conversationWorkingDirectory" placeholder="目标设备当前目录" @blur="saveConversationSettings"/><button type="button" class="pill" @click="openConversationDirectoryPicker">选择目录</button><button type="button" class="pill" @click="conversationWorkingDirectory=selectedConversationDevice?.workdir || '';saveConversationSettings()">使用当前目录</button></div></label></div><div class="conversation-compose-editor"><textarea v-model="conversationDraft" rows="3" placeholder="告诉数字伙伴要做什么..." @keydown.enter.exact.prevent="sendConversationMessage"/><div class="conversation-compose-actions"><button type="button" class="pill" :disabled="conversationSendPending || conversationAttachmentReading" @click="openConversationAttachmentPicker"><Paperclip :size="14"/>{{ conversationAttachmentReading ? '读取图片中…' : '添加图片' }}</button><input ref="conversationAttachmentInput" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden @change="handleConversationAttachment"/><ZiButton size="sm" :disabled="conversationStatusLoading || conversationSendPending || conversationAttachmentReading" @click="sendConversationMessage">{{ conversationSendPending ? '发送中…' : '发送' }}</ZiButton></div></div><div v-if="conversationAttachments.length" class="conversation-draft-images"><div v-for="(attachment,index) in conversationAttachments" :key="index" class="conversation-draft-image"><button type="button" :aria-label="'查看待发送图片：'+attachment.name" @click="openConversationImage(attachment)"><img :src="conversationAttachmentPreviewSrc(attachment)" :alt="attachment.name"/></button><span>{{ attachment.name }}</span><button type="button" :aria-label="'移除图片：'+attachment.name" @click="removeConversationAttachment(index)">×</button></div></div><p class="conversation-image-hint">PNG、JPEG、GIF、WebP，每条消息图片合计最多 10 MB。识图需要支持视觉的模型；Hermes 当前每条消息支持一张图片。</p><p v-if="conversationSendError" class="conversation-send-error" role="alert">{{ conversationSendError }} · 草稿已保留，可重新发送</p></div></div><ZiEmptyState v-else icon="⌁" title="选择一个对话" description="从左侧选择对话，或新建一个。"/></ZiCard></div></div>
       </section>
   </WorkspaceShell>
 

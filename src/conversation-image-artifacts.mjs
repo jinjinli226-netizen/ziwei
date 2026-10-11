@@ -150,7 +150,7 @@ export function imageArtifactDeliveryBody(body, {maxBytes=MAX_ACTION_RESULT_JSON
   }
   // Unexpected large metadata must produce a visible failure rather than an
   // endlessly retried HTTP 413. Preserve valid images in the minimal envelope.
-  const minimal={status:'failed',error:'执行结果元数据超过 JSON 回传大小预算；仅保留图片及错误摘要',result:{runtime:result.runtime || null,output:truncationNotice,truncated:true,truncationReason:'action_result_json_budget',truncationDetails:['metadata_removed'],...(Array.isArray(result.outputArtifacts)?{outputArtifacts:result.outputArtifacts}:{})}};
+  const minimal={status:'failed',error:'执行结果元数据超过 JSON 回传大小预算；仅保留图片及错误摘要',...(body.receiptOnly!==undefined?{receiptOnly:body.receiptOnly}:{}),result:{runtime:result.runtime || null,output:truncationNotice,truncated:true,truncationReason:'action_result_json_budget',truncationDetails:['metadata_removed'],...(Array.isArray(result.outputArtifacts)?{outputArtifacts:result.outputArtifacts}:{})}};
   if (jsonBytes(minimal) <= maxBytes) return minimal;
   throw failure('图片回传本身超过 JSON 大小预算，不能截断图片内容');
 }
