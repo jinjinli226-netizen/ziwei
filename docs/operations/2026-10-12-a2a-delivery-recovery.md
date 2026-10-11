@@ -1,6 +1,6 @@
-# 2026-10-12 A2A 执行恢复发布与验收
+# 2026-10-12 A2A 执行恢复发布与验收（已上线，验收与精确QA清理完成）
 
-## 源码与构建
+## 首版ce0源码与构建
 
 - 分支：`codex/a2a-delivery-recovery`。
 - 功能提交：`ce0a0e3a48fc46b1bf1b83ad5620ef8073bf6c9c`，GitHub push 后 `ls-remote` 核对一致。
@@ -9,7 +9,7 @@
 - 两处 lint 均检查 74 个源码文件，前端构建通过；精确公开 npm 包含 32 个文件，逐个核对提交源码、归档和真实 Windows 安装。
 - 前端 JS `index-DS7SuX_Z.js` / CSS `index-Chy_TRFE.css`。
 
-## 主站及官方包
+## 首版ce0主站及官方包
 
 北京时间 2026-10-12 03:58 发布主站 `/opt/ziwei/releases/ce0a0e3-a2a-e8c5cb96`。主 API PID `170667`；控制仍 `/opt/ziwei-control/releases/8a4fe59` / PID `134533`；Nginx PID `737`。
 
@@ -21,19 +21,13 @@
 
 源码归档 build `2e13c32c5834b6ce791929d0abefe426d84fbaa424702f64e34e3a651e6b50bf`，Windows 安装 build `7ff3d6bb45d7161372f8b9208fe3cf17a8329ab9b8105d682452bf4527c82147`。区别仅为 npm bin-links 将 `scripts/ziwei-user.mjs` 第一行 shebang 的 CRLF 转为 LF；其余包文件逐字节一致。安装 build 与源码 build 分别记录，不能混用。
 
-## 实际 Windows 客户端
+## 首轮实际Windows升级（历史）
 
-通过 WMI 隐藏启动原生 Python，Windows 文件句柄最终路径确认 plain AppData，而非桌面 MSIX 的历史 LocalCache。升级前实际 global 入口是 `D:\work\nodejs\node_global\node_modules\ziwei`，原 PID `51880` / build `7c2d47abb3982eb31fbdd2245fe0550235efed9ec418848de901dfead8bdaf64`；磁盘配置、运行 lifecycle 身份、工作区、设备匹配。
-
-先从公开下载入口取得此精确 SHA 的包，在全新私有 prefix 真实 npm 安装，核对 32 文件、metadata、bootstrap 和 Windows build；无正式 daemon 启动。然后原 global CLI 通过已有安全 `update --package ... --sha256 ... --json` 维护流程升级，不重新配对或直接终止进程。
-
-本次 maintenance：`update-2fc603b0-736f-4e20-a8e1-919d861ea7f2`，状态 `queued → running → complete`，北京时间 04:00:27 完成，`restoredRunning=true`、`configurationPreserved=true`。新原生 PID `51924` / 实际安装及运行 build 均 `7ff3d6bb45d7161372f8b9208fe3cf17a8329ab9b8105d682452bf4527c82147`，旧 PID 已退出，ready 为 true。
-
-`bigtron` / `device_bfd9a3d2-c2cc-4a36-8bd8-465bea492493`、原配置 SHA `7913bf1c1b490ecf9b6d6760787973c28f8c484703c144eb0028b57ef8166b72`、primary binding、global 入口、Codex auth/config 摘要均保持。版本号仍为 0.1.0，本次真实更新由 commit、公开包 SHA 与实际运行 build 核实。
+首轮使用原安全入口，于04:00:27 complete；旧PID51880退出，新PID51924/安装及运行build7ff3d6bb…，ready=true。plain AppData与运行身份匹配，配置、连接、global入口、Codex auth/config和绑定保持；版本号仍0.1.0。第二次bf实际升级及最新PID/build见下方补充发布段。
 
 ## 真实公网恢复矩阵
 
-独立全新 QA run `e7ea1762-7ecd-4708-9976-5c4f7d5b231c` 使用正常注册和配对创建个人 owner/workspace 与两台认证 fixture device。候选来自精确包的真实 Windows 安装模块；运行实际 delivery engine 与 dispatcher，执行器明确返回人工 fixture，无 CLI、模型、手机操作或 heartbeat。北京时间 04:04:20，5/5 通过：
+独立全新e7ea QA 使用正常注册和配对创建个人 owner/workspace 与两台认证 fixture device。候选来自精确包的真实 Windows 安装模块；运行实际 delivery engine 与 dispatcher，执行器明确返回人工 fixture，无 CLI、模型、手机操作或 heartbeat。北京时间 04:04:20，5/5 通过：
 
 | 场景 | 执行器次数 | engine result 上传次数 | 恢复证据 |
 | --- | ---: | ---: | --- |
@@ -51,7 +45,7 @@
 
 ## 真实浏览器状态矩阵
 
-独立新 run `63572f6d-76b4-449b-b816-4c79dee2c6f7` 通过正常注册/配对创建自己的 owner、个人 workspace、两个 fixture device 和 plain Codex fixture employee。没有启动 fixture daemon、CLI/模型或手机操作；A/B/D 回执是明确标记的人工 fixture，不能算真实 Codex 输出。
+独立browser635 QA 通过正常注册/配对创建自己的 owner、个人 workspace、两个 fixture device 和 plain Codex fixture employee。没有启动 fixture daemon、CLI/模型或手机操作；A/B/D 回执是明确标记的人工 fixture，不能算真实 Codex 输出。
 
 已安装 Edge 使用本次证据目录内全新临时 profile 独立 headless 启动，实际加载公开 Vue 构建与真实 API/WS。原用户浏览器的新增 CDP 连接没有完成授权，首次连接失败证据保留；不能宣称在用户日常 Edge 的现有 CDP 会话里完成了全部矩阵。原用户标签保留，新 headless/context 结束后其 exact profile 进程残留 0。
 
@@ -61,20 +55,47 @@ E 为从未 ACK/执行的本轮独立 pending fixture；根任务核对 owner/wo
 
 ## 真实 global Codex 执行与问答限制
 
-独立 run `208390cc-f7a7-498d-b012-4ed1792be7cf` 使用既有 bigtron Owner 的正常 API，新建 personal plain Codex 员工 `employee_3449738d-80fe-4235-a65f-ad08f963f4f8` 与会话 `conv_fab0970d-4e9c-4069-b5ff-5c9ed89b06de`。职责、人格、指令和消息均新写，skills 为空，没有安装模板、配置手机 MCP、复制正式 Creator 指令或读取旧会话。专用 cwd 为该 run 下的空目录；不声称使用独立 Codex HOME。
+第一轮first208使用既有bigtron Owner的正常API，新建personal/plain Codex员工和会话，职责/人格/消息均新写，skills为空，没有使用正式Creator、模板、旧指令或phone MCP。使用独立空cwd，不声称隔离Codex HOME。
 
-只提交一次新的 `clientMessageId`；实际 user 为 `convmsg_5cbd664a-2ae4-4dad-8c6e-e591e8c7131a`，action `action_131e0e4a-387e-4206-94d8-a1a0cfa061b1` 于北京时间 04:28:40 canonical succeeded。一条 user、一个 action、一次 action.started、一条 assistant；没有重试 POST 或重发原 expired 消息。原生 observer 捕获唯一 Codex PID68620 / parent51924，PEB 实际 cwd 匹配专用目录，模型参数 `gpt-6.1-sol`，default profile。实际 management MCP loaded，只调用 `ziwei_list_employees` 与 `ziwei_phone_mcp_setup` 各一次、ok；phone MCP 未加载或配置，正式任务仍为 2。
+仅提交一次新消息，04:28:40 canonical succeeded：一user/action/action.started/assistant，无重试或旧expired重发。原生唯一Codex PID68620/parent51924、default profile、gpt-6.1-sol及实际cwd通过；management MCP loaded，ziwei_list_employees与ziwei_phone_mcp_setup各一次ok，phone MCP未加载或配置，任务仍2。
 
 执行与投递链路通过，数量回答并未全部通过。实际目录为 3 个员工（包括本 QA 自身）和 2 个手机。模型正确回答 employee_count=3，但表示 phone-mcp/setup 输出被截断，无法核验完整 phones 数组，phone_count 返回 failed，没有猜测 2；输出还有前置说明，未满足 QA 的纯三字段 JSON 格式。
 
 正常 phone API 对象完整，pretty JSON 34782 字符 / 46809 UTF-8 字节、phones 两条；bridge 源码完整 pretty JSON 返回，无截断逻辑。runtime result.truncated=false、diagnostics 1386 字节，未触及 daemon 4 MiB 输出预算。因实际工具 result 原始字节未记录、Codex `--ephemeral` 未保存 session，只能推断限制位于 Codex 工具输入/呈现链路，不能据此确定 CLI 与 provider 中的具体截断层。失败原始问答和证据保留，不用正常 API 的 2 条目录替代模型实际回答。
 
-## 手机数量只读摘要修复（客户端验证中）
+## 手机目录摘要：官方包及实际客户端已更新
 
-`ziwei_phone_mcp_setup` 新增可选 `view:"summary"`；默认 `view:"full"` 保留完整配置资料。摘要只在客户端投影已有同权限 GET 的完整对象，不增加接口调用或控制器查询，`view` 不发送到服务端。它明确统计 `control_catalog` 手机目录的非空真实 ID 去重数量，以及当前调用者可见工作区的员工与电脑数量；不是工作区已绑定手机数。接口不可用或目录格式无效时返回 unknown/null 和原因，健康空目录才返回 0。
+| 项目 | 实际值 |
+| --- | --- |
+| 主站/前端 | `ce0a0e3`，保持；JS/CSS字节不变 |
+| 客户端源码 | `bf2135158c693534849443daf7d146046ac5f201`，已推送 |
+| 验证 | 源码633/633、精确git archive633/633，0 fail/cancelled/skipped/todo；lint74/前端构建通过；Windows32文件真实隔离实装验真 |
+| 官方包 | 108903B，SHA `6631d4e8a6f26849187448824b0abc7af855b3a7d3f4c50936e8133cbaaa0b98` |
+| sourceBuild | `524423aa4df120540321f3efb9771b5dc38ba4ae5025e596e291ca9ad00e3e72` |
+| Windows安装/运行build | `33f572266dffd96ee24d4a3bbbed7275bdf4210ebfc7b7e6e3af30faa9b93e9a` |
+| 北京时间 | 06:29:08发布包；06:45:01.719 queued →06:45:02.229 running →06:45:18.777实际升级complete |
 
-摘要先返回完整数量，再提供有字节预算的最多 20 条简短手机资料，标明列表或字段是否裁剪。仅修改管理 MCP 客户端与针对性回归；不改变服务端权限、归属、手机能力或任何手机操作。新包只发布客户端层，主站与前端继续使用上面的 `ce0a0e3`，无需再重启服务。新公开包、实际 global 安全升级、新隔离真实 Codex 数量问答完成后另记准确版本和结果。
+只更新官方CLI包与release.json，保留bootstrap、windowsWorkdir、conversationImages及a2aDeliveryRecovery；metadata明确clientOnlyPublication=true、mainSiteCommitUnchanged=true。包发布的服务操作、配置写入、数据库写入/恢复、模型与手机动作均0。公开health、metadata、包、index、JS、CSS均200；主站/前端/控制/Nginx、正式稳定资源和对象目录保持。源码与Windows安装build的唯一已验证差异仍是npm bin-links对首行shebang换行的归一。
 
-## 精确 QA 清理
+两次旧私有发布保护分别被固定31秒checkedAt假设与terminal/latest-node即时相等假设拒绝，均自动恢复旧包原字节，没有恢复整库或操作服务。新守卫依据实际cache/heartbeat源码及SQLite观察窗口，只修正已登记时间字段，完整schema/PK/stable和其它规则保持；旧失败/回滚记录保留。新publisher59项离线回归、成功发布前后六份实际DB的SHA/完整性/FK及三段保护核对均通过，长期备份保留。
 
-本轮三份独立 manifest 的清理正在进行；每份先保存主站/control 的 SQLite backup API 副本并离线预览，根任务审核实际精确 PK 与完整行 SHA，再在串行空闲窗口执行，保护全部正式和其它 QA 资源。当前文档不将尚未完成的删除、撤销探测或本机 secret 清除记为成功。原正式 expired 动作/消息保持原始历史。
+第二次实际global更新沿原安全维护入口，确认plain AppData与lifecycle身份。旧PID51924已退出，新PID17648；实际安装/运行build均33f572…，原配置、global入口、primary/shared绑定、credential及Codex auth/config保持，32文件验真，升级后ready=true/active0。官方包、隔离实装与实际用户升级分别留证，不混用。
+
+`ziwei_phone_mcp_setup` 新增可选summary，默认full不变；只投影原同权限GET，view不传给服务端。手机数为control_catalog非空ID去重目录数量，不是工作区绑定数；无效/不可用返回null，健康空目录才返回0。成功摘要保留完整数量，最多20条简短资料及裁剪标记，pretty UTF-8≤6144B、escaped-text≤7168B。非2xx HTTP错误文本未新增限长；工具名/次数审计不保存任意参数，缺少绑定本cwd/session的原始事件时参数证据必须unavailable。
+
+第二轮7a只使用普通数量消息、全新personal/plain Codex员工和独立cwd，沿原auth/default profile，不隔离HOME。提示没有指定view、统计范围或数量答案；执行与回答、工具参数直接证据分别判断。创建前独立目录为2员工/2目录手机/2任务，八GET200、旧会话404；此为创建前观察，新QA可能改变员工总数，不能预埋为模型答案。实际结果：普通数量问答一次真实执行succeeded；员工3、control_catalog手机2及范围功能核对通过，cwd按Windows路径归一与实际原生PEB匹配，不声称逐字符相同。严格纯三字段JSON格式未通过：原回复带前置说明，原答案保留。两个只读管理工具各一次ok，phone MCP未配置/未加载，手机动作0；参数证据unavailable（没有绑定本次执行的参数直接证据），不从数量或scope反推view，未追加模型重跑。
+
+## 精确QA清理及剩余事项
+
+| 轮次 | 实际结果 |
+| --- | --- |
+| 网络fixture | 精确114行提交清理，完整保留保护通过；原临时owner和两设备认证各实际401 |
+| 浏览器fixture | 精确80行已提交、完整独立保留复核通过；原owner和两设备各一次真实GET401；旧postcheck失败与独立复核分别保留 |
+| first208真实Codex首轮 | 06:42:16.306精确提交82行/8表，四份实际DB SHA/完整性/FK、完整PK减集合、82行before SHA/after absent和3013条保留stable核对通过；Owner auth/正式management状态200、指定QAemployee/会话404 |
+| 7a普通问答后的第四轮 | 第四轮精确提交清理88行，正式及其它资源的全部PK/稳定字段和服务保护通过；指定QA员工/会话404，正式Owner/管理状态200，共享management bearer/cache KEEP。浏览器本地两项删除受自动审查阻挡的限制保持。 |
+
+沿用正式Owner/device的QA不删除其身份，shared management bearer/cache KEEP；指定QA访问404不等于通用bearer已401撤销。正式Creator、员工、手机MCP/绑定、auth/config/HOME、任务和其它资源保持。原expired动作及第一轮未通过的数量回答不重放或改写。
+
+最终普通API目录复验为2员工、2个control_catalog手机、2任务；QA员工/会话404，正式认证与管理状态200。六份完整双库备份共85表复核，精确删除88行，3013条保留记录通过保护；正式设备metadata仅有已独立核对的自然续期expiresAt变化，保留当前值，其余正式稳定字段及全部既有A2A历史原始字节保持。最终原生PID17648 ready=true、build33f572…及32文件/配置保护通过；最终公网七资源验真通过。
+
+浏览器本地credentials文件与临时profile两个精确删除目标仍保留：自动审查两次在命令启动前返回 `blocked by policy`，未提供更具体原因，没有绕过或继续重试。线上三项认证已401，不能据此声称本地两项已清除；截图、manifest及原证据保持。
