@@ -52,13 +52,61 @@ export const toolDefinitions = [
   { name: 'ziwei_list_documents', description: '列出指定紫薇工作区的文档。', inputSchema: { type: 'object', properties: {} } },
   { name: 'ziwei_read_document', description: '读取紫薇工作区内的文档。', inputSchema: { type: 'object', required: ['id'], properties: { id: { type: 'string' } } } },
   { name: 'ziwei_write_document', description: '在紫薇工作区创建文档，或更新已有文档。', inputSchema: { type: 'object', required: ['name'], properties: { id: { type: 'string' }, name: { type: 'string' }, type: { type: 'string' }, content: { type: 'string' }, mimeType: { type: 'string' }, parentId: { type: 'string' } } } },
-  {name:'ziwei_phone_mcp_setup',description:'发现工作区手机平台技能实际版本/安装状态、电脑runtime/profile与原中控手机。员工绑定手机后才会获得完整十工具。',inputSchema:{type:'object',properties:{}}},
+  {name:'ziwei_phone_mcp_setup',description:'只读发现手机平台技能、电脑runtime/profile与原中控手机目录。数量查询使用 view:"summary"，返回 control_catalog 的唯一手机ID数量、当前可见员工与电脑数量及简短目录；不是工作区已绑定手机数。默认 view:"full" 保留完整配置资料。员工绑定手机后才会获得完整十工具。',inputSchema:{type:'object',properties:{view:{type:'string',enum:['summary','full'],default:'full'}}}},
   {name:'ziwei_install_skill',description:'安装或卸载当前工作区已发现的真实平台技能ID，并保留版本记录；卸载手机技能不删除员工人格、其他技能或手机绑定。',inputSchema:{type:'object',required:['id'],properties:{id:{type:'string'},installed:{type:'boolean',default:true}}}},
   {name:'ziwei_configure_phone_mcp',description:'为当前工作区员工配置已安装手机技能、精确电脑/runtime/profile和手机绑定。不会复制管理员凭据。',inputSchema:{type:'object',required:['id','enabled'],properties:{id:{type:'string'},enabled:{type:'boolean'},phoneDeviceId:{type:'string'},targetDeviceId:{type:'string'},runtime:{type:'string'},runtimeProfile:{type:['string','null']},accountId:{type:'string'},accountLabel:{type:'string'}}}},
   {name:'ziwei_get_phone_mcp_status',description:'回读员工手机技能保存、API、实际MCP加载和本配置手机命令/截图验收结果；不能把配置成功当成实机成功。',inputSchema:{type:'object',required:['id'],properties:{id:{type:'string'}}}},
   {name:'ziwei_check_phone_mcp',description:'创建员工持久会话实际加载手机MCP并读取list/status。此次capability只准只读检测，返回action需回读。',inputSchema:{type:'object',required:['id'],properties:{id:{type:'string'},idempotencyKey:{type:'string'}}}},
   {name:'ziwei_trial_phone_mcp',description:'创建真实员工持久会话执行已绑定手机health或screenshot，返回action需回读commandId/状态/截图；幂等键避免重复试运行。',inputSchema:{type:'object',required:['id'],properties:{id:{type:'string'},action:{type:'string',enum:['health','screenshot']},idempotencyKey:{type:'string'}}}}
 ].map(tool=>({...tool,inputSchema:{...tool.inputSchema,properties:{...tool.inputSchema.properties,workspace:{type:'string',description:'可选的明确目标工作区；必须已经在本MCP bearer授权scope中，省略沿用当前工作区。'}}}}));
+
+function phoneSetupSummary(value, workspace) {
+  const shortText = (text, maxBytes) => {
+    if (typeof text !== 'string') return null;
+    if (Buffer.byteLength(text, 'utf8') <= maxBytes) return text;
+    let clipped = '', bytes = 0;
+    for (const character of text) {
+      const size = Buffer.byteLength(character, 'utf8');
+      if (bytes + size > maxBytes - 3) break;
+      clipped += character; bytes += size;
+    }
+    return clipped + '…';
+  };
+  const apiHealthy = value?.api?.status === 'healthy' && value.api.available !== false && (value.api.error == null || value.api.error === '');
+  const hasId = row => row && typeof row === 'object' && !Array.isArray(row) && typeof row.id === 'string' && row.id.trim();
+  const validPhones = Array.isArray(value?.phones) && value.phones.every(hasId);
+  const phones = new Map();
+  if (apiHealthy && validPhones) for (const phone of value.phones) if (!phones.has(phone.id)) phones.set(phone.id, phone);
+  const phoneCount = apiHealthy && validPhones ? phones.size : null;
+  const arrayCount = entries => Array.isArray(entries) && entries.every(hasId) ? entries.length : null;
+  const summary = {
+    workspace: shortText(workspace, 128), workspaceTruncated: shortText(workspace, 128) !== workspace,
+    counts: { phones: phoneCount, employees: arrayCount(value?.employees), computers: arrayCount(value?.computers) },
+    source: 'control_catalog', scope: 'control_catalog',
+    phoneCountStatus: phoneCount === null ? 'failed' : 'ready',
+    ...(phoneCount === null ? { phoneCountReason: apiHealthy ? 'invalid_phone_directory' : 'phone_api_unavailable' } : {}),
+    api: { status: shortText(value?.api?.status, 32) || 'invalid', ...(typeof value?.api?.available === 'boolean' ? { available: value.api.available } : {}), error: shortText(value?.api?.error, 512) },
+    phones: [], phoneList: { limit: 20, shown: 0, total: phoneCount, truncated: false, fieldsTruncated: false }
+  };
+  for (const phone of phones.values()) {
+    if (summary.phones.length === 20) break;
+    const item = { id: shortText(phone.id, 128), alias: shortText(phone.alias, 96), status: shortText(phone.status, 48) };
+    if (['id', 'alias', 'status'].some(key => typeof phone[key] === 'string' && item[key] !== phone[key])) summary.phoneList.fieldsTruncated = true;
+    summary.phones.push(item);
+  }
+  const fits = () => {
+    const text = JSON.stringify(summary, null, 2);
+    return Buffer.byteLength(text, 'utf8') <= 6 * 1024 && Buffer.byteLength(JSON.stringify(text), 'utf8') <= 7 * 1024;
+  };
+  while (true) {
+    summary.phoneList.shown = summary.phones.length;
+    summary.phoneList.truncated = phoneCount !== null && summary.phones.length < phoneCount;
+    if (fits()) break;
+    if (summary.phones.length === 0) throw new Error('手机目录 summary 超出输出字节预算');
+    summary.phones.pop();
+  }
+  return summary;
+}
 
 export function createMcpClient(options = {}) {
   const config = configFromEnv(options);
@@ -102,7 +150,12 @@ export function createMcpClient(options = {}) {
     async createTask(input) { return request('POST', `${workspacePath}/tasks`, input); },
     async listDocuments(input={}) { return request('GET', `${workspacePath}/documents`,undefined,input); },
     async readDocument(input) { return request('GET', `${workspacePath}/documents/${encodeURIComponent(input.id)}`,undefined,{workspace:input.workspace}); },
-    async phoneMcpSetup(input={}) {return request('GET',`${workspacePath}/phone-mcp/setup`,undefined,input);},
+    async phoneMcpSetup(input={}) {
+      const { view = 'full', ...query } = input;
+      if (!['summary', 'full'].includes(view)) throw new Error('手机目录 view 必须是 summary 或 full');
+      const value = await request('GET', `${workspacePath}/phone-mcp/setup`, undefined, query);
+      return view === 'summary' ? phoneSetupSummary(value, String(query.workspace || config.workspace).trim()) : value;
+    },
     async installSkill(input) {return request('POST',`${workspacePath}/skills/${encodeURIComponent(input.id)}/install`,input);},
     async configurePhoneMcp(input) {const{id,...body}=input;return request('PUT',`${workspacePath}/employees/${encodeURIComponent(id)}/phone-mcp`,body);},
     async getPhoneMcpStatus(input) {return request('GET',`${workspacePath}/employees/${encodeURIComponent(input.id)}/phone-mcp/status`,undefined,{workspace:input.workspace});},

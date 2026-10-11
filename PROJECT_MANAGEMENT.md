@@ -2,9 +2,18 @@
 
 > **唯一维护入口**：本文是紫薇项目的当前状态、开发约定、运维流程和 AI 接手说明。
 >
-> **当前发布接续工作树**：`C:\Users\25941\.codex\worktrees\2884\灵光爸爸拆解`。原 `D:\灵光爸爸拆解` 保留用户修改，不作为本轮发布来源。
+> **当前发布接续工作树**：`C:\Users\25941\.codex\worktrees\a2a-delivery-recovery\灵光爸爸拆解`，分支 `codex/a2a-delivery-recovery`。原 `D:\灵光爸爸拆解` 保留用户修改；`2884` 树保留未完成 SEC/手机归属改动，两者均不作为本轮发布来源。
 >
-> **文档状态**：以 2026-10-12 持久会话图片发布/验收结果、当前 Windows 检测/维护与下列支持范围为准；每次结构、运行方式或功能边界发生变化时必须更新本文。历史清理、断开与favicon记录保留；用户随后新增的正式连接不能再被旧清理范围覆盖。较早的版本/PID、逐员工 MCP 开关或独立 bearer 操作不能替代当前规则。
+> **文档状态**：以最上方 2026-10-12 A2A 恢复发布的实际服务器、官方包和 Windows 运行版本为当前状态；下方发布段落保留历史时间线，旧 PID51880 不再代表当前客户端。每次结构、运行方式或功能边界发生变化时必须更新本文。历史清理、断开与 favicon 记录保留；用户随后新增的正式连接不能被旧清理范围覆盖。
+
+### 2026-10-12 当前发布：A2A 执行与投递恢复（已上线，最终验收进行中）
+
+- 功能提交 `ce0a0e3a48fc46b1bf1b83ad5620ef8073bf6c9c` 已推送 `origin/codex/a2a-delivery-recovery`。源码和精确 git archive 均完整串行 615/615、lint74/build 通过；正式图片基线 `1c94c9c` 保留，未合入 T9 未完成 SEC/手机归属补丁。
+- 正式旧消息 ACK 已在服务器提交，但旧客户端 3 秒超时后未执行；`includeAcked=1` 未被识别使后续无法恢复。已修正认证 ACK 恢复、启动前持久化、持久 result/event 投递、轻量回执和请求预算；执行启动后没有可靠结果时报告 `EXECUTION_UNCERTAIN`，不自动重复启动 CLI。原 expired 动作与消息保持历史，不重放。
+- 03:58 北京时间主站发布 `/opt/ziwei/releases/ce0a0e3-a2a-e8c5cb96`，主 API PID170667；官方包 107747B / SHA `415d6165debc2c3d60a712ffe9891cf54a780d7d6f5e7e8d93668401fdbdf128`，前端 `index-DS7SuX_Z.js` / `index-Chy_TRFE.css`。只重启主 API 一次，控制 PID134533/`8a4fe59`、Nginx PID737/配置、端口和 bootstrap 保持；双库离线 integrity/FK、正式主键及 15 类稳定资源保护通过，不恢复旧数据库。
+- 本人实际 global Windows 客户端通过原安全维护入口升级，maintenance `update-2fc603b0-736f-4e20-a8e1-919d861ea7f2` 于 04:00:27 真正 complete。当前原生 PID51924，安装和运行 build 均 `7ff3d6bb45d7161372f8b9208fe3cf17a8329ab9b8105d682452bf4527c82147`、ready=true；bigtron/device_bfd…、配置/绑定及 Codex auth/config 保持。版本号仍 0.1.0，以 commit/公开包 SHA/实际运行 build 判断更新。
+- 独立新 fixture 公网恢复 5/5 通过，86 次真实 HTTPS 记录验证 10 MiB 输入、丢 ACK/event 回执、中断 result、已提交 result 丢回执；每条执行器一次、task0，fixture 没有真实 CLI/模型/手机动作。独立已安装 Edge headless 浏览器状态矩阵 9/9 通过，包含旧响应、真实 WS 重连/草稿和 390 窄屏；原用户浏览器标签保留。真实 global Codex 首次只读执行 succeeded、仅两个指定工具各一次，但完整手机配置工具输出过长，手机数量回答未通过；已新增兼容的只读 summary 数量输出，正在验证新包与全新会话。本轮精确 QA 清理进行中。
+- 接续只处理 `.local/a2a-recovery/qa/` 本轮独立 manifest 范围的实际 Codex 验收、短时双库备份/精确 PK+行 SHA 预览与清理、旧 QA 凭据实际 401 和最终健康核对。使用最新 [A2A 发布运维记录](docs/operations/2026-10-12-a2a-delivery-recovery.md)；已 complete 的 A2A 升级保持原记录；后续只为新 summary 客户端修复做一次有新包 SHA 的安全更新。不重跑旧 T9 清理，不覆盖原树修改或正式 Creator/手机/连接/历史。
 
 ### 2026-10-11 持久会话双向图片（已上线，验收与精确QA清理完成）
 
