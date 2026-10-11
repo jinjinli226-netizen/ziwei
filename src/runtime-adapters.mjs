@@ -860,6 +860,18 @@ export function executeRuntime({ runtime, prompt, model = null, profile = null, 
   let creatorIsolation = null;
   let selectedModel = model || null;
   try {
+    // Internal executor policy, never an A2A payload field. Apply the complete
+    // host table before scoped MCP injection: a later table override would
+    // erase this execution's authorized management/phone transport entries.
+    if (resolvedRuntime === 'Codex' && codexMcpDisabledServers.length) {
+      if (!Array.isArray(codexMcpDisabledServers) || codexMcpDisabledServers.some(name=>typeof name !== 'string' || !name || name.length > 200 || /[\u0000-\u001f\u007f]/.test(name))) throw new Error('Codex MCP 禁用名单必须是安全的服务名数组');
+      // Codex splits dotted override paths without parsing quoted segments.
+      // Quote server keys in a TOML inline-table value instead, also supporting
+      // literal names containing dots without editing native HOME config.
+      const table=[...new Set(codexMcpDisabledServers)].map(name=>`${JSON.stringify(name)}={enabled=false}`).join(',');
+      const flags=['--config',`mcp_servers={${table}}`];
+      const index=invocation.args.lastIndexOf('-');invocation.args.splice(index<0?invocation.args.length:index,0,...flags);
+    }
     const launch = prepareManagementMcpLaunch({ runtime: resolvedRuntime, profile, model, invocation, env: childEnv, ...(managementMcp || {}), creatorInstance, creatorInstanceDirectory });
     invocation = launch.invocation; childEnv = launch.env; receipt = launch.receipt;
     creatorPrepared = launch.creatorPrepared;
@@ -868,17 +880,6 @@ export function executeRuntime({ runtime, prompt, model = null, profile = null, 
     cleanupOverlay = launch.cleanup || cleanupOverlay;
     const phoneLaunch = prepareTerminalMcpLaunch({ runtime: resolvedRuntime, profile, invocation, env: childEnv, profileBaseHome, hermesOverlayHome: launch.overlayHome, ...(terminalMcp || {}) });
     invocation = phoneLaunch.invocation; childEnv = phoneLaunch.env; phoneReceipt = phoneLaunch.receipt;
-    // Internal executor policy, never an A2A payload field. One-shot QA can
-    // disable host MCP servers without editing the native HOME configuration.
-    if (resolvedRuntime === 'Codex' && codexMcpDisabledServers.length) {
-      if (!Array.isArray(codexMcpDisabledServers) || codexMcpDisabledServers.some(name=>typeof name !== 'string' || !name || name.length > 200 || /[\u0000-\u001f\u007f]/.test(name))) throw new Error('Codex MCP 禁用名单必须是安全的服务名数组');
-      // Codex splits dotted override paths without parsing quoted segments.
-      // Quote server keys in a TOML inline-table value instead (also safe for
-      // literal names containing dots); merging preserves native transport.
-      const table=[...new Set(codexMcpDisabledServers)].map(name=>`${JSON.stringify(name)}={enabled=false}`).join(',');
-      const flags=['--config',`mcp_servers={${table}}`];
-      const index=invocation.args.lastIndexOf('-');invocation.args.splice(index<0?invocation.args.length:index,0,...flags);
-    }
     if (resolvedRuntime === 'Hermes' && !receipt && !phoneReceipt) childEnv.HERMES_HOME = hermesProfileHome(profile || 'default', { baseHome: profileBaseHome });
   } catch (error) { cleanupOverlay(); return Promise.reject(error); }
   let spec;

@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { createLocalActionExecutor } from '../src/local-action.mjs';
-import { discoverInstalledRuntimes,resetRuntimeDiscovery } from '../src/runtime-adapters.mjs';
+import { discoverInstalledRuntimes,resetRuntimeDiscovery,executeRuntime } from '../src/runtime-adapters.mjs';
 
 const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/lM8AAAAASUVORK5CYII=','base64');
 function fixture(t,executorOptions={}) {
@@ -83,4 +83,30 @@ test('trusted executor can disable global Codex MCP by quoted key while action p
   const overrides=JSON.parse(result.result.output).configOverrides;
   assert.ok(overrides.includes('mcp_servers={"iphone-controller"={enabled=false},"key.with.dot"={enabled=false}}'));
   assert.equal(overrides.some(x=>x.includes('untrusted-payload')),false);
+});
+test('global Codex MCP table policy precedes scoped management and phone overrides',windowsOnly,async t=>{
+  const f=fixture(t),tokenFile=path.join(f.root,'fixture-mcp.json');
+  const token=crypto.randomUUID();fs.writeFileSync(tokenFile,JSON.stringify({token,workspaces:['image-fixture']}));
+  const result=await executeRuntime({runtime:'Codex',prompt:'isolated fake argv only; no model',cwd:f.cwd,
+    codexMcpDisabledServers:['iphone-controller','ziwei_management','ziwei-terminal'],
+    managementMcp:{workspace:'image-fixture',config:{enabled:true,tokenFile,baseUrl:'https://example.test'},auditDirectory:path.join(f.root,'audit'),actionId:'image-policy'}});
+  assert.equal(result.status,'failed');assert.equal(result.code,'management_mcp_not_loaded','fake argv output must not bypass actual MCP handshake verification');
+  const overrides=JSON.parse(result.result.output).configOverrides;
+  const table=overrides.findIndex(x=>x.startsWith('mcp_servers={'));
+  assert.ok(table>=0);
+  assert.ok(table<overrides.findIndex(x=>x.startsWith('mcp_servers.ziwei_management.command=')),'global table must precede the scoped management transport');
+  assert.ok(table<overrides.indexOf('mcp_servers.ziwei_management.enabled=true'),'scoped management must override inherited disabled state');
+  assert.ok(table<overrides.indexOf('mcp_servers.ziwei-terminal.enabled=false'),'phone policy must follow the global table');
+  assert.equal(JSON.stringify(overrides).includes(token),false);
+});
+test('default empty MCP policy adds no whole-table override to ordinary management execution',windowsOnly,async t=>{
+  const f=fixture(t),tokenFile=path.join(f.root,'fixture-mcp.json');
+  fs.writeFileSync(tokenFile,JSON.stringify({token:crypto.randomUUID(),workspaces:['image-fixture']}));
+  const result=await executeRuntime({runtime:'Codex',prompt:'isolated fake argv only; no model',cwd:f.cwd,
+    managementMcp:{workspace:'image-fixture',config:{enabled:true,tokenFile,baseUrl:'https://example.test'},auditDirectory:path.join(f.root,'audit'),actionId:'image-policy-default'}});
+  assert.equal(result.status,'failed');assert.equal(result.code,'management_mcp_not_loaded');
+  const overrides=JSON.parse(result.result.output).configOverrides;
+  assert.equal(overrides.some(x=>x.startsWith('mcp_servers={')),false);
+  assert.ok(overrides.includes('mcp_servers.ziwei_management.enabled=true'));
+  assert.ok(overrides.includes('mcp_servers.ziwei-terminal.enabled=false'));
 });
