@@ -95,10 +95,18 @@ export function openDatabase({ memory = false, filename = path.join(ROOT, 'data'
     );
     CREATE TABLE IF NOT EXISTS bot_routines (
       automation_id TEXT PRIMARY KEY, employee_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
-      conversation_id TEXT NOT NULL, authority TEXT NOT NULL DEFAULT 'ziwei',
+      conversation_id TEXT NOT NULL, authority TEXT NOT NULL DEFAULT 'ziwei', native_driver_json TEXT,
       FOREIGN KEY(automation_id) REFERENCES automations(id) ON DELETE CASCADE,
       FOREIGN KEY(employee_id) REFERENCES hermes_bots(employee_id) ON DELETE CASCADE,
       FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS bot_gateway_inbox (
+      id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, employee_id TEXT NOT NULL, platform TEXT NOT NULL,
+      chat_id TEXT NOT NULL, message_id TEXT NOT NULL, source_action_id TEXT NOT NULL, content TEXT NOT NULL,
+      revision INTEGER NOT NULL, control_epoch INTEGER NOT NULL, action_id TEXT, status TEXT NOT NULL DEFAULT 'queued',
+      created_at TEXT NOT NULL, error TEXT,
+      UNIQUE(workspace_id,employee_id,platform,chat_id,message_id),
+      FOREIGN KEY(employee_id) REFERENCES hermes_bots(employee_id) ON DELETE CASCADE
     );
     CREATE TABLE IF NOT EXISTS schema_migrations (
       version TEXT PRIMARY KEY, applied_at TEXT NOT NULL
@@ -330,6 +338,7 @@ export function openDatabase({ memory = false, filename = path.join(ROOT, 'data'
     "ALTER TABLE devices ADD COLUMN client_build TEXT",
     "ALTER TABLE devices ADD COLUMN arch TEXT",
     "ALTER TABLE devices ADD COLUMN runtime_discovery_json TEXT NOT NULL DEFAULT '{}'",
+    "ALTER TABLE bot_routines ADD COLUMN native_driver_json TEXT",
     "ALTER TABLE conversations ADD COLUMN model_id TEXT",
     "ALTER TABLE conversations ADD COLUMN working_directory TEXT",
     "ALTER TABLE conversations ADD COLUMN device_id TEXT",

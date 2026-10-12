@@ -13,7 +13,8 @@ export function createActionScheduler({execute,concurrency=3,onError=()=>{},canS
    for(const a of Array.isArray(actions)?actions:[]){
     if(!canStart(a))continue;
     if(!a?.id||active.has(a.id)||active.size>=concurrency)continue;
-    const manager=a.type==='conversation.execute'||a.payload?.employeeTemplateId==='ziwei-employee-creator';
+    const native=a.payload?.nativeOperation;
+    const manager=a.type==='conversation.execute'&&!a.payload?.collaboration?.sourceActionId||a.payload?.employeeTemplateId==='ziwei-employee-creator'||a.type==='hermes.bot.native'&&(native?.resource==='groups'&&native.operation==='step'||native?.resource==='collaboration'&&native.input?.mode==='group');
     // Serialize conversations and known Creator parents, leaving capacity for
     // the child tasks they may await. Provenance is supplied by the server.
     if(manager&&managers>=1)continue;

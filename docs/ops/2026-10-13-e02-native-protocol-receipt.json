@@ -1,0 +1,578 @@
+{
+  "status": "passed",
+  "date": "2026-10-13",
+  "kind": "installed-native-with-loopback-protocol-peers",
+  "nativeVersion": "0.21.3",
+  "installedSourceHead": "bbaf7af5c83546d19f8060f4097d3bb25cd1a3c3",
+  "sourcePreserved": true,
+  "externalModelCalls": 0,
+  "resourceReceipts": [
+    {
+      "resource": "memory",
+      "operation": "read",
+      "status": "succeeded",
+      "nativeVersion": "0.21.3"
+    },
+    {
+      "resource": "memory",
+      "operation": "write",
+      "status": "succeeded",
+      "nativeVersion": "0.21.3"
+    },
+    {
+      "resource": "memory",
+      "operation": "write",
+      "status": "succeeded",
+      "nativeVersion": "0.21.3"
+    },
+    {
+      "resource": "memory",
+      "operation": "write",
+      "status": "failed",
+      "nativeVersion": "0.21.3"
+    },
+    {
+      "resource": "skills",
+      "operation": "install",
+      "status": "succeeded",
+      "nativeVersion": "0.21.3"
+    },
+    {
+      "resource": "skills",
+      "operation": "read",
+      "status": "succeeded",
+      "nativeVersion": "0.21.3"
+    },
+    {
+      "resource": "skills",
+      "operation": "update",
+      "status": "succeeded",
+      "nativeVersion": "0.21.3"
+    },
+    {
+      "resource": "skills",
+      "operation": "read",
+      "status": "succeeded",
+      "nativeVersion": "0.21.3"
+    },
+    {
+      "resource": "skills",
+      "operation": "list",
+      "status": "succeeded",
+      "nativeVersion": "0.21.3"
+    },
+    {
+      "resource": "skills",
+      "operation": "install",
+      "status": "failed",
+      "nativeVersion": "0.21.3"
+    },
+    {
+      "resource": "skills",
+      "operation": "install",
+      "status": "failed",
+      "nativeVersion": "0.21.3"
+    },
+    {
+      "resource": "skills",
+      "operation": "hub_search",
+      "status": "succeeded",
+      "nativeVersion": "0.21.3"
+    },
+    {
+      "resource": "skills",
+      "operation": "hub_install",
+      "status": "succeeded",
+      "nativeVersion": "0.21.3"
+    },
+    {
+      "resource": "mcp",
+      "operation": "inspect",
+      "status": "succeeded",
+      "nativeVersion": "0.21.3"
+    },
+    {
+      "resource": "mcp",
+      "operation": "call",
+      "status": "succeeded",
+      "nativeVersion": "0.21.3"
+    },
+    {
+      "resource": "mcp",
+      "operation": "call",
+      "status": "failed",
+      "nativeVersion": "0.21.3"
+    },
+    {
+      "resource": "mcp",
+      "operation": "inspect",
+      "status": "succeeded",
+      "nativeVersion": "0.21.3"
+    },
+    {
+      "resource": "mcp",
+      "operation": "call",
+      "status": "succeeded",
+      "nativeVersion": "0.21.3"
+    },
+    {
+      "resource": "mcp",
+      "operation": "call",
+      "status": "failed",
+      "nativeVersion": "0.21.3"
+    },
+    {
+      "resource": "mcp",
+      "operation": "inspect",
+      "status": "succeeded",
+      "nativeVersion": "0.21.3"
+    },
+    {
+      "resource": "mcp",
+      "operation": "call",
+      "status": "succeeded",
+      "nativeVersion": "0.21.3"
+    },
+    {
+      "resource": "mcp",
+      "operation": "call",
+      "status": "failed",
+      "nativeVersion": "0.21.3"
+    },
+    {
+      "resource": "voice",
+      "operation": "transcribe",
+      "status": "succeeded",
+      "nativeVersion": "0.21.3"
+    },
+    {
+      "resource": "voice",
+      "operation": "synthesize",
+      "status": "succeeded",
+      "nativeVersion": "0.21.3"
+    },
+    {
+      "resource": "goals",
+      "operation": "start",
+      "status": "succeeded",
+      "nativeVersion": "0.21.3"
+    },
+    {
+      "resource": "goals",
+      "operation": "_prepare",
+      "status": "succeeded",
+      "nativeVersion": "0.21.3"
+    },
+    {
+      "resource": "goals",
+      "operation": "_settle",
+      "status": "succeeded",
+      "nativeVersion": "0.21.3"
+    },
+    {
+      "resource": "sessions",
+      "operation": "list",
+      "status": "succeeded",
+      "nativeVersion": "0.21.3"
+    },
+    {
+      "resource": "sessions",
+      "operation": "search",
+      "status": "succeeded",
+      "nativeVersion": "0.21.3"
+    },
+    {
+      "resource": "heartbeat",
+      "operation": "start",
+      "status": "succeeded",
+      "nativeVersion": "0.21.3"
+    },
+    {
+      "resource": "heartbeat",
+      "operation": "_prepare",
+      "status": "succeeded",
+      "nativeVersion": "0.21.3"
+    },
+    {
+      "resource": "heartbeat",
+      "operation": "pause",
+      "status": "succeeded",
+      "nativeVersion": "0.21.3"
+    },
+    {
+      "resource": "heartbeat",
+      "operation": "resume",
+      "status": "succeeded",
+      "nativeVersion": "0.21.3"
+    },
+    {
+      "resource": "heartbeat",
+      "operation": "_prepare",
+      "status": "succeeded",
+      "nativeVersion": "0.21.3"
+    },
+    {
+      "resource": "kanban",
+      "operation": "create",
+      "status": "succeeded",
+      "nativeVersion": "0.21.3"
+    },
+    {
+      "resource": "kanban",
+      "operation": "_prepare",
+      "status": "succeeded",
+      "nativeVersion": "0.21.3"
+    },
+    {
+      "resource": "kanban",
+      "operation": "_settle",
+      "status": "succeeded",
+      "nativeVersion": "0.21.3"
+    },
+    {
+      "resource": "collaboration",
+      "operation": "message",
+      "status": "succeeded",
+      "nativeVersion": "0.21.3"
+    },
+    {
+      "resource": "collaboration",
+      "operation": "publish",
+      "status": "succeeded",
+      "nativeVersion": "0.21.3"
+    },
+    {
+      "resource": "heartbeat",
+      "operation": "start",
+      "status": "succeeded",
+      "nativeVersion": "0.21.3"
+    },
+    {
+      "resource": "heartbeat",
+      "operation": "_prepare",
+      "status": "succeeded",
+      "nativeVersion": "0.21.3"
+    },
+    {
+      "resource": "heartbeat",
+      "operation": "_fail",
+      "status": "succeeded",
+      "nativeVersion": "0.21.3"
+    },
+    {
+      "resource": "goals",
+      "operation": "start",
+      "status": "succeeded",
+      "nativeVersion": "0.21.3"
+    },
+    {
+      "resource": "goals",
+      "operation": "_prepare",
+      "status": "succeeded",
+      "nativeVersion": "0.21.3"
+    },
+    {
+      "resource": "goals",
+      "operation": "_settle",
+      "status": "succeeded",
+      "nativeVersion": "0.21.3"
+    },
+    {
+      "resource": "goals",
+      "operation": "_prepare",
+      "status": "failed",
+      "nativeVersion": "0.21.3"
+    },
+    {
+      "resource": "kanban",
+      "operation": "create",
+      "status": "succeeded",
+      "nativeVersion": "0.21.3"
+    },
+    {
+      "resource": "kanban",
+      "operation": "_prepare",
+      "status": "succeeded",
+      "nativeVersion": "0.21.3"
+    },
+    {
+      "resource": "kanban",
+      "operation": "_fail",
+      "status": "succeeded",
+      "nativeVersion": "0.21.3"
+    }
+  ],
+  "requests": [
+    {
+      "kind": "mcp",
+      "method": "initialize"
+    },
+    {
+      "kind": "mcp",
+      "method": "tools/list"
+    },
+    {
+      "kind": "mcp",
+      "method": "initialize"
+    },
+    {
+      "kind": "mcp",
+      "method": "tools/list"
+    },
+    {
+      "kind": "mcp",
+      "method": "tools/call"
+    },
+    {
+      "kind": "mcp",
+      "method": "initialize"
+    },
+    {
+      "kind": "mcp",
+      "method": "tools/list"
+    },
+    {
+      "kind": "sse",
+      "method": "initialize"
+    },
+    {
+      "kind": "sse",
+      "method": "tools/list"
+    },
+    {
+      "kind": "sse",
+      "method": "initialize"
+    },
+    {
+      "kind": "sse",
+      "method": "tools/list"
+    },
+    {
+      "kind": "sse",
+      "method": "tools/call"
+    },
+    {
+      "kind": "sse",
+      "method": "initialize"
+    },
+    {
+      "kind": "sse",
+      "method": "tools/list"
+    },
+    {
+      "kind": "stt",
+      "multipart": true
+    },
+    {
+      "kind": "tts"
+    },
+    {
+      "kind": "sse",
+      "method": "initialize"
+    },
+    {
+      "kind": "mcp",
+      "method": "initialize"
+    },
+    {
+      "kind": "sse",
+      "method": "tools/list"
+    },
+    {
+      "kind": "mcp",
+      "method": "tools/list"
+    },
+    {
+      "kind": "model",
+      "model": "fixture",
+      "hasTools": true,
+      "hasToolResult": false,
+      "toolNames": [
+        "tool_search",
+        "tool_describe",
+        "tool_call"
+      ]
+    },
+    {
+      "kind": "model",
+      "model": "fixture",
+      "hasTools": true,
+      "hasToolResult": true,
+      "toolNames": [
+        "tool_search",
+        "tool_describe",
+        "tool_call"
+      ]
+    },
+    {
+      "kind": "judge",
+      "model": "fixture",
+      "hasTools": false,
+      "hasToolResult": false,
+      "toolNames": []
+    },
+    {
+      "kind": "judge",
+      "model": "fixture",
+      "hasTools": false,
+      "hasToolResult": false,
+      "toolNames": []
+    },
+    {
+      "kind": "collaboration_model",
+      "model": "fixture",
+      "hasTools": true,
+      "hasToolResult": false,
+      "toolNames": [
+        "delegate_task",
+        "tool_search",
+        "tool_describe",
+        "tool_call"
+      ]
+    },
+    {
+      "kind": "group",
+      "operation": "admit",
+      "target": "employee_peer"
+    },
+    {
+      "kind": "collaboration_model",
+      "model": "fixture",
+      "hasTools": true,
+      "hasToolResult": true,
+      "toolNames": [
+        "delegate_task",
+        "tool_search",
+        "tool_describe",
+        "tool_call"
+      ]
+    },
+    {
+      "kind": "collaboration_model",
+      "model": "fixture",
+      "hasTools": true,
+      "hasToolResult": false,
+      "toolNames": [
+        "delegate_task",
+        "tool_search",
+        "tool_describe",
+        "tool_call"
+      ]
+    },
+    {
+      "kind": "group",
+      "operation": "admit",
+      "target": "employee_peer"
+    },
+    {
+      "kind": "collaboration_model",
+      "model": "fixture",
+      "hasTools": true,
+      "hasToolResult": true,
+      "toolNames": [
+        "delegate_task",
+        "tool_search",
+        "tool_describe",
+        "tool_call"
+      ]
+    },
+    {
+      "kind": "group",
+      "operation": "admit",
+      "target": "employee_peer"
+    },
+    {
+      "kind": "sse",
+      "method": "initialize"
+    },
+    {
+      "kind": "mcp",
+      "method": "initialize"
+    },
+    {
+      "kind": "sse",
+      "method": "tools/list"
+    },
+    {
+      "kind": "mcp",
+      "method": "tools/list"
+    },
+    {
+      "kind": "model",
+      "model": "fixture",
+      "hasTools": true,
+      "hasToolResult": false,
+      "toolNames": [
+        "tool_search",
+        "tool_describe",
+        "tool_call"
+      ]
+    },
+    {
+      "kind": "model",
+      "model": "fixture",
+      "hasTools": true,
+      "hasToolResult": true,
+      "toolNames": [
+        "tool_search",
+        "tool_describe",
+        "tool_call"
+      ]
+    },
+    {
+      "kind": "gateway",
+      "operation": "ingress",
+      "messageId": "native-gateway-message"
+    }
+  ],
+  "group": {
+    "runs": [
+      {
+        "actionId": "dtask:b1450e01076da69f3def8cca4fd3e725de7197a828ecaa0a",
+        "employeeId": "employee_peer",
+        "status": "succeeded"
+      },
+      {
+        "actionId": "group-parent",
+        "employeeId": "employee_native_full",
+        "status": "succeeded"
+      }
+    ],
+    "history": {
+      "status": "succeeded",
+      "count": 115,
+      "cursor": 115
+    }
+  },
+  "gateway": {
+    "connected": true,
+    "nativeVersion": "0.21.3",
+    "ingressCount": 1,
+    "stopConfirmed": true,
+    "processExit": {
+      "platform": "win32",
+      "supervisor": "windows-job",
+      "launched": true,
+      "rootPid": 36344,
+      "rootConfirmed": true,
+      "rootExitCode": 0,
+      "treeConfirmed": true,
+      "activeProcesses": 0,
+      "cancelled": false,
+      "failureCode": null,
+      "hostExitCode": 0,
+      "streamsComplete": true,
+      "hostSignal": null
+    }
+  },
+  "checks": {
+    "tests": 776,
+    "passed": 776,
+    "failed": 0,
+    "faultTests": 28,
+    "lintSources": 96,
+    "pythonAst": "passed",
+    "diffCheck": "passed",
+    "frontendBuild": "passed"
+  }
+}

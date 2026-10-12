@@ -2,9 +2,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { parseDocument, stringify } from 'yaml';
-import { normalizeBotConfig, botFailure } from './hermes-bot-config.mjs';
+import { normalizeBotConfig, botFailure, permittedCredentialName } from './hermes-bot-config.mjs';
 
-export const BOT_RUNTIME_ENV_KEYS=['ZIWEI_INSTANCE_KIND','ZIWEI_BOT_REVISION'];
+export const BOT_RUNTIME_ENV_KEYS=['ZIWEI_INSTANCE_KIND','ZIWEI_BOT_REVISION','ZIWEI_BOT_ACTION_ID','ZIWEI_BOT_DEVICE_TOKEN'];
 const hash=value=>createHash('sha256').update(value).digest('hex');
 function noLink(file) {try{if(fs.lstatSync(file).isSymbolicLink())throw botFailure('BOT_HOME_INVALID','Bot 状态路径不能是链接');}catch(error){if(error.code!=='ENOENT')throw error;}}
 function write(file,text) {noLink(file);const tmp=`${file}.${randomUUID()}.tmp`;try{fs.writeFileSync(tmp,text,{flag:'wx',mode:0o600});fs.renameSync(tmp,file);}finally{try{fs.unlinkSync(tmp);}catch{}}}
@@ -23,7 +23,7 @@ export function prepareHermesBotHome({context,sourceHome,privateDirectory,worksp
   const sameProvider=provider===(sourceConfig.model?.provider || sourceConfig.provider);
   const endpoint=custom?.base_url || (sameProvider?sourceConfig.model?.base_url:null);
   const apiMode=custom?.api_mode || (sameProvider?sourceConfig.model?.api_mode:null);
-  if(custom && (!custom.key_env || !/^[A-Z][A-Z0-9_]*$/.test(custom.key_env)))throw botFailure('BOT_PROVIDER_UNSUPPORTED','自定义 provider 必须使用来源 profile 的 key_env 引用，不复制字面 API key');
+  if(custom && !permittedCredentialName(custom.key_env))throw botFailure('BOT_PROVIDER_UNSUPPORTED','自定义 provider 必须使用来源 profile 的外部服务 key_env 引用');
   const root=path.resolve(privateDirectory);noLink(root);fs.mkdirSync(root,{recursive:true,mode:0o700});
   const key=hash(JSON.stringify([url.origin,workspace,context.employeeId]));const home=path.join(root,key);noLink(home);fs.mkdirSync(home,{recursive:true,mode:0o700});
   if(fs.realpathSync.native(home)===source||path.dirname(fs.realpathSync.native(home))!==fs.realpathSync.native(root))throw botFailure('BOT_HOME_INVALID','Bot HOME 必须独立于来源 profile');
@@ -38,11 +38,14 @@ export function prepareHermesBotHome({context,sourceHome,privateDirectory,worksp
     model:{provider,default:model,...(endpoint?{base_url:endpoint}:{}),...(apiMode?{api_mode:apiMode}:{})},
     ...(custom?{providers:{[providerName]:Object.fromEntries(['base_url','api_mode','default_model','key_env','context_length'].filter(key=>custom[key]!==undefined).map(key=>[key,custom[key]]).concat([['discover_models',false]]))}}:{}),
     fallback_providers:[],updates:{check:false},...(sourceConfig.models_dev?.url?{models_dev:{url:sourceConfig.models_dev.url}}:{}),
-    agent:{max_turns:config.maxTurns,run_budget_seconds:840,bot_mode_protocol:false,coding_context:'off',disabled_toolsets:readOnly?['all']:['cron','delegate','kanban']},
-    platform_toolsets:{cli:config.toolsets},
-    memory:{provider:'',memory_enabled:config.memory.enabled,user_profile_enabled:config.memory.userProfile},
-    skills:{disabled:config.skills.disabled,project_discovery:false},
-    mcp_servers:readOnly?{}:config.mcpServers,
+    agent:{max_turns:config.maxTurns,run_budget_seconds:840,bot_mode_protocol:false,coding_context:'off',disabled_toolsets:readOnly?['all']:['cronjob','delegation','kanban']},
+    platform_toolsets:{cli:[...config.toolsets,...(config.collaboration?.enabled&&!readOnly?['ziwei_collaboration']:[])]},
+    memory:{provider:'',memory_enabled:config.memory.enabled,user_profile_enabled:config.memory.userProfile,...(config.memory.charLimit?{memory_char_limit:config.memory.charLimit}:{}),...(config.memory.userCharLimit?{user_char_limit:config.memory.userCharLimit}:{})},
+    skills:{disabled:config.skills.disabled,project_discovery:false,external_dirs:[],create_dir:'',auto_load:config.skills.autoLoad || []},
+    plugins:{enabled:Object.entries(config.gateway?.platforms || {}).filter(([,v])=>v.enabled).map(([name])=>`${name.replaceAll('_','-')}-platform`),disabled:[]},
+    mcp_servers:readOnly?{}:Object.fromEntries(Object.entries(config.mcpServers).map(([name,{connectTimeout,...server}])=>['ziwei_external_'+name,{...server,...(connectTimeout?{connect_timeout:connectTimeout}:{})}])),
+    ...(config.gateway?{gateway:{platforms:config.gateway.platforms,profile_routes:config.gateway.profileRoutes.map(route=>({...route,profile:context.employeeId}))}}:{}),
+    ...Object.fromEntries(Object.entries(config.voice || {}).map(([kind,v])=>[kind,{enabled:v.enabled,provider:v.provider,[v.provider]:{...(v.model?{model:v.model}:{}),...(v.baseUrl?{base_url:v.baseUrl}:{}),...(v.keyEnv?{api_key:`\${${v.keyEnv}}`}:{}),...(v.voice?{voice:v.voice}:{}),...(v.language?{language:v.language}:{})}}])),
     approvals:{mode:readOnly?'manual':'off',single_query_mode:readOnly?'deny':'approve',unattended_mode:readOnly?'deny':'approve',cron_mode:'deny'},
     security:{allow_lazy_installs:false},kanban:{dispatch_in_gateway:false},logging:{level:'WARNING',max_size_mb:5,backup_count:5}
   };

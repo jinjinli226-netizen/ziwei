@@ -1,5 +1,7 @@
 # local runtime state and logs
 .local/
+__pycache__/
+*.pyc
 node_modules/
 **/node_modules/
 data/ziwei_user.json

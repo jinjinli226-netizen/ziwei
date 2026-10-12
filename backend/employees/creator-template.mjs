@@ -1,7 +1,7 @@
 import { normalizeRuntimeProfile } from '../../src/employee-runtime.mjs';
 
 // Execution overlay is versioned separately from installed template/persona.
-export const CREATOR_BOT_GUIDANCE = '紫薇 Bot 能力合同 v1：用户要求 Hermes Bot/全天岗位时，用 ziwei_bot capabilities/list 发现与查重，然后 create 当前已认证工作区独立 Bot（稳定 idempotencyKey）。回读 get 保存字段及主聊天；validate 创建无模型原生配置检查，用 ziwei_get_action 等待 succeeded，再 get 最新 revision/control_epoch。用户已明确创建并启用时，在同一授权中 control activate（expectedRevision、expectedControlEpoch），无需再索要相同授权。没有明确启用意图时保留 draft。Routine 用 ziwei_bot createRoutine/runRoutine 等，唯一调度属于紫薇。旧 Creator 自身人格、HOME、记忆和聊天保持，不把 Creator 当目标岗位；Bot 目标仅 Hermes，Creator 自身可用 Codex。未集成的群聊/Gateway/Goals/Heartbeat/Kanban 不可伪造可用，EXECUTION_UNCERTAIN 只回读原回执，不换标识重跑。';
+export const CREATOR_BOT_GUIDANCE = '紫薇 Bot 能力合同 v2：用户要求 Hermes Bot/全天岗位时，用 ziwei_bot capabilities/list 发现与查重；现有普通Hermes员工用 initialize，同一employee_id继续承载Bot能力；新岗位用 create（稳定idempotencyKey）。get回读保存字段和主聊天；validate创建无模型原生检查，用ziwei_get_action等到succeeded，再get最新revision/control_epoch。用户已明确创建并启用时，同一授权内control activate，无需再索要相同授权；未要求启用则保留draft。原生资源用ziwei_bot native：data={expectedRevision,expectedControlEpoch,idempotencyKey,resource,operation,input}，resource支持memory/sessions/skills/mcp/goals/heartbeat/kanban/groups/gateway/voice；等待原action终态，staged/requires_authorization不能称已保存。memory修改使用read所得hash，技能更新/删除使用原生hash；凭据只保存本机外部服务变量引用，不读取或传递ZIWEI内部凭据。Goals/Heartbeat/Kanban/groups的持续推进用现有Routine.nativeDriver，唯一调度属于紫薇，有限回合及预算/expiry必须保存；resume保留预算，不补历史tick。collaboration仅选择当前工作区配置明确授权的员工，群聊用原生计划和真实成员action结果，accepted不是完成。Gateway连接以真实connect回执判断，断开须stopConfirmed；语音先保存明确provider，通过服务器中转，不回传provider key。旧Creator自身人格/HOME/记忆/聊天保持，Creator不是普通岗位Bot。EXECUTION_UNCERTAIN只回读原执行与停止证据，不换标识重跑，不以配置或依赖存在冒充运行成功。';
 
 const workflow = [
   {

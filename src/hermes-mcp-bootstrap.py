@@ -114,7 +114,8 @@ def prepare_creator_home(current):
                     'ZIWEI_TERMINAL_EMPLOYEE_ID', 'ZIWEI_TERMINAL_DEVICE_ID',
                     'ZIWEI_CREATOR_HOME', 'ZIWEI_CREATOR_SOURCE_HOME', 'ZIWEI_CREATOR_KEY',
                     'ZIWEI_CREATOR_WORKSPACE', 'ZIWEI_CREATOR_EMPLOYEE_ID', 'ZIWEI_CREATOR_PROFILE',
-                    'ZIWEI_INSTANCE_KIND', 'ZIWEI_BOT_REVISION'}
+                    'ZIWEI_INSTANCE_KIND', 'ZIWEI_BOT_REVISION', 'ZIWEI_BOT_ACTION_ID', 'ZIWEI_BOT_DEVICE_TOKEN',
+                    'HERMES_KANBAN_HOME', 'HERMES_KANBAN_DB'}
     routing_env = {key: os.environ[key] for key in routing_keys if key in os.environ}
     constants = importlib.import_module('hermes_constants')
     if str(Path(constants.__file__).resolve()) != current['paths']['constants']:
@@ -130,13 +131,22 @@ def prepare_creator_home(current):
     # Only the file selector is replaced. Hermes still owns locks, transactions,
     # atomic writes and OAuth refresh; no refresh token is cloned into the instance.
     auth._auth_file_path = lambda: source / 'auth.json'
+    if is_bot:
+        # This preview uses source authentication as a read-only reference.
+        # A required refresh must ask for source-side authorization, never
+        # silently mutate the user's original store from an isolated Bot.
+        def refuse_source_auth_write(*args, **kwargs):
+            raise UnsupportedNativeHermes('bot source authentication refresh required')
+        auth._save_auth_store = refuse_source_auth_write
+        auth_codex = importlib.import_module('hermes_cli.auth_codex')
+        auth_codex._save_codex_tokens = refuse_source_auth_write
     # Load the selected profile's .env into this execution's memory only. Never
     # persist it or allow it to replace trusted scope/home/MCP routing values.
     from dotenv import dotenv_values
     reserved = {'HERMES_HOME', 'HERMES_MANAGED_DIR', 'PYTHONPATH', 'PYTHONHOME',
                 'CONTROL_MCP_API_URL', 'CONTROL_MCP_AUTH'}
     if is_bot:
-        reserved.update({'TERMINAL_CWD', 'HERMES_TOOLSETS', 'HERMES_MAX_TURNS'})
+        reserved.update({'TERMINAL_CWD', 'HERMES_TOOLSETS', 'HERMES_MAX_TURNS','HERMES_KANBAN_HOME','HERMES_KANBAN_DB'})
     for key, value in dotenv_values(source / '.env').items():
         if value is not None and key not in reserved and not key.startswith(('ZIWEI_', 'HERMES_CREATOR_')):
             os.environ[key] = value
@@ -174,7 +184,7 @@ def confirm_creator_home(current, config, prepared):
                                'agent': ('max_turns', 'disabled_toolsets', 'bot_mode_protocol'),
                                'memory': ('memory_enabled', 'user_profile_enabled'),
                                'platform_toolsets': ('cli',),
-                               'skills': ('disabled', 'project_discovery'),
+                               'skills': ('disabled', 'project_discovery', 'external_dirs', 'create_dir', 'auto_load'),
                                'security': ('allow_lazy_installs',)}.items():
             for name in names:
                 if effective.get(section, {}).get(name) != raw.get(section, {}).get(name):
@@ -225,7 +235,9 @@ def run():
     native_args = sys.argv[5:]
     discover_only = bool(native_args and native_args[0] == '--discover-only')
     config_only = bool(native_args and native_args[0] == '--config-only')
-    if discover_only or config_only:
+    native_operation = bool(native_args and native_args[0] == '--native-operation')
+    gateway_worker = bool(native_args and native_args[0] == '--gateway-worker')
+    if discover_only or config_only or native_operation or gateway_worker:
         native_args = native_args[1:]
     if not native_args or native_args[0] != '--':
         raise UnsupportedNativeHermes('arguments')
@@ -245,8 +257,26 @@ def run():
         original_load_config = config.load_config
 
         def isolated_bot_config(*args, **kwargs):
-            effective = original_load_config(*args, **kwargs)
             raw = config.read_raw_config()
+            # Hermes expands both embedded ${VAR} and ${env:VAR} during load.
+            # Validate the untouched instance config before internal route
+            # credentials could be substituted into an external command/URL.
+            import re
+            def check_refs(value, path=()):
+                if isinstance(value, dict):
+                    for key, item in value.items(): check_refs(item, (*path, key))
+                elif isinstance(value, list):
+                    for index, item in enumerate(value): check_refs(item, (*path, index))
+                elif isinstance(value, str) and '${' in value:
+                    credential = (len(path) >= 4 and path[0] == 'mcp_servers' and path[2] in {'env', 'headers'}) or (path and path[0] == 'gateway' and ('envRefs' in path or 'extra' in path and re.search(r'(secret|token|password|api_key|authorization|app_id)$', str(path[-1]), re.I))) or (path and path[0] in {'stt', 'tts'} and path[-1] == 'api_key')
+                    match = re.fullmatch(r'\$\{([A-Z][A-Z0-9_]*)\}', value)
+                    if not credential or not match or re.match(r'ZIWEI_|CONTROL_MCP_|HERMES_|PYTHON|NODE_OPTIONS$|HOME$|USERPROFILE$', match.group(1)):
+                        raise UnsupportedNativeHermes('credential-reference')
+            check_refs(raw)
+            effective = original_load_config(*args, **kwargs)
+            # Approved Bot plugins only. Global managed/plugin discovery cannot
+            # add arbitrary host hooks to a Bot process.
+            effective['plugins'] = raw.get('plugins', {'enabled': [], 'disabled': []})
             requested = set(raw.get('mcp_servers', {}))
             # Allow only this execution's explicit Bot servers and scoped Ziwei
             # transports. Native global/plugin discovery must not add host MCPs.
@@ -255,21 +285,55 @@ def run():
             else:
                 import yaml
                 policy = yaml.safe_load((Path(overlay) / 'config.yaml').read_text(encoding='utf-8')) or {}
-                requested.update(name for name in policy.get('mcp_servers', {}) if name in {'ziwei_management', 'ziwei_terminal'})
+                requested.update(name for name in policy.get('mcp_servers', {}) if name in {'ziwei_management', 'ziwei-terminal'})
                 effective['mcp_servers'] = {name: value for name, value in effective.get('mcp_servers', {}).items() if name in requested}
+            # Audio credentials expand in memory only. The persisted config
+            # continues to contain ${ENV} references and never provider keys.
+            def refs(value):
+                import re
+                if isinstance(value, dict): return {k: refs(v) for k, v in value.items()}
+                if isinstance(value, list): return [refs(v) for v in value]
+                if isinstance(value, str) and re.fullmatch(r'\$\{[A-Z][A-Z0-9_]*\}', value):
+                    return os.environ.get(value[2:-1], '')
+                return value
+            for section in ('stt', 'tts'):
+                if section in raw: effective[section] = refs(raw[section])
             return effective
 
         config.load_config = isolated_bot_config
     isolation = confirm_creator_home(current, config, prepared_isolation)
     if isolation:
         print('ZIWEI_CREATOR_ISOLATION:' + json.dumps(isolation), file=sys.stderr, flush=True)
+    if native_operation or gateway_worker:
+        if not isolation or isolation.get('kind') != 'hermes-bot':
+            raise UnsupportedNativeHermes('bot native operation scope')
+        request = json.loads(sys.stdin.readline())
+        context = request.pop('context')
+        if context.get('employeeId') != isolation['employeeId'] or context.get('revision') != isolation['revision'] or context.get('workspace') != isolation['workspace']:
+            raise UnsupportedNativeHermes('bot native operation identity')
+        module_path = Path(__file__).with_name('hermes-native-bridge.py')
+        spec = importlib.util.spec_from_file_location('ziwei_native_bridge', module_path)
+        bridge = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(bridge)
+        if gateway_worker:
+            bridge.run_gateway_worker(request, context)
+        else:
+            try:
+                result = bridge.run_operation(request, context)
+            except bridge.NativeOperationError as error:
+                import hermes_cli
+                result = {'schemaVersion': 2, 'resource': request['resource'], 'operation': request['operation'],
+                          'employeeId': context['employeeId'], 'revision': context['revision'],
+                          'nativeVersion': hermes_cli.__version__, 'status': 'failed', 'code': str(error), 'data': None}
+            print('ZIWEI_NATIVE_RESULT:' + json.dumps(result, ensure_ascii=False), flush=True)
+        return 0
     if config_only:
         if not isolation or isolation.get('kind') != 'hermes-bot':
             raise UnsupportedNativeHermes('bot check')
         effective = config.load_config()
         selected = effective.get('platform_toolsets', {}).get('cli', [])
         from toolsets import TOOLSETS
-        if any(name not in TOOLSETS and not name.startswith('mcp-') for name in selected):
+        if any(name not in TOOLSETS and name != 'ziwei_collaboration' and not name.startswith('mcp-') for name in selected):
             raise UnsupportedNativeHermes('bot toolset unknown')
         import hermes_cli
         print(json.dumps({'botValidation': {'valid': True, 'schemaVersion': 1,
@@ -282,6 +346,11 @@ def run():
                             'memory': effective.get('memory', {}).get('memory_enabled'),
                             'toolsets': selected}}, 'externalModelCalls': 0}))
         return 0
+    if isolation and isolation.get('kind') == 'hermes-bot' and 'ziwei_collaboration' in config.load_config().get('platform_toolsets', {}).get('cli', []):
+        spec = importlib.util.spec_from_file_location('ziwei_native_bridge', Path(__file__).with_name('hermes-native-bridge.py'))
+        bridge = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(bridge)
+        bridge.install_collaboration_tools(isolation)
     original_gate = startup._has_configured_mcp_servers
 
     def effective_mcp_gate():

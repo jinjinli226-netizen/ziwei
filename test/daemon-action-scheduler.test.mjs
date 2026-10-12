@@ -5,6 +5,14 @@ const flush=()=>new Promise(resolve=>setImmediate(resolve));
 const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};};
 const action=(id,employeeId,type='task.execute')=>({id,type,payload:{employeeId}});
 
+for(const nativeOperation of [{resource:'groups',operation:'step'},{resource:'collaboration',operation:'message',input:{mode:'group'}}])test('native Group parents preserve a slot for their actual conversation children',async t=>{
+ const release=deferred();t.after(()=>release.resolve());const calls=[];
+ const parent=id=>({...action(id,id,'hermes.bot.native'),payload:{employeeId:id,nativeOperation}});
+ const scheduler=createActionScheduler({execute:async a=>{calls.push(a.id);if(a.id==='parent1')await release.promise;else if(a.id==='child')release.resolve();}});
+ scheduler.schedule([parent('parent1'),parent('parent2'),parent('parent3')]);await flush();assert.deepEqual(calls,['parent1']);
+ scheduler.schedule([parent('parent2'),{...action('child','C','conversation.execute'),payload:{employeeId:'C',collaboration:{sourceActionId:'parent1'}}}]);await flush();assert.deepEqual(calls,['parent1','child']);await scheduler.whenIdle();
+});
+
 test('built-in Creator task parents reserve capacity for their child employees',async()=>{
  const release=deferred();const calls=[];
  const parent=id=>({...action(id,id),payload:{employeeId:id,employeeTemplateId:'ziwei-employee-creator'}});

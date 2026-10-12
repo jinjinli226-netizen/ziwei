@@ -844,7 +844,7 @@ export function parseRuntimeStreamLine(line, state, onOutput = () => {}, onStage
 }
 
 /** Execute an installed CLI using an explicit argv, with full local approval. */
-export async function executeRuntime({ runtime, prompt, model = null, profile = null, cwd = process.cwd(), env = {}, attachments = [], imageArtifacts = null, codexMcpDisabledServers = [], managementMcp = null, terminalMcp = null, creatorInstance, creatorInstanceDirectory, hermesBot, botInstanceDirectory, beforeSpawn, signal, onOutput, onProgress, onStage, onActivity, onSupervision } = {}) {
+export async function executeRuntime({ runtime, prompt, model = null, profile = null, cwd = process.cwd(), env = {}, attachments = [], imageArtifacts = null, codexMcpDisabledServers = [], managementMcp = null, terminalMcp = null, creatorInstance, creatorInstanceDirectory, hermesBot, botInstanceDirectory, botAuthority, beforeSpawn, signal, onOutput, onProgress, onStage, onActivity, onSupervision } = {}) {
   if (signal?.aborted) return Promise.resolve({ status: 'failed', code: 'cancelled', error: 'runtime execution cancelled before launch' });
   if(hermesBot)hermesBot={...hermesBot,config:normalizeBotConfig(hermesBot.config)};
   const resolvedRuntime = normalizeRuntime(runtime);
@@ -922,7 +922,7 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
       botPrepared=prepareHermesBotHome({context:hermesBot,sourceHome:hermesProfileHome(profile || 'default',{baseHome:profileBaseHome}),privateDirectory:botInstanceDirectory,workspace:managementMcp?.workspace,apiBase:managementMcp?.apiBase});
       invocation={args:['chat','--query-file','-','-c','Ziwei '+String(hermesBot.conversationId || 'Bot Chat'),'--create-if-missing','--format','stream-json','--model',botPrepared.effectiveModel,'--provider',botPrepared.provider,'--max-turns',String(hermesBot.config.maxTurns),'--run-budget','840',...imageInputs.flatMap(item=>['--image',item.path])],stdin:content,format:'json-lines'};
     }
-    const launch = hermesBot?.config.permissions.mode==='read_only' ? {invocation,env:childEnv,receipt:null} : prepareManagementMcpLaunch({ runtime: resolvedRuntime, profile, model, invocation, env: childEnv, ...(managementMcp || {}), creatorInstance, creatorInstanceDirectory });
+    const launch = hermesBot && (hermesBot.config.permissions.mode==='read_only'||hermesBot.config.permissions.management===false) ? {invocation,env:childEnv,receipt:null} : prepareManagementMcpLaunch({ runtime: resolvedRuntime, profile, model, invocation, env: childEnv, ...(managementMcp || {}), creatorInstance, creatorInstanceDirectory });
     invocation = launch.invocation; childEnv = launch.env; receipt = launch.receipt;
     creatorPrepared = launch.creatorPrepared;
     selectedModel = launch.effectiveModel || selectedModel;
@@ -933,8 +933,9 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
         launch.overlayHome=overlay.home;invocation.args.unshift('--profile',profile || 'default');
       }
       Object.assign(childEnv,botPrepared.env);creatorPrepared=botPrepared.receipt;
+      if(botAuthority){if(typeof botAuthority.actionId!=='string'||typeof botAuthority.deviceToken!=='string'||!botAuthority.deviceToken)throw new Error('Bot 协作缺少受信执行凭据');Object.assign(childEnv,{ZIWEI_BOT_ACTION_ID:botAuthority.actionId,ZIWEI_BOT_DEVICE_TOKEN:botAuthority.deviceToken,ZIWEI_API_BASE:managementMcp.apiBase});}
       for(let i=invocation.args.length-2;i>=0;i--)if(invocation.args[i]==='--toolsets')invocation.args.splice(i,2);
-      const selected=[...hermesBot.config.toolsets,...(receipt?['mcp-ziwei_management']:[]),...Object.entries(hermesBot.config.mcpServers).filter(([,entry])=>entry.enabled).map(([name])=>'mcp-'+name)];
+      const selected=[...hermesBot.config.toolsets,...(hermesBot.config.collaboration?.enabled?['ziwei_collaboration']:[]),...(receipt?['ziwei_management']:[]),...Object.entries(hermesBot.config.mcpServers).filter(([,entry])=>entry.enabled).map(([name])=>'ziwei_external_'+name)];
       if(selected.length)invocation.args.push('--toolsets',selected.join(','));
       selectedModel=botPrepared.effectiveModel;
     }
@@ -942,6 +943,7 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
     cleanupOverlay = launch.cleanup || cleanupOverlay;
     const phoneLaunch = prepareTerminalMcpLaunch({ runtime: resolvedRuntime, profile, invocation, env: childEnv, profileBaseHome, hermesOverlayHome: launch.overlayHome, ...(terminalMcp || {}) });
     invocation = phoneLaunch.invocation; childEnv = phoneLaunch.env; phoneReceipt = phoneLaunch.receipt;
+    if(hermesBot&&phoneReceipt){const index=invocation.args.indexOf('--toolsets');if(index<0)invocation.args.push('--toolsets','ziwei-terminal');else invocation.args[index+1]+=',ziwei-terminal';}
     if (resolvedRuntime === 'Hermes' && !receipt && !phoneReceipt && !hermesBot) childEnv.HERMES_HOME = hermesProfileHome(profile || 'default', { baseHome: profileBaseHome });
   } catch (error) { cleanupOverlay(); return Promise.reject(error); }
   let spec;

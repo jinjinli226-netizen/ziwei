@@ -1,4 +1,8 @@
 import fs from 'node:fs';
+import {executeHermesNative} from './hermes-native-runtime.mjs';
+import {createBotGatewayManager} from './hermes-gateway-runtime.mjs';
+import {executeBotGroup} from './hermes-group-runtime.mjs';
+import {executeNativeDriver} from './hermes-driver-runtime.mjs';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
 import {executeRuntime, runtimeInvocation, bootstrapTerminalMcp, discoverInstalledRuntimes, hermesHome, hermesProfileHome, validateHermesBotRuntime} from './runtime-adapters.mjs';
@@ -363,16 +367,24 @@ export function createLocalActionExecutor({runtimeDir, defaultWorkdir = process.
   if (!runtimeDir) throw new TypeError('runtimeDir is required');
   fs.mkdirSync(runtimeDir, {recursive: true});
   const automaticManagement = managementBootstrap || (workspace && deviceToken ? createManagementBootstrap({ workspace, apiBase, deviceId, deviceToken, cacheDirectory: path.join(runtimeDir, 'management-mcp-credentials') }) : null);
+  const gateways=createBotGatewayManager({apiBase,workspace,deviceToken});
   return async (action, context = {}) => {
     const type = String(action?.type || '');
     if (action?.payload?.deviceId && deviceId && action.payload.deviceId !== deviceId) throw new Error('执行目标设备与本机已配对设备不一致；不会回退其他设备');
     if (action?.workspace && workspace && action.workspace !== workspace) throw new Error('执行工作区与本机已配对工作区不一致');
+    const authorizeBot=async()=>{
+      if(!action.payload?.hermesBot)return;
+      if(!deviceToken || action.payload.hermesBot.workspace!==workspace)throw new Error('Bot 缺少当前工作区已配对设备凭据');
+      const response=await fetch(`${String(apiBase).replace(/\/$/,'')}/a2a/v1/actions/${encodeURIComponent(action.id)}/bot-start`,{method:'POST',headers:{'content-type':'application/json','x-ziwei-device-token':deviceToken},body:JSON.stringify({workspace}),signal:context.signal?AbortSignal.any([context.signal,AbortSignal.timeout(10000)]):AbortSignal.timeout(10000),redirect:'error'});
+      const value=await response.json();if(!response.ok || value.allowed!==true)throw Object.assign(new Error(value.error || 'Bot 执行授权已过期或已暂停'),{definitelyNotStarted:true});
+    };
     if (type === 'device.workspace.connect') {
       if (!onWorkspaceConnect) throw new Error('本机连接不允许接收共享工作区授权');
       return { status: 'succeeded', result: await onWorkspaceConnect(action.payload?.grantId, context) };
     }
     if (type === 'directory.inspect' || type === 'device.directory.inspect') {
       const payload = action.payload || {};
+      await authorizeBot();
       return {
         status: 'succeeded',
         result: inspectLocalDirectory({
@@ -388,12 +400,22 @@ export function createLocalActionExecutor({runtimeDir, defaultWorkdir = process.
     if (type === 'hermes.profile.create' || type === 'profile.create') {
       return {status: 'succeeded', result: createHermesProfile({payload: action.payload || {}, hermesHomePath})};
     }
-    const authorizeBot=async()=>{
-      if(!action.payload?.hermesBot)return;
-      if(!deviceToken || action.payload.hermesBot.workspace!==workspace)throw new Error('Bot 缺少当前工作区已配对设备凭据');
-      const response=await fetch(`${String(apiBase).replace(/\/$/,'')}/a2a/v1/actions/${encodeURIComponent(action.id)}/bot-start`,{method:'POST',headers:{'content-type':'application/json','x-ziwei-device-token':deviceToken},body:JSON.stringify({workspace}),signal:context.signal?AbortSignal.any([context.signal,AbortSignal.timeout(10000)]):AbortSignal.timeout(10000),redirect:'error'});
-      const value=await response.json();if(!response.ok || value.allowed!==true)throw new Error(value.error || 'Bot 执行授权已过期或已暂停');
-    };
+    if(type==='hermes.bot.native') {
+      const options={context:action.payload.hermesBot,baseHome:hermesHomePath || hermesHome(),privateDirectory:path.join(runtimeDir,'bot-instances'),workspace,apiBase,beforeSpawn:authorizeBot,signal:context.signal || AbortSignal.timeout(120000),cwd:defaultWorkdir};
+      const operation=action.payload.nativeOperation;
+      const prepareBotManagement=async()=>((action.payload.hermesBot.config.permissions.mode==='read_only'||action.payload.hermesBot.config.permissions.management===false)?{}:automaticManagement?await automaticManagement.prepare({signal:context.signal}):managementMcpConfig);
+      const runBotTurn=async(prompt,driverMcp)=>executeRuntime({runtime:'Hermes',profile:action.payload.profile,model:action.payload.model,prompt,cwd:options.cwd,hermesBot:action.payload.hermesBot,botInstanceDirectory:options.privateDirectory,botAuthority:{actionId:action.id,deviceToken},beforeSpawn:authorizeBot,env:{HERMES_HOME:options.baseHome},managementMcp:{workspace,apiBase,request:{enabled:action.payload.hermesBot.config.permissions.mode==='execute'},config:driverMcp,actionId:action.id},signal:context.signal,onOutput:context.onOutput,onStage:context.onStage,onSupervision:context.onSupervision});
+      if(operation.resource==='groups'&&operation.operation==='step'||operation.resource==='collaboration'&&operation.input.mode==='group')return executeBotGroup(action,{...options,operation},{deviceToken,authorize:authorizeBot,signal:context.signal,runSource:async plan=>runBotTurn(plan.payload.prompt,await prepareBotManagement())});
+      if(operation.resource==='gateway'&&['connect','disconnect','inbound','outbound'].includes(operation.operation)){const data=await gateways.operate(action,{...options,operation});return{status:data.connected===false&&operation.operation==='connect'||data.success===false?'failed':'succeeded',...(data.code==='EXECUTION_UNCERTAIN'?{code:'EXECUTION_UNCERTAIN',executionState:'uncertain'}:{}),result:{nativeOperation:{schemaVersion:2,resource:'gateway',operation:operation.operation,employeeId:options.context.employeeId,revision:options.context.revision,nativeVersion:data.nativeVersion || null,status:data.success===false||data.connected===false&&operation.operation==='connect'?'failed':'succeeded',data},...(data.code==='EXECUTION_UNCERTAIN'?{code:'EXECUTION_UNCERTAIN',executionState:'uncertain'}:{})}};}
+      if(['goals','heartbeat','kanban'].includes(operation.resource)&&['step','dispatch'].includes(operation.operation)) {
+        return executeNativeDriver(action,{...options,operation},{
+          prepareManagement:prepareBotManagement,
+          runTurn:(data,driverMcp)=>runBotTurn(data.prompt,driverMcp),
+          settlement:async()=>{const response=await fetch(String(apiBase).replace(/\/$/,'')+'/a2a/v1/actions/'+encodeURIComponent(action.id)+'/bot-settle',{method:'POST',headers:{'content-type':'application/json','x-ziwei-device-token':deviceToken},body:JSON.stringify({workspace}),signal:AbortSignal.timeout(10000),redirect:'error'});const authority=await response.json();return response.ok?authority:{allowed:false};}
+        });
+      }
+      return executeHermesNative({...options,operation});
+    }
     if(type==='hermes.bot.validate') {
       await authorizeBot();
       return validateHermesBotRuntime({context:action.payload.hermesBot,baseHome:hermesHomePath || hermesHome(),privateDirectory:path.join(runtimeDir,'bot-instances'),workspace,apiBase});
@@ -421,7 +443,7 @@ export function createLocalActionExecutor({runtimeDir, defaultWorkdir = process.
       const imageArtifacts = createImageArtifactSession({runtimeDir,actionId:action.id,conversationId:payload.conversationId || null});
       if (payload.terminalMcp?.enabled === true && terminalMcpConfig.enabled === false) throw new Error('本机手机 MCP 已明确禁用');
       if(payload.hermesBot?.config.permissions.mode==='read_only' && payload.terminalMcp?.enabled)throw new Error('Bot 只读对话权限不允许手机 MCP');
-      const preparedManagement = payload.hermesBot?.config.permissions.mode==='read_only'?{}:automaticManagement ? await automaticManagement.prepare({ signal: context.signal }) : managementMcpConfig;
+      const preparedManagement = payload.hermesBot&&(payload.hermesBot.config.permissions.mode==='read_only'||payload.hermesBot.config.permissions.management===false)?{}:automaticManagement ? await automaticManagement.prepare({ signal: context.signal }) : managementMcpConfig;
       const phoneSession = await bootstrapTerminalMcp({ request: payload.terminalMcp, workspace, actionId: action.id, apiBase, deviceToken, privateDirectory: path.join(runtimeDir, 'terminal-mcp-credentials'), signal: context.signal });
       try { return await executeRuntime({
         runtime,
@@ -431,7 +453,7 @@ export function createLocalActionExecutor({runtimeDir, defaultWorkdir = process.
         attachments: attachmentPaths,
         imageArtifacts,
         codexMcpDisabledServers,
-        ...(payload.hermesBot?{hermesBot:payload.hermesBot,botInstanceDirectory:path.join(runtimeDir,'bot-instances'),beforeSpawn:authorizeBot}:{}),
+        ...(payload.hermesBot?{hermesBot:payload.hermesBot,botInstanceDirectory:path.join(runtimeDir,'bot-instances'),botAuthority:{actionId:action.id,deviceToken},beforeSpawn:authorizeBot}:{}),
         cwd: safeCwd,
         env: { ...(payload.env || {}), ...(hermesHomePath ? { HERMES_HOME: hermesHomePath } : {}) },
         ...(payload.employeeTemplateId === 'ziwei-employee-creator' ? {

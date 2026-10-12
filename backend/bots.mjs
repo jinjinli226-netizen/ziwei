@@ -1,9 +1,11 @@
 import crypto from 'node:crypto';
+import {normalizeNativeOperation,nativeIsExecution,nativeNeedsTools} from '../src/hermes-native-contract.mjs';
 import { normalizeBotConfig, botFailure, BOT_CAPABILITY_CATALOG } from '../src/hermes-bot-config.mjs';
 
 const parse = value => { try { return JSON.parse(value); } catch { return null; } };
 const now = () => new Date().toISOString();
 export const BOT_INTERNAL = Symbol('trusted bot validation');
+export const botActionMaintenance=(type,payload)=>type==='hermes.bot.validate' || type==='directory.inspect' || type==='hermes.bot.native' && !nativeIsExecution(normalizeNativeOperation(payload.nativeOperation));
 const canonical = value => JSON.stringify(value, (_key,item) => item && typeof item === 'object' && !Array.isArray(item) ? Object.fromEntries(Object.entries(item).sort(([a],[b])=>a.localeCompare(b))) : item);
 export const botUncertain = value => Boolean(value && (value.code === 'EXECUTION_UNCERTAIN' || value.executionState === 'uncertain' || botUncertain(value.result)));
 export const botSnapshot = (db, employeeId, workspaceId) => {
@@ -29,6 +31,7 @@ export function assertBotExecution(db, workspaceId, payload, { validation = fals
   if(payload.automationId) {
     const run=payload.runId?db.prepare('SELECT * FROM automation_runs WHERE id=?').get(payload.runId):null;
     if(!routine || !run || run.workspace_id!==workspaceId || run.automation_id!==payload.automationId || run.action_id && run.action_id!==actionId)throw botFailure('BOT_RUN_BINDING_CONFLICT','Routine 运行与当前 action 不一致');
+    if(db.prepare('SELECT status FROM automations WHERE id=?').get(payload.automationId)?.status!=='active')throw botFailure('BOT_NOT_ACTIVE','Routine 已暂停');
   }
   const employee = db.prepare('SELECT * FROM employees WHERE id=? AND workspace_id=?').get(employeeId,workspaceId);
   if (payload.runtime && payload.runtime !== 'Hermes' || payload.deviceId && payload.deviceId !== employee.target_device_id || payload.profile && payload.profile !== employee.runtime_profile || payload.model && payload.model !== employee.model_id) throw botFailure('BOT_BINDING_CONFLICT','Bot 执行不可覆盖已验证的运行绑定');
@@ -85,7 +88,7 @@ export function createBotService(repo, management) {
     scope(slug,context);
     const device=management.discovery(slug,{deviceId:input.deviceId,userId:context.actorUserId,deviceScope:context.deviceScope}).devices.find(item=>item.id===input.deviceId) || null;
     const runtime=device?.runtimes.find(item=>item.name==='Hermes') || null;
-    const integrated=new Set(['bot_identity','persistent_chat','profile_memory','model_provider','skills','tools_mcp','routines','multimodal','session_search','observability']);
+    const integrated=new Set(['groups_mentions','delegation','gateway','voice','goals','heartbeat','kanban','bot_identity','persistent_chat','profile_memory','model_provider','skills','tools_mcp','routines','multimodal','session_search','observability']);
     return {schemaVersion:1,workspace:slug,deviceId:input.deviceId || null,runtime,capabilities:BOT_CAPABILITY_CATALOG.map(([id,label])=>({id,label,status:!integrated.has(id)?'not_integrated':(!runtime?'unknown':(!runtime.available?'requires_dependency':'requires_configuration')),configurable:integrated.has(id),reason:!integrated.has(id)?'原生能力尚未接入紫薇控制与结果链；不能由此入口启用':(!runtime?'目标电脑尚未提供 Hermes 发现证据':(!runtime.available?runtime.issues.map(item=>item.message).join('；'):'需保存配置并在目标电脑验证；执行成功由实际回执确认')),evidence:[...(runtime?.version?[`device_heartbeat:${runtime.version}`]:[]),'ziwei.bot.schema:1']}))};
   };
   const runs = (slug,id,context={}) => { const {ws}=resolve(slug,id,context); return db.prepare('SELECT id,payload_json FROM a2a_actions WHERE workspace_id=? ORDER BY created_at DESC,rowid DESC').all(ws.id).filter(row=>parse(row.payload_json)?.hermesBot?.employeeId===id).slice(0,100).map(row=>repo.getA2AAction(row.id,{workspaceSlug:slug})); };
@@ -100,13 +103,53 @@ export function createBotService(repo, management) {
     }
     const {row,employee}=resolve(slug,id,context), validationAction=row.validation_action_id?repo.getA2AAction(row.validation_action_id,{workspaceSlug:slug}):null;
     const validationStatus=!validationAction?'not_checked':validationAction.payload.hermesBot.revision!==row.revision?'stale':validationAction.status==='succeeded'&&row.validated_revision===row.revision?'succeeded':['failed','expired','succeeded'].includes(validationAction.status)?'failed':'pending';
-    const configured=validationStatus==='succeeded';
+    const configured=validationStatus==='succeeded', botRuns=runs(slug,id,context),nativeResources={};
+    for(const action of botRuns){const receipt=action.result?.nativeOperation || action.result?.result?.nativeOperation;if(receipt?.revision===row.revision&&!nativeResources[receipt.resource])nativeResources[receipt.resource]={...receipt,actionId:action.id,actionStatus:action.status,completedAt:action.completed_at};}
     const botCapabilities=capabilities(slug,{deviceId:employee.target_device_id},context).capabilities.map(item=>({...item,...(configured && item.status==='requires_configuration' && ['bot_identity','persistent_chat','profile_memory','model_provider','routines','observability'].includes(item.id)?{status:'available',reason:'本版本已通过目标电脑原生配置检查；模型运行结果仍以实际执行回执为准',evidence:[...item.evidence,`validation:${row.validation_action_id}:revision:${row.revision}`]}:{})}));
-    return {id,employee_id:id,workspace:slug,employee,configuration_state:'initialized',kind:'employee',config:parse(row.config_json),revision:row.revision,control_state:row.control_state,control_epoch:row.control_epoch,main_conversation_id:row.main_conversation_id,scheduler_authority:'ziwei',validation:{status:validationStatus,action_id:row.validation_action_id,revision:validationAction?.payload?.hermesBot?.revision ?? null,error:validationAction?.error || null},latest_run:runs(slug,id,context)[0] || null,stop_action:row.stop_action_id?repo.getA2AAction(row.stop_action_id,{workspaceSlug:slug}):null,capabilities:botCapabilities,effect:{savedRevision:row.revision,validatedRevision:row.validated_revision,scope:'next_execution',pendingReason:row.validated_revision!==row.revision?'目标电脑尚未验证本版本':row.control_state!=='active'?'Bot 尚未启用':null}};
+    return {id,employee_id:id,workspace:slug,employee,configuration_state:'initialized',kind:'employee',config:parse(row.config_json),revision:row.revision,control_state:row.control_state,control_epoch:row.control_epoch,main_conversation_id:row.main_conversation_id,nativeResources,scheduler_authority:'ziwei',validation:{status:validationStatus,action_id:row.validation_action_id,revision:validationAction?.payload?.hermesBot?.revision ?? null,error:validationAction?.error || null},latest_run:botRuns[0] || null,stop_action:row.stop_action_id?repo.getA2AAction(row.stop_action_id,{workspaceSlug:slug}):null,capabilities:botCapabilities,effect:{savedRevision:row.revision,validatedRevision:row.validated_revision,scope:'next_execution',pendingReason:row.validated_revision!==row.revision?'目标电脑尚未验证本版本':row.control_state!=='active'?'Bot 尚未启用':null}};
   };
   const routine = (slug,id,autoId,context={}) => {const {ws}=resolve(slug,id,context);const binding=db.prepare('SELECT * FROM bot_routines WHERE automation_id=? AND employee_id=? AND workspace_id=?').get(autoId,id,ws.id);if(!binding)throw botFailure('ROUTINE_NOT_FOUND','Routine 不属于当前 Bot',404);return {...repo.getAutomation(slug,autoId),...binding,last_result:repo.listAutomationRuns(autoId)[0] || null};};
   return {
     capabilities,get,runs,
+    native(slug,id,input={},context={}) {return {action:idempotent(slug,`native:${id}`,input,context,()=>{
+      if(Object.keys(input).some(key=>!['expectedRevision','expectedControlEpoch','idempotencyKey','resource','operation','input','workspace'].includes(key)))throw botFailure('BOT_NATIVE_INPUT_INVALID','原生请求包含未知字段',400);
+      if(input.workspace&&input.workspace!==slug)throw botFailure('BOT_WORKSPACE_CONFLICT','原生请求工作区不一致',403);
+      let {row,employee}=resolve(slug,id,context);revision(row,input);
+      if(input.expectedControlEpoch!==row.control_epoch)throw botFailure('BOT_CONTROL_CONFLICT','expectedControlEpoch 已变化');
+      const nativeOperation=normalizeNativeOperation(input);
+      if(nativeOperation.resource==='collaboration')throw botFailure('BOT_COLLABORATION_ROUTE_REQUIRED','协作需要经过工作区员工目标检查');
+      if(nativeIsExecution(nativeOperation))assertBotExecution(db,row.workspace_id,{employeeId:id});
+      else assertBotExecution(db,row.workspace_id,{employeeId:id},{validation:true});
+      const config=parse(row.config_json);
+      if(nativeNeedsTools(nativeOperation)&&config.permissions.mode!=='execute')throw botFailure('BOT_PERMISSION_CONFLICT','此原生操作需要明确 execute 权限');
+      if(nativeOperation.resource==='groups'&&nativeOperation.operation==='step'&&(!config.collaboration?.enabled||config.permissions.mode!=='execute'))throw botFailure('BOT_PERMISSION_CONFLICT','群聊推进需要明确协作授权');
+      if(nativeOperation.resource==='skills'&&['enable','disable'].includes(nativeOperation.operation)) {
+        const disabled=new Set(config.skills.disabled);if(nativeOperation.operation==='disable')disabled.add(nativeOperation.input.name);else disabled.delete(nativeOperation.input.name);
+        config.skills.disabled=[...disabled];this.update(slug,id,{expectedRevision:row.revision,config},context);({row,employee}=resolve(slug,id,context));
+      }
+      if(['gateway','voice'].includes(nativeOperation.resource)&&nativeOperation.operation==='configure') {config[nativeOperation.resource]=nativeOperation.input.config;this.update(slug,id,{expectedRevision:row.revision,config},context);({row,employee}=resolve(slug,id,context));}
+      management.validateSelection(slug,{runtime:'Hermes',targetDeviceId:employee.target_device_id,runtimeProfile:employee.runtime_profile},{context});
+      return repo.createA2AAction(slug,{type:'hermes.bot.native',payload:{employeeId:id,nativeOperation:{...nativeOperation,requestId:input.idempotencyKey}},dedupeKey:`bot-native:${id}:${input.idempotencyKey}`,botInternal:BOT_INTERNAL});
+    },actionId=>management.action(slug,actionId,context))};},
+    collaboration(slug,id,input={},context={}) {return atomic(()=>{
+      const {row,employee}=resolve(slug,id,context);revision(row,input);
+      if(input.expectedControlEpoch!==row.control_epoch)throw botFailure('BOT_CONTROL_CONFLICT','expectedControlEpoch 已变化');
+      const source=input.sourceActionId?repo.getA2AAction(input.sourceActionId,{workspaceSlug:slug}):null;
+      if(input.sourceActionId&&(!source||source.status!=='acked'||source.payload.hermesBot?.employeeId!==id))throw botFailure('BOT_SOURCE_ACTION_INVALID','协作来源不是当前 Bot 的在途 action');
+      assertBotExecution(db,row.workspace_id,{employeeId:id,...(source?{hermesBot:source.payload.hermesBot}:{})},{actionId:source?.id});
+      const config=parse(row.config_json);
+      if(config.permissions.mode!=='execute'||!config.collaboration?.enabled)throw botFailure('BOT_PERMISSION_CONFLICT','先明确启用 Bot 协作与 execute 权限');
+      if(input.operation==='list'&&source)return {actions:repo.listA2AActions(slug,{status:'all'}).filter(action=>action.payload.collaboration?.sourceActionId===source.id)};
+      const ids=[...new Set(input.targetEmployeeIds || [])];
+      if(!ids.length||ids.length>5||ids.includes(id)||!['message','delegate','group'].includes(input.mode || 'message')||typeof input.content!=='string'||!input.content.trim()||input.content.length>20000)throw botFailure('BOT_COLLABORATION_INVALID','协作需要1–5个明确目标和内容',400);
+      const targets=ids.map(target=>{if(!config.collaboration.targetEmployeeIds.includes(target))throw botFailure('BOT_TARGET_NOT_AUTHORIZED','协作目标未在此 Bot 配置授权');const checked=resolve(slug,target,{...context,actorUserId:context.actorUserId || employee.owner_user_id,deviceScope:null,deviceCredentialDeviceId:null,authenticatedMcp:true});const bot=assertBotExecution(db,row.workspace_id,{employeeId:target});return{id:target,name:checked.employee.name,revision:bot.row.revision,controlEpoch:bot.row.control_epoch,conversationId:bot.row.main_conversation_id};});
+      const groupId=input.groupId || (input.mode==='group'?`group_${crypto.createHash('sha256').update(`${id}:${input.idempotencyKey}`).digest('hex').slice(0,20)}`:null);
+      if(groupId&&!/^group_[A-Za-z0-9_-]{1,80}$/.test(groupId))throw botFailure('BOT_COLLABORATION_INVALID','groupId 无效',400);
+      if(input.nativeTask&&(!source||input.nativeTask.identity?.room_id!==groupId||targets.length!==1||input.nativeTask.payload?.target_member_id!==targets[0].id||input.nativeTask.payload?.prompt!==input.content))throw botFailure('BOT_NATIVE_GROUP_PLAN_INVALID','原生群聊计划、目标或prompt不一致');
+      const manifest={sourceEmployeeId:id,sourceActionId:source?.id || null,mode:input.mode || 'message',content:input.content,groupId,targets,...(input.nativeTask?{nativeTask:input.nativeTask}:{})};
+      if(source)return {actions:repo.dispatchBotCollaboration(slug,manifest,input.idempotencyKey)};
+      return {action:idempotent(slug,`collaboration:${id}`,input,context,()=>repo.createA2AAction(slug,{type:'hermes.bot.native',botInternal:BOT_INTERNAL,dedupeKey:`bot-collaboration:${id}:${input.idempotencyKey}`,payload:{employeeId:id,collaborationManifest:manifest,nativeOperation:{schemaVersion:2,resource:'collaboration',operation:'message',requestId:input.idempotencyKey,input:{targets,content:input.content,mode:manifest.mode,...(groupId?{groupId}:{})}}}}),actionId=>management.action(slug,actionId,context))};
+    });},
     list(slug,context={}) {const {context:actor}=scope(slug,context);return repo.listEmployees(slug,{...actor,enforceEmployeeVisibility:true}).filter(employee=>employee.runtime==='Hermes'&&(!actor.deviceScope||employee.target_device_id===actor.deviceScope)).map(employee=>get(slug,employee.id,actor));},
     initialize(slug,id,input={},context={}) {
       return idempotent(slug,`initialize:${id}`,input,context,()=>{
@@ -120,7 +163,8 @@ export function createBotService(repo, management) {
         }
         const inFlight=db.prepare('SELECT status,acked_at,result_json,payload_json FROM a2a_actions WHERE workspace_id=?').all(employee.workspace_id).some(row=>parse(row.payload_json)?.employeeId===id && (['pending','acked'].includes(row.status) || botUncertain(parse(row.result_json)) || row.status==='expired' && row.acked_at));
         if(inFlight)throw botFailure('BOT_BUSY','员工仍有在途动作，先核对原回执再初始化');
-        const conversation=db.prepare("SELECT id FROM conversations WHERE employee_id=? AND workspace_id=? AND status='active' ORDER BY updated_at DESC LIMIT 1").get(id,employee.workspace_id) || management.createConversation(slug,{employeeId:id,title:`${employee.name} · 主聊天`},actor);
+        const conversation=db.prepare("SELECT id,device_id,model_id FROM conversations WHERE employee_id=? AND workspace_id=? AND status='active' ORDER BY updated_at DESC LIMIT 1").get(id,employee.workspace_id) || management.createConversation(slug,{employeeId:id,title:`${employee.name} · 主聊天`},actor);
+        if(conversation.device_id && conversation.device_id!==employee.target_device_id || conversation.model_id && conversation.model_id!==employee.model_id)throw botFailure('BOT_CONVERSATION_CONFLICT','现有主聊天模型或电脑与员工绑定不一致，请先核对聊天设置');
         const stamp=now();db.prepare('INSERT INTO hermes_bots(employee_id,workspace_id,config_json,main_conversation_id,created_at,updated_at) VALUES(?,?,?,?,?,?)').run(id,employee.workspace_id,JSON.stringify(normalizeBotConfig(input.config || {})),conversation.id,stamp,stamp);
         db.prepare("UPDATE employees SET status='draft' WHERE id=?").run(id);
         return get(slug,id,actor);
@@ -179,14 +223,17 @@ export function createBotService(repo, management) {
           const stop=repo.createA2AAction(slug,{type:'action.cancel',dedupeKey:`bot-stop:${active.id}`,payload:{actionId:active.id,deviceId:active.payload.deviceId}});
           db.prepare('UPDATE hermes_bots SET stop_action_id=? WHERE employee_id=?').run(stop.id,id);
         }
+        if(input.operation==='stop')for(const descendant of repo.listA2AActions(slug,{status:'all'}).filter(action=>action.payload.collaboration?.sourceEmployeeId===id&&['pending','acked'].includes(action.status))){if(descendant.status==='pending')repo.resultA2AAction(descendant.id,{status:'failed',error:'来源 Bot 已停止，协作未启动',result:{stopConfirmed:true}});else repo.createA2AAction(slug,{type:'action.cancel',dedupeKey:`bot-stop-descendant:${descendant.id}`,payload:{actionId:descendant.id,deviceId:descendant.payload.deviceId}});}
       }
       return get(slug,id,context);
     });},
     routines(slug,id,context={}) {resolve(slug,id,context);return db.prepare('SELECT automation_id FROM bot_routines WHERE employee_id=?').all(id).map(item=>routine(slug,id,item.automation_id,context));},
     createRoutine(slug,id,input={},context={}) {resolve(slug,id,context);return idempotent(slug,`routine:${id}`,input,context,()=>{
-      const {row}=resolve(slug,id,context);if(!String(input.prompt||'').trim())throw botFailure('ROUTINE_PROMPT_REQUIRED','Routine 需要工作指令',400);
+      const {row}=resolve(slug,id,context);
+      let driver=null;if(input.nativeDriver){driver=normalizeNativeOperation(input.nativeDriver);if(!['goals.step','heartbeat.step','kanban.dispatch','groups.step'].includes(`${driver.resource}.${driver.operation}`))throw botFailure('BOT_DRIVER_INVALID','Routine 原生驱动只允许有界推进',400);}
+      if(!driver&&!String(input.prompt||'').trim())throw botFailure('ROUTINE_PROMPT_REQUIRED','Routine 需要工作指令',400);
       new Intl.DateTimeFormat('en',{timeZone:input.timezone || 'Asia/Shanghai'}).format();
-      const auto=repo.createAutomation(slug,{...input,maxRetries:0});db.prepare("UPDATE automations SET executor='ziwei_bot' WHERE id=?").run(auto.id);db.prepare('INSERT INTO bot_routines(automation_id,employee_id,workspace_id,conversation_id) VALUES(?,?,?,?)').run(auto.id,id,row.workspace_id,row.main_conversation_id);
+      const auto=repo.createAutomation(slug,{...input,prompt:driver?`Hermes ${driver.resource} 有限推进`:input.prompt,maxRetries:0});db.prepare("UPDATE automations SET executor='ziwei_bot' WHERE id=?").run(auto.id);db.prepare('INSERT INTO bot_routines(automation_id,employee_id,workspace_id,conversation_id,native_driver_json) VALUES(?,?,?,?,?)').run(auto.id,id,row.workspace_id,row.main_conversation_id,driver?JSON.stringify(driver):null);
       return routine(slug,id,auto.id,context);
     },autoId=>routine(slug,id,autoId,context));},
     updateRoutine(slug,id,autoId,input={},context={}) {routine(slug,id,autoId,context);repo.updateAutomation(autoId,input);return routine(slug,id,autoId,context);},
