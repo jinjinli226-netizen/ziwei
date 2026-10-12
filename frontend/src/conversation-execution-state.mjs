@@ -2,6 +2,8 @@ const terminal = new Set(['succeeded','failed','expired','cancelled']);
 
 export function executionPresentation(execution) {
   const status = execution?.status;
+  const uncertain = execution?.result?.code === 'EXECUTION_UNCERTAIN' || execution?.code === 'EXECUTION_UNCERTAIN' || execution?.result?.executionState === 'uncertain' || status === 'uncertain' || (status === 'expired' && Boolean(execution?.acked_at));
+  if (uncertain) return {label:'执行结果或停止状态待核实，请查看原执行回执',summary:'执行待核实',busy:false,tone:'warning',retryable:false};
   const labels = {
     pending:['已提交，等待 ziwei_user 接收','等待接收'],
     acked:['数字伙伴执行中','执行中'],
@@ -11,7 +13,7 @@ export function executionPresentation(execution) {
     cancelled:['执行已取消','已取消'],
   };
   const [label,summary] = labels[status] || (status ? [`状态：${status}`,`状态：${status}`] : ['','']);
-  return { label,summary,busy:['pending','acked'].includes(status),tone:status==='succeeded'?'success':terminal.has(status)?'error':['pending','acked'].includes(status)?'running':'idle' };
+  return { label,summary,busy:['pending','acked'].includes(status),tone:status==='succeeded'?'success':terminal.has(status)?'error':['pending','acked'].includes(status)?'running':'idle',retryable:['failed','expired'].includes(status) };
 }
 
 function newestExecution(previous, incoming) {

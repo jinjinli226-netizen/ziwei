@@ -1,0 +1,27 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import {createConversationComposerStore} from './conversation-compose.js';
+import {conversationSettingsSnapshot} from './workdir.js';
+const app=await readFile(new URL('./App.vue',import.meta.url),'utf8');
+function source(name){const start=app.search(new RegExp(`(?:async )?function ${name}\\(`));assert.ok(start>=0);return app.slice(start,app.indexOf('\n}',start)+2);}
+function actual(name,bindings){return new Function(...Object.keys(bindings),`let conversationOpenGeneration=0;return (${source(name)});`)(...Object.values(bindings));}
+test('actual Bot message relies on server model and device binding even when generic composer fields are stale',async()=>{
+  const composer=createConversationComposerStore(),writes=[],conversation={id:'chat',employee_id:'bot',device_id:'fixed-device',messages:[]};composer.updateDraft('qa\0chat','hello');
+  const send=actual('sendConversationMessage',{selectedConversation:{value:conversation},employees:{value:[{id:'bot',runtime:'Hermes',model_id:'fixed-model'}]},conversationDeviceId:{value:'fixed-device'},devices:{value:[]},conversationSettingsSnapshot,botBindingPending:{value:false},conversationBotBinding:{value:{id:'bot'}},conversationModelId:{value:'wrong-override'},conversationWorkingDirectory:{value:''},conversationComposeKey:()=> 'qa\0chat',conversationComposer:composer,api:{addConversationMessage:async(_id,body)=>{writes.push(body);return {id:'msg'};}},refreshSelectedConversation:async()=>{},startConversationPolling:()=>{},notify:()=>{}});
+  await send();assert.equal(writes.length,1);assert.equal('model' in writes[0],false);assert.equal('runtime' in writes[0],false);assert.equal('targetDeviceId' in writes[0],false);
+});
+test('actual Bot device selector cannot rewrite its binding or launch directory inspection',()=>{
+  const device={value:'fixed'},notices=[];let inspections=0;
+  const select=actual('selectConversationDevice',{conversationDeviceId:device,botBindingPending:{value:false},conversationBotBinding:{value:{id:'bot'}},selectedConversation:{value:{employee_id:'bot'}},notify:message=>notices.push(message),openConversationDirectoryPicker:()=>inspections++});
+  select('other');assert.equal(device.value,'fixed');assert.equal(inspections,0);assert.match(notices[0],/已绑定/);
+});
+test('failed workspace load cannot authorize prior workspace model and skill options',async()=>{
+  const refs=Object.fromEntries([...source('load').matchAll(/(\w+)\.value/g)].map(match=>[match[1],{value:[]}]));
+  refs.authState.value={memberships:[{slug:'b',role:'owner'}]};refs.summary.value={workspace:{slug:'a'}};refs.loadedBotOptionsWorkspace.value='a';refs.models.value=[{id:'a-private'}];refs.skills.value=[{id:'a-skill'}];
+  const blank={workspace:{slug:'b',preferences:{}},tasks:[],runtimes:[],models:[],skills:[],documents:[],automations:[],members:[],devices:[],employees:[],calendars:[],agents:[]};
+  const api=Object.fromEntries(['summary','tasks','runtimes','models','skills','documents','automations','members','devices','employees','calendar','settings','agents'].map(name=>[name,async()=>blank]));api.tasks=async()=>{throw new Error('load failed');};
+  const load=new Function(...Object.keys({...refs,api}),`let workspaceLoadGeneration=0;const workspaceSlug=()=> 'b';const notify=()=>{};return (${source('load')});`)(...Object.values({...refs,api}));
+  await load();assert.equal(refs.loading.value,false);assert.equal(refs.summary.value.workspace.slug,'b');assert.equal(refs.loadedBotOptionsWorkspace.value,'a');
+  assert.match(app,/:models="loadedBotOptionsWorkspace===botWorkspace\?/);assert.match(app,/:skills="loadedBotOptionsWorkspace===botWorkspace\?/);
+});

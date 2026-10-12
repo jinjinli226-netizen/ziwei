@@ -8,7 +8,7 @@ function source(name){const start=app.search(new RegExp(`(?:async )?function ${n
 function implementation(name,bindings){
   const dependencies=name==='openConversation'?['conversationRequestScope','applyConversationDetail']:[];
   const stateBindings=dependencies.length?{createConversationRequestSequence,mergeConversationDetail,mergeConversationLists,conversationSettingsSnapshot,mergeConversationSettingsDraft}:{};
-  const allBindings={...stateBindings,...bindings};
+  const allBindings={refreshEmployeeBots:async()=>{},...stateBindings,...bindings};
   return new Function(...Object.keys(allBindings),`let workspaceLoadGeneration=0,conversationOpenGeneration=0,conversationListGeneration=0;${dependencies.length?'const conversationRequests=createConversationRequestSequence();':''}${dependencies.map(source).join('\n')}\nreturn (${source(name)});`)(...Object.values(allBindings));
 }
 

@@ -1,12 +1,12 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
-import { ListTodo, GitBranch, CalendarDays, BookOpenText, UsersRound, Share2, Settings, Puzzle, House, Languages, CircleHelp, ChevronUp, ChevronDown, LayoutDashboard, Check, Plus, LogOut } from 'lucide-vue-next';
+import { Bot, ListTodo, GitBranch, CalendarDays, BookOpenText, UsersRound, Share2, Settings, Puzzle, House, Languages, CircleHelp, ChevronUp, ChevronDown, LayoutDashboard, Check, Plus, LogOut } from 'lucide-vue-next';
 import { ZiButton, ZiFormField, ZiInput, ZiModal } from '@ziwei/ui';
 import ZiSelect from './ZiSelect.vue';
 const props = defineProps({ page: String, account: Object, workspace: Object, workspaces: { type: Array, default: () => [] }, language: { type: String, default: 'zh-CN' } });
 const emit = defineEmits(['navigate','workspace','language','create-workspace','logout']);
 const sectionKeys = [
-  { key:'project', items:[['issues','tasks',ListTodo],['workflow','workflow',GitBranch],['calendar','calendar',CalendarDays],['docs','docs',BookOpenText]] },
+  { key:'project', items:[['bots','bots',Bot],['issues','tasks',ListTodo],['workflow','workflow',GitBranch],['calendar','calendar',CalendarDays],['docs','docs',BookOpenText]] },
   { key:'settings', items:[['members','members',UsersRound],['skills','skills',BookOpenText]] },
   { key:'system', items:[['invite','invite',Share2],['ziwei-connect','ziweiConnect',Share2],['settings','settings',Settings],['open','open',Puzzle]] }
 ];
@@ -16,13 +16,13 @@ const help = ref(false);
 const user = computed(() => props.account || {name:'',email:'',role:null});
 const workspace = computed(() => props.workspace || {name:'',slug:'',kind:null});
 const translations = {
-  'zh-CN': { project:'项目', settings:'设置', system:'系统', tasks:'任务', workflow:'工作流', calendar:'日历', docs:'文档', members:'团队管理', skills:'技能管理', invite:'邀请', ziweiConnect:'紫薇·互联', open:'开放平台', home:'主页', workspace:'工作区', workspaceSettings:'工作区设置', interfaceLanguage:'界面语言', helpTitle:'紫薇使用帮助', helpTask:'在「任务」中创建工作，按状态查看进展；使用筛选、分组和排序管理看板。', helpTeam:'「团队管理」中登记设备和数字员工，「技能管理」中维护可用能力。', openTask:'打开任务', owner:'工作区所有者', member:'工作区成员', logout:'退出登录' },
+  'zh-CN': { bots:'Bot 伙伴', project:'项目', settings:'设置', system:'系统', tasks:'任务', workflow:'工作流', calendar:'日历', docs:'文档', members:'团队管理', skills:'技能管理', invite:'邀请', ziweiConnect:'紫薇·互联', open:'开放平台', home:'主页', workspace:'工作区', workspaceSettings:'工作区设置', interfaceLanguage:'界面语言', helpTitle:'紫薇使用帮助', helpTask:'在「任务」中创建工作，按状态查看进展；使用筛选、分组和排序管理看板。', helpTeam:'「团队管理」中登记设备和数字员工，「技能管理」中维护可用能力。', openTask:'打开任务', owner:'工作区所有者', member:'工作区成员', logout:'退出登录' },
   'en-US': { project:'Projects', settings:'Settings', system:'System', tasks:'Tasks', workflow:'Workflows', calendar:'Calendar', docs:'Documents', members:'Team', skills:'Skills', invite:'Invite', ziweiConnect:'Ziwei connect', open:'Open platform', home:'Home', workspace:'Workspace', workspaceSettings:'Workspace settings', interfaceLanguage:'Interface language', helpTitle:'Ziwei help', helpTask:'Create work in Tasks, then use filters, grouping, and sorting to manage the board.', helpTeam:'Register devices and digital employees in Team, and manage reusable capabilities in Skills.', openTask:'Open tasks', owner:'Workspace owner', member:'Workspace member', logout:'Log out' },
   'ja-JP': { project:'プロジェクト', settings:'設定', system:'システム', tasks:'タスク', workflow:'ワークフロー', calendar:'カレンダー', docs:'ドキュメント', members:'チーム管理', skills:'スキル管理', invite:'招待', ziweiConnect:'紫薇·互联', open:'オープンプラットフォーム', home:'ホーム', workspace:'ワークスペース', workspaceSettings:'ワークスペース設定', interfaceLanguage:'表示言語', helpTitle:'紫薇ヘルプ', helpTask:'タスクで作業を作成し、フィルターと並べ替えで管理します。', helpTeam:'チームでデバイスとデジタル社員を管理し、スキルを再利用できます。', openTask:'タスクを開く', owner:'ワークスペース所有者', member:'ワークスペースメンバー', logout:'ログアウト' },
   'ko-KR': { project:'프로젝트', settings:'설정', system:'시스템', tasks:'작업', workflow:'워크플로', calendar:'캘린더', docs:'문서', members:'팀 관리', skills:'스킬 관리', invite:'초대', ziweiConnect:'紫薇·互联', open:'오픈 플랫폼', home:'홈', workspace:'워크스페이스', workspaceSettings:'워크스페이스 설정', interfaceLanguage:'언어', helpTitle:'紫薇 도움말', helpTask:'작업에서 업무를 만들고 필터와 정렬로 보드를 관리하세요.', helpTeam:'팀에서 장치와 디지털 직원을 관리하고 스킬을 재사용하세요.', openTask:'작업 열기', owner:'工作区所有者', member:'工作区成员', logout:'로그아웃' }
 };
 const t = computed(() => translations[props.language] || translations['zh-CN']);
-const sections = computed(() => sectionKeys.map(section => ({ label:t.value[section.key], items:section.items.map(([key,label,icon]) => [key,t.value[label],icon]) })));
+const sections = computed(() => sectionKeys.map(section => ({ label:t.value[section.key], items:section.items.map(([key,label,icon]) => [key,t.value[label] || 'Bots',icon]) })));
 const languageOptions = [{ code:'en-US', label:'English' }, { code:'zh-CN', label:'简体中文' }, { code:'ko-KR', label:'한국어' }, { code:'ja-JP', label:'日本語' }];
 const workspaceCreateOpen = ref(false);
 const workspaceCreateForm = ref({ name:'', slug:'', kind:'personal' });
