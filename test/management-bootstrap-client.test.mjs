@@ -165,5 +165,9 @@ test('client build identity detects upgraded code even when package version is u
     const afterPythonChange = bootstrapModule.clientBuildIdentity(directory);
     assert.notEqual(beforePythonChange, afterPythonChange, 'Python-only startup fixes must trigger the same-version native upgrade');
     assert.equal(bootstrapModule.clientBuildMismatch({ version: '0.1.0', clientBuild: beforePythonChange }, '0.1.0', afterPythonChange), true);
+    fs.writeFileSync(path.join(directory, 'src', 'runtime-process.ps1'), 'first Windows supervisor');
+    const beforeSupervisorChange = bootstrapModule.clientBuildIdentity(directory);
+    fs.writeFileSync(path.join(directory, 'src', 'runtime-process.ps1'), 'updated Windows supervisor only');
+    assert.notEqual(beforeSupervisorChange, bootstrapModule.clientBuildIdentity(directory), 'Windows process supervisor-only fixes must trigger a same-version native upgrade');
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });

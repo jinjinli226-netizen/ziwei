@@ -41,7 +41,10 @@ try {
     Write-Host 'Finish or cancel its current work first. Continuing stops only this verified instance, upgrades it, and restores the connection.'
     Write-Host 'After restart, the client may receive unfinished server tasks again. The updater cannot prove those tasks have drained.'
     $ziweiLegacyAnswer = Read-Host 'Type YES to confirm stopping and restarting this early client, or anything else to cancel'
-    if ($ziweiLegacyAnswer -cne 'YES') { throw 'Cancelled. The original client, installation and configuration were preserved.' }
+    if ($ziweiLegacyAnswer.Trim() -ine 'YES') {
+      Write-Host 'Cancelled. The original client, installation and configuration were preserved.'
+      return
+    }
     $ziweiLegacyProofFile = Join-Path $ziweiMaintenanceDirectory 'legacy-stop-proof.json'
     [System.IO.File]::WriteAllText($ziweiLegacyProofFile, ($ziweiCheck.legacyProof | ConvertTo-Json -Depth 8), (New-Object System.Text.UTF8Encoding($false)))
     $ziweiUpdateArguments += @('--allow-legacy-stop', '--legacy-proof', $ziweiLegacyProofFile)

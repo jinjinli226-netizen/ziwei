@@ -5,10 +5,36 @@ import os from 'node:os';
 import path from 'node:path';
 import {createActionDelivery, ACTION_TRANSPORT_BUDGETS} from '../src/daemon-action-delivery.mjs';
 import {MAX_ACTION_RESULT_JSON_BYTES} from '../src/conversation-image-artifacts.mjs';
+import {createActionScheduler} from '../src/daemon-action-scheduler.mjs';
 
 const identity={apiBase:'https://example.invalid',workspace:'test',deviceId:'device-A'};
 const action=(id='action-test')=>({id,type:'conversation.execute',workspace_id:'ws-test',agent_id:'ziwei_user',status:'pending',expires_at:new Date(Date.now()+10000).toISOString(),payload:{deviceId:'device-A',conversationId:'conv-test',employeeId:'employee-test',messageId:'message-test'}});
 const expired=()=>new Date(Date.now()-1000).toISOString();
+
+test('quarantine permits only verified durable result retry after upload failure without a second execution', async t => {
+ let executions=0,quarantined=false,failUpload=true;
+ const f=fixture(t,{dispatch:async()=>{executions++;quarantined=true;return {status:'failed',code:'EXECUTION_UNCERTAIN',executionState:'uncertain',reason:'STOP_UNCONFIRMED',error:'isolated unknown tree',result:{processExit:{platform:'win32',rootConfirmed:true,treeConfirmed:false},partialEffectsPossible:true}};}});
+ const post=async(...args)=>{if(args[0].endsWith('/result')&&failUpload){failUpload=false;throw new Error('fixture upload interrupted');}return f.options.post(...args);};
+ const first=f.create({post});await assert.rejects(first.execute(action()),/upload interrupted/);
+ assert.equal(quarantined,true);assert.equal(executions,1);
+ const pending=JSON.parse(fs.readFileSync(journalFiles(f.dir,'action-test').result));
+ assert.equal(pending.result.code,'EXECUTION_UNCERTAIN');assert.equal(pending.result.executionState,'uncertain');assert.equal(pending.result.reason,'STOP_UNCONFIRMED');assert.equal(pending.result.processExit.treeConfirmed,false);
+ const restarted=f.create({post,dispatch:async()=>{executions++;throw new Error('must not execute during quarantine');}});
+ const snapshots=()=>Object.fromEntries(fs.readdirSync(f.dir).map(name=>[name,fs.readFileSync(path.join(f.dir,name),'hex')]));
+ const before=snapshots();
+ assert.equal(restarted.canDeliverWithoutExecution(action()),true);
+ assert.equal(restarted.canDeliverWithoutExecution(action('new-action')),false);
+ assert.equal(restarted.canDeliverWithoutExecution({...action(),payload:{...action().payload,deviceId:'device-B'}}),false);
+ assert.deepEqual(snapshots(),before,'read-only gate may not create or rewrite journals');
+ const prior=f.calls.length;
+ const scheduler=createActionScheduler({canStart:a=>!quarantined||restarted.canDeliverWithoutExecution(a),quarantinedActionIds:()=>['action-test'],execute:a=>restarted.execute(a)});
+ assert.deepEqual(scheduler.schedule([action('new-action'),action()]),['action-test']);await scheduler.whenIdle();
+ assert.equal(executions,1);assert.equal(f.status,'failed');assert.equal(scheduler.activeCount,1);
+ const resumed=f.calls.slice(prior);assert.equal(resumed.filter(c=>c.url.endsWith('/ack')).length,1);assert.equal(resumed.filter(c=>c.url.endsWith('/result')).length,1);
+ const wire=resumed.find(c=>c.url.endsWith('/result')).body.result;assert.equal(wire.code,'EXECUTION_UNCERTAIN');assert.equal(wire.executionState,'uncertain');assert.equal(wire.reason,'STOP_UNCONFIRMED');assert.equal(wire.processExit.treeConfirmed,false);
+ assert.equal(resumed.some(c=>c.url.includes('new-action')),false);
+ assert.equal(restarted.canDeliverWithoutExecution(action()),false,'confirmed receipts do not need scheduling');
+});
 function fixture(t, overrides={}) {
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'ziwei-delivery-'));
  t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));

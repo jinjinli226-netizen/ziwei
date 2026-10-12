@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { parseDocument, parse as parseYaml } from 'yaml';
@@ -10,6 +10,7 @@ import { normalizeRuntimeProfile } from './employee-runtime.mjs';
 import { prepareCreatorRuntimeHome, CREATOR_RUNTIME_ENV_KEYS } from './creator-runtime-home.mjs';
 import { createCliDiscoveryContext, discoverRuntimeCli, carryRuntimeDiscoveryEnvironment, runtimeDiscoveryEnvironment } from './runtime-cli-discovery.mjs';
 import { imageArtifactInstructions, readImageArtifacts, validateImageBytes, imageArtifactDeliveryBody, MAX_CONVERSATION_IMAGE_BYTES, MAX_ACTION_RESULT_JSON_BYTES } from './conversation-image-artifacts.mjs';
+import { spawnSupervisedRuntime } from './runtime-process.mjs';
 
 /**
  * Native local runtime adapters used by ziwei_user.
@@ -802,7 +803,8 @@ export function parseRuntimeStreamLine(line, state, onOutput = () => {}, onStage
 }
 
 /** Execute an installed CLI using an explicit argv, with full local approval. */
-export function executeRuntime({ runtime, prompt, model = null, profile = null, cwd = process.cwd(), env = {}, attachments = [], imageArtifacts = null, codexMcpDisabledServers = [], managementMcp = null, terminalMcp = null, creatorInstance, creatorInstanceDirectory, signal, onOutput, onProgress, onStage } = {}) {
+export function executeRuntime({ runtime, prompt, model = null, profile = null, cwd = process.cwd(), env = {}, attachments = [], imageArtifacts = null, codexMcpDisabledServers = [], managementMcp = null, terminalMcp = null, creatorInstance, creatorInstanceDirectory, signal, onOutput, onProgress, onStage, onActivity, onSupervision } = {}) {
+  if (signal?.aborted) return Promise.resolve({ status: 'failed', code: 'cancelled', error: 'runtime execution cancelled before launch' });
   const resolvedRuntime = normalizeRuntime(runtime);
   if (!resolvedRuntime) return Promise.reject(new Error(`未知本机运行时: ${runtime || '(empty)'}`));
   const imageInputs = attachments.filter(item=>/^image\//i.test(item?.mimeType || '') || /\.(?:png|jpe?g|gif|webp)$/i.test(item?.path || ''));
@@ -896,6 +898,8 @@ export function executeRuntime({ runtime, prompt, model = null, profile = null, 
     }
   }
   const state = { output: '', response: '', bytes: 0, truncated: false, lineBuffer: '' };
+  const emitOutput = chunk => { if (!signal?.aborted) onOutput?.(chunk); };
+  const emitStage = stage => { if (!signal?.aborted) onStage?.(stage); };
   let diagnosticBuffer = '';
   const consumeDiagnostics = chunk => {
     if (!creatorPrepared) { consume(chunk); return; }
@@ -912,15 +916,19 @@ export function executeRuntime({ runtime, prompt, model = null, profile = null, 
     }
   };
   const consume = chunk => {
-    if (invocation.format !== 'json-lines') { appendOutput(state, chunk, onOutput); return; }
+    if (invocation.format !== 'json-lines') { appendOutput(state, chunk, emitOutput); return; }
     state.lineBuffer += String(chunk || '');
     const lines = state.lineBuffer.split(/\r?\n/);
     state.lineBuffer = lines.pop() || '';
-    for (const line of lines) parseRuntimeStreamLine(line, state, onOutput, onStage);
+    for (const line of lines) parseRuntimeStreamLine(line, state, emitOutput, emitStage);
   };
   return new Promise((resolve, reject) => {
-    const child = spawn(spec.command, spec.args, { cwd: path.resolve(String(cwd || process.cwd())), env: childEnv, shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    let supervision;
+    try { supervision = spawnSupervisedRuntime({ command: spec.command, args: spec.args, cwd: path.resolve(String(cwd || process.cwd())), env: childEnv }); }
+    catch (error) { cleanupOverlay(); reject(error); return; }
+    const { child } = supervision;
     let settled = false;
+    let launchError = null;
     const finish = (result, error = null) => {
       if (settled) return;
       settled = true;
@@ -928,26 +936,36 @@ export function executeRuntime({ runtime, prompt, model = null, profile = null, 
       signal?.removeEventListener('abort', abort);
       if (error) reject(error); else resolve(result);
     };
-    const abort = () => { try { child.kill('SIGTERM'); } catch {} };
+    const abort = () => { void supervision.stop(); };
     if (signal) {
       if (signal.aborted) abort();
       else signal.addEventListener('abort', abort, { once: true });
     }
     child.stdout?.on('data', chunk => {
+      if (!signal?.aborted) onActivity?.({ runtime: resolvedRuntime, stream: 'stdout', bytes: Buffer.byteLength(chunk) });
       consume(chunk);
-      onProgress?.({ runtime: resolvedRuntime, bytes: state.bytes, truncated: state.truncated });
+      if (!signal?.aborted) onProgress?.({ runtime: resolvedRuntime, bytes: state.bytes, truncated: state.truncated });
     });
     child.stderr?.on('data', chunk => {
       // stderr contains diagnostics and is deliberately streamed to the same
       // redacted event channel without writing it to the daemon log.
+      if (!signal?.aborted) onActivity?.({ runtime: resolvedRuntime, stream: 'stderr', bytes: Buffer.byteLength(chunk) });
       consumeDiagnostics(chunk);
     });
-    child.once('error', error => finish(null, error));
-    child.once('close', (code, childSignal) => {
+    child.once('error', error => { launchError = error; });
+    child.once('close', async (code, childSignal) => {
+      const processExit = await supervision.completionEvidence;
       if (diagnosticBuffer) consumeDiagnostics('\n');
-      if (state.lineBuffer) parseRuntimeStreamLine(state.lineBuffer, state, onOutput, onStage);
-      if (signal?.aborted) return finish({ status: 'failed', code: 'cancelled', error: 'runtime execution cancelled', result: { runtime: resolvedRuntime, code, signal: childSignal, output: state.output, truncated: state.truncated } });
-    const result = { runtime: resolvedRuntime, model: selectedModel, profile: profile || null, binary: discovered.binary, code, signal: childSignal, output: state.response.trim() || state.output, diagnostics: state.response.trim() ? state.output : null, truncated: state.truncated, ...(spec.nativeBinding ? { hermesBootstrap: spec.nativeBinding } : {}), ...(creatorPrepared ? { creatorIsolation: creatorIsolation || { ...creatorPrepared, enabled: false, reasonCode: 'native_isolation_unconfirmed' } } : {}), ...(receipt ? { managementMcp: managementMcpReceipt(receipt) } : {}), ...(phoneReceipt ? { terminalMcp: terminalMcpReceipt(phoneReceipt) } : {}), ...(attachments.length ? {inputAttachments:attachments} : {}) };
+      if (state.lineBuffer) parseRuntimeStreamLine(state.lineBuffer, state, emitOutput, emitStage);
+      const exitResult = { runtime: resolvedRuntime, code, signal: childSignal, processExit, output: state.output, truncated: state.truncated };
+      // A normally completed CLI may intentionally leave a user-requested
+      // background service running. Cancellation requires a verified empty
+      // owned tree; ordinary completion requires a verified root exit.
+      const neverLaunched = processExit.launched === false && processExit.treeConfirmed;
+      if (process.platform === 'win32' && !neverLaunched && (!processExit.rootConfirmed || ((signal?.aborted || processExit.cancelled) && !processExit.treeConfirmed))) return finish({ status: 'failed', code: 'EXECUTION_UNCERTAIN', executionState: 'uncertain', error: '无法确认本次 CLI 及其子进程的停止状态；工具可能已产生写入，请核实后处理，不要直接重发原消息。', result: exitResult });
+      if (launchError) return finish(null, launchError);
+      if (signal?.aborted) return finish({ status: 'failed', code: 'cancelled', error: 'runtime execution cancelled; completed tool writes may already exist', result: exitResult });
+    const result = { runtime: resolvedRuntime, model: selectedModel, profile: profile || null, binary: discovered.binary, code, signal: childSignal, processExit, output: state.response.trim() || state.output, diagnostics: state.response.trim() ? state.output : null, truncated: state.truncated, ...(spec.nativeBinding ? { hermesBootstrap: spec.nativeBinding } : {}), ...(creatorPrepared ? { creatorIsolation: creatorIsolation || { ...creatorPrepared, enabled: false, reasonCode: 'native_isolation_unconfirmed' } } : {}), ...(receipt ? { managementMcp: managementMcpReceipt(receipt) } : {}), ...(phoneReceipt ? { terminalMcp: terminalMcpReceipt(phoneReceipt) } : {}), ...(attachments.length ? {inputAttachments:attachments} : {}) };
       if (code === 0 && creatorPrepared && !creatorIsolation) return finish({ status: 'failed', code: 'creator_isolation_unconfirmed', error: 'Hermes 未确认 Creator 实例状态隔离；不能报告执行成功', result });
       const mcpFailure = code === 0 ? managementMcpExecutionFailure(result.managementMcp) || terminalMcpExecutionFailure(result.terminalMcp) : null;
       if (mcpFailure) return finish({ status: 'failed', ...mcpFailure, result });
@@ -958,6 +976,8 @@ export function executeRuntime({ runtime, prompt, model = null, profile = null, 
       }
       finish(imageArtifactDeliveryBody({ status: 'succeeded', result },{maxBytes:MAX_ACTION_RESULT_JSON_BYTES-64*1024}));
     });
+    try { onSupervision?.(supervision); }
+    catch (error) { launchError = error; abort(); }
     if (invocation.stdin !== null && invocation.stdin !== undefined) child.stdin.end(String(invocation.stdin));
     else child.stdin.end();
   });

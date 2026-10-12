@@ -41,6 +41,7 @@ function log(event, extra = {}) {
 }
 function rotate() { try { if (fs.statSync(logPath).size > 5 * 1024 * 1024) fs.renameSync(logPath, `${logPath}.${Date.now()}`); } catch {} }
 const connections = new Map();
+const executionAllowed = () => ![...connections.values()].some(connection => connection.dispatcher?.quarantined);
 let connectionErrors = [];
 function installConnections() {
   const resolved = resolveWorkspaceConnections(config, { configPath, root: ROOT });
@@ -79,9 +80,10 @@ function installConnections() {
       workdir: config.workdir || process.cwd() || ROOT,
       workspace: config.workspace, deviceId: config.deviceId,
       stateFile: path.join(connectionRuntimeDir, 'action-state.json'), execute: localExecutor,
+      canExecute: executionAllowed,
       onEvent: (event, extra) => {
         log(event, { workspace: config.workspace, ...extra });
-        if (extra?.actionId && ['action.started', 'action.output', 'action.progress', 'action.stage'].includes(event)) state.actionDelivery?.recordEvent(extra.actionId, event, extra);
+        if (extra?.actionId && ['action.started', 'action.output', 'action.progress', 'action.stage', 'action.waiting'].includes(event)) state.actionDelivery?.recordEvent(extra.actionId, event, extra);
       },
     });
     state.actionDelivery = createActionDelivery({
@@ -94,6 +96,8 @@ function installConnections() {
     });
     state.actionScheduler = createActionScheduler({
       execute: action => state.actionDelivery.execute(action),
+      canStart: action => executionAllowed() || state.actionDelivery.canDeliverWithoutExecution(action),
+      quarantinedActionIds: () => state.dispatcher.quarantinedActionIds,
       onError: (error, action) => log('a2a_action_failed', { workspace: config.workspace, actionId: action.id, error: error.message }),
     });
     state.managementStatus = state.managementBootstrap.status();
@@ -246,10 +250,12 @@ function heartbeatFresh() {
 }
 function lifecycleConfigurationHash() { try { return createHash('sha256').update(fs.readFileSync(configPath)).digest('hex'); } catch { return null; } }
 function healthPayload() {
+  const executionQuarantined = !executionAllowed();
+  const quarantinedActionCount = [...connections.values()].reduce((total, connection) => total + connection.dispatcher.quarantinedActionIds.length, 0);
   return { service: 'ziwei_user', version: VERSION, clientBuild: CLIENT_BUILD, bridge: 'ziwei_user', agentId: 'ziwei_user', workspace: config.workspace, deviceId: config.deviceId, runtimes: runtimeDiscovery.runtimes, managementMcp: primaryConnection?.managementBootstrap.status(), terminalMcp: primaryConnection?.terminalStatus, lastHeartbeat, lastHeartbeatAgeMs: lastHeartbeatAt ? Math.max(0, Date.now() - lastHeartbeatAt) : null, lastPoll, pid: process.pid,
     lifecycle: { nonce: lifecycleNonce, root: ROOT, configPath, configSha256: lifecycleConfigurationHash(), startedAt: lifecycleStartedAt, managedAuxiliaryCount: 0 },
-    connectionState: draining ? 'draining' : 'connected', activeActionCount: [...connections.values()].reduce((total, connection) => total + connection.actionScheduler.activeCount, 0), pollingCount: [...connections.values()].filter(connection => connection.polling).length,
-    connections: [...connections.values()].map(connection => ({ workspace: connection.config.workspace, deviceId: connection.config.deviceId, primary: connection.config.primary, configured: true, ready: !draining && connection.lastHeartbeatAt > 0 && Date.now() - connection.lastHeartbeatAt <= Math.max(45_000, (Number(config.heartbeatMs) || 15_000) * 3), lastHeartbeat: connection.lastHeartbeat, managementMcp: connection.managementBootstrap.status(), terminalMcp: connection.terminalStatus })), connectionErrors,
+    connectionState: draining ? 'draining' : executionQuarantined ? 'quarantined' : 'connected', executionQuarantined, quarantinedActionCount, activeActionCount: [...connections.values()].reduce((total, connection) => total + connection.actionScheduler.activeCount, 0), pollingCount: [...connections.values()].filter(connection => connection.polling).length,
+    connections: [...connections.values()].map(connection => ({ workspace: connection.config.workspace, deviceId: connection.config.deviceId, primary: connection.config.primary, configured: true, ready: !draining && !executionQuarantined && connection.lastHeartbeatAt > 0 && Date.now() - connection.lastHeartbeatAt <= Math.max(45_000, (Number(config.heartbeatMs) || 15_000) * 3), lastHeartbeat: connection.lastHeartbeat, managementMcp: connection.managementBootstrap.status(), terminalMcp: connection.terminalStatus })), connectionErrors,
   };
 }
 const health = http.createServer((req, res) => {
@@ -279,7 +285,7 @@ const health = http.createServer((req, res) => {
     return;
   }
   if (req.url === '/healthz') { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ ok: true, ...healthPayload() })); return; }
-  if (req.url === '/readyz') { const ready = !draining && heartbeatFresh(); res.writeHead(ready ? 200 : 503, { 'content-type': 'application/json' }); res.end(JSON.stringify({ ready, ...healthPayload() })); return; }
+  if (req.url === '/readyz') { const ready = !draining && executionAllowed() && heartbeatFresh(); res.writeHead(ready ? 200 : 503, { 'content-type': 'application/json' }); res.end(JSON.stringify({ ready, ...healthPayload() })); return; }
   res.writeHead(404); res.end();
 });
 let stopping = false;

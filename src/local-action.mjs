@@ -433,6 +433,8 @@ export function createLocalActionExecutor({runtimeDir, defaultWorkdir = process.
         onOutput: context.onOutput,
         onProgress: context.onProgress,
         onStage: context.onStage,
+        onActivity: context.onActivity,
+        onSupervision: context.onSupervision,
       }); } finally { phoneSession.cleanup(); }
     }
     if (type === 'message.deliver' || type === 'local.message' || type === 'task.execute') {

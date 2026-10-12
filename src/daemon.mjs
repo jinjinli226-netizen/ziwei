@@ -19,6 +19,15 @@ function classifyOutputStage(chunk) {
   return { stage: 'response', message: '生成结果', detail: 'CLI 输出' };
 }
 
+function safeProcessExit(value) {
+  if (!value || typeof value !== 'object') return null;
+  const result = {};
+  for (const key of ['launched', 'rootConfirmed', 'treeConfirmed', 'cancelled']) if (typeof value[key] === 'boolean') result[key] = value[key];
+  for (const key of ['rootPid', 'rootExitCode', 'activeProcesses', 'hostExitCode']) if (value[key] === null || Number.isSafeInteger(value[key])) result[key] = value[key];
+  for (const key of ['platform', 'supervisor', 'failureCode']) if (typeof value[key] === 'string' && /^[a-zA-Z0-9_-]{1,100}$/.test(value[key])) result[key] = value[key];
+  return result;
+}
+
 export class ActionDispatcher {
   #completed = new Map();
   #completedIdentity = new Map();
@@ -34,10 +43,14 @@ export class ActionDispatcher {
   #stateError = null;
   #workspace;
   #deviceId;
-  constructor({execute, now = () => Date.now(), workdir = process.cwd(), onEvent = () => {}, stateFile = null, workspace = '', deviceId = ''} = {}) {
+  #stopGraceMs;
+  #canExecute;
+  #quarantines = new Set();
+  constructor({execute, now = () => Date.now(), workdir = process.cwd(), onEvent = () => {}, stateFile = null, workspace = '', deviceId = '', stopGraceMs = 10000, canExecute = () => true} = {}) {
     if (typeof execute !== 'function') throw new TypeError('ActionDispatcher requires an execute function');
     this.#execute = execute; this.#now = now; this.#workdir = process.platform === 'win32' ? resolveWindowsWorkdirPath(process.cwd(), workdir) : path.resolve(workdir); this.#onEvent = onEvent;
     this.#workspace = String(workspace || ''); this.#deviceId = String(deviceId || '');
+    this.#stopGraceMs = Math.max(1, Number(stopGraceMs) || 10000); this.#canExecute = canExecute;
     this.#stateFile = stateFile ? path.resolve(stateFile) : null; this.#loadState();
   }
   #loadState() {
@@ -54,9 +67,14 @@ export class ActionDispatcher {
       }
       for (const item of parsed.version === 2 ? parsed.started : []) {
         if (!item || typeof item.key !== 'string' || !item.key || (!['string', 'number'].includes(typeof item.actionId) && item.actionId !== null) || !item.identity || !validIdentity(item.identity) || !Number.isFinite(item.startedAt) || started.has(item.key)) throw new Error('Invalid started action state');
+        if (item.nativeRuntime !== undefined && typeof item.nativeRuntime !== 'boolean') throw new Error('Invalid runtime ownership state');
+        if (item.quarantine !== undefined && (!item.quarantine || typeof item.quarantine.stopConfirmed !== 'boolean')) throw new Error('Invalid execution quarantine state');
         started.set(item.key, item);
       }
       this.#completed = completed; this.#completedIdentity = identities; this.#legacyCompleted = legacy; this.#started = started;
+      for (const [key, item] of started) {
+        if (!completed.has(key) && (item.nativeRuntime || item.quarantine) && item.quarantine?.stopConfirmed !== true) this.#quarantines.add(key);
+      }
     } catch (error) {
       if (error?.code === 'ENOENT') return;
       this.#stateError = error;
@@ -109,17 +127,36 @@ export class ActionDispatcher {
     if (actionId === undefined || actionId === null || String(actionId) === '') return null;
     return [...entries.entries()].find(([, item]) => String(getActionId(item) ?? '') === String(actionId)) || null;
   }
-  #uncertain(action, reason, error) {
-    return this.#failure(action, `执行状态无法安全确认，需人工核实后处理：${error instanceof Error ? error.message : String(error)}`, {code: 'EXECUTION_UNCERTAIN', executionState: 'uncertain', reason});
+  #uncertain(action, reason, error, extra = {}) {
+    return this.#failure(action, `执行状态无法安全确认，需人工核实后处理：${error instanceof Error ? error.message : String(error)}`, {code: 'EXECUTION_UNCERTAIN', executionState: 'uncertain', reason, ...extra});
   }
   #duplicate(action, result) {
     return {status: 'duplicate', actionId: action?.id, originalStatus: result.status, result: result.result, error: result.error, completedAt: result.completedAt, ...(result.code ? {code: result.code} : {}), ...(result.reason ? {reason: result.reason} : {}), ...(result.executionState ? {executionState: result.executionState} : {})};
   }
   #markStarted(action, key, identity) {
-    this.#started.set(key, {key, actionId: action?.id ?? null, identity, startedAt: this.#now()});
+    this.#started.set(key, {key, actionId: action?.id ?? null, identity, startedAt: this.#now(), ...(isNativeRuntimeAction(action) ? {nativeRuntime: true} : {})});
     try { this.#saveState(); }
     catch (error) { throw Object.assign(new Error(error?.message || String(error)), {code: 'ACTION_STATE_WRITE_FAILED'}); }
   }
+  #quarantine(key, reason) {
+    const item = this.#started.get(key); if (!item) return;
+    this.#quarantines.add(key);
+    item.quarantine = {reason, recordedAt: this.#now(), stopConfirmed: false};
+    try { this.#saveState(); } catch {} // The durable native started record also blocks restart.
+    this.#onEvent('action.quarantined', {actionId: item.actionId, reason});
+  }
+  #confirmQuarantineStopped(key) {
+    if (!this.#quarantines.has(key)) return;
+    const item = this.#started.get(key); if (!item) return;
+    const previous = item.quarantine;
+    item.quarantine = {...previous, stopConfirmed: true, confirmedAt: this.#now()};
+    try { this.#saveState(); }
+    catch { item.quarantine = previous; return; }
+    this.#quarantines.delete(key);
+    this.#onEvent('action.quarantine_cleared', {actionId: item.actionId, reason: 'STOP_CONFIRMED'});
+  }
+  get quarantined() { return this.#stateError !== null || this.#quarantines.size > 0; }
+  get quarantinedActionIds() { return [...this.#quarantines].map(key => String(this.#started.get(key)?.actionId ?? key)).concat(this.#stateError ? ['state-corrupt'] : []); }
   #inside(root, candidate) {
     const relative = path.relative(root, candidate);
     return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
@@ -160,8 +197,8 @@ export class ActionDispatcher {
       const actionType = String(action.type || '').toLowerCase();
       if (actionType === 'agent.cancel' || actionType === 'action.cancel') {
         this.#markStarted(action, key, identity);
-        const target = String(action.payload?.actionId || action.payload?.action_id || ''); const cancelled = this.cancel(target);
-        return {status: cancelled ? 'succeeded' : 'failed', actionId, result: {targetActionId: target, cancelled}, completedAt: this.#now(), ...(cancelled ? {} : {error: 'target action is not running'})};
+        const target = String(action.payload?.actionId || action.payload?.action_id || ''); const cancellationRequested = this.cancel(target);
+        return {status: cancellationRequested ? 'succeeded' : 'failed', actionId, result: {targetActionId: target, cancellationRequested, stopConfirmed: false, message: cancellationRequested ? '取消请求已接受；目标是否停止须以目标动作的停止回执为准' : '目标当前没有可取消的运行实例'}, completedAt: this.#now(), ...(cancellationRequested ? {} : {error: 'target action is not running'})};
       }
       const expiresAt = action.expiresAt ?? action.expires_at;
       if (expiresAt && Number.isFinite(Date.parse(String(expiresAt))) && Date.parse(String(expiresAt)) <= Date.now()) throw new Error('A2A action expired');
@@ -170,43 +207,79 @@ export class ActionDispatcher {
         ...(action.payload && typeof action.payload === 'object' ? action.payload : {}),
         workdir, ...(needsNativeCwd(action) ? { cwd: workdir } : {})
       }} : action;
-      this.#markStarted(action, key, identity);
-      this.#onEvent('action.started', {actionId, type: action.type});
+      if (this.quarantined || !this.#canExecute(action)) return this.#uncertain(action, 'EXECUTION_QUARANTINED', '本机仍有未确认停止的执行；未启动新动作');
+      const nativeRuntime = isNativeRuntimeAction(action);
       const requestedTimeout = action.payload?.timeoutMs ?? action.payload?.timeout_ms;
       const hasHardTimeout = requestedTimeout !== undefined && requestedTimeout !== null && String(requestedTimeout).trim() !== '' && Number.isFinite(Number(requestedTimeout));
-      const hardTimeoutMs = hasHardTimeout ? Math.max(100, Number(requestedTimeout)) : null;
+      let hardTimeoutMs = hasHardTimeout ? Math.max(100, Number(requestedTimeout)) : nativeRuntime ? 15 * 60 * 1000 : null;
+      if (nativeRuntime && expiresAt) {
+        const remaining = Date.parse(String(expiresAt)) - this.#now() - 60000;
+        if (!Number.isFinite(remaining) || remaining < 100) return this.#failure(action, 'A2A action lease leaves insufficient time for execution and confirmed shutdown', {code: 'ACTION_LEASE_INSUFFICIENT'});
+        hardTimeoutMs = Math.min(hardTimeoutMs, remaining);
+      }
+      const hardDeadline = hardTimeoutMs === null ? null : this.#now() + hardTimeoutMs;
       const requestedIdleTimeout = action.payload?.idleTimeoutMs ?? action.payload?.idle_timeout_ms;
-      const idleTimeoutMs = Math.max(100, Number.isFinite(Number(requestedIdleTimeout)) ? Number(requestedIdleTimeout) : 2 * 60 * 1000);
-      let timedOut = false;
-      let resolveTimeout;
-      const failForTimeout = (reason) => {
-        if (timedOut) return;
-        timedOut = true;
-        controller.abort();
-        const message = reason === 'idle'
-          ? `A2A action timed out after no activity for ${idleTimeoutMs}ms`
-          : `A2A action timed out after ${hardTimeoutMs}ms`;
-        resolveTimeout?.({status: 'failed', code: 'action_timeout', error: message});
+      const hasIdleTimeout = requestedIdleTimeout !== undefined && requestedIdleTimeout !== null && String(requestedIdleTimeout).trim() !== '' && Number.isFinite(Number(requestedIdleTimeout));
+      const idleTimeoutMs = hasIdleTimeout ? Math.max(100, Number(requestedIdleTimeout)) : 2 * 60 * 1000;
+      const enforceIdle = !nativeRuntime || hasIdleTimeout;
+      this.#markStarted(action, key, identity);
+      this.#onEvent('action.started', {actionId, type: action.type});
+      let stopReason = null; let resolveStop; let supervision = null; let stopInvoked = false;
+      let executionSettled = false; let stoppedEvidence = null; let latestEvidence = null; let resolveConfirmed;
+      const stopRequested = new Promise(resolve => { resolveStop = resolve; });
+      const confirmed = new Promise(resolve => { resolveConfirmed = resolve; });
+      const rootFinished = value => value?.rootConfirmed === true || (value?.launched === false && value.treeConfirmed === true);
+      const reliableStop = value => rootFinished(value) && (value.treeConfirmed === true || (process.platform !== 'win32' && value.platform && value.platform !== 'win32'));
+      const observeEvidence = promise => Promise.resolve(promise).then(value => {
+        latestEvidence = value;
+        if (reliableStop(value)) {
+          stoppedEvidence = value; resolveConfirmed(true); if (executionSettled) this.#confirmQuarantineStopped(key);
+        }
+        return value;
+      }, () => null);
+      const invokeStop = () => {
+        if (!supervision || stopInvoked) return;
+        stopInvoked = true; observeEvidence(Promise.resolve().then(() => supervision.stop()));
+      };
+      const requestStop = reason => {
+        if (stopReason) return;
+        stopReason = reason; controller.abort(); invokeStop(); resolveStop({kind: 'stop'});
+      };
+      controller.signal.addEventListener('abort', () => { if (!stopReason) requestStop('cancelled'); }, {once: true});
+      const bounded = async promise => {
+        let timer;
+        try { return await Promise.race([promise, new Promise(resolve => { timer = setTimeout(() => resolve(null), this.#stopGraceMs); })]); }
+        finally { clearTimeout(timer); }
       };
       let lastActivityAt = this.#now();
-      const refreshIdleTimeout = () => { if (!timedOut) lastActivityAt = this.#now(); };
+      const refreshIdleTimeout = () => { if (!stopReason) lastActivityAt = this.#now(); };
+      let waitingEmitted = false;
       const clearTimeouts = () => {
         if (hardTimeoutHandle) clearTimeout(hardTimeoutHandle);
         if (idleWatchdogHandle) clearInterval(idleWatchdogHandle);
         hardTimeoutHandle = null;
         idleWatchdogHandle = null;
       };
-      const timeout = new Promise(resolve => {
-        resolveTimeout = resolve;
-        if (hardTimeoutMs !== null) hardTimeoutHandle = setTimeout(() => failForTimeout('hard'), hardTimeoutMs);
-        const intervalMs = Math.max(25, Math.min(1000, Math.floor(idleTimeoutMs / 4)));
-        idleWatchdogHandle = setInterval(() => {
-          if (!timedOut && this.#now() - lastActivityAt >= idleTimeoutMs) failForTimeout('idle');
-        }, intervalMs);
-      });
-      const execution = Promise.resolve().then(() => this.#execute(executableAction, {
+      if (hardDeadline !== null) hardTimeoutHandle = setTimeout(() => requestStop('hard'), Math.max(0, hardDeadline - this.#now()));
+      const intervalMs = Math.max(25, Math.min(1000, Math.floor(idleTimeoutMs / 4)));
+      idleWatchdogHandle = setInterval(() => {
+        if (stopReason || this.#now() - lastActivityAt < idleTimeoutMs) return;
+        if (enforceIdle) requestStop('idle');
+        else if (!waitingEmitted) {
+          waitingEmitted = true;
+          this.#onEvent('action.waiting', {actionId, type: action.type, message: '未收到新输出，仍在等待 CLI；无法据此确认执行进度', detail: '静默不等于执行停止，本地执行截止时间保持不变', idleMs: this.#now() - lastActivityAt});
+        }
+      }, intervalMs);
+      const execution = Promise.resolve().then(() => controller.signal.aborted ? {status: 'failed', code: 'cancelled'} : this.#execute(executableAction, {
         signal: controller.signal,
+        onActivity: refreshIdleTimeout,
+        onSupervision: value => {
+          if (supervision || !value || typeof value.stop !== 'function' || !value.completionEvidence || typeof value.completionEvidence.then !== 'function') throw new Error('Invalid runtime supervision registration');
+          supervision = value; observeEvidence(value.completionEvidence);
+          if (stopReason) invokeStop();
+        },
         onOutput: chunk => {
+          if (stopReason) return;
           refreshIdleTimeout();
           const bytes = Buffer.byteLength(String(chunk || ''));
           const stage = classifyOutputStage(chunk);
@@ -220,7 +293,7 @@ export class ActionDispatcher {
             progress: { phase: 'output', bytes, detail: stage.detail }
           });
         },
-        onStage: stage => { refreshIdleTimeout(); this.#onEvent('action.stage', {
+        onStage: stage => { if (stopReason) return; refreshIdleTimeout(); this.#onEvent('action.stage', {
           actionId,
           type: action.type,
           stage: stage?.stage || 'output',
@@ -229,19 +302,48 @@ export class ActionDispatcher {
           ...(stage?.summary ? { summary: stage.summary } : {}),
           progress: { phase: 'stage', ...stage }
         }); },
-        onProgress: progress => { refreshIdleTimeout(); this.#onEvent('action.progress', {
+        onProgress: progress => { if (stopReason) return; refreshIdleTimeout(); this.#onEvent('action.progress', {
           actionId,
           type: action.type,
           message: progress?.runtime ? `${progress.runtime} 正在执行` : 'CLI 正在执行',
           detail: Number(progress?.bytes) > 0 ? `已接收 ${Number(progress.bytes).toLocaleString()} B 输出` : '正在接收 CLI 输出',
           progress: { phase: 'running', ...progress }
         }); },
-      }));
-      const result = await Promise.race([execution, timeout]); clearTimeouts();
-      if (timedOut) return {...result, actionId, completedAt: this.#now()};
-      if (controller.signal.aborted) return {status: 'failed', actionId, code: 'cancelled', error: 'A2A action cancelled', completedAt: this.#now()};
+      })).then(value => ({kind: 'execution', value}), error => ({kind: 'execution', error})).then(outcome => {
+        executionSettled = true;
+        if (!supervision) resolveConfirmed(true);
+        if (!supervision || stoppedEvidence) this.#confirmQuarantineStopped(key);
+        return outcome;
+      });
+      const outcome = await Promise.race([execution, stopRequested]); clearTimeouts();
+      if (stopReason) {
+        invokeStop();
+        const stopped = await bounded(Promise.all([execution, confirmed]));
+        const receipt = {result: {processExit: safeProcessExit(stoppedEvidence || latestEvidence), partialEffectsPossible: true}};
+        if (!stopped || (supervision ? !stoppedEvidence : !executionSettled)) {
+          this.#quarantine(key, 'STOP_UNCONFIRMED');
+          return this.#uncertain(action, 'STOP_UNCONFIRMED', '已请求停止，但无法确认运行进程及任务树已退出；工具可能已经写入，请核实后再决定是否重新提交', receipt);
+        }
+        const cancelled = stopReason === 'cancelled';
+        const error = cancelled ? 'A2A action cancelled' : stopReason === 'idle' ? `A2A action timed out after no activity for ${idleTimeoutMs}ms` : `A2A action timed out after ${hardTimeoutMs}ms`;
+        return this.#failure(action, `${error}；工具可能已经写入或产生其他影响，请核实后再决定是否重新提交`, {code: cancelled ? 'cancelled' : 'action_timeout', ...receipt});
+      }
+      if (supervision && !rootFinished(latestEvidence)) {
+        await bounded(observeEvidence(supervision.completionEvidence));
+        if (!rootFinished(latestEvidence)) {
+          this.#quarantine(key, 'ROOT_EXIT_UNCONFIRMED');
+          return this.#uncertain(action, 'ROOT_EXIT_UNCONFIRMED', '运行时返回但未能确认原进程退出', {result: {processExit: safeProcessExit(latestEvidence), partialEffectsPossible: true}});
+        }
+      }
+      if (outcome.error) throw outcome.error;
+      const result = outcome.value;
       const executorStatus = result && typeof result === 'object' ? String(result.status || '') : '';
       if (executorStatus && executorStatus !== 'succeeded') {
+        if (result.code === 'EXECUTION_UNCERTAIN' || result.executionState === 'uncertain') {
+          this.#quarantine(key, result.reason || 'EXECUTOR_UNCERTAIN');
+          if (stoppedEvidence) this.#confirmQuarantineStopped(key);
+          return this.#uncertain(action, result.reason || 'EXECUTOR_UNCERTAIN', result.error || '运行时执行状态未确认', {result: {processExit: safeProcessExit(stoppedEvidence || latestEvidence), partialEffectsPossible: true}});
+        }
         if (executorStatus === 'failed') return this.#failure(action, result.error || 'Local executor failed', {result: result.result, code: result.code || 'executor_failed'});
         return this.#failure(action, `Local executor returned non-terminal status: ${executorStatus}`, {result, code: 'execution_not_completed'});
       }
@@ -287,6 +389,6 @@ export class ActionDispatcher {
     try { return await entry.promise; }
     finally { if (this.#inFlight.get(key) === entry) this.#inFlight.delete(key); }
   }
-  cancel(actionId) { const controller = this.#controllers.get(String(actionId)); if (!controller) return false; controller.abort(); this.#onEvent('action.cancelled', {actionId}); return true; }
-  status(actionId) { const id = String(actionId); return {actionId: id, running: this.#controllers.has(id), completed: [...this.#completed.values()].find(item => String(item.actionId) === id) || null}; }
+  cancel(actionId) { const controller = this.#controllers.get(String(actionId)); if (!controller) return false; controller.abort(); this.#onEvent('action.cancel_requested', {actionId, stopConfirmed: false}); return true; }
+  status(actionId) { const id = String(actionId); return {actionId: id, running: this.#controllers.has(id) || this.quarantinedActionIds.includes(id), quarantined: this.quarantinedActionIds.includes(id), completed: [...this.#completed.values()].find(item => String(item.actionId) === id) || null}; }
 }

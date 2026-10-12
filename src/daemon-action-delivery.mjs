@@ -127,7 +127,11 @@ export function createActionDelivery({directory,identity,post,dispatch,retryDela
     const original=readBlob(record,'action').action;
     const result=await dispatch({...original,...record.action,payload:{...original.payload,...record.action.payload}});
     const status=result.status==='succeeded'||(result.status==='duplicate'&&result.originalStatus==='succeeded')?'succeeded':'failed';
-    const delivery=imageArtifactDeliveryBody({status,result:result.result??result,error:status==='failed'?(result.error||'ziwei_user execution failed'):null,receiptOnly:true});
+    const outcome=result.result??result;
+    const wireResult=result.code==='EXECUTION_UNCERTAIN'||result.executionState==='uncertain'
+      ? {...(outcome&&typeof outcome==='object'&&!Array.isArray(outcome)?outcome:{result:outcome}),code:'EXECUTION_UNCERTAIN',executionState:'uncertain',...(typeof result.reason==='string'&&/^[A-Z0-9_]{1,100}$/.test(result.reason)?{reason:result.reason}:{})}
+      : outcome;
+    const delivery=imageArtifactDeliveryBody({status,result:wireResult,error:status==='failed'?(result.error||'ziwei_user execution failed'):null,receiptOnly:true});
     record.resultDigest=writeBlob(action.id,'result',delivery);
     record.retainEvidence=result.code==='EXECUTION_UNCERTAIN'||result.executionState==='uncertain'||delivery.result?.code==='EXECUTION_UNCERTAIN'||delivery.result?.executionState==='uncertain';
     record.dispatcherStatus=result.status;record.state='result_pending';save(record);
@@ -161,6 +165,7 @@ export function createActionDelivery({directory,identity,post,dispatch,retryDela
   }
  }
  return {
+  canDeliverWithoutExecution(action){try{return Boolean(action?.id&&read(action,{create:false})?.state==='result_pending');}catch{return false;}},
   execute(action){if(!action?.id)return Promise.reject(new TypeError('Action ID required'));try{validateTarget(action);}catch(error){return Promise.reject(error);}const actionBinding=binding(action,connection);if(active.has(action.id))return activeBindings.get(action.id)===actionBinding?active.get(action.id):Promise.reject(new Error(`Action delivery identity mismatch: ${action.id}`));const promise=Promise.resolve().then(()=>run(action)).finally(()=>{active.delete(action.id);activeBindings.delete(action.id);});active.set(action.id,promise);activeBindings.set(action.id,actionBinding);return promise;},
   recordEvent,
   recoverActions(){
