@@ -37,6 +37,7 @@ function objectArguments(value) {
 }
 
 export const toolDefinitions = [
+  {name:'ziwei_bot',description:'Hermes Bot 统一管理。capabilities/list发现；create创建当前工作区独立Bot并返回主聊天；get回读；validate无模型原生配置检查，用ziwei_get_action等待成功后get最新revision/control_epoch，再control activate。用户已说创建并启用可覆盖正常步骤。control必须expectedRevision与expectedControlEpoch，旧请求不得覆盖暂停。Routine紫薇唯一调度，uncertain不得重跑，密钥仅用本机环境引用。',inputSchema:{type:'object',required:['operation'],properties:{operation:{type:'string',enum:['capabilities','list','create','initialize','get','update','validate','control','runs','routines','createRoutine','updateRoutine','deleteRoutine','runRoutine']},id:{type:'string'},routineId:{type:'string'},deviceId:{type:'string'},data:{type:'object',description:'create: name,targetDeviceId,runtimeProfile,model,persona,description,instructions,config,idempotencyKey; update: expectedRevision,employee/config; validate: expectedRevision,idempotencyKey; control: expectedRevision,expectedControlEpoch,operation activate/pause/resume/stop; Routine: name,prompt,schedule,timezone,idempotencyKey.'}}}},
   {name:'ziwei_inspect_workdir',description:'在指定在线电脑检查真实工作目录。返回异步 action，以 ziwei_get_action 等待 succeeded 后，将 result.path 和 action.id 作为员工 defaultWorkingDirectory/defaultWorkingDirectoryActionId 保存。检查回执10分钟内有效。仅用户明确要求创建时传 createIfMissing:true；不会创建会话或执行员工任务。',inputSchema:{type:'object',required:['deviceId','path'],properties:{deviceId:{type:'string'},path:{type:'string',maxLength:4096},createIfMissing:{type:'boolean',default:false},idempotencyKey:{type:'string'}}}},
   {name:'ziwei_create_conversation',description:'为当前工作区员工创建新会话，返回持久化目录快照；不发送消息或执行任务。省略 workingDirectory 会继承员工绑定该电脑的默认目录，再沿用设备目录。非空显式目录仅覆盖该会话。使用稳定 idempotencyKey 安全重试。',inputSchema:{type:'object',required:['employeeId'],properties:{employeeId:{type:'string'},title:{type:'string'},deviceId:{type:'string'},workingDirectory:{type:['string','null'],maxLength:4096},model:{type:'string'},idempotencyKey:{type:'string'}}}},
   { name: 'ziwei_mcp_health', description: '检查当前紫薇工作区 MCP 管理入口状态与窄管理面边界。', inputSchema: { type: 'object', properties: {} } },
@@ -143,6 +144,14 @@ export function createMcpClient(options = {}) {
     return payload;
   }
   return {
+    async bot(input={}) {
+      const {operation,id,routineId,deviceId,workspace}=input,body={...(input.data || {}),...(workspace?{workspace}:{})};
+      const base=`${workspacePath}/bots`,item=`${base}/${encodeURIComponent(id || '')}`;
+      if(['initialize','get','update','validate','control','runs','routines','createRoutine','updateRoutine','deleteRoutine','runRoutine'].includes(operation)&&!id)throw new Error('Bot 操作需要 id');
+      if(['updateRoutine','deleteRoutine','runRoutine'].includes(operation)&&!routineId)throw new Error('Routine 操作需要 routineId');
+      const paths={capabilities:['GET',`${base}/capabilities`],list:['GET',base],create:['POST',base],initialize:['POST',`${workspacePath}/employees/${encodeURIComponent(id || '')}/bot`],get:['GET',item],update:['PATCH',item],validate:['POST',`${item}/validate`],control:['POST',`${item}/control`],runs:['GET',`${item}/runs`],routines:['GET',`${item}/routines`],createRoutine:['POST',`${item}/routines`],updateRoutine:['PATCH',`${item}/routines/${encodeURIComponent(routineId)}`],deleteRoutine:['DELETE',`${item}/routines/${encodeURIComponent(routineId)}`],runRoutine:['POST',`${item}/routines/${encodeURIComponent(routineId)}/run`]};
+      if(!paths[operation])throw new Error('未知 Bot operation');const [method,url]=paths[operation];return request(method,url,method==='GET'?undefined:body,{workspace,...(deviceId?{deviceId}:{})});
+    },
     async inspectWorkdir(input) {const {deviceId,...body}=input;return request('POST',`${workspacePath}/devices/${encodeURIComponent(deviceId)}/workdir/inspect`,body);},
     async createConversation(input) {return request('POST',`${workspacePath}/conversations`,input);},
     async health(input={}) { return request('GET', `${workspacePath}/health`,undefined,input); },
@@ -183,6 +192,7 @@ function textResult(value) {
 
 export function createMcpHandler(client) {
   const calls = {
+    ziwei_bot:args=>client.bot(args),
     ziwei_inspect_workdir:args=>client.inspectWorkdir(args),
     ziwei_create_conversation:args=>client.createConversation(args),
     ziwei_mcp_health: args => client.health(args),

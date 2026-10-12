@@ -70,9 +70,9 @@ function verifyPassword(password, encoded) {
 }
 
 function hashToken(token) { return crypto.createHash('sha256').update(String(token || '')).digest('hex'); }
-function sessionCookie(value, maxAgeSeconds = SESSION_TTL_MS / 1000, { secure = false } = {}) {
+function sessionCookie(value, maxAgeSeconds = SESSION_TTL_MS / 1000, { secure = false, cookieName = SESSION_COOKIE } = {}) {
   const maxAge = Math.max(0, Math.floor(maxAgeSeconds));
-  return `${SESSION_COOKIE}=${encodeURIComponent(value)}; Max-Age=${maxAge}; Path=/; HttpOnly; SameSite=Lax${secure ? '; Secure' : ''}`;
+  return `${cookieName}=${encodeURIComponent(value)}; Max-Age=${maxAge}; Path=/; HttpOnly; SameSite=Lax${secure ? '; Secure' : ''}`;
 }
 
 function userView(row) {
@@ -80,7 +80,7 @@ function userView(row) {
   return { id: row.id, email: row.email, name: row.name, created_at: row.created_at, last_login_at: row.last_login_at };
 }
 
-export function createAuthService(db, { sessionTtlMs = SESSION_TTL_MS } = {}) {
+export function createAuthService(db, { sessionTtlMs = SESSION_TTL_MS, cookieName = SESSION_COOKIE } = {}) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS local_users (
       id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
@@ -127,9 +127,9 @@ export function createAuthService(db, { sessionTtlMs = SESSION_TTL_MS } = {}) {
   }
 
   return {
-    cookieName: SESSION_COOKIE,
+    cookieName,
     status(req) {
-      const token = parseCookies(req.headers.cookie)[SESSION_COOKIE] || req.headers['x-ziwei-session'];
+      const token = parseCookies(req.headers.cookie)[cookieName] || req.headers['x-ziwei-session'];
       const auth = findSession(token);
       const users = db.prepare('SELECT COUNT(*) AS count FROM local_users').get().count;
       return { setup_required: Number(users) === 0, authenticated: Boolean(auth), user: auth?.user || null, memberships: auth?.memberships || [] };
@@ -217,11 +217,11 @@ export function createAuthService(db, { sessionTtlMs = SESSION_TTL_MS } = {}) {
       return { workspace: { id: workspaceId, slug, name, kind, plan: 'free', timezone: String(input.timezone || 'Asia/Shanghai'), created_at: timestamp }, membership };
     },
     logout(req) {
-      const token = parseCookies(req.headers.cookie)[SESSION_COOKIE] || req.headers['x-ziwei-session'];
+      const token = parseCookies(req.headers.cookie)[cookieName] || req.headers['x-ziwei-session'];
       if (token) db.prepare('DELETE FROM local_sessions WHERE token_hash=?').run(hashToken(token));
     },
     authenticate(req) {
-      const token = parseCookies(req.headers.cookie)[SESSION_COOKIE] || req.headers['x-ziwei-session'];
+      const token = parseCookies(req.headers.cookie)[cookieName] || req.headers['x-ziwei-session'];
       return findSession(token);
     },
     canAccess(userId, slug) {
@@ -231,12 +231,12 @@ export function createAuthService(db, { sessionTtlMs = SESSION_TTL_MS } = {}) {
     setCookie(res, session, req = null) {
       const forwardedProto = String(req?.headers?.['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase();
       const secure = forwardedProto === 'https' || req?.secure === true || process.env.NODE_ENV === 'production';
-      res.setHeader('Set-Cookie', sessionCookie(session.token, sessionTtlMs / 1000, { secure }));
+      res.setHeader('Set-Cookie', sessionCookie(session.token, sessionTtlMs / 1000, { secure, cookieName }));
     },
     clearCookie(res, req = null) {
       const forwardedProto = String(req?.headers?.['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase();
       const secure = forwardedProto === 'https' || req?.secure === true || process.env.NODE_ENV === 'production';
-      res.setHeader('Set-Cookie', sessionCookie('', 0, { secure }));
+      res.setHeader('Set-Cookie', sessionCookie('', 0, { secure, cookieName }));
     },
     memberships,
     verifyPassword

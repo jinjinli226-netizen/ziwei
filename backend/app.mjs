@@ -675,7 +675,7 @@ export function createApp(options = {}) {
     res.json(repo.requestManagementMcpRetry(req.params.slug, String(req.body?.deviceId || ''), employeeContext(req)));
   });
   const mcpGuard = mcpTokenRequired({ ...mcpOptions, authorize: managementBootstrap.authorize });
-  const mcpContext = req => ({ actorUserId: req.mcpCredential.actorUserId, actorRole: req.mcpCredential.actorRole, deviceScope: req.mcpCredential.deviceScope, deviceCredentialDeviceId: req.mcpCredential.deviceId, enforceEmployeeVisibility: true, enforceDeviceOwnership: true });
+  const mcpContext = req => ({ actorUserId: req.mcpCredential.actorUserId, actorRole: req.mcpCredential.actorRole, deviceScope: req.mcpCredential.deviceScope, deviceCredentialDeviceId: req.mcpCredential.deviceId, authenticatedMcp:true, enforceEmployeeVisibility: true, enforceDeviceOwnership: true });
   const mcpEmployeeGuard = (req, _res, next) => {
     try {
       const context = mcpContext(req);
@@ -694,6 +694,25 @@ export function createApp(options = {}) {
     catch (error) { res.status(503).json({ ok: false, error: error.message }); }
   });
   app.get('/mcp/v1/workspaces/:slug/discovery', mcpGuard, (req, res) => res.json(management.discovery(req.params.slug, { ...req.query, userId: req.mcpCredential.actorUserId, deviceScope: req.mcpCredential.deviceScope })));
+  function registerBotRoutes(prefix,guard,contextFor) {
+    const base=`${prefix}/workspaces/:slug/bots`, bots=management.bots;
+    app.get(`${base}/capabilities`,guard,(req,res)=>res.json(bots.capabilities(req.params.slug,req.query,contextFor(req))));
+    app.get(base,guard,(req,res)=>res.json({bots:bots.list(req.params.slug,contextFor(req))}));
+    app.post(base,guard,(req,res)=>{const result=bots.create(req.params.slug,req.body,contextFor(req));res.status(result.duplicate?200:201).json(result);});
+    app.post(`${prefix}/workspaces/:slug/employees/:id/bot`,guard,(req,res)=>res.json(bots.initialize(req.params.slug,req.params.id,req.body,contextFor(req))));
+    app.get(`${base}/:id`,guard,(req,res)=>res.json(bots.get(req.params.slug,req.params.id,contextFor(req))));
+    app.patch(`${base}/:id`,guard,(req,res)=>res.json(bots.update(req.params.slug,req.params.id,req.body,contextFor(req))));
+    app.post(`${base}/:id/validate`,guard,(req,res)=>res.status(202).json(bots.validate(req.params.slug,req.params.id,req.body,contextFor(req))));
+    app.post(`${base}/:id/control`,guard,(req,res)=>res.json(bots.control(req.params.slug,req.params.id,req.body,contextFor(req))));
+    app.get(`${base}/:id/runs`,guard,(req,res)=>res.json({runs:bots.runs(req.params.slug,req.params.id,contextFor(req))}));
+    app.get(`${base}/:id/routines`,guard,(req,res)=>res.json({routines:bots.routines(req.params.slug,req.params.id,contextFor(req))}));
+    app.post(`${base}/:id/routines`,guard,(req,res)=>res.status(201).json(bots.createRoutine(req.params.slug,req.params.id,req.body,contextFor(req))));
+    app.patch(`${base}/:id/routines/:routineId`,guard,(req,res)=>res.json(bots.updateRoutine(req.params.slug,req.params.id,req.params.routineId,req.body,contextFor(req))));
+    app.delete(`${base}/:id/routines/:routineId`,guard,(req,res)=>res.json(bots.deleteRoutine(req.params.slug,req.params.id,req.params.routineId,contextFor(req))));
+    app.post(`${base}/:id/routines/:routineId/run`,guard,(req,res)=>res.status(202).json(bots.runRoutine(req.params.slug,req.params.id,req.params.routineId,req.body,contextFor(req))));
+  }
+  registerBotRoutes('/api',requireRole('owner','admin','member'),employeeContext);
+  registerBotRoutes('/mcp/v1',mcpGuard,mcpContext);
   app.get('/mcp/v1/workspaces/:slug/phone-mcp/setup',mcpGuard,async(req,res,next)=>{try{res.json(await phoneMcp.setup(req.params.slug,{...mcpContext(req),userId:req.mcpCredential.actorUserId}));}catch(error){next(error);}});
   app.post('/mcp/v1/workspaces/:slug/skills/:id/install',mcpGuard,(req,res)=>{if(!repo.listSkills(req.params.slug).some(row=>row.id===req.params.id))return res.status(404).json({error:'技能不属于当前工作区'});res.json(repo.setSkillInstalled(req.params.id,req.body?.installed!==false));});
   app.put('/mcp/v1/workspaces/:slug/employees/:id/phone-mcp',mcpGuard,mcpEmployeeGuard,async(req,res,next)=>{try{res.json(await phoneMcp.save(req.params.slug,req.params.id,req.body || {}));}catch(error){next(error);}});
@@ -781,6 +800,7 @@ export function createApp(options = {}) {
   app.post('/a2a/v1/actions', (req, res, next) => { const workspace = String(req.body.workspace || req.body.workspace_slug || '').trim(); if (!workspace) return res.status(400).json({ error: 'A2A action 必须明确 workspace' }); try { const action=repo.createA2AAction(workspace, req.body); return res.status(action.duplicate ? 200 : 201).json(action); } catch (error) { return next(error); } });
   app.get('/a2a/v1/actions', (req, res, next) => { const workspace=String(req.query.workspace || '').trim(); if (!workspace) return res.status(400).json({ error: 'A2A poll 必须明确 workspace' }); try { return res.json({ actions:repo.listA2AActions(workspace,{agentId:req.query.agent || req.query.agent_id,status:req.query.status || 'pending',includeAcked:req.query.includeAcked ?? req.query.include_acked,includeResult:String(req.query.includeResult || '').toLowerCase() !== 'false',deviceId:req.deviceCredential?.deviceId}) }); } catch (error) { return next(error); } });
   app.post('/a2a/v1/actions/:id/ack', (req, res) => { if (!assertA2AActionWorkspace(repo, req, res)) return; return res.json(repo.ackA2AAction(req.params.id, { ...(req.body || {}), deviceId:req.deviceCredential?.deviceId })); });
+  app.post('/a2a/v1/actions/:id/bot-start',(req,res)=>{if(!assertA2AActionWorkspace(repo,req,res))return;res.json(repo.authorizeBotStart(req.params.id,{deviceId:req.deviceCredential?.deviceId}));});
   app.post('/a2a/v1/actions/:id/events', (req, res) => { if (!assertA2AActionWorkspace(repo, req, res)) return; return res.status(202).json(repo.recordA2AEvent(req.params.id, { ...(req.body || {}), deviceId:req.deviceCredential?.deviceId })); });
   app.get('/a2a/v1/actions/:id/events', (req, res) => { if (!assertA2AActionWorkspace(repo, req, res)) return; return res.json({ events: repo.listA2AEvents(req.params.id) }); });
   app.post('/a2a/v1/actions/:id/result', (req, res) => { if (!assertA2AActionWorkspace(repo, req, res)) return; return res.json(repo.resultA2AAction(req.params.id, { ...(req.body || {}), deviceId:req.deviceCredential?.deviceId })); });

@@ -94,7 +94,8 @@ def prepare_creator_home(current):
     if home == source or home.is_symlink() or Path(home_value).is_symlink():
         raise UnsupportedNativeHermes('creator home')
     metadata = json.loads((home / 'ziwei-instance.json').read_text(encoding='utf-8'))
-    expected = {'templateId': 'ziwei-employee-creator', 'key': os.environ.get('ZIWEI_CREATOR_KEY'),
+    is_bot = os.environ.get('ZIWEI_INSTANCE_KIND') == 'hermes-bot'
+    expected = {'templateId': 'ziwei-hermes-bot' if is_bot else 'ziwei-employee-creator', 'key': os.environ.get('ZIWEI_CREATOR_KEY'),
                 'workspace': os.environ.get('ZIWEI_CREATOR_WORKSPACE'),
                 'employeeId': os.environ.get('ZIWEI_CREATOR_EMPLOYEE_ID'),
                 'sourceProfile': os.environ.get('ZIWEI_CREATOR_PROFILE')}
@@ -112,7 +113,8 @@ def prepare_creator_home(current):
                     'ZIWEI_TERMINAL_TOKEN_FILE', 'ZIWEI_TERMINAL_AUDIT_FILE',
                     'ZIWEI_TERMINAL_EMPLOYEE_ID', 'ZIWEI_TERMINAL_DEVICE_ID',
                     'ZIWEI_CREATOR_HOME', 'ZIWEI_CREATOR_SOURCE_HOME', 'ZIWEI_CREATOR_KEY',
-                    'ZIWEI_CREATOR_WORKSPACE', 'ZIWEI_CREATOR_EMPLOYEE_ID', 'ZIWEI_CREATOR_PROFILE'}
+                    'ZIWEI_CREATOR_WORKSPACE', 'ZIWEI_CREATOR_EMPLOYEE_ID', 'ZIWEI_CREATOR_PROFILE',
+                    'ZIWEI_INSTANCE_KIND', 'ZIWEI_BOT_REVISION'}
     routing_env = {key: os.environ[key] for key in routing_keys if key in os.environ}
     constants = importlib.import_module('hermes_constants')
     if str(Path(constants.__file__).resolve()) != current['paths']['constants']:
@@ -133,6 +135,8 @@ def prepare_creator_home(current):
     from dotenv import dotenv_values
     reserved = {'HERMES_HOME', 'HERMES_MANAGED_DIR', 'PYTHONPATH', 'PYTHONHOME',
                 'CONTROL_MCP_API_URL', 'CONTROL_MCP_AUTH'}
+    if is_bot:
+        reserved.update({'TERMINAL_CWD', 'HERMES_TOOLSETS', 'HERMES_MAX_TURNS'})
     for key, value in dotenv_values(source / '.env').items():
         if value is not None and key not in reserved and not key.startswith(('ZIWEI_', 'HERMES_CREATOR_')):
             os.environ[key] = value
@@ -156,11 +160,30 @@ def confirm_creator_home(current, config, prepared):
     auth = importlib.import_module('hermes_cli.auth')
     effective = config.load_config()
     provider = effective.get('model', {})
-    if not isinstance(provider, dict) or provider.get('provider') != 'openai-codex':
+    is_bot = expected['templateId'] == 'ziwei-hermes-bot'
+    if not isinstance(provider, dict) or not provider.get('provider') or (not is_bot and provider.get('provider') != 'openai-codex'):
         raise UnsupportedNativeHermes('creator provider unsupported')
     memory = effective.get('memory', {})
     if not isinstance(memory, dict) or str(memory.get('provider') or '').strip():
         raise UnsupportedNativeHermes('creator memory provider unsupported')
+    if is_bot:
+        raw = config.read_raw_config()
+        # Native managed policy has final precedence. Refuse expansion or silent
+        # rewriting of the saved Bot permission/configuration at that boundary.
+        for section, names in {'model': ('provider', 'default'),
+                               'agent': ('max_turns', 'disabled_toolsets', 'bot_mode_protocol'),
+                               'memory': ('memory_enabled', 'user_profile_enabled'),
+                               'platform_toolsets': ('cli',),
+                               'skills': ('disabled', 'project_discovery'),
+                               'security': ('allow_lazy_installs',)}.items():
+            for name in names:
+                if effective.get(section, {}).get(name) != raw.get(section, {}).get(name):
+                    raise UnsupportedNativeHermes('bot managed config conflict:' + section + '.' + name)
+        from hermes_cli.skills_config import get_disabled_skills
+        if set(raw.get('skills', {}).get('disabled', [])) - get_disabled_skills(effective, 'cli'):
+            raise UnsupportedNativeHermes('bot essential skill cannot be disabled')
+        if raw.get('agent', {}).get('disabled_toolsets') == ['all'] and effective.get('mcp_servers'):
+            raise UnsupportedNativeHermes('bot read only mcp conflict')
     if config.get_config_path().resolve() != home / 'config.yaml' or constants.get_hermes_home().resolve() != home or auth._auth_file_path() != source / 'auth.json':
         raise UnsupportedNativeHermes('creator route')
     memory_module = importlib.import_module('tools.memory_tool')
@@ -177,10 +200,18 @@ def confirm_creator_home(current, config, prepared):
         raise UnsupportedNativeHermes('creator route')
     # The context override was active before main imports logging/config; worker
     # threads additionally inherit the now-isolated HERMES_HOME environment.
-    return {'enabled': True, **{key: expected[key] for key in ('key', 'workspace', 'employeeId', 'sourceProfile')}, 'authMode': 'source-native-store'}
+    return {'enabled': True, **{key: expected[key] for key in ('key', 'workspace', 'employeeId', 'sourceProfile')}, 'authMode': 'source-native-store',
+            **({'kind': 'hermes-bot', 'revision': int(os.environ['ZIWEI_BOT_REVISION'])} if is_bot else {})}
 
 
 def run():
+    if len(sys.argv) == 3 and sys.argv[1] == '--version-probe':
+        current = binding(sys.argv[2])
+        import hermes_cli
+        if Path(hermes_cli.__file__).resolve().parent != Path(current['paths']['main']).parent:
+            raise UnsupportedNativeHermes('version package')
+        print('Hermes ' + hermes_cli.__version__)
+        return 0
     if len(sys.argv) == 3 and sys.argv[1] == '--probe':
         print(json.dumps(binding(sys.argv[2])))
         return 0
@@ -193,7 +224,8 @@ def run():
         raise UnsupportedNativeHermes('changed')
     native_args = sys.argv[5:]
     discover_only = bool(native_args and native_args[0] == '--discover-only')
-    if discover_only:
+    config_only = bool(native_args and native_args[0] == '--config-only')
+    if discover_only or config_only:
         native_args = native_args[1:]
     if not native_args or native_args[0] != '--':
         raise UnsupportedNativeHermes('arguments')
@@ -209,9 +241,47 @@ def run():
     for name, module in [('main', native), ('mcp_startup', startup), ('config', config), ('managed_scope', managed)]:
         if str(Path(module.__file__).resolve()) != current['paths'][name]:
             raise UnsupportedNativeHermes('changed')
+    if os.environ.get('ZIWEI_INSTANCE_KIND') == 'hermes-bot':
+        original_load_config = config.load_config
+
+        def isolated_bot_config(*args, **kwargs):
+            effective = original_load_config(*args, **kwargs)
+            raw = config.read_raw_config()
+            requested = set(raw.get('mcp_servers', {}))
+            # Allow only this execution's explicit Bot servers and scoped Ziwei
+            # transports. Native global/plugin discovery must not add host MCPs.
+            if raw.get('agent', {}).get('disabled_toolsets') == ['all']:
+                effective['mcp_servers'] = {}
+            else:
+                import yaml
+                policy = yaml.safe_load((Path(overlay) / 'config.yaml').read_text(encoding='utf-8')) or {}
+                requested.update(name for name in policy.get('mcp_servers', {}) if name in {'ziwei_management', 'ziwei_terminal'})
+                effective['mcp_servers'] = {name: value for name, value in effective.get('mcp_servers', {}).items() if name in requested}
+            return effective
+
+        config.load_config = isolated_bot_config
     isolation = confirm_creator_home(current, config, prepared_isolation)
     if isolation:
         print('ZIWEI_CREATOR_ISOLATION:' + json.dumps(isolation), file=sys.stderr, flush=True)
+    if config_only:
+        if not isolation or isolation.get('kind') != 'hermes-bot':
+            raise UnsupportedNativeHermes('bot check')
+        effective = config.load_config()
+        selected = effective.get('platform_toolsets', {}).get('cli', [])
+        from toolsets import TOOLSETS
+        if any(name not in TOOLSETS and not name.startswith('mcp-') for name in selected):
+            raise UnsupportedNativeHermes('bot toolset unknown')
+        import hermes_cli
+        print(json.dumps({'botValidation': {'valid': True, 'schemaVersion': 1,
+              'employeeId': isolation['employeeId'], 'revision': isolation['revision'],
+              'sourceProfile': isolation['sourceProfile'], 'nativeVersion': hermes_cli.__version__,
+              'nativeFingerprint': current['fingerprint'], 'isolation': isolation,
+              'effective': {'provider': effective.get('model', {}).get('provider'),
+                            'model': effective.get('model', {}).get('default'),
+                            'maxTurns': effective.get('agent', {}).get('max_turns'),
+                            'memory': effective.get('memory', {}).get('memory_enabled'),
+                            'toolsets': selected}}, 'externalModelCalls': 0}))
+        return 0
     original_gate = startup._has_configured_mcp_servers
 
     def effective_mcp_gate():
@@ -240,6 +310,13 @@ def run():
 
 if __name__ == '__main__':
     def fail_safe(reason=None):
+        if os.environ.get('ZIWEI_INSTANCE_KIND') == 'hermes-bot':
+            code = str(reason) if isinstance(reason, UnsupportedNativeHermes) else type(reason).__name__
+            print('Hermes Bot bootstrap rejected before model startup: ' + code, file=sys.stderr)
+            sys.exit(125)
+        if isinstance(reason, UnsupportedNativeHermes) and str(reason).startswith('bot managed config conflict:'):
+            print('Hermes Bot effective configuration conflicts at ' + str(reason).split(':', 1)[1] + '; no model was started.', file=sys.stderr)
+            sys.exit(125)
         if os.environ.get('ZIWEI_CREATOR_HOME'):
             safe_reasons = {'creator provider unsupported': 'The effective provider is not supported for isolated native authentication.',
                             'creator memory provider unsupported': 'The external memory provider has no verified employee namespace.',

@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { normalizeRuntimeProfile } from '../src/employee-runtime.mjs';
+import { createBotService } from './bots.mjs';
 
 const parse = (value, fallback = {}) => { try { return JSON.parse(value) ?? fallback; } catch { return fallback; } };
 const fingerprint = value => crypto.createHash('sha256').update(JSON.stringify(canonical(value))).digest('hex');
@@ -129,7 +130,7 @@ export function createManagementService(repo) {
     const missingReceipt = latest?.status === 'succeeded' && receipt.loaded !== true;
     return { employee_id: item.id, enabled: item.management_mcp_enabled, target_device_id: item.target_device_id, runtime: item.runtime, runtime_profile: item.runtime_profile, device, receipt: { status: !latest ? 'never_run' : (latest.status === 'failed' || latest.status === 'expired' || missingReceipt ? 'failed' : (receipt.loaded ? 'loaded' : (receipt.injected ? 'injected' : 'pending'))), loaded: receipt.loaded === true, injected: receipt.injected === true, action_id: latest?.id || null, completed_at: latest?.completed_at || null, error: latest?.error || (missingReceipt ? '员工执行已退出，但缺少实际管理 MCP 握手与加载回执，请检查本机配置后重试。' : null), tool_calls: receipt.toolCalls || receipt.tool_calls || [] } };
   };
-  return {
+  const service = {
     discovery, validateSelection, employee, tasks, task, action, employeeStatus,
     createEmployee(slug, input, context = {}) {
       return idempotent(slug, 'employee', input, body => {
@@ -142,6 +143,26 @@ export function createManagementService(repo) {
     },
     updateEmployee(slug, id, input, context = {}) {
       const previous = employee(slug, id, context);
+      if(db.prepare('SELECT 1 FROM hermes_bots WHERE employee_id=?').get(id) && !context.botConfigurationWrite) {
+        const bindingKeys=['runtime','targetDeviceId','target_device_id','deviceId','device_id','runtimeProfile','runtime_profile','profile','hermesProfile','hermes_profile'];
+        for(const key of bindingKeys) if(Object.hasOwn(input,key)) {
+          const saved=key==='runtime'?previous.runtime:(/profile/i.test(key)?previous.runtime_profile:previous.target_device_id);
+          if((input[key] ?? null)!==(saved ?? null))fail('已配置 Bot 的 runtime/电脑/profile 迁移需要单独迁移流程。','BOT_MIGRATION_REQUIRED',409);
+        }
+        const patch=Object.fromEntries(['name','avatar','description','persona','instructions','skills','visibility'].filter(key=>Object.hasOwn(input,key)).map(key=>[key,input[key]]));
+        for(const key of ['model','modelId','model_id'])if(Object.hasOwn(input,key)){patch.model=input[key];break;}
+        const current=service.bots.get(slug,id,context);
+        let updated=Object.keys(patch).length?service.bots.update(slug,id,{expectedRevision:input.expectedRevision ?? current.revision,employee:patch},context):current;
+        if(input.status && input.status!==previous.status) {
+          if(!['active','paused'].includes(input.status))fail('Bot 状态由控制入口管理，归档请先暂停并核对执行。','BOT_CONTROL_INVALID',409);
+          if(input.status==='active' && (input.expectedRevision!==updated.revision || input.expectedControlEpoch!==updated.control_epoch))fail('启用 Bot 必须提供最新 expectedRevision 与 expectedControlEpoch；请刷新 Bot 配置。','BOT_CONTROL_CONFLICT',409);
+          updated=service.bots.control(slug,id,{expectedRevision:input.expectedRevision ?? updated.revision,expectedControlEpoch:input.expectedControlEpoch ?? updated.control_epoch,operation:input.status==='active'?'activate':'pause'},context);
+        }
+        const directoryKeys=['defaultWorkingDirectory','default_working_directory','defaultWorkingDirectoryActionId','default_working_directory_action_id'];
+        const directoryPatch=Object.fromEntries(directoryKeys.filter(key=>Object.hasOwn(input,key)).map(key=>[key,input[key]]));
+        if(Object.keys(directoryPatch).length)repo.updateEmployee(id,directoryPatch,{...trustedContext(context),botConfigurationWrite:true});
+        return employee(slug,id,context);
+      }
       const configChanged = ['runtime', 'targetDeviceId','target_device_id','deviceId','device_id','runtimeProfile','runtime_profile','profile','hermesProfile','hermes_profile','managementMcpEnabled','management_mcp_enabled','managementMcp'].some(key => Object.hasOwn(input, key));
       const targetSpecified = ['targetDeviceId','target_device_id','deviceId','device_id'].some(key => Object.hasOwn(input, key));
       const profileSpecified = ['runtimeProfile','runtime_profile','profile','hermesProfile','hermes_profile'].some(key => Object.hasOwn(input, key));
@@ -187,4 +208,6 @@ export function createManagementService(repo) {
       }, id => action(slug, id, context));
     }
   };
+  service.bots = createBotService(repo, service);
+  return service;
 }

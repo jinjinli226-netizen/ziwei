@@ -1,5 +1,11 @@
 # 紫薇项目管理与 AI 接手手册
 
+### 2026-10-12 V2 E02：同一数字员工的 Hermes Bot 后端本地预览候选（未上线）
+
+实际实现位于受管隔离树 `C:\Users\25941\.codex\worktrees\v2-e02-hermes-bot\灵光爸爸拆解`，分支 `codex/v2-e02-hermes-bot`，基线 `6eaf7de`。团队数字员工为唯一身份，Bot能力通过 employee_id 一对一附表接入；两入口共享编辑/状态/主聊天，既有普通Hermes可幂等初始化，Creator保持原受信管理者。模型/provider/原生独立HOME/记忆开关/技能禁用/工具/MCP/有界执行配置进入真实原生链；普通Hermes续聊、Bot验证/激活/暂停/停止请求、Routine复用既有automation调度与主聊天结果已接入。uncertain与expired+acked保留占用，禁止自动重跑；旧员工状态入口不能自动取得新epoch来覆盖暂停。
+
+完整合同、全量能力矩阵、真实证据与E03唯一预览启动方法见[API合同](docs/contracts/2026-10-12-hermes-bot-api.md)和[E02交付](docs/handoffs/2026-10-12-e02-hermes-bot-preview.md)。本次725项全量回归通过，lint82、构建1764模块通过；最后provider端点继承修正由独立HOME专项覆盖。真实Hermes0.21.3+loopback假模型两轮同session、请求历史2→4、无工具、Windows两个root exit0/Job空，未调用外部模型或复制正式凭据。安装原HEAD与4个已有修改保持。用户只授权本地预览；本树未启动长期预览，E03负责最终集成树唯一启动及端口/持久诊断日志。服务器/正式客户端未切换，群聊/委派/Gateway/语音/Goals/Heartbeat/Kanban等后续接入缺口明确列示，未做真实24小时验收，未发布。
+
 ### 2026-10-12 V2 E01追加：Creator接入Hermes全天岗位（文档方案，未实现、未实测、未发布）
 
 用户已澄清：“全局”指公共Creator模板在每个工作区复用安装，实例创建当前已认证工作区的员工，不是bigtron的Creator跨区管理；新增24小时/7×24岗位能力仅面向Hermes Agent，运行位置为现有Windows电脑持续开机环境。Creator自身现有Codex/Hermes支持保持，其执行runtime与目标Hermes分别选择。E01是研发方案会话，产品是其交付的模板/运行底座，不建立生产Creator到Codex会话的依赖。

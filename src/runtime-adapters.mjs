@@ -11,6 +11,9 @@ import { prepareCreatorRuntimeHome, CREATOR_RUNTIME_ENV_KEYS } from './creator-r
 import { createCliDiscoveryContext, discoverRuntimeCli, carryRuntimeDiscoveryEnvironment, runtimeDiscoveryEnvironment } from './runtime-cli-discovery.mjs';
 import { imageArtifactInstructions, readImageArtifacts, validateImageBytes, imageArtifactDeliveryBody, MAX_CONVERSATION_IMAGE_BYTES, MAX_ACTION_RESULT_JSON_BYTES } from './conversation-image-artifacts.mjs';
 import { spawnSupervisedRuntime } from './runtime-process.mjs';
+import { prepareHermesBotHome, BOT_RUNTIME_ENV_KEYS } from './hermes-bot-runtime.mjs';
+import { normalizeBotConfig } from './hermes-bot-config.mjs';
+export { prepareHermesBotHome } from './hermes-bot-runtime.mjs';
 
 /**
  * Native local runtime adapters used by ziwei_user.
@@ -533,7 +536,7 @@ function metadataVersionFor(binary) {
 
 export function discoverInstalledRuntimes({ force = false, cliDiscovery = null } = {}) {
   if (!cliDiscovery && !force && cached.value && cached.expiresAt > Date.now()) return cached.value;
-  const context = cliDiscovery || createCliDiscoveryContext({ spawnSpec: runtimeSpawnSpec, extraCandidates: windowsRuntimeCandidates, metadataVersion: metadataVersionFor });
+  const context = cliDiscovery || createCliDiscoveryContext({ spawnSpec: runtimeDiscoverySpawnSpec, extraCandidates: windowsRuntimeCandidates, metadataVersion: metadataVersionFor });
   const runtimes = {};
   for (const [runtime, definition] of Object.entries(DEFINITIONS)) {
     const found = discoverRuntimeCli({ runtime, ...definition }, context);
@@ -588,13 +591,26 @@ export function hermesProfileHome(profile, { baseHome = null } = {}) {
 }
 
 /** Bind the actual native launcher interpreter, never a Python discovered separately on PATH. */
-export function hermesMcpSpawnSpec(binary, args, { env = process.env } = {}) {
+function boundHermesInterpreter(binary) {
   let interpreter;
   try {
     const header = fs.readFileSync(binary).toString('latin1').match(/#!([^\r\n]+)/)?.[1]?.trim();
     interpreter = header?.replace(/^"(.+)"$/, '$1');
     if (!interpreter || !path.isAbsolute(interpreter) || /(?:^|[\\/])env(?:\s|$)/.test(interpreter) || !fs.statSync(interpreter).isFile()) throw new Error();
   } catch { throw new Error('Hermes 原生入口未绑定可核实的绝对解释器；请更新 Hermes 安装，不会改用系统 Python'); }
+  return interpreter;
+}
+
+export function runtimeDiscoverySpawnSpec(binary,args) {
+  if(/^hermes(?:\.exe)?$/i.test(path.basename(binary)) && args.length===1 && args[0]==='--version') {
+    try {return {command:boundHermesInterpreter(binary),args:[HERMES_MCP_BOOTSTRAP,'--version-probe',path.resolve(binary)]};}
+    catch { /* Other supported launchers retain their own native --version path. */ }
+  }
+  return runtimeSpawnSpec(binary,args);
+}
+
+export function hermesMcpSpawnSpec(binary, args, { env = process.env } = {}) {
+  const interpreter=boundHermesInterpreter(binary);
   let binding;
   try {
     const output = execFileSync(interpreter, [HERMES_MCP_BOOTSTRAP, '--probe', path.resolve(binary)], { env, encoding: 'utf8', timeout: 5000, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -606,6 +622,27 @@ export function hermesMcpSpawnSpec(binary, args, { env = process.env } = {}) {
 
 function readPrivateJson(file) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return {}; }
+}
+
+/** Import and validate native config in the bound interpreter; no model or MCP startup. */
+export function validateHermesBotRuntime({context,baseHome,privateDirectory,workspace,apiBase,binary}={}) {
+  const profile=context.sourceProfile || 'default';
+  const prepared=prepareHermesBotHome({context,sourceHome:hermesProfileHome(profile,{baseHome}),privateDirectory,workspace,apiBase});
+  const overlay=createHermesExecutionOverlay({profile,baseHome,privateDirectory:path.join(privateDirectory,'overlays')});
+  const env={...process.env,HERMES_HOME:overlay.sourceHome,HERMES_MANAGED_DIR:overlay.home,...prepared.env};
+  try {
+    const launcher=binary || discoverInstalledRuntimes().runtimes.Hermes?.binary;
+    if(!launcher)throw new Error('目标电脑未发现 Hermes CLI');
+    const spec=hermesMcpSpawnSpec(launcher,['--profile',profile],{env});
+    spec.args.splice(5,0,'--config-only');
+    const output=execFileSync(spec.command,spec.args,{env,encoding:'utf8',timeout:30_000,windowsHide:true,stdio:['ignore','pipe','pipe']});
+    const result=output.trim().split(/\r?\n/).map(line=>{try{return JSON.parse(line);}catch{return null;}}).find(item=>item?.botValidation);
+    if(!result?.botValidation?.valid)throw new Error('缺少 Hermes 原生配置验证回执');
+    return {status:'succeeded',result};
+  } catch(error) {
+    if(error.code==='ETIMEDOUT')throw new Error('Hermes 配置检查超时；未启动模型');
+    throw new Error(`Hermes 配置检查失败；未启动模型。${redactSecrets(String(error.stderr || error.message || '')).slice(0,800)}`);
+  } finally {overlay.cleanup();}
 }
 
 function hasCredential(value) {
@@ -630,10 +667,12 @@ export function hermesProfileReadiness(profile, { baseHome = null } = {}) {
   const providerAuth = auth.providers?.[provider] || auth.credential_pool?.[provider];
   let dotEnv = '';
   try { dotEnv = fs.readFileSync(path.join(selectedHome, '.env'), 'utf8'); } catch {}
-  const knownKeys = { 'openai-codex': [], openai: ['OPENAI_API_KEY'], openrouter: ['OPENROUTER_API_KEY'], anthropic: ['ANTHROPIC_API_KEY'], google: ['GEMINI_API_KEY', 'GOOGLE_API_KEY'], deepseek: ['DEEPSEEK_API_KEY'], nous: ['NOUS_API_KEY'], custom: ['CUSTOM_API_KEY'] }[provider];
+  const customProvider=config.providers?.[provider.replace(/^custom:/,'')];
+  const explicitKeyEnv=customProvider?.key_env;
+  const knownKeys = /^[A-Z][A-Z0-9_]{0,127}$/.test(explicitKeyEnv || '') ? [explicitKeyEnv] : { 'openai-codex': [], openai: ['OPENAI_API_KEY'], openrouter: ['OPENROUTER_API_KEY'], anthropic: ['ANTHROPIC_API_KEY'], google: ['GEMINI_API_KEY', 'GOOGLE_API_KEY'], deepseek: ['DEEPSEEK_API_KEY'], nous: ['NOUS_API_KEY'], custom: ['CUSTOM_API_KEY'] }[provider];
   const envCredential = (knownKeys || []).some(key => String(process.env[key] || '').trim() || new RegExp(`^\\s*(?:export\\s+)?${key}\\s*=\\s*["']?[^\\s"'#]+`, 'm').test(dotEnv));
   const localProvider = ['ollama', 'lm-studio', 'vllm'].includes(provider);
-  const authenticated = hasCredential(providerAuth) || envCredential || localProvider;
+  const authenticated = hasCredential(providerAuth) || envCredential || localProvider || hasCredential(customProvider);
   return { ...base, provider: 'configured', authentication: authenticated ? 'configured' : (knownKeys ? 'missing' : 'unknown'), ready: authenticated, providerName: provider, ...(!authenticated ? { code: knownKeys ? 'authentication_missing' : 'authentication_unknown', reason: `Hermes profile ${name} 的 provider ${provider} 尚未确认认证；请在该独立 profile 配置或登录 provider，不能回退主 profile` } : {}) };
 }
 
@@ -783,6 +822,8 @@ export function parseRuntimeStreamLine(line, state, onOutput = () => {}, onStage
   if (!trimmed) return;
   try {
     const value = JSON.parse(trimmed);
+    if(value.session_id)state.sessionId=String(value.session_id);
+    if(value.type==='result' && typeof value.text==='string')state.response=value.text;
     const stage = runtimeStage(value);
     if (stage) {
       const summary = reasoningSummary(value);
@@ -803,8 +844,9 @@ export function parseRuntimeStreamLine(line, state, onOutput = () => {}, onStage
 }
 
 /** Execute an installed CLI using an explicit argv, with full local approval. */
-export function executeRuntime({ runtime, prompt, model = null, profile = null, cwd = process.cwd(), env = {}, attachments = [], imageArtifacts = null, codexMcpDisabledServers = [], managementMcp = null, terminalMcp = null, creatorInstance, creatorInstanceDirectory, signal, onOutput, onProgress, onStage, onActivity, onSupervision } = {}) {
+export async function executeRuntime({ runtime, prompt, model = null, profile = null, cwd = process.cwd(), env = {}, attachments = [], imageArtifacts = null, codexMcpDisabledServers = [], managementMcp = null, terminalMcp = null, creatorInstance, creatorInstanceDirectory, hermesBot, botInstanceDirectory, beforeSpawn, signal, onOutput, onProgress, onStage, onActivity, onSupervision } = {}) {
   if (signal?.aborted) return Promise.resolve({ status: 'failed', code: 'cancelled', error: 'runtime execution cancelled before launch' });
+  if(hermesBot)hermesBot={...hermesBot,config:normalizeBotConfig(hermesBot.config)};
   const resolvedRuntime = normalizeRuntime(runtime);
   if (!resolvedRuntime) return Promise.reject(new Error(`未知本机运行时: ${runtime || '(empty)'}`));
   const imageInputs = attachments.filter(item=>/^image\//i.test(item?.mimeType || '') || /\.(?:png|jpe?g|gif|webp)$/i.test(item?.path || ''));
@@ -837,7 +879,7 @@ export function executeRuntime({ runtime, prompt, model = null, profile = null, 
   }
   delete childEnv.ZIWEI_CONFIG;
   // An employee with MCP disabled must not inherit daemon management credentials.
-  for (const key of [...MANAGEMENT_ENV_KEYS, ...TERMINAL_ENV_KEYS, ...LEGACY_TERMINAL_ENV_KEYS, ...CREATOR_RUNTIME_ENV_KEYS]) delete childEnv[key];
+  for (const key of [...MANAGEMENT_ENV_KEYS, ...TERMINAL_ENV_KEYS, ...LEGACY_TERMINAL_ENV_KEYS, ...CREATOR_RUNTIME_ENV_KEYS, ...BOT_RUNTIME_ENV_KEYS]) delete childEnv[key];
   delete childEnv.ZIWEI_DEVICE_TOKEN;
   delete childEnv.ZIWEI_DAEMON_DEVICE_TOKEN;
   const profileBaseHome = childEnv.HERMES_HOME || hermesHome();
@@ -874,18 +916,36 @@ export function executeRuntime({ runtime, prompt, model = null, profile = null, 
       const flags=['--config',`mcp_servers={${table}}`];
       const index=invocation.args.lastIndexOf('-');invocation.args.splice(index<0?invocation.args.length:index,0,...flags);
     }
-    const launch = prepareManagementMcpLaunch({ runtime: resolvedRuntime, profile, model, invocation, env: childEnv, ...(managementMcp || {}), creatorInstance, creatorInstanceDirectory });
+    let botPrepared=null;
+    if(hermesBot) {
+      if(resolvedRuntime!=='Hermes')throw new Error('Bot 必须使用 Hermes');
+      botPrepared=prepareHermesBotHome({context:hermesBot,sourceHome:hermesProfileHome(profile || 'default',{baseHome:profileBaseHome}),privateDirectory:botInstanceDirectory,workspace:managementMcp?.workspace,apiBase:managementMcp?.apiBase});
+      invocation={args:['chat','--query-file','-','-c','Ziwei '+String(hermesBot.conversationId || 'Bot Chat'),'--create-if-missing','--format','stream-json','--model',botPrepared.effectiveModel,'--provider',botPrepared.provider,'--max-turns',String(hermesBot.config.maxTurns),'--run-budget','840',...imageInputs.flatMap(item=>['--image',item.path])],stdin:content,format:'json-lines'};
+    }
+    const launch = hermesBot?.config.permissions.mode==='read_only' ? {invocation,env:childEnv,receipt:null} : prepareManagementMcpLaunch({ runtime: resolvedRuntime, profile, model, invocation, env: childEnv, ...(managementMcp || {}), creatorInstance, creatorInstanceDirectory });
     invocation = launch.invocation; childEnv = launch.env; receipt = launch.receipt;
     creatorPrepared = launch.creatorPrepared;
     selectedModel = launch.effectiveModel || selectedModel;
+    if(botPrepared) {
+      if(!launch.overlayHome) {
+        const overlay=createHermesExecutionOverlay({profile,baseHome:profileBaseHome,privateDirectory:path.join(botInstanceDirectory,'overlays')});
+        childEnv.HERMES_HOME=overlay.sourceHome;childEnv.HERMES_MANAGED_DIR=overlay.home;launch.cleanup=overlay.cleanup;
+        launch.overlayHome=overlay.home;invocation.args.unshift('--profile',profile || 'default');
+      }
+      Object.assign(childEnv,botPrepared.env);creatorPrepared=botPrepared.receipt;
+      for(let i=invocation.args.length-2;i>=0;i--)if(invocation.args[i]==='--toolsets')invocation.args.splice(i,2);
+      const selected=[...hermesBot.config.toolsets,...(receipt?['mcp-ziwei_management']:[]),...Object.entries(hermesBot.config.mcpServers).filter(([,entry])=>entry.enabled).map(([name])=>'mcp-'+name)];
+      if(selected.length)invocation.args.push('--toolsets',selected.join(','));
+      selectedModel=botPrepared.effectiveModel;
+    }
     if (resolvedRuntime === 'Hermes' && creatorInstance?.templateId === 'ziwei-employee-creator' && !creatorPrepared) throw new Error('Creator Hermes 缺少可信实例工作区或管理 MCP 连接；未启动模型');
     cleanupOverlay = launch.cleanup || cleanupOverlay;
     const phoneLaunch = prepareTerminalMcpLaunch({ runtime: resolvedRuntime, profile, invocation, env: childEnv, profileBaseHome, hermesOverlayHome: launch.overlayHome, ...(terminalMcp || {}) });
     invocation = phoneLaunch.invocation; childEnv = phoneLaunch.env; phoneReceipt = phoneLaunch.receipt;
-    if (resolvedRuntime === 'Hermes' && !receipt && !phoneReceipt) childEnv.HERMES_HOME = hermesProfileHome(profile || 'default', { baseHome: profileBaseHome });
+    if (resolvedRuntime === 'Hermes' && !receipt && !phoneReceipt && !hermesBot) childEnv.HERMES_HOME = hermesProfileHome(profile || 'default', { baseHome: profileBaseHome });
   } catch (error) { cleanupOverlay(); return Promise.reject(error); }
   let spec;
-  try { spec = resolvedRuntime === 'Hermes' && childEnv.HERMES_MANAGED_DIR && receipt ? hermesMcpSpawnSpec(discovered.binary, invocation.args, { env: childEnv }) : runtimeSpawnSpec(discovered.binary, invocation.args); }
+  try { spec = resolvedRuntime === 'Hermes' && childEnv.HERMES_MANAGED_DIR && (receipt || hermesBot) ? hermesMcpSpawnSpec(discovered.binary, invocation.args, { env: childEnv }) : runtimeSpawnSpec(discovered.binary, invocation.args); }
   catch (error) { cleanupOverlay(); return Promise.reject(error); }
   // The desktop user session may have a proxy configured in Windows Internet
   // Settings while the daemon process has no proxy variables in its service
@@ -922,6 +982,7 @@ export function executeRuntime({ runtime, prompt, model = null, profile = null, 
     state.lineBuffer = lines.pop() || '';
     for (const line of lines) parseRuntimeStreamLine(line, state, emitOutput, emitStage);
   };
+  if(beforeSpawn) {try{await beforeSpawn();}catch(error){cleanupOverlay();throw error;}}
   return new Promise((resolve, reject) => {
     let supervision;
     try { supervision = spawnSupervisedRuntime({ command: spec.command, args: spec.args, cwd: path.resolve(String(cwd || process.cwd())), env: childEnv }); }
@@ -966,7 +1027,8 @@ export function executeRuntime({ runtime, prompt, model = null, profile = null, 
       if (launchError) return finish(null, launchError);
       if (signal?.aborted) return finish({ status: 'failed', code: 'cancelled', error: 'runtime execution cancelled; completed tool writes may already exist', result: exitResult });
     const result = { runtime: resolvedRuntime, model: selectedModel, profile: profile || null, binary: discovered.binary, code, signal: childSignal, processExit, output: state.response.trim() || state.output, diagnostics: state.response.trim() ? state.output : null, truncated: state.truncated, ...(spec.nativeBinding ? { hermesBootstrap: spec.nativeBinding } : {}), ...(creatorPrepared ? { creatorIsolation: creatorIsolation || { ...creatorPrepared, enabled: false, reasonCode: 'native_isolation_unconfirmed' } } : {}), ...(receipt ? { managementMcp: managementMcpReceipt(receipt) } : {}), ...(phoneReceipt ? { terminalMcp: terminalMcpReceipt(phoneReceipt) } : {}), ...(attachments.length ? {inputAttachments:attachments} : {}) };
-      if (code === 0 && creatorPrepared && !creatorIsolation) return finish({ status: 'failed', code: 'creator_isolation_unconfirmed', error: 'Hermes 未确认 Creator 实例状态隔离；不能报告执行成功', result });
+      if(hermesBot)Object.assign(result,{botIsolation:creatorIsolation,configurationRevision:hermesBot.revision,nativeSessionId:state.sessionId || null});
+      if (code === 0 && creatorPrepared && !creatorIsolation) return finish({ status: 'failed', code: 'creator_isolation_unconfirmed', error: 'Hermes 未确认实例状态隔离；不能报告执行成功', result });
       const mcpFailure = code === 0 ? managementMcpExecutionFailure(result.managementMcp) || terminalMcpExecutionFailure(result.terminalMcp) : null;
       if (mcpFailure) return finish({ status: 'failed', ...mcpFailure, result });
       if (code !== 0) return finish({ status: 'failed', code: 'runtime_failed', error: formatRuntimeFailure(resolvedRuntime, code, state.output), result });

@@ -1,5 +1,9 @@
 # 紫薇项目 HandOff
 
+## 2026-10-12 V2 E02 同一员工的 Hermes Bot 后端候选
+
+基线6eaf7de，隔离分支codex/v2-e02-hermes-bot。已实现Bot附加能力与统一员工身份、配置实际原生生效、Hermes连续聊天/同session恢复、Creator同后端MCP、单一automation Routine与不确定执行保护；普通现有Hermes幂等初始化保持ID和旧聊天，Creator不转普通岗位。候选只交本地预览，E03负责最终集成与唯一预览启动；不发布或更换正式服务/客户端。证据、完整能力缺口、独立Q步骤与启动参数见[交付](docs/handoffs/2026-10-12-e02-hermes-bot-preview.md)及[API](docs/contracts/2026-10-12-hermes-bot-api.md)。725全量、16专项、lint82/build1764和真实CLI+本地假模型两轮证据；外部模型、跨Bot/Gateway/语音/Goals/Heartbeat/Kanban、24小时耐久仍待后续接入/验证。
+
 ## 2026-10-12 V1 最终收尾已完成：Creator修复发布、本机升级及QA闭环
 
 用户将当前进度和本轮必要修复定为V1终点，见 [版本边界](docs/releases/V1_FINALIZATION.md)，不启动V2新功能。324731e已推送；709/709、lint79/build1764、36文件Windows包及打包supervisor smoke通过。17:54:48仅官方三下载文件发布：Windows build7e2ae40a…、包1592d107…，独立公网回读及三服务/主站保护核验通过；本机18:19:57已按原连接升级complete，PID12132/ready=true，36文件和build一致，原配置/设备/认证/43会话及action-state保护通过。原观察器自行退出，新观察器36400绑定12132，两次心跳通过。

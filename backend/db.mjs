@@ -85,6 +85,21 @@ export function openDatabase({ memory = false, filename = path.join(ROOT, 'data'
       PRIMARY KEY(workspace_id,kind,request_key),
       FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS hermes_bots (
+      employee_id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, config_json TEXT NOT NULL,
+      revision INTEGER NOT NULL DEFAULT 1, control_state TEXT NOT NULL DEFAULT 'draft', control_epoch INTEGER NOT NULL DEFAULT 1,
+      main_conversation_id TEXT, validation_action_id TEXT, validated_revision INTEGER,
+      active_action_id TEXT, stop_action_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+      FOREIGN KEY(employee_id) REFERENCES employees(id) ON DELETE CASCADE,
+      FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS bot_routines (
+      automation_id TEXT PRIMARY KEY, employee_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL, authority TEXT NOT NULL DEFAULT 'ziwei',
+      FOREIGN KEY(automation_id) REFERENCES automations(id) ON DELETE CASCADE,
+      FOREIGN KEY(employee_id) REFERENCES hermes_bots(employee_id) ON DELETE CASCADE,
+      FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+    );
     CREATE TABLE IF NOT EXISTS schema_migrations (
       version TEXT PRIMARY KEY, applied_at TEXT NOT NULL
     );

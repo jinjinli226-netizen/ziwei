@@ -1,5 +1,8 @@
 import { normalizeRuntimeProfile } from '../../src/employee-runtime.mjs';
 
+// Execution overlay is versioned separately from installed template/persona.
+export const CREATOR_BOT_GUIDANCE = '紫薇 Bot 能力合同 v1：用户要求 Hermes Bot/全天岗位时，用 ziwei_bot capabilities/list 发现与查重，然后 create 当前已认证工作区独立 Bot（稳定 idempotencyKey）。回读 get 保存字段及主聊天；validate 创建无模型原生配置检查，用 ziwei_get_action 等待 succeeded，再 get 最新 revision/control_epoch。用户已明确创建并启用时，在同一授权中 control activate（expectedRevision、expectedControlEpoch），无需再索要相同授权。没有明确启用意图时保留 draft。Routine 用 ziwei_bot createRoutine/runRoutine 等，唯一调度属于紫薇。旧 Creator 自身人格、HOME、记忆和聊天保持，不把 Creator 当目标岗位；Bot 目标仅 Hermes，Creator 自身可用 Codex。未集成的群聊/Gateway/Goals/Heartbeat/Kanban 不可伪造可用，EXECUTION_UNCERTAIN 只回读原回执，不换标识重跑。';
+
 const workflow = [
   {
     id: 'understand-request', title: '识别请求与补齐关键信息', tools: [],

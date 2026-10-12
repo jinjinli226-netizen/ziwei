@@ -300,7 +300,7 @@ test('Creator second chat receives its own prior request and completed assistant
   assert.equal(payload.messageId,second.body.id);
 });
 
-test('Creator history is bounded and ordinary employee chat keeps current-request behavior', async t => {
+test('Creator history remains bounded and ordinary Hermes chat now includes its own history', async t => {
   const f=await fixture(t);const installed=await f.install(f.input);assert.equal(installed.status,201);
   const conversation=installed.body.conversation;
   for(let index=0;index<22;index++)f.repo.addConversationMessage(conversation.id,{role:index%2?'assistant':'user',content:`history_${index} `+'x'.repeat(1800),dispatch:false});
@@ -311,9 +311,9 @@ test('Creator history is bounded and ordinary employee chat keeps current-reques
   assert.equal(entries.some(row=>row.content.includes('history_0 ')),false);assert.ok(entries.some(row=>row.content.includes('history_21 ')));
   const ordinary=f.repo.createEmployee(f.workspace.slug,{name:'Ordinary no history',runtime:'Hermes',runtimeProfile:'default',targetDeviceId:'creator-pc',ownerUserId:f.member.user_id});
   const ordinaryChat=f.repo.createConversation(f.workspace.slug,{employeeId:ordinary.id});
-  f.repo.addConversationMessage(ordinaryChat.id,{role:'assistant',content:'ORDINARY_PAST_SHOULD_STAY_OUT',dispatch:false});
+  f.repo.addConversationMessage(ordinaryChat.id,{role:'assistant',content:'ORDINARY_PAST_IS_CONTINUED',dispatch:false});
   const normal=await f.request(`/api/conversations/${ordinaryChat.id}/messages`,{content:'Ordinary current request'});assert.equal(normal.status,201);
-  assert.doesNotMatch(normal.body.execution.payload.prompt,/ORDINARY_PAST_SHOULD_STAY_OUT|历史会话记录/);
+  assert.match(normal.body.execution.payload.prompt,/ORDINARY_PAST_IS_CONTINUED/);
 });
 
 test('Creator task conversation binding rejects another employee or workspace before any task write', async t => {

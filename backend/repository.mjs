@@ -18,6 +18,9 @@ import { syncPhoneSkill } from './skills/catalog.mjs';
 import { redactSecrets } from '../src/redaction.mjs';
 import { normalizeConversationAttachments } from './conversation-attachments.mjs';
 import { resolveEmployeeDefaultWorkdir } from './employee-workdir.mjs';
+import { assertBotExecution, botUncertain, BOT_INTERNAL } from './bots.mjs';
+import { botFailure } from '../src/hermes-bot-config.mjs';
+import { CREATOR_BOT_GUIDANCE } from './employees/creator-template.mjs';
 
 const now = () => new Date().toISOString();
 const id = prefix => `${prefix}_${crypto.randomUUID()}`;
@@ -335,7 +338,8 @@ export function createRepository(options = {}) {
     return instance ? {...rest,employeeTemplateId:instance.template_id,employeeName:instance.name,employeePersona:instance.persona,employeeInstructions:instance.instructions,employeeDescription:instance.description} : rest;
   };
   const creatorConversationBinding = (employee, conversationId, messageId = null) => {
-    if (!employee || trustedTemplatePayload(employee.workspace_id,{employeeId:employee.id}).employeeTemplateId !== 'ziwei-employee-creator') return null;
+    if (!employee) return null;
+    if (employee.runtime!=='Hermes' && trustedTemplatePayload(employee.workspace_id,{employeeId:employee.id}).employeeTemplateId!=='ziwei-employee-creator') return null;
     if (!conversationId) { if (messageId) throw new Error('Creator 当前消息缺少绑定会话'); return null; }
     const conversation=db.prepare('SELECT id FROM conversations WHERE id=? AND workspace_id=? AND employee_id=?').get(String(conversationId),employee.workspace_id,employee.id);
     if (!conversation) throw new Error('Creator 会话与当前员工或工作区不一致');
@@ -364,7 +368,8 @@ export function createRepository(options = {}) {
     const employeeWorkspace = employee ? db.prepare('SELECT slug FROM workspaces WHERE id=?').get(employee.workspace_id)?.slug : null;
     const skillIds = employee ? (Array.isArray(employee.skills) ? employee.skills : parse(employee.skills_json)) : [];
     const skillText = skillIds.map(skillId => db.prepare('SELECT name,content,description FROM skills WHERE workspace_id=? AND (id=? OR name=?)').get(employee.workspace_id, String(skillId), String(skillId))).filter(Boolean).map(skill => `技能：${skill.name}\n${String(skill.content || skill.description || '').slice(0, 100000)}`).join('\n\n');
-    const instructions = [employee?.description ? `岗位职责：${employee.description}` : '', employee?.persona ? `人格：${employee.persona}` : '', employee?.instructions, skillText].filter(Boolean).join('\n\n');
+    const isCreator=employee && trustedTemplatePayload(employee.workspace_id,{employeeId:employee.id}).employeeTemplateId==='ziwei-employee-creator';
+    const instructions = [employee?.description ? `岗位职责：${employee.description}` : '', employee?.persona ? `人格：${employee.persona}` : '', employee?.instructions, skillText, isCreator?CREATOR_BOT_GUIDANCE:''].filter(Boolean).join('\n\n');
     const phoneConfig = employee && db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='ziwei_connect_bindings'").get() ? db.prepare(`SELECT p.enabled,b.device_id,b.account_id,s.id AS skill_id,s.version FROM employee_phone_mcp p JOIN ziwei_connect_bindings b ON b.employee_id=p.employee_id AND b.workspace_id=p.workspace_id JOIN skills s ON s.workspace_id=p.workspace_id AND s.catalog_id='ziwei-phone-control' AND s.installed=1 WHERE p.employee_id=?`).get(employee.id) : null;
     const phoneRevision = phoneConfig ? hashSecret(JSON.stringify([Boolean(phoneConfig.enabled && skillIds.includes(phoneConfig.skill_id)),phoneConfig.skill_id,phoneConfig.version,employee.target_device_id,employee.runtime,employee.runtime_profile,phoneConfig.device_id,phoneConfig.account_id || null])) : null;
     return {
@@ -573,6 +578,7 @@ export function createRepository(options = {}) {
     createTask(slug, input = {}) {
       const ws = workspace(slug); if (!ws) throw new Error('Workspace not found'); const created = now();
       const executionEmployee = input.runtime || input.model || input.execute === true ? employeeForInput(ws.id, input) : null;
+      if(executionEmployee)assertBotExecution(db,ws.id,{employeeId:executionEmployee.id,runtime:input.runtime || executionEmployee.runtime,model:input.model || executionEmployee.model_id,profile:input.runtimeProfile || input.profile || executionEmployee.runtime_profile,deviceId:input.targetDeviceId || input.deviceId || executionEmployee.target_device_id});
       creatorConversationBinding(executionEmployee,input.conversationId || input.conversation_id || null);
       const targetDeviceId = String(input.targetDeviceId || input.target_device_id || input.deviceId || input.device_id || executionEmployee?.target_device_id || '').trim() || null;
       if (targetDeviceId) {
@@ -1002,9 +1008,30 @@ export function createRepository(options = {}) {
     },
     getAutomationById(automationId) { const row = db.prepare('SELECT * FROM automations WHERE id=?').get(automationId); if (!row) return null; return automationView(row, db.prepare('SELECT COUNT(*) AS count FROM automation_runs WHERE automation_id=?').get(row.id).count); },
     deleteAutomation(automationId) { const row=db.prepare('SELECT * FROM automations WHERE id=?').get(automationId); if (!row) throw new Error('Automation not found'); db.prepare('DELETE FROM automations WHERE id=?').run(automationId); return {id:automationId,deleted:true}; },
+    runBotRoutine(row,binding,mode,options={}) {
+      db.exec('SAVEPOINT bot_routine_run');
+      try {
+        if(row.status!=='active')throw botFailure('BOT_NOT_ACTIVE','Routine 已暂停');
+        const bot=assertBotExecution(db,row.workspace_id,{employeeId:binding.employee_id});
+        const ws=db.prepare('SELECT slug FROM workspaces WHERE id=?').get(row.workspace_id);
+        const stamp=now(),runId=id('autorun'),slot=mode==='scheduled'?options.scheduledAt || row.next_run:runId;
+        const dedupeKey=`bot-routine:${row.id}:${slot}`;
+        const existing=db.prepare('SELECT payload_json FROM a2a_actions WHERE workspace_id=? AND dedupe_key=?').get(row.workspace_id,dedupeKey);
+        if(existing){const run=db.prepare('SELECT * FROM automation_runs WHERE id=?').get(parse(existing.payload_json).runId);db.exec('RELEASE bot_routine_run');return {...run,duplicate:true};}
+        const payload={...executionPayload({prompt:row.prompt,employee:bot.employee,conversationId:binding.conversation_id}),automationId:row.id,runId,attempt:0,scheduledAt:mode==='scheduled'?slot:null,schedulerAuthority:'ziwei'};
+        db.prepare("INSERT INTO automation_runs(id,automation_id,workspace_id,status,mode,message,attempt,max_attempts,created_at) VALUES(?,?,?,'queued',?,'等待 Bot 执行',0,1,?)").run(runId,row.id,row.workspace_id,mode,stamp);
+        const action=this.createA2AAction(ws.slug,{type:'automation.execute',dedupeKey,payload});
+        db.prepare('UPDATE automation_runs SET action_id=? WHERE id=?').run(action.id,runId);
+        db.prepare('UPDATE automations SET last_run=?,next_run=? WHERE id=?').run(stamp,parseSchedule(row.schedule,new Date(stamp),row.timezone),row.id);
+        db.exec('RELEASE bot_routine_run');return db.prepare('SELECT * FROM automation_runs WHERE id=?').get(runId);
+      } catch(error){db.exec('ROLLBACK TO bot_routine_run; RELEASE bot_routine_run');throw error;}
+    },
     runAutomation(automationId, mode='manual', options = {}) {
       const row = db.prepare('SELECT * FROM automations WHERE id=?').get(automationId); if (!row) throw new Error('Automation not found');
-      const timestamp=now(); const run={id:id('autorun'),automation_id:automationId,workspace_id:row.workspace_id,status:'queued',mode:String(mode || 'manual'),message:'已提交给 ziwei_user，等待本机执行',result_json:null,error:null,attempt:0,max_attempts:Number(row.max_retries || 3)+1,next_retry_at:null,action_id:null,created_at:timestamp,started_at:null,finished_at:null};
+      const binding=db.prepare('SELECT * FROM bot_routines WHERE automation_id=?').get(automationId);
+      if(binding)return this.runBotRoutine(row,binding,mode,options);
+      if(row.executor==='ziwei_bot')throw botFailure('BOT_NOT_FOUND','Routine 所属 Bot 已删除或解绑，禁止降级执行',404);
+      const timestamp=now(); const run={id:id('autorun'),automation_id:automationId,workspace_id:row.workspace_id,status:'queued',mode:String(mode || 'manual'),message:'已提交给 ziwei_user，等待本机执行',result_json:null,error:null,attempt:0,max_attempts:Number(row.max_retries ?? 3)+1,next_retry_at:null,action_id:null,created_at:timestamp,started_at:null,finished_at:null};
       db.prepare('INSERT INTO automation_runs(id,automation_id,workspace_id,status,mode,message,result_json,error,attempt,max_attempts,next_retry_at,action_id,created_at,started_at,finished_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(run.id,run.automation_id,run.workspace_id,run.status,run.mode,run.message,null,null,run.attempt,run.max_attempts,null,null,run.created_at,null,null);
       const ws=db.prepare('SELECT slug FROM workspaces WHERE id=?').get(row.workspace_id); const action=this.createA2AAction(ws.slug,{type:'automation.execute',dedupeKey:`automation:${automationId}:${run.id}:0`,payload:{automationId,runId:run.id,prompt:row.prompt,outputMode:row.output_mode,webhookUrl:row.webhook_url,attempt:0}});
       db.prepare('UPDATE automation_runs SET action_id=? WHERE id=?').run(action.id,run.id); db.prepare('UPDATE automations SET last_run=?,next_run=? WHERE id=?').run(timestamp,parseSchedule(row.schedule,new Date(timestamp),row.timezone || 'Asia/Shanghai'),automationId);
@@ -1016,7 +1043,10 @@ export function createRepository(options = {}) {
       const rows = slug ? [selected] : db.prepare('SELECT * FROM workspaces').all();
       const due=[]; for (const ws of rows.filter(Boolean)) {
         const items=db.prepare("SELECT * FROM automations WHERE workspace_id=? AND status='active' AND next_run IS NOT NULL AND next_run<=?").all(ws.id,at.toISOString());
-        for (const item of items) due.push(this.runAutomation(item.id,'scheduled'));
+        for (const item of items) {
+          try {due.push(this.runAutomation(item.id,'scheduled',{scheduledAt:item.next_run}));}
+          catch(error) {if(!['BOT_NOT_ACTIVE','BOT_NOT_VALIDATED','BOT_BUSY'].includes(error.code))throw error;}
+        }
       }
       void this.dispatchWebhookDeliveries(); return due;
     },
@@ -1048,12 +1078,15 @@ export function createRepository(options = {}) {
       return db.prepare('SELECT id,automation_id,run_id,workspace_id,url,event,status,attempts,max_attempts,next_retry_at,response_status,error,created_at,sent_at FROM webhook_deliveries WHERE run_id=? ORDER BY created_at DESC').all(runId);
     },
     completeAutomationRun(runId, input = {}) {
+      const botRun=db.prepare('SELECT r.action_id FROM automation_runs r JOIN bot_routines b ON b.automation_id=r.automation_id WHERE r.id=?').get(runId);
+      if(botRun && (input.botInternal!==BOT_INTERNAL || input.sourceActionId!==botRun.action_id))throw botFailure('BOT_RESULT_ROUTE_REQUIRED','Bot Routine 结果只接受原设备 action 的真实回执');
       const run=db.prepare('SELECT * FROM automation_runs WHERE id=?').get(runId); if(!run) throw new Error('Automation run not found'); if(['completed','failed'].includes(run.status)) return {...run,duplicate:true,result:jsonObject(run.result_json)};
+      if(botUncertain(input.result)) {db.prepare("UPDATE automation_runs SET status='uncertain',result_json=?,error=?,message=?,finished_at=? WHERE id=?").run(JSON.stringify(input.result),input.error || '执行未确认','执行不确定；只允许查询原回执，不重跑业务',now(),runId);return {...db.prepare('SELECT * FROM automation_runs WHERE id=?').get(runId),result:input.result};}
       const status=String(input.status || (input.error ? 'failed' : 'completed')); if(!['completed','failed'].includes(status)) throw new Error('Automation run status must be completed or failed'); const result=input.result === undefined ? null : JSON.stringify(input.result); const error=input.error ? String(input.error) : null; const finished=now();
-      if(status==='failed' && Number(run.attempt || 0)+1 < Number(run.max_attempts || 1)) { const nextAttempt=Number(run.attempt || 0)+1; const auto=db.prepare('SELECT * FROM automations WHERE id=?').get(run.automation_id); const retryAt=new Date(Date.now()+Number(auto?.retry_backoff_ms || 1000)*2**Math.max(0,nextAttempt-1)).toISOString(); db.prepare("UPDATE automation_runs SET status='retrying',error=?,result_json=?,attempt=?,next_retry_at=?,message=?,finished_at=? WHERE id=?").run(error,result,nextAttempt,retryAt,'执行失败，已安排重试',null,runId); return this.queueAutomationRetry(runId,retryAt); }
+      if(status==='failed' && !db.prepare('SELECT 1 FROM bot_routines WHERE automation_id=?').get(run.automation_id) && Number(run.attempt || 0)+1 < Number(run.max_attempts || 1)) { const nextAttempt=Number(run.attempt || 0)+1; const auto=db.prepare('SELECT * FROM automations WHERE id=?').get(run.automation_id); const retryAt=new Date(Date.now()+Number(auto?.retry_backoff_ms || 1000)*2**Math.max(0,nextAttempt-1)).toISOString(); db.prepare("UPDATE automation_runs SET status='retrying',error=?,result_json=?,attempt=?,next_retry_at=?,message=?,finished_at=? WHERE id=?").run(error,result,nextAttempt,retryAt,'执行失败，已安排重试',null,runId); return this.queueAutomationRetry(runId,retryAt); }
       db.prepare('UPDATE automation_runs SET status=?,error=?,result_json=?,finished_at=?,message=? WHERE id=?').run(status,error,result,finished,status==='completed'?'执行完成':'执行失败',runId); const ws=db.prepare('SELECT slug FROM workspaces WHERE id=?').get(run.workspace_id); audit(ws.slug,'ziwei_user',`automation.${status}`,{automationId:run.automation_id,runId,error}); const delivery=this.queueWebhookDelivery(runId,status,input.result,error); if (delivery) void this.dispatchWebhookDeliveries(); return {...db.prepare('SELECT * FROM automation_runs WHERE id=?').get(runId),result:jsonObject(result),webhook:delivery};
     },
-    queueAutomationRetry(runId, retryAt = now()) { const run=db.prepare('SELECT * FROM automation_runs WHERE id=?').get(runId); if(!run) throw new Error('Automation run not found'); const auto=db.prepare('SELECT * FROM automations WHERE id=?').get(run.automation_id); const ws=db.prepare('SELECT slug FROM workspaces WHERE id=?').get(run.workspace_id); const action=this.createA2AAction(ws.slug,{type:'automation.execute',dedupeKey:`automation:${run.automation_id}:${run.id}:${run.attempt}`,payload:{automationId:run.automation_id,runId:run.id,prompt:auto.prompt,outputMode:auto.output_mode,webhookUrl:auto.webhook_url,attempt:run.attempt}}); db.prepare('UPDATE automation_runs SET status=\'queued\',action_id=?,next_retry_at=? WHERE id=?').run(action.id,retryAt,runId); return {...db.prepare('SELECT * FROM automation_runs WHERE id=?').get(runId),action_id:action.id}; },
+    queueAutomationRetry(runId, retryAt = now()) { const run=db.prepare('SELECT * FROM automation_runs WHERE id=?').get(runId); if(!run) throw new Error('Automation run not found'); if(run.status==='uncertain' || db.prepare('SELECT 1 FROM bot_routines WHERE automation_id=?').get(run.automation_id))throw botFailure('BOT_RETRY_FORBIDDEN','Bot Routine 不自动重试；先核对原执行证据'); const auto=db.prepare('SELECT * FROM automations WHERE id=?').get(run.automation_id); const ws=db.prepare('SELECT slug FROM workspaces WHERE id=?').get(run.workspace_id); const action=this.createA2AAction(ws.slug,{type:'automation.execute',dedupeKey:`automation:${run.automation_id}:${run.id}:${run.attempt}`,payload:{automationId:run.automation_id,runId:run.id,prompt:auto.prompt,outputMode:auto.output_mode,webhookUrl:auto.webhook_url,attempt:run.attempt}}); db.prepare('UPDATE automation_runs SET status=\'queued\',action_id=?,next_retry_at=? WHERE id=?').run(action.id,retryAt,runId); return {...db.prepare('SELECT * FROM automation_runs WHERE id=?').get(runId),action_id:action.id}; },
     listMembers(slug) { const ws=workspace(slug); if (!ws) throw new Error('Workspace not found'); return db.prepare('SELECT * FROM members WHERE workspace_id=? ORDER BY joined_at').all(ws.id); },
     createMember(slug, input = {}) {
       const ws=workspace(slug); if (!ws) throw new Error('Workspace not found');
@@ -1382,6 +1415,7 @@ export function createRepository(options = {}) {
     },
     updateEmployee(employeeId, input = {}, context = {}) {
       const row = db.prepare('SELECT * FROM employees WHERE id=?').get(employeeId); if (!row) throw new Error('数字员工不存在');
+      if (db.prepare('SELECT 1 FROM hermes_bots WHERE employee_id=?').get(employeeId) && !context.botConfigurationWrite) throw botFailure('BOT_CONFIG_ROUTE_REQUIRED','请从 Bot 版本化配置入口修改此员工');
       const ws = db.prepare('SELECT * FROM workspaces WHERE id=?').get(row.workspace_id); if (!ws) throw new Error('Workspace not found');
       const name=String(input.name ?? row.name).trim(); if (!name) throw new Error('数字员工名称不能为空');
       const runtime=String(input.runtime ?? row.runtime).trim() || row.runtime;
@@ -1405,7 +1439,9 @@ export function createRepository(options = {}) {
     },
     deleteEmployee(employeeId) {
       const row=db.prepare('SELECT * FROM employees WHERE id=?').get(employeeId); if (!row) throw new Error('数字员工不存在');
+      if(db.prepare('SELECT 1 FROM hermes_bots WHERE employee_id=?').get(employeeId))assertBotExecution(db,row.workspace_id,{employeeId},{validation:true});
       const ws=db.prepare('SELECT * FROM workspaces WHERE id=?').get(row.workspace_id); if (!ws) throw new Error('Workspace not found');
+      db.prepare("UPDATE automations SET status='paused',next_run=NULL,executor='ziwei_bot' WHERE id IN (SELECT automation_id FROM bot_routines WHERE employee_id=?)").run(employeeId);
       db.prepare('DELETE FROM employees WHERE id=?').run(employeeId); audit(ws.slug,'user','employee.deleted',{employeeId,name:row.name}); return {id:employeeId,name:row.name,deleted:true};
     },
     listEmployeeEnvironment(employeeId) {
@@ -1722,7 +1758,7 @@ export function createRepository(options = {}) {
       const dispatch = message.role === 'user' && input.dispatch !== false;
       const executionSettings = {
         runtime: input.runtime || employee?.runtime || null,
-        model: input.model || input.modelId || conversation.model_id || employee?.model_id || null,
+        model: input.model || input.modelId || (employee && db.prepare('SELECT 1 FROM hermes_bots WHERE employee_id=?').get(employee.id) ? employee.model_id : conversation.model_id || employee?.model_id) || null,
         profile: normalizeRuntimeProfile(input.profile ?? input.runtimeProfile ?? input.runtime_profile ?? input.hermesProfile ?? input.hermes_profile ?? employee?.runtime_profile),
         cwd: input.cwd || input.workingDirectory || input.working_directory || input.workdir || conversation.working_directory || null,
       };
@@ -1778,9 +1814,17 @@ export function createRepository(options = {}) {
       const dedupeKey = String(input.dedupeKey || input.dedupe_key || `${input.type || 'action'}:${crypto.randomUUID()}`);
       const existing = db.prepare('SELECT * FROM a2a_actions WHERE workspace_id=? AND dedupe_key=? ORDER BY created_at DESC LIMIT 1').get(ws.id, dedupeKey);
       if (existing) return { ...existing, duplicate: true, payload: parse(existing.payload_json), result: parse(existing.result_json) };
-      const payload = trustedTemplatePayload(ws.id,input.payload && typeof input.payload === 'object' ? input.payload : {});
+      let payload = trustedTemplatePayload(ws.id,input.payload && typeof input.payload === 'object' ? input.payload : {});
+      const isValidation=input.type==='hermes.bot.validate';
+      if (isValidation && input.botInternal!==BOT_INTERNAL) throw botFailure('BOT_VALIDATION_ROUTE_REQUIRED','请从 Bot 配置验证入口提交');
+      const bot=assertBotExecution(db,ws.id,payload,{validation:isValidation});
+      if(bot) {
+        if (!isValidation && !['task.execute','agent.execute','runtime.execute','conversation.execute','automation.execute'].includes(input.type || 'task.execute')) throw botFailure('BOT_ACTION_UNSUPPORTED','此 Bot 执行类型尚未接入');
+        payload={...payload,employeeId:bot.employee.id,runtime:'Hermes',model:bot.employee.model_id,profile:bot.employee.runtime_profile,deviceId:bot.employee.target_device_id,hermesBot:{...bot.snapshot,conversationId:payload.conversationId || bot.snapshot.conversationId}};
+      }
       const action = { id:id('action'), workspace_id:ws.id, agent_id:agentId, task_id:input.taskId || input.task_id || null, type:String(input.type || 'task.execute'), payload, dedupe_key:dedupeKey, status:'pending', expires_at:input.expiresAt || input.expires_at || new Date(Date.now()+a2aExecutionTimeoutMs(payload)+A2A_EXECUTION_LEASE_BUFFER_MS).toISOString(), created_at:now(), acked_at:null, completed_at:null, result_json:null, error:null };
       db.prepare('INSERT INTO a2a_actions(id,workspace_id,agent_id,task_id,type,payload_json,dedupe_key,status,expires_at,created_at,acked_at,completed_at,result_json,error) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(action.id,action.workspace_id,action.agent_id,action.task_id,action.type,JSON.stringify(action.payload),action.dedupe_key,action.status,action.expires_at,action.created_at,null,null,null,null);
+      if(bot)db.prepare('UPDATE hermes_bots SET active_action_id=? WHERE employee_id=?').run(action.id,bot.employee.id);
       audit(slug,'user','a2a.action.created',{actionId:action.id,type:action.type,dedupeKey}); return action;
     },
     listA2AActions(slug, input = {}) {
@@ -1795,6 +1839,14 @@ export function createRepository(options = {}) {
       const rows=db.prepare(`SELECT * FROM a2a_actions WHERE workspace_id=? AND agent_id=? AND status IN (${placeholders}) ORDER BY created_at`).all(ws.id,agentId,...statuses);
       return rows.filter(row => !deviceId || !actionTargetDevice(row) || actionTargetDevice(row) === deviceId)
         .map(row => a2aResponseView(row, { payload:executionActionPayload(row), includeResult:input.includeResult !== false }));
+    },
+    authorizeBotStart(actionId,input={}) {
+      const row=db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId);
+      if(!row || row.status!=='acked')throw botFailure('BOT_START_INVALID','执行尚未被当前设备领取');
+      assertActionDevice(row,input);
+      const bot=assertBotExecution(db,row.workspace_id,parse(row.payload_json),{validation:row.type==='hermes.bot.validate',actionId});
+      if(!bot)throw botFailure('BOT_NOT_FOUND','执行没有 Bot 绑定',404);
+      return {allowed:true,actionId,revision:bot.row.revision,controlEpoch:bot.row.control_epoch};
     },
     ackA2AAction(actionId, input = {}) {
       const receiptOnly = explicitBoolean(input.receiptOnly);
@@ -1811,6 +1863,7 @@ export function createRepository(options = {}) {
         if (['succeeded','failed'].includes(row.status)) response = { ...a2aResponseView(row, { receiptOnly, includeResult:!receiptOnly }), duplicate:true };
         else {
           const timestamp = now();
+          if(row.status==='pending')assertBotExecution(db,row.workspace_id,parse(row.payload_json),{validation:row.type==='hermes.bot.validate',actionId});
           if (row.expires_at && Date.parse(row.expires_at) <= Date.parse(timestamp)) {
             db.prepare("UPDATE a2a_actions SET status='expired',completed_at=? WHERE id=?").run(timestamp, actionId);
             expired = true;
@@ -1903,7 +1956,7 @@ export function createRepository(options = {}) {
       if (!['succeeded', 'failed'].includes(status)) throw new Error('A2A result status must be succeeded or failed');
       const payload = parse(row.payload_json);
       const ws = db.prepare('SELECT slug FROM workspaces WHERE id=?').get(row.workspace_id);
-      const replyConversationId = (row.type === 'conversation.execute' || row.task_id) ? payload.conversationId : null;
+      const replyConversationId = (row.type === 'conversation.execute' || row.task_id || row.type==='automation.execute' && payload.hermesBot) ? payload.conversationId : null;
       const conversation = replyConversationId ? db.prepare('SELECT * FROM conversations WHERE id=? AND workspace_id=?').get(String(replyConversationId), row.workspace_id) : null;
       if (replyConversationId && !conversation) throw new Error('执行结果的会话不属于当前工作区');
       if (conversation && payload.employeeId && String(payload.employeeId) !== String(conversation.employee_id || '')) throw new Error('执行结果的员工与绑定会话不一致');
@@ -1936,6 +1989,11 @@ export function createRepository(options = {}) {
       db.exec('SAVEPOINT conversation_result');
       try {
         db.prepare('UPDATE a2a_actions SET status=?,completed_at=?,result_json=?,error=? WHERE id=?').run(status, timestamp, result === undefined ? null : JSON.stringify(result), error, actionId);
+        if(payload.hermesBot) {
+          const validation=result?.botValidation || result?.result?.botValidation;
+          if(row.type==='hermes.bot.validate' && status==='succeeded' && validation?.valid===true && validation.schemaVersion===1 && validation.employeeId===payload.employeeId && validation.revision===payload.hermesBot.revision) db.prepare('UPDATE hermes_bots SET validated_revision=? WHERE employee_id=? AND revision=? AND control_epoch=? AND validation_action_id=?').run(validation.revision,payload.employeeId,validation.revision,payload.hermesBot.controlEpoch,actionId);
+          if(!botUncertain(result))db.prepare('UPDATE hermes_bots SET active_action_id=NULL WHERE employee_id=? AND active_action_id=?').run(payload.employeeId,actionId);
+        }
         audit(ws.slug, 'ziwei_user', `a2a.action.${status}`, { actionId, type: row.type, error });
         if (row.task_id) taskExecutionMessage(row.task_id, status, error, result);
         if (conversation) {
@@ -1945,7 +2003,7 @@ export function createRepository(options = {}) {
           db.prepare('UPDATE conversations SET updated_at=? WHERE id=?').run(timestamp, conversation.id);
           audit(ws.slug, 'assistant', 'conversation.message.created', { conversationId: conversation.id, messageId, actionId, dispatch: false });
         }
-        if (row.type === 'automation.execute' && payload.runId) this.completeAutomationRun(payload.runId, { status: status === 'succeeded' ? 'completed' : 'failed', result, error });
+        if (row.type === 'automation.execute' && payload.runId) this.completeAutomationRun(payload.runId, { status: status === 'succeeded' ? 'completed' : 'failed', result, error, botInternal:BOT_INTERNAL,sourceActionId:actionId });
         db.exec('RELEASE conversation_result');
       } catch (writeError) {
         db.exec('ROLLBACK TO conversation_result; RELEASE conversation_result');

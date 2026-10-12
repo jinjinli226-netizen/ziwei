@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
-import {executeRuntime, runtimeInvocation, bootstrapTerminalMcp, discoverInstalledRuntimes, hermesHome, hermesProfileHome} from './runtime-adapters.mjs';
+import {executeRuntime, runtimeInvocation, bootstrapTerminalMcp, discoverInstalledRuntimes, hermesHome, hermesProfileHome, validateHermesBotRuntime} from './runtime-adapters.mjs';
 import { createManagementBootstrap } from './management-bootstrap.mjs';
 import {normalizeRuntimeProfile} from './employee-runtime.mjs';
 import { isNativeRuntimeAction, resolveWindowsWorkdir, resolveWindowsWorkdirPath, windowsDirectoryError } from './windows-workdir.mjs';
@@ -388,6 +388,16 @@ export function createLocalActionExecutor({runtimeDir, defaultWorkdir = process.
     if (type === 'hermes.profile.create' || type === 'profile.create') {
       return {status: 'succeeded', result: createHermesProfile({payload: action.payload || {}, hermesHomePath})};
     }
+    const authorizeBot=async()=>{
+      if(!action.payload?.hermesBot)return;
+      if(!deviceToken || action.payload.hermesBot.workspace!==workspace)throw new Error('Bot 缺少当前工作区已配对设备凭据');
+      const response=await fetch(`${String(apiBase).replace(/\/$/,'')}/a2a/v1/actions/${encodeURIComponent(action.id)}/bot-start`,{method:'POST',headers:{'content-type':'application/json','x-ziwei-device-token':deviceToken},body:JSON.stringify({workspace}),signal:context.signal?AbortSignal.any([context.signal,AbortSignal.timeout(10000)]):AbortSignal.timeout(10000),redirect:'error'});
+      const value=await response.json();if(!response.ok || value.allowed!==true)throw new Error(value.error || 'Bot 执行授权已过期或已暂停');
+    };
+    if(type==='hermes.bot.validate') {
+      await authorizeBot();
+      return validateHermesBotRuntime({context:action.payload.hermesBot,baseHome:hermesHomePath || hermesHome(),privateDirectory:path.join(runtimeDir,'bot-instances'),workspace,apiBase});
+    }
     // Native model calls intentionally use the installed local CLI.  This is
     // the one action family with full local permissions; the ordinary file and
     // command actions below remain bounded to the bridge runtime directory.
@@ -410,7 +420,8 @@ export function createLocalActionExecutor({runtimeDir, defaultWorkdir = process.
       runtimeInvocation(runtime,{prompt:promptWithAttachments,attachments:attachmentPaths});
       const imageArtifacts = createImageArtifactSession({runtimeDir,actionId:action.id,conversationId:payload.conversationId || null});
       if (payload.terminalMcp?.enabled === true && terminalMcpConfig.enabled === false) throw new Error('本机手机 MCP 已明确禁用');
-      const preparedManagement = automaticManagement ? await automaticManagement.prepare({ signal: context.signal }) : managementMcpConfig;
+      if(payload.hermesBot?.config.permissions.mode==='read_only' && payload.terminalMcp?.enabled)throw new Error('Bot 只读对话权限不允许手机 MCP');
+      const preparedManagement = payload.hermesBot?.config.permissions.mode==='read_only'?{}:automaticManagement ? await automaticManagement.prepare({ signal: context.signal }) : managementMcpConfig;
       const phoneSession = await bootstrapTerminalMcp({ request: payload.terminalMcp, workspace, actionId: action.id, apiBase, deviceToken, privateDirectory: path.join(runtimeDir, 'terminal-mcp-credentials'), signal: context.signal });
       try { return await executeRuntime({
         runtime,
@@ -420,6 +431,7 @@ export function createLocalActionExecutor({runtimeDir, defaultWorkdir = process.
         attachments: attachmentPaths,
         imageArtifacts,
         codexMcpDisabledServers,
+        ...(payload.hermesBot?{hermesBot:payload.hermesBot,botInstanceDirectory:path.join(runtimeDir,'bot-instances'),beforeSpawn:authorizeBot}:{}),
         cwd: safeCwd,
         env: { ...(payload.env || {}), ...(hermesHomePath ? { HERMES_HOME: hermesHomePath } : {}) },
         ...(payload.employeeTemplateId === 'ziwei-employee-creator' ? {
