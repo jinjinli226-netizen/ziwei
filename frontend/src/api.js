@@ -121,6 +121,8 @@ export const api = {
   validateBot: (id, body, slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/bots/${encodeURIComponent(id)}/validate`, {method:'POST',body:JSON.stringify(body)}),
   controlBot: (id, body, slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/bots/${encodeURIComponent(id)}/control`, {method:'POST',body:JSON.stringify(body)}),
   botRuns: (id, slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/bots/${encodeURIComponent(id)}/runs`),
+  botNativeAction: (id, body, slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/bots/${encodeURIComponent(id)}/native/actions`, {method:'POST',body:JSON.stringify(body)}),
+  collaborateBot: (id, body, slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/bots/${encodeURIComponent(id)}/collaboration`, {method:'POST',body:JSON.stringify(body)}),
   botRoutines: (id, slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/bots/${encodeURIComponent(id)}/routines`),
   createBotRoutine: (id, body, slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/bots/${encodeURIComponent(id)}/routines`, {method:'POST',body:JSON.stringify(body)}),
   updateBotRoutine: (id, routineId, body, slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/bots/${encodeURIComponent(id)}/routines/${encodeURIComponent(routineId)}`, {method:'PATCH',body:JSON.stringify(body)}),

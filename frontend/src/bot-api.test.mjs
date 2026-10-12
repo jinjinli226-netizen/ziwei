@@ -25,7 +25,9 @@ test('all Bot operations retain explicit workspace, escaped IDs and revision bod
     await api.runBotRoutine('employee/a','routine/a',{idempotencyKey:'run-1'},'workspace-a');
     await api.deleteBotRoutine('employee/a','routine/a','workspace-a');
     await api.initializeEmployeeBot('employee/a',{idempotencyKey:'init-1'},'workspace-a');
-    assert.equal(calls.length,14);
+    await api.botNativeAction('employee/a',{resource:'memory',operation:'read',expectedRevision:5,expectedControlEpoch:2,idempotencyKey:'native-1'},'workspace-a');
+    await api.collaborateBot('employee/a',{mode:'message',targetEmployeeIds:['other'],content:'hello',expectedRevision:5,expectedControlEpoch:2,idempotencyKey:'collab-1'},'workspace-a');
+    assert.equal(calls.length,16);
     assert.ok(calls.every(call=>call.url.startsWith('https://fixture.invalid/api/workspaces/workspace-a/')));
     assert.ok(calls[1].url.endsWith('/employee%2Fa'));
     assert.ok(calls[2].url.endsWith('/capabilities?deviceId=device%2Fa'));
@@ -36,5 +38,7 @@ test('all Bot operations retain explicit workspace, escaped IDs and revision bod
     assert.equal(calls[12].options.method,'DELETE');
     assert.ok(calls[13].url.endsWith('/employees/employee%2Fa/bot'));
     assert.equal(JSON.parse(calls[6].options.body).expectedControlEpoch,2);
+    assert.ok(calls[14].url.endsWith('/bots/employee%2Fa/native/actions'));assert.equal(calls[14].options.method,'POST');
+    assert.ok(calls[15].url.endsWith('/bots/employee%2Fa/collaboration'));assert.equal(JSON.parse(calls[15].options.body).targetEmployeeIds[0],'other');
   } finally {Object.assign(globalThis,saved);}
 });
