@@ -2,7 +2,7 @@ function externalDelivery(value){
   if(!value||typeof value!=='object')return false;
   return Object.entries(value).some(([key,item])=>(/webhook/i.test(key)&&Boolean(item))||(/output.?mode/i.test(key)&&item==='webhook')||(item&&typeof item==='object'&&externalDelivery(item)));
 }
-export function previewRequestAllowed({method,path,body}){
+export function previewRequestAllowed({method,path,body,native=false}){
   if(externalDelivery(body))return false;
   if(/\/(?:ziwei-connect|phone-mcp|client-maintenance|client-update|terminal-mcp|daemon)(?:\/|$)/.test(path)||path.startsWith('/mcp/')||path.startsWith('/terminal-mcp/'))return false;
   if(method==='GET'){
@@ -14,6 +14,7 @@ export function previewRequestAllowed({method,path,body}){
   }
   if(method==='POST'&&['/api/workspaces','/api/auth/logout'].includes(path))return true;
   if(method==='POST'&&/^\/api\/workspaces\/[^/]+\/conversations$/.test(path))return true;
+  if(native&&method==='POST'&&/^\/api\/workspaces\/[^/]+\/bots\/[^/]+\/(native\/actions|collaboration)$/.test(path))return true;
   if(/^\/api\/workspaces\/[^/]+\/bots(?:\/[^/]+(?:\/(validate|control|routines)(?:\/[^/]+(?:\/run)?)?)?)?$/.test(path))return ['POST','PATCH','DELETE'].includes(method);
   if(/^\/api\/workspaces\/[^/]+\/employees(?:\/[^/]+(?:\/bot)?)?$/.test(path))return ['POST','PATCH','DELETE'].includes(method);
   if(/^\/api\/workspaces\/[^/]+\/employee-templates\/[^/]+\/instances$/.test(path))return method==='POST';

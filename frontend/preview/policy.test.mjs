@@ -8,3 +8,9 @@ test('URL import, webhook dispatch, native discovery and external controls are r
   for(const [method,path] of [['POST','/api/workspaces/preview-bots/skills/import'],['POST','/api/workspaces/preview-bots/documents/git/export'],['POST','/api/automation-runs/r/result'],['GET','/api/workspaces/preview-bots/hermes/profiles'],['POST','/api/workspaces/preview-bots/mcp/retry'],['GET','/api/workspaces/preview-bots/ziwei-connect/status'],['POST','/a2a/v1/actions']])assert.equal(previewRequestAllowed({method,path}),false,`${method} ${path}`);
   assert.equal(previewRequestAllowed({method:'POST',path:'/api/workspaces/preview-bots/bots/e/routines',body:{webhookUrl:'https://external.invalid/'}}),false);
 });
+test('native browser entry is explicit and does not open device or external delivery paths',()=>{
+  const request={method:'POST',path:'/api/workspaces/preview-bots/bots/e/native/actions'};
+  assert.equal(previewRequestAllowed(request),false);assert.equal(previewRequestAllowed({...request,native:true}),true);
+  assert.equal(previewRequestAllowed({method:'POST',path:'/a2a/v1/actions',native:true}),false);
+  assert.equal(previewRequestAllowed({...request,native:true,body:{webhookUrl:'https://external.invalid/'}}),false);
+});
