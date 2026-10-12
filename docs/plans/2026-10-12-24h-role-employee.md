@@ -12,11 +12,13 @@
 
 日期：2026-10-12，Asia/Shanghai。**当前状态：方案中，以下任务全为 NOT_STARTED；未实现、未实测、未发布。** 关联[设计](../superpowers/specs/2026-10-12-24h-role-employee-design.md)、[验收设计](2026-10-12-24h-role-employee-acceptance.md)、[会话台账](../handoffs/V2_SESSION_LEDGER.md)。
 
+追加范围：公共Creator模板各工作区分别安装实例；新增全天能力只针对目标Hermes，Creator自身仍支持原Codex/Hermes，两者runtime不强制相同。Creator通过正式管理工具配置同一套employee+role，E01会话不参与生产运行。第11节Creator接入合同对应下方C1–C3，仍只是未执行计划；本轮不操作bigtron正式Creator。
+
 ## 执行条件与拆分
 
 基线为 `2ebe3dfee2f438a0b6aa3045d46c83bb67d7341b`，V1 产品修复 `324731e`。后续 E 执行者开始前重新核对远端/工作树/适用规范及已获实现范围，不以本文当作正式员工启用或服务操作授权。原 D 目录、2884 工作树和可靠接续树的用户/既有修改均保留。本 E01 只落地本文等文档并本地提交，不推送、合并、安装、测试或发布。
 
-建议工作包 P1（Task 1–3）、P2（Task 4–6）、P3（Task 7–9）依次推进；数据合同稳定后可以让独立 Q 准备验收，但有依赖的实现串行，同一时刻最多两个用户可见活跃执行会话。总控随后实际分配 E/Q/R 编号，本计划不占用或虚构那些编号/会话 ID。内部只读审查可提供意见，实际文件写入及实现不能交给隐藏子代理。
+建议工作包 P1（Task 1–3）、P2（Task 4–6）、P3（Task 7、C1–C3、Task 8–9）依次推进；共12项任务。C1的数据合同可在P1稳定后审查，C2真实验证依赖P2，Creator整体联调在C1–C3完成后进入Q。数据合同稳定后可以让独立Q准备验收，但有依赖的实现串行，同一时刻最多两个用户可见活跃执行会话。总控随后实际分配E/Q/R编号，本计划不占用或虚构那些编号/会话ID。内部只读审查可提供意见，实际文件写入及实现不能交给隐藏子代理。
 
 每个任务采用“新增可观察行为测试 → 运行并核对预期失败 → 最小实现 → 专项通过 → 本地提交”的步骤；列出的新文件是未来要创建的精确路径，本轮没有创建。每条测试命令均为后续步骤，**本轮未执行**。事务规则与接口若需调整，先同步设计及测试，不以无约束通用脚本替代可信服务方法。
 
@@ -27,7 +29,7 @@
 **Files**：修改 `backend/db.mjs`、`backend/repository.mjs`；新增 `backend/employee-role-repository.mjs`、`test/employee-role-schema.test.mjs`、`test/employee-role-binding.test.mjs`。
 
 1. RED：用临时 SQLite 构造旧库、两个 workspace/owner、共享 source_profile 的两个 employee；断言重复初始化不改变旧行、未启用员工无岗位记录、跨身份配置失败且无部分写入、删除员工不能被回填重建。
-2. 建议新增表：`employee_roles`、`employee_routines`、`employee_work_items`、`employee_runs`、`employee_run_slots`、`employee_execution_claims`、`employee_dispatch_outbox`、`employee_checkpoints`、`employee_report_outbox`。字段和权威关系按设计第 4 节；run/slot/intent 有数据库唯一约束。表只在后续授权实现中创建。
+2. 建议新增表：`employee_roles`、`employee_routines`、`employee_work_items`、`employee_runs`、`employee_run_slots`、`employee_execution_claims`、`employee_dispatch_outbox`、`employee_checkpoints`、`employee_report_outbox`。字段和权威关系按设计第3–4节；employee_routines用唯一automation_id扩展现automation归属/策略，schedule/timezone/status/next_run只存在原automation行；Routine来源的employee_runs引用关联automation_run，后者为旧页面关联记录、不再独立派发，人工/目标工作无需伪造automation。run/slot/intent有数据库唯一约束。表只在后续授权实现中创建。
 3. 岗位必须绑定现有可见 employee 和主聊天，服务器校验实际 owner/workspace/设备及支持组合；新增记录 draft，启用前职责和交付标准非空。旧 employee/schema/Creator 行不批量回填，不把 runtime source profile 当可信 HOME。
 4. repository 承担验证、revision 乐观锁与原子写；新模块接受显式 db/clock/id 依赖，保持路由不直写 SQLite。版本冲突返回 409，不自动覆盖用户最新内容。
 5. GREEN：`node --test test/employee-role-schema.test.mjs test/employee-role-binding.test.mjs`。预期旧库二次初始化及隔离/冲突用例通过；保存本地提交。
@@ -37,8 +39,9 @@
 **Files**：修改 `backend/repository.mjs`；新增 `backend/employee-role-schedule.mjs`、`test/employee-role-schedule.test.mjs`。
 
 1. RED：覆盖 Asia/Shanghai 日期边界、明确其他 IANA 时区、无效时区、夏令时缺失/重复时刻、interval anchor 漂移、计划变更与重复 tick。
-2. 保留旧工作区 automation 行为与 API；新岗位 Routine 走独立方法，复用经验证的解析逻辑，避免把所有旧自动化迁到岗位。保存前预览未来 3 次 UTC/本地时间；首版最短间隔 5 分钟。
+2. 保留未绑定工作区automation行为与API；复用repository现cronPart/parseCron/zonedParts/nextCron/parseSchedule，必要时原样抽取共享函数，禁止重写通用Cron解析器。岗位方法只补anchor、revision及策略，保存前预览未来3次UTC/本地时间；首版最短间隔5分钟。旧API操作已绑定automation时进入同一岗位方法，不批量迁移现计划。
 3. `authority=platform`，计划键为岗位/Routine/revision/scheduled_at_utc；每一槽位只能有一个 disposition/work_id。tick 用注入的 at 推导，不混入内部 Date.now 造成不可复现；clock rollback 不重复槽位。
+   沿用backend/app.mjs唯一现有tick，在tickAutomations/runAutomation中按真实岗位绑定分流：普通automation保持旧路径，岗位scheduled/manual/retry只进入岗位队列；不能先产生旧automation.execute再派新action，也不加第二setInterval。下一次时间只推进关联automation.next_run。RED覆盖同一到期事件同时经旧/新入口仍只有一个slot/run/action，以及memory/disableScheduler、原生authority拒绝双触发。
 4. 明确 `coalesce_latest`（默认，6 小时内最近一次）、`skip`、`catch_up_bounded`（最多 3 次）和 skipped_* 原因；暂停期间默认不补。超长离线分批生成/聚合可核对的槽位统计，单事务最多处理 100 个到期项，不进行无界逐分钟数据库扫描。
 5. 改计划/时区递增 revision，旧未派发项 superseded；当前运行快照保留。人工有效期、容量和稳定排序按设计执行。
 6. GREEN：`node --test test/employee-role-schedule.test.mjs test/automations.test.mjs test/webhook-scheduler.test.mjs`。预期新语义和旧自动化/HMAC 行为均通过；本地提交。
@@ -102,7 +105,47 @@
 2. 提议 API：岗位 `GET/POST /api/employees/:id/routines`、`PATCH /api/employee-routines/:routineId`、`GET /api/employees/:id/work-items`、`GET /api/employee-runs/:runId`；人工主聊天派工仍从现有消息入口进入岗位统一队列。所有权不依赖浏览器字段。
 3. 用户配置职责/禁区/交付/计划与预算；页面展示下一次时间/时区、上一交付、当前工作、暂停/停止/恢复、历史槽位与失败原因。没有职责时不能启用，服务在线仅显示待命。
 4. 原子生成 report outbox 与关联主聊天消息，按 result/run/通知种类去重。无变化只写台账，成功交付/失败/需输入/实质变化才通知；补传不重复通知。历史普通会话不自动加看板卡。
+   复用现notifications存储/实时通道/读取和Webhook安全URL/HMAC/dispatch重试；内部无变化审计不直接调用会创建用户通知的audit。只有用户明确配置出站Webhook才通过关联automation_run投递，默认无新增外部投递；稳定结果键阻止重复入delivery，补投不得调用模型。A2A和daemon补传保留，岗位只增加归属/revision/控制层。
 5. GREEN：`node --test frontend/src/employee-role-state.test.mjs test/employee-role-api.test.mjs test/employee-role-notifications.test.mjs test/permissions-devices.test.mjs`。随后由授权验收者进行真实隔离浏览器 1440/390 核对；本地提交。
+
+### Task C1：公共岗位能力catalog与现有员工上的draft搭建
+
+**Files**：新增 `backend/employees/role-templates.mjs`、`backend/employees/role-setup.mjs`、`test/creator-role-setup.test.mjs`；修改 `backend/db.mjs`、`backend/repository.mjs`、`backend/management.mjs`、`backend/employee-role-repository.mjs`。现 `backend/employees/templates.mjs` 只在兼容接入确需时改动，不改Creator单例约束。
+
+1. RED：两个隔离工作区分别安装自己的Creator；catalog相同、实例/主聊天/人格不跨区泄露；同owner两个相同配置但不同创建意图可产生两名Hermes岗位；同意图重试不重复。非Hermes目标返回unsupported，Creator为Codex不影响选择目标Hermes。
+2. 新role catalog建议ID `ziwei-hermes-24h-role`，版本在候选冻结时分配；声明仅Hermes、支持provider与所需client protocol/schema/validation配方。catalog不返回任何实例私有数据、真实资源ID或凭据。
+3. 按设计第11.3节最小方式在已有`employee_roles`增加template/version/hash/provenance/apply_revision字段；应用历史用现有审计追加，不新增第二套员工/模板实例表。Creator `employee_template_instances` 的unique和new-instances-only保持。
+4. 新增setup及step receipts，按可信workspace+owner+根intent key保存fingerprint与固定步骤key，记录source user message/action和各阶段ID。删除保留墓碑；同key异参409，原资源删除返回Gone，不自动换key重建。
+5. `ziwei_create_employee`的后端可选roleSetupId须在创建employee的同事务绑定draft role；setup链漏字段拒绝，避免active普通employee在后续apply前被旧task入口启动。已有employee仅按用户明确ID回读/检查无在途后采用，保存非请求字段，不能收养同名或修改Creator本体。
+6. draft配置含职责/交付/禁区、同员工主聊天、独立namespace、明确Hermes绑定、disabled Routines/预算；原子保存与revision校验。配置回读与hash一致，阶段中断保留原资源；不在跨模型调用长事务内持锁。
+7. GREEN：`node --test test/creator-role-setup.test.mjs test/employee-role-schema.test.mjs test/employee-role-binding.test.mjs test/creator-template.test.mjs`，断言旧Creator来源和定制字节不变；本地提交。
+
+### Task C2：MCP端到端工具合同、draft验证与启用
+
+**Files**：修改 `scripts/ziwei-mcp.mjs`、`backend/app.mjs`、`backend/management.mjs`、`backend/employees/role-setup.mjs`、`src/local-action.mjs`、`src/runtime-adapters.mjs`、`src/daemon.mjs`、`src/management-bootstrap.mjs`；必要的可信执行上下文绑定同时修改 `backend/management-bootstrap.mjs`、`backend/repository.mjs`；新增 `test/creator-role-mcp.test.mjs`、`test/creator-role-validation.test.mjs`。
+
+1. RED：stdio tools/list与tools/call、client router、HTTP guards、service/schema一致；旧schema/缺工具/错误actor或workspace不能宣称就绪；伪造creatorId/templateId/owner/activate/checkOnly不产生权限或业务grant。
+2. 实现设计第11.4节七项提议工具及精确路由，discovery报告catalog/capability/schema/build所需与实际值。保留已存在工具参数（model不是modelId；update_employee不擅加幂等语义），两类工具在文档与UI清楚区分。
+3. 建立可信execution context/intentRef关联：由当前合法用户请求/平台实际action绑定，服务端核对workspace/owner/source及作用域；现managed bearer没有callerEmployee，不能用请求体冒充。引用不扩大现有权限；缺actor/上下文返回明确不足，不做跨区或旧归属兼容扩展。
+4. verify工具生成专用setup_validation work、purpose grant、固定probeId与run/action，绑定employee/device/role和binding revision。draft仅允许这类服务端验证，不接受任意prompt或模型自报checkOnly；paused/deleted/uncertain拒绝，所有普通旧task/聊天/A2A入口仍受draft门槛。复用现有监督、预算、幂等及停止确认。
+   验证专用临时overlay使用可核验toolset/MCP允许清单，不能沿现Hermes适配器`--toolsets all`；禁用正式写入、手机、外部账号和任意shell，不把业务instructions/SOUL当probe指令，保留源profile。RED覆盖残留写工具/额外MCP、允许清单未生效、只loaded无只读调用等负例；记录实际生效工具hash，无法证明当前原生支持限制则validation_unsupported并保持draft。
+   建议复用runtime.execute原生动作并由服务端提供validation目的，目标普通employee不占第二个manager槽；role/setup结果处理负责主聊天归属。并发上限1或无子槽时Creator返回原ID后结束，禁止提高并发或原地无限等候；测试父任务释放后同一个validation action只启动一次。
+5. 回执分开保存结构校验、真实action、产出检查、MCP准备、tools schema/loaded/toolCalls及setup/config revision。成功probe只说明本次验证，不是24小时PASS；unknown保留原action不重放。证据建议30分钟有效，绑定/template/模型/配置/client build变更后过期。
+   现get_employee_mcp_status只选最近匹配action，作为辅助展示；新setup证据必须引用精确get_action及本次服务端回执，不能为省事采用另一轮loaded=true。
+6. activate原子核对当前revision、证据和原用户明确启用意图，再active/开放未来Routine；只有搭建草稿意图时维持draft。response丢失回读原setup，不重建；普通update_employee(status=active)不能替代激活。控制工具复用第8节pause/resume/stop语义，不能形成MCP例外。
+   增补first_activated_at/suspended_from_state/activation_required和expectedControlEpoch/intentRevision合同；首次激活唯一走activate，draft直接resume、draft暂停后resume不能变active。验证后用户暂停/取消/暂缓或源聊天出现未处理新输入时，旧activate因epoch/intent cursor过期而拒绝；先处理新输入，不要求用户重新批准未变范围。旧激活key在后来暂停后重试只回当前paused，不重新启用。RED覆盖这些竞态及新revision要求重验证不能靠历史first_activated_at绕过。
+7. GREEN：`node --test test/creator-role-mcp.test.mjs test/creator-role-validation.test.mjs test/employee-role-controls.test.mjs test/management-mcp-runtime.test.mjs`；保留schema/静态契约与真实stdio fixture证据的区别；本地提交。真实模型由后续Q另做，不能把fixture标成真实loaded业务通过。
+
+### Task C3：已有Creator的指导overlay、市场与真实联调交接
+
+**Files**：修改 `backend/employees/creator-template.mjs`、`backend/employees/templates.mjs`（仅只读能力展示）、`backend/repository.mjs` 的可信执行上下文构造、`frontend/src/components/CreatorMarket.vue`、`frontend/src/creator-market.js`、`frontend/src/components/EmployeeRolePanel.vue`；新增 `backend/employees/creator-role-guidance.mjs`、`test/creator-role-guidance.test.mjs`、`test/creator-role-integration.test.mjs`。
+
+1. RED：origin=template、adopted-existing、customized三路径；源码模板版本不匹配/缺能力/定制禁区冲突；sourceTemplateVersion/null、capabilityVersion、authoringWorkflowRevision各自如实显示。非Creator按名字伪装不会获得可信模板身份。
+2. 采用可信discovery+执行时版本化搭建overlay，帮助现有Creator按“begin→create/reuse→draft→read→verify→activate”推进；保留原persona/instructions/SOUL/memory/auth/会话，不能覆写旧实例或假报已升级模板。新catalog内容只对新实例应用，旧实例能力说明和永久人格分开。用户未请求全天模式时普通员工流程保持。
+3. 普通缺项一次汇总询问，发现可查信息不重复问，已有明确搭建启用意图不增加逐步批准。Creator当前预算耗尽则回报原setup/phase/IDs，下一次合法执行从持久进度续办，不等待自己的/另一Creator串行任务导致死锁。
+4. 市场保留Creator主入口，仅展示真实可用的Hermes全天搭建能力与缺项，不要求新建第二张人工安装卡。目标多岗位由既有employee列表/role面板按employeeId呈现，不能塞进`template.instance`单对象；刷新打开按ID只读，不触发再安装。
+5. 新岗位Routine结果回目标主聊天；Creator主聊天只收搭建回执/链接和请求相关反馈。联调矩阵为Codex Creator→Hermes目标、Hermes Creator→Hermes目标；对未实测组合标NOT_RUN，不从一种推导另一种。Codex/Claude/Gemini目标全天申请被拒而普通路径保持。
+6. GREEN：`node --test test/creator-role-guidance.test.mjs test/creator-role-integration.test.mjs test/creator-template.test.mjs frontend/src/creator-market.test.mjs`；交付后续Q按验收C01–C16进行隔离真实联调，当前bigtron正式Creator只作为保护对象，不发送业务消息或改其配置来验证；本地提交。
 
 ### Task 8：日志、故障夹具与真实 24 小时证据
 
@@ -117,11 +160,11 @@
 ### Task 9：Q 独立验收与 R 发布准备
 
 1. E 在候选冻结后运行必要专项及仓库门槛 `npm test`、`npm run lint`、`npm run build`，保存实际统计；结果属于候选 SHA，不能引用 V1 的 709 项冒充。后续改动按风险补验，不反复无目的跑全量。
-2. Q 读取全部原始/失败证据、检查关键身份与恢复行为，并独立复核 24 小时统计及正式数据保护；接受标准见验收设计。总控负责判断并建立实际会话台账。
+2. Q 读取全部原始/失败证据、检查关键身份与恢复行为，并独立复核Creator自然语言搭建→岗位运行的C01–C16与24小时统计及正式数据保护；接受标准见验收设计。总控负责判断并建立实际会话台账。首次均为隔离QA，不使用bigtron正式Creator实发创建消息。
 3. R 在用户后续明确发布范围内才实施发布；分别记录后端 schema/API、前端、官方客户端包、实际目标客户端 build。需要哪层才发布哪层，包已上传不等于客户端已生效。R 前再次核实远端 SHA，不用本地 tracking ref 替代。
 4. 预制可审查的兼容迁移/备份/代码回退计划：新表新增不覆盖旧库，关闭新岗位派发必须先核实在途状态，回退保留新表及证据，不能整库恢复或让旧版本执行不认识的队列。回退不重放旧业务。
 5. 更新 `PROJECT_MANAGEMENT.md` 顶部、V2 台账及实际运维记录，只写真实状态；本 E01 不执行这五步，也不创建 Q/R 会话。
 
 ## 本文完成与交接标准
 
-本轮交付仅要求设计、分期计划、验收设计、会话台账和项目顶部状态齐备；源码引用可追溯、文档链接有效、Git diff 仅文档、专用分支本地提交且干净。正式岗位职责待用户提供；原生运行兼容、24 小时可靠性和发布均待后续授权执行，不把这些依赖写成已完成。
+本轮交付仅要求设计（含Creator接入合同）、分期计划、验收设计、会话台账和项目顶部状态齐备；源码引用可追溯、文档链接有效、Git diff仅文档、专用分支本地提交且干净。公共模板跨区复用/实例按当前区隔离、仅Hermes全天模式已明确；正式岗位职责仍待用户提供。bigtron当前Creator安全元数据尚未取得新的只读证据，保持unknown而不套用旧事故快照；不为补证据读取密钥或新建登录。原生运行兼容、真实联调、24小时可靠性和发布均待后续授权执行，不把这些依赖写成已完成。

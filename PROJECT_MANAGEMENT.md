@@ -1,5 +1,15 @@
 # 紫薇项目管理与 AI 接手手册
 
+### 2026-10-12 V2 E01追加：Creator接入Hermes全天岗位（文档方案，未实现、未实测、未发布）
+
+用户已澄清：“全局”指公共Creator模板在每个工作区复用安装，实例创建当前已认证工作区的员工，不是bigtron的Creator跨区管理；新增24小时/7×24岗位能力仅面向Hermes Agent，运行位置为现有Windows电脑持续开机环境。Creator自身现有Codex/Hermes支持保持，其执行runtime与目标Hermes分别选择。E01是研发方案会话，产品是其交付的模板/运行底座，不建立生产Creator到Codex会话的依赖。
+
+推荐路径为在现有Creator主聊天提出岗位、目标和计划，由正式管理工具发现能力→固定意图创建/复用employee→配置全天role为draft→回读→受限只读probe验证→依原用户明确启用意图激活。旧Creator通过待实现的capability/discovery+版本化执行指导overlay接入，保留persona/instructions/SOUL/记忆和sourceTemplateVersion；能力版本单独记录。Creator来源表单例保持，全天模板来源保存于现有role行，按workspace+employee允许多岗位独立应用，不造第二套员工系统或强制新市场入口。
+
+定时能力已存在：首版复用紫薇现parser、automation记录、唯一tick、通知/HMAC投递与A2A补传；岗位Routine只作一对一automation扩展，补身份、主聊天、记忆、revision、去重和控制。Hermes原生Cron源码存在但当前运行未核实，现CLI适配不等于Gateway/Cron桥接；不新建并行scheduler，不给同一意图双重计划。
+
+见[设计第11节](docs/superpowers/specs/2026-10-12-24h-role-employee-design.md)、[含C1–C3的实施计划](docs/plans/2026-10-12-24h-role-employee.md)、[含C01–C16的联调验收](docs/plans/2026-10-12-24h-role-employee-acceptance.md)及[V2台账](docs/handoffs/V2_SESSION_LEDGER.md)。现MCP没有这些全天模板工具；全部新接口/字段是提案，联调NOT_RUN。bigtron正式Creator当前精确元数据未取得新的只读证据（Edge读取失败、E01无已有IAB登录页），保持unknown，不沿用旧事故快照。仅在原E01隔离树修订5份文档并本地提交；未改正式Creator/员工、未运行模型/测试/构建/手机/业务、未启动服务或扩展跨区权限，未推送/合并/发布。
+
 ### 2026-10-12 V2 E01：24小时岗位员工方案（方案中，未实现、未实测、未发布）
 
 用户已明确需要可配置长期职责的“24小时数字员工”，并选择先在现有 Windows 电脑持续开机时全天工作。首个业务岗位职责尚未给出。本轮 `V2-E01-24小时岗位员工方案` 仅交付可审查文档：推荐紫薇持有唯一岗位调度权，复用既有工作区自动化、A2A持久防重/补传和Windows监督，增加每岗独立状态、Routine、主聊天、预算及真实暂停/停止/恢复合同。模型有工作才运行、单次执行有界；电脑休眠、断网或客户端退出须显示实际离线/待核实状态。

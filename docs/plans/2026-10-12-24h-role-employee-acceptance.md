@@ -4,6 +4,8 @@
 
 关联：[设计](../superpowers/specs/2026-10-12-24h-role-employee-design.md)、[实施计划](2026-10-12-24h-role-employee.md)、[会话台账](../handoffs/V2_SESSION_LEDGER.md)。V1 的测试/发布记录不能替代本计划的验收。总控后续分派用户可见 Q 会话独立验收，本 E01 不启动或排程验收。
 
+追加范围：公共Creator模板在各工作区分别安装实例，管理边界仍是当前已认证workspace；全天岗位仅面向Hermes，Creator可继续使用其现有Codex/Hermes运行时。第7节C01–C16为Creator→Hermes岗位的新增联调设计，当前全为NOT_RUN，不操作bigtron正式Creator。
+
 ## 1. 验收层级
 
 | 层级 | 必须证明 | 不足以证明 |
@@ -47,11 +49,11 @@
 | A13 | 缺少所需交付、需输入、预算耗尽、原生费用字段缺失 | 不伪报 succeeded；waiting 不续叫模型；8 段/96 次/120 分钟预算守住；费用是 null 而非0 |
 | A14 | 暂停时无运行/有排队/已有grant/正在运行 | paused持久；新 grant数为0；在途运行发停止且直到真实回执才确认；刷新/重启保持paused |
 | A15 | 执行槽满、离线停止、成功/停止竞态、停止证据缺失 | 控制通道不被堵；accepted ≠ stopped；真实成功先到则保留成功；未知保持占用与提醒 |
-| A16 | 恢复岗位、原生 plan 也试图表达相同意图 | 暂停期不补跑；uncertain不解除；首版拒绝双authority，未改用户原生cron |
+| A16 | 恢复岗位、原生plan也试图表达相同意图；现tick和旧手动automation入口并发 | 暂停期不补跑；uncertain不解除；首版同一现tick分流、一个automation下一次时间、一个slot/run/action，无第二生产tick或双authority；未改用户原生cron；未来native hook未满足时明确不支持接管 |
 | A17 | 成功/失败/需输入/有变化/无变化与结果补传 | 主聊天归属正确；同result只一条相应汇报；无变化不重复通知；全部执行仍可查 |
 | A18 | UI 1440/390、切岗位/工作区、断线重连、刷新/重登录 | 异步响应不串岗位；离线/暂停/运行/不确定清晰；停止按钮反馈真实；长职责/路径可读 |
 | A19 | 验收进程正常/异常退出、观察器采样中断与重挂 | 独立退出记录含精确实例和exit/unknown；不能把观察器断线当业务成功；缺口明确统计 |
-| A20 | 现有自动化、Creator、会话图片、默认目录、A2A 维护 | 对应专项回归通过；无业务/手机执行；不宣称补齐其他受阻功能 |
+| A20 | 现有自动化parser/CRUD/tick、通知/HMAC投递/重试、Creator、会话图片、默认目录、A2A维护 | 原解析器直接复用，未绑定automation行为保持；已绑定旧API经岗位revision/控制；同一结果/投递补传无重复模型与通知、无变化审计不扰民；对应专项回归通过，无业务/手机执行，不宣称补齐其他受阻功能 |
 | A21 | 单Routine暂停、取消当前工作、岗位暂停分别操作 | 三者作用域准确；暂停Routine不停止当前run或其他来源；岗位暂停对所有在途请求停止；均可追溯且不追补暂停窗口 |
 | A22 | 删除员工/职责revision变化/绑定切换与旧worker并发 | 删除持久撤销、墓碑和在途证据保留；迟到结果不复活员工；旧revision不自动续作；未收敛拒绝换设备/profile；保留HOME |
 | A23 | 已启用岗位通过旧task、普通聊天、Creator/管理MCP和直接A2A派工；旧payload到达 | 所有可信employee入口受同一占用/control epoch/grant门槛；缺字段不降级；启用前旧在途先收敛/隔离；暂停不可经旧入口绕过；未启用员工旧链路保持 |
@@ -149,4 +151,57 @@ Q 在24小时后只读重算上述指标，并独立抽查全部失败/unknown�
 
 只清理由本次 manifest 确定且证据已封存的 QA 资源；不按名称前缀批量删除、不碰共享认证/缓存/原有profile、不整库恢复。失败证据与必要追溯保留。正式业务、受阻任务和旧 QA 范围不会因这次验收被唤醒。
 
-首版产品 PASS 必须满足 A01–A23、候选必要回归/构建、真实 Hermes 隔离层、真实24小时层及数据保护全部通过。未来 R 发布前仍需再次核实运行环境和分层版本；发布后实际设备离线或未升级时应分别标记，不能因此回填本次 soak 成功结论。
+首版产品PASS必须满足A01–A23、候选宣称支持组合对应的C01–C16、必要回归/构建、真实Hermes隔离层、真实24小时层及数据保护全部通过。Creator runtime组合只按实际验证的矩阵单元签收，未测组合NOT_RUN，不从Codex Creator推导Hermes Creator或反向推导。未来R发布前仍需再次核实运行环境和分层版本；发布后实际设备离线或未升级时应分别标记，不能因此回填本次soak成功结论。
+
+## 7. Creator → Hermes全天岗位的独立联调
+
+### 7.1 当前能力与候选范围
+
+现有源码只有Creator市场模板`ziwei-employee-creator 1.0.0`及普通员工/任务/会话/profile管理工具；七项新role工具、draft验证/activate合同、旧Creator能力overlay均未实现。UI能打开Creator、HTTP管理入口健康、device prepare/configured、stdio tools/list、loaded/toolCalls和岗位交付成功分别取证，不能相互替代。
+
+本次E01只读检查未取得bigtron现存Creator的新元数据：可用连接器没有员工管理读取接口，Edge inventory报`nodeRepl.fetch request failed`，本会话IAB无已有tab。正式employeeId、模板来源/应用版本、runtime/profile/model/device、主聊天/MCP状态均unknown。后续Q如果需要正式保护元数据，只能通过已有合法只读路径核实；不得填入旧事故employeeId当当前实例、创建新登录/凭据或执行模型来查身份。首次联调的执行主体全部是隔离QA Creator，不用正式Creator。
+
+拟验证矩阵（全部NOT_RUN）：
+
+| Creator执行runtime | 目标员工runtime/模式 | 预期合同 | 签收范围 |
+| --- | --- | --- | --- |
+| Codex | Hermes全天 | 允许；发现与选择各自runtime，不把Creator配置复制给目标 | 真实通过后只签此组合 |
+| Hermes | Hermes全天 | 允许；Creator与目标独立HOME，父子有界执行不死锁 | 真实通过后只签此组合 |
+| 现有受支持Creator | Codex/Claude/Gemini全天 | 明确unsupported，不换目标runtime、不偷偷安装role | 负例/普通路径兼容 |
+| 现有受支持Creator | 普通员工（非全天） | 保持既有可用组合；不默认安装role或启用Routine | 不扩大各CLI既有功能边界 |
+
+同一catalog在两个隔离workspace的Creator实例可分别使用，但一个实例不能指定另一个workspace管理员工。只检查保留的现有scope拒绝，不实施跨区权限扩展或旧受阻兼容修复。
+
+### 7.2 联调用例
+
+| 编号 | 场景 | 必须留下的可核验证据 |
+| --- | --- | --- |
+| C01 | 两区/同区不同owner读取公共catalog并安装各自Creator | 公共定义一致，instance ID/owner/workspace隔离；catalog无跨成员persona/主聊天/凭据；当前workspace固定 |
+| C02 | 同owner用同Hermes能力模板创建两个相同配置但不同意图的岗位 | 两个employee/role/主聊天/namespace；Creator旧来源表单例约束保持；role按workspace+employee保存来源，不按template全区复用一个岗位 |
+| C03 | 每阶段响应丢失/重试，同key同参/异参，源员工已被用户删除 | 同setup/step返回原ID，异参409，删除返回Gone/墓碑；无换key重建或恢复已删除员工 |
+| C04 | 自然语言明确“搭建并按计划工作”，信息齐/缺关键项两种 | discovery先查可得信息；缺项一次汇总；从原用户请求追溯intentRef，已有授权不逐步重问；没有启用意图则draft |
+| C05 | 创建到draft配置之间崩溃，旧create_task/runtime/model/status=active请求并发 | employee与draft控制原子关联；未配置/未激活前旧入口无业务grant；不因employee.status active绕过role |
+| C06 | 完整配置回读、同名既有员工/明确指定已有employee | 配置hash/revision/ID一致；只按用户明确ID采用；非请求字段保持；不修改Creator本体，不给普通员工默认安装role |
+| C07 | draft验证、任意checkOnly/probe/prompt伪造、paused/deleted/uncertain验证；profile带写工具/额外MCP或限制不受支持 | 仅固定配方的服务端validation grant；精确run/action/employee/device/revision/purpose；临时overlay实际toolset/MCP允许清单/hash与只读调用可核验，无all/任意shell/正式写入/手机/外部账号；业务指令只作配置数据，源profile保持；限制无法证实则validation_unsupported、保持draft，模型/浏览器自报无效 |
+| C08 | probe succeeded但内容错误、只有loaded无toolCall、旧配置MCP回执 | 验证失败/缺证据而非validated；保存本次action的schema/loaded/toolCalls及产出检查；不从最近无关记录取成功 |
+| C09 | validate后修改职责/Routine/model/profile/namespace/build；30分钟过期；暂停/取消/新用户输入；draft→resume；激活后暂停再重试原activate | 旧证据/epoch/intent cursor不可激活；draft直接或经pause/resume不变active；未处理新输入先处理；相关变更重新验证且unknown不重放；合法激活只一次，旧key不能撤销后来暂停，next_due从真实激活后开始 |
+| C10 | origin=template/adopted-existing/customized旧Creator接入 | 原persona/instructions/SOUL/memory/认证/主聊天字节或适用稳定字段保持；sourceTemplateVersion（含null）不变；能力版本/overlay revision单列；不是批量改模板 |
+| C11 | Codex Creator→Hermes与Hermes Creator→Hermes；target非Hermes | 正向分别真实runtime/action/profile证据；负向unsupported；Creator runtime不强制等于目标；未测组合NOT_RUN |
+| C12 | 刷新/重新打开Creator和目标主聊天，重启隔离客户端 | 原setup/employee/conversation IDs保持；不通过POST重装恢复视图；同岗位记忆/检查点仍在，Creator与岗位不自动串记忆 |
+| C13 | 激活后实际到期Routine，人工消息插入与无变化观察 | 唯一slot/grant/实际action，目标主聊天收到唯一结果；Creator只收搭建回执/链接；无变化安静，不产生额外Creator模型轮次 |
+| C14 | Creator通过MCP暂停岗位/单Routine、停止run、删除/revision后旧派工 | 和网页相同控制合同；accepted≠stopped；旧MCP/Creator入口不能续作，停止证据明确，无新权限例外 |
+| C15 | 联调中断网、客户端退出、未知停止与恢复 | 原phase/ID不丢；已有结果仅补传；unknown不再启动原执行；精确reconcile后才解除匹配隔离，不以resume直接解锁 |
+| C16 | 旧schema/缺工具/缺actor或真实环境、Creator自身预算耗尽、同机并发1或无子槽、模板升级 | 不声称ready，不猜owner/建凭据/切scope/升级；Creator返回原phase/ID后释放父槽，原validation action再启动且仅一次，不伪装第二manager或提高并发；新catalog不覆盖定制或HOME；所有失败/保护证据保留 |
+
+### 7.3 真实联调步骤与回执
+
+1. Q先固定候选SHA/build、服务与stdio schema版本、两种模板manifest、capability/overlay revision和要签收的矩阵单元；完成A系列基础门槛及C系列非模型行为测试。记录隔离QA的精确身份/允许路径/模型预算，不启用生产工具或手机。
+2. 用隔离Creator主聊天提交一次明确且有完成标准的自然语言搭建请求。请求只针对隔离合成资料与目标Hermes岗位，包含是否启用、例行计划及资源边界；不要复制或重放正式旧创建消息。
+3. 从实际Creator action提取成功工具调用链：环境/模板发现→begin setup→employee创建或复用→draft及主聊天回读→verify→真实probe结果→activate。同时核对数据库/审计状态；工具输出声称成功但缺服务端状态则不通过。
+4. 故障注入覆盖创建/验证/激活响应丢失，必须先回读原setup/action；未知执行不重放。再次表达同一意图时稳定key复用；明确第二个独立岗位用新根key，二者不混淆。恢复步骤由后续合法Creator执行完成，不要求单次模型跑满24小时。
+5. 实际等待至少一个正常到期Routine运行并核对主聊天交付、暂停/停止、离线/unknown恢复和跨重启记忆。该短时真实链路只能签联调探针，不等于24小时PASS；随后第4节连续24小时soak应使用至少一个经该搭建流程产生的隔离Hermes岗位（QA-B），并保留setup→role→slot→run链。
+6. 确认实例来源、scope、正式保护状态和失败证据后，Q按组合给PASS/FAIL/INCOMPLETE/NOT_RUN。只有候选宣称支持的组合全部达到合同才能宣称该范围Creator联调通过，不能用一种runtime或一个owner的结果泛化。
+
+证据追加到同一私有验收根：`creator-integration/intent-manifest.json`（只含QA意图与ID）、`setup-phases.jsonl`、`tool-chain.jsonl`、`configuration-readback.json`、`validation-evidence.json`、`runtime-matrix.json`及正式保护摘要。每条工具证据关联Creator actual action、setup、目标employee、role/configuration revision、tool/schema和结果；保存用户原始QA请求的hash及授权范围，不写正式私密正文/凭据。
+
+原生probe的产出、停止/恢复、24小时台账与模板应用是分别签收的层次。全部字段当前为null/NOT_RUN；本轮没有新增模型调用、QA账号/员工、正式配置写入、手机动作或发布。
