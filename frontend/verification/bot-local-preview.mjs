@@ -58,6 +58,7 @@ try{
     await page.getByRole('button',{name:'刷新回执',exact:true}).click();await page.getByRole('button',{name:'启用 Bot',exact:true}).click();
     await page.getByText('已启用 · 待命',{exact:true}).first().waitFor();bot=await api(botPath(bot.id));assert.equal(bot.control_state,'active');
     const runs=await api(botPath(bot.id)+'/runs');assert.equal(runs.runs[0].result.fixture,true);assert.equal(runs.runs[0].type,'hermes.bot.validate');
+    await page.getByRole('button',{name:'能力组合',exact:true}).click();assert.ok(await page.getByText('合成流程已验证',{exact:true}).count()>0);assert.equal(await page.getByText('已接入',{exact:true}).count(),0);
   });
   await check('persistent main chat sends a message and receives a labelled synthetic result',async()=>{
     await page.getByRole('button',{name:'打开长期聊天',exact:true}).click();
