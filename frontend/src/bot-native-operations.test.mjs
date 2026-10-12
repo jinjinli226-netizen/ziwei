@@ -54,6 +54,9 @@ test('native configuration save uses the read version and confirms actual persis
   assert.equal(await ui.submit('memory','save',ui.resource('memory').draft),true);
   assert.equal(calls[0].expectedRevision,1);assert.equal(calls[0].workspace,'a');assert.equal(calls[0].botId,'bot');assert.equal(ui.resource('memory').data.revision,2);assert.equal(ui.resource('memory').phase,'succeeded');
 });
+test('native content CAS conflict retains the editor draft without becoming an unknown execution',async()=>{
+  const {ui}=fixture({submit:async()=>({kind:'action',action:{id:'conflict-action',status:'failed',error:'MEMORY_HASH_CONFLICT'}})});ui.select('ws','bot');ui.draft('memory',{content:'private edit'});await ui.submit('memory','write',ui.resource('memory').draft);assert.equal(ui.resource('memory').phase,'conflict');assert.equal(ui.resource('memory').draft.content,'private edit');assert.equal(ui.blocked(),false);
+});
 test('a read begun before saving cannot roll confirmed native data back',async()=>{
   const delayed=deferred();let reads=0;
   const {ui}=fixture({read:async()=>++reads===2?delayed.promise:{revision:reads>2?2:1}});

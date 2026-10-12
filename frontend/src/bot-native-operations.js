@@ -56,7 +56,7 @@ export function createBotNativeOperations({transport,wrap=value=>value,keyFactor
     if(executionUncertain(action)){item.phase='uncertain';return false;}
     if(['pending','acked','running','queued'].includes(action.status)){item.phase='accepted';return true;}
     if(!['succeeded','failed','cancelled','expired','rejected'].includes(action.status))throw new Error('尚不认识此原生执行状态，请核对原回执');
-    item.result=action.result||null;item.phase=action.status==='succeeded'?'succeeded':'failed';
+    item.result=action.result||null;item.phase=action.status==='succeeded'?'succeeded':/HASH_CONFLICT|REVISION_CONFLICT/.test(action.error||action.result?.code||'')?'conflict':'failed';
     const receipt=action.result?.nativeOperation||action.result?.result?.nativeOperation;
     if(action.status==='succeeded'&&(receipt?.data?.staged||receipt?.data?.pending_id||receipt?.data?.status==='staged'||receipt?.data?.mutation?.staged||receipt?.data?.mutation?.pending_id)){
       item.phase='staged';item.pending=null;item.review={actionId:action.id,pendingId:receipt.data.pending_id||receipt.data.mutation?.pending_id||null,scope:receipt.data.scope||saved?.intent.readHints?.scope||'memory',nativeVersion:receipt.nativeVersion,status:'requires_authorization'};if(saved){saved.kind='review';saved.phase='staged';saved.review=copy(item.review);delete saved.intent.input;registry.delete(key);registry.set(key+':review:'+saved.intent.idempotencyKey,saved);}persist();return false;
