@@ -16,6 +16,11 @@ test('actual Bot device selector cannot rewrite its binding or launch directory 
   const select=actual('selectConversationDevice',{conversationDeviceId:device,botBindingPending:{value:false},conversationBotBinding:{value:{id:'bot'}},selectedConversation:{value:{employee_id:'bot'}},notify:message=>notices.push(message),openConversationDirectoryPicker:()=>inspections++});
   select('other');assert.equal(device.value,'fixed');assert.equal(inspections,0);assert.match(notices[0],/已绑定/);
 });
+test('actual Bot directory picker stays closed while inspection is not integrated',()=>{
+  const opened={value:false},notices=[];
+  const open=actual('openConversationDirectoryPicker',{botBindingPending:{value:false},conversationBotBinding:{value:{id:'bot'}},selectedConversation:{value:{employee_id:'bot'}},conversationDirectoryPickerOpen:opened,selectedConversationDevice:{value:{status:'online'}},notify:message=>notices.push(message)});
+  open();assert.equal(opened.value,false);assert.match(notices[0],/尚未接入/);
+});
 test('failed workspace load cannot authorize prior workspace model and skill options',async()=>{
   const refs=Object.fromEntries([...source('load').matchAll(/(\w+)\.value/g)].map(match=>[match[1],{value:[]}]));
   refs.authState.value={memberships:[{slug:'b',role:'owner'}]};refs.summary.value={workspace:{slug:'a'}};refs.loadedBotOptionsWorkspace.value='a';refs.models.value=[{id:'a-private'}];refs.skills.value=[{id:'a-skill'}];

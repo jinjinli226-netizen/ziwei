@@ -61,6 +61,7 @@ try{
   });
   await check('persistent main chat sends a message and receives a labelled synthetic result',async()=>{
     await page.getByRole('button',{name:'打开长期聊天',exact:true}).click();
+    assert.equal(await page.getByRole('button',{name:'选择目录',exact:true}).isDisabled(),true);
     await page.getByPlaceholder('告诉数字伙伴要做什么...').fill('只验证隔离消息链，不执行实际业务。');await page.getByRole('button',{name:'发送',exact:true}).click();
     await poll(()=>api('/api/conversations/'+bot.main_conversation_id),value=>value.messages.some(message=>message.content.includes('【合成预览结果】')));
     await page.getByText('【合成预览结果】已收到这次工作。',{exact:false}).waitFor();
@@ -89,7 +90,7 @@ try{
   await check('an existing Hermes employee initializes in place and keeps its original conversation',async()=>{
     const employee=await api(`/api/workspaces/${workspace}/employees`,{name:marker+' 原员工',runtime:'Hermes',runtimeProfile:'preview-fixture',targetDeviceId:bot.employee.target_device_id,model:'fixture-model'});created.push(employee.id);
     const chat=await api(`/api/workspaces/${workspace}/conversations`,{employeeId:employee.id,title:'原员工聊天'});
-    await page.goto(front+`/${workspace}/bots/${employee.id}`);await page.getByRole('button',{name:'初始化此员工的 Bot 能力'}).click();
+    await page.goto(front+`/${workspace}/bots/${employee.id}`);await page.getByRole('button',{name:'能力组合',exact:true}).click();assert.equal(await page.getByRole('button',{name:'保存能力配置并读回',exact:true}).isDisabled(),true);await page.getByRole('button',{name:'初始化此员工的 Bot 能力'}).click();
     await page.getByText('Bot 能力已初始化',{exact:false}).waitFor();
     const initialized=await api(botPath(employee.id));assert.equal(initialized.id,employee.id);assert.equal(initialized.main_conversation_id,chat.id);
   });

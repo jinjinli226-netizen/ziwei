@@ -44,7 +44,8 @@ async function loadDiscovery(){
   catch(error){if(scopeCurrent(visit,workspace))discoveryError.value=botErrorMessage(error);}
   finally{if(scopeCurrent(visit,workspace))discoveryLoading.value=false;}
 }
-function selectBot(id){if(id===s.selectedId)return;if(configDirty.value&&!window.confirm('当前 Bot 有未保存修改，切换会丢弃草稿。继续切换？'))return;tab.value='chat';routineEditor.value=null;emit('select',id);void workbench.select(id);}
+function clearTransientDrafts(){routineEditor.value=null;routineScope.value=null;mcpName.value='';mcpCommand.value='';mcpArgs.value='';mcpEnv.value='';}
+function selectBot(id){if(id===s.selectedId)return;if(configDirty.value&&!window.confirm('当前 Bot 有未保存修改，切换会丢弃草稿。继续切换？'))return;tab.value='chat';clearTransientDrafts();emit('select',id);void workbench.select(id);}
 function chat(){if(s.bot?.main_conversation_id)emit('chat',{workspace:props.workspace,employee:s.bot.employee,conversation:{id:s.bot.main_conversation_id},botId:s.bot.id});}
 async function refresh(){await Promise.all([workbench.list(),workbench.refresh(),loadDiscovery()]);}
 async function save(){if(await workbench.save())emit('changed');}
@@ -107,10 +108,10 @@ function schedulePoll(){
   },4000);
 }
 watch(()=>props.workspace,async workspace=>{
-  generation++;routineEditor.value=null;showCreate.value=false;createBusy.value=false;discovery.value=null;tab.value=props.initialTab;
+  generation++;clearTransientDrafts();showCreate.value=false;createBusy.value=false;discovery.value=null;tab.value=props.initialTab;
   await Promise.all([workbench.setWorkspace(workspace,props.botId),loadDiscovery()]);
 },{immediate:true});
-watch(()=>props.botId,id=>{if(id!==s.selectedId){routineEditor.value=null;routineScope.value=null;mcpName.value='';mcpCommand.value='';mcpArgs.value='';mcpEnv.value='';void workbench.select(id);}});
+watch(()=>props.botId,id=>{if(id!==s.selectedId){clearTransientDrafts();void workbench.select(id);}});
 onBeforeUnmount(()=>{disposed=true;generation++;clearTimeout(pollTimer);workbench.dispose();});schedulePoll();
 </script>
 
@@ -152,7 +153,7 @@ onBeforeUnmount(()=>{disposed=true;generation++;clearTimeout(pollTimer);workbenc
               <div class="bot-surface"><h3>技能与工具</h3><p>紫薇技能挂载与 Hermes 原生技能禁用名单分别设置。</p><div class="bot-skill-list"><label v-for="skill in skills" :key="skill.id" class="bot-check"><input v-model="s.draft.employee.skills" type="checkbox" :value="skill.id"/>{{skill.name}}</label><p v-if="!skills.length">当前工作区没有可选择的技能。</p></div><div class="bot-fields"><label>Hermes 原生工具集<textarea v-model="toolsetsText" rows="4" placeholder="每行一个工具集名称；由后端核验"/></label><label>禁用的 Hermes 原生技能<textarea v-model="disabledSkillsText" rows="4" placeholder="每行一个原生技能名称"/></label></div><p v-if="s.draft.config.permissions.mode==='read_only'">当前为“仅对话”模式。配置工具集或 MCP 前，请在基础配置中明确选择启用工具，否则服务器会拒绝保存。</p></div>
               <details class="bot-advanced"><summary>MCP 与高级连接</summary><p>配置标准输入输出 MCP 的命令与参数。不要把 Token 或密码放进命令、参数；密钥仅引用本机环境变量名，由本机解析，不在紫薇保存值。</p><article v-for="(server,name) in s.draft.config.mcpServers" :key="name" class="bot-mcp-row"><div><strong>{{name}}</strong><label class="bot-check"><input v-model="server.enabled" type="checkbox"/>启用</label><button class="bot-link danger" @click="delete s.draft.config.mcpServers[name]">移除</button></div><label>命令<input v-model="server.command"/></label><label>参数（每行一个）<textarea :value="server.args.join('\n')" rows="2" @input="server.args=$event.target.value.split('\n').filter(Boolean)"/></label><small v-if="server.env&&Object.keys(server.env).length">本机变量引用：{{Object.keys(server.env).join('、')}}。密钥值不在此展示。</small></article><div class="bot-fields"><label>MCP 名称<input v-model="mcpName"/></label><label>命令<input v-model="mcpCommand" placeholder="例如 node"/></label><label class="wide">参数（每行一个）<textarea v-model="mcpArgs" rows="2"/></label><label class="wide">环境变量引用（每行 MCP变量名=本机变量名）<textarea v-model="mcpEnv" rows="2" placeholder="API_KEY=MY_LOCAL_API_KEY"/></label></div><button class="bot-button" :disabled="!mcpName.trim()||!mcpCommand.trim()" @click="addMcp">添加到草稿</button></details>
             </fieldset>
-            <div class="bot-save-bar"><p>全部修改统一保存，配置版本 {{s.draft.revision}}。未接入能力的开关不会被虚构。</p><button class="bot-button primary" :disabled="s.busy||s.writeUnknown||s.conflict" @click="save">保存能力配置并读回</button></div>
+            <div class="bot-save-bar"><p>全部修改统一保存，配置版本 {{s.draft.revision}}。未接入能力的开关不会被虚构。</p><button class="bot-button primary" :disabled="s.busy||s.writeUnknown||s.conflict||s.bot.configuration_state==='uninitialized'" @click="save">保存能力配置并读回</button></div>
           </section>
           <section v-else-if="tab==='routines'" class="bot-form-section">
             <div class="bot-section-heading"><div><h3>{{s.bot.employee.name}} 的 Routine</h3><p>由紫薇现有调度负责，结果回到此 Bot 主聊天。电脑及客户端需保持可用。</p></div><button class="bot-button" :disabled="s.busy||s.writeUnknown||s.bot.configuration_state==='uninitialized'" @click="editRoutine()"><Plus :size="16"/>添加计划</button></div>

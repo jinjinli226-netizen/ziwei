@@ -65,7 +65,17 @@ test('unknown Routine run retains its original key through readback and explicit
 });
 test('initializing an existing Hermes employee preserves its ID and avoids querying absent Bot records',async()=>{
   let current={...bot(),configuration_state:'uninitialized',revision:0},recordReads=0,initializations=0;
-  const ui=fixture({bot:async()=>current,botRuns:async()=>{recordReads++;return {runs:[]};},botRoutines:async()=>{recordReads++;return {routines:[]};},initializeEmployeeBot:async(id)=>{initializations++;assert.equal(id,'a');current={...bot(),revision:1};return current;}});
+  const ui=fixture({bot:async()=>current,conversation:async()=>({device_id:null}),botRuns:async()=>{recordReads++;return {runs:[]};},botRoutines:async()=>{recordReads++;return {routines:[]};},initializeEmployeeBot:async(id)=>{initializations++;assert.equal(id,'a');current={...bot(),revision:1};return current;}});
   await ui.setWorkspace('qa','a');assert.equal(recordReads,0);
   assert.equal(await ui.initialize(),true);assert.equal(initializations,1);assert.equal(ui.state.bot.id,'a');assert.equal(ui.state.bot.revision,1);
+});
+test('existing employee initialization checks the original conversation without writing or silently changing mismatched devices',async()=>{
+  let writes=0;const current={...bot(),configuration_state:'uninitialized',employee:{...bot().employee,target_device_id:'device-a'}};
+  const ui=fixture({bot:async()=>current,conversation:async()=>({device_id:'device-b'}),initializeEmployeeBot:async()=>{writes++;}});
+  await ui.setWorkspace('qa','a');assert.equal(await ui.initialize(),false);assert.equal(writes,0);assert.equal(ui.state.busy,false);assert.equal(ui.state.writeUnknown,false);assert.match(ui.state.error,/电脑.*不一致/);
+});
+test('a late initialization preflight cannot initialize an employee after switching Bot',async()=>{
+  const delayed=deferred();let writes=0;const current={...bot(),configuration_state:'uninitialized'};
+  const ui=fixture({bot:async id=>id==='a'?current:bot(id),conversation:()=>delayed.promise,initializeEmployeeBot:async()=>{writes++;}});
+  await ui.setWorkspace('qa','a');const initialization=ui.initialize();await ui.select('b');delayed.resolve({device_id:null});assert.equal(await initialization,false);assert.equal(writes,0);assert.equal(ui.state.bot.id,'b');
 });

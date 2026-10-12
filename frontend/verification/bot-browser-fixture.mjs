@@ -63,6 +63,12 @@ try{
   await check('configuration validation is not labelled business completion',async()=>{await page.getByRole('button',{name:'运行记录',exact:true}).click();await page.getByRole('button',{name:'检查已保存配置'}).click();await page.getByRole('button',{name:'启用 Bot',exact:true}).click();await page.getByText('已启用 · 待命',{exact:true}).first().waitFor();assert.equal(await page.getByText('上次已完成',{exact:true}).count(),0);});
   await check('Bot main chat and settings stay connected',async()=>{await page.getByRole('button',{name:'打开长期聊天',exact:true}).click();await page.getByText('这是隔离 fixture 对话，尚未调用真实 Hermes。',{exact:true}).waitFor();await page.getByRole('button',{name:'Bot 设置',exact:true}).click();await page.getByLabel('名称',{exact:true}).waitFor();});
   await check('create dialog opens and closes through real ZiModal events',async()=>{await page.getByRole('button',{name:'创建 Bot',exact:true}).click();assert.equal(await page.getByRole('dialog').count(),1);await page.getByRole('dialog').getByRole('button',{name:'关闭',exact:true}).click();await page.getByRole('dialog').waitFor({state:'detached'});});
+  await check('unadded MCP input cannot transfer through roster selection',async()=>{
+    await page.getByRole('button',{name:'能力组合',exact:true}).click();await page.getByText('MCP 与高级连接',{exact:true}).click();await page.getByLabel('MCP 名称',{exact:true}).fill('only-on-a');
+    await page.locator('.bot-roster-row').filter({hasText:'内容编辑'}).click();await page.getByRole('button',{name:'能力组合',exact:true}).click();
+    await page.getByText('MCP 与高级连接',{exact:true}).click();assert.equal(await page.getByLabel('MCP 名称',{exact:true}).inputValue(),'');
+    await page.locator('.bot-roster-row').filter({hasText:'已改名研究员'}).click();
+  });
   await check('history navigation closes a Routine editor and cannot transfer its draft to another Bot',async()=>{
     await page.locator('.bot-roster-row').filter({hasText:'内容编辑'}).click();await page.getByRole('heading',{name:'内容编辑',exact:true}).waitFor();
     await page.getByRole('button',{name:'例行工作',exact:true}).click();await page.getByRole('button',{name:'添加计划'}).click();await page.getByRole('dialog').getByLabel('名称',{exact:true}).fill('只属于 B 的未保存草稿');
