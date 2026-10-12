@@ -816,24 +816,32 @@ export function attachRealtimeWebSocket(server, app, { pathPrefix = '/api/worksp
     return slug ? decodeURIComponent(slug) : null;
   };
   const reject = (socket, status, message) => {
-    socket.write(`HTTP/1.1 ${status} ${message}\r\nConnection: close\r\n\r\n`);
-    socket.destroy();
+    socket.on('error', () => socket.destroy());
+    socket.end(`HTTP/1.1 ${status} ${message}\r\nConnection: close\r\n${status === 503 ? 'Retry-After: 1\r\n' : ''}\r\n`, () => socket.destroy());
   };
   server.on('upgrade', (req, socket, head) => {
-    let url;
-    try { url = new URL(req.url || '/', `http://${req.headers.host || '127.0.0.1'}`); } catch { reject(socket, 400, 'Bad Request'); return; }
-    const slug = matchPath(url.pathname);
-    if (!slug) { reject(socket, 404, 'Not Found'); return; }
-    const origin = String(req.headers.origin || '');
-    if (origin && origin !== allowedOrigin) { reject(socket, 403, 'Forbidden'); return; }
-    const auth = app.locals.auth;
-    const bypass = app.locals.authBypass === true;
-    const principal = bypass ? null : auth?.authenticate(req);
-    if (!bypass && !principal) { reject(socket, 401, 'Unauthorized'); return; }
-    if (!bypass && !auth?.canAccess(principal.user_id, slug)) { reject(socket, 403, 'Forbidden'); return; }
-    sockets.handleUpgrade(req, socket, head, ws => {
-      sockets.emit('connection', ws, req, { slug, principal });
-    });
+    // Upgrade callbacks run outside Express's request error middleware.
+    // Authentication touches session rows, so even a transient SQLite lock
+    // must reject this handshake without escaping the server event callback.
+    try {
+      let url;
+      try { url = new URL(req.url || '/', `http://${req.headers.host || '127.0.0.1'}`); } catch { reject(socket, 400, 'Bad Request'); return; }
+      const slug = matchPath(url.pathname);
+      if (!slug) { reject(socket, 404, 'Not Found'); return; }
+      const origin = String(req.headers.origin || '');
+      if (origin && origin !== allowedOrigin) { reject(socket, 403, 'Forbidden'); return; }
+      const auth = app.locals.auth;
+      const bypass = app.locals.authBypass === true;
+      const principal = bypass ? null : auth?.authenticate(req);
+      if (!bypass && !principal) { reject(socket, 401, 'Unauthorized'); return; }
+      if (!bypass && !auth?.canAccess(principal.user_id, slug)) { reject(socket, 403, 'Forbidden'); return; }
+      sockets.handleUpgrade(req, socket, head, ws => {
+        sockets.emit('connection', ws, req, { slug, principal });
+      });
+    } catch (error) {
+      const databaseBusy = error?.code === 'ERR_SQLITE_ERROR' && [5,6].includes(error.errcode);
+      reject(socket, databaseBusy ? 503 : 500, databaseBusy ? 'Service Unavailable' : 'Internal Server Error');
+    }
   });
   sockets.on('connection', (ws, _req, context) => {
     const send = event => {

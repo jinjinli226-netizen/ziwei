@@ -7,6 +7,9 @@ const ROOT = path.resolve(import.meta.dirname, '..');
 export function openDatabase({ memory = false, filename = path.join(ROOT, 'data', 'ziwei.sqlite') } = {}) {
   if (!memory) fs.mkdirSync(path.dirname(filename), { recursive: true });
   const db = new DatabaseSync(memory ? ':memory:' : filename);
+  // Read-only backups briefly hold shared locks. Give normal writes a bounded
+  // opportunity to commit after that reader releases its snapshot.
+  db.exec('PRAGMA busy_timeout = 5000');
   // An emptied installation is still an installation. Inspect the schema
   // before creating tables, rather than using the number of workspace rows.
   const existingInstallation = Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='workspaces'").get());
