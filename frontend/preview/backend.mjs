@@ -19,7 +19,7 @@ const frontendPort=Number(process.env.ZIWEI_PREVIEW_FRONTEND_PORT || 5283);
 if(!Number.isInteger(apiPort)||apiPort<1024||apiPort>65535)throw new Error('Invalid preview API port');
 const log=createPreviewLog(path.join(directory,'logs'),`backend-${process.env.ZIWEI_PREVIEW_INSTANCE || process.pid}`);
 const discoverFixture=()=>({agents:{Hermes:{version:'fixture-no-Hermes',models:[{id:'fixture-model',label:'合成演示模型（未调用真实模型）',provider:'fixture'}]}}});
-const app=createApp({filename:path.join(data,'preview.sqlite'),objectStoreDir:path.join(data,'objects'),discoverLocalVersions:discoverFixture,enableScheduler:false,requireAuth:true,requireDeviceAuth:true,managementMcpSecretFile:path.join(data,'management-signing.key'),ziweiConnectApiBase:'http://127.0.0.1:1/disabled-preview'});
+const app=createApp({filename:path.join(data,'preview.sqlite'),objectStoreDir:path.join(data,'objects'),discoverLocalVersions:discoverFixture,enableScheduler:false,requireAuth:true,requireDeviceAuth:true,managementMcpSecretFile:path.join(data,'management-signing.key'),ziweiConnectApiBase:'http://127.0.0.1:1/api'});
 const repo=app.locals.repo,auth=app.locals.auth,management=createManagementService(repo);
 const accessFile=path.join(data,'local-preview-access.private.json');
 let credentials;
