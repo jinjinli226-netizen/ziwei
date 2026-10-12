@@ -2,7 +2,7 @@
 
 ## 2026-10-12 Windows 早期协议升级接续
 
-ThinkPad 缺四字段且无 pause/drain 的兼容路径已实现：只读 update-check、真实进程/配置/端口 proof、YES 明确确认、绑定 Windows 句柄停止、实际恢复核验。不得将未知计数填零或承诺重启不会重新取得未完成任务。发布及最终验收以 [专项记录](docs/operations/2026-10-12-legacy-windows-upgrade.md) 为准；本机 PID36264/39608、现有主站与 QA 清理安全点保持。
+ThinkPad 缺四字段且无 pause/drain 的兼容路径已完成并发布：源码d01dc83，678/678、lint78/build、34文件Windows实装和真实d18121e四场景全部通过；官方包5c0fdb…/build54a053…于16:58:55上线，仅三个下载文件，三服务PID和主站保持。本机仍PID36264/c7b83…在线、观察器39608保持；ThinkPad须运行新官方入口后以该机真实回执确认完成。只读检查→明确YES→原proof精确停止→实际恢复核验；未知计数不填零，不承诺重启不会取得未完成任务。详情见 [专项记录](docs/operations/2026-10-12-legacy-windows-upgrade.md)，原QA清理安全点保持。
 
 ## 2026-10-12 当前接续：员工默认目录已发布，真实功能验收通过
 

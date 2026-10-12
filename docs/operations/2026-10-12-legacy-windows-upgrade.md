@@ -36,7 +36,15 @@ irm https://qzelynth.top/downloads/cli/update-windows.ps1 | iex
 
 最终完整回归 **678/678**，fail/cancelled/skipped/todo 均0；lint78通过，前端1764模块构建通过。独立复制/更新回归10/10，身份核验7/7，早期生命周期5/5。最终候选的四个完整历史安装场景全部通过。
 
-最终候选从已暂存 Git tree 归档生成，Windows 独立 npm 安装34个包文件均与归档逐字节一致，唯一允许差异为 npm 对 bin 第一行 shebang 的 CRLF→LF 归一。包 SHA256 `5c0fdbbab4c4d6c384b3e8e8ed079613cc0ed46213b58834d1ec9e621d7952f3`、124143 bytes；Windows build `54a0530deb0d0a0a6936a64abc77793fa7f1e72d91bb416204656687e6bf0ee7`，sourceBuild `e42c1538a789e037aa9c5052879604f283e9fed5b149bb16b61bff618f136ab4`。源码提交后须逐个确认所有发布文件的 Git blob 与打包 tree 相同。
+最终候选从已暂存 Git tree 归档生成，Windows 独立 npm 安装34个包文件均与归档逐字节一致，唯一允许差异为 npm 对 bin 第一行 shebang 的 CRLF→LF 归一。包 SHA256 `5c0fdbbab4c4d6c384b3e8e8ed079613cc0ed46213b58834d1ec9e621d7952f3`、124143 bytes；Windows build `54a0530deb0d0a0a6936a64abc77793fa7f1e72d91bb416204656687e6bf0ee7`，sourceBuild `e42c1538a789e037aa9c5052879604f283e9fed5b149bb16b61bff618f136ab4`。所有发布文件和 bootstrap 的 Git blob 已逐个核对，与源码提交 `d01dc8307f04145f17ee5fef0b643dc565eee36e` 相同。
+
+## 已发布结果
+
+源码 `d01dc83` 已推送 `origin/codex/employee-default-workdir`。北京时间2026-10-12 16:58:55完成仅客户端发布，操作 `bc71b6b0c1cd49b1a8f4e467416e1110`；仅替换 ziwei-latest.tgz、update-windows.ps1、release.json，metadata 最后切换。原文件备份在 `/opt/ziwei-backups/client-legacy-maintenance/bc71b6b0c1cd49b1a8f4e467416e1110`。
+
+公开 HTTPS 三资源已在发布后及独立只读 verify 各下载核对 SHA/大小。bootstrap SHA 为 `45af42a6d314974c74818a93ecdaafff8ea3f5c7454d5bdd3767369fa4d9591e`，metadata SHA 为 `86078e0be7cc78aa766c43e1a88847c38cb2edae0772d1eba98b1cb53cf8ee06`。主 API181593、control134533、Nginx737、release标记、前端首页及Nginx配置与发布前完全一致；发布器没有数据库操作。
+
+发布后本机只读核对仍为 PID36264、build c7b83…、bigtron、ready=true、activeActionCount=0，观察器39608仍运行。此次未再次升级或停启本机。磁盘配置当前 SHA 为 a633f988…，不同于更早功能验收时的7913bf1c…，本发布未写该配置，未将其字节相同列为本次验收结论。
 
 本次仅发布官方客户端下载文件；主 API、前端、控制服务、Nginx 和本机已验收的 PID36264/观察器39608不因发布而重启。ThinkPad 本机是否完成升级须以其实际 update-status 和健康结果为准，不能用隔离环境的成功代替。
 
