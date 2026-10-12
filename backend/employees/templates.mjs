@@ -8,6 +8,7 @@ const configurationHash = employee => crypto.createHash('sha256').update(JSON.st
   employee.name, employee.runtime, employee.model_id, employee.description, employee.persona,
   employee.visibility, employee.skills, employee.instructions, employee.runtime_profile,
   employee.avatar, employee.status, employee.target_device_id,
+  ...(employee.default_working_directory ? [employee.default_working_directory,employee.default_working_directory_device_id] : []),
 ])).digest('hex');
 const profileReady = profile => profile.provider_configured !== false && profile.authentication_configured !== false &&
   profile.readiness?.provider !== 'missing' && profile.readiness?.authentication !== 'missing' && profile.readiness?.ready !== false &&
@@ -85,7 +86,8 @@ export function createEmployeeTemplateService(repo, management) {
     }
     const visibility=Object.hasOwn(input,'visibility') ? optionalText(input.visibility) : 'personal';
     if (!['personal','workspace'].includes(visibility)) fail('visibility 必须是 personal 或 workspace。','TEMPLATE_VISIBILITY_INVALID');
-    return {...selected,modelId:optionalText(input.model),visibility};
+    return {...selected,modelId:optionalText(input.model),visibility,
+      ...Object.fromEntries(['defaultWorkingDirectory','default_working_directory','defaultWorkingDirectoryActionId','default_working_directory_action_id'].filter(key=>Object.hasOwn(input,key)).map(key=>[key,input[key]]))};
   };
   return {
     list(slug, context = {}) {

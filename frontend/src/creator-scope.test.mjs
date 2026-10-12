@@ -2,11 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {createConversationRequestSequence,mergeConversationDetail,mergeConversationLists} from './conversation-execution-state.mjs';
+import {conversationSettingsSnapshot,mergeConversationSettingsDraft} from './workdir.js';
 const app=await readFile(new URL('./App.vue',import.meta.url),'utf8');
 function source(name){const start=app.search(new RegExp(`(?:async )?function ${name}\\(`));assert.ok(start>=0);return app.slice(start,app.indexOf('\n}',start)+2);}
 function implementation(name,bindings){
   const dependencies=name==='openConversation'?['conversationRequestScope','applyConversationDetail']:[];
-  const stateBindings=dependencies.length?{createConversationRequestSequence,mergeConversationDetail,mergeConversationLists}:{};
+  const stateBindings=dependencies.length?{createConversationRequestSequence,mergeConversationDetail,mergeConversationLists,conversationSettingsSnapshot,mergeConversationSettingsDraft}:{};
   const allBindings={...stateBindings,...bindings};
   return new Function(...Object.keys(allBindings),`let workspaceLoadGeneration=0,conversationOpenGeneration=0,conversationListGeneration=0;${dependencies.length?'const conversationRequests=createConversationRequestSequence();':''}${dependencies.map(source).join('\n')}\nreturn (${source(name)});`)(...Object.values(allBindings));
 }

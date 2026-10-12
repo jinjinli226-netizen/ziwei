@@ -26,7 +26,7 @@ test('Creator catalog separates responsibilities, persona, real skills and execu
 test('every Creator workflow tool and example uses an actual management MCP signature', () => {
   const template = getEmployeeTemplate(templateId);
   const actualTools = new Map(toolDefinitions.map(tool => [tool.name, tool.inputSchema]));
-  assert.equal(actualTools.size, 21);
+  assert.equal(actualTools.size, 23);
   for (const step of template.workflow) {
     for (const name of step.tools) assert.ok(actualTools.has(name), `unknown workflow tool ${name}`);
   }

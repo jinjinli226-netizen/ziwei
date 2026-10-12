@@ -7,9 +7,37 @@ import http from 'node:http';
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { validateUpdateSource, downloadVerifiedPackage, resolveInstalledPackage, validateCandidatePackage, performClientUpdate, resolveNpmCli } from '../scripts/client-update.mjs';
+import { fileURLToPath } from 'node:url';
+import { validateUpdateSource, downloadVerifiedPackage, resolveInstalledPackage, validateCandidatePackage, performClientUpdate, resolveNpmCli, describeUpdateFailure, updateFailureResult } from '../scripts/client-update.mjs';
 
 const run = promisify(execFile);
+
+test('maintenance diagnostics distinguish a fetch timeout from a child process exit', () => {
+  const timedOut = new DOMException('PRIVATE_TIMEOUT_PAYLOAD', 'TimeoutError');
+  const diagnostic = describeUpdateFailure(timedOut, 'download_package');
+  assert.equal(diagnostic.reasonCode, 'OPERATION_TIMEOUT');
+  assert.equal(diagnostic.failureStage, 'download_package');
+  assert.equal('exitCode' in diagnostic, false);
+  assert.doesNotMatch(JSON.stringify(diagnostic), /PRIVATE_TIMEOUT_PAYLOAD/);
+});
+
+test('maintenance diagnostics project only bounded facts from nested or cyclic errors', () => {
+  const secret = 'PRIVATE_' + 'S'.repeat(8192);
+  const cause = Object.assign(new Error(secret), { code: 'EACCES', signal: secret, stdout: secret, stderr: secret, cmd: secret });
+  const outer = Object.assign(new Error(secret, { cause }), { code: secret, configuration: secret, reason: secret, failureStage: secret });
+  cause.cause = outer;
+  const diagnostic = describeUpdateFailure(outer, secret);
+  assert.equal(diagnostic.failureStage, 'unknown');
+  assert.equal(diagnostic.reasonCode, 'EACCES');
+  assert.equal('signal' in diagnostic, false);
+  assert.ok(JSON.stringify(diagnostic).length < 512);
+  assert.doesNotMatch(JSON.stringify(diagnostic), /PRIVATE_|stdout|stderr|cmd|configuration/);
+  const result = updateFailureResult(outer, 'stop_client');
+  assert.equal(result.reasonCode, 'EACCES');
+  assert.equal(result.failureStage, 'stop_client');
+  assert.equal(result.code, 'UPDATE_FAILED');
+  assert.doesNotMatch(JSON.stringify(result), /PRIVATE_|stdout|stderr|cmd|configuration/);
+});
 
 test('update sources reject copied Markdown, embedded credentials and mutable query strings', () => {
   assert.equal(validateUpdateSource('https://qzelynth.top/downloads/cli/ziwei-latest.tgz'), 'https://qzelynth.top/downloads/cli/ziwei-latest.tgz');
@@ -89,8 +117,44 @@ test('a corrupt candidate fails before stopping the client or touching its insta
   const file = path.join(home, 'ziwei_user.json'); fs.writeFileSync(file, '{"workspace":"original","deviceId":"unchanged"}');
   const artifact = path.join(directory, 'corrupt.tgz'); fs.writeFileSync(artifact, 'not a tar archive');
   let stops = 0;
-  await assert.rejects(performClientUpdate({ root, env: { ...process.env, ZIWEI_USER_HOME: home, ZIWEI_CONFIG: file }, directory: path.join(directory, 'maintenance'), artifactFile: artifact, sha256: createHash('sha256').update(fs.readFileSync(artifact)).digest('hex'), stopClient: async () => { stops++; return { wasRunning: true }; } }));
+  const events = [];
+  await assert.rejects(performClientUpdate({ root, env: { ...process.env, ZIWEI_USER_HOME: home, ZIWEI_CONFIG: file }, directory: path.join(directory, 'maintenance'), artifactFile: artifact, sha256: createHash('sha256').update(fs.readFileSync(artifact)).digest('hex'), stopClient: async () => { stops++; return { wasRunning: true }; }, log: (event, data) => events.push({ event, ...data }) }), error => {
+    assert.equal(error.failureStage, 'stage_install');
+    assert.equal(error.reasonCode, 'PROCESS_EXIT_NONZERO');
+    assert.equal(error.exitCode, 1);
+    assert.equal(error.originalRestored, true);
+    assert.doesNotMatch(error.message, /npm ERR|Command failed|npm-cli\.js|corrupt\.tgz/);
+    return true;
+  });
   assert.equal(stops, 0); assert.equal(fs.readFileSync(path.join(root, 'package.json'), 'utf8'), metadata);
+  assert.equal(fs.readFileSync(file, 'utf8'), '{"workspace":"original","deviceId":"unchanged"}');
+  assert.equal(events.filter(item => item.event === 'update_failed').length, 1);
+  assert.equal(events.at(-1).failureStage, 'stage_install');
+  assert.equal(events.at(-1).reasonCode, 'PROCESS_EXIT_NONZERO');
+  fs.mkdirSync(path.join(home, 'maintenance'), { recursive: true });
+  const workerDirectory = path.join(directory, 'worker-maintenance'); fs.mkdirSync(workerDirectory);
+  const parent = await run(process.execPath, ['-e', 'process.stdout.write(String(process.pid))'], { windowsHide: true });
+  const jobFile = path.join(workerDirectory, 'job.json');
+  fs.writeFileSync(jobFile, JSON.stringify({ root, directory: workerDirectory, parentPid: Number(parent.stdout), artifactFile: artifact, sha256: createHash('sha256').update(fs.readFileSync(artifact)).digest('hex') }));
+  await assert.rejects(run(process.execPath, [fileURLToPath(new URL('../scripts/client-update-worker.mjs', import.meta.url)), jobFile], { env: { ...process.env, ZIWEI_USER_HOME: home, ZIWEI_CONFIG: file }, windowsHide: true, timeout: 10_000 }), error => error.code === 1);
+  const result = JSON.parse(fs.readFileSync(path.join(workerDirectory, 'result.json')));
+  assert.equal(result.code, 'UPDATE_FAILED');
+  assert.equal(result.failureStage, 'stage_install');
+  assert.equal(result.reasonCode, 'PROCESS_EXIT_NONZERO');
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.originalRestored, true);
+  assert.match(result.message, /stage_install/);
+  const workerEvents = fs.readFileSync(path.join(workerDirectory, 'maintenance.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+  const workerFailures = workerEvents.filter(item => ['update_failed', 'maintenance_failed'].includes(item.event));
+  assert.equal(workerFailures.length, 2);
+  for (const event of workerFailures) {
+    assert.equal(event.failureStage, result.failureStage);
+    assert.equal(event.reasonCode, result.reasonCode);
+    assert.equal(event.exitCode, result.exitCode);
+    assert.equal(event.originalRestored, true);
+  }
+  assert.doesNotMatch(JSON.stringify({ result, workerEvents }), /Command failed|npm ERR|stdout|stderr/);
+  assert.equal(fs.readFileSync(path.join(root, 'package.json'), 'utf8'), metadata);
   assert.equal(fs.readFileSync(file, 'utf8'), '{"workspace":"original","deviceId":"unchanged"}');
 });
 
@@ -113,22 +177,112 @@ test('failed startup after package swap restores the original program and connec
   // The candidate passes version validation but cannot start; only the restored
   // original script can produce this marker. Neither fixture starts a daemon.
   fs.writeFileSync(path.join(root, 'scripts/start-ziwei-user.mjs'), "import fs from 'node:fs'; import path from 'node:path'; fs.writeFileSync(path.join(process.env.ZIWEI_USER_HOME,'original-restarted'), 'original');\n");
-  fs.writeFileSync(path.join(source, 'scripts/start-ziwei-user.mjs'), "process.exit(23);\n");
+  fs.writeFileSync(path.join(source, 'scripts/start-ziwei-user.mjs'), "console.error('deviceToken=PRIVATE_DIAGNOSTIC_SECRET config=PRIVATE_CONFIGURATION'); process.exit(23);\n");
   const bins = ['', '.cmd', '.ps1'].map(suffix => path.join(prefix, 'ziwei_user' + suffix));
   for (const file of bins) fs.writeFileSync(file, 'node_modules/ziwei/scripts/ziwei-user.mjs');
   const npmCli = resolveNpmCli();
   const packed = JSON.parse((await run(process.execPath, [npmCli, 'pack', '--json', '--pack-destination', directory], { cwd: source, windowsHide: true })).stdout)[0];
   const archive = path.join(directory, packed.filename);
   const stoppedVersions = [];
+  const events = [];
   await assert.rejects(performClientUpdate({ root, directory: path.join(directory, 'maintenance'), artifactFile: archive,
     sha256: createHash('sha256').update(fs.readFileSync(archive)).digest('hex'),
     env: { ...process.env, ZIWEI_USER_HOME: home, ZIWEI_CONFIG: configFile }, npmCli,
-    stopClient: async () => { stoppedVersions.push(JSON.parse(fs.readFileSync(path.join(root, 'package.json'))).version); return { wasRunning: true }; }
-  }), error => error.code === 'UPDATE_FAILED' && error.originalRestored === true);
+    stopClient: async () => { stoppedVersions.push(JSON.parse(fs.readFileSync(path.join(root, 'package.json'))).version); return { wasRunning: true }; },
+    log: (event, data) => events.push({ event, ...data })
+  }), error => {
+    assert.equal(error.code, 'UPDATE_FAILED');
+    assert.equal(error.originalRestored, true);
+    assert.equal(error.failureStage, 'restart_client');
+    assert.equal(error.reasonCode, 'PROCESS_EXIT_NONZERO');
+    assert.equal(error.exitCode, 23);
+    assert.match(error.message, /restart_client|启动/);
+    assert.doesNotMatch(error.message, /PRIVATE_|Command failed|start-ziwei-user\.mjs/);
+    return true;
+  });
   assert.deepEqual(stoppedVersions, ['0.1.0', '0.1.1']);
   assert.equal(JSON.parse(fs.readFileSync(path.join(root, 'package.json'))).version, '0.1.0');
   assert.equal(fs.readFileSync(path.join(home, 'original-restarted'), 'utf8'), 'original');
   assert.equal(fs.readFileSync(configFile, 'utf8'), configBytes);
   assert.equal(fs.readFileSync(path.join(home, 'Creator-MEMORY.md'), 'utf8'), 'original memory');
   assert.ok(bins.every(file => fs.readFileSync(file, 'utf8') === 'node_modules/ziwei/scripts/ziwei-user.mjs'));
+  const failures = events.filter(item => item.event === 'update_failed');
+  assert.equal(failures.length, 1);
+  assert.equal(failures[0].failureStage, 'restart_client');
+  assert.equal(failures[0].reasonCode, 'PROCESS_EXIT_NONZERO');
+  assert.equal(failures[0].exitCode, 23);
+  assert.doesNotMatch(JSON.stringify(failures), /PRIVATE_|Command failed|deviceToken|stdout|stderr/);
+
+  // A second isolated attempt has a restored original that cannot restart either.
+  // Both failure causes must survive; the original program still remains on disk.
+  fs.writeFileSync(path.join(root, 'scripts/start-ziwei-user.mjs'), "console.error('PRIVATE_RESTORE_SECRET'); process.exit(19);\n");
+  events.length = 0;
+  await assert.rejects(performClientUpdate({ root, directory: path.join(directory, 'maintenance-restart-failure'), artifactFile: archive,
+    sha256: createHash('sha256').update(fs.readFileSync(archive)).digest('hex'),
+    env: { ...process.env, ZIWEI_USER_HOME: home, ZIWEI_CONFIG: configFile }, npmCli,
+    stopClient: async () => ({ wasRunning: true }), log: (event, data) => events.push({ event, ...data })
+  }), error => {
+    const result = updateFailureResult(error);
+    assert.equal(result.originalRestored, false);
+    assert.equal(result.failureStage, 'restart_client');
+    assert.equal(result.exitCode, 23);
+    assert.equal(result.recoveryFailure?.failureStage, 'restart_original');
+    assert.equal(result.recoveryFailure?.reasonCode, 'PROCESS_EXIT_NONZERO');
+    assert.equal(result.recoveryFailure?.exitCode, 19);
+    assert.doesNotMatch(JSON.stringify(result), /PRIVATE_|Command failed|stdout|stderr/);
+    return true;
+  });
+  assert.equal(events.at(-1).recoveryFailure?.exitCode, 19);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(root, 'package.json'))).version, '0.1.0');
+  assert.equal(fs.readFileSync(configFile, 'utf8'), configBytes);
+  assert.equal(fs.readFileSync(path.join(home, 'Creator-MEMORY.md'), 'utf8'), 'original memory');
+  assert.ok(bins.every(file => fs.readFileSync(file, 'utf8') === 'node_modules/ziwei/scripts/ziwei-user.mjs'));
+
+  const externalConfig = '{"newConfiguration":"PRIVATE_EXTERNAL_CHANGE"';
+  let stopCalls = 0;
+  await assert.rejects(performClientUpdate({ root, directory: path.join(directory, 'maintenance-external-config'), artifactFile: archive,
+    sha256: createHash('sha256').update(fs.readFileSync(archive)).digest('hex'),
+    env: { ...process.env, ZIWEI_USER_HOME: home, ZIWEI_CONFIG: configFile }, npmCli,
+    stopClient: async () => { if (++stopCalls === 2) fs.writeFileSync(configFile, externalConfig); return { wasRunning: true }; }
+  }), error => {
+    const result = updateFailureResult(error);
+    assert.equal(result.originalRestored, false);
+    assert.equal(result.failureStage, 'restart_client');
+    assert.equal(result.exitCode, 23);
+    assert.equal(result.recoveryFailure?.failureStage, 'read_restoration_configuration');
+    assert.equal(result.recoveryFailure?.reasonCode, 'CONFIG_INVALID');
+    assert.doesNotMatch(JSON.stringify(result), /PRIVATE_|Command failed|stdout|stderr/);
+    return true;
+  });
+  assert.equal(JSON.parse(fs.readFileSync(path.join(root, 'package.json'))).version, '0.1.0');
+  assert.equal(fs.readFileSync(configFile, 'utf8'), externalConfig, 'maintenance must never restore stale connection configuration');
+  assert.equal(fs.readFileSync(path.join(home, 'Creator-MEMORY.md'), 'utf8'), 'original memory');
+  assert.ok(bins.every(file => fs.readFileSync(file, 'utf8') === 'node_modules/ziwei/scripts/ziwei-user.mjs'));
+});
+
+test('update worker reports a structured lock failure without changing an existing maintenance lock', async t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ziwei-update-worker-lock-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const home = path.join(directory, 'home');
+  const maintenance = path.join(home, 'maintenance');
+  fs.mkdirSync(maintenance, { recursive: true });
+  const lockFile = path.join(maintenance, 'operation.lock');
+  const originalLock = '{"operation":"uninstall","private":"PRIVATE_EXISTING_LOCK"}';
+  fs.writeFileSync(lockFile, originalLock);
+  const parent = await run(process.execPath, ['-e', 'process.stdout.write(String(process.pid))'], { windowsHide: true });
+  const jobFile = path.join(directory, 'job.json');
+  fs.writeFileSync(jobFile, JSON.stringify({ directory, parentPid: Number(parent.stdout), root: path.join(directory, 'untouched-installation') }));
+  await assert.rejects(run(process.execPath, [fileURLToPath(new URL('../scripts/client-update-worker.mjs', import.meta.url)), jobFile], { env: { ...process.env, ZIWEI_USER_HOME: home }, windowsHide: true, timeout: 10_000 }), error => error.code === 1);
+  const result = JSON.parse(fs.readFileSync(path.join(directory, 'result.json')));
+  assert.equal(result.state, 'failed');
+  assert.equal(result.code, 'MAINTENANCE_BUSY');
+  assert.equal(result.failureStage, 'acquire_lock');
+  assert.equal(result.reasonCode, 'MAINTENANCE_BUSY');
+  assert.equal(result.originalRestored, true);
+  const failed = fs.readFileSync(path.join(directory, 'maintenance.jsonl'), 'utf8').trim().split('\n').map(JSON.parse).find(item => item.event === 'maintenance_failed');
+  assert.equal(failed.failureStage, result.failureStage);
+  assert.equal(failed.reasonCode, result.reasonCode);
+  assert.equal(failed.originalRestored, true);
+  assert.doesNotMatch(JSON.stringify({ result, failed }), /PRIVATE_|private|stdout|stderr/);
+  assert.equal(fs.readFileSync(lockFile, 'utf8'), originalLock);
 });

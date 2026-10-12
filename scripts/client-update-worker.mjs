@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { performClientUpdate, waitForParentExit } from './client-update.mjs';
+import { performClientUpdate, waitForParentExit, updateFailureResult } from './client-update.mjs';
 
 const jobFile = path.resolve(process.argv[2]);
 const job = JSON.parse(fs.readFileSync(jobFile));
@@ -11,17 +11,22 @@ const result = value => { const staged = resultFile + '.next-' + process.pid; fs
 const lockFile = path.join(process.env.ZIWEI_USER_HOME, 'maintenance', 'operation.lock');
 const lock = JSON.stringify({ pid: process.pid, operation: 'update', jobFile });
 let ownsLock = false;
+let failureStage = 'wait_parent';
 const heartbeat = setInterval(() => log('maintenance_heartbeat'), 10_000); heartbeat.unref();
 try {
   await waitForParentExit(job.parentPid);
+  failureStage = 'acquire_lock';
   try { fs.writeFileSync(lockFile, lock, { flag: 'wx', mode: 0o600 }); ownsLock = true; }
-  catch (error) { if (error.code === 'EEXIST') throw new Error('已有客户端维护任务或待核实的维护锁；未同时更新/卸载，请查看上一任务结果。'); throw error; }
+  catch (error) { if (error.code === 'EEXIST') throw Object.assign(new Error('已有客户端维护任务或待核实的维护锁；未同时更新/卸载，请查看上一任务结果。'), { code: 'MAINTENANCE_BUSY' }); throw error; }
+  failureStage = 'validate_installation';
   log('update_started');
   result({ state: 'running', operation: 'update' });
   result(await performClientUpdate({ ...job, env: process.env, log }));
 } catch (error) {
-  log('maintenance_failed', { code: error.code || 'UPDATE_FAILED' });
-  result({ state: 'failed', operation: 'update', message: error.message });
+  const failed = updateFailureResult(error, failureStage);
+  const { message: _message, state: _state, operation: _operation, ...diagnostic } = failed;
+  log('maintenance_failed', diagnostic);
+  result(failed);
   process.exitCode = 1;
 } finally {
   clearInterval(heartbeat);

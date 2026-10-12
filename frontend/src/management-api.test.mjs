@@ -33,6 +33,12 @@ test('management reads and connection retry retain an explicit workspace while n
     await api.createEmployeeTemplateInstance('creator/id', {targetDeviceId:'computer-a',runtime:'Codex'}, 'workspace-a');
     assert.equal(requests.at(-1).url, 'https://qa.test/api/workspaces/workspace-a/employee-templates/creator%2Fid/instances');
     assert.deepEqual(JSON.parse(requests.at(-1).options.body), {targetDeviceId:'computer-a',runtime:'Codex'});
+    assert.equal(typeof api.inspectDeviceDirectory, 'function');
+    await api.inspectDeviceDirectory('computer/a', {path:'D:\\资料',createIfMissing:false}, 'workspace-a');
+    assert.equal(requests.at(-1).url,'https://qa.test/api/workspaces/workspace-a/devices/computer%2Fa/workdir/inspect');
+    assert.deepEqual(JSON.parse(requests.at(-1).options.body),{path:'D:\\资料',createIfMissing:false});
+    await api.deviceDirectoryAction('computer/a','action/a','workspace-a');
+    assert.equal(requests.at(-1).url,'https://qa.test/api/workspaces/workspace-a/devices/computer%2Fa/workdir/actions/action%2Fa');
   } finally {
     globalThis.window = saved.window; globalThis.fetch = saved.fetch;
   }

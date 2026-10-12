@@ -1,4 +1,5 @@
 import { employeeReadiness } from './management-mcp.js';
+import { defaultWorkdirPayload } from './workdir.js';
 
 function profileReady(profile) {
   return profile && typeof profile==='object' && profile.provider_configured!==false && profile.authentication_configured!==false &&
@@ -20,5 +21,5 @@ export function creatorSelection(discovery, {deviceId, runtime, profile=''}={}, 
 export function creatorInstancePayload(discovery, selection, supportedRuntimes) {
   const current=creatorSelection(discovery,selection,supportedRuntimes);
   if(!current.ready)throw new Error(current.issues.join('；'));
-  return {targetDeviceId:selection.deviceId,runtime:selection.runtime,...(current.profile?{runtimeProfile:current.profile}:{}),...(selection.model&&selection.model!=='default'?{model:selection.model}:{}),visibility:'personal'};
+  return {targetDeviceId:selection.deviceId,runtime:selection.runtime,...(current.profile?{runtimeProfile:current.profile}:{}),...(selection.model&&selection.model!=='default'?{model:selection.model}:{}),...defaultWorkdirPayload({path:selection.defaultWorkingDirectory,deviceId:selection.deviceId,workspace:discovery?.workspace,check:selection.defaultWorkingDirectoryCheck}),visibility:'personal'};
 }

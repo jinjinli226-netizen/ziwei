@@ -490,7 +490,7 @@ export function createApp(options = {}) {
   app.post('/api/daemon/heartbeat', requireDeviceCredential(repo), (req, res, next) => { const slug = String(req.body.workspace || req.body.workspace_slug || '').trim(); if (!slug) return res.status(400).json({ error: 'heartbeat 必须明确 workspace' }); try { return res.json({ ok: true, device: repo.heartbeatDevice(slug, req.body) }); } catch (error) { return next(error); } });
   app.post('/api/devices/heartbeat', requireDeviceCredential(repo), (req, res, next) => { const slug = String(req.body.workspace || req.body.workspace_slug || '').trim(); if (!slug) return res.status(400).json({ error: 'heartbeat 必须明确 workspace' }); try { return res.json({ ok: true, device: repo.heartbeatDevice(slug, req.body) }); } catch (error) { return next(error); } });
   app.get('/api/workspaces/:slug/employees', (req, res) => res.json({ employees: repo.listEmployees(req.params.slug, { actorUserId: req.auth?.user_id, actorRole: req.workspaceRole, enforceEmployeeVisibility: true }) }));
-  app.post('/api/workspaces/:slug/employees', requireRole('owner','admin','member'), (req, res) => { const input = { ...(req.body || {}), ownerUserId: req.auth?.user_id }; if (input.targetDeviceId || input.target_device_id || input.deviceId || input.device_id || input.managementMcpEnabled || input.managementMcp?.enabled) { const saved = management.createEmployee(req.params.slug, { ...input, idempotencyKey: req.get('Idempotency-Key') || input.idempotencyKey || input.idempotency_key }, employeeContext(req)); return res.status(saved.duplicate ? 200 : 201).json(saved); } return res.status(201).json(repo.createEmployee(req.params.slug, input)); });
+  app.post('/api/workspaces/:slug/employees', requireRole('owner','admin','member'), (req, res) => { const input = { ...(req.body || {}), ownerUserId: req.auth?.user_id }; if (input.targetDeviceId || input.target_device_id || input.deviceId || input.device_id || input.managementMcpEnabled || input.managementMcp?.enabled) { const saved = management.createEmployee(req.params.slug, { ...input, idempotencyKey: req.get('Idempotency-Key') || input.idempotencyKey || input.idempotency_key }, employeeContext(req)); return res.status(saved.duplicate ? 200 : 201).json(saved); } return res.status(201).json(repo.createEmployee(req.params.slug, input,employeeContext(req))); });
   const ensureEmployeeVisibleById = (req, idValue) => {
     const employee = repo.getEmployee(idValue, employeeContext(req));
     if (!employee) { const error = new Error('数字员工不存在'); error.status = 404; throw error; }
@@ -504,6 +504,11 @@ export function createApp(options = {}) {
   // Environment values are encrypted at rest and returned only as metadata or
   // a mask; custom parameters are JSON values validated by the repository.
   const employeeContext = req => ({ actorUserId: req.auth?.user_id, actorRole: req.workspaceRole, enforceEmployeeVisibility: true });
+  app.post('/api/workspaces/:slug/devices/:deviceId/workdir/inspect',requireRole('owner','admin','member'),(req,res)=>res.status(202).json({action:management.inspectWorkdir(req.params.slug,req.params.deviceId,req.body || {},employeeContext(req))}));
+  app.get('/api/workspaces/:slug/devices/:deviceId/workdir/actions/:actionId',requireRole('owner','admin','member'),(req,res)=>{
+    const action=repo.getDeviceDirectoryAction(req.params.slug,req.params.deviceId,req.params.actionId,employeeContext(req));
+    if(!action) return res.status(404).json({error:'目录检查回执不存在'});res.json({action});
+  });
   app.get('/api/workspaces/:slug/employee-templates', requireRole('owner','admin','member'), (req, res) => res.json(employeeTemplates.list(req.params.slug, employeeContext(req))));
   app.post('/api/workspaces/:slug/employee-templates/:id/instances', requireRole('owner','admin','member'), (req, res) => {
     const saved=employeeTemplates.install(req.params.slug, req.params.id, req.body || {}, employeeContext(req));
@@ -698,6 +703,13 @@ export function createApp(options = {}) {
   app.get('/mcp/v1/workspaces/:slug/employees/:id/mcp/status', mcpGuard, (req, res) => res.json(management.employeeStatus(req.params.slug, req.params.id, mcpContext(req))));
   app.get('/mcp/v1/workspaces/:slug/tasks/:id', mcpGuard, (req, res) => res.json(management.task(req.params.slug, req.params.id, mcpContext(req))));
   app.get('/mcp/v1/workspaces/:slug/actions/:id', mcpGuard, (req, res) => res.json(management.action(req.params.slug, req.params.id, mcpContext(req))));
+  app.post('/mcp/v1/workspaces/:slug/devices/:deviceId/workdir/inspect',mcpGuard,(req,res)=>{
+    const action=management.inspectWorkdir(req.params.slug,req.params.deviceId,req.body || {},mcpContext(req));res.status(action.duplicate ? 200 : 202).json(action);
+  });
+  app.post('/mcp/v1/workspaces/:slug/conversations',mcpGuard,(req,res)=>{
+    const conversation=management.createConversation(req.params.slug,{...(req.body || {}),idempotencyKey:req.get('Idempotency-Key') || req.body?.idempotencyKey || req.body?.idempotency_key},mcpContext(req));
+    res.status(conversation.duplicate ? 200 : 201).json(conversation);
+  });
   app.post('/mcp/v1/workspaces/:slug/hermes/profiles/requests', mcpGuard, (req, res) => { const action = management.createProfile(req.params.slug, { ...(req.body || {}), idempotencyKey: req.get('Idempotency-Key') || req.body?.idempotencyKey || req.body?.idempotency_key }, mcpContext(req)); res.status(action.duplicate ? 200 : 202).json(action); });
   app.get('/mcp/v1/workspaces/:slug/employees', mcpGuard, (req, res) => res.json({ employees: repo.listEmployees(req.params.slug, mcpContext(req)) }));
   app.post('/mcp/v1/workspaces/:slug/employees', mcpGuard, (req, res) => { const saved = management.createEmployee(req.params.slug, { ...(req.body || {}), idempotencyKey: req.get('Idempotency-Key') || req.body?.idempotencyKey || req.body?.idempotency_key }, mcpContext(req)); res.status(saved.duplicate ? 200 : 201).json(saved); });

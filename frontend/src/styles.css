@@ -265,6 +265,14 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .conversation-directory-option:hover { border-color:var(--ziwei-accent-line); color:var(--ziwei-accent); background:var(--ziwei-accent-soft); }
 .conversation-directory-option span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .conversation-directory-picker .form-actions { min-width:0; max-width:100%; flex-wrap:wrap; }
+.employee-default-workdir { display:grid; gap:9px; min-width:0; padding:14px; border:1px solid var(--ziwei-border); border-radius:10px; background:var(--ziwei-bg); }
+.employee-default-workdir .workdir-label { color:var(--ziwei-text); font-weight:600; font-size:13px; }
+.employee-default-workdir .employee-field-hint { margin:0; }
+.employee-default-workdir .conversation-directory-picker-input { display:flex; flex-wrap:wrap; gap:8px; min-width:0; }
+.workdir-path-input { min-width:0; flex:1 1 220px; width:100%; padding:9px 11px; border:1px solid var(--ziwei-border); border-radius:7px; background:#fff; color:var(--ziwei-text); font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace; }
+.workdir-full-path { margin:0; min-width:0; overflow-wrap:anywhere; color:var(--ziwei-muted); font:11px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace; }
+.employee-default-workdir .workdir-check-required { color:#956221; }
+@media(max-width:600px) { .employee-default-workdir { padding:11px; } .workdir-path-input { flex-basis:100%; } }
 .conversation-attachment-chip { display:inline-flex; align-items:center; gap:4px; max-width:180px; padding:4px 8px; border-radius:999px; background:#eef4fb; color:#54718f; font-size:11px; }
 .conversation-attachment-chip button { border:0; background:transparent; color:inherit; cursor:pointer; }
 @media (max-width:1100px) { .inbox-layout { grid-template-columns:1fr 1fr; } .inbox-thread { grid-column:1 / -1; } }

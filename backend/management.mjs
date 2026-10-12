@@ -137,7 +137,7 @@ export function createManagementService(repo) {
         const skills = repo.listSkills(slug);
         if (Array.isArray(body.skills)) for (const skillId of body.skills) if (!skills.some(skill => skill.id === skillId || skill.name === skillId)) fail(`当前工作区没有技能 ${String(skillId)}，请先发现真实技能或导入后重试。`, 'SKILL_NOT_FOUND');
         const ownerUserId = ['owner', 'admin'].includes(trustedContext(context).actorRole) ? body.ownerUserId ?? body.owner_user_id ?? context.actorUserId : context.actorUserId;
-        return repo.createEmployee(slug, { ...body, ...selection, ownerUserId, owner_user_id: ownerUserId, ...trustedContext(context) });
+        return repo.createEmployee(slug, { ...body, ...selection, ownerUserId, owner_user_id: ownerUserId, ...trustedContext(context) },trustedContext(context));
       }, id => employee(slug, id, context));
     },
     updateEmployee(slug, id, input, context = {}) {
@@ -147,7 +147,19 @@ export function createManagementService(repo) {
       const profileSpecified = ['runtimeProfile','runtime_profile','profile','hermesProfile','hermes_profile'].some(key => Object.hasOwn(input, key));
       const merged = { ...previous, ...input, runtime: input.runtime ?? previous.runtime, targetDeviceId: targetSpecified ? deviceInput(input) : previous.target_device_id, runtimeProfile: profileSpecified ? profileInput(input) : previous.runtime_profile, managementMcpEnabled: input.managementMcpEnabled ?? input.management_mcp_enabled ?? input.managementMcp?.enabled ?? previous.management_mcp_enabled };
       if (configChanged && merged.targetDeviceId) validateSelection(slug, merged, { context });
-      return repo.updateEmployee(id, input);
+      return repo.updateEmployee(id, input,trustedContext(context));
+    },
+    inspectWorkdir(slug,deviceId,input={},context={}) {
+      return repo.createDeviceDirectoryAction(slug,deviceId,input,trustedContext(context));
+    },
+    createConversation(slug,input={},context={}) {
+      if(!(input.employeeId || input.employee_id)) fail('必须指定当前工作区的员工 employeeId。','EMPLOYEE_REQUIRED');
+      const selected=employee(slug,input.employeeId || input.employee_id,context);
+      const targetDeviceId=String(input.deviceId ?? input.device_id ?? input.targetDeviceId ?? input.target_device_id ?? selected.target_device_id ?? '').trim() || null;
+      const ownLegacyDevice=Boolean(context.deviceScope && context.deviceScope===targetDeviceId && context.deviceCredentialDeviceId===targetDeviceId);
+      const create=body=>repo.createConversation(slug,{...body,...trustedContext(context),enforceDeviceOwnership:!ownLegacyDevice});
+      if(input.idempotencyKey===undefined && input.idempotency_key===undefined) return create(input);
+      return idempotent(slug,`conversation:${context.actorUserId || 'legacy'}`,input,create,id=>repo.getConversation(id,trustedContext(context)));
     },
     createTask(slug, input, context = {}) {
       return idempotent(slug, 'task', input, body => {

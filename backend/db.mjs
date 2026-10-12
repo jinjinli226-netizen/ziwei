@@ -167,6 +167,7 @@ export function openDatabase({ memory = false, filename = path.join(ROOT, 'data'
       runtime TEXT NOT NULL, model_id TEXT, description TEXT NOT NULL DEFAULT '', visibility TEXT NOT NULL DEFAULT 'workspace',
       skills_json TEXT NOT NULL DEFAULT '[]', instructions TEXT NOT NULL DEFAULT '', runtime_profile TEXT, avatar TEXT, status TEXT NOT NULL DEFAULT 'draft',
       management_mcp_enabled INTEGER NOT NULL DEFAULT 1,
+      default_working_directory TEXT, default_working_directory_device_id TEXT,
       created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
       FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
     );
@@ -291,6 +292,8 @@ export function openDatabase({ memory = false, filename = path.join(ROOT, 'data'
     "ALTER TABLE device_pairing_codes ADD COLUMN device_name TEXT",
     "ALTER TABLE device_pairing_codes ADD COLUMN device_os TEXT",
     "ALTER TABLE employees ADD COLUMN owner_user_id TEXT",
+    "ALTER TABLE employees ADD COLUMN default_working_directory TEXT",
+    "ALTER TABLE employees ADD COLUMN default_working_directory_device_id TEXT",
     "ALTER TABLE employees ADD COLUMN model_id TEXT",
     "ALTER TABLE employees ADD COLUMN description TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE employees ADD COLUMN visibility TEXT NOT NULL DEFAULT 'workspace'",

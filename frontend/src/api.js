@@ -35,6 +35,7 @@ async function request(path, options = {}) {
   if (!response.ok) {
     const error = new Error(data.error || (response.status === 413 ? '请求内容超过服务器限制，请选择更小的附件后重试' : `请求失败 ${response.status}`));
     error.status = response.status;
+    error.code = data.code;
     throw error;
   }
   return data;
@@ -111,8 +112,10 @@ export const api = {
   enableDevice: id => request(`/api/devices/${encodeURIComponent(id)}/enable`, { method:'POST', body:'{}' }),
   deleteDevice: id => request(`/api/workspaces/${encodeURIComponent(workspaceSlug())}/devices/${encodeURIComponent(id)}`, { method:'DELETE' }),
   employees: () => request(`/api/workspaces/${encodeURIComponent(workspaceSlug())}/employees`),
-  createEmployee: body => request(`/api/workspaces/${encodeURIComponent(workspaceSlug())}/employees`, { method: 'POST', body: JSON.stringify(body) }),
-  updateEmployee: (id, body) => request(`/api/workspaces/${encodeURIComponent(workspaceSlug())}/employees/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  createEmployee: (body, slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/employees`, { method: 'POST', body: JSON.stringify(body) }),
+  updateEmployee: (id, body, slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/employees/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  inspectDeviceDirectory: (deviceId, body = {}, slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/devices/${encodeURIComponent(deviceId)}/workdir/inspect`, { method:'POST', body:JSON.stringify(body) }),
+  deviceDirectoryAction: (deviceId, actionId, slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/devices/${encodeURIComponent(deviceId)}/workdir/actions/${encodeURIComponent(actionId)}`),
   employeeEnvironment: id => request(`/api/workspaces/${encodeURIComponent(workspaceSlug())}/employees/${encodeURIComponent(id)}/environment`),
   saveEmployeeEnvironment: (id, body) => request(`/api/workspaces/${encodeURIComponent(workspaceSlug())}/employees/${encodeURIComponent(id)}/environment`, { method:'POST', body:JSON.stringify(body) }),
   updateEmployeeEnvironment: (id, key, body) => request(`/api/workspaces/${encodeURIComponent(workspaceSlug())}/employees/${encodeURIComponent(id)}/environment/${encodeURIComponent(key)}`, { method:'PATCH', body:JSON.stringify(body) }),

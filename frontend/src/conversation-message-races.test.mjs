@@ -2,8 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {createConversationComposerStore} from './conversation-compose.js';
+import {conversationSettingsSnapshot} from './workdir.js';
 const app=await readFile(new URL('./App.vue',import.meta.url),'utf8');
-function actual(name,bindings){const start=app.indexOf(`async function ${name}(`),end=app.indexOf('\n}',start);assert.ok(start>=0);return new Function(...Object.keys(bindings),`let conversationOpenGeneration=0;return (${app.slice(start,end+2)});`)(...Object.values(bindings));}
+function actual(name,bindings){const start=app.indexOf(`async function ${name}(`),end=app.indexOf('\n}',start);assert.ok(start>=0);const context={conversationSettingsSnapshot,devices:{value:[]},...bindings};return new Function(...Object.keys(context),`let conversationOpenGeneration=0;return (${app.slice(start,end+2)});`)(...Object.values(context));}
 
 test('actual retry edit cannot overwrite an attachment read already in progress',()=>{
   const composer=createConversationComposerStore(),key='qa\0a',notices=[];
@@ -15,7 +16,7 @@ test('actual retry edit cannot overwrite an attachment read already in progress'
 });
 
 test('actual UI submit retains new conversation and new draft when an earlier response finishes',async()=>{
-  const composer=createConversationComposerStore({makeId:()=> 'one'}),selected={value:{id:'a',employee_id:'employee',messages:[]}},notifications=[];
+  const composer=createConversationComposerStore({makeId:()=> 'one'}),selected={value:{id:'a',employee_id:'employee',device_id:'qa-device',messages:[]}},notifications=[];
   composer.updateDraft('qa\0a','A content');let accept,requests=0,refreshes=0;
   const deferred=new Promise(resolve=>accept=resolve);
   const key=()=>`qa\0${selected.value.id}`;

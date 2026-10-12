@@ -11,43 +11,90 @@ const run = promisify(execFile);
 export const OFFICIAL_UPDATE_SOURCE = 'https://qzelynth.top/downloads/cli/ziwei-latest.tgz';
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const pause = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
+const failure = (code, message, details = {}) => Object.assign(new Error(message), { code, ...details });
+const UPDATE_STAGES = new Set(['validate_installation', 'resolve_npm', 'validate_paths', 'verify_archive', 'read_release_manifest', 'download_package', 'stage_install', 'validate_candidate', 'prepare_candidate', 'stop_client', 'verify_original', 'backup_original', 'activate_candidate', 'verify_installation', 'restart_client', 'verify_configuration', 'stop_failed_candidate', 'restore_original', 'restart_original', 'read_restoration_configuration', 'wait_parent', 'acquire_lock', 'unknown']);
+const SAFE_ERROR_CODES = new Set(['EBUSY', 'EPERM', 'EACCES', 'ENOENT', 'ENOTDIR', 'ENOSPC', 'EIO', 'EROFS', 'EEXIST', 'ETIMEDOUT', 'ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND', 'EAI_AGAIN', 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER', 'ERR_MODULE_NOT_FOUND', 'MODULE_NOT_FOUND', 'ERR_INVALID_PACKAGE_CONFIG', 'WINDOWS_ONLY', 'USERDATA_IN_PACKAGE', 'UNSAFE_PATH', 'CONFIG_UNREADABLE', 'CONFIG_INVALID', 'PID_MISMATCH', 'PROCESS_IDENTITY_MISMATCH', 'PROCESS_CHANGED', 'NON_LOCAL_CONTROL', 'INVALID_HEALTH_PORT', 'HEALTH_UNREACHABLE', 'FOREIGN_LISTENER', 'CLIENT_IDENTITY_MISMATCH', 'LIFECYCLE_IDENTITY_MISMATCH', 'LIFECYCLE_DOWNGRADE', 'INVALID_TIMEOUT', 'BUILD_INVALID', 'HEALTH_MISSING', 'PROCESS_MISSING', 'CONTROL_AUTH_MISSING', 'CONFIG_CHANGED', 'CONTROL_REJECTED', 'CLIENT_BUSY', 'CLIENT_RESTARTED', 'STOP_TIMEOUT', 'STOP_FAILED', 'NOT_GLOBAL_INSTALL', 'PACKAGE_MISMATCH', 'BIN_MISMATCH', 'NPM_UNAVAILABLE', 'MAINTENANCE_BUSY', 'INSTALL_CHANGED', 'INVALID_PARENT', 'PARENT_STILL_RUNNING', 'UPDATE_SOURCE_INVALID', 'UPDATE_HASH_INVALID', 'UPDATE_HTTP_FAILED', 'UPDATE_TOO_LARGE', 'UPDATE_MANIFEST_INVALID', 'UPDATE_BUILD_MISMATCH']);
+const SAFE_SIGNALS = new Set(['SIGTERM', 'SIGKILL', 'SIGABRT', 'SIGINT', 'SIGBREAK']);
+const FAILURE_REASONS = {
+  EBUSY: '文件或安装目录被占用', EPERM: '操作权限不足或文件受保护', EACCES: '访问权限不足', ENOENT: '所需文件或路径不存在', ENOTDIR: '所需路径不是目录', ENOSPC: '磁盘空间不足', EIO: '文件读写失败', EROFS: '文件系统只读', EEXIST: '目标文件已存在', ETIMEDOUT: '操作超时', ECONNREFUSED: '连接被拒绝', ECONNRESET: '连接被重置', ENOTFOUND: '服务器地址解析失败', EAI_AGAIN: '服务器地址解析暂时失败', ERR_CHILD_PROCESS_STDIO_MAXBUFFER: '子进程输出超过维护限制',
+  PROCESS_EXIT_NONZERO: '子进程以非零退出码退出', PROCESS_TERMINATED: '子进程被终止', OPERATION_TIMEOUT: '维护请求超时', OPERATION_ABORTED: '维护请求被取消', MAINTENANCE_BUSY: '已有维护任务或待核实的维护锁', CLIENT_BUSY: '客户端仍有执行或请求未完成', CONFIG_CHANGED: '连接配置在维护期间发生变化', UPDATE_HASH_INVALID: '更新包 SHA-256 校验失败', UPDATE_HTTP_FAILED: '官方更新请求失败', UPDATE_TOO_LARGE: '更新包超过大小限制', UPDATE_SOURCE_INVALID: '更新地址未通过安全校验', UPDATE_MANIFEST_INVALID: '官方发布清单与更新地址不匹配', UPDATE_BUILD_MISMATCH: '实际安装与已验证候选的 build 不一致', NPM_UNAVAILABLE: '当前 Node 对应的 npm CLI 无法核验', INVALID_PARENT: '发起更新的父进程身份无效', PARENT_STILL_RUNNING: '发起更新的 CLI 未在时限内退出'
+};
+
+// Never serialize arbitrary Error.message, command, stdout, stderr, stack or config.
+// The cause chain is bounded; only public codes and small numeric facts may leave it.
+export function describeUpdateFailure(error, stage = 'unknown') {
+  const failureStage = UPDATE_STAGES.has(stage) ? stage : 'unknown';
+  let reasonCode = null, exitCode, signal, httpStatus;
+  const seen = new Set();
+  for (let current = error, depth = 0; current && typeof current === 'object' && depth < 4 && !seen.has(current); current = current.cause, depth++) {
+    seen.add(current);
+    if (!reasonCode && SAFE_ERROR_CODES.has(current.code)) reasonCode = current.code;
+    if (!reasonCode && ['TimeoutError', 'AbortError'].includes(current.name)) reasonCode = current.name === 'TimeoutError' ? 'OPERATION_TIMEOUT' : 'OPERATION_ABORTED';
+    if (exitCode === undefined && typeof current.cmd === 'string' && Number.isInteger(current.code) && current.code !== 0 && Math.abs(current.code) <= 2147483647) exitCode = current.code;
+    if (!signal && SAFE_SIGNALS.has(current.signal)) signal = current.signal;
+    if (httpStatus === undefined && current.code === 'UPDATE_HTTP_FAILED' && Number.isInteger(current.httpStatus) && current.httpStatus >= 100 && current.httpStatus <= 599) httpStatus = current.httpStatus;
+  }
+  reasonCode ||= exitCode !== undefined ? 'PROCESS_EXIT_NONZERO' : signal ? 'PROCESS_TERMINATED' : failureStage.toUpperCase() + '_FAILED';
+  const reason = FAILURE_REASONS[reasonCode] || (SAFE_ERROR_CODES.has(reasonCode) ? '客户端安全核验或维护操作失败' : '此维护阶段未完成；未记录未经核验的原始输出');
+  return { failureStage, reasonCode, reason, ...(exitCode !== undefined ? { exitCode } : {}), ...(signal ? { signal } : {}), ...(httpStatus !== undefined ? { httpStatus } : {}) };
+}
+
+function diagnosticMessage(diagnostic) {
+  return `失败阶段：${diagnostic.failureStage}；原因：${diagnostic.reason}（${diagnostic.reasonCode}${diagnostic.exitCode !== undefined ? `，退出码 ${diagnostic.exitCode}` : ''}${diagnostic.httpStatus !== undefined ? `，HTTP ${diagnostic.httpStatus}` : ''}）。`;
+}
+
+class ClientUpdateFailure extends Error {
+  constructor(error, stage, originalRestored, backup, recoveryFailure = null) {
+    const diagnostic = describeUpdateFailure(error, stage);
+    const busy = ['EBUSY', 'EPERM', 'EACCES'].includes(error?.code);
+    const recovery = originalRestored ? (busy ? 'Windows 安装目录仍被其他进程或终端占用；原版本已保留或恢复，连接配置未清空。请退出该目录/解除实际占用后重试。' : '更新失败，原版本已保留或恢复；连接配置未清空。') : `更新失败且原版本恢复未完成；原程序备份保留于 ${backup}，请查看维护日志，不要重新配对。`;
+    super(recovery + diagnosticMessage(diagnostic) + (recoveryFailure ? '恢复失败：' + diagnosticMessage(recoveryFailure) : ''), { cause: error });
+    Object.assign(this, diagnostic, { code: busy ? 'PROGRAM_DIRECTORY_BUSY' : 'UPDATE_FAILED', originalRestored, ...(recoveryFailure ? { recoveryFailure } : {}) });
+  }
+}
+
+export function updateFailureResult(error, stage = 'unknown') {
+  const captured = error instanceof ClientUpdateFailure;
+  const diagnostic = describeUpdateFailure(error, captured ? error.failureStage : stage);
+  return { state: 'failed', operation: 'update', code: captured ? error.code : SAFE_ERROR_CODES.has(error?.code) ? error.code : 'UPDATE_FAILED', ...diagnostic, originalRestored: captured ? error.originalRestored : true, ...(captured && error.recoveryFailure ? { recoveryFailure: error.recoveryFailure } : {}), message: captured ? error.message : '更新未完成；原安装未更换。' + diagnosticMessage(diagnostic) };
+}
 
 export function validateUpdateSource(value, { allowLoopback = false } = {}) {
   let url;
-  try { url = new URL(String(value)); } catch { throw new Error('更新地址必须是纯 HTTPS URL，不能包含 Markdown 链接格式'); }
-  if ((url.protocol !== 'https:' && !(allowLoopback && url.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname))) || url.username || url.password || url.search || url.hash) throw new Error('更新地址必须使用 HTTPS，不接受凭据、查询串或片段');
+  try { url = new URL(String(value)); } catch { throw failure('UPDATE_SOURCE_INVALID', '更新地址必须是纯 HTTPS URL，不能包含 Markdown 链接格式'); }
+  if ((url.protocol !== 'https:' && !(allowLoopback && url.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname))) || url.username || url.password || url.search || url.hash) throw failure('UPDATE_SOURCE_INVALID', '更新地址必须使用 HTTPS，不接受凭据、查询串或片段');
   return url.href;
 }
 
 export async function downloadVerifiedPackage({ url, sha256, destination, allowLoopback = false }) {
   const source = validateUpdateSource(url, { allowLoopback });
-  if (!/^[a-f0-9]{64}$/.test(sha256 || '')) throw new Error('更新包缺少有效 SHA-256');
+  if (!/^[a-f0-9]{64}$/.test(sha256 || '')) throw failure('UPDATE_HASH_INVALID', '更新包缺少有效 SHA-256');
   const response = await fetch(source, { redirect: 'error', signal: AbortSignal.timeout(120_000) });
-  if (!response.ok) throw new Error(`更新包下载失败（HTTP ${response.status}）`);
-  if (Number(response.headers.get('content-length')) > 50 * 1024 * 1024) throw new Error('更新包超过大小限制');
+  if (!response.ok) throw failure('UPDATE_HTTP_FAILED', `更新包下载失败（HTTP ${response.status}）`, { httpStatus: response.status });
+  if (Number(response.headers.get('content-length')) > 50 * 1024 * 1024) throw failure('UPDATE_TOO_LARGE', '更新包超过大小限制');
   const chunks = []; let size = 0;
-  for await (const chunk of response.body) { size += chunk.length; if (size > 50 * 1024 * 1024) throw new Error('更新包超过大小限制'); chunks.push(chunk); }
+  for await (const chunk of response.body) { size += chunk.length; if (size > 50 * 1024 * 1024) throw failure('UPDATE_TOO_LARGE', '更新包超过大小限制'); chunks.push(chunk); }
   const bytes = Buffer.concat(chunks);
-  if (hash(bytes) !== sha256) throw new Error('更新包 SHA-256 校验失败，原版本未修改');
+  if (hash(bytes) !== sha256) throw failure('UPDATE_HASH_INVALID', '更新包 SHA-256 校验失败，原版本未修改');
   fs.writeFileSync(destination, bytes, { flag: 'wx', mode: 0o600 });
   return { sha256, bytes: size };
 }
 
 export function validateCandidatePackage(root) {
   const meta = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
-  if (meta.name !== 'ziwei' || JSON.stringify(meta.bin) !== JSON.stringify({ ziwei_user: 'scripts/ziwei-user.mjs' }) || !fs.statSync(path.join(root, 'scripts/ziwei-user.mjs')).isFile()) throw new Error('更新目标必须是紫薇 ziwei 包及原 ziwei_user 入口');
+  if (meta.name !== 'ziwei' || JSON.stringify(meta.bin) !== JSON.stringify({ ziwei_user: 'scripts/ziwei-user.mjs' }) || !fs.statSync(path.join(root, 'scripts/ziwei-user.mjs')).isFile()) throw failure('PACKAGE_MISMATCH', '更新目标必须是紫薇 ziwei 包及原 ziwei_user 入口');
   return meta;
 }
 
 export function resolveInstalledPackage(input, platform = process.platform) {
   const root = path.resolve(input);
   const actualRoot = fs.realpathSync(root);
-  if ((platform === 'win32' ? actualRoot.toLowerCase() !== root.toLowerCase() : actualRoot !== root) || fs.lstatSync(root).isSymbolicLink()) throw new Error('安装目录不能是链接；未修改其他安装');
+  if ((platform === 'win32' ? actualRoot.toLowerCase() !== root.toLowerCase() : actualRoot !== root) || fs.lstatSync(root).isSymbolicLink()) throw failure('UNSAFE_PATH', '安装目录不能是链接；未修改其他安装');
   validateCandidatePackage(root);
   const modules = path.dirname(root);
-  if (path.basename(root) !== 'ziwei' || path.basename(modules) !== 'node_modules') throw new Error('update/uninstall 只支持实际全局安装，源码工作树不属于卸载范围');
+  if (path.basename(root) !== 'ziwei' || path.basename(modules) !== 'node_modules') throw failure('NOT_GLOBAL_INSTALL', 'update/uninstall 只支持实际全局安装，源码工作树不属于卸载范围');
   let prefix = path.dirname(modules);
-  if (platform !== 'win32') { if (path.basename(prefix) !== 'lib') throw new Error('无法核实全局 npm 安装布局'); prefix = path.dirname(prefix); }
+  if (platform !== 'win32') { if (path.basename(prefix) !== 'lib') throw failure('NOT_GLOBAL_INSTALL', '无法核实全局 npm 安装布局'); prefix = path.dirname(prefix); }
   return { root, prefix, modules, binDirectory: platform === 'win32' ? prefix : path.join(prefix, 'bin') };
 }
 
@@ -56,60 +103,81 @@ export function resolveNpmCli({ env = process.env, node = process.execPath } = {
   for (const candidate of paths) {
     try { const real = fs.realpathSync(candidate); if (path.basename(real) === 'npm-cli.js' && JSON.parse(fs.readFileSync(path.resolve(real, '../../package.json'))).name === 'npm') return real; } catch {}
   }
-  throw new Error('未找到当前 Node 对应的 npm CLI；原安装未修改，请在正常 Node/npm 终端重试');
+  throw failure('NPM_UNAVAILABLE', '未找到当前 Node 对应的 npm CLI；原安装未修改，请在正常 Node/npm 终端重试');
 }
 
 function assertOutside(file, root) {
   const relative = path.relative(root, path.resolve(file));
-  if (relative === '' || (!relative.startsWith('..' + path.sep) && relative !== '..' && !path.isAbsolute(relative))) throw new Error('用户配置与维护目录必须位于客户端程序目录之外，未移动或删除用户数据');
+  if (relative === '' || (!relative.startsWith('..' + path.sep) && relative !== '..' && !path.isAbsolute(relative))) throw failure('USERDATA_IN_PACKAGE', '用户配置与维护目录必须位于客户端程序目录之外，未移动或删除用户数据');
 }
 
 function noLinks(file) {
   for (let current = path.resolve(file); ; current = path.dirname(current)) {
     let stat; try { stat = fs.lstatSync(current); } catch (error) { if (error.code !== 'ENOENT') throw error; }
-    if (stat?.isSymbolicLink()) throw new Error('维护路径包含链接，未修改客户端或用户数据');
+    if (stat?.isSymbolicLink()) throw failure('UNSAFE_PATH', '维护路径包含链接，未修改客户端或用户数据');
     if (current === path.dirname(current)) break;
   }
 }
 
 function copyPackage(source, destination) {
-  function inspect(directory) { for (const entry of fs.readdirSync(directory, { withFileTypes: true })) { const file = path.join(directory, entry.name); if (entry.isSymbolicLink()) throw new Error('客户端安装包含链接，未复制或更换程序目录'); if (entry.isDirectory()) inspect(file); } }
+  function inspect(directory) { for (const entry of fs.readdirSync(directory, { withFileTypes: true })) { const file = path.join(directory, entry.name); if (entry.isSymbolicLink()) throw failure('UNSAFE_PATH', '客户端安装包含链接，未复制或更换程序目录'); if (entry.isDirectory()) inspect(file); } }
   inspect(source); fs.cpSync(source, destination, { recursive: true, errorOnExist: true, force: false });
 }
 
 function configurationSnapshot(file) { return fs.existsSync(file) ? hash(fs.readFileSync(file)) : null; }
-function assertConfiguration(file, before) { if (configurationSnapshot(file) !== before) throw new Error('维护期间连接配置发生变化；未覆盖用户的新配置'); }
+function assertConfiguration(file, before) { if (configurationSnapshot(file) !== before) throw failure('CONFIG_CHANGED', '维护期间连接配置发生变化；未覆盖用户的新配置'); }
 
-export async function performClientUpdate({ root, env = process.env, directory, artifactFile, sha256, source = OFFICIAL_UPDATE_SOURCE, npmCli = resolveNpmCli({ env }), stopClient, log = () => {} } = {}) {
-  if (process.platform !== 'win32') throw new Error('本轮 update 仅支持 Windows；未修改此平台客户端');
+export async function performClientUpdate(options = {}) {
+  const progress = { stage: 'validate_installation' };
+  try { return await performClientUpdateInternal(options, progress); }
+  catch (error) {
+    if (error instanceof ClientUpdateFailure) throw error;
+    const originalRestored = !progress.originalTouched;
+    const captured = new ClientUpdateFailure(error, progress.stage, originalRestored, progress.backup || null);
+    (options.log || (() => {}))('update_failed', { ...describeUpdateFailure(captured, captured.failureStage), code: captured.code, originalRestored, backup: progress.backup || null });
+    throw captured;
+  }
+}
+
+async function performClientUpdateInternal({ root, env = process.env, directory, artifactFile, sha256, source = OFFICIAL_UPDATE_SOURCE, npmCli, stopClient, log = () => {} }, progress) {
+  if (process.platform !== 'win32') throw failure('WINDOWS_ONLY', '本轮 update 仅支持 Windows；未修改此平台客户端');
   const installation = resolveInstalledPackage(root);
   const lifecycle = await import('./client-lifecycle.mjs');
   const originalLayout = lifecycle.validateInstalledClientLayout({ root, env });
+  progress.stage = 'resolve_npm';
+  npmCli ||= resolveNpmCli({ env });
+  progress.stage = 'validate_paths';
   directory = path.resolve(directory); assertOutside(directory, root); noLinks(directory);
   const configFile = resolveConfigPath({ root, env }); assertOutside(configFile, root); noLinks(configFile);
   const configBefore = configurationSnapshot(configFile);
   const userHome = defaultUserDir({ env }); assertOutside(userHome, root); noLinks(userHome);
   fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
   const archive = path.join(directory, 'verified-update.tgz');
-  if (artifactFile) { const bytes = fs.readFileSync(path.resolve(artifactFile)); if (!/^[a-f0-9]{64}$/.test(sha256 || '') || hash(bytes) !== sha256) throw new Error('本地更新包 SHA-256 校验失败'); fs.writeFileSync(archive, bytes, { flag: 'wx', mode: 0o600 }); }
+  progress.stage = 'verify_archive';
+  if (artifactFile) { const bytes = fs.readFileSync(path.resolve(artifactFile)); if (!/^[a-f0-9]{64}$/.test(sha256 || '') || hash(bytes) !== sha256) throw failure('UPDATE_HASH_INVALID', '本地更新包 SHA-256 校验失败'); fs.writeFileSync(archive, bytes, { flag: 'wx', mode: 0o600 }); }
   else {
+    progress.stage = 'read_release_manifest';
     source = validateUpdateSource(source);
     const metadataUrl = new URL('release.json', source).href;
     const response = await fetch(metadataUrl, { redirect: 'error', signal: AbortSignal.timeout(15_000) });
-    if (!response.ok) throw new Error(`官方发布清单读取失败（HTTP ${response.status}）`);
+    if (!response.ok) throw failure('UPDATE_HTTP_FAILED', '官方发布清单读取失败', { httpStatus: response.status });
     const metadata = await response.json();
-    if (metadata.url !== source || !/^[a-f0-9]{64}$/.test(metadata.sha256 || '')) throw new Error('官方发布清单与安装地址不一致');
+    if (metadata.url !== source || !/^[a-f0-9]{64}$/.test(metadata.sha256 || '')) throw failure('UPDATE_MANIFEST_INVALID', '官方发布清单与安装地址不一致');
     sha256 = metadata.sha256;
+    progress.stage = 'download_package';
     await downloadVerifiedPackage({ url: source, sha256, destination: archive });
   }
   // Install and validate the complete dependency tree before touching the running client.
   const stage = path.join(directory, 'stage-prefix');
   log('update_staging', { sha256 });
+  progress.stage = 'stage_install';
   await run(process.execPath, [npmCli, 'install', '--global', '--prefix', stage, archive, '--ignore-scripts', '--no-audit', '--no-fund'], { env, cwd: directory, timeout: 180_000, windowsHide: true, maxBuffer: 2 * 1024 * 1024 });
   const stagedRoot = path.join(stage, ...(process.platform === 'win32' ? [] : ['lib']), 'node_modules', 'ziwei');
+  progress.stage = 'validate_candidate';
   validateCandidatePackage(stagedRoot);
   await run(process.execPath, [path.join(stagedRoot, 'scripts/ziwei-user.mjs'), 'version'], { env, cwd: directory, timeout: 15_000, windowsHide: true });
   const newBuild = clientBuildIdentity(stagedRoot), oldBuild = clientBuildIdentity(root);
+  progress.stage = 'prepare_candidate';
   const operationId = randomUUID();
   const candidate = path.join(installation.modules, `.ziwei-ready-${operationId}`);
   const backup = path.join(installation.modules, `.ziwei-backup-${operationId}`);
@@ -119,41 +187,55 @@ export async function performClientUpdate({ root, env = process.env, directory, 
   const stop = stopClient || lifecycle.stopClient;
   const start = async () => run(process.execPath, [path.join(root, 'scripts/start-ziwei-user.mjs')], { env, cwd: userHome, timeout: 30_000, windowsHide: true });
   try {
+    progress.stage = 'stop_client';
     stopped = await stop({ root, env });
+    progress.stage = 'verify_original';
     assertConfiguration(configFile, configBefore);
-    if (clientBuildIdentity(root) !== oldBuild) throw new Error('原程序在准备期间已变化，未覆盖另一维护任务的安装');
+    if (clientBuildIdentity(root) !== oldBuild) throw failure('INSTALL_CHANGED', '原程序在准备期间已变化，未覆盖另一维护任务的安装');
     const currentLayout = lifecycle.validateInstalledClientLayout({ root, env });
-    if (currentLayout.binHashes.some((item, i) => item.hash !== originalLayout.binHashes[i].hash)) throw new Error('原 npm 入口在维护期间已变化，未覆盖或修改其他程序入口');
+    if (currentLayout.binHashes.some((item, i) => item.hash !== originalLayout.binHashes[i].hash)) throw failure('BIN_MISMATCH', '原 npm 入口在维护期间已变化，未覆盖或修改其他程序入口');
     // Both renames stay in the original node_modules directory. npm's original bin shims
     // continue pointing to the same ziwei_user entry; no global prefix is rewritten.
-    fs.renameSync(root, backup); moved = true;
+    progress.stage = 'backup_original';
+    fs.renameSync(root, backup); moved = true; progress.originalTouched = true; progress.backup = backup;
+    progress.stage = 'activate_candidate';
     fs.renameSync(candidate, root); installed = true;
+    progress.stage = 'verify_installation';
     validateCandidatePackage(root);
-    if (clientBuildIdentity(root) !== newBuild) throw new Error('实际安装 build 与已验证候选不一致');
+    if (clientBuildIdentity(root) !== newBuild) throw failure('UPDATE_BUILD_MISMATCH', '实际安装 build 与已验证候选不一致');
     assertConfiguration(configFile, configBefore);
     const config = fs.existsSync(configFile) ? JSON.parse(fs.readFileSync(configFile)) : null;
     const restart = Boolean(stopped.wasRunning && config?.workspace && config?.connectionState !== 'disconnected');
-    if (restart) await start();
+    if (restart) { progress.stage = 'restart_client'; await start(); }
+    progress.stage = 'verify_configuration';
     assertConfiguration(configFile, configBefore);
     log('update_complete', { oldBuild, clientBuild: newBuild, sha256, restoredRunning: restart, backup });
     return { state: 'complete', operation: 'update', oldBuild, clientBuild: newBuild, sha256, restoredRunning: restart, configurationPreserved: true, prefix: installation.prefix, backup };
   } catch (error) {
     let recovered = !moved;
+    let recoveryFailure = null;
     if (moved) {
+      let recoveryStage = 'stop_failed_candidate';
       try {
         // A failed startup may leave a new daemon alive; stop only that exact installation.
         if (installed) await stop({ root, env });
+        recoveryStage = 'restore_original';
         if (fs.existsSync(root)) fs.renameSync(root, path.join(installation.modules, `.ziwei-failed-${operationId}`));
         fs.renameSync(backup, root); recovered = clientBuildIdentity(root) === oldBuild;
-      } catch { recovered = false; }
+      } catch (cause) { recovered = false; recoveryFailure = describeUpdateFailure(cause, recoveryStage); }
     }
     if (recovered && stopped?.wasRunning) {
-      const config = fs.existsSync(configFile) ? JSON.parse(fs.readFileSync(configFile)) : null;
-      if (config?.workspace && config?.connectionState !== 'disconnected') { try { await start(); } catch { recovered = false; } }
+      let recoveryStage = 'read_restoration_configuration';
+      try {
+        let config;
+        try { config = fs.existsSync(configFile) ? JSON.parse(fs.readFileSync(configFile)) : null; }
+        catch (cause) { if (cause instanceof SyntaxError) throw failure('CONFIG_INVALID', '恢复期间连接配置不是有效 JSON；未覆盖用户配置', { cause }); throw cause; }
+        if (config?.workspace && config?.connectionState !== 'disconnected') { recoveryStage = 'restart_original'; await start(); }
+      } catch (cause) { recovered = false; recoveryFailure = describeUpdateFailure(cause, recoveryStage); }
     }
-    const busy = ['EBUSY', 'EPERM', 'EACCES'].includes(error.code);
-    log('update_failed', { originalRestored: recovered, code: error.code || 'UPDATE_FAILED', backup: moved ? backup : null });
-    throw Object.assign(new Error(recovered ? (busy ? 'Windows 安装目录仍被其他进程或终端占用；原版本已保留或恢复，连接配置未清空。请退出该目录/解除实际占用后重试。' : '更新失败，原版本已保留或恢复；连接配置未清空。请查看维护日志。') : `更新失败且原版本恢复未完成；原程序备份保留于 ${backup}，请查看维护日志，不要重新配对。`, { cause: error }), { code: busy ? 'PROGRAM_DIRECTORY_BUSY' : 'UPDATE_FAILED', originalRestored: recovered });
+    const captured = new ClientUpdateFailure(error, progress.stage, recovered, backup, recoveryFailure);
+    log('update_failed', { ...describeUpdateFailure(captured, captured.failureStage), originalRestored: recovered, code: captured.code, ...(recoveryFailure ? { recoveryFailure } : {}), backup: moved ? backup : null });
+    throw captured;
   }
 }
 
@@ -186,8 +268,8 @@ export function readUpdateResult({ env = process.env } = {}) {
 }
 
 export async function waitForParentExit(pid, timeoutMs = 30_000) {
-  if (!Number.isSafeInteger(pid) || pid <= 0 || pid === process.pid) throw new Error('更新父进程身份无效，未修改安装');
+  if (!Number.isSafeInteger(pid) || pid <= 0 || pid === process.pid) throw failure('INVALID_PARENT', '更新父进程身份无效，未修改安装');
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) { let alive = true; try { process.kill(pid, 0); } catch (error) { alive = error.code !== 'ESRCH'; } if (!alive) return; await pause(100); }
-  throw new Error('发起更新的 CLI 未退出，未停止 daemon 或更换程序目录');
+  throw failure('PARENT_STILL_RUNNING', '发起更新的 CLI 未退出，未停止 daemon 或更换程序目录');
 }

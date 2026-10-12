@@ -1,5 +1,11 @@
 # 紫薇项目 HandOff
 
+## 2026-10-12 本轮进行中：员工默认目录
+
+当前代码分支 `codex/employee-default-workdir`，基于已推送 `d748835`，在隔离接续工作树开发。员工默认目录由后端保存并绑定真实验证电脑，新会话继承并保存自己的目录快照；旧会话不随员工修改，NULL迁移不回填正式员工。目录检查复用原生协议，不移动 HOME/记忆，不执行手机动作或重放过期消息。具体接口、前端异步范围和发布计划见 [实施计划](docs/plans/2026-10-12-employee-default-workdir.md)。
+
+静态 MCP 定义改动要求本轮官方包及原生安全更新；同时补齐 Windows 维护错误丢失原始阶段/原因的诊断缺口。Thinkpad 具体根因等待该机证据。此段为开发状态，发布/真机验收/精确QA清理尚未完成，最新真实状态以 [PROJECT_MANAGEMENT.md](PROJECT_MANAGEMENT.md) 最上方为准，不能将下方旧版本/PID视为当前结论。
+
 ## 2026-10-10 当前发布：Windows 本地工作目录
 
 目录 inspect 与原生执行不再把 config.workdir 当唯一批准根；用户可访问本地 C/D 等盘，默认目录仅作起点及相对基准。两层统一词法/真实路径解析，修复相对路径重复解析和盘符简写；Windows ACL、设备/工作区、runtimeDir/附件边界保留，非 Windows 原规则保持。24 项专项及隔离 CLI 实际 cwd、旧 bigtron 客户端 C/D 错误已有证据。源码/官方包发布及用户实际更新分别记录，见 [工作目录运维记录](docs/operations/2026-10-10-windows-workdir.md)；不得据历史 disconnected 磁盘配置停止或重配对当前在线 bigtron 实例。

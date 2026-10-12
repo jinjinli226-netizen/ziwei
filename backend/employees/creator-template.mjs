@@ -103,6 +103,7 @@ export function createTemplateEmployeeConfig(templateId, options = {}) {
   return {
     name, runtime, targetDeviceId, runtimeProfile, visibility,
     ...(modelId !== null ? { modelId } : {}),
+    ...Object.fromEntries(['defaultWorkingDirectory','default_working_directory','defaultWorkingDirectoryActionId','default_working_directory_action_id'].filter(key=>Object.hasOwn(options,key)).map(key=>[key,options[key]])),
     description: template.description, persona: template.persona, instructions: template.instructions,
     skills: [...template.skills], managementMcpEnabled: true,
     templateId: template.id, templateVersion: template.version

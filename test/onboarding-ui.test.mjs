@@ -5,6 +5,7 @@ import test from 'node:test';
 
 const root = path.resolve(import.meta.dirname, '..');
 const appSource = fs.readFileSync(path.join(root, 'frontend', 'src', 'App.vue'), 'utf8');
+const workdirPickerSource = fs.readFileSync(path.join(root, 'frontend', 'src', 'components', 'WorkdirPicker.vue'), 'utf8');
 
 test('first-run onboarding does not infer a workspace from the URL', () => {
   assert.match(appSource, /首次使用先创建账号，登录后再建立你的第一个工作区/);
@@ -85,8 +86,10 @@ test('tasks and conversations expose a target device contract', () => {
   assert.match(appSource, /targetDeviceId:conversationDeviceId\.value/);
   assert.match(appSource, /选择目录/);
   assert.match(appSource, /conversationDirectoryPickerOpen/);
-  assert.match(appSource, /inspectConversationDirectory/);
-  assert.match(appSource, /创建并使用/);
+  assert.match(appSource, /<WorkdirPicker[^>]*\bconversation\b/);
+  assert.match(workdirPickerSource, /api\.inspectConversationDirectory\(scope\.entityId,[\s\S]*deviceId:scope\.deviceId/);
+  assert.match(workdirPickerSource, /创建并使用/);
+  assert.match(workdirPickerSource, /inspect\(path,true,conversation\)/);
 });
 
 test('employee creation keeps runtime discovery generic and preserves an explicit runtime choice', () => {

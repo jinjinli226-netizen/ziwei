@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { createRepository } from '../../backend/repository.mjs';
 import { createApp } from '../../backend/app.mjs';
+import {conversationSettingsSnapshot,mergeConversationSettingsDraft} from './workdir.js';
 
 const app = await readFile(new URL('./App.vue', import.meta.url), 'utf8');
 const state = await import('./conversation-execution-state.mjs').catch(error => {
@@ -28,6 +29,7 @@ function harness(overrides={}, { realOpen=false,realtime=false }={}) {
     closeRealtime:()=>{},authState:{value:{authenticated:true}},eventSource:{value:null},loadNotifications:()=>{},refreshTasks:()=>{},
     realtimeSubscription:{value:null},connectWorkspaceRealtime:callbacks=>{bindings.realtimeSubscription.value=callbacks;return {close(){}};},
     ...state,
+    conversationSettingsSnapshot,mergeConversationSettingsDraft,
   };
   bindings.api.websocketUrl=()=> 'ws://fixture';bindings.api.streamUrl=()=> '/fixture';
   const names = ['conversationRequestScope','applyConversationDetail','loadConversationExecution','loadConversations','refreshSelectedConversation','refreshConversationState',...(realOpen?['openConversation']:[]),...(realtime?['openRealtime']:[])];
