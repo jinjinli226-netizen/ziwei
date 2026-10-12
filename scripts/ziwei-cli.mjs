@@ -22,6 +22,7 @@ function usage() {
   ziwei_user start
   ziwei_user stop [--expected-pid <PID>] [--json]    Windows：停止本客户端，保留所有连接与数据
   ziwei_user update [--json]                      Windows：验证官方包后升级，保留连接和身份
+  ziwei_user update-check [--json]                只读核验升级实例；早期旧版需确认未知任务状态
   ziwei_user update-status [--json]               查看包外升级任务的真实完成/失败结果
   ziwei_user uninstall [--json]                   Windows：卸载本客户端，保留配置、认证和记忆
   ziwei_user remove                              uninstall 的别名
@@ -459,6 +460,18 @@ async function main() {
     const { launchClientUpdate } = await import('./client-update.mjs');
     const result = await launchClientUpdate({ codeRoot: ROOT, root: args.target ? path.resolve(String(args.target)) : ROOT, args, env: process.env });
     console.log(args.json ? JSON.stringify(result) : `Windows 升级任务已提交，CLI 退出后开始。请运行 ziwei_user update-status 查看真实完成结果。\n维护日志: ${result.logFile}`);
+    return;
+  }
+  if (command === 'update-check') {
+    rejectSecrets(args);
+    const { inspectClientMaintenance } = await import('./client-lifecycle.mjs');
+    let result;
+    try { result = await inspectClientMaintenance({ root: args.target ? path.resolve(String(args.target)) : ROOT, env: process.env }); }
+    catch (error) {
+      const { updateFailureResult } = await import('./client-update.mjs');
+      result = updateFailureResult(error, 'validate_installation'); process.exitCode = 1;
+    }
+    console.log(JSON.stringify(result, null, args.json ? undefined : 2));
     return;
   }
   if (command === 'update-status') {

@@ -82,6 +82,17 @@ test('strict legacy compatibility drains a real pre-nonce daemon and terminates 
   assert.equal(fs.readFileSync(path.join(item.home, 'operations'), 'utf8'), 'pause\n');
 });
 
+test('a proven modern exit remains identifiable when a later configuration check fails', { skip: process.platform !== 'win32', timeout: 15000 }, async t => {
+  const item = await fixture(t);
+  item.child.once('exit', () => fs.appendFileSync(item.file, '\n'));
+  await assert.rejects(stopClient({ root: item.root, env: item.env, timeoutMs: 10000 }), error => {
+    assert.equal(error.code, 'CONFIG_CHANGED'); assert.equal(error.stoppedClientReceipt?.stopped, true);
+    assert.equal(error.stoppedClientReceipt.pid, item.child.pid); assert.equal(error.stoppedClientReceipt.activeActionCount, 0);
+    assert.notEqual(error.resumeFailed, true); return true;
+  });
+  assert.equal(fs.readFileSync(path.join(item.home, 'operations'), 'utf8'), 'pause\nstop\n');
+});
+
 test('uninstall verifies exact npm package and bin ownership and rejects userdata within the package', { skip: process.platform !== 'win32' }, t => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ziwei-uninstall-layout-')); t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const root = path.join(directory, 'node_modules', 'ziwei'); fs.mkdirSync(path.join(root, 'scripts'), { recursive: true });

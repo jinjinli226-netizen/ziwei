@@ -15,7 +15,20 @@ const failure = (code, message, details = {}) => Object.assign(new Error(message
 const UPDATE_STAGES = new Set(['validate_installation', 'resolve_npm', 'validate_paths', 'verify_archive', 'read_release_manifest', 'download_package', 'stage_install', 'validate_candidate', 'prepare_candidate', 'stop_client', 'verify_original', 'backup_original', 'activate_candidate', 'verify_installation', 'restart_client', 'verify_configuration', 'stop_failed_candidate', 'restore_original', 'restart_original', 'read_restoration_configuration', 'wait_parent', 'acquire_lock', 'unknown']);
 const SAFE_ERROR_CODES = new Set(['EBUSY', 'EPERM', 'EACCES', 'ENOENT', 'ENOTDIR', 'ENOSPC', 'EIO', 'EROFS', 'EEXIST', 'ETIMEDOUT', 'ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND', 'EAI_AGAIN', 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER', 'ERR_MODULE_NOT_FOUND', 'MODULE_NOT_FOUND', 'ERR_INVALID_PACKAGE_CONFIG', 'WINDOWS_ONLY', 'USERDATA_IN_PACKAGE', 'UNSAFE_PATH', 'CONFIG_UNREADABLE', 'CONFIG_INVALID', 'PID_MISMATCH', 'PROCESS_IDENTITY_MISMATCH', 'PROCESS_CHANGED', 'NON_LOCAL_CONTROL', 'INVALID_HEALTH_PORT', 'HEALTH_UNREACHABLE', 'FOREIGN_LISTENER', 'CLIENT_IDENTITY_MISMATCH', 'LIFECYCLE_IDENTITY_MISMATCH', 'LIFECYCLE_DOWNGRADE', 'INVALID_TIMEOUT', 'BUILD_INVALID', 'HEALTH_MISSING', 'PROCESS_MISSING', 'CONTROL_AUTH_MISSING', 'CONFIG_CHANGED', 'CONTROL_REJECTED', 'CLIENT_BUSY', 'CLIENT_RESTARTED', 'STOP_TIMEOUT', 'STOP_FAILED', 'NOT_GLOBAL_INSTALL', 'PACKAGE_MISMATCH', 'BIN_MISMATCH', 'NPM_UNAVAILABLE', 'MAINTENANCE_BUSY', 'INSTALL_CHANGED', 'INVALID_PARENT', 'PARENT_STILL_RUNNING', 'UPDATE_SOURCE_INVALID', 'UPDATE_HASH_INVALID', 'UPDATE_HTTP_FAILED', 'UPDATE_TOO_LARGE', 'UPDATE_MANIFEST_INVALID', 'UPDATE_BUILD_MISMATCH']);
 const SAFE_SIGNALS = new Set(['SIGTERM', 'SIGKILL', 'SIGABRT', 'SIGINT', 'SIGBREAK']);
+for (const code of ['LEGACY_STOP_CONFIRMATION_REQUIRED', 'LEGACY_CONFIRMATION_INVALID', 'LEGACY_IDENTITY_UNVERIFIED', 'LEGACY_PROTOCOL_MISMATCH', 'LEGACY_PROOF_INVALID', 'LEGACY_PROOF_EXPIRED', 'LEGACY_IDENTITY_CHANGED', 'LEGACY_SOURCE_UNRECOGNIZED', 'LEGACY_CONFIG_MISMATCH', 'LEGACY_CONFIG_NAMESPACE_UNVERIFIED', 'LEGACY_STOP_PROOF_REQUIRED', 'LEGACY_STOP_FAILED']) SAFE_ERROR_CODES.add(code);
 const FAILURE_REASONS = {
+  LEGACY_STOP_CONFIRMATION_REQUIRED: '旧版无法报告当前任务，执行状态未知；须先核验实例并明确确认停止后迁移',
+  LEGACY_CONFIRMATION_INVALID: '旧版迁移需要本次明确确认与同一实例的检查凭据',
+  LEGACY_IDENTITY_UNVERIFIED: '无法完整核验旧版进程、配置或监听端口，未执行停止',
+  LEGACY_PROTOCOL_MISMATCH: '客户端协议与已核验的旧版迁移路径不符',
+  LEGACY_PROOF_INVALID: '旧版实例检查凭据无效，未执行停止',
+  LEGACY_PROOF_EXPIRED: '旧版实例检查已过期，请重新检查并确认',
+  LEGACY_IDENTITY_CHANGED: '旧版实例或配置在确认后发生变化',
+  LEGACY_SOURCE_UNRECOGNIZED: '旧版程序不属于已核验的历史版本，未执行停止',
+  LEGACY_CONFIG_MISMATCH: '旧版进程实际使用的配置与待升级配置不符',
+  LEGACY_CONFIG_NAMESPACE_UNVERIFIED: '无法核验旧版进程与维护进程使用同一配置命名空间',
+  LEGACY_STOP_PROOF_REQUIRED: '旧版停止缺少本次确认所绑定的实例检查凭据',
+  LEGACY_STOP_FAILED: '未能确认旧版实例已按本次授权停止，请查看停止与恢复结果',
   EBUSY: '文件或安装目录被占用', EPERM: '操作权限不足或文件受保护', EACCES: '访问权限不足', ENOENT: '所需文件或路径不存在', ENOTDIR: '所需路径不是目录', ENOSPC: '磁盘空间不足', EIO: '文件读写失败', EROFS: '文件系统只读', EEXIST: '目标文件已存在', ETIMEDOUT: '操作超时', ECONNREFUSED: '连接被拒绝', ECONNRESET: '连接被重置', ENOTFOUND: '服务器地址解析失败', EAI_AGAIN: '服务器地址解析暂时失败', ERR_CHILD_PROCESS_STDIO_MAXBUFFER: '子进程输出超过维护限制',
   PROCESS_EXIT_NONZERO: '子进程以非零退出码退出', PROCESS_TERMINATED: '子进程被终止', OPERATION_TIMEOUT: '维护请求超时', OPERATION_ABORTED: '维护请求被取消', MAINTENANCE_BUSY: '已有维护任务或待核实的维护锁', CLIENT_BUSY: '客户端仍有执行或请求未完成', CONFIG_CHANGED: '连接配置在维护期间发生变化', UPDATE_HASH_INVALID: '更新包 SHA-256 校验失败', UPDATE_HTTP_FAILED: '官方更新请求失败', UPDATE_TOO_LARGE: '更新包超过大小限制', UPDATE_SOURCE_INVALID: '更新地址未通过安全校验', UPDATE_MANIFEST_INVALID: '官方发布清单与更新地址不匹配', UPDATE_BUILD_MISMATCH: '实际安装与已验证候选的 build 不一致', NPM_UNAVAILABLE: '当前 Node 对应的 npm CLI 无法核验', INVALID_PARENT: '发起更新的父进程身份无效', PARENT_STILL_RUNNING: '发起更新的 CLI 未在时限内退出'
 };
@@ -44,19 +57,20 @@ function diagnosticMessage(diagnostic) {
 }
 
 class ClientUpdateFailure extends Error {
-  constructor(error, stage, originalRestored, backup, recoveryFailure = null) {
+  constructor(error, stage, originalRestored, backup, recoveryFailure = null, restoration = {}) {
     const diagnostic = describeUpdateFailure(error, stage);
     const busy = ['EBUSY', 'EPERM', 'EACCES'].includes(error?.code);
-    const recovery = originalRestored ? (busy ? 'Windows 安装目录仍被其他进程或终端占用；原版本已保留或恢复，连接配置未清空。请退出该目录/解除实际占用后重试。' : '更新失败，原版本已保留或恢复；连接配置未清空。') : `更新失败且原版本恢复未完成；原程序备份保留于 ${backup}，请查看维护日志，不要重新配对。`;
+    const installationRestored = restoration.originalInstallationRestored ?? originalRestored;
+    const recovery = originalRestored ? (busy ? 'Windows 安装目录仍被其他进程或终端占用；原版本已保留或恢复，连接配置未清空。请退出该目录/解除实际占用后重试。' : '更新失败，原版本已保留或恢复；连接配置未清空。') : installationRestored ? '更新失败；原安装已保留或恢复，但原运行状态未恢复。请查看维护日志，不要重新配对。' : `更新失败且原版本恢复未完成；${backup ? `原程序备份路径为 ${backup}；` : ''}请查看维护日志，不要重新配对。`;
     super(recovery + diagnosticMessage(diagnostic) + (recoveryFailure ? '恢复失败：' + diagnosticMessage(recoveryFailure) : ''), { cause: error });
-    Object.assign(this, diagnostic, { code: busy ? 'PROGRAM_DIRECTORY_BUSY' : 'UPDATE_FAILED', originalRestored, ...(recoveryFailure ? { recoveryFailure } : {}) });
+    Object.assign(this, diagnostic, { code: busy ? 'PROGRAM_DIRECTORY_BUSY' : 'UPDATE_FAILED', originalRestored, originalInstallationRestored: restoration.originalInstallationRestored ?? originalRestored, runningStateRestored: restoration.runningStateRestored ?? null, ...(recoveryFailure ? { recoveryFailure } : {}) });
   }
 }
 
 export function updateFailureResult(error, stage = 'unknown') {
   const captured = error instanceof ClientUpdateFailure;
   const diagnostic = describeUpdateFailure(error, captured ? error.failureStage : stage);
-  return { state: 'failed', operation: 'update', code: captured ? error.code : SAFE_ERROR_CODES.has(error?.code) ? error.code : 'UPDATE_FAILED', ...diagnostic, originalRestored: captured ? error.originalRestored : true, ...(captured && error.recoveryFailure ? { recoveryFailure: error.recoveryFailure } : {}), message: captured ? error.message : '更新未完成；原安装未更换。' + diagnosticMessage(diagnostic) };
+  return { state: 'failed', operation: 'update', code: captured ? error.code : SAFE_ERROR_CODES.has(error?.code) ? error.code : 'UPDATE_FAILED', ...diagnostic, originalRestored: captured ? error.originalRestored : true, originalInstallationRestored: captured ? error.originalInstallationRestored : true, runningStateRestored: captured ? error.runningStateRestored : null, ...(captured && error.recoveryFailure ? { recoveryFailure: error.recoveryFailure } : {}), message: captured ? error.message : '更新未完成；原安装未更换。' + diagnosticMessage(diagnostic) };
 }
 
 export function validateUpdateSource(value, { allowLoopback = false } = {}) {
@@ -120,12 +134,36 @@ function noLinks(file) {
 }
 
 function copyPackage(source, destination) {
-  function inspect(directory) { for (const entry of fs.readdirSync(directory, { withFileTypes: true })) { const file = path.join(directory, entry.name); if (entry.isSymbolicLink()) throw failure('UNSAFE_PATH', '客户端安装包含链接，未复制或更换程序目录'); if (entry.isDirectory()) inspect(file); } }
-  inspect(source); fs.cpSync(source, destination, { recursive: true, errorOnExist: true, force: false });
+  // fs.cpSync can abort this Windows Node process (0xC0000409) on an npm
+  // dependency tree, bypassing JavaScript recovery entirely. Copy explicitly
+  // into the unique candidate directory before touching the original client.
+  const copy = (from, to) => {
+    const stat = fs.lstatSync(from);
+    if (stat.isSymbolicLink() || (!stat.isDirectory() && !stat.isFile())) throw failure('UNSAFE_PATH', '客户端安装包含链接或非普通文件，未更换程序目录');
+    if (stat.isDirectory()) {
+      fs.mkdirSync(to);
+      for (const name of fs.readdirSync(from)) copy(path.join(from, name), path.join(to, name));
+    } else fs.copyFileSync(from, to, fs.constants.COPYFILE_EXCL);
+  };
+  copy(source, destination);
 }
 
 function configurationSnapshot(file) { return fs.existsSync(file) ? hash(fs.readFileSync(file)) : null; }
 function assertConfiguration(file, before) { if (configurationSnapshot(file) !== before) throw failure('CONFIG_CHANGED', '维护期间连接配置发生变化；未覆盖用户的新配置'); }
+
+/** Confirmation is tied to the exact readonly probe shown to the user. */
+export async function readLegacyUpdateConsent(args = {}) {
+  if (args['allow-legacy-stop'] === undefined && args['legacy-proof'] === undefined) return {};
+  if (args['allow-legacy-stop'] !== true || typeof args['legacy-proof'] !== 'string' || !args['legacy-proof']) throw failure('LEGACY_CONFIRMATION_INVALID', '旧版迁移须同时提供明确确认和本次实例检查文件');
+  const file = path.resolve(args['legacy-proof']); noLinks(file);
+  if (!fs.statSync(file).isFile() || fs.statSync(file).size > 65536) throw failure('LEGACY_CONFIRMATION_INVALID', '旧版实例检查文件无效');
+  let legacyProof;
+  try { legacyProof = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '')); }
+  catch { throw failure('LEGACY_CONFIRMATION_INVALID', '旧版实例检查文件无效'); }
+  const { assertLegacyProof } = await import('./client-legacy-identity.mjs');
+  assertLegacyProof(legacyProof, legacyProof);
+  return { allowLegacyStop: true, legacyProof };
+}
 
 export async function performClientUpdate(options = {}) {
   const progress = { stage: 'validate_installation' };
@@ -139,11 +177,16 @@ export async function performClientUpdate(options = {}) {
   }
 }
 
-async function performClientUpdateInternal({ root, env = process.env, directory, artifactFile, sha256, source = OFFICIAL_UPDATE_SOURCE, npmCli, stopClient, log = () => {} }, progress) {
+async function performClientUpdateInternal({ root, env = process.env, directory, artifactFile, sha256, source = OFFICIAL_UPDATE_SOURCE, npmCli, stopClient, allowLegacyStop = false, legacyProof, log = () => {} }, progress) {
   if (process.platform !== 'win32') throw failure('WINDOWS_ONLY', '本轮 update 仅支持 Windows；未修改此平台客户端');
   const installation = resolveInstalledPackage(root);
   const lifecycle = await import('./client-lifecycle.mjs');
   const originalLayout = lifecycle.validateInstalledClientLayout({ root, env });
+  if (allowLegacyStop !== false || legacyProof !== undefined) {
+    if (allowLegacyStop !== true || !legacyProof) throw failure('LEGACY_CONFIRMATION_INVALID', '旧版迁移缺少明确确认或同一实例凭据');
+    const { inspectLegacyClientIdentity } = await import('./client-legacy-identity.mjs');
+    await inspectLegacyClientIdentity({ root, env, expectedProof: legacyProof });
+  }
   progress.stage = 'resolve_npm';
   npmCli ||= resolveNpmCli({ env });
   progress.stage = 'validate_paths';
@@ -185,10 +228,23 @@ async function performClientUpdateInternal({ root, env = process.env, directory,
   assertConfiguration(configFile, configBefore);
   let stopped, moved = false, installed = false;
   const stop = stopClient || lifecycle.stopClient;
-  const start = async () => run(process.execPath, [path.join(root, 'scripts/start-ziwei-user.mjs')], { env, cwd: userHome, timeout: 30_000, windowsHide: true });
+  const start = async expectedBuild => {
+    const legacyMigration = stopped?.legacyProtocol === 'pre-identity';
+    // Historical start scripts accept a weak health identity. The maintained
+    // helper independently proves the port is free and the restarted instance
+    // actually belongs to this installation and unchanged configuration.
+    if (legacyMigration && (await lifecycle.inspectClientMaintenance({ root, env })).state !== 'stopped') throw failure('CLIENT_RESTARTED', '恢复前已有运行实例，未启动第二个客户端');
+    await run(process.execPath, [path.join(root, 'scripts/start-ziwei-user.mjs')], { env, cwd: userHome, timeout: 30_000, windowsHide: true });
+    if (legacyMigration) {
+      const running = await lifecycle.inspectClientMaintenance({ root, env });
+      if (!running.wasRunning || !['ready', 'legacy_confirmation_required'].includes(running.state)) throw failure('HEALTH_MISSING', '原生启动退出后未核验到此安装的运行实例');
+      assertConfiguration(configFile, configBefore);
+      if (clientBuildIdentity(root) !== expectedBuild || (running.legacyProof && (running.legacyProof.installedBuild !== expectedBuild || running.legacyProof.configSha256 !== configBefore))) throw failure('INSTALL_CHANGED', '恢复后的运行实例或安装身份不匹配');
+    }
+  };
   try {
     progress.stage = 'stop_client';
-    stopped = await stop({ root, env });
+    stopped = await stop({ root, env, ...(allowLegacyStop ? { allowLegacyStop: true, legacyProof } : {}) });
     progress.stage = 'verify_original';
     assertConfiguration(configFile, configBefore);
     if (clientBuildIdentity(root) !== oldBuild) throw failure('INSTALL_CHANGED', '原程序在准备期间已变化，未覆盖另一维护任务的安装');
@@ -206,12 +262,15 @@ async function performClientUpdateInternal({ root, env = process.env, directory,
     assertConfiguration(configFile, configBefore);
     const config = fs.existsSync(configFile) ? JSON.parse(fs.readFileSync(configFile)) : null;
     const restart = Boolean(stopped.wasRunning && config?.workspace && config?.connectionState !== 'disconnected');
-    if (restart) { progress.stage = 'restart_client'; await start(); }
+    if (restart) { progress.stage = 'restart_client'; await start(newBuild); }
     progress.stage = 'verify_configuration';
     assertConfiguration(configFile, configBefore);
     log('update_complete', { oldBuild, clientBuild: newBuild, sha256, restoredRunning: restart, backup });
-    return { state: 'complete', operation: 'update', oldBuild, clientBuild: newBuild, sha256, restoredRunning: restart, configurationPreserved: true, prefix: installation.prefix, backup };
+    return { state: 'complete', operation: 'update', oldBuild, clientBuild: newBuild, sha256, restoredRunning: restart, configurationPreserved: true, prefix: installation.prefix, backup, ...(stopped.legacyProtocol === 'pre-identity' ? { legacyMigration: { confirmed: true, activeActionCount: null, pollingCount: null, drained: false, unfinishedTasksMayResume: restart } } : {}) };
   } catch (error) {
+    // A verified stop may finish before a later config/exit check throws.
+    // Preserve that receipt rather than losing it at `stopped = await stop`.
+    if (!stopped && error.stoppedClientReceipt?.stopped === true && error.stoppedClientReceipt.wasRunning === true) stopped = error.stoppedClientReceipt;
     let recovered = !moved;
     let recoveryFailure = null;
     if (moved) {
@@ -224,36 +283,49 @@ async function performClientUpdateInternal({ root, env = process.env, directory,
         fs.renameSync(backup, root); recovered = clientBuildIdentity(root) === oldBuild;
       } catch (cause) { recovered = false; recoveryFailure = describeUpdateFailure(cause, recoveryStage); }
     }
+    if (recovered) {
+      try { if (clientBuildIdentity(root) !== oldBuild) throw failure('INSTALL_CHANGED', '原安装身份发生变化，未报告原安装已恢复'); }
+      catch (cause) { recovered = false; recoveryFailure = describeUpdateFailure(cause, 'restore_original'); }
+    }
+    const originalInstallationRestored = recovered;
+    let runningStateRestored = stopped?.wasRunning ? false : null;
     if (recovered && stopped?.wasRunning) {
       let recoveryStage = 'read_restoration_configuration';
       try {
+        assertConfiguration(configFile, configBefore);
+        if (clientBuildIdentity(root) !== oldBuild) throw failure('INSTALL_CHANGED', '原安装身份发生变化，未启动另一份程序');
         let config;
         try { config = fs.existsSync(configFile) ? JSON.parse(fs.readFileSync(configFile)) : null; }
         catch (cause) { if (cause instanceof SyntaxError) throw failure('CONFIG_INVALID', '恢复期间连接配置不是有效 JSON；未覆盖用户配置', { cause }); throw cause; }
-        if (config?.workspace && config?.connectionState !== 'disconnected') { recoveryStage = 'restart_original'; await start(); }
+        if (config?.workspace && config?.connectionState !== 'disconnected') { recoveryStage = 'restart_original'; await start(oldBuild); runningStateRestored = true; }
       } catch (cause) { recovered = false; recoveryFailure = describeUpdateFailure(cause, recoveryStage); }
     }
-    const captured = new ClientUpdateFailure(error, progress.stage, recovered, backup, recoveryFailure);
-    log('update_failed', { ...describeUpdateFailure(captured, captured.failureStage), originalRestored: recovered, code: captured.code, ...(recoveryFailure ? { recoveryFailure } : {}), backup: moved ? backup : null });
+    const captured = new ClientUpdateFailure(error, progress.stage, recovered, moved ? backup : null, recoveryFailure, { originalInstallationRestored, runningStateRestored });
+    log('update_failed', { ...describeUpdateFailure(captured, captured.failureStage), originalRestored: recovered, originalInstallationRestored, runningStateRestored, code: captured.code, ...(recoveryFailure ? { recoveryFailure } : {}), backup: moved ? backup : null });
     throw captured;
   }
 }
 
 export async function launchClientUpdate({ codeRoot, root = codeRoot, args = {}, env = process.env } = {}) {
   if (process.platform !== 'win32') throw new Error('本轮 update 仅支持 Windows；未修改此平台客户端');
+  const legacyConsent = await readLegacyUpdateConsent(args);
   resolveInstalledPackage(root);
   const { validateInstalledClientLayout } = await import('./client-lifecycle.mjs');
   validateInstalledClientLayout({ root, env });
   const npmCli = resolveNpmCli({ env });
   const home = defaultUserDir({ env }); assertOutside(home, root); noLinks(home);
   if (args.force) throw new Error('update 不使用 --force；Windows 文件占用不能强制绕过。此命令会先安全停止本客户端再更换已验证程序。');
+  if (legacyConsent.allowLegacyStop) {
+    const { inspectLegacyClientIdentity } = await import('./client-legacy-identity.mjs');
+    await inspectLegacyClientIdentity({ root, env, expectedProof: legacyConsent.legacyProof });
+  }
   const directory = path.join(home, 'maintenance', `update-${randomUUID()}`);
   fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
   const helperRoot = path.join(directory, 'helper'); fs.mkdirSync(helperRoot);
-  for (const relative of ['package.json', 'daemon/config.mjs', 'src/management-bootstrap.mjs', 'scripts/client-update.mjs', 'scripts/client-update-worker.mjs', 'scripts/client-lifecycle.mjs']) {
+  for (const relative of ['package.json', 'daemon/config.mjs', 'src/management-bootstrap.mjs', 'scripts/client-update.mjs', 'scripts/client-update-worker.mjs', 'scripts/client-lifecycle.mjs', 'scripts/client-legacy-identity.mjs', 'scripts/client-legacy-identity.ps1']) {
     const target = path.join(helperRoot, relative); fs.mkdirSync(path.dirname(target), { recursive: true }); fs.copyFileSync(path.join(codeRoot, relative), target);
   }
-  const job = { root: path.resolve(root), parentPid: process.pid, directory, npmCli, ...(args.package ? { artifactFile: path.resolve(String(args.package)), sha256: args.sha256 } : {}) };
+  const job = { root: path.resolve(root), parentPid: process.pid, directory, npmCli, ...legacyConsent, ...(args.package ? { artifactFile: path.resolve(String(args.package)), sha256: args.sha256 } : {}) };
   const jobFile = path.join(directory, 'job.json'); fs.writeFileSync(jobFile, JSON.stringify(job), { mode: 0o600 });
   const resultFile = path.join(directory, 'result.json');
   fs.writeFileSync(resultFile, JSON.stringify({ state: 'queued', operation: 'update', queuedAt: new Date().toISOString() }), { mode: 0o600 });

@@ -12,6 +12,8 @@ const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 const samePath = (a, b) => typeof a === 'string' && typeof b === 'string' && path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
 const psQuote = value => "'" + String(value).replaceAll("'", "''") + "'";
 const failure = (code, message) => Object.assign(new Error(message), { code });
+let legacyModule;
+const legacyIdentity = () => legacyModule ||= import('./client-legacy-identity.mjs');
 function windowsOnly() { if (process.platform !== 'win32') throw failure('WINDOWS_ONLY', 'stop/uninstall 当前仅支持 Windows，未修改此平台客户端'); }
 function within(file, root) { const relative = path.relative(path.resolve(root), path.resolve(file)); return !relative || (relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative)); }
 function assertOutside(file, root) { if (within(file, root)) throw failure('USERDATA_IN_PACKAGE', '用户配置或数据仍在程序目录内，拒绝卸载；请先迁移到持久用户目录'); }
@@ -31,8 +33,8 @@ export function windowsCommandArguments(value) {
   if (quoted) return []; if (present) result.push(token); return result;
 }
 
-async function powershell(code) {
-  const { stdout } = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', '[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); ' + code], { encoding: 'utf8', timeout: 6000, windowsHide: true, maxBuffer: 4 * 1024 * 1024 });
+async function powershell(code, timeoutMs = 6000) {
+  const { stdout } = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', '[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); ' + code], { encoding: 'utf8', timeout: timeoutMs, windowsHide: true, maxBuffer: 4 * 1024 * 1024 });
   return stdout.trim() ? JSON.parse(stdout.replace(/^\uFEFF/, '')) : null;
 }
 export async function inspectNativeClientProcess(pid, root) {
@@ -74,15 +76,85 @@ function validateHealth(body, { root, file, snapshot, build, expectedPid, expect
   } else if (expectedNonce !== undefined || pinned?.lifecycle) throw failure('LIFECYCLE_DOWNGRADE', 'daemon 实例 nonce 缺失，拒绝降级停止');
   return body;
 }
-async function boundLegacyTermination(record, root) {
+async function boundLegacyTermination(record, root, { legacyProof, waitMs = 5000 } = {}) {
   await assertProcessUnchanged(record, root);
   // Hold a Windows process handle before the final checks. Kill uses that handle,
   // so a reused numeric PID can never redirect termination to a new process.
-  await powershell(`$p=Get-Process -Id ${record.pid} -ErrorAction Stop; $handle=$p.Handle; $c=Get-CimInstance Win32_Process -Filter 'ProcessId = ${record.pid}'; if(!$c -or $c.CreationDate.ToUniversalTime().ToString('o') -ne ${psQuote(record.creationTime)} -or [Math]::Abs(($p.StartTime.ToUniversalTime()-$c.CreationDate.ToUniversalTime()).TotalMilliseconds) -gt 2 -or $c.ExecutablePath -ine ${psQuote(process.execPath)} -or $c.CommandLine -cne ${psQuote(record.command || '')}) { throw 'Process identity changed' }; $p.Kill(); [pscustomobject]@{stopped=$true}|ConvertTo-Json -Compress`);
+  let finalLegacyChecks = '';
+  if (legacyProof) {
+    const { assertLegacyProof } = await legacyIdentity();
+    assertLegacyProof(legacyProof, legacyProof);
+    const url = new URL(legacyProof.healthOrigin), host = url.hostname === '[::1]' ? '::1' : url.hostname;
+    finalLegacyChecks = `$hasher=[Security.Cryptography.SHA256]::Create(); try{$configHash=[BitConverter]::ToString($hasher.ComputeHash([IO.File]::ReadAllBytes(${psQuote(legacyProof.configPath)}))).Replace('-','').ToLowerInvariant()}finally{$hasher.Dispose()}; if($configHash -cne ${psQuote(legacyProof.configSha256)}){throw 'Configuration changed'}; $listeners=@(Get-NetTCPConnection -State Listen -LocalPort ${Number(url.port)} -ErrorAction Stop | Where-Object {$_.LocalAddress -eq ${psQuote(host)}}); if($listeners.Count -ne 1 -or $listeners[0].OwningProcess -ne ${record.pid}){throw 'Listener changed'}; if(([DateTime]::UtcNow-[DateTime]::Parse(${psQuote(legacyProof.observedAt)}).ToUniversalTime()).TotalMilliseconds -gt 300000){throw 'Confirmation expired'}; `;
+  }
+  const result = await powershell(`$ErrorActionPreference='Stop'; $p=Get-Process -Id ${record.pid} -ErrorAction Stop; try{$handle=$p.Handle; $c=Get-CimInstance Win32_Process -Filter 'ProcessId = ${record.pid}'; if(!$c -or $c.CreationDate.ToUniversalTime().ToString('o') -ne ${psQuote(record.creationTime)} -or [Math]::Abs(($p.StartTime.ToUniversalTime()-$c.CreationDate.ToUniversalTime()).TotalMilliseconds) -gt 2 -or $c.ExecutablePath -ine ${psQuote(process.execPath)} -or $c.CommandLine -cne ${psQuote(record.command || '')}) { throw 'Process identity changed' }; ${finalLegacyChecks}$p.Kill(); if(!$p.WaitForExit(${Math.max(1, Math.floor(waitMs))}) -or !$p.HasExited){throw 'Process exit not confirmed'}; [pscustomobject]@{stopped=$true}|ConvertTo-Json -Compress}finally{$p.Dispose()}`, waitMs + 6000);
+  if (result?.stopped !== true) throw failure('STOP_UNCONFIRMED', '目标实例退出结果未确认，未报告停止成功');
+  return result;
+}
+
+function isPreIdentityHealth(body, context) {
+  // This selects the separate verifier; it never authorizes a stop by itself.
+  return body?.service === 'ziwei_user' && body.agentId === 'ziwei_user' && body.workspace === context.snapshot.config.workspace && Number.isSafeInteger(body.pid) && body.pid > 0 && (context.expectedPid === undefined || body.pid === context.expectedPid) && ['deviceId', 'clientBuild', 'activeActionCount', 'pollingCount', 'lifecycle', 'connectionState'].every(field => !Object.prototype.hasOwnProperty.call(body, field));
+}
+
+/** Read-only preflight. Legacy task activity stays unknown until explicit consent. */
+export async function inspectClientMaintenance({ root, env = process.env, configPath, legacyProof } = {}) {
+  windowsOnly(); root = path.resolve(root); noLinks(root);
+  const file = configPath ? path.resolve(configPath) : resolveConfigPath({ root, env }); noLinks(file);
+  const snapshot = readConfiguration(file), origin = healthOrigin(snapshot.config, env), build = clientBuildIdentity(root);
+  const initial = await health(origin);
+  if (!initial) {
+    if (legacyProof || (await findNativePids(root)).length) throw failure('HEALTH_MISSING', '此安装仍有未核验 daemon 或原确认实例已变化，拒绝报告已停止');
+    return { state: 'stopped', wasRunning: false, pid: null };
+  }
+  const context = { root, file, snapshot, build };
+  if (isPreIdentityHealth(initial, context)) {
+    const { inspectLegacyClientIdentity } = await legacyIdentity();
+    const proof = await inspectLegacyClientIdentity({ root, env, configPath: file, body: initial, expectedProof: legacyProof });
+    return { state: 'legacy_confirmation_required', wasRunning: true, pid: proof.pid, legacyProtocol: 'pre-identity', activeActionCount: null, pollingCount: null, legacyProof: legacyProof || proof };
+  }
+  if (legacyProof) throw failure('LEGACY_PROTOCOL_MISMATCH', '当前实例已不符合原确认的旧协议，未停止任何进程');
+  validateHealth(initial, context);
+  const record = await inspectNativeClientProcess(initial.pid, root); if (!record) throw failure('PROCESS_MISSING', '健康接口的 daemon 进程已退出');
+  validateHealth(initial, { ...context, processRecord: record });
+  if (readConfiguration(file).hash !== snapshot.hash) throw failure('CONFIG_CHANGED', '只读预检期间配置发生变化');
+  return { state: 'ready', wasRunning: true, pid: initial.pid, activeActionCount: initial.activeActionCount, pollingCount: initial.pollingCount };
+}
+
+async function stopPreIdentityClient(context, { env, initial, allowLegacyStop, legacyProof, timeoutMs, shutdownTimeoutMs }) {
+  if (context.expectedNonce !== undefined) throw failure('LIFECYCLE_DOWNGRADE', 'daemon 实例 nonce 缺失，拒绝降级停止');
+  const { inspectLegacyClientIdentity, validateLegacyHealth } = await legacyIdentity();
+  if (allowLegacyStop !== true) {
+    await inspectLegacyClientIdentity({ root: context.root, env, configPath: context.file, body: initial });
+    throw failure('LEGACY_STOP_CONFIRMATION_REQUIRED', '旧版客户端不报告执行或轮询状态，无法确认空闲；必须明确确认可能中断当前任务后，携带本实例的只读核验证据重试');
+  }
+  if (!legacyProof) throw failure('LEGACY_STOP_PROOF_REQUIRED', '停止旧版客户端必须携带确认前的原实例核验证据；未自动确认新进程');
+  const proof = await inspectLegacyClientIdentity({ root: context.root, env, configPath: context.file, body: initial, expectedProof: legacyProof });
+  if (context.build !== proof.installedBuild) throw failure('LEGACY_IDENTITY_CHANGED', '指定安装 build 与原确认实例不符，未停止任何进程');
+  const record = await inspectNativeClientProcess(proof.pid, context.root);
+  if (!record || record.creationTime !== proof.creationTime || record.commandHash !== proof.commandHash) throw failure('PROCESS_CHANGED', '原确认 daemon 实例已变化，未停止任何进程');
+  const commandRecord = await powershell(`Get-CimInstance Win32_Process -Filter 'ProcessId = ${record.pid}' | Select-Object CommandLine | ConvertTo-Json -Compress`);
+  record.command = commandRecord?.CommandLine;
+  if (typeof record.command !== 'string' || digest(record.command) !== proof.commandHash) throw failure('PROCESS_CHANGED', '原确认 daemon 入口已变化，未停止任何进程');
+  const assertOriginal = () => { if (readConfiguration(context.file).hash !== proof.configSha256 || clientBuildIdentity(context.root) !== proof.installedBuild) throw failure('LEGACY_IDENTITY_CHANGED', '原确认配置或安装文件已变化'); };
+  assertOriginal();
+  validateLegacyHealth(await health(context.origin), { workspace: proof.workspace, expectedPid: proof.pid });
+  let stoppedClientReceipt;
+  try {
+    await boundLegacyTermination(record, context.root, { legacyProof, waitMs: Math.min(shutdownTimeoutMs, timeoutMs, 8000) });
+    stoppedClientReceipt = { stopped: true, wasRunning: true, pid: record.pid, creationTime: record.creationTime, legacyProtocol: 'pre-identity', activeActionCount: null, pollingCount: null };
+    if ((await findNativePids(context.root)).length) throw failure('CLIENT_RESTARTED', '原实例退出后此安装又出现 daemon，未结束新进程');
+    assertOriginal();
+    return { ...stoppedClientReceipt, alreadyStopped: false, drained: false };
+  } catch (error) {
+    const result = ['PROCESS_CHANGED', 'PROCESS_IDENTITY_MISMATCH', 'LEGACY_IDENTITY_CHANGED', 'CLIENT_RESTARTED', 'STOP_UNCONFIRMED'].includes(error.code) ? error : failure('LEGACY_STOP_FAILED', '旧版实例停止结果无法安全完成核验，请查看维护诊断');
+    if (stoppedClientReceipt) result.stoppedClientReceipt = stoppedClientReceipt;
+    throw result;
+  }
 }
 
 /** Stop preserves pairing/config/auth/state. It never starts or forgets a client. */
-export async function stopClient({ root, env = process.env, configPath, expectedPid, expectedNonce, expectedBuild, timeoutMs = 30000, drainTimeoutMs, shutdownTimeoutMs = 8000 } = {}) {
+export async function stopClient({ root, env = process.env, configPath, expectedPid, expectedNonce, expectedBuild, timeoutMs = 30000, drainTimeoutMs, shutdownTimeoutMs = 8000, allowLegacyStop = false, legacyProof } = {}) {
   windowsOnly(); root = path.resolve(root); noLinks(root);
   if (!Number.isFinite(timeoutMs) || timeoutMs < 1 || !Number.isFinite(shutdownTimeoutMs) || shutdownTimeoutMs < 1 || (drainTimeoutMs !== undefined && (!Number.isFinite(drainTimeoutMs) || drainTimeoutMs < 1))) throw failure('INVALID_TIMEOUT', '停止超时参数无效');
   const file = configPath ? path.resolve(configPath) : resolveConfigPath({ root, env }); noLinks(file);
@@ -90,11 +162,14 @@ export async function stopClient({ root, env = process.env, configPath, expected
   if (!/^[a-f0-9]{64}$/.test(build)) throw failure('BUILD_INVALID', '客户端 build 身份无效');
   let initial = await health(origin);
   if (!initial) {
+    if (legacyProof) throw failure('LEGACY_IDENTITY_CHANGED', '原确认的旧版实例健康接口已变化，未自动确认其他进程');
     if (expectedPid !== undefined && await inspectNativeClientProcess(expectedPid, root)) throw failure('HEALTH_MISSING', '指定 daemon 仍存活但健康接口缺失，拒绝停止');
     if ((await findNativePids(root)).length) throw failure('HEALTH_MISSING', '此安装仍有未核验 daemon，拒绝报告已停止');
     return { stopped: true, alreadyStopped: true, wasRunning: false, pid: null };
   }
-  const context = { root, file, snapshot, build, expectedPid, expectedNonce };
+  const context = { root, file, snapshot, build, expectedPid, expectedNonce, origin };
+  if (isPreIdentityHealth(initial, context)) return stopPreIdentityClient(context, { env, initial, allowLegacyStop, legacyProof, timeoutMs, shutdownTimeoutMs });
+  if (legacyProof) throw failure('LEGACY_PROTOCOL_MISMATCH', '当前实例已不符合原确认的旧协议，未停止任何进程');
   validateHealth(initial, context);
   const record = await inspectNativeClientProcess(initial.pid, root); if (!record) throw failure('PROCESS_MISSING', '健康接口的 daemon 进程已退出');
   validateHealth(initial, { ...context, processRecord: record });
@@ -104,7 +179,8 @@ export async function stopClient({ root, env = process.env, configPath, expected
   if (typeof record.command !== 'string' || digest(record.command) !== record.commandHash) throw failure('PROCESS_CHANGED', 'daemon 进程入口已变化');
   if (!snapshot.config.deviceToken) throw failure('CONTROL_AUTH_MISSING', '运行实例缺少本机控制凭据，拒绝停止');
   const assertConfig = () => { if (readConfiguration(file).hash !== snapshot.hash) throw failure('CONFIG_CHANGED', '停止期间配置已变化，未覆盖或删除用户配置'); };
-  let paused = false;
+  let paused = false, stoppedClientReceipt;
+  const exitedReceipt = () => ({ stopped: true, wasRunning: true, pid: record.pid, creationTime: record.creationTime, activeActionCount: 0, pollingCount: 0, legacyIdentity: !initial.lifecycle });
   const control = async (operation, allowConfigurationChange = false) => {
     const response = await fetch(origin + '/local/connection-control', { method: 'POST', redirect: 'error', headers: { 'content-type': 'application/json', 'x-ziwei-local-control': snapshot.config.deviceToken }, body: JSON.stringify({ operation, ...(initial.lifecycle ? { nonce: initial.lifecycle.nonce } : {}) }), signal: AbortSignal.timeout(2500) });
     if (!response.ok) throw failure('CONTROL_REJECTED', `本机控制请求被拒绝（HTTP ${response.status}），未强制结束进程`);
@@ -123,11 +199,12 @@ export async function stopClient({ root, env = process.env, configPath, expected
     assertConfig(); await assertProcessUnchanged(record, root);
     const final = validateHealth(await health(origin), { ...context, pinned: initial });
     if (final.connectionState !== 'draining' || final.activeActionCount || final.pollingCount) throw failure('CLIENT_BUSY', '客户端执行状态变化；未强制结束进程');
-    if (initial.lifecycle) await control('stop'); else await boundLegacyTermination(record, root);
+    if (initial.lifecycle) await control('stop'); else { await boundLegacyTermination(record, root); stoppedClientReceipt = exitedReceipt(); }
     const stoppedDeadline = Date.now() + Math.min(shutdownTimeoutMs, timeoutMs);
     while (Date.now() < stoppedDeadline) {
       const currentProcess = await inspectNativeClientProcess(record.pid, root);
       if (!currentProcess || currentProcess.creationTime !== record.creationTime) {
+        stoppedClientReceipt = exitedReceipt();
         const remaining = await findNativePids(root);
         if (remaining.length) throw failure('CLIENT_RESTARTED', '停止后此安装又出现 daemon，未结束新进程');
         assertConfig();
@@ -137,12 +214,13 @@ export async function stopClient({ root, env = process.env, configPath, expected
     }
     throw failure('STOP_TIMEOUT', 'daemon 未在时限内退出，未强制结束进程');
   } catch (error) {
-    if (paused) {
+    if (paused && !stoppedClientReceipt) {
       try { await assertProcessUnchanged(record, root); const current = await health(origin); validateHealth(current, { ...context, snapshot: { ...snapshot, hash: current?.lifecycle?.configSha256 }, pinned: initial }); await control('resume', true); error.resumed = true; }
       catch { error.resumeFailed = true; error.message += '；恢复接收失败，请核对原实例健康状态'; }
     }
-    if (!error.code) throw failure('STOP_FAILED', '客户端停止失败，未修改配置或删除数据');
-    throw error;
+    const result = typeof error.code === 'string' ? error : failure('STOP_FAILED', '客户端停止失败，未修改配置或删除数据');
+    if (stoppedClientReceipt) result.stoppedClientReceipt = stoppedClientReceipt;
+    throw result;
   }
 }
 
@@ -217,7 +295,7 @@ export async function launchClientUninstall({ root, env = process.env } = {}) {
   const home = defaultUserDir({ env }); assertOutside(home, root); assertOutside(resolveConfigPath({ root, env }), root); noLinks(home);
   const directory = path.join(home, 'maintenance', randomUUID()), helperRoot = path.join(directory, 'helper-root');
   fs.mkdirSync(helperRoot, { recursive: true, mode: 0o700 });
-  for (const relative of ['package.json', 'scripts/client-lifecycle.mjs', 'scripts/client-maintenance-helper.mjs', 'daemon/config.mjs', 'src/management-bootstrap.mjs']) {
+  for (const relative of ['package.json', 'scripts/client-lifecycle.mjs', 'scripts/client-legacy-identity.mjs', 'scripts/client-legacy-identity.ps1', 'scripts/client-maintenance-helper.mjs', 'daemon/config.mjs', 'src/management-bootstrap.mjs']) {
     const target = path.join(helperRoot, relative); fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 }); fs.copyFileSync(path.join(root, relative), target);
   }
   const jobFile = path.join(directory, 'job.json'), resultFile = path.join(directory, 'result.json');

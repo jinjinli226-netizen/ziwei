@@ -29,7 +29,26 @@ try {
   & $ziweiNpm install --global --prefix $ziweiStagePrefix $ziweiArchive --ignore-scripts --no-audit --no-fund
   if ($LASTEXITCODE -ne 0) { throw 'Updater staging failed; the original installation was not changed.' }
   $ziweiUpdaterEntry = Join-Path $ziweiStagePrefix 'node_modules\ziwei\scripts\ziwei-user.mjs'
-  $ziweiQueuedText = & $ziweiNode $ziweiUpdaterEntry update --target $ziweiInstalledRoot --package $ziweiArchive --sha256 $ziweiRelease.sha256 --json
+  $ziweiCheckText = & $ziweiNode $ziweiUpdaterEntry update-check --target $ziweiInstalledRoot --json
+  $ziweiCheckExit = $LASTEXITCODE
+  $ziweiCheck = $ziweiCheckText | ConvertFrom-Json
+  if ($ziweiCheckExit -ne 0) { throw ('Client preflight failed [' + $ziweiCheck.reasonCode + ']: ' + $ziweiCheck.reason + '. No process was stopped and no installation was replaced.') }
+  $ziweiUpdateArguments = @('update', '--target', $ziweiInstalledRoot, '--package', $ziweiArchive, '--sha256', $ziweiRelease.sha256, '--json')
+  if ($ziweiCheck.state -eq 'legacy_confirmation_required') {
+    Write-Host ('Verified early client PID: ' + $ziweiCheck.legacyProof.pid)
+    Write-Host ('Verified configuration: ' + $ziweiCheck.legacyProof.configPath)
+    Write-Host 'This early client cannot report or drain active tasks. Task status is UNKNOWN.'
+    Write-Host 'Finish or cancel its current work first. Continuing stops only this verified instance, upgrades it, and restores the connection.'
+    Write-Host 'After restart, the client may receive unfinished server tasks again. The updater cannot prove those tasks have drained.'
+    $ziweiLegacyAnswer = Read-Host 'Type YES to confirm stopping and restarting this early client, or anything else to cancel'
+    if ($ziweiLegacyAnswer -cne 'YES') { throw 'Cancelled. The original client, installation and configuration were preserved.' }
+    $ziweiLegacyProofFile = Join-Path $ziweiMaintenanceDirectory 'legacy-stop-proof.json'
+    [System.IO.File]::WriteAllText($ziweiLegacyProofFile, ($ziweiCheck.legacyProof | ConvertTo-Json -Depth 8), (New-Object System.Text.UTF8Encoding($false)))
+    $ziweiUpdateArguments += @('--allow-legacy-stop', '--legacy-proof', $ziweiLegacyProofFile)
+  } elseif ($ziweiCheck.state -notin @('ready', 'stopped')) {
+    throw 'Unknown maintenance check result. The original client was preserved.'
+  }
+  $ziweiQueuedText = & $ziweiNode $ziweiUpdaterEntry @ziweiUpdateArguments
   if ($LASTEXITCODE -ne 0) { throw 'Update submission failed; the original installation was not changed.' }
   $ziweiQueued = $ziweiQueuedText | ConvertFrom-Json
   Write-Host ('The update runs outside the package. Result: ' + $ziweiQueued.resultFile)

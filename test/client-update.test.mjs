@@ -8,9 +8,60 @@ import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import { validateUpdateSource, downloadVerifiedPackage, resolveInstalledPackage, validateCandidatePackage, performClientUpdate, resolveNpmCli, describeUpdateFailure, updateFailureResult } from '../scripts/client-update.mjs';
 
 const run = promisify(execFile);
+
+function fileInventory(directory) {
+  const files = {}, directories = [];
+  const visit = (folder, relative = '') => {
+    for (const item of fs.readdirSync(folder, { withFileTypes: true })) {
+      const name = relative ? relative + '/' + item.name : item.name;
+      assert.equal(item.isSymbolicLink(), false, 'a completed installation must not contain links');
+      if (item.isDirectory()) { directories.push(name); visit(path.join(folder, item.name), name); }
+      else { assert.equal(item.isFile(), true); files[name] = createHash('sha256').update(fs.readFileSync(path.join(folder, item.name))).digest('hex'); }
+    }
+  };
+  visit(directory);
+  return { files: Object.fromEntries(Object.entries(files).sort(([a], [b]) => a.localeCompare(b))), directories: directories.sort() };
+}
+
+function bundleInstalledRuntimeDependencies(source) {
+  const repository = path.resolve(import.meta.dirname, '..'), modules = path.join(repository, 'node_modules');
+  const pending = ['express', 'ws', 'yaml'].map(name => ({ name, from: repository })), copied = new Set(), versions = {};
+  while (pending.length) {
+    const { name, from } = pending.pop();
+    const require = createRequire(path.join(from, 'package.json'));
+    // Some dependencies intentionally export only subpaths and no bare entry.
+    // Resolve the installed package folder using Node's own module search path.
+    const directory = require.resolve.paths(name).map(folder => path.join(folder, name)).find(folder => fs.existsSync(path.join(folder, 'package.json')));
+    assert.ok(directory, 'installed runtime package must have metadata');
+    const meta = JSON.parse(fs.readFileSync(path.join(directory, 'package.json'))); assert.equal(meta.name, name);
+    if (from === repository) versions[name] = meta.version;
+    if (copied.has(directory)) continue;
+    copied.add(directory);
+    const relative = path.relative(modules, directory);
+    assert.ok(relative && relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative));
+    const target = path.join(source, 'node_modules', relative);
+    // Materialize real installed fixture files without invoking the crashing
+    // Node fs.cpSync path before the updater itself is under test.
+    const copyFixture = (fromDirectory, toDirectory) => {
+      fs.mkdirSync(toDirectory, { recursive: true });
+      for (const item of fs.readdirSync(fromDirectory, { withFileTypes: true })) {
+        if (item.name === 'node_modules') continue;
+        assert.equal(item.isSymbolicLink(), false);
+        if (item.isDirectory()) copyFixture(path.join(fromDirectory, item.name), path.join(toDirectory, item.name));
+        else { assert.ok(item.isFile()); fs.writeFileSync(path.join(toDirectory, item.name), fs.readFileSync(path.join(fromDirectory, item.name))); }
+      }
+    };
+    copyFixture(directory, target);
+    for (const dependency of Object.keys(meta.dependencies || {})) pending.push({ name: dependency, from: directory });
+  }
+  const packageFile = path.join(source, 'package.json');
+  fs.writeFileSync(packageFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(packageFile)), dependencies: versions, bundledDependencies: Object.keys(versions) }));
+  return copied.size;
+}
 
 test('maintenance diagnostics distinguish a fetch timeout from a child process exit', () => {
   const timedOut = new DOMException('PRIVATE_TIMEOUT_PAYLOAD', 'TimeoutError');
@@ -74,7 +125,7 @@ test('update only accepts the canonical Ziwei global install and exact supported
   assert.throws(() => validateCandidatePackage(root), /紫薇|ziwei/);
 });
 
-test('Windows staged npm update preserves stopped state, original prefix, bin shim and every connection identity', { skip: process.platform !== 'win32' }, async t => {
+test('Windows staged npm update copies the complete runtime dependency tree before stopping and preserves identity', { skip: process.platform !== 'win32', timeout: 60000 }, async t => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ziwei-real-npm-update-'));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const prefix = path.join(directory, 'global-prefix');
@@ -86,6 +137,8 @@ test('Windows staged npm update preserves stopped state, original prefix, bin sh
     fs.writeFileSync(path.join(target, 'scripts/ziwei-user.mjs'), `#!/usr/bin/env node\nconsole.log('ziwei_user ${version}');\n`);
   }
   fixture(root, '0.1.0'); fixture(source, '0.1.1');
+  const dependencyCount = bundleInstalledRuntimeDependencies(source);
+  assert.ok(dependencyCount > 30, 'exercise the real Express/ws/yaml dependency closure, not a two-file package');
   for (const suffix of ['', '.cmd', '.ps1']) fs.writeFileSync(path.join(prefix, 'ziwei_user' + suffix), 'node_modules/ziwei/scripts/ziwei-user.mjs');
   fs.mkdirSync(path.join(prefix, 'node_modules', 'other-cli')); fs.writeFileSync(path.join(prefix, 'node_modules', 'other-cli', 'keep'), 'unrelated CLI');
   const home = path.join(directory, 'user-data'); fs.mkdirSync(home);
@@ -95,14 +148,51 @@ test('Windows staged npm update preserves stopped state, original prefix, bin sh
   const npmCli = resolveNpmCli();
   const packed = JSON.parse((await run(process.execPath, [npmCli, 'pack', '--json', '--pack-destination', directory], { cwd: source, windowsHide: true })).stdout)[0];
   const archive = path.join(directory, packed.filename);
-  let stopped = 0;
-  const result = await performClientUpdate({ root, directory: path.join(directory, 'operation'), artifactFile: archive, sha256: createHash('sha256').update(fs.readFileSync(archive)).digest('hex'), env: { ...process.env, ZIWEI_USER_HOME: home, ZIWEI_CONFIG: file }, npmCli, stopClient: async () => { stopped++; return { wasRunning: false, alreadyStopped: true }; } });
+  let stopped = 0, stagedInventory;
+  const operation = path.join(directory, 'operation');
+  const result = await performClientUpdate({ root, directory: operation, artifactFile: archive, sha256: createHash('sha256').update(fs.readFileSync(archive)).digest('hex'), env: { ...process.env, ZIWEI_USER_HOME: home, ZIWEI_CONFIG: file, npm_config_offline: 'true' }, npmCli, stopClient: async () => {
+    stopped++;
+    const candidates = fs.readdirSync(path.dirname(root)).filter(name => name.startsWith('.ziwei-ready-'));
+    assert.equal(candidates.length, 1);
+    stagedInventory = fileInventory(path.join(operation, 'stage-prefix', 'node_modules', 'ziwei'));
+    assert.ok(Object.keys(stagedInventory.files).length > 300, 'copy the actual installed dependency files');
+    t.diagnostic(`Verified ${dependencyCount} real runtime packages and ${Object.keys(stagedInventory.files).length} installed file hashes before stop.`);
+    assert.deepEqual(fileInventory(path.join(path.dirname(root), candidates[0])), stagedInventory, 'all candidate bytes must be prepared before stop');
+    assert.equal(JSON.parse(fs.readFileSync(path.join(root, 'package.json'))).version, '0.1.0');
+    return { wasRunning: false, alreadyStopped: true };
+  } });
   assert.equal(result.state, 'complete'); assert.equal(result.restoredRunning, false); assert.equal(result.prefix, prefix); assert.equal(stopped, 1);
   assert.equal(JSON.parse(fs.readFileSync(path.join(root, 'package.json'))).version, '0.1.1');
   assert.equal(fs.readFileSync(file, 'utf8'), config); assert.equal(fs.readFileSync(path.join(home, 'MEMORY.md'), 'utf8'), 'original Creator memory');
   assert.equal(fs.readFileSync(path.join(prefix, 'ziwei_user.cmd'), 'utf8'), 'node_modules/ziwei/scripts/ziwei-user.mjs');
   assert.equal(fs.readFileSync(path.join(prefix, 'node_modules', 'other-cli', 'keep'), 'utf8'), 'unrelated CLI');
   assert.equal(JSON.parse(fs.readFileSync(path.join(result.backup, 'package.json'))).version, '0.1.0');
+  assert.deepEqual(fileInventory(root), stagedInventory, 'every installed dependency byte and directory must match staging');
+});
+
+test('Windows staged candidate junction is rejected before stopping and cannot copy external userdata', { skip: process.platform !== 'win32', timeout: 30000 }, async t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ziwei-update-copy-link-'));
+  const resolved = path.resolve(directory); assert.ok(resolved.startsWith(path.resolve(os.tmpdir()) + path.sep) && path.basename(resolved).startsWith('ziwei-update-copy-link-'));
+  t.after(() => fs.rmSync(resolved, { recursive: true, force: true }));
+  const prefix = path.join(directory, 'prefix'), root = path.join(prefix, 'node_modules', 'ziwei'), source = path.join(directory, 'source');
+  for (const [folder, version] of [[root, '0.1.0'], [source, '0.1.1']]) {
+    fs.mkdirSync(path.join(folder, 'scripts'), { recursive: true });
+    fs.writeFileSync(path.join(folder, 'package.json'), JSON.stringify({ name: 'ziwei', version, type: 'module', bin: { ziwei_user: 'scripts/ziwei-user.mjs' } }));
+    fs.writeFileSync(path.join(folder, 'scripts', 'ziwei-user.mjs'), 'console.log("fixture");');
+  }
+  for (const suffix of ['', '.cmd', '.ps1']) fs.writeFileSync(path.join(prefix, 'ziwei_user' + suffix), 'node_modules/ziwei/scripts/ziwei-user.mjs');
+  const home = path.join(directory, 'userdata'); fs.mkdirSync(home);
+  const configPath = path.join(home, 'ziwei_user.json'); fs.writeFileSync(configPath, '{"workspace":"retained"}');
+  fs.writeFileSync(path.join(home, 'memory.txt'), 'must never enter candidate');
+  // Version validation runs in staging before copy. Create an actual Windows
+  // junction there to exercise refusal without exposing any real user folder.
+  fs.writeFileSync(path.join(source, 'scripts', 'ziwei-user.mjs'), 'import fs from "node:fs";import path from "node:path";fs.symlinkSync(process.env.ZIWEI_USER_HOME,path.resolve(import.meta.dirname,"../external-data"),"junction");console.log("fixture");');
+  const npmCli = resolveNpmCli();
+  const packed = JSON.parse((await run(process.execPath, [npmCli, 'pack', '--json', '--pack-destination', directory], { cwd: source, windowsHide: true })).stdout)[0];
+  const archive = path.join(directory, packed.filename), original = fileInventory(root), originalUserdata = fileInventory(home);
+  let stops = 0;
+  await assert.rejects(performClientUpdate({ root, directory: path.join(directory, 'operation'), artifactFile: archive, sha256: createHash('sha256').update(fs.readFileSync(archive)).digest('hex'), env: { ...process.env, ZIWEI_USER_HOME: home, ZIWEI_CONFIG: configPath }, npmCli, stopClient: async () => { stops++; return { wasRunning: false }; } }), error => error.failureStage === 'prepare_candidate' && error.reasonCode === 'UNSAFE_PATH');
+  assert.equal(stops, 0); assert.deepEqual(fileInventory(root), original); assert.deepEqual(fileInventory(home), originalUserdata);
 });
 
 test('a corrupt candidate fails before stopping the client or touching its installed program', { skip: process.platform !== 'win32' }, async t => {
@@ -250,7 +340,10 @@ test('failed startup after package swap restores the original program and connec
     assert.equal(result.failureStage, 'restart_client');
     assert.equal(result.exitCode, 23);
     assert.equal(result.recoveryFailure?.failureStage, 'read_restoration_configuration');
-    assert.equal(result.recoveryFailure?.reasonCode, 'CONFIG_INVALID');
+    assert.equal(result.recoveryFailure?.reasonCode, 'CONFIG_CHANGED');
+    assert.equal(result.originalInstallationRestored, true);
+    assert.equal(result.runningStateRestored, false);
+    assert.match(result.message, /原运行状态未恢复/);
     assert.doesNotMatch(JSON.stringify(result), /PRIVATE_|Command failed|stdout|stderr/);
     return true;
   });

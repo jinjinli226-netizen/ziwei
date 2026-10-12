@@ -12,6 +12,8 @@
     "scripts/ziwei-user.mjs",
     "scripts/start-ziwei-user.mjs",
     "scripts/client-lifecycle.mjs",
+    "scripts/client-legacy-identity.mjs",
+    "scripts/client-legacy-identity.ps1",
     "scripts/client-maintenance-helper.mjs",
     "scripts/client-update.mjs",
     "scripts/client-update-worker.mjs",

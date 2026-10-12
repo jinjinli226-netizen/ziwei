@@ -1,5 +1,9 @@
 # 紫薇项目 HandOff
 
+## 2026-10-12 Windows 早期协议升级接续
+
+ThinkPad 缺四字段且无 pause/drain 的兼容路径已实现：只读 update-check、真实进程/配置/端口 proof、YES 明确确认、绑定 Windows 句柄停止、实际恢复核验。不得将未知计数填零或承诺重启不会重新取得未完成任务。发布及最终验收以 [专项记录](docs/operations/2026-10-12-legacy-windows-upgrade.md) 为准；本机 PID36264/39608、现有主站与 QA 清理安全点保持。
+
 ## 2026-10-12 当前接续：员工默认目录已发布，真实功能验收通过
 
 GitHub分支 `codex/employee-default-workdir`，功能/前端/官方客户端 `274a418`，主API热修复 `a66df9c`，实际全局Windowsbuild `c7b83…`。主API181593/控制134533/Nginx737，本机原PID36264/独立观察器39608保持。员工默认目录绑定真实电脑检查，新会话保存快照，旧会话和HOME/记忆保持；正式默认字段仍NULL。
