@@ -1,0 +1,62 @@
+<script setup>
+import {computed,ref,watch} from 'vue';
+import NativeOperationStatus from './NativeOperationStatus.vue';
+import BotMcpPanel from './BotMcpPanel.vue';
+import {nativeReceipt} from '../bot-native-transport.js';
+import {nativeItems,nativeValue,nativeSkillCatalog} from '../bot-native-data.js';
+const props=defineProps({ui:{type:Object,required:true},bot:{type:Object,required:true},draft:{type:Object,required:true},enabled:Boolean,configBusy:Boolean});
+const emit=defineEmits(['save-config']);
+const memoryScope=ref('memory'),memoryText=ref(''),memoryHash=ref(''),sessionQuery=ref(''),hubQuery=ref(''),error=ref('');
+const editor=ref(null),skillForm=ref({name:'',content:''});
+const memorySync=ref(null);
+const memory=computed(()=>props.ui.resource('memory')),sessions=computed(()=>props.ui.resource('sessions')),skills=computed(()=>props.ui.resource('skills')),hub=computed(()=>props.ui.resource('skillHub')),detail=computed(()=>props.ui.resource('skillDetail'));
+const sessionRows=computed(()=>nativeItems(sessions.value.data,['sessions','results','items']));
+const skillRows=computed(()=>nativeSkillCatalog(skills.value.data));
+const hubRows=computed(()=>nativeItems(hub.value.data,['results','skills','items']));
+const sessionMessages=computed(()=>nativeItems(sessions.value.data,['messages']));
+const memoryEntries=computed(()=>nativeValue(memory.value.data)?.scope===memoryScope.value?nativeValue(memory.value.data)?.entries||[]:[]);
+const skillOperation=computed(()=>nativeReceipt({result:skills.value.result}));
+const sameScope=(workspace,id)=>props.ui.state.workspace===workspace&&props.ui.state.botId===id;
+async function readMemory(){const workspace=props.ui.state.workspace,id=props.bot.id,scope=memoryScope.value;if(await props.ui.read('memory',{scope})&&sameScope(workspace,id)&&scope===memoryScope.value){const value=nativeValue(memory.value.data);memoryText.value=value?.content||'';memoryHash.value=value?.hash||'';}}
+async function saveMemory(clear=false){if(!memoryHash.value)return;if(clear&&!window.confirm('清空此 Bot 的当前原生记忆文档？'))return;const input={scope:memoryScope.value,content:clear?'':memoryText.value,expectedHash:memoryHash.value};if(clear)memorySync.value={scope:memoryScope.value,hash:memoryHash.value,text:memoryText.value};props.ui.draft('memory',input);await props.ui.submit('memory','write',input);}
+async function removeMemoryEntry(index){if(!memoryHash.value||props.ui.blocked()||memoryText.value!==nativeValue(memory.value.data)?.content)return;if(!window.confirm('删除当前原生记忆的这一条记录？'))return;const content=memoryEntries.value.filter((_,item)=>item!==index).join('\n§\n');memorySync.value={scope:memoryScope.value,hash:memoryHash.value,text:memoryText.value};await props.ui.submit('memory','write',{scope:memoryScope.value,content,expectedHash:memoryHash.value});}
+async function searchSessions(){await props.ui.read('sessions',{...(sessionQuery.value.trim()?{query:sessionQuery.value.trim()}:{}),limit:10});}
+async function openSkill(item){const workspace=props.ui.state.workspace,id=props.bot.id;error.value='';if(await props.ui.read('skillDetail',{name:item.name})&&sameScope(workspace,id)){const value=nativeValue(detail.value.data);skillForm.value={name:item.name,content:value?.content||'',expectedHash:value?.hash||''};editor.value='edit';}}
+function newSkill(){editor.value='new';error.value='';skillForm.value={name:'',content:'',expectedHash:''};}
+async function saveSkill(){if(!skillForm.value.name.trim()||!skillForm.value.content.trim())return;const isNew=editor.value==='new',input={name:skillForm.value.name.trim(),content:skillForm.value.content,...(!isNew?{expectedHash:skillForm.value.expectedHash}:{})};if(!isNew&&!input.expectedHash){error.value='没有原生读取 hash，不能覆盖修改。';return;}const workspace=props.ui.state.workspace,id=props.bot.id,resource=isNew?'skills':'skillDetail';props.ui.draft(resource,input);if(await props.ui.submit(resource,isNew?'install':'update',input)&&props.ui.resource(resource).phase==='succeeded'&&sameScope(workspace,id))editor.value=null;}
+async function removeSkill(){if(!skillForm.value.expectedHash||!window.confirm('删除此 Bot 的原生技能 '+skillForm.value.name+'？'))return;const workspace=props.ui.state.workspace,id=props.bot.id;if(await props.ui.submit('skills','remove',{name:skillForm.value.name,expectedHash:skillForm.value.expectedHash})&&props.ui.resource('skills').phase==='succeeded'&&sameScope(workspace,id))editor.value=null;}
+async function hubInstall(item){const identifier=item.identifier||item.id;if(!identifier){error.value='Hub 没有返回可安装标识。';return;}await props.ui.submit('skills','hub_install',{identifier,...(item.name?{name:item.name}:{})});}
+watch(()=>[props.ui.state.workspace,props.bot.id],()=>{memoryScope.value='memory';memoryText.value='';memoryHash.value='';memorySync.value=null;sessionQuery.value='';hubQuery.value='';error.value='';editor.value=null;},{immediate:true});
+watch(()=>memory.value.data,value=>{const data=nativeValue(value);if(data?.scope===memoryScope.value&&data.hash){memoryHash.value=data.hash;const sync=memorySync.value;if(sync?.scope===data.scope&&sync.hash!==data.hash){if(memoryText.value===sync.text)memoryText.value=data.content||'';memorySync.value=null;}}});
+watch(()=>detail.value.data,value=>{const data=nativeValue(value),name=data?.name||value?.action?.payload?.nativeOperation?.input?.name;if(editor.value==='edit'&&name===skillForm.value.name&&data?.hash)skillForm.value.expectedHash=data.hash;});
+</script>
+<template>
+  <div class="native-workspace">
+    <section class="native-section" aria-label="原生记忆">
+      <div class="native-toolbar"><div><h3>原生记忆</h3><p class="native-help">读取和管理当前员工自己的 Hermes 文档。开关仍在能力配置中。</p></div><button class="bot-button" :disabled="!enabled||memory.loading||memory.busy" @click="readMemory">{{memory.loading?'读取中…':'读取当前文档'}}</button></div>
+      <div class="native-subtabs"><button :class="{selected:memoryScope==='memory'}" @click="memoryScope='memory';memoryText='';memoryHash=''">长期记忆</button><button :class="{selected:memoryScope==='user'}" @click="memoryScope='user';memoryText='';memoryHash=''">用户画像</button></div>
+      <div class="native-fields"><label>记忆正文<textarea v-model="memoryText" rows="9" :disabled="!memoryHash||memory.busy" placeholder="先读取原生文档，再编辑。正文只留在当前页面草稿。"/></label></div>
+      <div class="native-actions"><button class="bot-button primary" :disabled="!enabled||!memoryHash||ui.blocked()" @click="saveMemory()">提交记忆修改</button><button class="bot-button danger" :disabled="!enabled||!memoryHash||ui.blocked()||memoryEntries.length>1" @click="saveMemory(true)">清空当前文档</button></div>
+      <details v-if="memoryEntries.length" class="native-advanced"><summary>原生记忆条目 · {{memoryEntries.length}}</summary><article v-for="(entry,index) in memoryEntries" :key="index" class="native-list-row"><p>{{entry}}</p><button class="bot-button danger" :disabled="!enabled||ui.blocked()||!memoryHash||memoryText!==nativeValue(memory.data)?.content" @click="removeMemoryEntry(index)">删除此条</button></article><p>原生多条记忆需逐条移除，最后一条可明确清空；有正文草稿时先提交或重新读取，再删除条目。</p></details><p class="native-help">提交后保留原回执。暂存、等待处理与实际写入分别显示；冲突不会覆盖新内容。</p>
+      <NativeOperationStatus :state="memory" @poll="ui.poll('memory')" @recover="ui.recover('memory')"/>
+    </section>
+    <section class="native-section" aria-label="原生会话检索">
+      <div class="native-toolbar"><div><h3>原生会话检索</h3><p class="native-help">检索当前 Bot 的 SessionDB，保持原生会话与紫薇主聊天的归属。</p></div></div>
+      <form class="native-fields" @submit.prevent="searchSessions"><label>查询词<input v-model="sessionQuery" placeholder="留空列出最近会话"/></label><div><button class="bot-button" :disabled="!enabled||sessions.loading">{{sessions.loading?'查询中…':'查询原生会话'}}</button></div></form>
+      <div class="native-list"><article v-for="item in sessionRows" :key="item.session_id||item.id" class="native-list-row"><div><strong>{{item.title||item.name||item.session_id||item.id}}</strong><small>{{item.created_at||item.updated_at||''}} · {{item.session_id||item.id}}</small><p>{{item.snippet||item.content||''}}</p></div><button class="bot-button" :disabled="sessions.loading" @click="ui.read('sessions',{sessionId:item.session_id||item.id})">查看记录</button></article></div>
+      <div v-if="sessionMessages.length" class="native-record"><p v-for="(message,index) in sessionMessages" :key="message.id||index"><strong>{{message.role}}</strong> · {{message.content}}</p></div>
+      <p v-if="sessions.data&&!sessionRows.length&&!sessionMessages.length" class="native-empty">本次读取没有返回匹配记录。</p><NativeOperationStatus :state="sessions" @poll="ui.poll('sessions')" @recover="ui.recover('sessions')"/>
+    </section>
+    <section class="native-section" aria-label="原生技能管理">
+      <p v-if="error" role="alert" class="native-error">{{error}}</p>
+      <div class="native-toolbar"><div><h3>原生技能</h3><p class="native-help">管理这位 Bot 隔离 HOME 中的技能目录。工作区挂载技能仍在原能力配置中选择。</p></div><div class="native-actions"><button class="bot-button" :disabled="!enabled||skills.loading" @click="ui.read('skills')">刷新原生目录</button><button class="bot-button primary" :disabled="!enabled||ui.blocked()" @click="newSkill">安装技能正文</button></div></div>
+      <div class="native-list"><article v-for="item in skillRows" :key="item.name||item.id" class="native-list-row"><div><strong>{{item.name||item.id}}</strong><small>{{item.enabled===false?'已禁用':'启用状态以原生回执为准'}} · {{item.source||item.provenance?.source||'来源尚未返回'}}</small><small v-if="item.hash">目录 hash：{{item.hash}}</small><p v-if="item.verified===false" class="native-help">安装结果尚未核实。</p></div><div class="native-actions"><button class="bot-button" :disabled="ui.blocked()" @click="openSkill(item)">查看 / 更新</button><button class="bot-button" :disabled="ui.blocked()" @click="ui.submit('skills',item.enabled===false?'enable':'disable',{name:item.name})">{{item.enabled===false?'启用':'禁用'}}</button><button class="bot-button" :disabled="ui.blocked()" @click="ui.submit('skills','check_updates',{name:item.name})">检查更新</button></div></article></div>
+      <div v-if="skillOperation?.operation==='check_updates'" class="native-record" aria-label="技能更新结果"><strong>原生更新检查结果</strong><article v-for="(item,index) in skillOperation.data.items||[]" :key="item.name||index"><p>{{item.name||'技能'}} · {{item.status||item.reason||'原生未返回状态'}}</p><details><summary>来源与更新证据</summary><pre>{{JSON.stringify(item,null,2)}}</pre></details></article></div><p v-if="skills.data&&!skillRows.length" class="native-empty">原生目录未返回技能。</p><NativeOperationStatus :state="skills" @poll="ui.poll('skills')" @recover="ui.recover('skills')"/>
+      <div class="native-fields"><label>Hub 搜索<input v-model="hubQuery" placeholder="原生技能名称或关键词"/></label></div><div class="native-actions"><button class="bot-button" :disabled="!enabled||hub.loading||!hubQuery.trim()" @click="ui.read('skillHub',{query:hubQuery.trim(),limit:20})">查询 Hub</button></div>
+      <div class="native-list"><article v-for="item in hubRows" :key="item.identifier||item.id||item.name" class="native-list-row"><div><strong>{{item.name||item.identifier||item.id}}</strong><small>{{item.source||''}}</small><p>{{item.description||item.summary||''}}</p></div><button class="bot-button" :disabled="ui.blocked()" @click="hubInstall(item)">安装到此 Bot</button></article></div><NativeOperationStatus :state="hub"/>
+      <p class="native-help">Hub 返回“installed”不等于验收成功。提交后以实际原生目录、provenance、hash 与安装确认回执核实。</p>
+      <details v-if="editor" open class="native-advanced"><summary>{{editor==='new'?'安装新技能':'更新原生技能'}}</summary><div class="native-fields"><label>技能名称<input v-model="skillForm.name" :disabled="editor==='edit'"/></label><label>SKILL.md 正文<textarea v-model="skillForm.content" rows="9"/></label><p v-if="error" role="alert" class="native-error">{{error}}</p><div class="native-actions"><button class="bot-button primary" :disabled="ui.blocked()" @click="saveSkill">提交技能正文</button><button v-if="editor==='edit'" class="bot-button danger" :disabled="ui.blocked()" @click="removeSkill">删除原生技能</button><button class="bot-button" @click="editor=null">关闭编辑</button></div></div><NativeOperationStatus :state="detail" @poll="ui.poll('skillDetail')" @recover="ui.recover('skillDetail')"/></details>
+    </section>
+    <BotMcpPanel :ui="ui" :bot="bot" :draft="draft" :enabled="enabled" :config-busy="configBusy" @save-config="emit('save-config')"/>
+  </div>
+</template>

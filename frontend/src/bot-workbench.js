@@ -90,19 +90,7 @@ export function createBotWorkbench({api,wrap=value=>value}) {
   async function initialize(){
     if(state.bot?.configuration_state!=='uninitialized')return false;
     if(state.busy||state.writeUnknown)return false;
-    const request=scope.begin('initialize'),snapshot=clone(state.bot),config=clone(state.draft.config);
-    state.busy=true;state.error='';
-    try{
-      if(snapshot.main_conversation_id){
-        const conversation=await api.conversation(snapshot.main_conversation_id);
-        if(!scope.current(request))return false;
-        if(conversation.device_id&&conversation.device_id!==snapshot.employee.target_device_id){
-          state.error='原会话的电脑与当前员工绑定不一致。请先在原会话核对并保存电脑与目录，再初始化 Bot；这里不会静默改绑或创建第二份聊天。';return false;
-        }
-      }
-    }catch(error){if(scope.current(request))state.error=botErrorMessage(error);return false;}
-    finally{if(scope.current(request))state.busy=false;}
-    if(!scope.current(request))return false;
+    const config=clone(state.draft.config);
     const idempotencyKey='bot-initialize-'+state.selectedId;
     return mutate((id,workspace)=>api.initializeEmployeeBot(id,{idempotencyKey,config},workspace),'原员工 Bot 能力已初始化并读回。员工 ID 和既有聊天保持；请检查并启用。',{readback:true,resetDraft:true});
   }

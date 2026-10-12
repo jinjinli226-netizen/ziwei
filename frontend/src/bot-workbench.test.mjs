@@ -69,13 +69,13 @@ test('initializing an existing Hermes employee preserves its ID and avoids query
   await ui.setWorkspace('qa','a');assert.equal(recordReads,0);
   assert.equal(await ui.initialize(),true);assert.equal(initializations,1);assert.equal(ui.state.bot.id,'a');assert.equal(ui.state.bot.revision,1);
 });
-test('existing employee initialization checks the original conversation without writing or silently changing mismatched devices',async()=>{
+test('existing employee initialization preserves the server atomic conversation conflict without silently rebinding',async()=>{
   let writes=0;const current={...bot(),configuration_state:'uninitialized',employee:{...bot().employee,target_device_id:'device-a'}};
-  const ui=fixture({bot:async()=>current,conversation:async()=>({device_id:'device-b'}),initializeEmployeeBot:async()=>{writes++;}});
-  await ui.setWorkspace('qa','a');assert.equal(await ui.initialize(),false);assert.equal(writes,0);assert.equal(ui.state.busy,false);assert.equal(ui.state.writeUnknown,false);assert.match(ui.state.error,/电脑.*不一致/);
+  const ui=fixture({bot:async()=>current,initializeEmployeeBot:async()=>{writes++;throw Object.assign(new Error('现有主聊天模型或电脑与员工绑定不一致'),{status:409,code:'BOT_CONVERSATION_CONFLICT'});}});
+  await ui.setWorkspace('qa','a');assert.equal(await ui.initialize(),false);assert.equal(writes,1);assert.equal(ui.state.busy,false);assert.equal(ui.state.writeUnknown,false);assert.match(ui.state.error,/模型或电脑.*不一致/);assert.equal(ui.state.bot.configuration_state,'uninitialized');
 });
-test('a late initialization preflight cannot initialize an employee after switching Bot',async()=>{
+test('a late initialization response cannot replace another selected employee',async()=>{
   const delayed=deferred();let writes=0;const current={...bot(),configuration_state:'uninitialized'};
-  const ui=fixture({bot:async id=>id==='a'?current:bot(id),conversation:()=>delayed.promise,initializeEmployeeBot:async()=>{writes++;}});
-  await ui.setWorkspace('qa','a');const initialization=ui.initialize();await ui.select('b');delayed.resolve({device_id:null});assert.equal(await initialization,false);assert.equal(writes,0);assert.equal(ui.state.bot.id,'b');
+  const ui=fixture({bot:async id=>id==='a'?current:bot(id),initializeEmployeeBot:async()=>{writes++;return delayed.promise;}});
+  await ui.setWorkspace('qa','a');const initialization=ui.initialize();await ui.select('b');delayed.resolve(bot('a'));assert.equal(await initialization,false);assert.equal(writes,1);assert.equal(ui.state.bot.id,'b');
 });

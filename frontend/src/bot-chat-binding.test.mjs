@@ -16,10 +16,13 @@ test('actual Bot device selector cannot rewrite its binding or launch directory 
   const select=actual('selectConversationDevice',{conversationDeviceId:device,botBindingPending:{value:false},conversationBotBinding:{value:{id:'bot'}},selectedConversation:{value:{employee_id:'bot'}},notify:message=>notices.push(message),openConversationDirectoryPicker:()=>inspections++});
   select('other');assert.equal(device.value,'fixed');assert.equal(inspections,0);assert.match(notices[0],/已绑定/);
 });
-test('actual Bot directory picker stays closed while inspection is not integrated',()=>{
-  const opened={value:false},notices=[];
-  const open=actual('openConversationDirectoryPicker',{botBindingPending:{value:false},conversationBotBinding:{value:{id:'bot'}},selectedConversation:{value:{employee_id:'bot'}},conversationDirectoryPickerOpen:opened,selectedConversationDevice:{value:{status:'online'}},notify:message=>notices.push(message)});
-  open();assert.equal(opened.value,false);assert.match(notices[0],/尚未接入/);
+test('actual Bot directory picker opens for its bound online device without changing runtime binding',()=>{
+  const opened={value:false},path={value:''},device={value:{id:'fixed-device',status:'online',workdir:'C:\\owned'}},notices=[];
+  const open=actual('openConversationDirectoryPicker',{botBindingPending:{value:false},conversationDirectoryEditorVersion:{value:0},conversationDirectoryPathDraft:path,conversationDirectoryCheck:{value:null},conversationWorkingDirectory:{value:'C:\\chat'},conversationDirectoryPickerOpen:opened,selectedConversationDevice:device,notify:message=>notices.push(message)});
+  open();assert.equal(opened.value,true);assert.equal(path.value,'C:\\chat');assert.equal(device.value.id,'fixed-device');assert.deepEqual(notices,[]);
+});
+test('directory inspection remains unavailable while Bot binding is unresolved',()=>{
+  const opened={value:false},notices=[];const open=actual('openConversationDirectoryPicker',{botBindingPending:{value:true},conversationDirectoryPickerOpen:opened,notify:message=>notices.push(message)});open();assert.equal(opened.value,false);assert.match(notices[0],/正在核对/);
 });
 test('failed workspace load cannot authorize prior workspace model and skill options',async()=>{
   const refs=Object.fromEntries([...source('load').matchAll(/(\w+)\.value/g)].map(match=>[match[1],{value:[]}]));

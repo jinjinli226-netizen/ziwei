@@ -13,10 +13,10 @@ const browser=await chromium.launch({headless:true,channel:'msedge'});
 const page=await browser.newPage({viewport:{width:1440,height:1000},deviceScaleFactor:1});
 const errors=[],requests=[];page.on('pageerror',error=>errors.push(error.message));
 const capabilities=[['bot_identity','Bot 身份与岗位'],['persistent_chat','持久主聊天'],['profile_memory','独立原生记忆'],['model_provider','模型与服务商'],['skills','技能'],['tools_mcp','工具与 MCP'],['routines','定时 Routine'],['groups_mentions','群聊与 @提及'],['delegation','Bot 委派'],['gateway','外部消息 Gateway'],['voice','语音'],['multimodal','多模态'],['session_search','会话检索'],['goals','Goals'],['heartbeat','Heartbeat'],['kanban','Kanban'],['observability','运行记录']].map(([id,label],i)=>({id,label,configurable:i<7,status:i<7?'requires_configuration':'not_integrated',reason:i<7?'隔离 UI fixture：需要配置与实际设备回执。':'此能力尚未接入控制与结果链。',evidence:['fixture=true','ziwei.bot.schema:1']}));
-const makeBot=(id,name)=>({id,employee_id:id,workspace:'qa',employee:{id,name,description:'隔离界面演示 · 未连接真实设备',persona:'简洁、认真',instructions:'整理合成资料并提供来源。',runtime:'Hermes',runtime_profile:'fixture',target_device_id:'fixture-device',skills:[],model_id:null},config:defaultBotConfig(),revision:1,control_state:'draft',control_epoch:1,main_conversation_id:`chat-${id}`,scheduler_authority:'ziwei',validation:{status:'not_checked',revision:null},latest_run:null,capabilities});
-let bots=[makeBot('bot-a','资料研究员'),makeBot('bot-b','内容编辑')],routines=[],conflict=false;
+const makeBot=(id,name)=>({id,employee_id:id,workspace:'qa',configuration_state:'initialized',employee:{id,name,description:'隔离界面演示 · 未连接真实设备',persona:'简洁、认真',instructions:'整理合成资料并提供来源。',runtime:'Hermes',runtime_profile:'fixture',target_device_id:'fixture-device',skills:[],model_id:null},config:defaultBotConfig(),revision:1,control_state:'draft',control_epoch:1,main_conversation_id:`chat-${id}`,scheduler_authority:'ziwei',validation:{status:'not_checked',revision:null},latest_run:null,capabilities});
+let bots=[makeBot('bot-a','资料研究员'),makeBot('bot-b','内容编辑')],routines=[],conflict=false,workingDirectory='C:\\fixture-owned';
 const device={id:'fixture-device',name:'隔离演示电脑（fixture）',status:'online',runtimes:[{name:'Hermes',available:true,cli_status:'available',version:'fixture-only',authenticated:true,readiness:{ready:true},profiles:[{name:'fixture',ready:true,hasProvider:true,authentication_configured:true}]}]};
-const conversation=id=>({id,title:'资料研究员 · 主聊天',employee_id:'bot-a',employee:bots[0].employee,device_id:device.id,messages:[{id:'message-fixture',role:'assistant',content:'这是隔离 fixture 对话，尚未调用真实 Hermes。'}],execution:null});
+const conversation=id=>({id,title:'资料研究员 · 主聊天',employee_id:'bot-a',employee:bots[0].employee,device_id:device.id,working_directory:workingDirectory,messages:[{id:'message-fixture',role:'assistant',content:'这是隔离 fixture 对话，尚未调用真实 Hermes。'}],execution:null});
 async function json(route,data,status=200){return route.fulfill({status,contentType:'application/json',body:JSON.stringify(data)});}
 await page.route('**/*',async route=>{
   const req=route.request(),url=new URL(req.url()),p=url.pathname;
@@ -37,7 +37,7 @@ await page.route('**/*',async route=>{
     if(suffix==='/control'){bot.control_state=['activate','resume'].includes(body.operation)?'active':'paused';bot.control_epoch++;return json(route,bot);}
     return json(route,bot);
   }
-  if(p.startsWith('/api/conversations/'))return json(route,conversation(p.split('/')[3]));
+  if(p.startsWith('/api/conversations/')){if(p.endsWith('/workdir/inspect'))return json(route,{action:{id:'directory-fixture',status:'succeeded',result:{path:req.postDataJSON().path,exists:true,isDirectory:true,roots:[],entries:[]}}});if(req.method()==='PATCH'){const body=req.postDataJSON();requests.push({path:p,body});workingDirectory=body.workingDirectory;}return json(route,conversation(p.split('/')[3]));}
   if(p.includes('/notifications/stream'))return route.fulfill({contentType:'text/event-stream',body:': fixture\n\n'});
   if(p.startsWith('/api/')||p.startsWith('/a2a/')){
     const blank={workspace:{slug:'qa',name:'隔离 QA',timezone:'Asia/Shanghai',preferences:{}},tasks:[],runtimes:[],models:[{id:'fixture-model',label:'合成模型（fixture）'}],skills:[],documents:[],automations:[],members:[],devices:[device],employees:bots.map(bot=>bot.employee),calendars:[],agents:[],conversations:[conversation('chat-bot-a')],notifications:[],stats:{unread:0}};
@@ -62,11 +62,13 @@ try{
   await check('Routine creation uses selected Bot and timezone',async()=>{await page.getByRole('button',{name:'例行工作',exact:true}).click();await page.getByRole('button',{name:'添加计划'}).click();await page.getByRole('dialog').getByLabel('名称',{exact:true}).fill('合成日报');await page.getByLabel('工作内容',{exact:true}).fill('整理 fixture 内容，不调用真实模型');await page.getByRole('button',{name:'保存 Routine',exact:true}).click();await page.getByRole('dialog').waitFor({state:'detached'});await page.getByRole('heading',{name:'合成日报'}).waitFor();assert.equal(routines[0].employee_id,'bot-a');assert.equal(routines[0].timezone,'Asia/Shanghai');});
   await check('configuration validation is not labelled business completion',async()=>{await page.getByRole('button',{name:'运行记录',exact:true}).click();await page.getByRole('button',{name:'检查已保存配置'}).click();await page.getByRole('button',{name:'启用 Bot',exact:true}).click();await page.getByText('已启用 · 待命',{exact:true}).first().waitFor();assert.equal(await page.getByText('上次已完成',{exact:true}).count(),0);});
   await check('Bot main chat and settings stay connected',async()=>{await page.getByRole('button',{name:'打开长期聊天',exact:true}).click();await page.getByText('这是隔离 fixture 对话，尚未调用真实 Hermes。',{exact:true}).waitFor();await page.getByRole('button',{name:'Bot 设置',exact:true}).click();await page.getByLabel('名称',{exact:true}).waitFor();});
+  await check('Bot main chat checks a directory on its bound device and preserves model/device binding',async()=>{await page.getByRole('button',{name:'打开长期聊天',exact:true}).click();await page.getByRole('button',{name:'选择目录',exact:true}).click();await page.getByRole('dialog').getByRole('textbox',{name:'当前会话工作目录'}).fill('C:\\fixture-checked');await page.getByRole('button',{name:'检查目录',exact:true}).click();await page.getByText('目录存在，可以使用',{exact:true}).waitFor();await page.getByRole('button',{name:'选择此目录',exact:true}).click();await page.getByRole('dialog').waitFor({state:'detached'});const saved=requests.findLast(row=>row.path==='/api/conversations/chat-bot-a');assert.deepEqual(saved.body,{workingDirectory:'C:\\fixture-checked'});await page.getByRole('button',{name:'Bot 设置',exact:true}).click();});
+  await check('native Routine creates a typed Heartbeat driver under the same Bot scheduler',async()=>{await page.getByRole('button',{name:'例行工作',exact:true}).click();await page.getByRole('button',{name:'添加计划'}).click();await page.getByRole('dialog').getByLabel('名称',{exact:true}).fill('原生主动检查计划');await page.getByLabel('运行内容').selectOption('heartbeat');await page.getByRole('button',{name:'保存 Routine',exact:true}).click();await page.getByRole('dialog').waitFor({state:'detached'});assert.deepEqual(routines.at(-1).nativeDriver,{resource:'heartbeat',operation:'step',input:{}});assert.equal(routines.at(-1).employee_id,'bot-a');});
   await check('create dialog opens and closes through real ZiModal events',async()=>{await page.getByRole('button',{name:'创建 Bot',exact:true}).click();assert.equal(await page.getByRole('dialog').count(),1);await page.getByRole('dialog').getByRole('button',{name:'关闭',exact:true}).click();await page.getByRole('dialog').waitFor({state:'detached'});});
   await check('unadded MCP input cannot transfer through roster selection',async()=>{
-    await page.getByRole('button',{name:'能力组合',exact:true}).click();await page.getByText('MCP 与高级连接',{exact:true}).click();await page.getByLabel('MCP 名称',{exact:true}).fill('only-on-a');
-    await page.locator('.bot-roster-row').filter({hasText:'内容编辑'}).click();await page.getByRole('button',{name:'能力组合',exact:true}).click();
-    await page.getByText('MCP 与高级连接',{exact:true}).click();assert.equal(await page.getByLabel('MCP 名称',{exact:true}).inputValue(),'');
+    await page.getByRole('button',{name:'资料与工具',exact:true}).click();await page.getByRole('button',{name:'添加 MCP',exact:true}).click();await page.getByLabel('MCP 名称',{exact:true}).fill('only-on-a');
+    await page.locator('.bot-roster-row').filter({hasText:'内容编辑'}).click();await page.getByRole('button',{name:'资料与工具',exact:true}).click();
+    await page.getByRole('button',{name:'添加 MCP',exact:true}).click();assert.equal(await page.getByLabel('MCP 名称',{exact:true}).inputValue(),'');
     await page.locator('.bot-roster-row').filter({hasText:'已改名研究员'}).click();
   });
   await check('history navigation closes a Routine editor and cannot transfer its draft to another Bot',async()=>{
@@ -84,7 +86,7 @@ try{
     await page.getByRole('button',{name:'在团队管理查看',exact:true}).click();await page.locator('.org-employee-card').filter({hasText:'同一位数字员工'}).waitFor();
     assert.equal(bots.filter(bot=>bot.id==='bot-created').length,1);
     await page.getByRole('menu',{name:'同一位数字员工 操作'}).getByRole('menuitem',{name:'Bot 工作视图',exact:true}).click();
-    await page.getByRole('heading',{name:'同一位数字员工',exact:true}).waitFor();assert.ok(page.url().endsWith('/qa/bots/bot-created'));
+    await page.getByRole('heading',{name:'同一位数字员工',exact:true}).waitFor();assert.equal(new URL(page.url()).pathname,'/qa/bots/bot-created');
   });
   await page.setViewportSize({width:390,height:844});
   await page.screenshot({path:path.join(evidence,'fixture-bot-mobile.png'),fullPage:true});
