@@ -20,9 +20,17 @@ export function preparePreviewNativeHome(directory,apiBase){
   once(path.join(managed,'config.yaml'),stringify({updates:{check:false},auxiliary:{title_generation:{enabled:false},background_review:{enabled:false}}}));
   // Python SDKs may not honor provider URL configuration. Block every external
   // socket in this owned process tree, including default discovery endpoints.
-  once(path.join(guard,'sitecustomize.py'),"import socket,ipaddress\n_orig=socket.socket.connect\ndef local_connect(self,address):\n if isinstance(address,tuple):\n  host=str(address[0])\n  try: allowed=(host=='localhost' or ipaddress.ip_address(host).is_loopback) and int(address[1])=="+new URL(apiBase).port+"\n  except ValueError: allowed=False\n  if not allowed: raise RuntimeError('Isolated preview blocks non-owned network endpoints')\n return _orig(self,address)\nsocket.socket.connect=local_connect\n");
+  fs.writeFileSync(path.join(guard,'sitecustomize.py'),previewSocketGuard(Number(new URL(apiBase).port)),{mode:0o600});
   Object.assign(process.env,{HERMES_HOME:source,HERMES_MANAGED_DIR:managed,HERMES_ALLOW_PRIVATE_URLS:'true',PYTHONNOUSERSITE:'1',PYTHONPATH:guard,NO_PROXY:'127.0.0.1,localhost',no_proxy:'127.0.0.1,localhost'});
   return {home,source};
+}
+
+export function previewSocketGuard(apiPort){
+  if(!Number.isInteger(apiPort)||apiPort<1024||apiPort>65535)throw new Error('Invalid owned API port');
+  // Windows asyncio's socketpair creates its own ephemeral loopback listener.
+  // Permit connections to listeners created in this Python process, without
+  // opening access to other projects' loopback ports.
+  return `import socket,ipaddress\n_connect=socket.socket.connect\n_listen=socket.socket.listen\n_close=socket.socket.close\n_owned={}\ndef is_local(host):\n try: return host=='localhost' or ipaddress.ip_address(str(host)).is_loopback\n except ValueError: return False\ndef local_listen(self,*args,**kwargs):\n result=_listen(self,*args,**kwargs)\n address=self.getsockname()\n if isinstance(address,tuple) and is_local(address[0]): _owned[id(self)]=int(address[1])\n return result\ndef local_close(self):\n _owned.pop(id(self),None)\n return _close(self)\ndef local_connect(self,address):\n if isinstance(address,tuple) and not (is_local(address[0]) and (int(address[1])==${apiPort} or int(address[1]) in _owned.values())): raise RuntimeError('Isolated preview blocks non-owned network endpoints')\n return _connect(self,address)\nsocket.socket.connect=local_connect\nsocket.socket.listen=local_listen\nsocket.socket.close=local_close\n`;
 }
 
 export async function previewNativePeer(req,res){
@@ -47,13 +55,18 @@ export async function previewNativePeer(req,res){
   res.json({});return true;
 }
 
+export function previewGatewayResult(data,action,version){
+  const operation=action.payload.nativeOperation,snapshot=action.payload.hermesBot,failed=data.success===false||operation.operation==='connect'&&!data.connected,uncertain=data.code==='EXECUTION_UNCERTAIN';
+  return {status:failed?'failed':'succeeded',...(failed?{error:data.code||'GATEWAY_OPERATION_FAILED'}:{}),...(uncertain?{code:'EXECUTION_UNCERTAIN',executionState:'uncertain'}:{}),result:{nativeOperation:{schemaVersion:2,resource:'gateway',operation:operation.operation,employeeId:snapshot.employeeId,revision:snapshot.revision,nativeVersion:data.nativeVersion||version,status:failed?'failed':'succeeded',data},...(uncertain?{code:'EXECUTION_UNCERTAIN',executionState:'uncertain'}:{})}};
+}
+
 export function createPreviewNativeRuntime({directory,repo,workspaces,ownerUserId,apiBase,log}){
-  const {home,source}=preparePreviewNativeHome(directory,apiBase),version=discoverInstalledRuntimes().runtimes.Hermes?.version;
-  if(!version)throw new Error('原生预览未发现已安装 Hermes；不会回退为合成成功');
+  const {home,source}=preparePreviewNativeHome(directory,apiBase),installed=discoverInstalledRuntimes().runtimes.Hermes,version=installed?.version;
+  if(installed?.status!=='available'||!installed.binary||!version)throw new Error('原生预览未发现可用的已安装 Hermes；不会回退为合成成功');
   const file=path.join(directory,'data/native-devices.private.json'),devices=fs.existsSync(file)?JSON.parse(fs.readFileSync(file,'utf8')):{};
   for(const {slug} of workspaces)if(!devices[slug]){const pairing=repo.createDevicePairing(slug,{createdBy:ownerUserId,name:'本机原生隔离预览'});devices[slug]=repo.claimDevicePairing({code:pairing.code,name:'本机原生隔离预览'});}
   fs.writeFileSync(file,JSON.stringify(devices),{mode:0o600});
-  let stopping=false;const connections=[];
+  let stopping=false,verified=false;const connections=[];
   const request=async(connection,route,body)=>{const response=await fetch(apiBase+route,{method:'POST',headers:{'content-type':'application/json','x-ziwei-device-token':connection.deviceToken},body:JSON.stringify({...body,workspace:connection.workspace}),redirect:'error',signal:AbortSignal.timeout(120000)});const value=await response.json();if(!response.ok)throw Object.assign(new Error(value.code||'PREVIEW_NATIVE_API_ERROR'),{status:response.status});return value;};
   for(const {slug} of workspaces){
     const device=devices[slug],runtimeDir=path.join(home,'workers',slug);fs.mkdirSync(runtimeDir,{recursive:true});
@@ -65,10 +78,9 @@ export function createPreviewNativeRuntime({directory,repo,workspaces,ownerUserI
         assertPreviewNativeAction(action,home,apiBase);const operation=action.payload.nativeOperation;let result;
         if(operation?.resource==='gateway'&&['connect','disconnect','inbound','outbound'].includes(operation.operation)){
           const data=await gateways.operate(action,{context:action.payload.hermesBot,baseHome:source,privateDirectory:path.join(runtimeDir,'bot-instances'),workspace:slug,apiBase,operation,cwd:home,signal:context.signal,beforeSpawn:async()=>{const receipt=await request(device,`/a2a/v1/actions/${action.id}/bot-start`,{});if(!receipt.allowed)throw Object.assign(new Error('Bot 授权已撤销'),{definitelyNotStarted:true});}});
-          const failed=data.success===false||operation.operation==='connect'&&!data.connected;
-          result={status:failed?'failed':'succeeded',result:{nativeOperation:{schemaVersion:2,resource:'gateway',operation:operation.operation,employeeId:action.payload.hermesBot.employeeId,revision:action.payload.hermesBot.revision,nativeVersion:data.nativeVersion||version,status:failed?'failed':'succeeded',data},...(data.code==='EXECUTION_UNCERTAIN'?{code:data.code,executionState:'uncertain'}:{})}};
+          result=previewGatewayResult(data,action,version);
         }else result=await executor(action,context);
-        if(result.result){result.result.executionSource='local_test_provider';if(result.result.nativeOperation)result.result.nativeOperation.executionSource='local_test_provider';}return result;
+        if(result.result){result.result.executionSource='local_test_provider';if(result.result.nativeOperation){result.result.nativeOperation.executionSource='local_test_provider';if(result.status==='succeeded'&&result.result.nativeOperation.nativeVersion===version)verified=true;}if(result.result.botValidation?.valid&&result.result.botValidation.nativeVersion===version)verified=true;}return result;
       }});
     delivery=createActionDelivery({directory:path.join(runtimeDir,'action-delivery'),identity:{apiBase,workspace:slug,deviceId:device.deviceId},post:(route,body)=>request(device,route,body),dispatch:action=>dispatcher.dispatch(action),onEvent:(event,extra)=>log.write(event,{workspace:slug,actionId:extra.actionId,code:extra.code})});
     const scheduler=createActionScheduler({execute:action=>delivery.execute(action),canStart:action=>!stopping&&(!dispatcher.quarantined||delivery.canDeliverWithoutExecution(action)),quarantinedActionIds:()=>dispatcher.quarantinedActionIds,onError:(error,action)=>log.write('native_delivery_error',{actionId:action.id,error:error.message})});
@@ -76,5 +88,5 @@ export function createPreviewNativeRuntime({directory,repo,workspaces,ownerUserI
   }
   const heartbeat=()=>{for(const {slug,device} of connections)repo.heartbeatDevice(slug,{deviceId:device.deviceId,name:'本机原生隔离预览 · 本地测试 provider',workdir:home,pid:process.pid,runtimes:{Hermes:{status:'available',version,profiles:[{name:'default',provider_configured:true,authentication_configured:true,readiness:{ready:true}}],models:[{id:'preview-local-model',label:'本机原生 · 本地测试 provider'}]}}});};
   heartbeat();const monitor=setInterval(heartbeat,10000),worker=setInterval(()=>{try{for(const connection of connections){const pending=repo.listA2AActions(connection.slug,{status:'pending',deviceId:connection.device.deviceId});connection.scheduler.schedule([...connection.delivery.recoverActions(),...pending]);}}catch(error){log.write('native_poll_error',{code:error.code,error:error.message});}},500);
-  return {version,home,devices:Object.fromEntries(connections.map(item=>[item.slug,item.device.deviceId])),ownsToken(token){const credential=repo.authenticateDeviceToken(token);return Boolean(credential&&connections.some(item=>item.device.deviceId===credential.deviceId&&item.slug===credential.workspace));},async close(){stopping=true;clearInterval(worker);clearInterval(monitor);for(const connection of connections){for(const action of repo.listA2AActions(connection.slug,{status:'acked',deviceId:connection.device.deviceId}))connection.dispatcher.cancel(action.id);await connection.gateways.close();}await Promise.all(connections.map(item=>item.scheduler.whenIdle()));}};
+  return {version,home,get verified(){return verified;},devices:Object.fromEntries(connections.map(item=>[item.slug,item.device.deviceId])),ownsToken(token){const credential=repo.authenticateDeviceToken(token);return Boolean(credential&&connections.some(item=>item.device.deviceId===credential.deviceId&&item.slug===credential.workspace));},async close(){stopping=true;clearInterval(worker);clearInterval(monitor);for(const connection of connections){for(const action of repo.listA2AActions(connection.slug,{status:'acked',deviceId:connection.device.deviceId}))connection.dispatcher.cancel(action.id);await connection.gateways.close();}await Promise.all(connections.map(item=>item.scheduler.whenIdle()));}};
 }

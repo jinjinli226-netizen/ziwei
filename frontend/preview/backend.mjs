@@ -77,7 +77,7 @@ outer.use(async(req,res,next)=>{
   req.headers.cookie=`${auth.cookieName}=${session.token}`;
   next();
 });
-outer.get('/__preview/health',(_req,res)=>res.json({ok:true,preview:true,fixtureDevices:true,realHermes:true,localTestProvider:true,nativeVersion:native.version,schedulerEnabled:false,pid:process.pid,database:path.join(data,'preview.sqlite'),runtimeHome}));
+outer.get('/__preview/health',(_req,res)=>res.json({ok:true,preview:true,fixtureDevices:true,realHermes:true,hermesInstalled:true,nativeExecutionVerified:native.verified,localTestProvider:true,nativeVersion:native.version,schedulerEnabled:false,pid:process.pid,database:path.join(data,'preview.sqlite'),runtimeHome}));
 outer.use(app);
 const server=http.createServer(outer);
 server.prependListener('upgrade',req=>{req.headers.cookie=`${auth.cookieName}=${session.token}`;});
@@ -104,7 +104,7 @@ const worker=setInterval(()=>{
     }
   }catch(error){log.write('fixture_worker_error',{error:error.message,code:error.code});}
 },1000);
-const monitor=setInterval(()=>{heartbeat();log.write('api_heartbeat',{pid:process.pid,port:apiPort,fixture:true});},15000);
+const monitor=setInterval(()=>{heartbeat();log.write('api_heartbeat',{pid:process.pid,port:apiPort,fixtureDevices:true,realHermes:true,nativeExecutionVerified:native.verified});},15000);
 const renewal=setInterval(()=>{session=auth.login(credentials).session;},24*60*60*1000);
 process.on('uncaughtExceptionMonitor',error=>log.write('uncaught_exception',{error:error.message,stack:error.stack}));
 let stopping=false;

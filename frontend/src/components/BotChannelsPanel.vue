@@ -1,4 +1,5 @@
 <script setup>
+const nativePreview=import.meta.env.VITE_ZIWEI_NATIVE_PREVIEW==='true';
 import {computed,onBeforeUnmount,ref,watch} from 'vue';
 import NativeOperationStatus from './NativeOperationStatus.vue';
 import {audioInput,nativeValue,gatewayStages,gatewayExtra,safeProviderUrl} from '../bot-native-data.js';
@@ -26,7 +27,7 @@ watch(()=>[props.ui.state.workspace,props.bot.id],reset,{immediate:true});onBefo
 </script>
 <template>
   <div class="native-workspace">
-    <section class="native-section" aria-label="Gateway 渠道">
+    <section class="native-section" aria-label="Gateway 渠道"><p v-if="nativePreview" class="native-help">此隔离预览可保存和读取渠道设置，未启用外部渠道监听器。真实连接需在授权电脑配置 SDK、凭据及已登记端口。</p>
       <div class="native-toolbar"><div><h3>消息渠道 Gateway</h3><p class="native-help">配置渠道、授权引用与路由，分别核实保存、进程、渠道连接和媒体 provider。</p></div><button class="bot-button" :disabled="!enabled||gateway.loading" @click="ui.read('gateway')">读取连接状态</button></div>
       <div class="native-stage-grid"><article><strong>配置已保存</strong><span>{{bot.config.gateway?'已保存配置；需核对原生回读':'尚未保存渠道配置'}}</span></article><article><strong>Gateway 进程</strong><span>{{stages.process}}</span></article><article><strong>渠道连接</strong><span>{{stages.connection}}</span></article><article><strong>媒体 provider</strong><span>{{stages.media}}</span></article></div>
       <div class="native-list"><article v-for="(channel,name) in platforms" :key="name" class="native-list-row"><div><strong>{{name}}</strong><small>{{channel.enabled?'草稿中启用':'草稿中停用'}} · {{channel.tokenEnv?'已设置本机凭据引用':'凭据引用未配置'}}</small></div><button class="bot-button" @click="editPlatform(name)">编辑渠道</button></article></div>

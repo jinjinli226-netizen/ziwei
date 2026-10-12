@@ -3,7 +3,13 @@ function externalDelivery(value){
   return Object.entries(value).some(([key,item])=>(/webhook/i.test(key)&&Boolean(item))||(/output.?mode/i.test(key)&&item==='webhook')||(item&&typeof item==='object'&&externalDelivery(item)));
 }
 export function previewRequestAllowed({method,path,body,native=false}){
-  if(externalDelivery(body))return false;
+  let deliveryBody=body;
+  if(native&&/^\/api\/workspaces\/[^/]+\/bots(?:\/[^/]+)?$/.test(path)&&body?.config?.gateway?.platforms?.webhook){
+    const channel=body.config.gateway.platforms.webhook;
+    if(!['127.0.0.1','localhost'].includes(channel.extra?.host))return false;
+    deliveryBody=structuredClone(body);delete deliveryBody.config.gateway.platforms.webhook;
+  }
+  if(externalDelivery(deliveryBody))return false;
   if(/\/(?:ziwei-connect|phone-mcp|client-maintenance|client-update|terminal-mcp|daemon)(?:\/|$)/.test(path)||path.startsWith('/mcp/')||path.startsWith('/terminal-mcp/'))return false;
   if(method==='GET'){
     if(['/healthz','/__preview/health','/api/auth/status','/api/auth/me','/api/workspaces','/a2a/v1/agents'].includes(path))return true;

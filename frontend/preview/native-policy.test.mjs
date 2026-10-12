@@ -9,4 +9,6 @@ test('native preview permits isolated HOME and loopback providers only',()=>{
   assert.throws(()=>assertPreviewNativeAction({payload:{hermesBot:{sourceProfile:'preview-fixture'}}},home));
   assert.throws(()=>assertPreviewNativeAction({...action({}),payload:{...action({}).payload,workdir:path.dirname(home)}},home));
   assert.throws(()=>assertPreviewNativeAction(action({mcpServers:{otherProject:{url:'http://127.0.0.1:9999/mcp'}}}),home,'http://127.0.0.1:4283'));
+  assert.throws(()=>assertPreviewNativeAction(action({voice:{tts:{provider:'openai'}}}),home));
+  assert.throws(()=>assertPreviewNativeAction({payload:{...action({}).payload,nativeOperation:{resource:'gateway',operation:'connect',input:{platform:'webhook'}}}},home));
 });

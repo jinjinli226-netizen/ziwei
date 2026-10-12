@@ -13,4 +13,6 @@ test('native browser entry is explicit and does not open device or external deli
   assert.equal(previewRequestAllowed(request),false);assert.equal(previewRequestAllowed({...request,native:true}),true);
   assert.equal(previewRequestAllowed({method:'POST',path:'/a2a/v1/actions',native:true}),false);
   assert.equal(previewRequestAllowed({...request,native:true,body:{webhookUrl:'https://external.invalid/'}}),false);
+  const gateway={method:'PATCH',path:'/api/workspaces/preview-bots/bots/e',native:true,body:{config:{gateway:{platforms:{webhook:{enabled:true,extra:{host:'127.0.0.1',port:42000}}}}}}};
+  assert.equal(previewRequestAllowed(gateway),true);gateway.body.config.gateway.platforms.webhook.extra.host='0.0.0.0';assert.equal(previewRequestAllowed(gateway),false);
 });
