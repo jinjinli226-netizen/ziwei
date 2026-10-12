@@ -1,5 +1,7 @@
 # E03 Hermes 原生能力界面候选
 
+后续状态：E02稳定候选已组合，唯一5283/4283预览已按原状态根更新并完成真实原生HTTP与持久页面验收。最新数据、证据及两项待修后端审查见 [原生持久预览交接](2026-10-13-e03-hermes-native-preview.md)。下文保留此候选形成时的历史记录。
+
 2026-10-13，Asia/Shanghai。完整原生集成仍在继续；本文记录可审查的前端候选与后续集成入口，不把合成回执当作真实 Hermes 验收。
 
 工作树 `C:\Users\25941\.codex\worktrees\v2-e03-hermes-full-ui\灵光爸爸拆解`，分支 `codex/v2-e03-hermes-full-ui`。基线 `90e588b84a7a69a0ec41fbe41e5ebfb18debdb8a`。第一版预览仍在旧树 `v2-e03-hermes-bot-ui` 的 5283/4283，本轮尚未替换、启动第二套长期预览或修改正式服务。

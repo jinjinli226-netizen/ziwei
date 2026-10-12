@@ -9,6 +9,7 @@ const root=path.resolve(import.meta.dirname,'../..'),directory=previewStateDirec
 assert.ok(process.env.ZIWEI_PREVIEW_DATA_ROOT,'Pass the verified owned state root explicitly');
 const evidence=path.join(root,'.local/e03-native-preview-evidence');fs.mkdirSync(evidence,{recursive:true});const file=path.join(evidence,'preservation.json');
 const db=new DatabaseSync(path.join(directory,'data/preview.sqlite'),{readOnly:true});
+db.exec('PRAGMA busy_timeout=10000');
 const digest=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 try{
   const rows=table=>db.prepare(`SELECT * FROM ${table} ORDER BY id`).all();
