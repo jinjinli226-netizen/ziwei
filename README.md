@@ -1,10 +1,10 @@
 # 紫薇
 
-## 员工默认工作目录（2026-10-12，本轮待发布验收）
+## 员工默认工作目录（2026-10-12，已发布并完成真实功能验收）
 
 在员工创建、编辑或 Creator 市场中选择目标电脑，填写目录并点击“检查目录”。存在目录可保存；缺失目录仅通过明确的“创建缺失目录”操作创建。保存后，该员工后续新会话自动继承，旧会话和单次临时覆盖保留自己的目录。更换电脑保留填写的路径，但须重新检查或明确清除默认目录。设置由后端持久化，刷新与重新登录无需重复选择；员工 HOME/记忆不迁移，旧员工默认值保持空。
 
-API 员工 create/update 的 `defaultWorkingDirectory` 非空值与 `defaultWorkingDirectoryActionId` 使用同设备实际成功检查回执，完成后10分钟内有效；PATCH 省略保留、null清空。会话 create 省略目录继承，非空显式 `workingDirectory` 仅覆盖该会话。管理 MCP 使用 `ziwei_inspect_workdir` 检查，`ziwei_get_action` 回读，再保存员工；`ziwei_create_conversation` 只创建并返回目录快照。新版工具定义需更新官方客户端。实际发布状态见 [项目管理手册](PROJECT_MANAGEMENT.md)。
+API 员工 create/update 的 `defaultWorkingDirectory` 非空值与 `defaultWorkingDirectoryActionId` 使用同设备实际成功检查回执，完成后10分钟内有效；PATCH 省略保留、null清空。会话 create 省略目录继承，非空显式 `workingDirectory` 仅覆盖该会话。管理 MCP 使用 `ziwei_inspect_workdir` 检查，`ziwei_get_action` 回读，再保存员工；`ziwei_create_conversation` 只创建并返回目录快照。官方新客户端已发布，本机升级后实际 build 为 `c7b83…`。功能提交 `274a418`，主 API 锁争用修复 `a66df9c`；完整662/662、实际浏览器和唯一原生 Codex 执行已通过。发布、精确清理进度及证据边界见 [本轮运维记录](docs/operations/2026-10-12-employee-default-workdir.md) 与 [项目管理手册](PROJECT_MANAGEMENT.md)。
 
 ## Windows 本地工作目录（2026-10-10）
 

@@ -4,15 +4,17 @@
 >
 > **当前发布接续工作树**：`C:\Users\25941\.codex\worktrees\a2a-delivery-recovery\灵光爸爸拆解`，本轮分支 `codex/employee-default-workdir`，从已发布接续 `d748835` 开始。原 `D:\灵光爸爸拆解` 保留用户修改；`2884` 树保留未完成 SEC/手机归属改动，两者均不作为本轮发布来源。
 >
-> **文档状态**：以最上方 2026-10-12 A2A 恢复发布的实际服务器、官方包和 Windows 运行版本为当前状态；下方发布段落保留历史时间线，旧 PID51880 不再代表当前客户端。每次结构、运行方式或功能边界发生变化时必须更新本文。历史清理、断开与 favicon 记录保留；用户随后新增的正式连接不能被旧清理范围覆盖。
+> **文档状态**：以最上方 2026-10-12 员工默认目录发布的实际服务器、官方包和 Windows 运行版本为当前状态；下方发布段落保留历史时间线，旧 PID51880 不再代表当前客户端。每次结构、运行方式或功能边界发生变化时必须更新本文。历史清理、断开与 favicon 记录保留；用户随后新增的正式连接不能被旧清理范围覆盖。
 
-### 2026-10-12 进行中：员工默认工作目录及 Windows 升级诊断
+### 2026-10-12 当前发布：员工默认目录、Windows 维护诊断与锁争用修复
 
-- 用户已批准设计及完整发布验收；方案见 [实施计划](docs/plans/2026-10-12-employee-default-workdir.md)。员工保存默认目录与验证设备，新会话统一继承并保存快照；已有会话、临时覆盖、员工 HOME/记忆保持。未设置的正式员工迁移为 NULL，不自动指定目录。
-- 员工创建/编辑和 Creator 使用真实 `directory.inspect` 检查；改变电脑保留路径草稿并重新验证或明确清空。后端校验成功回执的工作区、设备、受信任身份、实际目录与10分钟完成时效。body 的 checked/role/binding 字段不能替代授权。
-- 静态管理 MCP 新增 `ziwei_inspect_workdir`、`ziwei_create_conversation`，员工 create/update 公开默认目录和检查回执字段；因此本轮需发布官方新客户端并核实原生安全升级。现有 A2A 恢复、图片、目录安全规则及手机摘要保留。
-- Windows 升级失败诊断补齐受控阶段、原因代码、退出码/信号/HTTP状态与恢复失败信息，禁止任意 Error.message、stdout/stderr、token 或配置输出。Thinkpad 的具体升级失败原因尚待该机真实证据，不据 MSIX 路径推断。
-- 当前仍处于本地验证阶段，主站 `ce0a0e3`、官方客户端 `bf21351` 和本机 PID17648/build33f572…尚未因本轮变更。源码全量复验658/658通过（0 fail/cancelled/skipped/todo），lint78文件与1764模块构建通过；实际构建Edge headless DOM fixture8/8，包括1440/390长中文目录、canonical回执、设备切换及明确创建。首跑旧UI位置断言已按共享组件更新；尚未声明本轮发布、真机验收或QA清理完成。部署及验证结果将以实际运维记录更新。
+- 功能/前端/官方客户端提交 `274a418`，主 API 锁争用修复 `a66df9c` 已推送 `origin/codex/employee-default-workdir`。当前主 API `/opt/ziwei/releases/a66df9c-sqlite-179d0d46`、PID181593；客户端实际 Windows build `c7b83…`，官方包112679B/32文件。主站 marker 与客户端 metadata 的 commit 分开记录，不能将较早的 ce0/bf/PID17648 视为当前状态。
+- 员工默认目录和验证设备已持久化，手工/Creator/API/MCP 会话创建共用继承规则。新会话保存快照，旧会话及临时覆盖保持；原正式员工两个新字段均为 NULL，HOME/记忆不移动。后端要求真实可信目录回执，前端异步结果绑定编辑范围。
+- 功能精确 archive658/658，热修复精确 archive662/662，均0 fail/cancelled/skipped/todo；lint78、1764模块构建及32文件Windows实装通过。源码独立34/34、实际构建DOM fixture8/8、维护行为17/17通过。ThinkPad具体失败原因仍缺该机日志，只能确认结构化阶段/原因诊断已修复发布。
+- 本机仅一次升级，随后用户自己启动的PID36264保持，ready=true/active0，原配置7913…、Codex auth59f…/configb487…及原连接未变。独立观察器39608日志 `C:\Users\25941\AppData\Local\Ziwei\ziwei_user\logs\client-exit-watch.jsonl` 已验证真实健康心跳；只守护当前实例，未来PID/重启需要重新挂接。原端口4178/5178/20242保持，未启动本地前端/API新实例。
+- 真实API员工隔离/两会话D盘继承/临时覆盖/修改只影响新会话/重新登录、已安装23工具列表及两个新MCP实际调用、Edge1440/390长中文目录保存/刷新/三次正常登录/新会话继承均通过。唯一真实Codex执行 succeeded/exit0/gpt-6.1-sol/精确marker，实际CLI33448父36264 PEB cwd匹配保存目录，管理工具调用和手机动作均0。
+- 旧API在只读快照时曾因SQLite锁导致一次systemd自动重启，现已加busy_timeout5000和WebSocket异常边界。累计主API两次计划停启加上述一次自动重启；control134533/Nginx737没有重启。保留备份和失败证据，没有整库恢复。
+- 清理状态：功能验收完成；精确QA清理在预检查安全点保留，尚无删除。期间出现真实用户的新员工、邀请、文档和会话执行，须保留后重建清理比较基线；QA清单与全量快照已保存。ThinkPad另已确认早期health协议缺4字段且无pause/drain，兼容升级仍待修复；本机25941实装已通过，不能混为同一结果。详细版本、备份、证据和限制见 [本轮运维记录](docs/operations/2026-10-12-employee-default-workdir.md)。
 
 ### 2026-10-12 当前发布：A2A 恢复与手机目录摘要（已上线，验收与精确QA清理完成）
 

@@ -1,10 +1,12 @@
 # 紫薇项目 HandOff
 
-## 2026-10-12 本轮进行中：员工默认目录
+## 2026-10-12 当前接续：员工默认目录已发布，真实功能验收通过
 
-当前代码分支 `codex/employee-default-workdir`，基于已推送 `d748835`，在隔离接续工作树开发。员工默认目录由后端保存并绑定真实验证电脑，新会话继承并保存自己的目录快照；旧会话不随员工修改，NULL迁移不回填正式员工。目录检查复用原生协议，不移动 HOME/记忆，不执行手机动作或重放过期消息。具体接口、前端异步范围和发布计划见 [实施计划](docs/plans/2026-10-12-employee-default-workdir.md)。
+GitHub分支 `codex/employee-default-workdir`，功能/前端/官方客户端 `274a418`，主API热修复 `a66df9c`，实际全局Windowsbuild `c7b83…`。主API181593/控制134533/Nginx737，本机原PID36264/独立观察器39608保持。员工默认目录绑定真实电脑检查，新会话保存快照，旧会话和HOME/记忆保持；正式默认字段仍NULL。
 
-静态 MCP 定义改动要求本轮官方包及原生安全更新；同时补齐 Windows 维护错误丢失原始阶段/原因的诊断缺口。Thinkpad 具体根因等待该机证据。此段为开发状态，发布/真机验收/精确QA清理尚未完成，最新真实状态以 [PROJECT_MANAGEMENT.md](PROJECT_MANAGEMENT.md) 最上方为准，不能将下方旧版本/PID视为当前结论。
+精确源码archive662/662、lint78/build、32文件实装、真实API/已安装MCP两工具/Edge长中文保存及重新登录/1440与390布局均通过。唯一只读Codex action9ad030… succeeded、退出0、精确标记，实际CLI33448父36264 PEB目录与页面/会话/action匹配，管理工具与手机动作0。原配置/auth/入口复验一致。
+
+本轮QA清理在预检查安全点保留，尚无apply/删除；正式并发创建的员工、邀请、文档与会话执行均须保留，恢复时先重建比较基线。优先处理ThinkPad已确认的早期health协议兼容：33001实际HTTP200，但缺deviceId/clientBuild/activeActionCount/pollingCount，旧版无pause/drain，不能填0或盲目重试升级。本机25941无需再次升级/启动，已通过的功能无需重跑。服务端旧SQLite锁崩溃一次已记录并修复，控制/Nginx保持。详细状态见 [本轮运维记录](docs/operations/2026-10-12-employee-default-workdir.md) 与 [PROJECT_MANAGEMENT.md](PROJECT_MANAGEMENT.md)。
 
 ## 2026-10-10 当前发布：Windows 本地工作目录
 
