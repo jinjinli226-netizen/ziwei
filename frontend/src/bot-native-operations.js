@@ -125,7 +125,7 @@ export function createBotNativeOperations({transport,wrap=value=>value,keyFactor
     if(!pending||resource(name).busy)return false;
     if(['readback','review','tracking'].includes(pending.kind))return read(name,pending.intent.readHints);
     if(pending.action?.id)return poll(name);
-    if(pending.replayable===false||name==='collaboration'&&pending.intent.readHints?.sourceActionId){
+    if(pending.replayable===false||transport.lookup||name==='collaboration'&&pending.intent.readHints?.sourceActionId){
       if(!transport.lookup){resource(name).error='原请求正文未缓存；请在运行记录定位原请求，不重发新意图。';return false;}
       const request=scope.begin('recover:'+name);resource(name).busy=true;
       try{const original=await transport.lookup(pending.intent);if(original?.kind==='collaboration')return await trackCollaboration(name,key,pending,original.actions,request);const ok=accept(name,key,original,request);if(scope.current(request)&&resource(name).phase==='readback_required')return await read(name,pending.intent.readHints);return ok;}catch(error){if(scope.current(request))resource(name).error=botErrorMessage(error);return false;}finally{if(scope.current(request))resource(name).busy=false;}

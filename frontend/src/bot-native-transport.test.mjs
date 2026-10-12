@@ -66,3 +66,6 @@ test('a frozen native intent retains exactly the original control epoch when the
   const intent=transport.freeze({workspace:'a',botId:'bot',resource:'skills',operation:'install',input:{name:'x'},idempotencyKey:'same-intent'});
   await transport.submit(intent);epoch=8;await transport.submit(intent);assert.deepEqual(calls[0],calls[1]);assert.equal(calls[1].expectedControlEpoch,7);
 });
+test('a new intent uses current Bot config authority while native document hash retains resource CAS',()=>{
+  const {transport}=fixture();const intent=transport.freeze({workspace:'a',botId:'bot',resource:'memory',operation:'write',expectedRevision:1,input:{expectedHash:'native-document-hash'},idempotencyKey:'new-intent'});assert.equal(intent.expectedRevision,4);assert.equal(intent.expectedControlEpoch,7);assert.equal(intent.input.expectedHash,'native-document-hash');
+});

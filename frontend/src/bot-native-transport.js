@@ -95,5 +95,5 @@ export function createNativeBotTransport({api,getBot,onBotChanged=async()=>{},ke
     }
     const list=await api.botRuns(context.botId,context.workspace),found=(list.runs||[]).find(item=>item.payload?.nativeOperation?.requestId===context.idempotencyKey);if(!found)throw failure('尚未定位原请求；原意图保留，请在运行记录核对',404,'NATIVE_ACTION_NOT_FOUND');return checked(found,context,context.resource==='collaboration'?'collaboration':readDescriptors[context.resource]?.[0]);
   }
-  return {read,submit,action,lookup,freeze:context=>({...context,...snapshot(context)})};
+  return {read,submit,action,lookup,freeze:context=>({...context,...snapshot({...context,expectedRevision:undefined,expectedControlEpoch:undefined})})};
 }
