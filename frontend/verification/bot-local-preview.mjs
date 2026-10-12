@@ -23,7 +23,7 @@ async function api(route,body,method=body?'POST':'GET'){
   const data=await response.json();assert.ok(response.ok(),`${method} ${route}: ${response.status()} ${data.error}`);return data;
 }
 const botPath=id=>`/api/workspaces/${workspace}/bots/${id}`;
-async function check(name,fn){await fn();results.push({name,passed:true});}
+async function check(name,fn){await fn();results.push({name,passed:true});console.log('passed: '+name);}
 async function poll(read,predicate){for(let i=0;i<45;i++){const value=await read();if(predicate(value))return value;await new Promise(resolve=>setTimeout(resolve,500));}throw new Error('Timed out waiting for preview receipt');}
 const marker=`E03 隔离验收 ${Date.now()}`;
 try{
@@ -68,22 +68,22 @@ try{
     await page.getByRole('button',{name:'Bot 设置',exact:true}).click();await page.getByLabel('人格',{exact:true}).waitFor();
   });
   await check('Routine stores timezone and routes a manual fixture result to the same main chat',async()=>{
-    await page.getByRole('button',{name:'例行工作',exact:true}).click();await page.getByText('此隔离预览已关闭自动调度',{exact:false}).waitFor();
+    await page.getByRole('button',{name:'例行工作',exact:true}).click();await page.getByText('本地预览已关闭自动调度',{exact:false}).waitFor();
     await page.getByRole('button',{name:'添加计划'}).click();await page.getByRole('dialog').getByLabel('名称',{exact:true}).fill('隔离日报验收');
     await page.getByLabel('工作内容',{exact:true}).fill('仅生成合成预览结果');
     await page.getByRole('button',{name:'保存 Routine',exact:true}).click();await page.getByRole('dialog').waitFor({state:'detached'});
     const routine=(await api(botPath(bot.id)+'/routines')).routines[0];routineId=routine.id;assert.equal(routine.employee_id,bot.id);assert.equal(routine.conversation_id,bot.main_conversation_id);assert.equal(routine.timezone,'Asia/Shanghai');assert.ok(routine.next_run);
     await page.getByRole('button',{name:'手动运行',exact:true}).click();
-    await poll(()=>api(botPath(bot.id)+'/runs'),value=>value.runs.some(run=>run.type!=='hermes.bot.validate'&&run.status==='succeeded'&&run.payload?.automationRunId));
+    await poll(()=>api(botPath(bot.id)+'/runs'),value=>value.runs.some(run=>run.type!=='hermes.bot.validate'&&run.status==='succeeded'&&run.payload?.runId));
     await page.getByRole('button',{name:'刷新 Bot 列表与状态'}).click();await page.screenshot({path:path.join(evidence,'local-preview-routine-desktop.png'),fullPage:true});
-    await page.getByRole('button',{name:'暂停',exact:true}).click();assert.equal((await api(botPath(bot.id)+'/routines')).routines[0].status,'paused');
+    await page.getByRole('button',{name:'暂停',exact:true}).click();await page.getByText('计划已暂停',{exact:true}).waitFor();assert.equal((await api(botPath(bot.id)+'/routines')).routines[0].status,'paused');
   });
   await check('Team view and Bot pause refer to the same employee',async()=>{
     await page.getByRole('button',{name:'在团队管理查看',exact:true}).click();await page.locator('.org-employee-card').filter({hasText:marker}).waitFor();
     await page.getByRole('menu',{name:marker+' 操作'}).getByRole('menuitem',{name:'Bot 工作视图',exact:true}).click();await page.getByRole('heading',{name:marker,exact:true}).waitFor();
     assert.equal(new URL(page.url()).pathname,`/${workspace}/bots/${bot.id}`);
     await page.getByRole('button',{name:'运行记录',exact:true}).click();await page.getByRole('button',{name:'暂停 Bot',exact:true}).click();
-    assert.equal((await api(botPath(bot.id))).control_state,'paused');
+    await poll(()=>api(botPath(bot.id)),value=>value.control_state==='paused');
     assert.equal((await api(`/api/workspaces/${workspace}/employees`)).employees.find(item=>item.id===bot.id).status,'paused');
   });
   await check('an existing Hermes employee initializes in place and keeps its original conversation',async()=>{
@@ -98,6 +98,7 @@ try{
     await page.getByRole('button',{name:'Bot 伙伴',exact:true}).click();await page.getByRole('heading',{name:'与你的 Bot 一起工作'}).waitFor();
     assert.equal(await page.locator('.bot-roster-row').filter({hasText:marker}).count(),0);
     await page.locator('.bot-roster-row').first().click();await page.getByRole('button',{name:'能力组合',exact:true}).click();await page.getByText('外部消息 Gateway',{exact:true}).waitFor();
+    assert.equal(await page.getByRole('button',{name:'能力组合',exact:true}).getAttribute('aria-current'),'page');
     await page.screenshot({path:path.join(evidence,'local-preview-capabilities-desktop.png'),fullPage:true});
     await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true);
     await page.screenshot({path:path.join(evidence,'local-preview-mobile.png'),fullPage:true});
@@ -106,6 +107,18 @@ try{
     for(const [method,route,data] of [['GET',`/api/workspaces/${workspace}/hermes/profiles`],['POST',`/api/workspaces/${workspace}/skills/import`,{url:'https://external.invalid/'}],['POST',botPath(bot.id)+'/routines',{name:'blocked',webhookUrl:'https://external.invalid/'}]]){
       const response=await page.request.fetch(base+route,{method,...(data?{data}:{})});assert.equal(response.status(),503);assert.equal((await response.json()).code,'PREVIEW_EXTERNAL_DISABLED');
     }
+  });
+  await check('UI employee deletion removes the same identity from both views',async()=>{
+    await page.setViewportSize({width:1440,height:1000});await page.goto(front+`/${workspace}/bots/${bot.id}`);
+    await page.getByRole('button',{name:'删除员工',exact:true}).click();
+    await poll(()=>api(`/api/workspaces/${workspace}/bots`),value=>!value.bots.some(item=>item.id===bot.id));
+    assert.equal((await api(`/api/workspaces/${workspace}/employees`)).employees.some(item=>item.id===bot.id),false);
+    await page.getByRole('heading',{name:'选择一个长期合作的伙伴'}).waitFor();
+    for(const id of created.filter(id=>id!==bot.id))await api(`/api/workspaces/${workspace}/employees/${id}`,null,'DELETE');
+    await page.getByRole('button',{name:'刷新 Bot 列表与状态'}).click();
+    await page.locator('.bot-roster-row').filter({hasText:'资料研究员'}).click();
+    await page.getByRole('heading',{name:'继续与 资料研究员 的对话'}).waitFor();
+    await page.screenshot({path:path.join(evidence,'local-preview-roster-desktop.png'),fullPage:true});
   });
   assert.deepEqual(errors,[]);
   await fs.writeFile(path.join(evidence,'local-preview-result.json'),JSON.stringify({realHttp:true,executorFixture:true,realHermes:false,health,results,consoleErrors:errors},null,2));
