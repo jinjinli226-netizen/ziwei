@@ -7,6 +7,7 @@ import {fileURLToPath} from 'node:url';
 import {createPreservation,FROZEN_VERSIONS,PRODUCT_ROLE,digest,uncertain,exitedTree} from './version-preservation.mjs';
 import {readDatabaseSnapshot,nativeActionDigest} from './preservation-native-databases.mjs';
 import {verifyPreservationPackages} from '../scripts/verify-preservation-packages.mjs';
+import {validateNativeSourceRefs,namespaceCaptureFile,verifyRuntimeCaptureEnvelope} from './preservation-source-namespace.mjs';
 
 const fail=code=>{throw Object.assign(new Error(code),{code});};
 const hash=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
@@ -112,7 +113,22 @@ export function validateProductionFreshness(payload,now=Date.now()){
 }
 const absolute=value=>typeof value==='string'&&(path.win32.isAbsolute(value)||path.posix.isAbsolute(value))&&!value.includes('\0');
 const inside=(root,file,flavour=path)=>{const relative=flavour.relative(root,file);return relative===''||relative!=='..'&&!relative.startsWith('..'+flavour.sep)&&!flavour.isAbsolute(relative);};
-function instance(value){fields(value,['pid','createdAt','nonceDigest']);if(!Number.isSafeInteger(value.pid)||value.pid<=0||!Number.isFinite(Date.parse(value.createdAt))||!hex(value.nonceDigest))fail('PRODUCTION_INSTANCE_INVALID');}
+function instance(value){
+ fields(value,['pid','createdAt','nonceDigest'],['identityKind','nativeBirth']);
+ const kind=value.identityKind||'boot-nonce';
+ if(!Number.isSafeInteger(value.pid)||value.pid<=0||!['boot-nonce','systemd-invocation','legacy-os-start'].includes(kind))fail('PRODUCTION_INSTANCE_INVALID');
+ if(kind==='boot-nonce'&&(!Number.isFinite(Date.parse(value.createdAt))||!hex(value.nonceDigest))||kind==='systemd-invocation'&&(!hex(value.nonceDigest)||!value.nativeBirth)||kind==='legacy-os-start'&&(value.nonceDigest!==null||!value.nativeBirth))fail('PRODUCTION_INSTANCE_INVALID');
+ if(value.nativeBirth){fields(value.nativeBirth,['bootId'],['startTicks','createdAt']);if(typeof value.nativeBirth.bootId!=='string'||!(/^[a-f0-9-]{36}$|^[a-f0-9]{64}$/).test(value.nativeBirth.bootId)||Boolean(value.nativeBirth.startTicks)===Boolean(value.nativeBirth.createdAt)||value.nativeBirth.startTicks&&!(/^[1-9][0-9]*$/).test(value.nativeBirth.startTicks)||value.nativeBirth.createdAt&&!Number.isFinite(Date.parse(value.nativeBirth.createdAt)))fail('PRODUCTION_INSTANCE_INVALID');}
+ if(value.createdAt!==null&&!Number.isFinite(Date.parse(value.createdAt)))fail('PRODUCTION_INSTANCE_INVALID');
+}
+function newerInstance(original,row){
+ if(original.nativeBirth){
+  if(!row.nativeBirth||row.nativeBirth.bootId!==original.nativeBirth.bootId)return false;
+  if(original.nativeBirth.startTicks)return /^[1-9][0-9]*$/.test(row.nativeBirth.startTicks||'')&&BigInt(row.nativeBirth.startTicks)>BigInt(original.nativeBirth.startTicks);
+  return Number.isFinite(Date.parse(row.nativeBirth.createdAt))&&Date.parse(row.nativeBirth.createdAt)>Date.parse(original.nativeBirth.createdAt);
+ }
+ return Number.isFinite(Date.parse(row.createdAt))&&Date.parse(row.createdAt)>Date.parse(original.createdAt);
+}
 function validateInstallTargets(original,kind,packages,manifests){
  fields(original.installTargets,['v1-compat','v2']);
  for(const role of ['v1-compat','v2']){
@@ -184,7 +200,7 @@ export function validateProductionSpec(input){
  unique(spec.hosts.map(host=>host.hostId));
  unique(spec.hosts.flatMap(host=>host.deviceIds));
  for(const host of spec.hosts){
-  fields(host,['hostId','deviceIds','workspaceIds','clients','apiInstances']);
+  fields(host,['hostId','deviceIds','workspaceIds','clients','apiInstances'],['nativeSourceRefs']);validateNativeSourceRefs(host);
   if(!id(host.hostId)||!Array.isArray(host.clients)||!Array.isArray(host.apiInstances)||!host.clients.length&&!host.apiInstances.length)fail('PRODUCTION_SCOPE_INVALID');
   for(const values of [host.deviceIds,host.workspaceIds])if(unique(values).some(value=>!id(value)))fail('PRODUCTION_SCOPE_INVALID');
   const authority=trust.hosts.find(row=>row.hostId===host.hostId);if(!authority||authority.bindingDigest!==digestProduction(host))fail('PRODUCTION_HOST_BINDING');
@@ -227,7 +243,7 @@ export function readProductionProjection(db){
 function controlState(db){
  if(!tableExists(db,'version_preservation'))return {state:'absent',operationId:null};
  const row=db.prepare('SELECT * FROM version_preservation WHERE singleton=1').get();
- return row?{state:row.state,operationId:row.operation_id,intentDigest:digest(row.intent_json),versionsDigest:digest(row.versions_json)}:{state:'absent',operationId:null};
+ return row?{state:row.state,operationId:row.operation_id,intentDigest:digest(row.intent_json),snapshotDigest:row.snapshot_json?digest(row.snapshot_json):null,versionsDigest:digest(row.versions_json)}:{state:'absent',operationId:null};
 }
 function storedReceipt(db,spec,command){
  if(tableExists(db,'production_preservation_identity')){const identity=db.prepare('SELECT * FROM production_preservation_identity WHERE singleton=1').get();if(identity&&(identity.database_id!==spec.database.databaseId||!equal(JSON.parse(identity.file_identity_json),spec.database)))fail('PRODUCTION_DATABASE_CONFLICT');}
@@ -236,7 +252,7 @@ function storedReceipt(db,spec,command){
  if(prior.some(row=>row.spec_hash!==spec.specHash))fail('PRODUCTION_OPERATION_CONFLICT');
  const receipt=prior.find(row=>row.command===command);return receipt?JSON.parse(receipt.receipt_json):null;
 }
-const requestFields=['domain','schemaVersion','kind','command','collector','challenge','issuedAt','expiresAt','operationId','specHash','databaseIdentity','freezeDigest','binding','actionProjection','gatewayInbox','homes','priorEvidenceDigest','targetOrigins','installed'];
+const requestFields=['domain','schemaVersion','kind','command','collector','challenge','issuedAt','expiresAt','operationId','specHash','databaseIdentity','freezeDigest','binding','actionProjection','gatewayInbox','homes','priorEvidenceDigest','targetOrigins','installed','controlIdentity'];
 export function validateProductionRequest(input){
  const {request,trust,command,kind,now=Date.now()}=argumentsObject(input,['request','trust','command','kind','now']);
  const payload=verifyProductionEnvelope({envelope:request,trust,expected:{domain:'ziwei-production-request-v1',schemaVersion:1,collector:'ziwei-production-source-v1',...(command?{command}:{}),...(kind?{kind}:{})},now});
@@ -250,8 +266,8 @@ export function validateProductionRequest(input){
  else if(payload.installed!==null)fail('PRODUCTION_INSTALL_TARGET_INVALID');
  return payload;
 }
-const proofFields=['domain','schemaVersion','kind','command','collector','challenge','issuedAt','expiresAt','operationId','specHash','databaseIdentity','freezeDigest','bindingDigest','actionProjectionDigest','gatewayInboxDigest','homesDigest','installedDigest','priorEvidenceDigest','observations','files','directories','nativeDatabases','nativeStateProofs','gatewayInboxProofs','actionBindings','issues','safe','evidenceDigest'];
-export function productionEvidenceDigest(payload){const value=copy(payload);delete value.evidenceDigest;for(const key of ['domain','kind','challenge','issuedAt','expiresAt','priorEvidenceDigest'])delete value[key];return digestProduction(value);}
+const proofFields=['domain','schemaVersion','kind','command','collector','challenge','issuedAt','expiresAt','operationId','specHash','databaseIdentity','freezeDigest','bindingDigest','actionProjectionDigest','gatewayInboxDigest','homesDigest','installedDigest','priorEvidenceDigest','observations','files','directories','nativeDatabases','nativeStateProofs','gatewayInboxProofs','actionBindings','issues','safe','evidenceDigest','runtimeProofs'];
+export function productionEvidenceDigest(payload){const value=copy(payload);delete value.evidenceDigest;for(const key of ['domain','kind','challenge','issuedAt','expiresAt','priorEvidenceDigest','runtimeProofs'])delete value[key];return digestProduction(value);}
 export function productionHostActions(binding,projection){
  return projection.tables.a2a_actions.rows.filter(action=>{
   if(!binding.workspaceIds.includes(action.workspace_id))return false;
@@ -287,7 +303,7 @@ function validateObservations(payload,binding,manifest){
  if(payload.command==='restore'){
   const running=observations.runningV2;
   if(!running||running.fenceState!=='sealed'||running.productRole!=='v2'||running.buildDigest!==manifest.buildDigest||running.databaseId!==payload.databaseIdentity.databaseId||!Array.isArray(running.instances)||running.instances.length!==expected.length)fail('PRODUCTION_RESTORE_RUNNING_V2_REQUIRED');
-  for(const original of expected){const target=original.installTargets.v2,kind=original.configPath?'client':'api',matched=running.instances.filter(row=>row.kind===kind&&row.bindingDigest===digestProduction(original)&&row.targetDigest===digestProduction(target)&&row.root===target.root&&row.entryPath===target.entryPath&&row.running===true&&row.productRole==='v2'&&row.buildDigest===target.buildDigest&&row.pid!==original.originalInstance.pid&&Number.isSafeInteger(row.pid)&&row.pid>0&&hex(row.nonceDigest)&&Number.isFinite(Date.parse(row.createdAt))&&Date.parse(row.createdAt)>Date.parse(original.originalInstance.createdAt));if(matched.length!==1)fail('PRODUCTION_RESTORE_RUNNING_V2_REQUIRED');}
+  for(const original of expected){const target=original.installTargets.v2,kind=original.configPath?'client':'api',matched=running.instances.filter(row=>row.kind===kind&&row.bindingDigest===digestProduction(original)&&row.targetDigest===digestProduction(target)&&row.root===target.root&&row.entryPath===target.entryPath&&row.running===true&&row.productRole==='v2'&&row.buildDigest===target.buildDigest&&Number.isSafeInteger(row.pid)&&row.pid>0&&hex(row.nonceDigest)&&row.nonceDigest!==original.originalInstance.nonceDigest&&newerInstance(original.originalInstance,row));if(matched.length!==1)fail('PRODUCTION_RESTORE_RUNNING_V2_REQUIRED');}
  }else if(observations.runningV2!==undefined)fail('PRODUCTION_SOURCE_NOT_STOPPED');
 }
 function verifySourceProofs(envelopes,requests,trust,manifest){
@@ -299,20 +315,30 @@ function verifySourceProofs(envelopes,requests,trust,manifest){
   const source=request.payload;
   const payload=verifyProductionEnvelope({envelope,trust,expected:{domain:source.kind==='collect'?'ziwei-production-collect-proof-v1':'ziwei-production-recheck-proof-v1',schemaVersion:1,kind:source.kind,command:source.command,collector:source.collector,challenge:source.challenge,issuedAt:source.issuedAt,expiresAt:source.expiresAt,operationId:source.operationId,specHash:source.specHash,databaseIdentity:source.databaseIdentity,freezeDigest:source.freezeDigest,bindingDigest:digestProduction(source.binding),actionProjectionDigest:digestProduction(source.actionProjection),gatewayInboxDigest:digestProduction(source.gatewayInbox),homesDigest:digestProduction(source.homes),installedDigest:digestProduction(source.installed),priorEvidenceDigest:source.priorEvidenceDigest}});
   fields(payload,proofFields);
-  for(const field of ['files','directories','nativeDatabases','nativeStateProofs','gatewayInboxProofs','actionBindings','issues'])if(!Array.isArray(payload[field]))fail('PRODUCTION_PROOF_INVALID');
+  for(const field of ['files','directories','nativeDatabases','nativeStateProofs','gatewayInboxProofs','actionBindings','issues','runtimeProofs'])if(!Array.isArray(payload[field]))fail('PRODUCTION_PROOF_INVALID');
   if(payload.safe!==true||payload.issues.length||!hex(payload.evidenceDigest)||payload.evidenceDigest!==productionEvidenceDigest(payload))fail('PRODUCTION_SOURCE_UNSAFE');
   validateObservations(payload,source.binding,manifest);
   const permitted=[...source.binding.clients.flatMap(client=>[client.root,client.userHome,client.runtimeDir,client.baseHome]),...source.binding.apiInstances.map(api=>api.root),...source.homes.map(home=>home.home),...[...source.binding.clients,...source.binding.apiInstances].flatMap(original=>Object.values(original.installTargets).map(target=>target.root))];
   const configPaths=source.binding.clients.map(client=>client.configPath);
+  const refs=validateNativeSourceRefs(source.binding),referenceFiles=refs.filter(row=>row.sha256),captureFiles=refs.filter(row=>row.kind==='namespace-capture-directory-v1').flatMap(ref=>['before-stop','after-stop'].map(phase=>namespaceCaptureFile(ref,phase)));
   for(const record of [...payload.files,...payload.directories,...payload.nativeDatabases]){
    const flavour=payload.observations.namespace==='win32'?path.win32:path.posix;
-   if(typeof record.path!=='string'||!flavour.isAbsolute(record.path)||!configPaths.includes(record.path)&&!permitted.some(root=>inside(root,record.path,flavour)))fail('PRODUCTION_RECORD_SCOPE');
+   const externalFile=payload.files.includes(record)&&(referenceFiles.some(ref=>ref.canonicalPath===record.path&&record.sha256===ref.sha256)||captureFiles.includes(record.path));
+   if(typeof record.path!=='string'||!flavour.isAbsolute(record.path)||!configPaths.includes(record.path)&&!permitted.some(root=>inside(root,record.path,flavour))&&!externalFile)fail('PRODUCTION_RECORD_SCOPE');
    if(record.deviceId&&!source.binding.deviceIds.includes(record.deviceId)||record.workspaceId&&!source.binding.workspaceIds.includes(record.workspaceId))fail('PRODUCTION_RECORD_SCOPE');
   }
   for(const file of payload.files){if(typeof file.path!=='string'||typeof file.exists!=='boolean'||file.exists&&(!hex(file.sha256)||!Number.isSafeInteger(file.bytes)||file.bytes<0||!file.identity))fail('PRODUCTION_PROOF_INVALID');}
   for(const directory of payload.directories)if(typeof directory.path!=='string'||typeof directory.exists!=='boolean'||!Array.isArray(directory.names)||directory.exists&&!directory.identity)fail('PRODUCTION_PROOF_INVALID');
   for(const client of source.binding.clients)if(!payload.files.some(row=>row.path===client.configPath&&row.exists&&row.sha256===client.configSha256))fail('PRODUCTION_CONFIG_COVERAGE');
-  for(const action of productionHostActions(source.binding,source.actionProjection))if(!payload.actionBindings.some(row=>row.id===action.id&&row.digest===nativeActionDigest(action)))fail('PRODUCTION_ACTION_COVERAGE');
+  const hostActions=productionHostActions(source.binding,source.actionProjection);
+  if(payload.actionBindings.length!==hostActions.length||new Set(payload.actionBindings.map(row=>row.id)).size!==payload.actionBindings.length)fail('PRODUCTION_ACTION_COVERAGE');
+  for(const action of hostActions)if(!payload.actionBindings.some(row=>row.id===action.id&&row.digest===nativeActionDigest(action)))fail('PRODUCTION_ACTION_COVERAGE');
+  for(const proof of payload.nativeStateProofs.filter(row=>row.kind==='legacy-never-dispatched-v1'))if(proof.hostId!==source.binding.hostId||proof.operationId!==source.operationId||proof.specHash!==source.specHash||proof.verified!==true||!hostActions.some(action=>action.id===proof.actionId&&nativeActionDigest(action)===proof.actionDigest))fail('PRODUCTION_ACTION_COVERAGE');
+  if(source.command==='restore'&&refs.some(ref=>ref.kind==='runtime-identity-directory-v1')){
+   if(payload.runtimeProofs.length!==1)fail('PRODUCTION_RESTORE_RUNNING_V2_REQUIRED');
+   const runtime=verifyRuntimeCaptureEnvelope({envelope:payload.runtimeProofs[0],trust,request:source});
+   for(const sample of runtime.instances)if(!payload.observations.runningV2.instances.some(row=>['kind','bindingDigest','targetDigest','root','entryPath','productRole','buildDigest','pid','nativeBirth','nonceDigest'].every(key=>equal(row[key],sample[key]))))fail('PRODUCTION_RESTORE_RUNNING_V2_REQUIRED');
+  }else if(payload.runtimeProofs.length)fail('PRODUCTION_PROOF_INVALID');
   for(const database of payload.nativeDatabases)for(const suffix of ['','-wal','-journal','-shm'])if(!payload.files.some(row=>row.path===database.path+suffix))fail('PRODUCTION_DATABASE_COVERAGE');
   records.push({hostId:envelope.hostId,payload});
  }
@@ -323,10 +349,10 @@ function homesFor(spec,projection){
  for(const host of spec.hosts)for(const client of host.clients)for(const workspaceId of host.workspaceIds){const workspace=projection.tables.workspaces.rows.find(row=>row.id===workspaceId);if(!workspace)fail('PRODUCTION_WORKSPACE_COVERAGE');for(const employee of projection.tables.employees?.rows||[]){if(employee.workspace_id!==workspaceId||employee.runtime!=='hermes'||employee.target_device_id&&!host.deviceIds.includes(employee.target_device_id))continue;homes.push({hostId:host.hostId,home:client.baseHome,sourceProfile:employee.runtime_profile||'default',employeeId:employee.id,workspace:workspace.slug,workspaceId,deviceId:employee.target_device_id||host.deviceIds[0]||null,origin:spec.authorization.targetOrigins[0]});}}
  return homes;
 }
-function requestsFor(validated,command,kind,projection,freezeDigest,priorEvidenceDigest){
+function requestsFor(validated,command,kind,projection,freezeDigest,priorEvidenceDigest,controlIdentity){
  const challenge=crypto.randomUUID(),issuedAt=new Date().toISOString(),expiresAt=new Date(Date.parse(issuedAt)+60000).toISOString();
  const homes=homesFor(validated.spec,projection),gatewayInbox=projection.tables.bot_gateway_inbox?.rows||[];
- return validated.spec.hosts.map(binding=>{const installed=command==='restore'?{productRole:'v2',candidateCommit:validated.spec.candidateCommit,databaseId:validated.spec.database.databaseId,apiBuildDigest:validated.manifest.buildDigest,clientBuild:validated.manifest.clientBuild,apiContents:validated.manifest.contents,clientContents:validated.manifest.clientContents||[],targets:installedTargets(binding)}:null;return signProductionEnvelope({hostId:binding.hostId,trust:validated.trust,payload:{domain:'ziwei-production-request-v1',schemaVersion:1,kind,command,collector:'ziwei-production-source-v1',challenge,issuedAt,expiresAt,operationId:validated.spec.operationId,specHash:validated.spec.specHash,databaseIdentity:validated.databaseIdentity,freezeDigest,binding,actionProjection:projection,gatewayInbox,homes:homes.filter(row=>row.hostId===binding.hostId),priorEvidenceDigest,targetOrigins:validated.spec.authorization.targetOrigins,installed}});});
+ return validated.spec.hosts.map(binding=>{const installed=command==='restore'?{productRole:'v2',candidateCommit:validated.spec.candidateCommit,databaseId:validated.spec.database.databaseId,apiBuildDigest:validated.manifest.buildDigest,clientBuild:validated.manifest.clientBuild,apiContents:validated.manifest.contents,clientContents:validated.manifest.clientContents||[],targets:installedTargets(binding)}:null;return signProductionEnvelope({hostId:binding.hostId,trust:validated.trust,payload:{domain:'ziwei-production-request-v1',schemaVersion:1,kind,command,collector:'ziwei-production-source-v1',challenge,issuedAt,expiresAt,operationId:validated.spec.operationId,specHash:validated.spec.specHash,databaseIdentity:validated.databaseIdentity,freezeDigest,binding,actionProjection:projection,gatewayInbox,homes:homes.filter(row=>row.hostId===binding.hostId),priorEvidenceDigest,targetOrigins:validated.spec.authorization.targetOrigins,installed,controlIdentity}});});
 }
 function verifyBackup(envelope,validated,freezeDigest){
  if(!envelope||envelope.hostId!==validated.trust.backupHostId)fail('PRODUCTION_BACKUP_REQUIRED');
@@ -354,13 +380,13 @@ export async function runProductionPreservation(input){
  if(command!=='prepare'&&initial.control.operationId!==pinned.operationId)fail('PRODUCTION_OPERATION_REQUIRED');
  if(!proofProvider||typeof proofProvider.collect!=='function'||typeof proofProvider.recheck!=='function')fail('PRODUCTION_TRANSPORT_REQUIRED');
  const freezeDigest=digestProduction({operationId:pinned.operationId,specHash:pinned.specHash,databaseIdentity:validated.databaseIdentity,versions:FROZEN_VERSIONS});
- const collectRequests=requestsFor(validated,command,'collect',initial.projection,freezeDigest,null);
+ const collectRequests=requestsFor(validated,command,'collect',initial.projection,freezeDigest,null,initial.control);
  const context={operationId:pinned.operationId,specHash:pinned.specHash,databaseIdentity:validated.databaseIdentity,freezeDigest,requiredHosts:pinned.hosts.map(row=>row.hostId)};
  const envelopes=copy(await proofProvider.collect({...copy(context),requests:copy(collectRequests),priorEvidenceDigest:null}));
  const collected=verifySourceProofs(envelopes,collectRequests,validated.trust,validated.manifest),priorEvidenceDigest=digestProduction(envelopes);
  if(productionSemanticIssues(initial.projection,collected.flatMap(row=>row.payload.nativeStateProofs)).length)fail('PRODUCTION_ORIGINAL_DEBT');
  for(const action of initial.projection.tables.a2a_actions.rows)if(!collected.some(row=>row.payload.actionBindings.some(binding=>binding.id===action.id&&binding.digest===nativeActionDigest(action))))fail('PRODUCTION_ACTION_COVERAGE');
- const recheckRequests=requestsFor(validated,command,'recheck',initial.projection,freezeDigest,priorEvidenceDigest);
+ const recheckRequests=requestsFor(validated,command,'recheck',initial.projection,freezeDigest,priorEvidenceDigest,initial.control);
  const fresh=copy(await proofProvider.recheck({...copy(context),requests:copy(recheckRequests),previous:copy(envelopes),priorEvidenceDigest}));
  const rechecked=verifySourceProofs(fresh,recheckRequests,validated.trust,validated.manifest);
  for(const original of collected){const latest=rechecked.find(row=>row.hostId===original.hostId);if(!latest||latest.payload.evidenceDigest!==original.payload.evidenceDigest)fail('PRODUCTION_SOURCE_CHANGED');}

@@ -7,6 +7,7 @@ import {canonicalProduction,digestProduction,signProductionEnvelope,verifyProduc
 import * as nativeEvidence from '../backend/preservation-native-evidence.mjs';
 import {scanOwnedNativeDatabases,nativeActionDigest,attestNativeVersion} from '../backend/preservation-native-databases.mjs';
 import {clientBuildIdentity} from '../src/management-bootstrap.mjs';
+import {observePreservationSourceNamespace} from '../backend/preservation-source-namespace.mjs';
 
 const fail=code=>{throw Object.assign(new Error(code),{code});};
 const sha=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
@@ -121,7 +122,11 @@ export function collectProductionSourceProof({request,trust,previous=null,observ
  const homes=(scoped?.homes||payload.homes).map(scope=>({...scope,...attestNativeVersion(scope,actions)}));
  const scanned=scanFiles({connections,actions,homes,productionRequest:payload});
  const native=scanDatabases({homes,actions,gatewayInbox:payload.gatewayInbox,gatewayExits:scanned.gatewayExits,operationId:payload.operationId});
- issues.push(...productionSemanticIssues(payload.actionProjection,scanned.originalActionProofs||[]));
+ // Source hosts cannot borrow another host's legacy assessment. The product
+ // performs the global semantic/debt check after every host proof verifies.
+ const localProjection=JSON.parse(canonicalProduction(payload.actionProjection));localProjection.tables.a2a_actions.rows=actions;
+ if(!payload.binding.apiInstances.length)for(const table of ['automation_runs','webhook_deliveries','ziwei_connect_runs'])if(localProjection.tables[table])localProjection.tables[table].rows=localProjection.tables[table].rows.filter(row=>payload.binding.workspaceIds.includes(row.workspace_id)&&(!row.action_id||actions.some(action=>action.id===row.action_id)));
+ issues.push(...productionSemanticIssues(localProjection,scanned.originalActionProofs||[]));
  for(const action of actions){
   const assessment=(scanned.originalActionProofs||[]).find(proof=>proof.kind==='legacy-never-dispatched-v1'&&proof.actionId===action.id&&proof.actionDigest===nativeActionDigest(action)&&proof.operationId===payload.operationId&&proof.specHash===payload.specHash&&proof.challenge===payload.challenge&&proof.hostId===request.hostId&&proof.verified===true);
   if(['pending','acked'].includes(action.status)||action.status==='expired'&&action.acked_at&&!assessment)issues.push({code:'SOURCE_ORIGINAL_ACTION_DEBT',actionId:action.id});
@@ -167,13 +172,25 @@ export function collectProductionSourceProof({request,trust,previous=null,observ
  }
  recheckRecords({files,directories});
  const after=observe(payload.binding,payload);if(!equal(observations,after))issues.push({code:'SOURCE_PROCESS_OBSERVATION_CHANGED'});
- const result={domain:payload.kind==='collect'?'ziwei-production-collect-proof-v1':'ziwei-production-recheck-proof-v1',schemaVersion:1,kind:payload.kind,command:payload.command,collector:payload.collector,challenge:payload.challenge,issuedAt:payload.issuedAt,expiresAt:payload.expiresAt,operationId:payload.operationId,specHash:payload.specHash,databaseIdentity:payload.databaseIdentity,freezeDigest:payload.freezeDigest,bindingDigest:digestProduction(payload.binding),actionProjectionDigest:digestProduction(payload.actionProjection),gatewayInboxDigest:digestProduction(payload.gatewayInbox),homesDigest:digestProduction(payload.homes),installedDigest:digestProduction(payload.installed),priorEvidenceDigest:payload.priorEvidenceDigest,observations,files,directories,nativeDatabases:native.nativeDatabases,nativeStateProofs:[...native.nativeStateProofs,...(scoped?.proofs||[]),...(scanned.originalActionProofs||[]).map(proof=>{const stable=JSON.parse(canonicalProduction(proof));delete stable.challenge;return stable;})],gatewayInboxProofs:native.gatewayInboxProofs,actionBindings:actions.map(row=>({id:row.id,digest:nativeActionDigest(row)})),issues,safe:issues.length===0,evidenceDigest:null};
+ const result={domain:payload.kind==='collect'?'ziwei-production-collect-proof-v1':'ziwei-production-recheck-proof-v1',schemaVersion:1,kind:payload.kind,command:payload.command,collector:payload.collector,challenge:payload.challenge,issuedAt:payload.issuedAt,expiresAt:payload.expiresAt,operationId:payload.operationId,specHash:payload.specHash,databaseIdentity:payload.databaseIdentity,freezeDigest:payload.freezeDigest,bindingDigest:digestProduction(payload.binding),actionProjectionDigest:digestProduction(payload.actionProjection),gatewayInboxDigest:digestProduction(payload.gatewayInbox),homesDigest:digestProduction(payload.homes),installedDigest:digestProduction(payload.installed),priorEvidenceDigest:payload.priorEvidenceDigest,observations,files,directories,nativeDatabases:native.nativeDatabases,nativeStateProofs:[...native.nativeStateProofs,...(scoped?.proofs||[]),...(scanned.originalActionProofs||[]).map(proof=>{const stable=JSON.parse(canonicalProduction(proof));delete stable.challenge;return stable;})],gatewayInboxProofs:native.gatewayInboxProofs,actionBindings:actions.map(row=>({id:row.id,digest:nativeActionDigest(row)})),issues,safe:issues.length===0,evidenceDigest:null,runtimeProofs:[]};
  result.evidenceDigest=productionEvidenceDigest(result);
  if(prior&&result.evidenceDigest!==prior.evidenceDigest)fail('SOURCE_EVIDENCE_CHANGED');
  validateProductionFreshness(payload);
  return signProductionEnvelope({hostId:request.hostId,trust,payload:result});
 }
-export function runProductionSourceCli(args){
+export async function collectVerifiedProductionSourceProof({request,trust,previous=null},native){
+ const payload=validateProductionRequest({request,trust}),before=await observePreservationSourceNamespace({binding:payload.binding,request:payload,trust},native);
+ const observation=before.observations;
+ sourceScopeRecords.set(observation,{files:before.files,directories:before.directories,homes:before.homes,connections:before.connections,proofs:before.proofs});
+ const envelope=collectProductionSourceProof({request,trust,previous,observe:()=>observation});
+ const after=await observePreservationSourceNamespace({binding:payload.binding,request:payload,trust},native);
+ if(!equal(before.observations,after.observations)||!equal(before.files,after.files)||!equal(before.proofs,after.proofs))fail('SOURCE_NAMESPACE_CHANGED');
+ envelope.payload.runtimeProofs=before.runtimeProofs;
+ envelope.payload.evidenceDigest=productionEvidenceDigest(envelope.payload);
+ validateProductionFreshness(payload);
+ return signProductionEnvelope({hostId:request.hostId,trust,payload:envelope.payload});
+}
+export async function runProductionSourceCli(args){
  if(!Array.isArray(args)||!['collect','recheck'].includes(args[0]))fail('SOURCE_ARGUMENT_INVALID');
  const options={},allowed=new Set(['--request','--trust','--output','--previous']);
  for(let index=1;index<args.length;index+=2){const key=args[index],value=args[index+1];if(!allowed.has(key)||Object.hasOwn(options,key)||typeof value!=='string'||value.startsWith('--'))fail('SOURCE_ARGUMENT_INVALID');options[key]=value;}
@@ -182,10 +199,10 @@ export function runProductionSourceCli(args){
  const parent=fs.realpathSync.native(path.dirname(output));if(parent!==path.dirname(output)||fs.lstatSync(parent).isSymbolicLink())fail('SOURCE_PATH_INVALID');
  const request=decode(privateRead(options['--request'])),trust=decode(privateRead(options['--trust']));
  validateProductionRequest({request,trust,kind:args[0]});
- const previous=options['--previous']?decode(privateRead(options['--previous'])):null,envelope=collectProductionSourceProof({request,trust,previous});
+ const previous=options['--previous']?decode(privateRead(options['--previous'])):null,envelope=await collectVerifiedProductionSourceProof({request,trust,previous});
  fs.writeFileSync(output,canonicalProduction(envelope),{flag:'wx',mode:0o600});
  return {complete:envelope.payload.safe,path:output,hostId:envelope.hostId,operationId:envelope.payload.operationId,evidenceDigest:envelope.payload.evidenceDigest};
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){
- try{console.log(JSON.stringify(runProductionSourceCli(process.argv.slice(2))));}catch(error){console.error(JSON.stringify({code:/^(SOURCE|PRODUCTION)_[A-Z0-9_]+$/.test(error.code||'')?error.code:'SOURCE_PROOF_FAILED',reason:'Read-only source proof refused'}));process.exitCode=1;}
+ try{console.log(JSON.stringify(await runProductionSourceCli(process.argv.slice(2))));}catch(error){console.error(JSON.stringify({code:/^(SOURCE|PRODUCTION)_[A-Z0-9_]+$/.test(error.code||'')?error.code:'SOURCE_PROOF_FAILED',reason:'Read-only source proof refused'}));process.exitCode=1;}
 }

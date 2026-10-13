@@ -9,6 +9,8 @@ import {fileURLToPath} from 'node:url';
 import {canonicalProduction,digestProduction,signProductionEnvelope,validateProductionSpec,runProductionPreservation,readProductionProjection,productionEvidenceDigest,validateProductionFreshness} from '../backend/production-preservation.mjs';
 import {createPreservation,FROZEN_VERSIONS} from '../backend/version-preservation.mjs';
 import {readDatabaseSnapshot} from '../backend/preservation-native-databases.mjs';
+import {nativeActionDigest} from '../backend/preservation-native-databases.mjs';
+import {clientBuildIdentity} from '../src/management-bootstrap.mjs';
 import {collectProductionSourceProof,runProductionSourceCli} from '../scripts/production-source-proof.mjs';
 
 const sha=value=>crypto.createHash('sha256').update(value).digest('hex');
@@ -19,7 +21,7 @@ function fixture(t){
  const databaseFile=path.join(root,'current.sqlite'),db=new DatabaseSync(databaseFile);
  db.exec("CREATE TABLE workspaces(id TEXT PRIMARY KEY,slug TEXT); INSERT INTO workspaces VALUES('ws_fixture','fixture'); CREATE TABLE employees(id TEXT PRIMARY KEY,workspace_id TEXT,runtime TEXT,status TEXT); CREATE TABLE tasks(id TEXT PRIMARY KEY,assignee TEXT); CREATE TABLE conversations(id TEXT PRIMARY KEY,employee_id TEXT); CREATE TABLE a2a_actions(id TEXT PRIMARY KEY,workspace_id TEXT,type TEXT,payload_json TEXT,result_json TEXT,status TEXT,acked_at TEXT); CREATE TABLE management_requests(workspace_id TEXT,kind TEXT,request_key TEXT,fingerprint TEXT,resource_id TEXT,PRIMARY KEY(workspace_id,kind,request_key));");db.close();
  const packages=path.join(root,'packages'),packageRoot=path.join(root,'staged-v2');fs.mkdirSync(packages);fs.mkdirSync(packageRoot);
- const files=['backend/server.mjs','backend/production-preservation.mjs','backend/version-preservation.mjs','backend/preservation-native-evidence.mjs','backend/preservation-native-databases.mjs','backend/preservation-legacy-archive.mjs','backend/preservation-legacy-source.mjs','scripts/production-source-proof.mjs','scripts/v2-preservation.mjs','scripts/verify-preservation-packages.mjs','src/execution-admission.mjs','scripts/client-lifecycle.mjs','scripts/client-legacy-identity.mjs','src/management-bootstrap.mjs','daemon/config.mjs'];
+ const files=['backend/server.mjs','backend/production-preservation.mjs','backend/preservation-source-namespace.mjs','backend/version-preservation.mjs','backend/preservation-native-evidence.mjs','backend/preservation-native-databases.mjs','backend/preservation-legacy-archive.mjs','backend/preservation-legacy-source.mjs','scripts/production-source-proof.mjs','scripts/v2-preservation.mjs','scripts/verify-preservation-packages.mjs','src/execution-admission.mjs','scripts/client-lifecycle.mjs','scripts/client-legacy-identity.mjs','src/management-bootstrap.mjs','daemon/config.mjs'];
  for(const file of files){const target=path.join(packageRoot,file);fs.mkdirSync(path.dirname(target),{recursive:true});fs.copyFileSync(path.join(repository,file),target);}
  const candidateCommit='a'.repeat(40),manifests=[],artifacts=[];
  for(const productRole of ['v1-compat','v2']){
@@ -143,7 +145,7 @@ test('matching installed V2 fixture restores same current DB with compat increme
  const db=new DatabaseSync(f.spec.database.path);createPreservation(db,{role:'v1-compat'});db.exec("INSERT INTO employees VALUES('ordinary','ws_fixture','codex','active'); INSERT INTO tasks VALUES('v1_increment','ordinary'); CREATE TABLE ordinary_tombstones(id TEXT PRIMARY KEY); INSERT INTO ordinary_tombstones VALUES('deleted_during_compat')");db.close();
  const apiRoot=f.spec.hosts[0].apiInstances[0].installTargets.v2.root;fs.cpSync(f.packageRoot,apiRoot,{recursive:true});
  const manifest=JSON.parse(fs.readFileSync(path.join(f.spec.packages.directory,'v2-manifest.json')));
- const observe=(binding,request)=>({...f.observe(binding),runningV2:{fenceState:'sealed',productRole:'v2',buildDigest:manifest.buildDigest,databaseId:f.spec.database.databaseId,instances:request.installed.targets.map(target=>({kind:target.kind,bindingDigest:target.bindingDigest,targetDigest:target.targetDigest,root:target.root,entryPath:target.entryPath,running:true,productRole:'v2',buildDigest:target.buildDigest,pid:999999998,createdAt:'2026-10-14T00:00:00.000Z',nonceDigest:nonce}))}});
+ const observe=(binding,request)=>({...f.observe(binding),runningV2:{fenceState:'sealed',productRole:'v2',buildDigest:manifest.buildDigest,databaseId:f.spec.database.databaseId,instances:request.installed.targets.map(target=>({kind:target.kind,bindingDigest:target.bindingDigest,targetDigest:target.targetDigest,root:target.root,entryPath:target.entryPath,running:true,productRole:'v2',buildDigest:target.buildDigest,pid:999999998,createdAt:'2026-10-14T00:00:00.000Z',nonceDigest:'d'.repeat(64)}))}});
  f.provider.collect=input=>input.requests.map(request=>collectProductionSourceProof({request,trust:f.trust,observe}));
  f.provider.recheck=input=>input.requests.map(request=>collectProductionSourceProof({request,trust:f.trust,previous:input.previous,observe}));
  const restored=await runProductionPreservation({...options(f),command:'restore',apply:true});assert.equal(restored.state,'restored');
@@ -153,10 +155,10 @@ test('matching installed V2 fixture restores same current DB with compat increme
 test('source CLI rejects output reuse and bad HMAC before inspecting native processes',async t=>{
  const f=fixture(t),requestFile=path.join(f.root,'request.json'),trustFile=path.join(f.root,'trust.json'),output=path.join(f.root,'source-proof.json');
  fs.writeFileSync(trustFile,JSON.stringify(f.trust));fs.writeFileSync(output,'retained-original-envelope');
- assert.throws(()=>runProductionSourceCli(['collect','--request',requestFile,'--trust',trustFile,'--output',output]),{code:'SOURCE_OUTPUT_EXISTS'});
+ await assert.rejects(runProductionSourceCli(['collect','--request',requestFile,'--trust',trustFile,'--output',output]),{code:'SOURCE_OUTPUT_EXISTS'});
  assert.equal(fs.readFileSync(output,'utf8'),'retained-original-envelope');
  fs.unlinkSync(output);
- f.provider.collect=input=>{const request=input.requests[0];request.signature='0'.repeat(64);fs.writeFileSync(requestFile,JSON.stringify(request));assert.throws(()=>runProductionSourceCli(['collect','--request',requestFile,'--trust',trustFile,'--output',output]),{code:'PRODUCTION_SIGNATURE_INVALID'});assert.equal(fs.existsSync(output),false);throw Object.assign(new Error('fixture finished'),{code:'FIXTURE_END'});};
+ f.provider.collect=async input=>{const request=input.requests[0];request.signature='0'.repeat(64);fs.writeFileSync(requestFile,JSON.stringify(request));await assert.rejects(runProductionSourceCli(['collect','--request',requestFile,'--trust',trustFile,'--output',output]),{code:'PRODUCTION_SIGNATURE_INVALID'});assert.equal(fs.existsSync(output),false);throw Object.assign(new Error('fixture finished'),{code:'FIXTURE_END'});};
  await assert.rejects(runProductionPreservation({...options(f),command:'prepare',apply:true}),{code:'FIXTURE_END'});
 });
 test('late backup cannot make an expired source proof reach any schema or phase write',async t=>{
@@ -199,7 +201,7 @@ test('restore uses approved new physical API release while old release stays unc
  reapprove(f);await runProductionPreservation({...options(f),command:'prepare',apply:true});await runProductionPreservation({...options(f),command:'seal',apply:true});
  const target=original.installTargets.v2;assert.notEqual(target.root,original.root);fs.cpSync(f.packageRoot,target.root,{recursive:true});
  const manifest=JSON.parse(fs.readFileSync(path.join(f.spec.packages.directory,'v2-manifest.json')));
- const observe=(binding,request)=>({...f.observe(binding),runningV2:{fenceState:'sealed',productRole:'v2',buildDigest:manifest.buildDigest,databaseId:f.spec.database.databaseId,instances:request.installed.targets.map(approved=>({kind:approved.kind,bindingDigest:approved.bindingDigest,targetDigest:approved.targetDigest,root:approved.root,entryPath:approved.entryPath,running:true,productRole:'v2',buildDigest:approved.buildDigest,pid:999999998,createdAt:'2026-10-14T00:00:00.000Z',nonceDigest:nonce}))}});
+ const observe=(binding,request)=>({...f.observe(binding),runningV2:{fenceState:'sealed',productRole:'v2',buildDigest:manifest.buildDigest,databaseId:f.spec.database.databaseId,instances:request.installed.targets.map(approved=>({kind:approved.kind,bindingDigest:approved.bindingDigest,targetDigest:approved.targetDigest,root:approved.root,entryPath:approved.entryPath,running:true,productRole:'v2',buildDigest:approved.buildDigest,pid:999999998,createdAt:'2026-10-14T00:00:00.000Z',nonceDigest:'d'.repeat(64)}))}});
  f.provider.collect=input=>input.requests.map(request=>collectProductionSourceProof({request,trust:f.trust,observe}));
  f.provider.recheck=input=>input.requests.map(request=>collectProductionSourceProof({request,trust:f.trust,previous:input.previous,observe}));
  const restored=await runProductionPreservation({...options(f),command:'restore',apply:true});assert.equal(restored.state,'restored');assert.equal(restored.databaseId,f.spec.database.databaseId);assert.equal(sha(fs.readFileSync(original.entryPath)),oldBytes);
@@ -231,4 +233,37 @@ test('approved Windows client targets may retain the same global physical instal
  const userHome=path.join(f.root,'client-user'),client={root:clientRoot,entryPath,configPath:path.join(userHome,'config.json'),userHome,runtimeDir:path.join(userHome,'runtime'),baseHome:path.join(f.root,'hermes-home'),configSha256:nonce,installedRole:'v1',clientBuild:nonce,originalInstance:{pid:999999997,createdAt:'2026-10-01T00:00:00.000Z',nonceDigest:nonce},installTargets:Object.fromEntries(['v1-compat','v2'].map(role=>[role,{root:clientRoot,entryPath,manifestSha256:f.spec.packages.manifests.find(row=>row.productRole===role).sha256,buildDigest:nonce}]))};
  f.spec.hosts[0].clients.push(client);f.spec.backupScope.homes.push(client.baseHome,client.userHome);f.spec.backupScope.configs.push(client.configPath);f.spec.backupScope.journals.push(client.runtimeDir);reapprove(f);
  const validated=validateProductionSpec({spec:f.spec,trust:f.trust,packageRoot:f.packageRoot});assert.equal(validated.spec.hosts[0].clients[0].installTargets.v2.root,clientRoot);
+});
+function twoHostFixture(t){
+ const f=fixture(t),root=path.join(f.root,'windows-client'),userHome=path.join(f.root,'windows-user'),runtimeDir=path.join(userHome,'runtime'),baseHome=path.join(f.root,'windows-hermes'),entryPath=path.join(root,'daemon/ziwei_user.mjs');fs.mkdirSync(path.dirname(entryPath),{recursive:true});fs.writeFileSync(entryPath,'// isolated stopped Windows client source\n');for(const dir of [runtimeDir,baseHome])fs.mkdirSync(dir,{recursive:true});
+ const configPath=path.join(userHome,'config.json');fs.writeFileSync(configPath,JSON.stringify({workspace:'fixture',deviceId:'windows_device',apiBase:'https://fixture.invalid',hermesHome:baseHome,sharedWorkspaces:[]}));const clientBuild=clientBuildIdentity(root);
+ for(const role of ['v1-compat','v2']){const file=path.join(f.spec.packages.directory,role+'-manifest.json'),manifest=JSON.parse(fs.readFileSync(file));manifest.clientContents=[{path:'daemon/ziwei_user.mjs',sha256:sha(fs.readFileSync(entryPath))}];manifest.clientBuild=clientBuild;fs.writeFileSync(file,JSON.stringify(manifest));const pin=f.spec.packages.manifests.find(row=>row.productRole===role);pin.sha256=sha(fs.readFileSync(file));f.spec.hosts[0].apiInstances[0].installTargets[role].manifestSha256=pin.sha256;}
+ const client={root,entryPath,configPath,userHome,runtimeDir,baseHome,configSha256:sha(fs.readFileSync(configPath)),installedRole:'v1',clientBuild,originalInstance:{pid:999999997,createdAt:'2026-10-01T00:00:00.000Z',nonceDigest:nonce},installTargets:Object.fromEntries(['v1-compat','v2'].map(role=>[role,{root,entryPath,manifestSha256:f.spec.packages.manifests.find(row=>row.productRole===role).sha256,buildDigest:clientBuild}]))};
+ const host={hostId:'windows_fixture',deviceIds:['windows_device'],workspaceIds:['ws_fixture'],clients:[client],apiInstances:[]},keyRef=path.join(f.root,'windows.key');fs.writeFileSync(keyRef,crypto.randomBytes(32),{mode:0o600});f.spec.hosts.push(host);f.trust.hosts.push({hostId:host.hostId,keyId:'windows_key',keyRef,bindingDigest:digestProduction(host)});f.spec.backupScope.homes.push(baseHome,userHome);f.spec.backupScope.journals.push(runtimeDir);f.spec.backupScope.configs.push(configPath);reapprove(f);
+ const action={id:'legacy_windows',workspace_id:'ws_fixture',type:'command',payload_json:JSON.stringify({deviceId:'windows_device'}),result_json:null,status:'expired',acked_at:'2026-10-01T00:00:00.000Z'},db=new DatabaseSync(f.spec.database.path);db.prepare('INSERT INTO a2a_actions VALUES(?,?,?,?,?,?,?)').run(...Object.values(action));db.close();
+ const collected=[],scanFiles=({actions,productionRequest})=>({issues:[],files:[],directories:[],gatewayExits:[],originalActionProofs:actions.map(row=>({kind:'legacy-never-dispatched-v1',actionId:row.id,actionDigest:nativeActionDigest(row),operationId:productionRequest.operationId,specHash:productionRequest.specHash,challenge:productionRequest.challenge,hostId:productionRequest.binding.hostId,verified:true}))}),scanDatabases=()=>({issues:[],files:[],directories:[],nativeDatabases:[],nativeStateProofs:[],gatewayInboxProofs:[]});
+ const collect=(input,previous)=>input.requests.map(request=>{if(request.hostId==='host_fixture')assert.deepEqual(request.payload.binding.deviceIds,[]);return collectProductionSourceProof({request,trust:f.trust,previous,observe:f.observe,scanFiles:args=>{if(request.hostId==='host_fixture')assert.equal(args.actions.some(row=>row.id==='legacy_windows'),false);return scanFiles(args);},scanDatabases});});
+ f.provider.collect=input=>{const result=collect(input);collected.push(...result);return result;};f.provider.recheck=input=>collect(input,input.previous);return {...f,host,action,collected};
+}
+test('two hosts keep Windows expired ACK interpretation local and combine verified original evidence',async t=>{
+ const f=twoHostFixture(t),result=await runProductionPreservation({...options(f),command:'prepare',apply:true});assert.equal(result.state,'preparing');assert.equal(f.collected[0].payload.actionBindings.length,0);assert.equal(f.collected[0].payload.nativeStateProofs.length,0);assert.equal(f.collected[1].payload.actionBindings[0].id,f.action.id);assert.equal(f.collected[1].payload.nativeStateProofs[0].hostId,f.host.hostId);
+});
+test('two-host signed wrong host/digest/device and global pending debt refuse before first write',async t=>{
+ for(const change of ['wrong-host','wrong-digest','wrong-device','global-pending']){
+  const f=twoHostFixture(t),collect=f.provider.collect;
+  if(change==='wrong-device'||change==='global-pending'){const db=new DatabaseSync(f.spec.database.path);if(change==='wrong-device')db.prepare('UPDATE a2a_actions SET payload_json=?,acked_at=NULL').run(JSON.stringify({deviceId:'unowned_device'}));else db.exec("INSERT INTO a2a_actions VALUES('global_pending','ws_fixture','command','{}',NULL,'pending',NULL)");db.close();}
+  const before=sourceBytes(f);f.provider.collect=input=>collect(input).map(envelope=>{
+   if(change==='wrong-host'&&envelope.hostId===f.host.hostId)envelope.payload.nativeStateProofs[0].hostId='host_fixture';
+   if(change==='wrong-digest'&&envelope.hostId===f.host.hostId)envelope.payload.actionBindings[0].digest='0'.repeat(64);
+   if(change==='wrong-device'&&envelope.hostId==='host_fixture'){const row=input.requests[0].payload.actionProjection.tables.a2a_actions.rows[0];envelope.payload.actionBindings.push({id:row.id,digest:nativeActionDigest(row)});}
+   if(change==='global-pending'){envelope.payload.issues=[];envelope.payload.safe=true;}
+   envelope.payload.evidenceDigest=productionEvidenceDigest(envelope.payload);return signProductionEnvelope({hostId:envelope.hostId,payload:envelope.payload,trust:f.trust});
+  });
+  await assert.rejects(runProductionPreservation({...options(f),command:'prepare',apply:true}),{code:change==='global-pending'?'PRODUCTION_ORIGINAL_DEBT':'PRODUCTION_ACTION_COVERAGE'});assert.equal(sourceBytes(f),before);assert.equal(readDatabaseSnapshot(f.spec.database.path,db=>db.prepare("SELECT 1 FROM sqlite_master WHERE name='version_preservation'").get()),undefined);
+ }
+});
+test('private namespace evidence directories do not authorize arbitrary descendants',async t=>{
+ const f=fixture(t),outside=path.join(f.root,'native-evidence');fs.mkdirSync(outside);f.spec.hosts[0].nativeSourceRefs=[{kind:'namespace-capture-directory-v1',canonicalPath:outside,producerSha256:nonce}];reapprove(f);const collect=f.provider.collect,before=sourceBytes(f);
+ f.provider.collect=input=>collect(input).map(envelope=>{envelope.payload.files.push({path:path.join(outside,'unapproved.sqlite'),exists:false});envelope.payload.evidenceDigest=productionEvidenceDigest(envelope.payload);return signProductionEnvelope({hostId:envelope.hostId,payload:envelope.payload,trust:f.trust});});
+ await assert.rejects(runProductionPreservation({...options(f),command:'prepare',apply:true}),{code:'PRODUCTION_RECORD_SCOPE'});assert.equal(sourceBytes(f),before);
 });
