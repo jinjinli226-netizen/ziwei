@@ -1,6 +1,6 @@
 # R01 旧 ACK / never-dispatched 有界评估
 
-状态：**外部 legacy assessment 候选；CODE/CACHE VERIFIED / 正式admission仍待核、未放行、未生成正式签名**。2026-10-14（北京时间）。只读核既有准确历史证据、当前原生缓存与固定旧源码；不新增正式产品接口、不迁移，不改原action的expired状态/空result，不补synthetic Job、rootPID或treeConfirmed。本轮结束后R01 checkpoint idle。
+状态：**source-bound 外部 legacy assessment 候选；CODE/CACHE/LOGGER VERIFIED / 正式admission仍待接与独审、未放行、未生成正式签名**。2026-10-14（北京时间）。只读核既有准确历史证据、当前原生缓存与固定旧源码；不新增正式产品接口、不迁移，不改原action的expired状态/空result，不补synthetic Job、rootPID或treeConfirmed。本轮结束后R01 checkpoint idle。
 
 ## Subject 与原证据
 
@@ -51,7 +51,16 @@ R01先前有界读取的原轮转日志 `legacy-journals-04-history.json` SHA `4
 
 原source runtime/log由ZIWEI_USER_HOME决定；configPath可以独立override。plain AppData config自身不能推出runtime/log根。需把原日志canonical path/文件hash/全覆盖区间、原PID/startedAt或nonce/build、实际home/runtime根归属核为同一boot/scope。当前有历史原PID/build/config/path、精确原cache byte identity和实际source bytes；将这些来源接入正式proof时，仍须回核同一boot/scope根归属与日志完整覆盖，不能让peer自证key或借新generation。
 
-**本轮分析结论：对这一个subject，精确旧包、原cache缺原dedupe、唯一action失败记录/无started与3秒时间线共同支持never-dispatched候选。** 正式admission仍是未接/待核状态：缺独立正式签名、operation/spec/challenge/当前冻结DB关联以及由E02/Q审核的同boot/scope日志根/覆盖验证。没有签成生产PASS、不释放bootstrap；无需补不存在的rootPID/Job或改原result，可由明确外部legacy assessment类型承接这种旧协议证明。该结论不能推广到其他39条legacy终态或全实例排空。
+在总控要求的现有日志列表内作一次有界同boot复核：只读取 `legacy-journals-04-history.json` 已列文件，并fresh核该projection及3份原历史artifact SHA。原PID51880实际出现在两份不可变轮转文件，canonical final path精确为原AppData日志路径；读取前后字节和之前projection的完整SHA相同，完整解析均无坏行、旧PID无其他workspace：
+
+| 原文件 | 原PID覆盖区间 / SHA |
+| --- | --- |
+| `daemon.log.1791689059232` | 16149条原PID记录，`2026-10-10T10:40:42.458Z` 至 `2026-10-11T03:24:19.232Z`；SHA `447bf1c4db2b8a51f15f71e433803e030ec84ba3124b407987e1f3bd53c02403` |
+| `daemon.log.1791772341015` | 16524条原PID记录，`2026-10-11T03:24:19.238Z` 至 `20:00:21.171Z`；SHA `4794319aa2c10cab415febc45305e29e3b1c5dd13400b1dc92e4e8b6ba248456` |
+
+原代次只有一个start和一个exit，start与历史进程创建时间相差约2.6秒，完整覆盖action创建/ACK/过期窗口，包含唯一目标失败记录且无`action.started`；与原context摘要一致。物理log root为 `C:\Users\25941\AppData\Local\Ziwei\ziwei_user\logs`，runtime root为对应`runtime`，原cache final path和原config/boot身份分别有既有artifact锚点。原历史ZIWEI_USER_HOME环境值未直接采集，报告仅声明实际观测物理根，不声称已恢复其原环境或lexical alias。
+
+**本轮分析结论：对这一个subject，精确旧包、原cache缺原dedupe、同boot完整logger覆盖/唯一失败且无started，与3秒时间线共同支持source-bound never-dispatched候选。** 这是按旧协议证明未进入执行器的候选，不是原Job/treeConfirmed。正式admission仍是未接/待独审状态：独立正式签名、operation/spec/challenge/当前冻结DB关联、E02实际支持与Q正确/错scope/cache/log缺失用例未交付或未验。没有签成生产PASS、不释放bootstrap；原expired/empty-result保持。该结论不能推广到其他39条legacy终态或全实例排空。
 
 ## 外部legacy assessment最小待接契约
 
@@ -77,5 +86,6 @@ Q最小用例：完整已核fixture可接受该外部证明但不改原expired/e
 - `original-cache-byte-audit-03-prefix.json` SHA `7a61211c8ca424dd917eaa0ee41117b9a156862fa61d76f1e4027acca735d229`，原33条完整byte/hash匹配；无source写入。
 - `cache-prefix-final.log` SHA `ebe7c23d5db824de2a780cfed7ade7b613fa9150b496201388d22f2b70369aa5`，9项；原cache-final7项、cache-red/utf8-red/prefix-red及绿日志保留。数据库/auth/HOME/log原始正文与私有产物不入Git。
 - `original-archive-byte-audit-01.json` SHA `43cfebbfe785f8f7635a2c03ee1e3a5ff000afb1b1e68b31dad39f7aeba9d43d` 保存上述一次准确旧archive的30文件字节manifest、source/Windows build与6module identity；取证脚本 `r01-legacy-archive-readonly.py` 只接受准确历史包hash/size并拒绝非正规成员，不执行包。
+- `original-logscope-audit-01.json`保留首次旧PowerShell Microsoft Date格式解析失败；`original-logscope-audit-02.json` SHA `e2497abd0ab13842562efceeb35ccd0f60690d33be010f7644628e9a6ce43192` 成功核上述同boot文件/覆盖，sameBootWindowVerified/targetLoggerCoverageVerified/currentIdentityStable均true，sourceWrites0。reader仅兼容既有`/Date(ms)/`或ISO日期，不改原日期材料。
 
-不扩大扫描。由总控决定下一次有界只读补原pack/cache/log锚点或把此scope保持unknown；R本轮保存脱敏报告后idle，释放可见执行槽。最终Gate齐备后R仍唯一publisher，沿已有授权接续safeGitHub push/读回与实部署。
+不扩大扫描。原pack/cache/logger缺项本轮已逐项消除，前期失败保留为过程证据而非最终cache未知结论。由E02/Q承接明确外部legacy assessment格式及signature/operation绑定验证；字段不明时仍拒切。R本轮保存脱敏报告后idle，释放可见执行槽。最终Gate齐备后R仍唯一publisher，沿已有授权接续safeGitHub push/读回与实部署。
