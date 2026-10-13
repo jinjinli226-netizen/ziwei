@@ -1,0 +1,9 @@
+{"at": 1791880205.4774506, "pid": 55064, "kind": "guard-ready", "sourceRefreshAndWritesDenied": true, "modelEffortOverride": false}
+{"at": 1791880214.616832, "pid": 55064, "kind": "model-request", "endpoint": "https://chatgpt.com/backend-api/codex/responses", "model": "gpt-6.1-sol", "effort": "max", "clientRequest": {"session_id": "20261013_163005_8e41d3", "x-client-request-id": "pck_08c895e72c249f88149ad43c"}, "credentialLocallyFresh": true, "tools": ["memory"]}
+{"at": 1791880214.6180573, "pid": 55064, "kind": "proxy-connect", "host": "127.0.0.1", "port": 7890}
+{"at": 1791880219.868356, "pid": 55064, "kind": "model-http-response", "status": 200, "requestId": null}
+{"at": 1791880221.2554452, "pid": 55064, "kind": "provider-error", "code": null, "param": null}
+{"at": 1791880223.7001328, "pid": 55064, "kind": "model-request", "endpoint": "https://chatgpt.com/backend-api/codex/responses", "model": "gpt-6.1-sol", "effort": "max", "clientRequest": {"session_id": "20261013_163005_8e41d3", "x-client-request-id": "pck_08c895e72c249f88149ad43c"}, "credentialLocallyFresh": true, "tools": ["memory"]}
+{"at": 1791880223.7001328, "pid": 55064, "kind": "proxy-connect", "host": "127.0.0.1", "port": 7890}
+{"at": 1791880229.6792157, "pid": 55064, "kind": "model-http-response", "status": 200, "requestId": null}
+{"at": 1791880238.2944803, "pid": 55064, "kind": "provider-terminal", "type": "response.completed", "responseId": "resp_0d225ad0bdede454016acdec23e81081909345fff06987c106", "status": "completed", "model": "gpt-6.1-sol", "reasoningEffort": "max", "usage": {"input_tokens": 3909, "output_tokens": 129, "total_tokens": 4038}, "error": {}}

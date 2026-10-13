@@ -1,0 +1,73 @@
+{
+  "at": "2026-10-13T08:43:25.266Z",
+  "kind": "offline QA SessionDB/memory/dispatcher audit; no requests",
+  "bots": [
+    {
+      "role": "A",
+      "id": "employee_ba73a74b-0518-4b98-8462-eafac8e05ee9",
+      "home": "C:\\Users\\25941\\AppData\\Local\\hermes\\profiles\\bot-504caac5ec3d36140faa80b9",
+      "messageRoleCounts": [
+        {
+          "role": "assistant",
+          "count": 3
+        },
+        {
+          "role": "user",
+          "count": 3
+        }
+      ],
+      "toolCallOrResultRows": 0,
+      "memoryMatchesExpected": true
+    },
+    {
+      "role": "B",
+      "id": "employee_e62fbab7-ebb7-4b4a-a5b2-601934484b9f",
+      "home": "C:\\Users\\25941\\AppData\\Local\\hermes\\profiles\\bot-0bbf55723b92e51d62b69dc5",
+      "messageRoleCounts": [
+        {
+          "role": "assistant",
+          "count": 1
+        },
+        {
+          "role": "user",
+          "count": 1
+        }
+      ],
+      "toolCallOrResultRows": 0,
+      "memoryMatchesExpected": true
+    }
+  ],
+  "startedActionIds": [
+    "action_08d40992-7ccc-49e2-bb41-154dcaeb82ae",
+    "action_a9405ac7-5bcc-4bf7-bcaa-2b2b9d66180b",
+    "action_e02f3848-5b0b-4b29-a165-18fc73fb2ec6",
+    "action_07a4bc57-5e5d-4656-b729-2ea0af2467ee",
+    "action_47aa84c2-1eca-4dc0-9827-81afd43f95ab",
+    "action_0d2e9725-b1db-4bca-b3aa-5ec66f24603a",
+    "action_70a8f563-7bbe-46a3-a9ef-9d1f0b350fce",
+    "action_bddf98c4-d22d-4ed7-9838-282b616d888a",
+    "action_fef8905a-7d82-4114-b01e-b57f6b5f6302",
+    "action_4d3e9e68-def3-4438-be9f-d73c4f0065c3",
+    "action_3c69034b-5d5f-4668-b55e-a972bef33f8d",
+    "action_d6912a6d-1518-498b-9ce6-522a818767dd"
+  ],
+  "completedActionIds": [
+    "action_08d40992-7ccc-49e2-bb41-154dcaeb82ae",
+    "action_a9405ac7-5bcc-4bf7-bcaa-2b2b9d66180b",
+    "action_e02f3848-5b0b-4b29-a165-18fc73fb2ec6",
+    "action_07a4bc57-5e5d-4656-b729-2ea0af2467ee",
+    "action_47aa84c2-1eca-4dc0-9827-81afd43f95ab",
+    "action_0d2e9725-b1db-4bca-b3aa-5ec66f24603a",
+    "action_70a8f563-7bbe-46a3-a9ef-9d1f0b350fce",
+    "action_bddf98c4-d22d-4ed7-9838-282b616d888a",
+    "action_fef8905a-7d82-4114-b01e-b57f6b5f6302",
+    "action_4d3e9e68-def3-4438-be9f-d73c4f0065c3",
+    "action_3c69034b-5d5f-4668-b55e-a972bef33f8d",
+    "action_d6912a6d-1518-498b-9ce6-522a818767dd"
+  ],
+  "uniqueStarts": true,
+  "oneOrdinaryTaskAction": true,
+  "firstActionNotRecreated": true,
+  "zeroClientToolCalls": true,
+  "noDuplicateMemoryOrTaskSideEffectsObserved": true
+}

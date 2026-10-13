@@ -1,0 +1,13 @@
+test_explicit_ultra_reports_actual_clamp_and_rejects_before_model (__main__.Reasoning.test_explicit_ultra_reports_actual_clamp_and_rejects_before_model) ... ok
+test_final_native_kwargs_cannot_override_matched_max_or_model (__main__.Reasoning.test_final_native_kwargs_cannot_override_matched_max_or_model) ... ok
+test_later_native_request_cannot_switch_effort_after_preflight (__main__.Reasoning.test_later_native_request_cannot_switch_effort_after_preflight) ... ok
+test_managed_policy_cannot_change_an_explicit_effort (__main__.Reasoning.test_managed_policy_cannot_change_an_explicit_effort) ... ok
+test_matching_native_effort_is_reported_again_at_request_boundary (__main__.Reasoning.test_matching_native_effort_is_reported_again_at_request_boundary) ... ok
+test_no_explicit_value_keeps_native_default_and_installs_no_guard (__main__.Reasoning.test_no_explicit_value_keeps_native_default_and_installs_no_guard) ... ok
+test_verified_exact_gpt61_sol_max_survives_native_clamp_and_final_kwargs (__main__.Reasoning.test_verified_exact_gpt61_sol_max_survives_native_clamp_and_final_kwargs) ... ok
+test_verified_max_does_not_expand_another_model (__main__.Reasoning.test_verified_max_does_not_expand_another_model) ... ok
+
+----------------------------------------------------------------------
+Ran 8 tests in 0.238s
+
+OK

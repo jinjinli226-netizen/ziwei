@@ -1,0 +1,28 @@
+(node:52012) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+passed real native resolver creates distinct A B owned Profiles with exact max configuration
+passed native memory CAS is isolated before actual model calls
+passed A first real max turn is in its exact native HOME and main session
+passed A executor rebuild continues the same real native session and memory
+passed B real model sees no A acceptance memory
+passed bounded ordinary task runs in the same A owned HOME through product task API
+{"status":"failed","root":"C:\\Users\\25941\\.codex\\worktrees\\v2-q01-real-provider-acceptance\\灵光爸爸拆解\\.local\\q01-real-provider\\q01-product-real-fca3ac19-3e98-4a3d-9ef6-86fd52478d2d","sourceHashesUnchanged":true,"cleanup":{"closed":true,"errors":[],"localApiClosed":true,"profilesRetainedAsOwnedQaEvidence":[{"id":"employee_ba73a74b-0518-4b98-8462-eafac8e05ee9","home":"C:\\Users\\25941\\AppData\\Local\\hermes\\profiles\\bot-504caac5ec3d36140faa80b9"},{"id":"employee_e62fbab7-ebb7-4b4a-a5b2-601934484b9f","home":"C:\\Users\\25941\\AppData\\Local\\hermes\\profiles\\bot-0bbf55723b92e51d62b69dc5"}]}}
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+4 !== 5
+
+    at file:///C:/Users/25941/.codex/worktrees/v2-q01-real-provider-acceptance/%E7%81%B5%E5%85%89%E7%88%B8%E7%88%B8%E6%8B%86%E8%A7%A3/.local/q01-real-provider/product-first-chain.mjs:45:343
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5) {
+  generatedMessage: true,
+  code: 'ERR_ASSERTION',
+  actual: 4,
+  expected: 5,
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+
+Node.js v24.13.0

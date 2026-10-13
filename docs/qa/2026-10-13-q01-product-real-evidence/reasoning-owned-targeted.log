@@ -1,0 +1,27 @@
+(node:32652) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ Bot reasoning effort accepts exact native levels and leaves absent legacy values absent (2.1174ms)
+✔ create, definite provisioning recovery, validation and revised execution retain exact effort and model (78.5217ms)
+✔ owned HOME preparation keeps explicit effort across overlay and later revisions without changing source (52.4153ms)
+✔ reasoning receipts accept matching identity and preserve a visible clamp while rejecting forged success (0.4101ms)
+(node:51772) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ new Bots own distinct stable named profiles and one durable provisioning action (63.3673ms)
+✔ provisioning is separate from validation and exact native HOME proof is required (35.2862ms)
+✔ mismatched HOME or ownership receipt cannot mark a profile provisioned (30.9638ms)
+✔ provisioning rejects contradictory or incomplete process exit proof (25.7042ms)
+✔ unknown provisioning retains original action and cannot create a second profile (27.3526ms)
+✔ definite provisioning failure can retry the same identity, and employee rename does not rename profile (27.365ms)
+✔ existing employee initialization stays legacy and arbitrary ownership fields are refused (20.6653ms)
+✔ owned Bot profiles are marked and refused as initialization sources before creating another employee (29.6736ms)
+✔ a provisioned validated Bot can take a management task before the next discovery heartbeat (37.8134ms)
+✔ owned profile preparation uses its named HOME, keeps state, and only references source auth (47.1432ms)
+✔ owned readiness follows only the verified source credential reference (21.5415ms)
+ℹ tests 15
+ℹ suites 0
+ℹ pass 15
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 489.2603

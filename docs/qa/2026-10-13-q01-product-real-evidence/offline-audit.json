@@ -1,0 +1,400 @@
+{
+  "at": "2026-10-13T08:54:15.085Z",
+  "kind": "offline audit of already completed exact product run; no requests",
+  "sourceRecordStatus": "failed",
+  "sourceRecordFailure": "Expected values to be strictly equal:\n\n4 !== 5\n",
+  "productScenariosPassed": 6,
+  "actionCount": 12,
+  "modelActions": [
+    {
+      "id": "action_fef8905a-7d82-4114-b01e-b57f6b5f6302",
+      "type": "conversation.execute",
+      "status": "succeeded",
+      "home": "C:\\Users\\25941\\AppData\\Local\\hermes\\profiles\\bot-504caac5ec3d36140faa80b9",
+      "profile": "bot-504caac5ec3d36140faa80b9",
+      "nativeSessionId": "20261013_163005_8e41d3",
+      "reasoning": {
+        "schemaVersion": 1,
+        "employeeId": "employee_ba73a74b-0518-4b98-8462-eafac8e05ee9",
+        "revision": 1,
+        "provider": "openai-codex",
+        "model": "gpt-6.1-sol",
+        "requested": "max",
+        "effective": "max",
+        "actual": "max",
+        "status": "matched",
+        "phase": "request",
+        "evidence": "native_codex_transport",
+        "actualModel": "gpt-6.1-sol",
+        "nativeActual": "xhigh",
+        "mode": "verified_gpt61_sol_max",
+        "requests": 4
+      },
+      "processExit": {
+        "platform": "win32",
+        "supervisor": "windows-job",
+        "launched": true,
+        "rootPid": 38432,
+        "rootConfirmed": true,
+        "rootExitCode": 0,
+        "treeConfirmed": true,
+        "activeProcesses": 0,
+        "cancelled": false,
+        "failureCode": null,
+        "hostExitCode": 0,
+        "streamsComplete": true,
+        "hostSignal": null
+      },
+      "syntheticOutput": "Q01-A-ONLY-9dc29bab FIRST"
+    },
+    {
+      "id": "action_4d3e9e68-def3-4438-be9f-d73c4f0065c3",
+      "type": "conversation.execute",
+      "status": "succeeded",
+      "home": "C:\\Users\\25941\\AppData\\Local\\hermes\\profiles\\bot-504caac5ec3d36140faa80b9",
+      "profile": "bot-504caac5ec3d36140faa80b9",
+      "nativeSessionId": "20261013_163005_8e41d3",
+      "reasoning": {
+        "schemaVersion": 1,
+        "employeeId": "employee_ba73a74b-0518-4b98-8462-eafac8e05ee9",
+        "revision": 1,
+        "provider": "openai-codex",
+        "model": "gpt-6.1-sol",
+        "requested": "max",
+        "effective": "max",
+        "actual": "max",
+        "status": "matched",
+        "phase": "request",
+        "evidence": "native_codex_transport",
+        "actualModel": "gpt-6.1-sol",
+        "nativeActual": "xhigh",
+        "mode": "verified_gpt61_sol_max",
+        "requests": 2
+      },
+      "processExit": {
+        "platform": "win32",
+        "supervisor": "windows-job",
+        "launched": true,
+        "rootPid": 52472,
+        "rootConfirmed": true,
+        "rootExitCode": 0,
+        "treeConfirmed": true,
+        "activeProcesses": 0,
+        "cancelled": false,
+        "failureCode": null,
+        "hostExitCode": 0,
+        "streamsComplete": true,
+        "hostSignal": null
+      },
+      "syntheticOutput": "FIRST Q01-A-ONLY-9dc29bab SECOND"
+    },
+    {
+      "id": "action_3c69034b-5d5f-4668-b55e-a972bef33f8d",
+      "type": "conversation.execute",
+      "status": "succeeded",
+      "home": "C:\\Users\\25941\\AppData\\Local\\hermes\\profiles\\bot-0bbf55723b92e51d62b69dc5",
+      "profile": "bot-0bbf55723b92e51d62b69dc5",
+      "nativeSessionId": "20261013_163113_f893ce",
+      "reasoning": {
+        "schemaVersion": 1,
+        "employeeId": "employee_e62fbab7-ebb7-4b4a-a5b2-601934484b9f",
+        "revision": 1,
+        "provider": "openai-codex",
+        "model": "gpt-6.1-sol",
+        "requested": "max",
+        "effective": "max",
+        "actual": "max",
+        "status": "matched",
+        "phase": "request",
+        "evidence": "native_codex_transport",
+        "actualModel": "gpt-6.1-sol",
+        "nativeActual": "xhigh",
+        "mode": "verified_gpt61_sol_max",
+        "requests": 2
+      },
+      "processExit": {
+        "platform": "win32",
+        "supervisor": "windows-job",
+        "launched": true,
+        "rootPid": 38324,
+        "rootConfirmed": true,
+        "rootExitCode": 0,
+        "treeConfirmed": true,
+        "activeProcesses": 0,
+        "cancelled": false,
+        "failureCode": null,
+        "hostExitCode": 0,
+        "streamsComplete": true,
+        "hostSignal": null
+      },
+      "syntheticOutput": "B-ISOLATED"
+    },
+    {
+      "id": "action_d6912a6d-1518-498b-9ce6-522a818767dd",
+      "type": "task.execute",
+      "status": "succeeded",
+      "home": "C:\\Users\\25941\\AppData\\Local\\hermes\\profiles\\bot-504caac5ec3d36140faa80b9",
+      "profile": "bot-504caac5ec3d36140faa80b9",
+      "nativeSessionId": "20261013_163005_8e41d3",
+      "reasoning": {
+        "schemaVersion": 1,
+        "employeeId": "employee_ba73a74b-0518-4b98-8462-eafac8e05ee9",
+        "revision": 1,
+        "provider": "openai-codex",
+        "model": "gpt-6.1-sol",
+        "requested": "max",
+        "effective": "max",
+        "actual": "max",
+        "status": "matched",
+        "phase": "request",
+        "evidence": "native_codex_transport",
+        "actualModel": "gpt-6.1-sol",
+        "nativeActual": "xhigh",
+        "mode": "verified_gpt61_sol_max",
+        "requests": 2
+      },
+      "processExit": {
+        "platform": "win32",
+        "supervisor": "windows-job",
+        "launched": true,
+        "rootPid": 2020,
+        "rootConfirmed": true,
+        "rootExitCode": 0,
+        "treeConfirmed": true,
+        "activeProcesses": 0,
+        "cancelled": false,
+        "failureCode": null,
+        "hostExitCode": 0,
+        "streamsComplete": true,
+        "hostSignal": null
+      },
+      "syntheticOutput": "Q01-A-ONLY-9dc29bab TASK-DONE"
+    }
+  ],
+  "wireRequests": [
+    {
+      "at": 1791880214.616832,
+      "pid": 55064,
+      "kind": "model-request",
+      "endpoint": "https://chatgpt.com/backend-api/codex/responses",
+      "model": "gpt-6.1-sol",
+      "effort": "max",
+      "clientRequest": {
+        "session_id": "20261013_163005_8e41d3",
+        "x-client-request-id": "pck_08c895e72c249f88149ad43c"
+      },
+      "credentialLocallyFresh": true,
+      "tools": [
+        "memory"
+      ]
+    },
+    {
+      "at": 1791880223.7001328,
+      "pid": 55064,
+      "kind": "model-request",
+      "endpoint": "https://chatgpt.com/backend-api/codex/responses",
+      "model": "gpt-6.1-sol",
+      "effort": "max",
+      "clientRequest": {
+        "session_id": "20261013_163005_8e41d3",
+        "x-client-request-id": "pck_08c895e72c249f88149ad43c"
+      },
+      "credentialLocallyFresh": true,
+      "tools": [
+        "memory"
+      ]
+    },
+    {
+      "at": 1791880251.5244231,
+      "pid": 52336,
+      "kind": "model-request",
+      "endpoint": "https://chatgpt.com/backend-api/codex/responses",
+      "model": "gpt-6.1-sol",
+      "effort": "max",
+      "clientRequest": {
+        "session_id": "20261013_163005_8e41d3",
+        "x-client-request-id": "pck_08c895e72c249f88149ad43c"
+      },
+      "credentialLocallyFresh": true,
+      "tools": [
+        "memory"
+      ]
+    },
+    {
+      "at": 1791880281.2028952,
+      "pid": 18064,
+      "kind": "model-request",
+      "endpoint": "https://chatgpt.com/backend-api/codex/responses",
+      "model": "gpt-6.1-sol",
+      "effort": "max",
+      "clientRequest": {
+        "session_id": "20261013_163113_f893ce",
+        "x-client-request-id": "pck_dccf362f550b2dcffde48ed1"
+      },
+      "credentialLocallyFresh": true,
+      "tools": [
+        "memory"
+      ]
+    },
+    {
+      "at": 1791880306.9796638,
+      "pid": 32380,
+      "kind": "model-request",
+      "endpoint": "https://chatgpt.com/backend-api/codex/responses",
+      "model": "gpt-6.1-sol",
+      "effort": "max",
+      "clientRequest": {
+        "session_id": "20261013_163005_8e41d3",
+        "x-client-request-id": "pck_08c895e72c249f88149ad43c"
+      },
+      "credentialLocallyFresh": true,
+      "tools": [
+        "memory"
+      ]
+    }
+  ],
+  "httpResponses": [
+    {
+      "at": 1791880219.868356,
+      "pid": 55064,
+      "kind": "model-http-response",
+      "status": 200,
+      "requestId": null
+    },
+    {
+      "at": 1791880229.6792157,
+      "pid": 55064,
+      "kind": "model-http-response",
+      "status": 200,
+      "requestId": null
+    },
+    {
+      "at": 1791880257.436853,
+      "pid": 52336,
+      "kind": "model-http-response",
+      "status": 200,
+      "requestId": null
+    },
+    {
+      "at": 1791880287.474797,
+      "pid": 18064,
+      "kind": "model-http-response",
+      "status": 200,
+      "requestId": null
+    },
+    {
+      "at": 1791880314.5128117,
+      "pid": 32380,
+      "kind": "model-http-response",
+      "status": 200,
+      "requestId": null
+    }
+  ],
+  "completedResponses": [
+    {
+      "at": 1791880238.2944803,
+      "pid": 55064,
+      "kind": "provider-terminal",
+      "type": "response.completed",
+      "responseId": "resp_0d225ad0bdede454016acdec23e81081909345fff06987c106",
+      "status": "completed",
+      "model": "gpt-6.1-sol",
+      "reasoningEffort": "max",
+      "usage": {
+        "input_tokens": 3909,
+        "output_tokens": 129,
+        "total_tokens": 4038
+      },
+      "error": {}
+    },
+    {
+      "at": 1791880270.3649147,
+      "pid": 52336,
+      "kind": "provider-terminal",
+      "type": "response.completed",
+      "responseId": "resp_0d225ad0bdede454016acdec3f9404819082ee54f580fee6fb",
+      "status": "completed",
+      "model": "gpt-6.1-sol",
+      "reasoningEffort": "max",
+      "usage": {
+        "input_tokens": 4636,
+        "output_tokens": 163,
+        "total_tokens": 4799
+      },
+      "error": {}
+    },
+    {
+      "at": 1791880293.0901854,
+      "pid": 18064,
+      "kind": "provider-terminal",
+      "type": "response.completed",
+      "responseId": "resp_07e6d3cf4c690210016acdec5d6ee88196b5100044fd5bcdd6",
+      "status": "completed",
+      "model": "gpt-6.1-sol",
+      "reasoningEffort": "max",
+      "usage": {
+        "input_tokens": 3875,
+        "output_tokens": 101,
+        "total_tokens": 3976
+      },
+      "error": {}
+    },
+    {
+      "at": 1791880319.443052,
+      "pid": 32380,
+      "kind": "provider-terminal",
+      "type": "response.completed",
+      "responseId": "resp_0d225ad0bdede454016acdec78a5688190a54b652caf15ffc2",
+      "status": "completed",
+      "model": "gpt-6.1-sol",
+      "reasoningEffort": "max",
+      "usage": {
+        "input_tokens": 5250,
+        "output_tokens": 17,
+        "total_tokens": 5267
+      },
+      "error": {}
+    }
+  ],
+  "explicitSseErrors": [
+    {
+      "at": 1791880221.2554452,
+      "pid": 55064,
+      "kind": "provider-error",
+      "code": null,
+      "param": null
+    }
+  ],
+  "accountingBalanced": true,
+  "sourceHashesUnchanged": true,
+  "installedCodeUnchanged": true,
+  "productCodeSha": "5ed970666907b16a1818464bbc0397ec7136d8af",
+  "cleanup": {
+    "closed": true,
+    "errors": [],
+    "localApiClosed": true,
+    "profilesRetainedAsOwnedQaEvidence": [
+      {
+        "id": "employee_ba73a74b-0518-4b98-8462-eafac8e05ee9",
+        "home": "C:\\Users\\25941\\AppData\\Local\\hermes\\profiles\\bot-504caac5ec3d36140faa80b9"
+      },
+      {
+        "id": "employee_e62fbab7-ebb7-4b4a-a5b2-601934484b9f",
+        "home": "C:\\Users\\25941\\AppData\\Local\\hermes\\profiles\\bot-0bbf55723b92e51d62b69dc5"
+      }
+    ]
+  },
+  "retryCause": "Matching native QA profile errors.log reports explicit provider server overload at 16:30:21, then one bounded retry inside the original first action; no unknown transport failure or action replay.",
+  "redactedNativeErrorLog": {
+    "kind": "synthetic owned QA profile error log filtered and redacted",
+    "file": "C:/Users/25941/AppData/Local/hermes/profiles/bot-504caac5ec3d36140faa80b9/logs/errors.log",
+    "lines": [
+      "2026-10-13 16:30:07,592 WARNING cli: Background MCP discovery previously exited with no connected servers; retrying discovery thread",
+      "2026-10-13 16:30:21,260 WARNING [20261013_163005_8e41d3] agent.conversation_loop: API call failed (attempt 1/3) error_type=APIError thread=MainThread:22572 provider=openai-codex base_url=https://chatgpt.com/backend-api/codex model=gpt-6.1-sol summary=Our servers are currently overloaded. Please try again later.",
+      "2026-10-13 16:30:21,261 WARNING [20261013_163005_8e41d3] agent.conversation_loop: Retrying API call in 2.332965239578816s (attempt 1/3) thread=MainThread:22572 provider=openai-codex base_url=https://chatgpt.com/backend-api/codex model=gpt-6.1-sol policy=default error=Our servers are currently overloaded. Please try again later.",
+      "2026-10-13 16:30:44,861 WARNING cli: Background MCP discovery previously exited with no connected servers; retrying discovery thread",
+      "2026-10-13 16:31:38,813 WARNING cli: Background MCP discovery previously exited with no connected servers; retrying discovery thread"
+    ]
+  },
+  "limitation": "Original strict harness failed on 4 completed != 5 attempts. One explicit SSE overload error is the missing terminal class. Error code was not retained by the initial SSE observation whitelist; cause was independently recovered from native QA profile log. Original failed result is preserved, not rewritten as passed."
+}

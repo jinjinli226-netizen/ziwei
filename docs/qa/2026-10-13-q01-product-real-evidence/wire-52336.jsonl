@@ -1,0 +1,5 @@
+{"at": 1791880243.3948221, "pid": 52336, "kind": "guard-ready", "sourceRefreshAndWritesDenied": true, "modelEffortOverride": false}
+{"at": 1791880251.5244231, "pid": 52336, "kind": "model-request", "endpoint": "https://chatgpt.com/backend-api/codex/responses", "model": "gpt-6.1-sol", "effort": "max", "clientRequest": {"session_id": "20261013_163005_8e41d3", "x-client-request-id": "pck_08c895e72c249f88149ad43c"}, "credentialLocallyFresh": true, "tools": ["memory"]}
+{"at": 1791880251.5244231, "pid": 52336, "kind": "proxy-connect", "host": "127.0.0.1", "port": 7890}
+{"at": 1791880257.436853, "pid": 52336, "kind": "model-http-response", "status": 200, "requestId": null}
+{"at": 1791880270.3649147, "pid": 52336, "kind": "provider-terminal", "type": "response.completed", "responseId": "resp_0d225ad0bdede454016acdec3f9404819082ee54f580fee6fb", "status": "completed", "model": "gpt-6.1-sol", "reasoningEffort": "max", "usage": {"input_tokens": 4636, "output_tokens": 163, "total_tokens": 4799}, "error": {}}

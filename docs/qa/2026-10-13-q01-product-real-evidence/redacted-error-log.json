@@ -1,0 +1,11 @@
+{
+  "kind": "synthetic owned QA profile error log filtered and redacted",
+  "file": "C:/Users/25941/AppData/Local/hermes/profiles/bot-504caac5ec3d36140faa80b9/logs/errors.log",
+  "lines": [
+    "2026-10-13 16:30:07,592 WARNING cli: Background MCP discovery previously exited with no connected servers; retrying discovery thread",
+    "2026-10-13 16:30:21,260 WARNING [20261013_163005_8e41d3] agent.conversation_loop: API call failed (attempt 1/3) error_type=APIError thread=MainThread:22572 provider=openai-codex base_url=https://chatgpt.com/backend-api/codex model=gpt-6.1-sol summary=Our servers are currently overloaded. Please try again later.",
+    "2026-10-13 16:30:21,261 WARNING [20261013_163005_8e41d3] agent.conversation_loop: Retrying API call in 2.332965239578816s (attempt 1/3) thread=MainThread:22572 provider=openai-codex base_url=https://chatgpt.com/backend-api/codex model=gpt-6.1-sol policy=default error=Our servers are currently overloaded. Please try again later.",
+    "2026-10-13 16:30:44,861 WARNING cli: Background MCP discovery previously exited with no connected servers; retrying discovery thread",
+    "2026-10-13 16:31:38,813 WARNING cli: Background MCP discovery previously exited with no connected servers; retrying discovery thread"
+  ]
+}

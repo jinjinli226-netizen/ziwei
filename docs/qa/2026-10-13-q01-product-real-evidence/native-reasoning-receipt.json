@@ -1,0 +1,385 @@
+{
+  "date": "2026-10-13T08:47:13.418Z",
+  "nativeVersion": "0.21.3",
+  "model": "gpt-6.1-sol",
+  "sourceHashesUnchanged": true,
+  "installedSourceHashes": {
+    "hermes_constants.py": "3c0b9d5d7b47318d1c9605a96719861059dd1ad80b4a696b215cf5fcf3d93ec7",
+    "agent/reasoning_effort.py": "b47b5b3d209c2a5df4b525a1630cbe7b56195e161527c22d0fdded45e23bac14",
+    "agent/transports/codex.py": "3b74f0fc7801a55fab6a8d9131e4485892c8ebccd366802ed5ea98087308a275",
+    "hermes_cli/auth.py": "be8629ea5f06e08840425bc22b11f52827ec8578fdeb4f7bfbb8715c6e0bf76f",
+    "hermes_cli/auth_codex.py": "d35b1fd58296cc692bad51a39133cfec575a43e34b7e49c0698d30bf445b0ae2"
+  },
+  "installedTrackedStatusUnchanged": true,
+  "network": "All model network and DNS blocked; source credentials are synthetic; no external acceptance claimed",
+  "root": "C:\\Users\\25941\\.codex\\worktrees\\v2-q01-real-provider-acceptance\\灵光爸爸拆解\\.local\\q01-bot-reasoning-1791881222390",
+  "nativeFixtures": {
+    "tests": 8,
+    "processExit": {
+      "platform": "win32",
+      "supervisor": "windows-job",
+      "launched": true,
+      "rootPid": 26220,
+      "rootConfirmed": true,
+      "rootExitCode": 0,
+      "treeConfirmed": true,
+      "activeProcesses": 0,
+      "cancelled": false,
+      "failureCode": null,
+      "hostExitCode": 0,
+      "streamsComplete": true,
+      "hostSignal": null
+    }
+  },
+  "results": [
+    {
+      "operation": "provision",
+      "status": "succeeded",
+      "result": {
+        "botProvision": {
+          "schemaVersion": 1,
+          "mode": "owned_profile",
+          "workspace": "test-111",
+          "employeeId": "employee_reasoning_smoke",
+          "deviceId": "fixture-pc",
+          "ownershipId": "reasoning-smoke-owner",
+          "profile": "bot-reasoning-smoke",
+          "home": "C:\\Users\\25941\\.codex\\worktrees\\v2-q01-real-provider-acceptance\\灵光爸爸拆解\\.local\\q01-bot-reasoning-1791881222390\\source\\profiles\\bot-reasoning-smoke",
+          "profileHome": "C:\\Users\\25941\\.codex\\worktrees\\v2-q01-real-provider-acceptance\\灵光爸爸拆解\\.local\\q01-bot-reasoning-1791881222390\\source\\profiles\\bot-reasoning-smoke",
+          "nativeVersion": "0.21.3",
+          "authentication": "configured",
+          "authMode": "source-native-store",
+          "templateProfile": "default",
+          "duplicate": false,
+          "provisionActionId": "action_reasoning_smoke",
+          "reasoning": {
+            "requested": "ultra",
+            "actual": null,
+            "status": "configured"
+          }
+        },
+        "processExit": {
+          "platform": "win32",
+          "supervisor": "windows-job",
+          "launched": true,
+          "rootPid": 54768,
+          "rootConfirmed": true,
+          "rootExitCode": 0,
+          "treeConfirmed": true,
+          "activeProcesses": 0,
+          "cancelled": false,
+          "failureCode": null,
+          "hostExitCode": 0,
+          "streamsComplete": true,
+          "hostSignal": null
+        }
+      }
+    },
+    {
+      "operation": "validate-ultra",
+      "status": "failed",
+      "code": "BOT_REASONING_UNSATISFIED",
+      "error": "原生实际推理等级与明确请求不一致；未启动模型",
+      "result": {
+        "botValidation": {
+          "valid": false,
+          "schemaVersion": 1,
+          "employeeId": "employee_reasoning_smoke",
+          "revision": 1,
+          "effective": {
+            "reasoning": {
+              "schemaVersion": 1,
+              "employeeId": "employee_reasoning_smoke",
+              "revision": 1,
+              "provider": "openai-codex",
+              "model": "gpt-6.1-sol",
+              "requested": "ultra",
+              "effective": "ultra",
+              "actual": "xhigh",
+              "status": "mismatch",
+              "phase": "preflight",
+              "evidence": "native_codex_transport",
+              "actualModel": "gpt-6.1-sol",
+              "nativeActual": "xhigh",
+              "mode": "native"
+            }
+          }
+        },
+        "externalModelCalls": 0
+      }
+    },
+    {
+      "operation": "model-ultra-rejected-before-request",
+      "status": "failed",
+      "code": "BOT_REASONING_UNSATISFIED",
+      "error": "原生实际推理等级未满足明确请求；禁止将降级结果当作成功",
+      "result": {
+        "runtime": "Hermes",
+        "model": "gpt-6.1-sol",
+        "profile": "bot-reasoning-smoke",
+        "binary": "C:\\Users\\25941\\AppData\\Local\\hermes\\bin\\hermes.exe",
+        "code": 125,
+        "signal": null,
+        "processExit": {
+          "platform": "win32",
+          "supervisor": "windows-job",
+          "launched": true,
+          "rootPid": 34044,
+          "rootConfirmed": true,
+          "rootExitCode": 125,
+          "treeConfirmed": true,
+          "activeProcesses": 0,
+          "cancelled": false,
+          "failureCode": null,
+          "hostExitCode": 0,
+          "streamsComplete": true,
+          "hostSignal": null
+        },
+        "output": "",
+        "diagnostics": null,
+        "truncated": false,
+        "hermesBootstrap": {
+          "binary": "C:\\Users\\25941\\AppData\\Local\\hermes\\bin\\hermes.exe",
+          "interpreter": "C:\\Users\\25941\\AppData\\Local\\hermes\\hermes-agent\\venv\\Scripts\\python.exe",
+          "entrypoint": "C:\\Users\\25941\\AppData\\Local\\hermes\\hermes-agent\\hermes_cli\\main.py",
+          "mode": "effective-mcp-gate"
+        },
+        "creatorIsolation": {
+          "enabled": true,
+          "key": "reasoning-smoke-owner",
+          "workspace": "test-111",
+          "employeeId": "employee_reasoning_smoke",
+          "sourceProfile": "bot-reasoning-smoke",
+          "authMode": "source-native-store",
+          "kind": "hermes-bot",
+          "revision": 1,
+          "mode": "owned_profile",
+          "profile": "bot-reasoning-smoke",
+          "home": "C:\\Users\\25941\\.codex\\worktrees\\v2-q01-real-provider-acceptance\\灵光爸爸拆解\\.local\\q01-bot-reasoning-1791881222390\\source\\profiles\\bot-reasoning-smoke",
+          "profileHome": "C:\\Users\\25941\\.codex\\worktrees\\v2-q01-real-provider-acceptance\\灵光爸爸拆解\\.local\\q01-bot-reasoning-1791881222390\\source\\profiles\\bot-reasoning-smoke",
+          "reasoning": {
+            "requested": "ultra",
+            "actual": null,
+            "status": "configured"
+          }
+        },
+        "botIsolation": {
+          "enabled": true,
+          "key": "reasoning-smoke-owner",
+          "workspace": "test-111",
+          "employeeId": "employee_reasoning_smoke",
+          "sourceProfile": "bot-reasoning-smoke",
+          "authMode": "source-native-store",
+          "kind": "hermes-bot",
+          "revision": 1,
+          "mode": "owned_profile",
+          "profile": "bot-reasoning-smoke",
+          "home": "C:\\Users\\25941\\.codex\\worktrees\\v2-q01-real-provider-acceptance\\灵光爸爸拆解\\.local\\q01-bot-reasoning-1791881222390\\source\\profiles\\bot-reasoning-smoke",
+          "profileHome": "C:\\Users\\25941\\.codex\\worktrees\\v2-q01-real-provider-acceptance\\灵光爸爸拆解\\.local\\q01-bot-reasoning-1791881222390\\source\\profiles\\bot-reasoning-smoke",
+          "reasoning": {
+            "requested": "ultra",
+            "actual": null,
+            "status": "configured"
+          }
+        },
+        "configurationRevision": 1,
+        "nativeSessionId": null,
+        "reasoning": {
+          "schemaVersion": 1,
+          "employeeId": "employee_reasoning_smoke",
+          "revision": 1,
+          "provider": "openai-codex",
+          "model": "gpt-6.1-sol",
+          "requested": "ultra",
+          "effective": "ultra",
+          "actual": "xhigh",
+          "status": "mismatch",
+          "phase": "preflight",
+          "evidence": "native_codex_transport",
+          "actualModel": "gpt-6.1-sol",
+          "nativeActual": "xhigh",
+          "mode": "native",
+          "requests": 0
+        },
+        "neverStarted": true,
+        "externalModelCalls": 0
+      }
+    },
+    {
+      "operation": "validate-max",
+      "status": "succeeded",
+      "result": {
+        "botValidation": {
+          "valid": true,
+          "schemaVersion": 1,
+          "employeeId": "employee_reasoning_smoke",
+          "revision": 2,
+          "sourceProfile": "bot-reasoning-smoke",
+          "nativeVersion": "0.21.3",
+          "nativeFingerprint": "0d93a99be81e04e848676237988bdd8015817660698701978bab4f087a2ec514",
+          "isolation": {
+            "enabled": true,
+            "key": "reasoning-smoke-owner",
+            "workspace": "test-111",
+            "employeeId": "employee_reasoning_smoke",
+            "sourceProfile": "bot-reasoning-smoke",
+            "authMode": "source-native-store",
+            "kind": "hermes-bot",
+            "revision": 2,
+            "mode": "owned_profile",
+            "profile": "bot-reasoning-smoke",
+            "home": "C:\\Users\\25941\\.codex\\worktrees\\v2-q01-real-provider-acceptance\\灵光爸爸拆解\\.local\\q01-bot-reasoning-1791881222390\\source\\profiles\\bot-reasoning-smoke",
+            "profileHome": "C:\\Users\\25941\\.codex\\worktrees\\v2-q01-real-provider-acceptance\\灵光爸爸拆解\\.local\\q01-bot-reasoning-1791881222390\\source\\profiles\\bot-reasoning-smoke",
+            "reasoning": {
+              "requested": "max",
+              "actual": null,
+              "status": "configured"
+            }
+          },
+          "effective": {
+            "provider": "openai-codex",
+            "model": "gpt-6.1-sol",
+            "maxTurns": 2,
+            "reasoning": {
+              "schemaVersion": 1,
+              "employeeId": "employee_reasoning_smoke",
+              "revision": 2,
+              "provider": "openai-codex",
+              "model": "gpt-6.1-sol",
+              "requested": "max",
+              "effective": "max",
+              "actual": "max",
+              "nativeActual": "xhigh",
+              "mode": "verified_gpt61_sol_max",
+              "actualModel": "gpt-6.1-sol",
+              "status": "matched",
+              "phase": "preflight",
+              "evidence": "native_codex_transport"
+            },
+            "memory": true,
+            "toolsets": []
+          }
+        },
+        "externalModelCalls": 0
+      }
+    },
+    {
+      "operation": "validate-high",
+      "status": "succeeded",
+      "result": {
+        "botValidation": {
+          "valid": true,
+          "schemaVersion": 1,
+          "employeeId": "employee_reasoning_smoke",
+          "revision": 3,
+          "sourceProfile": "bot-reasoning-smoke",
+          "nativeVersion": "0.21.3",
+          "nativeFingerprint": "0d93a99be81e04e848676237988bdd8015817660698701978bab4f087a2ec514",
+          "isolation": {
+            "enabled": true,
+            "key": "reasoning-smoke-owner",
+            "workspace": "test-111",
+            "employeeId": "employee_reasoning_smoke",
+            "sourceProfile": "bot-reasoning-smoke",
+            "authMode": "source-native-store",
+            "kind": "hermes-bot",
+            "revision": 3,
+            "mode": "owned_profile",
+            "profile": "bot-reasoning-smoke",
+            "home": "C:\\Users\\25941\\.codex\\worktrees\\v2-q01-real-provider-acceptance\\灵光爸爸拆解\\.local\\q01-bot-reasoning-1791881222390\\source\\profiles\\bot-reasoning-smoke",
+            "profileHome": "C:\\Users\\25941\\.codex\\worktrees\\v2-q01-real-provider-acceptance\\灵光爸爸拆解\\.local\\q01-bot-reasoning-1791881222390\\source\\profiles\\bot-reasoning-smoke",
+            "reasoning": {
+              "requested": "high",
+              "actual": null,
+              "status": "configured"
+            }
+          },
+          "effective": {
+            "provider": "openai-codex",
+            "model": "gpt-6.1-sol",
+            "maxTurns": 2,
+            "reasoning": {
+              "schemaVersion": 1,
+              "employeeId": "employee_reasoning_smoke",
+              "revision": 3,
+              "provider": "openai-codex",
+              "model": "gpt-6.1-sol",
+              "requested": "high",
+              "effective": "high",
+              "actual": "high",
+              "nativeActual": "high",
+              "mode": "native",
+              "actualModel": "gpt-6.1-sol",
+              "status": "matched",
+              "phase": "preflight",
+              "evidence": "native_codex_transport"
+            },
+            "memory": true,
+            "toolsets": []
+          }
+        },
+        "externalModelCalls": 0
+      }
+    },
+    {
+      "operation": "managed-effort-conflict",
+      "status": "failed",
+      "code": "BOT_REASONING_MANAGED_CONFLICT",
+      "error": "原生明确推理配置被拒绝；未启动模型",
+      "result": {
+        "botValidation": {
+          "valid": false,
+          "schemaVersion": 1,
+          "employeeId": "employee_reasoning_smoke",
+          "revision": 3,
+          "effective": {
+            "reasoning": {
+              "requested": "high",
+              "actual": null,
+              "status": "rejected",
+              "code": "BOT_REASONING_MANAGED_CONFLICT"
+            }
+          }
+        },
+        "externalModelCalls": 0
+      }
+    },
+    {
+      "operation": "validate-no-explicit-effort",
+      "status": "succeeded",
+      "result": {
+        "botValidation": {
+          "valid": true,
+          "schemaVersion": 1,
+          "employeeId": "employee_reasoning_smoke",
+          "revision": 4,
+          "sourceProfile": "bot-reasoning-smoke",
+          "nativeVersion": "0.21.3",
+          "nativeFingerprint": "d6d0f7b13e37a09388879460ecdb495b6987bc1be9582bb37fbf4c8c95df01f1",
+          "isolation": {
+            "enabled": true,
+            "key": "reasoning-smoke-owner",
+            "workspace": "test-111",
+            "employeeId": "employee_reasoning_smoke",
+            "sourceProfile": "bot-reasoning-smoke",
+            "authMode": "source-native-store",
+            "kind": "hermes-bot",
+            "revision": 4,
+            "mode": "owned_profile",
+            "profile": "bot-reasoning-smoke",
+            "home": "C:\\Users\\25941\\.codex\\worktrees\\v2-q01-real-provider-acceptance\\灵光爸爸拆解\\.local\\q01-bot-reasoning-1791881222390\\source\\profiles\\bot-reasoning-smoke",
+            "profileHome": "C:\\Users\\25941\\.codex\\worktrees\\v2-q01-real-provider-acceptance\\灵光爸爸拆解\\.local\\q01-bot-reasoning-1791881222390\\source\\profiles\\bot-reasoning-smoke"
+          },
+          "effective": {
+            "provider": "openai-codex",
+            "model": "gpt-6.1-sol",
+            "maxTurns": 20,
+            "memory": true,
+            "toolsets": []
+          }
+        },
+        "externalModelCalls": 0
+      }
+    }
+  ]
+}
