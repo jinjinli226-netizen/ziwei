@@ -302,14 +302,17 @@ function validateObservations(payload,binding,manifest){
  for(const original of expected){const matches=observations.instances.filter(row=>row.bindingDigest===digestProduction(original)&&equal(row.originalInstance,original.originalInstance)&&row.stopped===true);if(matches.length!==1)fail('PRODUCTION_INSTANCE_COVERAGE');}
  if(payload.command==='restore'){
   const running=observations.runningV2;
-  if(!running||running.fenceState!=='sealed'||running.productRole!=='v2'||running.buildDigest!==manifest.buildDigest||running.databaseId!==payload.databaseIdentity.databaseId||!Array.isArray(running.instances)||running.instances.length!==expected.length)fail('PRODUCTION_RESTORE_RUNNING_V2_REQUIRED');
+  if(!running||running.productRole!=='v2'||!Array.isArray(running.instances)||running.instances.length!==expected.length)fail('PRODUCTION_RESTORE_RUNNING_V2_REQUIRED');
+  if(binding.apiInstances.length){if(running.fenceState!=='sealed'||running.buildDigest!==manifest.buildDigest||running.databaseId!==payload.databaseIdentity.databaseId)fail('PRODUCTION_RESTORE_RUNNING_V2_REQUIRED');}
+  else if(['fenceState','buildDigest','databaseId'].some(key=>Object.hasOwn(running,key)))fail('PRODUCTION_RESTORE_CLIENT_API_CLAIM');
   for(const original of expected){const target=original.installTargets.v2,kind=original.configPath?'client':'api',matched=running.instances.filter(row=>row.kind===kind&&row.bindingDigest===digestProduction(original)&&row.targetDigest===digestProduction(target)&&row.root===target.root&&row.entryPath===target.entryPath&&row.running===true&&row.productRole==='v2'&&row.buildDigest===target.buildDigest&&Number.isSafeInteger(row.pid)&&row.pid>0&&hex(row.nonceDigest)&&row.nonceDigest!==original.originalInstance.nonceDigest&&newerInstance(original.originalInstance,row));if(matched.length!==1)fail('PRODUCTION_RESTORE_RUNNING_V2_REQUIRED');}
  }else if(observations.runningV2!==undefined)fail('PRODUCTION_SOURCE_NOT_STOPPED');
 }
-function verifySourceProofs(envelopes,requests,trust,manifest){
+export function verifySourceProofs(envelopes,requests,trust,manifest){
  if(!Array.isArray(envelopes)||envelopes.length!==requests.length)fail('PRODUCTION_HOST_COVERAGE');
  unique(envelopes.map(row=>row.hostId),'PRODUCTION_HOST_COVERAGE');
- const records=[];
+ const records=[],apiTargets=requests.flatMap(request=>request.payload.command==='restore'?request.payload.installed.targets.filter(row=>row.kind==='api').map(target=>({hostId:request.hostId,target})):[]),apiRuntime=[];
+ if(requests.some(request=>request.payload.command==='restore')&&!apiTargets.length)fail('PRODUCTION_RESTORE_API_REQUIRED');
  for(const request of requests){
   const envelope=envelopes.find(row=>row.hostId===request.hostId);if(!envelope)fail('PRODUCTION_HOST_COVERAGE');
   const source=request.payload;
@@ -334,14 +337,17 @@ function verifySourceProofs(envelopes,requests,trust,manifest){
   if(payload.actionBindings.length!==hostActions.length||new Set(payload.actionBindings.map(row=>row.id)).size!==payload.actionBindings.length)fail('PRODUCTION_ACTION_COVERAGE');
   for(const action of hostActions)if(!payload.actionBindings.some(row=>row.id===action.id&&row.digest===nativeActionDigest(action)))fail('PRODUCTION_ACTION_COVERAGE');
   for(const proof of payload.nativeStateProofs.filter(row=>row.kind==='legacy-never-dispatched-v1'))if(proof.hostId!==source.binding.hostId||proof.operationId!==source.operationId||proof.specHash!==source.specHash||proof.verified!==true||!hostActions.some(action=>action.id===proof.actionId&&nativeActionDigest(action)===proof.actionDigest))fail('PRODUCTION_ACTION_COVERAGE');
-  if(source.command==='restore'&&refs.some(ref=>ref.kind==='runtime-identity-directory-v1')){
-   if(payload.runtimeProofs.length!==1)fail('PRODUCTION_RESTORE_RUNNING_V2_REQUIRED');
+  if(source.command==='restore'&&[...source.binding.clients,...source.binding.apiInstances].length){
+   if(!refs.some(ref=>ref.kind==='runtime-identity-directory-v1')||payload.runtimeProofs.length!==1)fail('PRODUCTION_RESTORE_RUNNING_V2_REQUIRED');
    const runtime=verifyRuntimeCaptureEnvelope({envelope:payload.runtimeProofs[0],trust,request:source});
    for(const sample of runtime.instances)if(!payload.observations.runningV2.instances.some(row=>['kind','bindingDigest','targetDigest','root','entryPath','productRole','buildDigest','pid','nativeBirth','nonceDigest'].every(key=>equal(row[key],sample[key]))))fail('PRODUCTION_RESTORE_RUNNING_V2_REQUIRED');
+   for(const sample of runtime.instances.filter(row=>row.kind==='api')){const proof=sample.apiIdentity.payload;if(proof.fenceState!==payload.observations.runningV2.fenceState||proof.buildDigest!==payload.observations.runningV2.buildDigest||proof.databaseIdentity.databaseId!==payload.observations.runningV2.databaseId)fail('PRODUCTION_RESTORE_RUNNING_V2_REQUIRED');apiRuntime.push({hostId:request.hostId,sample});}
   }else if(payload.runtimeProofs.length)fail('PRODUCTION_PROOF_INVALID');
   for(const database of payload.nativeDatabases)for(const suffix of ['','-wal','-journal','-shm'])if(!payload.files.some(row=>row.path===database.path+suffix))fail('PRODUCTION_DATABASE_COVERAGE');
   records.push({hostId:envelope.hostId,payload});
  }
+ if(apiRuntime.length!==apiTargets.length)fail('PRODUCTION_RESTORE_API_REQUIRED');
+ for(const {hostId,target} of apiTargets)if(apiRuntime.filter(row=>row.hostId===hostId&&row.sample.bindingDigest===target.bindingDigest&&row.sample.targetDigest===target.targetDigest).length!==1)fail('PRODUCTION_RESTORE_API_REQUIRED');
  return records;
 }
 function homesFor(spec,projection){

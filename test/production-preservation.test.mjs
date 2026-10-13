@@ -12,12 +12,13 @@ import {readDatabaseSnapshot} from '../backend/preservation-native-databases.mjs
 import {nativeActionDigest} from '../backend/preservation-native-databases.mjs';
 import {clientBuildIdentity} from '../src/management-bootstrap.mjs';
 import {collectProductionSourceProof,runProductionSourceCli} from '../scripts/production-source-proof.mjs';
+import {createProductionApiIdentityHandler,createApiIdentityRequest} from '../backend/preservation-source-namespace.mjs';
 
 const sha=value=>crypto.createHash('sha256').update(value).digest('hex');
 const repository=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const nonce='c'.repeat(64);
 function fixture(t){
- const root=fs.mkdtempSync(path.join(os.tmpdir(),'ziwei-production-entry-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'ziwei-production-entry-')),nativeRuntimeConnections=[];t.after(()=>{for(const connection of nativeRuntimeConnections)connection.close();fs.rmSync(root,{recursive:true,force:true});});
  const databaseFile=path.join(root,'current.sqlite'),db=new DatabaseSync(databaseFile);
  db.exec("CREATE TABLE workspaces(id TEXT PRIMARY KEY,slug TEXT); INSERT INTO workspaces VALUES('ws_fixture','fixture'); CREATE TABLE employees(id TEXT PRIMARY KEY,workspace_id TEXT,runtime TEXT,status TEXT); CREATE TABLE tasks(id TEXT PRIMARY KEY,assignee TEXT); CREATE TABLE conversations(id TEXT PRIMARY KEY,employee_id TEXT); CREATE TABLE a2a_actions(id TEXT PRIMARY KEY,workspace_id TEXT,type TEXT,payload_json TEXT,result_json TEXT,status TEXT,acked_at TEXT); CREATE TABLE management_requests(workspace_id TEXT,kind TEXT,request_key TEXT,fingerprint TEXT,resource_id TEXT,PRIMARY KEY(workspace_id,kind,request_key));");db.close();
  const packages=path.join(root,'packages'),packageRoot=path.join(root,'staged-v2');fs.mkdirSync(packages);fs.mkdirSync(packageRoot);
@@ -46,11 +47,20 @@ function fixture(t){
   recheck(input){calls.push('recheck');return input.requests.map(request=>collectProductionSourceProof({request,trust,previous:input.previous,observe}));},
   backup(input){calls.push('backup');const issuedAt=new Date().toISOString(),payload={domain:'ziwei-production-backup-proof-v1',schemaVersion:1,kind:'backup-restore-read',command:'seal',challenge:crypto.randomUUID(),issuedAt,expiresAt:new Date(Date.parse(issuedAt)+60000).toISOString(),operationId:input.operationId,specHash:input.specHash,databaseIdentity:input.databaseIdentity,freezeDigest:input.freezeDigest,scopeDigest:digestProduction(input.scope),manifestDigest:nonce,restoreReadDigest:nonce,mainDatabase:{path:input.scope.mainDatabase,integrity:'ok',foreignKeys:'ok',stablePrimaryKeysDigest:nonce,fileDigest:nonce},controlDatabases:[],objectsDigest:nonce,homesDigest:nonce,journalsDigest:nonce,configsDigest:nonce,privateReferencesDigest:nonce,originalWritersStopped:true,safe:true};return signProductionEnvelope({hostId:host.hostId,payload,trust});}
  };
- return {root,spec,trust,packageRoot,provider,calls,observe,entryPath};
+ return {root,spec,trust,packageRoot,provider,calls,observe,entryPath,nativeRuntimeConnections};
 }
 const options=f=>({spec:f.spec,trust:f.trust,packageRoot:f.packageRoot,proofProvider:f.provider});
 const sourceBytes=f=>sha(fs.readFileSync(f.spec.database.path));
 const reapprove=f=>{delete f.spec.specHash;f.spec.specHash=digestProduction(f.spec);f.trust.approvedSpecs=[{operationId:f.spec.operationId,specHash:f.spec.specHash}];for(const host of f.spec.hosts)f.trust.hosts.find(row=>row.hostId===host.hostId).bindingDigest=digestProduction(host);};
+function privateApiRuntimeProvider(f,t){
+ const host=f.spec.hosts[0],directory=path.join(f.root,'private-runtime');fs.mkdirSync(directory);host.nativeSourceRefs=[{kind:'runtime-identity-directory-v1',canonicalPath:directory,producerSha256:'b'.repeat(64)}];reapprove(f);let handler,db;
+ const collect=(input,previous=null)=>input.requests.map(request=>{
+  if(request.payload.command!=='restore')return collectProductionSourceProof({request,trust:f.trust,previous,observe:f.observe});
+  const payload=request.payload,target=payload.installed.targets[0];if(!handler){db=new DatabaseSync(f.spec.database.path);f.nativeRuntimeConnections.push(db);handler=createProductionApiIdentityHandler({db,trust:f.trust,hostId:host.hostId},{readBootstrap:()=>({root:target.root,entryPath:target.entryPath,descriptor:{productRole:'v2'},sources:payload.installed.apiContents}),readDatabaseConnectionIdentity:()=>{const stat=fs.lstatSync(f.spec.database.path,{bigint:true});return {canonicalPath:f.spec.database.canonicalPath,identity:{dev:String(stat.dev),ino:String(stat.ino)}};}});}
+  const response={statusCode:200,setHeader(){},status(code){this.statusCode=code;return this;},json(value){this.value=value;return this;}};handler({body:createApiIdentityRequest({sourceRequest:request,trust:f.trust,target}),socket:{remoteAddress:'127.0.0.1'}},response);assert.equal(response.statusCode,200);const identity=response.value,proof=identity.payload,nativeBirth={bootId:'a'.repeat(64),createdAt:proof.startedAt},sample={kind:'api',bindingDigest:target.bindingDigest,targetDigest:target.targetDigest,root:target.root,entryPath:target.entryPath,productRole:'v2',buildDigest:target.buildDigest,pid:process.pid,nativeBirth,nonceDigest:proof.nonceDigest,apiIdentity:identity},running={...sample,running:true,createdAt:proof.startedAt};delete running.apiIdentity;
+  const observe=binding=>({...f.observe(binding),runningV2:{fenceState:proof.fenceState,productRole:'v2',buildDigest:proof.buildDigest,databaseId:proof.databaseIdentity.databaseId,instances:[running]}}),envelope=collectProductionSourceProof({request,trust:f.trust,previous,observe});envelope.payload.runtimeProofs=[signProductionEnvelope({hostId:host.hostId,trust:f.trust,payload:{domain:'ziwei-production-runtime-capture-v1',schemaVersion:1,producer:'ziwei-source-namespace-v1',producerSha256:'b'.repeat(64),command:'restore',challenge:payload.challenge,issuedAt:payload.issuedAt,expiresAt:payload.expiresAt,operationId:payload.operationId,specHash:payload.specHash,databaseIdentity:payload.databaseIdentity,freezeDigest:payload.freezeDigest,bindingDigest:digestProduction(host),installedDigest:digestProduction(payload.installed),instances:[sample]}})];envelope.payload.evidenceDigest=productionEvidenceDigest(envelope.payload);return signProductionEnvelope({hostId:host.hostId,trust:f.trust,payload:envelope.payload});
+ });f.provider.collect=input=>collect(input);f.provider.recheck=input=>collect(input,input.previous);
+}
 test('schema-aware old V1 inspection is absent and does not initialize or touch bytes',async t=>{
  const f=fixture(t),before=sourceBytes(f);const plan=await runProductionPreservation({...options(f),command:'inspect'});
  assert.equal(plan.state,'absent');assert.equal(plan.willApply,false);assert.equal(sourceBytes(f),before);assert.deepEqual(f.calls,[]);
@@ -141,13 +151,9 @@ test('default native observation refuses an absent original PID without complete
  await assert.rejects(runProductionPreservation({...options(f),command:'prepare',apply:true}),{code:'PRODUCTION_SOURCE_UNSAFE'});assert.equal(sourceBytes(f),before);
 });
 test('matching installed V2 fixture restores same current DB with compat increments and tombstones intact',async t=>{
- const f=fixture(t);await runProductionPreservation({...options(f),command:'prepare',apply:true});await runProductionPreservation({...options(f),command:'seal',apply:true});
+ const f=fixture(t);privateApiRuntimeProvider(f,t);await runProductionPreservation({...options(f),command:'prepare',apply:true});await runProductionPreservation({...options(f),command:'seal',apply:true});
  const db=new DatabaseSync(f.spec.database.path);createPreservation(db,{role:'v1-compat'});db.exec("INSERT INTO employees VALUES('ordinary','ws_fixture','codex','active'); INSERT INTO tasks VALUES('v1_increment','ordinary'); CREATE TABLE ordinary_tombstones(id TEXT PRIMARY KEY); INSERT INTO ordinary_tombstones VALUES('deleted_during_compat')");db.close();
  const apiRoot=f.spec.hosts[0].apiInstances[0].installTargets.v2.root;fs.cpSync(f.packageRoot,apiRoot,{recursive:true});
- const manifest=JSON.parse(fs.readFileSync(path.join(f.spec.packages.directory,'v2-manifest.json')));
- const observe=(binding,request)=>({...f.observe(binding),runningV2:{fenceState:'sealed',productRole:'v2',buildDigest:manifest.buildDigest,databaseId:f.spec.database.databaseId,instances:request.installed.targets.map(target=>({kind:target.kind,bindingDigest:target.bindingDigest,targetDigest:target.targetDigest,root:target.root,entryPath:target.entryPath,running:true,productRole:'v2',buildDigest:target.buildDigest,pid:999999998,createdAt:'2026-10-14T00:00:00.000Z',nonceDigest:'d'.repeat(64)}))}});
- f.provider.collect=input=>input.requests.map(request=>collectProductionSourceProof({request,trust:f.trust,observe}));
- f.provider.recheck=input=>input.requests.map(request=>collectProductionSourceProof({request,trust:f.trust,previous:input.previous,observe}));
  const restored=await runProductionPreservation({...options(f),command:'restore',apply:true});assert.equal(restored.state,'restored');
  assert.deepEqual(readDatabaseSnapshot(f.spec.database.path,db=>({task:db.prepare("SELECT id FROM tasks WHERE id='v1_increment'").get().id,tombstone:db.prepare("SELECT id FROM ordinary_tombstones").get().id})),{task:'v1_increment',tombstone:'deleted_during_compat'});
  assert.equal(restored.databaseId,f.spec.database.databaseId);
@@ -198,12 +204,8 @@ test('restore uses approved new physical API release while old release stays unc
   const manifest=JSON.parse(fs.readFileSync(path.join(f.spec.packages.directory,role+'-manifest.json'))),root=path.join(f.root,'releases',role);
   return [role,{root,entryPath:path.join(root,'backend/server.mjs'),manifestSha256:f.spec.packages.manifests.find(row=>row.productRole===role).sha256,buildDigest:manifest.buildDigest}];
  }));
- reapprove(f);await runProductionPreservation({...options(f),command:'prepare',apply:true});await runProductionPreservation({...options(f),command:'seal',apply:true});
+ reapprove(f);privateApiRuntimeProvider(f,t);await runProductionPreservation({...options(f),command:'prepare',apply:true});await runProductionPreservation({...options(f),command:'seal',apply:true});
  const target=original.installTargets.v2;assert.notEqual(target.root,original.root);fs.cpSync(f.packageRoot,target.root,{recursive:true});
- const manifest=JSON.parse(fs.readFileSync(path.join(f.spec.packages.directory,'v2-manifest.json')));
- const observe=(binding,request)=>({...f.observe(binding),runningV2:{fenceState:'sealed',productRole:'v2',buildDigest:manifest.buildDigest,databaseId:f.spec.database.databaseId,instances:request.installed.targets.map(approved=>({kind:approved.kind,bindingDigest:approved.bindingDigest,targetDigest:approved.targetDigest,root:approved.root,entryPath:approved.entryPath,running:true,productRole:'v2',buildDigest:approved.buildDigest,pid:999999998,createdAt:'2026-10-14T00:00:00.000Z',nonceDigest:'d'.repeat(64)}))}});
- f.provider.collect=input=>input.requests.map(request=>collectProductionSourceProof({request,trust:f.trust,observe}));
- f.provider.recheck=input=>input.requests.map(request=>collectProductionSourceProof({request,trust:f.trust,previous:input.previous,observe}));
  const restored=await runProductionPreservation({...options(f),command:'restore',apply:true});assert.equal(restored.state,'restored');assert.equal(restored.databaseId,f.spec.database.databaseId);assert.equal(sha(fs.readFileSync(original.entryPath)),oldBytes);
 });
 test('approved target pins reject wrong role manifest/build/entry before transport or first write',async t=>{
