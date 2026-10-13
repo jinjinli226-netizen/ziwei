@@ -116,6 +116,7 @@ export const api = {
   bot: (id, slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/bots/${encodeURIComponent(id)}`),
   botCapabilities: (deviceId = '', slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/bots/capabilities${deviceId ? `?deviceId=${encodeURIComponent(deviceId)}` : ''}`),
   createBot: (body, slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/bots`, {method:'POST',body:JSON.stringify(body)}),
+  provisionBot: (id, body, slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/bots/${encodeURIComponent(id)}/provision`, {method:'POST',body:JSON.stringify(body)}),
   initializeEmployeeBot: (id, body, slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/employees/${encodeURIComponent(id)}/bot`, {method:'POST',body:JSON.stringify(body)}),
   updateBot: (id, body, slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/bots/${encodeURIComponent(id)}`, {method:'PATCH',body:JSON.stringify(body)}),
   validateBot: (id, body, slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/bots/${encodeURIComponent(id)}/validate`, {method:'POST',body:JSON.stringify(body)}),

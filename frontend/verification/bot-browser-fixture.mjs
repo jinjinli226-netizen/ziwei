@@ -24,7 +24,7 @@ await page.route('**/*',async route=>{
   if(p.startsWith('/assets/')){const file=path.join(dist,p);return route.fulfill({body:await fs.readFile(file),contentType:p.endsWith('.css')?'text/css':'application/javascript'});}
   if(p==='/api/auth/status')return json(route,{setup_required:false,authenticated:true,user:{id:'fixture-user',name:'隔离预览',role:'owner'},memberships:[{slug:'qa',name:'隔离 QA',role:'owner'}]});
   if(p.includes('/mcp/discovery'))return json(route,{workspace:'qa',devices:[device]});
-  if(p==='/api/workspaces/qa/bots'&&req.method()==='POST'){const body=req.postDataJSON();requests.push({method:'POST',path:p,body});const bot=makeBot('bot-created',body.name);bot.employee={...bot.employee,...body,runtime_profile:body.runtimeProfile,target_device_id:body.targetDeviceId};bot.config=body.config;bots.push(bot);return json(route,bot,201);}
+  if(p==='/api/workspaces/qa/bots'&&req.method()==='POST'){const body=req.postDataJSON();requests.push({method:'POST',path:p,body});const bot=makeBot('bot-created',body.name);bot.employee={...bot.employee,runtime_profile:'bot-fixture-created',target_device_id:body.targetDeviceId};bot.instance={mode:'owned_profile',profile:'bot-fixture-created',templateProfile:body.sourceProfile,ownershipId:'fixture-owned-created',home:'C:\\fixture\\profiles\\bot-fixture-created',provisioning:{actionId:'fixture-provision-created',status:'provisioned',authentication:'source_reference'}};bot.config=body.config;device.runtimes[0].profiles.push({name:bot.instance.profile,authentication_configured:true});bots.push(bot);return json(route,bot,202);}
   if(p==='/api/workspaces/qa/bots')return json(route,{bots});
   const match=p.match(/^\/api\/workspaces\/qa\/bots\/([^/]+)(.*)$/);
   if(match){const bot=bots.find(item=>item.id===match[1]),suffix=match[2],body=req.method()==='GET'?null:req.postDataJSON();if(!bot)return json(route,{error:'not found'},404);
@@ -81,7 +81,6 @@ try{
     await page.getByRole('button',{name:'创建 Bot',exact:true}).click();
     await page.getByRole('dialog').getByLabel('名称',{exact:true}).fill('同一位数字员工');
     await page.getByRole('combobox',{name:'新 Bot 运行电脑'}).click();await page.getByRole('option',{name:'隔离演示电脑（fixture） · 在线',exact:true}).click();
-    await page.getByLabel('Profile 来源',{exact:true}).selectOption('existing');await page.getByRole('combobox',{name:'新 Bot Hermes profile'}).click();await page.getByRole('option',{name:'fixture',exact:true}).click();
     await page.getByRole('button',{name:'创建并配置',exact:true}).click();await page.getByRole('dialog').waitFor({state:'detached'});
     await page.getByRole('button',{name:'在团队管理查看',exact:true}).click();await page.locator('.org-employee-card').filter({hasText:'同一位数字员工'}).waitFor();
     assert.equal(bots.filter(bot=>bot.id==='bot-created').length,1);
