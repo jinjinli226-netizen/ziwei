@@ -1,0 +1,126 @@
+{
+  "recordedAtUtc": "2026-10-13T10:04:54Z",
+  "recordedAtShanghai": "2026-10-13 18:04:54 +08:00",
+  "scope": "read-only Git, tracked source and retained local public archive; no product/runtime/database/preview/auth/server/client/Hermes/network actions",
+  "statuses": {
+    "matrix": "prepared",
+    "dynamicRollback": "NOT_RUN",
+    "compatibilityArtifactSha": null,
+    "installation": "NOT_RUN",
+    "runtimeSwitch": "NOT_RUN",
+    "formalSwitch": "NOT_AUTHORIZED"
+  },
+  "versions": {
+    "v1Tree": "2ebe3dfee2f438a0b6aa3045d46c83bb67d7341b",
+    "v1Product": "324731e79c6a855fad1f501379630bbfa67e5d34",
+    "recordedV1Api": "a66df9c76de5ed016932ca0193a307f3df72f47f",
+    "recordedFrontend": "274a418353b66d3c1dec23590274597921dccc34",
+    "v2Product": "5643d5d36c3cd85d74ab849c77f52b6f69555093",
+    "cliVersion": "0.1.0"
+  },
+  "retainedArchive": {
+    "path": "C:\\Users\\25941\\.codex\\worktrees\\a2a-delivery-recovery\\灵光爸爸拆解\\.local\\creator-idle-timeout-20261012\\build-0d374b6313c14240b8afc4cd9ac19f50\\ziwei-0.1.0.tgz",
+    "sha256": "1592d107fcbcf27b9ec5e0d909f871ffa3851d9e136e015713156144d70fc8cc",
+    "bytes": 134338,
+    "fileCount": 36,
+    "perFileManifestCompared": 36,
+    "perFileMismatch": [],
+    "computedSourceBuild": "7e96fc4aab132a941e460d2be0ef108a5536b825312371b6326cd43cd74757ce",
+    "sourceBuildMatches": true,
+    "recordedHistoricalInstalledBuild": "7e2ae40a8e9cb12ad8592514db263b6952f27bd0eae6fe01d3b84fe8cd3d1950",
+    "installedBuildFreshVerification": false
+  },
+  "strictArchiveVsGit": {
+    "exitCode": 1,
+    "rawMismatchFiles": 36,
+    "preserved": true,
+    "explanation": "The strict raw comparison is retained as failed. Independent follow-up normalized CRLF to LF for source-content diagnosis only: 36 EOL-only files, zero other content differences. Package bytes remain validated against their original SHA and 36 manifest hashes."
+  },
+  "archiveVsGitEolFollowup": {
+    "exitCode": 0,
+    "eolOnlyFiles": [
+      "LICENSE",
+      "README.md",
+      "backend/a2a-auth.mjs",
+      "daemon/config.example.json",
+      "daemon/config.mjs",
+      "daemon/ziwei_user.example.json",
+      "daemon/ziwei_user.mjs",
+      "daemon/ziwei-daemon.mjs",
+      "package.json",
+      "scripts/client-legacy-identity.mjs",
+      "scripts/client-legacy-identity.ps1",
+      "scripts/client-lifecycle.mjs",
+      "scripts/client-maintenance-helper.mjs",
+      "scripts/client-update-worker.mjs",
+      "scripts/client-update.mjs",
+      "scripts/start-ziwei-user.mjs",
+      "scripts/ziwei-cli.mjs",
+      "scripts/ziwei-mcp.mjs",
+      "scripts/ziwei-terminal-mcp.mjs",
+      "scripts/ziwei-user.mjs",
+      "src/conversation-image-artifacts.mjs",
+      "src/creator-runtime-home.mjs",
+      "src/daemon-action-delivery.mjs",
+      "src/daemon-action-scheduler.mjs",
+      "src/daemon.mjs",
+      "src/domain.mjs",
+      "src/employee-runtime.mjs",
+      "src/hermes-mcp-bootstrap.py",
+      "src/local-action.mjs",
+      "src/management-bootstrap.mjs",
+      "src/redaction.mjs",
+      "src/runtime-adapters.mjs",
+      "src/runtime-cli-discovery.mjs",
+      "src/runtime-process.mjs",
+      "src/runtime-process.ps1",
+      "src/windows-workdir.mjs"
+    ],
+    "otherContentMismatch": [],
+    "normalizationDoesNotReplaceArchiveSha": true
+  },
+  "sourceComparisons": {
+    "v1ProductVsTree": {
+      "paths": [
+        "backend",
+        "src",
+        "daemon",
+        "scripts",
+        "package*.json",
+        "frontend"
+      ],
+      "differences": []
+    },
+    "v1TreeVsRecordedApi": {
+      "paths": [
+        "backend",
+        "frontend"
+      ],
+      "gitDiffExit": 0
+    },
+    "v1TreeVsRecordedFrontend": {
+      "paths": [
+        "frontend"
+      ],
+      "gitDiffExit": 0
+    },
+    "formalRuntimeObserved": false
+  },
+  "initialPythonCheck": {
+    "exitCode": 1,
+    "lookupFailed": "python not found on PATH",
+    "archiveRead": false,
+    "hermesVenvUsed": false,
+    "followup": "Node + system tar; read-only, no extraction or installation"
+  },
+  "rawPackageOutputs": [
+    "{\r\n  \"path\": \"C:\\\\Users\\\\25941\\\\.codex\\\\worktrees\\\\a2a-delivery-recovery\\\\灵光爸爸拆解\\\\.local\\\\creator-idle-timeout-20261012\\\\build-0d374b6313c14240b8afc4cd9ac19f50\\\\ziwei-0.1.0.tgz\",\r\n  \"bytes\": 134338,\r\n  \"sha256\": \"1592d107fcbcf27b9ec5e0d909f871ffa3851d9e136e015713156144d70fc8cc\"\r\n}\r\npackage/LICENSE\r\npackage/daemon/config.example.json\r\npackage/package.json\r\npackage/daemon/ziwei_user.example.json\r\npackage/README.md\r\npackage/backend/a2a-auth.mjs\r\npackage/scripts/client-legacy-identity.mjs\r\npackage/scripts/client-lifecycle.mjs\r\npackage/scripts/client-maintenance-helper.mjs\r\npackage/scripts/client-update-worker.mjs\r\npackage/scripts/client-update.mjs\r\npackage/daemon/config.mjs\r\npackage/src/conversation-image-artifacts.mjs\r\npackage/src/creator-runtime-home.mjs\r\npackage/src/daemon-action-delivery.mjs\r\npackage/src/daemon-action-scheduler.mjs\r\npackage/src/daemon.mjs\r\npackage/src/domain.mjs\r\npackage/src/employee-runtime.mjs\r\npackage/src/local-action.mjs\r\npackage/src/management-bootstrap.mjs\r\npackage/src/redaction.mjs\r\npackage/src/runtime-adapters.mjs\r\npackage/src/runtime-cli-discovery.mjs\r\npackage/src/runtime-process.mjs\r\npackage/scripts/start-ziwei-user.mjs\r\npackage/src/windows-workdir.mjs\r\npackage/daemon/ziwei_user.mjs\r\npackage/scripts/ziwei-cli.mjs\r\npackage/daemon/ziwei-daemon.mjs\r\npackage/scripts/ziwei-mcp.mjs\r\npackage/scripts/ziwei-terminal-mcp.mjs\r\npackage/scripts/ziwei-user.mjs\r\npackage/scripts/client-legacy-identity.ps1\r\npackage/src/runtime-process.ps1\r\npackage/src/hermes-mcp-bootstrap.py\r\n",
+    "{\"keys\":[\"kind\",\"tested\",\"windowsInstallationVerified\",\"commit\",\"version\",\"clientArchive\",\"clientSha256\",\"bytes\",\"clientBuild\",\"sourceBuild\",\"clientBuildPlatform\",\"bootstrapFile\",\"bootstrapSha256\",\"bootstrapBytes\",\"packageFileCount\",\"packageFiles\",\"sourceTree\",\"allPublishedFilesMatchCommit\",\"testCounts\",\"testLogSha256\",\"packagedSupervisorSmoke\",\"createdAt\"],\"fields\":{\"commit\":\"324731e79c6a855fad1f501379630bbfa67e5d34\",\"version\":\"0.1.0\",\"clientSha256\":\"1592d107fcbcf27b9ec5e0d909f871ffa3851d9e136e015713156144d70fc8cc\",\"bytes\":134338,\"clientBuild\":\"7e2ae40a8e9cb12ad8592514db263b6952f27bd0eae6fe01d3b84fe8cd3d1950\",\"sourceBuild\":\"7e96fc4aab132a941e460d2be0ef108a5536b825312371b6326cd43cd74757ce\",\"clientBuildPlatform\":\"win32\",\"bootstrapSha256\":\"579fdeac68b92e24a62069c173af193f5b45bbb0ef220206004d7888ffa99b8a\",\"bootstrapBytes\":5986,\"packageFileCount\":36,\"packageFiles\":{\"LICENSE\":{\"sha256\":\"309b223f90a6612747dde97a9aae28e640729134a27e37be22d620d2a75fd1e8\",\"installedSha256\":\"309b223f90a6612747dde97a9aae28e640729134a27e37be22d620d2a75fd1e8\",\"bytes\":1103},\"README.md\":{\"sha256\":\"8a223ad439aa3ace0e5c0f0d8e5bee91b906b6710b36268d73abbc9eed15a6ef\",\"installedSha256\":\"8a223ad439aa3ace0e5c0f0d8e5bee91b906b6710b36268d73abbc9eed15a6ef\",\"bytes\":30930},\"backend/a2a-auth.mjs\":{\"sha256\":\"470787f82831c1165f33497b40ef9d042d97d6f867b5777b897eb4f5b0577843\",\"installedSha256\":\"470787f82831c1165f33497b40ef9d042d97d6f867b5777b897eb4f5b0577843\",\"bytes\":1912},\"daemon/config.example.json\":{\"sha256\":\"b49ddaff2911625fb09c2008251e7de041ce1dde654aa0ada795822863d107fd\",\"installedSha256\":\"b49ddaff2911625fb09c2008251e7de041ce1dde654aa0ada795822863d107fd\",\"bytes\":263},\"daemon/config.mjs\":{\"sha256\":\"6a850dfe5a3a4ef22a27e834fb84a00eed7c37c502788cb5a81b577b380d048a\",\"installedSha256\":\"6a850dfe5a3a4ef22a27e834fb84a00eed7c37c502788cb5a81b577b380d048a\",\"bytes\":12292},\"daemon/ziwei_user.example.json\":{\"sha256\":\"a564470686dfc994f801c1a1210afaaad345ec4595d2091eb74342156f1f2876\",\"installedSha256\":\"a564470686dfc994f801c1a1210afaaad345ec4595d2091eb74342156f1f2876\",\"bytes\":299},\"daemon/ziwei_user.mjs\":{\"sha256\":\"ee6fc944f33c080d86723239e901c8d975a3de555170b659d54ab52ddd03e7fc\",\"installedSha256\":\"ee6fc944f33c080d86723239e901c8d975a3de555170b659d54ab52ddd03e7fc\",\"bytes\":22276},\"daemon/ziwei-daemon.mjs\":{\"sha256\":\"9887bff991f2cb58d2f30df0cc1894ebad2009d19237db12b92ead192301a05c\",\"installedSha256\":\"9887bff991f2cb58d2f30df0cc1894ebad2009d19237db12b92ead192301a05c\",\"bytes\":28},\"package.json\":{\"sha256\":\"0ce0f010d50090c738b839bfaa15f68d8ad9eb298af34de6728a597f4975e4c6\",\"installedSha256\":\"0ce0f010d50090c738b839bfaa15f68d8ad9eb298af34de6728a597f4975e4c6\",\"bytes\":2108},\"scripts/client-legacy-identity.mjs\":{\"sha256\":\"dded5dc1da657ed77106da39aeb7a52549363318841cc5f9afcd3e60d7ebf065\",\"installedSha256\":\"dded5dc1da657ed77106da39aeb7a52549363318841cc5f9afcd3e60d7ebf065\",\"bytes\":12991},\"scripts/client-legacy-identity.ps1\":{\"sha256\":\"a09946d149495ac20d701c7581140bcd9b9b53ff0a7c2d77bcae18cc6c19098a\",\"installedSha256\":\"a09946d149495ac20d701c7581140bcd9b9b53ff0a7c2d77bcae18cc6c19098a\",\"bytes\":8811},\"scripts/client-lifecycle.mjs\":{\"sha256\":\"834979b1de6d1ca52301d60dfee29861dd058f76d5abdd5c92daf41d77ff66d6\",\"installedSha256\":\"834979b1de6d1ca52301d60dfee29861dd058f76d5abdd5c92daf41d77ff66d6\",\"bytes\":32436},\"scripts/client-maintenance-helper.mjs\":{\"sha256\":\"f0bf96884bc349c0e92c64f4fca05017355f3356fa3c2d64c8468452b026c99a\",\"installedSha256\":\"f0bf96884bc349c0e92c64f4fca05017355f3356fa3c2d64c8468452b026c99a\",\"bytes\":1575},\"scripts/client-update-worker.mjs\":{\"sha256\":\"9621ff1b7de0c308f0b5e47176416425db5aa19aacdd6a69bfaad363ae9c56f8\",\"installedSha256\":\"9621ff1b7de0c308f0b5e47176416425db5aa19aacdd6a69bfaad363ae9c56f8\",\"bytes\":2191},\"scripts/client-update.mjs\":{\"sha256\":\"77a3816bbe01e7dcea6fa29d322cb2293d3d866940a81fef1f4c891f777f33c9\",\"installedSha256\":\"77a3816bbe01e7dcea6fa29d322cb2293d3d866940a81fef1f4c891f777f33c9\",\"bytes\":31722},\"scripts/start-ziwei-user.mjs\":{\"sha256\":\"58d7a5793b8b1f109f6b4c50fed0e37f8d49a899a0c7d139d8ffb9c70c300fe5\",\"installedSha256\":\"58d7a5793b8b1f109f6b4c50fed0e37f8d49a899a0c7d139d8ffb9c70c300fe5\",\"bytes\":7456},\"scripts/ziwei-cli.mjs\":{\"sha256\":\"01fa7597a349f9b0b23712e63876c15d1001f5a95fedc653f02975c483ae24c0\",\"installedSha256\":\"01fa7597a349f9b0b23712e63876c15d1001f5a95fedc653f02975c483ae24c0\",\"bytes\":27186},\"scripts/ziwei-mcp.mjs\":{\"sha256\":\"34bc8c4c30736b9c5c8a80020fccaf75c91bc48c1f3c8e71254c308807502199\",\"installedSha256\":\"34bc8c4c30736b9c5c8a80020fccaf75c91bc48c1f3c8e71254c308807502199\",\"bytes\":26894},\"scripts/ziwei-terminal-mcp.mjs\":{\"sha256\":\"7137cc5bc8d76e1e7098d86ab65034ccdf1d494d0fd462e82c588e84ccc20f24\",\"installedSha256\":\"7137cc5bc8d76e1e7098d86ab65034ccdf1d494d0fd462e82c588e84ccc20f24\",\"bytes\":15183},\"scripts/ziwei-user.mjs\":{\"sha256\":\"5509d7a0ec8b15f886c083b7b6ca7508dd89f29ec76ced4430e9af45d1ac77b9\",\"installedSha256\":\"a4ea5debf3b5c3bd0b9367808585e557923479a0863964b481d7425d7198b08a\",\"bytes\":454},\"src/conversation-image-artifacts.mjs\":{\"sha256\":\"8ac4d29a90f59fc68f867380dfc7075288552ac30de05230aee4fe6514de2704\",\"installedSha256\":\"8ac4d29a90f59fc68f867380dfc7075288552ac30de05230aee4fe6514de2704\",\"bytes\":11845},\"src/creator-runtime-home.mjs\":{\"sha256\":\"651a5a458fa15b7ccbe6c78edc4c814392a6f0c4cbc0152f3ee56d55dadddc38\",\"installedSha256\":\"651a5a458fa15b7ccbe6c78edc4c814392a6f0c4cbc0152f3ee56d55dadddc38\",\"bytes\":7946},\"src/daemon-action-delivery.mjs\":{\"sha256\":\"05315a8b1bc275ee134e6f8fe1a71c6aa04421f8322c584682f533a7706910c0\",\"installedSha256\":\"05315a8b1bc275ee134e6f8fe1a71c6aa04421f8322c584682f533a7706910c0\",\"bytes\":18032},\"src/daemon-action-scheduler.mjs\":{\"sha256\":\"aea90fc77f3cbe8f2b70e3ec48e433848f3cb45a283aeb09538b988a36012ad0\",\"installedSha256\":\"aea90fc77f3cbe8f2b70e3ec48e433848f3cb45a283aeb09538b988a36012ad0\",\"bytes\":1807},\"src/daemon.mjs\":{\"sha256\":\"f1163d04489723b945013fd00f9f572460d5259bc92a20750c5f4dc81c86e0b2\",\"installedSha256\":\"f1163d04489723b945013fd00f9f572460d5259bc92a20750c5f4dc81c86e0b2\",\"bytes\":28539},\"src/domain.mjs\":{\"sha256\":\"2edd229d7cc5cd5de2488ea183e64562d0ea2b93d54966ccd7bcf25cfdadd3b9\",\"installedSha256\":\"2edd229d7cc5cd5de2488ea183e64562d0ea2b93d54966ccd7bcf25cfdadd3b9\",\"bytes\":682},\"src/employee-runtime.mjs\":{\"sha256\":\"c8f992b6fab13c0bb967d7e06a7c6164083a96ab814625277696bde461f1986a\",\"installedSha256\":\"c8f992b6fab13c0bb967d7e06a7c6164083a96ab814625277696bde461f1986a\",\"bytes\":911},\"src/hermes-mcp-bootstrap.py\":{\"sha256\":\"04c8ba09a83372ef89b75b261f6dd74cb52c79d368bc065e1741fe52ff65801f\",\"installedSha256\":\"04c8ba09a83372ef89b75b261f6dd74cb52c79d368bc065e1741fe52ff65801f\",\"bytes\":15518},\"src/local-action.mjs\":{\"sha256\":\"4477217731270a518b58e63bd6ff695c53817b26948ad0c1820712a459009921\",\"installedSha256\":\"4477217731270a518b58e63bd6ff695c53817b26948ad0c1820712a459009921\",\"bytes\":28367},\"src/management-bootstrap.mjs\":{\"sha256\":\"1fe4f0a6aac7f963620c4ea34aa66f6b407c0d81e373a5165c8c34d7865336df\",\"installedSha256\":\"1fe4f0a6aac7f963620c4ea34aa66f6b407c0d81e373a5165c8c34d7865336df\",\"bytes\":7846},\"src/redaction.mjs\":{\"sha256\":\"9b2c2e54ead4a9fae7e2b42cc0a59b748121a6f261ce4413d4a559811d465b30\",\"installedSha256\":\"9b2c2e54ead4a9fae7e2b42cc0a59b748121a6f261ce4413d4a559811d465b30\",\"bytes\":444},\"src/runtime-adapters.mjs\":{\"sha256\":\"b7bb8973b5a5afa9c327a2524c7dcc3399c9ec7a5e2cb9ebd8d4df8b86adbdb1\",\"installedSha256\":\"b7bb8973b5a5afa9c327a2524c7dcc3399c9ec7a5e2cb9ebd8d4df8b86adbdb1\",\"bytes\":69578},\"src/runtime-cli-discovery.mjs\":{\"sha256\":\"94bb89b2128ec0a59623847612918fffdbf073e1c5ae54385f01020a4318c52f\",\"installedSha256\":\"94bb89b2128ec0a59623847612918fffdbf073e1c5ae54385f01020a4318c52f\",\"bytes\":9356},\"src/runtime-process.mjs\":{\"sha256\":\"13aa7bd16891bae3373c5759231cceb9639cd04c7a2a58342901dc791dd20326\",\"installedSha256\":\"13aa7bd16891bae3373c5759231cceb9639cd04c7a2a58342901dc791dd20326\",\"bytes\":9208},\"src/runtime-process.ps1\":{\"sha256\":\"7f9651ec8022c8f9e16719ceef8aafe9ef1c88a4202238baf7ac3106b460760c\",\"installedSha256\":\"7f9651ec8022c8f9e16719ceef8aafe9ef1c88a4202238baf7ac3106b460760c\",\"bytes\":17339},\"src/windows-workdir.mjs\":{\"sha256\":\"f0523cba4934f86e507f508044b785dd8c55f900101dcca1f475983c61f97341\",\"installedSha256\":\"f0523cba4934f86e507f508044b785dd8c55f900101dcca1f475983c61f97341\",\"bytes\":4763}},\"allPublishedFilesMatchCommit\":true,\"testLogSha256\":\"ec673d399f03747bf461b993e8cb390da105c49e3639c1a2e2b81c26f12fe96e\",\"packagedSupervisorSmoke\":{\"platform\":\"win32\",\"supervisor\":\"windows-job\",\"launched\":true,\"rootPid\":53956,\"rootConfirmed\":true,\"rootExitCode\":0,\"treeConfirmed\":true,\"activeProcesses\":0,\"cancelled\":false,\"failureCode\":null,\"hostExitCode\":0,\"streamsComplete\":true,\"hostSignal\":null}}}\n",
+    "      FOREIGN KEY(device_id) REFERENCES devices(id) ON DELETE CASCADE\r\n    );\r\n    CREATE INDEX IF NOT EXISTS idx_runtime_device_metadata_workspace ON runtime_device_metadata(workspace_id,device_id,runtime_name);\r\n    CREATE TABLE IF NOT EXISTS management_requests (\r\n      workspace_id TEXT NOT NULL, kind TEXT NOT NULL, request_key TEXT NOT NULL,\r\n      fingerprint TEXT NOT NULL, resource_id TEXT NOT NULL, created_at TEXT NOT NULL,\r\n      PRIMARY KEY(workspace_id,kind,request_key),\r\n      FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE\r\n    );\r\n    CREATE TABLE IF NOT EXISTS hermes_bots (\r\n      employee_id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, config_json TEXT NOT NULL,\r\n      revision INTEGER NOT NULL DEFAULT 1, control_state TEXT NOT NULL DEFAULT 'draft', control_epoch INTEGER NOT NULL DEFAULT 1,\r\n      main_conversation_id TEXT, validation_action_id TEXT, validated_revision INTEGER,\r\n      active_action_id TEXT, stop_action_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,\r\n      FOREIGN KEY(employee_id) REFERENCES employees(id) ON DELETE CASCADE,\r\n      FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE\r\n    );\r\n    CREATE TABLE IF NOT EXISTS bot_routines (\r\n      automation_id TEXT PRIMARY KEY, employee_id TEXT NOT NULL, workspace_id TEXT NOT NULL,\r\n      conversation_id TEXT NOT NULL, authority TEXT NOT NULL DEFAULT 'ziwei', native_driver_json TEXT,\r\n      FOREIGN KEY(automation_id) REFERENCES automations(id) ON DELETE CASCADE,\r\n      FOREIGN KEY(employee_id) REFERENCES hermes_bots(employee_id) ON DELETE CASCADE,\r\n      FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE\r\n    );\r\n    CREATE TABLE IF NOT EXISTS bot_gateway_inbox (\r\n      id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, employee_id TEXT NOT NULL, platform TEXT NOT NULL,\r\n      chat_id TEXT NOT NULL, message_id TEXT NOT NULL, source_action_id TEXT NOT NULL, content TEXT NOT NULL,\r\n      revision INTEGER NOT NULL, control_epoch INTEGER NOT NULL, action_id TEXT, status TEXT NOT NULL DEFAULT 'queued',\r\n      created_at TEXT NOT NULL, error TEXT,\r\n      UNIQUE(workspace_id,employee_id,platform,chat_id,message_id),\r\n      FOREIGN KEY(employee_id) REFERENCES hermes_bots(employee_id) ON DELETE CASCADE\r\n    );\r\n    CREATE TABLE IF NOT EXISTS schema_migrations (\r\n      version TEXT PRIMARY KEY, applied_at TEXT NOT NULL\r\n    );\r\n    CREATE TABLE IF NOT EXISTS tasks (\r\n88:export function clientBuildIdentity(root) {\r\n# Hermes Bot API v1 — E02 / E03 实施契约\r\n\r\n2026-10-12。本文件是本次实现合同，接口实现与测试状态见后续验收记录；不得把合同当作已上线证明。\r\n\r\n基线 6eaf7de；后端工作树 `C:\\Users\\25941\\.codex\\worktrees\\v2-e02-hermes-bot\\灵光爸爸拆解`，分支 `codex/v2-e02-hermes-bot`。前端由 E03 负责。\r\n\r\n## 路径\r\n\r\n所有新接口属于当前认证工作区 `/api/workspaces/:slug`；MCP 使用相同服务的 `/mcp/v1/workspaces/:slug`。\r\n\r\n| 方法和相对路径 | 请求 | 响应 |\r\n| --- | --- | --- |\r\n| GET `/bots/capabilities?deviceId=...` | 无 | `{schemaVersion:1, workspace, deviceId, runtime, capabilities:Capability[]}` |\r\n| GET `/bots` | 无 | `{bots:Bot[]}` |\r\n| POST `/bots` | `BotCreate`，必传 `idempotencyKey` | `Bot`；201，新请求；200，duplicate |\r\n| POST `/employees/:id/bot` | `{idempotencyKey,config?}` | 初始化现有 Hermes 岗位员工能力，返回同 employee ID；原员工和聊天保持，旧 HOME/记忆不迁移或覆盖；Creator 明确拒绝普通岗位初始化。 |\r\n| GET `/bots/:id` | employee ID | `Bot` |\r\n| PATCH `/bots/:id` | `{expectedRevision, employee?:EmployeePatch, config?:BotConfig}` | `Bot` |\r\n| POST `/bots/:id/validate` | `{expectedRevision,idempotencyKey}` | `{action}`，202；异步本机配置检查，不调用模型 |\r\n| POST `/bots/:id/control` | `{expectedRevision,expectedControlEpoch,operation:'activate'|'pause'|'resume'|'stop'}` | `Bot`；从最新响应取 `control_epoch`，防旧启用请求覆盖新暂停 |\r\n| GET `/bots/:id/runs` | 无 | `{runs:Action[]}` |\r\n| GET `/bots/:id/routines` | 无 | `{routines:Routine[]}` |\r\n| POST `/bots/:id/routines` | `{name,prompt,schedule,timezone,idempotencyKey}` | `Routine` |\r\n| PATCH `/bots/:id/routines/:routineId` | `{name?,prompt?,schedule?,timezone?,status?:'active'|'paused'}` | `Routine` |\r\n| DELETE `/bots/:id/routines/:routineId` | 无 | `{id,deleted:true}` |\r\n| POST `/bots/:id/routines/:routineId/run` | `{idempotencyKey}` | automation run，202 |\r\n\r\n主聊天沿用现有 GET `/api/conversations/:conversationId`、POST `/api/conversations/:conversationId/messages`；消息带 `{content,clientMessageId,attachments?}`。主会话 ID 为 `main_conversation_id`。新 Bot 默认 draft，先 validate 回读 action succeeded，再明确 activate。旧 Creator 不自动转为 Bot，旧 HOME/记忆/会话保持。\r\n\r\n团队管理的数字员工是唯一实体。Bot 附表 `hermes_bots.employee_id` 一对一引用 employee；两入口创建、名称/模型/人格编辑、暂停、删除均操作同一个 ID。团队管理原 PATCH 员工接口会将已有 Bot 的修改汇入本服务，运行配置变化同样转 draft 并等待验证；暂停同步 employee.status。Bot 列表来自同工作区/owner/visibility 的 Hermes 员工列表。尚未初始化的既有员工返回 `configuration_state:'uninitialized'`、`revision:0`、`main_conversation_id:string|null`；前端应提供初始化入口，禁止以新建 Bot 替代。`kind:'creator'` 表示原受信 Creator，保留其管理/会话路径，普通岗位初始化不适用。\r\n\r\n## 类型\r\n\r\n```ts\r\ntype BotCreate = {\r\n  idempotencyKey:string;\r\n  name:string; targetDeviceId:string; runtimeProfile:string; model?:string;\r\n  persona?:string; description?:string; instructions?:string;\r\n  visibility?:'personal'|'workspace'; skills?:string[];\r\n  config?:BotConfig;\r\n};\r\ntype BotConfig = {\r\n  provider:string|null; // null 沿用来源 profile\r\n  toolsets:string[]; // 原生工具集；默认 []，明确配置后才开启工具\r\n  maxTurns:number; // 1..100，默认 20，有界单次执行\r\n  memory:{enabled:boolean,userProfile:boolean};\r\n  skills:{disabled:string[]};\r\n  mcpServers:Record<string,{command:string,args:string[],env?:Record<string,string>,enabled?:boolean}>;\r\n  permissions:{mode:'read_only'|'execute'}; // read_only 原生无工具，只对话；execute 才使用明确选择的工具\r\n};\r\ntype Bot = {\r\n  id:string; employee_id:string; workspace:string;\r\n"
+  ],
+  "rawSourceOutputs": [
+    "{\r\n  \"scope\": \"V1 tree vs recorded formal API source\",\r\n  \"gitDiffExit\": 0\r\n}\r\n{\r\n  \"scope\": \"V1 tree vs recorded frontend source\",\r\n  \"gitDiffExit\": 0\r\n}\r\n",
+    "{\"sourceCommit\":\"324731e79c6a855fad1f501379630bbfa67e5d34\",\"archiveFilesChecked\":36,\"archiveVsGitChanged\":[\"LICENSE\",\"README.md\",\"backend/a2a-auth.mjs\",\"daemon/config.example.json\",\"daemon/config.mjs\",\"daemon/ziwei_user.example.json\",\"daemon/ziwei_user.mjs\",\"daemon/ziwei-daemon.mjs\",\"package.json\",\"scripts/client-legacy-identity.mjs\",\"scripts/client-legacy-identity.ps1\",\"scripts/client-lifecycle.mjs\",\"scripts/client-maintenance-helper.mjs\",\"scripts/client-update-worker.mjs\",\"scripts/client-update.mjs\",\"scripts/start-ziwei-user.mjs\",\"scripts/ziwei-cli.mjs\",\"scripts/ziwei-mcp.mjs\",\"scripts/ziwei-terminal-mcp.mjs\",\"scripts/ziwei-user.mjs\",\"src/conversation-image-artifacts.mjs\",\"src/creator-runtime-home.mjs\",\"src/daemon-action-delivery.mjs\",\"src/daemon-action-scheduler.mjs\",\"src/daemon.mjs\",\"src/domain.mjs\",\"src/employee-runtime.mjs\",\"src/hermes-mcp-bootstrap.py\",\"src/local-action.mjs\",\"src/management-bootstrap.mjs\",\"src/redaction.mjs\",\"src/runtime-adapters.mjs\",\"src/runtime-cli-discovery.mjs\",\"src/runtime-process.mjs\",\"src/runtime-process.ps1\",\"src/windows-workdir.mjs\"],\"formalRuntimeObserved\":false}\n"
+  ],
+  "evidenceLimit": "Historical manifest test/install flags are excluded from new-Q test totals; source equality is not live deployment identity; matrix dynamic status stays NOT_RUN"
+}
