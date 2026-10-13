@@ -21,6 +21,24 @@ The focused main chat keeps its same employee/conversation, composer and executi
 
 Browser responses are explicit fixtures; their displayed HOME values are fixture values. Desktop and 390px screenshots were inspected. They do not prove native resolver HOME equality or a real model turn. The inherited Gateway native health patch remains integrated and independently verified (16+9 native tests) at `850431c`.
 
+## Composed implementation and native proof
+
+E02 stable implementation `96559f8eb1df9292e8d264daaa80a0d584408616` was picked as `8825abd`, after its plan dependency was picked as `5710e3b`. Final contract: `docs/contracts/2026-10-13-hermes-owned-profile-api.md`. UI filters owned Profiles from initialization sources and treats authentication as an opening-time snapshot. A fresh validate is possible after source credentials are repaired; successful current validation supersedes the snapshot. Readonly OAuth expiry is shown using `authMode:source-native-store`.
+
+`node frontend/verification/bot-owned-native.mjs` passed 6 actual product UI/API tests with installed Hermes 0.21.3: `.local/e03-owned-native-1791875423626/receipt.json`. Two named Profiles were created by real Windows Job actions. The first main-chat model action confirmed `botIsolation.home === botIsolation.profileHome === instance.home` and a native session ID. Reload, 390px chat, rename, native memory isolation and lost-response recovery all preserved the original identity. Source config/auth/.env hashes remained unchanged. Adjacent `cleanup.json` confirms closure with no errors.
+
+Native policy initially expected a redundant top-level workspace field; the actual product carries workspace in the trusted Bot snapshot. The policy now checks that snapshot and rejects contradictory optional values. The native layout creates a blank `.env` scaffold, so verification checks that source test values were not copied. Initial failed runs remain on disk and are not counted as passing evidence.
+
+Final composed Node regression: **886/886**, no failure/cancel/skip, 74.0834487 seconds: `.local/e03-owned-full-node.log`. Focused backend/native-preview tests: 25/25. Browser fixtures: 6 owned, 15 ordinary/focused and 21 native-panel. The only actual model provider tested so far is the loopback protocol provider.
+
+## Required real-provider acceptance
+
+The user requires one run against their already configured real provider before any launch claim. Q01 owns that next acceptance after this execution line finishes. This candidate is not yet real-provider accepted or authorized for deployment.
+
+The full candidate code is in the E03 owned-profile tree. Entry points: `createApp` in `backend/app.mjs`, `createLocalActionExecutor` in `src/local-action.mjs`, and the official dispatcher/delivery. Identity/provisioning: `backend/bots.mjs` and `backend/bot-profiles.mjs`. Native layout: `src/hermes-owned-profile.mjs` and `.py`. HOME binding and source authentication reference: `src/hermes-bot-runtime.mjs`. Readonly OAuth and actual HOME confirmation: `src/hermes-mcp-bootstrap.py`. The UI native harness demonstrates the complete create/validate/activate/chat/reload sequence, but its provider/socket guard intentionally remains loopback-only.
+
+E03 actually discovered only `custom:preview-local`, model `preview-local-model`, at its own temporary API. The user's real source Profile, provider host/model and auth store have not been inspected by E03 and must be discovered by Q01 under the new minimal-call authorization. Send only synthetic test text, keep secrets out of receipts/logs, preserve source auth bytes, and allow only the selected provider domain plus owned API endpoints. Expired OAuth or missing source is a real failure; do not substitute the loopback provider.
+
 ## Remaining first-chain integration
 
 Pick E02 stable owned-profile SHA, check its final authentication/status and recovery contract, extend only the native-preview provision allowlist/binding policy, then run actual product UI in a fresh temporary HOME with installed Hermes. Verify two named Profiles, native resolver HOME equals actual first-run HOME, same-key replay/reload and rename preserve Bot/main chat/state, and a bounded local test-provider message returns in the same conversation. Perform the final composed regression once, then update the one persistent preview with original stateRoot and preservation proof.
