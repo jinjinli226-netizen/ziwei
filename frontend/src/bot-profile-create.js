@@ -29,7 +29,7 @@ export function createBotProfileRequest({api,wrap=value=>value,namespace='',stor
       if(!found){update('discovery_pending','Profile 创建回执已成功；设备发现尚未更新，请继续查询。');return false;}
       registry.delete(scope);persist();Object.assign(state,{pending:null,phase:'succeeded',profile:entry.profile,discovery,error:''});return true;
     }catch(error){if(!recovering&&!entry.actionId&&entry.phase!=='unknown'&&error.status>=400&&error.status<500){registry.delete(scope);persist();if(current(visit))Object.assign(state,{pending:null,phase:'failed',error:error.message});}else update('unknown',error.message||'Profile 请求结果待核实，请继续查询原任务。');return false;}
-    finally{busy.delete(scope);if(current(visit))state.busy=false;}
+    finally{busy.delete(scope);if(!disposed&&key(state.workspace,state.deviceId)===scope)state.busy=false;}
   }
   async function submit(value){
     const profile=String(value||'').trim(),scope=key(state.workspace,state.deviceId),previous=registry.get(scope);
