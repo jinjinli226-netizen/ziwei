@@ -267,7 +267,16 @@ export function createHermesExecutionOverlay({ profile, baseHome, privateDirecto
   const cleanup = () => {
     // Only remove the exact private child created here. Never remove the user's source home.
     if (path.dirname(path.resolve(home)) === parent && path.resolve(home) !== path.resolve(source)) {
-      try { fs.rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch {}
+      try {
+        fs.rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+        // Some Windows Node builds silently leave Unicode paths behind. This
+        // overlay owns only flat config/env files; never traverse a replacement
+        // junction or delete an unexpected directory in the fallback.
+        if (fs.existsSync(home) && !fs.lstatSync(home).isSymbolicLink() && fs.realpathSync.native(home) === path.join(fs.realpathSync.native(parent), path.basename(home))) {
+          for (const entry of fs.readdirSync(home, { withFileTypes: true })) if (!entry.isDirectory() || entry.isSymbolicLink()) fs.unlinkSync(path.join(home, entry.name));
+          fs.rmdirSync(home);
+        }
+      } catch {}
     }
   };
   try {

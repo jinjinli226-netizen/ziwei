@@ -3,7 +3,11 @@ function once(text,needle,value){if(text.split(needle).length!==2)throw new Erro
 export function patchRuntimeProfileBinding(text){
   const frozenV1=text.includes('export function executeRuntime(');
   if(frozenV1)text=once(text,'export function executeRuntime(','export async function executeRuntime(');
-  text=once(text,'fs.rmSync(home, { recursive: true, force: true });','fs.rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });');
+  text=once(text,'fs.rmSync(home, { recursive: true, force: true });',`fs.rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+        if (fs.existsSync(home) && !fs.lstatSync(home).isSymbolicLink() && fs.realpathSync.native(home) === path.join(fs.realpathSync.native(parent), path.basename(home))) {
+          for (const entry of fs.readdirSync(home, { withFileTypes: true })) if (!entry.isDirectory() || entry.isSymbolicLink()) fs.unlinkSync(path.join(home, entry.name));
+          fs.rmdirSync(home);
+        }`);
   for(const anchor of ['profileBaseHome, hermesOverlayHome }','profileBaseHome, hermesOverlayHome })'])text=text.replaceAll(anchor,anchor.replace('hermesOverlayHome','hermesOverlayHome, selectedProfileHome'));
   text=once(text,'hermesHome({ baseHome: profileBaseHome || env.HERMES_HOME })',"(selectedProfileHome || hermesHome({ baseHome: profileBaseHome || env.HERMES_HOME }))");
   text=once(text,'hermesOverlayHome || hermesProfileHome(normalized, { baseHome: profileBaseHome || env.HERMES_HOME })','hermesOverlayHome || selectedProfileHome || hermesProfileHome(normalized, { baseHome: profileBaseHome || env.HERMES_HOME })');
