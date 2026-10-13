@@ -10,7 +10,7 @@ const groups=computed(()=>props.ui.resource('groups')),groupDetail=computed(()=>
 const available=computed(()=>props.bots.filter(item=>item.workspace===props.ui.state.workspace&&item.id!==props.bot.id&&item.kind!=='creator'));
 const rows=computed(()=>nativeItems(state.value.data,['collaborations','runs','items']));
 const result=computed(()=>state.value.result?.nativeOperation?.data||state.value.result?.result?.nativeOperation?.data||state.value.result);
-async function submit(){const allowed=new Set(available.value.map(item=>item.id));const selected=targets.value.filter(id=>allowed.has(id));if(selected.length!==targets.value.length)return;await props.ui.submit('collaboration',mode.value,{targetEmployeeIds:selected,content:content.value,...(groupId.value?{groupId:groupId.value}:{}),...(sourceActionId.value?{sourceActionId:sourceActionId.value}:{})});}
+async function submit(){const allowed=new Set(available.value.map(item=>item.id));const selected=targets.value.filter(id=>allowed.has(id));if(selected.length!==targets.value.length)return;await props.ui.submit('collaboration',mode.value,{targetEmployeeIds:selected,content:content.value,...(mode.value==='group'&&groupId.value?{groupId:groupId.value}:{}),...(mode.value==='delegate'&&sourceActionId.value?{sourceActionId:sourceActionId.value}:{})});}
 function authorize(){props.draft.config.collaboration={enabled:true,targetEmployeeIds:[...targets.value]};}
 watch(()=>[props.ui.state.workspace,props.bot.id],()=>{mode.value='message';targets.value=[];content.value='';groupId.value='';sourceActionId.value='';},{immediate:true});
 </script>

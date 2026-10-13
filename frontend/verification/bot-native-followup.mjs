@@ -1,0 +1,97 @@
+// Targeted real HTTP/frontend transport + installed Room/Mattermost/Windows Job
+// acceptance. The API, model and Mattermost peers are transient, owned loopback
+// fixtures; no installed source, formal HOME, account or device is modified.
+import fs from 'node:fs';
+import path from 'node:path';
+import http from 'node:http';
+import assert from 'node:assert/strict';
+import {randomBytes} from 'node:crypto';
+import {pathToFileURL} from 'node:url';
+import {stringify} from 'yaml';
+import {WebSocketServer} from 'ws';
+import {createApp} from '../../backend/app.mjs';
+import {createLocalActionExecutor} from '../../src/local-action.mjs';
+import {ActionDispatcher} from '../../src/daemon.mjs';
+import {createActionDelivery} from '../../src/daemon-action-delivery.mjs';
+import {createActionScheduler} from '../../src/daemon-action-scheduler.mjs';
+import {createNativeBotTransport,nativeReceipt} from '../src/bot-native-transport.js';
+import {createBotNativeOperations} from '../src/bot-native-operations.js';
+import {previewSocketGuard} from '../preview/native-runtime.mjs';
+
+const project=path.resolve(import.meta.dirname,'../..');
+const groupModule=await import('../../src/hermes-group-runtime.mjs');
+assert.equal(typeof groupModule.createGroupSupervision,'function','Integrate the committed E02 follow-up candidate before running real acceptance');
+const root=path.join(project,'.local',`e03-native-followup-${Date.now()}`),source=path.join(root,'source'),guard=path.join(root,'guard'),managed=path.join(root,'managed');
+for(const dir of [root,source,guard,managed])fs.mkdirSync(dir,{recursive:true});
+const previousEnv={...process.env},previousCwd=process.cwd(),previousFetch=globalThis.fetch,previousWindow=globalThis.window;
+const results=[],nativeActions=[],models=[],protocol={restIdentity:0,websocketConnected:0,websocketRejected:0,authFrames:0,posts:0};
+let app,apiServer,peer,websockets,tick,heartbeat,dispatcher,scheduler,delivery,ui,cookie='',bot,peerBot,device,base,peerBase,sourceTurns=0,peerTurns=0,holdSecond=false,revoked=false,activeGateway=false,api;
+const ownedOrigins=new Set();
+const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+async function check(name,fn){await fn();results.push({name,passed:true});console.log('passed: '+name);}
+async function userRequest(route,body,method=body?'POST':'GET'){const response=await previousFetch(base+route,{method,headers:{'content-type':'application/json',...(cookie?{cookie}:{})},...(body?{body:JSON.stringify(body)}:{})});if(response.headers.get('set-cookie'))cookie=response.headers.get('set-cookie').split(';')[0];const value=await response.json();assert.ok(response.ok,value.error);return value;}
+async function workerRequest(route,body){const response=await fetch(base+route,{method:'POST',headers:{'content-type':'application/json','x-ziwei-device-token':device.deviceToken},body:JSON.stringify({...body,workspace:'e03-followup'}),redirect:'error',signal:AbortSignal.timeout(120000)});const value=await response.json();if(!response.ok)throw Object.assign(new Error(value.code||value.error),{status:response.status});return value;}
+async function terminal(action,expected='succeeded'){for(let i=0;i<1200;i++){const current=(await api.botRuns(action.payload?.employeeId||bot.id,'e03-followup')).runs.find(row=>row.id===action.id);if(current&&!['pending','acked'].includes(current.status)){assert.equal(current.status,expected,current.error);nativeActions.push({id:current.id,type:current.type,status:current.status,nativeVersion:nativeReceipt(current)?.nativeVersion,processExit:current.result?.processExit,nativeGroup:current.result?.nativeGroup,code:current.result?.code});return current;}await wait(100);}throw new Error('Original native action timed out: '+action.id);}
+async function enable(row){const validated=await api.validateBot(row.id,{expectedRevision:row.revision,idempotencyKey:crypto.randomUUID()},'e03-followup');await terminal(validated.action);row=await api.bot(row.id,'e03-followup');return api.controlBot(row.id,{operation:'activate',expectedRevision:row.revision,expectedControlEpoch:row.control_epoch},'e03-followup');}
+const modelAnswer=(res,q,answer)=>{res.setHeader('content-type','text/event-stream');res.end('data: '+JSON.stringify({id:'owned-followup',object:'chat.completion.chunk',created:1,model:q.model,choices:[{index:0,delta:{role:'assistant',content:answer},finish_reason:null}]})+'\n\ndata: '+JSON.stringify({id:'owned-followup',object:'chat.completion.chunk',created:1,model:q.model,choices:[{index:0,delta:{},finish_reason:'stop'}]})+'\n\ndata: [DONE]\n\n');};
+try{
+  peer=http.createServer(async(req,res)=>{
+    if(req.url==='/api/v4/users/me'){protocol.restIdentity++;res.setHeader('content-type','application/json');res.end(JSON.stringify({id:'owned-bot-user',username:'owned-bot'}));return;}
+    const chunks=[];for await(const chunk of req)chunks.push(chunk);const bytes=Buffer.concat(chunks);
+    if(req.url==='/api/v4/posts'){protocol.posts++;res.end('{}');return;}
+    if(req.url==='/v1/chat/completions'){
+      const q=JSON.parse(bytes);const isSource=q.model==='followup-source';if(isSource)sourceTurns++;else peerTurns++;models.push({model:q.model,turn:isSource?sourceTurns:peerTurns,held:holdSecond&&isSource&&sourceTurns===2});
+      if(holdSecond&&isSource&&sourceTurns===2){res.setHeader('content-type','text/event-stream');res.flushHeaders();return;}
+      const answer=isSource?(sourceTurns===1?'@'+peerBot.id+' reply to this isolated group.':'E03-SOURCE-SECOND-TURN-DONE'):'@'+bot.id+' confirm the isolated group result.';
+      if(q.stream)modelAnswer(res,q,answer);else{res.setHeader('content-type','application/json');res.end(JSON.stringify({id:'owned-followup',object:'chat.completion',model:q.model,choices:[{index:0,message:{role:'assistant',content:answer},finish_reason:'stop'}],usage:{prompt_tokens:1,completion_tokens:1,total_tokens:2}}));}return;
+    }
+    res.setHeader('content-type','application/json');res.end('{}');
+  });
+  websockets=new WebSocketServer({noServer:true});
+  peer.on('upgrade',(req,socket,head)=>{if(req.url!=='/api/v4/websocket'||revoked){protocol.websocketRejected++;socket.end('HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n');return;}websockets.handleUpgrade(req,socket,head,ws=>{protocol.websocketConnected++;websockets.emit('connection',ws,req);});});
+  websockets.on('connection',ws=>{ws.on('message',()=>{protocol.authFrames++;ws.send(JSON.stringify({status:'OK',seq_reply:1}));});});
+  await new Promise((resolve,reject)=>{peer.once('error',reject);peer.listen(0,'127.0.0.1',resolve);});peerBase=`http://127.0.0.1:${peer.address().port}`;ownedOrigins.add(peerBase);
+  const sourceBody=stringify({model:{provider:'custom:followup-local',default:'followup-source',base_url:peerBase+'/v1',api_mode:'chat_completions'},providers:{'followup-local':{key_env:'E03_FOLLOWUP_KEY',base_url:peerBase+'/v1',api_mode:'chat_completions',context_length:131072}},plugins:{enabled:['mattermost-platform']},models_dev:{url:peerBase+'/catalog'}});
+  fs.writeFileSync(path.join(source,'config.yaml'),sourceBody);fs.writeFileSync(path.join(source,'auth.json'),'{}');fs.writeFileSync(path.join(source,'.env'),'E03_FOLLOWUP_KEY=owned-model-only\nE03_MM_TOKEN=owned-mattermost-only\nE03_MM_URL='+peerBase+'\n');fs.writeFileSync(path.join(managed,'config.yaml'),stringify({updates:{check:false},auxiliary:{title_generation:{enabled:false},background_review:{enabled:false}}}));
+  for(const key of Object.keys(process.env))if(/^(?:ZIWEI_|CONTROL_MCP_|HERMES_|OPENAI_|ANTHROPIC_|GOOGLE_|GEMINI_)|(?:_KEY|_TOKEN|_SECRET|PASSWORD)$|^(?:HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|NODE_OPTIONS|PYTHONPATH)$/.test(key))delete process.env[key];
+  Object.assign(process.env,{HOME:source,USERPROFILE:source,APPDATA:path.join(root,'AppData/Roaming'),LOCALAPPDATA:path.join(root,'AppData/Local'),CODEX_HOME:path.join(root,'codex'),HERMES_HOME:source,HERMES_MANAGED_DIR:managed,PYTHONNOUSERSITE:'1',PYTHONPATH:guard,HERMES_ALLOW_PRIVATE_URLS:'true',NO_PROXY:'127.0.0.1,localhost',no_proxy:'127.0.0.1,localhost'});process.chdir(root);
+  app=createApp({memory:true,envEncryptionKey:randomBytes(32).toString('hex'),enableScheduler:false,requireAuth:true,requireDeviceAuth:true,discoverLocalVersions:()=>({agents:{Hermes:{version:'0.21.3',models:[{id:'followup-source'},{id:'followup-peer'}]}}})});apiServer=app.listen(0,'127.0.0.1');await new Promise((resolve,reject)=>{apiServer.once('listening',resolve);apiServer.once('error',reject);});base=`http://127.0.0.1:${apiServer.address().port}`;ownedOrigins.add(base);
+  const apiPort=Number(new URL(base).port),peerPort=Number(new URL(peerBase).port);fs.writeFileSync(path.join(guard,'sitecustomize.py'),previewSocketGuard(apiPort).replace(`int(address[1])==${apiPort}`,`int(address[1]) in (${apiPort},${peerPort})`));
+  globalThis.fetch=(url,options)=>{assert.ok(ownedOrigins.has(new URL(url).origin),'Only owned peer/API network is allowed');return previousFetch(url,options);};globalThis.__e03FollowupFrontendFetch=(url,options={})=>fetch(url,{...options,headers:{...options.headers,...(new URL(url).origin===base?{cookie}:{})}});
+  globalThis.window={location:{origin:base,pathname:'/e03-followup/bots'},dispatchEvent(){}};
+  let code=fs.readFileSync(path.join(project,'frontend/src/api.js'),'utf8').replace("'./api-base.js'",JSON.stringify(pathToFileURL(path.join(project,'frontend/src/api-base.js')).href)).replaceAll('import.meta.env.',`({VITE_API_URL:${JSON.stringify(base)},DEV:false}).`);code='const fetch=globalThis.__e03FollowupFrontendFetch;\n'+code;({api}=await import('data:text/javascript;base64,'+Buffer.from(code).toString('base64')));
+  const principal=await userRequest('/api/auth/setup',{name:'E03 targeted native',email:'e03-targeted@fixture.invalid',password:'owned-followup-password'});await userRequest('/api/workspaces',{slug:'e03-followup',name:'E03 targeted native',kind:'personal'});
+  const pairing=app.locals.repo.createDevicePairing('e03-followup',{createdBy:principal.user.id,name:'Owned native worker'});device=app.locals.repo.claimDevicePairing({code:pairing.code,name:'Owned native worker'});
+  const pulse=()=>app.locals.repo.heartbeatDevice('e03-followup',{deviceId:device.deviceId,workdir:root,runtimes:{Hermes:{status:'available',version:'0.21.3',profiles:[{name:'default',provider_configured:true,authentication_configured:true,readiness:{ready:true}}],models:[{id:'followup-source'},{id:'followup-peer'}]}}});pulse();heartbeat=setInterval(pulse,10000);
+  const runtimeDir=path.join(root,'worker'),execute=createLocalActionExecutor({runtimeDir,defaultWorkdir:root,hermesHomePath:source,workspace:'e03-followup',apiBase:base,deviceId:device.deviceId,deviceToken:device.deviceToken,terminalMcpConfig:{enabled:false}});
+  dispatcher=new ActionDispatcher({workspace:'e03-followup',deviceId:device.deviceId,workdir:root,stateFile:path.join(runtimeDir,'action-state.json'),execute,onEvent:(event,extra)=>{if(extra.actionId&&['action.started','action.output','action.progress','action.stage','action.waiting'].includes(event))delivery?.recordEvent(extra.actionId,event,extra);}});
+  delivery=createActionDelivery({directory:path.join(runtimeDir,'delivery'),identity:{workspace:'e03-followup',deviceId:device.deviceId,apiBase:base},post:workerRequest,dispatch:action=>dispatcher.dispatch(action)});scheduler=createActionScheduler({execute:action=>delivery.execute(action),canStart:action=>!dispatcher.quarantined||delivery.canDeliverWithoutExecution(action),quarantinedActionIds:()=>dispatcher.quarantinedActionIds,onError:(error,action)=>{fs.appendFileSync(path.join(root,'delivery-errors.jsonl'),JSON.stringify({actionId:action.id,code:error.code||error.message})+'\n');}});
+  tick=setInterval(()=>scheduler.schedule([...delivery.recoverActions(),...app.locals.repo.listA2AActions('e03-followup',{status:'pending',deviceId:device.deviceId})]),100);
+  const config={permissions:{mode:'execute',management:false},maxTurns:5,drivers:{maxTotalTurns:3}};
+  bot=await api.createBot({name:'E03 Source',runtimeProfile:'default',targetDeviceId:device.deviceId,model:'followup-source',config,idempotencyKey:crypto.randomUUID()},'e03-followup');peerBot=await api.createBot({name:'E03 Peer',runtimeProfile:'default',targetDeviceId:device.deviceId,model:'followup-peer',config,idempotencyKey:crypto.randomUUID()},'e03-followup');
+  bot=await api.updateBot(bot.id,{expectedRevision:bot.revision,config:{...bot.config,collaboration:{enabled:true,targetEmployeeIds:[peerBot.id]}}},'e03-followup');bot=await enable(bot);peerBot=await enable(peerBot);
+  const transport=createNativeBotTransport({api,getBot:()=>bot,onBotChanged:async()=>{bot=await api.bot(bot.id,'e03-followup');},wait:()=>wait(100),pollLimit:1200});ui=createBotNativeOperations({transport});ui.select('e03-followup',bot.id);
+  await check('exact source @ runs twice in one parent with real peer turn and separate group sessions',async()=>{
+    const main=bot.main_conversation_id,peerMain=peerBot.main_conversation_id;await ui.submit('collaboration','group',{targetEmployeeIds:[peerBot.id],content:'@'+bot.id+' begin the isolated discussion.',groupId:'followup_source_twice'});const parent=await terminal(ui.resource('collaboration').action);
+    assert.equal(parent.payload.nativeOperation.input.targets.some(row=>row.id===bot.id),false);assert.equal(parent.result.nativeGroup.runs.length,3);const turns=parent.result.nativeGroup.runs.filter(row=>row.employeeId===bot.id);assert.equal(turns.length,2);assert.ok(turns.every(row=>row.actionId===parent.id));assert.equal(sourceTurns,2);assert.equal(peerTurns,1);assert.equal(parent.result.processExit.supervisor,'runtime-group');assert.equal(parent.result.processExit.treeConfirmed,true);
+    assert.notEqual(parent.payload.conversationId,main);assert.equal(parent.payload.hermesBot.conversationId,parent.payload.conversationId);const peerAction=(await api.botRuns(peerBot.id,'e03-followup')).runs.find(row=>row.payload.collaboration?.sourceActionId===parent.id);assert.ok(peerAction);assert.notEqual(peerAction.payload.conversationId,peerMain);assert.notEqual(peerAction.payload.conversationId,parent.payload.conversationId);
+    await ui.poll('collaboration');await ui.read('collaboration');assert.equal(ui.resource('collaboration').data.data.runs.filter(row=>row.id===parent.id).length,1);assert.equal((await api.bot(bot.id,'e03-followup')).main_conversation_id,main);assert.equal((await api.bot(peerBot.id,'e03-followup')).main_conversation_id,peerMain);
+  });
+  await check('real Mattermost REST/WS adapter fatal 401 replaces connected in actual frontend status receipt',async()=>{
+    bot=await api.updateBot(bot.id,{expectedRevision:bot.revision,config:{...bot.config,gateway:{platforms:{mattermost:{enabled:true,tokenEnv:'E03_MM_TOKEN',envRefs:{MATTERMOST_URL:'${E03_MM_URL}',MATTERMOST_TOKEN:'${E03_MM_TOKEN}'},allowedUsers:['owned-user'],extra:{url:peerBase}}}}}},'e03-followup');bot=await enable(bot);
+    await ui.submit('gateway','connect',{platform:'mattermost',durationSeconds:20});const connected=await terminal(ui.resource('gateway').action);assert.equal(connected.result.nativeOperation.data.connected,true);activeGateway=true;
+    for(let i=0;i<100&&!protocol.authFrames;i++)await wait(100);assert.ok(protocol.websocketConnected>=1);assert.ok(protocol.authFrames>=1);revoked=true;for(const socket of websockets.clients)socket.close();for(let i=0;i<150&&!protocol.websocketRejected;i++)await wait(100);assert.ok(protocol.websocketRejected>=1);await ui.poll('gateway');
+    for(let i=0;i<30;i++){await ui.read('gateway');if(ui.resource('gateway').data?.data?.runtime?.find(row=>row.platform==='mattermost')?.status==='failed')break;await wait(100);}
+    const row=ui.resource('gateway').data.data.runtime.find(item=>item.platform==='mattermost');assert.equal(row.status,'failed');assert.equal(row.code,'mattermost_auth_error');assert.equal(protocol.posts,0);
+    await ui.submit('gateway','disconnect',{platform:'mattermost'});const stopped=await terminal(ui.resource('gateway').action);assert.equal(stopped.result.nativeOperation.data.stopConfirmed,true);await ui.poll('gateway');activeGateway=false;
+  });
+  await check('stopping the same group parent during its second source turn confirms every Windows execution tree and does not replay',async()=>{
+    sourceTurns=0;peerTurns=0;holdSecond=true;await ui.submit('collaboration','group',{targetEmployeeIds:[peerBot.id],content:'@'+bot.id+' begin stop verification.',groupId:'followup_stop_second_source'});const parent=ui.resource('collaboration').action;for(let i=0;i<1200&&sourceTurns<2;i++)await wait(100);assert.equal(sourceTurns,2);bot=await api.bot(bot.id,'e03-followup');await api.controlBot(bot.id,{operation:'stop',expectedRevision:bot.revision,expectedControlEpoch:bot.control_epoch},'e03-followup');const stopped=await terminal(parent,'failed');assert.equal(stopped.result.processExit.supervisor,'runtime-group');assert.equal(stopped.result.processExit.treeConfirmed,true);assert.equal(stopped.result.processExit.activeProcesses,0);assert.notEqual(stopped.result.code,'EXECUTION_UNCERTAIN');await wait(300);assert.equal(sourceTurns,2);assert.equal(peerTurns,1);
+  });
+  assert.equal(fs.readFileSync(path.join(source,'config.yaml'),'utf8'),sourceBody);assert.equal(fs.readFileSync(path.join(source,'auth.json'),'utf8'),'{}');
+  const proof={status:'passed',kind:'actual-product-http-frontend-transport-installed-room-mattermost-and-windows-group-supervision',sourcePreserved:true,externalAccountCalls:0,localTestProvider:true,results,nativeActions,models,protocol};fs.writeFileSync(path.join(root,'receipt.json'),JSON.stringify(proof,null,2));console.log(JSON.stringify({passed:results.length,evidence:path.join(root,'receipt.json')}));
+}catch(error){fs.writeFileSync(path.join(root,'failure.json'),JSON.stringify({error:error.message,results,nativeActions,models,protocol},null,2));throw error;}
+finally{
+  if(activeGateway&&api&&bot){try{const current=await api.bot(bot.id,'e03-followup');const accepted=await api.botNativeAction(bot.id,{resource:'gateway',operation:'disconnect',input:{platform:'mattermost'},expectedRevision:current.revision,expectedControlEpoch:current.control_epoch,idempotencyKey:crypto.randomUUID()},'e03-followup');await terminal(accepted.action);}catch{}}
+  clearInterval(tick);clearInterval(heartbeat);if(dispatcher&&app&&device)for(const action of app.locals.repo.listA2AActions('e03-followup',{status:'acked',deviceId:device.deviceId}))dispatcher.cancel(action.id);await scheduler?.whenIdle();await delivery?.whenIdle();ui?.dispose();for(const socket of websockets?.clients||[])socket.terminate();websockets?.close();for(const server of [apiServer,peer])if(server){server.closeAllConnections?.();await new Promise(resolve=>server.close(resolve));}app?.locals.repo.db.close();globalThis.fetch=previousFetch;globalThis.window=previousWindow;delete globalThis.__e03FollowupFrontendFetch;process.chdir(previousCwd);for(const key of Object.keys(process.env))if(!Object.hasOwn(previousEnv,key))delete process.env[key];Object.assign(process.env,previousEnv);
+}

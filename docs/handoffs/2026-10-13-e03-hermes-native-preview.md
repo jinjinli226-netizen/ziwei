@@ -56,7 +56,7 @@
 1. **P2：群组正文精确`@发起Bot`被拒绝。** 稳定bridge第523–525行mention白名单只有targets，而Bot API禁止targets包含source。合同承诺被@的source在父action执行，group-runtime已有runSource。E02需允许冻结room roster内的source精确ID，并继续核验其他目标；前端不应把自己塞进targets绕过API。
 2. **P2：Gateway adapter失效后worker仍报告connected。** 稳定bridge第766行定时直接写connected，不检查真实adapter的fatal/running状态。Mattermost token失效可令原生监听结束，外层却不断刷新lastHeartbeat，状态不会降为unconfirmed。E02需采集真实适配器状态/fatal原因，写明确断线或失败及进程证据。前端逐平台runtime数组解析本身正确。
 
-具体问题已形成可审查记录，向E02跨聊天发送及接入修正的直接用户授权问题仍待回复。E03没有修改其工作树或后端/src/contract分工文件。当前候选不能称“全部Hermes能力全量闭合”。
+总控已将具体问题交E02继续修复，并明确授权E03读取和接入其稳定补丁；这里不再等待跨聊天发送确认。另将同父action第二次source回合的监督聚合与停止一并纳入真实隔离验收。E03没有修改其工作树或后端/src/contract分工文件。当前候选不能称“全部Hermes能力全量闭合”。
 
 正式D目录、2884、正式服务器/数据、Creator原HOME/会话、客户端、真实手机及既有Hermes安装源码不在本次修改范围；没有push、正式merge或发布。
 

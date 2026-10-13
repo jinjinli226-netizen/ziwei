@@ -36,6 +36,13 @@ test('Gateway status distinguishes configuration, a running process and a connec
   assert.match(value.process,/123/);assert.match(value.connection,/telegram.*connected/);assert.match(value.media,/STT.*缺少.*TTS.*已配置/);
   assert.doesNotMatch(mod.gatewayStages({configuredPlatforms:['telegram'],configuredIsConnected:false}).connection,/已连接/);
 });
+test('Gateway reports the latest disconnected, failed or unconfirmed platform independently of its live PID',()=>{
+  for(const status of ['failed','disconnected','unconfirmed']){
+    const value=mod.gatewayStages({runtime:[{platform:'telegram',status,pid:123,lastHeartbeat:Math.floor(Date.now()/1000),fatalCode:'fixture-token-revoked'},{platform:'slack',status:'connected',pid:456,lastHeartbeat:Math.floor(Date.now()/1000)}]});
+    assert.equal(value.connection,`telegram · ${status}（原生最近报告）、slack · connected（原生最近报告）`);
+    assert.match(value.process,new RegExp('原生报告 '+status+' · PID 123'));
+  }
+});
 test('Gateway advanced credentials require environment references recursively',()=>{
   assert.deepEqual(mod.gatewayExtra({nested:{token:'${LOCAL_TOKEN}'},timeout:10}),{nested:{token:'${LOCAL_TOKEN}'},timeout:10});
   assert.throws(()=>mod.gatewayExtra({nested:{api_key:'demo-value'}}),/环境变量引用/);
