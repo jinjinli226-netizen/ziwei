@@ -51,8 +51,24 @@ function legacyConnectionProof(connection,request,read,directoryProof){
   return {client,workspaceId:workspace.id,policyDigest:digest(legacyProtocolFiles),sourceDigest:digest(sources)};
 }
 
-/** Read-only evidence. Zero in-memory counters cannot replace these files. */
-export function scanNativeFiles({connections=[],actions=[],homes=[],productionRequest}={}) {
+/** Formal source evidence always requires original history/protocol binding. */
+export function scanNativeFiles(options={}) {return scanFileEvidence(options,false);}
+
+/** Current daemon admission only; this cannot attest a production namespace. */
+export function inspectLocalDaemonMaintenanceFiles({connections=[]}={}) {
+  const {safe,issues,files,directories}=scanFileEvidence({connections},true);
+  return {safe,issues,files,directories};
+}
+
+function explicitExitUnknown(value){
+  if(!value||typeof value!=='object')return false;
+  if(Object.hasOwn(value,'processExit')&&!exitedTree(value.processExit))return true;
+  return Object.values(value).some(item=>Array.isArray(item)?item.some(explicitExitUnknown):explicitExitUnknown(item));
+}
+
+/** Read-only evidence. Zero in-memory counters cannot replace these files.
+ * localMaintenance is lexical code state, never selected by input JSON. */
+function scanFileEvidence({connections=[],actions=[],homes=[],productionRequest}={},localMaintenance) {
   const issues=[],files=[],directories=[],gatewayExits=[],legacyHistoryProofs=[],originals=new Map(actions.map(row=>[row.id,normalizedAction(row)]));
   const issue=(code,detail={})=>issues.push({code,...detail});
   const read=file=>{try{const stat=fs.lstatSync(file);if(!stat.isFile()||stat.isSymbolicLink()||stat.nlink!==1)throw new Error('not regular file');const bytes=fs.readFileSync(file);files.push({path:path.resolve(file),exists:true,sha256:hash(bytes),bytes:bytes.length,identity:{dev:String(stat.dev),ino:String(stat.ino)}});return bytes.toString('utf8');}catch(error){if(error.code==='ENOENT')files.push({path:path.resolve(file),exists:false});throw error;}};
@@ -64,9 +80,9 @@ export function scanNativeFiles({connections=[],actions=[],homes=[],productionRe
     const stateFile=path.join(runtimeDir,'action-state.json');let state;
     try{
       state=json(read(stateFile));
-      const legacyShape=state?.version===1&&Array.isArray(state.completed)&&Number.isFinite(Date.parse(state.updatedAt||''))&&Object.keys(state).every(key=>['version','updatedAt','completed'].includes(key));
+      const legacyShape=state?.version===1&&Array.isArray(state.completed)&&(localMaintenance&&state.updatedAt===undefined||Number.isFinite(Date.parse(state.updatedAt||'')))&&Object.keys(state).every(key=>['version','updatedAt','completed'].includes(key));
       const modernShape=state?.version===2&&Array.isArray(state.completed)&&Array.isArray(state.started);
-      if(!modernShape&&!(legacyShape&&productionRequest))throw Error('invalid version/shape');
+      if(!modernShape&&!(legacyShape&&(localMaintenance||productionRequest)))throw Error('invalid version/shape');
       const validIdentity=value=>value===undefined||(value&&typeof value==='object'&&!Array.isArray(value)&&Object.values(value).every(item=>typeof item==='string'));
       const startedKeys=new Set();
       for(const started of state.started||[]){
@@ -75,7 +91,7 @@ export function scanNativeFiles({connections=[],actions=[],homes=[],productionRe
       }
       const completedKeys=new Set();
       for(const completed of state.completed){
-        if(!completed||typeof completed.key!=='string'||!completed.key||completedKeys.has(completed.key)||!completed.result||!['succeeded','failed'].includes(completed.result.status)||typeof completed.result.actionId!=='string'||!completed.result.actionId||!validIdentity(completed.identity)||legacyHistoryUncertain(completed,state.version===1||completed.legacy===true))throw Error('invalid completed record');
+        if(!completed||typeof completed.key!=='string'||!completed.key||completedKeys.has(completed.key)||!completed.result||!['succeeded','failed'].includes(completed.result.status)||typeof completed.result.actionId!=='string'||!completed.result.actionId||!validIdentity(completed.identity)||legacyHistoryUncertain(completed,localMaintenance||state.version===1||completed.legacy===true)||localMaintenance&&explicitExitUnknown(completed))throw Error('invalid completed record');
         if((state.version===1||completed.legacy===true)&&Object.keys(completed).some(key=>!(state.version===1?['key','result']:['key','result','legacy']).includes(key)))throw Error('unknown legacy wrapper');
         completedKeys.add(completed.key);
         if(state.version===2&&completed.legacy!==true&&(!completed.identity||!(state.started||[]).some(started=>started?.key===completed.key&&started.actionId===completed.result.actionId)))throw Error('unpaired completed record');
@@ -85,10 +101,15 @@ export function scanNativeFiles({connections=[],actions=[],homes=[],productionRe
     if(state){
       const legacyActions=new Set(),legacyKeys=new Set();let legacySource;
       const legacy=state.completed.filter(row=>state.version===1||row?.legacy===true);
-      if(legacy.length)try{legacySource=legacyConnectionProof(connection,productionRequest,read,directoryProof);}catch{issue('LEGACY_PROTOCOL_UNPROVEN',{path:stateFile});}
+      if(legacy.length&&!localMaintenance)try{legacySource=legacyConnectionProof(connection,productionRequest,read,directoryProof);}catch{issue('LEGACY_PROTOCOL_UNPROVEN',{path:stateFile});}
       for(const completed of legacy){
         const original=originals.get(completed?.result?.actionId),result=completed?.result,exit=executionExit(result);
         const expectedKey=String(original?.dedupe_key??original?.dedupeKey??original?.id??''),device=actionDevice(original,productionRequest);
+        if(localMaintenance){
+          const worker=result?.result?.nativeOperation?.data?.residentWorker;
+          if(!Number.isFinite(result?.completedAt)||legacyKeys.has(completed.key)||legacyActions.has(result.actionId)||completed.identity||legacyHistoryUncertain(result)||explicitExitUnknown(result)||(exit||worker)&&!exitedTree(exit))issue('LEGACY_HISTORY_UNPROVEN',{path:stateFile,actionId:result?.actionId||null});
+          legacyKeys.add(completed.key);legacyActions.add(result.actionId);continue;
+        }
         // A legacy completion is immutable terminal history. Missing fields
         // that did not exist in V1 are never fabricated as process evidence.
         if(!legacySource||!original||!result||typeof completed.key!=='string'||!completed.key||legacyKeys.has(completed.key)||legacyActions.has(original.id)||completed.identity||completed.key!==expectedKey||!['succeeded','failed'].includes(original.status)||original.status!==result.status||legacyHistoryUncertain(result)||!Number.isFinite(result.completedAt)||exit&&!exitedTree(exit)||original.workspace_id!==legacySource.workspaceId||device!==deviceId||!equal(original.result,result.result??result)||original.error&&original.error!==result.error){issue('LEGACY_HISTORY_UNPROVEN',{path:stateFile,actionId:result?.actionId||null});continue;}
@@ -103,6 +124,7 @@ export function scanNativeFiles({connections=[],actions=[],homes=[],productionRe
         if(!equal(started.identity,completed.identity)||completed.result?.actionId!==started.actionId||!['succeeded','failed'].includes(completed.result?.status)||uncertain(completed.result))issue('ACTION_RESULT_UNCERTAIN',{actionId:started.actionId,path:stateFile});
         if(started.identity.workspace!==workspace||started.identity.deviceId!==deviceId)issue('ACTION_IDENTITY_MISMATCH',{actionId:started.actionId,path:stateFile});
         const gateway=completed.result?.result?.nativeOperation,worker=gateway?.data?.residentWorker;
+        if(localMaintenance&&worker&&!exitedTree(executionExit(completed.result)))issue('GATEWAY_TREE_UNKNOWN',{actionId:started.actionId,path:stateFile});
         if(gateway?.resource==='gateway'){const binding=started.resourceBinding;if(!binding||binding.type!=='hermes.bot.native'||binding.resource!=='gateway'||binding.operation!==gateway.operation||binding.employeeId!==gateway.employeeId||binding.revision!==gateway.revision||worker&&(binding.platform!==worker.platform||binding.controlEpoch!==worker.controlEpoch)||originals.has(started.actionId)&&!gatewayResultMatches(originals.get(started.actionId),completed.result.result))issue('GATEWAY_CACHE_IDENTITY_MISMATCH',{actionId:started.actionId,path:stateFile});}
         if(gateway?.resource==='gateway'&&worker){const originalConnection=state.completed.find(row=>row.result?.actionId===worker.sourceActionId),originalWorker=originalConnection?.result?.result?.nativeOperation?.data?.residentWorker;
           if(worker.workspace!==workspace||!worker.workerNonce||!Number.isInteger(worker.rootPid)||gateway.operation==='connect'&&worker.sourceActionId!==started.actionId||gateway.operation!=='connect'&&!equal(worker,originalWorker))issue('GATEWAY_CACHE_IDENTITY_MISMATCH',{actionId:started.actionId,path:stateFile});

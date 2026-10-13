@@ -12,7 +12,7 @@ import { discoverInstalledRuntimes, terminalMcpStatus } from '../src/runtime-ada
 import { readA2AToken } from '../backend/a2a-auth.mjs';
 import { createManagementBootstrap, clientBuildIdentity } from '../src/management-bootstrap.mjs';
 import { defaultUserDir, resolveConfigPath, resolveDaemonDataDirectory, resolveWorkspaceConnections, claimWorkspaceGrant } from './config.mjs';
-import {scanNativeFiles} from '../backend/preservation-native-evidence.mjs';
+import {inspectLocalDaemonMaintenanceFiles} from '../backend/preservation-native-evidence.mjs';
 
 const ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const packageMeta = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
@@ -257,7 +257,7 @@ function healthPayload() {
   const executionQuarantined = !executionAllowed();
   const quarantinedActionCount = [...connections.values()].reduce((total, connection) => total + connection.dispatcher.quarantinedActionIds.length, 0);
   const gateway=[...connections.values()].map(connection=>connection.localExecutor.maintenanceStatus());
-  const fileEvidence=scanNativeFiles({connections:[...connections.values()].map(connection=>({workspace:connection.config.workspace,deviceId:connection.config.deviceId,apiBase:connection.config.apiBase,runtimeDir:connection.runtimeDir}))});
+  const fileEvidence=inspectLocalDaemonMaintenanceFiles({connections:[...connections.values()].map(connection=>({workspace:connection.config.workspace,deviceId:connection.config.deviceId,apiBase:connection.config.apiBase,runtimeDir:connection.runtimeDir}))});
   const maintenance={safe:fileEvidence.safe&&gateway.every(row=>row.safe)&&quarantinedActionCount===0,pendingDeliveryCount:[...connections.values()].reduce((n,c)=>n+c.actionDelivery.pendingCount,0),blockedDeliveryCount:[...connections.values()].reduce((n,c)=>n+c.actionDelivery.blockedCount,0),gatewayWorkers:gateway.flatMap(row=>row.workers),fileIssues:fileEvidence.issues};
   return { service: 'ziwei_user', version: VERSION, clientBuild: CLIENT_BUILD, bridge: 'ziwei_user', agentId: 'ziwei_user', workspace: config.workspace, deviceId: config.deviceId, runtimes: runtimeDiscovery.runtimes, managementMcp: primaryConnection?.managementBootstrap.status(), terminalMcp: primaryConnection?.terminalStatus, lastHeartbeat, lastHeartbeatAgeMs: lastHeartbeatAt ? Math.max(0, Date.now() - lastHeartbeatAt) : null, lastPoll, pid: process.pid,
     lifecycle: { nonce: lifecycleNonce, root: ROOT, configPath, configSha256: lifecycleConfigurationHash(), runtimeDir, startedAt: lifecycleStartedAt, managedAuxiliaryCount: maintenance.gatewayWorkers.filter(row=>row.processAlive!==false).length }, maintenance,
