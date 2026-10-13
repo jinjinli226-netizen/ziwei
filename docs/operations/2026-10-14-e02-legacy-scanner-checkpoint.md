@@ -18,4 +18,6 @@
 
 Root/E03可独立承接新namespace observer模块；E02保留既有native scanner/legacy和SDK HOME/shared范围解析。observer准确输入缺项在同目录 2026-10-14-e02-source-observer-input-gap.md，不能plain相信PIDgone/argv=全worker零。
 
+当前有限交接：已按root明确顺序合入E03 6358f286b0361809020462b13d52a8d7e28099ab与2b45d693b207e2dffe81ac5dcf9f1f942b98c838，对应本树f6db9fd、75905ee。producer缺的namespace observer尚未导入。两修复加CLI/hook/legacy/crypto联合41/41 PASS；新全量993/993 PASS（0fail/0skip），lint126源码PASS。实际API入口验证fixture随approved installTargets合同同步，需用新的准确6产物/2manifest复核后冻结。旧155四阶段仅其原批作者证据，不外推为本新production候选的Q签字。
+
 组合包e9a4a1f0c63bee783292fe5bd2d9fb00f7fdaa4c只包含前一production CLI/package检查点，不含本parser增量：其6准确产物/2manifest在 `.local/preservation-production-entry-checkpoint`，两API实际解压入口已证明rehearsal与production inspect/prepare plan/source DB+WAL+SHM和目录零变化、无network/helper，兼容apply拒绝且V2无transport首写前拒绝。初次生产plan fixture只有sentinel而缺真实V1核心表，按PRODUCTION_DATABASE_SCHEMA拒绝；现验证器补齐隔离fixture核心表并保留sentinel原字节后通过，没有修改product/schema gate。该批仍缺production namespace/legacy assessment/backup/恢复实际身份等签收，不是发布候选。
