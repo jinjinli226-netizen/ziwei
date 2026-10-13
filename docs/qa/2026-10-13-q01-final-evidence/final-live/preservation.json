@@ -1,0 +1,31 @@
+{
+  "at": "2026-10-13T09:20:38.895Z",
+  "beforeUpdate": "2026-10-13T08:43:52.538Z",
+  "originalHomeFiles": 1205,
+  "verified": 1205,
+  "changed": [],
+  "accounts": {
+    "count": 1,
+    "baselineCount": 1,
+    "preserved": true,
+    "baselineDigest": "0e7355ecdd602e69e7adbd8a29cd0b6d709fdce3f3f457a5733171367daacdf1",
+    "currentDigest": "0e7355ecdd602e69e7adbd8a29cd0b6d709fdce3f3f457a5733171367daacdf1",
+    "excludedFields": [
+      "last_login_at"
+    ]
+  },
+  "health": {
+    "ok": true,
+    "preview": true,
+    "fixtureDevices": true,
+    "realHermes": true,
+    "hermesInstalled": true,
+    "nativeExecutionVerified": true,
+    "localTestProvider": true,
+    "nativeVersion": "0.21.3",
+    "schedulerEnabled": false,
+    "pid": 16872,
+    "database": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\data\\preview.sqlite",
+    "runtimeHome": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home"
+  }
+}

@@ -1,0 +1,25 @@
+
+> ziwei@0.1.0 build
+> vite build --config frontend/vite.config.mjs
+
+vite v7.3.6 building client environment for production...
+transforming...
+✓ 1787 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                                0.56 kB │ gzip:   0.39 kB
+dist/assets/BotNativeWorkspace-C0Hm1-im.css    4.25 kB │ gzip:   1.19 kB
+dist/assets/BotMainChat-zyIYaPxx.css          14.16 kB │ gzip:   3.00 kB
+dist/assets/BotWorkbench-tdNWNnZY.css         16.33 kB │ gzip:   3.38 kB
+dist/assets/index-BcfEIlpL.css               222.98 kB │ gzip:  39.51 kB
+dist/assets/bot-owned-profile-BpQo1u8R.js      7.31 kB │ gzip:   3.31 kB
+dist/assets/BotMainChat-DbIqKV83.js           15.48 kB │ gzip:   5.60 kB
+dist/assets/BotWorkbench-DQCxH-GK.js          72.30 kB │ gzip:  25.00 kB
+dist/assets/BotNativeWorkspace-BtHH8--s.js    75.22 kB │ gzip:  22.06 kB
+dist/assets/index-CHEJb3rl.js                508.17 kB │ gzip: 160.38 kB
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 9.62s

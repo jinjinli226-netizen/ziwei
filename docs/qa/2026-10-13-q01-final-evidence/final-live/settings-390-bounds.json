@@ -1,0 +1,84 @@
+{
+  "containerOverflow": [],
+  "innerWidth": 390,
+  "inputBounds": [
+    {
+      "client": 181,
+      "label": "名称",
+      "left": 124.33333587646484,
+      "overflowX": "clip",
+      "right": 307.00000762939453,
+      "scroll": 213,
+      "type": "text"
+    },
+    {
+      "client": 181,
+      "label": "岗位 / 简介",
+      "left": 124.33333587646484,
+      "overflowX": "clip",
+      "right": 307.00000762939453,
+      "scroll": 181,
+      "type": "text"
+    },
+    {
+      "client": 181,
+      "label": "头像",
+      "left": 124.33333587646484,
+      "overflowX": "clip",
+      "right": 307.00000762939453,
+      "scroll": 181,
+      "type": "file"
+    },
+    {
+      "client": 181,
+      "label": "Provider",
+      "left": 124.33333587646484,
+      "overflowX": "clip",
+      "right": 307.00000762939453,
+      "scroll": 181,
+      "type": "text"
+    },
+    {
+      "client": 181,
+      "label": "单次最多轮数",
+      "left": 124.33333587646484,
+      "overflowX": "clip",
+      "right": 307.00000762939453,
+      "scroll": 181,
+      "type": "number"
+    },
+    {
+      "client": 181,
+      "label": "主动工作累计回合上限",
+      "left": 124.33333587646484,
+      "overflowX": "clip",
+      "right": 307.00000762939453,
+      "scroll": 181,
+      "type": "number"
+    },
+    {
+      "client": 181,
+      "label": "主动工作截止时间",
+      "left": 124.33333587646484,
+      "overflowX": "clip",
+      "right": 307.00000762939453,
+      "scroll": 181,
+      "type": "text"
+    },
+    {
+      "client": 15,
+      "label": "",
+      "left": 208.6666717529297,
+      "overflowX": "visible",
+      "right": 223.6666717529297,
+      "scroll": 15,
+      "type": "checkbox"
+    }
+  ],
+  "menuBounds": [
+    {
+      "left": 136,
+      "right": 296
+    }
+  ]
+}

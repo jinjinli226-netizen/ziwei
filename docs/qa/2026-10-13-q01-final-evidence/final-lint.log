@@ -1,0 +1,5 @@
+
+> ziwei@0.1.0 lint
+> node scripts/lint.mjs
+
+lint ok: 121 source files checked

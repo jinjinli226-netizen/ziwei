@@ -1,0 +1,38 @@
+{
+  "observedAtUtc": "2026-10-13T09:24:09.1915960Z",
+  "processes": [
+    {
+      "ProcessId": 8436,
+      "ParentProcessId": 5764,
+      "CommandLine": "\"C:\\Program Files\\nodejs\\node.exe\" \"C:\\Users\\25941\\.codex\\worktrees\\v2-e03-bot-reasoning\\灵光爸爸拆解\\frontend\\preview\\supervisor.mjs\""
+    },
+    {
+      "ProcessId": 16872,
+      "ParentProcessId": 8436,
+      "CommandLine": "\"C:\\Program Files\\nodejs\\node.exe\" frontend/preview/backend.mjs"
+    },
+    {
+      "ProcessId": 54484,
+      "ParentProcessId": 8436,
+      "CommandLine": "\"C:\\Program Files\\nodejs\\node.exe\" node_modules/vite/bin/vite.js --config frontend/vite.config.mjs --host 127.0.0.1 --port 5283 --strictPort"
+    }
+  ],
+  "listeners": [
+    {
+      "LocalAddress": "127.0.0.1",
+      "LocalPort": 5283,
+      "OwningProcess": 54484
+    },
+    {
+      "LocalAddress": "127.0.0.1",
+      "LocalPort": 4283,
+      "OwningProcess": 16872
+    }
+  ],
+  "completedQaJobRootPids": [
+    41724,
+    31892
+  ],
+  "qaJobRootsStillPresent": [],
+  "readOnly": true
+}

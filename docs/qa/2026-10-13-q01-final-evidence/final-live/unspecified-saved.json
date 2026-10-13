@@ -1,0 +1,800 @@
+{
+  "at": "2026-10-13T09:13:07.549Z",
+  "label": "unspecified-saved",
+  "bot": {
+    "id": "employee_6ae5ac62-2574-4abb-aa45-7c8cfe0532f9",
+    "employee_id": "employee_6ae5ac62-2574-4abb-aa45-7c8cfe0532f9",
+    "workspace": "preview-bots",
+    "employee": {
+      "id": "employee_6ae5ac62-2574-4abb-aa45-7c8cfe0532f9",
+      "workspace_id": "ws_e63e1bee-7004-494e-a16c-39960539a8f0",
+      "owner_user_id": "user_55744a3e-12cc-4477-8f09-e7e65cf30dcb",
+      "name": "Q01 Final reasoning 20261013",
+      "runtime": "Hermes",
+      "model_id": null,
+      "description": "",
+      "visibility": "personal",
+      "skills_json": "[]",
+      "instructions": "",
+      "runtime_profile": "bot-3d2b9626d2c375841c473e35",
+      "avatar": null,
+      "status": "draft",
+      "management_mcp_enabled": true,
+      "default_working_directory": null,
+      "default_working_directory_device_id": null,
+      "created_at": "2026-10-13T09:08:10.514Z",
+      "updated_at": "2026-10-13T09:12:48.864Z",
+      "persona": "",
+      "target_device_id": "device_f2b4263c-086b-41d2-842a-dc237b762420",
+      "skills": []
+    },
+    "instance": {
+      "mode": "owned_profile",
+      "profile": "bot-3d2b9626d2c375841c473e35",
+      "templateProfile": "default",
+      "ownershipId": "7692c6a2-a33e-4cde-b5db-6e691860a91d",
+      "provisionActionId": "action_a204e229-f1e5-416d-bd56-4c82d76b56b7",
+      "authMode": "source-native-store",
+      "home": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-3d2b9626d2c375841c473e35",
+      "provisioning": {
+        "actionId": "action_a204e229-f1e5-416d-bd56-4c82d76b56b7",
+        "status": "provisioned",
+        "authentication": "configured",
+        "error": null
+      }
+    },
+    "configuration_state": "initialized",
+    "kind": "employee",
+    "config": {
+      "provider": null,
+      "toolsets": [],
+      "maxTurns": 20,
+      "memory": {
+        "enabled": true,
+        "userProfile": true
+      },
+      "skills": {
+        "disabled": []
+      },
+      "mcpServers": {},
+      "permissions": {
+        "mode": "read_only"
+      }
+    },
+    "revision": 3,
+    "control_state": "draft",
+    "control_epoch": 3,
+    "main_conversation_id": "conv_3f9d57b8-1de6-4f1c-a563-7539476b5e85",
+    "nativeResources": {},
+    "scheduler_authority": "ziwei",
+    "validation": {
+      "status": "stale",
+      "action_id": "action_c81907dd-85bf-45d1-8103-2c617c11613e",
+      "revision": 2,
+      "error": "原生实际推理等级与明确请求不一致；未启动模型"
+    },
+    "latest_run": {
+      "id": "action_c81907dd-85bf-45d1-8103-2c617c11613e",
+      "task_id": null,
+      "agent_id": "ziwei_user",
+      "type": "hermes.bot.validate",
+      "status": "failed",
+      "payload": {
+        "employeeId": "employee_6ae5ac62-2574-4abb-aa45-7c8cfe0532f9",
+        "runtime": "Hermes",
+        "model": null,
+        "profile": "bot-3d2b9626d2c375841c473e35",
+        "deviceId": "device_f2b4263c-086b-41d2-842a-dc237b762420",
+        "hermesBot": {
+          "schemaVersion": 1,
+          "employeeId": "employee_6ae5ac62-2574-4abb-aa45-7c8cfe0532f9",
+          "workspace": "preview-bots",
+          "revision": 2,
+          "controlEpoch": 2,
+          "config": {
+            "provider": null,
+            "toolsets": [],
+            "maxTurns": 20,
+            "memory": {
+              "enabled": true,
+              "userProfile": true
+            },
+            "skills": {
+              "disabled": []
+            },
+            "mcpServers": {},
+            "permissions": {
+              "mode": "read_only"
+            },
+            "reasoningEffort": "max"
+          },
+          "sourceProfile": "bot-3d2b9626d2c375841c473e35",
+          "instance": {
+            "mode": "owned_profile",
+            "profile": "bot-3d2b9626d2c375841c473e35",
+            "templateProfile": "default",
+            "ownershipId": "7692c6a2-a33e-4cde-b5db-6e691860a91d",
+            "provisionActionId": "action_a204e229-f1e5-416d-bd56-4c82d76b56b7"
+          },
+          "deviceId": "device_f2b4263c-086b-41d2-842a-dc237b762420",
+          "model": null,
+          "persona": "",
+          "instructions": "",
+          "description": "",
+          "name": "Q01 Final reasoning 20261013",
+          "conversationId": "conv_3f9d57b8-1de6-4f1c-a563-7539476b5e85"
+        }
+      },
+      "dedupe_key": "bot-validate:employee_6ae5ac62-2574-4abb-aa45-7c8cfe0532f9:2:bot-validate-employee_6ae5ac62-2574-4abb-aa45-7c8cfe0532f9-2-dfcdadae-e1d2-43ed-9d8d-fcbafa491ce3",
+      "created_at": "2026-10-13T09:11:10.543Z",
+      "acked_at": "2026-10-13T09:11:10.962Z",
+      "completed_at": "2026-10-13T09:11:13.817Z",
+      "result": {
+        "botValidation": {
+          "valid": false,
+          "schemaVersion": 1,
+          "employeeId": "employee_6ae5ac62-2574-4abb-aa45-7c8cfe0532f9",
+          "revision": 2,
+          "effective": {
+            "reasoning": {
+              "schemaVersion": 1,
+              "employeeId": "employee_6ae5ac62-2574-4abb-aa45-7c8cfe0532f9",
+              "revision": 2,
+              "provider": "custom:preview-local",
+              "model": "preview-local-model",
+              "requested": "max",
+              "effective": "max",
+              "actual": null,
+              "status": "unsupported",
+              "phase": "preflight",
+              "evidence": "native_codex_transport",
+              "actualModel": "preview-local-model",
+              "nativeActual": null,
+              "mode": "native"
+            }
+          }
+        },
+        "externalModelCalls": 0,
+        "executionSource": "local_test_provider"
+      },
+      "error": "原生实际推理等级与明确请求不一致；未启动模型",
+      "events": [
+        {
+          "id": "action-event_5a013ade12fb9c73b1dc21829741e601a7a78aadcbb1b6be3e9d78c586f6c783",
+          "action_id": "action_c81907dd-85bf-45d1-8103-2c617c11613e",
+          "type": "action.started",
+          "message": "",
+          "data": {
+            "actionId": "action_c81907dd-85bf-45d1-8103-2c617c11613e",
+            "type": "hermes.bot.validate"
+          },
+          "created_at": "2026-10-13T09:11:10.995Z"
+        },
+        {
+          "id": "action-event_33d7da776841df06c5cef717b3af5e0b62b5e31dad19dedd5833aeb0e326b236",
+          "action_id": "action_c81907dd-85bf-45d1-8103-2c617c11613e",
+          "type": "failed",
+          "message": "",
+          "data": {
+            "result": {
+              "botValidation": {
+                "valid": false,
+                "schemaVersion": 1,
+                "employeeId": "employee_6ae5ac62-2574-4abb-aa45-7c8cfe0532f9",
+                "revision": 2,
+                "effective": {
+                  "reasoning": {
+                    "schemaVersion": 1,
+                    "employeeId": "employee_6ae5ac62-2574-4abb-aa45-7c8cfe0532f9",
+                    "revision": 2,
+                    "provider": "custom:preview-local",
+                    "model": "preview-local-model",
+                    "requested": "max",
+                    "effective": "max",
+                    "actual": null,
+                    "status": "unsupported",
+                    "phase": "preflight",
+                    "evidence": "native_codex_transport",
+                    "actualModel": "preview-local-model",
+                    "nativeActual": null,
+                    "mode": "native"
+                  }
+                }
+              },
+              "externalModelCalls": 0,
+              "executionSource": "local_test_provider"
+            },
+            "error": "原生实际推理等级与明确请求不一致；未启动模型"
+          },
+          "created_at": "2026-10-13T09:11:13.690Z"
+        }
+      ]
+    },
+    "stop_action": null,
+    "capabilities": [
+      {
+        "id": "bot_identity",
+        "label": "Bot 身份与岗位",
+        "status": "requires_configuration",
+        "configurable": true,
+        "reason": "需保存配置并在目标电脑验证；执行成功由实际回执确认",
+        "evidence": [
+          "device_heartbeat:0.21.3",
+          "ziwei.bot.schema:1"
+        ]
+      },
+      {
+        "id": "persistent_chat",
+        "label": "持久主聊天",
+        "status": "requires_configuration",
+        "configurable": true,
+        "reason": "需保存配置并在目标电脑验证；执行成功由实际回执确认",
+        "evidence": [
+          "device_heartbeat:0.21.3",
+          "ziwei.bot.schema:1"
+        ]
+      },
+      {
+        "id": "profile_memory",
+        "label": "独立原生记忆",
+        "status": "requires_configuration",
+        "configurable": true,
+        "reason": "需保存配置并在目标电脑验证；执行成功由实际回执确认",
+        "evidence": [
+          "device_heartbeat:0.21.3",
+          "ziwei.bot.schema:1"
+        ]
+      },
+      {
+        "id": "model_provider",
+        "label": "模型与服务商",
+        "status": "requires_configuration",
+        "configurable": true,
+        "reason": "需保存配置并在目标电脑验证；执行成功由实际回执确认",
+        "evidence": [
+          "device_heartbeat:0.21.3",
+          "ziwei.bot.schema:1"
+        ]
+      },
+      {
+        "id": "skills",
+        "label": "技能",
+        "status": "requires_configuration",
+        "configurable": true,
+        "reason": "需保存配置并在目标电脑验证；执行成功由实际回执确认",
+        "evidence": [
+          "device_heartbeat:0.21.3",
+          "ziwei.bot.schema:1"
+        ]
+      },
+      {
+        "id": "tools_mcp",
+        "label": "工具与 MCP",
+        "status": "requires_configuration",
+        "configurable": true,
+        "reason": "需保存配置并在目标电脑验证；执行成功由实际回执确认",
+        "evidence": [
+          "device_heartbeat:0.21.3",
+          "ziwei.bot.schema:1"
+        ]
+      },
+      {
+        "id": "routines",
+        "label": "定时 Routine",
+        "status": "requires_configuration",
+        "configurable": true,
+        "reason": "需保存配置并在目标电脑验证；执行成功由实际回执确认",
+        "evidence": [
+          "device_heartbeat:0.21.3",
+          "ziwei.bot.schema:1"
+        ]
+      },
+      {
+        "id": "groups_mentions",
+        "label": "群聊与 @提及",
+        "status": "requires_configuration",
+        "configurable": true,
+        "reason": "需保存配置并在目标电脑验证；执行成功由实际回执确认",
+        "evidence": [
+          "device_heartbeat:0.21.3",
+          "ziwei.bot.schema:1"
+        ]
+      },
+      {
+        "id": "delegation",
+        "label": "Bot 委派",
+        "status": "requires_configuration",
+        "configurable": true,
+        "reason": "需保存配置并在目标电脑验证；执行成功由实际回执确认",
+        "evidence": [
+          "device_heartbeat:0.21.3",
+          "ziwei.bot.schema:1"
+        ]
+      },
+      {
+        "id": "gateway",
+        "label": "外部消息 Gateway",
+        "status": "requires_configuration",
+        "configurable": true,
+        "reason": "需保存配置并在目标电脑验证；执行成功由实际回执确认",
+        "evidence": [
+          "device_heartbeat:0.21.3",
+          "ziwei.bot.schema:1"
+        ]
+      },
+      {
+        "id": "voice",
+        "label": "语音",
+        "status": "requires_configuration",
+        "configurable": true,
+        "reason": "需保存配置并在目标电脑验证；执行成功由实际回执确认",
+        "evidence": [
+          "device_heartbeat:0.21.3",
+          "ziwei.bot.schema:1"
+        ]
+      },
+      {
+        "id": "multimodal",
+        "label": "多模态",
+        "status": "requires_configuration",
+        "configurable": true,
+        "reason": "需保存配置并在目标电脑验证；执行成功由实际回执确认",
+        "evidence": [
+          "device_heartbeat:0.21.3",
+          "ziwei.bot.schema:1"
+        ]
+      },
+      {
+        "id": "session_search",
+        "label": "会话检索",
+        "status": "requires_configuration",
+        "configurable": true,
+        "reason": "需保存配置并在目标电脑验证；执行成功由实际回执确认",
+        "evidence": [
+          "device_heartbeat:0.21.3",
+          "ziwei.bot.schema:1"
+        ]
+      },
+      {
+        "id": "goals",
+        "label": "Goals",
+        "status": "requires_configuration",
+        "configurable": true,
+        "reason": "需保存配置并在目标电脑验证；执行成功由实际回执确认",
+        "evidence": [
+          "device_heartbeat:0.21.3",
+          "ziwei.bot.schema:1"
+        ]
+      },
+      {
+        "id": "heartbeat",
+        "label": "Heartbeat",
+        "status": "requires_configuration",
+        "configurable": true,
+        "reason": "需保存配置并在目标电脑验证；执行成功由实际回执确认",
+        "evidence": [
+          "device_heartbeat:0.21.3",
+          "ziwei.bot.schema:1"
+        ]
+      },
+      {
+        "id": "kanban",
+        "label": "Kanban",
+        "status": "requires_configuration",
+        "configurable": true,
+        "reason": "需保存配置并在目标电脑验证；执行成功由实际回执确认",
+        "evidence": [
+          "device_heartbeat:0.21.3",
+          "ziwei.bot.schema:1"
+        ]
+      },
+      {
+        "id": "observability",
+        "label": "运行记录",
+        "status": "requires_configuration",
+        "configurable": true,
+        "reason": "需保存配置并在目标电脑验证；执行成功由实际回执确认",
+        "evidence": [
+          "device_heartbeat:0.21.3",
+          "ziwei.bot.schema:1"
+        ]
+      }
+    ],
+    "effect": {
+      "savedRevision": 3,
+      "validatedRevision": null,
+      "scope": "next_execution",
+      "pendingReason": "目标电脑尚未验证本版本"
+    }
+  },
+  "state": {
+    "mode": "owned_profile",
+    "profile": "bot-3d2b9626d2c375841c473e35",
+    "templateProfile": "default",
+    "home": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-3d2b9626d2c375841c473e35",
+    "provisioned": true,
+    "canValidate": true,
+    "canRecover": false,
+    "modelReady": false,
+    "authentication": "configured",
+    "actionId": "action_a204e229-f1e5-416d-bd56-4c82d76b56b7",
+    "error": "",
+    "stage": "provisioned",
+    "label": "专属 Profile 已创建",
+    "issues": []
+  },
+  "discoveredProfile": {
+    "name": "bot-3d2b9626d2c375841c473e35",
+    "configured": true,
+    "valid": true,
+    "owned_profile": true,
+    "initialization_source": false,
+    "hasSoul": true,
+    "provider_configured": true,
+    "authentication_configured": true,
+    "readiness": {
+      "authentication": "configured",
+      "provider": "configured",
+      "ready": true
+    }
+  },
+  "ownedAsTemplate": false,
+  "templateIssues": [
+    "另一个 Bot 的专属 Profile 不能作为初始化来源。"
+  ],
+  "team": {
+    "id": "employee_6ae5ac62-2574-4abb-aa45-7c8cfe0532f9",
+    "workspace_id": "ws_e63e1bee-7004-494e-a16c-39960539a8f0",
+    "owner_user_id": "user_55744a3e-12cc-4477-8f09-e7e65cf30dcb",
+    "name": "Q01 Final reasoning 20261013",
+    "runtime": "Hermes",
+    "model_id": null,
+    "description": "",
+    "visibility": "personal",
+    "skills_json": "[]",
+    "instructions": "",
+    "runtime_profile": "bot-3d2b9626d2c375841c473e35",
+    "avatar": null,
+    "status": "draft",
+    "management_mcp_enabled": true,
+    "default_working_directory": null,
+    "default_working_directory_device_id": null,
+    "created_at": "2026-10-13T09:08:10.514Z",
+    "updated_at": "2026-10-13T09:12:48.864Z",
+    "persona": "",
+    "target_device_id": "device_f2b4263c-086b-41d2-842a-dc237b762420",
+    "skills": []
+  },
+  "chat": {
+    "id": "conv_3f9d57b8-1de6-4f1c-a563-7539476b5e85",
+    "workspace_id": "ws_e63e1bee-7004-494e-a16c-39960539a8f0",
+    "employee_id": "employee_6ae5ac62-2574-4abb-aa45-7c8cfe0532f9",
+    "title": "Q01 Final reasoning 20261013 · 主聊天",
+    "status": "active",
+    "model_id": null,
+    "working_directory": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home",
+    "device_id": "device_f2b4263c-086b-41d2-842a-dc237b762420",
+    "created_at": "2026-10-13T09:08:10.517Z",
+    "updated_at": "2026-10-13T09:08:10.517Z",
+    "employee": {
+      "id": "employee_6ae5ac62-2574-4abb-aa45-7c8cfe0532f9",
+      "name": "Q01 Final reasoning 20261013",
+      "avatar": "",
+      "runtime": "Hermes",
+      "runtime_name": "Hermes",
+      "model_id": null,
+      "runtime_profile": "bot-3d2b9626d2c375841c473e35",
+      "target_device_id": "device_f2b4263c-086b-41d2-842a-dc237b762420",
+      "default_working_directory": null,
+      "default_working_directory_device_id": null,
+      "status": "draft"
+    },
+    "employee_binding": "bound",
+    "requires_employee_assignment": false,
+    "execution": null,
+    "messages": []
+  },
+  "runs": [
+    {
+      "id": "action_c81907dd-85bf-45d1-8103-2c617c11613e",
+      "task_id": null,
+      "agent_id": "ziwei_user",
+      "type": "hermes.bot.validate",
+      "status": "failed",
+      "payload": {
+        "employeeId": "employee_6ae5ac62-2574-4abb-aa45-7c8cfe0532f9",
+        "runtime": "Hermes",
+        "model": null,
+        "profile": "bot-3d2b9626d2c375841c473e35",
+        "deviceId": "device_f2b4263c-086b-41d2-842a-dc237b762420",
+        "hermesBot": {
+          "schemaVersion": 1,
+          "employeeId": "employee_6ae5ac62-2574-4abb-aa45-7c8cfe0532f9",
+          "workspace": "preview-bots",
+          "revision": 2,
+          "controlEpoch": 2,
+          "config": {
+            "provider": null,
+            "toolsets": [],
+            "maxTurns": 20,
+            "memory": {
+              "enabled": true,
+              "userProfile": true
+            },
+            "skills": {
+              "disabled": []
+            },
+            "mcpServers": {},
+            "permissions": {
+              "mode": "read_only"
+            },
+            "reasoningEffort": "max"
+          },
+          "sourceProfile": "bot-3d2b9626d2c375841c473e35",
+          "instance": {
+            "mode": "owned_profile",
+            "profile": "bot-3d2b9626d2c375841c473e35",
+            "templateProfile": "default",
+            "ownershipId": "7692c6a2-a33e-4cde-b5db-6e691860a91d",
+            "provisionActionId": "action_a204e229-f1e5-416d-bd56-4c82d76b56b7"
+          },
+          "deviceId": "device_f2b4263c-086b-41d2-842a-dc237b762420",
+          "model": null,
+          "persona": "",
+          "instructions": "",
+          "description": "",
+          "name": "Q01 Final reasoning 20261013",
+          "conversationId": "conv_3f9d57b8-1de6-4f1c-a563-7539476b5e85"
+        }
+      },
+      "dedupe_key": "bot-validate:employee_6ae5ac62-2574-4abb-aa45-7c8cfe0532f9:2:bot-validate-employee_6ae5ac62-2574-4abb-aa45-7c8cfe0532f9-2-dfcdadae-e1d2-43ed-9d8d-fcbafa491ce3",
+      "created_at": "2026-10-13T09:11:10.543Z",
+      "acked_at": "2026-10-13T09:11:10.962Z",
+      "completed_at": "2026-10-13T09:11:13.817Z",
+      "result": {
+        "botValidation": {
+          "valid": false,
+          "schemaVersion": 1,
+          "employeeId": "employee_6ae5ac62-2574-4abb-aa45-7c8cfe0532f9",
+          "revision": 2,
+          "effective": {
+            "reasoning": {
+              "schemaVersion": 1,
+              "employeeId": "employee_6ae5ac62-2574-4abb-aa45-7c8cfe0532f9",
+              "revision": 2,
+              "provider": "custom:preview-local",
+              "model": "preview-local-model",
+              "requested": "max",
+              "effective": "max",
+              "actual": null,
+              "status": "unsupported",
+              "phase": "preflight",
+              "evidence": "native_codex_transport",
+              "actualModel": "preview-local-model",
+              "nativeActual": null,
+              "mode": "native"
+            }
+          }
+        },
+        "externalModelCalls": 0,
+        "executionSource": "local_test_provider"
+      },
+      "error": "原生实际推理等级与明确请求不一致；未启动模型",
+      "events": [
+        {
+          "id": "action-event_5a013ade12fb9c73b1dc21829741e601a7a78aadcbb1b6be3e9d78c586f6c783",
+          "action_id": "action_c81907dd-85bf-45d1-8103-2c617c11613e",
+          "type": "action.started",
+          "message": "",
+          "data": {
+            "actionId": "action_c81907dd-85bf-45d1-8103-2c617c11613e",
+            "type": "hermes.bot.validate"
+          },
+          "created_at": "2026-10-13T09:11:10.995Z"
+        },
+        {
+          "id": "action-event_33d7da776841df06c5cef717b3af5e0b62b5e31dad19dedd5833aeb0e326b236",
+          "action_id": "action_c81907dd-85bf-45d1-8103-2c617c11613e",
+          "type": "failed",
+          "message": "",
+          "data": {
+            "result": {
+              "botValidation": {
+                "valid": false,
+                "schemaVersion": 1,
+                "employeeId": "employee_6ae5ac62-2574-4abb-aa45-7c8cfe0532f9",
+                "revision": 2,
+                "effective": {
+                  "reasoning": {
+                    "schemaVersion": 1,
+                    "employeeId": "employee_6ae5ac62-2574-4abb-aa45-7c8cfe0532f9",
+                    "revision": 2,
+                    "provider": "custom:preview-local",
+                    "model": "preview-local-model",
+                    "requested": "max",
+                    "effective": "max",
+                    "actual": null,
+                    "status": "unsupported",
+                    "phase": "preflight",
+                    "evidence": "native_codex_transport",
+                    "actualModel": "preview-local-model",
+                    "nativeActual": null,
+                    "mode": "native"
+                  }
+                }
+              },
+              "externalModelCalls": 0,
+              "executionSource": "local_test_provider"
+            },
+            "error": "原生实际推理等级与明确请求不一致；未启动模型"
+          },
+          "created_at": "2026-10-13T09:11:13.690Z"
+        }
+      ]
+    },
+    {
+      "id": "action_a204e229-f1e5-416d-bd56-4c82d76b56b7",
+      "task_id": null,
+      "agent_id": "ziwei_user",
+      "type": "hermes.bot.provision",
+      "status": "succeeded",
+      "payload": {
+        "employeeId": "employee_6ae5ac62-2574-4abb-aa45-7c8cfe0532f9",
+        "runtime": "Hermes",
+        "model": null,
+        "profile": "bot-3d2b9626d2c375841c473e35",
+        "deviceId": "device_f2b4263c-086b-41d2-842a-dc237b762420",
+        "hermesBot": {
+          "schemaVersion": 1,
+          "employeeId": "employee_6ae5ac62-2574-4abb-aa45-7c8cfe0532f9",
+          "workspace": "preview-bots",
+          "revision": 1,
+          "controlEpoch": 1,
+          "config": {
+            "provider": null,
+            "toolsets": [],
+            "maxTurns": 20,
+            "memory": {
+              "enabled": true,
+              "userProfile": true
+            },
+            "skills": {
+              "disabled": []
+            },
+            "mcpServers": {},
+            "permissions": {
+              "mode": "read_only"
+            }
+          },
+          "sourceProfile": "bot-3d2b9626d2c375841c473e35",
+          "instance": {
+            "mode": "owned_profile",
+            "profile": "bot-3d2b9626d2c375841c473e35",
+            "templateProfile": "default",
+            "ownershipId": "7692c6a2-a33e-4cde-b5db-6e691860a91d",
+            "provisionActionId": "action_a204e229-f1e5-416d-bd56-4c82d76b56b7"
+          },
+          "deviceId": "device_f2b4263c-086b-41d2-842a-dc237b762420",
+          "model": null,
+          "persona": "",
+          "instructions": "",
+          "description": "",
+          "name": "Q01 Final reasoning 20261013",
+          "conversationId": "conv_3f9d57b8-1de6-4f1c-a563-7539476b5e85"
+        }
+      },
+      "dedupe_key": "bot-provision:employee_6ae5ac62-2574-4abb-aa45-7c8cfe0532f9:initial",
+      "created_at": "2026-10-13T09:08:10.518Z",
+      "acked_at": "2026-10-13T09:08:10.922Z",
+      "completed_at": "2026-10-13T09:08:14.039Z",
+      "result": {
+        "botProvision": {
+          "schemaVersion": 1,
+          "mode": "owned_profile",
+          "workspace": "preview-bots",
+          "employeeId": "employee_6ae5ac62-2574-4abb-aa45-7c8cfe0532f9",
+          "deviceId": "device_f2b4263c-086b-41d2-842a-dc237b762420",
+          "ownershipId": "7692c6a2-a33e-4cde-b5db-6e691860a91d",
+          "profile": "bot-3d2b9626d2c375841c473e35",
+          "home": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-3d2b9626d2c375841c473e35",
+          "profileHome": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-3d2b9626d2c375841c473e35",
+          "nativeVersion": "0.21.3",
+          "authentication": "configured",
+          "authMode": "source-native-store",
+          "templateProfile": "default",
+          "duplicate": false,
+          "provisionActionId": "action_a204e229-f1e5-416d-bd56-4c82d76b56b7"
+        },
+        "processExit": {
+          "platform": "win32",
+          "supervisor": "windows-job",
+          "launched": true,
+          "rootPid": 31892,
+          "rootConfirmed": true,
+          "rootExitCode": 0,
+          "treeConfirmed": true,
+          "activeProcesses": 0,
+          "cancelled": false,
+          "failureCode": null,
+          "hostExitCode": 0,
+          "streamsComplete": true,
+          "hostSignal": null
+        },
+        "executionSource": "local_test_provider"
+      },
+      "error": null,
+      "events": [
+        {
+          "id": "action-event_23f266b91f9f3d000ebf755da77ad257b4f904fcb69a7ee0bb9a5b34ceef02e0",
+          "action_id": "action_a204e229-f1e5-416d-bd56-4c82d76b56b7",
+          "type": "action.started",
+          "message": "",
+          "data": {
+            "actionId": "action_a204e229-f1e5-416d-bd56-4c82d76b56b7",
+            "type": "hermes.bot.provision"
+          },
+          "created_at": "2026-10-13T09:08:12.801Z"
+        },
+        {
+          "id": "action-event_1b0bca9b102e16556c3b8a2fffdcb173aa4ff1f855eba38f2254bf4f698e3260",
+          "action_id": "action_a204e229-f1e5-416d-bd56-4c82d76b56b7",
+          "type": "succeeded",
+          "message": "",
+          "data": {
+            "result": {
+              "botProvision": {
+                "schemaVersion": 1,
+                "mode": "owned_profile",
+                "workspace": "preview-bots",
+                "employeeId": "employee_6ae5ac62-2574-4abb-aa45-7c8cfe0532f9",
+                "deviceId": "device_f2b4263c-086b-41d2-842a-dc237b762420",
+                "ownershipId": "7692c6a2-a33e-4cde-b5db-6e691860a91d",
+                "profile": "bot-3d2b9626d2c375841c473e35",
+                "home": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-3d2b9626d2c375841c473e35",
+                "profileHome": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-3d2b9626d2c375841c473e35",
+                "nativeVersion": "0.21.3",
+                "authentication": "configured",
+                "authMode": "source-native-store",
+                "templateProfile": "default",
+                "duplicate": false,
+                "provisionActionId": "action_a204e229-f1e5-416d-bd56-4c82d76b56b7"
+              },
+              "processExit": {
+                "platform": "win32",
+                "supervisor": "windows-job",
+                "launched": true,
+                "rootPid": 31892,
+                "rootConfirmed": true,
+                "rootExitCode": 0,
+                "treeConfirmed": true,
+                "activeProcesses": 0,
+                "cancelled": false,
+                "failureCode": null,
+                "hostExitCode": 0,
+                "streamsComplete": true,
+                "hostSignal": null
+              },
+              "executionSource": "local_test_provider"
+            },
+            "error": null
+          },
+          "created_at": "2026-10-13T09:08:13.874Z"
+        }
+      ]
+    }
+  ],
+  "health": {
+    "ok": true,
+    "preview": true,
+    "fixtureDevices": true,
+    "realHermes": true,
+    "hermesInstalled": true,
+    "nativeExecutionVerified": true,
+    "localTestProvider": true,
+    "nativeVersion": "0.21.3",
+    "schedulerEnabled": false,
+    "pid": 16872,
+    "database": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\data\\preview.sqlite",
+    "runtimeHome": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home"
+  }
+}

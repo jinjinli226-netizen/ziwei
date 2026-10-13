@@ -1,0 +1,112 @@
+[
+  {
+    "name": "desktop standalone main chat",
+    "state": {
+      "bot": "employee_6ae5ac62-2574-4abb-aa45-7c8cfe0532f9",
+      "conversation": "conv_3f9d57b8-1de6-4f1c-a563-7539476b5e85",
+      "globalHeader": 0,
+      "globalNavigation": 0,
+      "text": "Q\nQ01 Final reasoning 20261013\n已完成\n· 主聊天\n本地预览\nBot 设置\n工作面板\n\n同一位伙伴，同一条长期对话\n\nQ01 final local UI verification: one bounded synthetic reply\n\n17:16\nQ\n\n【本机原生 Hermes · 本地测试 provider】已完成这个隔离回合。此回复验证同一 Bot 的原生执行与结果回传；没有连接外部模型或业务账号。\n\n17:16\n已完成\n8 个阶段\n沿用 Profile 模型\n本机原生隔离预览 · 本地测试 provider\nruntime-home\n\nEnter 发送 · Shift + Enter 换行\n图片合计最多 10 MB；Hermes 每条支持一张。\n\n工作面板\n刷新实际记录\n关联任务\n0\n\n这位 Bot 暂无关联任务。\n\n查看工作区任务\n会话附件\n0\n\n附件会随真实消息显示在这里。\n\n例行工作\n0\n\n尚未设置例行工作。\n\n管理例行工作\n最近运行\n数字伙伴已完成\n17:15\n数字伙伴已完成\n17:13\n执行失败\n17:11\n数字伙伴已完成\n17:08\n运行与控制",
+      "width": 1280
+    }
+  },
+  {
+    "name": "390px standalone chat",
+    "state": {
+      "bot": "employee_6ae5ac62-2574-4abb-aa45-7c8cfe0532f9",
+      "conversation": "conv_3f9d57b8-1de6-4f1c-a563-7539476b5e85",
+      "globalNavigation": 0,
+      "innerWidth": 390,
+      "overflow": [],
+      "rootWidth": 390
+    }
+  },
+  {
+    "name": "mobile refresh restores reply and same IDs",
+    "state": {
+      "bot": "employee_6ae5ac62-2574-4abb-aa45-7c8cfe0532f9",
+      "conversation": "conv_3f9d57b8-1de6-4f1c-a563-7539476b5e85",
+      "globalNavigation": 0,
+      "hasReply": true,
+      "mainChat": 1,
+      "url": "http://127.0.0.1:5283/preview-bots/inbox/conv_3f9d57b8-1de6-4f1c-a563-7539476b5e85?employee=employee_6ae5ac62-2574-4abb-aa45-7c8cfe0532f9&bot=employee_6ae5ac62-2574-4abb-aa45-7c8cfe0532f9"
+    }
+  },
+  {
+    "name": "return restores global navigation",
+    "state": {
+      "bot": null,
+      "conversation": null,
+      "globalNavigation": 1,
+      "hasReply": false,
+      "mainChat": 0,
+      "url": "http://127.0.0.1:5283/preview-bots/bots/employee_6ae5ac62-2574-4abb-aa45-7c8cfe0532f9?section=chat"
+    }
+  },
+  {
+    "name": "browser back restores full-page chat",
+    "state": {
+      "bot": "employee_6ae5ac62-2574-4abb-aa45-7c8cfe0532f9",
+      "conversation": "conv_3f9d57b8-1de6-4f1c-a563-7539476b5e85",
+      "globalNavigation": 0,
+      "hasReply": true,
+      "mainChat": 1,
+      "url": "http://127.0.0.1:5283/preview-bots/inbox/conv_3f9d57b8-1de6-4f1c-a563-7539476b5e85?employee=employee_6ae5ac62-2574-4abb-aa45-7c8cfe0532f9&bot=employee_6ae5ac62-2574-4abb-aa45-7c8cfe0532f9"
+    }
+  },
+  {
+    "name": "browser forward restores Bot settings",
+    "state": {
+      "bot": null,
+      "conversation": null,
+      "globalNavigation": 1,
+      "hasReply": false,
+      "mainChat": 0,
+      "url": "http://127.0.0.1:5283/preview-bots/bots/employee_6ae5ac62-2574-4abb-aa45-7c8cfe0532f9?section=chat"
+    }
+  },
+  {
+    "name": "second chat entry opens original conversation",
+    "state": {
+      "bot": "employee_6ae5ac62-2574-4abb-aa45-7c8cfe0532f9",
+      "conversation": "conv_3f9d57b8-1de6-4f1c-a563-7539476b5e85",
+      "globalNavigation": 0,
+      "hasReply": true,
+      "mainChat": 1,
+      "url": "http://127.0.0.1:5283/preview-bots/inbox/conv_3f9d57b8-1de6-4f1c-a563-7539476b5e85?employee=employee_6ae5ac62-2574-4abb-aa45-7c8cfe0532f9&bot=employee_6ae5ac62-2574-4abb-aa45-7c8cfe0532f9"
+    }
+  },
+  {
+    "name": "team Bot settings returns original employee",
+    "state": {
+      "bot": null,
+      "conversation": null,
+      "globalNavigation": 1,
+      "hasReply": false,
+      "mainChat": 0,
+      "url": "http://127.0.0.1:5283/preview-bots/bots/employee_6ae5ac62-2574-4abb-aa45-7c8cfe0532f9?section=settings"
+    }
+  },
+  {
+    "name": "ordinary Inbox observed after direct route",
+    "state": {
+      "bot": "employee_6ae5ac62-2574-4abb-aa45-7c8cfe0532f9",
+      "conversation": "conv_3f9d57b8-1de6-4f1c-a563-7539476b5e85",
+      "globalNavigation": 0,
+      "hasReply": true,
+      "mainChat": 1,
+      "url": "http://127.0.0.1:5283/preview-bots/inbox/conv_3f9d57b8-1de6-4f1c-a563-7539476b5e85"
+    }
+  },
+  {
+    "name": "ordinary Inbox list keeps global navigation",
+    "state": {
+      "bot": null,
+      "conversation": null,
+      "globalNavigation": 1,
+      "hasReply": false,
+      "mainChat": 0,
+      "url": "http://127.0.0.1:5283/preview-bots/inbox"
+    }
+  }
+]

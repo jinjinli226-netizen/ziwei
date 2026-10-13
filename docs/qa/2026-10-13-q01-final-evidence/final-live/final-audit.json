@@ -1,0 +1,115 @@
+{
+  "at": "2026-10-13T09:22:54.725Z",
+  "status": "passed",
+  "checks": [
+    {
+      "name": "real owned Profile discovery is accepted and cannot be an initialization template",
+      "passed": true
+    },
+    {
+      "name": "UI max survives actual API save/readback on the same identity",
+      "passed": true
+    },
+    {
+      "name": "unsupported local provider max is honestly rejected with no model call or activation",
+      "passed": true
+    },
+    {
+      "name": "unspecified removes the config field and revalidation applies only to the saved revision",
+      "passed": true
+    },
+    {
+      "name": "configuration change expires validation, rejects direct activation, and blocked Enter has no action/message",
+      "passed": true
+    },
+    {
+      "name": "current-version activation and one native local reply use the confirmed same HOME and fully exit",
+      "passed": true
+    },
+    {
+      "name": "Bot and team share employee ID, named Profile and main conversation throughout saves and navigation",
+      "passed": true
+    },
+    {
+      "name": "390px chat has no inner overflow and settings/menu/input boxes stay within the viewport",
+      "passed": true
+    },
+    {
+      "name": "refresh, return, back/forward and both chat entries preserve the route/chrome contract",
+      "passed": true
+    },
+    {
+      "name": "exact temporary employee cleanup preserves the original roster, account and 1205 HOME files",
+      "passed": true
+    }
+  ],
+  "sourceSha": "a70f05e078d29d104daf5db1f47a7cff17f40b53",
+  "productCandidate": "5643d5d36c3cd85d74ab849c77f52b6f69555093",
+  "allProductAndVerificationFilesMatch": true,
+  "realCloudBackendAndRuntimeUnchanged": true,
+  "installedTrackedCodeFiles": 6685,
+  "installedCodeChanged": [],
+  "sourceAuthHashes": {
+    "config.yaml": {
+      "expected": "08ee45a2367a405f4f01abb7009ac79ff249e5c9f4f2509b3659c75eab83765f",
+      "current": "08ee45a2367a405f4f01abb7009ac79ff249e5c9f4f2509b3659c75eab83765f",
+      "unchanged": true
+    },
+    ".env": {
+      "expected": "014c4de1df255682e895ed0c1d0c82bad512e5aba7bd46f65704e543a2efb24c",
+      "current": "014c4de1df255682e895ed0c1d0c82bad512e5aba7bd46f65704e543a2efb24c",
+      "unchanged": true
+    },
+    "auth.json": {
+      "expected": "57c06a0c9b9868c8d18b2c0f1dfdbfddd9581393c43dc0a18da973b6cd63fc04",
+      "current": "57c06a0c9b9868c8d18b2c0f1dfdbfddd9581393c43dc0a18da973b6cd63fc04",
+      "unchanged": true
+    }
+  },
+  "cleanup": "employee_6ae5ac62-2574-4abb-aa45-7c8cfe0532f9",
+  "previewCheckpoint": {
+    "safe": true,
+    "frontendHTTP": 200,
+    "unfinished": [],
+    "preview": {
+      "phase": "ready",
+      "instance": "2026-10-13T08-44-22-675Z-8436",
+      "supervisorPid": 8436,
+      "backendPid": 16872,
+      "frontendPid": 54484,
+      "apiPort": 4283,
+      "frontendPort": 5283,
+      "url": "http://127.0.0.1:5283/preview-bots/bots",
+      "startedAt": "2026-10-13T08:44:22.759Z",
+      "launchMode": "windows-independent",
+      "candidate": "5643d5d36c3cd85d74ab849c77f52b6f69555093",
+      "root": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-bot-reasoning\\灵光爸爸拆解",
+      "stateRoot": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview",
+      "database": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\data\\preview.sqlite",
+      "runtimeHome": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home",
+      "fixtureDevices": true,
+      "realHermes": true,
+      "localTestProvider": true,
+      "log": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\logs\\supervisor-2026-10-13T08-44-22-675Z-8436.jsonl",
+      "readyAt": "2026-10-13T08:44:37.745Z"
+    },
+    "health": {
+      "ok": true,
+      "preview": true,
+      "fixtureDevices": true,
+      "realHermes": true,
+      "hermesInstalled": true,
+      "nativeExecutionVerified": true,
+      "localTestProvider": true,
+      "nativeVersion": "0.21.3",
+      "schedulerEnabled": false,
+      "pid": 16872,
+      "database": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\data\\preview.sqlite",
+      "runtimeHome": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home"
+    }
+  },
+  "rawCloudHarnessStatus": "failed",
+  "rawCloudAccountingFailurePreserved": true,
+  "cloudRerun": false,
+  "scope": "independent local final integration UI/control acceptance; real cloud execution separately preserved and related through identical backend/runtime bytes"
+}

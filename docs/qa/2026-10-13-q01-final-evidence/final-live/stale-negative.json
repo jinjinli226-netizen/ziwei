@@ -1,0 +1,17 @@
+{
+  "at": "2026-10-13T09:13:07.987Z",
+  "revision": 3,
+  "validation": {
+    "status": "stale",
+    "action_id": "action_c81907dd-85bf-45d1-8103-2c617c11613e",
+    "revision": 2,
+    "error": "原生实际推理等级与明确请求不一致；未启动模型"
+  },
+  "rejected": {
+    "status": 409,
+    "value": {
+      "error": "先验证当前配置，再明确启用",
+      "code": "BOT_NOT_VALIDATED"
+    }
+  }
+}
