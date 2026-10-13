@@ -14,11 +14,11 @@ const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 const inside=(root,value)=>{const relative=path.relative(path.resolve(root),path.resolve(value));return relative!==''&&relative!=='..'&&!relative.startsWith(`..${path.sep}`)&&!path.isAbsolute(relative);};
 function scope(spec){const root=path.resolve(spec.isolatedRoot||''),marker=JSON.parse(fs.readFileSync(path.join(root,'preservation-rehearsal.json'),'utf8'));if(marker.purpose!=='ziwei-data-preserving-rehearsal'||!inside(root,spec.database))throw new Error('Apply requires an owned rehearsal root and its existing DB');for(const client of spec.clients||[])for(const value of [client.root,client.configPath,client.userHome].filter(Boolean))if(!inside(root,value))throw new Error('Client path is outside isolated rehearsal root');return root;}
 const productionFailure=code=>{throw Object.assign(new Error(code),{code});};
-async function productionRun({command,apply,spec},{trust,proofProvider,backupProof,packageRoot}={}){
+async function productionRun({command,apply,spec},{trust,proofProvider,backupProof,packageRoot,legacyActionPolicy=null}={}){
   if(!['inspect','prepare','seal','restore','abort'].includes(command))productionFailure('PRODUCTION_COMMAND_INVALID');
   if(!trust||typeof trust!=='object'||Array.isArray(trust))productionFailure('PRODUCTION_INDEPENDENT_TRUST_REQUIRED');
   const {runProductionPreservation}=await import('../backend/production-preservation.mjs');
-  return runProductionPreservation({command,apply,spec,trust,...(proofProvider?{proofProvider}:{}),...(backupProof?{backupProof}:{}),...(packageRoot?{packageRoot}:{})});
+  return runProductionPreservation({command,apply,spec,trust,...(proofProvider?{proofProvider}:{}),...(backupProof?{backupProof}:{}),...(packageRoot?{packageRoot}:{})},{legacyActionPolicy});
 }
 export async function runPreservation({command='inspect',apply=false,...spec}={},productionInputs={}) {
   // Production uses its immutable typed spec and independently supplied trust.
@@ -60,7 +60,8 @@ async function main(){
     if(fs.realpathSync.native(trustPath)===fs.realpathSync.native(specPath))productionFailure('PRODUCTION_INDEPENDENT_TRUST_REQUIRED');
     const trust=JSON.parse(fs.readFileSync(trustPath,'utf8'));
     // Preserve the complete raw production spec for its strict field validator.
-    result=await productionRun({command,apply,spec},{trust});
+    const{loadPrivateLegacyGuardPolicy}=await import('../backend/preservation-legacy-integration.mjs');
+    result=await productionRun({command,apply,spec},{trust,legacyActionPolicy:loadPrivateLegacyGuardPolicy()});
   }else result=await runPreservation({...spec,command,apply});
   console.log(JSON.stringify(result,null,2));
 }

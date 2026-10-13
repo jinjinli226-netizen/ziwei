@@ -8,6 +8,7 @@ import * as nativeEvidence from '../backend/preservation-native-evidence.mjs';
 import {scanOwnedNativeDatabases,nativeActionDigest,attestNativeVersion} from '../backend/preservation-native-databases.mjs';
 import {clientBuildIdentity} from '../src/management-bootstrap.mjs';
 import {observePreservationSourceNamespace} from '../backend/preservation-source-namespace.mjs';
+import {loadApprovedLegacySource} from '../backend/preservation-legacy-integration.mjs';
 
 const fail=code=>{throw Object.assign(new Error(code),{code});};
 const sha=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
@@ -120,7 +121,9 @@ export function collectProductionSourceProof({request,trust,previous=null,observ
  const scoped=sourceScopeRecords.get(observations);
  if(scoped){files.push(...scoped.files);directories.push(...scoped.directories);connections.push(...scoped.connections.filter(row=>!connections.some(existing=>equal(existing,row))));}
  const homes=(scoped?.homes||payload.homes).map(scope=>({...scope,...attestNativeVersion(scope,actions)}));
- const scanned=scanFiles({connections,actions,homes,productionRequest:payload});
+ const legacy=loadApprovedLegacySource({binding:payload.binding,requestBinding:Object.fromEntries(['operationId','specHash','freezeDigest','challenge'].map(key=>[key,payload[key]]))});
+ files.push(...legacy.files);
+ const scanned=scanFiles({connections,actions,homes,productionRequest:payload},{legacySource:legacy.legacySource});
  const native=scanDatabases({homes,actions,gatewayInbox:payload.gatewayInbox,gatewayExits:scanned.gatewayExits,operationId:payload.operationId});
  // Source hosts cannot borrow another host's legacy assessment. The product
  // performs the global semantic/debt check after every host proof verifies.
@@ -172,7 +175,8 @@ export function collectProductionSourceProof({request,trust,previous=null,observ
  }
  recheckRecords({files,directories});
  const after=observe(payload.binding,payload);if(!equal(observations,after))issues.push({code:'SOURCE_PROCESS_OBSERVATION_CHANGED'});
- const result={domain:payload.kind==='collect'?'ziwei-production-collect-proof-v1':'ziwei-production-recheck-proof-v1',schemaVersion:1,kind:payload.kind,command:payload.command,collector:payload.collector,challenge:payload.challenge,issuedAt:payload.issuedAt,expiresAt:payload.expiresAt,operationId:payload.operationId,specHash:payload.specHash,databaseIdentity:payload.databaseIdentity,freezeDigest:payload.freezeDigest,bindingDigest:digestProduction(payload.binding),actionProjectionDigest:digestProduction(payload.actionProjection),gatewayInboxDigest:digestProduction(payload.gatewayInbox),homesDigest:digestProduction(payload.homes),installedDigest:digestProduction(payload.installed),priorEvidenceDigest:payload.priorEvidenceDigest,observations,files,directories,nativeDatabases:native.nativeDatabases,nativeStateProofs:[...native.nativeStateProofs,...(scoped?.proofs||[]),...(scanned.originalActionProofs||[]).map(proof=>{const stable=JSON.parse(canonicalProduction(proof));delete stable.challenge;return stable;})],gatewayInboxProofs:native.gatewayInboxProofs,actionBindings:actions.map(row=>({id:row.id,digest:nativeActionDigest(row)})),issues,safe:issues.length===0,evidenceDigest:null,runtimeProofs:[]};
+ const uniqueFiles=[];for(const file of files){const prior=uniqueFiles.find(row=>row.path===file.path);if(prior){if(!equal(prior,file))issues.push({code:'SOURCE_DUPLICATE_FILE_CONFLICT'});}else uniqueFiles.push(file);}
+ const result={domain:payload.kind==='collect'?'ziwei-production-collect-proof-v1':'ziwei-production-recheck-proof-v1',schemaVersion:1,kind:payload.kind,command:payload.command,collector:payload.collector,challenge:payload.challenge,issuedAt:payload.issuedAt,expiresAt:payload.expiresAt,operationId:payload.operationId,specHash:payload.specHash,databaseIdentity:payload.databaseIdentity,freezeDigest:payload.freezeDigest,bindingDigest:digestProduction(payload.binding),actionProjectionDigest:digestProduction(payload.actionProjection),gatewayInboxDigest:digestProduction(payload.gatewayInbox),homesDigest:digestProduction(payload.homes),installedDigest:digestProduction(payload.installed),priorEvidenceDigest:payload.priorEvidenceDigest,observations,files:uniqueFiles,directories,nativeDatabases:native.nativeDatabases,nativeStateProofs:[...native.nativeStateProofs,...(scoped?.proofs||[]),...(scanned.originalActionProofs||[]).map(proof=>{const stable=JSON.parse(canonicalProduction(proof));delete stable.challenge;return stable;})],gatewayInboxProofs:native.gatewayInboxProofs,actionBindings:actions.map(row=>({id:row.id,digest:nativeActionDigest(row)})),issues,safe:issues.length===0,evidenceDigest:null,runtimeProofs:[]};
  result.evidenceDigest=productionEvidenceDigest(result);
  if(prior&&result.evidenceDigest!==prior.evidenceDigest)fail('SOURCE_EVIDENCE_CHANGED');
  validateProductionFreshness(payload);

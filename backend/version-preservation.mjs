@@ -38,7 +38,7 @@ export function gatewayResultMatches(action,result){const p=parse(action.payload
 
 const legacyProofKind='legacy-never-dispatched-v1';
 const legacyPolicyPins=['actionId','actionDigest','hostId','workspaceId','deviceId','origin','specHash','authorizationDigest','historicalGenerationDigest','policyDigest','sourceDigest','cacheDigest','loggerDigest'];
-function copyLegacyActionPolicy(value){
+export function copyLegacyActionPolicy(value){
   if(value===null)return null;
   const invalid=()=>fail('ROLLBACK_LEGACY_POLICY_INVALID','旧 action 策略必须由独立代码提供完整固定绑定');
   const plain=(item,keys)=>item&&typeof item==='object'&&!Array.isArray(item)&&[Object.prototype,null].includes(Object.getPrototypeOf(item))&&Reflect.ownKeys(item).length===keys.length&&keys.every(key=>Object.hasOwn(item,key)&&Object.hasOwn(Object.getOwnPropertyDescriptor(item,key),'value'));

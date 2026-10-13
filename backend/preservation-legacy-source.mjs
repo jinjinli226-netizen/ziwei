@@ -39,10 +39,10 @@ function validateState(state, scope) {
   }
 }
 function readLocal(file) {
-  const stat = fs.lstatSync(file);
-  require(stat.isFile() && !stat.isSymbolicLink() && stat.nlink === 1 && stat.size <= 8 * 1024 * 1024 && samePath(fs.realpathSync.native(file), file));
+  const stat = fs.lstatSync(file,{bigint:true});
+  require(stat.isFile() && !stat.isSymbolicLink() && stat.nlink === 1n && stat.size <= 8n * 1024n * 1024n && samePath(fs.realpathSync.native(file), file));
   const bytes = fs.readFileSync(file);
-  const after = fs.lstatSync(file); require(stat.dev === after.dev && stat.ino === after.ino && stat.size === after.size && stat.mtimeMs === after.mtimeMs);
+  const after = fs.lstatSync(file,{bigint:true}); require(stat.dev === after.dev && stat.ino === after.ino && stat.size === after.size && stat.mtimeNs === after.mtimeNs);
   return {bytes, identity: {dev: String(stat.dev), ino: String(stat.ino)}};
 }
 

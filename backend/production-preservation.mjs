@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import {types} from 'node:util';
 import {DatabaseSync} from 'node:sqlite';
 import {fileURLToPath} from 'node:url';
-import {createPreservation,FROZEN_VERSIONS,PRODUCT_ROLE,digest,uncertain,exitedTree} from './version-preservation.mjs';
+import {createPreservation,FROZEN_VERSIONS,PRODUCT_ROLE,digest,uncertain,exitedTree,copyLegacyActionPolicy} from './version-preservation.mjs';
 import {readDatabaseSnapshot,nativeActionDigest} from './preservation-native-databases.mjs';
 import {verifyPreservationPackages} from '../scripts/verify-preservation-packages.mjs';
 import {validateNativeSourceRefs,namespaceCaptureFile,verifyRuntimeCaptureEnvelope} from './preservation-source-namespace.mjs';
@@ -308,7 +308,7 @@ function validateObservations(payload,binding,manifest){
   for(const original of expected){const target=original.installTargets.v2,kind=original.configPath?'client':'api',matched=running.instances.filter(row=>row.kind===kind&&row.bindingDigest===digestProduction(original)&&row.targetDigest===digestProduction(target)&&row.root===target.root&&row.entryPath===target.entryPath&&row.running===true&&row.productRole==='v2'&&row.buildDigest===target.buildDigest&&Number.isSafeInteger(row.pid)&&row.pid>0&&hex(row.nonceDigest)&&row.nonceDigest!==original.originalInstance.nonceDigest&&newerInstance(original.originalInstance,row));if(matched.length!==1)fail('PRODUCTION_RESTORE_RUNNING_V2_REQUIRED');}
  }else if(observations.runningV2!==undefined)fail('PRODUCTION_SOURCE_NOT_STOPPED');
 }
-export function verifySourceProofs(envelopes,requests,trust,manifest){
+export function verifySourceProofs(envelopes,requests,trust,manifest,legacyActionPolicy=null){
  if(!Array.isArray(envelopes)||envelopes.length!==requests.length)fail('PRODUCTION_HOST_COVERAGE');
  unique(envelopes.map(row=>row.hostId),'PRODUCTION_HOST_COVERAGE');
  const records=[],apiTargets=requests.flatMap(request=>request.payload.command==='restore'?request.payload.installed.targets.filter(row=>row.kind==='api').map(target=>({hostId:request.hostId,target})):[]),apiRuntime=[];
@@ -336,7 +336,14 @@ export function verifySourceProofs(envelopes,requests,trust,manifest){
   const hostActions=productionHostActions(source.binding,source.actionProjection);
   if(payload.actionBindings.length!==hostActions.length||new Set(payload.actionBindings.map(row=>row.id)).size!==payload.actionBindings.length)fail('PRODUCTION_ACTION_COVERAGE');
   for(const action of hostActions)if(!payload.actionBindings.some(row=>row.id===action.id&&row.digest===nativeActionDigest(action)))fail('PRODUCTION_ACTION_COVERAGE');
-  for(const proof of payload.nativeStateProofs.filter(row=>row.kind==='legacy-never-dispatched-v1'))if(proof.hostId!==source.binding.hostId||proof.operationId!==source.operationId||proof.specHash!==source.specHash||proof.verified!==true||!hostActions.some(action=>action.id===proof.actionId&&nativeActionDigest(action)===proof.actionDigest))fail('PRODUCTION_ACTION_COVERAGE');
+  for(const proof of payload.nativeStateProofs.filter(row=>row.kind==='legacy-never-dispatched-v1')){
+   const policy=legacyActionPolicy;
+   const keys=['schemaVersion','kind','actionId','actionDigest','operationId','specHash','freezeDigest','hostId','workspaceId','workspace','deviceId','origin','authorizationDigest','historicalGenerationDigest','policyDigest','sourceDigest','cacheDigest','loggerDigest','artifactDigest','conclusion','verified'];
+   const action=hostActions.find(row=>row.id===proof.actionId);
+   if(Object.keys(proof).length!==keys.length||keys.some(key=>!Object.hasOwn(proof,key))||!action||action.status!=='expired'||!action.acked_at||action.result_json!==''||!source.actionProjection.tables.workspaces.rows.some(row=>row.id===proof.workspaceId&&row.slug===proof.workspace)||!source.targetOrigins.includes(proof.origin))fail('PRODUCTION_ACTION_COVERAGE');
+   if(!policy||proof.schemaVersion!==1||proof.hostId!==source.binding.hostId||proof.operationId!==source.operationId||proof.specHash!==source.specHash||proof.freezeDigest!==source.freezeDigest||proof.verified!==true||proof.conclusion!=='never-dispatched'||uncertain(proof)||!hex(proof.artifactDigest)||Object.entries(policy).filter(([key])=>key!=='requiredFiles').some(([key,value])=>proof[key]!==value)||!hostActions.some(action=>action.id===proof.actionId&&nativeActionDigest(action)===proof.actionDigest))fail('PRODUCTION_ACTION_COVERAGE');
+   for(const required of policy.requiredFiles)if(payload.files.filter(file=>file.path===required.path&&file.exists===true&&file.sha256===required.sha256).length!==1)fail('PRODUCTION_ACTION_COVERAGE');
+  }
   if(source.command==='restore'&&[...source.binding.clients,...source.binding.apiInstances].length){
    if(!refs.some(ref=>ref.kind==='runtime-identity-directory-v1')||payload.runtimeProofs.length!==1)fail('PRODUCTION_RESTORE_RUNNING_V2_REQUIRED');
    const runtime=verifyRuntimeCaptureEnvelope({envelope:payload.runtimeProofs[0],trust,request:source});
@@ -346,6 +353,8 @@ export function verifySourceProofs(envelopes,requests,trust,manifest){
   for(const database of payload.nativeDatabases)for(const suffix of ['','-wal','-journal','-shm'])if(!payload.files.some(row=>row.path===database.path+suffix))fail('PRODUCTION_DATABASE_COVERAGE');
   records.push({hostId:envelope.hostId,payload});
  }
+ const legacyProofs=records.flatMap(row=>row.payload.nativeStateProofs.filter(proof=>proof.kind==='legacy-never-dispatched-v1'));
+ if(legacyActionPolicy&&legacyProofs.length!==1||!legacyActionPolicy&&legacyProofs.length)fail('PRODUCTION_ACTION_COVERAGE');
  if(apiRuntime.length!==apiTargets.length)fail('PRODUCTION_RESTORE_API_REQUIRED');
  for(const {hostId,target} of apiTargets)if(apiRuntime.filter(row=>row.hostId===hostId&&row.sample.bindingDigest===target.bindingDigest&&row.sample.targetDigest===target.targetDigest).length!==1)fail('PRODUCTION_RESTORE_API_REQUIRED');
  return records;
@@ -372,10 +381,12 @@ function verifyBackup(envelope,validated,freezeDigest){
  return payload;
 }
 /** Every await is before creating a writable DB/guard. Hooks are synchronous. */
-export async function runProductionPreservation(input){
+export async function runProductionPreservation(input,{legacyActionPolicy=null}={}){
  const {command='inspect',apply=false,spec,trust,proofProvider,backupProof,packageRoot}=argumentsObject(input,['command','apply','spec','trust','proofProvider','backupProof','packageRoot']);
  if(!['inspect','prepare','seal','restore','abort'].includes(command)||typeof apply!=='boolean')fail('PRODUCTION_COMMAND_INVALID');
  const validated=validateProductionSpec({spec,trust,...(packageRoot!==undefined?{packageRoot}:{})}),pinned=validated.spec;
+ const legacyPolicy=copyLegacyActionPolicy(legacyActionPolicy);
+ if(legacyPolicy&&(legacyPolicy.specHash!==pinned.specHash||!pinned.hosts.some(host=>host.hostId===legacyPolicy.hostId&&host.workspaceIds.includes(legacyPolicy.workspaceId)&&host.deviceIds.includes(legacyPolicy.deviceId))))fail('PRODUCTION_ACTION_COVERAGE');
  if(!pinned.authorization.allowedCommands.includes(command))fail('PRODUCTION_COMMAND_NOT_AUTHORIZED');
  const initial=readDatabaseSnapshot(pinned.database.path,db=>({projection:readProductionProjection(db),control:controlState(db),receipt:storedReceipt(db,pinned,command)}));
  if(initial.control.operationId&&initial.control.operationId!==pinned.operationId&&initial.control.state!=='restored')fail('PRODUCTION_OPERATION_CONFLICT');
@@ -389,12 +400,12 @@ export async function runProductionPreservation(input){
  const collectRequests=requestsFor(validated,command,'collect',initial.projection,freezeDigest,null,initial.control);
  const context={operationId:pinned.operationId,specHash:pinned.specHash,databaseIdentity:validated.databaseIdentity,freezeDigest,requiredHosts:pinned.hosts.map(row=>row.hostId)};
  const envelopes=copy(await proofProvider.collect({...copy(context),requests:copy(collectRequests),priorEvidenceDigest:null}));
- const collected=verifySourceProofs(envelopes,collectRequests,validated.trust,validated.manifest),priorEvidenceDigest=digestProduction(envelopes);
+ const collected=verifySourceProofs(envelopes,collectRequests,validated.trust,validated.manifest,legacyPolicy),priorEvidenceDigest=digestProduction(envelopes);
  if(productionSemanticIssues(initial.projection,collected.flatMap(row=>row.payload.nativeStateProofs)).length)fail('PRODUCTION_ORIGINAL_DEBT');
  for(const action of initial.projection.tables.a2a_actions.rows)if(!collected.some(row=>row.payload.actionBindings.some(binding=>binding.id===action.id&&binding.digest===nativeActionDigest(action))))fail('PRODUCTION_ACTION_COVERAGE');
  const recheckRequests=requestsFor(validated,command,'recheck',initial.projection,freezeDigest,priorEvidenceDigest,initial.control);
  const fresh=copy(await proofProvider.recheck({...copy(context),requests:copy(recheckRequests),previous:copy(envelopes),priorEvidenceDigest}));
- const rechecked=verifySourceProofs(fresh,recheckRequests,validated.trust,validated.manifest);
+ const rechecked=verifySourceProofs(fresh,recheckRequests,validated.trust,validated.manifest,legacyPolicy);
  for(const original of collected){const latest=rechecked.find(row=>row.hostId===original.hostId);if(!latest||latest.payload.evidenceDigest!==original.payload.evidenceDigest)fail('PRODUCTION_SOURCE_CHANGED');}
  const backup=command==='seal'?verifyBackup(backupProof||await proofProvider.backup?.({...copy(context),scope:copy(pinned.backupScope)}),validated,freezeDigest):null;
  const projectionDigest=digestProduction(initial.projection);
@@ -403,8 +414,8 @@ export async function runProductionPreservation(input){
  verifyStagedPackage(pinned,validated.root);
  productionDatabaseIdentity(pinned.database);
  if(readDatabaseSnapshot(pinned.database.path,db=>digestProduction(readProductionProjection(db)))!==projectionDigest)fail('PRODUCTION_PROJECTION_CHANGED');
- const trustedRecords=new WeakSet(),native={safe:true,issues:[],operationId:pinned.operationId,files:[],directories:[],nativeDatabases:[],nativeStateProofs:[],gatewayInboxProofs:[],actionBindings:[]};
- for(const {payload} of rechecked)for(const key of ['files','directories','nativeDatabases','nativeStateProofs','gatewayInboxProofs','actionBindings'])for(const record of payload[key]){if(['files','directories'].includes(key))trustedRecords.add(record);if(key==='actionBindings'&&native[key].some(row=>row.id===record.id)){if(!native[key].some(row=>equal(row,record)))fail('PRODUCTION_ACTION_COVERAGE');}else native[key].push(record);}
+ const trustedRecords=new WeakMap(),native={safe:true,issues:[],operationId:pinned.operationId,files:[],directories:[],nativeDatabases:[],nativeStateProofs:[],gatewayInboxProofs:[],actionBindings:[]};
+ for(const {payload} of rechecked)for(const key of ['files','directories','nativeDatabases','nativeStateProofs','gatewayInboxProofs','actionBindings'])for(const record of payload[key]){if(key==='files')trustedRecords.set(record,'file');else if(key==='directories')trustedRecords.set(record,'directory');else if(key==='nativeStateProofs'&&legacyPolicy&&record.kind==='legacy-never-dispatched-v1')trustedRecords.set(record,record.kind);if(key==='actionBindings'&&native[key].some(row=>row.id===record.id)){if(!native[key].some(row=>equal(row,record)))fail('PRODUCTION_ACTION_COVERAGE');}else native[key].push(record);}
  const db=new DatabaseSync(pinned.database.path);let committed,receiptWrite=false;
  try{
   db.exec('PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON');
@@ -417,8 +428,9 @@ export async function runProductionPreservation(input){
   db.exec('CREATE TABLE IF NOT EXISTS production_preservation_identity(singleton INTEGER PRIMARY KEY CHECK(singleton=1),database_id TEXT NOT NULL,file_identity_json TEXT NOT NULL); CREATE TABLE IF NOT EXISTS production_preservation_receipts(operation_id TEXT NOT NULL,command TEXT NOT NULL,spec_hash TEXT NOT NULL,receipt_json TEXT NOT NULL,PRIMARY KEY(operation_id,command));');
   for(const table of ['production_preservation_identity','production_preservation_receipts'])for(const event of ['INSERT','UPDATE','DELETE'])db.exec("CREATE TRIGGER IF NOT EXISTS "+table+'_'+event.toLowerCase()+" BEFORE "+event+" ON "+table+" WHEN ziwei_production_receipt_write_admitted()=0 BEGIN SELECT RAISE(ABORT,'PRODUCTION_RECEIPT_PRIVATE'); END");
   const guard=createPreservation(db,{
+   legacyActionPolicy:legacyPolicy,
    collectNativeEvidence:()=>{const row=db.prepare('SELECT * FROM version_preservation WHERE singleton=1').get();return {...native,intentDigest:digest(row.intent_json),versionsDigest:digest(row.versions_json)};},
-   verifySourceRecord:({record})=>trustedRecords.has(record)?true:undefined,
+   verifySourceRecord:({kind,record})=>trustedRecords.get(record)===kind?true:undefined,
    beforeCommit:()=>{productionDatabaseIdentity(pinned.database);storedReceipt(db,pinned,command);if(digestProduction(readProductionProjection(db))!==projectionDigest)fail('PRODUCTION_PROJECTION_CHANGED');for(const request of recheckRequests)validateProductionFreshness(request.payload);if(backup)validateProductionFreshness(backup);},
    persistReceipt:({row,report})=>{
     committed={mode:'applied',command,operationId:pinned.operationId,specHash:pinned.specHash,databaseId:pinned.database.databaseId,databaseIdentity:validated.databaseIdentity,role:validated.role,state:row.state,freezeDigest,projectionDigest,intentDigest:digest(row.intent_json),snapshotDigest:row.snapshot_json?digest(row.snapshot_json):null,evidenceDigest:digestProduction(fresh),backupDigest:backup?digestProduction(backup):null,report:copy(report)};
