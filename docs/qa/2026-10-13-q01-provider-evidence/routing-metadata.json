@@ -1,0 +1,41 @@
+{
+  "kind": "read-only routing metadata; no network and no credentials printed",
+  "routing": [
+    {
+      "name": "HTTP_PROXY",
+      "configured": true,
+      "origin": "http://127.0.0.1:7890",
+      "hasCredentials": false,
+      "source": "source dotenv"
+    },
+    {
+      "name": "HTTPS_PROXY",
+      "configured": true,
+      "origin": "http://127.0.0.1:7890",
+      "hasCredentials": false,
+      "source": "source dotenv"
+    },
+    {
+      "name": "ALL_PROXY",
+      "configured": false
+    },
+    {
+      "name": "http_proxy",
+      "configured": false
+    },
+    {
+      "name": "https_proxy",
+      "configured": false
+    },
+    {
+      "name": "all_proxy",
+      "configured": false
+    },
+    {
+      "name": "HERMES_CODEX_BASE_URL",
+      "configured": false
+    }
+  ],
+  "probeUsedProxy": false,
+  "priorProbeServiceResult": "unknown-timeout-no-replay"
+}

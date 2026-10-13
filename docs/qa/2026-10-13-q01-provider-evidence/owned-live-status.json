@@ -1,0 +1,513 @@
+{
+  "at": "2026-10-13T07:45:43.522Z",
+  "candidate": "4594d1b9bd5f1790cd206c54766d43fbf0912c9c",
+  "bot": {
+    "id": "employee_f284b789-b6e2-4fc3-9c79-910f5cf63a91",
+    "employee_id": "employee_f284b789-b6e2-4fc3-9c79-910f5cf63a91",
+    "workspace": "preview-bots",
+    "employee": {
+      "id": "employee_f284b789-b6e2-4fc3-9c79-910f5cf63a91",
+      "workspace_id": "ws_e63e1bee-7004-494e-a16c-39960539a8f0",
+      "owner_user_id": "user_55744a3e-12cc-4477-8f09-e7e65cf30dcb",
+      "name": "Q01 Owned A 20261013",
+      "runtime": "Hermes",
+      "model_id": null,
+      "description": "",
+      "visibility": "personal",
+      "skills_json": "[]",
+      "instructions": "",
+      "runtime_profile": "bot-d75966a6811644b7647cd4ee",
+      "avatar": null,
+      "status": "draft",
+      "management_mcp_enabled": true,
+      "default_working_directory": null,
+      "default_working_directory_device_id": null,
+      "created_at": "2026-10-13T07:43:50.102Z",
+      "updated_at": "2026-10-13T07:43:50.102Z",
+      "persona": "",
+      "target_device_id": "device_f2b4263c-086b-41d2-842a-dc237b762420",
+      "skills": []
+    },
+    "instance": {
+      "mode": "owned_profile",
+      "profile": "bot-d75966a6811644b7647cd4ee",
+      "templateProfile": "default",
+      "ownershipId": "13d5c562-cea8-4bd9-b560-a24d62fd8212",
+      "provisionActionId": "action_d5540447-6266-4c86-8691-57217f791bbf",
+      "authMode": "source-native-store",
+      "home": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-d75966a6811644b7647cd4ee",
+      "provisioning": {
+        "actionId": "action_d5540447-6266-4c86-8691-57217f791bbf",
+        "status": "provisioned",
+        "authentication": "configured",
+        "error": null
+      }
+    },
+    "configuration_state": "initialized",
+    "kind": "employee",
+    "config": {
+      "provider": null,
+      "toolsets": [],
+      "maxTurns": 20,
+      "memory": {
+        "enabled": true,
+        "userProfile": true
+      },
+      "skills": {
+        "disabled": []
+      },
+      "mcpServers": {},
+      "permissions": {
+        "mode": "read_only"
+      }
+    },
+    "revision": 1,
+    "control_state": "draft",
+    "control_epoch": 1,
+    "main_conversation_id": "conv_c9f7b627-e11a-4406-9d3c-561ed70a5654",
+    "nativeResources": {},
+    "scheduler_authority": "ziwei",
+    "validation": {
+      "status": "not_checked",
+      "action_id": null,
+      "revision": null,
+      "error": null
+    },
+    "latest_run": {
+      "id": "action_d5540447-6266-4c86-8691-57217f791bbf",
+      "task_id": null,
+      "agent_id": "ziwei_user",
+      "type": "hermes.bot.provision",
+      "status": "succeeded",
+      "payload": {
+        "employeeId": "employee_f284b789-b6e2-4fc3-9c79-910f5cf63a91",
+        "runtime": "Hermes",
+        "model": null,
+        "profile": "bot-d75966a6811644b7647cd4ee",
+        "deviceId": "device_f2b4263c-086b-41d2-842a-dc237b762420",
+        "hermesBot": {
+          "schemaVersion": 1,
+          "employeeId": "employee_f284b789-b6e2-4fc3-9c79-910f5cf63a91",
+          "workspace": "preview-bots",
+          "revision": 1,
+          "controlEpoch": 1,
+          "config": {
+            "provider": null,
+            "toolsets": [],
+            "maxTurns": 20,
+            "memory": {
+              "enabled": true,
+              "userProfile": true
+            },
+            "skills": {
+              "disabled": []
+            },
+            "mcpServers": {},
+            "permissions": {
+              "mode": "read_only"
+            }
+          },
+          "sourceProfile": "bot-d75966a6811644b7647cd4ee",
+          "instance": {
+            "mode": "owned_profile",
+            "profile": "bot-d75966a6811644b7647cd4ee",
+            "templateProfile": "default",
+            "ownershipId": "13d5c562-cea8-4bd9-b560-a24d62fd8212",
+            "provisionActionId": "action_d5540447-6266-4c86-8691-57217f791bbf"
+          },
+          "deviceId": "device_f2b4263c-086b-41d2-842a-dc237b762420",
+          "model": null,
+          "persona": "",
+          "instructions": "",
+          "description": "",
+          "name": "Q01 Owned A 20261013",
+          "conversationId": "conv_c9f7b627-e11a-4406-9d3c-561ed70a5654"
+        }
+      },
+      "dedupe_key": "bot-provision:employee_f284b789-b6e2-4fc3-9c79-910f5cf63a91:initial",
+      "created_at": "2026-10-13T07:43:50.105Z",
+      "acked_at": "2026-10-13T07:43:50.425Z",
+      "completed_at": "2026-10-13T07:43:53.665Z",
+      "result": {
+        "botProvision": {
+          "schemaVersion": 1,
+          "mode": "owned_profile",
+          "workspace": "preview-bots",
+          "employeeId": "employee_f284b789-b6e2-4fc3-9c79-910f5cf63a91",
+          "deviceId": "device_f2b4263c-086b-41d2-842a-dc237b762420",
+          "ownershipId": "13d5c562-cea8-4bd9-b560-a24d62fd8212",
+          "profile": "bot-d75966a6811644b7647cd4ee",
+          "home": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-d75966a6811644b7647cd4ee",
+          "profileHome": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-d75966a6811644b7647cd4ee",
+          "nativeVersion": "0.21.3",
+          "authentication": "configured",
+          "authMode": "source-native-store",
+          "templateProfile": "default",
+          "duplicate": false,
+          "provisionActionId": "action_d5540447-6266-4c86-8691-57217f791bbf"
+        },
+        "processExit": {
+          "platform": "win32",
+          "supervisor": "windows-job",
+          "launched": true,
+          "rootPid": 38488,
+          "rootConfirmed": true,
+          "rootExitCode": 0,
+          "treeConfirmed": true,
+          "activeProcesses": 0,
+          "cancelled": false,
+          "failureCode": null,
+          "hostExitCode": 0,
+          "streamsComplete": true,
+          "hostSignal": null
+        },
+        "executionSource": "local_test_provider"
+      },
+      "error": null,
+      "events": [
+        {
+          "id": "action-event_b1bf375be4d5c2e155481e3851c4143cbf07da3c32244f98a3600f88852ddfd6",
+          "action_id": "action_d5540447-6266-4c86-8691-57217f791bbf",
+          "type": "action.started",
+          "message": "",
+          "data": {
+            "actionId": "action_d5540447-6266-4c86-8691-57217f791bbf",
+            "type": "hermes.bot.provision"
+          },
+          "created_at": "2026-10-13T07:43:52.375Z"
+        },
+        {
+          "id": "action-event_644f792adc5ee9ce8c4039d33f2da6d3a653a28d195db336c8455870245884a0",
+          "action_id": "action_d5540447-6266-4c86-8691-57217f791bbf",
+          "type": "succeeded",
+          "message": "",
+          "data": {
+            "result": {
+              "botProvision": {
+                "schemaVersion": 1,
+                "mode": "owned_profile",
+                "workspace": "preview-bots",
+                "employeeId": "employee_f284b789-b6e2-4fc3-9c79-910f5cf63a91",
+                "deviceId": "device_f2b4263c-086b-41d2-842a-dc237b762420",
+                "ownershipId": "13d5c562-cea8-4bd9-b560-a24d62fd8212",
+                "profile": "bot-d75966a6811644b7647cd4ee",
+                "home": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-d75966a6811644b7647cd4ee",
+                "profileHome": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-d75966a6811644b7647cd4ee",
+                "nativeVersion": "0.21.3",
+                "authentication": "configured",
+                "authMode": "source-native-store",
+                "templateProfile": "default",
+                "duplicate": false,
+                "provisionActionId": "action_d5540447-6266-4c86-8691-57217f791bbf"
+              },
+              "processExit": {
+                "platform": "win32",
+                "supervisor": "windows-job",
+                "launched": true,
+                "rootPid": 38488,
+                "rootConfirmed": true,
+                "rootExitCode": 0,
+                "treeConfirmed": true,
+                "activeProcesses": 0,
+                "cancelled": false,
+                "failureCode": null,
+                "hostExitCode": 0,
+                "streamsComplete": true,
+                "hostSignal": null
+              },
+              "executionSource": "local_test_provider"
+            },
+            "error": null
+          },
+          "created_at": "2026-10-13T07:43:53.501Z"
+        }
+      ]
+    },
+    "stop_action": null,
+    "capabilities": [
+      {
+        "id": "bot_identity",
+        "label": "Bot 身份与岗位",
+        "status": "requires_configuration",
+        "configurable": true,
+        "reason": "需保存配置并在目标电脑验证；执行成功由实际回执确认",
+        "evidence": [
+          "device_heartbeat:0.21.3",
+          "ziwei.bot.schema:1"
+        ]
+      },
+      {
+        "id": "persistent_chat",
+        "label": "持久主聊天",
+        "status": "requires_configuration",
+        "configurable": true,
+        "reason": "需保存配置并在目标电脑验证；执行成功由实际回执确认",
+        "evidence": [
+          "device_heartbeat:0.21.3",
+          "ziwei.bot.schema:1"
+        ]
+      },
+      {
+        "id": "profile_memory",
+        "label": "独立原生记忆",
+        "status": "requires_configuration",
+        "configurable": true,
+        "reason": "需保存配置并在目标电脑验证；执行成功由实际回执确认",
+        "evidence": [
+          "device_heartbeat:0.21.3",
+          "ziwei.bot.schema:1"
+        ]
+      },
+      {
+        "id": "model_provider",
+        "label": "模型与服务商",
+        "status": "requires_configuration",
+        "configurable": true,
+        "reason": "需保存配置并在目标电脑验证；执行成功由实际回执确认",
+        "evidence": [
+          "device_heartbeat:0.21.3",
+          "ziwei.bot.schema:1"
+        ]
+      },
+      {
+        "id": "skills",
+        "label": "技能",
+        "status": "requires_configuration",
+        "configurable": true,
+        "reason": "需保存配置并在目标电脑验证；执行成功由实际回执确认",
+        "evidence": [
+          "device_heartbeat:0.21.3",
+          "ziwei.bot.schema:1"
+        ]
+      },
+      {
+        "id": "tools_mcp",
+        "label": "工具与 MCP",
+        "status": "requires_configuration",
+        "configurable": true,
+        "reason": "需保存配置并在目标电脑验证；执行成功由实际回执确认",
+        "evidence": [
+          "device_heartbeat:0.21.3",
+          "ziwei.bot.schema:1"
+        ]
+      },
+      {
+        "id": "routines",
+        "label": "定时 Routine",
+        "status": "requires_configuration",
+        "configurable": true,
+        "reason": "需保存配置并在目标电脑验证；执行成功由实际回执确认",
+        "evidence": [
+          "device_heartbeat:0.21.3",
+          "ziwei.bot.schema:1"
+        ]
+      },
+      {
+        "id": "groups_mentions",
+        "label": "群聊与 @提及",
+        "status": "requires_configuration",
+        "configurable": true,
+        "reason": "需保存配置并在目标电脑验证；执行成功由实际回执确认",
+        "evidence": [
+          "device_heartbeat:0.21.3",
+          "ziwei.bot.schema:1"
+        ]
+      },
+      {
+        "id": "delegation",
+        "label": "Bot 委派",
+        "status": "requires_configuration",
+        "configurable": true,
+        "reason": "需保存配置并在目标电脑验证；执行成功由实际回执确认",
+        "evidence": [
+          "device_heartbeat:0.21.3",
+          "ziwei.bot.schema:1"
+        ]
+      },
+      {
+        "id": "gateway",
+        "label": "外部消息 Gateway",
+        "status": "requires_configuration",
+        "configurable": true,
+        "reason": "需保存配置并在目标电脑验证；执行成功由实际回执确认",
+        "evidence": [
+          "device_heartbeat:0.21.3",
+          "ziwei.bot.schema:1"
+        ]
+      },
+      {
+        "id": "voice",
+        "label": "语音",
+        "status": "requires_configuration",
+        "configurable": true,
+        "reason": "需保存配置并在目标电脑验证；执行成功由实际回执确认",
+        "evidence": [
+          "device_heartbeat:0.21.3",
+          "ziwei.bot.schema:1"
+        ]
+      },
+      {
+        "id": "multimodal",
+        "label": "多模态",
+        "status": "requires_configuration",
+        "configurable": true,
+        "reason": "需保存配置并在目标电脑验证；执行成功由实际回执确认",
+        "evidence": [
+          "device_heartbeat:0.21.3",
+          "ziwei.bot.schema:1"
+        ]
+      },
+      {
+        "id": "session_search",
+        "label": "会话检索",
+        "status": "requires_configuration",
+        "configurable": true,
+        "reason": "需保存配置并在目标电脑验证；执行成功由实际回执确认",
+        "evidence": [
+          "device_heartbeat:0.21.3",
+          "ziwei.bot.schema:1"
+        ]
+      },
+      {
+        "id": "goals",
+        "label": "Goals",
+        "status": "requires_configuration",
+        "configurable": true,
+        "reason": "需保存配置并在目标电脑验证；执行成功由实际回执确认",
+        "evidence": [
+          "device_heartbeat:0.21.3",
+          "ziwei.bot.schema:1"
+        ]
+      },
+      {
+        "id": "heartbeat",
+        "label": "Heartbeat",
+        "status": "requires_configuration",
+        "configurable": true,
+        "reason": "需保存配置并在目标电脑验证；执行成功由实际回执确认",
+        "evidence": [
+          "device_heartbeat:0.21.3",
+          "ziwei.bot.schema:1"
+        ]
+      },
+      {
+        "id": "kanban",
+        "label": "Kanban",
+        "status": "requires_configuration",
+        "configurable": true,
+        "reason": "需保存配置并在目标电脑验证；执行成功由实际回执确认",
+        "evidence": [
+          "device_heartbeat:0.21.3",
+          "ziwei.bot.schema:1"
+        ]
+      },
+      {
+        "id": "observability",
+        "label": "运行记录",
+        "status": "requires_configuration",
+        "configurable": true,
+        "reason": "需保存配置并在目标电脑验证；执行成功由实际回执确认",
+        "evidence": [
+          "device_heartbeat:0.21.3",
+          "ziwei.bot.schema:1"
+        ]
+      }
+    ],
+    "effect": {
+      "savedRevision": 1,
+      "validatedRevision": null,
+      "scope": "next_execution",
+      "pendingReason": "目标电脑尚未验证本版本"
+    }
+  },
+  "actualDiscoveredProfile": {
+    "name": "bot-d75966a6811644b7647cd4ee",
+    "configured": true,
+    "valid": true,
+    "owned_profile": true,
+    "initialization_source": false,
+    "hasSoul": true,
+    "provider_configured": true,
+    "authentication_configured": true,
+    "readiness": {
+      "authentication": "configured",
+      "provider": "configured",
+      "ready": true
+    }
+  },
+  "computedStatus": {
+    "mode": "owned_profile",
+    "profile": "bot-d75966a6811644b7647cd4ee",
+    "templateProfile": "default",
+    "home": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-d75966a6811644b7647cd4ee",
+    "provisioned": true,
+    "canValidate": true,
+    "canRecover": false,
+    "modelReady": false,
+    "authentication": "configured",
+    "actionId": "action_d5540447-6266-4c86-8691-57217f791bbf",
+    "error": "",
+    "stage": "discovery_pending",
+    "label": "专属 Profile 已创建 · 等待设备发现",
+    "issues": [
+      "另一个 Bot 的专属 Profile 不能作为初始化来源。"
+    ]
+  },
+  "actions": [
+    {
+      "id": "action_d5540447-6266-4c86-8691-57217f791bbf",
+      "type": "hermes.bot.provision",
+      "status": "succeeded",
+      "result": {
+        "botProvision": {
+          "schemaVersion": 1,
+          "mode": "owned_profile",
+          "workspace": "preview-bots",
+          "employeeId": "employee_f284b789-b6e2-4fc3-9c79-910f5cf63a91",
+          "deviceId": "device_f2b4263c-086b-41d2-842a-dc237b762420",
+          "ownershipId": "13d5c562-cea8-4bd9-b560-a24d62fd8212",
+          "profile": "bot-d75966a6811644b7647cd4ee",
+          "home": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-d75966a6811644b7647cd4ee",
+          "profileHome": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-d75966a6811644b7647cd4ee",
+          "nativeVersion": "0.21.3",
+          "authentication": "configured",
+          "authMode": "source-native-store",
+          "templateProfile": "default",
+          "duplicate": false,
+          "provisionActionId": "action_d5540447-6266-4c86-8691-57217f791bbf"
+        },
+        "processExit": {
+          "platform": "win32",
+          "supervisor": "windows-job",
+          "launched": true,
+          "rootPid": 38488,
+          "rootConfirmed": true,
+          "rootExitCode": 0,
+          "treeConfirmed": true,
+          "activeProcesses": 0,
+          "cancelled": false,
+          "failureCode": null,
+          "hostExitCode": 0,
+          "streamsComplete": true,
+          "hostSignal": null
+        },
+        "executionSource": "local_test_provider"
+      },
+      "error": null
+    }
+  ],
+  "health": {
+    "ok": true,
+    "preview": true,
+    "fixtureDevices": true,
+    "realHermes": true,
+    "hermesInstalled": true,
+    "nativeExecutionVerified": true,
+    "localTestProvider": true,
+    "nativeVersion": "0.21.3",
+    "schedulerEnabled": false,
+    "pid": 31840,
+    "database": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\data\\preview.sqlite",
+    "runtimeHome": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home"
+  }
+}

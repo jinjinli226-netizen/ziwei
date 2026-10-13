@@ -1,0 +1,88 @@
+{
+  "date": "2026-10-13T07:54:28.450Z",
+  "version": "0.21.3",
+  "sdkAvailable": {
+    "slack_sdk": false,
+    "slack_bolt": false,
+    "telegram": false,
+    "discord": false,
+    "dingtalk_stream": false,
+    "lark_oapi": true,
+    "aiohttp": true
+  },
+  "installedHead": "bbaf7af5c83546d19f8060f4097d3bb25cd1a3c3",
+  "installedSourceHashes": {
+    "gateway/platforms/base.py": "4a356394aa49f30ec5f5d4b36d99c430fe9fc8b58317b13edea64aac1d382e45",
+    "gateway/platforms/webhook.py": "6f9f4d5daa3c007723e8e9167c7fb583a02386eb5fb889d37e83abf3a826a6cc",
+    "plugins/platforms/slack/adapter.py": "9957c4d45ddec3c060378c29608b129958759bd76e71cfcb05f8615ba1a18c2f",
+    "plugins/platforms/telegram/adapter.py": "8779e398b0c2023747b49df79e7c59d843456d9994a3d35e9e4ca18569c866b5",
+    "plugins/platforms/discord/adapter.py": "3a7f1bbc7f810c5d02c88cec68117b97834919dce0dbb1aef8d758527a6e52f1",
+    "plugins/platforms/feishu/adapter.py": "1620636a328b8e7613c19e8094bf1b771ef0620f338dd107c20bea9da162db1d",
+    "plugins/platforms/dingtalk/adapter.py": "b5f87e222a47dedecfdefdf5a3a4018be7a60c202de848251d64520e1e972c4f",
+    "plugins/platforms/mattermost/adapter.py": "280fdf52ebedf241872bc9486257cef6c81333f807f3daaa4faa630307c405dd"
+  },
+  "installedTrackedStatusUnchanged": true,
+  "runs": [
+    {
+      "label": "receive-health",
+      "log": ".local/q01-receive-health-1791878046297/receive-health.log",
+      "processExit": {
+        "platform": "win32",
+        "supervisor": "windows-job",
+        "launched": true,
+        "rootPid": 34524,
+        "rootConfirmed": true,
+        "rootExitCode": 0,
+        "treeConfirmed": true,
+        "activeProcesses": 0,
+        "cancelled": false,
+        "failureCode": null,
+        "hostExitCode": 0,
+        "streamsComplete": true,
+        "hostSignal": null
+      },
+      "tests": 16
+    },
+    {
+      "label": "prior-native-regression",
+      "log": ".local/q01-receive-health-1791878046297/prior-native-regression.log",
+      "processExit": {
+        "platform": "win32",
+        "supervisor": "windows-job",
+        "launched": true,
+        "rootPid": 54612,
+        "rootConfirmed": true,
+        "rootExitCode": 0,
+        "treeConfirmed": true,
+        "activeProcesses": 0,
+        "cancelled": false,
+        "failureCode": null,
+        "hostExitCode": 0,
+        "streamsComplete": true,
+        "hostSignal": null
+      },
+      "tests": 9
+    },
+    {
+      "label": "native-manifest",
+      "log": ".local/q01-receive-health-1791878046297/native-manifest.log",
+      "processExit": {
+        "platform": "win32",
+        "supervisor": "windows-job",
+        "launched": true,
+        "rootPid": 38648,
+        "rootConfirmed": true,
+        "rootExitCode": 0,
+        "treeConfirmed": true,
+        "activeProcesses": 0,
+        "cancelled": false,
+        "failureCode": null,
+        "hostExitCode": 0,
+        "streamsComplete": true,
+        "hostSignal": null
+      }
+    }
+  ],
+  "network": "loopback sockets only; external connect and DNS blocked",
+  "boundary": "Actual installed adapters. Slack, Telegram, Discord and DingTalk SDK boundaries are controlled fixtures; Feishu uses installed SDK and a local WebSocket. No cloud account validation."
+}

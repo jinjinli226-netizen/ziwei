@@ -1,0 +1,127 @@
+{
+  "at": "2026-10-13T07:47:16.126501+00:00",
+  "modelRequests": 0,
+  "noCredentialsRead": true,
+  "results": [
+    {
+      "route": "direct",
+      "method": "HEAD",
+      "endpoint": "https://chatgpt.com/backend-api/codex/responses",
+      "authenticationSent": false,
+      "proxy": null,
+      "startedAt": "2026-10-13T07:46:46.422665+00:00",
+      "errorClass": "ConnectTimeout",
+      "causeClasses": [
+        "ConnectTimeout",
+        "ConnectTimeout",
+        "TimeoutError"
+      ],
+      "tlsAndResponseReceived": false,
+      "events": [
+        {
+          "event": "connection.connect_tcp.started",
+          "elapsedSeconds": 0.109
+        },
+        {
+          "event": "connection.connect_tcp.failed",
+          "elapsedSeconds": 24.14
+        }
+      ],
+      "durationSeconds": 24.14
+    },
+    {
+      "route": "existing-source-proxy",
+      "method": "HEAD",
+      "endpoint": "https://chatgpt.com/backend-api/codex/responses",
+      "authenticationSent": false,
+      "proxy": "http://127.0.0.1:7890",
+      "startedAt": "2026-10-13T07:47:10.561692+00:00",
+      "httpStatus": 405,
+      "requestId": null,
+      "tlsAndResponseReceived": true,
+      "events": [
+        {
+          "event": "connection.connect_tcp.started",
+          "elapsedSeconds": 0.031
+        },
+        {
+          "event": "connection.connect_tcp.complete",
+          "elapsedSeconds": 0.031
+        },
+        {
+          "event": "http11.send_request_headers.started",
+          "elapsedSeconds": 0.031
+        },
+        {
+          "event": "http11.send_request_headers.complete",
+          "elapsedSeconds": 0.031
+        },
+        {
+          "event": "http11.send_request_body.started",
+          "elapsedSeconds": 0.031
+        },
+        {
+          "event": "http11.send_request_body.complete",
+          "elapsedSeconds": 0.031
+        },
+        {
+          "event": "http11.receive_response_headers.started",
+          "elapsedSeconds": 0.031
+        },
+        {
+          "event": "http11.receive_response_headers.complete",
+          "elapsedSeconds": 0.031
+        },
+        {
+          "event": "proxy.start_tls.started",
+          "elapsedSeconds": 0.031
+        },
+        {
+          "event": "proxy.start_tls.complete",
+          "elapsedSeconds": 4.656
+        },
+        {
+          "event": "http11.send_request_headers.started",
+          "elapsedSeconds": 4.656
+        },
+        {
+          "event": "http11.send_request_headers.complete",
+          "elapsedSeconds": 4.656
+        },
+        {
+          "event": "http11.send_request_body.started",
+          "elapsedSeconds": 4.656
+        },
+        {
+          "event": "http11.send_request_body.complete",
+          "elapsedSeconds": 4.656
+        },
+        {
+          "event": "http11.receive_response_headers.started",
+          "elapsedSeconds": 4.656
+        },
+        {
+          "event": "http11.receive_response_headers.complete",
+          "elapsedSeconds": 5.563
+        },
+        {
+          "event": "http11.receive_response_body.started",
+          "elapsedSeconds": 5.563
+        },
+        {
+          "event": "http11.receive_response_body.complete",
+          "elapsedSeconds": 5.563
+        },
+        {
+          "event": "http11.response_closed.started",
+          "elapsedSeconds": 5.563
+        },
+        {
+          "event": "http11.response_closed.complete",
+          "elapsedSeconds": 5.563
+        }
+      ],
+      "durationSeconds": 5.563
+    }
+  ]
+}

@@ -1,0 +1,226 @@
+{
+  "kind": "installed-transport-and-sdk-capability-probe",
+  "probeId": "q01-max-proxy-bfd745ac-2933-4f95-be1c-9a91f4edfcaf",
+  "startedAt": "2026-10-13T07:58:13.783907+00:00",
+  "requestedModel": "gpt-6.1-sol",
+  "requestedEffort": "max",
+  "productExecutionAccepted": false,
+  "sdkRetries": 0,
+  "modelRequests": 1,
+  "refreshRequests": 0,
+  "loginRequests": 0,
+  "responseModel": "gpt-6.1-sol",
+  "requestId": null,
+  "responseId": "resp_06fad05399ddd6c1016acde4a00a448197835b2f019f3ee688",
+  "usage": {
+    "input_tokens": 37,
+    "input_tokens_details": {
+      "cached_tokens": 0,
+      "cache_write_tokens": 0
+    },
+    "output_tokens": 37,
+    "output_tokens_details": {
+      "reasoning_tokens": 24
+    },
+    "total_tokens": 74,
+    "attribution": {
+      "items": {
+        "msg_06fad05399ddd6c1016acde4a00b308197a962071741265942": {
+          "input_tokens": 14,
+          "cached_tokens": 0,
+          "cache_write_tokens": 0,
+          "output_tokens": 0,
+          "content": [
+            {
+              "input_tokens": 14,
+              "cached_tokens": 0,
+              "cache_write_tokens": 0,
+              "output_tokens": 0
+            }
+          ]
+        },
+        "msg_06fad05399ddd6c1016acde4a2eb3c819797ff9aea05741ffd": {
+          "input_tokens": 0,
+          "cached_tokens": 0,
+          "cache_write_tokens": 0,
+          "output_tokens": 13,
+          "content": [
+            {
+              "input_tokens": 0,
+              "cached_tokens": 0,
+              "cache_write_tokens": 0,
+              "output_tokens": 13
+            }
+          ]
+        },
+        "rs_06fad05399ddd6c1016acde4a267f88197b16dbb571b719b86": {
+          "input_tokens": 2,
+          "cached_tokens": 0,
+          "cache_write_tokens": 0,
+          "output_tokens": 24
+        }
+      },
+      "request_fields": {
+        "instructions": {
+          "input_tokens": 21,
+          "cached_tokens": 0,
+          "cache_write_tokens": 0,
+          "output_tokens": 0
+        }
+      }
+    }
+  },
+  "sourceHashesBefore": {
+    "config.yaml": "08ee45a2367a405f4f01abb7009ac79ff249e5c9f4f2509b3659c75eab83765f",
+    ".env": "014c4de1df255682e895ed0c1d0c82bad512e5aba7bd46f65704e543a2efb24c",
+    "auth.json": "57c06a0c9b9868c8d18b2c0f1dfdbfddd9581393c43dc0a18da973b6cd63fc04"
+  },
+  "installedBefore": {
+    "scope": "all tracked Python/JS/PowerShell code",
+    "trackedCodeFiles": 6685,
+    "manifestSha256": "36db265667b7be8cfca16a25157e906fa5928d873360a953d2a220f63de4119e"
+  },
+  "refreshBlockingVerified": true,
+  "endpoint": "https://chatgpt.com/backend-api/codex/responses",
+  "providerOrigin": "https://chatgpt.com",
+  "proxy": "http://127.0.0.1:7890",
+  "sourceProvider": "openai-codex",
+  "sourceConfiguredEffort": "ultra",
+  "nativeDeclaredEfforts": [
+    "none",
+    "low",
+    "medium",
+    "high",
+    "xhigh"
+  ],
+  "nativeUnmodifiedClamp": "xhigh",
+  "credentialSource": "installed native _read_codex_tokens singleton; credential pool not selected",
+  "localExpiryNotDue": true,
+  "oauthEndpointBlockingVerified": true,
+  "capabilityOnlyOverride": "transport request_overrides reasoning max; installed source unchanged",
+  "wireModel": "gpt-6.1-sol",
+  "wireReasoning": {
+    "effort": "max",
+    "summary": "auto"
+  },
+  "wireStream": true,
+  "wireToolsCount": 0,
+  "transportEvents": [
+    {
+      "event": "connection.connect_tcp.started",
+      "at": "2026-10-13T07:58:20.570611+00:00"
+    },
+    {
+      "event": "connection.connect_tcp.complete",
+      "at": "2026-10-13T07:58:20.570611+00:00"
+    },
+    {
+      "event": "http11.send_request_headers.started",
+      "at": "2026-10-13T07:58:20.570611+00:00"
+    },
+    {
+      "event": "http11.send_request_headers.complete",
+      "at": "2026-10-13T07:58:20.575146+00:00"
+    },
+    {
+      "event": "http11.send_request_body.started",
+      "at": "2026-10-13T07:58:20.575146+00:00"
+    },
+    {
+      "event": "http11.send_request_body.complete",
+      "at": "2026-10-13T07:58:20.575146+00:00"
+    },
+    {
+      "event": "http11.receive_response_headers.started",
+      "at": "2026-10-13T07:58:20.575146+00:00"
+    },
+    {
+      "event": "http11.receive_response_headers.complete",
+      "at": "2026-10-13T07:58:20.575911+00:00"
+    },
+    {
+      "event": "proxy.start_tls.started",
+      "at": "2026-10-13T07:58:20.575911+00:00"
+    },
+    {
+      "event": "proxy.start_tls.complete",
+      "at": "2026-10-13T07:58:23.351447+00:00"
+    },
+    {
+      "event": "http11.send_request_headers.started",
+      "at": "2026-10-13T07:58:23.351447+00:00"
+    },
+    {
+      "event": "http11.send_request_headers.complete",
+      "at": "2026-10-13T07:58:23.351447+00:00"
+    },
+    {
+      "event": "http11.send_request_body.started",
+      "at": "2026-10-13T07:58:23.351949+00:00"
+    },
+    {
+      "event": "http11.send_request_body.complete",
+      "at": "2026-10-13T07:58:23.351949+00:00"
+    },
+    {
+      "event": "http11.receive_response_headers.started",
+      "at": "2026-10-13T07:58:23.351949+00:00"
+    },
+    {
+      "event": "http11.receive_response_headers.complete",
+      "at": "2026-10-13T07:58:26.443535+00:00"
+    },
+    {
+      "event": "http11.receive_response_body.started",
+      "at": "2026-10-13T07:58:26.443535+00:00"
+    },
+    {
+      "event": "http11.receive_response_body.complete",
+      "at": "2026-10-13T07:58:28.951926+00:00"
+    },
+    {
+      "event": "http11.response_closed.started",
+      "at": "2026-10-13T07:58:28.951926+00:00"
+    },
+    {
+      "event": "http11.response_closed.complete",
+      "at": "2026-10-13T07:58:28.951926+00:00"
+    }
+  ],
+  "httpStatus": 200,
+  "eventTypes": [
+    "response.completed",
+    "response.content_part.added",
+    "response.content_part.done",
+    "response.created",
+    "response.in_progress",
+    "response.output_item.added",
+    "response.output_item.done",
+    "response.output_text.delta",
+    "response.output_text.done"
+  ],
+  "outputMarkerMatched": true,
+  "responseStatus": "completed",
+  "responseReasoning": {
+    "effort": "max",
+    "generate_summary": null,
+    "summary": "detailed",
+    "context": "all_turns",
+    "mode": "standard"
+  },
+  "serverError": {},
+  "status": "accepted",
+  "sourceHashesAfter": {
+    "config.yaml": "08ee45a2367a405f4f01abb7009ac79ff249e5c9f4f2509b3659c75eab83765f",
+    ".env": "014c4de1df255682e895ed0c1d0c82bad512e5aba7bd46f65704e543a2efb24c",
+    "auth.json": "57c06a0c9b9868c8d18b2c0f1dfdbfddd9581393c43dc0a18da973b6cd63fc04"
+  },
+  "sourceHashesUnchanged": true,
+  "installedAfter": {
+    "scope": "all tracked Python/JS/PowerShell code",
+    "trackedCodeFiles": 6685,
+    "manifestSha256": "36db265667b7be8cfca16a25157e906fa5928d873360a953d2a220f63de4119e"
+  },
+  "installedCodeUnchanged": true,
+  "finishedAt": "2026-10-13T07:58:30.642265+00:00"
+}

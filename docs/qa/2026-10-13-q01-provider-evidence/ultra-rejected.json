@@ -1,0 +1,160 @@
+{
+  "kind": "installed-transport-and-sdk-capability-probe",
+  "probeId": "q01-ultra-proxy-e85f9336-39ec-4792-819a-2ea33e9d66a5",
+  "startedAt": "2026-10-13T07:48:49.529910+00:00",
+  "requestedModel": "gpt-6.1-sol",
+  "requestedEffort": "ultra",
+  "productExecutionAccepted": false,
+  "sdkRetries": 0,
+  "modelRequests": 1,
+  "refreshRequests": 0,
+  "loginRequests": 0,
+  "responseModel": null,
+  "requestId": null,
+  "responseId": null,
+  "usage": null,
+  "sourceHashesBefore": {
+    "config.yaml": "08ee45a2367a405f4f01abb7009ac79ff249e5c9f4f2509b3659c75eab83765f",
+    ".env": "014c4de1df255682e895ed0c1d0c82bad512e5aba7bd46f65704e543a2efb24c",
+    "auth.json": "57c06a0c9b9868c8d18b2c0f1dfdbfddd9581393c43dc0a18da973b6cd63fc04"
+  },
+  "installedBefore": {
+    "scope": "all tracked Python/JS/PowerShell code",
+    "trackedCodeFiles": 6685,
+    "manifestSha256": "36db265667b7be8cfca16a25157e906fa5928d873360a953d2a220f63de4119e"
+  },
+  "refreshBlockingVerified": true,
+  "endpoint": "https://chatgpt.com/backend-api/codex/responses",
+  "providerOrigin": "https://chatgpt.com",
+  "proxy": "http://127.0.0.1:7890",
+  "sourceProvider": "openai-codex",
+  "sourceConfiguredEffort": "ultra",
+  "nativeDeclaredEfforts": [
+    "none",
+    "low",
+    "medium",
+    "high",
+    "xhigh"
+  ],
+  "nativeUnmodifiedClamp": "xhigh",
+  "credentialSource": "installed native _read_codex_tokens singleton; credential pool not selected",
+  "localExpiryNotDue": true,
+  "oauthEndpointBlockingVerified": true,
+  "capabilityOnlyOverride": "transport request_overrides reasoning ultra; installed source unchanged",
+  "wireModel": "gpt-6.1-sol",
+  "wireReasoning": {
+    "effort": "ultra",
+    "summary": "auto"
+  },
+  "wireStream": true,
+  "wireToolsCount": 0,
+  "transportEvents": [
+    {
+      "event": "connection.connect_tcp.started",
+      "at": "2026-10-13T07:48:56.251666+00:00"
+    },
+    {
+      "event": "connection.connect_tcp.complete",
+      "at": "2026-10-13T07:48:56.256266+00:00"
+    },
+    {
+      "event": "http11.send_request_headers.started",
+      "at": "2026-10-13T07:48:56.256266+00:00"
+    },
+    {
+      "event": "http11.send_request_headers.complete",
+      "at": "2026-10-13T07:48:56.256266+00:00"
+    },
+    {
+      "event": "http11.send_request_body.started",
+      "at": "2026-10-13T07:48:56.256266+00:00"
+    },
+    {
+      "event": "http11.send_request_body.complete",
+      "at": "2026-10-13T07:48:56.256266+00:00"
+    },
+    {
+      "event": "http11.receive_response_headers.started",
+      "at": "2026-10-13T07:48:56.256266+00:00"
+    },
+    {
+      "event": "http11.receive_response_headers.complete",
+      "at": "2026-10-13T07:48:56.256773+00:00"
+    },
+    {
+      "event": "proxy.start_tls.started",
+      "at": "2026-10-13T07:48:56.256773+00:00"
+    },
+    {
+      "event": "proxy.start_tls.complete",
+      "at": "2026-10-13T07:49:00.330446+00:00"
+    },
+    {
+      "event": "http11.send_request_headers.started",
+      "at": "2026-10-13T07:49:00.330759+00:00"
+    },
+    {
+      "event": "http11.send_request_headers.complete",
+      "at": "2026-10-13T07:49:00.330759+00:00"
+    },
+    {
+      "event": "http11.send_request_body.started",
+      "at": "2026-10-13T07:49:00.330759+00:00"
+    },
+    {
+      "event": "http11.send_request_body.complete",
+      "at": "2026-10-13T07:49:00.331302+00:00"
+    },
+    {
+      "event": "http11.receive_response_headers.started",
+      "at": "2026-10-13T07:49:00.331302+00:00"
+    },
+    {
+      "event": "http11.receive_response_headers.complete",
+      "at": "2026-10-13T07:49:02.315259+00:00"
+    },
+    {
+      "event": "http11.receive_response_body.started",
+      "at": "2026-10-13T07:49:02.318275+00:00"
+    },
+    {
+      "event": "http11.receive_response_body.complete",
+      "at": "2026-10-13T07:49:02.318275+00:00"
+    },
+    {
+      "event": "http11.response_closed.started",
+      "at": "2026-10-13T07:49:02.318275+00:00"
+    },
+    {
+      "event": "http11.response_closed.complete",
+      "at": "2026-10-13T07:49:02.318275+00:00"
+    }
+  ],
+  "httpStatus": 400,
+  "status": "rejected",
+  "errorClass": "BadRequestError",
+  "causeClasses": [
+    "BadRequestError",
+    "HTTPStatusError"
+  ],
+  "serverError": {
+    "type": "invalid_request_error",
+    "param": "reasoning.effort",
+    "code": "invalid_value"
+  },
+  "serverMessage": "Invalid value: 'ultra'. Supported values are: 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', and 'max'.",
+  "nullEvidenceReason": "No completed provider response; response model/usage unavailable.",
+  "sourceHashesAfter": {
+    "config.yaml": "08ee45a2367a405f4f01abb7009ac79ff249e5c9f4f2509b3659c75eab83765f",
+    ".env": "014c4de1df255682e895ed0c1d0c82bad512e5aba7bd46f65704e543a2efb24c",
+    "auth.json": "57c06a0c9b9868c8d18b2c0f1dfdbfddd9581393c43dc0a18da973b6cd63fc04"
+  },
+  "sourceHashesUnchanged": true,
+  "installedAfter": {
+    "scope": "all tracked Python/JS/PowerShell code",
+    "trackedCodeFiles": 6685,
+    "manifestSha256": "36db265667b7be8cfca16a25157e906fa5928d873360a953d2a220f63de4119e"
+  },
+  "installedCodeUnchanged": true,
+  "finishedAt": "2026-10-13T07:49:04.772492+00:00"
+}

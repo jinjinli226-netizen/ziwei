@@ -1,0 +1,16 @@
+test_ended_native_listener_is_not_connected (__main__.NativeFollowup.test_ended_native_listener_is_not_connected) ... ok
+test_exact_source_is_a_native_plan_target (__main__.NativeFollowup.test_exact_source_is_a_native_plan_target) ... ok
+test_native_credential_rejection_preserves_failed_state (__main__.NativeFollowup.test_native_credential_rejection_preserves_failed_state) ... Mattermost: failed to authenticate — check MATTERMOST_TOKEN and MATTERMOST_URL
+ok
+test_native_disconnect_stops_new_sends (__main__.NativeFollowup.test_native_disconnect_stops_new_sends) ... ok
+test_native_mattermost_ws_auth_fatal_is_not_connected (__main__.NativeFollowup.test_native_mattermost_ws_auth_fatal_is_not_connected) ... Mattermost WS auth failed (HTTP 401) — stopping reconnect
+ok
+test_real_webhook_listener_must_still_be_serving (__main__.NativeFollowup.test_real_webhook_listener_must_still_be_serving) ... ok
+test_recovery_republishes_only_unattempted_original_deliveries (__main__.NativeFollowup.test_recovery_republishes_only_unattempted_original_deliveries) ... ok
+test_unknown_and_source_prefix_mentions_are_rejected (__main__.NativeFollowup.test_unknown_and_source_prefix_mentions_are_rejected) ... ok
+test_unknown_send_is_not_replayed (__main__.NativeFollowup.test_unknown_send_is_not_replayed) ... ok
+
+----------------------------------------------------------------------
+Ran 9 tests in 3.350s
+
+OK

@@ -1,0 +1,69 @@
+{
+  "kind": "installed-transport-and-sdk-capability-probe",
+  "probeId": "q01-gpt-6.1-sol-ultra-20261013",
+  "startedAt": "2026-10-13T07:38:42.728603+00:00",
+  "requestedModel": "gpt-6.1-sol",
+  "requestedEffort": "ultra",
+  "productExecutionAccepted": false,
+  "sdkRetries": 0,
+  "modelRequests": 1,
+  "refreshRequests": 0,
+  "loginRequests": 0,
+  "responseModel": null,
+  "requestId": null,
+  "responseId": null,
+  "usage": null,
+  "sourceHashesBefore": {
+    "config.yaml": "08ee45a2367a405f4f01abb7009ac79ff249e5c9f4f2509b3659c75eab83765f",
+    ".env": "014c4de1df255682e895ed0c1d0c82bad512e5aba7bd46f65704e543a2efb24c",
+    "auth.json": "57c06a0c9b9868c8d18b2c0f1dfdbfddd9581393c43dc0a18da973b6cd63fc04"
+  },
+  "installedBefore": {
+    "scope": "all tracked Python/JS/PowerShell code",
+    "trackedCodeFiles": 6685,
+    "manifestSha256": "36db265667b7be8cfca16a25157e906fa5928d873360a953d2a220f63de4119e"
+  },
+  "refreshBlockingVerified": true,
+  "endpoint": "https://chatgpt.com/backend-api/codex/responses",
+  "providerOrigin": "https://chatgpt.com",
+  "proxy": "none: isolated SDK trust_env=False",
+  "sourceProvider": "openai-codex",
+  "sourceConfiguredEffort": "ultra",
+  "nativeDeclaredEfforts": [
+    "none",
+    "low",
+    "medium",
+    "high",
+    "xhigh"
+  ],
+  "nativeUnmodifiedClamp": "xhigh",
+  "credentialSource": "installed native _read_codex_tokens singleton; credential pool not selected",
+  "localExpiryNotDue": true,
+  "oauthEndpointBlockingVerified": true,
+  "capabilityOnlyOverride": "transport request_overrides reasoning ultra; installed source unchanged",
+  "wireModel": "gpt-6.1-sol",
+  "wireReasoning": {
+    "effort": "ultra",
+    "summary": "auto"
+  },
+  "wireStream": true,
+  "wireToolsCount": 0,
+  "status": "blocked_or_uncertain",
+  "errorClass": "APITimeoutError",
+  "httpStatus": null,
+  "serverError": {},
+  "nullEvidenceReason": "No completed provider response; response model/usage unavailable.",
+  "sourceHashesAfter": {
+    "config.yaml": "08ee45a2367a405f4f01abb7009ac79ff249e5c9f4f2509b3659c75eab83765f",
+    ".env": "014c4de1df255682e895ed0c1d0c82bad512e5aba7bd46f65704e543a2efb24c",
+    "auth.json": "57c06a0c9b9868c8d18b2c0f1dfdbfddd9581393c43dc0a18da973b6cd63fc04"
+  },
+  "sourceHashesUnchanged": true,
+  "installedAfter": {
+    "scope": "all tracked Python/JS/PowerShell code",
+    "trackedCodeFiles": 6685,
+    "manifestSha256": "36db265667b7be8cfca16a25157e906fa5928d873360a953d2a220f63de4119e"
+  },
+  "installedCodeUnchanged": true,
+  "finishedAt": "2026-10-13T07:39:56.221218+00:00"
+}

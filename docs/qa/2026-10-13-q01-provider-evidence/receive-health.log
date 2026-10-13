@@ -1,0 +1,34 @@
+test_actual_loopback_socket_and_native_disconnect (__main__.ReceiveHealth.test_actual_loopback_socket_and_native_disconnect) ... Executing <Task pending name='Task-2' coro=<ReceiveHealth.test_actual_loopback_socket_and_native_disconnect() running at C:\Users\25941\.codex\worktrees\v2-q01-real-provider-acceptance\灵光爸爸拆解\test\fixtures\hermes-receive-health.py:164> wait_for=<_GatheringFuture pending cb=[Task.task_wakeup()] created at C:\Users\25941\AppData\Local\hermes\hermes-agent\.hermes-runtime\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\tasks.py:709> cb=[_run_until_complete_cb() at C:\Users\25941\AppData\Local\hermes\hermes-agent\.hermes-runtime\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\base_events.py:181] created at C:\Users\25941\AppData\Local\hermes\hermes-agent\.hermes-runtime\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\runners.py:100> took 0.297 seconds
+ok
+test_async_probe_cannot_accept_replaced_handler (__main__.ReceiveHealth.test_async_probe_cannot_accept_replaced_handler) ... ok
+test_dingtalk_receiving_socket_recovers_but_unknown_api_stays_unconfirmed (__main__.ReceiveHealth.test_dingtalk_receiving_socket_recovers_but_unknown_api_stays_unconfirmed) ... Executing <Task finished name='Task-31' coro=<ReceiveHealth.test_dingtalk_receiving_socket_recovers_but_unknown_api_stays_unconfirmed() done, defined at C:\Users\25941\.codex\worktrees\v2-q01-real-provider-acceptance\灵光爸爸拆解\test\fixtures\hermes-receive-health.py:250> result=None created at C:\Users\25941\AppData\Local\hermes\hermes-agent\.hermes-runtime\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\runners.py:100> took 0.156 seconds
+ok
+test_discord_native_probe_requires_live_receiver_and_fresh_ack (__main__.ReceiveHealth.test_discord_native_probe_requires_live_receiver_and_fresh_ack) ... ok
+test_fatal_during_async_probe_wins_and_hides_raw_message (__main__.ReceiveHealth.test_fatal_during_async_probe_wins_and_hides_raw_message) ... ok
+test_feishu_actual_sdk_connection_reports_local_socket_close (__main__.ReceiveHealth.test_feishu_actual_sdk_connection_reports_local_socket_close) ... Executing <Task pending name='Task-56' coro=<ReceiveHealth.test_feishu_actual_sdk_connection_reports_local_socket_close() running at C:\Users\25941\.codex\worktrees\v2-q01-real-provider-acceptance\灵光爸爸拆解\test\fixtures\hermes-receive-health.py:230> wait_for=<_GatheringFuture pending cb=[Task.task_wakeup()] created at C:\Users\25941\AppData\Local\hermes\hermes-agent\.hermes-runtime\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\tasks.py:709> cb=[_run_until_complete_cb() at C:\Users\25941\AppData\Local\hermes\hermes-agent\.hermes-runtime\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\base_events.py:181] created at C:\Users\25941\AppData\Local\hermes\hermes-agent\.hermes-runtime\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\runners.py:100> took 13.266 seconds
+ok
+test_feishu_webhook_requires_actual_serving_listener (__main__.ReceiveHealth.test_feishu_webhook_requires_actual_serving_listener) ... ok
+test_listener_transport_stale_and_unknown_are_not_connected (__main__.ReceiveHealth.test_listener_transport_stale_and_unknown_are_not_connected) ... ok
+test_missing_listener_and_exact_native_restart_failure (__main__.ReceiveHealth.test_missing_listener_and_exact_native_restart_failure) ... [Slack] Socket Mode unhealthy (isolated test); reconnecting
+[Slack] Socket Mode reconnect failed: isolated restart rejected
+Traceback (most recent call last):
+  File "C:\Users\25941\AppData\Local\hermes\hermes-agent\plugins\platforms\slack\adapter.py", line 1292, in _restart_socket_mode
+    self._start_socket_mode_handler()
+  File "C:\Users\25941\.codex\worktrees\v2-q01-real-provider-acceptance\灵光爸爸拆解\test\fixtures\hermes-receive-health.py", line 80, in fail_start
+    def fail_start(): raise RuntimeError('isolated restart rejected')
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: isolated restart rejected
+ok
+test_native_restart_recovers_only_after_new_receiver_is_ready (__main__.ReceiveHealth.test_native_restart_recovers_only_after_new_receiver_is_ready) ... [Slack] Socket Mode unhealthy (isolated recovery); reconnecting
+ok
+test_other_platforms_do_not_inherit_running_as_receive_proof (__main__.ReceiveHealth.test_other_platforms_do_not_inherit_running_as_receive_proof) ... ok
+test_probe_exception_or_timeout_is_unconfirmed (__main__.ReceiveHealth.test_probe_exception_or_timeout_is_unconfirmed) ... ok
+test_reconnect_lock_closes_admission_even_with_old_open_socket (__main__.ReceiveHealth.test_reconnect_lock_closes_admission_even_with_old_open_socket) ... ok
+test_sdk_receiver_task_ended_or_unobservable (__main__.ReceiveHealth.test_sdk_receiver_task_ended_or_unobservable) ... ok
+test_telegram_native_polling_generation_requires_progress_and_recovers (__main__.ReceiveHealth.test_telegram_native_polling_generation_requires_progress_and_recovers) ... ok
+test_slack_missing_receiver_does_not_emit_inbound_or_send (__main__.WorkerAdmission.test_slack_missing_receiver_does_not_emit_inbound_or_send) ... ok
+
+----------------------------------------------------------------------
+Ran 16 tests in 16.295s
+
+OK

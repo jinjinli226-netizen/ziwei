@@ -1,0 +1,265 @@
+{
+  "at": "2026-10-13T07:57:02.655Z",
+  "candidate": "4594d1b9bd5f1790cd206c54766d43fbf0912c9c",
+  "kind": "actual-product-HTTP-with-client-response-discard-and-persisted-controller-recovery",
+  "calls": [
+    {
+      "body": {
+        "name": "Q01 Owned B response recovery 20261013",
+        "targetDeviceId": "device_f2b4263c-086b-41d2-842a-dc237b762420",
+        "sourceProfile": "default",
+        "model": null,
+        "visibility": "personal",
+        "config": {
+          "provider": null,
+          "toolsets": [],
+          "maxTurns": 20,
+          "memory": {
+            "enabled": true,
+            "userProfile": true
+          },
+          "skills": {
+            "disabled": []
+          },
+          "mcpServers": {},
+          "permissions": {
+            "mode": "read_only"
+          }
+        },
+        "idempotencyKey": "bot-owned-f9fa274a-95ee-4bf5-b905-d39890cb013b"
+      },
+      "status": 202,
+      "id": "employee_181e1c52-4689-4cb5-aafd-770128597558",
+      "profile": "bot-bfbcd276ea0c3c335594ef61",
+      "main": "conv_72fc2f94-8810-4c69-b896-1fded4046d92"
+    },
+    {
+      "body": {
+        "name": "Q01 Owned B response recovery 20261013",
+        "targetDeviceId": "device_f2b4263c-086b-41d2-842a-dc237b762420",
+        "sourceProfile": "default",
+        "model": null,
+        "visibility": "personal",
+        "config": {
+          "provider": null,
+          "toolsets": [],
+          "maxTurns": 20,
+          "memory": {
+            "enabled": true,
+            "userProfile": true
+          },
+          "skills": {
+            "disabled": []
+          },
+          "mcpServers": {},
+          "permissions": {
+            "mode": "read_only"
+          }
+        },
+        "idempotencyKey": "bot-owned-f9fa274a-95ee-4bf5-b905-d39890cb013b"
+      },
+      "status": 200,
+      "id": "employee_181e1c52-4689-4cb5-aafd-770128597558",
+      "profile": "bot-bfbcd276ea0c3c335594ef61",
+      "main": "conv_72fc2f94-8810-4c69-b896-1fded4046d92"
+    }
+  ],
+  "first": {
+    "id": "employee_f284b789-b6e2-4fc3-9c79-910f5cf63a91",
+    "main": "conv_c9f7b627-e11a-4406-9d3c-561ed70a5654",
+    "instance": {
+      "mode": "owned_profile",
+      "profile": "bot-d75966a6811644b7647cd4ee",
+      "templateProfile": "default",
+      "ownershipId": "13d5c562-cea8-4bd9-b560-a24d62fd8212",
+      "provisionActionId": "action_d5540447-6266-4c86-8691-57217f791bbf",
+      "authMode": "source-native-store",
+      "home": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-d75966a6811644b7647cd4ee",
+      "provisioning": {
+        "actionId": "action_d5540447-6266-4c86-8691-57217f791bbf",
+        "status": "provisioned",
+        "authentication": "configured",
+        "error": null
+      }
+    }
+  },
+  "second": {
+    "id": "employee_181e1c52-4689-4cb5-aafd-770128597558",
+    "main": "conv_72fc2f94-8810-4c69-b896-1fded4046d92",
+    "instance": {
+      "mode": "owned_profile",
+      "profile": "bot-bfbcd276ea0c3c335594ef61",
+      "templateProfile": "default",
+      "ownershipId": "305a77a3-4844-44ef-8f45-3b973086f368",
+      "provisionActionId": "action_0f33b75c-1e45-4964-841d-93a24081256c",
+      "authMode": "source-native-store",
+      "home": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-bfbcd276ea0c3c335594ef61",
+      "provisioning": {
+        "actionId": "action_0f33b75c-1e45-4964-841d-93a24081256c",
+        "status": "provisioned",
+        "authentication": "configured",
+        "error": null
+      }
+    }
+  },
+  "provision": {
+    "id": "action_0f33b75c-1e45-4964-841d-93a24081256c",
+    "task_id": null,
+    "agent_id": "ziwei_user",
+    "type": "hermes.bot.provision",
+    "status": "succeeded",
+    "payload": {
+      "employeeId": "employee_181e1c52-4689-4cb5-aafd-770128597558",
+      "runtime": "Hermes",
+      "model": null,
+      "profile": "bot-bfbcd276ea0c3c335594ef61",
+      "deviceId": "device_f2b4263c-086b-41d2-842a-dc237b762420",
+      "hermesBot": {
+        "schemaVersion": 1,
+        "employeeId": "employee_181e1c52-4689-4cb5-aafd-770128597558",
+        "workspace": "preview-bots",
+        "revision": 1,
+        "controlEpoch": 1,
+        "config": {
+          "provider": null,
+          "toolsets": [],
+          "maxTurns": 20,
+          "memory": {
+            "enabled": true,
+            "userProfile": true
+          },
+          "skills": {
+            "disabled": []
+          },
+          "mcpServers": {},
+          "permissions": {
+            "mode": "read_only"
+          }
+        },
+        "sourceProfile": "bot-bfbcd276ea0c3c335594ef61",
+        "instance": {
+          "mode": "owned_profile",
+          "profile": "bot-bfbcd276ea0c3c335594ef61",
+          "templateProfile": "default",
+          "ownershipId": "305a77a3-4844-44ef-8f45-3b973086f368",
+          "provisionActionId": "action_0f33b75c-1e45-4964-841d-93a24081256c"
+        },
+        "deviceId": "device_f2b4263c-086b-41d2-842a-dc237b762420",
+        "model": null,
+        "persona": "",
+        "instructions": "",
+        "description": "",
+        "name": "Q01 Owned B response recovery 20261013",
+        "conversationId": "conv_72fc2f94-8810-4c69-b896-1fded4046d92"
+      }
+    },
+    "dedupe_key": "bot-provision:employee_181e1c52-4689-4cb5-aafd-770128597558:initial",
+    "created_at": "2026-10-13T07:56:50.531Z",
+    "acked_at": "2026-10-13T07:56:50.850Z",
+    "completed_at": "2026-10-13T07:56:54.329Z",
+    "result": {
+      "botProvision": {
+        "schemaVersion": 1,
+        "mode": "owned_profile",
+        "workspace": "preview-bots",
+        "employeeId": "employee_181e1c52-4689-4cb5-aafd-770128597558",
+        "deviceId": "device_f2b4263c-086b-41d2-842a-dc237b762420",
+        "ownershipId": "305a77a3-4844-44ef-8f45-3b973086f368",
+        "profile": "bot-bfbcd276ea0c3c335594ef61",
+        "home": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-bfbcd276ea0c3c335594ef61",
+        "profileHome": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-bfbcd276ea0c3c335594ef61",
+        "nativeVersion": "0.21.3",
+        "authentication": "configured",
+        "authMode": "source-native-store",
+        "templateProfile": "default",
+        "duplicate": false,
+        "provisionActionId": "action_0f33b75c-1e45-4964-841d-93a24081256c"
+      },
+      "processExit": {
+        "platform": "win32",
+        "supervisor": "windows-job",
+        "launched": true,
+        "rootPid": 43112,
+        "rootConfirmed": true,
+        "rootExitCode": 0,
+        "treeConfirmed": true,
+        "activeProcesses": 0,
+        "cancelled": false,
+        "failureCode": null,
+        "hostExitCode": 0,
+        "streamsComplete": true,
+        "hostSignal": null
+      },
+      "executionSource": "local_test_provider"
+    },
+    "error": null,
+    "events": [
+      {
+        "id": "action-event_d72edc4e11fb51bb48e0eb75b5cd5d0c9944307cd19650feab4f06c187b0f6ab",
+        "action_id": "action_0f33b75c-1e45-4964-841d-93a24081256c",
+        "type": "action.started",
+        "message": "",
+        "data": {
+          "actionId": "action_0f33b75c-1e45-4964-841d-93a24081256c",
+          "type": "hermes.bot.provision"
+        },
+        "created_at": "2026-10-13T07:56:52.925Z"
+      },
+      {
+        "id": "action-event_d06795e8c062a4d3047e6c1865996538a2b0d1ae38bdea2e17afb61026bc16fc",
+        "action_id": "action_0f33b75c-1e45-4964-841d-93a24081256c",
+        "type": "succeeded",
+        "message": "",
+        "data": {
+          "result": {
+            "botProvision": {
+              "schemaVersion": 1,
+              "mode": "owned_profile",
+              "workspace": "preview-bots",
+              "employeeId": "employee_181e1c52-4689-4cb5-aafd-770128597558",
+              "deviceId": "device_f2b4263c-086b-41d2-842a-dc237b762420",
+              "ownershipId": "305a77a3-4844-44ef-8f45-3b973086f368",
+              "profile": "bot-bfbcd276ea0c3c335594ef61",
+              "home": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-bfbcd276ea0c3c335594ef61",
+              "profileHome": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-bfbcd276ea0c3c335594ef61",
+              "nativeVersion": "0.21.3",
+              "authentication": "configured",
+              "authMode": "source-native-store",
+              "templateProfile": "default",
+              "duplicate": false,
+              "provisionActionId": "action_0f33b75c-1e45-4964-841d-93a24081256c"
+            },
+            "processExit": {
+              "platform": "win32",
+              "supervisor": "windows-job",
+              "launched": true,
+              "rootPid": 43112,
+              "rootConfirmed": true,
+              "rootExitCode": 0,
+              "treeConfirmed": true,
+              "activeProcesses": 0,
+              "cancelled": false,
+              "failureCode": null,
+              "hostExitCode": 0,
+              "streamsComplete": true,
+              "hostSignal": null
+            },
+            "executionSource": "local_test_provider"
+          },
+          "error": null
+        },
+        "created_at": "2026-10-13T07:56:54.090Z"
+      }
+    ]
+  },
+  "checks": {
+    "lostResponseRecoveredSameIdentity": true,
+    "twoHomesDistinct": true,
+    "oneProvisionAction": true,
+    "nativeMemoryIsolated": true
+  },
+  "memoryActions": [
+    "action_24af68a7-ec61-4f35-a771-495da23c0c6c",
+    "action_79897d51-224d-44e1-b016-b6ea31d223f1"
+  ]
+}

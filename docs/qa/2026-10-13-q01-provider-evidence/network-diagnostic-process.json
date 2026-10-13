@@ -1,0 +1,15 @@
+{
+  "platform": "win32",
+  "supervisor": "windows-job",
+  "launched": true,
+  "rootPid": 36860,
+  "rootConfirmed": true,
+  "rootExitCode": 0,
+  "treeConfirmed": true,
+  "activeProcesses": 0,
+  "cancelled": false,
+  "failureCode": null,
+  "hostExitCode": 0,
+  "streamsComplete": true,
+  "hostSignal": null
+}

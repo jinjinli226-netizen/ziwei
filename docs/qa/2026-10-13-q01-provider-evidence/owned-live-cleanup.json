@@ -1,0 +1,700 @@
+{
+  "at": "2026-10-13T08:09:30.304Z",
+  "candidate": "4594d1b9bd5f1790cd206c54766d43fbf0912c9c",
+  "result": [
+    {
+      "id": "employee_f284b789-b6e2-4fc3-9c79-910f5cf63a91",
+      "main": "conv_c9f7b627-e11a-4406-9d3c-561ed70a5654",
+      "profile": "bot-d75966a6811644b7647cd4ee",
+      "home": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-d75966a6811644b7647cd4ee",
+      "paused": true,
+      "runs": [
+        {
+          "id": "action_d479d3c2-2f58-4870-88d2-ecd24638e1a5",
+          "type": "directory.inspect",
+          "status": "succeeded",
+          "result": {
+            "path": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-d75966a6811644b7647cd4ee",
+            "currentPath": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home",
+            "exists": true,
+            "created": false,
+            "isDirectory": true,
+            "roots": [
+              "C:\\",
+              "D:\\"
+            ],
+            "entries": [
+              {
+                "name": "audio_cache",
+                "path": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-d75966a6811644b7647cd4ee\\audio_cache",
+                "type": "directory"
+              },
+              {
+                "name": "backups",
+                "path": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-d75966a6811644b7647cd4ee\\backups",
+                "type": "directory"
+              },
+              {
+                "name": "cache",
+                "path": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-d75966a6811644b7647cd4ee\\cache",
+                "type": "directory"
+              },
+              {
+                "name": "cron",
+                "path": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-d75966a6811644b7647cd4ee\\cron",
+                "type": "directory"
+              },
+              {
+                "name": "home",
+                "path": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-d75966a6811644b7647cd4ee\\home",
+                "type": "directory"
+              },
+              {
+                "name": "hooks",
+                "path": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-d75966a6811644b7647cd4ee\\hooks",
+                "type": "directory"
+              },
+              {
+                "name": "image_cache",
+                "path": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-d75966a6811644b7647cd4ee\\image_cache",
+                "type": "directory"
+              },
+              {
+                "name": "logs",
+                "path": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-d75966a6811644b7647cd4ee\\logs",
+                "type": "directory"
+              },
+              {
+                "name": "memories",
+                "path": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-d75966a6811644b7647cd4ee\\memories",
+                "type": "directory"
+              },
+              {
+                "name": "pairing",
+                "path": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-d75966a6811644b7647cd4ee\\pairing",
+                "type": "directory"
+              },
+              {
+                "name": "plans",
+                "path": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-d75966a6811644b7647cd4ee\\plans",
+                "type": "directory"
+              },
+              {
+                "name": "runtime",
+                "path": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-d75966a6811644b7647cd4ee\\runtime",
+                "type": "directory"
+              },
+              {
+                "name": "sandboxes",
+                "path": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-d75966a6811644b7647cd4ee\\sandboxes",
+                "type": "directory"
+              },
+              {
+                "name": "sessions",
+                "path": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-d75966a6811644b7647cd4ee\\sessions",
+                "type": "directory"
+              },
+              {
+                "name": "skills",
+                "path": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-d75966a6811644b7647cd4ee\\skills",
+                "type": "directory"
+              },
+              {
+                "name": "skins",
+                "path": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-d75966a6811644b7647cd4ee\\skins",
+                "type": "directory"
+              },
+              {
+                "name": "workspace",
+                "path": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-d75966a6811644b7647cd4ee\\workspace",
+                "type": "directory"
+              }
+            ],
+            "executionSource": "local_test_provider"
+          },
+          "error": null
+        },
+        {
+          "id": "action_23fbe82d-0740-4d90-8dfd-33c142c7e0ec",
+          "type": "conversation.execute",
+          "status": "succeeded",
+          "result": {
+            "runtime": "Hermes",
+            "model": "preview-local-model",
+            "profile": "bot-d75966a6811644b7647cd4ee",
+            "binary": "C:\\Users\\25941\\AppData\\Local\\hermes\\bin\\hermes.exe",
+            "code": 0,
+            "signal": null,
+            "processExit": {
+              "platform": "win32",
+              "supervisor": "windows-job",
+              "launched": true,
+              "rootPid": 33552,
+              "rootConfirmed": true,
+              "rootExitCode": 0,
+              "treeConfirmed": true,
+              "activeProcesses": 0,
+              "cancelled": false,
+              "failureCode": null,
+              "hostExitCode": 0,
+              "streamsComplete": true,
+              "hostSignal": null
+            },
+            "output": "【本机原生 Hermes · 本地测试 provider】已完成这个隔离回合。此回复验证同一 Bot 的原生执行与结果回传；没有连接外部模型或业务账号。",
+            "diagnostics": "↻ Resumed session 20261013_155252_6fd756 \"Ziwei conv_c9f7b627-e11a-4406-9d3c-561ed70a5654\" (1 user message, 2 total messages)\n【本机原生 Hermes · 本地测试 provider】已完成这个隔离回合。此回复验证同一 Bot 的原生执行与结果回传；没有连接外部模型或业务账号。【本机原生 Hermes · 本地测试 provider】已完成这个隔离回合。此回复验证同一 Bot 的原生执行与结果回传；没有连接外部模型或业务账号。session_id: 20261013_155252_6fd756\n",
+            "truncated": false,
+            "hermesBootstrap": {
+              "binary": "C:\\Users\\25941\\AppData\\Local\\hermes\\bin\\hermes.exe",
+              "interpreter": "C:\\Users\\25941\\AppData\\Local\\hermes\\hermes-agent\\venv\\Scripts\\python.exe",
+              "entrypoint": "C:\\Users\\25941\\AppData\\Local\\hermes\\hermes-agent\\hermes_cli\\main.py",
+              "mode": "effective-mcp-gate"
+            },
+            "creatorIsolation": {
+              "enabled": true,
+              "key": "13d5c562-cea8-4bd9-b560-a24d62fd8212",
+              "workspace": "preview-bots",
+              "employeeId": "employee_f284b789-b6e2-4fc3-9c79-910f5cf63a91",
+              "sourceProfile": "bot-d75966a6811644b7647cd4ee",
+              "authMode": "source-native-store",
+              "kind": "hermes-bot",
+              "revision": 1,
+              "mode": "owned_profile",
+              "profile": "bot-d75966a6811644b7647cd4ee",
+              "home": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-d75966a6811644b7647cd4ee",
+              "profileHome": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-d75966a6811644b7647cd4ee"
+            },
+            "inputAttachments": [
+              {
+                "name": "q01-synthetic-pixel.png",
+                "path": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.ziwei\\attachments\\action_23fbe82d-0740-4d90-8dfd-33c142c7e0ec\\q01-synthetic-pixel.png",
+                "bytes": 68,
+                "mimeType": "image/png"
+              }
+            ],
+            "botIsolation": {
+              "enabled": true,
+              "key": "13d5c562-cea8-4bd9-b560-a24d62fd8212",
+              "workspace": "preview-bots",
+              "employeeId": "employee_f284b789-b6e2-4fc3-9c79-910f5cf63a91",
+              "sourceProfile": "bot-d75966a6811644b7647cd4ee",
+              "authMode": "source-native-store",
+              "kind": "hermes-bot",
+              "revision": 1,
+              "mode": "owned_profile",
+              "profile": "bot-d75966a6811644b7647cd4ee",
+              "home": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-d75966a6811644b7647cd4ee",
+              "profileHome": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-d75966a6811644b7647cd4ee"
+            },
+            "configurationRevision": 1,
+            "nativeSessionId": "20261013_155252_6fd756",
+            "outputArtifacts": [],
+            "executionSource": "local_test_provider"
+          },
+          "error": null
+        },
+        {
+          "id": "action_24af68a7-ec61-4f35-a771-495da23c0c6c",
+          "type": "hermes.bot.native",
+          "status": "succeeded",
+          "result": {
+            "nativeOperation": {
+              "schemaVersion": 2,
+              "resource": "memory",
+              "operation": "read",
+              "employeeId": "employee_f284b789-b6e2-4fc3-9c79-910f5cf63a91",
+              "revision": 1,
+              "nativeVersion": "0.21.3",
+              "status": "succeeded",
+              "data": {
+                "scope": "memory",
+                "content": "Q01-A-MEMORY-ISOLATION-ONLY",
+                "entries": [
+                  "Q01-A-MEMORY-ISOLATION-ONLY"
+                ],
+                "hash": "eb01aca1133eb375d71563434f0480cc83e282f7c30be025c86f3168d97b4c78",
+                "limit": 2200,
+                "saved": false,
+                "mutation": null
+              },
+              "executionSource": "local_test_provider"
+            },
+            "processExit": {
+              "platform": "win32",
+              "supervisor": "windows-job",
+              "launched": true,
+              "rootPid": 34052,
+              "rootConfirmed": true,
+              "rootExitCode": 0,
+              "treeConfirmed": true,
+              "activeProcesses": 0,
+              "cancelled": false,
+              "failureCode": null,
+              "hostExitCode": 0,
+              "streamsComplete": true,
+              "hostSignal": null
+            },
+            "botIsolation": {
+              "enabled": true,
+              "key": "13d5c562-cea8-4bd9-b560-a24d62fd8212",
+              "workspace": "preview-bots",
+              "employeeId": "employee_f284b789-b6e2-4fc3-9c79-910f5cf63a91",
+              "sourceProfile": "bot-d75966a6811644b7647cd4ee",
+              "authMode": "source-native-store",
+              "kind": "hermes-bot",
+              "revision": 1,
+              "mode": "owned_profile",
+              "profile": "bot-d75966a6811644b7647cd4ee",
+              "home": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-d75966a6811644b7647cd4ee",
+              "profileHome": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-d75966a6811644b7647cd4ee"
+            },
+            "executionSource": "local_test_provider"
+          },
+          "error": null
+        },
+        {
+          "id": "action_0811f11b-13de-4139-a781-613a1a86cd00",
+          "type": "hermes.bot.native",
+          "status": "succeeded",
+          "result": {
+            "nativeOperation": {
+              "schemaVersion": 2,
+              "resource": "memory",
+              "operation": "write",
+              "employeeId": "employee_f284b789-b6e2-4fc3-9c79-910f5cf63a91",
+              "revision": 1,
+              "nativeVersion": "0.21.3",
+              "status": "succeeded",
+              "data": {
+                "scope": "memory",
+                "content": "Q01-A-MEMORY-ISOLATION-ONLY",
+                "entries": [
+                  "Q01-A-MEMORY-ISOLATION-ONLY"
+                ],
+                "hash": "eb01aca1133eb375d71563434f0480cc83e282f7c30be025c86f3168d97b4c78",
+                "limit": 2200,
+                "saved": true,
+                "mutation": {
+                  "success": true,
+                  "done": true,
+                  "target": "memory",
+                  "usage": "1% — 27/2,200 chars",
+                  "entry_count": 1,
+                  "message": "Applied 1 operation(s).",
+                  "note": "Write saved. This update is complete — do not repeat it."
+                }
+              },
+              "executionSource": "local_test_provider"
+            },
+            "processExit": {
+              "platform": "win32",
+              "supervisor": "windows-job",
+              "launched": true,
+              "rootPid": 10712,
+              "rootConfirmed": true,
+              "rootExitCode": 0,
+              "treeConfirmed": true,
+              "activeProcesses": 0,
+              "cancelled": false,
+              "failureCode": null,
+              "hostExitCode": 0,
+              "streamsComplete": true,
+              "hostSignal": null
+            },
+            "botIsolation": {
+              "enabled": true,
+              "key": "13d5c562-cea8-4bd9-b560-a24d62fd8212",
+              "workspace": "preview-bots",
+              "employeeId": "employee_f284b789-b6e2-4fc3-9c79-910f5cf63a91",
+              "sourceProfile": "bot-d75966a6811644b7647cd4ee",
+              "authMode": "source-native-store",
+              "kind": "hermes-bot",
+              "revision": 1,
+              "mode": "owned_profile",
+              "profile": "bot-d75966a6811644b7647cd4ee",
+              "home": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-d75966a6811644b7647cd4ee",
+              "profileHome": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-d75966a6811644b7647cd4ee"
+            },
+            "executionSource": "local_test_provider"
+          },
+          "error": null
+        },
+        {
+          "id": "action_2bc0e911-1208-4a31-b28f-874872cbfa11",
+          "type": "hermes.bot.native",
+          "status": "succeeded",
+          "result": {
+            "nativeOperation": {
+              "schemaVersion": 2,
+              "resource": "memory",
+              "operation": "read",
+              "employeeId": "employee_f284b789-b6e2-4fc3-9c79-910f5cf63a91",
+              "revision": 1,
+              "nativeVersion": "0.21.3",
+              "status": "succeeded",
+              "data": {
+                "scope": "memory",
+                "content": "",
+                "entries": [],
+                "hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                "limit": 2200,
+                "saved": false,
+                "mutation": null
+              },
+              "executionSource": "local_test_provider"
+            },
+            "processExit": {
+              "platform": "win32",
+              "supervisor": "windows-job",
+              "launched": true,
+              "rootPid": 32556,
+              "rootConfirmed": true,
+              "rootExitCode": 0,
+              "treeConfirmed": true,
+              "activeProcesses": 0,
+              "cancelled": false,
+              "failureCode": null,
+              "hostExitCode": 0,
+              "streamsComplete": true,
+              "hostSignal": null
+            },
+            "botIsolation": {
+              "enabled": true,
+              "key": "13d5c562-cea8-4bd9-b560-a24d62fd8212",
+              "workspace": "preview-bots",
+              "employeeId": "employee_f284b789-b6e2-4fc3-9c79-910f5cf63a91",
+              "sourceProfile": "bot-d75966a6811644b7647cd4ee",
+              "authMode": "source-native-store",
+              "kind": "hermes-bot",
+              "revision": 1,
+              "mode": "owned_profile",
+              "profile": "bot-d75966a6811644b7647cd4ee",
+              "home": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-d75966a6811644b7647cd4ee",
+              "profileHome": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-d75966a6811644b7647cd4ee"
+            },
+            "executionSource": "local_test_provider"
+          },
+          "error": null
+        },
+        {
+          "id": "action_934bc6a0-685e-482e-994e-93fe410155b2",
+          "type": "conversation.execute",
+          "status": "succeeded",
+          "result": {
+            "runtime": "Hermes",
+            "model": "preview-local-model",
+            "profile": "bot-d75966a6811644b7647cd4ee",
+            "binary": "C:\\Users\\25941\\AppData\\Local\\hermes\\bin\\hermes.exe",
+            "code": 0,
+            "signal": null,
+            "processExit": {
+              "platform": "win32",
+              "supervisor": "windows-job",
+              "launched": true,
+              "rootPid": 53920,
+              "rootConfirmed": true,
+              "rootExitCode": 0,
+              "treeConfirmed": true,
+              "activeProcesses": 0,
+              "cancelled": false,
+              "failureCode": null,
+              "hostExitCode": 0,
+              "streamsComplete": true,
+              "hostSignal": null
+            },
+            "output": "【本机原生 Hermes · 本地测试 provider】已完成这个隔离回合。此回复验证同一 Bot 的原生执行与结果回传；没有连接外部模型或业务账号。",
+            "diagnostics": "Session 20261013_155252_6fd756 found but has no messages. Starting fresh.\n【本机原生 Hermes · 本地测试 provider】已完成这个隔离回合。此回复验证同一 Bot 的原生执行与结果回传；没有连接外部模型或业务账号。【本机原生 Hermes · 本地测试 provider】已完成这个隔离回合。此回复验证同一 Bot 的原生执行与结果回传；没有连接外部模型或业务账号。session_id: 20261013_155252_6fd756\n",
+            "truncated": false,
+            "hermesBootstrap": {
+              "binary": "C:\\Users\\25941\\AppData\\Local\\hermes\\bin\\hermes.exe",
+              "interpreter": "C:\\Users\\25941\\AppData\\Local\\hermes\\hermes-agent\\venv\\Scripts\\python.exe",
+              "entrypoint": "C:\\Users\\25941\\AppData\\Local\\hermes\\hermes-agent\\hermes_cli\\main.py",
+              "mode": "effective-mcp-gate"
+            },
+            "creatorIsolation": {
+              "enabled": true,
+              "key": "13d5c562-cea8-4bd9-b560-a24d62fd8212",
+              "workspace": "preview-bots",
+              "employeeId": "employee_f284b789-b6e2-4fc3-9c79-910f5cf63a91",
+              "sourceProfile": "bot-d75966a6811644b7647cd4ee",
+              "authMode": "source-native-store",
+              "kind": "hermes-bot",
+              "revision": 1,
+              "mode": "owned_profile",
+              "profile": "bot-d75966a6811644b7647cd4ee",
+              "home": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-d75966a6811644b7647cd4ee",
+              "profileHome": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-d75966a6811644b7647cd4ee"
+            },
+            "botIsolation": {
+              "enabled": true,
+              "key": "13d5c562-cea8-4bd9-b560-a24d62fd8212",
+              "workspace": "preview-bots",
+              "employeeId": "employee_f284b789-b6e2-4fc3-9c79-910f5cf63a91",
+              "sourceProfile": "bot-d75966a6811644b7647cd4ee",
+              "authMode": "source-native-store",
+              "kind": "hermes-bot",
+              "revision": 1,
+              "mode": "owned_profile",
+              "profile": "bot-d75966a6811644b7647cd4ee",
+              "home": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-d75966a6811644b7647cd4ee",
+              "profileHome": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-d75966a6811644b7647cd4ee"
+            },
+            "configurationRevision": 1,
+            "nativeSessionId": "20261013_155252_6fd756",
+            "outputArtifacts": [],
+            "executionSource": "local_test_provider"
+          },
+          "error": null
+        },
+        {
+          "id": "action_b13a7fdb-ffc2-4376-ac53-92c832fc5705",
+          "type": "hermes.bot.validate",
+          "status": "succeeded",
+          "result": {
+            "botValidation": {
+              "valid": true,
+              "schemaVersion": 1,
+              "employeeId": "employee_f284b789-b6e2-4fc3-9c79-910f5cf63a91",
+              "revision": 1,
+              "sourceProfile": "bot-d75966a6811644b7647cd4ee",
+              "nativeVersion": "0.21.3",
+              "nativeFingerprint": "d6d0f7b13e37a09388879460ecdb495b6987bc1be9582bb37fbf4c8c95df01f1",
+              "isolation": {
+                "enabled": true,
+                "key": "13d5c562-cea8-4bd9-b560-a24d62fd8212",
+                "workspace": "preview-bots",
+                "employeeId": "employee_f284b789-b6e2-4fc3-9c79-910f5cf63a91",
+                "sourceProfile": "bot-d75966a6811644b7647cd4ee",
+                "authMode": "source-native-store",
+                "kind": "hermes-bot",
+                "revision": 1,
+                "mode": "owned_profile",
+                "profile": "bot-d75966a6811644b7647cd4ee",
+                "home": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-d75966a6811644b7647cd4ee",
+                "profileHome": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-d75966a6811644b7647cd4ee"
+              },
+              "effective": {
+                "provider": "custom:preview-local",
+                "model": "preview-local-model",
+                "maxTurns": 20,
+                "memory": true,
+                "toolsets": []
+              }
+            },
+            "externalModelCalls": 0,
+            "executionSource": "local_test_provider"
+          },
+          "error": null
+        },
+        {
+          "id": "action_d5540447-6266-4c86-8691-57217f791bbf",
+          "type": "hermes.bot.provision",
+          "status": "succeeded",
+          "result": {
+            "botProvision": {
+              "schemaVersion": 1,
+              "mode": "owned_profile",
+              "workspace": "preview-bots",
+              "employeeId": "employee_f284b789-b6e2-4fc3-9c79-910f5cf63a91",
+              "deviceId": "device_f2b4263c-086b-41d2-842a-dc237b762420",
+              "ownershipId": "13d5c562-cea8-4bd9-b560-a24d62fd8212",
+              "profile": "bot-d75966a6811644b7647cd4ee",
+              "home": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-d75966a6811644b7647cd4ee",
+              "profileHome": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-d75966a6811644b7647cd4ee",
+              "nativeVersion": "0.21.3",
+              "authentication": "configured",
+              "authMode": "source-native-store",
+              "templateProfile": "default",
+              "duplicate": false,
+              "provisionActionId": "action_d5540447-6266-4c86-8691-57217f791bbf"
+            },
+            "processExit": {
+              "platform": "win32",
+              "supervisor": "windows-job",
+              "launched": true,
+              "rootPid": 38488,
+              "rootConfirmed": true,
+              "rootExitCode": 0,
+              "treeConfirmed": true,
+              "activeProcesses": 0,
+              "cancelled": false,
+              "failureCode": null,
+              "hostExitCode": 0,
+              "streamsComplete": true,
+              "hostSignal": null
+            },
+            "executionSource": "local_test_provider"
+          },
+          "error": null
+        }
+      ],
+      "chatSummary": {
+        "workingDirectory": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-d75966a6811644b7647cd4ee",
+        "messages": [
+          {
+            "id": "convmsg_45602d2b-531e-4303-bc73-f34aa173a712",
+            "role": "user",
+            "syntheticText": "Q01 synthetic local preview conversation. Return the local verification marker.",
+            "attachments": []
+          },
+          {
+            "id": "convmsg_913a33ec-4376-4967-ad19-69ee58e1e605",
+            "role": "assistant",
+            "syntheticText": "【本机原生 Hermes · 本地测试 provider】已完成这个隔离回合。此回复验证同一 Bot 的原生执行与结果回传；没有连接外部模型或业务账号。",
+            "attachments": []
+          },
+          {
+            "id": "convmsg_745005de-3fd7-4ff6-a16b-184fc34f7b83",
+            "role": "user",
+            "syntheticText": "Q01 synthetic image attachment transport verification only.",
+            "attachments": [
+              {
+                "name": "q01-synthetic-pixel.png",
+                "mimeType": "image/png",
+                "size": 68
+              }
+            ]
+          },
+          {
+            "id": "convmsg_b27e1ada-baf2-4870-9824-5ea8b665f921",
+            "role": "assistant",
+            "syntheticText": "【本机原生 Hermes · 本地测试 provider】已完成这个隔离回合。此回复验证同一 Bot 的原生执行与结果回传；没有连接外部模型或业务账号。",
+            "attachments": []
+          }
+        ]
+      },
+      "deleted": true
+    },
+    {
+      "id": "employee_181e1c52-4689-4cb5-aafd-770128597558",
+      "main": "conv_72fc2f94-8810-4c69-b896-1fded4046d92",
+      "profile": "bot-bfbcd276ea0c3c335594ef61",
+      "home": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-bfbcd276ea0c3c335594ef61",
+      "paused": true,
+      "runs": [
+        {
+          "id": "action_79897d51-224d-44e1-b016-b6ea31d223f1",
+          "type": "hermes.bot.native",
+          "status": "succeeded",
+          "result": {
+            "nativeOperation": {
+              "schemaVersion": 2,
+              "resource": "memory",
+              "operation": "read",
+              "employeeId": "employee_181e1c52-4689-4cb5-aafd-770128597558",
+              "revision": 1,
+              "nativeVersion": "0.21.3",
+              "status": "succeeded",
+              "data": {
+                "scope": "memory",
+                "content": "",
+                "entries": [],
+                "hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                "limit": 2200,
+                "saved": false,
+                "mutation": null
+              },
+              "executionSource": "local_test_provider"
+            },
+            "processExit": {
+              "platform": "win32",
+              "supervisor": "windows-job",
+              "launched": true,
+              "rootPid": 28444,
+              "rootConfirmed": true,
+              "rootExitCode": 0,
+              "treeConfirmed": true,
+              "activeProcesses": 0,
+              "cancelled": false,
+              "failureCode": null,
+              "hostExitCode": 0,
+              "streamsComplete": true,
+              "hostSignal": null
+            },
+            "botIsolation": {
+              "enabled": true,
+              "key": "305a77a3-4844-44ef-8f45-3b973086f368",
+              "workspace": "preview-bots",
+              "employeeId": "employee_181e1c52-4689-4cb5-aafd-770128597558",
+              "sourceProfile": "bot-bfbcd276ea0c3c335594ef61",
+              "authMode": "source-native-store",
+              "kind": "hermes-bot",
+              "revision": 1,
+              "mode": "owned_profile",
+              "profile": "bot-bfbcd276ea0c3c335594ef61",
+              "home": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-bfbcd276ea0c3c335594ef61",
+              "profileHome": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-bfbcd276ea0c3c335594ef61"
+            },
+            "executionSource": "local_test_provider"
+          },
+          "error": null
+        },
+        {
+          "id": "action_0f33b75c-1e45-4964-841d-93a24081256c",
+          "type": "hermes.bot.provision",
+          "status": "succeeded",
+          "result": {
+            "botProvision": {
+              "schemaVersion": 1,
+              "mode": "owned_profile",
+              "workspace": "preview-bots",
+              "employeeId": "employee_181e1c52-4689-4cb5-aafd-770128597558",
+              "deviceId": "device_f2b4263c-086b-41d2-842a-dc237b762420",
+              "ownershipId": "305a77a3-4844-44ef-8f45-3b973086f368",
+              "profile": "bot-bfbcd276ea0c3c335594ef61",
+              "home": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-bfbcd276ea0c3c335594ef61",
+              "profileHome": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home\\.hermes\\profiles\\bot-bfbcd276ea0c3c335594ef61",
+              "nativeVersion": "0.21.3",
+              "authentication": "configured",
+              "authMode": "source-native-store",
+              "templateProfile": "default",
+              "duplicate": false,
+              "provisionActionId": "action_0f33b75c-1e45-4964-841d-93a24081256c"
+            },
+            "processExit": {
+              "platform": "win32",
+              "supervisor": "windows-job",
+              "launched": true,
+              "rootPid": 43112,
+              "rootConfirmed": true,
+              "rootExitCode": 0,
+              "treeConfirmed": true,
+              "activeProcesses": 0,
+              "cancelled": false,
+              "failureCode": null,
+              "hostExitCode": 0,
+              "streamsComplete": true,
+              "hostSignal": null
+            },
+            "executionSource": "local_test_provider"
+          },
+          "error": null
+        }
+      ],
+      "chatSummary": {
+        "workingDirectory": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home",
+        "messages": []
+      },
+      "deleted": true
+    }
+  ],
+  "remainingOldIds": [
+    "employee_2cf91534-604d-4373-a095-741d38c8e2f6",
+    "employee_841788a1-5c86-44cb-b0cd-80171826d221"
+  ],
+  "pendingOrAckedOwnedActions": 0,
+  "health": {
+    "ok": true,
+    "preview": true,
+    "fixtureDevices": true,
+    "realHermes": true,
+    "hermesInstalled": true,
+    "nativeExecutionVerified": true,
+    "localTestProvider": true,
+    "nativeVersion": "0.21.3",
+    "schedulerEnabled": false,
+    "pid": 31840,
+    "database": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\data\\preview.sqlite",
+    "runtimeHome": "C:\\Users\\25941\\.codex\\worktrees\\v2-e03-hermes-bot-ui\\灵光爸爸拆解\\.local\\bot-preview\\runtime-home"
+  },
+  "profileHomesRetainedAsTestEvidence": true
+}
