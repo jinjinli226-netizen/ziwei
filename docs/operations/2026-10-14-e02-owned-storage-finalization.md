@@ -12,6 +12,10 @@ registry 可以吞掉 close 异常或保留 unsafe pinned handle；返回 count 
 
 owned fingerprint 增加 registry 与 sqlite_safe_read 的真实 module source/path/required function shape，并在调用时再核实际 imported module path。缺失或 source 变化拒绝，不 fallback 到全局 close_all。
 
+边界补充：SDK cli cleanup 自身也会启动默认30秒 watchdog；若收尾超过其时限，watchdog可 os._exit(0) 跳过剩余 finally。因此不能声称每次 finally 必然完整执行。本修复不改该原生 watchdog；任何这样的未知 WAL/claims 或不完整父树回执仍由原独立门槛拒绝。
+
+首轮9c9f9fa package在实际 SHA对照发现 V2 native bridge未被overlay，仍是 frozen baseline旧文件。该目录 `.local/preservation-owned-storage-finalized` 保留并标 NOT_ACCEPTED，没有执行四阶段。打包器已把V2 bridge纳入明确overlay；后续只使用新目录重建并逐字节核真实包。
+
 验证记录：新增回归先复现 operation 无 finalization、native.main 完成/SystemExit 无 finalization、SDK吞 close 后仍live却产生成功结果三个失败，然后修复转绿。6个 bootstrap/owned tests（新用例含15个 scope/error/ref balancing 检查）PASS；实际安装 SDK 的16个 receive-health加9个 prior-native adapter tests PASS，原监督根退出/tree完成，安装源/status未变。全量957/957 PASS（0fail/0skip），lint125文件PASS。私有日志位于本树 `.local/preservation-profile-window/owned-finalization-*`，适配器原回执 `.local/receive-health-1791917671467/receipt.json`。fresh package/实际 SDK 四阶段仍须完成后另记。
 
 先前 strict fail-closed 冻结检查点为 b88cbd6fc0c16c6554e973115110710bdde9c5d1，目录 `.local/preservation-native-safe-checkpoint`，6产物、2 manifests、actual extracted API readonly入口证明与956/956全量结果已核。handoff-native-safe-checkpoint.json 明确 nativeFourphase.accepted=false；不能将它或70c0df6包视为正式发布候选。

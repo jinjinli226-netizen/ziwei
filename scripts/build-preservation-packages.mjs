@@ -60,7 +60,7 @@ function fileList(directory,prefix=''){return fs.readdirSync(path.join(directory
 export function buildPackages({output=path.join(root,'.local','preservation-packages')}={}){
   if(fs.existsSync(output))throw new Error('Output already exists; use a fresh directory to preserve history');fs.mkdirSync(output,{recursive:true});
   const overlays=shared.concat(['backend/db.mjs','backend/repository.mjs','backend/app.mjs','backend/bots.mjs','backend/management.mjs','backend/ziwei-connect.mjs','backend/phone-mcp.mjs','src/local-action.mjs','src/daemon.mjs','src/management-bootstrap.mjs','src/runtime-adapters.mjs','src/hermes-gateway-runtime.mjs','daemon/ziwei_user.mjs']);
-  overlays.push('src/hermes-mcp-bootstrap.py');
+  overlays.push('src/hermes-mcp-bootstrap.py','src/hermes-native-bridge.py');
   const candidateCommit=run('git',['rev-parse','HEAD']).trim(),overlay=overlays.map(file=>({path:file,sha256:sha(fs.readFileSync(path.join(root,file)))})),packages=[];
   const npmCli=path.join(path.dirname(process.execPath),'node_modules/npm/bin/npm-cli.js');
   for(const role of ['v1-compat','v2']){
