@@ -3,6 +3,7 @@ function once(text,needle,value){if(text.split(needle).length!==2)throw new Erro
 export function patchRuntimeProfileBinding(text){
   const frozenV1=text.includes('export function executeRuntime(');
   if(frozenV1)text=once(text,'export function executeRuntime(','export async function executeRuntime(');
+  text=once(text,'fs.rmSync(home, { recursive: true, force: true });','fs.rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });');
   for(const anchor of ['profileBaseHome, hermesOverlayHome }','profileBaseHome, hermesOverlayHome })'])text=text.replaceAll(anchor,anchor.replace('hermesOverlayHome','hermesOverlayHome, selectedProfileHome'));
   text=once(text,'hermesHome({ baseHome: profileBaseHome || env.HERMES_HOME })',"(selectedProfileHome || hermesHome({ baseHome: profileBaseHome || env.HERMES_HOME }))");
   text=once(text,'hermesOverlayHome || hermesProfileHome(normalized, { baseHome: profileBaseHome || env.HERMES_HOME })','hermesOverlayHome || selectedProfileHome || hermesProfileHome(normalized, { baseHome: profileBaseHome || env.HERMES_HOME })');

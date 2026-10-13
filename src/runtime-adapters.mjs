@@ -267,7 +267,7 @@ export function createHermesExecutionOverlay({ profile, baseHome, privateDirecto
   const cleanup = () => {
     // Only remove the exact private child created here. Never remove the user's source home.
     if (path.dirname(path.resolve(home)) === parent && path.resolve(home) !== path.resolve(source)) {
-      try { fs.rmSync(home, { recursive: true, force: true }); } catch {}
+      try { fs.rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch {}
     }
   };
   try {
