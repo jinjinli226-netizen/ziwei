@@ -3,7 +3,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {pathToFileURL} from 'node:url';
-import {canonicalProduction,digestProduction,signProductionEnvelope,verifyProductionEnvelope,validateProductionRequest,validateProductionFreshness,productionEvidenceDigest,productionHostActions} from '../backend/production-preservation.mjs';
+import {canonicalProduction,digestProduction,signProductionEnvelope,verifyProductionEnvelope,validateProductionRequest,validateProductionFreshness,productionEvidenceDigest,productionHostActions,productionSemanticIssues} from '../backend/production-preservation.mjs';
 import * as nativeEvidence from '../backend/preservation-native-evidence.mjs';
 import {scanOwnedNativeDatabases,nativeActionDigest,attestNativeVersion} from '../backend/preservation-native-databases.mjs';
 import {clientBuildIdentity} from '../src/management-bootstrap.mjs';
@@ -12,6 +12,7 @@ const fail=code=>{throw Object.assign(new Error(code),{code});};
 const sha=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
 const equal=(a,b)=>digestProduction(a)===digestProduction(b);
 const scanNativeFiles=nativeEvidence.scanNativeFiles;
+const sourceScopeRecords=new WeakMap();
 const decode=text=>{try{return JSON.parse(text);}catch{fail('SOURCE_JSON_INVALID');}};
 const privateRead=file=>{if(typeof file!=='string'||!path.isAbsolute(file)||path.resolve(file)!==file)fail('SOURCE_PATH_INVALID');let current=file;while(true){if(fs.lstatSync(current).isSymbolicLink())fail('SOURCE_PATH_LINKED');const parent=path.dirname(current);if(parent===current)break;current=parent;}const stat=fs.lstatSync(file);if(!stat.isFile()||stat.nlink!==1||fs.realpathSync.native(file)!==file)fail('SOURCE_PATH_INVALID');return fs.readFileSync(file);};
 function fileProof(file,files){
@@ -44,7 +45,8 @@ export function observeSourceProcesses(binding,request){
  const unresolved=[],originals=[...binding.clients,...binding.apiInstances];
  for(const original of originals)if(inventory.some(row=>row.pid===original.originalInstance.pid))unresolved.push({code:'ORIGINAL_PID_PRESENT',pid:original.originalInstance.pid});
  const complete=nativeEvidence.observeOriginalNativeScopes?.({binding,inventory,request});
- const runningPids=new Set((complete?.runningV2?.instances||[]).filter(row=>row.running===true).map(row=>row.pid)),matches=new Set();
+ const runningPids=new Set(request?.command==='restore'?(complete?.runningV2?.instances||[]).filter(row=>row.running===true&&row.productRole==='v2'&&row.root&&row.entryPath&&row.bindingDigest).map(row=>row.pid):[]),matches=new Set();
+ if(request?.command!=='restore'&&complete?.runningV2)unresolved.push({code:'SOURCE_NEW_WRITER_PRESENT'});
  for(const row of inventory){
   if(ignored.has(row.pid)||runningPids.has(row.pid))continue;
   const command=process.platform==='win32'?String(row.command||'').toLowerCase():String(row.command||'');
@@ -56,8 +58,11 @@ export function observeSourceProcesses(binding,request){
  // A command substring and an absent parent PID cannot account for detached
  // raw-spawn workers. E02's native observer must establish complete original
  // registry/namespace coverage; absence of that capability stays unknown.
- if(complete?.safe!==true||complete?.workerScopeComplete!==true||complete?.namespaceComplete!==true)unresolved.push({code:'SOURCE_ORIGINAL_WORKER_NAMESPACE_UNPROVEN'});
- return {namespace:process.platform,namespaceComplete:complete?.namespaceComplete===true,workerScopeComplete:complete?.workerScopeComplete===true&&unresolved.length===0,originalStopped:originals.every(original=>!inventory.some(row=>row.pid===original.originalInstance.pid)),restarted:matches.size>0,unresolved,instances:complete?.instances||[],...(complete?.runningV2?{runningV2:complete.runningV2}:{})};
+ if(complete?.safe!==true||complete?.workerScopeComplete!==true||complete?.namespaceComplete!==true||['files','directories','homes','connections','proofs'].some(key=>!Array.isArray(complete?.[key])))unresolved.push({code:'SOURCE_ORIGINAL_WORKER_NAMESPACE_UNPROVEN'});
+ const scoped=complete&&['files','directories','homes','connections','proofs'].every(key=>Array.isArray(complete[key]))?Object.fromEntries(['files','directories','homes','connections','proofs'].map(key=>[key,complete[key]])):null;
+ const observation={namespace:process.platform,namespaceComplete:complete?.namespaceComplete===true,workerScopeComplete:complete?.workerScopeComplete===true&&unresolved.length===0,originalStopped:originals.every(original=>!inventory.some(row=>row.pid===original.originalInstance.pid)),restarted:matches.size>0,unresolved,instances:complete?.instances||[],...(complete?.runningV2?{runningV2:complete.runningV2}:{}),...(scoped?{scopeDigest:digestProduction(scoped)}:{})};
+ if(scoped)sourceScopeRecords.set(observation,scoped);
+ return observation;
 }
 function connectionsFor(payload,files,directories,issues){
  const connections=[];
@@ -108,9 +113,12 @@ export function collectProductionSourceProof({request,trust,previous=null,observ
  const files=[],directories=[],issues=[],actions=productionHostActions(payload.binding,payload.actionProjection),connections=connectionsFor(payload,files,directories,issues);
  const observations=observe(payload.binding,payload);
  if(observations.originalStopped!==true||observations.workerScopeComplete!==true||observations.namespaceComplete!==true||observations.restarted!==false||observations.unresolved?.length)issues.push({code:'SOURCE_WORKERS_NOT_PROVEN_STOPPED'});
- const homes=payload.homes.map(scope=>({...scope,...attestNativeVersion(scope,actions)}));
+ const scoped=sourceScopeRecords.get(observations);
+ if(scoped){files.push(...scoped.files);directories.push(...scoped.directories);connections.push(...scoped.connections.filter(row=>!connections.some(existing=>equal(existing,row))));}
+ const homes=(scoped?.homes||payload.homes).map(scope=>({...scope,...attestNativeVersion(scope,actions)}));
  const scanned=scanFiles({connections,actions,homes,productionRequest:payload});
  const native=scanDatabases({homes,actions,gatewayInbox:payload.gatewayInbox,gatewayExits:scanned.gatewayExits,operationId:payload.operationId});
+ issues.push(...productionSemanticIssues(payload.actionProjection,scanned.originalActionProofs||[]));
  for(const action of actions){
   const assessment=(scanned.originalActionProofs||[]).find(proof=>proof.kind==='legacy-never-dispatched-v1'&&proof.actionId===action.id&&proof.actionDigest===nativeActionDigest(action)&&proof.operationId===payload.operationId&&proof.specHash===payload.specHash&&proof.challenge===payload.challenge&&proof.hostId===request.hostId&&proof.verified===true);
   if(['pending','acked'].includes(action.status)||action.status==='expired'&&action.acked_at&&!assessment)issues.push({code:'SOURCE_ORIGINAL_ACTION_DEBT',actionId:action.id});
@@ -131,19 +139,31 @@ export function collectProductionSourceProof({request,trust,previous=null,observ
  if(payload.command==='restore'){
   const installed=payload.installed;
   if(!installed||installed.productRole!=='v2')issues.push({code:'SOURCE_RESTORE_IDENTITY_REQUIRED'});
-  else for(const [root,contents] of [...payload.binding.apiInstances.map(row=>[row.root,installed.apiContents]),...payload.binding.clients.map(row=>[row.root,installed.clientContents])]){
+  else for(const [root,contents,isApi] of [...payload.binding.apiInstances.map(row=>[row.root,installed.apiContents,true]),...payload.binding.clients.map(row=>[row.root,installed.clientContents,false])]){
    if(!Array.isArray(contents)||!contents.length){issues.push({code:'SOURCE_RESTORE_SOURCE_REQUIRED'});continue;}
+   const approved=new Set();
    for(const row of contents){
     if(!row||typeof row.path!=='string'||row.path.includes('\\')||row.path.split('/').some(part=>!part||part==='.'||part==='..')||path.posix.isAbsolute(row.path))fail('SOURCE_RESTORE_SCOPE_INVALID');
-    if(root===payload.binding.apiInstances.find(api=>api.root===root)?.root&&!['backend','src','scripts','skills','daemon','package.json','package-lock.json','preservation-package.json'].includes(row.path.split('/')[0]))continue;
+    if(isApi&&!['backend','src','scripts','skills','daemon','package.json','package-lock.json','preservation-package.json'].includes(row.path.split('/')[0]))continue;
+    if(approved.has(row.path))fail('SOURCE_RESTORE_SCOPE_INVALID');approved.add(row.path);
     const bytes=fileProof(path.join(root,row.path),files);if(!bytes||sha(bytes)!==row.sha256)issues.push({code:'SOURCE_RESTORE_SOURCE_CHANGED'});
    }
+   function installedWalk(directory,prefix=''){
+    for(const name of directoryProof(directory,directories)){
+     if(!prefix&&['node_modules','.git','.local','data'].includes(name))continue;
+     if(isApi&&!prefix&&!['backend','src','scripts','skills','daemon','package.json','package-lock.json','preservation-package.json'].includes(name))continue;
+     const file=path.join(directory,name),relative=prefix?prefix+'/'+name:name,stat=fs.lstatSync(file);
+     if(stat.isSymbolicLink())fail('SOURCE_PATH_LINKED');
+     if(stat.isDirectory())installedWalk(file,relative);else if(!approved.has(relative))issues.push({code:'SOURCE_RESTORE_EXTRA_SOURCE'});
+    }
+   }
+   installedWalk(root);
    const descriptor=decode(privateRead(path.join(root,'preservation-package.json')));if(descriptor.productRole!=='v2'||descriptor.candidateCommit!==installed.candidateCommit)issues.push({code:'SOURCE_RESTORE_ROLE_CHANGED'});
   }
  }
  recheckRecords({files,directories});
  const after=observe(payload.binding,payload);if(!equal(observations,after))issues.push({code:'SOURCE_PROCESS_OBSERVATION_CHANGED'});
- const result={domain:payload.kind==='collect'?'ziwei-production-collect-proof-v1':'ziwei-production-recheck-proof-v1',schemaVersion:1,kind:payload.kind,command:payload.command,collector:payload.collector,challenge:payload.challenge,issuedAt:payload.issuedAt,expiresAt:payload.expiresAt,operationId:payload.operationId,specHash:payload.specHash,databaseIdentity:payload.databaseIdentity,freezeDigest:payload.freezeDigest,bindingDigest:digestProduction(payload.binding),actionProjectionDigest:digestProduction(payload.actionProjection),gatewayInboxDigest:digestProduction(payload.gatewayInbox),homesDigest:digestProduction(payload.homes),priorEvidenceDigest:payload.priorEvidenceDigest,observations,files,directories,nativeDatabases:native.nativeDatabases,nativeStateProofs:[...native.nativeStateProofs,...(scanned.originalActionProofs||[]).map(proof=>{const stable=JSON.parse(canonicalProduction(proof));delete stable.challenge;return stable;})],gatewayInboxProofs:native.gatewayInboxProofs,actionBindings:actions.map(row=>({id:row.id,digest:nativeActionDigest(row)})),issues,safe:issues.length===0,evidenceDigest:null};
+ const result={domain:payload.kind==='collect'?'ziwei-production-collect-proof-v1':'ziwei-production-recheck-proof-v1',schemaVersion:1,kind:payload.kind,command:payload.command,collector:payload.collector,challenge:payload.challenge,issuedAt:payload.issuedAt,expiresAt:payload.expiresAt,operationId:payload.operationId,specHash:payload.specHash,databaseIdentity:payload.databaseIdentity,freezeDigest:payload.freezeDigest,bindingDigest:digestProduction(payload.binding),actionProjectionDigest:digestProduction(payload.actionProjection),gatewayInboxDigest:digestProduction(payload.gatewayInbox),homesDigest:digestProduction(payload.homes),priorEvidenceDigest:payload.priorEvidenceDigest,observations,files,directories,nativeDatabases:native.nativeDatabases,nativeStateProofs:[...native.nativeStateProofs,...(scoped?.proofs||[]),...(scanned.originalActionProofs||[]).map(proof=>{const stable=JSON.parse(canonicalProduction(proof));delete stable.challenge;return stable;})],gatewayInboxProofs:native.gatewayInboxProofs,actionBindings:actions.map(row=>({id:row.id,digest:nativeActionDigest(row)})),issues,safe:issues.length===0,evidenceDigest:null};
  result.evidenceDigest=productionEvidenceDigest(result);
  if(prior&&result.evidenceDigest!==prior.evidenceDigest)fail('SOURCE_EVIDENCE_CHANGED');
  validateProductionFreshness(payload);

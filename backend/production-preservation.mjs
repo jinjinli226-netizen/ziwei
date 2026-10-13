@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import {types} from 'node:util';
 import {DatabaseSync} from 'node:sqlite';
 import {fileURLToPath} from 'node:url';
-import {createPreservation,FROZEN_VERSIONS,PRODUCT_ROLE,digest} from './version-preservation.mjs';
+import {createPreservation,FROZEN_VERSIONS,PRODUCT_ROLE,digest,uncertain,exitedTree} from './version-preservation.mjs';
 import {readDatabaseSnapshot,nativeActionDigest} from './preservation-native-databases.mjs';
 import {verifyPreservationPackages} from '../scripts/verify-preservation-packages.mjs';
 
@@ -132,7 +132,19 @@ function verifyStagedPackage(spec,packageRoot){
  const entries=manifest.contents.filter(row=>included(row.path)),expected=new Set();
  for(const row of entries){fields(row,['path','sha256']);if(!hex(row.sha256)||typeof row.path!=='string'||row.path.includes('\\')||path.posix.isAbsolute(row.path)||row.path.split('/').some(part=>!part||part==='.'||part==='..')||expected.has(row.path))fail('PRODUCTION_PACKAGE_INVALID');expected.add(row.path);const file=path.join(root,row.path);privateFile(file);if(hash(fs.readFileSync(file))!==row.sha256)fail('PRODUCTION_PACKAGE_CHANGED');}
  for(const mandatory of ['backend/production-preservation.mjs','backend/version-preservation.mjs','backend/preservation-native-evidence.mjs','backend/preservation-native-databases.mjs','scripts/production-source-proof.mjs','scripts/v2-preservation.mjs','scripts/verify-preservation-packages.mjs','src/execution-admission.mjs','preservation-package.json'])if(!expected.has(mandatory))fail('PRODUCTION_PACKAGE_CLOSURE');
- if(hash(fs.readFileSync(fileURLToPath(import.meta.url)))!==manifest.contents.find(row=>row.path==='backend/production-preservation.mjs').sha256)fail('PRODUCTION_LOADED_ADAPTER_CHANGED');
+ // packageRoot cannot lend its identity to code imported from another checkout.
+ // Cover the loaded static and literal dynamic relative dependency closure,
+ // including the source collector's native/lifecycle modules.
+ const loadedRoot=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..'),pending=['backend/production-preservation.mjs','scripts/production-source-proof.mjs'],checked=new Set();
+ while(pending.length){
+  const relative=pending.pop();if(checked.has(relative))continue;checked.add(relative);
+  const entry=manifest.contents.find(row=>row.path===relative),file=path.join(loadedRoot,relative);privateFile(file);
+  const bytes=fs.readFileSync(file);if(!entry||hash(bytes)!==entry.sha256)fail('PRODUCTION_LOADED_CLOSURE_CHANGED');
+  for(const match of bytes.toString('utf8').matchAll(/\b(?:from\s+|import\s*\(\s*|import\s+)(['"])(\.[^'"]+)\1/g)){
+   const dependency=path.resolve(path.dirname(file),match[2]);if(!inside(loadedRoot,dependency))fail('PRODUCTION_PACKAGE_CLOSURE');
+   pending.push(path.relative(loadedRoot,dependency).replaceAll('\\','/'));
+  }
+ }
  function walk(directory,prefix){for(const entry of fs.readdirSync(directory,{withFileTypes:true})){const relative=prefix?prefix+'/'+entry.name:entry.name,file=path.join(directory,entry.name);if(entry.isSymbolicLink())fail('PRODUCTION_PACKAGE_CHANGED');if(entry.isDirectory())walk(file,relative);else if(!expected.has(relative))fail('PRODUCTION_PACKAGE_CHANGED');}}
  for(const name of ['backend','src','scripts','skills','daemon'])if(fs.existsSync(path.join(root,name)))walk(path.join(root,name),name);
  return {role:PRODUCT_ROLE,root,manifest,manifests};
@@ -233,8 +245,23 @@ export function productionHostActions(binding,projection){
   return device?binding.deviceIds.includes(device):binding.apiInstances.length>0;
  });
 }
+/** A stable row digest does not establish execution/delivery terminal state. */
+export function productionSemanticIssues(projection,originalActionProofs=[]){
+ const issues=[];
+ const parsed=row=>{if(row.result_json===null||row.result_json===undefined||row.result_json==='')return null;try{return JSON.parse(row.result_json);}catch{issues.push({code:'PRODUCTION_RESULT_INVALID',id:row.id});return null;}};
+ const debt=value=>value&&typeof value==='object'&&(value.retainEvidence===true||value.status==='blocked'||value.executionState==='blocked'||value.processExit&&!exitedTree(value.processExit)||Object.values(value).some(debt));
+ for(const row of projection.tables.a2a_actions.rows){
+  const result=parsed(row),assessment=originalActionProofs.some(proof=>proof.kind==='legacy-never-dispatched-v1'&&proof.actionId===row.id&&proof.actionDigest===nativeActionDigest(row)&&proof.verified===true);
+  if(!['succeeded','failed','expired'].includes(row.status)||uncertain(result)||debt(result)||['succeeded','failed'].includes(row.status)&&!row.acked_at||row.status==='expired'&&row.acked_at&&!assessment)issues.push({code:'PRODUCTION_ORIGINAL_ACTION_DEBT',id:row.id});
+ }
+ for(const [table,terminal] of [['automation_runs',['completed','failed','dry_run','cancelled']],['webhook_deliveries',['delivered','failed','cancelled']],['ziwei_connect_runs',['succeeded','failed','dry_run','cancelled']]]){
+  for(const row of projection.tables[table]?.rows||[]){const result=parsed(row);if(!terminal.includes(row.status)||uncertain(result)||debt(result))issues.push({code:'PRODUCTION_ORIGINAL_QUEUE_DEBT',table,id:row.id});}
+ }
+ return issues;
+}
 function validateObservations(payload,binding,manifest){
- const observations=payload.observations;fields(observations,['namespace','namespaceComplete','workerScopeComplete','originalStopped','restarted','unresolved','instances'],['runningV2']);
+ const observations=payload.observations;fields(observations,['namespace','namespaceComplete','workerScopeComplete','originalStopped','restarted','unresolved','instances'],['runningV2','scopeDigest']);
+ if(observations.scopeDigest!==undefined&&!hex(observations.scopeDigest))fail('PRODUCTION_PROOF_INVALID');
  if(!['win32','linux'].includes(observations.namespace)||observations.namespaceComplete!==true||observations.workerScopeComplete!==true||observations.originalStopped!==true||observations.restarted!==false||!Array.isArray(observations.unresolved)||observations.unresolved.length||!Array.isArray(observations.instances))fail('PRODUCTION_SOURCE_NOT_STOPPED');
  const expected=[...binding.clients,...binding.apiInstances];
  if(observations.instances.length!==expected.length)fail('PRODUCTION_INSTANCE_COVERAGE');
@@ -243,7 +270,7 @@ function validateObservations(payload,binding,manifest){
   const running=observations.runningV2;
   if(!running||running.fenceState!=='sealed'||running.productRole!=='v2'||running.buildDigest!==manifest.buildDigest||running.databaseId!==payload.databaseIdentity.databaseId||!Array.isArray(running.instances)||running.instances.length!==expected.length)fail('PRODUCTION_RESTORE_RUNNING_V2_REQUIRED');
   for(const original of expected){const matched=running.instances.filter(row=>row.bindingDigest===digestProduction(original)&&row.root===original.root&&row.entryPath===original.entryPath&&row.running===true&&row.productRole==='v2'&&row.buildDigest===(original.configPath?manifest.clientBuild:manifest.buildDigest)&&row.pid!==original.originalInstance.pid&&Number.isSafeInteger(row.pid)&&row.pid>0&&hex(row.nonceDigest)&&Number.isFinite(Date.parse(row.createdAt))&&Date.parse(row.createdAt)>Date.parse(original.originalInstance.createdAt));if(matched.length!==1)fail('PRODUCTION_RESTORE_RUNNING_V2_REQUIRED');}
- }
+ }else if(observations.runningV2!==undefined)fail('PRODUCTION_SOURCE_NOT_STOPPED');
 }
 function verifySourceProofs(envelopes,requests,trust,manifest){
  if(!Array.isArray(envelopes)||envelopes.length!==requests.length)fail('PRODUCTION_HOST_COVERAGE');
@@ -314,6 +341,7 @@ export async function runProductionPreservation(input){
  const context={operationId:pinned.operationId,specHash:pinned.specHash,databaseIdentity:validated.databaseIdentity,freezeDigest,requiredHosts:pinned.hosts.map(row=>row.hostId)};
  const envelopes=copy(await proofProvider.collect({...copy(context),requests:copy(collectRequests),priorEvidenceDigest:null}));
  const collected=verifySourceProofs(envelopes,collectRequests,validated.trust,validated.manifest),priorEvidenceDigest=digestProduction(envelopes);
+ if(productionSemanticIssues(initial.projection,collected.flatMap(row=>row.payload.nativeStateProofs)).length)fail('PRODUCTION_ORIGINAL_DEBT');
  for(const action of initial.projection.tables.a2a_actions.rows)if(!collected.some(row=>row.payload.actionBindings.some(binding=>binding.id===action.id&&binding.digest===nativeActionDigest(action))))fail('PRODUCTION_ACTION_COVERAGE');
  const recheckRequests=requestsFor(validated,command,'recheck',initial.projection,freezeDigest,priorEvidenceDigest);
  const fresh=copy(await proofProvider.recheck({...copy(context),requests:copy(recheckRequests),previous:copy(envelopes),priorEvidenceDigest}));
@@ -332,6 +360,9 @@ export async function runProductionPreservation(input){
  try{
   db.exec('PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON');
   const recovered=storedReceipt(db,pinned,command);if(recovered)return recovered;
+  // Last boundary check after package reads, snapshot reads and DB open.
+  for(const request of [...collectRequests,...recheckRequests])validateProductionFreshness(request.payload);
+  if(backup)validateProductionFreshness(backup);
   db.function('ziwei_production_receipt_write_admitted',()=>receiptWrite?1:0);
   // Source proof is complete before this first schema write.
   db.exec('CREATE TABLE IF NOT EXISTS production_preservation_identity(singleton INTEGER PRIMARY KEY CHECK(singleton=1),database_id TEXT NOT NULL,file_identity_json TEXT NOT NULL); CREATE TABLE IF NOT EXISTS production_preservation_receipts(operation_id TEXT NOT NULL,command TEXT NOT NULL,spec_hash TEXT NOT NULL,receipt_json TEXT NOT NULL,PRIMARY KEY(operation_id,command));');
@@ -339,7 +370,7 @@ export async function runProductionPreservation(input){
   const guard=createPreservation(db,{
    collectNativeEvidence:()=>{const row=db.prepare('SELECT * FROM version_preservation WHERE singleton=1').get();return {...native,intentDigest:digest(row.intent_json),versionsDigest:digest(row.versions_json)};},
    verifySourceRecord:({record})=>trustedRecords.has(record)?true:undefined,
-   beforeCommit:()=>{productionDatabaseIdentity(pinned.database);storedReceipt(db,pinned,command);if(digestProduction(readProductionProjection(db))!==projectionDigest)fail('PRODUCTION_PROJECTION_CHANGED');for(const request of recheckRequests)validateProductionFreshness(request.payload);},
+   beforeCommit:()=>{productionDatabaseIdentity(pinned.database);storedReceipt(db,pinned,command);if(digestProduction(readProductionProjection(db))!==projectionDigest)fail('PRODUCTION_PROJECTION_CHANGED');for(const request of recheckRequests)validateProductionFreshness(request.payload);if(backup)validateProductionFreshness(backup);},
    persistReceipt:({row,report})=>{
     committed={mode:'applied',command,operationId:pinned.operationId,specHash:pinned.specHash,databaseId:pinned.database.databaseId,databaseIdentity:validated.databaseIdentity,role:validated.role,state:row.state,freezeDigest,projectionDigest,intentDigest:digest(row.intent_json),snapshotDigest:row.snapshot_json?digest(row.snapshot_json):null,evidenceDigest:digestProduction(fresh),backupDigest:backup?digestProduction(backup):null,report:copy(report)};
     receiptWrite=true;try{db.prepare('INSERT OR IGNORE INTO production_preservation_identity VALUES(1,?,?)').run(pinned.database.databaseId,canonicalProduction(pinned.database));db.prepare('INSERT INTO production_preservation_receipts VALUES(?,?,?,?)').run(pinned.operationId,command,pinned.specHash,canonicalProduction(committed));}finally{receiptWrite=false;}

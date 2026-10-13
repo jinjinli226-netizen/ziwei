@@ -19,7 +19,7 @@ function fixture(t){
  const databaseFile=path.join(root,'current.sqlite'),db=new DatabaseSync(databaseFile);
  db.exec("CREATE TABLE workspaces(id TEXT PRIMARY KEY,slug TEXT); INSERT INTO workspaces VALUES('ws_fixture','fixture'); CREATE TABLE employees(id TEXT PRIMARY KEY,workspace_id TEXT,runtime TEXT,status TEXT); CREATE TABLE tasks(id TEXT PRIMARY KEY,assignee TEXT); CREATE TABLE conversations(id TEXT PRIMARY KEY,employee_id TEXT); CREATE TABLE a2a_actions(id TEXT PRIMARY KEY,workspace_id TEXT,type TEXT,payload_json TEXT,result_json TEXT,status TEXT,acked_at TEXT); CREATE TABLE management_requests(workspace_id TEXT,kind TEXT,request_key TEXT,fingerprint TEXT,resource_id TEXT,PRIMARY KEY(workspace_id,kind,request_key));");db.close();
  const packages=path.join(root,'packages'),packageRoot=path.join(root,'staged-v2');fs.mkdirSync(packages);fs.mkdirSync(packageRoot);
- const files=['backend/server.mjs','backend/production-preservation.mjs','backend/version-preservation.mjs','backend/preservation-native-evidence.mjs','backend/preservation-native-databases.mjs','scripts/production-source-proof.mjs','scripts/v2-preservation.mjs','scripts/verify-preservation-packages.mjs','src/execution-admission.mjs'];
+ const files=['backend/server.mjs','backend/production-preservation.mjs','backend/version-preservation.mjs','backend/preservation-native-evidence.mjs','backend/preservation-native-databases.mjs','scripts/production-source-proof.mjs','scripts/v2-preservation.mjs','scripts/verify-preservation-packages.mjs','src/execution-admission.mjs','scripts/client-lifecycle.mjs','scripts/client-legacy-identity.mjs','src/management-bootstrap.mjs','daemon/config.mjs'];
  for(const file of files){const target=path.join(packageRoot,file);fs.mkdirSync(path.dirname(target),{recursive:true});fs.copyFileSync(path.join(repository,file),target);}
  const candidateCommit='a'.repeat(40),manifests=[],artifacts=[];
  for(const productRole of ['v1-compat','v2']){
@@ -167,4 +167,24 @@ test('late backup cannot make an expired source proof reach any schema or phase 
  };
  await assert.rejects(runProductionPreservation({...options(f),command:'seal',apply:true}),{code:'PRODUCTION_PROOF_EXPIRED'});
  assert.equal(sourceBytes(f),before);
+});
+test('an approved staged root cannot lend identity to a different loaded security dependency',async t=>{
+ const f=fixture(t),relative='backend/version-preservation.mjs',file=path.join(f.packageRoot,relative);fs.appendFileSync(file,'\n// different approved staged implementation\n');
+ const manifestFile=path.join(f.spec.packages.directory,'v2-manifest.json'),manifest=JSON.parse(fs.readFileSync(manifestFile));manifest.contents.find(row=>row.path===relative).sha256=sha(fs.readFileSync(file));manifest.buildDigest=sha(JSON.stringify(manifest.contents));fs.writeFileSync(manifestFile,JSON.stringify(manifest));
+ f.spec.packages.manifests.find(row=>row.productRole==='v2').sha256=sha(fs.readFileSync(manifestFile));delete f.spec.specHash;f.spec.specHash=digestProduction(f.spec);f.trust.approvedSpecs[0].specHash=f.spec.specHash;
+ const before=sourceBytes(f);await assert.rejects(runProductionPreservation({...options(f),command:'prepare',apply:true}),{code:'PRODUCTION_LOADED_CLOSURE_CHANGED'});assert.equal(sourceBytes(f),before);assert.deepEqual(f.calls,[]);
+});
+test('unknown/uncertain old action and queued delivery debt refuse before first schema write',async t=>{
+ const mutations=[
+  db=>db.exec("INSERT INTO a2a_actions VALUES('old_unknown','ws_fixture','command','{}',NULL,'uncertain',NULL)"),
+  db=>db.exec("INSERT INTO a2a_actions VALUES('old_unknown','ws_fixture','command','{}','{\"code\":\"EXECUTION_UNCERTAIN\"}','succeeded',NULL)"),
+  db=>db.exec("CREATE TABLE automation_runs(id TEXT,status TEXT,result_json TEXT); INSERT INTO automation_runs VALUES('old_run','running',NULL)"),
+  db=>db.exec("CREATE TABLE webhook_deliveries(id TEXT,status TEXT); INSERT INTO webhook_deliveries VALUES('old_delivery','sending')")
+ ];
+ for(const mutate of mutations){const f=fixture(t),db=new DatabaseSync(f.spec.database.path);mutate(db);db.close();const before=sourceBytes(f);await assert.rejects(runProductionPreservation({...options(f),command:'prepare',apply:true}),{code:'PRODUCTION_SOURCE_UNSAFE'});assert.equal(sourceBytes(f),before);}
+});
+test('a signed running-V2 exemption cannot authorize offline prepare',async t=>{
+ const f=fixture(t),before=sourceBytes(f),observe=binding=>({...f.observe(binding),runningV2:{instances:[]}});
+ f.provider.collect=input=>input.requests.map(request=>collectProductionSourceProof({request,trust:f.trust,observe}));
+ await assert.rejects(runProductionPreservation({...options(f),command:'prepare',apply:true}),{code:'PRODUCTION_SOURCE_NOT_STOPPED'});assert.equal(sourceBytes(f),before);
 });
