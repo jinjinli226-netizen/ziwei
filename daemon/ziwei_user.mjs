@@ -348,7 +348,12 @@ function stop(signal) {
   const closed = new Promise(resolve => { if (health.listening) health.close(resolve); else resolve(); });
   // Signal shutdown also owns any registered resident Gateway. Its existing
   // close method waits for the supervised completion; no arbitrary PID is used.
-  const executors = [...connections.values()].map(connection => Promise.resolve().then(() => connection.localExecutor.close()));
+  const executors = [...connections.values()].map(connection => Promise.resolve().then(async () => {
+    await connection.localExecutor.close();
+    // Supervision resolves even when a receipt/tree is unknown. Keep that
+    // registered uncertainty visible instead of reporting successful shutdown.
+    if (connection.localExecutor.maintenanceStatus()?.safe !== true) throw new Error('REGISTERED_GATEWAY_EXIT_UNCONFIRMED');
+  }));
   void Promise.allSettled([closed, ...activeHeartbeats, ...executors]).then(results => {
     const failed = results.filter(result => result.status === 'rejected').length;
     log('stopped', { signal, ...(failed ? { cleanupFailures: failed } : {}) });
