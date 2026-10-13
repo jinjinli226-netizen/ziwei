@@ -2,13 +2,15 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
-import {createHash} from 'node:crypto';
+import {createHash,randomBytes,randomUUID} from 'node:crypto';
 import {DatabaseSync} from 'node:sqlite';
 import {pathToFileURL} from 'node:url';
+import {digestProduction} from '../backend/production-preservation.mjs';
 
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 /** Real archive entry, external cwd, no QA marker or dependency symlink. */
 export function verifyApiEntries(directory){
+ directory=path.resolve(directory);
  const results=[];
  for(const role of ['v1-compat','v2']){
   const manifest=JSON.parse(fs.readFileSync(path.join(directory,role+'-manifest.json'))),archive=path.join(directory,role+'-api.zip'),artifact=manifest.artifacts.find(row=>path.basename(row.path)===role+'-api.zip');
@@ -19,6 +21,15 @@ export function verifyApiEntries(directory){
    const file=path.join(temp,'original.sqlite');db=new DatabaseSync(file);db.exec('CREATE TABLE sentinel(id TEXT PRIMARY KEY,value TEXT);INSERT INTO sentinel VALUES(\'original\',\'retained\');PRAGMA journal_mode=WAL;PRAGMA wal_autocheckpoint=0;INSERT INTO sentinel VALUES(\'wal-original\',\'retained in WAL\')');
    const spec=path.join(temp,'spec.json');fs.writeFileSync(spec,JSON.stringify({database:file,operationId:'archive-readonly-original'}));
    const guard=path.join(temp,'guard.cjs');fs.writeFileSync(guard,"const deny=()=>{throw Error('Readonly plan must not execute a helper or use network')};global.fetch=deny;require('node:net').Socket.prototype.connect=deny;for(const name of ['spawn','spawnSync','exec','execSync','execFile','execFileSync','fork'])require('node:child_process')[name]=deny;");
+   const productionCommands=[];let productionSpec,productionTrust;
+   if(fs.existsSync(path.join(extracted,'backend/production-preservation.mjs'))){
+    const originalRoot=path.join(temp,'stopped-original-api'),entryPath=path.join(originalRoot,'backend/server.mjs');fs.mkdirSync(path.dirname(entryPath),{recursive:true});fs.writeFileSync(entryPath,'// isolated original archive fixture\n');
+    const nonce='c'.repeat(64),host={hostId:'archive_fixture',deviceIds:[],workspaceIds:['ws_archive_fixture'],clients:[],apiInstances:[{root:originalRoot,entryPath,role:'v1',buildDigest:sha(JSON.stringify([{path:'backend/server.mjs',sha256:sha(fs.readFileSync(entryPath))}])),serviceManager:'isolated-plan-fixture',originalInstance:{pid:999999999,createdAt:'2026-10-01T00:00:00.000Z',nonceDigest:nonce}}]};
+    const manifests=['v1-compat','v2'].map(productRole=>({productRole,sha256:sha(fs.readFileSync(path.join(directory,productRole+'-manifest.json')))})),artifacts=['v1-compat','v2'].flatMap(productRole=>JSON.parse(fs.readFileSync(path.join(directory,productRole+'-manifest.json'))).artifacts.map(row=>({name:path.basename(row.path),sha256:row.sha256,bytes:row.bytes}))),stat=fs.lstatSync(file,{bigint:true});
+    const value={schemaVersion:1,mode:'production',operationId:'archive-production-plan',authorization:{executor:'R01',targetOrigins:['https://fixture.invalid'],allowedCommands:['inspect','prepare','seal','restore','abort']},database:{path:file,canonicalPath:fs.realpathSync.native(file),identity:{dev:String(stat.dev),ino:String(stat.ino)},databaseId:randomUUID()},packages:{directory,manifests,artifacts},candidateCommit:manifest.candidateCommit,qa:{commit:'b'.repeat(40),evidenceSha256:nonce},versions:manifest.versions,hosts:[host],backupScope:{mainDatabase:file,controlDatabases:[],objectRoots:[],homes:[],journals:[],configs:[],privateReferences:[]},bootstrap:{fromRole:'v1',offline:true,allOriginalWritersStopped:true}};
+    value.specHash=digestProduction(value);productionSpec=path.join(temp,'production-spec.json');fs.writeFileSync(productionSpec,JSON.stringify(value));
+    const keyRef=path.join(temp,'private-fixture-key');fs.writeFileSync(keyRef,randomBytes(32),{mode:0o600});productionTrust=path.join(temp,'independent-trust.json');fs.writeFileSync(productionTrust,JSON.stringify({schemaVersion:1,algorithm:'hmac-sha256',hosts:[{hostId:host.hostId,keyId:'archive_fixture',keyRef,bindingDigest:digestProduction(host)}],approvedSpecs:[{operationId:value.operationId,specHash:value.specHash}],backupHostId:host.hostId}));
+   }
    const sourceHashes=()=>['','-wal','-shm'].map(suffix=>({suffix,sha256:sha(fs.readFileSync(file+suffix))}));const beforeSource=JSON.stringify(sourceHashes()),names=fs.readdirSync(temp).sort(),commands=[];
    for(const command of ['inspect','prepare']){
     const output=execFileSync(process.execPath,['--require',guard,path.join(extracted,'scripts/v2-preservation.mjs'),command,'--spec',spec],{cwd:temp,encoding:'utf8',windowsHide:true,maxBuffer:2*1024*1024}),report=JSON.parse(output);
@@ -26,13 +37,25 @@ export function verifyApiEntries(directory){
     if(JSON.stringify(sourceHashes())!==beforeSource||JSON.stringify(fs.readdirSync(temp).sort())!==JSON.stringify(names))throw Error('Readonly archive modified original files');
     commands.push({command,mode:report.mode,willApply:report.willApply,role:report.report.role});
    }
+   if(productionSpec){
+    for(const command of ['inspect','prepare']){
+     const output=execFileSync(process.execPath,['--require',guard,path.join(extracted,'scripts/v2-preservation.mjs'),command,'--spec',productionSpec,'--trust',productionTrust],{cwd:temp,encoding:'utf8',windowsHide:true,maxBuffer:2*1024*1024}),report=JSON.parse(output);
+     if(report.mode!=='plan'||report.willApply!==false||report.role!==role||report.state!=='absent')throw Error('Production archive plan mismatch');
+     if(JSON.stringify(sourceHashes())!==beforeSource||JSON.stringify(fs.readdirSync(temp).sort())!==JSON.stringify(names))throw Error('Production archive plan modified original files');
+     productionCommands.push({command,mode:report.mode,willApply:false,role:report.role});
+    }
+    let refused;
+    try{execFileSync(process.execPath,['--require',guard,path.join(extracted,'scripts/v2-preservation.mjs'),'prepare','--spec',productionSpec,'--trust',productionTrust,'--apply'],{cwd:temp,encoding:'utf8',windowsHide:true,stdio:'pipe'});}catch(error){refused=JSON.parse(String(error.stderr).split('\n').find(line=>line.startsWith('{'))||'{}').code;}
+    if(refused!==(role==='v1-compat'?'PRODUCTION_COMPAT_READ_ONLY':'PRODUCTION_TRANSPORT_REQUIRED')||JSON.stringify(sourceHashes())!==beforeSource||JSON.stringify(fs.readdirSync(temp).sort())!==JSON.stringify(names))throw Error('Production archive first-write refusal failed: '+refused);
+    productionCommands.push({command:'prepare',apply:true,refused});
+   }
    // Unchanged main+WAL bytes prove that the source schema remains sentinel-only.
    // A new parent read transaction would itself alter the fixture SHM read mark.
    // Negative control removes only this disposable archive's dependency.
    fs.unlinkSync(path.join(extracted,'daemon/config.mjs'));let missing=false;
    try{execFileSync(process.execPath,['--require',guard,path.join(extracted,'scripts/v2-preservation.mjs'),'inspect','--spec',spec],{cwd:temp,encoding:'utf8',windowsHide:true,stdio:'pipe'});}catch(error){missing=String(error.stderr).includes('ERR_MODULE_NOT_FOUND');}
    if(!missing||JSON.stringify(sourceHashes())!==beforeSource)throw Error('Missing dependency negative control failed');
-   results.push({role,archiveSha256:artifact.sha256,commands,sourceDatabaseUnchanged:true,sourceWalShmUnchanged:true,noNewSchema:true,noQaMarker:true,noNetworkOrHelper:true,missingDependencyRefused:true});
+   results.push({role,archiveSha256:artifact.sha256,commands,...(productionSpec?{productionCommands,productionScope:'Exact actual artifact pins and independent ephemeral key/spec; readonly plan and no-transport/compat first-write refusal only; not native namespace approval'}:{}),sourceDatabaseUnchanged:true,sourceWalShmUnchanged:true,noNewSchema:true,noQaMarker:true,noNetworkOrHelper:true,missingDependencyRefused:true});
   }finally{
    db?.close();
    const target=path.resolve(temp),parent=path.resolve(os.tmpdir());if(path.dirname(target)!==parent||!path.basename(target).startsWith('ziwei-api-entry-'))throw Error('Cleanup scope invalid');
