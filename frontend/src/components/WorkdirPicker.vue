@@ -4,10 +4,10 @@ import {Folder,HardDrive} from 'lucide-vue-next';
 import {api} from '../api.js';
 import {createDirectoryController} from '../workdir.js';
 
-const props=defineProps({modelValue:{type:String,default:''},workspace:{type:String,required:true},deviceId:{type:String,default:''},deviceName:{type:String,default:''},entityId:{type:String,default:''},editorId:{type:[Number,String],default:0},conversation:Boolean,disabled:Boolean,label:{type:String,default:'默认工作目录（可选）'},originalPath:{type:String,default:''},originalDeviceId:{type:String,default:''}});
+const props=defineProps({modelValue:{type:String,default:''},workspace:{type:String,required:true},deviceId:{type:String,default:''},deviceName:{type:String,default:''},entityId:{type:String,default:''},editorId:{type:[Number,String],default:0},botRevision:Number,botControlEpoch:Number,conversation:Boolean,disabled:Boolean,label:{type:String,default:'默认工作目录（可选）'},originalPath:{type:String,default:''},originalDeviceId:{type:String,default:''}});
 const emit=defineEmits(['update:modelValue','checked','use']);
 let disposed=false;
-const controller=createDirectoryController({wrap:reactive,scope:()=>({workspace:props.workspace,entityId:props.entityId,deviceId:props.deviceId,editorId:disposed?'disposed':props.editorId}),inspect:(scope,body)=>props.conversation?api.inspectConversationDirectory(scope.entityId,{...body,deviceId:scope.deviceId}):api.inspectDeviceDirectory(scope.deviceId,body,scope.workspace),poll:(id,scope)=>props.conversation?api.conversationDirectoryAction(scope.entityId,id):api.deviceDirectoryAction(scope.deviceId,id,scope.workspace)});
+const controller=createDirectoryController({wrap:reactive,scope:()=>({workspace:props.workspace,entityId:props.entityId,deviceId:props.deviceId,editorId:disposed?'disposed':props.editorId}),inspect:(scope,body)=>props.conversation?api.inspectConversationDirectory(scope.entityId,{...body,deviceId:scope.deviceId,...(props.botRevision!=null&&props.botControlEpoch!=null?{expectedRevision:props.botRevision,expectedControlEpoch:props.botControlEpoch}:{})}):api.inspectDeviceDirectory(scope.deviceId,body,scope.workspace),poll:(id,scope)=>props.conversation?api.conversationDirectoryAction(scope.entityId,id):api.deviceDirectoryAction(scope.deviceId,id,scope.workspace)});
 const state=controller.state;
 const path=computed({get:()=>props.modelValue,set:value=>{controller.setPath(value);emit('checked',null);emit('update:modelValue',value);}});
 const unchanged=computed(()=>Boolean(props.originalPath)&&props.modelValue.trim()===props.originalPath.trim()&&props.deviceId===props.originalDeviceId);
@@ -22,7 +22,7 @@ async function inspect(directory=path.value,createIfMissing=false,use=false){
 function clear(){path.value='';}
 function use(){if(state.check&&state.check.path===props.modelValue.trim())emit('use',state.check);}
 watch(()=>props.modelValue,value=>{if(value!==state.path){controller.setPath(value);emit('checked',null);}},{immediate:true,flush:'sync'});
-watch(()=>[props.workspace,props.entityId,props.deviceId,props.editorId],()=>{controller.invalidate();emit('checked',null);},{flush:'sync'});
+watch(()=>[props.workspace,props.entityId,props.deviceId,props.editorId,props.botRevision,props.botControlEpoch],()=>{controller.invalidate();emit('checked',null);},{flush:'sync'});
 onBeforeUnmount(()=>{disposed=true;controller.invalidate();});
 </script>
 

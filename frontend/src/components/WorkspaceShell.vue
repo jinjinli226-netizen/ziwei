@@ -3,7 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { Bot, ListTodo, GitBranch, CalendarDays, BookOpenText, UsersRound, Share2, Settings, Puzzle, House, Languages, CircleHelp, ChevronUp, ChevronDown, LayoutDashboard, Check, Plus, LogOut } from 'lucide-vue-next';
 import { ZiButton, ZiFormField, ZiInput, ZiModal } from '@ziwei/ui';
 import ZiSelect from './ZiSelect.vue';
-const props = defineProps({ page: String, account: Object, workspace: Object, workspaces: { type: Array, default: () => [] }, language: { type: String, default: 'zh-CN' } });
+const props = defineProps({ page: String, focused: Boolean, account: Object, workspace: Object, workspaces: { type: Array, default: () => [] }, language: { type: String, default: 'zh-CN' } });
 const emit = defineEmits(['navigate','workspace','language','create-workspace','logout']);
 const sectionKeys = [
   { key:'project', items:[['bots','bots',Bot],['issues','tasks',ListTodo],['workflow','workflow',GitBranch],['calendar','calendar',CalendarDays],['docs','docs',BookOpenText]] },
@@ -26,6 +26,7 @@ const sections = computed(() => sectionKeys.map(section => ({ label:t.value[sect
 const languageOptions = [{ code:'en-US', label:'English' }, { code:'zh-CN', label:'简体中文' }, { code:'ko-KR', label:'한국어' }, { code:'ja-JP', label:'日本語' }];
 const workspaceCreateOpen = ref(false);
 const workspaceCreateForm = ref({ name:'', slug:'', kind:'personal' });
+watch(()=>props.focused,value=>{if(value){menu.value='';help.value=false;workspaceCreateOpen.value=false;}});
 watch(() => props.language, value => { if (value && translations[value]) language.value=value; });
 function closeShellMenus(event) {
   const target = event?.target;
@@ -54,8 +55,8 @@ function submitWorkspaceCreate() { if (!workspaceCreateForm.value.name.trim()) r
 function requestLogout() { menu.value=''; emit('logout'); }
 </script>
 <template>
-  <div class="workspace-shell" @keydown.esc="handleShellKeydown">
-    <header class="workspace-topbar">
+  <div class="workspace-shell" :class="{'focused-workspace':focused}" @keydown.esc="handleShellKeydown">
+    <header v-if="!focused" class="workspace-topbar">
       <button class="product-brand" @click="go('home')" aria-label="紫薇主页"><img src="/ziwei-logo.png" alt=""/><strong>紫薇</strong></button>
       <div class="shell-menu-anchor">
         <button class="workspace-picker" aria-haspopup="menu" :aria-expanded="menu==='workspace'" @click="menu=menu==='workspace'?'':'workspace'"><span class="workspace-initial">{{ workspace.name?.slice(0,1) || '紫' }}</span>{{ workspace.slug || workspace.name }}<ChevronDown :size="14"/></button>
@@ -64,7 +65,7 @@ function requestLogout() { menu.value=''; emit('logout'); }
       <button class="shell-home" @click="go('home')"><LayoutDashboard :size="16"/>{{ t.home }}</button>
     </header>
     <div class="workspace-body">
-      <aside class="workspace-sidebar" aria-label="工作区导航">
+      <aside v-if="!focused" class="workspace-sidebar" aria-label="工作区导航">
         <section v-for="(section,index) in sections" :key="section.label" class="sidebar-section" :class="{'project-section':index===0,'settings-section':index===1}">
           <h2>{{ section.label }}</h2>
           <nav :aria-label="section.label">

@@ -13,6 +13,10 @@ export function assertPreviewNativeAction(action,home,apiBase,{sourceHome,device
   }
   const snapshot=action.payload?.hermesBot;
   if(!snapshot)throw Object.assign(new Error('原生预览只执行明确绑定的 Bot；Creator 保留原路径'),{definitelyNotStarted:true});
+  if(action.type==='directory.inspect'){
+    const directory=path.resolve(String(action.payload.path||''));let parent=directory;while(!fs.existsSync(parent)&&parent!==path.dirname(parent))parent=path.dirname(parent);
+    if(!action.payload.path||!inside(path.resolve(home),directory)||!inside(fs.realpathSync(home),fs.realpathSync(parent)))reject('隔离预览只检查自己的 HOME 内目录；其他项目目录不开放');
+  }
   if(snapshot.sourceProfile!=='default'){
     if(!sourceHome||!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(snapshot.sourceProfile||''))reject('请选择隔离电脑实际发现的独立 Profile');
     const profile=path.join(sourceHome,'profiles',snapshot.sourceProfile);
