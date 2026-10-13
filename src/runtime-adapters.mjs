@@ -663,17 +663,26 @@ export function hermesProfileReadiness(profile, { baseHome = null } = {}) {
   catch (error) { return { ...base, code: error.code === 'ENOENT' ? 'provider_missing' : 'profile_config_invalid', reason: `Hermes profile ${name} 缺少有效 provider 配置；请在该 profile 运行 hermes setup` }; }
   const provider = String(config.model?.provider || config.provider || '').trim();
   if (!provider || ['auto', 'none'].includes(provider)) return { ...base, code: 'provider_missing', reason: `Hermes profile ${name} 未指定 provider；请在该 profile 运行 hermes setup` };
-  const auth = readPrivateJson(path.join(selectedHome, 'auth.json'));
+  let credentialHome=selectedHome,authMode='profile-native-store';
+  const ownership=readPrivateJson(path.join(selectedHome,'ziwei-instance.json'));
+  if(ownership.mode==='owned_profile'){
+    try{
+      const source=hermesProfileHome(ownership.templateProfile,{baseHome});
+      if(ownership.profile!==name||ownership.sourceProfile!==name||!ownership.key||!ownership.employeeId||!ownership.deviceId||!ownership.provisionActionId||fs.realpathSync.native(source)!==ownership.sourceHome||fs.realpathSync.native(source)===fs.realpathSync.native(selectedHome))throw new Error();
+      credentialHome=source;authMode='source-native-store';
+    }catch{return{...base,code:'profile_binding_invalid',reason:'Bot 专属 Profile 的认证来源绑定不匹配'};}
+  }
+  const auth = readPrivateJson(path.join(credentialHome, 'auth.json'));
   const providerAuth = auth.providers?.[provider] || auth.credential_pool?.[provider];
   let dotEnv = '';
-  try { dotEnv = fs.readFileSync(path.join(selectedHome, '.env'), 'utf8'); } catch {}
+  try { dotEnv = fs.readFileSync(path.join(credentialHome, '.env'), 'utf8'); } catch {}
   const customProvider=config.providers?.[provider.replace(/^custom:/,'')];
   const explicitKeyEnv=customProvider?.key_env;
   const knownKeys = /^[A-Z][A-Z0-9_]{0,127}$/.test(explicitKeyEnv || '') ? [explicitKeyEnv] : { 'openai-codex': [], openai: ['OPENAI_API_KEY'], openrouter: ['OPENROUTER_API_KEY'], anthropic: ['ANTHROPIC_API_KEY'], google: ['GEMINI_API_KEY', 'GOOGLE_API_KEY'], deepseek: ['DEEPSEEK_API_KEY'], nous: ['NOUS_API_KEY'], custom: ['CUSTOM_API_KEY'] }[provider];
   const envCredential = (knownKeys || []).some(key => String(process.env[key] || '').trim() || new RegExp(`^\\s*(?:export\\s+)?${key}\\s*=\\s*["']?[^\\s"'#]+`, 'm').test(dotEnv));
   const localProvider = ['ollama', 'lm-studio', 'vllm'].includes(provider);
   const authenticated = hasCredential(providerAuth) || envCredential || localProvider || hasCredential(customProvider);
-  return { ...base, provider: 'configured', authentication: authenticated ? 'configured' : (knownKeys ? 'missing' : 'unknown'), ready: authenticated, providerName: provider, ...(!authenticated ? { code: knownKeys ? 'authentication_missing' : 'authentication_unknown', reason: `Hermes profile ${name} 的 provider ${provider} 尚未确认认证；请在该独立 profile 配置或登录 provider，不能回退主 profile` } : {}) };
+  return { ...base, provider: 'configured', authentication: authenticated ? 'configured' : (knownKeys ? 'missing' : 'unknown'), ready: authenticated, providerName: provider,authMode, ...(!authenticated ? { code: knownKeys ? 'authentication_missing' : 'authentication_unknown', reason: authMode==='source-native-store'?`Hermes profile ${name} 的 provider ${provider} 尚未确认认证；请检查此 Bot 绑定的来源认证，不能回退其他配置`:`Hermes profile ${name} 的 provider ${provider} 尚未确认认证；请在该独立 profile 配置或登录 provider，不能回退主 profile` } : {}) };
 }
 
 export function runtimeReadiness(runtime, { codexHome = process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), baseHome = null } = {}) {
@@ -709,7 +718,8 @@ export function listHermesProfiles({ baseHome = null } = {}) {
   if (!fs.existsSync(root)) return [];
   const entryFor = (name, profileRoot) => {
     const readiness = hermesProfileReadiness(name, { baseHome: root });
-    return { name, configured: true, valid: true, hasSoul: fs.existsSync(path.join(profileRoot, 'SOUL.md')), provider_configured: readiness.provider === 'configured', authentication_configured: readiness.authentication === 'configured', readiness };
+    const owned=readPrivateJson(path.join(profileRoot,'ziwei-instance.json')).mode==='owned_profile';
+    return { name, configured: true, valid: true, owned_profile:owned,initialization_source:!owned,hasSoul: fs.existsSync(path.join(profileRoot, 'SOUL.md')), provider_configured: readiness.provider === 'configured', authentication_configured: readiness.authentication === 'configured', readiness };
   };
   const profiles = [entryFor('default', root)];
   const profilesRoot = path.join(root, 'profiles');

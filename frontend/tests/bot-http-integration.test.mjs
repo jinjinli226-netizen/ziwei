@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {createApp} from '../../backend/app.mjs';
 import {createBotWorkbench} from '../src/bot-workbench.js';
+import {completeOwnedProfile} from '../../test-support/owned-profile.mjs';
 
 test('real isolated Bot API integrates persisted configuration, main chat, controls, workspace and unknown Routine recovery',async()=>{
   const app=createApp({memory:true,requireAuth:true,enableScheduler:false,requireDeviceAuth:false});
@@ -30,6 +31,7 @@ test('real isolated Bot API integrates persisted configuration, main chat, contr
     source+='\n//# sourceURL=bot-api-integration-fixture.js';
     const {api}=await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
     const bot=await api.createBot({name:'One employee, two views',targetDeviceId:fixtureDevice.id,runtimeProfile:'default',model:'fixture-model',idempotencyKey:'e03-create'},'e03-a');
+    completeOwnedProfile(app.locals.repo,bot);
     const employees=await http('/api/workspaces/e03-a/employees');assert.equal(employees.employees.filter(item=>item.id===bot.id).length,1);
     const ui=createBotWorkbench({api});await ui.setWorkspace('e03-a',bot.id);
     ui.state.draft.employee.persona='Saved configuration marker';assert.equal(await ui.save(),true);assert.equal(ui.state.bot.revision,2);assert.equal(ui.state.bot.employee.persona,'Saved configuration marker');

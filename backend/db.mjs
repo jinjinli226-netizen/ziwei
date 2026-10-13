@@ -339,6 +339,8 @@ export function openDatabase({ memory = false, filename = path.join(ROOT, 'data'
     "ALTER TABLE devices ADD COLUMN arch TEXT",
     "ALTER TABLE devices ADD COLUMN runtime_discovery_json TEXT NOT NULL DEFAULT '{}'",
     "ALTER TABLE bot_routines ADD COLUMN native_driver_json TEXT",
+    "ALTER TABLE hermes_bots ADD COLUMN profile_binding_json TEXT",
+    "ALTER TABLE hermes_bots ADD COLUMN provision_action_id TEXT",
     "ALTER TABLE conversations ADD COLUMN model_id TEXT",
     "ALTER TABLE conversations ADD COLUMN working_directory TEXT",
     "ALTER TABLE conversations ADD COLUMN device_id TEXT",

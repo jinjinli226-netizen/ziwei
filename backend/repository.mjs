@@ -19,6 +19,7 @@ import { redactSecrets } from '../src/redaction.mjs';
 import { normalizeConversationAttachments } from './conversation-attachments.mjs';
 import { resolveEmployeeDefaultWorkdir } from './employee-workdir.mjs';
 import { assertBotExecution, botUncertain, BOT_INTERNAL, botActionMaintenance } from './bots.mjs';
+import {verifyBotProvisionReceipt} from './bot-profiles.mjs';
 import { botFailure } from '../src/hermes-bot-config.mjs';
 import { CREATOR_BOT_GUIDANCE } from './employees/creator-template.mjs';
 
@@ -676,7 +677,7 @@ export function createRepository(options = {}) {
         const status = raw.status ? String(raw.status) : (version ? 'available' : 'unavailable');
         const detection = safeRuntimeDetection(raw.detection,status);
         const models = Array.isArray(raw.models) ? raw.models.filter(item => item && typeof item === 'object').slice(0, 100) : [];
-        const profiles = Array.isArray(raw.profiles) ? raw.profiles.filter(item => item && typeof item === 'object' && /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(String(item.name || ''))).slice(0, 100).map(item => ({ name: String(item.name), ...Object.fromEntries(Object.entries(item).filter(([key, value]) => ['configured','valid','hasSoul','provider_configured','authentication_configured'].includes(key) && typeof value === 'boolean')), ...(item.readiness && typeof item.readiness === 'object' ? { readiness: Object.fromEntries(Object.entries(item.readiness).filter(([key, value]) => ['authentication','provider','ready','reason','code'].includes(key) && ['string','boolean'].includes(typeof value))) } : {}) })) : [];
+        const profiles = Array.isArray(raw.profiles) ? raw.profiles.filter(item => item && typeof item === 'object' && /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(String(item.name || ''))).slice(0, 100).map(item => ({ name: String(item.name), ...Object.fromEntries(Object.entries(item).filter(([key, value]) => ['configured','valid','hasSoul','provider_configured','authentication_configured','owned_profile','initialization_source'].includes(key) && typeof value === 'boolean')), ...(item.readiness && typeof item.readiness === 'object' ? { readiness: Object.fromEntries(Object.entries(item.readiness).filter(([key, value]) => ['authentication','provider','ready','reason','code'].includes(key) && ['string','boolean'].includes(typeof value))) } : {}) })) : [];
         const readiness = raw.readiness && typeof raw.readiness === 'object' ? Object.fromEntries(Object.entries(raw.readiness).filter(([key, value]) => ['authentication','provider','ready','reason','code'].includes(key) && ['string','boolean'].includes(typeof value))) : {};
         const existing = db.prepare('SELECT id FROM runtime_metadata WHERE workspace_id=? AND runtime_name=?').get(ws.id, name);
         if (existing) db.prepare('UPDATE runtime_metadata SET version=?,binary=?,status=?,models_json=?,profiles_json=?,last_seen=? WHERE id=?').run(version,binary,status,JSON.stringify(models),JSON.stringify(profiles),timestamp,existing.id);
@@ -1819,13 +1820,15 @@ export function createRepository(options = {}) {
       if (existing) return { ...existing, duplicate: true, payload: parse(existing.payload_json), result: parse(existing.result_json) };
       let payload = trustedTemplatePayload(ws.id,input.payload && typeof input.payload === 'object' ? input.payload : {});
       const isValidation=input.type==='hermes.bot.validate';
+      const isProvisioning=input.type==='hermes.bot.provision';
+      if(isProvisioning&&input.botInternal!==BOT_INTERNAL)throw botFailure('BOT_PROVISION_ROUTE_REQUIRED','请使用 Bot 专属 Profile 创建入口');
       if(input.type==='hermes.bot.native' && input.botInternal!==BOT_INTERNAL)throw botFailure('BOT_NATIVE_ROUTE_REQUIRED','请从版本化 Bot 原生操作入口提交');
       if(input.type==='directory.inspect' && input.botInternal!==BOT_INTERNAL && payload.hermesBot)throw botFailure('BOT_DIRECTORY_ROUTE_REQUIRED','请使用当前聊天目录入口');
       if (isValidation && input.botInternal!==BOT_INTERNAL) throw botFailure('BOT_VALIDATION_ROUTE_REQUIRED','请从 Bot 配置验证入口提交');
-      const bot=assertBotExecution(db,ws.id,payload,{validation:botActionMaintenance(input.type,payload)});
+      const bot=assertBotExecution(db,ws.id,payload,{validation:botActionMaintenance(input.type,payload),provisioning:isProvisioning,requireProfile:!isProvisioning});
       if(bot) {
         if(input.type==='directory.inspect' && input.botInternal!==BOT_INTERNAL)throw botFailure('BOT_DIRECTORY_ROUTE_REQUIRED','请使用已认证的聊天目录入口');
-        if (!isValidation && !['task.execute','agent.execute','runtime.execute','conversation.execute','automation.execute','hermes.bot.native','directory.inspect'].includes(input.type || 'task.execute')) throw botFailure('BOT_ACTION_UNSUPPORTED','此 Bot 执行类型尚未接入');
+        if (!isValidation && !isProvisioning && !['task.execute','agent.execute','runtime.execute','conversation.execute','automation.execute','hermes.bot.native','directory.inspect'].includes(input.type || 'task.execute')) throw botFailure('BOT_ACTION_UNSUPPORTED','此 Bot 执行类型尚未接入');
         const native=payload.nativeOperation;
         if(input.type==='hermes.bot.native'&&(native?.resource==='groups'&&native.operation==='step'||native?.resource==='collaboration'&&native.input?.mode==='group')){
           const title=`Group: ${native.input.groupId}`;
@@ -1856,7 +1859,7 @@ export function createRepository(options = {}) {
       const row=db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId);
       if(!row || row.status!=='acked')throw botFailure('BOT_START_INVALID','执行尚未被当前设备领取');
       assertActionDevice(row,input);
-      const bot=assertBotExecution(db,row.workspace_id,parse(row.payload_json),{validation:botActionMaintenance(row.type,parse(row.payload_json)),actionId});
+      const bot=assertBotExecution(db,row.workspace_id,parse(row.payload_json),{validation:botActionMaintenance(row.type,parse(row.payload_json)),provisioning:row.type==='hermes.bot.provision',requireProfile:row.type!=='hermes.bot.provision',actionId});
       if(!bot)throw botFailure('BOT_NOT_FOUND','执行没有 Bot 绑定',404);
       return {allowed:true,actionId,revision:bot.row.revision,controlEpoch:bot.row.control_epoch};
     },
@@ -1919,7 +1922,7 @@ export function createRepository(options = {}) {
         if (['succeeded','failed'].includes(row.status)) response = { ...a2aResponseView(row, { receiptOnly, includeResult:!receiptOnly }), duplicate:true };
         else {
           const timestamp = now();
-          if(row.status==='pending')assertBotExecution(db,row.workspace_id,parse(row.payload_json),{validation:botActionMaintenance(row.type,parse(row.payload_json)),actionId});
+          if(row.status==='pending')assertBotExecution(db,row.workspace_id,parse(row.payload_json),{validation:botActionMaintenance(row.type,parse(row.payload_json)),provisioning:row.type==='hermes.bot.provision',requireProfile:row.type!=='hermes.bot.provision',actionId});
           if (row.expires_at && Date.parse(row.expires_at) <= Date.parse(timestamp)) {
             db.prepare("UPDATE a2a_actions SET status='expired',completed_at=? WHERE id=?").run(timestamp, actionId);
             expired = true;
@@ -2062,6 +2065,7 @@ export function createRepository(options = {}) {
       const timestamp = now();
       db.exec('SAVEPOINT conversation_result');
       try {
+        if(row.type==='hermes.bot.provision'&&status==='succeeded')verifyBotProvisionReceipt(payload,result);
         if(status==='succeeded'&&payload.collaborationManifest&&payload.collaborationManifest.mode!=='group'){
           const receipt=result?.nativeOperation || result?.result?.nativeOperation;
           if(receipt?.status!=='succeeded'||receipt.resource!=='collaboration'||receipt.employeeId!==payload.employeeId||receipt.revision!==payload.hermesBot.revision)throw botFailure('BOT_COLLABORATION_RECEIPT_REQUIRED','原生协作回执不匹配');

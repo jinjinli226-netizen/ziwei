@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { normalizeRuntimeProfile } from '../src/employee-runtime.mjs';
 import { createBotService } from './bots.mjs';
+import {botProfileBinding,assertBotProfileReady} from './bot-profiles.mjs';
 
 const parse = (value, fallback = {}) => { try { return JSON.parse(value) ?? fallback; } catch { return fallback; } };
 const fingerprint = value => crypto.createHash('sha256').update(JSON.stringify(canonical(value))).digest('hex');
@@ -23,6 +24,7 @@ export function createManagementService(repo) {
     const requestedId = deviceInput(options);
     const devices = repo.listDevices(slug, { userId: options.userId }).filter(item => (!requestedId || item.id === requestedId) && (!options.deviceScope || item.id === options.deviceScope)).map(item => {
       const metadata = db.prepare('SELECT * FROM runtime_device_metadata WHERE workspace_id=? AND device_id=? ORDER BY runtime_name').all(workspace.id, item.id);
+      const ownedProfiles=new Set(db.prepare('SELECT b.profile_binding_json,e.runtime_profile FROM hermes_bots b JOIN employees e ON e.id=b.employee_id WHERE e.target_device_id=?').all(item.id).filter(row=>botProfileBinding(row).mode==='owned_profile').map(row=>row.runtime_profile));
       const runtimes = metadata.map(row => {
         const deviceRuntime=item.runtimes.find(runtime=>runtime.name.toLowerCase()===row.runtime_name.toLowerCase());
         const readiness = parse(row.readiness_json);
@@ -37,7 +39,8 @@ export function createManagementService(repo) {
         const seenAt = Date.parse(row.last_seen || '');
         const age = Number(item.heartbeat_interval_ms || 10000);
         if (!Number.isFinite(seenAt) || Date.now() - seenAt > Math.max(45000, age * 4)) issues.push({ code: 'DISCOVERY_STALE', message: 'CLI 发现证据已过期，请等待目标电脑新的运行时发现心跳。' });
-        return { name: row.runtime_name, version: row.version, binary: row.binary, cli_status: deviceRuntime?.cli_status || (item.status === 'online' ? row.status : 'offline'), discovery_state:deviceRuntime?.discovery_state, detection:deviceRuntime?.detection, models: parse(row.models_json, []), profiles: parse(row.profiles_json, []), readiness, last_seen: row.last_seen, available: issues.length === 0, verified: readiness.authentication === 'configured' && readiness.provider === 'configured' && issues.length === 0, issues };
+        const profiles=parse(row.profiles_json,[]).map(profile=>row.runtime_name.toLowerCase()==='hermes'?{...profile,owned_profile:profile.owned_profile===true||ownedProfiles.has(profile.name),initialization_source:profile.initialization_source!==false&&profile.owned_profile!==true&&!ownedProfiles.has(profile.name)}:profile);
+        return { name: row.runtime_name, version: row.version, binary: row.binary, cli_status: deviceRuntime?.cli_status || (item.status === 'online' ? row.status : 'offline'), discovery_state:deviceRuntime?.discovery_state, detection:deviceRuntime?.detection, models: parse(row.models_json, []), profiles, readiness, last_seen: row.last_seen, available: issues.length === 0, verified: readiness.authentication === 'configured' && readiness.provider === 'configured' && issues.length === 0, issues };
       });
       return { id: item.id, name: item.name, os: item.os, status: item.status, healthy: item.healthy, last_seen: item.last_seen, heartbeat_age_ms: item.heartbeat_age_ms, workdir: item.workdir, management_mcp: parse(item.management_mcp_json), terminal_mcp:parse(item.terminal_mcp_json), runtimes };
     });
@@ -196,7 +199,10 @@ export function createManagementService(repo) {
         if (body.runtime && String(body.runtime).toLowerCase() !== selected.runtime.toLowerCase()) fail('任务 runtime 与员工配置不同；请先明确更新员工，不能静默替换运行时。', 'RUNTIME_MISMATCH');
         if (profileInput(body) && profileInput(body) !== selected.runtime_profile) fail('任务 profile 与员工配置不同；请先明确更新员工。', 'PROFILE_MISMATCH');
         const targetDeviceId = deviceInput(body) || selected.target_device_id;
-        const selection = validateSelection(slug, { runtime: selected.runtime, runtimeProfile: selected.runtime_profile, targetDeviceId, managementMcpEnabled: selected.management_mcp_enabled }, { context });
+        const botRow=db.prepare('SELECT * FROM hermes_bots WHERE employee_id=? AND workspace_id=?').get(selected.id,selected.workspace_id);
+        const owned=botProfileBinding(botRow).mode==='owned_profile';
+        if(owned){assertBotProfileReady(db,botRow,selected);if(targetDeviceId!==selected.target_device_id)fail('Bot 任务必须使用专属 Profile 所属电脑','BOT_BINDING_CONFLICT',409);}
+        const selection = validateSelection(slug, { runtime: selected.runtime, runtimeProfile: selected.runtime_profile, targetDeviceId, managementMcpEnabled: selected.management_mcp_enabled }, { context,requireProfile:!owned });
         const ownLegacyDevice = Boolean(context.deviceScope && context.deviceScope === selection.targetDeviceId && context.deviceCredentialDeviceId === selection.targetDeviceId);
         return task(slug, repo.createTask(slug, { ...body, ...selection, employeeId: selected.id, assignee: selected.id, execute: true, ...trustedContext(context), enforceDeviceOwnership: !ownLegacyDevice }).id, context);
       }, id => task(slug, id, context));

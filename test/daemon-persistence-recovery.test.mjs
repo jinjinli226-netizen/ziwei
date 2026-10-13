@@ -17,6 +17,18 @@ function fixture(t) {
 }
 const action = (extra = {}) => ({ id: 'action-recovery', dedupe_key: 'dedupe-recovery', type: 'task.execute', workspace_id: 'workspace-a', payload: { deviceId: 'device-a' }, ...extra });
 
+test('owned profile provisioning is quarantined when a restart finds no terminal receipt', async t => {
+  const f=fixture(t);let interruptedState;
+  const first=new ActionDispatcher({...f,workdir:f.root,execute:async()=>{
+    interruptedState=fs.readFileSync(f.stateFile,'utf8');return{};
+  }});
+  assert.equal((await first.dispatch(action({type:'hermes.bot.provision'}))).status,'succeeded');
+  fs.writeFileSync(f.stateFile,interruptedState);
+  const restarted=new ActionDispatcher({...f,workdir:f.root,execute:async()=>{throw new Error('must not replay provisioning');}});
+  assert.equal(restarted.quarantined,true);
+  assert.equal((await restarted.dispatch(action({type:'hermes.bot.provision'}))).code,'EXECUTION_UNCERTAIN');
+});
+
 test('dispatcher flushes a durable started record before invoking the executor', async t => {
   const f = fixture(t);
   const originalFsync = fs.fsyncSync;

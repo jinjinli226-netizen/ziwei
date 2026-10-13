@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 import {createRepository} from '../backend/repository.mjs';
 import {createManagementService} from '../backend/management.mjs';
 import {normalizeBotConfig} from '../src/hermes-bot-config.mjs';
+import {completeOwnedProfile} from '../test-support/owned-profile.mjs';
 
-const setup=()=>{const repo=createRepository({memory:true}),bots=createManagementService(repo).bots;repo.heartbeatDevice('test-111',{deviceId:'native-pc',runtimes:{Hermes:{status:'available',version:'0.21.3',profiles:[{name:'default'}],models:[{id:'fixture'}]}}});const bot=bots.create('test-111',{name:'Native',targetDeviceId:'native-pc',runtimeProfile:'default',model:'fixture',idempotencyKey:'native-bot'});return{repo,bots,bot};};
+const setup=()=>{const repo=createRepository({memory:true}),bots=createManagementService(repo).bots;repo.heartbeatDevice('test-111',{deviceId:'native-pc',runtimes:{Hermes:{status:'available',version:'0.21.3',profiles:[{name:'default'}],models:[{id:'fixture'}]}}});const bot=bots.create('test-111',{name:'Native',targetDeviceId:'native-pc',runtimeProfile:'default',model:'fixture',idempotencyKey:'native-bot'});completeOwnedProfile(repo,bot);return{repo,bots,bot};};
 const request=(bot,resource,operation,input={})=>({expectedRevision:bot.revision,expectedControlEpoch:bot.control_epoch,idempotencyKey:`${resource}:${operation}`,resource,operation,input});
-function enable(f,bot){const {action}=f.bots.validate('test-111',bot.id,{expectedRevision:bot.revision,idempotencyKey:`validate:${bot.id}:${bot.revision}`});f.repo.ackA2AAction(action.id,{deviceId:'native-pc'});f.repo.resultA2AAction(action.id,{status:'succeeded',result:{botValidation:{schemaVersion:1,valid:true,employeeId:bot.id,revision:bot.revision}}});return f.bots.control('test-111',bot.id,{expectedRevision:bot.revision,expectedControlEpoch:bot.control_epoch,operation:'activate'});}
+function enable(f,bot){completeOwnedProfile(f.repo,bot);const {action}=f.bots.validate('test-111',bot.id,{expectedRevision:bot.revision,idempotencyKey:`validate:${bot.id}:${bot.revision}`});f.repo.ackA2AAction(action.id,{deviceId:'native-pc'});f.repo.resultA2AAction(action.id,{status:'succeeded',result:{botValidation:{schemaVersion:1,valid:true,employeeId:bot.id,revision:bot.revision}}});return f.bots.control('test-111',bot.id,{expectedRevision:bot.revision,expectedControlEpoch:bot.control_epoch,operation:'activate'});}
 
 test('native maintenance is bound and idempotent in draft; active execution and raw forgery are rejected',()=>{
   const f=setup();try{

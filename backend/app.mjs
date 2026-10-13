@@ -698,10 +698,11 @@ export function createApp(options = {}) {
     const base=`${prefix}/workspaces/:slug/bots`, bots=management.bots;
     app.get(`${base}/capabilities`,guard,(req,res)=>res.json(bots.capabilities(req.params.slug,req.query,contextFor(req))));
     app.get(base,guard,(req,res)=>res.json({bots:bots.list(req.params.slug,contextFor(req))}));
-    app.post(base,guard,(req,res)=>{const result=bots.create(req.params.slug,req.body,contextFor(req));res.status(result.duplicate?200:201).json(result);});
+    app.post(base,guard,(req,res)=>{const result=bots.create(req.params.slug,req.body,contextFor(req));res.status(result.duplicate?200:202).json(result);});
     app.post(`${prefix}/workspaces/:slug/employees/:id/bot`,guard,(req,res)=>res.json(bots.initialize(req.params.slug,req.params.id,req.body,contextFor(req))));
     app.get(`${base}/:id`,guard,(req,res)=>res.json(bots.get(req.params.slug,req.params.id,contextFor(req))));
     app.patch(`${base}/:id`,guard,(req,res)=>res.json(bots.update(req.params.slug,req.params.id,req.body,contextFor(req))));
+    app.post(`${base}/:id/provision`,guard,(req,res)=>res.status(202).json(bots.provision(req.params.slug,req.params.id,req.body,contextFor(req))));
     app.post(`${base}/:id/validate`,guard,(req,res)=>res.status(202).json(bots.validate(req.params.slug,req.params.id,req.body,contextFor(req))));
     app.post(`${base}/:id/native/actions`,guard,(req,res)=>res.status(202).json(bots.native(req.params.slug,req.params.id,req.body,contextFor(req))));
     app.post(`${base}/:id/collaboration`,guard,(req,res)=>res.status(202).json(bots.collaboration(req.params.slug,req.params.id,req.body,contextFor(req))));

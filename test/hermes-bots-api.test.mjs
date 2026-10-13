@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createApp } from '../backend/app.mjs';
 import { createMcpClient } from '../scripts/ziwei-mcp.mjs';
 import { createAuthService } from '../backend/auth.mjs';
+import {completeOwnedProfile} from '../test-support/owned-profile.mjs';
 
 test('manual API and Creator MCP use one Bot record, native validation, controls and Routine backend',async()=>{
   const token='isolated-bot-mcp-test-token',app=createApp({memory:true,mcpToken:token,mcpWorkspace:'test-111',mcpRole:'admin'}),repo=app.locals.repo;
@@ -12,7 +13,10 @@ test('manual API and Creator MCP use one Bot record, native validation, controls
   const request=async(method,path,body)=>{const response=await fetch(base+path,{method,headers:body?{'content-type':'application/json'}:{},...(body?{body:JSON.stringify(body)}:{})});return {status:response.status,body:await response.json()};};
   try {
     const created=await request('POST','/api/workspaces/test-111/bots',{name:'API Bot',targetDeviceId:'api-bot-pc',runtimeProfile:'default',model:'model-a',persona:'fixture role',idempotencyKey:'create'});
-    assert.equal(created.status,201);const bot=created.body;
+    assert.equal(created.status,202);const bot=created.body;
+    const pending=await client.bot({operation:'provision',id:bot.id,data:{expectedRevision:1,idempotencyKey:'observe-original'}});
+    assert.equal(pending.action.id,bot.instance.provisioning.actionId);assert.equal(pending.duplicate,true);
+    assert.equal(bot.instance.home,null);completeOwnedProfile(repo,bot);
     const read=await client.bot({operation:'get',id:bot.id});assert.equal(read.id,bot.id);assert.equal(read.main_conversation_id,bot.main_conversation_id);
     const validation=await client.bot({operation:'validate',id:bot.id,data:{expectedRevision:1,idempotencyKey:'validate'}});
     repo.ackA2AAction(validation.action.id,{deviceId:'api-bot-pc'});

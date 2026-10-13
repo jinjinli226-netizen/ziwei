@@ -6,6 +6,7 @@ import {executeNativeDriver} from './hermes-driver-runtime.mjs';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
 import {executeRuntime, runtimeInvocation, bootstrapTerminalMcp, discoverInstalledRuntimes, hermesHome, hermesProfileHome, validateHermesBotRuntime} from './runtime-adapters.mjs';
+import {provisionHermesBotProfile} from './hermes-owned-profile.mjs';
 import { createManagementBootstrap } from './management-bootstrap.mjs';
 import {normalizeRuntimeProfile} from './employee-runtime.mjs';
 import { isNativeRuntimeAction, resolveWindowsWorkdir, resolveWindowsWorkdirPath, windowsDirectoryError } from './windows-workdir.mjs';
@@ -400,6 +401,7 @@ export function createLocalActionExecutor({runtimeDir, defaultWorkdir = process.
     if (type === 'hermes.profile.create' || type === 'profile.create') {
       return {status: 'succeeded', result: createHermesProfile({payload: action.payload || {}, hermesHomePath})};
     }
+    if(type==='hermes.bot.provision')return provisionHermesBotProfile({context:action.payload.hermesBot,baseHome:hermesHomePath || hermesHome(),workspace,apiBase,beforeSpawn:authorizeBot,signal:context.signal,onSupervision:context.onSupervision});
     if(type==='hermes.bot.native') {
       const options={context:action.payload.hermesBot,baseHome:hermesHomePath || hermesHome(),privateDirectory:path.join(runtimeDir,'bot-instances'),workspace,apiBase,beforeSpawn:authorizeBot,signal:context.signal || AbortSignal.timeout(120000),cwd:defaultWorkdir};
       const operation=action.payload.nativeOperation;

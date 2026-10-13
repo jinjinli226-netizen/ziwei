@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 export function isNativeRuntimeAction(action) {
-  if(action?.type==='hermes.bot.native')return true;
+  if(['hermes.bot.native','hermes.bot.provision'].includes(action?.type))return true;
   const type = String(action?.type || '').toLowerCase();
   return ['agent.execute', 'conversation.execute', 'runtime.execute', 'automation.execute'].includes(type)
     || (type === 'task.execute' && (action?.payload?.runtime || action?.payload?.agent || action?.payload?.modelId || action?.payload?.prompt));

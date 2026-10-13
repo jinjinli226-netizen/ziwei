@@ -46,6 +46,12 @@ def _binding(launcher):
     managed = Path(paths['managed_scope']).read_text(encoding='utf-8')
     if '_has_configured_mcp_servers' not in startup or 'HERMES_MANAGED_DIR' not in managed:
         raise UnsupportedNativeHermes('overlay')
+    if os.environ.get('ZIWEI_BOT_PROFILE_MODE') == 'owned_profile':
+        target = Path(paths['main']).with_name('profiles.py')
+        functions = {node.name for node in ast.parse(target.read_text(encoding='utf-8')).body if isinstance(node, ast.FunctionDef)}
+        if not {'get_profile_dir', 'profile_exists', '_bootstrap_profile_dir', '_finish_profile_layout'}.issubset(functions):
+            raise UnsupportedNativeHermes('owned profile layout')
+        paths['profiles'] = str(target.resolve(strict=True))
     if os.environ.get('ZIWEI_CREATOR_HOME'):
         root = Path(paths['main']).parent.parent
         isolated_sources = {'auth': 'hermes_cli.auth', 'auth_codex': 'hermes_cli.auth_codex',
@@ -95,13 +101,18 @@ def prepare_creator_home(current):
         raise UnsupportedNativeHermes('creator home')
     metadata = json.loads((home / 'ziwei-instance.json').read_text(encoding='utf-8'))
     is_bot = os.environ.get('ZIWEI_INSTANCE_KIND') == 'hermes-bot'
+    owned = is_bot and os.environ.get('ZIWEI_BOT_PROFILE_MODE') == 'owned_profile'
     expected = {'templateId': 'ziwei-hermes-bot' if is_bot else 'ziwei-employee-creator', 'key': os.environ.get('ZIWEI_CREATOR_KEY'),
                 'workspace': os.environ.get('ZIWEI_CREATOR_WORKSPACE'),
                 'employeeId': os.environ.get('ZIWEI_CREATOR_EMPLOYEE_ID'),
                 'sourceProfile': os.environ.get('ZIWEI_CREATOR_PROFILE')}
     if any(metadata.get(key) != value for key, value in expected.items()) or Path(metadata.get('sourceHome', '')).resolve() != source:
         raise UnsupportedNativeHermes('creator binding')
-    if (home / 'auth.json').exists() or (home / '.env').exists():
+    if owned:
+        profiles = importlib.import_module('hermes_cli.profiles')
+        if str(Path(profiles.__file__).resolve()) != current['paths']['profiles'] or metadata.get('mode') != 'owned_profile' or profiles.get_profile_dir(expected['sourceProfile']).resolve() != home:
+            raise UnsupportedNativeHermes('owned profile home')
+    if not owned and ((home / 'auth.json').exists() or (home / '.env').exists()):
         raise UnsupportedNativeHermes('creator cloned auth')
     # Preserve only the authoritative runtime scope. The native dotenv loader
     # intentionally uses process HERMES_HOME while selecting the source profile,
@@ -114,7 +125,7 @@ def prepare_creator_home(current):
                     'ZIWEI_TERMINAL_EMPLOYEE_ID', 'ZIWEI_TERMINAL_DEVICE_ID',
                     'ZIWEI_CREATOR_HOME', 'ZIWEI_CREATOR_SOURCE_HOME', 'ZIWEI_CREATOR_KEY',
                     'ZIWEI_CREATOR_WORKSPACE', 'ZIWEI_CREATOR_EMPLOYEE_ID', 'ZIWEI_CREATOR_PROFILE',
-                    'ZIWEI_INSTANCE_KIND', 'ZIWEI_BOT_REVISION', 'ZIWEI_BOT_ACTION_ID', 'ZIWEI_BOT_DEVICE_TOKEN',
+                    'ZIWEI_INSTANCE_KIND', 'ZIWEI_BOT_REVISION', 'ZIWEI_BOT_ACTION_ID', 'ZIWEI_BOT_DEVICE_TOKEN', 'ZIWEI_BOT_PROFILE_MODE',
                     'HERMES_KANBAN_HOME', 'HERMES_KANBAN_DB'}
     routing_env = {key: os.environ[key] for key in routing_keys if key in os.environ}
     constants = importlib.import_module('hermes_constants')
@@ -159,7 +170,8 @@ def confirm_creator_home(current, config, prepared):
     home, source, expected, routing_env = prepared
     # main's import consumed --profile using the native selector. Never silently
     # accept another profile or state/tool caches already initialized elsewhere.
-    if Path(os.environ.get('HERMES_HOME', '')).resolve() != source or 'cli' in sys.modules:
+    owned = os.environ.get('ZIWEI_BOT_PROFILE_MODE') == 'owned_profile'
+    if Path(os.environ.get('HERMES_HOME', '')).resolve() != (home if owned else source) or 'cli' in sys.modules:
         raise UnsupportedNativeHermes('creator profile')
     os.environ['HERMES_HOME'] = str(home)
     for key in tuple(os.environ):
@@ -211,7 +223,8 @@ def confirm_creator_home(current, config, prepared):
     # The context override was active before main imports logging/config; worker
     # threads additionally inherit the now-isolated HERMES_HOME environment.
     return {'enabled': True, **{key: expected[key] for key in ('key', 'workspace', 'employeeId', 'sourceProfile')}, 'authMode': 'source-native-store',
-            **({'kind': 'hermes-bot', 'revision': int(os.environ['ZIWEI_BOT_REVISION'])} if is_bot else {})}
+            **({'kind': 'hermes-bot', 'revision': int(os.environ['ZIWEI_BOT_REVISION'])} if is_bot else {}),
+            **({'mode': 'owned_profile', 'profile': expected['sourceProfile'], 'home': str(home), 'profileHome': str(home)} if owned else {})}
 
 
 def run():
@@ -233,6 +246,19 @@ def run():
     if current != expected:
         raise UnsupportedNativeHermes('changed')
     native_args = sys.argv[5:]
+    if native_args and native_args[0] == '--owned-profile-provision':
+        profiles = importlib.import_module('hermes_cli.profiles')
+        if str(Path(profiles.__file__).resolve()) != current['paths'].get('profiles'):
+            raise UnsupportedNativeHermes('owned profile package')
+        module = importlib.util.spec_from_file_location('ziwei_owned_profile', Path(__file__).with_name('hermes-owned-profile.py'))
+        bridge = importlib.util.module_from_spec(module); module.loader.exec_module(bridge)
+        try:
+            receipt = bridge.provision(json.loads(sys.stdin.readline()))
+            print('ZIWEI_BOT_PROVISION:' + json.dumps({'status': 'succeeded', 'botProvision': receipt}), flush=True)
+        except Exception as error:
+            code = str(error) if str(error).startswith('BOT_PROFILE_') else 'BOT_PROFILE_CREATE_FAILED'
+            print('ZIWEI_BOT_PROVISION:' + json.dumps({'status': 'failed', 'code': code}), flush=True)
+        return 0
     discover_only = bool(native_args and native_args[0] == '--discover-only')
     config_only = bool(native_args and native_args[0] == '--config-only')
     native_operation = bool(native_args and native_args[0] == '--native-operation')

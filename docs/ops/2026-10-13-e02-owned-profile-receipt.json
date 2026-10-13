@@ -1,0 +1,462 @@
+{
+  "date": "2026-10-13T06:50:12.637Z",
+  "nativeVersion": "0.21.3",
+  "installedHead": "bbaf7af5c83546d19f8060f4097d3bb25cd1a3c3",
+  "installedSourceHashes": {
+    "hermes_cli/profiles.py": "04e55e78f0a383786bddd15b022f7f089bcc22a217904c2eeb794b65517f17aa",
+    "hermes_cli/main.py": "9b8d28c918b4b4133e3606a5b18d9ed53db89e4ac1ffef40468375877278a266",
+    "hermes_cli/auth.py": "be8629ea5f06e08840425bc22b11f52827ec8578fdeb4f7bfbb8715c6e0bf76f",
+    "hermes_cli/auth_codex.py": "d35b1fd58296cc692bad51a39133cfec575a43e34b7e49c0698d30bf445b0ae2",
+    "hermes_constants.py": "3c0b9d5d7b47318d1c9605a96719861059dd1ad80b4a696b215cf5fcf3d93ec7",
+    "hermes_state.py": "ba4ca1ac0c79441c830175db43a5e0b3a8b521d88cc822cdc2b5652244c157f5",
+    "tools/memory_tool.py": "ed9c5db6b3144b88425f7039280239b29a047143aa8ffdfd3b7f47bf7e707143"
+  },
+  "installedTrackedStatusUnchanged": true,
+  "sourceHashesUnchanged": true,
+  "receiptPath": "C:\\Users\\25941\\.codex\\worktrees\\v2-e02-native-capabilities\\灵光爸爸拆解\\.local\\owned-profile-1791874169103\\receipt.json",
+  "receiptSha256": "20532109250a98fd2aa87d306d1e609e1870fb054620c9cfac6e1a9a1bad30e7",
+  "network": "Loopback model protocol only; external connect and DNS blocked; no real phone or external account",
+  "nativeFixtures": {
+    "tests": 5,
+    "processExit": {
+      "platform": "win32",
+      "supervisor": "windows-job",
+      "launched": true,
+      "rootPid": 24016,
+      "rootConfirmed": true,
+      "rootExitCode": 0,
+      "treeConfirmed": true,
+      "activeProcesses": 0,
+      "cancelled": false,
+      "failureCode": null,
+      "hostExitCode": 0,
+      "streamsComplete": true,
+      "hostSignal": null
+    }
+  },
+  "bots": [
+    {
+      "employeeId": "employee_8b8fd4d0-e4fc-4cd0-8d8a-869552b91018",
+      "mainConversationId": "conv_23ed0c28-85f4-45bf-8050-588d46f999e0",
+      "instance": {
+        "mode": "owned_profile",
+        "profile": "bot-10058e32d69ecb9aea1f1594",
+        "templateProfile": "default",
+        "ownershipId": "a38c15f4-15fa-4a22-8368-604b3c26107b",
+        "provisionActionId": "action_2e363ee3-1c99-4487-846c-f789a5a73ad7",
+        "authMode": "source-native-store",
+        "home": "C:\\Users\\25941\\.codex\\worktrees\\v2-e02-native-capabilities\\灵光爸爸拆解\\.local\\owned-profile-1791874169103\\source\\profiles\\bot-10058e32d69ecb9aea1f1594",
+        "provisioning": {
+          "actionId": "action_2e363ee3-1c99-4487-846c-f789a5a73ad7",
+          "status": "provisioned",
+          "authentication": "configured",
+          "error": null
+        }
+      }
+    },
+    {
+      "employeeId": "employee_4800086e-c486-47ac-9526-2a2a6a133726",
+      "mainConversationId": "conv_2339763a-d266-4b3d-b9da-0ce92945e8ec",
+      "instance": {
+        "mode": "owned_profile",
+        "profile": "bot-548b64ae080288b2b4b03304",
+        "templateProfile": "default",
+        "ownershipId": "fa9fa947-6b0e-4a42-80e4-5193d462c280",
+        "provisionActionId": "action_8eded857-5cb1-4e5d-b033-e2795bc19336",
+        "authMode": "source-native-store",
+        "home": "C:\\Users\\25941\\.codex\\worktrees\\v2-e02-native-capabilities\\灵光爸爸拆解\\.local\\owned-profile-1791874169103\\source\\profiles\\bot-548b64ae080288b2b4b03304",
+        "provisioning": {
+          "actionId": "action_8eded857-5cb1-4e5d-b033-e2795bc19336",
+          "status": "provisioned",
+          "authentication": "configured",
+          "error": null
+        }
+      }
+    }
+  ],
+  "taskId": "task_31f565f8-7533-49a4-ace1-fe1d4bfbb5cd",
+  "modelCalls": [
+    {
+      "role": "a",
+      "ownMemory": false,
+      "authorizationCorrect": true
+    },
+    {
+      "role": "a",
+      "ownMemory": true,
+      "authorizationCorrect": true
+    },
+    {
+      "role": "b",
+      "ownMemory": false,
+      "authorizationCorrect": true
+    },
+    {
+      "role": "a",
+      "ownMemory": true,
+      "authorizationCorrect": true
+    },
+    {
+      "role": "a",
+      "ownMemory": true,
+      "authorizationCorrect": true
+    }
+  ],
+  "actions": [
+    {
+      "id": "action_2e363ee3-1c99-4487-846c-f789a5a73ad7",
+      "type": "hermes.bot.provision",
+      "botProvision": {
+        "schemaVersion": 1,
+        "mode": "owned_profile",
+        "workspace": "test-111",
+        "employeeId": "employee_8b8fd4d0-e4fc-4cd0-8d8a-869552b91018",
+        "deviceId": "device_00aa9bc0-0221-4456-ac5d-53df69fed9ff",
+        "ownershipId": "a38c15f4-15fa-4a22-8368-604b3c26107b",
+        "profile": "bot-10058e32d69ecb9aea1f1594",
+        "home": "C:\\Users\\25941\\.codex\\worktrees\\v2-e02-native-capabilities\\灵光爸爸拆解\\.local\\owned-profile-1791874169103\\source\\profiles\\bot-10058e32d69ecb9aea1f1594",
+        "profileHome": "C:\\Users\\25941\\.codex\\worktrees\\v2-e02-native-capabilities\\灵光爸爸拆解\\.local\\owned-profile-1791874169103\\source\\profiles\\bot-10058e32d69ecb9aea1f1594",
+        "nativeVersion": "0.21.3",
+        "authentication": "configured",
+        "authMode": "source-native-store",
+        "templateProfile": "default",
+        "duplicate": false,
+        "provisionActionId": "action_2e363ee3-1c99-4487-846c-f789a5a73ad7"
+      },
+      "botValidation": null,
+      "botIsolation": null,
+      "nativeSessionId": null,
+      "processExit": {
+        "platform": "win32",
+        "supervisor": "windows-job",
+        "launched": true,
+        "rootPid": 46240,
+        "rootConfirmed": true,
+        "rootExitCode": 0,
+        "treeConfirmed": true,
+        "activeProcesses": 0,
+        "cancelled": false,
+        "failureCode": null,
+        "hostExitCode": 0,
+        "streamsComplete": true,
+        "hostSignal": null
+      }
+    },
+    {
+      "id": "action_defa71d8-8f73-4d95-909e-6d867d4088d8",
+      "type": "hermes.bot.validate",
+      "botProvision": null,
+      "botValidation": {
+        "valid": true,
+        "schemaVersion": 1,
+        "employeeId": "employee_8b8fd4d0-e4fc-4cd0-8d8a-869552b91018",
+        "revision": 1,
+        "sourceProfile": "bot-10058e32d69ecb9aea1f1594",
+        "nativeVersion": "0.21.3",
+        "nativeFingerprint": "d6d0f7b13e37a09388879460ecdb495b6987bc1be9582bb37fbf4c8c95df01f1",
+        "isolation": {
+          "enabled": true,
+          "key": "a38c15f4-15fa-4a22-8368-604b3c26107b",
+          "workspace": "test-111",
+          "employeeId": "employee_8b8fd4d0-e4fc-4cd0-8d8a-869552b91018",
+          "sourceProfile": "bot-10058e32d69ecb9aea1f1594",
+          "authMode": "source-native-store",
+          "kind": "hermes-bot",
+          "revision": 1,
+          "mode": "owned_profile",
+          "profile": "bot-10058e32d69ecb9aea1f1594",
+          "home": "C:\\Users\\25941\\.codex\\worktrees\\v2-e02-native-capabilities\\灵光爸爸拆解\\.local\\owned-profile-1791874169103\\source\\profiles\\bot-10058e32d69ecb9aea1f1594",
+          "profileHome": "C:\\Users\\25941\\.codex\\worktrees\\v2-e02-native-capabilities\\灵光爸爸拆解\\.local\\owned-profile-1791874169103\\source\\profiles\\bot-10058e32d69ecb9aea1f1594"
+        },
+        "effective": {
+          "provider": "custom:ziwei-owned",
+          "model": "fixture-a",
+          "maxTurns": 4,
+          "memory": true,
+          "toolsets": [
+            "memory"
+          ]
+        }
+      },
+      "botIsolation": null,
+      "nativeSessionId": null,
+      "processExit": null
+    },
+    {
+      "id": "action_8eded857-5cb1-4e5d-b033-e2795bc19336",
+      "type": "hermes.bot.provision",
+      "botProvision": {
+        "schemaVersion": 1,
+        "mode": "owned_profile",
+        "workspace": "test-111",
+        "employeeId": "employee_4800086e-c486-47ac-9526-2a2a6a133726",
+        "deviceId": "device_00aa9bc0-0221-4456-ac5d-53df69fed9ff",
+        "ownershipId": "fa9fa947-6b0e-4a42-80e4-5193d462c280",
+        "profile": "bot-548b64ae080288b2b4b03304",
+        "home": "C:\\Users\\25941\\.codex\\worktrees\\v2-e02-native-capabilities\\灵光爸爸拆解\\.local\\owned-profile-1791874169103\\source\\profiles\\bot-548b64ae080288b2b4b03304",
+        "profileHome": "C:\\Users\\25941\\.codex\\worktrees\\v2-e02-native-capabilities\\灵光爸爸拆解\\.local\\owned-profile-1791874169103\\source\\profiles\\bot-548b64ae080288b2b4b03304",
+        "nativeVersion": "0.21.3",
+        "authentication": "configured",
+        "authMode": "source-native-store",
+        "templateProfile": "default",
+        "duplicate": false,
+        "provisionActionId": "action_8eded857-5cb1-4e5d-b033-e2795bc19336"
+      },
+      "botValidation": null,
+      "botIsolation": null,
+      "nativeSessionId": null,
+      "processExit": {
+        "platform": "win32",
+        "supervisor": "windows-job",
+        "launched": true,
+        "rootPid": 47920,
+        "rootConfirmed": true,
+        "rootExitCode": 0,
+        "treeConfirmed": true,
+        "activeProcesses": 0,
+        "cancelled": false,
+        "failureCode": null,
+        "hostExitCode": 0,
+        "streamsComplete": true,
+        "hostSignal": null
+      }
+    },
+    {
+      "id": "action_fdf311c9-94cb-4f5b-b9aa-5d6572e1cf44",
+      "type": "hermes.bot.validate",
+      "botProvision": null,
+      "botValidation": {
+        "valid": true,
+        "schemaVersion": 1,
+        "employeeId": "employee_4800086e-c486-47ac-9526-2a2a6a133726",
+        "revision": 1,
+        "sourceProfile": "bot-548b64ae080288b2b4b03304",
+        "nativeVersion": "0.21.3",
+        "nativeFingerprint": "d6d0f7b13e37a09388879460ecdb495b6987bc1be9582bb37fbf4c8c95df01f1",
+        "isolation": {
+          "enabled": true,
+          "key": "fa9fa947-6b0e-4a42-80e4-5193d462c280",
+          "workspace": "test-111",
+          "employeeId": "employee_4800086e-c486-47ac-9526-2a2a6a133726",
+          "sourceProfile": "bot-548b64ae080288b2b4b03304",
+          "authMode": "source-native-store",
+          "kind": "hermes-bot",
+          "revision": 1,
+          "mode": "owned_profile",
+          "profile": "bot-548b64ae080288b2b4b03304",
+          "home": "C:\\Users\\25941\\.codex\\worktrees\\v2-e02-native-capabilities\\灵光爸爸拆解\\.local\\owned-profile-1791874169103\\source\\profiles\\bot-548b64ae080288b2b4b03304",
+          "profileHome": "C:\\Users\\25941\\.codex\\worktrees\\v2-e02-native-capabilities\\灵光爸爸拆解\\.local\\owned-profile-1791874169103\\source\\profiles\\bot-548b64ae080288b2b4b03304"
+        },
+        "effective": {
+          "provider": "custom:ziwei-owned",
+          "model": "fixture-b",
+          "maxTurns": 4,
+          "memory": true,
+          "toolsets": [
+            "memory"
+          ]
+        }
+      },
+      "botIsolation": null,
+      "nativeSessionId": null,
+      "processExit": null
+    },
+    {
+      "id": "action_85f5c60e-4090-4a23-a9af-3f3deef7edda",
+      "type": "conversation.execute",
+      "botProvision": null,
+      "botValidation": null,
+      "botIsolation": {
+        "enabled": true,
+        "key": "a38c15f4-15fa-4a22-8368-604b3c26107b",
+        "workspace": "test-111",
+        "employeeId": "employee_8b8fd4d0-e4fc-4cd0-8d8a-869552b91018",
+        "sourceProfile": "bot-10058e32d69ecb9aea1f1594",
+        "authMode": "source-native-store",
+        "kind": "hermes-bot",
+        "revision": 1,
+        "mode": "owned_profile",
+        "profile": "bot-10058e32d69ecb9aea1f1594",
+        "home": "C:\\Users\\25941\\.codex\\worktrees\\v2-e02-native-capabilities\\灵光爸爸拆解\\.local\\owned-profile-1791874169103\\source\\profiles\\bot-10058e32d69ecb9aea1f1594",
+        "profileHome": "C:\\Users\\25941\\.codex\\worktrees\\v2-e02-native-capabilities\\灵光爸爸拆解\\.local\\owned-profile-1791874169103\\source\\profiles\\bot-10058e32d69ecb9aea1f1594"
+      },
+      "nativeSessionId": "20261013_144940_746709",
+      "processExit": {
+        "platform": "win32",
+        "supervisor": "windows-job",
+        "launched": true,
+        "rootPid": 37404,
+        "rootConfirmed": true,
+        "rootExitCode": 0,
+        "treeConfirmed": true,
+        "activeProcesses": 0,
+        "cancelled": false,
+        "failureCode": null,
+        "hostExitCode": 0,
+        "streamsComplete": true,
+        "hostSignal": null
+      }
+    },
+    {
+      "id": "action_ac801ea8-c175-4917-82e5-eb2d89378bc5",
+      "type": "conversation.execute",
+      "botProvision": null,
+      "botValidation": null,
+      "botIsolation": {
+        "enabled": true,
+        "key": "fa9fa947-6b0e-4a42-80e4-5193d462c280",
+        "workspace": "test-111",
+        "employeeId": "employee_4800086e-c486-47ac-9526-2a2a6a133726",
+        "sourceProfile": "bot-548b64ae080288b2b4b03304",
+        "authMode": "source-native-store",
+        "kind": "hermes-bot",
+        "revision": 1,
+        "mode": "owned_profile",
+        "profile": "bot-548b64ae080288b2b4b03304",
+        "home": "C:\\Users\\25941\\.codex\\worktrees\\v2-e02-native-capabilities\\灵光爸爸拆解\\.local\\owned-profile-1791874169103\\source\\profiles\\bot-548b64ae080288b2b4b03304",
+        "profileHome": "C:\\Users\\25941\\.codex\\worktrees\\v2-e02-native-capabilities\\灵光爸爸拆解\\.local\\owned-profile-1791874169103\\source\\profiles\\bot-548b64ae080288b2b4b03304"
+      },
+      "nativeSessionId": "20261013_144949_8bacd4",
+      "processExit": {
+        "platform": "win32",
+        "supervisor": "windows-job",
+        "launched": true,
+        "rootPid": 14228,
+        "rootConfirmed": true,
+        "rootExitCode": 0,
+        "treeConfirmed": true,
+        "activeProcesses": 0,
+        "cancelled": false,
+        "failureCode": null,
+        "hostExitCode": 0,
+        "streamsComplete": true,
+        "hostSignal": null
+      }
+    },
+    {
+      "id": "action_f5d5f873-ed87-450c-afa5-4a0a88f7da01",
+      "type": "conversation.execute",
+      "botProvision": null,
+      "botValidation": null,
+      "botIsolation": {
+        "enabled": true,
+        "key": "a38c15f4-15fa-4a22-8368-604b3c26107b",
+        "workspace": "test-111",
+        "employeeId": "employee_8b8fd4d0-e4fc-4cd0-8d8a-869552b91018",
+        "sourceProfile": "bot-10058e32d69ecb9aea1f1594",
+        "authMode": "source-native-store",
+        "kind": "hermes-bot",
+        "revision": 1,
+        "mode": "owned_profile",
+        "profile": "bot-10058e32d69ecb9aea1f1594",
+        "home": "C:\\Users\\25941\\.codex\\worktrees\\v2-e02-native-capabilities\\灵光爸爸拆解\\.local\\owned-profile-1791874169103\\source\\profiles\\bot-10058e32d69ecb9aea1f1594",
+        "profileHome": "C:\\Users\\25941\\.codex\\worktrees\\v2-e02-native-capabilities\\灵光爸爸拆解\\.local\\owned-profile-1791874169103\\source\\profiles\\bot-10058e32d69ecb9aea1f1594"
+      },
+      "nativeSessionId": "20261013_144940_746709",
+      "processExit": {
+        "platform": "win32",
+        "supervisor": "windows-job",
+        "launched": true,
+        "rootPid": 52324,
+        "rootConfirmed": true,
+        "rootExitCode": 0,
+        "treeConfirmed": true,
+        "activeProcesses": 0,
+        "cancelled": false,
+        "failureCode": null,
+        "hostExitCode": 0,
+        "streamsComplete": true,
+        "hostSignal": null
+      }
+    },
+    {
+      "id": "action_7da5a87e-e226-4f3e-8918-3404e440c2cc",
+      "type": "task.execute",
+      "botProvision": null,
+      "botValidation": null,
+      "botIsolation": {
+        "enabled": true,
+        "key": "a38c15f4-15fa-4a22-8368-604b3c26107b",
+        "workspace": "test-111",
+        "employeeId": "employee_8b8fd4d0-e4fc-4cd0-8d8a-869552b91018",
+        "sourceProfile": "bot-10058e32d69ecb9aea1f1594",
+        "authMode": "source-native-store",
+        "kind": "hermes-bot",
+        "revision": 1,
+        "mode": "owned_profile",
+        "profile": "bot-10058e32d69ecb9aea1f1594",
+        "home": "C:\\Users\\25941\\.codex\\worktrees\\v2-e02-native-capabilities\\灵光爸爸拆解\\.local\\owned-profile-1791874169103\\source\\profiles\\bot-10058e32d69ecb9aea1f1594",
+        "profileHome": "C:\\Users\\25941\\.codex\\worktrees\\v2-e02-native-capabilities\\灵光爸爸拆解\\.local\\owned-profile-1791874169103\\source\\profiles\\bot-10058e32d69ecb9aea1f1594"
+      },
+      "nativeSessionId": "20261013_144940_746709",
+      "processExit": {
+        "platform": "win32",
+        "supervisor": "windows-job",
+        "launched": true,
+        "rootPid": 25396,
+        "rootConfirmed": true,
+        "rootExitCode": 0,
+        "treeConfirmed": true,
+        "activeProcesses": 0,
+        "cancelled": false,
+        "failureCode": null,
+        "hostExitCode": 0,
+        "streamsComplete": true,
+        "hostSignal": null
+      }
+    },
+    {
+      "id": "action_05098eeb-a0ab-4537-8d45-8722eddf4ca3",
+      "type": "hermes.bot.native",
+      "botProvision": null,
+      "botValidation": null,
+      "botIsolation": {
+        "enabled": true,
+        "key": "a38c15f4-15fa-4a22-8368-604b3c26107b",
+        "workspace": "test-111",
+        "employeeId": "employee_8b8fd4d0-e4fc-4cd0-8d8a-869552b91018",
+        "sourceProfile": "bot-10058e32d69ecb9aea1f1594",
+        "authMode": "source-native-store",
+        "kind": "hermes-bot",
+        "revision": 1,
+        "mode": "owned_profile",
+        "profile": "bot-10058e32d69ecb9aea1f1594",
+        "home": "C:\\Users\\25941\\.codex\\worktrees\\v2-e02-native-capabilities\\灵光爸爸拆解\\.local\\owned-profile-1791874169103\\source\\profiles\\bot-10058e32d69ecb9aea1f1594",
+        "profileHome": "C:\\Users\\25941\\.codex\\worktrees\\v2-e02-native-capabilities\\灵光爸爸拆解\\.local\\owned-profile-1791874169103\\source\\profiles\\bot-10058e32d69ecb9aea1f1594"
+      },
+      "nativeSessionId": null,
+      "processExit": {
+        "platform": "win32",
+        "supervisor": "windows-job",
+        "launched": true,
+        "rootPid": 11912,
+        "rootConfirmed": true,
+        "rootExitCode": 0,
+        "treeConfirmed": true,
+        "activeProcesses": 0,
+        "cancelled": false,
+        "failureCode": null,
+        "hostExitCode": 0,
+        "streamsComplete": true,
+        "hostSignal": null
+      }
+    }
+  ],
+  "verification": {
+    "fullNodeTests": 800,
+    "fullNodePassed": 800,
+    "fullNodeFailed": 0,
+    "fullNodeDurationMs": 80884.4793,
+    "compatibilityTests": 32,
+    "compatibilityPassed": 32,
+    "lintSourceFiles": 99,
+    "pythonAstFiles": 3,
+    "diffCheck": "passed"
+  },
+  "limitations": [
+    "No external model/account or OAuth refresh tested; source OAuth writes remain blocked.",
+    "Owned-to-owned initialization is explicitly unsupported.",
+    "Config-only validation has no independent process-tree receipt.",
+    "Management API task execution is verified; management/phone MCP loader and phone commands are deferred."
+  ]
+}

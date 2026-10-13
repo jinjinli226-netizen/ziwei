@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRepository } from '../backend/repository.mjs';
 import { createManagementService } from '../backend/management.mjs';
+import {completeOwnedProfile} from '../test-support/owned-profile.mjs';
 
 test('ordinary Hermes conversation carries only its own bounded prior turns into execution', () => {
   const repo = createRepository({ memory: true });
@@ -27,6 +28,7 @@ function fixture() {
   return {repo,management,bots:management.bots,input};
 }
 function activate(f,bot) {
+  completeOwnedProfile(f.repo,bot);
   const {action}=f.bots.validate('test-111',bot.id,{expectedRevision:bot.revision,idempotencyKey:`validate-${bot.revision}`});
   f.repo.ackA2AAction(action.id,{deviceId:'bot-pc'});
   f.repo.resultA2AAction(action.id,{status:'succeeded',result:{botValidation:{valid:true,schemaVersion:1,employeeId:bot.id,revision:bot.revision,sourceProfile:'default',nativeVersion:'0.21.3'}}});
@@ -40,6 +42,7 @@ test('Bot create is idempotent, supports multiple independent instances, and del
     assert.equal(same.id,one.id);assert.equal(same.duplicate,true);assert.equal(one.control_state,'draft');
     const two=f.bots.create('test-111',{...f.input,idempotencyKey:'create-two'});
     assert.notEqual(one.id,two.id);assert.notEqual(one.main_conversation_id,two.main_conversation_id);
+    completeOwnedProfile(f.repo,one);
     f.repo.deleteEmployee(one.id);
     assert.throws(()=>f.bots.create('test-111',f.input),{code:'IDEMPOTENCY_RESOURCE_GONE'});
   } finally {f.repo.db.close();}
@@ -48,13 +51,14 @@ test('Bot create is idempotent, supports multiple independent instances, and del
 test('Bot activation, paused and raw execution routes share the same gate and trusted config',()=>{
   const f=fixture();try {
     let bot=f.bots.create('test-111',f.input);
-    assert.throws(()=>f.repo.addConversationMessage(bot.main_conversation_id,{content:'not yet'}),{code:'BOT_NOT_ACTIVE'});
+    assert.throws(()=>f.repo.addConversationMessage(bot.main_conversation_id,{content:'not yet'}),{code:'BOT_PROFILE_NOT_PROVISIONED'});
+    completeOwnedProfile(f.repo,bot);
     assert.throws(()=>f.bots.control('test-111',bot.id,{expectedRevision:1,expectedControlEpoch:1,operation:'activate'}),{code:'BOT_NOT_VALIDATED'});
     bot=activate(f,bot);
     const message=f.repo.addConversationMessage(bot.main_conversation_id,{content:'first',clientMessageId:'first'});
     const action=f.repo.getA2AAction(message.execution.id);
     assert.equal(action.payload.hermesBot.employeeId,bot.id);assert.equal(action.payload.hermesBot.config.maxTurns,20);
-    assert.equal(action.payload.model,'test-model');assert.equal(action.payload.profile,'default');assert.equal(action.payload.deviceId,'bot-pc');
+    assert.equal(action.payload.model,'test-model');assert.equal(action.payload.profile,bot.instance.profile);assert.equal(action.payload.deviceId,'bot-pc');
     assert.throws(()=>f.repo.createA2AAction('test-111',{type:'runtime.execute',payload:{employeeId:bot.id,prompt:'bypass'}}),{code:'BOT_BUSY'});
     f.repo.resultA2AAction(action.id,{status:'succeeded',result:{output:'first answer'}});
     f.bots.control('test-111',bot.id,{expectedRevision:1,expectedControlEpoch:2,operation:'pause'});
@@ -102,6 +106,7 @@ test('paused Bot accepts original device results while rejecting new starts and 
 test('Bot identity cannot be hidden behind ordinary employee, missing employee, or foreign workspace',()=>{
   const f=fixture();try{
     const bot=f.bots.create('test-111',f.input),other=f.repo.createEmployee('test-111',{name:'ordinary'});
+    completeOwnedProfile(f.repo,bot);
     assert.throws(()=>f.repo.createA2AAction('test-111',{type:'conversation.execute',payload:{employeeId:other.id,conversationId:bot.main_conversation_id,prompt:'bypass'}}),{code:'BOT_BINDING_CONFLICT'});
     assert.throws(()=>f.repo.createA2AAction('test-111',{type:'conversation.execute',payload:{conversationId:bot.main_conversation_id,prompt:'bypass'}}),{code:'BOT_NOT_ACTIVE'});
     const routine=f.bots.createRoutine('test-111',bot.id,{name:'routine',prompt:'work',schedule:'每小时',idempotencyKey:'routine'});
