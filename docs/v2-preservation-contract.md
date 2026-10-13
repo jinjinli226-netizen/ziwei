@@ -54,7 +54,7 @@ Gateway connect 的成功结果保持原样；真实 worker 退出后，将同 s
 
 ## 原生持久状态证据增补
 
-新 collector 在同 operation/preparing 下读取原 action 全量投影及 owned/legacy HOME；异步前后核 intent/versions，seal 最后事务核 action、Inbox、文件/目录摘要及 inode。源 state.db/kanban.db/hosted_rooms.db 从不由 SQLite 直接打开：先读取 DB/WAL/journal 到私有副本，验证 WAL header/frame/salt/滚动 checksum、页大小与最终 commit，再用只读事务 quick_check。源 DB/WAL/journal 的存在性、bytes/inode 被前后和提交前绑定；源 SHM 不创建/改写。无法解释的损坏 WAL、旧 salt/reset 尾、未提交尾、部分帧或非空 recovery journal 明确 unknown，保留证据拒切。规则依据 [SQLite 官方文件格式](https://www.sqlite.org/fileformat2.html#walformat)。
+新 collector 在同 operation/preparing 下读取原 action 全量投影及 owned/legacy HOME；异步前后核 intent/versions，seal 最后事务核 action、Inbox、文件/目录摘要及 inode。源 state.db/kanban.db/hosted_rooms.db 从不由 SQLite 直接打开：先读取 DB/WAL/journal 到私有副本，验证 WAL header/frame/salt/滚动 checksum、页大小与最终 commit，再用只读事务 quick_check。源 DB/WAL/journal 的存在性、bytes/inode 被前后和提交前绑定；源 SHM 不创建/改写。无法解释的损坏 WAL、未提交当前尾、部分帧或非空 recovery journal 明确 unknown，保留证据拒切。对正常复用的旧 salt/reset 尾，必须额外读取稳定 SHM 两份相同 header，验证 native checksum/version/init/页大小/salt/mxFrame/最后 commit checksum/nPage/backfill，才能限定当前有效前缀；尾部按旧 salt 段核验：代次差严格递增且受 header checkpoint counter 限定；段首不能延续前一代 checksum，同段逐帧 checksum 必须连续，最后须为 commit。salt-only 损坏的当前已提交尾不能借 stale SHM 隐藏 pending claim。缺/损坏 index、当前 salt 尾，或 empty/missing WAL 却有非零 mxFrame，均拒绝。源 SHM 的存在/bytes/inode 同样进入前后与 seal 最后清单，SQLite 仍只打开私有 DB/WAL副本。规则依据 [SQLite 官方文件格式](https://www.sqlite.org/fileformat2.html#walformat)和[WAL-index 格式](https://www.sqlite.org/walformat.html)。
 
 现支持 Hermes 0.21.3、state schema30，并核 core 表字段类型/主键。开通版本不能遮盖后续同 scope 原 native/validation 版本冲突。legacy 仅从原 marker+已 health/config 绑定的明确 baseHOME 和原成功 validation/fingerprint/isolation/退出树取版本；shared scope 使用实际 entry.hermesHome || config.hermesHome。若运行 HOME 只能由未知进程环境决定，保持 unknown。
 

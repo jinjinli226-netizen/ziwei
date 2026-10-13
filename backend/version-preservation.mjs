@@ -179,7 +179,7 @@ export function createPreservation(db,{role=PRODUCT_ROLE,collectNativeEvidence=n
     if(!native.safe){event(operationId,'seal_refused',{issues:native.issues});fail('ROLLBACK_NOT_DRAINED','本机执行与补传证据不完整',native.issues);}
     return transaction(()=>{const checked=inspect(),currentOperation=operation({operationId});
       if(new Set((native.gatewayInboxProofs||[]).map(proof=>proof.inboxId)).size!==(native.gatewayInboxProofs||[]).length)fail('ROLLBACK_NOT_DRAINED','原生 Inbox proof 必须唯一');
-      if(native.nativeDatabases){const originalActions=all(db,'a2a_actions').filter(action=>classifyAction(action).isV2);if(originalActions.some(action=>!(native.actionBindings||[]).some(binding=>binding.id===action.id))||native.nativeDatabases.some(record=>['','-wal','-journal'].some(suffix=>!(native.files||[]).some(file=>file.path===record.path+suffix))))fail('ROLLBACK_NOT_DRAINED','原生证据缺少完整原 action 或数据库文件清单');}
+      if(native.nativeDatabases){const originalActions=all(db,'a2a_actions').filter(action=>classifyAction(action).isV2);if(originalActions.some(action=>!(native.actionBindings||[]).some(binding=>binding.id===action.id))||native.nativeDatabases.some(record=>['','-wal','-journal','-shm'].some(suffix=>!(native.files||[]).some(file=>file.path===record.path+suffix))))fail('ROLLBACK_NOT_DRAINED','原生证据缺少完整原 action 或数据库文件清单');}
       const inboxProofs=new Map((native.gatewayInboxProofs||[]).map(proof=>[proof.inboxId,proof]));
       const remaining=checked.issues.filter(issue=>{
         if(issue.code!=='GATEWAY_INBOX_NOT_DRAINED'||issue.status!=='dispatched')return true;

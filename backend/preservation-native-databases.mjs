@@ -28,8 +28,11 @@ const hasTable=(db,name)=>Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE 
 
 // SQLite fileformat2 WAL header/frame checksums. Unknown reset tails refuse;
 // quick_check alone can silently read the old main DB after an invalid WAL.
-function validateWal(bytes,main){
-  if(!bytes.length)return;
+function validateWal(bytes,main,index){
+  if(!bytes.length){
+    if(index){const fail=()=>{throw Error('NATIVE_WAL_INDEX_UNPROVEN');},little=os.endianness()==='LE',word=i=>little?index.readUInt32LE(i):index.readUInt32BE(i);if(index.length<32768||index.length%32768||!index.subarray(0,48).equals(index.subarray(48,96)))fail();let a=0,b=0;for(let i=0;i<40;i+=8){a=(a+word(i)+b)>>>0;b=(b+word(i+4)+a)>>>0;}const pageSize=(little?index.readUInt16LE(14):index.readUInt16BE(14)),mainSize=main.length>=100?(main.readUInt16BE(16)===1?65536:main.readUInt16BE(16)):0;if(word(0)!==3007000||word(4)!==0||index[12]!==1||index[13]>1||(pageSize===1?65536:pageSize)!==mainSize||word(16)!==0||word(96)!==0||word(128)!==0||a!==word(40)||b!==word(44))fail();}
+    return;
+  }
   const fail=()=>{throw Error('NATIVE_WAL_UNPROVEN');};
   if(bytes.length<32||main.length<100)fail();
   const magic=bytes.readUInt32BE(0),size=bytes.readUInt32BE(8),mainSize=main.readUInt16BE(16)===1?65536:main.readUInt16BE(16);
@@ -37,31 +40,59 @@ function validateWal(bytes,main){
   let s0=0,s1=0;const word=offset=>magic===0x377f0682?bytes.readUInt32LE(offset):bytes.readUInt32BE(offset);
   const checksum=(start,end)=>{for(let i=start;i<end;i+=8){s0=(s0+word(i)+s1)>>>0;s1=(s1+word(i+4)+s0)>>>0;}};
   checksum(0,24);if(s0!==bytes.readUInt32BE(24)||s1!==bytes.readUInt32BE(28))fail();
-  const salt=bytes.subarray(16,24);let committed=bytes.length===32;
-  for(let offset=32;offset<bytes.length;offset+=size+24){
+  const salt=bytes.subarray(16,24);let committed=bytes.length===32,frames=(bytes.length-32)/(size+24),committedPages,indexHeader;
+  if(index){
+    const indexFail=()=>{throw Error('NATIVE_WAL_INDEX_UNPROVEN');};
+    if(index.length<32768||index.length%32768||!index.subarray(0,48).equals(index.subarray(48,96)))indexFail();
+    const nativeLittle=os.endianness()==='LE',u32=offset=>nativeLittle?index.readUInt32LE(offset):index.readUInt32BE(offset),u16=offset=>nativeLittle?index.readUInt16LE(offset):index.readUInt16BE(offset);
+    let x=0,y=0;for(let i=0;i<40;i+=8){x=(x+u32(i)+y)>>>0;y=(y+u32(i+4)+x)>>>0;}
+    const declared=u32(16),pageSize=u16(14)===1?65536:u16(14);
+    if(u32(0)!==3007000||u32(4)!==0||index[12]!==1||index[13]!==Number(magic===0x377f0683)||pageSize!==size||!index.subarray(32,40).equals(salt)||x!==u32(40)||y!==u32(44)||declared>frames||u32(96)>declared||u32(128)>declared)indexFail();
+    frames=declared;indexHeader={checksum:[u32(24),u32(28)],pages:u32(20)};
+  }
+  const activeEnd=32+frames*(size+24);
+  for(let offset=32;offset<activeEnd;offset+=size+24){
     if(!bytes.subarray(offset+8,offset+16).equals(salt)||!bytes.readUInt32BE(offset))fail();
     checksum(offset,offset+8);checksum(offset+24,offset+24+size);
     if(s0!==bytes.readUInt32BE(offset+16)||s1!==bytes.readUInt32BE(offset+20))fail();
-    committed=bytes.readUInt32BE(offset+4)>0;
+    committedPages=bytes.readUInt32BE(offset+4);committed=committedPages>0;
   }
-  if(!committed)fail();
+  if(!committed&&frames)fail();
+  if(indexHeader&&frames&&(indexHeader.checksum[0]!==s0||indexHeader.checksum[1]!==s1||indexHeader.pages!==committedPages))throw Error('NATIVE_WAL_INDEX_UNPROVEN');
+  // An authenticated current index may delimit old reset bytes, never current
+  // uncommitted/checksum-damaged frames. Every tail header must carry old salt.
+  let priorSalt=null,priorAge=0,lastTailCommit;const generations=bytes.readUInt32BE(12);
+  for(let offset=activeEnd;offset<bytes.length;offset+=size+24){
+    const tailSalt=bytes.subarray(offset+8,offset+16),age=(bytes.readUInt32BE(16)-bytes.readUInt32BE(offset+8))>>>0;
+    if(!indexHeader||tailSalt.equals(salt)||!bytes.readUInt32BE(offset))fail();
+    const newGeneration=!priorSalt||!tailSalt.equals(priorSalt);
+    if(newGeneration&&(age<=priorAge||age>generations))fail();
+    checksum(offset,offset+8);checksum(offset+24,offset+24+size);
+    const matches=s0===bytes.readUInt32BE(offset+16)&&s1===bytes.readUInt32BE(offset+20);
+    // Salt is not covered by frame checksum. A tail continuing the current
+    // chain is damaged current data, never a proven old reset generation.
+    if(newGeneration?matches:!matches)fail();
+    if(newGeneration){priorSalt=tailSalt;priorAge=age;}
+    s0=bytes.readUInt32BE(offset+16);s1=bytes.readUInt32BE(offset+20);lastTailCommit=bytes.readUInt32BE(offset+4);
+  }
+  if(activeEnd<bytes.length&&!lastTailCommit)fail();
 }
 
 /** Source bytes are never opened by SQLite: WAL is copied with the DB to a private reader. */
 function snapshot(file,files,read){
   const source=[];
-  for(const suffix of ['', '-wal', '-journal']){
+  for(const suffix of ['', '-wal', '-journal', '-shm']){
     const target=file+suffix;
     if(!fs.existsSync(target)){const proof={path:target,exists:false};source.push({proof});files.push(proof);continue;}
     const stat=fs.lstatSync(target);if(!stat.isFile()||stat.isSymbolicLink()||stat.nlink!==1)throw Error('NATIVE_DATABASE_IDENTITY_UNKNOWN');
     const bytes=fs.readFileSync(target),proof={path:target,exists:true,bytes:bytes.length,sha256:hash(bytes),identity:{dev:String(stat.dev),ino:String(stat.ino)}};
     files.push(proof);source.push({proof,bytes});if(suffix==='-journal'&&bytes.length)throw Error('NATIVE_DATABASE_RECOVERY_REQUIRED');
   }
-  if(!source[0].proof.exists){if(source[1].proof.exists)throw Error('NATIVE_DATABASE_ORPHAN_WAL');return null;}
-  if(source[1].proof.exists)validateWal(source[1].bytes,source[0].bytes);
+  if(!source[0].proof.exists){if(source[1].proof.exists||source[3].proof.exists)throw Error('NATIVE_DATABASE_ORPHAN_WAL');return null;}
+  if(source[1].proof.exists||source[3].proof.exists)validateWal(source[1].bytes||Buffer.alloc(0),source[0].bytes,source[3].bytes);
   const directory=fs.mkdtempSync(path.join(os.tmpdir(),'ziwei-native-read-')),copy=path.join(directory,path.basename(file));let db;
   try{
-    for(const item of source.filter(row=>row.proof.exists&&!row.proof.path.endsWith('-journal')))fs.writeFileSync(path.join(directory,path.basename(item.proof.path)),item.bytes,{mode:0o600});
+    for(const item of source.filter(row=>row.proof.exists&&!['-journal','-shm'].some(suffix=>row.proof.path.endsWith(suffix))))fs.writeFileSync(path.join(directory,path.basename(item.proof.path)),item.bytes,{mode:0o600});
     db=new DatabaseSync(copy,{readOnly:true});db.function('ziwei_private_sha256',{deterministic:true},value=>typeof value==='string'?hash(value):null);db.exec('PRAGMA query_only=ON; BEGIN');
     if(db.prepare('PRAGMA quick_check').all().some(row=>Object.values(row)[0]!=='ok'))throw Error('NATIVE_DATABASE_CORRUPT');
     const result=read(db);db.exec('COMMIT');return result;
