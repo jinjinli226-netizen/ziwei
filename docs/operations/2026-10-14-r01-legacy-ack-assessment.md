@@ -58,7 +58,7 @@ R01先前有界读取的原轮转日志 `legacy-journals-04-history.json` SHA `4
 | `daemon.log.1791689059232` | 16149条原PID记录，`2026-10-10T10:40:42.458Z` 至 `2026-10-11T03:24:19.232Z`；SHA `447bf1c4db2b8a51f15f71e433803e030ec84ba3124b407987e1f3bd53c02403` |
 | `daemon.log.1791772341015` | 16524条原PID记录，`2026-10-11T03:24:19.238Z` 至 `20:00:21.171Z`；SHA `4794319aa2c10cab415febc45305e29e3b1c5dd13400b1dc92e4e8b6ba248456` |
 
-原代次只有一个start和一个exit，start与历史进程创建时间相差约2.6秒，完整覆盖action创建/ACK/过期窗口，包含唯一目标失败记录且无`action.started`；与原context摘要一致。物理log root为 `C:\Users\25941\AppData\Local\Ziwei\ziwei_user\logs`，runtime root为对应`runtime`，原cache final path和原config/boot身份分别有既有artifact锚点。原历史ZIWEI_USER_HOME环境值未直接采集，报告仅声明实际观测物理根，不声称已恢复其原环境或lexical alias。
+原代次只有一个start和一个exit，start与历史进程创建时间相差约2.6秒，完整覆盖action创建/ACK/过期窗口，包含唯一目标失败记录且无`action.started`；与原context摘要一致。logger reader最终guard将target coverage显式绑定boot条件；正式admission还须同时检查sameBootWindowVerified与targetLoggerCoverageVerified，不能用单一target flag。已有audit02两者均true，最后收紧guard不改变其已核事实。物理log root为 `C:\Users\25941\AppData\Local\Ziwei\ziwei_user\logs`，runtime root为对应`runtime`，原cache final path和原config/boot身份分别有既有artifact锚点。原历史ZIWEI_USER_HOME环境值未直接采集，报告仅声明实际观测物理根，不声称已恢复其原环境或lexical alias。
 
 **本轮分析结论：对这一个subject，精确旧包、原cache缺原dedupe、同boot完整logger覆盖/唯一失败且无started，与3秒时间线共同支持source-bound never-dispatched候选。** 这是按旧协议证明未进入执行器的候选，不是原Job/treeConfirmed。正式admission仍是未接/待独审状态：独立正式签名、operation/spec/challenge/当前冻结DB关联、E02实际支持与Q正确/错scope/cache/log缺失用例未交付或未验。没有签成生产PASS、不释放bootstrap；原expired/empty-result保持。该结论不能推广到其他39条legacy终态或全实例排空。
 
