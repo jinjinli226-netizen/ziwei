@@ -49,7 +49,7 @@ export function legacyFixture(t) {
   const logPaths = [path.join(logDir, 'daemon.log.1791728790000'), path.join(logDir, 'daemon.log.1791748821171')];
   const sourcePath = path.join(runtime, 'action-state.json');
   const context = {captureUTC: '2026-10-11T17:10:33.538432+00:00', sameActionRecords: [failure], nearbyRecords: [second[1], failure, second[3]]};
-  const inspect = {captureUTC: '2026-10-11T17:10:33.527386+00:00', config: {finalPath: configPath, workspace, deviceId, apiBase: origin}, logs: [{path: logPaths[0], finalPath: logPaths[0], bytes: Buffer.byteLength(serialize(first))}, {path: path.join(logDir, 'daemon.log'), finalPath: path.join(logDir, 'daemon.log'), lastAt: second[3].at, bytes:Buffer.byteLength(serialize(second.slice(0,4)))}], actionStates: [{path: sourcePath, finalPath: sourcePath}]};
+  const inspect = {captureUTC: '2026-10-11T17:10:33.527386+00:00', config: {finalPath: configPath, workspace, deviceId, apiBase: origin}, logs: [{path: logPaths[0], finalPath: logPaths[0], bytes: Buffer.byteLength(serialize(first)),lastAt:first.at(-1).at}, {path: path.join(logDir, 'daemon.log'), finalPath: path.join(logDir, 'daemon.log'), lastAt: second[3].at, bytes:Buffer.byteLength(serialize(second.slice(0,4)))}], actionStates: [{path: sourcePath, finalPath: sourcePath}]};
   const snapshot = {captureUTC: '2026-10-11T17:10:33.773674+00:00', config: {path: configPath, finalPath: configPath, sha256: generation.configSha256, workspace, deviceId, apiBase: origin, sharedBindings: []}, health: {pid: generation.pid, clientBuild: generation.installedBuild, workspace, deviceId, lifecycle: {root, configPath, configSha256: generation.configSha256, startedAt: '2026-10-10T10:40:39.986Z'}}, nativeProcess: {pid: generation.pid, executable: generation.executable, creationDate: '/Date(1791628839884)/', commandSha256: generation.commandSha256}, installedBuild: generation.installedBuild, actionStates: [{path: sourcePath, finalPath: sourcePath, sha256: sha(historicalBytes), bytes: Buffer.byteLength(historicalBytes)}]};
   const descriptors = {};
   for (const [role, bytes, source] of [['archive', archive.bytes, path.join(root, 'source.tgz')], ['context', JSON.stringify(context), path.join(root, 'context.json')], ['inspect', JSON.stringify(inspect), path.join(root, 'inspect.json')], ['snapshot', JSON.stringify(snapshot), path.join(root, 'snapshot.json')], ['cache', JSON.stringify(state), sourcePath], ['loggerStart', serialize(first), logPaths[0]], ['loggerEnd', serialize(second), logPaths[1]]]) {
@@ -212,6 +212,11 @@ for(const result of [false,undefined,{},Promise.resolve(true)])test('only exact 
 });
 test('a producer error after a partial capture cannot qualify the logger inventory', t => {
   const f=legacyFixture(t);replaceCapture(f,capture=>{capture.error={type:'OSError',message:'isolated read refused'};});
+  const cap=createLegacySourceInterpreter({authorization:f.authorization,requestBinding:f.requestBinding,verifyLoggerCoverage:f.verifyLoggerCoverage});
+  assert.throws(()=>cap.neverDispatchedProof({productionRequest:f.request,connection:f.connection,action:f.action,state:f.state}),{code:'LEGACY_SOURCE_UNPROVEN'});
+});
+test('captured rotation endpoint must match the strictly parsed original bytes', t => {
+  const f=legacyFixture(t);replaceCapture(f,capture=>{capture.logs[0].lastAt='2026-10-11T14:26:30.003Z';});
   const cap=createLegacySourceInterpreter({authorization:f.authorization,requestBinding:f.requestBinding,verifyLoggerCoverage:f.verifyLoggerCoverage});
   assert.throws(()=>cap.neverDispatchedProof({productionRequest:f.request,connection:f.connection,action:f.action,state:f.state}),{code:'LEGACY_SOURCE_UNPROVEN'});
 });

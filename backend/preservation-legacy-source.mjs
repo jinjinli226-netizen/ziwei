@@ -136,6 +136,7 @@ export function createLegacySourceInterpreter({authorization, requestBinding, re
       // Their timestamps cannot reorder mandatory start/exit records.
       ranges.push({first: timestamp(records[0].at), last: timestamp(records.at(-1).at)}); rows.push(...records);
     }
+    require(ranges[0].last === timestamp(capturedRotation[0].lastAt));
     require(rotationTimes[0] <= timestamp(captured.captureUTC) && timestamp(captured.captureUTC) < rotationTimes[1]);
     require(ranges[1].first >= ranges[0].last && ranges[1].first - ranges[0].last <= 1000);
     const boot = rows.filter(row => row.pid === generation.pid), starts = boot.filter(row => row.event === 'started'), exits = boot.filter(row => row.event === 'exited');

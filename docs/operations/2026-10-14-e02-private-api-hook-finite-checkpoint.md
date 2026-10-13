@@ -19,7 +19,7 @@ createApp({
 
 新实际 Express 测试 28/28 PASS、0 skip：inline/file/env 三入口、只有原 file-backed `repo.db`、POST 签名验证、GET404、无配置 POST404、错误 HMAC/host/spec/operation/target/DB/fence/过期与 JSON callback 403+no-store；主库/WAL/journal/config 字节和 total_changes 均未变化。实际 fixture restore 后原 sealed 请求拒绝。代码 IO 显式注入 native bootstrap/connection identity，且所有 key/config/DB 都在临时目录，不涉及正式密钥或服务。
 
-此前 API 稿组合全量在 `.local/private-api-combined-full-suite.log`：1162/1162 PASS、0 fail/skip，属于加入 FD 修复与本轮 legacy 覆盖拒绝前的检查点。本轮最终直接相关组合 `.local/finite-api-legacy-targeted-02.log`：**217 项、216 PASS、0 fail、1 Linux 专项平台 skip**；覆盖实际 route28、namespace、production、archive、legacy/final guard、native files、build/manifest 与本地 daemon maintenance。lint129 PASS。单独 API/namespace/FD 组合40 PASS、1 Linux skip。没有重复完整 SDK 四阶段或宣称新全量/完整 Windows namespace/client 身份资格。
+此前 API 稿组合全量在 `.local/private-api-combined-full-suite.log`：1162/1162 PASS、0 fail/skip，属于加入 FD 修复与本轮 legacy 覆盖拒绝前的检查点。本轮最终直接相关组合 `.local/finite-api-legacy-targeted-03.log`：**218 项、217 PASS、0 fail、1 Linux 专项平台 skip**；覆盖实际 route28、namespace、production、archive、legacy/final guard、native files、build/manifest 与本地 daemon maintenance。lint129 PASS。单独 API/namespace/FD 组合40 PASS、1 Linux skip。没有重复完整 SDK 四阶段或宣称新全量/完整 Windows namespace/client 身份资格。
 
 只读包审查另找到 Windows client npm files 漏导出 `scripts/verify-preservation-packages.mjs` 的真实静态依赖；已补该文件及 `scripts/v2-preservation.mjs`，同时加入 client build 输入。namespace/legacy 模块继续进入两类包 shared/meta/files。修复后必须从真实新 TGZ 的隔离安装目录导入 source proof/namespace/production 模块，并核两 CLI 文件，不只检查 staging。
 
