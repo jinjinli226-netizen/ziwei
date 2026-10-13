@@ -2,6 +2,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {spawn} from 'node:child_process';
+// Formal production wiring uses the frozen product ABI. Existing generic
+// exports below remain isolated fixture utilities.
+export {createProductionProofProvider,createSourceCliTransport} from './r01-production-wire.mjs';
 
 const fail=code=>{throw Object.assign(new Error(code),{code});};
 const hex=value=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);

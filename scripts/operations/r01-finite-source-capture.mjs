@@ -4,6 +4,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
+// This factory writes the product's signed capture schema; the draft container
+// functions below never qualify a production namespace.
+export {createNamespaceCaptureWriter} from './r01-production-wire.mjs';
 
 const fail=code=>{throw Object.assign(new Error(code),{code});};
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex');

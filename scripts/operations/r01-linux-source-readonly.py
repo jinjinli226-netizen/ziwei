@@ -9,7 +9,7 @@ import collections, datetime, hashlib, json, os, pathlib, re, shlex, sqlite3, su
 sha = lambda data: hashlib.sha256(data).hexdigest()
 now = lambda: datetime.datetime.now(datetime.timezone.utc).isoformat()
 PROPERTIES = ['MainPID','InvocationID','ControlGroup','KillMode','SendSIGKILL','Delegate','Restart',
-              'ActiveState','SubState','ExecMainStartTimestamp','FragmentPath','DropInPaths','User','NRestarts']
+              'ActiveState','SubState','ExecMainStartTimestamp','ExecMainStartTimestampMonotonic','ActiveEnterTimestampMonotonic','FragmentPath','DropInPaths','User','NRestarts']
 SERVICES = ['ziwei-api.service','ziwei-control-api.service','nginx.service']
 issues = []
 def command(args):
@@ -72,6 +72,7 @@ def service(name):
     value=dict(line.split('=',1) for line in command(['systemctl','show',name]+[part for key in PROPERTIES for part in ['-p',key]]).splitlines() if '=' in line)
     # systemd's actual D-Bus/show property uses uppercase ID.
     invocation=value.pop('InvocationID',None)
+    value['nativeInvocationID']=invocation
     value['identityKind']='systemd-invocation';value['invocationIdSha256']=sha(invocation.encode()) if invocation else None
     value['apiSelfReportedNonce']=None
     value['unitFiles']=[file_record(file) for file in [value.get('FragmentPath')]+shlex.split(value.get('DropInPaths','')) if file]

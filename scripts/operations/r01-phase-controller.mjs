@@ -3,6 +3,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import {pathToFileURL} from 'node:url';
 import {canonicalDigest} from './r01-proof-provider.mjs';
+export {createProductionPhaseController} from './r01-production-wire.mjs';
 const fail=code=>{throw Object.assign(new Error(code),{code});};
 const commands=['inspect','prepare','seal','restore','abort'];
 const expectedState={prepare:'preparing',seal:'sealed',restore:'restored',abort:'restored'};
