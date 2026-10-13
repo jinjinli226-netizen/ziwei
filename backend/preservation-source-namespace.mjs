@@ -7,7 +7,7 @@ import {fileURLToPath} from 'node:url';
 import {canonicalProduction,digestProduction,signProductionEnvelope,verifyProductionEnvelope,validateProductionRequest,productionHostActions} from './production-preservation.mjs';
 import {PRODUCT_ROLE,FROZEN_VERSIONS,digest,exitedTree,executionExit} from './version-preservation.mjs';
 import {nativeActionDigest} from './preservation-native-databases.mjs';
-import {windowsCommandArguments} from '../scripts/client-lifecycle.mjs';
+import {clientBuildIdentity} from '../src/management-bootstrap.mjs';
 
 const run=promisify(execFile),sha=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
 const ROOT=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
@@ -16,7 +16,7 @@ const copy=value=>JSON.parse(canonicalProduction(value));
 const equal=(a,b)=>digestProduction(a)===digestProduction(b);
 const fail=code=>{throw Object.assign(new Error(code),{code});};
 const iso=value=>typeof value==='string'&&Number.isFinite(Date.parse(value))&&new Date(value).toISOString()===value;
-const fileKinds=new Set(['namespace-policy-v1','legacy-source-archive','legacy-source-code','legacy-action-cache','legacy-action-logger','legacy-action-assessment','native-job-result','maintenance-evidence']);
+const fileKinds=new Set(['namespace-policy-v1','windows-source-audit-v1','legacy-source-archive','legacy-source-code','legacy-action-cache','legacy-action-logger','legacy-action-assessment','native-job-result','maintenance-evidence']);
 const directoryKinds=new Set(['namespace-capture-directory-v1','runtime-identity-directory-v1']);
 const fields=(value,required,optional=[])=>{canonicalProduction(value);if(!value||Array.isArray(value)||typeof value!=='object'||required.some(key=>!Object.hasOwn(value,key))||Object.keys(value).some(key=>!required.includes(key)&&!optional.includes(key)))fail('SOURCE_NAMESPACE_FIELDS');};
 export function validateNativeSourceRefs(binding){
@@ -145,7 +145,7 @@ export function verifyRuntimeCaptureEnvelope({envelope,trust,request}){
   fields(sample,['kind','bindingDigest','targetDigest','root','entryPath','productRole','buildDigest','pid','nativeBirth','nonceDigest',target.kind==='api'?'apiIdentity':'clientIdentity']);
   if(sample.targetDigest!==target.targetDigest||sample.root!==target.root||sample.entryPath!==target.entryPath||sample.buildDigest!==target.buildDigest||sample.productRole!=='v2'||!hex(sample.nonceDigest)||!Number.isSafeInteger(sample.pid)||sample.pid<=0)fail('SOURCE_RUNTIME_TARGET');
   if(target.kind==='api'){const proof=verifyApiIdentityProof({envelope:sample.apiIdentity,trust,request,target,process:sample});if(proof.nonceDigest!==sample.nonceDigest)fail('SOURCE_RUNTIME_API');}
-  else fail('SOURCE_RUNTIME_CLIENT_IDENTITY_UNSUPPORTED');
+  else {const proof=verifyClientIdentityProof({envelope:sample.clientIdentity,trust,request,target,process:sample});if(proof.nonceDigest!==sample.nonceDigest)fail('SOURCE_RUNTIME_CLIENT');}
  }
  return payload;
 }
@@ -160,7 +160,7 @@ export async function observePreservationSourceNamespace(input,native=defaultNat
   if(!refs.length)return errorObservation('SOURCE_NAMESPACE_EVIDENCE_REQUIRED');
   const files=[],nativeRefs=[],policy=policyFor(binding,refs,files),policyDigest=digestProduction(policy),captureRef=refs.find(row=>row.kind==='namespace-capture-directory-v1');
   if(!captureRef)fail('SOURCE_NAMESPACE_EVIDENCE_REQUIRED');
-  for(const ref of refs.filter(row=>fileKinds.has(row.kind)&&row.kind!=='namespace-policy-v1')){const bytes=readPlain(ref.canonicalPath,files);if(sha(bytes)!==ref.sha256)fail('SOURCE_NAMESPACE_REF_CHANGED');nativeRefs.push({...ref,...(ref.kind==='native-job-result'?{value:json(bytes)}:{})});}
+  for(const ref of refs.filter(row=>fileKinds.has(row.kind)&&row.kind!=='namespace-policy-v1')){const bytes=readPlain(ref.canonicalPath,files);if(sha(bytes)!==ref.sha256)fail('SOURCE_NAMESPACE_REF_CHANGED');nativeRefs.push({...ref,...(['native-job-result','windows-source-audit-v1'].includes(ref.kind)?{value:json(bytes)}:{})});}
   const beforeEnvelope=privateEnvelope(namespaceCaptureFile(captureRef,'before-stop'),files),afterEnvelope=privateEnvelope(namespaceCaptureFile(captureRef,'after-stop'),files);
   const before=verifiedCapture(beforeEnvelope,context,'before-stop',captureRef.producerSha256,policyDigest),after=verifiedCapture(afterEnvelope,context,'after-stop',captureRef.producerSha256,policyDigest);
   if(after.previousCaptureDigest!==digestProduction(beforeEnvelope)||before.previousCaptureDigest!==null||Date.parse(after.capturedAt)<Date.parse(before.capturedAt))fail('SOURCE_NAMESPACE_CHAIN');
@@ -178,18 +178,20 @@ export async function observePreservationSourceNamespace(input,native=defaultNat
    const selector=policy.instances.find(row=>row.bindingDigest===digestProduction(original)),first=before.instances.find(row=>row.bindingDigest===selector.bindingDigest),last=after.instances.find(row=>row.bindingDigest===selector.bindingDigest);
    checkOriginalCapture(original,first,selector,'before-stop');checkOriginalCapture(original,last,selector,'after-stop');
    if(selector.namespace.kind==='systemd-cgroup'&&(first.namespace.bootId!==last.namespace.bootId||original.originalInstance.nativeBirth&&first.namespace.bootId!==original.originalInstance.nativeBirth.bootId))fail('SOURCE_NAMESPACE_BIRTH');
-   const current=await native.readProcess(original.originalInstance.pid);
+   const current=await native.readProcess(original.originalInstance.pid,original.originalInstance);
    if(current&&sameOriginalBirth(original.originalInstance,current))fail('SOURCE_ORIGINAL_INSTANCE_PRESENT');
-   const namespace=await native.readNamespace(selector.namespace);
+   const runtimeSample=runtime?.instances.find(row=>row.kind===kind&&row.bindingDigest===selector.bindingDigest),namespace=await native.readNamespace(selector.namespace,{binding,original,request,nativeRefs,before:first,after:last,runtime:runtimeSample});
    if(namespace.kind==='systemd-cgroup'){
     validateSystemdSnapshot(namespace,selector.namespace);
     if(namespace.unit!==selector.namespace.unit||namespace.controlGroup!==selector.namespace.controlGroup||namespace.KillMode!=='control-group'||namespace.Delegate!==false||namespace.SendSIGKILL!==true||!Array.isArray(namespace.members))fail('SOURCE_NAMESPACE_SCOPE');
     if(namespace.bootId!==last.namespace.bootId||request.command!=='restore'&&(namespace.members.length||!['inactive','failed'].includes(namespace.ActiveState)||!equal(systemdEpoch(namespace),systemdEpoch(last.namespace))))fail('SOURCE_NAMESPACE_RESTARTED');
    }else if(namespace.kind==='windows-source'){
+    if(Array.isArray(namespace.unresolved)&&namespace.unresolved.length)fail(/^SOURCE_[A-Z0-9_]+$/.test(namespace.unresolved[0]?.code||'')?namespace.unresolved[0].code:'SOURCE_WINDOWS_COVERAGE');
     if(namespace.visibility!=='native-memory-and-registry'||!Array.isArray(namespace.members)||request.command!=='restore'&&namespace.members.length||!Array.isArray(namespace.unresolved)||namespace.unresolved.length)fail('SOURCE_WINDOWS_COVERAGE');
     if(!Array.isArray(after.workerFacts?.sourceBindings)||after.workerFacts.sourceBindings.some(value=>!refs.some(ref=>ref.sha256===value)))fail('SOURCE_WINDOWS_COVERAGE');
     const verified=verifyWindowsWorkerFacts(after.workerFacts,productionHostActions(binding,request.actionProjection).filter(row=>row.acked_at).map(row=>({id:row.id,digest:nativeActionDigest(row),bindingDigest:selector.bindingDigest,resultExit:row.result_json?executionExit(json(row.result_json)):null})),nativeRefs);
     if(!verified.safe)fail(verified.issues[0].code);
+    if(Array.isArray(namespace.files))files.push(...namespace.files);
    }else fail('SOURCE_NAMESPACE_SCOPE');
    instances.push({bindingDigest:selector.bindingDigest,originalInstance:copy(original.originalInstance),stopped:true});
    stableProofs.push({kind:'original-namespace-proof-v1',bindingDigest:selector.bindingDigest,beforeCaptureDigest:digestProduction(beforeEnvelope),afterCaptureDigest:digestProduction(afterEnvelope),policyDigest});
@@ -197,15 +199,16 @@ export async function observePreservationSourceNamespace(input,native=defaultNat
     const target=request.installed.targets.find(row=>row.kind===kind&&row.bindingDigest===selector.bindingDigest),sample=runtime.instances.find(row=>row.kind===kind&&row.bindingDigest===selector.bindingDigest);
     if(!target||!sample||sample.targetDigest!==target.targetDigest||sample.root!==target.root||sample.entryPath!==target.entryPath||sample.buildDigest!==target.buildDigest||sample.productRole!=='v2'||!hex(sample.nonceDigest))fail('SOURCE_RUNTIME_TARGET');
     const live=await native.readProcess(sample.pid);
-    if(!live||live.entryPath!==target.entryPath||!equal(live.nativeBirth,sample.nativeBirth)||!Number.isSafeInteger(sample.pid)||sample.pid<=0||!Array.isArray(namespace.members)||namespace.members.length!==1||namespace.members[0]!==sample.pid)fail('SOURCE_RUNTIME_PROCESS');
+    const consoleHosts=namespace.kind==='windows-source'?namespace.consoleHosts||[]:[],allowedMembers=new Set([sample.pid,...consoleHosts.filter(row=>row.kind==='console-host'&&row.parentPid===sample.pid&&row.parentCreatedAt===live?.createdAt&&row.signature==='Microsoft Corporation'&&Array.isArray(row.children)&&row.children.length===0).map(row=>row.pid)]);
+    if(!live||live.entryPath!==target.entryPath||!equal(live.nativeBirth,sample.nativeBirth)||!Number.isSafeInteger(sample.pid)||sample.pid<=0||!Array.isArray(namespace.members)||!namespace.members.includes(sample.pid)||allowedMembers.size!==namespace.members.length||namespace.members.some(pid=>!allowedMembers.has(pid)))fail('SOURCE_RUNTIME_PROCESS');
     const listener=await native.readListener(selector.identityOrigin,sample.pid);if(listener.listenerPid!==sample.pid)fail('SOURCE_RUNTIME_LISTENER');
     if(kind==='api'){
      const identity=verifyApiIdentityProof({envelope:sample.apiIdentity,trust,request,target,process:live});if(identity.nonceDigest!==sample.nonceDigest)fail('SOURCE_RUNTIME_API');
-    }else fail('SOURCE_RUNTIME_CLIENT_IDENTITY_UNSUPPORTED');
-    running.push({kind,bindingDigest:selector.bindingDigest,targetDigest:target.targetDigest,root:target.root,entryPath:target.entryPath,running:true,productRole:'v2',buildDigest:target.buildDigest,pid:sample.pid,createdAt:live.createdAt,nativeBirth:live.nativeBirth,nonceDigest:sample.nonceDigest});
+    }else {const identity=verifyClientIdentityProof({envelope:sample.clientIdentity,trust,request,target,process:live});if(identity.nonceDigest!==sample.nonceDigest)fail('SOURCE_RUNTIME_CLIENT');}
+    running.push({kind,bindingDigest:selector.bindingDigest,targetDigest:target.targetDigest,root:target.root,entryPath:target.entryPath,running:true,productRole:'v2',buildDigest:target.buildDigest,pid:sample.pid,createdAt:live.createdAt,nativeBirth:live.nativeBirth,nonceDigest:sample.nonceDigest,...(consoleHosts.length?{consoleHosts}: {})});
    }
   }
-  const observations={namespace:process.platform,namespaceComplete:true,workerScopeComplete:true,originalStopped:true,restarted:false,unresolved:[],instances,scopeDigest:digestProduction({policyDigest,beforeCaptureDigest:digestProduction(beforeEnvelope),afterCaptureDigest:digestProduction(afterEnvelope)}),...(runtime?{runningV2:{fenceState:'sealed',productRole:'v2',buildDigest:request.installed.apiBuildDigest,databaseId:request.databaseIdentity.databaseId,instances:running}}:{})};
+  const actualApi=runtime?.instances.find(row=>row.kind==='api')?.apiIdentity.payload,observations={namespace:process.platform,namespaceComplete:true,workerScopeComplete:true,originalStopped:true,restarted:false,unresolved:[],instances,scopeDigest:digestProduction({policyDigest,beforeCaptureDigest:digestProduction(beforeEnvelope),afterCaptureDigest:digestProduction(afterEnvelope)}),...(runtime?{runningV2:{productRole:'v2',instances:running,...(actualApi?{fenceState:actualApi.fenceState,buildDigest:actualApi.buildDigest,databaseId:actualApi.databaseIdentity.databaseId}:{})}}:{})};
   return {safe:true,namespaceComplete:true,workerScopeComplete:true,instances,files,directories:[],homes:copy(request.homes||[]),connections:[],proofs:stableProofs,observations,runtimeProofs:runtimeEnvelope?[runtimeEnvelope]:[],issues:[]};
  }catch(error){return errorObservation(/^SOURCE_[A-Z0-9_]+$/.test(error.code||'')?error.code:'SOURCE_NAMESPACE_UNPROVEN');}
 }
@@ -275,6 +278,76 @@ export function verifyApiIdentityProof({envelope,trust,request,target,process:re
  return payload;
 }
 
+const clientRequestKeys=['domain','schemaVersion','kind','command','challenge','issuedAt','expiresAt','operationId','specHash','freezeDigest','binding','target','installedDigest','expectedSources','expectedConfig','originScope','workspaceScope'];
+const clientCounters=['activeActionCount','pollingCount','quarantinedActionCount','pendingDeliveryCount','blockedDeliveryCount','managedAuxiliaryCount','gatewayPendingCount','gatewayInFlightCount','gatewayInboundCount'];
+const clientProofKeys=['domain','schemaVersion','service','command','challenge','issuedAt','expiresAt','operationId','specHash','freezeDigest','requestDigest','bindingDigest','targetDigest','installedDigest','pid','startedAt','nonceDigest','root','entryPath','productRole','clientBuild','bootSourcesDigest','configPath','loadedConfigSha256','configSha256','runtimeDir','userHome','baseHome','connections','connectionState','issues',...clientCounters];
+function clientRequestPayload(request,target){
+ const original=request.binding.clients.find(row=>digestProduction(row)===target.bindingDigest);
+ if(!original||target.kind!=='client'||!request.installed.targets.some(row=>equal(row,target)))fail('SOURCE_RUNTIME_TARGET');
+ const workspaceScope=request.actionProjection.tables.workspaces.rows.filter(row=>request.binding.workspaceIds.includes(row.id)).map(row=>({workspaceId:row.id,workspace:row.slug})).sort((a,b)=>a.workspaceId<b.workspaceId?-1:1);
+ return {domain:'ziwei-production-client-identity-request-v1',schemaVersion:1,kind:'client-runtime',command:'restore',challenge:request.challenge,issuedAt:request.issuedAt,expiresAt:request.expiresAt,operationId:request.operationId,specHash:request.specHash,freezeDigest:request.freezeDigest,binding:request.binding,target,installedDigest:digestProduction(request.installed),expectedSources:request.installed.clientContents,expectedConfig:{configPath:original.configPath,configSha256:original.configSha256,runtimeDir:original.runtimeDir,userHome:original.userHome,baseHome:original.baseHome},originScope:request.targetOrigins,workspaceScope};
+}
+export function createClientIdentityRequest({sourceRequest,trust,target}){
+ const request=validateProductionRequest({request:sourceRequest,trust,command:'restore'});
+ return signProductionEnvelope({hostId:sourceRequest.hostId,trust,payload:clientRequestPayload(request,target)});
+}
+function canonicalDirectory(directory){
+ if(!path.isAbsolute(directory)||path.resolve(directory)!==directory)fail('SOURCE_CLIENT_PATH');
+ let current=directory;while(true){const stat=fs.lstatSync(current);if(stat.isSymbolicLink()||!stat.isDirectory())fail('SOURCE_CLIENT_PATH');const parent=path.dirname(current);if(parent===current)break;current=parent;}
+ if(fs.realpathSync.native(directory)!==directory)fail('SOURCE_CLIENT_PATH');return directory;
+}
+function clientConnections(rows){
+ if(!Array.isArray(rows)||!rows.length||rows.length>128)fail('SOURCE_CLIENT_CONNECTIONS');
+ const result=rows.map(row=>{fields(row,['workspace','deviceId','apiBase','hermesHome','runtimeDir','primary']);const url=new URL(row.apiBase),absolute=value=>typeof value==='string'&&(path.win32.isAbsolute(value)||path.posix.isAbsolute(value)),scope=value=>typeof value==='string'&&/^[a-z0-9][a-z0-9_-]{0,127}$/i.test(value);if(!scope(row.workspace)||!scope(row.deviceId)||url.origin!==row.apiBase||url.username||url.password||!['https:','http:'].includes(url.protocol)||typeof row.primary!=='boolean'||!absolute(row.hermesHome)||!absolute(row.runtimeDir))fail('SOURCE_CLIENT_CONNECTIONS');return copy(row);});
+ if(result.filter(row=>row.primary).length!==1||new Set(result.map(row=>row.workspace+'|'+row.deviceId)).size!==result.length)fail('SOURCE_CLIENT_CONNECTIONS');
+ return result.sort((a,b)=>{const x=a.workspace+'|'+a.deviceId,y=b.workspace+'|'+b.deviceId;return x<y?-1:x>y?1:0;});
+}
+function configuredConnections(config,runtimeDir){
+ if(config.connectionState==='disconnected')fail('SOURCE_CLIENT_CONNECTIONS');
+ return clientConnections([config,...(config.sharedWorkspaces||[]).filter(row=>row.enabled!==false)].map((row,index)=>({workspace:row.workspace,deviceId:row.deviceId,apiBase:new URL(row.apiBase||config.apiBase).origin,hermesHome:row.hermesHome||config.hermesHome,runtimeDir:index===0?runtimeDir:path.join(runtimeDir,'shared-workspaces',row.workspace,row.deviceId),primary:index===0})));
+}
+function validateClientState(value,connections){
+ fields(value,['connectionState','connections','issues',...clientCounters]);
+ if(value.connectionState!=='draining'||!Array.isArray(value.issues)||value.issues.length||clientCounters.some(key=>!Number.isSafeInteger(value[key])||value[key]!==0)||!equal(clientConnections(value.connections),connections))fail('SOURCE_CLIENT_NOT_DRAINED');
+ return copy(value);
+}
+/** E02 supplies only actual immutable startup bytes/variables and live runtime
+ * state. Requests can never provide these inputs or an IO callback. */
+export function createProductionClientIdentityHandler({trust,hostId,boot,readState},io={}){
+ if(!trust||typeof hostId!=='string'||typeof readState!=='function')fail('SOURCE_CLIENT_CONFIGURATION');
+ if(String(process.env.NODE_OPTIONS||'').trim())fail('SOURCE_CLIENT_BOOT');
+ fields(boot,['nonce','startedAt','clientBuild','configPath','runtimeDir','loadedConfigSha256','connections']);const saved=copy(boot);
+ if(!/^[a-zA-Z0-9_-]{16,128}$/.test(saved.nonce)||!iso(saved.startedAt)||!hex(saved.clientBuild)||!hex(saved.loadedConfigSha256))fail('SOURCE_CLIENT_BOOT');
+ const snapshot=copy((io.readBootstrap||(()=>({root:fs.realpathSync.native(ROOT),entryPath:fs.realpathSync.native(path.resolve(process.argv[1])),descriptor:json(readPlain(path.join(ROOT,'preservation-package.json'))),sources:bootSources(ROOT),clientBuild:clientBuildIdentity(ROOT)})))());
+ canonicalDirectory(snapshot.root);canonicalDirectory(saved.runtimeDir);canonicalDirectory(path.dirname(saved.configPath));const configBytes=readPlain(saved.configPath),config=json(configBytes),connections=clientConnections(saved.connections);
+ if(path.basename(saved.runtimeDir)!=='runtime')fail('SOURCE_CLIENT_PATH');for(const row of connections){canonicalDirectory(row.hermesHome);canonicalDirectory(row.runtimeDir);}
+ if(PRODUCT_ROLE!=='v2'||snapshot.descriptor.productRole!==PRODUCT_ROLE||snapshot.clientBuild!==saved.clientBuild||sha(configBytes)!==saved.loadedConfigSha256||!equal(connections,configuredConnections(config,saved.runtimeDir)))fail('SOURCE_CLIENT_BOOT');
+ const pid=process.pid,nonceDigest=sha(saved.nonce),sourceDigest=digestProduction(sortedSources(snapshot.sources));
+ return function clientIdentityHandler(req,res){
+  res.setHeader('Cache-Control','no-store');
+  try{
+   if(!['127.0.0.1','::1','::ffff:127.0.0.1'].includes(req.socket?.remoteAddress)||req.body?.hostId!==hostId)fail('SOURCE_CLIENT_LOCAL_ONLY');
+   const payload=verifyProductionEnvelope({envelope:req.body,trust,expected:{domain:'ziwei-production-client-identity-request-v1',schemaVersion:1,kind:'client-runtime',command:'restore'}});fields(payload,clientRequestKeys);
+   const authority=trust.hosts.find(row=>row.hostId===hostId),original=payload.binding.clients.find(row=>digestProduction(row)===payload.target.bindingDigest),target=payload.target;
+   if(!authority||payload.binding.hostId!==hostId||authority.bindingDigest!==digestProduction(payload.binding)||!trust.approvedSpecs.some(row=>row.operationId===payload.operationId&&row.specHash===payload.specHash)||!original||target.kind!=='client'||target.productRole!=='v2'||!equal(original.installTargets.v2,{root:target.root,entryPath:target.entryPath,manifestSha256:target.manifestSha256,buildDigest:target.buildDigest})||target.targetDigest!==digestProduction(original.installTargets.v2)||target.root!==snapshot.root||target.entryPath!==snapshot.entryPath||target.buildDigest!==saved.clientBuild||!equal(payload.expectedConfig,{configPath:original.configPath,configSha256:original.configSha256,runtimeDir:original.runtimeDir,userHome:original.userHome,baseHome:original.baseHome})||payload.expectedConfig.configPath!==saved.configPath||payload.expectedConfig.configSha256!==saved.loadedConfigSha256||payload.expectedConfig.runtimeDir!==saved.runtimeDir||!equal(sortedSources(payload.expectedSources),sortedSources(snapshot.sources)))fail('SOURCE_CLIENT_BOOT');
+   if(original.userHome!==path.dirname(saved.runtimeDir)||sha(readPlain(saved.configPath))!==saved.loadedConfigSha256||clientBuildIdentity(snapshot.root)!==saved.clientBuild||!equal(sortedSources(bootSources(snapshot.root)),sortedSources(snapshot.sources)))fail('SOURCE_CLIENT_BOOT_CHANGED');
+   canonicalDirectory(path.dirname(saved.runtimeDir));for(const row of connections){canonicalDirectory(row.hermesHome);canonicalDirectory(row.runtimeDir);}
+   for(const row of connections)if(!payload.originScope.includes(row.apiBase)||!payload.binding.deviceIds.includes(row.deviceId)||!payload.workspaceScope.some(scope=>scope.workspace===row.workspace&&payload.binding.workspaceIds.includes(scope.workspaceId))||row.hermesHome!==original.baseHome||row.runtimeDir!==(row.primary?original.runtimeDir:path.join(original.runtimeDir,'shared-workspaces',row.workspace,row.deviceId)))fail('SOURCE_CLIENT_CONNECTIONS');
+   const state=validateClientState(copy(readState()),connections),proof={domain:'ziwei-production-client-identity-proof-v1',schemaVersion:1,service:'ziwei_user',command:'restore',challenge:payload.challenge,issuedAt:payload.issuedAt,expiresAt:payload.expiresAt,operationId:payload.operationId,specHash:payload.specHash,freezeDigest:payload.freezeDigest,requestDigest:digestProduction(payload),bindingDigest:digestProduction(payload.binding),targetDigest:target.targetDigest,installedDigest:payload.installedDigest,pid,startedAt:saved.startedAt,nonceDigest,root:snapshot.root,entryPath:snapshot.entryPath,productRole:PRODUCT_ROLE,clientBuild:saved.clientBuild,bootSourcesDigest:sourceDigest,configPath:saved.configPath,loadedConfigSha256:saved.loadedConfigSha256,configSha256:sha(configBytes),runtimeDir:saved.runtimeDir,userHome:path.dirname(saved.runtimeDir),baseHome:config.hermesHome,connections,...Object.fromEntries(['connectionState','issues',...clientCounters].map(key=>[key,state[key]]))};
+   res.json(signProductionEnvelope({hostId,trust,payload:proof}));
+  }catch{res.status(403).json({code:'SOURCE_CLIENT_IDENTITY_REFUSED'});}
+ };
+}
+export function verifyClientIdentityProof({envelope,trust,request,target,process:record}){
+ if(envelope?.hostId!==request.binding.hostId)fail('SOURCE_RUNTIME_CLIENT');const expected=clientRequestPayload(request,target),original=request.binding.clients.find(row=>digestProduction(row)===target.bindingDigest);
+ // This verifier also runs on the API host. Only the client factory and source
+ // collector may open the Windows config; remote verification is pure.
+ const payload=verifyProductionEnvelope({envelope,trust,expected:{domain:'ziwei-production-client-identity-proof-v1',schemaVersion:1,service:'ziwei_user',command:'restore',challenge:request.challenge,issuedAt:request.issuedAt,expiresAt:request.expiresAt,operationId:request.operationId,specHash:request.specHash,freezeDigest:request.freezeDigest,requestDigest:digestProduction(expected),bindingDigest:digestProduction(request.binding),targetDigest:target.targetDigest,installedDigest:digestProduction(request.installed),pid:record.pid,root:target.root,entryPath:target.entryPath,productRole:'v2',clientBuild:target.buildDigest,bootSourcesDigest:digestProduction(sortedSources(request.installed.clientContents)),configPath:original.configPath,loadedConfigSha256:original.configSha256,configSha256:original.configSha256,runtimeDir:original.runtimeDir,userHome:original.userHome,baseHome:original.baseHome}});fields(payload,clientProofKeys);
+ const connections=clientConnections(payload.connections),paths=path.win32.isAbsolute(original.runtimeDir)?path.win32:path.posix;for(const row of connections)if(!expected.originScope.includes(row.apiBase)||!request.binding.deviceIds.includes(row.deviceId)||!expected.workspaceScope.some(scope=>scope.workspace===row.workspace)||row.hermesHome!==original.baseHome||row.runtimeDir!==(row.primary?original.runtimeDir:paths.join(original.runtimeDir,'shared-workspaces',row.workspace,row.deviceId)))fail('SOURCE_RUNTIME_CLIENT');
+ validateClientState(Object.fromEntries(['connectionState','connections','issues',...clientCounters].map(key=>[key,payload[key]])),connections);
+ if(!hex(payload.nonceDigest)||payload.nonceDigest===original.originalInstance.nonceDigest||!iso(payload.startedAt)||record.createdAt&&Math.abs(Date.parse(payload.startedAt)-Date.parse(record.createdAt))>15000)fail('SOURCE_RUNTIME_CLIENT');return payload;
+}
+
 async function readLinuxProcess(pid){
  if(!Number.isSafeInteger(pid)||pid<=0)fail('SOURCE_NATIVE_PROCESS');
  try{
@@ -284,11 +357,84 @@ async function readLinuxProcess(pid){
  }catch(error){if(error.code==='ENOENT'||error.code==='ESRCH')return null;throw error;}
 }
 async function powershell(script){const {stdout}=await run('powershell.exe',['-NoLogo','-NoProfile','-NonInteractive','-Command',script],{windowsHide:true,encoding:'utf8',timeout:10000,maxBuffer:8*1024*1024});return stdout.trim()?json(stdout.replace(/^\uFEFF/,'')):null;}
-async function readWindowsProcess(pid){
- if(!Number.isSafeInteger(pid)||pid<=0)fail('SOURCE_NATIVE_PROCESS');
- const value=await powershell("$ErrorActionPreference='Stop'; $p=Get-CimInstance Win32_Process -Filter 'ProcessId = "+pid+"'; if($p){$b=(Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime().ToString('o'); [pscustomobject]@{pid=[int]$p.ProcessId;command=$p.CommandLine;executable=$p.ExecutablePath;createdAt=$p.CreationDate.ToUniversalTime().ToString('o');boot=$b}|ConvertTo-Json -Compress}");
- if(!value)return null;const argv=windowsCommandArguments(value.command||'');if(argv.length!==2||!path.isAbsolute(argv[1]))fail('SOURCE_NATIVE_ENTRY');
- const createdAt=new Date(value.createdAt).toISOString();return {pid,createdAt,nativeBirth:{bootId:sha(value.boot),createdAt},entryPath:fs.realpathSync.native(argv[1]),executable:value.executable,commandDigest:sha(value.command)};
+async function readWindowsProcess(pid,original){
+ try{return await inspectWindowsSourceProcess({pid,...(iso(original?.createdAt)?{createdAt:original.createdAt}:{})});}catch(error){if(original&&error.code==='SOURCE_WINDOWS_BIRTH_CHANGED')return null;throw error;}
+}
+export async function inspectWindowsSourceProcess(input){
+ fields(input,['pid'],['createdAt','entryPath']);if(process.platform!=='win32'||!Number.isSafeInteger(input.pid)||input.pid<=0||input.createdAt!==undefined&&!iso(input.createdAt))fail('SOURCE_NATIVE_PROCESS');
+ const value=await readWindowsSourceHelper(input);
+ if(value.state==='absent')return null;
+ if(value.nodeOptionsPresent!==false)fail('SOURCE_WINDOWS_EXECUTION_OPTIONS');
+ if(value.state!=='present'||value.pid!==input.pid||!iso(value.createdAt)||!hex(value.bootId)||!(/^[0-9]+$/).test(value.creationFileTime||'')||value.samePackageContext!==true||!value.paths||!path.isAbsolute(value.cwd)||!path.isAbsolute(value.entryPath))fail('SOURCE_WINDOWS_NATIVE_UNREADABLE');
+ const allowed=['HOME','USERPROFILE','HOMEDRIVE','HOMEPATH','LOCALAPPDATA','APPDATA','ZIWEI_CONFIG','ZIWEI_USER_HOME','ZIWEI_RUNTIME_DIR','ZIWEI_SDK_ROOT','HERMES_HOME','HERMES_MANAGED_DIR'];
+ for(const [name,text] of Object.entries(value.paths))if(!allowed.includes(name.toUpperCase())||typeof text!=='string'||text.length>32766||/[\0\r\n]/.test(text)||/^[a-z]:(?![\\/])/i.test(text)&&name!=='HOMEDRIVE')fail('SOURCE_WINDOWS_PATH_UNAVAILABLE');
+ return {pid:value.pid,parentPid:value.parentPid,createdAt:value.createdAt,creationFileTime:value.creationFileTime,nativeBirth:{bootId:value.bootId,createdAt:value.createdAt},entryPath:fs.realpathSync.native(value.entryPath),executable:fs.realpathSync.native(value.executable),commandDigest:value.commandDigest,cwd:value.cwd,paths:value.paths,pathVariablesRead:allowed,executionOptionsAbsent:true,samePackageContext:true};
+}
+async function readWindowsSourceHelper(input){
+ const helper=fileURLToPath(new URL('./preservation-source-native-windows.ps1',import.meta.url));if(sha(readPlain(helper).toString('utf8').replaceAll('\r\n','\n'))!=='c60e1a4b941e82f43e87c8aa6e588da41269fc5701a01fff421940297ddbb5d2')fail('SOURCE_WINDOWS_HELPER_CHANGED');
+ return new Promise((resolve,reject)=>{const child=execFile('powershell.exe',['-NoLogo','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',helper],{windowsHide:true,encoding:'utf8',timeout:15000,maxBuffer:256*1024},(error,stdout,stderr)=>{if(error){const code=/SOURCE_WINDOWS_[A-Z_]+/.exec(stderr||'')?.[0]||'SOURCE_WINDOWS_NATIVE_UNREADABLE';reject(Object.assign(new Error(code),{code}));}else try{resolve(json(stdout.replace(/^\uFEFF/,'')));}catch(failed){reject(failed);}});child.stdin.on('error',()=>{});child.stdin.end(canonicalProduction(input));});
+}
+// This exact closed program has no imports, evaluation, IO or child creation.
+// It supplies a genuine native qualification case, never an SDK capability.
+export const WINDOWS_NO_WORKER_PROGRAM="process.send({ready:true});setInterval(()=>{},1000);process.on('message',()=>process.exit(0));";
+function windowsScopePaths(original,processRecord){
+ if(!processRecord||processRecord.pid!==original.originalInstance.pid||!sameOriginalBirth(original.originalInstance,processRecord)||processRecord.entryPath!==original.entryPath||processRecord.executionOptionsAbsent!==true||processRecord.samePackageContext!==true||!Array.isArray(processRecord.pathVariablesRead)||!['ZIWEI_CONFIG','ZIWEI_USER_HOME','HERMES_HOME'].every(key=>processRecord.pathVariablesRead.includes(key)))fail('SOURCE_WINDOWS_BOOT_PROVENANCE_REQUIRED');
+ const paths=processRecord.paths;if(!paths||typeof processRecord.cwd!=='string')fail('SOURCE_WINDOWS_PATH_UNAVAILABLE');
+ const config=paths.ZIWEI_CONFIG?path.resolve(processRecord.cwd,paths.ZIWEI_CONFIG):paths.ZIWEI_USER_HOME?path.join(path.resolve(processRecord.cwd,paths.ZIWEI_USER_HOME),'ziwei_user.json'):path.join(original.root,'data','ziwei_user.json'),runtime=paths.ZIWEI_USER_HOME?path.join(path.resolve(processRecord.cwd,paths.ZIWEI_USER_HOME),'runtime'):path.join(original.root,'.local','runtime');
+ if(config!==original.configPath||runtime!==original.runtimeDir||paths.HERMES_HOME&&path.resolve(processRecord.cwd,paths.HERMES_HOME)!==original.baseHome)fail('SOURCE_WINDOWS_ENVIRONMENT_SCOPE_CHANGED');
+ return {config,runtime};
+}
+const auditedSdkBuild='7e2ae40a8e9cb12ad8592514db263b6952f27bd0eae6fe01d3b84fe8cd3d1950';
+const auditedSdkSources={
+ 'daemon/ziwei_user.mjs':'ee6fc944f33c080d86723239e901c8d975a3de555170b659d54ab52ddd03e7fc',
+ 'daemon/config.mjs':'6a850dfe5a3a4ef22a27e834fb84a00eed7c37c502788cb5a81b577b380d048a',
+ 'src/daemon.mjs':'f1163d04489723b945013fd00f9f572460d5259bc92a20750c5f4dc81c86e0b2',
+ 'src/local-action.mjs':'4477217731270a518b58e63bd6ff695c53817b26948ad0c1820712a459009921',
+ 'src/runtime-adapters.mjs':'b7bb8973b5a5afa9c327a2524c7dcc3399c9ec7a5e2cb9ebd8d4df8b86adbdb1',
+ 'src/management-bootstrap.mjs':'1fe4f0a6aac7f963620c4ea34aa66f6b407c0d81e373a5165c8c34d7865336df',
+ 'src/runtime-cli-discovery.mjs':'94bb89b2128ec0a59623847612918fffdbf073e1c5ae54385f01020a4318c52f'
+};
+function verifyWindowsSourceAudit(context,processRecord,files){
+ const {original,nativeRefs=[],before,after}=context,ref=nativeRefs.find(row=>row.kind==='windows-source-audit-v1'&&row.bindingDigest===digestProduction(original));if(!ref)fail('SOURCE_WINDOWS_SOURCE_AUDIT_REQUIRED');
+ const bytes=readPlain(ref.canonicalPath,files);if(sha(bytes)!==ref.sha256)fail('SOURCE_NAMESPACE_REF_CHANGED');const audit=json(bytes);fields(audit,['schemaVersion','kind','bindingDigest','originalInstance','clientBuild','entrySource','entrySha256','protocol','spawnSites','loggerPaths','maintenanceRoot']);
+ if(audit.schemaVersion!==1||audit.kind!=='windows-source-audit-v1'||audit.bindingDigest!==digestProduction(original)||!equal(audit.originalInstance,original.originalInstance)||audit.clientBuild!==original.clientBuild||!nativeRefs.some(row=>row.kind==='legacy-source-code'&&row.canonicalPath===audit.entrySource&&row.sha256===audit.entrySha256&&row.bindingDigest===audit.bindingDigest))fail('SOURCE_WINDOWS_SOURCE_AUDIT_INVALID');
+ windowsScopePaths(original,processRecord||before?.process);
+ const source=readPlain(audit.entrySource,files);if(sha(source)!==audit.entrySha256||!Array.isArray(audit.spawnSites)||!Array.isArray(audit.loggerPaths))fail('SOURCE_WINDOWS_SOURCE_AUDIT_INVALID');
+ if(audit.protocol==='standalone-no-worker-v1'){
+  if(source.toString('utf8')!==WINDOWS_NO_WORKER_PROGRAM||audit.spawnSites.length||audit.loggerPaths.length||audit.maintenanceRoot!==null)fail('SOURCE_WINDOWS_SOURCE_AUDIT_INVALID');return;
+ }
+ // This finite interpretation is tied to the audited installed SDK, not to a
+ // caller's declaration that an arbitrary program has no worker spawn sites.
+ if(audit.protocol!=='ziwei-sdk-current-boot-v1'||audit.clientBuild!==auditedSdkBuild||clientBuildIdentity(original.root)!==auditedSdkBuild||audit.spawnSites.length||audit.entrySource!==path.join(original.root,'daemon','ziwei_user.mjs'))fail('SOURCE_WINDOWS_SOURCE_AUDIT_INVALID');
+ for(const [relative,hash] of Object.entries(auditedSdkSources)){const file=path.join(original.root,...relative.split('/'));if(!nativeRefs.some(row=>row.kind==='legacy-source-code'&&row.bindingDigest===audit.bindingDigest&&row.canonicalPath===file&&row.sha256===hash)||sha(readPlain(file,files))!==hash)fail('SOURCE_WINDOWS_SOURCE_AUDIT_INVALID');}
+ if(!audit.loggerPaths.length||audit.maintenanceRoot!==path.join(original.userHome,'maintenance'))fail('SOURCE_WINDOWS_MAINTENANCE_PROVENANCE_REQUIRED');
+ // The controller supplies raw snapshot hashes, not an empty/safe flag.
+ const snapshots=after.namespace.sourceFiles;if(!Array.isArray(snapshots))fail('SOURCE_WINDOWS_BOOT_LOGGER_REQUIRED');
+ const records=[];for(const file of audit.loggerPaths){if(!file.startsWith(original.userHome+path.sep))fail('SOURCE_WINDOWS_SOURCE_AUDIT_INVALID');const data=readPlain(file,files),snapshot=snapshots.find(row=>row.path===file&&row.sha256===sha(data));if(!snapshot)fail('SOURCE_WINDOWS_BOOT_LOGGER_REQUIRED');records.push(...data.toString('utf8').split(/\r?\n/).filter(Boolean).map(json));}
+ const bootRecords=records.filter(row=>row.pid===original.originalInstance.pid&&Date.parse(row.at)>=Date.parse(original.originalInstance.createdAt));if(!bootRecords.some(row=>row.event==='started'&&Math.abs(Date.parse(row.at)-Date.parse(original.originalInstance.createdAt))<15000))fail('SOURCE_WINDOWS_BOOT_LOGGER_REQUIRED');if(bootRecords.some(row=>row.event==='action.started'))fail('SOURCE_WINDOWS_ACTION_WORKERS_REQUIRE_NATIVE_EXIT');
+ // Synchronous logger-before-execute excludes the unentered action branches.
+ // Management bootstrap/status and terminal status do not spawn. Discovery,
+ // however, ran on boot and heartbeat and saved no PID/birth/tree history.
+ // The selected Hermes probe timed out; a returned spawnSync or current empty
+ // inventory cannot recover detached/version-query descendants retroactively.
+ fail('SOURCE_WINDOWS_DISCOVERY_DESCENDANTS_UNRECOVERABLE');
+}
+async function readWindowsNamespace(selector,context){
+ if(selector.kind!=='windows-source'||!context?.original)fail('SOURCE_WINDOWS_SCOPE_CONTEXT_REQUIRED');
+ const {original,nativeRefs=[]}=context,unresolved=[],members=[],current=await readWindowsProcess(original.originalInstance.pid,original.originalInstance);
+ if(current&&sameOriginalBirth(original.originalInstance,current)){
+  members.push(current.pid);
+  try{windowsScopePaths(original,current);}catch(error){unresolved.push({code:error.code||'SOURCE_WINDOWS_PATH_UNAVAILABLE'});}
+ }
+ const roots=[original.root,original.userHome,original.runtimeDir,original.baseHome,...Object.values(original.installTargets||{}).map(row=>row.root)].filter(Boolean).map(root=>root.toLowerCase()),literal=value=>"'"+value.replaceAll("'","''")+"'",sample=await powershell("$ErrorActionPreference='Stop'; $roots=@("+roots.map(literal).join(',')+"); $rows=@(Get-CimInstance Win32_Process | ForEach-Object {$command=([string]$_.CommandLine).ToLowerInvariant();$related=@($roots|Where-Object {$command.Contains($_)}).Count -gt 0;[pscustomobject]@{pid=[int]$_.ProcessId;parentPid=[int]$_.ParentProcessId;related=$related}}); [pscustomobject]@{observerPid=[int]$PID;processes=$rows}|ConvertTo-Json -Depth 4 -Compress");
+ if(!Number.isSafeInteger(sample?.observerPid)||!Array.isArray(sample.processes))fail('SOURCE_WINDOWS_INVENTORY_UNREADABLE');const inventory=sample.processes,collectors=new Set([sample.observerPid]);let expanded=true;while(expanded){expanded=false;for(const row of inventory)if(collectors.has(row.parentPid)&&!collectors.has(row.pid)){collectors.add(row.pid);expanded=true;}}
+ const associated=new Set(members);let changed=true;while(changed){changed=false;for(const row of inventory){if(collectors.has(row.pid)||row.pid===process.pid)continue;if(row.related||associated.has(row.parentPid)){if(!associated.has(row.pid)){associated.add(row.pid);changed=true;}}}}
+ for(const pid of associated)if(!members.includes(pid))members.push(pid);
+ const consoleHosts=[],consoleIssues=[];if(context.runtime){const parent=await inspectWindowsSourceProcess({pid:context.runtime.pid});if(parent&&equal(parent.nativeBirth,context.runtime.nativeBirth))for(const row of inventory.filter(row=>associated.has(row.pid)&&row.parentPid===parent.pid)){
+  try{const proof=await readWindowsSourceHelper({kind:'console-host',pid:row.pid,parentPid:parent.pid,parentCreatedAt:parent.createdAt});fields(proof,['state','kind','pid','parentPid','parentCreatedAt','createdAt','creationFileTime','executable','imageSha256','signature','children']);if(proof.state!=='present'||proof.kind!=='console-host'||proof.pid!==row.pid||proof.parentPid!==parent.pid||proof.parentCreatedAt!==parent.createdAt||!iso(proof.createdAt)||!hex(proof.imageSha256)||proof.signature!=='Microsoft Corporation'||!Array.isArray(proof.children)||proof.children.length||sha(fs.readFileSync(proof.executable))!==proof.imageSha256)fail('SOURCE_WINDOWS_CONSOLE_UNPROVEN');consoleHosts.push({...proof,executable:fs.realpathSync.native(proof.executable)});}catch(error){consoleIssues.push({pid:row.pid,code:error.code||'SOURCE_WINDOWS_CONSOLE_UNPROVEN'});}
+ }}
+ const files=[];try{verifyWindowsSourceAudit(context,current&&sameOriginalBirth(original.originalInstance,current)?current:null,files);}catch(error){unresolved.push({code:error.code||'SOURCE_WINDOWS_SOURCE_AUDIT_INVALID'});}
+ return {kind:'windows-source',visibility:'native-memory-and-registry',members:members.sort((a,b)=>a-b),memberDetails:members.map(pid=>inventory.find(row=>row.pid===pid)).filter(Boolean),consoleHosts,consoleIssues,unresolved,files,nativeSnapshot:current};
 }
 async function readSystemd(namespace){
  if(namespace.kind!=='systemd-cgroup'||!(/^[a-zA-Z0-9_.@-]+\.service$/).test(namespace.unit||'')||typeof namespace.controlGroup!=='string'||!namespace.controlGroup.startsWith('/')||namespace.controlGroup.split('/').includes('..'))fail('SOURCE_NAMESPACE_SCOPE');
@@ -308,7 +454,7 @@ async function readListener(origin,pid){
  if(inodes.size!==1||owned.size!==1)fail('SOURCE_RUNTIME_LISTENER');return {listenerPid:pid};
 }
 export const defaultNativeSourceIO=Object.freeze({
- readProcess:pid=>process.platform==='linux'?readLinuxProcess(pid):process.platform==='win32'?readWindowsProcess(pid):Promise.reject(Object.assign(new Error('SOURCE_NATIVE_PLATFORM'),{code:'SOURCE_NATIVE_PLATFORM'})),
- readNamespace:namespace=>process.platform==='linux'?readSystemd(namespace):Promise.reject(Object.assign(new Error('SOURCE_WINDOWS_NATIVE_INSPECTION_REQUIRED'),{code:'SOURCE_WINDOWS_NATIVE_INSPECTION_REQUIRED'})),
+ readProcess:(pid,original)=>process.platform==='linux'?readLinuxProcess(pid):process.platform==='win32'?readWindowsProcess(pid,original):Promise.reject(Object.assign(new Error('SOURCE_NATIVE_PLATFORM'),{code:'SOURCE_NATIVE_PLATFORM'})),
+ readNamespace:(namespace,context)=>process.platform==='linux'?readSystemd(namespace):process.platform==='win32'?readWindowsNamespace(namespace,context):Promise.reject(Object.assign(new Error('SOURCE_NATIVE_PLATFORM'),{code:'SOURCE_NATIVE_PLATFORM'})),
  readListener
 });

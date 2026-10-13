@@ -184,7 +184,7 @@ export async function collectVerifiedProductionSourceProof({request,trust,previo
  sourceScopeRecords.set(observation,{files:before.files,directories:before.directories,homes:before.homes,connections:before.connections,proofs:before.proofs});
  const envelope=collectProductionSourceProof({request,trust,previous,observe:()=>observation});
  const after=await observePreservationSourceNamespace({binding:payload.binding,request:payload,trust},native);
- if(!equal(before.observations,after.observations)||!equal(before.files,after.files)||!equal(before.proofs,after.proofs))fail('SOURCE_NAMESPACE_CHANGED');
+ if(!equal(before.observations,after.observations)||!equal(before.files,after.files)||!equal(before.proofs,after.proofs))throw Object.assign(new Error('SOURCE_NAMESPACE_CHANGED'),{code:'SOURCE_NAMESPACE_CHANGED',details:{beforeIssues:before.issues,afterIssues:after.issues,observationsChanged:!equal(before.observations,after.observations),filesChanged:!equal(before.files,after.files),proofsChanged:!equal(before.proofs,after.proofs)}});
  envelope.payload.runtimeProofs=before.runtimeProofs;
  envelope.payload.evidenceDigest=productionEvidenceDigest(envelope.payload);
  validateProductionFreshness(payload);
