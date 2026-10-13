@@ -4,6 +4,7 @@ import path from 'node:path';
 import { WebSocketServer } from 'ws';
 import { createRepository } from './repository.mjs';
 import {guardRepository} from './version-preservation.mjs';
+import {createProductionApiIdentityHandler} from './preservation-source-namespace.mjs';
 import { RealtimeHub } from './realtime.mjs';
 import { exportDocumentsToGit, importDocumentsFromGit } from './git-sync.mjs';
 import { createAuthService } from './auth.mjs';
@@ -237,7 +238,35 @@ function assertApiKeyWorkspace(req, res, next) {
   next();
 }
 
-export function createApp(options = {}) {
+function privatePreservationIdentityConfiguration(options){
+  const inline=options.privatePreservationIdentity;
+  const file=options.privatePreservationIdentityConfigPath||process.env.ZIWEI_PRODUCTION_IDENTITY_CONFIG;
+  const refuse=()=>{throw Object.assign(Error('Private preservation identity configuration is invalid'),{code:'SOURCE_API_CONFIGURATION'});};
+  if(inline==null&&!file)return null;
+  if(inline!=null&&file)refuse();
+  let config;
+  try{
+    if(file){
+      if(typeof file!=='string'||!path.isAbsolute(file)||path.resolve(file)!==file)refuse();
+      for(let current=file;;current=path.dirname(current)){
+        const stat=fs.lstatSync(current);if(stat.isSymbolicLink())refuse();
+        if(current===file&&(!stat.isFile()||stat.nlink!==1||stat.size>256*1024))refuse();
+        if(path.dirname(current)===current)break;
+      }
+      if(fs.realpathSync.native(file)!==file)refuse();
+      config=JSON.parse(fs.readFileSync(file,'utf8'));
+      if(config?.schemaVersion!==1||Object.keys(config).sort().join(',')!=='hostId,schemaVersion,trust')refuse();
+    }else{
+      config=inline;
+      if(!config||Object.keys(config).sort().join(',')!=='hostId,trust')refuse();
+    }
+    if(typeof config.hostId!=='string'||!config.hostId||!config.trust||typeof config.trust!=='object'||Array.isArray(config.trust))refuse();
+    return{hostId:config.hostId,trust:structuredClone(config.trust)};
+  }catch{refuse();}
+}
+
+export function createApp(options = {}, {productionIdentityIo={}}={}) {
+  const privateIdentity=privatePreservationIdentityConfiguration(options);
   const app = express();
   const realtime = new RealtimeHub();
   const repo = guardRepository(options.repository || createRepository({ ...options, onEvent: event => realtime.publish(event) }),options.preservation);
@@ -274,6 +303,10 @@ export function createApp(options = {}) {
   // limit plus encoding and envelope overhead without accepting unbounded
   // request bodies.
   app.use(express.json({ limit: '16mb' }));
+  if(privateIdentity){
+    const handler=createProductionApiIdentityHandler({db:repo.db,hostId:privateIdentity.hostId,trust:privateIdentity.trust},productionIdentityIo);
+    app.post('/internal/preservation/identity',handler);
+  }
   const authBypass = options.requireAuth === false || (options.memory === true && options.requireAuth !== true);
   app.locals.authBypass = authBypass;
   app.locals.requireDeviceAuth = options.requireDeviceAuth === undefined ? !authBypass : Boolean(options.requireDeviceAuth);

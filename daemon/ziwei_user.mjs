@@ -26,8 +26,12 @@ const runtimeDir = standaloneHome ? path.join(standaloneHome, 'runtime') : path.
 const configPath = resolveConfigPath({ root: ROOT, env: process.env });
 const lifecycleNonce = randomBytes(24).toString('hex');
 const lifecycleStartedAt = new Date().toISOString();
-const config = fs.existsSync(configPath)
-  ? JSON.parse(fs.readFileSync(configPath, 'utf8'))
+// Keep the digest of the exact bytes parsed at startup. A later disk read may
+// inspect current configuration but cannot stand in for loaded configuration.
+const loadedConfigBytes = fs.existsSync(configPath) ? fs.readFileSync(configPath) : null;
+const loadedConfigSha256 = loadedConfigBytes ? createHash('sha256').update(loadedConfigBytes).digest('hex') : null;
+const config = loadedConfigBytes
+  ? JSON.parse(loadedConfigBytes.toString('utf8'))
   : { agentId: 'ziwei_user', serviceName: 'ziwei_user', workspace: process.env.ZIWEI_WORKSPACE || '', apiBase: process.env.ZIWEI_API_BASE || 'http://127.0.0.1:4178', healthHost: '127.0.0.1', healthPort: 20242, heartbeatMs: 15000, pollMs: 5000 };
 if (config.connectionState === 'disconnected') { console.error('ziwei_user 已明确断开全部工作区；拒绝环境变量回退和轮询，请使用 connect 重新配对。'); process.exit(1); }
 fs.mkdirSync(dataDir, { recursive: true });
