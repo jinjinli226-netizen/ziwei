@@ -36,8 +36,9 @@ export function executionExit(value) {
 }
 export function gatewayResultMatches(action,result){const p=parse(action.payload_json)||action.payload||{},operation=p.nativeOperation,receipt=result?.nativeOperation,worker=receipt?.data?.residentWorker;return action.type==='hermes.bot.native'&&operation?.resource==='gateway'&&receipt?.resource==='gateway'&&operation.operation===receipt.operation&&p.employeeId===receipt.employeeId&&p.hermesBot?.revision===receipt.revision&&(!worker||worker.employeeId===p.employeeId&&worker.revision===p.hermesBot?.revision&&worker.controlEpoch===p.hermesBot?.controlEpoch&&worker.platform===operation.input?.platform&&(operation.operation!=='connect'||worker.sourceActionId===action.id));}
 
-export function createPreservation(db,{role=PRODUCT_ROLE,collectNativeEvidence=null,readOnly=false}={}) {
+export function createPreservation(db,{role=PRODUCT_ROLE,collectNativeEvidence=null,readOnly=false,beforeCommit=null,persistReceipt=null,verifySourceRecord=null}={}) {
   if(!['v2','v1-compat'].includes(role))fail('PRODUCT_ROLE_INVALID','产品包角色无效');
+  for(const hook of [beforeCommit,persistReceipt,verifySourceRecord])if(hook!==null&&(typeof hook!=='function'||hook.constructor?.name==='AsyncFunction'))fail('ROLLBACK_HOOK_INVALID','转换 hook 必须为独立代码传入的同步函数');
   if(!readOnly)db.exec(`CREATE TABLE IF NOT EXISTS version_preservation (
     singleton INTEGER PRIMARY KEY CHECK(singleton=1), operation_id TEXT NOT NULL,
     state TEXT NOT NULL CHECK(state IN ('preparing','sealed','restored')),
@@ -60,6 +61,10 @@ export function createPreservation(db,{role=PRODUCT_ROLE,collectNativeEvidence=n
   const frozen=()=>role==='v1-compat'||['preparing','sealed'].includes(current()?.state);
   const event=(operationId,type,payload)=>{const previous=operationWrite;operationWrite=true;try{return db.prepare('INSERT INTO version_preservation_events(operation_id,event,payload_json,created_at) VALUES(?,?,?,?)').run(operationId,type,canonical(payload),new Date().toISOString());}finally{operationWrite=previous;}};
   const transaction=fn=>{db.exec('BEGIN IMMEDIATE');operationWrite=true;try{const result=fn();db.exec('COMMIT');return result;}catch(error){db.exec('ROLLBACK');throw error;}finally{operationWrite=false;}};
+  const invoke=(hook,input)=>{if(!hook)return undefined;const value=hook({db,...input});if(value&&typeof value.then==='function')fail('ROLLBACK_HOOK_INVALID','转换事务禁止异步 hook');return value;};
+  const before=(command,operationId)=>invoke(beforeCommit,{command,operationId,row:current()});
+  const receipt=(command,operationId)=>{const report=inspect();invoke(persistReceipt,{command,operationId,row:current(),report});return report;};
+  const sourceRecord=(kind,record)=>{if(!verifySourceRecord)return undefined;const value=invoke(verifySourceRecord,{kind,record});if(value!==undefined&&value!==true)fail('ROLLBACK_EVIDENCE_CHANGED','可信源 host 复核拒绝文件证据');return value;};
   function inventory() {
     const bots=all(db,'hermes_bots'),employees=all(db,'employees'),routines=all(db,'bot_routines');
     const saved=parse(current()?.intent_json),errors=[];
@@ -137,7 +142,7 @@ export function createPreservation(db,{role=PRODUCT_ROLE,collectNativeEvidence=n
     if(binding?.mode==='owned_profile'&&proof.home!==owned?.home)return false;
     const connectResult=parse(connect.result_json),replyResult=parse(reply.result_json),receipt=connectResult?.nativeOperation||connectResult?.result?.nativeOperation,output=replyResult?.output||replyResult?.result?.output||replyResult?.text,bodyHash=crypto.createHash('sha256').update(inbox.content).digest('hex');
     if(proof.sourceActionId!==reply.id||proof.actionDigest!==nativeActionDigest(reply)||proof.resultDigest!==digest(replyResult)||proof.treeDigest!==digest(executionExit(replyResult))||reply.status!=='succeeded'||!reply.acked_at||uncertain(replyResult)||!exitedTree(executionExit(replyResult))||typeof output!=='string'||!output||proof.nativeContentDigest!==bodyHash||replyPayload?.prompt!==inbox.content||connectPayload?.employeeId!==inbox.employee_id||replyPayload?.employeeId!==inbox.employee_id||connect.workspace_id!==inbox.workspace_id||reply.workspace_id!==inbox.workspace_id||connectPayload?.hermesBot?.workspace!==proof.workspace||replyPayload?.hermesBot?.workspace!==proof.workspace||connectPayload?.hermesBot?.revision!==proof.revision||replyPayload?.hermesBot?.revision!==proof.revision||connectPayload?.hermesBot?.controlEpoch!==proof.controlEpoch||replyPayload?.hermesBot?.controlEpoch!==proof.controlEpoch||connectPayload?.nativeOperation?.resource!=='gateway'||connectPayload.nativeOperation.operation!=='connect'||connectPayload.nativeOperation.input?.platform!==proof.platform||replyPayload?.gateway?.connectionActionId!==connect.id||replyPayload.gateway.platform!==inbox.platform||replyPayload.gateway.chatId!==inbox.chat_id||replyPayload.gateway.messageId!==inbox.message_id||proof.platform!==inbox.platform||proof.chatId!==inbox.chat_id||proof.messageId!==inbox.message_id||proof.revision!==inbox.revision||proof.controlEpoch!==inbox.control_epoch||inbox.source_action_id!==connect.id||inbox.action_id!==reply.id||exit?.connectedPid!==receipt?.data?.pid||exit?.processExit?.rootPid!==exit?.connectedPid)return false;
-    return Boolean(native.nativeDatabases.some(row=>row.exists&&row.path===path.join(proof.home,'state.db')&&row.home===proof.home&&row.employeeId===proof.employeeId&&row.deviceId===proof.deviceId&&row.operationId===operationId)&&exit&&exit.home===proof.home&&exit.ownershipId===proof.ownershipId&&exit.workspaceId===proof.workspaceId&&exit.deviceId===proof.deviceId&&exit.sourceActionId===connect.id&&exit.connectActionDigest===proof.connectActionDigest&&exit.employeeId===proof.employeeId&&exit.workspace===proof.workspace&&exit.platform===proof.platform&&exit.revision===proof.revision&&exit.controlEpoch===proof.controlEpoch&&exit.processAlive===false&&exitedTree(exit.processExit)&&digest(exit)===proof.connectTreeDigest);
+    return Boolean(native.nativeDatabases.some(row=>row.exists&&row.path===(path.win32.isAbsolute(proof.home)?path.win32:path.posix).join(proof.home,'state.db')&&row.home===proof.home&&row.employeeId===proof.employeeId&&row.deviceId===proof.deviceId&&row.operationId===operationId)&&exit&&exit.home===proof.home&&exit.ownershipId===proof.ownershipId&&exit.workspaceId===proof.workspaceId&&exit.deviceId===proof.deviceId&&exit.sourceActionId===connect.id&&exit.connectActionDigest===proof.connectActionDigest&&exit.employeeId===proof.employeeId&&exit.workspace===proof.workspace&&exit.platform===proof.platform&&exit.revision===proof.revision&&exit.controlEpoch===proof.controlEpoch&&exit.processAlive===false&&exitedTree(exit.processExit)&&digest(exit)===proof.connectTreeDigest);
   }
   function inspect() {
     const row=current(),inv=inventory(),issues=[...inv.errors],actions=all(db,'a2a_actions').filter(action=>classifyAction(action).isV2);
@@ -165,12 +170,13 @@ export function createPreservation(db,{role=PRODUCT_ROLE,collectNativeEvidence=n
     if(role!=='v2')fail('ROLLBACK_ROLE_INVALID','只允许 V2 保护包准备降级');
     if(!/^[-a-zA-Z0-9_]{1,128}$/.test(operationId||'')||canonical(versions)!==canonical(FROZEN_VERSIONS))fail('ROLLBACK_INTENT_INVALID','必须提供精确操作标识与冻结版本');
     return transaction(()=>{const row=current();if(row){if(row.operation_id===operationId&&canonical(parse(row.versions_json))===canonical(versions))return inspect();if(row.state!=='restored')fail('ROLLBACK_OPERATION_CONFLICT','现有操作尚未恢复，禁止替换');}
-      const stamp=new Date().toISOString(),intent=snapshot();
+      before('prepare',operationId);const stamp=new Date().toISOString(),intent=snapshot();
       db.prepare('INSERT OR REPLACE INTO version_preservation(singleton,operation_id,state,versions_json,intent_json,created_at,updated_at) VALUES(1,?,\'preparing\',?,?,?,?)').run(operationId,canonical(versions),canonical(intent),stamp,stamp);
-      event(operationId,'preparing',{versions,identityDigest:digest(intent)});return inspect();});
+      event(operationId,'preparing',{versions,identityDigest:digest(intent)});return receipt('prepare',operationId);});
   }
   async function seal({operationId,...evidenceOptions}={}) {
     if(readOnly)fail('ROLLBACK_READ_ONLY','只读检查禁止封存');
+    if(role!=='v2')fail('ROLLBACK_ROLE_INVALID','封存只能由 V2 保护包执行');
     const row=operation({operationId});if(row.state==='sealed')return inspect();if(row.state!=='preparing')fail('ROLLBACK_STATE_INVALID','只有 preparing 可以封存');
     const initial=inspect();
     const immediate=initial.issues.filter(issue=>issue.code!=='GATEWAY_INBOX_NOT_DRAINED'||issue.status!=='dispatched');
@@ -189,15 +195,16 @@ export function createPreservation(db,{role=PRODUCT_ROLE,collectNativeEvidence=n
       if((native.nativeDatabases||checked.issues.some(issue=>issue.code==='GATEWAY_INBOX_NOT_DRAINED'))&&(native.operationId!==operationId||native.intentDigest!==digest(currentOperation.intent_json)||native.versionsDigest!==digest(currentOperation.versions_json)))fail('ROLLBACK_EVIDENCE_CHANGED','原生证据的冻结操作身份发生变化');
       for(const binding of native.actionBindings||[]){const action=db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(binding.id);if(!action||nativeActionDigest(action)!==binding.digest)fail('ROLLBACK_EVIDENCE_CHANGED','原生证据依赖的原 action 发生变化');}
       validateIdentities(parse(row.intent_json));
-      for(const file of native.files||[])try{if(file.exists===false?fs.existsSync(file.path):crypto.createHash('sha256').update(fs.readFileSync(file.path)).digest('hex')!==file.sha256)fail('ROLLBACK_EVIDENCE_CHANGED','本机文件证据在封存前发生变化');if(file.identity){const stat=fs.lstatSync(file.path);if(stat.isSymbolicLink()||String(stat.dev)!==file.identity.dev||String(stat.ino)!==file.identity.ino)fail('ROLLBACK_EVIDENCE_CHANGED','原生数据库文件身份发生变化');}}catch(error){if(error.code==='ROLLBACK_EVIDENCE_CHANGED')throw error;fail('ROLLBACK_EVIDENCE_CHANGED','本机文件证据不可读');}
-      for(const directory of native.directories||[])try{if(directory.identity){const stat=fs.lstatSync(directory.path);if(stat.isSymbolicLink()||!stat.isDirectory()||String(stat.dev)!==directory.identity.dev||String(stat.ino)!==directory.identity.ino)fail('ROLLBACK_EVIDENCE_CHANGED','本机目录身份发生变化');}if(directory.exists?canonical(fs.readdirSync(directory.path).sort())!==canonical(directory.names):fs.existsSync(directory.path))fail('ROLLBACK_EVIDENCE_CHANGED','本机目录证据在封存前发生变化');}catch(error){if(error.code==='ROLLBACK_EVIDENCE_CHANGED')throw error;fail('ROLLBACK_EVIDENCE_CHANGED','本机目录证据不可读');}
+      for(const file of native.files||[])try{if(sourceRecord('file',file)===true)continue;if(file.exists===false?fs.existsSync(file.path):crypto.createHash('sha256').update(fs.readFileSync(file.path)).digest('hex')!==file.sha256)fail('ROLLBACK_EVIDENCE_CHANGED','本机文件证据在封存前发生变化');if(file.identity){const stat=fs.lstatSync(file.path);if(stat.isSymbolicLink()||String(stat.dev)!==file.identity.dev||String(stat.ino)!==file.identity.ino)fail('ROLLBACK_EVIDENCE_CHANGED','原生数据库文件身份发生变化');}}catch(error){if(['ROLLBACK_EVIDENCE_CHANGED','ROLLBACK_HOOK_INVALID'].includes(error.code))throw error;fail('ROLLBACK_EVIDENCE_CHANGED','本机文件证据不可读');}
+      for(const directory of native.directories||[])try{if(sourceRecord('directory',directory)===true)continue;if(directory.identity){const stat=fs.lstatSync(directory.path);if(stat.isSymbolicLink()||!stat.isDirectory()||String(stat.dev)!==directory.identity.dev||String(stat.ino)!==directory.identity.ino)fail('ROLLBACK_EVIDENCE_CHANGED','本机目录身份发生变化');}if(directory.exists?canonical(fs.readdirSync(directory.path).sort())!==canonical(directory.names):fs.existsSync(directory.path))fail('ROLLBACK_EVIDENCE_CHANGED','本机目录证据在封存前发生变化');}catch(error){if(['ROLLBACK_EVIDENCE_CHANGED','ROLLBACK_HOOK_INVALID'].includes(error.code))throw error;fail('ROLLBACK_EVIDENCE_CHANGED','本机目录证据不可读');}
+      before('seal',operationId);
       const saved=snapshot(),stamp=new Date().toISOString();
       controlWrite=true;
       try{for(const bot of saved.bots){db.prepare("UPDATE employees SET status='paused' WHERE id=?").run(bot.employee_id);db.prepare("UPDATE hermes_bots SET control_state='paused',control_epoch=control_epoch+1,updated_at=? WHERE employee_id=?").run(stamp,bot.employee_id);}
         for(const binding of saved.routines)db.prepare("UPDATE automations SET status='paused',next_run=NULL WHERE id=?").run(binding.automation_id);
       }finally{controlWrite=false;}
       db.prepare("UPDATE version_preservation SET state='sealed',snapshot_json=?,evidence_json=?,updated_at=? WHERE singleton=1").run(canonical(saved),canonical(native),stamp);
-      event(operationId,'sealed',{snapshotDigest:digest(saved),evidenceDigest:digest(native)});return inspect();});
+      event(operationId,'sealed',{snapshotDigest:digest(saved),evidenceDigest:digest(native)});return receipt('seal',operationId);});
   }
   function restore({operationId}={}) {
     if(readOnly)fail('ROLLBACK_READ_ONLY','只读检查禁止恢复');
@@ -205,9 +212,9 @@ export function createPreservation(db,{role=PRODUCT_ROLE,collectNativeEvidence=n
     return transaction(()=>{const row=operation({operationId});if(row.state==='restored')return inspect();if(row.state!=='sealed')fail('ROLLBACK_STATE_INVALID','只能恢复已封存操作');
       const saved=parse(row.snapshot_json);if(!saved)fail('ROLLBACK_SNAPSHOT_INVALID','封存快照不可读');
       validateIdentities(saved,{sealed:true});
-      const stamp=new Date().toISOString();db.prepare("UPDATE version_preservation SET state='restored',updated_at=? WHERE singleton=1").run(stamp);event(operationId,'restored',{pausedEmployeeIds:saved.bots.map(bot=>bot.employee_id),pausedRoutineIds:saved.routines.map(row=>row.automation_id),replay:false});return inspect();});
+      before('restore',operationId);const stamp=new Date().toISOString();db.prepare("UPDATE version_preservation SET state='restored',updated_at=? WHERE singleton=1").run(stamp);event(operationId,'restored',{pausedEmployeeIds:saved.bots.map(bot=>bot.employee_id),pausedRoutineIds:saved.routines.map(row=>row.automation_id),replay:false});return receipt('restore',operationId);});
   }
-  function abort({operationId}={}) {if(readOnly||role!=='v2')fail('ROLLBACK_READ_ONLY','当前包不可撤销准备');return transaction(()=>{const row=operation({operationId});if(row.state!=='preparing')fail('ROLLBACK_STATE_INVALID','只允许撤销尚未封存的准备');db.prepare("UPDATE version_preservation SET state='restored',updated_at=? WHERE singleton=1").run(new Date().toISOString());event(operationId,'preparation_aborted',{sealed:false,replay:false});return inspect();});}
+  function abort({operationId}={}) {if(readOnly||role!=='v2')fail('ROLLBACK_READ_ONLY','当前包不可撤销准备');return transaction(()=>{const row=operation({operationId});if(row.state!=='preparing')fail('ROLLBACK_STATE_INVALID','只允许撤销尚未封存的准备');before('abort',operationId);db.prepare("UPDATE version_preservation SET state='restored',updated_at=? WHERE singleton=1").run(new Date().toISOString());event(operationId,'preparation_aborted',{sealed:false,replay:false});return receipt('abort',operationId);});}
   db.function('ziwei_v2_admitted',id=>!frozen()||!actionById(id).isV2?1:0);
   db.function('ziwei_preservation_transition_admitted',()=>operationWrite?1:0);
   if(!readOnly)for(const table of ['version_preservation','version_preservation_events'])for(const event of ['INSERT','UPDATE','DELETE'])db.exec(`CREATE TRIGGER IF NOT EXISTS preservation_transition_${table}_${event.toLowerCase()} BEFORE ${event} ON ${table} WHEN ziwei_preservation_transition_admitted()=0 BEGIN SELECT RAISE(ABORT,'ROLLBACK_TRANSITION_PRIVATE'); END`);
