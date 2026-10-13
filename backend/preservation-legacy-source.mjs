@@ -48,8 +48,9 @@ function readLocal(file) {
 
 /** Constructed only by independently approved source code. Neither a signed
  * request nor an assessment JSON can select this capability or a reader. */
-export function createLegacySourceInterpreter({authorization, requestBinding, readBytes = readLocal} = {}) {
+export function createLegacySourceInterpreter({authorization, requestBinding, readBytes = readLocal, verifyLoggerCoverage = null} = {}) {
   require(typeof readBytes === 'function' && readBytes.constructor?.name !== 'AsyncFunction');
+  require(verifyLoggerCoverage === null || typeof verifyLoggerCoverage === 'function' && verifyLoggerCoverage.constructor?.name !== 'AsyncFunction');
   const policy = freeze(structuredClone(authorization));
   const expectedRequest=freeze(structuredClone(requestBinding));
   require(expectedRequest&&typeof expectedRequest.operationId==='string'&&expectedRequest.operationId&&hex(expectedRequest.specHash)&&hex(expectedRequest.freezeDigest)&&typeof expectedRequest.challenge==='string'&&expectedRequest.challenge.length>=16);
@@ -112,15 +113,22 @@ export function createLegacySourceInterpreter({authorization, requestBinding, re
     for (const cfg of [snapshot.config, captured.config]) require(cfg && samePath(finalPath(cfg.finalPath), generation.configPath) && cfg.workspace === policy.workspace && cfg.deviceId === policy.deviceId && new URL(cfg.apiBase).origin === policy.origin);
     require(samePath(snapshot.config.path, generation.configPath) && snapshot.config.sha256 === generation.configSha256 && Array.isArray(snapshot.config.sharedBindings) && snapshot.config.sharedBindings.length === 0);
     require(captured.actionStates?.filter(row => samePath(row.path, expectedCachePath) && samePath(finalPath(row.finalPath), expectedCachePath)).length === 1);
-    const capturedRotation=captured.logs?.filter(row=>samePath(row.path,policy.artifacts.loggerStart.sourcePath)&&samePath(finalPath(row.finalPath),row.path));
+    // This finite profile covers one captured rotation plus the captured active
+    // file that later became loggerEnd. Never filter an incomplete subset out
+    // of a larger inventory. Filename suffixes are wall-clock milliseconds,
+    // not sequence numbers; timestamp proximity is not a coverage witness.
+    require(!Object.hasOwn(captured,'error') && Array.isArray(captured.logs) && captured.logs.length === 2 && captured.logs.every(row => row && plainPath(row.path) && samePath(finalPath(row.finalPath),row.path) && Number.isSafeInteger(row.bytes) && row.bytes > 0));
+    const capturedRotation=captured.logs.filter(row=>samePath(row.path,policy.artifacts.loggerStart.sourcePath));
     const activeLogPath=apiFor(generation.logDir).join(generation.logDir,'daemon.log'),capturedActive=captured.logs?.filter(row=>samePath(row.path,activeLogPath)&&samePath(finalPath(row.finalPath),activeLogPath));
     require(capturedRotation?.length===1&&capturedRotation[0].bytes===raw.loggerStart.length&&capturedActive?.length===1&&Number.isSafeInteger(capturedActive[0].bytes)&&capturedActive[0].bytes>0&&capturedActive[0].bytes<raw.loggerEnd.length);
     const activePrefix=raw.loggerEnd.subarray(0,capturedActive[0].bytes);require(activePrefix.at(-1)===10);
     const activeRows=new TextDecoder('utf-8',{fatal:true}).decode(activePrefix).split(/\r?\n/).filter(Boolean).map(line=>parse(Buffer.from(line)));
     require(activeRows.at(-1)?.at===capturedActive[0].lastAt);
-    const rows = [], ranges = [];
+    const rows = [], ranges = [], rotationTimes = [];
     for (const role of ['loggerStart', 'loggerEnd']) {
       const file = policy.artifacts[role]; require(samePath(apiFor(file.sourcePath).dirname(file.sourcePath), generation.logDir) && /^daemon\.log\.\d+$/.test(apiFor(file.sourcePath).basename(file.sourcePath)));
+      const rotationTime = Number(apiFor(file.sourcePath).basename(file.sourcePath).slice('daemon.log.'.length));
+      require(Number.isSafeInteger(rotationTime) && rotationTime > 0); rotationTimes.push(rotationTime);
       const lines = new TextDecoder('utf-8', {fatal: true}).decode(raw[role]).split(/\r?\n/).filter(Boolean), records = lines.map(line => parse(Buffer.from(line)));
       require(records.length > 0 && records.every(row => row && Number.isInteger(row.pid) && row.pid > 0 && typeof row.event === 'string' && row.event && Number.isFinite(timestamp(row.at))));
       // Preserve append order. The reviewed logger spreads native event fields
@@ -128,20 +136,27 @@ export function createLegacySourceInterpreter({authorization, requestBinding, re
       // Their timestamps cannot reorder mandatory start/exit records.
       ranges.push({first: timestamp(records[0].at), last: timestamp(records.at(-1).at)}); rows.push(...records);
     }
+    require(rotationTimes[0] <= timestamp(captured.captureUTC) && timestamp(captured.captureUTC) < rotationTimes[1]);
     require(ranges[1].first >= ranges[0].last && ranges[1].first - ranges[0].last <= 1000);
     const boot = rows.filter(row => row.pid === generation.pid), starts = boot.filter(row => row.event === 'started'), exits = boot.filter(row => row.event === 'exited');
     require(boot.every(row => row.workspace === undefined || row.workspace === policy.workspace) && starts.length === 1 && exits.length === 1 && boot.indexOf(starts[0])===0 && boot.indexOf(exits[0])===boot.length-1 && Math.abs(timestamp(starts[0].at) - timestamp(generation.createdAt)) < 15000 && timestamp(exits[0].at) > timestamp(starts[0].at) && boot.every(row => timestamp(row.at) >= timestamp(starts[0].at) && timestamp(row.at) <= timestamp(exits[0].at)));
     require([snapshot.captureUTC, captured.captureUTC, context.captureUTC].every(value => timestamp(value) > timestamp(subject.fields.acked_at) && timestamp(value) < timestamp(exits[0].at)));
     const loggerDigest = digest(['loggerStart', 'loggerEnd'].map(role => ({path: policy.artifacts[role].sourcePath, sha256: hash(raw[role]), bytes: raw[role].length})));
+    const loggerCoverage = freeze({schemaVersion:1,kind:'legacy-logger-coverage-v1',logDir:generation.logDir,historicalGenerationDigest:digest(generation),capture:{path:policy.artifacts.inspect.sourcePath,sha256:policy.artifacts.inspect.sha256,bytes:raw.inspect.length,captureUTC:captured.captureUTC,entries:captured.logs.map(row=>({path:row.path,bytes:row.bytes})).sort((a,b)=>a.path.localeCompare(b.path))},chain:['loggerStart','loggerEnd'].map((role,index)=>({path:policy.artifacts[role].sourcePath,sha256:policy.artifacts[role].sha256,bytes:raw[role].length,rotationAt:rotationTimes[index]})),activePrefixSha256:hash(activePrefix),loggerDigest});
+    // Original bytes prove what the capture says, not how its producer selected
+    // files. Only an independent code verifier may qualify the complete native
+    // inventory/producer. Wire flags and a close timestamp cannot qualify it.
+    const loggerCoverageComplete = !historicalOnly && verifyLoggerCoverage !== null && verifyLoggerCoverage(loggerCoverage) === true;
     const recordDigests = historicalRows.map(row => digest(row));
-    return {client: requestScope.client, workspaceId: policy.workspaceId, policyDigest: archive.policyDigest, sourceDigest: digest({archive: archive.archiveSha256, build: archive.installedBuild, authorizationDigest}), authorizationDigest, historicalGenerationDigest: digest(generation), cacheDigest: historical.sha256, loggerDigest, artifactDigest: digest(files), recordDigests, files, boot, targetRecords:rows.filter(row=>row.actionId===subject.actionId), context, retained};
+    return {client: requestScope.client, workspaceId: policy.workspaceId, policyDigest: archive.policyDigest, sourceDigest: digest({archive: archive.archiveSha256, build: archive.installedBuild, authorizationDigest}), authorizationDigest, historicalGenerationDigest: digest(generation), cacheDigest: historical.sha256, loggerDigest, loggerCoverageDigest:digest(loggerCoverage),loggerCoverageComplete, artifactDigest: digest(files), recordDigests, files, boot, targetRecords:rows.filter(row=>row.actionId===subject.actionId), context, retained};
   }
   const capability = Object.freeze({
     subjectActionId: subject.actionId,
-    auditHistoricalSource() {const {policyDigest,sourceDigest,historicalGenerationDigest,cacheDigest,loggerDigest,recordDigests,files}=inspect({},true);return freeze({scope:'historical-source-only',policyDigest,sourceDigest,historicalGenerationDigest,cacheDigest,loggerDigest,recordCount:recordDigests.length,files,currentConfigVerified:false,namespaceComplete:null});},
+    auditHistoricalSource() {const {policyDigest,sourceDigest,historicalGenerationDigest,cacheDigest,loggerDigest,loggerCoverageDigest,recordDigests,files}=inspect({},true);return freeze({scope:'historical-source-only',policyDigest,sourceDigest,historicalGenerationDigest,cacheDigest,loggerDigest,loggerCoverageDigest,loggerCoverageComplete:false,recordCount:recordDigests.length,files,currentConfigVerified:false,namespaceComplete:null});},
     connectionProof(input) {const {boot, targetRecords, context, retained, ...evidence} = inspect(input); return freeze(evidence);},
     neverDispatchedProof(input) {
       const evidence = inspect(input), {action, state, productionRequest: request} = input;
+      require(evidence.loggerCoverageComplete);
       require(action?.id === subject.actionId && nativeActionDigest(action) === subject.actionDigest && typeof action.payload_json === 'string' && hash(action.payload_json) === subject.payloadSha256 && action.result_json === '' && hash(action.result_json) === subject.resultSha256 && typeof action.dedupe_key === 'string' && hash(action.dedupe_key) === subject.dedupeKeySha256 && Object.entries(subject.fields).every(([key, value]) => equal(action[key], value)));
       const projected = request.actionProjection.tables.a2a_actions.rows.filter(row => row.id === action.id); require(projected.length === 1 && nativeActionDigest(projected[0]) === subject.actionDigest);
       const payload = parse(Buffer.from(action.payload_json)), devices = ['deviceId', 'device_id', 'targetDeviceId', 'target_device_id'].map(key => payload[key]).filter(value => value !== undefined && value !== null && value !== '');

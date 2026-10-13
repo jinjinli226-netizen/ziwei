@@ -21,6 +21,7 @@ createLegacySourceInterpreter({
   authorization, // 独立批准、复制并冻结的一条 subject/host/scope/原始文件 pins
   requestBinding: {operationId, specHash, freezeDigest, challenge},
   readBytes, // 可省略；同步代码 reader，不来自 JSON/wire
+  verifyLoggerCoverage, // 独立同步代码 verifier；缺省 null，动作证明拒绝
 });
 ```
 
@@ -30,7 +31,9 @@ capability 的方法是 `connectionProof({productionRequest,connection,state})`�
 
 connectionProof 从原 archive 与原 cache 前缀解释已经证明的旧记录，返回 recordDigests；仅命中的 `{key,result}` 可作为 migrated legacy history。当前安装已是另一 V2 root/源码时，仍使用准确旧 archive；新增任意 `legacy:true` 不能继承前缀资格。现代 started/completed、delivery、resident 和其它未知状态仍由原 scanner 完整检查。
 
-neverDispatchedProof 检查独立 requestBinding、host/workspace/device/origin/runtime/config SHA；原 signed projection 必须仍含唯一 raw row，完整 nativeActionDigest、原 payload/result/dedupe SHA 与字段均匹配。retained/current 全缓存都不得有目标 action 或 dedupe；完整两份日志中所有 PID 的目标记录只能有同一旧 generation 的唯一固定 timeout failure，且无 target started。mandatory start-before-executor 与 ACK-before-dispatch 来自核对的原协议源码，不能只凭超时、count=0、mtime 或 analysis 标志推断。
+neverDispatchedProof 检查独立 requestBinding、host/workspace/device/origin/runtime/config SHA；原 signed projection 必须仍含唯一 raw row，完整 nativeActionDigest、原 payload/result/dedupe SHA 与字段均匹配。retained/current 全缓存都不得有目标 action 或 dedupe；经过独立完整范围资格的两份日志中所有 PID 的目标记录只能有同一旧 generation 的唯一固定 timeout failure，且无 target started。mandatory start-before-executor 与 ACK-before-dispatch 来自核对的原协议源码，不能只凭超时、count=0、mtime 或 analysis 标志推断。
+
+本轮后续 P1 审查发现旧“端点差不超过一秒”没有证明中间轮转未遗漏。新限定 profile 必须核整个 captured.logs 恰好首 rotation + active，完整 active 原前缀匹配后续 rotation，且 rotation 时间在 capture 之后；这些只是关系检查。完整原捕获 producer/历史 membership witness 必须由独立 `verifyLoggerCoverage` 审核，精确同步返回 true 才可生成动作证明；默认 null、JSON flags、truthy/Promise 返回均不行。传入的 frozen candidate 绑定原 logDir/generation digest/capture artifact SHA 与 bytes/captureUTC/全部 entries、两 segment pins/rotation timestamp、active prefix SHA/loggerDigest。详见 `2026-10-14-e02-legacy-logger-coverage-gate.md`。实际原捕获目前缺 producer 完整性依据，最新 audit 的 loggerCoverageComplete 为 false；之前历史审计通过不表示完整 logger scope。
 
 proof 绑定 op/spec/challenge/freeze/host/action 与 authorization/history/policy/source/cache/logger/artifact digests，只包含 `conclusion:'never-dispatched'` 与代码产生的 verified。它不生成 processExit、Job、tree 或 namespace proof。各 artifact/config 文件及身份继续进入 scanner files 清单，参与完整 source manifest/fresh recheck。
 
@@ -52,7 +55,7 @@ createPreservation(db, {
 
 特殊 proof 出现但没有独立代码 policy 或同对象可信登记时拒绝。E03 source 会剥离嵌入 proof 的 challenge 以保持 collect/recheck evidenceDigest 稳定；最终谓词不要求该已剥离字段，challenge/TTL 由外层签名与受信登记绑定。原全量 actionBindings、投影复核、beforeCommit 与原 identity/control/snapshot 验证保持。
 
-E03 待补窄接点：从严格批准的 static nativeSourceRefs 构造 interpreter/requestBinding；source CLI 用固定第二代码参数执行 scanner；特殊 proof 验签/唯一性/固定绑定完成后以原对象和 exact kind 登记，并独立传 legacyActionPolicy 给 guard。不得将任意 nativeStateProofs 或 assessment JSON 全部放进 WeakSet。此接点完成前生产 apply 继续默认拒绝。
+E03 待补窄接点：从严格批准的 static nativeSourceRefs 构造 interpreter/requestBinding，并从独立审核的捕获 producer/membership witness 构造 verifyLoggerCoverage；source CLI 用固定第二代码参数执行 scanner；特殊 proof 验签/唯一性/固定绑定完成后以原对象和 exact kind 登记，并独立传 legacyActionPolicy 给 guard。不得将任意 nativeStateProofs 或 assessment JSON 全部放进 WeakSet。此接点与完整 logger 范围资格完成前生产 apply 继续默认拒绝。
 
 ## 验证与后续
 
@@ -60,4 +63,4 @@ E03 待补窄接点：从严格批准的 static nativeSourceRefs 构造 interpre
 
 首轮全量 1119 项中的 21 项 production fixture 因漏打包新增两个模块而按 loaded closure 正确拒绝；fixture 补齐真实依赖后 production 26/26 PASS，产品校验未放宽。修正后全量 **1119/1119 PASS，0 fail/skip**，lint 检查 128 个产品 source PASS。完整失败日志与修正后日志分别保存在 `.local/legacy-source-full-suite.log` 与 `.local/legacy-source-full-suite-02.log`。最终全量结果在私有 handoff 固定，不用早先候选或作者 fixture 代替 Q01 资格。
 
-下一独立集成：已明确批准的 E03 `ac1b4d51a97def8f3f8589f8a7c4d450f0fedfb8` 与 API 私有身份 hook。Windows 默认 native inspection/client identity 仍等待 E03 实现；当前 PID12132 的完整 PEB/HOME/worker/maintenance namespace 仍未知。没有正式停止、provider/model/phone、push/deploy 或 Q01 验收声明。
+已集成：明确批准的 E03 `ac1b4d51a97def8f3f8589f8a7c4d450f0fedfb8` 及 FD 修复 `05879fcd2882bbf3eea689ab283cacafede29721`，各对应 E02 `8a1af2c` / `c591e86`；私有 API hook 单独记录。Windows 默认 native inspection/client identity 仍等待 E03 实现；当前 PID12132 的完整 PEB/HOME/worker/maintenance namespace 仍未知。没有正式停止、provider/model/phone、push/deploy 或 Q01 验收声明。
