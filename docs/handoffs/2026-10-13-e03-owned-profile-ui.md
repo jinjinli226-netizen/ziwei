@@ -1,6 +1,6 @@
 # E03 owned Profile frontend candidate
 
-This candidate connects the E02 published owned-profile API shape. It is a frontend candidate, not yet proof of installed-Hermes owned provisioning or an updated persistent preview. The stable E02 implementation must be cherry-picked and checked before either claim.
+The owned-profile first chain is now integrated, tested with installed Hermes and the local protocol provider, and running in the one persistent preview. Real external provider acceptance is still required by the user before any launch claim.
 
 The ordinary create dialog now submits one Bot request with an initialization `sourceProfile`. The service chooses the dedicated name and device resolves HOME. The dialog collects only name, computer and advanced source/model/visibility; role/persona remain editable on the same Bot after provisioning. This makes response-loss recovery deterministic without storing private role text.
 
@@ -39,8 +39,16 @@ The full candidate code is in the E03 owned-profile tree. Entry points: `createA
 
 E03 actually discovered only `custom:preview-local`, model `preview-local-model`, at its own temporary API. The user's real source Profile, provider host/model and auth store have not been inspected by E03 and must be discovered by Q01 under the new minimal-call authorization. Send only synthetic test text, keep secrets out of receipts/logs, preserve source auth bytes, and allow only the selected provider domain plus owned API endpoints. Expired OAuth or missing source is a real failure; do not substitute the loopback provider.
 
-## Remaining first-chain integration
+## Persistent preview and Q handoff
 
-Pick E02 stable owned-profile SHA, check its final authentication/status and recovery contract, extend only the native-preview provision allowlist/binding policy, then run actual product UI in a fresh temporary HOME with installed Hermes. Verify two named Profiles, native resolver HOME equals actual first-run HOME, same-key replay/reload and rename preserve Bot/main chat/state, and a bounded local test-provider message returns in the same conversation. Perform the final composed regression once, then update the one persistent preview with original stateRoot and preservation proof.
+Working source is `C:\Users\25941\.codex\worktrees\v2-e03-owned-profile\灵光爸爸拆解`, branch `codex/v2-e03-owned-profile`. Backend running candidate is `4594d1b9bd5f1790cd206c54766d43fbf0912c9c`; the later documentation commit does not require another restart. E02 implementation source `96559f8` is included as `8825abd`; Gateway source `427da412` is included as `850431c`. The machine handoff `.local/e03-owned-profile-handoff.json` records the final HEAD and all proof paths.
 
-Working source is `C:\Users\25941\.codex\worktrees\v2-e03-owned-profile\灵光爸爸拆解`, branch `codex/v2-e03-owned-profile`. The earlier source at `v2-e03-profile-chat` stays unchanged for the current 5283/4283 preview. No new long-lived preview, formal services, real phone actions, push, merge or deployment were performed. Phone composition remains a later backend/frontend patch and is not claimed here.
+On 2026-10-13 15:17 the original owned API process was stopped only after fresh health/PID/parent/listener checks and zero unfinished/unknown actions. Its supervisor logged both children exiting. Original stateRoot remains `C:\Users\25941\.codex\worktrees\v2-e03-hermes-bot-ui\灵光爸爸拆解\.local\bot-preview`; consistent backup is `backups/before-owned-profile-1791875766436.sqlite`. New native supervisor entry `frontend/preview/launch-windows.ps1` reused this exact stateRoot and ports 5283/4283.
+
+Current instance: `2026-10-13T07-17-33-644Z-8908`, supervisor 8908, API 31840, Vite 54608, `windows-independent`. Real HTTP and command-line/parent observations confirmed these owners. Independent supervisor and business logs append every 15 seconds under the original `logs` directory. The port registry record remains `498622e5bdf9d880` under its original owning cwd; its note now records actual logs and the pending real-provider gate.
+
+After-update native memory read succeeded with Hermes 0.21.3 and root/tree exit evidence. Preservation verified the original 2 employees, 14 conversations, 22 messages and 1 user; account authentication fields are unchanged, only normal login timestamp changes are permitted. The live create entry is enabled, server-generated naming is shown, and 390px create/main chat fit. Capture did not submit another live Bot, change the seed main chat or create a fake demonstration task. Live proof: `.local/e03-native-preview-evidence/current-health.json`, `preservation.json` and `live-owned-layout.json`.
+
+URL: `http://127.0.0.1:5283/preview-bots/bots`. The original seed Bot/main chat remain available, honestly labelled legacy source + private instance. New creations use owned Profile/HOME. No second long-lived preview, formal server change, real phone actions, push, merge or deployment occurred; external exits and automatic Routine scheduling remain disabled in this preview. Phone composition is a later task.
+
+Latest user model constraint for Q01: **gpt-6.1-sol, reasoning ultra**. Verify exact provider model ID and whether ultra is supported and actually sent; the coding-agent setting does not prove the Bot setting. The current local-test model is `preview-local-model` and does not satisfy this constraint. Missing real source configuration, expired OAuth or unsupported model/effort must be reported honestly, with no silent model/provider substitution.
