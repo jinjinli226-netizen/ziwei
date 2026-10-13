@@ -119,9 +119,9 @@ onBeforeUnmount(()=>{disposed=true;generation++;clearTimeout(pollTimer);workbenc
 
 <template>
   <section class="bot-workbench" aria-label="Hermes Bot 工作台">
-    <header class="bot-page-heading"><div><span class="bot-eyebrow">紫薇 · 数字伙伴</span><h1>与你的 Bot 一起工作</h1><p>与团队管理使用同一份数字员工。这里查看长期聊天、能力和例行工作。</p></div><div class="bot-actions"><button class="bot-button" @click="emit('creator')"><Sparkles :size="16"/> 伙伴市场 Creator</button><button class="bot-button primary" @click="newBot"><Plus :size="17"/>创建 Bot</button></div></header>
     <div class="bot-layout">
       <aside class="bot-roster" aria-label="当前工作区 Bot 名册"><div class="bot-roster-top"><strong>Hermes 员工 <small>{{s.bots.length}}</small></strong><button class="bot-icon-button" aria-label="刷新 Bot 列表与状态" :disabled="s.loading||s.reading||s.busy" @click="refresh"><RefreshCw :size="16"/></button></div><label class="bot-search"><Search :size="16"/><input v-model="search" placeholder="搜索名称或岗位" aria-label="搜索 Bot"/></label>
+        <div class="bot-roster-actions"><button class="bot-button primary" @click="newBot"><Plus :size="16"/>创建 Bot</button><button class="bot-button" @click="emit('creator')"><Sparkles :size="16"/>伙伴市场 Creator</button></div>
         <p v-if="s.loading&&!s.bots.length" class="bot-empty" role="status">正在读取工作区 Bot…</p>
         <button v-for="item in bots" :key="item.id" class="bot-roster-row" :class="{selected:s.selectedId===item.id}" :aria-current="s.selectedId===item.id?'true':undefined" @click="selectBot(item.id)"><span class="bot-avatar"><img v-if="item.employee?.avatar" :src="item.employee.avatar" alt=""/><span v-else>{{item.employee?.name?.slice(0,1)||'✦'}}</span><i :data-tone="botPresence(item).tone"/></span><span class="bot-roster-copy"><strong>{{item.employee?.name||'未命名 Bot'}}</strong><span>{{item.employee?.description||'Hermes 数字伙伴'}}</span><small>{{botPresence(item).label}}</small></span><ChevronRight :size="14"/></button>
         <div v-if="!s.loading&&!bots.length" class="bot-empty"><Bot :size="30"/><p>{{search?'没有匹配的 Bot':'在当前工作区创建第一个 Bot'}}</p><small>Bot 是同一数字员工的 Hermes 工作视图。创建后也会出现在团队管理。</small></div>

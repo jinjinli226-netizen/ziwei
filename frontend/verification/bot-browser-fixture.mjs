@@ -51,7 +51,7 @@ const results=[];
 async function check(name,fn){await fn();results.push({name,passed:true});}
 try{
   await page.goto('https://ziwei-fixture.invalid/qa/bots/bot-a');
-  await page.getByRole('heading',{name:'与你的 Bot 一起工作'}).waitFor();
+  await page.getByRole('button',{name:'创建 Bot',exact:true}).waitFor();
   await page.getByRole('heading',{name:'继续与 资料研究员 的对话'}).waitFor();
   await check('initial roster has no unintended modal',async()=>assert.equal(await page.getByRole('dialog').count(),0));
   await page.screenshot({path:path.join(evidence,'fixture-bot-roster-desktop.png'),fullPage:true});

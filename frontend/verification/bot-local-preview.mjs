@@ -28,7 +28,7 @@ async function poll(read,predicate){for(let i=0;i<45;i++){const value=await read
 const marker=`E03 隔离验收 ${Date.now()}`;
 try{
   await page.goto(front+`/${workspace}/bots`);
-  await page.getByRole('heading',{name:'与你的 Bot 一起工作'}).waitFor();
+  await page.getByRole('button',{name:'创建 Bot',exact:true}).waitFor();
   await check('real page displays preview boundary and brand',async()=>{
     await page.getByText('独立本地预览 · 配置保存使用真实 API',{exact:false}).waitFor();
     assert.equal(await page.locator('.product-brand img').evaluate(img=>img.complete&&img.naturalWidth>0),true);
@@ -97,7 +97,7 @@ try{
   });
   await check('workspace switching clears previous employees and capability catalog stays explicit',async()=>{
     await page.locator('.workspace-picker').click();await page.locator('.workspace-popup').getByRole('button',{name:'preview-alt',exact:false}).click();
-    await page.getByRole('button',{name:'Bot 伙伴',exact:true}).click();await page.getByRole('heading',{name:'与你的 Bot 一起工作'}).waitFor();
+    await page.getByRole('button',{name:'Bot 伙伴',exact:true}).click();await page.getByRole('button',{name:'创建 Bot',exact:true}).waitFor();
     assert.equal(await page.locator('.bot-roster-row').filter({hasText:marker}).count(),0);
     await page.locator('.bot-roster-row').first().click();await page.getByRole('button',{name:'能力组合',exact:true}).click();await page.getByText('外部消息 Gateway',{exact:true}).waitFor();
     assert.equal(await page.getByRole('button',{name:'能力组合',exact:true}).getAttribute('aria-current'),'page');
