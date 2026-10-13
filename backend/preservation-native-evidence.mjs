@@ -5,6 +5,7 @@ import {clientBuildIdentity} from '../src/management-bootstrap.mjs';
 import {inspectClientMaintenance,inspectNativeClientProcess,inspectNativeHealthListener} from '../scripts/client-lifecycle.mjs';
 import {digest,uncertain,exitedTree,executionExit,gatewayResultMatches} from './version-preservation.mjs';
 import {scanOwnedNativeDatabases,nativeActionDigest,attestNativeVersion} from './preservation-native-databases.mjs';
+import {isLegacySourceInterpreter} from './preservation-legacy-source.mjs';
 
 const hash=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
 const json=value=>{try{return JSON.parse(value);}catch{return null;}};
@@ -34,7 +35,8 @@ const legacyProtocolFiles={
   'src/local-action.mjs':'88cf1bd4b32411c47eb6e277209ff453f858948ae24fc75611db2c599104fa3c',
   'src/runtime-adapters.mjs':'3295b1eabf47c58d47e7e3d80148909f1bf854d1f7043d68b0b4866b43c14b39'
 };
-function legacyConnectionProof(connection,request,read,directoryProof){
+function legacyConnectionProof(connection,request,read,directoryProof,state,legacySource){
+  if(legacySource)return legacySource.connectionProof({productionRequest:request,connection,state});
   if(request?.schemaVersion!==1||request.domain!=='ziwei-production-request-v1'||!['collect','recheck'].includes(request.kind)||!request.operationId||!request.challenge||! /^[a-f0-9]{64}$/.test(request.specHash||''))throw Error('request');
   const workspace=request.actionProjection?.tables?.workspaces?.rows?.find(row=>row.slug===connection.workspace);
   if(!workspace||!request.binding?.workspaceIds?.includes(workspace.id)||!request.binding?.deviceIds?.includes(connection.deviceId)||!request.targetOrigins?.includes(new URL(connection.apiBase).origin))throw Error('scope');
@@ -52,7 +54,10 @@ function legacyConnectionProof(connection,request,read,directoryProof){
 }
 
 /** Formal source evidence always requires original history/protocol binding. */
-export function scanNativeFiles(options={}) {return scanFileEvidence(options,false);}
+export function scanNativeFiles(options={}, {legacySource=null}={}) {
+  if(legacySource!==null&&!isLegacySourceInterpreter(legacySource))throw Object.assign(Error('Legacy source capability is not approved code'),{code:'LEGACY_SOURCE_CAPABILITY_INVALID'});
+  return scanFileEvidence(options,false,legacySource);
+}
 
 /** Current daemon admission only; this cannot attest a production namespace. */
 export function inspectLocalDaemonMaintenanceFiles({connections=[]}={}) {
@@ -68,8 +73,8 @@ function explicitExitUnknown(value){
 
 /** Read-only evidence. Zero in-memory counters cannot replace these files.
  * localMaintenance is lexical code state, never selected by input JSON. */
-function scanFileEvidence({connections=[],actions=[],homes=[],productionRequest}={},localMaintenance) {
-  const issues=[],files=[],directories=[],gatewayExits=[],legacyHistoryProofs=[],originals=new Map(actions.map(row=>[row.id,normalizedAction(row)]));
+function scanFileEvidence({connections=[],actions=[],homes=[],productionRequest}={},localMaintenance,legacyInterpreter=null) {
+  const issues=[],files=[],directories=[],gatewayExits=[],legacyHistoryProofs=[],legacyNeverDispatchedProofs=[],originals=new Map(actions.map(row=>[row.id,normalizedAction(row)]));
   const issue=(code,detail={})=>issues.push({code,...detail});
   const read=file=>{try{const stat=fs.lstatSync(file);if(!stat.isFile()||stat.isSymbolicLink()||stat.nlink!==1)throw new Error('not regular file');const bytes=fs.readFileSync(file);files.push({path:path.resolve(file),exists:true,sha256:hash(bytes),bytes:bytes.length,identity:{dev:String(stat.dev),ino:String(stat.ino)}});return bytes.toString('utf8');}catch(error){if(error.code==='ENOENT')files.push({path:path.resolve(file),exists:false});throw error;}};
   const directoryProof=directory=>{try{const stat=fs.lstatSync(directory);if(!stat.isDirectory()||stat.isSymbolicLink())throw Error('identity');const names=fs.readdirSync(directory).sort();directories.push({path:path.resolve(directory),exists:true,names,identity:{dev:String(stat.dev),ino:String(stat.ino)}});}catch(error){if(error.code==='ENOENT')directories.push({path:path.resolve(directory),exists:false,names:[]});else issue('DIRECTORY_UNREADABLE',{path:directory});}};
@@ -101,7 +106,10 @@ function scanFileEvidence({connections=[],actions=[],homes=[],productionRequest}
     if(state){
       const legacyActions=new Set(),legacyKeys=new Set();let legacySource;
       const legacy=state.completed.filter(row=>state.version===1||row?.legacy===true);
-      if(legacy.length&&!localMaintenance)try{legacySource=legacyConnectionProof(connection,productionRequest,read,directoryProof);}catch{issue('LEGACY_PROTOCOL_UNPROVEN',{path:stateFile});}
+      if((legacy.length||legacyInterpreter&&originals.has(legacyInterpreter.subjectActionId))&&!localMaintenance)try{
+        legacySource=legacyConnectionProof(connection,productionRequest,read,directoryProof,state,legacyInterpreter);
+        for(const file of legacySource.files||[])if(!files.some(row=>row.path===file.path&&row.sha256===file.sha256))files.push(file);
+      }catch{issue('LEGACY_PROTOCOL_UNPROVEN',{path:stateFile});}
       for(const completed of legacy){
         const original=originals.get(completed?.result?.actionId),result=completed?.result,exit=executionExit(result);
         const expectedKey=String(original?.dedupe_key??original?.dedupeKey??original?.id??''),device=actionDevice(original,productionRequest);
@@ -112,7 +120,7 @@ function scanFileEvidence({connections=[],actions=[],homes=[],productionRequest}
         }
         // A legacy completion is immutable terminal history. Missing fields
         // that did not exist in V1 are never fabricated as process evidence.
-        if(!legacySource||!original||!result||typeof completed.key!=='string'||!completed.key||legacyKeys.has(completed.key)||legacyActions.has(original.id)||completed.identity||completed.key!==expectedKey||!['succeeded','failed'].includes(original.status)||original.status!==result.status||legacyHistoryUncertain(result)||!Number.isFinite(result.completedAt)||exit&&!exitedTree(exit)||original.workspace_id!==legacySource.workspaceId||device!==deviceId||!equal(original.result,result.result??result)||original.error&&original.error!==result.error){issue('LEGACY_HISTORY_UNPROVEN',{path:stateFile,actionId:result?.actionId||null});continue;}
+        if(!legacySource||legacySource.recordDigests&&!legacySource.recordDigests.includes(digest({key:completed.key,result}))||!original||!result||typeof completed.key!=='string'||!completed.key||legacyKeys.has(completed.key)||legacyActions.has(original.id)||completed.identity||completed.key!==expectedKey||!['succeeded','failed'].includes(original.status)||original.status!==result.status||legacyHistoryUncertain(result)||!Number.isFinite(result.completedAt)||exit&&!exitedTree(exit)||original.workspace_id!==legacySource.workspaceId||device!==deviceId||!equal(original.result,result.result??result)||original.error&&original.error!==result.error){issue('LEGACY_HISTORY_UNPROVEN',{path:stateFile,actionId:result?.actionId||null});continue;}
         legacyKeys.add(completed.key);legacyActions.add(original.id);
         legacyHistoryProofs.push({schemaVersion:1,kind:'legacy-terminal-history-v1',actionId:original.id,actionDigest:nativeActionDigest(original),operationId:productionRequest.operationId,specHash:productionRequest.specHash,challenge:productionRequest.challenge,hostId:productionRequest.binding.hostId,workspaceId:legacySource.workspaceId,deviceId,origin:connection.apiBase.replace(/\/$/,''),originalInstanceDigest:digest(legacySource.client.originalInstance),policyDigest:legacySource.policyDigest,sourceDigest:legacySource.sourceDigest,cacheRecordDigest:digest(completed),conclusion:'terminal-history-retained'});
       }
@@ -137,6 +145,11 @@ function scanFileEvidence({connections=[],actions=[],homes=[],productionRequest}
         const original=originals.get(started.actionId),resident=original?.type==='hermes.bot.native'&&original.payload.nativeOperation?.resource==='gateway'&&original.payload.nativeOperation.operation==='connect';
         if(!resident&&!exitedTree(executionExit(result)))issue('ACTION_TREE_UNKNOWN',{actionId:started.actionId,path:stateFile});
       }
+      if(legacyInterpreter&&originals.has(legacyInterpreter.subjectActionId))try{
+        if(!legacySource)throw Error('history');
+        const action=originals.get(legacyInterpreter.subjectActionId),proof=legacyInterpreter.neverDispatchedProof({productionRequest,connection,action,state});
+        legacyNeverDispatchedProofs.push(proof);legacyActions.add(action.id);
+      }catch{issue('LEGACY_NEVER_DISPATCHED_UNPROVEN',{actionId:legacyInterpreter.subjectActionId,path:stateFile});}
       for(const action of relevant.filter(row=>row.acked_at))if(!(state.started||[]).some(row=>row.actionId===action.id)&&!legacyActions.has(action.id))issue('ACTION_STATE_BINDING_MISSING',{actionId:action.id,path:stateFile});
     }
     const directory=path.join(runtimeDir,'action-delivery');let names=[];
@@ -179,7 +192,7 @@ function scanFileEvidence({connections=[],actions=[],homes=[],productionRequest}
     }
     for(const action of [...originals.values()].filter(row=>row.type==='hermes.bot.native'&&row.payload.employeeId===item.employeeId&&row.payload.nativeOperation?.resource==='gateway'&&row.payload.nativeOperation.operation==='connect'&&row.acked_at))if(!starts.some(entry=>entry.sourceActionId===action.id))issue('GATEWAY_LIFECYCLE_MISSING',{actionId:action.id,path:file});
   }
-  return {safe:issues.length===0,issues,files,directories,gatewayExits,legacyHistoryProofs,originalActionProofs:legacyHistoryProofs};
+  return {safe:issues.length===0,issues,files,directories,gatewayExits,legacyHistoryProofs,originalActionProofs:[...legacyHistoryProofs,...legacyNeverDispatchedProofs]};
 }
 
 /** Only actual native maintenance inspection + loopback health is accepted. */

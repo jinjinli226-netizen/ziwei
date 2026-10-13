@@ -36,9 +36,31 @@ export function executionExit(value) {
 }
 export function gatewayResultMatches(action,result){const p=parse(action.payload_json)||action.payload||{},operation=p.nativeOperation,receipt=result?.nativeOperation,worker=receipt?.data?.residentWorker;return action.type==='hermes.bot.native'&&operation?.resource==='gateway'&&receipt?.resource==='gateway'&&operation.operation===receipt.operation&&p.employeeId===receipt.employeeId&&p.hermesBot?.revision===receipt.revision&&(!worker||worker.employeeId===p.employeeId&&worker.revision===p.hermesBot?.revision&&worker.controlEpoch===p.hermesBot?.controlEpoch&&worker.platform===operation.input?.platform&&(operation.operation!=='connect'||worker.sourceActionId===action.id));}
 
-export function createPreservation(db,{role=PRODUCT_ROLE,collectNativeEvidence=null,readOnly=false,beforeCommit=null,persistReceipt=null,verifySourceRecord=null}={}) {
+const legacyProofKind='legacy-never-dispatched-v1';
+const legacyPolicyPins=['actionId','actionDigest','hostId','workspaceId','deviceId','origin','specHash','authorizationDigest','historicalGenerationDigest','policyDigest','sourceDigest','cacheDigest','loggerDigest'];
+function copyLegacyActionPolicy(value){
+  if(value===null)return null;
+  const invalid=()=>fail('ROLLBACK_LEGACY_POLICY_INVALID','旧 action 策略必须由独立代码提供完整固定绑定');
+  const plain=(item,keys)=>item&&typeof item==='object'&&!Array.isArray(item)&&[Object.prototype,null].includes(Object.getPrototypeOf(item))&&Reflect.ownKeys(item).length===keys.length&&keys.every(key=>Object.hasOwn(item,key)&&Object.hasOwn(Object.getOwnPropertyDescriptor(item,key),'value'));
+  const hex=item=>typeof item==='string'&&/^[a-f0-9]{64}$/.test(item);
+  if(!plain(value,[...legacyPolicyPins,'requiredFiles'])||legacyPolicyPins.some(key=>typeof value[key]!=='string'||!value[key])||legacyPolicyPins.filter(key=>key.endsWith('Digest')||key==='specHash').some(key=>!hex(value[key])))invalid();
+  try{const origin=new URL(value.origin);if(!['http:','https:'].includes(origin.protocol)||origin.origin!==value.origin)invalid();}catch{invalid();}
+  if(!Array.isArray(value.requiredFiles)||!value.requiredFiles.length)invalid();
+  const paths=new Set(),requiredFiles=[];
+  for(const record of value.requiredFiles){
+    if(!plain(record,['path','sha256'])||typeof record.path!=='string'||record.path.includes('\0')||!hex(record.sha256))invalid();
+    const flavour=path.win32.isAbsolute(record.path)?path.win32:path.posix,key=flavour===path.win32?record.path.toLowerCase():record.path;
+    if(!flavour.isAbsolute(record.path)||flavour.resolve(record.path)!==record.path||paths.has(key))invalid();
+    paths.add(key);requiredFiles.push(Object.freeze({path:record.path,sha256:record.sha256}));
+  }
+  return Object.freeze({...Object.fromEntries(legacyPolicyPins.map(key=>[key,value[key]])),requiredFiles:Object.freeze(requiredFiles)});
+}
+
+export function createPreservation(db,{role=PRODUCT_ROLE,collectNativeEvidence=null,readOnly=false,beforeCommit=null,persistReceipt=null,verifySourceRecord=null,legacyActionPolicy=null}={}) {
   if(!['v2','v1-compat'].includes(role))fail('PRODUCT_ROLE_INVALID','产品包角色无效');
   for(const hook of [beforeCommit,persistReceipt,verifySourceRecord])if(hook!==null&&(typeof hook!=='function'||hook.constructor?.name==='AsyncFunction'))fail('ROLLBACK_HOOK_INVALID','转换 hook 必须为独立代码传入的同步函数');
+  // This immutable capability is constructor code state, never a seal option.
+  const legacyPolicy=copyLegacyActionPolicy(legacyActionPolicy);
   if(!readOnly)db.exec(`CREATE TABLE IF NOT EXISTS version_preservation (
     singleton INTEGER PRIMARY KEY CHECK(singleton=1), operation_id TEXT NOT NULL,
     state TEXT NOT NULL CHECK(state IN ('preparing','sealed','restored')),
@@ -65,6 +87,27 @@ export function createPreservation(db,{role=PRODUCT_ROLE,collectNativeEvidence=n
   const before=(command,operationId)=>invoke(beforeCommit,{command,operationId,row:current()});
   const receipt=(command,operationId)=>{const report=inspect();invoke(persistReceipt,{command,operationId,row:current(),report});return report;};
   const sourceRecord=(kind,record)=>{if(!verifySourceRecord)return undefined;const value=invoke(verifySourceRecord,{kind,record});if(value!==undefined&&value!==true)fail('ROLLBACK_EVIDENCE_CHANGED','可信源 host 复核拒绝文件证据');return value;};
+  function verifyLegacyAction(native,operationId){
+    const refuse=()=>fail('ROLLBACK_NOT_DRAINED','原 V1 action 的唯一可信未下发证明不完整');
+    if(native.nativeStateProofs!==undefined&&!Array.isArray(native.nativeStateProofs))refuse();
+    const proofs=(native.nativeStateProofs||[]).filter(proof=>proof?.kind===legacyProofKind);
+    if(!legacyPolicy){if(proofs.length)refuse();return;}
+    if(proofs.length!==1)refuse();
+    const proof=proofs[0];
+    if(proof.schemaVersion!==1||proof.operationId!==operationId||proof.verified!==true||proof.conclusion!=='never-dispatched'||uncertain(proof)||legacyPolicyPins.some(key=>proof[key]!==legacyPolicy[key])||sourceRecord(legacyProofKind,proof)!==true)refuse();
+    const action=exists(db,'a2a_actions')?db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(legacyPolicy.actionId):null;
+    if(!action||classifyAction(action).isV2||nativeActionDigest(action)!==legacyPolicy.actionDigest||action.workspace_id!==legacyPolicy.workspaceId||action.status!=='expired'||typeof action.acked_at!=='string'||!action.acked_at||action.result_json!=='')refuse();
+    const payload=parse(action.payload_json);
+    if(!payload||typeof payload!=='object'||Array.isArray(payload))refuse();
+    const devices=['deviceId','device_id','targetDeviceId','target_device_id'].map(key=>payload[key]).filter(value=>value!==undefined&&value!==null&&value!=='');
+    if(!devices.length){const employee=all(db,'employees').filter(row=>row.id===(payload.employeeId||payload.employee_id||payload.assignee)&&row.workspace_id===legacyPolicy.workspaceId);if(employee.length!==1)refuse();devices.push(employee[0].target_device_id);}
+    if(devices.some(device=>device!==legacyPolicy.deviceId))refuse();
+    const bindings=Array.isArray(native.actionBindings)?native.actionBindings.filter(binding=>binding?.id===action.id):[];
+    if(bindings.length!==1||bindings[0].digest!==legacyPolicy.actionDigest||!Array.isArray(native.files))refuse();
+    for(const pin of legacyPolicy.requiredFiles){const records=native.files.filter(record=>record?.path===pin.path);if(records.length!==1||records[0].exists!==true||records[0].sha256!==pin.sha256)refuse();}
+    // Required files still pass through the original final source/file checker.
+    // No process receipt is fabricated, and the original action is never edited.
+  }
   function inventory() {
     const bots=all(db,'hermes_bots'),employees=all(db,'employees'),routines=all(db,'bot_routines');
     const saved=parse(current()?.intent_json),errors=[];
@@ -194,6 +237,7 @@ export function createPreservation(db,{role=PRODUCT_ROLE,collectNativeEvidence=n
       if(checked.state!=='preparing'||remaining.length)fail('ROLLBACK_NOT_DRAINED','证据检查期间状态发生变化',remaining);
       if((native.nativeDatabases||checked.issues.some(issue=>issue.code==='GATEWAY_INBOX_NOT_DRAINED'))&&(native.operationId!==operationId||native.intentDigest!==digest(currentOperation.intent_json)||native.versionsDigest!==digest(currentOperation.versions_json)))fail('ROLLBACK_EVIDENCE_CHANGED','原生证据的冻结操作身份发生变化');
       for(const binding of native.actionBindings||[]){const action=db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(binding.id);if(!action||nativeActionDigest(action)!==binding.digest)fail('ROLLBACK_EVIDENCE_CHANGED','原生证据依赖的原 action 发生变化');}
+      verifyLegacyAction(native,operationId);
       validateIdentities(parse(row.intent_json));
       for(const file of native.files||[])try{if(sourceRecord('file',file)===true)continue;if(file.exists===false?fs.existsSync(file.path):crypto.createHash('sha256').update(fs.readFileSync(file.path)).digest('hex')!==file.sha256)fail('ROLLBACK_EVIDENCE_CHANGED','本机文件证据在封存前发生变化');if(file.identity){const stat=fs.lstatSync(file.path);if(stat.isSymbolicLink()||String(stat.dev)!==file.identity.dev||String(stat.ino)!==file.identity.ino)fail('ROLLBACK_EVIDENCE_CHANGED','原生数据库文件身份发生变化');}}catch(error){if(['ROLLBACK_EVIDENCE_CHANGED','ROLLBACK_HOOK_INVALID'].includes(error.code))throw error;fail('ROLLBACK_EVIDENCE_CHANGED','本机文件证据不可读');}
       for(const directory of native.directories||[])try{if(sourceRecord('directory',directory)===true)continue;if(directory.identity){const stat=fs.lstatSync(directory.path);if(stat.isSymbolicLink()||!stat.isDirectory()||String(stat.dev)!==directory.identity.dev||String(stat.ino)!==directory.identity.ino)fail('ROLLBACK_EVIDENCE_CHANGED','本机目录身份发生变化');}if(directory.exists?canonical(fs.readdirSync(directory.path).sort())!==canonical(directory.names):fs.existsSync(directory.path))fail('ROLLBACK_EVIDENCE_CHANGED','本机目录证据在封存前发生变化');}catch(error){if(['ROLLBACK_EVIDENCE_CHANGED','ROLLBACK_HOOK_INVALID'].includes(error.code))throw error;fail('ROLLBACK_EVIDENCE_CHANGED','本机目录证据不可读');}
