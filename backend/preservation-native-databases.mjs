@@ -61,21 +61,10 @@ function validateWal(bytes,main,index){
   if(indexHeader&&frames&&(indexHeader.checksum[0]!==s0||indexHeader.checksum[1]!==s1||indexHeader.pages!==committedPages))throw Error('NATIVE_WAL_INDEX_UNPROVEN');
   // An authenticated current index may delimit old reset bytes, never current
   // uncommitted/checksum-damaged frames. Every tail header must carry old salt.
-  let priorSalt=null,priorAge=0,lastTailCommit;const generations=bytes.readUInt32BE(12);
-  for(let offset=activeEnd;offset<bytes.length;offset+=size+24){
-    const tailSalt=bytes.subarray(offset+8,offset+16),age=(bytes.readUInt32BE(16)-bytes.readUInt32BE(offset+8))>>>0;
-    if(!indexHeader||tailSalt.equals(salt)||!bytes.readUInt32BE(offset))fail();
-    const newGeneration=!priorSalt||!tailSalt.equals(priorSalt);
-    if(newGeneration&&(age<=priorAge||age>generations))fail();
-    checksum(offset,offset+8);checksum(offset+24,offset+24+size);
-    const matches=s0===bytes.readUInt32BE(offset+16)&&s1===bytes.readUInt32BE(offset+20);
-    // Salt is not covered by frame checksum. A tail continuing the current
-    // chain is damaged current data, never a proven old reset generation.
-    if(newGeneration?matches:!matches)fail();
-    if(newGeneration){priorSalt=tailSalt;priorAge=age;}
-    s0=bytes.readUInt32BE(offset+16);s1=bytes.readUInt32BE(offset+20);lastTailCommit=bytes.readUInt32BE(offset+4);
-  }
-  if(activeEnd<bytes.length&&!lastTailCommit)fail();
+  // Stable SHM proves the current prefix, not the origin of retained bytes.
+  // An old segment start has no checksum anchor after its prefix is overwritten.
+  // Until a source-bound prior full generation is available, preserve and refuse.
+  if(activeEnd<bytes.length)fail();
 }
 
 /** Source bytes are never opened by SQLite: WAL is copied with the DB to a private reader. */

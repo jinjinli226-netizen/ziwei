@@ -2,7 +2,7 @@
 
 状态：接口约定，实施与独立验收待完成；不是正式放行。2026-10-14。
 
-唯一产品 owner E02 承接 `backend/production-preservation.mjs`、`backend/preservation-native-evidence.mjs`、`backend/preservation-native-databases.mjs`、`backend/version-preservation.mjs`、`scripts/v2-preservation.mjs`、`scripts/production-source-proof.mjs`、角色导出器/打包器及其产品测试。R01 可在自己的 `scripts/operations/` 实现 transport、原实例 pause/stop、备份/restore-read、部署 staging 与 phase controller；不得修改这些产品文件。Q01 独立验收准确新候选及真实解压包。289d4f4 冻结包只承载已交付 G1，不包含以下新接口。
+产品 owner E02 承接`backend/preservation-native-evidence.mjs`、`backend/preservation-native-databases.mjs`、`backend/version-preservation.mjs`、`scripts/v2-preservation.mjs`、角色导出器/打包器及其产品测试；E03按总控2026-10-14拆分承接`backend/production-preservation.mjs`、`scripts/production-source-proof.mjs`及其专属新tests。R01 可在自己的 `scripts/operations/` 实现 transport、原实例 pause/stop、备份/restore-read、部署 staging 与 phase controller；不得修改这些产品文件。Q01 独立验收准确新候选及真实解压包。289d4f4 冻结包只承载已交付 G1，不包含以下新接口。
 
 ## 产品接口与调用方责任
 
