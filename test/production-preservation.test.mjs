@@ -32,6 +32,7 @@ function fixture(t){
  }
  const apiRoot=path.join(root,'original-api');fs.mkdirSync(path.join(apiRoot,'backend'),{recursive:true});const entryPath=path.join(apiRoot,'backend','server.mjs');fs.writeFileSync(entryPath,'// stopped original V1 fixture\n');
  const host={hostId:'host_fixture',deviceIds:[],workspaceIds:['ws_fixture'],clients:[],apiInstances:[{root:apiRoot,entryPath,role:'v1',buildDigest:sha(JSON.stringify([{path:'backend/server.mjs',sha256:sha(fs.readFileSync(entryPath))}])),serviceManager:'isolated-fixture',originalInstance:{pid:999999999,createdAt:'2026-10-01T00:00:00.000Z',nonceDigest:nonce}}]};
+ for(const original of host.apiInstances)original.installTargets=Object.fromEntries(['v1-compat','v2'].map(role=>{const manifest=JSON.parse(fs.readFileSync(path.join(packages,role+'-manifest.json'))),targetRoot=path.join(root,'releases',role);return [role,{root:targetRoot,entryPath:path.join(targetRoot,'backend/server.mjs'),manifestSha256:manifests.find(row=>row.productRole===role).sha256,buildDigest:manifest.buildDigest}];}));
  const stat=fs.lstatSync(databaseFile,{bigint:true}),database={path:databaseFile,canonicalPath:fs.realpathSync.native(databaseFile),identity:{dev:String(stat.dev),ino:String(stat.ino)},databaseId:crypto.randomUUID()};
  const spec={schemaVersion:1,mode:'production',operationId:'fixture-production',authorization:{executor:'R01',targetOrigins:['https://fixture.invalid'],allowedCommands:['inspect','prepare','seal','restore','abort']},database,packages:{directory:packages,manifests,artifacts},candidateCommit,qa:{commit:'b'.repeat(40),evidenceSha256:nonce},versions:FROZEN_VERSIONS,hosts:[host],backupScope:{mainDatabase:databaseFile,controlDatabases:[],objectRoots:[],homes:[],journals:[],configs:[],privateReferences:[]},bootstrap:{fromRole:'v1',offline:true,allOriginalWritersStopped:true}};
  spec.specHash=digestProduction(spec);
@@ -47,6 +48,7 @@ function fixture(t){
 }
 const options=f=>({spec:f.spec,trust:f.trust,packageRoot:f.packageRoot,proofProvider:f.provider});
 const sourceBytes=f=>sha(fs.readFileSync(f.spec.database.path));
+const reapprove=f=>{delete f.spec.specHash;f.spec.specHash=digestProduction(f.spec);f.trust.approvedSpecs=[{operationId:f.spec.operationId,specHash:f.spec.specHash}];for(const host of f.spec.hosts)f.trust.hosts.find(row=>row.hostId===host.hostId).bindingDigest=digestProduction(host);};
 test('schema-aware old V1 inspection is absent and does not initialize or touch bytes',async t=>{
  const f=fixture(t),before=sourceBytes(f);const plan=await runProductionPreservation({...options(f),command:'inspect'});
  assert.equal(plan.state,'absent');assert.equal(plan.willApply,false);assert.equal(sourceBytes(f),before);assert.deepEqual(f.calls,[]);
@@ -101,7 +103,7 @@ test('same operation with independently approved different spec cannot replace r
 });
 test('restore requires running matching V2 evidence and keeps sealed on stopped-old proof',async t=>{
  const f=fixture(t);await runProductionPreservation({...options(f),command:'prepare',apply:true});await runProductionPreservation({...options(f),command:'seal',apply:true});
- fs.cpSync(f.packageRoot,f.spec.hosts[0].apiInstances[0].root,{recursive:true});
+ fs.cpSync(f.packageRoot,f.spec.hosts[0].apiInstances[0].installTargets.v2.root,{recursive:true});
  await assert.rejects(runProductionPreservation({...options(f),command:'restore',apply:true}),{code:'PRODUCTION_RESTORE_RUNNING_V2_REQUIRED'});
  assert.equal((await runProductionPreservation({...options(f),command:'inspect'})).state,'sealed');
 });
@@ -139,9 +141,9 @@ test('default native observation refuses an absent original PID without complete
 test('matching installed V2 fixture restores same current DB with compat increments and tombstones intact',async t=>{
  const f=fixture(t);await runProductionPreservation({...options(f),command:'prepare',apply:true});await runProductionPreservation({...options(f),command:'seal',apply:true});
  const db=new DatabaseSync(f.spec.database.path);createPreservation(db,{role:'v1-compat'});db.exec("INSERT INTO employees VALUES('ordinary','ws_fixture','codex','active'); INSERT INTO tasks VALUES('v1_increment','ordinary'); CREATE TABLE ordinary_tombstones(id TEXT PRIMARY KEY); INSERT INTO ordinary_tombstones VALUES('deleted_during_compat')");db.close();
- const apiRoot=f.spec.hosts[0].apiInstances[0].root;fs.cpSync(f.packageRoot,apiRoot,{recursive:true});
+ const apiRoot=f.spec.hosts[0].apiInstances[0].installTargets.v2.root;fs.cpSync(f.packageRoot,apiRoot,{recursive:true});
  const manifest=JSON.parse(fs.readFileSync(path.join(f.spec.packages.directory,'v2-manifest.json')));
- const observe=(binding,request)=>({...f.observe(binding),runningV2:{fenceState:'sealed',productRole:'v2',buildDigest:manifest.buildDigest,databaseId:f.spec.database.databaseId,instances:binding.apiInstances.map(original=>({bindingDigest:digestProduction(original),root:original.root,entryPath:original.entryPath,running:true,productRole:'v2',buildDigest:manifest.buildDigest,pid:999999998,createdAt:'2026-10-14T00:00:00.000Z',nonceDigest:nonce}))}});
+ const observe=(binding,request)=>({...f.observe(binding),runningV2:{fenceState:'sealed',productRole:'v2',buildDigest:manifest.buildDigest,databaseId:f.spec.database.databaseId,instances:request.installed.targets.map(target=>({kind:target.kind,bindingDigest:target.bindingDigest,targetDigest:target.targetDigest,root:target.root,entryPath:target.entryPath,running:true,productRole:'v2',buildDigest:target.buildDigest,pid:999999998,createdAt:'2026-10-14T00:00:00.000Z',nonceDigest:nonce}))}});
  f.provider.collect=input=>input.requests.map(request=>collectProductionSourceProof({request,trust:f.trust,observe}));
  f.provider.recheck=input=>input.requests.map(request=>collectProductionSourceProof({request,trust:f.trust,previous:input.previous,observe}));
  const restored=await runProductionPreservation({...options(f),command:'restore',apply:true});assert.equal(restored.state,'restored');
@@ -187,4 +189,46 @@ test('a signed running-V2 exemption cannot authorize offline prepare',async t=>{
  const f=fixture(t),before=sourceBytes(f),observe=binding=>({...f.observe(binding),runningV2:{instances:[]}});
  f.provider.collect=input=>input.requests.map(request=>collectProductionSourceProof({request,trust:f.trust,observe}));
  await assert.rejects(runProductionPreservation({...options(f),command:'prepare',apply:true}),{code:'PRODUCTION_SOURCE_NOT_STOPPED'});assert.equal(sourceBytes(f),before);
+});
+test('restore uses approved new physical API release while old release stays unchanged',async t=>{
+ const f=fixture(t),original=f.spec.hosts[0].apiInstances[0],oldBytes=sha(fs.readFileSync(original.entryPath));
+ original.installTargets=Object.fromEntries(['v1-compat','v2'].map(role=>{
+  const manifest=JSON.parse(fs.readFileSync(path.join(f.spec.packages.directory,role+'-manifest.json'))),root=path.join(f.root,'releases',role);
+  return [role,{root,entryPath:path.join(root,'backend/server.mjs'),manifestSha256:f.spec.packages.manifests.find(row=>row.productRole===role).sha256,buildDigest:manifest.buildDigest}];
+ }));
+ reapprove(f);await runProductionPreservation({...options(f),command:'prepare',apply:true});await runProductionPreservation({...options(f),command:'seal',apply:true});
+ const target=original.installTargets.v2;assert.notEqual(target.root,original.root);fs.cpSync(f.packageRoot,target.root,{recursive:true});
+ const manifest=JSON.parse(fs.readFileSync(path.join(f.spec.packages.directory,'v2-manifest.json')));
+ const observe=(binding,request)=>({...f.observe(binding),runningV2:{fenceState:'sealed',productRole:'v2',buildDigest:manifest.buildDigest,databaseId:f.spec.database.databaseId,instances:request.installed.targets.map(approved=>({kind:approved.kind,bindingDigest:approved.bindingDigest,targetDigest:approved.targetDigest,root:approved.root,entryPath:approved.entryPath,running:true,productRole:'v2',buildDigest:approved.buildDigest,pid:999999998,createdAt:'2026-10-14T00:00:00.000Z',nonceDigest:nonce}))}});
+ f.provider.collect=input=>input.requests.map(request=>collectProductionSourceProof({request,trust:f.trust,observe}));
+ f.provider.recheck=input=>input.requests.map(request=>collectProductionSourceProof({request,trust:f.trust,previous:input.previous,observe}));
+ const restored=await runProductionPreservation({...options(f),command:'restore',apply:true});assert.equal(restored.state,'restored');assert.equal(restored.databaseId,f.spec.database.databaseId);assert.equal(sha(fs.readFileSync(original.entryPath)),oldBytes);
+});
+test('approved target pins reject wrong role manifest/build/entry before transport or first write',async t=>{
+ for(const mutation of [target=>{target.manifestSha256='e'.repeat(64);},target=>{target.buildDigest='e'.repeat(64);},target=>{target.entryPath=path.join(target.root,'unmanifested.mjs');}]){
+  const f=fixture(t),before=sourceBytes(f);mutation(f.spec.hosts[0].apiInstances[0].installTargets.v2);reapprove(f);
+  await assert.rejects(runProductionPreservation({...options(f),command:'prepare',apply:true}),{code:'PRODUCTION_INSTALL_TARGET_INVALID'});assert.equal(sourceBytes(f),before);assert.deepEqual(f.calls,[]);
+ }
+});
+test('HMAC-valid restore request cannot replace the immutable approved target',async t=>{
+ const f=fixture(t);await runProductionPreservation({...options(f),command:'prepare',apply:true});await runProductionPreservation({...options(f),command:'seal',apply:true});
+ const before=sourceBytes(f);let observed=0;
+ f.provider.collect=input=>input.requests.map(request=>{request.payload.installed.targets[0].root=path.join(f.root,'wrong-release');request.payload.installed.targets[0].entryPath=path.join(f.root,'wrong-release','backend/server.mjs');const forged=signProductionEnvelope({hostId:request.hostId,payload:request.payload,trust:f.trust});return collectProductionSourceProof({request:forged,trust:f.trust,observe(){observed++;return f.observe(f.spec.hosts[0]);}});});
+ await assert.rejects(runProductionPreservation({...options(f),command:'restore',apply:true}),{code:'PRODUCTION_INSTALL_TARGET_INVALID'});assert.equal(observed,0);assert.equal(sourceBytes(f),before);
+});
+test('running proof with old physical root or wrong new entry cannot authorize restore',async t=>{
+ for(const mutation of [(row,original)=>{row.root=original.root;row.entryPath=original.entryPath;},row=>{row.entryPath=path.join(row.root,'src','execution-admission.mjs');}]){
+  const f=fixture(t);await runProductionPreservation({...options(f),command:'prepare',apply:true});await runProductionPreservation({...options(f),command:'seal',apply:true});
+  const original=f.spec.hosts[0].apiInstances[0];fs.cpSync(f.packageRoot,original.installTargets.v2.root,{recursive:true});const before=sourceBytes(f);
+  const observe=(binding,request)=>{const instances=request.installed.targets.map(target=>({kind:target.kind,bindingDigest:target.bindingDigest,targetDigest:target.targetDigest,root:target.root,entryPath:target.entryPath,running:true,productRole:'v2',buildDigest:target.buildDigest,pid:999999998,createdAt:'2026-10-14T00:00:00.000Z',nonceDigest:nonce}));mutation(instances[0],original);return {...f.observe(binding),runningV2:{fenceState:'sealed',productRole:'v2',buildDigest:request.installed.apiBuildDigest,databaseId:f.spec.database.databaseId,instances}};};
+  f.provider.collect=input=>input.requests.map(request=>collectProductionSourceProof({request,trust:f.trust,observe}));
+  await assert.rejects(runProductionPreservation({...options(f),command:'restore',apply:true}),{code:'PRODUCTION_RESTORE_RUNNING_V2_REQUIRED'});assert.equal(sourceBytes(f),before);
+ }
+});
+test('approved Windows client targets may retain the same global physical install root',t=>{
+ const f=fixture(t),clientRoot=path.join(f.root,'global-client'),entryPath=path.join(clientRoot,'daemon/ziwei_user.mjs'),clientContents=[{path:'daemon/ziwei_user.mjs',sha256:nonce}];
+ for(const role of ['v1-compat','v2']){const file=path.join(f.spec.packages.directory,role+'-manifest.json'),manifest=JSON.parse(fs.readFileSync(file));manifest.clientContents=clientContents;fs.writeFileSync(file,JSON.stringify(manifest));const pin=f.spec.packages.manifests.find(row=>row.productRole===role);pin.sha256=sha(fs.readFileSync(file));f.spec.hosts[0].apiInstances[0].installTargets[role].manifestSha256=pin.sha256;}
+ const userHome=path.join(f.root,'client-user'),client={root:clientRoot,entryPath,configPath:path.join(userHome,'config.json'),userHome,runtimeDir:path.join(userHome,'runtime'),baseHome:path.join(f.root,'hermes-home'),configSha256:nonce,installedRole:'v1',clientBuild:nonce,originalInstance:{pid:999999997,createdAt:'2026-10-01T00:00:00.000Z',nonceDigest:nonce},installTargets:Object.fromEntries(['v1-compat','v2'].map(role=>[role,{root:clientRoot,entryPath,manifestSha256:f.spec.packages.manifests.find(row=>row.productRole===role).sha256,buildDigest:nonce}]))};
+ f.spec.hosts[0].clients.push(client);f.spec.backupScope.homes.push(client.baseHome,client.userHome);f.spec.backupScope.configs.push(client.configPath);f.spec.backupScope.journals.push(client.runtimeDir);reapprove(f);
+ const validated=validateProductionSpec({spec:f.spec,trust:f.trust,packageRoot:f.packageRoot});assert.equal(validated.spec.hosts[0].clients[0].installTargets.v2.root,clientRoot);
 });
