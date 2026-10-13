@@ -84,17 +84,17 @@ export function terminalMcpStatus({ config = {}, workspace = '', apiBase = '', d
   } catch (error) { return { ...status, reason: error.message }; }
 }
 
-function updateHermesTerminalServer({ profile, env, entry, profileBaseHome, hermesOverlayHome }) {
+function updateHermesTerminalServer({ profile, env, entry, profileBaseHome, hermesOverlayHome, selectedProfileHome }) {
   const normalized = normalizeRuntimeProfile(profile);
   if ((!normalized || normalized === 'default') && !hermesOverlayHome) {
     if (entry) throw new Error('Hermes 手机 MCP 需要明确的独立 profile；不能修改主 profile');
     // Do not let employees inherit an administrator's global phone service.
     let main;
-    try { main = parseYaml(fs.readFileSync(path.join(hermesHome({ baseHome: profileBaseHome || env.HERMES_HOME }), 'config.yaml'), 'utf8')); } catch {}
+    try { main = parseYaml(fs.readFileSync(path.join((selectedProfileHome || hermesHome({ baseHome: profileBaseHome || env.HERMES_HOME })), 'config.yaml'), 'utf8')); } catch {}
     if (main?.mcp_servers?.['ziwei-terminal']?.enabled !== false && main?.mcp_servers?.['ziwei-terminal']) throw new Error('Hermes 主 profile 含宿主手机 MCP；请为员工选择独立 profile，不能继承管理员入口');
     return null;
   }
-  const selectedHome = hermesOverlayHome || hermesProfileHome(normalized, { baseHome: profileBaseHome || env.HERMES_HOME });
+  const selectedHome = hermesOverlayHome || selectedProfileHome || hermesProfileHome(normalized, { baseHome: profileBaseHome || env.HERMES_HOME });
   if (!fs.existsSync(selectedHome)) throw new Error(`Hermes profile 不存在: ${normalized}`);
   const configPath = path.join(selectedHome, 'config.yaml');
   const original = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf8') : '{}';
@@ -116,7 +116,7 @@ function updateHermesTerminalServer({ profile, env, entry, profileBaseHome, herm
   return selectedHome;
 }
 
-export function prepareTerminalMcpLaunch({ runtime, profile, config = {}, workspace, request, auditDirectory, actionId, invocation, env = {}, profileBaseHome, hermesOverlayHome } = {}) {
+export function prepareTerminalMcpLaunch({ runtime, profile, config = {}, workspace, request, auditDirectory, actionId, invocation, env = {}, profileBaseHome, hermesOverlayHome, selectedProfileHome } = {}) {
   const args = [...invocation.args];
   const childEnv = { ...env };
   for (const key of [...TERMINAL_ENV_KEYS, ...LEGACY_TERMINAL_ENV_KEYS]) delete childEnv[key];
@@ -127,7 +127,7 @@ export function prepareTerminalMcpLaunch({ runtime, profile, config = {}, worksp
   }
   if (request?.enabled !== true) {
     if (runtime === 'Hermes') {
-      const home = updateHermesTerminalServer({ profile, env: childEnv, profileBaseHome, hermesOverlayHome });
+      const home = updateHermesTerminalServer({ profile, env: childEnv, profileBaseHome, hermesOverlayHome, selectedProfileHome });
       if (home) childEnv[hermesOverlayHome ? 'HERMES_MANAGED_DIR' : 'HERMES_HOME'] = home;
     }
     return { invocation: { ...invocation, args }, env: childEnv, receipt: null };
@@ -153,7 +153,7 @@ export function prepareTerminalMcpLaunch({ runtime, profile, config = {}, worksp
     args.splice(index < 0 ? args.length : index, 0, ...flags);
   } else {
     const entry = { command: process.execPath, args: [TERMINAL_ADAPTER], enabled: true, env: { ...Object.fromEntries(TERMINAL_ENV_KEYS.map(key => [key, hermesOverlayHome ? childEnv[key] : '${' + key + '}'])), ...Object.fromEntries(LEGACY_TERMINAL_ENV_KEYS.map(key => [key, ''])) } };
-    childEnv[hermesOverlayHome ? 'HERMES_MANAGED_DIR' : 'HERMES_HOME'] = updateHermesTerminalServer({ profile, env: childEnv, entry, profileBaseHome, hermesOverlayHome });
+    childEnv[hermesOverlayHome ? 'HERMES_MANAGED_DIR' : 'HERMES_HOME'] = updateHermesTerminalServer({ profile, env: childEnv, entry, profileBaseHome, hermesOverlayHome, selectedProfileHome });
     if (!args.includes('--toolsets')) args.push('--toolsets', 'all');
   }
   return { invocation: { ...invocation, args }, env: childEnv, receipt: { configured: true, injected: true, loaded: false, transport: 'stdio', serverName: 'ziwei-terminal', workspace, runtime, profile: profile || null, runtimeProfile: profile || null, employeeId: request.employeeId, targetDeviceId: request.deviceId, actionId, auditFile } };
@@ -244,9 +244,9 @@ export function managementMcpStatus(options = {}) {
 }
 
 /** Overlay only native MCP configuration; provider auth refresh and persona remain in the selected home. */
-export function createHermesExecutionOverlay({ profile, baseHome, privateDirectory, managedDirectory } = {}) {
+export function createHermesExecutionOverlay({ profile, baseHome, privateDirectory, managedDirectory, selectedProfileHome } = {}) {
   const normalized = normalizeRuntimeProfile(profile) || 'default';
-  const source = hermesProfileHome(normalized, { baseHome });
+  const source = selectedProfileHome || hermesProfileHome(normalized, { baseHome });
   if (!fs.existsSync(source)) throw new Error(`Hermes profile 不存在: ${normalized}；不会回退其他 profile`);
   const original = fs.existsSync(path.join(source, 'config.yaml')) ? fs.readFileSync(path.join(source, 'config.yaml'), 'utf8') : '{}';
   const sourceDocument = parseDocument(original);
@@ -279,7 +279,7 @@ export function createHermesExecutionOverlay({ profile, baseHome, privateDirecto
 }
 
 /** Configure a native stdio server without placing bearer credentials in argv or profile files. */
-export function prepareManagementMcpLaunch({ runtime, profile, model = null, config = {}, workspace, apiBase, request, auditDirectory, actionId = 'runtime', invocation, env = {}, creatorInstance, creatorInstanceDirectory } = {}) {
+export function prepareManagementMcpLaunch({ runtime, profile, model = null, config = {}, workspace, apiBase, request, auditDirectory, actionId = 'runtime', invocation, env = {}, creatorInstance, creatorInstanceDirectory, selectedProfileHome } = {}) {
   if (!workspace && request?.enabled !== true) return { invocation, env, receipt: null };
   if (request?.workspace && request.workspace !== workspace) throw new Error('管理 MCP 请求工作区与已配对工作区不一致');
   if (!['Codex', 'Hermes'].includes(runtime)) throw new Error(`${runtime} 尚不支持紫薇管理 MCP 启动注入；请显式选择 Codex 或 Hermes`);
@@ -309,7 +309,7 @@ export function prepareManagementMcpLaunch({ runtime, profile, model = null, con
     const stdinIndex = args.lastIndexOf('-');
     args.splice(stdinIndex >= 0 ? stdinIndex : args.length, 0, ...flags);
   } else {
-    overlay = createHermesExecutionOverlay({ profile, baseHome: env.HERMES_HOME, managedDirectory: env.HERMES_MANAGED_DIR, privateDirectory: path.join(auditDirectory, 'hermes-overlays') });
+    overlay = createHermesExecutionOverlay({ profile, selectedProfileHome, baseHome: env.HERMES_HOME, managedDirectory: env.HERMES_MANAGED_DIR, privateDirectory: path.join(auditDirectory, 'hermes-overlays') });
     const document = overlay.document;
     const entry = { command: process.execPath, args: [MANAGEMENT_ADAPTER], enabled: true, env: Object.fromEntries(MANAGEMENT_ENV_KEYS.map(key => [key, key === 'ZIWEI_MCP_TOKEN' && local.credentialEnv.ZIWEI_MCP_TOKEN ? '${ZIWEI_MCP_TOKEN}' : childEnv[key] || ''])) };
     try {
@@ -611,7 +611,7 @@ export function runtimeDiscoverySpawnSpec(binary,args) {
   return runtimeSpawnSpec(binary,args);
 }
 
-export function hermesMcpSpawnSpec(binary, args, { env = process.env } = {}) {
+export function hermesMcpSpawnSpec(binary, args, { env = process.env, boundProfile } = {}) {
   const interpreter=boundHermesInterpreter(binary);
   let binding;
   try {
@@ -619,7 +619,7 @@ export function hermesMcpSpawnSpec(binary, args, { env = process.env } = {}) {
     binding = JSON.parse(output);
     if (!binding.paths?.main || !binding.paths?.mcp_startup || !binding.paths?.managed_scope || !binding.fingerprint) throw new Error();
   } catch { throw new Error('Hermes 原生入口不兼容 managed MCP discovery 或安装已变化；请更新 Hermes/ziwei_user，不会替代运行时'); }
-  return { command: interpreter, args: [HERMES_MCP_BOOTSTRAP, '--launcher', path.resolve(binary), '--binding', JSON.stringify(binding), '--', ...args.map(String)], nativeBinding: { binary, interpreter, entrypoint: binding.paths.main, mode: 'effective-mcp-gate' } };
+  return { command: interpreter, args: [HERMES_MCP_BOOTSTRAP, '--launcher', path.resolve(binary), '--binding', JSON.stringify(binding), ...(boundProfile ? ['--bound-profile', JSON.stringify({home:boundProfile.home,profile:boundProfile.profile,baseHome:boundProfile.baseHome,identity:boundProfile.identity,requestedHome:boundProfile.requestedHome,protectedHomes:boundProfile.protectedHomes})] : []), '--', ...args.map(String)], nativeBinding: { binary, interpreter, entrypoint: binding.paths.main, mode: 'effective-mcp-gate' } };
 }
 
 function readPrivateJson(file) {
@@ -689,9 +689,9 @@ function hasCredential(value) {
   });
 }
 
-export function hermesProfileReadiness(profile, { baseHome = null } = {}) {
+export function hermesProfileReadiness(profile, { baseHome = null, selectedProfileHome = null } = {}) {
   const name = normalizeRuntimeProfile(profile) || 'default';
-  const selectedHome = hermesProfileHome(name, { baseHome });
+  const selectedHome = selectedProfileHome || hermesProfileHome(name, { baseHome });
   const base = { authentication: 'missing', provider: 'missing', ready: false, source: 'profile-files' };
   if (!fs.existsSync(selectedHome)) return { ...base, code: 'profile_missing', reason: `Hermes profile 不存在: ${name}；请先在目标设备创建该 profile` };
   let config;
@@ -890,7 +890,7 @@ export function parseRuntimeStreamLine(line, state, onOutput = () => {}, onStage
 }
 
 /** Execute an installed CLI using an explicit argv, with full local approval. */
-export async function executeRuntime({ runtime, prompt, model = null, profile = null, cwd = process.cwd(), env = {}, attachments = [], imageArtifacts = null, codexMcpDisabledServers = [], managementMcp = null, terminalMcp = null, creatorInstance, creatorInstanceDirectory, hermesBot, botInstanceDirectory, botAuthority, beforeSpawn, signal, onOutput, onProgress, onStage, onActivity, onSupervision } = {}) {
+export async function executeRuntime({ runtime, prompt, model = null, profile = null, cwd = process.cwd(), env = {}, attachments = [], imageArtifacts = null, codexMcpDisabledServers = [], managementMcp = null, terminalMcp = null, creatorInstance, creatorInstanceDirectory, hermesBot, botInstanceDirectory, botAuthority, beforeSpawn, executionGuard, signal, onOutput, onProgress, onStage, onActivity, onSupervision } = {}) {
   if (signal?.aborted) return Promise.resolve({ status: 'failed', code: 'cancelled', error: 'runtime execution cancelled before launch' });
   if(hermesBot)hermesBot={...hermesBot,config:normalizeBotConfig(hermesBot.config)};
   const resolvedRuntime = normalizeRuntime(runtime);
@@ -928,9 +928,13 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
   for (const key of [...MANAGEMENT_ENV_KEYS, ...TERMINAL_ENV_KEYS, ...LEGACY_TERMINAL_ENV_KEYS, ...CREATOR_RUNTIME_ENV_KEYS, ...BOT_RUNTIME_ENV_KEYS]) delete childEnv[key];
   delete childEnv.ZIWEI_DEVICE_TOKEN;
   delete childEnv.ZIWEI_DAEMON_DEVICE_TOKEN;
+  delete childEnv.ZIWEI_EXECUTION_PROFILE_BOUND;
   const profileBaseHome = childEnv.HERMES_HOME || hermesHome();
+  const profileBinding = resolvedRuntime === 'Hermes' && executionGuard ? executionGuard.select({sourceHome:hermesProfileHome(profile || 'default',{baseHome:profileBaseHome}),profile:profile || 'default',baseHome:profileBaseHome}) : null;
+  const selectedProfileHome=profileBinding?.home;
+  if(profileBinding) {profileBinding.verify({cwd});childEnv.HERMES_HOME=selectedProfileHome;childEnv.ZIWEI_EXECUTION_PROFILE_BOUND='1';}
   if (resolvedRuntime === 'Hermes') {
-    const readiness = hermesProfileReadiness(profile || 'default', { baseHome: childEnv.HERMES_HOME });
+    const readiness = hermesProfileReadiness(profile || 'default', { baseHome: childEnv.HERMES_HOME, selectedProfileHome });
     if (!readiness.ready) return Promise.reject(new Error(readiness.reason));
   } else if (resolvedRuntime === 'Codex') {
     const readiness = runtimeReadiness('Codex', { codexHome: childEnv.CODEX_HOME || path.join(os.homedir(), '.codex') });
@@ -973,7 +977,7 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
       reasoningProvider=botPrepared.provider;
       invocation={args:['chat','--query-file','-','-c','Ziwei '+String(hermesBot.conversationId || 'Bot Chat'),'--create-if-missing','--format','stream-json','--model',botPrepared.effectiveModel,'--provider',botPrepared.provider,'--max-turns',String(hermesBot.config.maxTurns),'--run-budget','840',...imageInputs.flatMap(item=>['--image',item.path])],stdin:content,format:'json-lines'};
     }
-    const launch = hermesBot && (hermesBot.config.permissions.mode==='read_only'||hermesBot.config.permissions.management===false) ? {invocation,env:childEnv,receipt:null} : prepareManagementMcpLaunch({ runtime: resolvedRuntime, profile, model, invocation, env: childEnv, ...(managementMcp || {}), creatorInstance, creatorInstanceDirectory });
+    const launch = hermesBot && (hermesBot.config.permissions.mode==='read_only'||hermesBot.config.permissions.management===false) ? {invocation,env:childEnv,receipt:null} : prepareManagementMcpLaunch({ runtime: resolvedRuntime, profile, model, invocation, env: childEnv, ...(managementMcp || {}), creatorInstance, creatorInstanceDirectory, selectedProfileHome });
     invocation = launch.invocation; childEnv = launch.env; receipt = launch.receipt;
     creatorPrepared = launch.creatorPrepared;
     selectedModel = launch.effectiveModel || selectedModel;
@@ -992,13 +996,18 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
     }
     if (resolvedRuntime === 'Hermes' && creatorInstance?.templateId === 'ziwei-employee-creator' && !creatorPrepared) throw new Error('Creator Hermes 缺少可信实例工作区或管理 MCP 连接；未启动模型');
     cleanupOverlay = launch.cleanup || cleanupOverlay;
-    const phoneLaunch = prepareTerminalMcpLaunch({ runtime: resolvedRuntime, profile, invocation, env: childEnv, profileBaseHome, hermesOverlayHome: launch.overlayHome, ...(terminalMcp || {}) });
+    if(profileBinding && !launch.overlayHome) {
+      const overlay=createHermesExecutionOverlay({profile,baseHome:profileBaseHome,selectedProfileHome,privateDirectory:profileBinding.overlayDirectory});
+      childEnv.HERMES_HOME=overlay.sourceHome;childEnv.HERMES_MANAGED_DIR=overlay.home;launch.overlayHome=overlay.home;cleanupOverlay=overlay.cleanup;
+      invocation.args.unshift('--profile',profile || 'default');
+    }
+    const phoneLaunch = prepareTerminalMcpLaunch({ runtime: resolvedRuntime, profile, invocation, env: childEnv, profileBaseHome, hermesOverlayHome: launch.overlayHome, ...(terminalMcp || {}), selectedProfileHome });
     invocation = phoneLaunch.invocation; childEnv = phoneLaunch.env; phoneReceipt = phoneLaunch.receipt;
     if(hermesBot&&phoneReceipt){const index=invocation.args.indexOf('--toolsets');if(index<0)invocation.args.push('--toolsets','ziwei-terminal');else invocation.args[index+1]+=',ziwei-terminal';}
-    if (resolvedRuntime === 'Hermes' && !receipt && !phoneReceipt && !hermesBot) childEnv.HERMES_HOME = hermesProfileHome(profile || 'default', { baseHome: profileBaseHome });
+    if (resolvedRuntime === 'Hermes' && !receipt && !phoneReceipt && !hermesBot) childEnv.HERMES_HOME = selectedProfileHome || hermesProfileHome(profile || 'default', { baseHome: profileBaseHome });
   } catch (error) { cleanupOverlay(); return Promise.reject(error); }
   let spec;
-  try { spec = resolvedRuntime === 'Hermes' && childEnv.HERMES_MANAGED_DIR && (receipt || hermesBot) ? hermesMcpSpawnSpec(discovered.binary, invocation.args, { env: childEnv }) : runtimeSpawnSpec(discovered.binary, invocation.args); }
+  try { spec = resolvedRuntime === 'Hermes' && childEnv.HERMES_MANAGED_DIR && (receipt || hermesBot || profileBinding) ? hermesMcpSpawnSpec(discovered.binary, invocation.args, { env: childEnv, boundProfile:profileBinding }) : runtimeSpawnSpec(discovered.binary, invocation.args); }
   catch (error) { cleanupOverlay(); return Promise.reject(error); }
   // The desktop user session may have a proxy configured in Windows Internet
   // Settings while the daemon process has no proxy variables in its service
@@ -1043,7 +1052,7 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
   if(beforeSpawn) {try{await beforeSpawn();}catch(error){cleanupOverlay();throw error;}}
   return new Promise((resolve, reject) => {
     let supervision;
-    try { supervision = spawnSupervisedRuntime({ command: spec.command, args: spec.args, cwd: path.resolve(String(cwd || process.cwd())), env: childEnv }); }
+    try { profileBinding?.verify({env:childEnv,cwd}); supervision = spawnSupervisedRuntime({ command: spec.command, args: spec.args, cwd: path.resolve(String(cwd || process.cwd())), env: childEnv }); }
     catch (error) { cleanupOverlay(); reject(error); return; }
     const { child } = supervision;
     let settled = false;

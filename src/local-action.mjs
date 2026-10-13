@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import {executeHermesNative} from './hermes-native-runtime.mjs';
 import {createBotGatewayManager} from './hermes-gateway-runtime.mjs';
-import {authorizeNativeExecution,assertNoOwnedBotResource,PRODUCT_ROLE} from './execution-admission.mjs';
+import {authorizeNativeExecution,assertNoOwnedBotResource,createHermesExecutionGuard,PRODUCT_ROLE} from './execution-admission.mjs';
 import {executeBotGroup} from './hermes-group-runtime.mjs';
 import {executeNativeDriver} from './hermes-driver-runtime.mjs';
 import path from 'node:path';
@@ -450,6 +450,8 @@ export function createLocalActionExecutor({runtimeDir, admissionHandledByDispatc
       const imageArtifacts = createImageArtifactSession({runtimeDir,actionId:action.id,conversationId:payload.conversationId || null});
       if (payload.terminalMcp?.enabled === true && terminalMcpConfig.enabled === false) throw new Error('本机手机 MCP 已明确禁用');
       if(payload.hermesBot?.config.permissions.mode==='read_only' && payload.terminalMcp?.enabled)throw new Error('Bot 只读对话权限不允许手机 MCP');
+      const executionGuard=PRODUCT_ROLE==='v1-compat'||['preparing','sealed'].includes(permit?.productState)?createHermesExecutionGuard(action,{protectedHomes:permit?.protectedHomes||[],runtimeDir,defaultWorkdir}):null;
+      if(executionGuard&&String(runtime).trim().toLowerCase()==='hermes')executionGuard.select({sourceHome:hermesProfileHome(payload.profile||payload.runtimeProfile||payload.runtime_profile||payload.hermesProfile||payload.hermes_profile||'default',{baseHome:hermesHomePath||payload.env?.HERMES_HOME||hermesHome()}),profile:payload.profile||payload.runtimeProfile||payload.runtime_profile||payload.hermesProfile||payload.hermes_profile||'default',baseHome:hermesHomePath||payload.env?.HERMES_HOME||hermesHome()});
       const preparedManagement = payload.hermesBot&&(payload.hermesBot.config.permissions.mode==='read_only'||payload.hermesBot.config.permissions.management===false)?{}:automaticManagement ? await automaticManagement.prepare({ signal: context.signal }) : managementMcpConfig;
       const phoneSession = await bootstrapTerminalMcp({ request: payload.terminalMcp, workspace, actionId: action.id, apiBase, deviceToken, privateDirectory: path.join(runtimeDir, 'terminal-mcp-credentials'), signal: context.signal });
       try { return await executeRuntime({
@@ -460,6 +462,7 @@ export function createLocalActionExecutor({runtimeDir, admissionHandledByDispatc
         attachments: attachmentPaths,
         imageArtifacts,
         codexMcpDisabledServers,
+        executionGuard,
         ...(payload.hermesBot?{hermesBot:payload.hermesBot,botInstanceDirectory:path.join(runtimeDir,'bot-instances'),botAuthority:{actionId:action.id,deviceToken},beforeSpawn:authorizeBot}:{}),
         cwd: safeCwd,
         env: { ...(payload.env || {}), ...(hermesHomePath ? { HERMES_HOME: hermesHomePath } : {}) },

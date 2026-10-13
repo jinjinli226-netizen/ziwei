@@ -52,6 +52,12 @@ def _binding(launcher):
         if not {'get_profile_dir', 'profile_exists', '_bootstrap_profile_dir', '_finish_profile_layout'}.issubset(functions):
             raise UnsupportedNativeHermes('owned profile layout')
         paths['profiles'] = str(target.resolve(strict=True))
+    if os.environ.get('ZIWEI_EXECUTION_PROFILE_BOUND') == '1':
+        target = Path(paths['main']).with_name('profiles.py')
+        functions = {node.name for node in ast.parse(target.read_text(encoding='utf-8')).body if isinstance(node, ast.FunctionDef)}
+        if 'resolve_profile_env' not in functions:
+            raise UnsupportedNativeHermes('profile binding shape')
+        paths['profiles'] = str(target.resolve(strict=True))
     if os.environ.get('ZIWEI_CREATOR_HOME'):
         root = Path(paths['main']).parent.parent
         isolated_sources = {'auth': 'hermes_cli.auth', 'auth_codex': 'hermes_cli.auth_codex',
@@ -260,6 +266,10 @@ def run():
     if current != expected:
         raise UnsupportedNativeHermes('changed')
     native_args = sys.argv[5:]
+    bound_profile = None
+    if native_args and native_args[0] == '--bound-profile':
+        bound_profile = json.loads(native_args[1])
+        native_args = native_args[2:]
     if native_args and native_args[0] == '--owned-profile-provision':
         profiles = importlib.import_module('hermes_cli.profiles')
         if str(Path(profiles.__file__).resolve()) != current['paths'].get('profiles'):
@@ -285,8 +295,18 @@ def run():
     if not overlay or not Path(overlay).is_absolute() or not Path(overlay).is_dir():
         raise UnsupportedNativeHermes('overlay')
     sys.argv = [launcher, *native_args[1:]]
+    verify_profile = None
+    if bound_profile is not None:
+        profiles = importlib.import_module('hermes_cli.profiles')
+        if str(Path(profiles.__file__).resolve()) != current['paths'].get('profiles'):
+            raise UnsupportedNativeHermes('profile binding package')
+        spec = importlib.util.spec_from_file_location('ziwei_profile_binding', Path(__file__).with_name('hermes-profile-binding.py'))
+        bridge = importlib.util.module_from_spec(spec); spec.loader.exec_module(bridge)
+        verify_profile = bridge.install(bound_profile, profiles)
     prepared_isolation = prepare_creator_home(current)
     native = importlib.import_module('hermes_cli.main')
+    if verify_profile is not None:
+        verify_profile()
     startup = importlib.import_module('hermes_cli.mcp_startup')
     config = importlib.import_module('hermes_cli.config')
     managed = importlib.import_module('hermes_cli.managed_scope')

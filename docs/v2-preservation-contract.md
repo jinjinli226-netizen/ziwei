@@ -28,6 +28,12 @@ seal 仅把 Bot 员工 status 改为 paused、Bot control_state 改为 paused �
 
 本机在原 wire action 被注入工作目录之前核完整 payload 摘要。封存期间还核实际 selected HOME/目标的 canonical 路径、原 marker 和服务器提供的保护 HOME，拒绝大小写/junction/相对目标别名进入 owned Bot HOME。default、普通 Profile 及 Creator 的来源 HOME 不因总 Hermes 根内有 Bot 而被全局封禁。
 
+Q01 对 `8556aec` 的独立复验发现：上述入口检查后，管理和手机 MCP bootstrap 的异步等待仍允许 Profile junction 切换；旧 V1 兼容包会再次按名称选择 HOME，并进入 owned Bot HOME。该旧候选未通过独立验收，旧失败记录必须保留。
+
+修复后的 V1 兼容和 preparing/sealed V2 客户端，在异步 bootstrap 前捕获同一原请求 Profile 的 canonical HOME 和目录身份。adapter 在 readiness、配置/overlay/Creator 准备前核验该绑定；所有准备函数使用同一 canonical HOME，在最后一次启动前等待后再次核验 alias、目录身份、实际 child HOME、managed/Creator/source HOME 及 cwd。命中保护目录返回 `V2_OBJECT_SEALED`，换到其他普通目录返回 `EXECUTION_RESOURCE_CHANGED`，均在本机启动前拒绝。可信闭包来自执行器的原 permit，不由 payload 设置。
+
+实际 Hermes 执行期 bootstrap 将同一绑定交给原生 Profile selector，保留请求名称，并调用原 selector 的校验/tombstone 规则后核对结果；主模块导入前、原生 selector 运行时和导入后均核验。它不改安装 Hermes、不复制 source auth；Creator 仍使用私有状态 HOME 和同一 source auth store。无管理 MCP 的受保护普通/default 调用也使用本次私有配置 overlay；清理只移除本次创建的 overlay。该机制约束本产品执行链的选取和启动，不声明覆盖 OS 级任意并发文件替换或员工自行调用原生 CLI。
+
 Gateway connect 的成功结果保持原样；真实 worker 退出后，将同 source action、平台、版本、nonce、HOME 和受监管 root PID 的追加生命周期证据 fsync 到原缓存。命令绑定同一个原连接。缺乏原 worker 的 alreadyDisconnected 仍 unknown。普通 runtime 结果不能自称 Gateway 来借用别的树退出证据。
 
 ## 备份、切换与故障处理
