@@ -7,7 +7,7 @@ import {createLocalActionExecutor} from '../../src/local-action.mjs';
 import {ActionDispatcher} from '../../src/daemon.mjs';
 import {createActionScheduler} from '../../src/daemon-action-scheduler.mjs';
 import {createActionDelivery} from '../../src/daemon-action-delivery.mjs';
-import {discoverInstalledRuntimes} from '../../src/runtime-adapters.mjs';
+import {discoverInstalledRuntimes,listHermesProfiles} from '../../src/runtime-adapters.mjs';
 import {createBotGatewayManager} from '../../src/hermes-gateway-runtime.mjs';
 import {assertPreviewNativeAction} from './native-policy.mjs';
 
@@ -75,18 +75,18 @@ export function createPreviewNativeRuntime({directory,repo,workspaces,ownerUserI
     let delivery;const dispatcher=new ActionDispatcher({workspace:slug,deviceId:device.deviceId,workdir:home,stateFile:path.join(runtimeDir,'action-state.json'),canExecute:()=>!stopping,
       onEvent:(event,extra)=>{log.write(event,{workspace:slug,actionId:extra.actionId,stage:extra.stage,code:extra.code});if(extra.actionId&&['action.started','action.output','action.progress','action.stage','action.waiting'].includes(event))delivery?.recordEvent(extra.actionId,event,extra);},
       execute:async(action,context)=>{
-        assertPreviewNativeAction(action,home,apiBase);const operation=action.payload.nativeOperation;let result;
+        assertPreviewNativeAction(action,home,apiBase,{sourceHome:source,deviceId:device.deviceId,workspace:slug});const operation=action.payload.nativeOperation;let result;
         if(operation?.resource==='gateway'&&['connect','disconnect','inbound','outbound'].includes(operation.operation)){
           const data=await gateways.operate(action,{context:action.payload.hermesBot,baseHome:source,privateDirectory:path.join(runtimeDir,'bot-instances'),workspace:slug,apiBase,operation,cwd:home,signal:context.signal,beforeSpawn:async()=>{const receipt=await request(device,`/a2a/v1/actions/${action.id}/bot-start`,{});if(!receipt.allowed)throw Object.assign(new Error('Bot 授权已撤销'),{definitelyNotStarted:true});}});
           result=previewGatewayResult(data,action,version);
         }else result=await executor(action,context);
         if(result.result){result.result.executionSource='local_test_provider';if(result.result.nativeOperation){result.result.nativeOperation.executionSource='local_test_provider';if(result.status==='succeeded'&&result.result.nativeOperation.nativeVersion===version)verified=true;}if(result.result.botValidation?.valid&&result.result.botValidation.nativeVersion===version)verified=true;}return result;
       }});
-    delivery=createActionDelivery({directory:path.join(runtimeDir,'action-delivery'),identity:{apiBase,workspace:slug,deviceId:device.deviceId},post:(route,body)=>request(device,route,body),dispatch:action=>dispatcher.dispatch(action),onEvent:(event,extra)=>log.write(event,{workspace:slug,actionId:extra.actionId,code:extra.code})});
+    delivery=createActionDelivery({directory:path.join(runtimeDir,'action-delivery'),identity:{apiBase,workspace:slug,deviceId:device.deviceId},post:(route,body)=>request(device,route,body),dispatch:action=>dispatcher.dispatch(action),onSuccess:async action=>{if(action.type==='hermes.profile.create')heartbeat();},onEvent:(event,extra)=>log.write(event,{workspace:slug,actionId:extra.actionId,code:extra.code})});
     const scheduler=createActionScheduler({execute:action=>delivery.execute(action),canStart:action=>!stopping&&(!dispatcher.quarantined||delivery.canDeliverWithoutExecution(action)),quarantinedActionIds:()=>dispatcher.quarantinedActionIds,onError:(error,action)=>log.write('native_delivery_error',{actionId:action.id,error:error.message})});
     connections.push({slug,device,dispatcher,delivery,scheduler,gateways});
   }
-  const heartbeat=()=>{for(const {slug,device} of connections)repo.heartbeatDevice(slug,{deviceId:device.deviceId,name:'本机原生隔离预览 · 本地测试 provider',workdir:home,pid:process.pid,runtimes:{Hermes:{status:'available',version,profiles:[{name:'default',provider_configured:true,authentication_configured:true,readiness:{ready:true}}],models:[{id:'preview-local-model',label:'本机原生 · 本地测试 provider'}]}}});};
+  function heartbeat(){const profiles=listHermesProfiles({baseHome:source});for(const {slug,device} of connections)repo.heartbeatDevice(slug,{deviceId:device.deviceId,name:'本机原生隔离预览 · 本地测试 provider',workdir:home,pid:process.pid,runtimes:{Hermes:{status:'available',version,profiles,models:[{id:'preview-local-model',label:'本机原生 · 本地测试 provider'}]}}});}
   heartbeat();const monitor=setInterval(heartbeat,10000),worker=setInterval(()=>{try{for(const connection of connections){const pending=repo.listA2AActions(connection.slug,{status:'pending',deviceId:connection.device.deviceId});connection.scheduler.schedule([...connection.delivery.recoverActions(),...pending]);}}catch(error){log.write('native_poll_error',{code:error.code,error:error.message});}},500);
   return {version,home,get verified(){return verified;},devices:Object.fromEntries(connections.map(item=>[item.slug,item.device.deviceId])),ownsToken(token){const credential=repo.authenticateDeviceToken(token);return Boolean(credential&&connections.some(item=>item.device.deviceId===credential.deviceId&&item.slug===credential.workspace));},async close(){stopping=true;clearInterval(worker);clearInterval(monitor);for(const connection of connections){for(const action of repo.listA2AActions(connection.slug,{status:'acked',deviceId:connection.device.deviceId}))connection.dispatcher.cancel(action.id);await connection.gateways.close();}await Promise.all(connections.map(item=>item.scheduler.whenIdle()));}};
 }

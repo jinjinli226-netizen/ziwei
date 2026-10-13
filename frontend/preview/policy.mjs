@@ -11,6 +11,7 @@ export function previewRequestAllowed({method,path,body,native=false}){
   }
   if(externalDelivery(deliveryBody))return false;
   if(/\/(?:ziwei-connect|phone-mcp|client-maintenance|client-update|terminal-mcp|daemon)(?:\/|$)/.test(path)||path.startsWith('/mcp/')||path.startsWith('/terminal-mcp/'))return false;
+  if(native&&/^\/api\/workspaces\/[^/]+\/hermes\/profiles(?:\/requests(?:\/[^/]+)?)?$/.test(path))return method==='GET'||method==='POST'&&path.endsWith('/requests');
   if(method==='GET'){
     if(['/healthz','/__preview/health','/api/auth/status','/api/auth/me','/api/workspaces','/a2a/v1/agents'].includes(path))return true;
     if(/^\/api\/workspaces\/[^/]+\/(summary|tasks|runtimes|models|skills|skill-sources|documents|automations|automation-templates|members|devices|employees|calendar|settings|notifications|bots|employee-templates|conversations)(?:\/.*)?$/.test(path))return true;

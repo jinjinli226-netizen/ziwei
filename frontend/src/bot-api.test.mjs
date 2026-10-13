@@ -40,5 +40,9 @@ test('all Bot operations retain explicit workspace, escaped IDs and revision bod
     assert.equal(JSON.parse(calls[6].options.body).expectedControlEpoch,2);
     assert.ok(calls[14].url.endsWith('/bots/employee%2Fa/native/actions'));assert.equal(calls[14].options.method,'POST');
     assert.ok(calls[15].url.endsWith('/bots/employee%2Fa/collaboration'));assert.equal(JSON.parse(calls[15].options.body).targetEmployeeIds[0],'other');
+    calls.length=0;
+    await api.hermesProfiles('device/a','workspace-a');await api.createHermesProfile({profile:'independent',deviceId:'device/a',soul:'# independent\n'},'profile-original','workspace-a');await api.hermesProfileAction('action/a','workspace-a');
+    assert.ok(calls.every(call=>call.url.startsWith('https://fixture.invalid/api/workspaces/workspace-a/hermes/profiles')));assert.ok(calls[0].url.endsWith('?deviceId=device%2Fa'));assert.equal(JSON.parse(calls[1].options.body).idempotencyKey,'profile-original');assert.ok(calls[2].url.endsWith('/requests/action%2Fa'));
+    calls.length=0;await api.hermesProfiles('device-a');await api.createHermesProfile({profile:'old-call'});await api.hermesProfileAction('old-action');assert.ok(calls.every(call=>call.url.startsWith('https://fixture.invalid/api/workspaces/workspace-b/')));
   } finally {Object.assign(globalThis,saved);}
 });

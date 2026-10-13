@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
+import fs from 'node:fs';
+import os from 'node:os';
 import {assertPreviewNativeAction} from './native-policy.mjs';
 const home=path.resolve('preview-home'),action=config=>({payload:{hermesBot:{sourceProfile:'default',config}}});
 test('native preview permits isolated HOME and loopback providers only',()=>{
@@ -12,3 +14,4 @@ test('native preview permits isolated HOME and loopback providers only',()=>{
   assert.throws(()=>assertPreviewNativeAction(action({voice:{tts:{provider:'openai'}}}),home));
   assert.throws(()=>assertPreviewNativeAction({payload:{...action({}).payload,nativeOperation:{resource:'gateway',operation:'connect',input:{platform:'webhook'}}}},home));
 });
+test('native preview permits only bound profile creation and an existing owned source profile',()=>{const owned=fs.mkdtempSync(path.join(os.tmpdir(),'owned-profile-policy-'));try{const sourceHome=path.join(owned,'.hermes');fs.mkdirSync(path.join(sourceHome,'profiles','created'),{recursive:true});const options={sourceHome,deviceId:'native-device',workspace:'preview-bots'},create={type:'hermes.profile.create',payload:{workspace:'preview-bots',deviceId:'native-device',profile:'created',soul:'# created\n'}};assert.equal(assertPreviewNativeAction(create,owned,'http://127.0.0.1:4283',options),true);for(const payload of [{profile:'default'},{deviceId:'fixture-device'},{workspace:'other'},{profile:'../outside'}])assert.throws(()=>assertPreviewNativeAction({...create,payload:{...create.payload,...payload}},owned,'http://127.0.0.1:4283',options));assert.equal(assertPreviewNativeAction({payload:{hermesBot:{sourceProfile:'created',config:{}}}},owned,'http://127.0.0.1:4283',options),true);assert.throws(()=>assertPreviewNativeAction({payload:{hermesBot:{sourceProfile:'missing',config:{}}}},owned,'http://127.0.0.1:4283',options));}finally{fs.rmSync(owned,{recursive:true,force:true});}});
