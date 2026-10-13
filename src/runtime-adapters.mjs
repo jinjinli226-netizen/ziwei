@@ -13,6 +13,8 @@ import { imageArtifactInstructions, readImageArtifacts, validateImageBytes, imag
 import { spawnSupervisedRuntime } from './runtime-process.mjs';
 import { prepareHermesBotHome, BOT_RUNTIME_ENV_KEYS } from './hermes-bot-runtime.mjs';
 import { normalizeBotConfig } from './hermes-bot-config.mjs';
+import {parseBotReasoningProof} from './hermes-bot-reasoning.mjs';
+export {parseBotReasoningProof} from './hermes-bot-reasoning.mjs';
 export { prepareHermesBotHome } from './hermes-bot-runtime.mjs';
 
 /**
@@ -641,6 +643,10 @@ export function validateHermesBotRuntime({context,baseHome,privateDirectory,work
     return {status:'succeeded',result};
   } catch(error) {
     if(error.code==='ETIMEDOUT')throw new Error('Hermes 配置检查超时；未启动模型');
+    const reasoning=String(error.stderr || '').split(/\r?\n/).map(line=>parseBotReasoningProof(line,context,{provider:prepared.provider,model:prepared.effectiveModel})).filter(Boolean).at(-1);
+    if(reasoning?.status!=='matched'&&reasoning)return{status:'failed',code:'BOT_REASONING_UNSATISFIED',error:'原生实际推理等级与明确请求不一致；未启动模型',result:{botValidation:{valid:false,schemaVersion:1,employeeId:context.employeeId,revision:context.revision,effective:{reasoning}},externalModelCalls:0}};
+    const rejection=String(error.stderr || '').match(/Hermes Bot bootstrap rejected before model startup: (BOT_REASONING_[A-Z_]+)/)?.[1];
+    if(context.config.reasoningEffort&&rejection)return{status:'failed',code:rejection,error:'原生明确推理配置被拒绝；未启动模型',result:{botValidation:{valid:false,schemaVersion:1,employeeId:context.employeeId,revision:context.revision,effective:{reasoning:{requested:context.config.reasoningEffort,actual:null,status:'rejected',code:rejection}}},externalModelCalls:0}};
     throw new Error(`Hermes 配置检查失败；未启动模型。${redactSecrets(String(error.stderr || error.message || '')).slice(0,800)}`);
   } finally {overlay.cleanup();}
 }
@@ -912,6 +918,10 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
   let cleanupOverlay = () => {};
   let creatorPrepared = null;
   let creatorIsolation = null;
+  let botReasoning=null;
+  let reasoningRequests=0;
+  let reasoningProvider=null;
+  let reasoningRejection=null;
   let selectedModel = model || null;
   try {
     // Internal executor policy, never an A2A payload field. Apply the complete
@@ -930,6 +940,7 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
     if(hermesBot) {
       if(resolvedRuntime!=='Hermes')throw new Error('Bot 必须使用 Hermes');
       botPrepared=prepareHermesBotHome({context:hermesBot,sourceHome:hermesProfileHome(profile || 'default',{baseHome:profileBaseHome}),privateDirectory:botInstanceDirectory,workspace:managementMcp?.workspace,apiBase:managementMcp?.apiBase});
+      reasoningProvider=botPrepared.provider;
       invocation={args:['chat','--query-file','-','-c','Ziwei '+String(hermesBot.conversationId || 'Bot Chat'),'--create-if-missing','--format','stream-json','--model',botPrepared.effectiveModel,'--provider',botPrepared.provider,'--max-turns',String(hermesBot.config.maxTurns),'--run-budget','840',...imageInputs.flatMap(item=>['--image',item.path])],stdin:content,format:'json-lines'};
     }
     const launch = hermesBot && (hermesBot.config.permissions.mode==='read_only'||hermesBot.config.permissions.management===false) ? {invocation,env:childEnv,receipt:null} : prepareManagementMcpLaunch({ runtime: resolvedRuntime, profile, model, invocation, env: childEnv, ...(managementMcp || {}), creatorInstance, creatorInstanceDirectory });
@@ -982,8 +993,13 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
       if (creatorPrepared && line.startsWith('ZIWEI_CREATOR_ISOLATION:')) {
         try {
           const value = JSON.parse(line.slice('ZIWEI_CREATOR_ISOLATION:'.length));
-          if (Object.keys(value).length === Object.keys(creatorPrepared).length && Object.entries(creatorPrepared).every(([key, item]) => value[key] === item)) creatorIsolation = creatorPrepared;
+          if (Object.keys(value).length === Object.keys(creatorPrepared).length && Object.entries(creatorPrepared).every(([key, item]) => typeof item==='object'?JSON.stringify(value[key])===JSON.stringify(item):value[key] === item)) creatorIsolation = creatorPrepared;
         } catch {}
+      } else if(hermesBot&&line.startsWith('ZIWEI_BOT_REASONING:')){
+        const proof=parseBotReasoningProof(line,hermesBot,{provider:reasoningProvider,model:selectedModel});
+        if(proof){botReasoning=proof;if(proof.phase==='request')reasoningRequests++;}
+      } else if(hermesBot?.config.reasoningEffort&&/^Hermes Bot bootstrap rejected before model startup: BOT_REASONING_[A-Z_]+$/.test(line)){
+        reasoningRejection=line.split(': ').at(-1);
       } else consume(`${line}\n`);
     }
   };
@@ -1040,6 +1056,15 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
       if (signal?.aborted) return finish({ status: 'failed', code: 'cancelled', error: 'runtime execution cancelled; completed tool writes may already exist', result: exitResult });
     const result = { runtime: resolvedRuntime, model: selectedModel, profile: profile || null, binary: discovered.binary, code, signal: childSignal, processExit, output: state.response.trim() || state.output, diagnostics: state.response.trim() ? state.output : null, truncated: state.truncated, ...(spec.nativeBinding ? { hermesBootstrap: spec.nativeBinding } : {}), ...(creatorPrepared ? { creatorIsolation: creatorIsolation || { ...creatorPrepared, enabled: false, reasonCode: 'native_isolation_unconfirmed' } } : {}), ...(receipt ? { managementMcp: managementMcpReceipt(receipt) } : {}), ...(phoneReceipt ? { terminalMcp: terminalMcpReceipt(phoneReceipt) } : {}), ...(attachments.length ? {inputAttachments:attachments} : {}) };
       if(hermesBot)Object.assign(result,{botIsolation:creatorIsolation,configurationRevision:hermesBot.revision,nativeSessionId:state.sessionId || null});
+      if(hermesBot?.config.reasoningEffort){
+        result.reasoning=botReasoning?{...botReasoning,requests:reasoningRequests}:{requested:hermesBot.config.reasoningEffort,actual:null,status:'unconfirmed',requests:0};
+        if(botReasoning&&botReasoning.status!=='matched'){
+          if(botReasoning.phase==='preflight'&&reasoningRequests===0)Object.assign(result,{neverStarted:true,externalModelCalls:0});
+          return finish({status:'failed',code:'BOT_REASONING_UNSATISFIED',error:'原生实际推理等级未满足明确请求；禁止将降级结果当作成功',result});
+        }
+        if(reasoningRejection){result.reasoning.status='rejected';result.reasoning.code=reasoningRejection;return finish({status:'failed',code:reasoningRejection,error:'原生明确推理配置被拒绝',result});}
+        if(code===0&&(!botReasoning||botReasoning.phase!=='request'||reasoningRequests<1))return finish({status:'failed',code:'BOT_REASONING_UNCONFIRMED',error:'缺少原生请求边界的实际推理等级回执',result});
+      }
       if (code === 0 && creatorPrepared && !creatorIsolation) return finish({ status: 'failed', code: 'creator_isolation_unconfirmed', error: 'Hermes 未确认实例状态隔离；不能报告执行成功', result });
       const mcpFailure = code === 0 ? managementMcpExecutionFailure(result.managementMcp) || terminalMcpExecutionFailure(result.terminalMcp) : null;
       if (mcpFailure) return finish({ status: 'failed', ...mcpFailure, result });

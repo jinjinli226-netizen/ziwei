@@ -12,6 +12,11 @@ def provision(request):
     from hermes_cli import profiles
     import yaml
     context, metadata = request['context'], request['metadata']
+    requested_effort=context.get('config',{}).get('reasoningEffort')
+    if requested_effort:
+        from hermes_constants import VALID_REASONING_EFFORTS
+        if requested_effort not in VALID_REASONING_EFFORTS or request['seedConfig'].get('agent',{}).get('reasoning_effort')!=requested_effort:
+            raise RuntimeError('BOT_PROFILE_REASONING_INVALID')
     instance = context.get('instance', {})
     name = instance.get('profile', '')
     if instance.get('mode') != 'owned_profile' or not re.fullmatch(r'bot-[a-z0-9_-]{1,58}', name):
@@ -74,4 +79,5 @@ def provision(request):
             'profileHome': str(profiles.get_profile_dir(name).resolve()), 'nativeVersion': __version__,
             'authentication': request['authentication'], 'authMode': 'source-native-store',
             'templateProfile': instance['templateProfile'], 'duplicate': duplicate,
-            'provisionActionId': instance['provisionActionId']}
+            'provisionActionId': instance['provisionActionId'],
+            **({'reasoning':{'requested':requested_effort,'actual':None,'status':'configured'}} if requested_effort else {})}

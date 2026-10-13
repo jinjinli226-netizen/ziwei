@@ -72,7 +72,7 @@ try{
   const native=spawnSupervisedRuntime({command:path.join(installed,'venv/Scripts/python.exe'),args:[path.resolve('test/fixtures/hermes-owned-profile.py')],cwd:root,env:process.env});
   let nativeOutput='';native.child.on('error',()=>{});for(const stream of [native.child.stdout,native.child.stderr])stream.on('data',data=>{nativeOutput+=String(data);});native.child.stdin.end();
   const timer=setTimeout(()=>void native.stop(),60000);let nativeExit;try{nativeExit=await native.completionEvidence;}finally{clearTimeout(timer);}
-  fs.writeFileSync(path.join(root,'native-fixtures.log'),nativeOutput);assert.equal(successfulProfileExit(nativeExit),true,nativeOutput);assert.match(nativeOutput,/Ran 5 tests/);assert.match(nativeOutput,/\nOK\s*$/);
+  fs.writeFileSync(path.join(root,'native-fixtures.log'),nativeOutput);assert.equal(successfulProfileExit(nativeExit),true,nativeOutput);assert.match(nativeOutput,/Ran 6 tests/);assert.match(nativeOutput,/\nOK\s*$/);
   executor=makeExecutor();const created=[];
   for(const role of ['a','b']){
     let bot=bots.create('test-111',{name:'Owned '+role,sourceProfile:'default',targetDeviceId:device.deviceId,model:'fixture-'+role,idempotencyKey:'owned-'+role,config:{maxTurns:4,toolsets:['memory'],permissions:{mode:'execute',management:false}}});
@@ -100,6 +100,6 @@ try{
   assert.ok(calls.filter(call=>call.role==='a').at(-1).ownMemory);assert.ok(calls.filter(call=>call.role==='b').every(call=>!call.ownMemory));assert.ok(calls.every(call=>call.authorizationCorrect));
   assert.deepEqual(snapshot(),before);
   assert.deepEqual(installedSnapshot(),installedBefore);assert.equal(installedStatus(),statusBefore);
-  const receipt={date:new Date().toISOString(),installedHead,installedSourceHashes:installedBefore,installedTrackedStatusUnchanged:true,nativeFixtures:{tests:5,processExit:nativeExit},bots:created.map(bot=>({employeeId:bot.id,mainConversationId:bot.main_conversation_id,instance:bot.instance})),taskId:task.id,calls,results,sourceHashesUnchanged:true,network:'Loopback model protocol only; external connect and DNS blocked; no real phone or external account',root};
+  const receipt={date:new Date().toISOString(),installedHead,installedSourceHashes:installedBefore,installedTrackedStatusUnchanged:true,nativeFixtures:{tests:6,processExit:nativeExit},bots:created.map(bot=>({employeeId:bot.id,mainConversationId:bot.main_conversation_id,instance:bot.instance})),taskId:task.id,calls,results,sourceHashesUnchanged:true,network:'Loopback model protocol only; external connect and DNS blocked; no real phone or external account',root};
   fs.writeFileSync(path.join(root,'receipt.json'),JSON.stringify(receipt,null,2));console.log('RECEIPT '+path.join(root,'receipt.json'));
 }finally{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));repo.db.close();}

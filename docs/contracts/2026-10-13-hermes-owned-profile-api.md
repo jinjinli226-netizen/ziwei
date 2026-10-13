@@ -70,8 +70,22 @@
 
 `ziwei_bot` 增加 `operation: "provision"`，create 输入支持 `sourceProfile`；工具说明和 Creator 管理指引均要求等待开通再 validate。原有 runs/action 查询、revision/control_epoch、设备绑定、忙碌/暂停/停止与不确定执行保护保留。设备将 `hermes.bot.provision` 纳入原生进程及持久化 started 记录；重启发现无终态时隔离，禁止重放。
 
+## 明确推理强度（有界补充）
+
+Bot `config` 新增可选 `reasoningEffort`，仅接受精确原生等级 `minimal/low/medium/high/xhigh/max/ultra`。创建和版本化更新使用同一字段；未提供时不保存新字段，也不改变既有 Bot/Creator 的默认行为。新 QA 请求应明确给出模型和等级，不能以来源配置存在该值代替。
+
+该字段随 revision 进入 provisioning/validate/聊天/任务的受信 `hermesBot.config`，新 HOME seed 与每回合 HOME 的 `agent.reasoning_effort` 相同。每次启动设置进程内 `ZIWEI_BOT_REASONING_EFFORT`，bootstrap 核对 raw/effective 配置以及原生 resolve_reasoning_config；managed policy 或 per-model override 改写时返回 `BOT_REASONING_MANAGED_CONFLICT`，不关闭 managed policy。
+
+开通的 `botProvision.reasoning={requested,actual:null,status:"configured"}` 只证明配置保存。验证回执 `botValidation.effective.reasoning` 和模型回执 `result.reasoning` 含 `requested/effective/actual/nativeActual/mode/status/phase/evidence/actualModel` 及 employee/revision/provider/model 绑定。`phase=preflight` 是本机原生转换检查；`conversion` 是每回合转换；`request` 是原生 request overrides 和 sanitization 后、SDK 接收前的最终 kwargs 核对，均不等于外部服务接受或实际计费。模型回执的 `requests` 统计这些最终原生请求准备回执，不是 HTTP 成功次数。
+
+明确请求被转换为其他等级时 `status=mismatch`，返回 `BOT_REASONING_UNSATISFIED`；缺少请求边界证明不能报告模型执行成功。服务端也拒绝缺少匹配 actual 的明确等级验证回执。`ultra` 不会被静默当作 `xhigh` 成功，旧未配置该字段的回执保持兼容。
+
+当前精确等级实际验收限定 `openai-codex`；其他 provider 显式请求等级时返回 `BOT_REASONING_PROVIDER_UNVERIFIED`。Q01 已经实际 Codex endpoint/机器既有代理验证精确 `gpt-6.1-sol / max` HTTP200，响应 model/effort 匹配。项目 adapter 因而只对 `openai-codex + gpt-6.1-sol + max` 补充兼容，回执为 `requested=max/effective=max/actual=max/nativeActual=xhigh/mode=verified_gpt61_sol_max`。安装版原始转换仍是 xhigh，且未修改安装文件或其他 provider/model/level 的支持集合。其他原生匹配情形 `mode=native`。
+
+Q01 的 `gpt-6.1-sol / ultra` HTTP400 已明确不支持；本补丁继续拒绝 ultra。Bot 以用户最新决策明确保存 max，旧 Bot 不批量改值。没有自动重试/降档代码；用户授权的 max→xhigh 仅在明确不支持时由版本化配置选择和新验收体现，超时、认证或限流不能触发降档。外部能力探测不替代正式产品连续聊天/任务首链验收。
+
 ## 认证及本轮边界
 
-`source-native-store` 复用现有认证：来源 `.env` 仅加载到当前进程；来源原生 OAuth 存储只读引用，不复制 token。两个原生写入口 `_save_auth_store`、`_save_codex_tokens` 在 Bot 进程内拒绝写入。需要 OAuth 刷新时运行失败，须处理来源授权；本轮不声称支持自动 OAuth 续期，也不要求每个 Bot 注册新的模型账号。
+`source-native-store` 复用现有认证：来源 `.env` 仅加载到当前进程；来源原生 OAuth 存储只读引用，不复制 token。两个原生写入口 `_save_auth_store`、`_save_codex_tokens` 在 Bot 进程内拒绝写入。需要 OAuth 刷新时运行失败，须处理来源授权；本轮不声称支持自动 OAuth 续期，也不要求每个 Bot 注册新的模型账号。来源 HTTP_PROXY/HTTPS_PROXY 也保留在进程内，不强制禁用正常机器代理，不改变系统代理或预览的 loopback 策略。
 
 实际验收包含本地协议 provider、两 Bot 原生创建、主聊天、普通管理任务、重建执行器后复用、记忆隔离和原生 memory read。管理 API 创建任务不等于管理 MCP loader 已握手；手机 MCP loader、手机命令及完整 native driver 组合留待独立后续验收。

@@ -20,6 +20,7 @@ import { normalizeConversationAttachments } from './conversation-attachments.mjs
 import { resolveEmployeeDefaultWorkdir } from './employee-workdir.mjs';
 import { assertBotExecution, botUncertain, BOT_INTERNAL, botActionMaintenance } from './bots.mjs';
 import {verifyBotProvisionReceipt} from './bot-profiles.mjs';
+import {botReasoningProof} from '../src/hermes-bot-reasoning.mjs';
 import { botFailure } from '../src/hermes-bot-config.mjs';
 import { CREATOR_BOT_GUIDANCE } from './employees/creator-template.mjs';
 
@@ -2066,6 +2067,11 @@ export function createRepository(options = {}) {
       db.exec('SAVEPOINT conversation_result');
       try {
         if(row.type==='hermes.bot.provision'&&status==='succeeded')verifyBotProvisionReceipt(payload,result);
+        if(row.type==='hermes.bot.validate'&&status==='succeeded'&&payload.hermesBot?.config.reasoningEffort){
+          const validation=result?.botValidation || result?.result?.botValidation;
+          const proof=botReasoningProof(validation?.effective?.reasoning,payload.hermesBot);
+          if(!proof||proof.status!=='matched'||proof.phase!=='preflight')throw botFailure('BOT_REASONING_RECEIPT_REQUIRED','明确推理等级缺少匹配原生实际值的验证回执');
+        }
         if(status==='succeeded'&&payload.collaborationManifest&&payload.collaborationManifest.mode!=='group'){
           const receipt=result?.nativeOperation || result?.result?.nativeOperation;
           if(receipt?.status!=='succeeded'||receipt.resource!=='collaboration'||receipt.employeeId!==payload.employeeId||receipt.revision!==payload.hermesBot.revision)throw botFailure('BOT_COLLABORATION_RECEIPT_REQUIRED','原生协作回执不匹配');
