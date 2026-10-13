@@ -3,9 +3,10 @@ const creationDefaults=version=>{if(version!==1)throw new Error('原创建请求
 export function ownedBotChatBlockReason(bot){
   if(bot?.instance?.mode!=='owned_profile')return '';
   if(!botInstanceStatus(bot).provisioned)return '专属 Profile 与 HOME 尚未确认，请在 Bot 设置查询原创建回执。';
-  if(!['configured','source_reference'].includes(bot.instance.provisioning.authentication))return '模型认证尚未就绪，请在 Bot 设置核对并检查配置。';
+  const checked=bot.validation?.status==='succeeded'&&bot.validation.revision===bot.revision;
+  if(!checked&&!['configured','source_reference'].includes(bot.instance.provisioning.authentication))return '模型认证尚待当前配置检查，请在 Bot 设置核对。';
   if(bot.control_state!=='active')return 'Bot 尚未启用，请在 Bot 设置检查并启用。';
-  if(bot.validation?.status!=='succeeded'||bot.validation.revision!==bot.revision)return '当前配置尚未通过检查，请在 Bot 设置核对。';
+  if(!checked)return '当前配置尚未通过检查，请在 Bot 设置核对。';
   return '';
 }
 
@@ -16,6 +17,7 @@ export function botCreateAdmission(discovery,{workspace,deviceId,sourceProfile}=
   if(!runtime||runtime.cli_status!=='available')issues.push('目标电脑尚未发现可用 Hermes CLI。');
   const profile=runtime?.profiles?.find(row=>(typeof row==='string'?row:row.name)===sourceProfile);
   if(!profile)issues.push('请选择目标电脑已发现的初始化来源 Profile。');
+  else if(profile.initialization_source===false||profile.owned_profile===true)issues.push('另一个 Bot 的专属 Profile 不能作为初始化来源。');
   const authenticationReady=Boolean(profile&&(profile.authentication_configured===true||profile.readiness?.ready===true));
   return{ready:issues.length===0,issues,authenticationReady,device,runtime,profile};
 }
@@ -27,7 +29,8 @@ export function botInstanceStatus(bot,discovery) {
   if(!confirmed){const failed=['failed','cancelled','expired'].includes(provision.status),unknown=provision.status==='uncertain'||provision.status==='provisioned';return{...base,stage:unknown?'uncertain':failed?'failed':'provisioning',label:unknown?'专属 Profile 结果待核实':failed?'专属 Profile 创建失败':'正在创建专属 Profile',canRecover:identity&&failed};}
   const admission=botCreateAdmission(discovery,{workspace:bot.workspace,deviceId:bot.employee?.target_device_id,sourceProfile:profile});
   const authentication=provision.authentication||'required',required=!['configured','source_reference'].includes(authentication),stage=!admission.ready?'discovery_pending':required?'authentication_required':'provisioned';
-  return{...base,home:instance.home,provisioned:true,authentication,stage,label:stage==='discovery_pending'?'专属 Profile 已创建 · 等待设备发现':required?'专属 Profile 已创建 · 模型认证未就绪':'专属 Profile 已创建',canValidate:admission.ready&&!required,modelReady:admission.ready&&!required,issues:admission.issues};
+  const computerReady=admission.device?.status==='online'&&admission.device.healthy!==false&&admission.runtime?.cli_status==='available';
+  return{...base,home:instance.home,provisioned:true,authentication,stage,label:stage==='discovery_pending'?'专属 Profile 已创建 · 等待设备发现':required?'专属 Profile 已创建 · 模型认证待检查':'专属 Profile 已创建',canValidate:Boolean(computerReady),modelReady:bot.validation?.status==='succeeded'&&bot.validation.revision===bot.revision,issues:admission.issues};
 }
 
 // The initial creation contains identifiers and fixed safe defaults only. Role,

@@ -12,8 +12,8 @@ const instance=computed(()=>botInstanceStatus(props.bot,props.discovery));
     <dl><div><dt>{{instance.mode==='owned_profile'?'专属 Profile':'来源 Profile'}}</dt><dd><code>{{instance.profile||'尚未报告'}}</code></dd></div><div><dt>{{instance.mode==='owned_profile'?'实际 HOME':'原实例 HOME'}}</dt><dd><code v-if="instance.home" data-bot-home>{{instance.home}}</code><span v-else>{{instance.mode==='owned_profile'?'等待设备回执确认':'原实例 HOME 未上报'}}</span></dd></div><div v-if="instance.mode==='owned_profile'"><dt>初始化来源</dt><dd>{{instance.templateProfile||'尚未报告'}}</dd></div></dl>
     <p v-if="instance.mode==='legacy_private_home'">此员工沿用原来源 Profile 和独立实例，保留原记忆与主聊天。</p>
     <template v-else>
-      <p v-if="instance.authentication==='source_reference'">模型认证引用初始化来源；OAuth 原存储只读，到期后需在来源 Profile 重新授权。能否运行以当前配置检查和实际回执为准。</p>
-      <p v-else-if="instance.authentication==='required'">模型认证尚未就绪。请在目标电脑核对此 Profile 的 provider 或初始化来源认证，再查询并检查配置。</p>
+      <p v-if="bot.instance.authMode==='source-native-store'||instance.authentication==='source_reference'">模型认证引用初始化来源；OAuth 原存储只读，到期后需在来源 Profile 重新授权。能否运行以当前配置检查和实际回执为准。</p>
+      <p v-if="instance.authentication==='required'">开通时模型认证未就绪。请在目标电脑核对此 Profile 的 provider 或初始化来源认证，再检查当前配置；开通快照不代替最新检查。</p>
       <p v-else-if="instance.authentication==='configured'">设备已报告模型认证配置；检查通过并启用后可在同一主聊天交任务。</p>
       <p v-if="instance.stage==='discovery_pending'">目录创建已确认，等待所选电脑重新报告此 Profile。{{instance.issues?.join('；')}}</p>
       <p v-if="instance.stage==='uncertain'">原创建结果待核实，继续查询同一动作；不会重新分配 Profile 或 HOME。</p>

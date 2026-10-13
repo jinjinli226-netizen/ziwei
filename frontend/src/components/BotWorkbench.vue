@@ -32,7 +32,8 @@ const selectedDevice=computed(()=>discovery.value?.devices?.find(item=>item.id==
 const deviceOptions=computed(()=>[{value:'',label:'选择当前工作区的电脑'},...(discovery.value?.devices || []).map(device=>({value:device.id,label:`${device.name || device.id} · ${device.status==='online'?'在线':'离线'}`}))]);
 const createDevice=computed(()=>discovery.value?.devices?.find(item=>item.id===createForm.value.targetDeviceId));
 const createRuntime=computed(()=>createDevice.value?.runtimes?.find(item=>item.name==='Hermes'));
-const profileOptions=computed(()=>[{value:'',label:'选择已发现的初始化来源'},...(createRuntime.value?.profiles || []).map(profile=>({value:typeof profile==='string'?profile:profile.name,label:typeof profile==='string'?profile:profile.name}))]);
+const sourceProfiles=computed(()=>(createRuntime.value?.profiles||[]).filter(profile=>profile.initialization_source!==false&&profile.owned_profile!==true&&!s.bots.some(bot=>bot.instance?.mode==='owned_profile'&&bot.employee?.target_device_id===createForm.value.targetDeviceId&&bot.instance.profile===(typeof profile==='string'?profile:profile.name))));
+const profileOptions=computed(()=>[{value:'',label:'选择已发现的初始化来源'},...sourceProfiles.value.map(profile=>({value:typeof profile==='string'?profile:profile.name,label:typeof profile==='string'?profile:profile.name}))]);
 const createReadiness=computed(()=>botCreateAdmission(discovery.value,{workspace:props.workspace,deviceId:createForm.value.targetDeviceId,sourceProfile:createForm.value.sourceProfile}));
 const instanceStatus=computed(()=>botInstanceStatus(s.bot,discovery.value));
 const modelOptions=computed(()=>[{value:'',label:'沿用来源 profile 模型'},...props.models.map(model=>({value:model.id,label:model.label || model.id}))]);
@@ -86,7 +87,7 @@ async function create(){
   ownedCreate.acknowledge(result.id);tab.value='chat';emit('changed');s.notice='Bot 和主聊天已保存。专属 Profile、HOME 与模型就绪状态见下方。';
 }
 async function refreshInstance(){await Promise.all([workbench.refresh(),loadDiscovery()]);}
-async function recoverInstance(){if(!instanceStatus.value.canRecover)return;const revision=s.bot.revision,epoch=s.bot.control_epoch,actionId=instanceStatus.value.actionId;await workbench.mutate((id,workspace)=>api.provisionBot(id,{expectedRevision:revision,expectedControlEpoch:epoch,idempotencyKey:`bot-profile-recover-${id}-${actionId}`},workspace),'已查询同一专属 Profile 的恢复请求，请等待原设备回执。',{readback:true});}
+async function recoverInstance(){if(!instanceStatus.value.canRecover)return;const revision=s.bot.revision,actionId=instanceStatus.value.actionId;await workbench.mutate((id,workspace)=>api.provisionBot(id,{expectedRevision:revision,idempotencyKey:`bot-profile-recover-${id}-${actionId}`},workspace),'已查询同一专属 Profile 的恢复请求，请等待原设备回执。',{readback:true});}
 async function prepareInstance(){
   if(preparing.value||!instanceStatus.value.canValidate||configDirty.value||s.busy||s.writeUnknown)return;
   const visit=generation,workspace=props.workspace,id=s.selectedId;preparing.value=true;
@@ -123,7 +124,7 @@ watch(()=>props.workspace,async workspace=>{
   generation++;createVisit++;ownedCreate.select(workspace);clearTransientDrafts();showCreate.value=false;discovery.value=null;tab.value=props.initialTab;
   await Promise.all([workbench.setWorkspace(workspace,props.botId),loadDiscovery()]);
 },{immediate:true});
-watch(()=>[createForm.value.targetDeviceId,createRuntime.value?.profiles],()=>{if(ownedCreateState.value.pending)return;const names=(createRuntime.value?.profiles||[]).map(row=>typeof row==='string'?row:row.name);if(!names.includes(createForm.value.sourceProfile))createForm.value.sourceProfile=names.includes('default')?'default':names[0]||'';});
+watch(()=>[createForm.value.targetDeviceId,sourceProfiles.value],()=>{if(ownedCreateState.value.pending)return;const names=sourceProfiles.value.map(row=>typeof row==='string'?row:row.name);if(!names.includes(createForm.value.sourceProfile))createForm.value.sourceProfile=names.includes('default')?'default':names[0]||'';});
 watch(()=>props.actorId,()=>{ownedCreate.dispose();ownedCreate=createOwnedBotRequest({api,wrap:reactive,namespace:props.actorId,origin:API_BASE,getDiscovery:()=>discovery.value});ownedCreateState.value=ownedCreate.state;closeCreate();});
 watch(()=>props.botId,id=>{if(id!==s.selectedId){clearTransientDrafts();void workbench.select(id);}});
 watch(()=>props.initialTab,value=>{if(tab.value!==value){routineEditor.value=null;tab.value=value;}});

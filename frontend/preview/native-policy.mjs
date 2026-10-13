@@ -13,6 +13,17 @@ export function assertPreviewNativeAction(action,home,apiBase,{sourceHome,device
   }
   const snapshot=action.payload?.hermesBot;
   if(!snapshot)throw Object.assign(new Error('原生预览只执行明确绑定的 Bot；Creator 保留原路径'),{definitelyNotStarted:true});
+  if(action.type==='hermes.bot.provision'){
+    const payload=action.payload||{},instance=snapshot.instance;
+    if(!sourceHome||!deviceId||payload.deviceId!==deviceId||payload.workspace!==workspace||snapshot.workspace!==workspace||snapshot.deviceId!==deviceId||snapshot.employeeId!==payload.employeeId||instance?.mode!=='owned_profile'||!instance.ownershipId)reject('专属 Profile 创建必须绑定当前原生电脑、工作区和 Bot');
+    if(!/^bot-[a-f0-9]{24}$/.test(instance.profile||'')||snapshot.sourceProfile!==instance.profile)reject('专属 Profile 名称必须使用服务端分配的身份');
+    const template=instance.templateProfile;
+    if(!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(template||''))reject('初始化来源 Profile 无效');
+    const source=template==='default'?sourceHome:path.join(sourceHome,'profiles',template);
+    if(!fs.existsSync(source)||!fs.statSync(source).isDirectory()||!inside(fs.realpathSync(sourceHome),fs.realpathSync(source)))reject('初始化来源必须属于本预览隔离 HOME');
+    const metadata=path.join(source,'ziwei-instance.json');if(fs.existsSync(metadata)&&JSON.parse(fs.readFileSync(metadata,'utf8')).mode==='owned_profile')reject('另一个 Bot 的专属 Profile 不能作为初始化来源');
+    return true;
+  }
   if(action.type==='directory.inspect'){
     const directory=path.resolve(String(action.payload.path||''));let parent=directory;while(!fs.existsSync(parent)&&parent!==path.dirname(parent))parent=path.dirname(parent);
     if(!action.payload.path||!inside(path.resolve(home),directory)||!inside(fs.realpathSync(home),fs.realpathSync(parent)))reject('隔离预览只检查自己的 HOME 内目录；其他项目目录不开放');

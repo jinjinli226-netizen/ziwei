@@ -23,6 +23,7 @@ export function previewRequestAllowed({method,path,body,native=false}){
   if(method==='POST'&&/^\/api\/workspaces\/[^/]+\/conversations$/.test(path))return true;
   if(native&&method==='POST'&&/^\/api\/conversations\/[^/]+\/workdir\/inspect$/.test(path))return true;
   if(native&&method==='POST'&&/^\/api\/workspaces\/[^/]+\/bots\/[^/]+\/(native\/actions|collaboration)$/.test(path))return true;
+  if(native&&method==='POST'&&/^\/api\/workspaces\/[^/]+\/bots\/[^/]+\/provision$/.test(path))return true;
   if(/^\/api\/workspaces\/[^/]+\/bots(?:\/[^/]+(?:\/(validate|control|routines)(?:\/[^/]+(?:\/run)?)?)?)?$/.test(path))return ['POST','PATCH','DELETE'].includes(method);
   if(/^\/api\/workspaces\/[^/]+\/employees(?:\/[^/]+(?:\/bot)?)?$/.test(path))return ['POST','PATCH','DELETE'].includes(method);
   if(/^\/api\/workspaces\/[^/]+\/employee-templates\/[^/]+\/instances$/.test(path))return method==='POST';
