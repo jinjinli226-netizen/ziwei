@@ -346,11 +346,15 @@ function stop(signal) {
   shutdownAbort.abort();
   for (const connection of connections.values()) connection.pollAbort?.abort();
   const closed = new Promise(resolve => { if (health.listening) health.close(resolve); else resolve(); });
-  void Promise.allSettled([closed, ...activeHeartbeats]).then(() => {
-    log('stopped', { signal });
+  // Signal shutdown also owns any registered resident Gateway. Its existing
+  // close method waits for the supervised completion; no arbitrary PID is used.
+  const executors = [...connections.values()].map(connection => Promise.resolve().then(() => connection.localExecutor.close()));
+  void Promise.allSettled([closed, ...activeHeartbeats, ...executors]).then(results => {
+    const failed = results.filter(result => result.status === 'rejected').length;
+    log('stopped', { signal, ...(failed ? { cleanupFailures: failed } : {}) });
     // Let outbound fetch, pipe writes and native close callbacks drain. The
     // server close callback alone is not a whole-process quiescence boundary.
-    process.exitCode = 0;
+    process.exitCode = failed ? 1 : 0;
   });
 }
 process.on('SIGINT', () => stop('SIGINT'));

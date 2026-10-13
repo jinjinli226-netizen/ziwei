@@ -73,7 +73,7 @@ function snapshot(file,files,read){
   for(const suffix of ['', '-wal', '-journal', '-shm']){
     const target=file+suffix;
     if(!fs.existsSync(target)){const proof={path:target,exists:false};source.push({proof});files.push(proof);continue;}
-    const stat=fs.lstatSync(target);if(!stat.isFile()||stat.isSymbolicLink()||stat.nlink!==1)throw Error('NATIVE_DATABASE_IDENTITY_UNKNOWN');
+    const stat=fs.lstatSync(target,{bigint:true});if(!stat.isFile()||stat.isSymbolicLink()||stat.nlink!==1n)throw Error('NATIVE_DATABASE_IDENTITY_UNKNOWN');
     const bytes=fs.readFileSync(target),proof={path:target,exists:true,bytes:bytes.length,sha256:hash(bytes),identity:{dev:String(stat.dev),ino:String(stat.ino)}};
     files.push(proof);source.push({proof,bytes});if(suffix==='-journal'&&bytes.length)throw Error('NATIVE_DATABASE_RECOVERY_REQUIRED');
   }
@@ -88,7 +88,7 @@ function snapshot(file,files,read){
   }finally{
     db?.close();
     for(const name of fs.readdirSync(directory)){const target=path.join(directory,name);if(fs.lstatSync(target).isSymbolicLink()||!fs.lstatSync(target).isFile())throw Error('NATIVE_SNAPSHOT_CLEANUP_UNKNOWN');fs.unlinkSync(target);}fs.rmdirSync(directory);
-    for(const {proof} of source){if(proof.exists){const stat=fs.lstatSync(proof.path);if(stat.isSymbolicLink()||String(stat.dev)!==proof.identity.dev||String(stat.ino)!==proof.identity.ino||hash(fs.readFileSync(proof.path))!==proof.sha256)throw Error('NATIVE_DATABASE_CHANGED');}else if(fs.existsSync(proof.path))throw Error('NATIVE_DATABASE_CHANGED');}
+    for(const {proof} of source){if(proof.exists){const stat=fs.lstatSync(proof.path,{bigint:true});if(stat.isSymbolicLink()||String(stat.dev)!==proof.identity.dev||String(stat.ino)!==proof.identity.ino||hash(fs.readFileSync(proof.path))!==proof.sha256)throw Error('NATIVE_DATABASE_CHANGED');}else if(fs.existsSync(proof.path))throw Error('NATIVE_DATABASE_CHANGED');}
   }
 }
 
@@ -103,9 +103,9 @@ export function scanOwnedNativeDatabases({homes=[],actions=[],gatewayInbox=[],ga
       const directory=path.join(scope.home,relative);
       try{
       if(!fs.existsSync(directory)){directories.push({path:directory,exists:false,names:[]});continue;}
-      const stat=fs.lstatSync(directory);if(!stat.isDirectory()||stat.isSymbolicLink()){issue('NATIVE_COLLABORATION_SCOPE_UNKNOWN',scope,{path:directory});continue;}
+      const stat=fs.lstatSync(directory,{bigint:true});if(!stat.isDirectory()||stat.isSymbolicLink()){issue('NATIVE_COLLABORATION_SCOPE_UNKNOWN',scope,{path:directory});continue;}
       const names=fs.readdirSync(directory).sort();directories.push({path:directory,exists:true,names,identity:{dev:String(stat.dev),ino:String(stat.ino)}});
-      if(relative==='collaboration/bot_relay'&&names.includes('roster.json')){const file=path.join(directory,'roster.json'),stat=fs.lstatSync(file);if(!stat.isFile()||stat.isSymbolicLink())issue('NATIVE_COLLABORATION_SCOPE_UNKNOWN',scope,{path:file});else{const bytes=fs.readFileSync(file);files.push({path:file,exists:true,sha256:hash(bytes),bytes:bytes.length,identity:{dev:String(stat.dev),ino:String(stat.ino)}});}}
+      if(relative==='collaboration/bot_relay'&&names.includes('roster.json')){const file=path.join(directory,'roster.json'),stat=fs.lstatSync(file,{bigint:true});if(!stat.isFile()||stat.isSymbolicLink())issue('NATIVE_COLLABORATION_SCOPE_UNKNOWN',scope,{path:file});else{const bytes=fs.readFileSync(file);files.push({path:file,exists:true,sha256:hash(bytes),bytes:bytes.length,identity:{dev:String(stat.dev),ino:String(stat.ino)}});}}
       if(['outbox','claimed','replies','locks'].includes(path.basename(relative))&&names.length)issue('NATIVE_COLLABORATION_QUEUE_UNPROVEN',scope,{path:directory,entries:names.length});
       if(relative==='collaboration'&&names.some(name=>name!=='bot_relay')||relative==='collaboration/bot_relay'&&names.some(name=>!['outbox','claimed','replies','locks','roster.json'].includes(name)))issue('NATIVE_COLLABORATION_SCOPE_UNKNOWN',scope,{path:directory});
       }catch{issue('NATIVE_COLLABORATION_UNREADABLE',scope,{path:directory});}
