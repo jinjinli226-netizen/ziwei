@@ -43,11 +43,11 @@ function v1Overlay(directory){
   fs.copyFileSync(path.join(root,'src/daemon.mjs'),path.join(directory,'src/daemon.mjs'));
   fs.copyFileSync(path.join(root,'src/management-bootstrap.mjs'),path.join(directory,'src/management-bootstrap.mjs'));
   patch(path.join(directory,'src/local-action.mjs'),text=>{
-    text=replace(text,"import fs from 'node:fs';","import fs from 'node:fs';\nimport {authorizeNativeExecution} from './execution-admission.mjs';",'executor import');
+    text=replace(text,"import fs from 'node:fs';","import fs from 'node:fs';\nimport {authorizeNativeExecution,assertNoOwnedBotResource} from './execution-admission.mjs';",'executor import');
     text=replace(text,'{runtimeDir, defaultWorkdir','{runtimeDir, admissionHandledByDispatcher=false, defaultWorkdir','executor flag');
-    text=replace(text,'  return async (action, context = {}) => {','  const execute = async (action, context = {}) => {\n    if(!admissionHandledByDispatcher)await authorizeNativeExecution(action,{apiBase,workspace,deviceId,deviceToken,signal:context.signal,hermesHome:hermesHomePath||hermesHome()});','executor admission');
+    text=replace(text,'  return async (action, context = {}) => {','  const admissions=new Map();\n  const execute = async (action, context = {}) => {\n    const permit=admissionHandledByDispatcher?admissions.get(action.id):await authorizeNativeExecution(action,{apiBase,workspace,deviceId,deviceToken,signal:context.signal,hermesHome:hermesHomePath||hermesHome(),runtimeDir,defaultWorkdir});\n    assertNoOwnedBotResource(action,{hermesHome:hermesHomePath||hermesHome(),protectedHomes:permit?.protectedHomes||[],runtimeDir,defaultWorkdir});\n    admissions.delete(action.id);','executor admission');
     if(!/  };\n}\s*$/.test(text))throw new Error('Executor suffix changed');
-    return text.replace(/  };\n}\s*$/,'  };\n  execute.authorizeExecution=action=>authorizeNativeExecution(action,{apiBase,workspace,deviceId,deviceToken,hermesHome:hermesHomePath||hermesHome()});\n  execute.maintenanceStatus=()=>({safe:true,workers:[]});\n  execute.close=async()=>{};\n  return execute;\n}\n');
+    return text.replace(/  };\n}\s*$/,'  };\n  execute.authorizeExecution=async action=>{const permit=await authorizeNativeExecution(action,{apiBase,workspace,deviceId,deviceToken,hermesHome:hermesHomePath||hermesHome(),runtimeDir,defaultWorkdir});admissions.set(action.id,permit);return permit;};\n  execute.maintenanceStatus=()=>({safe:true,workers:[]});\n  execute.close=async()=>{};\n  return execute;\n}\n');
   });
   patch(path.join(directory,'frontend/index.html'),text=>replace(text,'<body>','<body>\n    <div role="status" style="background:#eef6ff;color:#174e88;padding:8px 16px;font:14px sans-serif">V2 Bot 已封存，数据保留。原员工功能继续可用；恢复 V2 后可显式恢复 Bot。</div>','frontend notice'));
 }

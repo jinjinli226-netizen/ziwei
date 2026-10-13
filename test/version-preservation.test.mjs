@@ -113,7 +113,7 @@ test('frozen opaque V2 origin cannot authorize ordinary-looking child action',t=
 
 test('original ACKed completion settles during prepare but user writes stay sealed',t=>{
   const f=fixture(t),validation=f.bots.validate('test-111',f.bot.id,{expectedRevision:1,idempotencyKey:'completion-validation'}).action;
-  const processExit={launched:true,rootConfirmed:true,rootExitCode:0,treeConfirmed:true,activeProcesses:0};
+  const processExit={launched:true,rootPid:1,rootConfirmed:true,rootExitCode:0,treeConfirmed:true,activeProcesses:0};
   f.repo.ackA2AAction(validation.id,{deviceId:'rollback-pc'});f.repo.resultA2AAction(validation.id,{deviceId:'rollback-pc',status:'succeeded',result:{botValidation:{valid:true,schemaVersion:1,employeeId:f.bot.id,revision:1},processExit}});
   f.bots.control('test-111',f.bot.id,{expectedRevision:1,expectedControlEpoch:1,operation:'activate'});
   const message=f.repo.addConversationMessage(f.bot.main_conversation_id,{content:'already started'}),actionId=message.execution.id;

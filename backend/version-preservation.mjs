@@ -23,7 +23,7 @@ export function exitedTree(value) {
   if(!value||value.treeConfirmed!==true||value.activeProcesses!==0||value.failureCode)return false;
   if(Array.isArray(value.children))return value.supervisor==='runtime-group'&&value.rootConfirmed===true&&typeof value.launched==='boolean'&&(value.launched===false||value.children.length>0)&&value.children.every(child=>exitedTree(child.processExit||child));
   if(value.launched===false)return value.rootPid===null&&value.rootExitCode===null;
-  return value.launched===true&&value.rootConfirmed===true&&Number.isInteger(value.rootExitCode);
+  return value.launched===true&&value.rootConfirmed===true&&Number.isInteger(value.rootPid)&&value.rootPid>0&&Number.isInteger(value.rootExitCode);
 }
 export function executionExit(value) {
   const result=value?.result||value;
@@ -234,8 +234,9 @@ export function createPreservation(db,{role=PRODUCT_ROLE,collectNativeEvidence=n
   trigger('webhook_deliveries','INSERT','automation','NEW.automation_id');
   trigger('a2a_actions','INSERT','action-new','NEW.task_id','NEW.type','NEW.payload_json');
   trigger('a2a_actions','DELETE','action','OLD.id');
-  if(!readOnly&&exists(db,'a2a_actions'))db.exec(`DROP TRIGGER IF EXISTS preservation_a2a_actions_update;
+  if(!readOnly&&exists(db,'a2a_actions')){db.exec('SAVEPOINT preservation_trigger_upgrade');try{db.exec(`DROP TRIGGER IF EXISTS preservation_a2a_actions_update;
     CREATE TRIGGER preservation_a2a_actions_update BEFORE UPDATE ON a2a_actions WHEN ziwei_v2_action_update_admitted(OLD.id,NEW.type,NEW.task_id,NEW.payload_json,NEW.status,NEW.expires_at)=0 OR ziwei_v2_admitted(OLD.id)=0 AND (NEW.id IS NOT OLD.id OR NEW.workspace_id IS NOT OLD.workspace_id OR NEW.agent_id IS NOT OLD.agent_id OR NEW.dedupe_key IS NOT OLD.dedupe_key OR NEW.created_at IS NOT OLD.created_at OR NEW.acked_at IS NOT OLD.acked_at) BEGIN SELECT RAISE(ABORT,'V2_OBJECT_SEALED'); END`);
+    db.exec('RELEASE preservation_trigger_upgrade');}catch(error){db.exec('ROLLBACK TO preservation_trigger_upgrade; RELEASE preservation_trigger_upgrade');throw error;}}
   return {inspect,begin,seal,restore,abort,classify,classifyAction,assert,assertAction,frozen,role,protectEmployeeTable,settle};
 }
 

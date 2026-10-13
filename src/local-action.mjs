@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import {executeHermesNative} from './hermes-native-runtime.mjs';
 import {createBotGatewayManager} from './hermes-gateway-runtime.mjs';
-import {authorizeNativeExecution} from './execution-admission.mjs';
+import {authorizeNativeExecution,assertNoOwnedBotResource,PRODUCT_ROLE} from './execution-admission.mjs';
 import {executeBotGroup} from './hermes-group-runtime.mjs';
 import {executeNativeDriver} from './hermes-driver-runtime.mjs';
 import path from 'node:path';
@@ -370,8 +370,11 @@ export function createLocalActionExecutor({runtimeDir, admissionHandledByDispatc
   fs.mkdirSync(runtimeDir, {recursive: true});
   const automaticManagement = managementBootstrap || (workspace && deviceToken ? createManagementBootstrap({ workspace, apiBase, deviceId, deviceToken, cacheDirectory: path.join(runtimeDir, 'management-mcp-credentials') }) : null);
   const gateways=createBotGatewayManager({apiBase,workspace,deviceToken});
+  const admissions=new Map();
   const execute = async (action, context = {}) => {
-    if(!admissionHandledByDispatcher)await authorizeNativeExecution(action,{apiBase,workspace,deviceId,deviceToken,signal:context.signal,hermesHome:hermesHomePath||hermesHome()});
+    const permit=admissionHandledByDispatcher?admissions.get(action.id):await authorizeNativeExecution(action,{apiBase,workspace,deviceId,deviceToken,signal:context.signal,hermesHome:hermesHomePath||hermesHome(),runtimeDir,defaultWorkdir});
+    if(PRODUCT_ROLE==='v1-compat'||['preparing','sealed'].includes(permit?.productState))assertNoOwnedBotResource(action,{hermesHome:hermesHomePath||hermesHome(),protectedHomes:permit?.protectedHomes||[],runtimeDir,defaultWorkdir});
+    admissions.delete(action.id);
     const type = String(action?.type || '');
     if (action?.payload?.deviceId && deviceId && action.payload.deviceId !== deviceId) throw new Error('执行目标设备与本机已配对设备不一致；不会回退其他设备');
     if (action?.workspace && workspace && action.workspace !== workspace) throw new Error('执行工作区与本机已配对工作区不一致');
@@ -492,7 +495,7 @@ export function createLocalActionExecutor({runtimeDir, admissionHandledByDispatc
     throw new Error(`unsupported A2A action type: ${type || '(empty)'}`);
   };
   execute.maintenanceStatus=()=>gateways.maintenanceStatus();
-  execute.authorizeExecution=action=>authorizeNativeExecution(action,{apiBase,workspace,deviceId,deviceToken,hermesHome:hermesHomePath||hermesHome()});
+  execute.authorizeExecution=async action=>{const permit=await authorizeNativeExecution(action,{apiBase,workspace,deviceId,deviceToken,hermesHome:hermesHomePath||hermesHome(),runtimeDir,defaultWorkdir});admissions.set(action.id,permit);return permit;};
   execute.close=()=>gateways.close();
   return execute;
 }
