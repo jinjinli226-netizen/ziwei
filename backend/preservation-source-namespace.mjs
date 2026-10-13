@@ -229,10 +229,10 @@ export function readApiDatabaseConnectionIdentity(file){
  if(process.platform!=='linux')fail('SOURCE_API_DATABASE_HANDLE_UNSUPPORTED');
  const canonicalPath=fs.realpathSync.native(file),current=fs.lstatSync(canonicalPath,{bigint:true}),identities=[];
  for(const name of fs.readdirSync('/proc/self/fd')){
-  let opened;
-  try{const descriptor='/proc/self/fd/'+name,stat=fs.statSync(descriptor,{bigint:true});if(!stat.isFile())continue;opened=fs.openSync(descriptor,'r');const header=Buffer.alloc(16);if(fs.readSync(opened,header,0,16,0)===16&&header.toString()==='SQLite format 3\0')identities.push({dev:String(stat.dev),ino:String(stat.ino)});}
-  catch(error){if(!['ENOENT','EBADF'].includes(error.code))throw error;}
-  finally{if(opened!==undefined)fs.closeSync(opened);}
+  // Observe the existing FD with fstat/pread. Never open or close a descriptor
+  // for this inode: closing any such FD can release this process's POSIX locks.
+  try{const descriptor=Number(name),stat=fs.fstatSync(descriptor,{bigint:true});if(!stat.isFile())continue;fs.readlinkSync('/proc/self/fd/'+name);const header=Buffer.alloc(16);if(fs.readSync(descriptor,header,0,16,0)===16&&header.toString()==='SQLite format 3\0')identities.push({dev:String(stat.dev),ino:String(stat.ino)});}
+  catch(error){if(!['ENOENT','EBADF','ESPIPE'].includes(error.code))throw error;}
  }
  const identity={dev:String(current.dev),ino:String(current.ino)};
  if(!identities.length||identities.some(value=>!equal(value,identity)))fail('SOURCE_API_DATABASE_HANDLE');
