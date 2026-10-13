@@ -81,6 +81,23 @@ def _binding(launcher):
             found = {node.name for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
             if not set(functions).issubset(found):
                 raise UnsupportedNativeHermes('creator shape')
+        if os.environ.get('ZIWEI_INSTANCE_KIND') == 'hermes-bot' and os.environ.get('ZIWEI_BOT_PROFILE_MODE') == 'owned_profile':
+            spec = importlib.util.find_spec('hermes_state_registry')
+            target = Path(spec.origin).resolve(strict=True) if spec and spec.origin else None
+            if not target or target.suffix != '.py' or not target.is_relative_to(root):
+                raise UnsupportedNativeHermes('owned state registry source')
+            functions = {node.name for node in ast.parse(target.read_text(encoding='utf-8')).body if isinstance(node, ast.FunctionDef)}
+            if not {'acquire', 'release', 'close_all_under'}.issubset(functions):
+                raise UnsupportedNativeHermes('owned state registry shape')
+            paths['state_registry'] = str(target)
+            spec = importlib.util.find_spec('hermes_cli.sqlite_safe_read')
+            target = Path(spec.origin).resolve(strict=True) if spec and spec.origin else None
+            if not target or target.suffix != '.py' or not target.is_relative_to(root):
+                raise UnsupportedNativeHermes('owned state connection source')
+            functions = {node.name for node in ast.parse(target.read_text(encoding='utf-8')).body if isinstance(node, ast.FunctionDef)}
+            if 'has_live_connection' not in functions:
+                raise UnsupportedNativeHermes('owned state connection shape')
+            paths['sqlite_safe_read'] = str(target)
         if '_apply_profile_override()' not in Path(paths['main']).read_text(encoding='utf-8'):
             raise UnsupportedNativeHermes('creator profile')
     if os.environ.get('ZIWEI_BOT_REASONING_EFFORT'):
@@ -105,6 +122,24 @@ def binding(launcher):
         return _binding(launcher)
     except Exception:
         raise UnsupportedNativeHermes('binding') from None
+
+
+def finalize_owned_storage(current, isolation):
+    registry = importlib.import_module('hermes_state_registry')
+    if str(Path(registry.__file__).resolve()) != current['paths']['state_registry']:
+        raise UnsupportedNativeHermes('owned state registry changed')
+    # Use normal SDK close after this owned child has finished its work. This
+    # releases process-local caches, never opens a database for cleanup, and is
+    # not a claim that the later independent WAL/claim/tree checks will pass.
+    registry.close_all_under(isolation['home'])
+    safe_read = importlib.import_module('hermes_cli.sqlite_safe_read')
+    if str(Path(safe_read.__file__).resolve()) != current['paths']['sqlite_safe_read']:
+        raise UnsupportedNativeHermes('owned state connection changed')
+    # SDK registry teardown may log and swallow a failed close. Detect its
+    # still-tracked handles without opening any database or reading its body.
+    if any(safe_read.has_live_connection(Path(isolation['home']) / name)
+           for name in ('state.db', 'kanban.db')):
+        raise UnsupportedNativeHermes('owned state storage remains open')
 
 
 def prepare_creator_home(current):
@@ -380,16 +415,23 @@ def run():
         spec = importlib.util.spec_from_file_location('ziwei_native_bridge', module_path)
         bridge = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(bridge)
-        if gateway_worker:
-            bridge.run_gateway_worker(request, context)
-        else:
-            try:
-                result = bridge.run_operation(request, context)
-            except bridge.NativeOperationError as error:
-                import hermes_cli
-                result = {'schemaVersion': 2, 'resource': request['resource'], 'operation': request['operation'],
-                          'employeeId': context['employeeId'], 'revision': context['revision'],
-                          'nativeVersion': hermes_cli.__version__, 'status': 'failed', 'code': str(error), 'data': None}
+        try:
+            if gateway_worker:
+                bridge.run_gateway_worker(request, context)
+            else:
+                try:
+                    result = bridge.run_operation(request, context)
+                except bridge.NativeOperationError as error:
+                    import hermes_cli
+                    result = {'schemaVersion': 2, 'resource': request['resource'], 'operation': request['operation'],
+                              'employeeId': context['employeeId'], 'revision': context['revision'],
+                              'nativeVersion': hermes_cli.__version__, 'status': 'failed', 'code': str(error), 'data': None}
+        finally:
+            if isolation.get('mode') == 'owned_profile':
+                # The bridge is finished, including the Gateway adapter's async
+                # disconnect, before its owned connections are released.
+                finalize_owned_storage(current, isolation)
+        if not gateway_worker:
             print('ZIWEI_NATIVE_RESULT:' + json.dumps(result, ensure_ascii=False), flush=True)
         return 0
     if config_only:
@@ -440,6 +482,16 @@ def run():
                                        'status': item.get('status')} for item in statuses],
                           'externalModelCalls': 0}))
         return 0
+    if isolation and isolation.get('kind') == 'hermes-bot' and isolation.get('mode') == 'owned_profile':
+        def owned_main():
+            try:
+                return native.main()
+            finally:
+                # The Bot chat/query-file route raises SystemExit after native
+                # single-query cleanup. Its SDK storage cache still needs the
+                # owned child's explicit close before the process exits.
+                finalize_owned_storage(current, isolation)
+        return owned_main
     return native.main
 
 
