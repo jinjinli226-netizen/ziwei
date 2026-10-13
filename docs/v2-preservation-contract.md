@@ -1,6 +1,6 @@
 # 数据保留回退候选契约
 
-本契约描述 E02 隔离候选。正式环境部署、GitHub 推送和 Q01 独立验收没有由本地演练授权。
+本契约描述 E02 隔离候选。用户已授权达到上线门槛后由唯一 R01 推送 GitHub 并正式部署；本地演练不能替代 Q01 独立签收或正式入口验收。
 
 ## 版本与产物
 
@@ -51,3 +51,17 @@ Gateway connect 的成功结果保持原样；真实 worker 退出后，将同 s
 本地回归、真实 Windows Job 案例和四阶段回执分别报告。Q01 RB01–30 的独立结果仍由 Q01 填写；没有现场证据的故障、外部入口、Group、真实 Gateway 平台、UI 切换、真实付费 Provider、24 小时运行均不得从相邻用例推定 PASS。前端产物已经构建/核摘要，四阶段主要运行 API 与客户端。
 
 诊断使用项目内独立 observer：每 10 秒保存 PID/实例/健康状态，追加并轮转 stdout/stderr 和退出证据；下次启动记录上次未正常退出。隔离强制退出 fixture 验证后才标记诊断已验证。旧真实项目和端口保持不变。
+
+## 原生持久状态证据增补
+
+新 collector 在同 operation/preparing 下读取原 action 全量投影及 owned/legacy HOME；异步前后核 intent/versions，seal 最后事务核 action、Inbox、文件/目录摘要及 inode。源 state.db/kanban.db/hosted_rooms.db 从不由 SQLite 直接打开：先读取 DB/WAL/journal 到私有副本，验证 WAL header/frame/salt/滚动 checksum、页大小与最终 commit，再用只读事务 quick_check。源 DB/WAL/journal 的存在性、bytes/inode 被前后和提交前绑定；源 SHM 不创建/改写。无法解释的损坏 WAL、旧 salt/reset 尾、未提交尾、部分帧或非空 recovery journal 明确 unknown，保留证据拒切。规则依据 [SQLite 官方文件格式](https://www.sqlite.org/fileformat2.html#walformat)。
+
+现支持 Hermes 0.21.3、state schema30，并核 core 表字段类型/主键。开通版本不能遮盖后续同 scope 原 native/validation 版本冲突。legacy 仅从原 marker+已 health/config 绑定的明确 baseHOME 和原成功 validation/fingerprint/isolation/退出树取版本；shared scope 使用实际 entry.hermesHome || config.hermesHome。若运行 HOME 只能由未知进程环境决定，保持 unknown。
+
+Goals/Heartbeat 的 historical pending key（包括带冒号的原 requestId）必须有同原 session/source action/settled/result/退出树，当前 active 控制配置不等于未结 claim。Kanban 全 tasks/runs 检查：driver pending 绑定原 run；direct claim 后 complete/block 使用原真实 Run 回执共有字段和明确 input.runId；缺 runId、未结/过期 claim、successor run、未映射 run 一律拒绝。历史 key 与 run 不删除、不以 TTL 冒充退出。原成功 start/create/claim 回执所证明存在的 DB 不能因文件缺失被视为零。
+
+Gateway 从原 Python JSON key 推导 native inbound，正文只投影类型+SHA，不回传原文；同 native/inbox/reply prompt 必须一致，原 reply succeeded 且有原发送分支使用的非空输出。delivered/delivery_failed 都绑定原 connect 原 scope/revision/epoch 与 lifecycle worker 退出。dispatched Inbox 只由完整唯一 native proof、全量原 action 与 DB/WAL清单消除阻切；seal 仍保留 Inbox 的 dispatched 原值，返回 provenGatewayInbox，重复 seal 不增加第二次 epoch。错 operation/body/HOME/ownership/tree/envelope 或采集后 action/WAL 改动均拒绝。
+
+Group Discussion 非空 rooms/events/额外操作表及 collaboration/bot_relay 非空 outbox/claimed/replies/locks 目前明确 unsupported；不凭缺 driver.admit 或辅助内存计数认定空闲。未知目录/链接/读取错误拒绝。普通员工与 Creator 不在 Bot HOME 集合中，此约束不扩大到其 HOME。
+
+API archive 现在包含 daemon/ 静态依赖；构建后须从实际两角色 ZIP 解压目录、外部 cwd 执行 inspect 和 prepare 的只读 plan，断言无新 schema/marker/网络/helper、DB/sidecars不变，并保留缺 daemon/config 的负例。正式 mode 与跨 host proof 接口见 [E02 短契约](operations/2026-10-14-e02-production-preservation-contract.md)；该接口仍待实施与独立验证，不能通过复制 QA marker 启用生产 apply。

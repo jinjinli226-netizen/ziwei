@@ -1,0 +1,43 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {execFileSync} from 'node:child_process';
+import {createHash} from 'node:crypto';
+import {DatabaseSync} from 'node:sqlite';
+import {pathToFileURL} from 'node:url';
+
+const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
+/** Real archive entry, external cwd, no QA marker or dependency symlink. */
+export function verifyApiEntries(directory){
+ const results=[];
+ for(const role of ['v1-compat','v2']){
+  const manifest=JSON.parse(fs.readFileSync(path.join(directory,role+'-manifest.json'))),archive=path.join(directory,role+'-api.zip'),artifact=manifest.artifacts.find(row=>path.basename(row.path)===role+'-api.zip');
+  if(!artifact||sha(fs.readFileSync(archive))!==artifact.sha256)throw Error('Archive hash mismatch');
+  let db;const temp=fs.mkdtempSync(path.join(os.tmpdir(),'ziwei-api-entry-')),extracted=path.join(temp,'api');fs.mkdirSync(extracted);
+  try{
+   execFileSync('tar',['-xf',archive,'-C',extracted],{windowsHide:true});
+   const file=path.join(temp,'original.sqlite');db=new DatabaseSync(file);db.exec('CREATE TABLE sentinel(id TEXT PRIMARY KEY,value TEXT);INSERT INTO sentinel VALUES(\'original\',\'retained\');PRAGMA journal_mode=WAL;PRAGMA wal_autocheckpoint=0;INSERT INTO sentinel VALUES(\'wal-original\',\'retained in WAL\')');
+   const spec=path.join(temp,'spec.json');fs.writeFileSync(spec,JSON.stringify({database:file,operationId:'archive-readonly-original'}));
+   const guard=path.join(temp,'guard.cjs');fs.writeFileSync(guard,"const deny=()=>{throw Error('Readonly plan must not execute a helper or use network')};global.fetch=deny;require('node:net').Socket.prototype.connect=deny;for(const name of ['spawn','spawnSync','exec','execSync','execFile','execFileSync','fork'])require('node:child_process')[name]=deny;");
+   const sourceHashes=()=>['','-wal','-shm'].map(suffix=>({suffix,sha256:sha(fs.readFileSync(file+suffix))}));const before=sha(fs.readFileSync(file)),beforeSource=JSON.stringify(sourceHashes()),names=fs.readdirSync(temp).sort(),commands=[];
+   for(const command of ['inspect','prepare']){
+    const output=execFileSync(process.execPath,['--require',guard,path.join(extracted,'scripts/v2-preservation.mjs'),command,'--spec',spec],{cwd:temp,encoding:'utf8',windowsHide:true,maxBuffer:2*1024*1024}),report=JSON.parse(output);
+    if(report.mode!=='plan'||report.willApply!==false||report.report.role!==role)throw Error('Readonly archive role mismatch');
+    if(JSON.stringify(sourceHashes())!==beforeSource||JSON.stringify(fs.readdirSync(temp).sort())!==JSON.stringify(names))throw Error('Readonly archive modified original files');
+    commands.push({command,mode:report.mode,willApply:report.willApply,role:report.report.role});
+   }
+   if(db.prepare("SELECT name FROM sqlite_master WHERE name GLOB 'version_preservation*'").all().length)throw Error('Readonly plan added schema');
+   // Negative control removes only this disposable archive's dependency.
+   fs.unlinkSync(path.join(extracted,'daemon/config.mjs'));let missing=false;
+   try{execFileSync(process.execPath,['--require',guard,path.join(extracted,'scripts/v2-preservation.mjs'),'inspect','--spec',spec],{cwd:temp,encoding:'utf8',windowsHide:true,stdio:'pipe'});}catch(error){missing=String(error.stderr).includes('ERR_MODULE_NOT_FOUND');}
+   if(!missing||JSON.stringify(sourceHashes())!==beforeSource)throw Error('Missing dependency negative control failed');
+   results.push({role,archiveSha256:artifact.sha256,commands,sourceDatabaseUnchanged:true,sourceWalShmUnchanged:true,noNewSchema:true,noQaMarker:true,noNetworkOrHelper:true,missingDependencyRefused:true});
+  }finally{
+   db?.close();
+   const target=path.resolve(temp),parent=path.resolve(os.tmpdir());if(path.dirname(target)!==parent||!path.basename(target).startsWith('ziwei-api-entry-'))throw Error('Cleanup scope invalid');
+   fs.rmSync(target,{recursive:true,force:true,maxRetries:8,retryDelay:100});
+  }
+ }
+ return{schemaVersion:1,kind:'actual-extracted-api-readonly-entry',results};
+}
+if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){if(!process.argv[2])throw Error('Provide frozen package directory');const receipt=verifyApiEntries(path.resolve(process.argv[2]));fs.writeFileSync(path.join(path.resolve(process.argv[2]),'api-entry-proof.json'),JSON.stringify(receipt,null,2));console.log(JSON.stringify(receipt,null,2));}

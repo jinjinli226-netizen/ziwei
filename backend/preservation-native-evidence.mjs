@@ -2,8 +2,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {clientBuildIdentity} from '../src/management-bootstrap.mjs';
-import {inspectClientMaintenance,inspectNativeClientProcess} from '../scripts/client-lifecycle.mjs';
+import {inspectClientMaintenance,inspectNativeClientProcess,inspectNativeHealthListener} from '../scripts/client-lifecycle.mjs';
 import {digest,uncertain,exitedTree,executionExit,gatewayResultMatches} from './version-preservation.mjs';
+import {scanOwnedNativeDatabases,nativeActionDigest,attestNativeVersion} from './preservation-native-databases.mjs';
 
 const hash=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
 const json=value=>{try{return JSON.parse(value);}catch{return null;}};
@@ -13,10 +14,10 @@ function normalizedAction(row){return {...row,payload:row.payload||json(row.payl
 
 /** Read-only evidence. Zero in-memory counters cannot replace these files. */
 export function scanNativeFiles({connections=[],actions=[],homes=[]}={}) {
-  const issues=[],files=[],directories=[],originals=new Map(actions.map(row=>[row.id,normalizedAction(row)]));
+  const issues=[],files=[],directories=[],gatewayExits=[],originals=new Map(actions.map(row=>[row.id,normalizedAction(row)]));
   const issue=(code,detail={})=>issues.push({code,...detail});
-  const read=file=>{try{const stat=fs.lstatSync(file);if(!stat.isFile()||stat.isSymbolicLink())throw new Error('not regular file');const bytes=fs.readFileSync(file);files.push({path:path.resolve(file),exists:true,sha256:hash(bytes),bytes:bytes.length});return bytes.toString('utf8');}catch(error){if(error.code==='ENOENT')files.push({path:path.resolve(file),exists:false});throw error;}};
-  const directoryProof=directory=>{try{const names=fs.readdirSync(directory).sort();directories.push({path:path.resolve(directory),exists:true,names});}catch(error){if(error.code==='ENOENT')directories.push({path:path.resolve(directory),exists:false,names:[]});else issue('DIRECTORY_UNREADABLE',{path:directory});}};
+  const read=file=>{try{const stat=fs.lstatSync(file);if(!stat.isFile()||stat.isSymbolicLink()||stat.nlink!==1)throw new Error('not regular file');const bytes=fs.readFileSync(file);files.push({path:path.resolve(file),exists:true,sha256:hash(bytes),bytes:bytes.length,identity:{dev:String(stat.dev),ino:String(stat.ino)}});return bytes.toString('utf8');}catch(error){if(error.code==='ENOENT')files.push({path:path.resolve(file),exists:false});throw error;}};
+  const directoryProof=directory=>{try{const stat=fs.lstatSync(directory);if(!stat.isDirectory()||stat.isSymbolicLink())throw Error('identity');const names=fs.readdirSync(directory).sort();directories.push({path:path.resolve(directory),exists:true,names,identity:{dev:String(stat.dev),ino:String(stat.ino)}});}catch(error){if(error.code==='ENOENT')directories.push({path:path.resolve(directory),exists:false,names:[]});else issue('DIRECTORY_UNREADABLE',{path:directory});}};
   for(const connection of connections){
     const {runtimeDir,workspace,deviceId}=connection,scope={workspace,deviceId};
     directoryProof(runtimeDir);directoryProof(path.join(runtimeDir,'action-delivery'));directoryProof(path.join(runtimeDir,'shared-workspaces'));
@@ -83,16 +84,19 @@ export function scanNativeFiles({connections=[],actions=[],homes=[]}={}) {
       const startIndex=entries.indexOf(start),exitIndex=entries.findIndex((entry,index)=>index>startIndex&&entry.event==='gateway.exit'&&matches(entry)),exit=entries[exitIndex];
       const receipt=original.result?.nativeOperation?.data||original.result?.result?.nativeOperation?.data,connectedIndex=entries.findIndex((entry,index)=>index>startIndex&&index<exitIndex&&entry.event==='gateway.connected'&&matches(entry));
       if(starts.filter(entry=>entry.workerNonce===start.workerNonce).length!==1||!exit||exit.processAlive!==false||!exitedTree(exit.processExit)||receipt?.connected===true&&(connectedIndex<0||entries[connectedIndex].pid!==receipt.pid||exit.processExit.rootPid!==receipt.pid))issue('GATEWAY_TREE_UNKNOWN',{path:file,sourceActionId:start.sourceActionId,platform:start.platform});
+      else if(receipt?.connected===true)gatewayExits.push({home:item.home,ownershipId:item.ownershipId,workspaceId:item.workspaceId,deviceId:item.deviceId,sourceActionId:start.sourceActionId,connectActionDigest:nativeActionDigest(original),employeeId:start.employeeId,workspace:start.workspace,platform:start.platform,revision:start.revision,controlEpoch:start.controlEpoch,workerNonce:start.workerNonce,connectedPid:receipt.pid,processAlive:false,processExit:exit.processExit,lifecycleDigest:digest([start,entries[connectedIndex],exit])});
     }
     for(const action of [...originals.values()].filter(row=>row.type==='hermes.bot.native'&&row.payload.employeeId===item.employeeId&&row.payload.nativeOperation?.resource==='gateway'&&row.payload.nativeOperation.operation==='connect'&&row.acked_at))if(!starts.some(entry=>entry.sourceActionId===action.id))issue('GATEWAY_LIFECYCLE_MISSING',{actionId:action.id,path:file});
   }
-  return {safe:issues.length===0,issues,files,directories};
+  return {safe:issues.length===0,issues,files,directories,gatewayExits};
 }
 
 /** Only actual native maintenance inspection + loopback health is accepted. */
-export async function collectNativeEvidence(db,{clients=[]}={}) {
+export async function collectNativeEvidence(db,{clients=[],operationId}={}) {
   const issues=[],connections=[],clientProofs=[],homes=[],files=[];
-  const bots=db.prepare('SELECT b.*,e.target_device_id FROM hermes_bots b JOIN employees e ON e.id=b.employee_id').all();
+  const freeze=()=>db.prepare('SELECT operation_id,state,versions_json,intent_json FROM version_preservation WHERE singleton=1').get();
+  const initial=freeze();if(!operationId||initial?.operation_id!==operationId||initial.state!=='preparing')return{safe:false,issues:[{code:'NATIVE_FREEZE_IDENTITY_INVALID'}],files:[]};
+  const bots=db.prepare('SELECT b.*,e.target_device_id,e.runtime_profile FROM hermes_bots b JOIN employees e ON e.id=b.employee_id').all();
   const actions=db.prepare('SELECT * FROM a2a_actions').all().filter(row=>db.prepare('SELECT ziwei_v2_admitted(?) value').get(row.id).value===0);
   for(const specification of clients){
     try{
@@ -105,29 +109,36 @@ export async function collectNativeEvidence(db,{clients=[]}={}) {
       const response=await fetch(url,{signal:AbortSignal.timeout(3000),redirect:'error'}),body=await response.json();
       const runtime=specification.userHome?path.join(path.resolve(specification.userHome),'runtime'):path.join(root,'.local','runtime');
       if(!response.ok||body.pid!==inspected.pid||body.clientBuild!==clientBuildIdentity(root)||body.lifecycle?.configSha256!==hash(configBytes)||body.lifecycle?.runtimeDir!==runtime||body.connectionState!=='draining'||body.activeActionCount!==0||body.pollingCount!==0||body.quarantinedActionCount!==0||body.maintenance?.safe!==true)throw new Error('NATIVE_NOT_DRAINED');
-      const processRecord=await inspectNativeClientProcess(body.pid,root);if(!processRecord)throw new Error('NATIVE_PROCESS_CHANGED');
-      clientProofs.push({root,configPath,runtimeDir:runtime,pid:body.pid,clientBuild:body.clientBuild,lifecycle:body.lifecycle,processRecord,health:body.maintenance});files.push({path:configPath,sha256:hash(configBytes),bytes:configBytes.length});
+      const listener=await inspectNativeHealthListener(url.origin,body.pid),processRecord=await inspectNativeClientProcess(body.pid,root);if(!processRecord)throw new Error('NATIVE_PROCESS_CHANGED');
+      clientProofs.push({root,configPath,runtimeDir:runtime,pid:body.pid,clientBuild:body.clientBuild,lifecycle:body.lifecycle,processRecord,listener,health:body.maintenance});files.push({path:configPath,sha256:hash(configBytes),bytes:configBytes.length});
       if(body.connectionErrors?.length)throw new Error('CONNECTION_CONFIGURATION_INVALID');
-      for(const entry of [config,...(config.sharedWorkspaces||[]).filter(row=>row.enabled!==false)]){if(!entry.workspace||!entry.deviceId||!body.connections?.some(row=>row.workspace===entry.workspace&&row.deviceId===entry.deviceId&&row.configured===true))throw new Error('CONNECTION_IDENTITY_UNKNOWN');connections.push({workspace:entry.workspace,deviceId:entry.deviceId,apiBase:String(entry.apiBase||config.apiBase).replace(/\/$/,''),runtimeDir:entry===config?runtime:path.join(runtime,'shared-workspaces',entry.workspace,entry.deviceId)});}
+      for(const entry of [config,...(config.sharedWorkspaces||[]).filter(row=>row.enabled!==false)]){if(!entry.workspace||!entry.deviceId||!body.connections?.some(row=>row.workspace===entry.workspace&&row.deviceId===entry.deviceId&&row.configured===true))throw new Error('CONNECTION_IDENTITY_UNKNOWN');connections.push({workspace:entry.workspace,deviceId:entry.deviceId,apiBase:String(entry.apiBase||config.apiBase).replace(/\/$/,''),hermesHome:entry.hermesHome||config.hermesHome,runtimeDir:entry===config?runtime:path.join(runtime,'shared-workspaces',entry.workspace,entry.deviceId)});}
     }catch(error){issues.push({code:'NATIVE_CLIENT_EVIDENCE_INVALID',root:specification.root,reason:String(error.code||error.message).slice(0,120)});}
   }
   for(const bot of bots){
     const ws=db.prepare('SELECT slug FROM workspaces WHERE id=?').get(bot.workspace_id),connection=connections.find(row=>row.workspace===ws.slug&&row.deviceId===bot.target_device_id);
     if(!connection){issues.push({code:'BOT_DEVICE_EVIDENCE_MISSING',employeeId:bot.employee_id,deviceId:bot.target_device_id});continue;}
     const binding=json(bot.profile_binding_json);
-    let home;
+    let home,nativeVersion,ownershipId=binding?.ownershipId;
     if(binding?.mode==='owned_profile'){
-      const provision=db.prepare('SELECT status,result_json FROM a2a_actions WHERE id=?').get(bot.provision_action_id),result=json(provision?.result_json),receipt=result?.botProvision||result?.result?.botProvision;home=receipt?.home;
+      const provision=db.prepare('SELECT status,result_json FROM a2a_actions WHERE id=?').get(bot.provision_action_id),result=json(provision?.result_json),receipt=result?.botProvision||result?.result?.botProvision;home=receipt?.home;nativeVersion=receipt?.nativeVersion;
       if(provision?.status!=='succeeded'||!home||receipt.ownershipId!==binding.ownershipId){issues.push({code:'BOT_HOME_UNKNOWN',employeeId:bot.employee_id});continue;}
       try{const markerFile=path.join(home,'ziwei-instance.json'),bytes=fs.readFileSync(markerFile),marker=JSON.parse(bytes),sourceRoot=path.dirname(path.dirname(home)),templateHome=binding.templateProfile==='default'?sourceRoot:path.join(sourceRoot,'profiles',binding.templateProfile);files.push({path:markerFile,sha256:hash(bytes),bytes:bytes.length});if(!path.isAbsolute(home)||path.basename(home)!==binding.profile||path.basename(path.dirname(home))!=='profiles'||[home,path.dirname(home),markerFile].some(file=>fs.lstatSync(file).isSymbolicLink())||marker.version!==1||marker.templateId!=='ziwei-hermes-bot'||marker.mode!=='owned_profile'||marker.sourceProfile!==binding.profile||marker.templateProfile!==binding.templateProfile||marker.sourceHome!==fs.realpathSync.native(templateHome)||receipt.profileHome!==home||marker.employeeId!==bot.employee_id||marker.workspace!==ws.slug||marker.deviceId!==bot.target_device_id||marker.profile!==binding.profile||marker.key!==binding.ownershipId||marker.provisionActionId!==binding.provisionActionId||marker.origin!==new URL(connection.apiBase).origin)throw new Error('identity');}catch{issues.push({code:'BOT_HOME_IDENTITY_INVALID',employeeId:bot.employee_id});continue;}
-    }else {home=path.join(connection.runtimeDir,'bot-instances',hash(JSON.stringify([new URL(connection.apiBase).origin,ws.slug,bot.employee_id])));if(!fs.existsSync(home))issues.push({code:'BOT_HOME_UNKNOWN',employeeId:bot.employee_id});}
-    homes.push({home,employeeId:bot.employee_id,workspace:ws.slug});
+    }else {
+      ownershipId=hash(JSON.stringify([new URL(connection.apiBase).origin,ws.slug,bot.employee_id]));home=path.join(connection.runtimeDir,'bot-instances',ownershipId);
+      try{const sourceProfile=bot.runtime_profile||'default';if(!path.isAbsolute(connection.hermesHome||''))throw Error('source');const source=sourceProfile==='default'?connection.hermesHome:path.join(connection.hermesHome,'profiles',sourceProfile),markerFile=path.join(home,'ziwei-instance.json'),stat=fs.lstatSync(markerFile),bytes=fs.readFileSync(markerFile),marker=JSON.parse(bytes);if(!stat.isFile()||stat.isSymbolicLink()||stat.nlink!==1||[home,path.dirname(home),source,connection.hermesHome].some(file=>fs.lstatSync(file).isSymbolicLink())||fs.realpathSync.native(home)===fs.realpathSync.native(source)||marker.version!==1||marker.templateId!=='ziwei-hermes-bot'||marker.mode||marker.origin!==new URL(connection.apiBase).origin||marker.workspace!==ws.slug||marker.employeeId!==bot.employee_id||marker.key!==ownershipId||marker.sourceProfile!==sourceProfile||marker.sourceHome!==fs.realpathSync.native(source))throw Error('identity');files.push({path:markerFile,exists:true,sha256:hash(bytes),bytes:bytes.length,identity:{dev:String(stat.dev),ino:String(stat.ino)}});}
+      catch{issues.push({code:'BOT_HOME_IDENTITY_INVALID',employeeId:bot.employee_id});continue;}
+    }
+    const scope={home,origin:new URL(connection.apiBase).origin,employeeId:bot.employee_id,workspace:ws.slug,workspaceId:bot.workspace_id,deviceId:bot.target_device_id,ownershipId,sourceProfile:bot.runtime_profile||'default',nativeVersion};
+    const attestation=attestNativeVersion(scope,actions);homes.push({...scope,...attestation});
   }
   const scanned=scanNativeFiles({connections,actions,homes});issues.push(...scanned.issues);files.push(...scanned.files);
+  const nativeState=scanOwnedNativeDatabases({homes,actions,gatewayInbox:db.prepare('SELECT * FROM bot_gateway_inbox').all(),gatewayExits:scanned.gatewayExits,operationId});issues.push(...nativeState.issues);files.push(...nativeState.files);scanned.directories.push(...nativeState.directories);
   for(const action of actions.filter(row=>row.acked_at)){const payload=json(action.payload_json)||{},workspace=db.prepare('SELECT slug FROM workspaces WHERE id=?').get(action.workspace_id)?.slug;if(!connections.some(row=>row.workspace===workspace&&row.deviceId===payload.deviceId))issues.push({code:'ACTION_DEVICE_EVIDENCE_MISSING',actionId:action.id});if(!bots.some(bot=>bot.employee_id===payload.employeeId)&&action.type==='hermes.bot.native')issues.push({code:'ACTION_BOT_EVIDENCE_MISSING',actionId:action.id});}
   // Recheck actual files and processes after scanning, before the DB seal.
   for(const file of files)try{if(file.exists===false?fs.existsSync(file.path):hash(fs.readFileSync(file.path))!==file.sha256)issues.push({code:'NATIVE_FILE_CHANGED',path:file.path});}catch{issues.push({code:'NATIVE_FILE_CHANGED',path:file.path});}
   for(const directory of scanned.directories)try{if(directory.exists? !equal(fs.readdirSync(directory.path).sort(),directory.names):fs.existsSync(directory.path))issues.push({code:'NATIVE_DIRECTORY_CHANGED',path:directory.path});}catch{issues.push({code:'NATIVE_DIRECTORY_CHANGED',path:directory.path});}
-  for(const proof of clientProofs){const actual=await inspectNativeClientProcess(proof.pid,proof.root);if(!equal(actual,proof.processRecord))issues.push({code:'NATIVE_PROCESS_CHANGED',pid:proof.pid});try{const config=JSON.parse(fs.readFileSync(proof.configPath)),body=await(await fetch(`http://${config.healthHost||'127.0.0.1'}:${config.healthPort}/healthz`,{signal:AbortSignal.timeout(3000),redirect:'error'})).json();if(body.pid!==proof.pid||!equal(body.lifecycle,proof.lifecycle)||body.clientBuild!==proof.clientBuild||body.connectionState!=='draining'||body.activeActionCount!==0||body.pollingCount!==0||body.maintenance?.safe!==true)throw new Error('changed');}catch{issues.push({code:'NATIVE_DRAIN_CHANGED',pid:proof.pid});}}
-  return {safe:issues.length===0,issues,files,directories:scanned.directories,clients:clientProofs,checkedAt:new Date().toISOString()};
+  for(const proof of clientProofs){const actual=await inspectNativeClientProcess(proof.pid,proof.root);if(!equal(actual,proof.processRecord))issues.push({code:'NATIVE_PROCESS_CHANGED',pid:proof.pid});try{const config=JSON.parse(fs.readFileSync(proof.configPath));await inspectNativeHealthListener(`http://${config.healthHost||'127.0.0.1'}:${config.healthPort}`,proof.pid);const body=await(await fetch(`http://${config.healthHost||'127.0.0.1'}:${config.healthPort}/healthz`,{signal:AbortSignal.timeout(3000),redirect:'error'})).json();if(body.pid!==proof.pid||!equal(body.lifecycle,proof.lifecycle)||body.clientBuild!==proof.clientBuild||body.connectionState!=='draining'||body.activeActionCount!==0||body.pollingCount!==0||body.maintenance?.safe!==true)throw new Error('changed');}catch{issues.push({code:'NATIVE_DRAIN_CHANGED',pid:proof.pid});}}
+  if(!equal(freeze(),initial))issues.push({code:'NATIVE_FREEZE_IDENTITY_CHANGED'});
+  return {safe:issues.length===0,issues,files,directories:scanned.directories,clients:clientProofs,operationId,intentDigest:digest(initial.intent_json),versionsDigest:digest(initial.versions_json),actionBindings:actions.map(action=>({id:action.id,digest:nativeActionDigest(action)})),nativeDatabases:nativeState.nativeDatabases,nativeStateProofs:nativeState.nativeStateProofs,gatewayInboxProofs:nativeState.gatewayInboxProofs,checkedAt:new Date().toISOString()};
 }

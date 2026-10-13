@@ -10,7 +10,7 @@ const root=path.resolve(import.meta.dirname,'..'),sha=bytes=>createHash('sha256'
 const run=(command,args,cwd=root)=>execFileSync(command,args,{cwd,encoding:'utf8',windowsHide:true,maxBuffer:20*1024*1024});
 function replace(text,needle,value,file){const count=text.split(needle).length-1;if(count!==1)throw new Error(`Baseline anchor mismatch ${file}: ${count}`);return text.replace(needle,value);}
 function patch(file,apply){fs.writeFileSync(file,apply(fs.readFileSync(file,'utf8').replace(/\r\n/g,'\n')));}
-const shared=['backend/version-preservation.mjs','backend/preservation-native-evidence.mjs','src/execution-admission.mjs','src/hermes-profile-binding.py','scripts/preservation-profile-patch.mjs','scripts/v2-preservation.mjs','scripts/verify-preservation-packages.mjs'];
+const shared=['backend/version-preservation.mjs','backend/preservation-native-evidence.mjs','backend/preservation-native-databases.mjs','src/execution-admission.mjs','src/hermes-profile-binding.py','scripts/preservation-profile-patch.mjs','scripts/client-lifecycle.mjs','scripts/v2-preservation.mjs','scripts/verify-preservation-packages.mjs'];
 function v1Overlay(directory){
   patch(path.join(directory,'backend/db.mjs'),text=>{
     text=replace(text,"import path from 'node:path';","import path from 'node:path';\nimport {createPreservation} from './version-preservation.mjs';",'db import');
@@ -69,7 +69,7 @@ export function buildPackages({output=path.join(root,'.local','preservation-pack
     for(const file of shared){fs.mkdirSync(path.dirname(path.join(directory,file)),{recursive:true});fs.copyFileSync(path.join(root,file),path.join(directory,file));}
     if(role==='v1-compat')v1Overlay(directory);else for(const file of overlays)fs.copyFileSync(path.join(root,file),path.join(directory,file));
     patch(path.join(directory,'src/execution-admission.mjs'),text=>text.replace("PRODUCT_ROLE='v2'",`PRODUCT_ROLE='${role}'`));
-    const meta=JSON.parse(fs.readFileSync(path.join(directory,'package.json')));meta.files=[...new Set([...meta.files,'backend/version-preservation.mjs','backend/preservation-native-evidence.mjs','preservation-package.json'])];meta.bundleDependencies=Object.keys(meta.dependencies);
+    const meta=JSON.parse(fs.readFileSync(path.join(directory,'package.json')));meta.files=[...new Set([...meta.files,'backend/version-preservation.mjs','backend/preservation-native-evidence.mjs','backend/preservation-native-databases.mjs','preservation-package.json'])];meta.bundleDependencies=Object.keys(meta.dependencies);
     fs.writeFileSync(path.join(directory,'package.json'),JSON.stringify(meta,null,2)+'\n');
     const descriptor={schemaVersion:1,product:role==='v2'?'V2':'V1 data-preserving compatibility',productRole:role,packageSemver:meta.version,baseline,candidateCommit,versions:FROZEN_VERSIONS,overlay,productionApplied:false};fs.writeFileSync(path.join(directory,'preservation-package.json'),JSON.stringify(descriptor,null,2));
     fs.symlinkSync(path.join(root,'node_modules'),path.join(directory,'node_modules'),'junction');
@@ -78,7 +78,7 @@ export function buildPackages({output=path.join(root,'.local','preservation-pack
     const clientFile=path.join(output,`${role}-windows-client.tgz`);fs.renameSync(path.join(output,pack[0].filename),clientFile);
     const installPrefix=path.join(output,role+'-installation-proof');fs.mkdirSync(installPrefix);run(process.execPath,[npmCli,'install','--offline','--ignore-scripts','--no-audit','--no-fund','--prefix',installPrefix,clientFile]);const installedRoot=path.join(installPrefix,'node_modules/ziwei'),clientContents=fileList(installedRoot),installationChanges=clientContents.filter(row=>fs.existsSync(path.join(directory,row.path))&&sha(fs.readFileSync(path.join(directory,row.path)))!==row.sha256).map(row=>({...row,sourceSha256:sha(fs.readFileSync(path.join(directory,row.path)))}));
     const frontendFile=path.join(output,`${role}-frontend.zip`);run('tar',['-a','-cf',frontendFile,'-C',path.join(directory,'frontend/dist'),'.']);
-    const apiFile=path.join(output,`${role}-api.zip`);run('tar',['-a','-cf',apiFile,'-C',directory,'backend','src','scripts','skills','package.json','package-lock.json','preservation-package.json']);
+    const apiFile=path.join(output,`${role}-api.zip`);run('tar',['-a','-cf',apiFile,'-C',directory,'backend','src','scripts','skills','daemon','package.json','package-lock.json','preservation-package.json']);
     const contents=fileList(directory),manifest={...descriptor,sourceClientBuild:clientBuildIdentity(directory),clientBuild:clientBuildIdentity(installedRoot),clientContents,installationChanges,contents,buildDigest:sha(JSON.stringify(contents)),artifacts:[clientFile,frontendFile,apiFile].map(file=>({path:file,sha256:sha(fs.readFileSync(file)),bytes:fs.statSync(file).size})),offlineDependenciesBundled:true,apiDependencies:'Install bundled local client into an isolated prefix; use its node_modules for API. No global installation.'};
     fs.writeFileSync(path.join(output,`${role}-manifest.json`),JSON.stringify(manifest,null,2));packages.push({role,directory,manifest});
   }

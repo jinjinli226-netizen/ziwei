@@ -46,6 +46,16 @@ export async function inspectNativeClientProcess(pid, root) {
   if (!samePath(record.executable, process.execPath) || args.length !== 2 || !samePath(args[0], process.execPath) || !samePath(args[1], path.join(root, 'daemon', 'ziwei_user.mjs')) || !Number.isFinite(Date.parse(record.creationTime))) throw failure('PROCESS_IDENTITY_MISMATCH', '目标 PID 的 Node 路径、入口或创建时间不属于此安装，拒绝停止');
   return { pid, creationTime: record.creationTime, commandHash: digest(String(record.command)), executable: record.executable };
 }
+/** HTTP body PID cannot establish which process actually owns the listener. */
+export async function inspectNativeHealthListener(origin, expectedPid) {
+  windowsOnly();
+  const url=new URL(origin),host=url.hostname==='[::1]'?'::1':url.hostname==='localhost'?'127.0.0.1':url.hostname,port=Number(url.port);
+  if(url.protocol!=='http:'||!['127.0.0.1','::1'].includes(host)||url.username||url.password||!Number.isInteger(port)||port<1||port>65535||!Number.isInteger(expectedPid)||expectedPid<1)throw failure('HEALTH_LISTENER_INVALID','本机健康监听身份参数无效');
+  const records=await powershell(`$ErrorActionPreference='Stop'; @(Get-NetTCPConnection -State Listen -LocalPort ${port} -ErrorAction Stop | Where-Object {$_.LocalAddress -eq ${psQuote(host)}} | ForEach-Object {[pscustomobject]@{host=$_.LocalAddress;port=[int]$_.LocalPort;listenerPid=[int]$_.OwningProcess}}) | ConvertTo-Json -Compress`);
+  const matches=Array.isArray(records)?records:records?[records]:[];
+  if(matches.length!==1||matches[0].listenerPid!==expectedPid)throw failure('HEALTH_LISTENER_MISMATCH','健康端口实际监听进程与原 daemon PID 不一致');
+  return matches[0];
+}
 async function assertProcessUnchanged(before, root) { const current = await inspectNativeClientProcess(before.pid, root); if (!current || current.creationTime !== before.creationTime || current.commandHash !== before.commandHash) throw failure('PROCESS_CHANGED', 'daemon PID 或进程身份已变化，拒绝停止'); return current; }
 async function findNativePids(root) {
   const records = await powershell("Get-CimInstance Win32_Process -Filter \"Name = 'node.exe'\" | ForEach-Object { [pscustomobject]@{ pid=[int]$_.ProcessId; executable=$_.ExecutablePath; command=$_.CommandLine } } | ConvertTo-Json -Compress");
@@ -116,6 +126,7 @@ export async function inspectClientMaintenance({ root, env = process.env, config
   if (legacyProof) throw failure('LEGACY_PROTOCOL_MISMATCH', '当前实例已不符合原确认的旧协议，未停止任何进程');
   validateHealth(initial, context);
   const record = await inspectNativeClientProcess(initial.pid, root); if (!record) throw failure('PROCESS_MISSING', '健康接口的 daemon 进程已退出');
+  await inspectNativeHealthListener(origin,record.pid);
   validateHealth(initial, { ...context, processRecord: record });
   if (readConfiguration(file).hash !== snapshot.hash) throw failure('CONFIG_CHANGED', '只读预检期间配置发生变化');
   return { state: 'ready', wasRunning: true, pid: initial.pid, activeActionCount: initial.activeActionCount, pollingCount: initial.pollingCount };

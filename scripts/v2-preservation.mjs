@@ -4,6 +4,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {createHash} from 'node:crypto';
 import {pathToFileURL} from 'node:url';
 import {createPreservation,FROZEN_VERSIONS} from '../backend/version-preservation.mjs';
+import {readDatabaseSnapshot} from '../backend/preservation-native-databases.mjs';
 import {collectNativeEvidence} from '../backend/preservation-native-evidence.mjs';
 import {inspectClientMaintenance} from './client-lifecycle.mjs';
 import {verifyPreservationPackages} from './verify-preservation-packages.mjs';
@@ -15,7 +16,7 @@ function scope(spec){const root=path.resolve(spec.isolatedRoot||''),marker=JSON.
 export async function runPreservation({command='inspect',apply=false,...spec}={}) {
   if(!spec.database||!fs.existsSync(spec.database))throw new Error('An existing explicit database is required');
   if(!['inspect','prepare','seal','restore','abort','drain'].includes(command))throw new Error('Unknown operation');
-  if(!apply){const db=new DatabaseSync(path.resolve(spec.database),{readOnly:true});try{const report=createPreservation(db,{readOnly:true}).inspect();return {mode:'plan',command,willApply:false,versions:FROZEN_VERSIONS,report,next:command==='inspect'?null:'Re-run with --apply and an owned isolated rehearsal specification'};}finally{db.close();}}
+  if(!apply){const report=readDatabaseSnapshot(path.resolve(spec.database),db=>createPreservation(db,{readOnly:true}).inspect());return {mode:'plan',command,willApply:false,versions:FROZEN_VERSIONS,report,next:command==='inspect'?null:'Re-run with --apply and an owned isolated rehearsal specification'};}
   const root=scope(spec);
   if(!spec.packages)throw new Error('Apply requires verified preservation packages');
   const manifests=verifyPreservationPackages(spec.packages,{candidateCommit:spec.candidateCommit}),manifest=manifests.find(row=>row.productRole==='v2');
