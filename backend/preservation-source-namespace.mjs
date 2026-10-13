@@ -362,7 +362,14 @@ function checkedWindowsPowerShell(){
  try{canonicalDirectory(path.dirname(nativeWindowsPowerShell));const stat=fs.lstatSync(nativeWindowsPowerShell);if(!stat.isFile()||stat.isSymbolicLink()||fs.realpathSync.native(nativeWindowsPowerShell)!==nativeWindowsPowerShell||sha(fs.readFileSync(nativeWindowsPowerShell))!=='8bb6fa8c283b4d92120b1ef249a9b311b0f804d4cabbe9981159976c8be76a5e')fail('SOURCE_WINDOWS_EXECUTABLE_CHANGED');}catch{fail('SOURCE_WINDOWS_EXECUTABLE_CHANGED');}return nativeWindowsPowerShell;
 }
 function nativePowerShellEnvironment(){const env={};for(const [key,value] of Object.entries(process.env))if(!/^PSModulePath$/i.test(key))env[key]=value;env.PSModulePath=canonicalDirectory(path.join(path.dirname(nativeWindowsPowerShell),'Modules'));return env;}
-async function powershell(script){const {stdout}=await run(checkedWindowsPowerShell(),['-NoLogo','-NoProfile','-NonInteractive','-Command',script],{windowsHide:true,encoding:'utf8',env:nativePowerShellEnvironment(),timeout:10000,maxBuffer:8*1024*1024});return stdout.trim()?json(stdout.replace(/^\uFEFF/,'')):null;}
+function checkedWindowsSourceHelper(){
+ const helper=fileURLToPath(new URL('./preservation-source-native-windows.ps1',import.meta.url)),script=readPlain(helper).toString('utf8').replaceAll('\r\n','\n');if(sha(Buffer.from(script))!=='b8fd13d2c22c3ec25b081f4cb33157c24983f473264872ce0de3843f4016f643')fail('SOURCE_WINDOWS_HELPER_CHANGED');return {helper,script};
+}
+async function powershell(script,listener=false){
+ const nativeSource=checkedWindowsSourceHelper().script,marker='\n# ZIWEI_SYSTEM_MODULE_PRELUDE_END\n',boundary=nativeSource.indexOf(marker);if(boundary<0||boundary!==nativeSource.lastIndexOf(marker))fail('SOURCE_WINDOWS_HELPER_CHANGED');
+ const prelude=nativeSource.slice(0,boundary)+'\n'+(listener?"try{Import-ZiweiSystemModule 'NetTCPIP'}catch{[Console]::Error.WriteLine('SOURCE_WINDOWS_MODULE_UNPROVEN');exit 1}\n":'');
+ let stdout;try{({stdout}=await run(checkedWindowsPowerShell(),['-NoLogo','-NoProfile','-NonInteractive','-Command',prelude+script],{windowsHide:true,encoding:'utf8',env:nativePowerShellEnvironment(),timeout:10000,maxBuffer:8*1024*1024}));}catch(error){fail(/SOURCE_WINDOWS_[A-Z_]+/.exec(error.stderr||'')?.[0]||'SOURCE_WINDOWS_NATIVE_UNREADABLE');}return stdout.trim()?json(stdout.replace(/^\uFEFF/,'')):null;
+}
 async function readWindowsProcess(pid,original){
  try{return await inspectWindowsSourceProcess({pid,...(iso(original?.createdAt)?{createdAt:original.createdAt}:{})});}catch(error){if(original&&error.code==='SOURCE_WINDOWS_BIRTH_CHANGED')return null;throw error;}
 }
@@ -377,7 +384,7 @@ export async function inspectWindowsSourceProcess(input){
  return {pid:value.pid,parentPid:value.parentPid,createdAt:value.createdAt,creationFileTime:value.creationFileTime,nativeBirth:{bootId:value.bootId,createdAt:value.createdAt},entryPath:fs.realpathSync.native(value.entryPath),executable:fs.realpathSync.native(value.executable),commandDigest:value.commandDigest,cwd:value.cwd,paths:value.paths,pathVariablesRead:allowed,executionOptionsAbsent:true,samePackageContext:true};
 }
 async function readWindowsSourceHelper(input){
- const helper=fileURLToPath(new URL('./preservation-source-native-windows.ps1',import.meta.url));if(sha(readPlain(helper).toString('utf8').replaceAll('\r\n','\n'))!=='c60e1a4b941e82f43e87c8aa6e588da41269fc5701a01fff421940297ddbb5d2')fail('SOURCE_WINDOWS_HELPER_CHANGED');
+ const {helper}=checkedWindowsSourceHelper();
  return new Promise((resolve,reject)=>{const child=execFile(checkedWindowsPowerShell(),['-NoLogo','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',helper],{windowsHide:true,encoding:'utf8',env:nativePowerShellEnvironment(),timeout:15000,maxBuffer:256*1024},(error,stdout,stderr)=>{if(error){const code=/SOURCE_WINDOWS_[A-Z_]+/.exec(stderr||'')?.[0]||'SOURCE_WINDOWS_NATIVE_UNREADABLE';reject(Object.assign(new Error(code),{code}));}else try{resolve(json(stdout.replace(/^\uFEFF/,'')));}catch(failed){reject(failed);}});child.stdin.on('error',()=>{});child.stdin.end(canonicalProduction(input));});
 }
 // This exact closed program has no imports, evaluation, IO or child creation.
@@ -432,7 +439,7 @@ async function readWindowsNamespace(selector,context){
   members.push(current.pid);
   try{windowsScopePaths(original,current);}catch(error){unresolved.push({code:error.code||'SOURCE_WINDOWS_PATH_UNAVAILABLE'});}
  }
- const roots=[original.root,original.userHome,original.runtimeDir,original.baseHome,...Object.values(original.installTargets||{}).map(row=>row.root)].filter(Boolean).map(root=>root.toLowerCase()),literal=value=>"'"+value.replaceAll("'","''")+"'",sample=await powershell("$ErrorActionPreference='Stop'; $roots=@("+roots.map(literal).join(',')+"); $rows=@(Get-CimInstance Win32_Process | ForEach-Object {$command=([string]$_.CommandLine).ToLowerInvariant();$related=@($roots|Where-Object {$command.Contains($_)}).Count -gt 0;[pscustomobject]@{pid=[int]$_.ProcessId;parentPid=[int]$_.ParentProcessId;related=$related}}); [pscustomobject]@{observerPid=[int]$PID;processes=$rows}|ConvertTo-Json -Depth 4 -Compress");
+ const roots=[original.root,original.userHome,original.runtimeDir,original.baseHome,...Object.values(original.installTargets||{}).map(row=>row.root)].filter(Boolean).map(root=>root.toLowerCase()),literal=value=>"'"+value.replaceAll("'","''")+"'",sample=await powershell("$roots=@("+roots.map(literal).join(',')+"); $rows=@(CimCmdlets\\Get-CimInstance Win32_Process | Microsoft.PowerShell.Core\\ForEach-Object {$command=([string]$_.CommandLine).ToLowerInvariant();$related=@($roots|Microsoft.PowerShell.Core\\Where-Object {$command.Contains($_)}).Count -gt 0;[pscustomobject]@{pid=[int]$_.ProcessId;parentPid=[int]$_.ParentProcessId;related=$related}}); [pscustomobject]@{observerPid=[int]$PID;processes=$rows}|Microsoft.PowerShell.Utility\\ConvertTo-Json -Depth 4 -Compress");
  if(!Number.isSafeInteger(sample?.observerPid)||!Array.isArray(sample.processes))fail('SOURCE_WINDOWS_INVENTORY_UNREADABLE');const inventory=sample.processes,collectors=new Set([sample.observerPid]);let expanded=true;while(expanded){expanded=false;for(const row of inventory)if(collectors.has(row.parentPid)&&!collectors.has(row.pid)){collectors.add(row.pid);expanded=true;}}
  const associated=new Set(members);let changed=true;while(changed){changed=false;for(const row of inventory){if(collectors.has(row.pid)||row.pid===process.pid)continue;if(row.related||associated.has(row.parentPid)){if(!associated.has(row.pid)){associated.add(row.pid);changed=true;}}}}
  for(const pid of associated)if(!members.includes(pid))members.push(pid);
@@ -453,7 +460,7 @@ async function readSystemd(namespace){
 }
 async function readListener(origin,pid){
  const url=new URL(origin),port=Number(url.port);if(url.protocol!=='http:'||!['127.0.0.1','[::1]'].includes(url.hostname)||!Number.isSafeInteger(port)||port<=0||port>65535)fail('SOURCE_RUNTIME_LISTENER');
- if(process.platform==='win32'){const value=await powershell("$ErrorActionPreference='Stop'; @(Get-NetTCPConnection -State Listen -LocalPort "+port+" | ForEach-Object {[pscustomobject]@{listenerPid=[int]$_.OwningProcess}})|ConvertTo-Json -Compress");const rows=Array.isArray(value)?value:value?[value]:[];if(rows.length!==1||rows[0].listenerPid!==pid)fail('SOURCE_RUNTIME_LISTENER');return {listenerPid:pid};}
+ if(process.platform==='win32'){const value=await powershell("@(NetTCPIP\\Get-NetTCPConnection -State Listen -LocalPort "+port+" | Microsoft.PowerShell.Core\\ForEach-Object {[pscustomobject]@{listenerPid=[int]$_.OwningProcess}})|Microsoft.PowerShell.Utility\\ConvertTo-Json -Compress",true);const rows=Array.isArray(value)?value:value?[value]:[];if(rows.length!==1||rows[0].listenerPid!==pid)fail('SOURCE_RUNTIME_LISTENER');return {listenerPid:pid};}
  const inodes=new Set(),owned=new Set();
  for(const file of ['/proc/net/tcp','/proc/net/tcp6'])for(const line of fs.readFileSync(file,'utf8').split('\n').slice(1)){const words=line.trim().split(/\s+/);if(words[3]==='0A'&&parseInt(words[1]?.split(':')[1],16)===port)inodes.add(words[9]);}
  for(const name of fs.readdirSync('/proc/'+pid+'/fd'))try{const target=fs.readlinkSync('/proc/'+pid+'/fd/'+name),match=/^socket:\[([0-9]+)\]$/.exec(target);if(match&&inodes.has(match[1]))owned.add(match[1]);}catch(error){if(error.code!=='ENOENT')throw error;}

@@ -1,14 +1,50 @@
 $ErrorActionPreference='Stop'
+try {
+ $ziweiSystemModuleRoot=[IO.Path]::Combine([Environment]::SystemDirectory,'WindowsPowerShell\v1.0\Modules')
+ if($ziweiSystemModuleRoot -ine 'C:\Windows\System32\WindowsPowerShell\v1.0\Modules' -or $PSHOME -ine [IO.Directory]::GetParent($ziweiSystemModuleRoot).FullName){throw 'SOURCE_WINDOWS_MODULE_UNPROVEN'}
+ $env:PSModulePath=$ziweiSystemModuleRoot
+ $global:PSModuleAutoLoadingPreference='None'
+ function Import-ZiweiSystemModule([string]$Name) {
+  $ziweiManifest=[IO.Path]::Combine($ziweiSystemModuleRoot,$Name,$Name+'.psd1')
+  $ziweiModulePath=$ziweiManifest;$ziweiModuleBase=$PSHOME;$ziweiCommandType='Cmdlet'
+  switch -Exact ($Name) {
+   'Microsoft.PowerShell.Utility' {$ziweiCommands=@('ConvertFrom-Json','ConvertTo-Json','Add-Type');$ziweiAssembly='C:\Windows\Microsoft.Net\assembly\GAC_MSIL\Microsoft.PowerShell.Commands.Utility\v4.0_3.0.0.0__31bf3856ad364e35\Microsoft.PowerShell.Commands.Utility.dll'}
+   'CimCmdlets' {$ziweiCommands=@('Get-CimInstance','Invoke-CimMethod');$ziweiModuleBase=[IO.Path]::Combine($ziweiSystemModuleRoot,$Name);$ziweiModulePath='C:\Windows\Microsoft.Net\assembly\GAC_MSIL\Microsoft.Management.Infrastructure.CimCmdlets\v4.0_1.0.0.0__31bf3856ad364e35\Microsoft.Management.Infrastructure.CimCmdlets.dll';$ziweiAssembly=$ziweiModulePath}
+   'Microsoft.PowerShell.Security' {$ziweiCommands=@('Get-AuthenticodeSignature');$ziweiAssembly='C:\Windows\Microsoft.Net\assembly\GAC_MSIL\Microsoft.PowerShell.Security\v4.0_3.0.0.0__31bf3856ad364e35\Microsoft.PowerShell.Security.dll'}
+   'NetTCPIP' {$ziweiCommands=@('Get-NetTCPConnection');$ziweiModuleBase=[IO.Path]::Combine($ziweiSystemModuleRoot,$Name);$ziweiCommandType='Function'}
+   default {throw 'SOURCE_WINDOWS_MODULE_UNPROVEN'}
+  }
+  $ziweiCommandModuleName=$Name;$ziweiCommandModulePath=$ziweiModulePath
+  if($Name -ceq 'NetTCPIP'){$ziweiCommandModuleName='MSFT_NetTCPConnection';$ziweiCommandModulePath=[IO.Path]::Combine($ziweiModuleBase,'MSFT_NetTCPConnection.cdxml')}
+  foreach($ziweiModule in @(Microsoft.PowerShell.Core\Get-Module -Name $Name -All)) {
+   if($ziweiModule.Path -ine $ziweiModulePath -or $ziweiModule.ModuleBase -ine $ziweiModuleBase){throw 'SOURCE_WINDOWS_MODULE_UNPROVEN'}
+  }
+  if($Name -ceq 'NetTCPIP') {foreach($ziweiModule in @(Microsoft.PowerShell.Core\Get-Module -Name $ziweiCommandModuleName -All)){if($ziweiModule.Path -ine $ziweiCommandModulePath -or $ziweiModule.ModuleBase -ine $ziweiModuleBase){throw 'SOURCE_WINDOWS_MODULE_UNPROVEN'}}}
+  Microsoft.PowerShell.Core\Import-Module -Name $ziweiManifest -Scope Global -Force -ErrorAction Stop
+  foreach($ziweiCommandName in $ziweiCommands) {
+   $ziweiMatches=@(Microsoft.PowerShell.Core\Get-Command -Name ($Name+'\'+$ziweiCommandName) -All -ErrorAction Stop)
+   if($ziweiMatches.Count -ne 1){throw 'SOURCE_WINDOWS_MODULE_UNPROVEN'}
+   $ziweiCommand=$ziweiMatches[0]
+   if($ziweiCommand.ModuleName -cne $ziweiCommandModuleName -or [string]$ziweiCommand.CommandType -cne $ziweiCommandType -or $ziweiCommand.Module.Path -ine $ziweiCommandModulePath -or $ziweiCommand.Module.ModuleBase -ine $ziweiModuleBase -or ($ziweiCommandType -ceq 'Cmdlet' -and $ziweiCommand.ImplementingType.Assembly.Location -ine $ziweiAssembly)){throw 'SOURCE_WINDOWS_MODULE_UNPROVEN'}
+  }
+  if($env:PSModulePath -ine $ziweiSystemModuleRoot -or $global:PSModuleAutoLoadingPreference -cne 'None'){throw 'SOURCE_WINDOWS_MODULE_UNPROVEN'}
+ }
+ Import-ZiweiSystemModule 'Microsoft.PowerShell.Utility'
+ Import-ZiweiSystemModule 'CimCmdlets'
+} catch {
+ [Console]::Error.WriteLine('SOURCE_WINDOWS_MODULE_UNPROVEN');exit 1
+}
+# ZIWEI_SYSTEM_MODULE_PRELUDE_END
 [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)
 try {
  $ziweiPhase='SOURCE_WINDOWS_NATIVE_UNREADABLE'
- $ziweiInput=[Console]::In.ReadToEnd()|ConvertFrom-Json
+ $ziweiInput=[Console]::In.ReadToEnd()|Microsoft.PowerShell.Utility\ConvertFrom-Json
  $ziweiTargetId=[int]$ziweiInput.pid
  if($ziweiTargetId -lt 1 -or $ziweiTargetId -eq $PID){throw 'SOURCE_WINDOWS_PID_INVALID'}
- $ziweiRecord=Get-CimInstance Win32_Process -Filter "ProcessId = $ziweiTargetId"
- if(!$ziweiRecord){[pscustomobject]@{state='absent';pid=$ziweiTargetId}|ConvertTo-Json -Compress;exit 0}
+ $ziweiRecord=CimCmdlets\Get-CimInstance Win32_Process -Filter "ProcessId = $ziweiTargetId"
+ if(!$ziweiRecord){[pscustomobject]@{state='absent';pid=$ziweiTargetId}|Microsoft.PowerShell.Utility\ConvertTo-Json -Compress;exit 0}
  if([IntPtr]::Size -ne 8){throw 'SOURCE_WINDOWS_ARCHITECTURE'}
-  Add-Type -TypeDefinition @'
+  Microsoft.PowerShell.Utility\Add-Type -TypeDefinition @'
 using System;
 using System.Text;
 using System.Collections.Generic;
@@ -91,7 +127,7 @@ public static class ZiweiSourceReader {
 }
 '@
  if($ziweiInput.createdAt -and [DateTime]::FromFileTimeUtc([ZiweiSourceReader]::Birth($ziweiTargetId)).ToString('yyyy-MM-ddTHH:mm:ss.fffZ') -cne $ziweiInput.createdAt){throw 'SOURCE_WINDOWS_BIRTH_CHANGED'}
- $ziweiOwner=Invoke-CimMethod -InputObject $ziweiRecord -MethodName GetOwnerSid
+ $ziweiOwner=CimCmdlets\Invoke-CimMethod -InputObject $ziweiRecord -MethodName GetOwnerSid
  if($ziweiOwner.ReturnValue -ne 0 -or $ziweiOwner.Sid -ne [Security.Principal.WindowsIdentity]::GetCurrent().User.Value){throw 'SOURCE_WINDOWS_OWNER'}
  if($ziweiInput.kind -eq 'console-host'){$ziweiPhase='SOURCE_WINDOWS_CONSOLE_HANDLE'}
  $ziweiMemory=if($ziweiInput.kind -eq 'console-host'){[ZiweiSourceReader]::ConsoleIdentity($ziweiTargetId)}else{[ZiweiSourceReader]::Inspect($ziweiTargetId)}
@@ -103,31 +139,31 @@ public static class ZiweiSourceReader {
  if($ziweiInput.createdAt -and $ziweiInput.createdAt -cne $ziweiCreated){throw 'SOURCE_WINDOWS_BIRTH_CHANGED'}
  if($ziweiInput.kind -eq 'console-host'){
   $ziweiPhase='SOURCE_WINDOWS_CONSOLE_SCOPE'
-  $ziweiConsoleImage=Join-Path ([Environment]::SystemDirectory) 'conhost.exe'
+  $ziweiConsoleImage=[IO.Path]::Combine([Environment]::SystemDirectory,'conhost.exe')
   if($ziweiMemory.executable -ine $ziweiConsoleImage -or $ziweiRecord.ExecutablePath -ine $ziweiConsoleImage -or $ziweiRecord.ParentProcessId -ne $ziweiInput.parentPid -or $ziweiArgv.Count -lt 2 -or $ziweiArgv.Count -gt 3 -or $ziweiArgv[1] -notmatch '^0x[0-9a-f]+$' -or ($ziweiArgv.Count -eq 3 -and $ziweiArgv[2] -cne '-ForceV1')){throw 'SOURCE_WINDOWS_CONSOLE_UNPROVEN'}
-  $ziweiParent=Get-CimInstance Win32_Process -Filter "ProcessId = $($ziweiInput.parentPid)"
-  if(!$ziweiParent -or $ziweiParent.CreationDate.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffZ') -cne $ziweiInput.parentCreatedAt -or $ziweiRecord.CreationDate -lt $ziweiParent.CreationDate -or @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $ziweiTargetId").Count){throw 'SOURCE_WINDOWS_CONSOLE_UNPROVEN'}
+  $ziweiParent=CimCmdlets\Get-CimInstance Win32_Process -Filter "ProcessId = $($ziweiInput.parentPid)"
+  if(!$ziweiParent -or $ziweiParent.CreationDate.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffZ') -cne $ziweiInput.parentCreatedAt -or $ziweiRecord.CreationDate -lt $ziweiParent.CreationDate -or @(CimCmdlets\Get-CimInstance Win32_Process -Filter "ParentProcessId = $ziweiTargetId").Count){throw 'SOURCE_WINDOWS_CONSOLE_UNPROVEN'}
   $ziweiPhase='SOURCE_WINDOWS_CONSOLE_SIGNATURE'
-  Import-Module (Join-Path ([Environment]::SystemDirectory) 'WindowsPowerShell\v1.0\Modules\Microsoft.PowerShell.Security\Microsoft.PowerShell.Security.psd1') -ErrorAction Stop
+  Import-ZiweiSystemModule 'Microsoft.PowerShell.Security'
   $ziweiSignature=Microsoft.PowerShell.Security\Get-AuthenticodeSignature -LiteralPath $ziweiConsoleImage
   if($ziweiSignature.Status -ne 'Valid' -or $ziweiSignature.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation'){throw 'SOURCE_WINDOWS_CONSOLE_UNPROVEN'}
   $ziweiPhase='SOURCE_WINDOWS_CONSOLE_AFTER'
-  $ziweiConsoleAfter=Get-CimInstance Win32_Process -Filter "ProcessId = $ziweiTargetId"
+  $ziweiConsoleAfter=CimCmdlets\Get-CimInstance Win32_Process -Filter "ProcessId = $ziweiTargetId"
   if(!$ziweiConsoleAfter -or $ziweiConsoleAfter.CreationDate -ne $ziweiRecord.CreationDate -or $ziweiConsoleAfter.CommandLine -cne $ziweiRecord.CommandLine -or $ziweiConsoleAfter.ParentProcessId -ne $ziweiParent.ProcessId){throw 'SOURCE_WINDOWS_CONSOLE_UNPROVEN'}
   $ziweiPhase='SOURCE_WINDOWS_CONSOLE_HASH'
   $ziweiImageHasher=[Security.Cryptography.SHA256]::Create();$ziweiImageStream=[IO.File]::OpenRead($ziweiConsoleImage)
   try{$ziweiConsoleHash=[BitConverter]::ToString($ziweiImageHasher.ComputeHash($ziweiImageStream)).Replace('-','').ToLowerInvariant()}finally{$ziweiImageStream.Dispose();$ziweiImageHasher.Dispose()}
-  [pscustomobject]@{state='present';kind='console-host';pid=$ziweiTargetId;parentPid=[int]$ziweiParent.ProcessId;parentCreatedAt=$ziweiInput.parentCreatedAt;createdAt=$ziweiCreated;creationFileTime=$ziweiMemory.creationFileTime;executable=$ziweiConsoleImage;imageSha256=$ziweiConsoleHash;signature='Microsoft Corporation';children=@()}|ConvertTo-Json -Depth 3 -Compress
+  [pscustomobject]@{state='present';kind='console-host';pid=$ziweiTargetId;parentPid=[int]$ziweiParent.ProcessId;parentCreatedAt=$ziweiInput.parentCreatedAt;createdAt=$ziweiCreated;creationFileTime=$ziweiMemory.creationFileTime;executable=$ziweiConsoleImage;imageSha256=$ziweiConsoleHash;signature='Microsoft Corporation';children=@()}|Microsoft.PowerShell.Utility\ConvertTo-Json -Depth 3 -Compress
   exit 0
  }
  if($ziweiArgv.Count -ne 2){throw 'SOURCE_WINDOWS_COMMAND'}
- $ziweiEntry=if([IO.Path]::IsPathRooted($ziweiArgv[1])){[IO.Path]::GetFullPath($ziweiArgv[1])}else{[IO.Path]::GetFullPath((Join-Path $ziweiMemory.cwd $ziweiArgv[1]))}
+ $ziweiEntry=if([IO.Path]::IsPathRooted($ziweiArgv[1])){[IO.Path]::GetFullPath($ziweiArgv[1])}else{[IO.Path]::GetFullPath([IO.Path]::Combine($ziweiMemory.cwd,$ziweiArgv[1]))}
  if($ziweiInput.entryPath -and $ziweiInput.entryPath -ine $ziweiEntry){throw 'SOURCE_WINDOWS_ENTRY_CHANGED'}
- $ziweiAfter=Get-CimInstance Win32_Process -Filter "ProcessId = $ziweiTargetId"
+ $ziweiAfter=CimCmdlets\Get-CimInstance Win32_Process -Filter "ProcessId = $ziweiTargetId"
  if(!$ziweiAfter -or $ziweiAfter.CreationDate -ne $ziweiRecord.CreationDate -or $ziweiAfter.CommandLine -cne $ziweiRecord.CommandLine){throw 'SOURCE_WINDOWS_BIRTH_CHANGED'}
  $ziweiHasher=[Security.Cryptography.SHA256]::Create()
- try{$ziweiDigest=[BitConverter]::ToString($ziweiHasher.ComputeHash([Text.Encoding]::UTF8.GetBytes($ziweiRecord.CommandLine))).Replace('-','').ToLowerInvariant();$ziweiBoot=[BitConverter]::ToString($ziweiHasher.ComputeHash([Text.Encoding]::UTF8.GetBytes((Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime().ToString('o')))).Replace('-','').ToLowerInvariant()}finally{$ziweiHasher.Dispose()}
- [pscustomobject]@{state='present';pid=$ziweiTargetId;parentPid=[int]$ziweiRecord.ParentProcessId;createdAt=$ziweiCreated;creationFileTime=$ziweiMemory.creationFileTime;bootId=$ziweiBoot;cwd=$ziweiMemory.cwd;entryPath=$ziweiEntry;executable=$ziweiRecord.ExecutablePath;commandDigest=$ziweiDigest;paths=$ziweiMemory.environment;nodeOptionsPresent=$ziweiMemory.nodeOptionsPresent;samePackageContext=$ziweiMemory.samePackageContext}|ConvertTo-Json -Depth 5 -Compress
+ try{$ziweiDigest=[BitConverter]::ToString($ziweiHasher.ComputeHash([Text.Encoding]::UTF8.GetBytes($ziweiRecord.CommandLine))).Replace('-','').ToLowerInvariant();$ziweiBoot=[BitConverter]::ToString($ziweiHasher.ComputeHash([Text.Encoding]::UTF8.GetBytes((CimCmdlets\Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime().ToString('o')))).Replace('-','').ToLowerInvariant()}finally{$ziweiHasher.Dispose()}
+ [pscustomobject]@{state='present';pid=$ziweiTargetId;parentPid=[int]$ziweiRecord.ParentProcessId;createdAt=$ziweiCreated;creationFileTime=$ziweiMemory.creationFileTime;bootId=$ziweiBoot;cwd=$ziweiMemory.cwd;entryPath=$ziweiEntry;executable=$ziweiRecord.ExecutablePath;commandDigest=$ziweiDigest;paths=$ziweiMemory.environment;nodeOptionsPresent=$ziweiMemory.nodeOptionsPresent;samePackageContext=$ziweiMemory.samePackageContext}|Microsoft.PowerShell.Utility\ConvertTo-Json -Depth 5 -Compress
 } catch {
  $ziweiError=if($_.Exception.Message -match 'SOURCE_WINDOWS_[A-Z_]+'){$Matches[0]}else{if($ziweiInput.kind -eq 'console-host'){$ziweiPhase+'_'+$_.Exception.GetType().Name.ToUpperInvariant()}else{$ziweiPhase}}
  [Console]::Error.WriteLine($ziweiError);exit 1
