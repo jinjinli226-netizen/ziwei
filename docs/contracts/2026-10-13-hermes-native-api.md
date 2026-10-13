@@ -38,7 +38,7 @@ MCP inspect返回 `{server,connected,tools:[{name,schema}],status}`，call输入
 
 Voice status仅返回provider/enabled/configured及credentialsReturned:false；transcribe返回原生transcript/provider；synthesize返回 `{files:[{name,mimeType,audioBase64}],provider,...}`（每个音频至多5MiB），前端可播放data URL。必须先在 BotConfig.voice 明确STT/TTS provider，禁止默默切云。
 
-Gateway connect输入platform/durationSeconds（1–86400秒，默认86400），仅受监管原生adapter worker；返回connected是实际connect回执。disconnect回stopConfirmed/processExit，不能把请求受理当停止。监听器只产生紫薇入站记录与action；忙时消息以 platform/chatId/messageId 持久排队，同一聊天原ID不重复执行。入站与回复绑定确切 sourceActionId；已ACK的同平台 disconnect 或新connect永久撤销旧lease，其他平台不受影响。旧连接消息不能借另一条连接复活，需重新授权；delivery_started 与未确认发送不会自动重放。状态文件按平台独立，过期心跳显示unconfirmed。worker会在Bot版本/epoch授权撤销后关闭，日志位于该Bot HOME/logs/ziwei-native-lifecycle.jsonl，并记录独立监管健康与退出证据。
+Gateway connect输入platform/durationSeconds（1–86400秒，默认86400），仅受监管原生adapter worker；返回connected需要实际adapter连接及已核对的接收健康证据。disconnect回stopConfirmed/processExit，不能把请求受理当停止。监听器只产生紫薇入站记录与action；忙时消息以 platform/chatId/messageId 持久排队，同一聊天原ID不重复执行。入站与回复绑定确切 sourceActionId；已ACK的同平台 disconnect 或新connect永久撤销旧lease，其他平台不受影响。旧连接消息不能借另一条连接复活，需重新授权；delivery_started 与未确认发送不会自动重放。状态文件按平台独立，过期心跳显示unconfirmed。worker会在Bot版本/epoch授权撤销后关闭，日志位于该Bot HOME/logs/ziwei-native-lifecycle.jsonl，并记录独立监管健康与退出证据。
 
 BotConfig扩展：memory.charLimit/userCharLimit；skills.autoLoad；MCP transport/url/headers/timeout/connectTimeout/tools；permissions.management（默认true）；voice.stt/tts（provider/model/baseUrl/keyEnv/voice/language/enabled）；gateway.platforms（enabled/tokenEnv/envRefs/extra/allowedUsers）与profileRoutes；collaboration.enabled/targetEmployeeIds；drivers.maxTotalTurns/expiresAt。配置字段均严格验证且随revision保存；source auth只是只读引用，源认证需refresh时该Bot拒绝写原store。
 
@@ -69,3 +69,11 @@ Group 首条正文可精确 `@发起员工ID`。发起者从受信 action contex
 Gateway 渠道状态使用原生 adapter 的 fatal/is_connected/send_path_degraded；当前已验证 0.21.3 的 Mattermost WebSocket task/socket 与 Webhook serving site。`connect()` 返回 true 但接收路径尚未证实可用时为 `retrying`；认证或监听致命失败保留 `failed` 和脱敏 `code`，进程心跳不能改回 connected。每个心跳携带观察到的渠道状态，正常断开也不能覆盖已有失败原因。
 
 JS 管理器状态额外区分 `processAlive:true|false|null` 与 `processExit`：null 表示 Windows 监督结束但原进程树退出未确认，此时 disconnect 返回 `stopConfirmed:false`，新 connect 返回 `EXECUTION_UNCERTAIN`，不会启动替代 worker。停止准入独立锁存，缓冲的 connected/heartbeat 事件不能重新开放收发。临时恢复只继续同一 sourceActionId 的 pending/accepted 原消息；恢复事件与旧观察者并发时保留一次待处理事件，服务端仍按原消息幂等读取原 action。delivery_started/delivered/delivery_failed 均不会被恢复发布，未知发送继续保持不可自动重发。
+
+## 2026-10-13 Slack / 接收健康 P2 修订
+
+`is_connected`（原生 `_running`）仅作前置条件。Slack 还核对 Socket Mode task、SDK receiver/processor、重连锁、原生 transport 与 ping/pong 探针；探针最长等待 0.5 秒，await 后再次检查 fatal、运行状态和接收对象身份。缺少或结束的接收链路、重连和失活 transport 为 `retrying`；SDK 接口缺失、探针异常/超时为 `unconfirmed`。恢复为 connected 必须重新取得健康证据。两种非连接状态均经 status/heartbeat 传给 JS，阻止入站派发和新发送；失败原因与进程树证据仍独立保留。
+
+其他已核对的 0.21.3 路径：Telegram polling 的 updater/progress generation；Discord 接收 task 与原生 WebSocket/ACK 探针；Feishu WebSocket future/loop/SDK connection 或实际 webhook listener；DingTalk stream task/socket；原有 Mattermost task/socket 和 Webhook listener。未知插件与尚未核对 PTB listener 的 Telegram webhook 为 `unconfirmed`，不会仅凭 running 显示 connected。SDK 缺失时原生 connect 自身仍返回缺依赖失败。
+
+隔离证据见 `docs/ops/2026-10-13-e02-gateway-receive-health-acceptance.md`。这是安装版本接口与本地故障验证，不代表所有云账号已联通；正常路径与恢复有正向用例，未证实的渠道不能显示为已验证可收发。

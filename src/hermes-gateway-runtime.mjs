@@ -73,7 +73,7 @@ export function createBotGatewayManager({apiBase,workspace,deviceToken}={},depen
           for(const line of lines)if(line.startsWith('ZIWEI_GATEWAY_EVENT:')){let event;try{event=JSON.parse(line.slice('ZIWEI_GATEWAY_EVENT:'.length));}catch{continue;}
             if(['connected','failed','status','heartbeat','disconnected'].includes(event.event)){
               const status=event.status || (['connected','failed','disconnected'].includes(event.event)?event.event:null);
-              if(!worker.closed&&worker.status!=='failed'&&(!worker.stopping||status==='failed')&&['connected','retrying','failed','disconnected'].includes(status)){worker.status=status;worker.code=/^[A-Za-z0-9_-]{1,100}$/.test(event.code || '')?event.code:null;}
+              if(!worker.closed&&worker.status!=='failed'&&(!worker.stopping||status==='failed')&&['connected','retrying','unconfirmed','failed','disconnected'].includes(status)){worker.status=status;worker.code=/^[A-Za-z0-9_-]{1,100}$/.test(event.code || '')?event.code:null;}
               appendNativeLifecycle(worker.home,{event:'gateway.channel',status:worker.status,code:worker.code,pid:worker.child.pid || null});
             }
             if(event.event==='connected'&&accepting(worker)){appendNativeLifecycle(worker.home,{event:'gateway.connected',pid:event.pid,sourceActionId:action.id});resolveReady({connected:true,pid:event.pid,nativeVersion:event.nativeVersion,sourceActionId:action.id});}

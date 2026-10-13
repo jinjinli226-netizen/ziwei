@@ -159,9 +159,9 @@ class NativeFollowup(unittest.TestCase):
             adapter._wire_plugin_handlers = lambda _: None
             try:
                 self.assertTrue(await adapter.connect())
-                self.assertEqual(bridge.adapter_health(adapter, 'webhook'), ('connected', None))
+                self.assertEqual(await bridge.adapter_health(adapter, 'webhook'), ('connected', None))
                 for site in list(adapter._runner.sites): await site.stop()
-                self.assertEqual(bridge.adapter_health(adapter, 'webhook'), ('failed', 'GATEWAY_LISTENER_ENDED'))
+                self.assertEqual(await bridge.adapter_health(adapter, 'webhook'), ('failed', 'GATEWAY_LISTENER_ENDED'))
             finally:
                 await adapter.disconnect()
         asyncio.run(check())

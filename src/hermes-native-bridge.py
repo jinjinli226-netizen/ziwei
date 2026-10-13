@@ -664,13 +664,44 @@ def enqueue_native(target, text, isolation):
     return enqueue_envelope(home_path('collaboration'), target={'profile': target, 'handle': target, 'connection_id': isolation['workspace']}, message=text, sender_profile=isolation['employeeId'], sender_handle=isolation['employeeId'])
 
 
-def adapter_health(adapter, platform_name):
-    """Native public health + explicit 0.21.3 receive transports, never task scans."""
+def adapter_state(adapter):
+    """Running is a prerequisite, never proof that a receiver is usable."""
     if adapter.has_fatal_error:
         code = adapter.fatal_error_code or 'GATEWAY_ADAPTER_FATAL'
         return 'failed', code if re.fullmatch(r'[A-Za-z0-9_-]{1,100}', code) else 'GATEWAY_ADAPTER_FATAL'
     if not adapter.is_connected:
         return 'disconnected', 'GATEWAY_ADAPTER_DISCONNECTED'
+
+
+def task_live(task):
+    return task is not None and not task.done()
+
+
+def socket_open(socket):
+    if socket is None: return False
+    value = getattr(socket, 'open', None)
+    if isinstance(value, bool): return value
+    state = getattr(getattr(socket, 'state', None), 'name', None)
+    return state == 'OPEN' if state in {'OPEN', 'CONNECTING', 'CLOSING', 'CLOSED'} else None
+
+
+def listener_serving(runner):
+    return any(getattr(site, '_server', None) and site._server.is_serving() for site in getattr(runner, 'sites', ()))
+
+
+async def adapter_health(adapter, platform_name):
+    """Read installed 0.21.3 receive evidence; no network request or generic task scan."""
+    try:
+        return await _adapter_receive_health(adapter, platform_name)
+    except Exception:
+        return adapter_state(adapter) or ('unconfirmed', 'GATEWAY_HEALTH_PROBE_UNAVAILABLE')
+
+
+async def _adapter_receive_health(adapter, platform_name):
+    state = adapter_state(adapter)
+    if state: return state
+    if adapter.send_path_degraded:
+        return 'retrying', 'GATEWAY_RECEIVE_PATH_UNCONFIRMED'
     if platform_name == 'mattermost':
         listener = getattr(adapter, '_ws_task', None)
         if listener is None or listener.done():
@@ -679,13 +710,62 @@ def adapter_health(adapter, platform_name):
         if socket is None or socket.closed:
             return 'retrying', 'GATEWAY_RECEIVE_PATH_UNCONFIRMED'
     elif platform_name == 'webhook':
-        runner = getattr(adapter, '_runner', None)
-        sites = getattr(runner, 'sites', ())
-        if not any(getattr(site, '_server', None) and site._server.is_serving() for site in sites):
+        if not listener_serving(getattr(adapter, '_runner', None)):
             return 'failed', 'GATEWAY_LISTENER_ENDED'
-    if adapter.send_path_degraded:
-        return 'retrying', 'GATEWAY_RECEIVE_PATH_UNCONFIRMED'
-    return 'connected', None
+    elif platform_name == 'slack':
+        handler, task = getattr(adapter, '_handler', None), getattr(adapter, '_socket_mode_task', None)
+        lock = getattr(adapter, '_socket_reconnect_lock', None)
+        if lock is not None and lock.locked(): return 'retrying', 'GATEWAY_RECEIVER_RECONNECTING'
+        if handler is None or not task_live(task): return 'retrying', 'GATEWAY_LISTENER_UNAVAILABLE'
+        client = getattr(handler, 'client', None)
+        # These are the exact SDK receiver/dispatch tasks that the installed
+        # adapter cancels before closing Socket Mode. Missing API stays unknown.
+        receiver, processor = getattr(client, 'message_receiver', None), getattr(client, 'message_processor', None)
+        if receiver is None or processor is None: return 'unconfirmed', 'GATEWAY_RECEIVE_HEALTH_UNAVAILABLE'
+        if not task_live(receiver) or not task_live(processor): return 'retrying', 'GATEWAY_LISTENER_UNAVAILABLE'
+        connected = await asyncio.wait_for(adapter._socket_transport_connected(), timeout=.5)
+        state = adapter_state(adapter)
+        if state: return state
+        if (handler is not adapter._handler or task is not adapter._socket_mode_task
+                or receiver is not getattr(client, 'message_receiver', None)
+                or processor is not getattr(client, 'message_processor', None)
+                or not task_live(task) or not task_live(receiver) or not task_live(processor)
+                or lock is not None and lock.locked()):
+            return 'retrying', 'GATEWAY_RECEIVER_RECONNECTING'
+        if connected is None: return 'unconfirmed', 'GATEWAY_RECEIVE_HEALTH_UNAVAILABLE'
+        if not connected or adapter._socket_ping_pong_stale(): return 'retrying', 'GATEWAY_RECEIVE_PATH_UNCONFIRMED'
+    elif platform_name == 'discord':
+        if not task_live(getattr(adapter, '_bot_task', None)) or getattr(adapter, '_disconnecting', False):
+            return 'retrying', 'GATEWAY_LISTENER_UNAVAILABLE'
+        healthy, _ = adapter._read_websocket_health(getattr(adapter, '_client', None))
+        if not healthy: return 'retrying', 'GATEWAY_RECEIVE_PATH_UNCONFIRMED'
+    elif platform_name == 'telegram':
+        if getattr(adapter, '_webhook_mode', False):
+            # PTB webhook listener internals are not installed/verified here.
+            return 'unconfirmed', 'GATEWAY_RECEIVE_HEALTH_UNAVAILABLE'
+        updater = getattr(getattr(adapter, '_app', None), 'updater', None)
+        progress = getattr(adapter, '_polling_progress_event', None)
+        if not getattr(updater, 'running', False) or not getattr(adapter, '_polling_progress_accepting', False) or progress is None or not progress.is_set():
+            return 'retrying', 'GATEWAY_RECEIVE_PATH_UNCONFIRMED'
+    elif platform_name == 'feishu':
+        if getattr(adapter, '_connection_mode', None) == 'webhook':
+            if not listener_serving(getattr(adapter, '_webhook_runner', None)):
+                return 'failed', 'GATEWAY_LISTENER_ENDED'
+        else:
+            loop = getattr(adapter, '_ws_thread_loop', None)
+            if not task_live(getattr(adapter, '_ws_future', None)) or loop is None or not loop.is_running():
+                return 'retrying', 'GATEWAY_LISTENER_UNAVAILABLE'
+            opened = socket_open(getattr(getattr(adapter, '_ws_client', None), '_conn', None))
+            if opened is None: return 'unconfirmed', 'GATEWAY_RECEIVE_HEALTH_UNAVAILABLE'
+            if not opened: return 'retrying', 'GATEWAY_RECEIVE_PATH_UNCONFIRMED'
+    elif platform_name == 'dingtalk':
+        if not task_live(getattr(adapter, '_stream_task', None)): return 'retrying', 'GATEWAY_LISTENER_UNAVAILABLE'
+        opened = socket_open(getattr(getattr(adapter, '_stream_client', None), 'websocket', None))
+        if opened is None: return 'unconfirmed', 'GATEWAY_RECEIVE_HEALTH_UNAVAILABLE'
+        if not opened: return 'retrying', 'GATEWAY_RECEIVE_PATH_UNCONFIRMED'
+    else:
+        return 'unconfirmed', 'GATEWAY_RECEIVE_HEALTH_UNAVAILABLE'
+    return adapter_state(adapter) or ('connected', None)
 
 
 def run_gateway_worker(request, context):
@@ -751,14 +831,14 @@ def run_gateway_worker(request, context):
         state(status, code)
         import hermes_cli
         emit('connected' if status == 'connected' else 'failed' if status == 'failed' else 'status', pid=os.getpid(), platform=platform_name, nativeVersion=hermes_cli.__version__, **health)
-    def refresh_health():
-        if not closing: update_health(*adapter_health(adapter, platform_name))
+    async def refresh_health():
+        if not closing: update_health(*(await adapter_health(adapter, platform_name)))
         return accepting
     # This callback closes admission synchronously. Disconnecting here could
     # cancel the native task that is delivering its own fatal notification.
-    adapter.set_fatal_error_handler(lambda _: refresh_health())
+    adapter.set_fatal_error_handler(lambda _: update_health(*(adapter_state(adapter) or ('failed', 'GATEWAY_ADAPTER_FATAL'))))
     async def handler(event):
-        if not refresh_health():
+        if not await refresh_health():
             emit('inbound_rejected', code='GATEWAY_NOT_CONNECTED');return None
         # No prompt payload can choose profile/employee/model or bypass the
         # platform's revision, occupancy and active/validated checks.
@@ -800,15 +880,15 @@ def run_gateway_worker(request, context):
         try:
             connected = await asyncio.wait_for(adapter.connect(), timeout=45)
             if not connected:
-                update_health('failed', adapter_health(adapter, platform_name)[1] if adapter.has_fatal_error else 'GATEWAY_CONNECTION_REJECTED');return
-            refresh_health()
+                update_health('failed', adapter_state(adapter)[1] if adapter.has_fatal_error else 'GATEWAY_CONNECTION_REJECTED');return
+            await refresh_health()
             from hermes_state_registry import acquire
             db = acquire(home_path('state.db'))
             restored_generation = 0
             deadline = time.monotonic() + min(86400, max(1, request['input'].get('durationSeconds', 86400)))
             last_heartbeat = time.monotonic()
             while time.monotonic() < deadline:
-                refresh_health()
+                await refresh_health()
                 if health['status'] in {'failed', 'disconnected'}: break
                 if accepting and restored_generation != connection_generation:
                     for key, raw in db.list_meta_prefix('ziwei.gateway.inbound:'):
@@ -823,7 +903,7 @@ def run_gateway_worker(request, context):
                     await asyncio.sleep(.05);continue
                 operation = command.get('operation')
                 if operation == 'disconnect': break
-                if not refresh_health():
+                if not await refresh_health():
                     emit('command_result', commandId=command.get('commandId'), success=False, code='GATEWAY_NOT_CONNECTED');continue
                 if operation == 'send':
                     delivery_key = None
@@ -867,6 +947,6 @@ def run_gateway_worker(request, context):
             try:
                 await asyncio.wait_for(adapter.disconnect(), timeout=10)
             finally:
-                if health['status'] != 'failed': update_health('disconnected')
+                if health['status'] != 'failed': update_health('disconnected', health['code'])
                 state(**health);emit('disconnected', pid=os.getpid(), **health)
     asyncio.run(worker())
