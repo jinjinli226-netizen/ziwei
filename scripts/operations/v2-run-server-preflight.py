@@ -11,7 +11,7 @@ def main():
     parser.add_argument('--ssh-reference',required=True)
     parser.add_argument('--paramiko-path',required=True)
     parser.add_argument('--output',required=True)
-    parser.add_argument('--reader',choices=['baseline','legacy-actions'],default='baseline')
+    parser.add_argument('--reader',choices=['baseline','legacy-actions','source-capture'],default='baseline')
     args=parser.parse_args()
     root=pathlib.Path(__file__).resolve().parents[2]
     output=pathlib.Path(args.output).resolve()
@@ -22,7 +22,7 @@ def main():
     sys.path.insert(0,args.paramiko_path)
     import paramiko
     credentials=json.loads(pathlib.Path(args.ssh_reference).read_text(encoding='utf-8-sig'))
-    probe=pathlib.Path(__file__).with_name({'baseline':'v2-server-preflight-readonly.py','legacy-actions':'r01-legacy-actions-readonly.py'}[args.reader])
+    probe=pathlib.Path(__file__).with_name({'baseline':'v2-server-preflight-readonly.py','legacy-actions':'r01-legacy-actions-readonly.py','source-capture':'r01-linux-source-readonly.py'}[args.reader])
     client=paramiko.SSHClient()
     client.load_host_keys(credentials['knownHosts'])
     client.set_missing_host_key_policy(paramiko.RejectPolicy())
@@ -40,6 +40,12 @@ def main():
         report['runnerSourceSha256']=hashlib.sha256(pathlib.Path(__file__).read_bytes()).hexdigest()
         with output.open('x',encoding='utf-8') as stream:
             json.dump(report,stream,ensure_ascii=True,indent=2);stream.write('\n')
+        if args.reader=='source-capture':
+            print(json.dumps({'evidence':str(output),'sha256':hashlib.sha256(output.read_bytes()).hexdigest(),
+                'identityStable':report['identityStable'],'mainPID':report['services']['ziwei-api.service']['MainPID'],
+                'identityKind':report['services']['ziwei-api.service']['identityKind'],'scope':report['scope'],
+                'legacySubject':report['legacySubject'],'signingKeyReads':0,'serviceActions':0,'formalGatePassed':False},indent=2))
+            return
         if args.reader=='legacy-actions':
             print(json.dumps({'evidence':str(output),'sha256':hashlib.sha256(output.read_bytes()).hexdigest(),
                 **{key:report.get(key) for key in ['captureUTC','statusCounts','expiredAcked','uncertainActionIds','ackedWithoutLegacyTreeIds','formalDrainProven']},'databaseWrites':0},ensure_ascii=True,indent=2))
