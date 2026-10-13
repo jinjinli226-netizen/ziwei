@@ -1,0 +1,267 @@
+{
+  "date": "2026-10-13T08:14:22.128Z",
+  "baseCommit": "96559f8eb1df9292e8d264daaa80a0d584408616",
+  "nativeVersion": "0.21.3",
+  "model": "gpt-6.1-sol",
+  "localReceiptPath": "C:\\Users\\25941\\.codex\\worktrees\\v2-e02-native-capabilities\\灵光爸爸拆解\\.local\\bot-reasoning-1791879251390\\receipt.json",
+  "localReceiptSha256": "2351fad874d3ad38ad9de5575d8d6ef77c9559ea544ba464edd33e29be65d889",
+  "localNetwork": "All model network and DNS blocked; source credentials are synthetic; no external acceptance claimed",
+  "sourceHashesUnchanged": true,
+  "installedSourceHashes": {
+    "hermes_constants.py": "3c0b9d5d7b47318d1c9605a96719861059dd1ad80b4a696b215cf5fcf3d93ec7",
+    "agent/reasoning_effort.py": "b47b5b3d209c2a5df4b525a1630cbe7b56195e161527c22d0fdded45e23bac14",
+    "agent/transports/codex.py": "3b74f0fc7801a55fab6a8d9131e4485892c8ebccd366802ed5ea98087308a275",
+    "hermes_cli/auth.py": "be8629ea5f06e08840425bc22b11f52827ec8578fdeb4f7bfbb8715c6e0bf76f",
+    "hermes_cli/auth_codex.py": "d35b1fd58296cc692bad51a39133cfec575a43e34b7e49c0698d30bf445b0ae2"
+  },
+  "installedTrackedStatusUnchanged": true,
+  "nativeFixtures": {
+    "tests": 8,
+    "processExit": {
+      "platform": "win32",
+      "supervisor": "windows-job",
+      "launched": true,
+      "rootPid": 51368,
+      "rootConfirmed": true,
+      "rootExitCode": 0,
+      "treeConfirmed": true,
+      "activeProcesses": 0,
+      "cancelled": false,
+      "failureCode": null,
+      "hostExitCode": 0,
+      "streamsComplete": true,
+      "hostSignal": null
+    }
+  },
+  "localChecks": [
+    {
+      "operation": "provision",
+      "status": "succeeded",
+      "code": null,
+      "reasoning": {
+        "requested": "ultra",
+        "actual": null,
+        "status": "configured"
+      },
+      "revision": null,
+      "processExit": {
+        "platform": "win32",
+        "supervisor": "windows-job",
+        "launched": true,
+        "rootPid": 47632,
+        "rootConfirmed": true,
+        "rootExitCode": 0,
+        "treeConfirmed": true,
+        "activeProcesses": 0,
+        "cancelled": false,
+        "failureCode": null,
+        "hostExitCode": 0,
+        "streamsComplete": true,
+        "hostSignal": null
+      },
+      "neverStarted": null,
+      "externalModelCalls": null
+    },
+    {
+      "operation": "validate-ultra",
+      "status": "failed",
+      "code": "BOT_REASONING_UNSATISFIED",
+      "reasoning": {
+        "schemaVersion": 1,
+        "employeeId": "employee_reasoning_smoke",
+        "revision": 1,
+        "provider": "openai-codex",
+        "model": "gpt-6.1-sol",
+        "requested": "ultra",
+        "effective": "ultra",
+        "actual": "xhigh",
+        "status": "mismatch",
+        "phase": "preflight",
+        "evidence": "native_codex_transport",
+        "actualModel": "gpt-6.1-sol",
+        "nativeActual": "xhigh",
+        "mode": "native"
+      },
+      "revision": 1,
+      "processExit": null,
+      "neverStarted": null,
+      "externalModelCalls": 0
+    },
+    {
+      "operation": "model-ultra-rejected-before-request",
+      "status": "failed",
+      "code": "BOT_REASONING_UNSATISFIED",
+      "reasoning": {
+        "schemaVersion": 1,
+        "employeeId": "employee_reasoning_smoke",
+        "revision": 1,
+        "provider": "openai-codex",
+        "model": "gpt-6.1-sol",
+        "requested": "ultra",
+        "effective": "ultra",
+        "actual": "xhigh",
+        "status": "mismatch",
+        "phase": "preflight",
+        "evidence": "native_codex_transport",
+        "actualModel": "gpt-6.1-sol",
+        "nativeActual": "xhigh",
+        "mode": "native",
+        "requests": 0
+      },
+      "revision": 1,
+      "processExit": {
+        "platform": "win32",
+        "supervisor": "windows-job",
+        "launched": true,
+        "rootPid": 56988,
+        "rootConfirmed": true,
+        "rootExitCode": 125,
+        "treeConfirmed": true,
+        "activeProcesses": 0,
+        "cancelled": false,
+        "failureCode": null,
+        "hostExitCode": 0,
+        "streamsComplete": true,
+        "hostSignal": null
+      },
+      "neverStarted": true,
+      "externalModelCalls": 0
+    },
+    {
+      "operation": "validate-max",
+      "status": "succeeded",
+      "code": null,
+      "reasoning": {
+        "schemaVersion": 1,
+        "employeeId": "employee_reasoning_smoke",
+        "revision": 2,
+        "provider": "openai-codex",
+        "model": "gpt-6.1-sol",
+        "requested": "max",
+        "effective": "max",
+        "actual": "max",
+        "nativeActual": "xhigh",
+        "mode": "verified_gpt61_sol_max",
+        "actualModel": "gpt-6.1-sol",
+        "status": "matched",
+        "phase": "preflight",
+        "evidence": "native_codex_transport"
+      },
+      "revision": 2,
+      "processExit": null,
+      "neverStarted": null,
+      "externalModelCalls": 0
+    },
+    {
+      "operation": "validate-high",
+      "status": "succeeded",
+      "code": null,
+      "reasoning": {
+        "schemaVersion": 1,
+        "employeeId": "employee_reasoning_smoke",
+        "revision": 3,
+        "provider": "openai-codex",
+        "model": "gpt-6.1-sol",
+        "requested": "high",
+        "effective": "high",
+        "actual": "high",
+        "nativeActual": "high",
+        "mode": "native",
+        "actualModel": "gpt-6.1-sol",
+        "status": "matched",
+        "phase": "preflight",
+        "evidence": "native_codex_transport"
+      },
+      "revision": 3,
+      "processExit": null,
+      "neverStarted": null,
+      "externalModelCalls": 0
+    },
+    {
+      "operation": "managed-effort-conflict",
+      "status": "failed",
+      "code": "BOT_REASONING_MANAGED_CONFLICT",
+      "reasoning": {
+        "requested": "high",
+        "actual": null,
+        "status": "rejected",
+        "code": "BOT_REASONING_MANAGED_CONFLICT"
+      },
+      "revision": 3,
+      "processExit": null,
+      "neverStarted": null,
+      "externalModelCalls": 0
+    },
+    {
+      "operation": "validate-no-explicit-effort",
+      "status": "succeeded",
+      "code": null,
+      "reasoning": null,
+      "revision": 4,
+      "processExit": null,
+      "neverStarted": null,
+      "externalModelCalls": 0
+    }
+  ],
+  "independentProviderEvidence": {
+    "sourceThread": "V2-Q01-Hermes Bot本地独立验收",
+    "receiptPath": "C:\\Users\\25941\\.codex\\worktrees\\v2-q01-real-provider-acceptance\\灵光爸爸拆解\\.local\\q01-real-provider\\q01-max-proxy-bfd745ac-2933-4f95-be1c-9a91f4edfcaf\\provider-probe-result.json",
+    "receiptSha256": "ff4c20f934acb8c1c5ba1b69e7d3fda256bba652a2a6bb6cbb4fae4ecd9685b9",
+    "probeId": "q01-max-proxy-bfd745ac-2933-4f95-be1c-9a91f4edfcaf",
+    "endpoint": "https://chatgpt.com/backend-api/codex/responses",
+    "provider": "openai-codex",
+    "wireModel": "gpt-6.1-sol",
+    "wireReasoning": {
+      "effort": "max",
+      "summary": "auto"
+    },
+    "httpStatus": 200,
+    "responseModel": "gpt-6.1-sol",
+    "responseReasoning": {
+      "effort": "max",
+      "generate_summary": null,
+      "summary": "detailed",
+      "context": "all_turns",
+      "mode": "standard"
+    },
+    "responseStatus": "completed",
+    "responseId": "resp_06fad05399ddd6c1016acde4a00a448197835b2f019f3ee688",
+    "requestId": null,
+    "usage": {
+      "input": 37,
+      "output": 37,
+      "total": 74
+    },
+    "sourceHashesUnchanged": true,
+    "installedCodeUnchanged": true,
+    "refreshRequests": 0,
+    "loginRequests": 0,
+    "processExit": {
+      "platform": "win32",
+      "supervisor": "windows-job",
+      "launched": true,
+      "rootPid": 29612,
+      "rootConfirmed": true,
+      "rootExitCode": 0,
+      "treeConfirmed": true,
+      "activeProcesses": 0,
+      "cancelled": false,
+      "failureCode": null,
+      "hostExitCode": 0,
+      "streamsComplete": true,
+      "hostSignal": null
+    },
+    "scope": "Service capability evidence only; E02 sent no external request; formal product first chain remains Q01 work"
+  },
+  "verification": {
+    "nodeTargeted": 96,
+    "nodePassed": 96,
+    "nodeFailed": 0,
+    "nativeReasoningTests": 8,
+    "nativeOwnedTests": 6,
+    "lintFiles": 100,
+    "pythonAstFiles": 5,
+    "diffCheck": "passed",
+    "fullSuite": "Core 800/800 is previous commit evidence, not rerun or claimed for this patch"
+  }
+}

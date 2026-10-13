@@ -1,5 +1,6 @@
 // Shared wire validation: never forward unknown fields to a native runtime.
 export const BOT_SCHEMA_VERSION = 1;
+export const BOT_REASONING_EFFORTS=['minimal','low','medium','high','xhigh','max','ultra'];
 export function botFailure(code, message, status = 409) { return Object.assign(new Error(message), { code, status }); }
 const object = value => value && typeof value === 'object' && !Array.isArray(value);
 function keys(value, allowed, label) {
@@ -15,7 +16,8 @@ const bool = (value, fallback, label) => { if (value === undefined) return fallb
 export const permittedCredentialName=name=>typeof name==='string'&&/^[A-Z][A-Z0-9_]*$/.test(name)&&! /^(ZIWEI_|CONTROL_MCP_|HERMES_|PYTHON|NODE_OPTIONS$|HOME$|USERPROFILE$)/.test(name);
 export function normalizeBotConfig(input = {}) {
   validateCredentialPlaceholders(input);
-  keys(input, ['provider','toolsets','maxTurns','memory','skills','mcpServers','permissions','gateway','voice','collaboration','drivers'], 'Bot config');
+  keys(input, ['provider','reasoningEffort','toolsets','maxTurns','memory','skills','mcpServers','permissions','gateway','voice','collaboration','drivers'], 'Bot config');
+  if(Object.hasOwn(input,'reasoningEffort')&&!BOT_REASONING_EFFORTS.includes(input.reasoningEffort))throw botFailure('BOT_CONFIG_INVALID','reasoningEffort 必须为明确的原生等级：'+BOT_REASONING_EFFORTS.join(', '),400);
   const provider = input.provider ?? null;
   if (provider !== null && (typeof provider !== 'string' || !/^[A-Za-z0-9_.:-]{1,100}$/.test(provider))) throw botFailure('BOT_CONFIG_INVALID', 'provider 必须是原生服务商名称', 400);
   const maxTurns = input.maxTurns ?? 20;
@@ -48,6 +50,7 @@ export function normalizeBotConfig(input = {}) {
   if (toolsets.some(name => /^(all|cron|heartbeat|goals|kanban|delegate|delegation|bot|bot_mode)$/i.test(name))) throw botFailure('BOT_SCHEDULER_AUTHORITY','该工具集包含尚未接入统一控制的自主执行能力；请选择已接入的具体工具集',400);
   if (mode === 'read_only' && (toolsets.length || Object.values(mcpServers).some(server => server.enabled))) throw botFailure('BOT_PERMISSION_CONFLICT','read_only 只允许无工具对话；使用工具或 MCP 请明确选择 execute',400);
   const result={provider,toolsets,maxTurns,memory:{enabled:bool(memory.enabled,true,'memory.enabled'),userProfile:bool(memory.userProfile,true,'memory.userProfile'),...(memory.charLimit!==undefined?{charLimit:bounded(memory.charLimit,100,50000,'memory.charLimit')}:{}),...(memory.userCharLimit!==undefined?{userCharLimit:bounded(memory.userCharLimit,100,50000,'memory.userCharLimit')}:{})},skills:{disabled:names(skills.disabled ?? [],'skills.disabled'),...(skills.autoLoad!==undefined?{autoLoad:names(skills.autoLoad,'skills.autoLoad')}:{})},mcpServers,permissions:{mode,...(permissions.management!==undefined?{management:bool(permissions.management,true,'permissions.management')}:{})}};
+  if(input.reasoningEffort!==undefined)result.reasoningEffort=input.reasoningEffort;
   if(input.gateway!==undefined)result.gateway=normalizeGateway(input.gateway);
   if(input.voice!==undefined)result.voice=normalizeVoice(input.voice);
   if(input.collaboration!==undefined){keys(input.collaboration,['enabled','targetEmployeeIds'],'collaboration');result.collaboration={enabled:bool(input.collaboration.enabled,false,'collaboration.enabled'),targetEmployeeIds:names(input.collaboration.targetEmployeeIds || [],'collaboration.targetEmployeeIds')};}

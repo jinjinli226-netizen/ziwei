@@ -42,6 +42,14 @@ class OwnedProfile(unittest.TestCase):
         self.assertEqual((self.root/'auth.json').read_text(),'SOURCE AUTH UNCHANGED')
         self.assertEqual((self.root/'.env').read_text(),'OPENAI_API_KEY=fixture-only\n')
 
+    def test_explicit_reasoning_is_saved_and_reported_without_claiming_wire_support(self):
+        request=self.request();request['context']['config']={'reasoningEffort':'ultra'}
+        request['seedConfig']['agent']={'reasoning_effort':'ultra'}
+        result=self.module.provision(request)
+        self.assertEqual(result['reasoning'],{'requested':'ultra','actual':None,'status':'configured'})
+        import yaml
+        self.assertEqual(yaml.safe_load((Path(result['home'])/'config.yaml').read_text())['agent']['reasoning_effort'],'ultra')
+
     def test_duplicate_preserves_native_config_and_memory(self):
         request=self.request();first=self.module.provision(request);home=Path(first['home'])
         (home/'memories/MEMORY.md').write_text('FIRST MEMORY')
@@ -67,6 +75,7 @@ class OwnedProfile(unittest.TestCase):
 
     def test_owned_bootstrap_refuses_both_native_auth_write_paths(self):
         request=self.request();result=self.module.provision(request)
+        with (self.root/'.env').open('a') as file:file.write('HTTP_PROXY=http://127.0.0.1:19001\nHTTPS_PROXY=http://127.0.0.1:19001\n')
         bootstrap=Path(__file__).resolve().parents[2]/'src/hermes-mcp-bootstrap.py'
         env={**os.environ,'ZIWEI_CREATOR_HOME':result['home'],'ZIWEI_CREATOR_SOURCE_HOME':str(self.root),
              'ZIWEI_CREATOR_KEY':'owner-bot-first','ZIWEI_CREATOR_WORKSPACE':'fixture',
@@ -78,6 +87,8 @@ spec=importlib.util.spec_from_file_location('bootstrap',sys.argv[1])
 bootstrap=importlib.util.module_from_spec(spec);spec.loader.exec_module(bootstrap)
 current=bootstrap.binding(Path(sys.executable).with_name('hermes.exe'))
 bootstrap.prepare_creator_home(current)
+assert os.environ.get('HTTP_PROXY')=='http://127.0.0.1:19001'
+assert os.environ.get('HTTPS_PROXY')=='http://127.0.0.1:19001'
 from hermes_cli import auth,auth_codex
 assert auth._auth_file_path()==Path(os.environ['ZIWEI_CREATOR_SOURCE_HOME'])/'auth.json'
 blocked=[]
@@ -88,10 +99,12 @@ assert blocked==['auth','codex']
 print(json.dumps({'blocked':blocked}))
 '''
         before=(self.root/'auth.json').read_bytes()
+        env_before=(self.root/'.env').read_bytes()
         completed=subprocess.run([sys.executable,'-c',program,str(bootstrap)],env=env,capture_output=True,text=True,timeout=30)
         self.assertEqual(completed.returncode,0,completed.stderr)
         self.assertEqual(json.loads(completed.stdout)['blocked'],['auth','codex'])
         self.assertEqual((self.root/'auth.json').read_bytes(),before)
+        self.assertEqual((self.root/'.env').read_bytes(),env_before)
         self.assertFalse((Path(result['home'])/'auth.json').exists())
 
 if __name__=='__main__':unittest.main(verbosity=2)

@@ -38,7 +38,7 @@ export async function provisionHermesBotProfile({context,baseHome,workspace,apiB
   const seedConfig={model:{provider,default:model,...(baseUrl?{base_url:baseUrl}:{}),...(apiMode?{api_mode:apiMode}:{})},
     ...(custom?{providers:{[provider.replace(/^custom:/,'')]:{key_env:custom.key_env,...(baseUrl?{base_url:baseUrl}:{}),...(apiMode?{api_mode:apiMode}:{}),...(Number.isFinite(custom.context_length)?{context_length:custom.context_length}:{}),discover_models:false}}}:{}),
     ...(original.models_dev?.url?{models_dev:{url:endpoint(original.models_dev.url)}}:{}),
-    updates:{check:false},mcp_servers:{},plugins:{enabled:[],disabled:[]},platform_toolsets:{cli:[]},agent:{disabled_toolsets:['all'],bot_mode_protocol:false},security:{allow_lazy_installs:false}};
+    updates:{check:false},mcp_servers:{},plugins:{enabled:[],disabled:[]},platform_toolsets:{cli:[]},agent:{disabled_toolsets:['all'],bot_mode_protocol:false,...(context.config.reasoningEffort?{reasoning_effort:context.config.reasoningEffort}:{})},security:{allow_lazy_installs:false}};
   const childEnv={...process.env,...env,HERMES_HOME:baseHome,ZIWEI_BOT_PROFILE_MODE:'owned_profile',PYTHONDONTWRITEBYTECODE:'1',PYTHONUTF8:'1',PYTHONIOENCODING:'utf-8'};
   for(const key of Object.keys(childEnv))if(key.startsWith('ZIWEI_')&&key!=='ZIWEI_BOT_PROFILE_MODE'||key.startsWith('CONTROL_MCP_'))delete childEnv[key];
   const launcher=binary || discoverInstalledRuntimes().runtimes.Hermes?.binary;

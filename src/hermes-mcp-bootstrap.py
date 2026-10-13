@@ -77,6 +77,19 @@ def _binding(launcher):
                 raise UnsupportedNativeHermes('creator shape')
         if '_apply_profile_override()' not in Path(paths['main']).read_text(encoding='utf-8'):
             raise UnsupportedNativeHermes('creator profile')
+    if os.environ.get('ZIWEI_BOT_REASONING_EFFORT'):
+        for name,module_name,required in [('reasoning_transport','agent.transports.codex',{'_resolve_reasoning'}),
+                                          ('reasoning_effort','agent.reasoning_effort',{'codex_supported_efforts','clamp_effort'})]:
+            spec=importlib.util.find_spec(module_name)
+            target=Path(spec.origin).resolve(strict=True) if spec and spec.origin else None
+            if not target or target.suffix!='.py' or not target.is_relative_to(Path(paths['main']).parent.parent):
+                raise UnsupportedNativeHermes('bot reasoning binding')
+            functions={node.name for node in ast.parse(target.read_text(encoding='utf-8')).body if isinstance(node,ast.FunctionDef)}
+            if not required.issubset(functions):raise UnsupportedNativeHermes('bot reasoning shape')
+            if name=='reasoning_transport':
+                classes=[node for node in ast.parse(target.read_text(encoding='utf-8')).body if isinstance(node,ast.ClassDef) and node.name=='ResponsesApiTransport']
+                if not classes or not {'build_kwargs','preflight_kwargs'}.issubset({node.name for node in classes[0].body if isinstance(node,ast.FunctionDef)}):raise UnsupportedNativeHermes('bot reasoning transport shape')
+            paths[name]=str(target)
     sources = [launcher, *(Path(value) for value in paths.values())]
     return {'paths': paths, 'fingerprint': hashlib.sha256(b'\0'.join(p.read_bytes() for p in sources)).hexdigest()}
 
@@ -125,7 +138,7 @@ def prepare_creator_home(current):
                     'ZIWEI_TERMINAL_EMPLOYEE_ID', 'ZIWEI_TERMINAL_DEVICE_ID',
                     'ZIWEI_CREATOR_HOME', 'ZIWEI_CREATOR_SOURCE_HOME', 'ZIWEI_CREATOR_KEY',
                     'ZIWEI_CREATOR_WORKSPACE', 'ZIWEI_CREATOR_EMPLOYEE_ID', 'ZIWEI_CREATOR_PROFILE',
-                    'ZIWEI_INSTANCE_KIND', 'ZIWEI_BOT_REVISION', 'ZIWEI_BOT_ACTION_ID', 'ZIWEI_BOT_DEVICE_TOKEN', 'ZIWEI_BOT_PROFILE_MODE',
+                    'ZIWEI_INSTANCE_KIND', 'ZIWEI_BOT_REVISION', 'ZIWEI_BOT_ACTION_ID', 'ZIWEI_BOT_DEVICE_TOKEN', 'ZIWEI_BOT_PROFILE_MODE', 'ZIWEI_BOT_REASONING_EFFORT',
                     'HERMES_KANBAN_HOME', 'HERMES_KANBAN_DB'}
     routing_env = {key: os.environ[key] for key in routing_keys if key in os.environ}
     constants = importlib.import_module('hermes_constants')
@@ -224,7 +237,8 @@ def confirm_creator_home(current, config, prepared):
     # threads additionally inherit the now-isolated HERMES_HOME environment.
     return {'enabled': True, **{key: expected[key] for key in ('key', 'workspace', 'employeeId', 'sourceProfile')}, 'authMode': 'source-native-store',
             **({'kind': 'hermes-bot', 'revision': int(os.environ['ZIWEI_BOT_REVISION'])} if is_bot else {}),
-            **({'mode': 'owned_profile', 'profile': expected['sourceProfile'], 'home': str(home), 'profileHome': str(home)} if owned else {})}
+            **({'mode': 'owned_profile', 'profile': expected['sourceProfile'], 'home': str(home), 'profileHome': str(home)} if owned else {}),
+            **({'reasoning':{'requested':os.environ['ZIWEI_BOT_REASONING_EFFORT'],'actual':None,'status':'configured'}} if is_bot and os.environ.get('ZIWEI_BOT_REASONING_EFFORT') else {})}
 
 
 def run():
@@ -330,6 +344,11 @@ def run():
     isolation = confirm_creator_home(current, config, prepared_isolation)
     if isolation:
         print('ZIWEI_CREATOR_ISOLATION:' + json.dumps(isolation), file=sys.stderr, flush=True)
+    reasoning_proof=None
+    if isolation and isolation.get('kind')=='hermes-bot' and os.environ.get('ZIWEI_BOT_REASONING_EFFORT'):
+        module=importlib.util.spec_from_file_location('ziwei_bot_reasoning',Path(__file__).with_name('hermes-bot-reasoning.py'))
+        bridge=importlib.util.module_from_spec(module);module.loader.exec_module(bridge)
+        reasoning_proof=bridge.install(current,config,isolation,preflight=not(native_operation or gateway_worker),reject=UnsupportedNativeHermes)
     if native_operation or gateway_worker:
         if not isolation or isolation.get('kind') != 'hermes-bot':
             raise UnsupportedNativeHermes('bot native operation scope')
@@ -369,6 +388,7 @@ def run():
               'effective': {'provider': effective.get('model', {}).get('provider'),
                             'model': effective.get('model', {}).get('default'),
                             'maxTurns': effective.get('agent', {}).get('max_turns'),
+                            **({'reasoning':reasoning_proof} if reasoning_proof else {}),
                             'memory': effective.get('memory', {}).get('memory_enabled'),
                             'toolsets': selected}}, 'externalModelCalls': 0}))
         return 0

@@ -4,7 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { parseDocument, stringify } from 'yaml';
 import { normalizeBotConfig, botFailure, permittedCredentialName } from './hermes-bot-config.mjs';
 
-export const BOT_RUNTIME_ENV_KEYS=['ZIWEI_INSTANCE_KIND','ZIWEI_BOT_REVISION','ZIWEI_BOT_ACTION_ID','ZIWEI_BOT_DEVICE_TOKEN','ZIWEI_BOT_PROFILE_MODE'];
+export const BOT_RUNTIME_ENV_KEYS=['ZIWEI_INSTANCE_KIND','ZIWEI_BOT_REVISION','ZIWEI_BOT_ACTION_ID','ZIWEI_BOT_DEVICE_TOKEN','ZIWEI_BOT_PROFILE_MODE','ZIWEI_BOT_REASONING_EFFORT'];
 const hash=value=>createHash('sha256').update(value).digest('hex');
 function noLink(file) {try{if(fs.lstatSync(file).isSymbolicLink())throw botFailure('BOT_HOME_INVALID','Bot 状态路径不能是链接');}catch(error){if(error.code!=='ENOENT')throw error;}}
 function write(file,text) {noLink(file);const tmp=`${file}.${randomUUID()}.tmp`;try{fs.writeFileSync(tmp,text,{flag:'wx',mode:0o600});fs.renameSync(tmp,file);}finally{try{fs.unlinkSync(tmp);}catch{}}}
@@ -58,7 +58,7 @@ export function prepareHermesBotHome({context,sourceHome,privateDirectory,worksp
     model:{provider,default:model,...(endpoint?{base_url:endpoint}:{}),...(apiMode?{api_mode:apiMode}:{})},
     ...(custom?{providers:{[providerName]:Object.fromEntries(['base_url','api_mode','default_model','key_env','context_length'].filter(key=>custom[key]!==undefined).map(key=>[key,custom[key]]).concat([['discover_models',false]]))}}:{}),
     fallback_providers:[],updates:{check:false},...(sourceConfig.models_dev?.url?{models_dev:{url:sourceConfig.models_dev.url}}:{}),
-    agent:{max_turns:config.maxTurns,run_budget_seconds:840,bot_mode_protocol:false,coding_context:'off',disabled_toolsets:readOnly?['all']:['cronjob','delegation','kanban']},
+    agent:{max_turns:config.maxTurns,run_budget_seconds:840,bot_mode_protocol:false,coding_context:'off',disabled_toolsets:readOnly?['all']:['cronjob','delegation','kanban'],...(config.reasoningEffort?{reasoning_effort:config.reasoningEffort}:{})},
     platform_toolsets:{cli:[...config.toolsets,...(config.collaboration?.enabled&&!readOnly?['ziwei_collaboration']:[])]},
     memory:{provider:'',memory_enabled:config.memory.enabled,user_profile_enabled:config.memory.userProfile,...(config.memory.charLimit?{memory_char_limit:config.memory.charLimit}:{}),...(config.memory.userCharLimit?{user_char_limit:config.memory.userCharLimit}:{})},
     skills:{disabled:config.skills.disabled,project_discovery:false,external_dirs:[],create_dir:'',auto_load:config.skills.autoLoad || []},
@@ -72,6 +72,6 @@ export function prepareHermesBotHome({context,sourceHome,privateDirectory,worksp
   write(path.join(home,'config.yaml'),stringify(native));
   write(path.join(home,'SOUL.md'),[context.name,context.description,context.persona,context.instructions].filter(Boolean).join('\n\n')+'\n');
   write(path.join(home,'profile.yaml'),stringify({display_name:context.name,description:context.description || '',ui_meta:{'hermes-bots':{title:context.name}}}));
-  const receipt={enabled:true,key,workspace,employeeId:context.employeeId,sourceProfile:binding.sourceProfile,authMode:'source-native-store',kind:'hermes-bot',revision:context.revision,...(owned?{mode:'owned_profile',profile:binding.profile,home,profileHome:home}:{})};
-  return {home,sourceHome:source,config:native,effectiveModel:model,provider,receipt,env:{ZIWEI_CREATOR_HOME:home,ZIWEI_CREATOR_SOURCE_HOME:source,ZIWEI_CREATOR_KEY:key,ZIWEI_CREATOR_WORKSPACE:workspace,ZIWEI_CREATOR_EMPLOYEE_ID:context.employeeId,ZIWEI_CREATOR_PROFILE:binding.sourceProfile,ZIWEI_INSTANCE_KIND:'hermes-bot',ZIWEI_BOT_REVISION:String(context.revision),...(owned?{ZIWEI_BOT_PROFILE_MODE:'owned_profile'}:{})}};
+  const receipt={enabled:true,key,workspace,employeeId:context.employeeId,sourceProfile:binding.sourceProfile,authMode:'source-native-store',kind:'hermes-bot',revision:context.revision,...(owned?{mode:'owned_profile',profile:binding.profile,home,profileHome:home}:{}),...(config.reasoningEffort?{reasoning:{requested:config.reasoningEffort,actual:null,status:'configured'}}:{})};
+  return {home,sourceHome:source,config:native,effectiveModel:model,provider,receipt,env:{ZIWEI_CREATOR_HOME:home,ZIWEI_CREATOR_SOURCE_HOME:source,ZIWEI_CREATOR_KEY:key,ZIWEI_CREATOR_WORKSPACE:workspace,ZIWEI_CREATOR_EMPLOYEE_ID:context.employeeId,ZIWEI_CREATOR_PROFILE:binding.sourceProfile,ZIWEI_INSTANCE_KIND:'hermes-bot',ZIWEI_BOT_REVISION:String(context.revision),...(owned?{ZIWEI_BOT_PROFILE_MODE:'owned_profile'}:{}),...(config.reasoningEffort?{ZIWEI_BOT_REASONING_EFFORT:config.reasoningEffort}:{})}};
 }
