@@ -1,5 +1,7 @@
 # E02 Hermes 原生能力候选验收
 
+本页保留首轮候选 `037cb777` 的历史证据。Group / Gateway 后续 P2 补丁及新增验证见 [补丁验收](2026-10-13-e02-native-followup-acceptance.md)，最新补丁 SHA 见 `.local/e02-native-followup-handoff.json`。
+
 日期：2026-10-13。基线：90e588b84a7a69a0ec41fbe41e5ebfb18debdb8a。候选分支：codex/v2-e02-native-capabilities。
 工作树：C:\Users\25941\.codex\worktrees\v2-e02-native-capabilities\灵光爸爸拆解。实现提交以该分支HEAD和.local/e02-native-handoff.json为准。
 

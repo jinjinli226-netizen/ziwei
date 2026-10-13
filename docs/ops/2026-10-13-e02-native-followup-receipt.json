@@ -1,0 +1,111 @@
+{
+  "date": "2026-10-13",
+  "base": "037cb777c5f23d81622d451a5d1b67cd2098b786",
+  "nativeVersion": "0.21.3",
+  "installedHermesHead": "bbaf7af5c83546d19f8060f4097d3bb25cd1a3c3",
+  "checks": {
+    "node": {
+      "command": "node --test --test-concurrency=4",
+      "tests": 787,
+      "pass": 787,
+      "fail": 0,
+      "skipped": 0,
+      "durationMs": 85059.4817,
+      "log": ".local/native-followup-tests-bounded.log"
+    },
+    "defaultConcurrencyAttempt": {
+      "tests": 787,
+      "pass": 785,
+      "fail": 2,
+      "log": ".local/native-followup-tests-final.log",
+      "failures": [
+        "existing idle-progress timing assertion",
+        "existing detached-service test cleanup EPERM"
+      ]
+    },
+    "isolatedExistingRecheck": {
+      "tests": 16,
+      "pass": 16,
+      "log": ".local/native-followup-existing-recheck.log"
+    },
+    "newNodeCases": 11,
+    "lintSourceFiles": 96,
+    "pythonAst": "passed",
+    "diffCheck": "passed"
+  },
+  "group": {
+    "sourceReceipt": ".local/native-followup-1791856695927/receipt.json",
+    "scenarios": [
+      {
+        "scenario": "success",
+        "status": "succeeded",
+        "code": null,
+        "registrations": 1,
+        "authorized": 5,
+        "sourceTurns": 2,
+        "peerTurns": 1,
+        "treeConfirmed": true
+      },
+      {
+        "scenario": "budget",
+        "status": "succeeded",
+        "code": null,
+        "registrations": 1,
+        "authorized": 2,
+        "sourceTurns": 1,
+        "peerTurns": 0,
+        "treeConfirmed": true
+      },
+      {
+        "scenario": "pause",
+        "status": "succeeded",
+        "code": null,
+        "registrations": 1,
+        "authorized": 2,
+        "sourceTurns": 1,
+        "peerTurns": 0,
+        "treeConfirmed": true
+      },
+      {
+        "scenario": "stop",
+        "status": "failed",
+        "code": "cancelled",
+        "registrations": 1,
+        "authorized": 5,
+        "sourceTurns": 2,
+        "peerTurns": 1,
+        "treeConfirmed": true
+      }
+    ],
+    "sourceAndPeer": "installed Hermes with isolated HOME; loopback model endpoint",
+    "authority": "loopback A2A and settlement fixture; actual platform API/scheduler covered by Node suite"
+  },
+  "nativeRegression": {
+    "sourceReceipt": ".local/native-followup-1791856821008/receipt.json",
+    "cases": 9,
+    "processExit": {
+      "platform": "win32",
+      "supervisor": "windows-job",
+      "launched": true,
+      "rootPid": 19676,
+      "rootConfirmed": true,
+      "rootExitCode": 0,
+      "treeConfirmed": true,
+      "activeProcesses": 0,
+      "cancelled": false,
+      "failureCode": null,
+      "hostExitCode": 0,
+      "streamsComplete": true,
+      "hostSignal": null
+    },
+    "roomCases": 2,
+    "gatewayCases": 7,
+    "network": "loopback only; no external account or message"
+  },
+  "scope": {
+    "isolatedE02Only": true,
+    "productionModified": false,
+    "e03PreviewModified": false,
+    "pushOrMergeOrDeploy": false
+  }
+}

@@ -61,3 +61,11 @@ BotConfig扩展：memory.charLimit/userCharLimit；skills.autoLoad；MCP transpo
 BotConfig增量将保留已有字段并增加原生可验证的高级配置与HTTP MCP；具体字段以共享 `src/hermes-bot-config.mjs` schema为准，前端加载后应保留未编辑的高级字段。原生Goal/Heartbeat/Kanban的authority为 `ziwei`；原生状态管理与驱动已接入后才展示相应状态，实际凭据/设备/模型依赖分别展示，缺凭据不等于未实现接口。
 
 Gateway多凭据示例：`envRefs:{SLACK_APP_TOKEN:"${SOCKET_KEY}"}`，Feishu可映射`FEISHU_APP_ID/FEISHU_APP_SECRET`；worker调用原生env override填充所选PlatformConfig。这里只保存完整外部变量引用，实际密钥在目标电脑进程内读取；缺SDK/凭据的connect不会显示成功。DM/delegate经原生schema与envelope派发到授权员工，返回背景交接和原action标识；结果通过受控action查询，source stop撤销未开始子任务并请求停止已领取子任务。
+
+## 2026-10-13 P2 修订
+
+Group 首条正文可精确 `@发起员工ID`。发起者从受信 action context 加入原生冻结 roster，`targetEmployeeIds` 仍只填获授权的其他员工，不能把发起者重复放入目标数组。识别规则与原生 Discussion 的完整 mention 正则一致；未知成员、跨工作区 ID、合法 ID 加 `.fake`/`:other` 等后缀均不能通过前缀匹配授权。父任务只登记一次聚合监督，覆盖每轮发起者模型及 native read/publish 子进程；停止确认必须等待任务结束且所有已登记进程树有终态证据，第一轮退出不能替第二轮证明停止。
+
+Gateway 渠道状态使用原生 adapter 的 fatal/is_connected/send_path_degraded；当前已验证 0.21.3 的 Mattermost WebSocket task/socket 与 Webhook serving site。`connect()` 返回 true 但接收路径尚未证实可用时为 `retrying`；认证或监听致命失败保留 `failed` 和脱敏 `code`，进程心跳不能改回 connected。每个心跳携带观察到的渠道状态，正常断开也不能覆盖已有失败原因。
+
+JS 管理器状态额外区分 `processAlive:true|false|null` 与 `processExit`：null 表示 Windows 监督结束但原进程树退出未确认，此时 disconnect 返回 `stopConfirmed:false`，新 connect 返回 `EXECUTION_UNCERTAIN`，不会启动替代 worker。停止准入独立锁存，缓冲的 connected/heartbeat 事件不能重新开放收发。临时恢复只继续同一 sourceActionId 的 pending/accepted 原消息；恢复事件与旧观察者并发时保留一次待处理事件，服务端仍按原消息幂等读取原 action。delivery_started/delivered/delivery_failed 均不会被恢复发布，未知发送继续保持不可自动重发。

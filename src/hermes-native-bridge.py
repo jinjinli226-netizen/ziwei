@@ -520,8 +520,10 @@ def collaboration(op, args, context, request_id):
         rooms.create_room(db, room_id=rid, name=rid, members=members, authority_gateway_id='ziwei')
         room = rooms.room_state(db, room_id=rid)
         text = args['content']
-        mentioned = re.findall(r'@([A-Za-z0-9_-]+)', text)
-        allowed = {item['id'] for item in targets}
+        # Match the installed native policy exactly, including punctuation;
+        # a prefix of an unknown handle must never authorize that mention.
+        mentioned = discussion._MENTION_RE.findall(text)
+        allowed = {item['member_id'] for item in room['members']}
         if set(mentioned) - allowed: raise NativeOperationError('GROUP_MENTION_NOT_AUTHORIZED')
         if not mentioned: text = ' '.join('@' + item['id'] for item in targets) + '\n' + text
         rooms.append_event(db, room_id=rid, event_id=request_id, kind='message.user', actor={'kind': 'user', 'id': context['employeeId']}, payload={'text': text, 'thread_id': request_id}, authority_gateway_id='ziwei', authority_epoch=room['authority_epoch'])
@@ -662,6 +664,30 @@ def enqueue_native(target, text, isolation):
     return enqueue_envelope(home_path('collaboration'), target={'profile': target, 'handle': target, 'connection_id': isolation['workspace']}, message=text, sender_profile=isolation['employeeId'], sender_handle=isolation['employeeId'])
 
 
+def adapter_health(adapter, platform_name):
+    """Native public health + explicit 0.21.3 receive transports, never task scans."""
+    if adapter.has_fatal_error:
+        code = adapter.fatal_error_code or 'GATEWAY_ADAPTER_FATAL'
+        return 'failed', code if re.fullmatch(r'[A-Za-z0-9_-]{1,100}', code) else 'GATEWAY_ADAPTER_FATAL'
+    if not adapter.is_connected:
+        return 'disconnected', 'GATEWAY_ADAPTER_DISCONNECTED'
+    if platform_name == 'mattermost':
+        listener = getattr(adapter, '_ws_task', None)
+        if listener is None or listener.done():
+            return 'failed', 'GATEWAY_LISTENER_ENDED'
+        socket = getattr(adapter, '_ws', None)
+        if socket is None or socket.closed:
+            return 'retrying', 'GATEWAY_RECEIVE_PATH_UNCONFIRMED'
+    elif platform_name == 'webhook':
+        runner = getattr(adapter, '_runner', None)
+        sites = getattr(runner, 'sites', ())
+        if not any(getattr(site, '_server', None) and site._server.is_serving() for site in sites):
+            return 'failed', 'GATEWAY_LISTENER_ENDED'
+    if adapter.send_path_degraded:
+        return 'retrying', 'GATEWAY_RECEIVE_PATH_UNCONFIRMED'
+    return 'connected', None
+
+
 def run_gateway_worker(request, context):
     """Native adapters only; every model task goes back to Ziwei admission."""
     import queue
@@ -708,10 +734,32 @@ def run_gateway_worker(request, context):
     state_path = home_path('ziwei-gateway-state/' + platform_name + '.json')
     def emit(event, **data):
         print('ZIWEI_GATEWAY_EVENT:' + json.dumps({'event': event, **data}, ensure_ascii=False), flush=True)
-    def state(status):
+    health = {'status': 'starting', 'code': None}
+    accepting = False
+    closing = False
+    connection_generation = 0
+    def state(status, code=None):
         from utils import atomic_write_text
-        atomic_write_text(state_path, json.dumps({'pid': os.getpid(), 'platform': platform_name, 'status': status, 'lastHeartbeat': time.time(), 'employeeId': context['employeeId'], 'revision': context['revision'], 'controlEpoch': context.get('controlEpoch'), 'sourceActionId': request['actionId']}))
+        atomic_write_text(state_path, json.dumps({'pid': os.getpid(), 'platform': platform_name, 'status': status, 'code': code, 'lastHeartbeat': time.time(), 'employeeId': context['employeeId'], 'revision': context['revision'], 'controlEpoch': context.get('controlEpoch'), 'sourceActionId': request['actionId']}))
+    def update_health(status, code=None):
+        nonlocal accepting, connection_generation
+        if health['status'] == 'failed': return
+        accepting = status == 'connected' and not closing
+        if health == {'status': status, 'code': code}: return
+        if status == 'connected': connection_generation += 1
+        health.update(status=status, code=code)
+        state(status, code)
+        import hermes_cli
+        emit('connected' if status == 'connected' else 'failed' if status == 'failed' else 'status', pid=os.getpid(), platform=platform_name, nativeVersion=hermes_cli.__version__, **health)
+    def refresh_health():
+        if not closing: update_health(*adapter_health(adapter, platform_name))
+        return accepting
+    # This callback closes admission synchronously. Disconnecting here could
+    # cancel the native task that is delivering its own fatal notification.
+    adapter.set_fatal_error_handler(lambda _: refresh_health())
     async def handler(event):
+        if not refresh_health():
+            emit('inbound_rejected', code='GATEWAY_NOT_CONNECTED');return None
         # No prompt payload can choose profile/employee/model or bypass the
         # platform's revision, occupancy and active/validated checks.
         if platform_name != 'webhook' and str(event.source.user_id) not in allowed:
@@ -747,29 +795,36 @@ def run_gateway_worker(request, context):
         return None
     adapter.set_message_handler(handler)
     async def worker():
+        nonlocal accepting, closing
         connected = False
         try:
             connected = await asyncio.wait_for(adapter.connect(), timeout=45)
             if not connected:
-                state('failed');emit('failed', code='GATEWAY_CONNECTION_REJECTED');return
-            import hermes_cli
-            state('connected');emit('connected', pid=os.getpid(), platform=platform_name, nativeVersion=hermes_cli.__version__)
+                update_health('failed', adapter_health(adapter, platform_name)[1] if adapter.has_fatal_error else 'GATEWAY_CONNECTION_REJECTED');return
+            refresh_health()
             from hermes_state_registry import acquire
             db = acquire(home_path('state.db'))
-            for key, raw in db.list_meta_prefix('ziwei.gateway.inbound:'):
-                record = json.loads(raw)
-                if record.get('platform') == platform_name and record.get('sourceActionId') == request['actionId'] and record.get('state') in {'pending', 'accepted'} and record.get('revision') == context['revision'] and record.get('controlEpoch') == context.get('controlEpoch'):
-                    emit('inbound', **{key: record[key] for key in ('messageId', 'content', 'chatId')})
+            restored_generation = 0
             deadline = time.monotonic() + min(86400, max(1, request['input'].get('durationSeconds', 86400)))
             last_heartbeat = time.monotonic()
             while time.monotonic() < deadline:
+                refresh_health()
+                if health['status'] in {'failed', 'disconnected'}: break
+                if accepting and restored_generation != connection_generation:
+                    for key, raw in db.list_meta_prefix('ziwei.gateway.inbound:'):
+                        record = json.loads(raw)
+                        if record.get('platform') == platform_name and record.get('sourceActionId') == request['actionId'] and record.get('state') in {'pending', 'accepted'} and record.get('revision') == context['revision'] and record.get('controlEpoch') == context.get('controlEpoch'):
+                            emit('inbound', **{key: record[key] for key in ('messageId', 'content', 'chatId')})
+                    restored_generation = connection_generation
                 if time.monotonic() - last_heartbeat >= 5:
-                    state('connected');emit('heartbeat', pid=os.getpid());last_heartbeat = time.monotonic()
+                    state(**health);emit('heartbeat', pid=os.getpid(), **health);last_heartbeat = time.monotonic()
                 try: command = commands.get_nowait()
                 except queue.Empty:
                     await asyncio.sleep(.05);continue
                 operation = command.get('operation')
                 if operation == 'disconnect': break
+                if not refresh_health():
+                    emit('command_result', commandId=command.get('commandId'), success=False, code='GATEWAY_NOT_CONNECTED');continue
                 if operation == 'send':
                     delivery_key = None
                     if command.get('messageId'):
@@ -804,9 +859,14 @@ def run_gateway_worker(request, context):
                     emit('command_result', commandId=command['commandId'], success=response.status < 400, httpStatus=response.status)
                 else:
                     emit('command_result', commandId=command.get('commandId'), success=False, code='GATEWAY_COMMAND_UNSUPPORTED')
+        except Exception:
+            update_health('failed', 'GATEWAY_CONNECTION_ERROR')
         finally:
+            closing = True
+            accepting = False
             try:
-                if connected: await asyncio.wait_for(adapter.disconnect(), timeout=10)
+                await asyncio.wait_for(adapter.disconnect(), timeout=10)
             finally:
-                state('disconnected');emit('disconnected', pid=os.getpid())
+                if health['status'] != 'failed': update_health('disconnected')
+                state(**health);emit('disconnected', pid=os.getpid(), **health)
     asyncio.run(worker())
