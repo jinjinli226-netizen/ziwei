@@ -11,10 +11,49 @@ const json=value=>{try{return JSON.parse(value);}catch{return null;}};
 const equal=(a,b)=>digest(a)===digest(b);
 const deliveryBinding=(action,identity)=>{const p=action.payload||{};return hash(JSON.stringify({id:action.id,type:action.type,agent:action.agent_id||action.agentId||'ziwei_user',workspace:action.workspace_id||identity.workspace,device:identity.deviceId,employee:p.employeeId||p.employee_id||p.assignee||null,conversation:p.conversationId||p.conversation_id||null,message:p.messageId||p.message_id||null,dedupe:action.dedupe_key||action.dedupeKey||null}));};
 function normalizedAction(row){return {...row,payload:row.payload||json(row.payload_json)||{},result:row.result||json(row.result_json)};}
+function legacyHistoryUncertain(value,checkTree=true){
+  if(!value||typeof value!=='object')return false;
+  if(['executionState','execution_state'].some(key=>['unknown','uncertain','unconfirmed','blocked',...(checkTree?['pending','running','started']:[])].includes(value[key])))return true;
+  if(uncertain(value)||['executionUncertain','execution_uncertain','outcome_uncertain','retainEvidence'].some(key=>value[key]===true)||checkTree&&(value.treeConfirmed===false||Number(value.activeProcesses)>0))return true;
+  return Object.values(value).some(item=>Array.isArray(item)?item.some(child=>legacyHistoryUncertain(child,checkTree)):legacyHistoryUncertain(item,checkTree));
+}
+function actionDevice(action,request){
+  const payload=action?.payload||{},devices=['deviceId','device_id','targetDeviceId','target_device_id'].map(key=>payload[key]).filter(value=>value!==undefined&&value!==null&&value!=='');
+  if(devices.some(value=>typeof value!=='string')||new Set(devices).size>1)return null;
+  if(devices.length)return devices[0];
+  const employeeId=payload.employeeId||payload.employee_id||payload.assignee,employee=request?.actionProjection?.tables?.employees?.rows?.find(row=>row.id===employeeId&&row.workspace_id===action?.workspace_id);
+  return typeof employee?.target_device_id==='string'?employee.target_device_id:null;
+}
+// Exact reviewed V1 protocol bytes, normalized only for Windows CRLF. This
+// identifies history format and result binding, not worker/tree completion.
+const legacyProtocolFiles={
+  'src/management-bootstrap.mjs':'bddce314efe7bc836d6b67f19d64aa98b8801527f2a64a173eac9982e086fb74',
+  'daemon/ziwei_user.mjs':'7225a515885af09317d2f23976bb74f562ac3d6579eec1bd88ae0855cce35a2f',
+  'src/daemon.mjs':'1e5ab24e166466e5036d74b4a46b44485f61e9c8fcecc6ce69f125f8a6a3ff41',
+  'src/daemon-action-scheduler.mjs':'a2e2181e029d7e09b1b4ed82b26115013c792aaa1dfc1f19610e135e24c70a6e',
+  'src/local-action.mjs':'88cf1bd4b32411c47eb6e277209ff453f858948ae24fc75611db2c599104fa3c',
+  'src/runtime-adapters.mjs':'3295b1eabf47c58d47e7e3d80148909f1bf854d1f7043d68b0b4866b43c14b39'
+};
+function legacyConnectionProof(connection,request,read,directoryProof){
+  if(request?.schemaVersion!==1||request.domain!=='ziwei-production-request-v1'||!['collect','recheck'].includes(request.kind)||!request.operationId||!request.challenge||! /^[a-f0-9]{64}$/.test(request.specHash||''))throw Error('request');
+  const workspace=request.actionProjection?.tables?.workspaces?.rows?.find(row=>row.slug===connection.workspace);
+  if(!workspace||!request.binding?.workspaceIds?.includes(workspace.id)||!request.binding?.deviceIds?.includes(connection.deviceId)||!request.targetOrigins?.includes(new URL(connection.apiBase).origin))throw Error('scope');
+  const clients=(request.binding.clients||[]).filter(client=>client.installedRole==='v1'&&(client.runtimeDir===connection.runtimeDir||path.join(client.runtimeDir,'shared-workspaces',connection.workspace,connection.deviceId)===connection.runtimeDir));
+  if(clients.length!==1)throw Error('client');const client=clients[0],configuration=read(client.configPath);
+  if(hash(configuration)!==client.configSha256)throw Error('config');const config=json(configuration);
+  const entries=[config,...(config?.sharedWorkspaces||[]).filter(row=>row.enabled!==false)];
+  if(entries.filter(entry=>entry?.workspace===connection.workspace&&entry.deviceId===connection.deviceId&&new URL(entry.apiBase||config.apiBase).origin===new URL(connection.apiBase).origin).length!==1)throw Error('connection');
+  const sources=[];directoryProof(client.root);directoryProof(path.join(client.root,'src'));directoryProof(path.join(client.root,'daemon'));
+  for(const [relative,expected] of Object.entries(legacyProtocolFiles)){
+    const file=path.join(client.root,relative);if(fs.realpathSync.native(file)!==path.resolve(file))throw Error('source');
+    const text=read(file);if(hash(text.replace(/\r\n/g,'\n'))!==expected)throw Error('protocol');sources.push({path:path.resolve(file),sha256:hash(text)});
+  }
+  return {client,workspaceId:workspace.id,policyDigest:digest(legacyProtocolFiles),sourceDigest:digest(sources)};
+}
 
 /** Read-only evidence. Zero in-memory counters cannot replace these files. */
-export function scanNativeFiles({connections=[],actions=[],homes=[]}={}) {
-  const issues=[],files=[],directories=[],gatewayExits=[],originals=new Map(actions.map(row=>[row.id,normalizedAction(row)]));
+export function scanNativeFiles({connections=[],actions=[],homes=[],productionRequest}={}) {
+  const issues=[],files=[],directories=[],gatewayExits=[],legacyHistoryProofs=[],originals=new Map(actions.map(row=>[row.id,normalizedAction(row)]));
   const issue=(code,detail={})=>issues.push({code,...detail});
   const read=file=>{try{const stat=fs.lstatSync(file);if(!stat.isFile()||stat.isSymbolicLink()||stat.nlink!==1)throw new Error('not regular file');const bytes=fs.readFileSync(file);files.push({path:path.resolve(file),exists:true,sha256:hash(bytes),bytes:bytes.length,identity:{dev:String(stat.dev),ino:String(stat.ino)}});return bytes.toString('utf8');}catch(error){if(error.code==='ENOENT')files.push({path:path.resolve(file),exists:false});throw error;}};
   const directoryProof=directory=>{try{const stat=fs.lstatSync(directory);if(!stat.isDirectory()||stat.isSymbolicLink())throw Error('identity');const names=fs.readdirSync(directory).sort();directories.push({path:path.resolve(directory),exists:true,names,identity:{dev:String(stat.dev),ino:String(stat.ino)}});}catch(error){if(error.code==='ENOENT')directories.push({path:path.resolve(directory),exists:false,names:[]});else issue('DIRECTORY_UNREADABLE',{path:directory});}};
@@ -23,11 +62,41 @@ export function scanNativeFiles({connections=[],actions=[],homes=[]}={}) {
     directoryProof(runtimeDir);directoryProof(path.join(runtimeDir,'action-delivery'));directoryProof(path.join(runtimeDir,'shared-workspaces'));
     const relevant=[...originals.values()].filter(action=>!action.payload.deviceId||action.payload.deviceId===deviceId);
     const stateFile=path.join(runtimeDir,'action-state.json');let state;
-    try{state=json(read(stateFile));if(state?.version!==2||!Array.isArray(state.started)||!Array.isArray(state.completed))throw new Error('invalid version/shape');}
-    catch(error){if(error.code!=='ENOENT')issue('ACTION_STATE_CORRUPT',{path:stateFile});else if(relevant.some(action=>action.acked_at))issue('ACTION_STATE_MISSING',{path:stateFile});}
+    try{
+      state=json(read(stateFile));
+      const legacyShape=state?.version===1&&Array.isArray(state.completed)&&Number.isFinite(Date.parse(state.updatedAt||''))&&Object.keys(state).every(key=>['version','updatedAt','completed'].includes(key));
+      const modernShape=state?.version===2&&Array.isArray(state.completed)&&Array.isArray(state.started);
+      if(!modernShape&&!(legacyShape&&productionRequest))throw Error('invalid version/shape');
+      const validIdentity=value=>value===undefined||(value&&typeof value==='object'&&!Array.isArray(value)&&Object.values(value).every(item=>typeof item==='string'));
+      const startedKeys=new Set();
+      for(const started of state.started||[]){
+        if(!started||typeof started.key!=='string'||!started.key||startedKeys.has(started.key)||!['string','number'].includes(typeof started.actionId)&&started.actionId!==null||!started.identity||!validIdentity(started.identity)||!Number.isFinite(started.startedAt)||started.nativeRuntime!==undefined&&typeof started.nativeRuntime!=='boolean'||started.quarantine!==undefined&&(!started.quarantine||typeof started.quarantine.stopConfirmed!=='boolean'))throw Error('invalid started record');
+        startedKeys.add(started.key);
+      }
+      const completedKeys=new Set();
+      for(const completed of state.completed){
+        if(!completed||typeof completed.key!=='string'||!completed.key||completedKeys.has(completed.key)||!completed.result||!['succeeded','failed'].includes(completed.result.status)||typeof completed.result.actionId!=='string'||!completed.result.actionId||!validIdentity(completed.identity)||legacyHistoryUncertain(completed,state.version===1||completed.legacy===true))throw Error('invalid completed record');
+        if((state.version===1||completed.legacy===true)&&Object.keys(completed).some(key=>!(state.version===1?['key','result']:['key','result','legacy']).includes(key)))throw Error('unknown legacy wrapper');
+        completedKeys.add(completed.key);
+        if(state.version===2&&completed.legacy!==true&&(!completed.identity||!(state.started||[]).some(started=>started?.key===completed.key&&started.actionId===completed.result.actionId)))throw Error('unpaired completed record');
+      }
+    }
+    catch(error){state=null;if(error.code!=='ENOENT')issue('ACTION_STATE_CORRUPT',{path:stateFile});else if(relevant.some(action=>action.acked_at))issue('ACTION_STATE_MISSING',{path:stateFile});}
     if(state){
+      const legacyActions=new Set(),legacyKeys=new Set();let legacySource;
+      const legacy=state.completed.filter(row=>state.version===1||row?.legacy===true);
+      if(legacy.length)try{legacySource=legacyConnectionProof(connection,productionRequest,read,directoryProof);}catch{issue('LEGACY_PROTOCOL_UNPROVEN',{path:stateFile});}
+      for(const completed of legacy){
+        const original=originals.get(completed?.result?.actionId),result=completed?.result,exit=executionExit(result);
+        const expectedKey=String(original?.dedupe_key??original?.dedupeKey??original?.id??''),device=actionDevice(original,productionRequest);
+        // A legacy completion is immutable terminal history. Missing fields
+        // that did not exist in V1 are never fabricated as process evidence.
+        if(!legacySource||!original||!result||typeof completed.key!=='string'||!completed.key||legacyKeys.has(completed.key)||legacyActions.has(original.id)||completed.identity||completed.key!==expectedKey||!['succeeded','failed'].includes(original.status)||original.status!==result.status||legacyHistoryUncertain(result)||!Number.isFinite(result.completedAt)||exit&&!exitedTree(exit)||original.workspace_id!==legacySource.workspaceId||device!==deviceId||!equal(original.result,result.result??result)||original.error&&original.error!==result.error){issue('LEGACY_HISTORY_UNPROVEN',{path:stateFile,actionId:result?.actionId||null});continue;}
+        legacyKeys.add(completed.key);legacyActions.add(original.id);
+        legacyHistoryProofs.push({schemaVersion:1,kind:'legacy-terminal-history-v1',actionId:original.id,actionDigest:nativeActionDigest(original),operationId:productionRequest.operationId,specHash:productionRequest.specHash,challenge:productionRequest.challenge,hostId:productionRequest.binding.hostId,workspaceId:legacySource.workspaceId,deviceId,origin:connection.apiBase.replace(/\/$/,''),originalInstanceDigest:digest(legacySource.client.originalInstance),policyDigest:legacySource.policyDigest,sourceDigest:legacySource.sourceDigest,cacheRecordDigest:digest(completed),conclusion:'terminal-history-retained'});
+      }
       const keys=new Set();
-      for(const started of state.started){
+      for(const started of state.started||[]){
         if(!started?.key||keys.has(started.key)||!started.identity||!Number.isFinite(started.startedAt)){issue('ACTION_STATE_CORRUPT',{path:stateFile});continue;}keys.add(started.key);
         const completed=state.completed.find(row=>row.key===started.key);
         if(!completed){issue('STARTED_WITHOUT_RESULT',{actionId:started.actionId,path:stateFile});continue;}
@@ -38,7 +107,7 @@ export function scanNativeFiles({connections=[],actions=[],homes=[]}={}) {
         if(gateway?.resource==='gateway'&&worker){const originalConnection=state.completed.find(row=>row.result?.actionId===worker.sourceActionId),originalWorker=originalConnection?.result?.result?.nativeOperation?.data?.residentWorker;
           if(worker.workspace!==workspace||!worker.workerNonce||!Number.isInteger(worker.rootPid)||gateway.operation==='connect'&&worker.sourceActionId!==started.actionId||gateway.operation!=='connect'&&!equal(worker,originalWorker))issue('GATEWAY_CACHE_IDENTITY_MISMATCH',{actionId:started.actionId,path:stateFile});
         }
-        if(!originals.has(started.actionId)){if(started.nativeRuntime&&!exitedTree(executionExit(completed.result)))issue('UNMAPPED_NATIVE_EXECUTION',{actionId:started.actionId,path:stateFile});continue;}
+        if(!originals.has(started.actionId)){const exit=executionExit(completed.result);if((started.nativeRuntime||exit)&&!exitedTree(exit))issue('UNMAPPED_NATIVE_EXECUTION',{actionId:started.actionId,path:stateFile});continue;}
         const persisted=originals.get(started.actionId),expected=Object.fromEntries(Object.entries({...scope,workspaceId:persisted.workspace_id||persisted.workspaceId,actionWorkspace:persisted.workspace||persisted.workspace_slug,targetDeviceId:persisted.payload.deviceId||persisted.payload.device_id||persisted.payload.targetDeviceId||persisted.payload.target_device_id}).filter(([,value])=>value!==undefined&&value!==null&&String(value)!=='').map(([key,value])=>[key,String(value)]));
         if(!equal(started.identity,completed.identity)||!equal(started.identity,expected)||completed.result?.actionId!==started.actionId)issue('ACTION_IDENTITY_MISMATCH',{actionId:started.actionId,path:stateFile});
         if(!['succeeded','failed'].includes(completed.result?.status)||uncertain(completed.result))issue('ACTION_RESULT_UNCERTAIN',{actionId:started.actionId,path:stateFile});
@@ -46,7 +115,7 @@ export function scanNativeFiles({connections=[],actions=[],homes=[]}={}) {
         const original=originals.get(started.actionId),resident=original?.type==='hermes.bot.native'&&original.payload.nativeOperation?.resource==='gateway'&&original.payload.nativeOperation.operation==='connect';
         if(!resident&&!exitedTree(executionExit(result)))issue('ACTION_TREE_UNKNOWN',{actionId:started.actionId,path:stateFile});
       }
-      for(const action of relevant.filter(row=>row.acked_at))if(!state.started.some(row=>row.actionId===action.id))issue('ACTION_STATE_BINDING_MISSING',{actionId:action.id,path:stateFile});
+      for(const action of relevant.filter(row=>row.acked_at))if(!(state.started||[]).some(row=>row.actionId===action.id)&&!legacyActions.has(action.id))issue('ACTION_STATE_BINDING_MISSING',{actionId:action.id,path:stateFile});
     }
     const directory=path.join(runtimeDir,'action-delivery');let names=[];
     try{names=fs.readdirSync(directory);}catch(error){if(error.code!=='ENOENT')issue('DELIVERY_DIRECTORY_UNREADABLE',{path:directory});}
@@ -88,7 +157,7 @@ export function scanNativeFiles({connections=[],actions=[],homes=[]}={}) {
     }
     for(const action of [...originals.values()].filter(row=>row.type==='hermes.bot.native'&&row.payload.employeeId===item.employeeId&&row.payload.nativeOperation?.resource==='gateway'&&row.payload.nativeOperation.operation==='connect'&&row.acked_at))if(!starts.some(entry=>entry.sourceActionId===action.id))issue('GATEWAY_LIFECYCLE_MISSING',{actionId:action.id,path:file});
   }
-  return {safe:issues.length===0,issues,files,directories,gatewayExits};
+  return {safe:issues.length===0,issues,files,directories,gatewayExits,legacyHistoryProofs,originalActionProofs:legacyHistoryProofs};
 }
 
 /** Only actual native maintenance inspection + loopback health is accepted. */
