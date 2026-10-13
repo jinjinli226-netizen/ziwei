@@ -356,7 +356,13 @@ async function readLinuxProcess(pid){
   return {pid,createdAt:null,nativeBirth:parseLinuxProcessBirth(stat,bootId),entryPath:fs.realpathSync.native(path.resolve(cwd,argv[1])),executable,commandDigest:digestProduction(argv)};
  }catch(error){if(error.code==='ENOENT'||error.code==='ESRCH')return null;throw error;}
 }
-async function powershell(script){const {stdout}=await run('powershell.exe',['-NoLogo','-NoProfile','-NonInteractive','-Command',script],{windowsHide:true,encoding:'utf8',timeout:10000,maxBuffer:8*1024*1024});return stdout.trim()?json(stdout.replace(/^\uFEFF/,'')):null;}
+const nativeWindowsPowerShell='C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
+function checkedWindowsPowerShell(){
+ if(process.platform!=='win32'||process.arch!=='x64')fail('SOURCE_WINDOWS_NATIVE_PLATFORM');
+ try{canonicalDirectory(path.dirname(nativeWindowsPowerShell));const stat=fs.lstatSync(nativeWindowsPowerShell);if(!stat.isFile()||stat.isSymbolicLink()||fs.realpathSync.native(nativeWindowsPowerShell)!==nativeWindowsPowerShell||sha(fs.readFileSync(nativeWindowsPowerShell))!=='8bb6fa8c283b4d92120b1ef249a9b311b0f804d4cabbe9981159976c8be76a5e')fail('SOURCE_WINDOWS_EXECUTABLE_CHANGED');}catch{fail('SOURCE_WINDOWS_EXECUTABLE_CHANGED');}return nativeWindowsPowerShell;
+}
+function nativePowerShellEnvironment(){const env={};for(const [key,value] of Object.entries(process.env))if(!/^PSModulePath$/i.test(key))env[key]=value;env.PSModulePath=canonicalDirectory(path.join(path.dirname(nativeWindowsPowerShell),'Modules'));return env;}
+async function powershell(script){const {stdout}=await run(checkedWindowsPowerShell(),['-NoLogo','-NoProfile','-NonInteractive','-Command',script],{windowsHide:true,encoding:'utf8',env:nativePowerShellEnvironment(),timeout:10000,maxBuffer:8*1024*1024});return stdout.trim()?json(stdout.replace(/^\uFEFF/,'')):null;}
 async function readWindowsProcess(pid,original){
  try{return await inspectWindowsSourceProcess({pid,...(iso(original?.createdAt)?{createdAt:original.createdAt}:{})});}catch(error){if(original&&error.code==='SOURCE_WINDOWS_BIRTH_CHANGED')return null;throw error;}
 }
@@ -372,7 +378,7 @@ export async function inspectWindowsSourceProcess(input){
 }
 async function readWindowsSourceHelper(input){
  const helper=fileURLToPath(new URL('./preservation-source-native-windows.ps1',import.meta.url));if(sha(readPlain(helper).toString('utf8').replaceAll('\r\n','\n'))!=='c60e1a4b941e82f43e87c8aa6e588da41269fc5701a01fff421940297ddbb5d2')fail('SOURCE_WINDOWS_HELPER_CHANGED');
- return new Promise((resolve,reject)=>{const child=execFile('powershell.exe',['-NoLogo','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',helper],{windowsHide:true,encoding:'utf8',timeout:15000,maxBuffer:256*1024},(error,stdout,stderr)=>{if(error){const code=/SOURCE_WINDOWS_[A-Z_]+/.exec(stderr||'')?.[0]||'SOURCE_WINDOWS_NATIVE_UNREADABLE';reject(Object.assign(new Error(code),{code}));}else try{resolve(json(stdout.replace(/^\uFEFF/,'')));}catch(failed){reject(failed);}});child.stdin.on('error',()=>{});child.stdin.end(canonicalProduction(input));});
+ return new Promise((resolve,reject)=>{const child=execFile(checkedWindowsPowerShell(),['-NoLogo','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',helper],{windowsHide:true,encoding:'utf8',env:nativePowerShellEnvironment(),timeout:15000,maxBuffer:256*1024},(error,stdout,stderr)=>{if(error){const code=/SOURCE_WINDOWS_[A-Z_]+/.exec(stderr||'')?.[0]||'SOURCE_WINDOWS_NATIVE_UNREADABLE';reject(Object.assign(new Error(code),{code}));}else try{resolve(json(stdout.replace(/^\uFEFF/,'')));}catch(failed){reject(failed);}});child.stdin.on('error',()=>{});child.stdin.end(canonicalProduction(input));});
 }
 // This exact closed program has no imports, evaluation, IO or child creation.
 // It supplies a genuine native qualification case, never an SDK capability.
