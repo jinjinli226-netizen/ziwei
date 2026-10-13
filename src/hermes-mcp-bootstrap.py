@@ -499,7 +499,8 @@ if __name__ == '__main__':
     def fail_safe(reason=None):
         if os.environ.get('ZIWEI_INSTANCE_KIND') == 'hermes-bot':
             code = str(reason) if isinstance(reason, UnsupportedNativeHermes) else type(reason).__name__
-            print('Hermes Bot bootstrap rejected before model startup: ' + code, file=sys.stderr)
+            stage = ' before model startup' if code.startswith('BOT_REASONING_') else ''
+            print('Hermes Bot bootstrap rejected' + stage + ': ' + code, file=sys.stderr)
             sys.exit(125)
         if isinstance(reason, UnsupportedNativeHermes) and str(reason).startswith('bot managed config conflict:'):
             print('Hermes Bot effective configuration conflicts at ' + str(reason).split(':', 1)[1] + '; no model was started.', file=sys.stderr)

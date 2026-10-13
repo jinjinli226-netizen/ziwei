@@ -1,6 +1,6 @@
 # Owned Bot 正常 SDK storage 收尾
 
-状态：自有桥引用释放与 confirmed owned HOME 正常 SDK 收尾已实施；新的真实四阶段尚待执行。未知 WAL 旧尾规则保持拒绝，原失败样本不变，不能把源码结论或 close 返回 count 当成 release acceptance。
+状态：自有桥引用释放与 confirmed owned HOME 正常 SDK 收尾已实施；155625f新批实际 SDK 四阶段完整PASS，仍待Q01独立签收与正式production闭合。未知 WAL 旧尾规则保持拒绝，原失败样本不变，不能把源码结论或 close 返回 count 当成 release acceptance。
 
 本次只更改自有 `src/hermes-native-bridge.py`、`src/hermes-mcp-bootstrap.py` 和回归测试，没有修改已装 SDK、源 auth 或既有 failed HOME。`_prepare` 自己 acquire 的 pending DB 在成功、原 pending 拒绝与异常路径都 finally close，归还 shared reference。Gateway 每条 inbound handler 与整个 worker 的引用分别 finally 归还；adapter.disconnect 完成、worker 返回以后 bootstrap 才收尾 owned cache。
 
@@ -16,6 +16,8 @@ owned fingerprint 增加 registry 与 sqlite_safe_read 的真实 module source/p
 
 首轮9c9f9fa package在实际 SHA对照发现 V2 native bridge未被overlay，仍是 frozen baseline旧文件。该目录 `.local/preservation-owned-storage-finalized` 保留并标 NOT_ACCEPTED，没有执行四阶段。打包器已把V2 bridge纳入明确overlay；后续只使用新目录重建并逐字节核真实包。
 
-验证记录：新增回归先复现 operation 无 finalization、native.main 完成/SystemExit 无 finalization、SDK吞 close 后仍live却产生成功结果三个失败，然后修复转绿。6个 bootstrap/owned tests（新用例含15个 scope/error/ref balancing 检查）PASS；实际安装 SDK 的16个 receive-health加9个 prior-native adapter tests PASS，原监督根退出/tree完成，安装源/status未变。全量957/957 PASS（0fail/0skip），lint125文件PASS。私有日志位于本树 `.local/preservation-profile-window/owned-finalization-*`，适配器原回执 `.local/receive-health-1791917671467/receipt.json`。fresh package/实际 SDK 四阶段仍须完成后另记。
+验证记录：新增回归先复现 operation 无 finalization、native.main 完成/SystemExit 无 finalization、SDK吞 close 后仍live却产生成功结果三个失败，然后修复转绿。6个 bootstrap/owned tests（新用例含15个 scope/error/ref balancing 检查）PASS；实际安装 SDK 的16个 receive-health加9个 prior-native adapter tests PASS，原监督根退出/tree完成，安装源/status未变。全量957/957 PASS（0fail/0skip），lint125文件PASS。私有日志位于本树 `.local/preservation-profile-window/owned-finalization-*`，适配器原回执 `.local/receive-health-1791917671467/receipt.json`。
+
+新准确批 candidate=155625ff3ba6945b33914ac0ee7c943b03fca19a，目录 `.local/preservation-owned-storage-finalized-verified`：真实V2 bootstrap/bridge逐字节匹配当前candidate，两API实际解压入口readonly证明PASS；四phase原回执 `.local/preservation-rehearsal/1791918202016/receipt.json` complete/executionComplete/cleanupConfirmed均true，11个预期HTTP拒绝，包含原realACK未结拒绝、原任务完成、native严格seal、V1compat保留、V2restore与第二次seal/restore零新工作循环。运行后13770 SDK跟踪files、3源config/.env/auth文件、SDKGitHEAD/status与运行前完全相同，6387/6388/6389均无监听。6产物与2manifest准确SHA、白名单fourphase摘要和全部边界保存在该冻结目录 handoff-native-finalized.json；这是作者证据，不是Q01/production签收。
 
 先前 strict fail-closed 冻结检查点为 b88cbd6fc0c16c6554e973115110710bdde9c5d1，目录 `.local/preservation-native-safe-checkpoint`，6产物、2 manifests、actual extracted API readonly入口证明与956/956全量结果已核。handoff-native-safe-checkpoint.json 明确 nativeFourphase.accepted=false；不能将它或70c0df6包视为正式发布候选。

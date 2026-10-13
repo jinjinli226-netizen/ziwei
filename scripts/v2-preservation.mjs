@@ -13,7 +13,17 @@ import {clientBuildIdentity} from '../src/management-bootstrap.mjs';
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 const inside=(root,value)=>{const relative=path.relative(path.resolve(root),path.resolve(value));return relative!==''&&relative!=='..'&&!relative.startsWith(`..${path.sep}`)&&!path.isAbsolute(relative);};
 function scope(spec){const root=path.resolve(spec.isolatedRoot||''),marker=JSON.parse(fs.readFileSync(path.join(root,'preservation-rehearsal.json'),'utf8'));if(marker.purpose!=='ziwei-data-preserving-rehearsal'||!inside(root,spec.database))throw new Error('Apply requires an owned rehearsal root and its existing DB');for(const client of spec.clients||[])for(const value of [client.root,client.configPath,client.userHome].filter(Boolean))if(!inside(root,value))throw new Error('Client path is outside isolated rehearsal root');return root;}
-export async function runPreservation({command='inspect',apply=false,...spec}={}) {
+const productionFailure=code=>{throw Object.assign(new Error(code),{code});};
+async function productionRun({command,apply,spec},{trust,proofProvider,backupProof,packageRoot}={}){
+  if(!['inspect','prepare','seal','restore','abort'].includes(command))productionFailure('PRODUCTION_COMMAND_INVALID');
+  if(!trust||typeof trust!=='object'||Array.isArray(trust))productionFailure('PRODUCTION_INDEPENDENT_TRUST_REQUIRED');
+  const {runProductionPreservation}=await import('../backend/production-preservation.mjs');
+  return runProductionPreservation({command,apply,spec,trust,...(proofProvider?{proofProvider}:{}),...(backupProof?{backupProof}:{}),...(packageRoot?{packageRoot}:{})});
+}
+export async function runPreservation({command='inspect',apply=false,...spec}={},productionInputs={}) {
+  // Production uses its immutable typed spec and independently supplied trust.
+  // Trusted providers are code arguments, never fields removed from spec JSON.
+  if(spec.mode==='production')return productionRun({command,apply,spec},productionInputs);
   if(!spec.database||!fs.existsSync(spec.database))throw new Error('An existing explicit database is required');
   if(!['inspect','prepare','seal','restore','abort','drain'].includes(command))throw new Error('Unknown operation');
   if(!apply){const report=readDatabaseSnapshot(path.resolve(spec.database),db=>createPreservation(db,{readOnly:true}).inspect());return {mode:'plan',command,willApply:false,versions:FROZEN_VERSIONS,report,next:command==='inspect'?null:'Re-run with --apply and an owned isolated rehearsal specification'};}
@@ -38,5 +48,20 @@ export async function runPreservation({command='inspect',apply=false,...spec}={}
     return {mode:'applied',command,...(backup?{backup}:{}),report};
   } finally {db.close();}
 }
-async function main(){const args=process.argv.slice(2),command=args.find(value=>!value.startsWith('--'))||'inspect',index=args.indexOf('--spec');if(index<0||!args[index+1])throw new Error('Usage: node scripts/v2-preservation.mjs inspect|prepare|drain|seal|restore|abort --spec <local.json> [--apply]');const spec=JSON.parse(fs.readFileSync(path.resolve(args[index+1]),'utf8'));console.log(JSON.stringify(await runPreservation({...spec,command,apply:args.includes('--apply')}),null,2));}
+async function main(){
+  const args=process.argv.slice(2),command=args.find(value=>!value.startsWith('--'))||'inspect',index=args.indexOf('--spec');
+  if(index<0||!args[index+1])throw new Error('Usage: node scripts/v2-preservation.mjs inspect|prepare|drain|seal|restore|abort --spec <local.json> [--trust <independent.json>] [--apply]');
+  const specPath=path.resolve(args[index+1]),spec=JSON.parse(fs.readFileSync(specPath,'utf8')),apply=args.includes('--apply');
+  let result;
+  if(spec.mode==='production'){
+    const trustIndex=args.indexOf('--trust');
+    if(trustIndex<0||!args[trustIndex+1]||args.filter(value=>value==='--trust').length!==1)productionFailure('PRODUCTION_INDEPENDENT_TRUST_REQUIRED');
+    const trustPath=path.resolve(args[trustIndex+1]);
+    if(fs.realpathSync.native(trustPath)===fs.realpathSync.native(specPath))productionFailure('PRODUCTION_INDEPENDENT_TRUST_REQUIRED');
+    const trust=JSON.parse(fs.readFileSync(trustPath,'utf8'));
+    // Preserve the complete raw production spec for its strict field validator.
+    result=await productionRun({command,apply,spec},{trust});
+  }else result=await runPreservation({...spec,command,apply});
+  console.log(JSON.stringify(result,null,2));
+}
 if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href)main().catch(error=>{console.error(JSON.stringify({code:error.code||'PRESERVATION_FAILED',error:error.message,details:error.details||null}));process.exitCode=1;});

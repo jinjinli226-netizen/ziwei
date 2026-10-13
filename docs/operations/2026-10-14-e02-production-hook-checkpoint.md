@@ -21,3 +21,5 @@ sealed Inbox 的 HOME/path 关联现在使用 source 路径所属 win32/posix pa
 验证：5个新增 hook 用例（同事务三phase、拒绝回滚、首写前拒 async/JSON hook、thenable回滚、remote标签不能绕过），与既有 version/native-seal 联合23/23 PASS。另有当前 native fail-closed/相关hook联合31/31 PASS；这些是产品 hook 单元/集成证据，不是 production签名/transport/backup/bootstrap 已通过。
 
 owner：E02保留 backend/version-preservation.mjs、native模块、既有 scripts/v2-preservation.mjs、打包器；E03承接 backend/production-preservation.mjs、scripts/production-source-proof.mjs 及其专属新tests。E03提出CLI分流、包闭包等具体需求后由E02合入。最终同批源码与六产物由Q01独验，R01唯一正式执行。
+
+E02 CLI衔接已加入：mode=production先于原rehearsal/stringDB检查分流；CLI必须单独 --trust <independent.json>，不能与spec同一realpath，原spec完整交给严格validator（不删掉额外JSON字段）。程序调用的第二个code参数可传trust/proofProvider/backupProof/packageRoot；spec JSON不能提供provider函数或信任材料。production无drain/VACUUM，未指定 --apply默认仍plan。E03 module由明确dynamic import载入；缺少模块会拒绝，不fallback到rehearsal。2个新CLI拒绝用例与DB只读用例联合3/3 PASS，原sentinel字节/目录/sidecar零改动；正向签名与实际包入口待E03冻结组合后验证。
