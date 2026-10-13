@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { guardRepository } from './version-preservation.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { openDatabase } from './db.mjs';
@@ -484,9 +485,9 @@ export function createRepository(options = {}) {
     const row = candidates.find(candidate => parse(candidate.payload_json)?.conversationId === conversationId);
     if (!row) return null;
     let current = row;
-    if (['pending','acked'].includes(current.status) && current.expires_at && Date.parse(current.expires_at) <= Date.now()) {
+    if (['pending','acked'].includes(current.status) && current.expires_at && Date.parse(current.expires_at) <= Date.now() && db.prepare('SELECT ziwei_v2_admitted(?) admitted').get(current.id).admitted===1) {
       const timestamp = now();
-      db.prepare("UPDATE a2a_actions SET status='expired',completed_at=? WHERE id=? AND status IN ('pending','acked')").run(timestamp, current.id);
+      db.prepare("UPDATE a2a_actions SET status='expired',completed_at=? WHERE id=? AND ziwei_v2_admitted(id)=1 AND status IN ('pending','acked')").run(timestamp, current.id);
       current = { ...current, status:'expired', completed_at:timestamp };
     }
     const view = conversationActionView(current);
@@ -525,7 +526,7 @@ export function createRepository(options = {}) {
     const workspaceRow = db.prepare('SELECT slug FROM workspaces WHERE id=?').get(task.workspace_id);
     if (workspaceRow) audit(workspaceRow.slug, 'ziwei_user', 'task.execution.started', { taskId, from:task.state, to:'in_progress' });
   };
-  return {
+  return guardRepository({
     db,
     withEmployeeTemplateTransaction(create) {
       // This service owns its commit so notifications cannot escape a rollback.
@@ -1048,7 +1049,7 @@ export function createRepository(options = {}) {
         const items=db.prepare("SELECT * FROM automations WHERE workspace_id=? AND status='active' AND next_run IS NOT NULL AND next_run<=?").all(ws.id,at.toISOString());
         for (const item of items) {
           try {due.push(this.runAutomation(item.id,'scheduled',{scheduledAt:item.next_run}));}
-          catch(error) {if(!['BOT_NOT_ACTIVE','BOT_NOT_VALIDATED','BOT_BUSY'].includes(error.code))throw error;}
+          catch(error) {if(!['BOT_NOT_ACTIVE','BOT_NOT_VALIDATED','BOT_BUSY','V2_OBJECT_SEALED'].includes(error.code))throw error;}
         }
       }
       void this.dispatchWebhookDeliveries(); return due;
@@ -1063,7 +1064,7 @@ export function createRepository(options = {}) {
       return {id:deliveryId,event,signature};
     },
     async dispatchWebhookDeliveries(at = new Date()) {
-      const rows=db.prepare("SELECT * FROM webhook_deliveries WHERE status IN ('queued','retrying') AND (next_retry_at IS NULL OR next_retry_at<=?) ORDER BY created_at LIMIT 20").all(at.toISOString());
+      const rows=db.prepare("SELECT * FROM webhook_deliveries WHERE ziwei_v2_automation_admitted(automation_id)=1 AND status IN ('queued','retrying') AND (next_retry_at IS NULL OR next_retry_at<=?) ORDER BY created_at LIMIT 20").all(at.toISOString());
       for (const row of rows) {
         const attempts=Number(row.attempts || 0)+1; db.prepare('UPDATE webhook_deliveries SET status=\'sending\',attempts=? WHERE id=?').run(attempts,row.id);
         try {
@@ -1845,7 +1846,7 @@ export function createRepository(options = {}) {
     },
     listA2AActions(slug, input = {}) {
       const ws = workspace(slug); if (!ws) throw new Error('Workspace not found'); const agentId=String(input.agentId || input.agent_id || 'ziwei_user'); const requestedStatus=String(input.status || 'pending');
-      db.prepare("UPDATE a2a_actions SET status='expired',completed_at=? WHERE workspace_id=? AND status IN ('pending','acked') AND expires_at IS NOT NULL AND expires_at < ?").run(now(),ws.id,now());
+      db.prepare("UPDATE a2a_actions SET status='expired',completed_at=? WHERE workspace_id=? AND ziwei_v2_admitted(id)=1 AND status IN ('pending','acked') AND expires_at IS NOT NULL AND expires_at < ?").run(now(),ws.id,now());
       // `ziwei_user` asks for pending + previously acked work. An ack is only
       // transport receipt; if the daemon crashed before posting a terminal
       // result, the acked action must be delivered again after restart.
@@ -1984,13 +1985,13 @@ export function createRepository(options = {}) {
           if (['succeeded','failed','expired'].includes(row.status)) throw new Error('A2A action is already terminal');
           const timestamp = now();
           if (row.expires_at && Date.parse(row.expires_at) <= Date.parse(timestamp)) {
-            db.prepare("UPDATE a2a_actions SET status='expired',completed_at=? WHERE id=? AND status IN ('pending','acked')").run(timestamp, actionId);
+            db.prepare("UPDATE a2a_actions SET status='expired',completed_at=? WHERE id=? AND ziwei_v2_admitted(id)=1 AND status IN ('pending','acked')").run(timestamp, actionId);
             expired = true;
           } else {
             event = { id:eventId, action_id:actionId, type, message, data, created_at:timestamp };
             db.prepare('INSERT INTO a2a_action_events(id,action_id,type,message,data_json,created_at) VALUES(?,?,?,?,?,?)').run(event.id,event.action_id,type,message,dataJson,event.created_at);
             const leaseExpiry = new Date(Date.parse(timestamp) + a2aExecutionTimeoutMs(parse(row.payload_json)) + A2A_EXECUTION_LEASE_BUFFER_MS).toISOString();
-            db.prepare("UPDATE a2a_actions SET expires_at=? WHERE id=? AND status IN ('pending','acked')").run(leaseExpiry,actionId);
+            db.prepare("UPDATE a2a_actions SET expires_at=? WHERE id=? AND ziwei_v2_admitted(id)=1 AND status IN ('pending','acked')").run(leaseExpiry,actionId);
             const ws = db.prepare('SELECT slug FROM workspaces WHERE id=?').get(row.workspace_id);
             if (ws) audit(ws.slug,'ziwei_user','a2a.action.event',{actionId,type,message},deferredEvents);
           }
@@ -2110,5 +2111,5 @@ export function createRepository(options = {}) {
       if (actorUserId && payload.userId && String(payload.userId) !== String(actorUserId)) throw new Error('无权查看该 A2A action');
       return actionView(row, { includeEvents: true });
     }
-  };
+  }, options.preservation);
 }

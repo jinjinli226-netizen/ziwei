@@ -6,6 +6,7 @@ import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import {executionBinding} from '../src/execution-admission.mjs';
 import * as runtime from '../src/runtime-adapters.mjs';
 import { createLocalActionExecutor } from '../src/local-action.mjs';
 
@@ -243,6 +244,7 @@ test('status audit receipts finish only IDs issued in this execution and omit ra
 test('local executor removes the execution capability even when an explicit runtime cannot start', async () => {
   const f = fixture();
   const server = http.createServer((req, res) => {
+    if(req.url==='/a2a/v1/actions/action_phone/execution-admission'){res.setHeader('content-type','application/json');res.end(JSON.stringify({allowed:true,actionId:'action_phone',executionBinding:executionBinding({id:'action_phone',workspace:'phone_ai',type:'agent.execute',payload:{deviceId:'device_workstation',runtime:'UnknownExplicitRuntime',workdir:f.root,prompt:'do not start a model',terminalMcp:f.request}})}));return;}
     res.writeHead(200, { 'content-type': 'application/json' });
     if (req.url === '/api/workspaces/phone_ai/mcp/bootstrap') return res.end(JSON.stringify({ token: 'management-private', workspace: 'phone_ai', deviceId: 'device_workstation', credentialId: 'credential_workstation', managed: true, audience: 'ziwei-management', expiresAt: new Date(Date.now() + 3600000).toISOString(), apiBase: `http://127.0.0.1:${server.address().port}` }));
     res.end(JSON.stringify({ ...f.scope, baseUrl: `http://127.0.0.1:${server.address().port}/terminal-mcp/v1/workspaces/phone_ai/employees/employee_phone` }));

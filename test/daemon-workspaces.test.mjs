@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import test from 'node:test';
+import {executionBinding} from '../src/execution-admission.mjs';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import * as configuration from '../daemon/config.mjs';
@@ -50,6 +51,8 @@ test('a running isolated daemon accepts a grant and serves two identities withou
       if (response.actions.length) delivered = true;
     } else if (req.url === '/a2a/v1/actions/action_share/ack') {
       response = { id:'action_share',status:'acked',expires_at:new Date(Date.now()+16*60*1000).toISOString(),deviceId:'device_primary' };
+    } else if (req.url === '/a2a/v1/actions/action_share/execution-admission') {
+      response={allowed:true,actionId:'action_share',executionBinding:executionBinding({id:'action_share',workspace:'test_222',type:'device.workspace.connect',payload:{grantId:'grant_dynamic',deviceId:'device_primary'}})};
     } else if (req.url === '/a2a/v1/actions/action_share/result') {
       response = { id:'action_share',status:'succeeded' };
     }

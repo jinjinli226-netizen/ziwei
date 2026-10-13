@@ -1,11 +1,12 @@
 import fs from 'node:fs';
 import {executeHermesNative} from './hermes-native-runtime.mjs';
 import {createBotGatewayManager} from './hermes-gateway-runtime.mjs';
+import {authorizeNativeExecution} from './execution-admission.mjs';
 import {executeBotGroup} from './hermes-group-runtime.mjs';
 import {executeNativeDriver} from './hermes-driver-runtime.mjs';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
-import {executeRuntime, runtimeInvocation, bootstrapTerminalMcp, discoverInstalledRuntimes, hermesHome, hermesProfileHome, validateHermesBotRuntime} from './runtime-adapters.mjs';
+import {executeRuntime, runtimeInvocation, bootstrapTerminalMcp, discoverInstalledRuntimes, hermesHome, hermesProfileHome, validateHermesBotRuntimeSupervised} from './runtime-adapters.mjs';
 import {provisionHermesBotProfile} from './hermes-owned-profile.mjs';
 import { createManagementBootstrap } from './management-bootstrap.mjs';
 import {normalizeRuntimeProfile} from './employee-runtime.mjs';
@@ -364,12 +365,13 @@ function runCommand({runtimeDir, action, executable, baseArgs = [], allowedExecu
  * Unknown/unsupported actions fail loudly so the cloud never sees a fake
  * success merely because an action was accepted by the daemon.
  */
-export function createLocalActionExecutor({runtimeDir, defaultWorkdir = process.cwd(), allowedExecutables = [], executorCommand = null, executorArgs = [], defaultRuntime = null, hermesHomePath = null, codexMcpDisabledServers = [], managementMcpConfig = {}, managementBootstrap = null, terminalMcpConfig = {}, workspace = null, apiBase = null, deviceId = null, deviceToken = null, onWorkspaceConnect = null} = {}) {
+export function createLocalActionExecutor({runtimeDir, admissionHandledByDispatcher = false, defaultWorkdir = process.cwd(), allowedExecutables = [], executorCommand = null, executorArgs = [], defaultRuntime = null, hermesHomePath = null, codexMcpDisabledServers = [], managementMcpConfig = {}, managementBootstrap = null, terminalMcpConfig = {}, workspace = null, apiBase = null, deviceId = null, deviceToken = null, onWorkspaceConnect = null} = {}) {
   if (!runtimeDir) throw new TypeError('runtimeDir is required');
   fs.mkdirSync(runtimeDir, {recursive: true});
   const automaticManagement = managementBootstrap || (workspace && deviceToken ? createManagementBootstrap({ workspace, apiBase, deviceId, deviceToken, cacheDirectory: path.join(runtimeDir, 'management-mcp-credentials') }) : null);
   const gateways=createBotGatewayManager({apiBase,workspace,deviceToken});
-  return async (action, context = {}) => {
+  const execute = async (action, context = {}) => {
+    if(!admissionHandledByDispatcher)await authorizeNativeExecution(action,{apiBase,workspace,deviceId,deviceToken,signal:context.signal,hermesHome:hermesHomePath||hermesHome()});
     const type = String(action?.type || '');
     if (action?.payload?.deviceId && deviceId && action.payload.deviceId !== deviceId) throw new Error('执行目标设备与本机已配对设备不一致；不会回退其他设备');
     if (action?.workspace && workspace && action.workspace !== workspace) throw new Error('执行工作区与本机已配对工作区不一致');
@@ -408,7 +410,7 @@ export function createLocalActionExecutor({runtimeDir, defaultWorkdir = process.
       const prepareBotManagement=async()=>((action.payload.hermesBot.config.permissions.mode==='read_only'||action.payload.hermesBot.config.permissions.management===false)?{}:automaticManagement?await automaticManagement.prepare({signal:context.signal}):managementMcpConfig);
       const runBotTurn=async(prompt,driverMcp,supervision={})=>executeRuntime({runtime:'Hermes',profile:action.payload.profile,model:action.payload.model,prompt,cwd:options.cwd,hermesBot:action.payload.hermesBot,botInstanceDirectory:options.privateDirectory,botAuthority:{actionId:action.id,deviceToken},beforeSpawn:authorizeBot,env:{HERMES_HOME:options.baseHome},managementMcp:{workspace,apiBase,request:{enabled:action.payload.hermesBot.config.permissions.mode==='execute'},config:driverMcp,actionId:action.id},signal:context.signal,onOutput:context.onOutput,onStage:context.onStage,onSupervision:context.onSupervision,...supervision});
       if(operation.resource==='groups'&&operation.operation==='step'||operation.resource==='collaboration'&&operation.input.mode==='group')return executeBotGroup(action,{...options,operation,onSupervision:context.onSupervision},{deviceToken,authorize:authorizeBot,signal:context.signal,runSource:async(plan,supervision)=>runBotTurn(plan.payload.prompt,await prepareBotManagement(),supervision)});
-      if(operation.resource==='gateway'&&['connect','disconnect','inbound','outbound'].includes(operation.operation)){const data=await gateways.operate(action,{...options,operation});return{status:data.connected===false&&operation.operation==='connect'||data.success===false?'failed':'succeeded',...(data.code==='EXECUTION_UNCERTAIN'?{code:'EXECUTION_UNCERTAIN',executionState:'uncertain'}:{}),result:{nativeOperation:{schemaVersion:2,resource:'gateway',operation:operation.operation,employeeId:options.context.employeeId,revision:options.context.revision,nativeVersion:data.nativeVersion || null,status:data.success===false||data.connected===false&&operation.operation==='connect'?'failed':'succeeded',data},...(data.code==='EXECUTION_UNCERTAIN'?{code:'EXECUTION_UNCERTAIN',executionState:'uncertain'}:{})}};}
+      if(operation.resource==='gateway'&&['connect','disconnect','inbound','outbound'].includes(operation.operation)){const data=await gateways.operate(action,{...options,operation,onResidentExit:context.onResidentExit});return{status:data.connected===false&&operation.operation==='connect'||data.success===false?'failed':'succeeded',...(data.code==='EXECUTION_UNCERTAIN'?{code:'EXECUTION_UNCERTAIN',executionState:'uncertain'}:{}),result:{nativeOperation:{schemaVersion:2,resource:'gateway',operation:operation.operation,employeeId:options.context.employeeId,revision:options.context.revision,nativeVersion:data.nativeVersion || null,status:data.success===false||data.connected===false&&operation.operation==='connect'?'failed':'succeeded',data},...(data.code==='EXECUTION_UNCERTAIN'?{code:'EXECUTION_UNCERTAIN',executionState:'uncertain'}:{})}};}
       if(['goals','heartbeat','kanban'].includes(operation.resource)&&['step','dispatch'].includes(operation.operation)) {
         return executeNativeDriver(action,{...options,operation},{
           prepareManagement:prepareBotManagement,
@@ -420,7 +422,7 @@ export function createLocalActionExecutor({runtimeDir, defaultWorkdir = process.
     }
     if(type==='hermes.bot.validate') {
       await authorizeBot();
-      return validateHermesBotRuntime({context:action.payload.hermesBot,baseHome:hermesHomePath || hermesHome(),privateDirectory:path.join(runtimeDir,'bot-instances'),workspace,apiBase});
+      return validateHermesBotRuntimeSupervised({context:action.payload.hermesBot,baseHome:hermesHomePath || hermesHome(),privateDirectory:path.join(runtimeDir,'bot-instances'),workspace,apiBase,signal:context.signal,onSupervision:context.onSupervision});
     }
     // Native model calls intentionally use the installed local CLI.  This is
     // the one action family with full local permissions; the ordinary file and
@@ -489,5 +491,9 @@ export function createLocalActionExecutor({runtimeDir, defaultWorkdir = process.
     }
     throw new Error(`unsupported A2A action type: ${type || '(empty)'}`);
   };
+  execute.maintenanceStatus=()=>gateways.maintenanceStatus();
+  execute.authorizeExecution=action=>authorizeNativeExecution(action,{apiBase,workspace,deviceId,deviceToken,hermesHome:hermesHomePath||hermesHome()});
+  execute.close=()=>gateways.close();
+  return execute;
 }
 

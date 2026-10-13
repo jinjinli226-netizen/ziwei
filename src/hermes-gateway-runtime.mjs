@@ -8,6 +8,7 @@ import {spawnSupervisedRuntime} from './runtime-process.mjs';
 export function createBotGatewayManager({apiBase,workspace,deviceToken}={},dependencies={}) {
   const prepare=dependencies.nativeSpawn || nativeSpawn,spawn=dependencies.spawnSupervisedRuntime || spawnSupervisedRuntime;
   const workers=new Map();
+  const workerIdentity=worker=>({workspace,employeeId:worker.context.employeeId,platform:worker.platform,sourceActionId:worker.actionId,revision:worker.context.revision,controlEpoch:worker.context.controlEpoch,workerNonce:worker.workerNonce,rootPid:worker.child.pid||null});
   const api=async(method,url,body)=>{
     const response=await fetch(`${apiBase.replace(/\/$/,'')}${url}`,{method,headers:{'content-type':'application/json','x-ziwei-device-token':deviceToken},...(body?{body:JSON.stringify({...body,workspace})}:{}),signal:AbortSignal.timeout(15000),redirect:'error'});
     const result=await response.json();if(!response.ok)throw new Error(result.code || `GATEWAY_API_${response.status}`);return result;
@@ -15,6 +16,8 @@ export function createBotGatewayManager({apiBase,workspace,deviceToken}={},depen
   const keyFor=(context,platform)=>`${context.employeeId}:${platform}`;
   const accepting=worker=>!worker.closed&&!worker.stopping&&worker.status==='connected';
   const closeAdmission=worker=>{worker.stopping=true;if(worker.status!=='failed')worker.status='disconnected';};
+  const residentReceipt=worker=>({...workerIdentity(worker),home:worker.home});
+  const observeResident=(worker,callback)=>{if(!callback)return;void worker.completionEvidence.then(processExit=>callback({worker:residentReceipt(worker),processExit}));};
   const command=(worker,input)=>new Promise(resolve=>{
     if(!accepting(worker)){resolve({success:false,code:'GATEWAY_NOT_CONNECTED'});return;}
     const commandId=randomUUID();const timer=setTimeout(()=>{worker.commands.delete(commandId);resolve({success:false,code:'EXECUTION_UNCERTAIN'});},35000);
@@ -53,6 +56,7 @@ export function createBotGatewayManager({apiBase,workspace,deviceToken}={},depen
     finally{worker.inFlight.delete(messageKey);const pending=worker.pendingInbound.get(messageKey);worker.pendingInbound.delete(messageKey);if(pending&&accepting(worker))queueMicrotask(()=>void receive(worker,pending));}
   };
   return {
+    maintenanceStatus(){const rows=[...workers.values()].map(worker=>({...workerIdentity(worker),processAlive:worker.closed&&worker.processExit?.treeConfirmed===true&&worker.processExit?.activeProcesses===0?false:worker.closed?null:true,processExit:worker.processExit||null,pendingCommands:worker.commands.size,inFlight:worker.inFlight.size,pendingInbound:worker.pendingInbound.size}));return {safe:rows.every(worker=>worker.processAlive===false&&worker.pendingCommands===0&&worker.inFlight===0&&worker.pendingInbound===0),workers:rows};},
     status(context){return[...workers.values()].filter(worker=>worker.context.employeeId===context.employeeId).map(worker=>({platform:worker.platform,status:worker.status,code:worker.code || null,processAlive:worker.closed?(process.platform!=='win32'||worker.processExit?.treeConfirmed===true?false:null):true,processExit:worker.processExit || null,sourceActionId:worker.actionId,revision:worker.context.revision,controlEpoch:worker.context.controlEpoch,pid:worker.child.pid || null}));},
     async operate(action,options){
       await options.beforeSpawn?.();
@@ -63,8 +67,7 @@ export function createBotGatewayManager({apiBase,workspace,deviceToken}={},depen
         if(worker&&!worker.closed){if(worker.actionId===action.id)return{connected:accepting(worker),status:worker.status,code:worker.code,duplicate:true,sourceActionId:action.id};throw new Error('该 Bot 平台已有受监管连接；先断开并核对回执');}
         await options.beforeSpawn?.();
         const spec=prepare({...options,worker:true}),supervision=spawn(spec);
-        worker={context,platform,actionId:action.id,home:spec.prepared.home,...supervision,closed:false,status:'starting',code:null,commands:new Map(),inFlight:new Set(),pendingInbound:new Map(),line:'',leaseBusy:false};workers.set(key,worker);
-        appendNativeLifecycle(worker.home,{event:'gateway.starting',sourceActionId:action.id,revision:context.revision,controlEpoch:context.controlEpoch});
+        worker={context,platform,actionId:action.id,workerNonce:randomUUID(),home:spec.prepared.home,...supervision,closed:false,status:'starting',code:null,commands:new Map(),inFlight:new Set(),pendingInbound:new Map(),line:'',leaseBusy:false};workers.set(key,worker);observeResident(worker,options.onResidentExit);
         let resolveReady;const ready=new Promise(resolve=>{resolveReady=resolve;});
         worker.child.on('error',()=>resolveReady({connected:false,code:'GATEWAY_SPAWN_FAILED'}));
         worker.child.stderr.on('data',()=>{});
@@ -74,32 +77,37 @@ export function createBotGatewayManager({apiBase,workspace,deviceToken}={},depen
             if(['connected','failed','status','heartbeat','disconnected'].includes(event.event)){
               const status=event.status || (['connected','failed','disconnected'].includes(event.event)?event.event:null);
               if(!worker.closed&&worker.status!=='failed'&&(!worker.stopping||status==='failed')&&['connected','retrying','unconfirmed','failed','disconnected'].includes(status)){worker.status=status;worker.code=/^[A-Za-z0-9_-]{1,100}$/.test(event.code || '')?event.code:null;}
-              appendNativeLifecycle(worker.home,{event:'gateway.channel',status:worker.status,code:worker.code,pid:worker.child.pid || null});
+              appendNativeLifecycle(worker.home,{event:'gateway.channel',...workerIdentity(worker),status:worker.status,code:worker.code,pid:worker.child.pid || null});
             }
-            if(event.event==='connected'&&accepting(worker)){appendNativeLifecycle(worker.home,{event:'gateway.connected',pid:event.pid,sourceActionId:action.id});resolveReady({connected:true,pid:event.pid,nativeVersion:event.nativeVersion,sourceActionId:action.id});}
+            if(event.event==='connected'&&accepting(worker)){appendNativeLifecycle(worker.home,{event:'gateway.connected',...workerIdentity(worker),pid:event.pid});resolveReady({connected:true,pid:event.pid,nativeVersion:event.nativeVersion,sourceActionId:action.id,residentWorker:residentReceipt(worker)});}
             else if(event.event==='failed')resolveReady({connected:false,code:event.code});
-            else if(event.event==='heartbeat')appendNativeLifecycle(worker.home,{event:'gateway.heartbeat',pid:event.pid,status:worker.status,code:worker.code});
+            else if(event.event==='heartbeat')appendNativeLifecycle(worker.home,{event:'gateway.heartbeat',...workerIdentity(worker),pid:event.pid,status:worker.status,code:worker.code});
             else if(event.event==='inbound')void receive(worker,event);
             else if(event.event==='command_result'){worker.commands.get(event.commandId)?.(event);worker.commands.delete(event.commandId);}
           }
         });
+        if(!Number.isInteger(worker.child.pid))await new Promise(resolve=>{const finish=()=>{worker.child.off('spawn',finish);worker.child.off('error',finish);resolve();};worker.child.once('spawn',finish);worker.child.once('error',finish);});
+        if(!Number.isInteger(worker.child.pid)){const evidence=await worker.completionEvidence;spec.cleanup();return{connected:false,success:false,code:'GATEWAY_SPAWN_FAILED',processExit:evidence};}
+        appendNativeLifecycle(worker.home,{event:'gateway.starting',...workerIdentity(worker)});
         worker.child.stdin.write(JSON.stringify({...options.operation,actionId:action.id,context})+'\n');
-        const lease=setInterval(async()=>{if(worker.leaseBusy||worker.closed||worker.stopping)return;worker.leaseBusy=true;try{await api('POST',`/a2a/v1/actions/${action.id}/bot-gateway-lease`,{});appendNativeLifecycle(worker.home,{event:'gateway.supervisor.health',pid:worker.child.pid || null,status:worker.status});}catch{worker.status='failed';worker.code='GATEWAY_LEASE_REVOKED';closeAdmission(worker);worker.child.stdin.end(JSON.stringify({operation:'disconnect'})+'\n');setTimeout(()=>{if(!worker.closed)void worker.stop();},12000).unref?.();}finally{worker.leaseBusy=false;}},10000);lease.unref?.();
-        void worker.completionEvidence.then(evidence=>{worker.closed=true;worker.processExit=evidence;if(worker.status!=='failed')worker.status='disconnected';clearInterval(lease);spec.cleanup();appendNativeLifecycle(worker.home,{event:'gateway.exit',status:worker.status,code:worker.code,processExit:evidence});for(const resolve of worker.commands.values())resolve({success:false,code:'EXECUTION_UNCERTAIN'});worker.commands.clear();resolveReady({connected:false,code:worker.code || 'GATEWAY_EXITED_BEFORE_READY',processExit:evidence});});
+        const lease=setInterval(async()=>{if(worker.leaseBusy||worker.closed||worker.stopping)return;worker.leaseBusy=true;try{await api('POST',`/a2a/v1/actions/${action.id}/bot-gateway-lease`,{});appendNativeLifecycle(worker.home,{event:'gateway.supervisor.health',...workerIdentity(worker),pid:worker.child.pid || null,status:worker.status});}catch{worker.status='failed';worker.code='GATEWAY_LEASE_REVOKED';closeAdmission(worker);worker.child.stdin.end(JSON.stringify({operation:'disconnect'})+'\n');setTimeout(()=>{if(!worker.closed)void worker.stop();},12000).unref?.();}finally{worker.leaseBusy=false;}},10000);lease.unref?.();
+        void worker.completionEvidence.then(evidence=>{worker.closed=true;worker.processExit=evidence;if(worker.status!=='failed')worker.status='disconnected';clearInterval(lease);spec.cleanup();appendNativeLifecycle(worker.home,{event:'gateway.exit',...workerIdentity(worker),status:worker.status,code:worker.code,processAlive:evidence.treeConfirmed===true&&evidence.activeProcesses===0?false:null,processExit:evidence});for(const resolve of worker.commands.values())resolve({success:false,code:'EXECUTION_UNCERTAIN'});worker.commands.clear();resolveReady({connected:false,code:worker.code || 'GATEWAY_EXITED_BEFORE_READY',processExit:evidence});});
         const timeout=setTimeout(()=>resolveReady({connected:false,code:'GATEWAY_CONNECT_TIMEOUT'}),50000);const result=await ready;clearTimeout(timeout);
         if(!result.connected){closeAdmission(worker);await worker.stop();const evidence=await worker.completionEvidence;if(process.platform==='win32'&&!evidence.treeConfirmed)return{...result,success:false,code:'EXECUTION_UNCERTAIN',processExit:evidence};return{...result,processExit:evidence};}return result;
       }
       if(operation==='disconnect'){
-        if(!worker)return{connected:false,stopConfirmed:true,alreadyDisconnected:true};
-        if(worker.closed){const stopConfirmed=process.platform!=='win32'||worker.processExit?.treeConfirmed===true;return{connected:false,stopConfirmed,alreadyDisconnected:true,processExit:worker.processExit,...(!stopConfirmed?{success:false,code:'EXECUTION_UNCERTAIN'}:{})};}
+        if(!worker)return{connected:false,stopConfirmed:false,alreadyDisconnected:true,success:false,code:'EXECUTION_UNCERTAIN'};
+        observeResident(worker,options.onResidentExit);
+        if(worker.closed){const stopConfirmed=process.platform!=='win32'||worker.processExit?.treeConfirmed===true;return{connected:false,stopConfirmed,alreadyDisconnected:true,processExit:worker.processExit,residentWorker:residentReceipt(worker),...(!stopConfirmed?{success:false,code:'EXECUTION_UNCERTAIN'}:{})};}
         closeAdmission(worker);
         worker.child.stdin.end(JSON.stringify({operation:'disconnect'})+'\n');const timer=setTimeout(()=>void worker.stop(),12000);const evidence=await worker.completionEvidence;clearTimeout(timer);
         const stopConfirmed=process.platform!=='win32'||evidence.treeConfirmed;
-        return{connected:false,stopConfirmed,...(!stopConfirmed?{success:false,code:'EXECUTION_UNCERTAIN'}:{}),processExit:evidence};
+        return{connected:false,stopConfirmed,...(!stopConfirmed?{success:false,code:'EXECUTION_UNCERTAIN'}:{}),processExit:evidence,residentWorker:residentReceipt(worker)};
       }
       if(!worker||!accepting(worker)||worker.context.revision!==context.revision||worker.context.controlEpoch!==context.controlEpoch)throw new Error('当前 Bot 版本没有已连接 Gateway');
       await options.beforeSpawn?.();await api('POST',`/a2a/v1/actions/${worker.actionId}/bot-gateway-lease`,{});
-      return command(worker,{operation:operation==='outbound'?'send':'inbound',...input});
+      observeResident(worker,options.onResidentExit);
+      return {...await command(worker,{operation:operation==='outbound'?'send':'inbound',...input}),residentWorker:residentReceipt(worker)};
     },
     async close(){await Promise.all([...workers.values()].filter(worker=>!worker.closed).map(worker=>{closeAdmission(worker);return worker.stop();}));},
   };

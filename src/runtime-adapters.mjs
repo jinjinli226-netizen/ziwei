@@ -627,6 +627,36 @@ function readPrivateJson(file) {
 }
 
 /** Import and validate native config in the bound interpreter; no model or MCP startup. */
+export async function runBotValidationProcess(spec,{signal,onSupervision,timeoutMs=30000}={}) {
+  const supervision=spawnSupervisedRuntime(spec);onSupervision?.(supervision);let output='',stderr='',overflow=false;
+  supervision.child.stdout.on('data',bytes=>{output+=String(bytes);if(output.length>1024*1024){overflow=true;void supervision.stop();}});
+  supervision.child.stderr.on('data',bytes=>{stderr+=String(bytes);if(stderr.length>1024*1024){overflow=true;void supervision.stop();}});
+  supervision.child.on('error',()=>{});supervision.child.stdin.end();
+  const stop=()=>void supervision.stop();signal?.addEventListener('abort',stop,{once:true});if(signal?.aborted)stop();const timer=setTimeout(stop,timeoutMs);
+  let processExit;try{processExit=await supervision.completionEvidence;}finally{clearTimeout(timer);signal?.removeEventListener('abort',stop);}
+  if(overflow||processExit.rootExitCode!==0||processExit.rootConfirmed!==true||processExit.treeConfirmed!==true||processExit.activeProcesses!==0||processExit.failureCode)throw Object.assign(new Error('Hermes config-only process did not finish with a confirmed empty tree'),{stderr,processExit});
+  return {output,stderr,processExit};
+}
+
+export async function validateHermesBotRuntimeSupervised({context,baseHome,privateDirectory,workspace,apiBase,binary,signal,onSupervision}={}) {
+  const profile=context.sourceProfile || 'default',prepared=prepareHermesBotHome({context,sourceHome:hermesProfileHome(profile,{baseHome}),privateDirectory,workspace,apiBase}),overlay=createHermesExecutionOverlay({profile,baseHome,privateDirectory:path.join(privateDirectory,'overlays')});
+  const env={...process.env,HERMES_HOME:overlay.sourceHome,HERMES_MANAGED_DIR:overlay.home,...prepared.env};
+  try {
+    const launcher=binary || discoverInstalledRuntimes().runtimes.Hermes?.binary;if(!launcher)throw new Error('目标电脑未发现 Hermes CLI');
+    const spec=hermesMcpSpawnSpec(launcher,['--profile',profile],{env});spec.args.splice(5,0,'--config-only');
+    const execution=await runBotValidationProcess({...spec,cwd:process.cwd(),env},{signal,onSupervision});
+    const result=execution.output.trim().split(/\r?\n/).map(line=>{try{return JSON.parse(line);}catch{return null;}}).find(item=>item?.botValidation);
+    if(!result?.botValidation?.valid)throw Object.assign(new Error('缺少 Hermes 原生配置验证回执'),{processExit:execution.processExit,stderr:execution.stderr});
+    return {status:'succeeded',result:{...result,processExit:execution.processExit}};
+  } catch(error) {
+    const reasoning=String(error.stderr||'').split(/\r?\n/).map(line=>parseBotReasoningProof(line,context,{provider:prepared.provider,model:prepared.effectiveModel})).filter(Boolean).at(-1);
+    if(reasoning&&reasoning.status!=='matched')return {status:'failed',code:'BOT_REASONING_UNSATISFIED',error:'原生实际推理等级与明确请求不一致；未启动模型',result:{botValidation:{valid:false,schemaVersion:1,employeeId:context.employeeId,revision:context.revision,effective:{reasoning}},externalModelCalls:0,processExit:error.processExit}};
+    const rejection=String(error.stderr||'').match(/Hermes Bot bootstrap rejected before model startup: (BOT_REASONING_[A-Z_]+)/)?.[1];
+    if(context.config.reasoningEffort&&rejection)return {status:'failed',code:rejection,error:'原生明确推理配置被拒绝；未启动模型',result:{botValidation:{valid:false,schemaVersion:1,employeeId:context.employeeId,revision:context.revision,effective:{reasoning:{requested:context.config.reasoningEffort,actual:null,status:'rejected',code:rejection}}},externalModelCalls:0,processExit:error.processExit}};
+    return {status:'failed',code:'BOT_VALIDATION_FAILED',error:`Hermes 配置检查失败；未启动模型。${redactSecrets(String(error.stderr||error.message)).slice(0,800)}`,result:{processExit:error.processExit||null}};
+  } finally {overlay.cleanup();}
+}
+
 export function validateHermesBotRuntime({context,baseHome,privateDirectory,workspace,apiBase,binary}={}) {
   const profile=context.sourceProfile || 'default';
   const prepared=prepareHermesBotHome({context,sourceHome:hermesProfileHome(profile,{baseHome}),privateDirectory,workspace,apiBase});

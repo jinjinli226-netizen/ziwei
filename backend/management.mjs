@@ -145,6 +145,7 @@ export function createManagementService(repo) {
       }, id => employee(slug, id, context));
     },
     updateEmployee(slug, id, input, context = {}) {
+      repo.preservation?.assert({employeeId:id});
       const previous = employee(slug, id, context);
       if(db.prepare('SELECT 1 FROM hermes_bots WHERE employee_id=?').get(id) && !context.botConfigurationWrite) {
         const bindingKeys=['runtime','targetDeviceId','target_device_id','deviceId','device_id','runtimeProfile','runtime_profile','profile','hermesProfile','hermes_profile'];
@@ -177,6 +178,7 @@ export function createManagementService(repo) {
       return repo.createDeviceDirectoryAction(slug,deviceId,input,trustedContext(context));
     },
     createConversation(slug,input={},context={}) {
+      repo.preservation?.assert(input);
       if(!(input.employeeId || input.employee_id)) fail('必须指定当前工作区的员工 employeeId。','EMPLOYEE_REQUIRED');
       const selected=employee(slug,input.employeeId || input.employee_id,context);
       const targetDeviceId=String(input.deviceId ?? input.device_id ?? input.targetDeviceId ?? input.target_device_id ?? selected.target_device_id ?? '').trim() || null;
@@ -186,6 +188,7 @@ export function createManagementService(repo) {
       return idempotent(slug,`conversation:${context.actorUserId || 'legacy'}`,input,create,id=>repo.getConversation(id,trustedContext(context)));
     },
     createTask(slug, input, context = {}) {
+      repo.preservation?.assert(input);
       return idempotent(slug, 'task', input, body => {
         const reference = body.employeeId || body.employee_id || body.assignee;
         const matching = repo.listEmployees(slug).filter(row => row.id === reference || row.name === reference);
@@ -208,6 +211,7 @@ export function createManagementService(repo) {
       }, id => task(slug, id, context));
     },
     createProfile(slug, input, context = {}) {
+      repo.preservation?.assert(input);
       return idempotent(slug, 'hermes-profile', input, body => {
         validateSelection(slug, { ...body, runtime: 'Hermes' }, { requireProfile: false, context });
         return repo.createHermesProfileAction(slug, { ...body, ...trustedContext(context) }, { deviceCredentialDeviceId: context.deviceCredentialDeviceId });

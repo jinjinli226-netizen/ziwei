@@ -12,6 +12,7 @@ import { discoverInstalledRuntimes, terminalMcpStatus } from '../src/runtime-ada
 import { readA2AToken } from '../backend/a2a-auth.mjs';
 import { createManagementBootstrap, clientBuildIdentity } from '../src/management-bootstrap.mjs';
 import { defaultUserDir, resolveConfigPath, resolveDaemonDataDirectory, resolveWorkspaceConnections, claimWorkspaceGrant } from './config.mjs';
+import {scanNativeFiles} from '../backend/preservation-native-evidence.mjs';
 
 const ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const packageMeta = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
@@ -50,10 +51,11 @@ function installConnections() {
   for (const config of resolved.connections) {
     if (connections.has(config.workspace)) continue;
     const connectionRuntimeDir = config.primary ? runtimeDir : path.join(runtimeDir, 'shared-workspaces', config.workspace, config.deviceId);
-    const state = { config, polling: false, lastHeartbeat: null, lastHeartbeatAt: 0, lastPoll: null };
+    const state = { config, runtimeDir:connectionRuntimeDir, polling: false, lastHeartbeat: null, lastHeartbeatAt: 0, lastPoll: null };
     state.managementBootstrap = createManagementBootstrap({ workspace: config.workspace, deviceId: config.deviceId, deviceToken: config.deviceToken, apiBase: config.apiBase, cacheDirectory: path.join(dataDir, 'management-mcp-credentials') });
     const localExecutor = createLocalActionExecutor({
       runtimeDir: connectionRuntimeDir,
+      admissionHandledByDispatcher:true,
       defaultWorkdir: config.workdir || process.cwd() || ROOT,
       allowedExecutables: Array.isArray(config.allowedExecutables) ? config.allowedExecutables : [],
       executorCommand: config.executorCommand || process.env.ZIWEI_EXECUTOR_COMMAND || null,
@@ -75,11 +77,13 @@ function installConnections() {
         return result;
       } : null,
     });
+    state.localExecutor=localExecutor;
     state.dispatcher = new ActionDispatcher({
       // Keep primary state in place and isolate every explicitly shared workspace.
       workdir: config.workdir || process.cwd() || ROOT,
       workspace: config.workspace, deviceId: config.deviceId,
       stateFile: path.join(connectionRuntimeDir, 'action-state.json'), execute: localExecutor,
+      authorizeExecute:action=>localExecutor.authorizeExecution(action),
       canExecute: executionAllowed,
       onEvent: (event, extra) => {
         log(event, { workspace: config.workspace, ...extra });
@@ -252,8 +256,11 @@ function lifecycleConfigurationHash() { try { return createHash('sha256').update
 function healthPayload() {
   const executionQuarantined = !executionAllowed();
   const quarantinedActionCount = [...connections.values()].reduce((total, connection) => total + connection.dispatcher.quarantinedActionIds.length, 0);
+  const gateway=[...connections.values()].map(connection=>connection.localExecutor.maintenanceStatus());
+  const fileEvidence=scanNativeFiles({connections:[...connections.values()].map(connection=>({workspace:connection.config.workspace,deviceId:connection.config.deviceId,apiBase:connection.config.apiBase,runtimeDir:connection.runtimeDir}))});
+  const maintenance={safe:fileEvidence.safe&&gateway.every(row=>row.safe)&&quarantinedActionCount===0,pendingDeliveryCount:[...connections.values()].reduce((n,c)=>n+c.actionDelivery.pendingCount,0),blockedDeliveryCount:[...connections.values()].reduce((n,c)=>n+c.actionDelivery.blockedCount,0),gatewayWorkers:gateway.flatMap(row=>row.workers),fileIssues:fileEvidence.issues};
   return { service: 'ziwei_user', version: VERSION, clientBuild: CLIENT_BUILD, bridge: 'ziwei_user', agentId: 'ziwei_user', workspace: config.workspace, deviceId: config.deviceId, runtimes: runtimeDiscovery.runtimes, managementMcp: primaryConnection?.managementBootstrap.status(), terminalMcp: primaryConnection?.terminalStatus, lastHeartbeat, lastHeartbeatAgeMs: lastHeartbeatAt ? Math.max(0, Date.now() - lastHeartbeatAt) : null, lastPoll, pid: process.pid,
-    lifecycle: { nonce: lifecycleNonce, root: ROOT, configPath, configSha256: lifecycleConfigurationHash(), startedAt: lifecycleStartedAt, managedAuxiliaryCount: 0 },
+    lifecycle: { nonce: lifecycleNonce, root: ROOT, configPath, configSha256: lifecycleConfigurationHash(), runtimeDir, startedAt: lifecycleStartedAt, managedAuxiliaryCount: maintenance.gatewayWorkers.filter(row=>row.processAlive!==false).length }, maintenance,
     connectionState: draining ? 'draining' : executionQuarantined ? 'quarantined' : 'connected', executionQuarantined, quarantinedActionCount, activeActionCount: [...connections.values()].reduce((total, connection) => total + connection.actionScheduler.activeCount, 0), pollingCount: [...connections.values()].filter(connection => connection.polling).length,
     connections: [...connections.values()].map(connection => ({ workspace: connection.config.workspace, deviceId: connection.config.deviceId, primary: connection.config.primary, configured: true, ready: !draining && !executionQuarantined && connection.lastHeartbeatAt > 0 && Date.now() - connection.lastHeartbeatAt <= Math.max(45_000, (Number(config.heartbeatMs) || 15_000) * 3), lastHeartbeat: connection.lastHeartbeat, managementMcp: connection.managementBootstrap.status(), terminalMcp: connection.terminalStatus })), connectionErrors,
   };
@@ -272,7 +279,7 @@ const health = http.createServer((req, res) => {
       if ((nonce !== undefined && nonce !== lifecycleNonce) || (operation === 'stop' && nonce !== lifecycleNonce)) { res.writeHead(409); res.end(); return; }
       if (operation === 'stop') {
         const state = healthPayload();
-        if (!draining || state.activeActionCount || state.pollingCount) { res.writeHead(409); res.end(); return; }
+        if (!draining || state.activeActionCount || state.pollingCount || !state.maintenance.safe) { res.writeHead(409); res.end(); return; }
         res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(state));
         setImmediate(() => stop('local_maintenance'));
         return;

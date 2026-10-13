@@ -7,6 +7,8 @@
   },
   "files": [
     "backend/a2a-auth.mjs",
+    "backend/version-preservation.mjs",
+    "backend/preservation-native-evidence.mjs",
     "daemon",
     "scripts/ziwei-cli.mjs",
     "scripts/ziwei-user.mjs",

@@ -211,6 +211,8 @@ export function createZiweiConnect(repo, options = {}) {
     CREATE INDEX IF NOT EXISTS idx_ziwei_connect_runs_workspace ON ziwei_connect_runs(workspace_id, created_at);
   `);
   for (const statement of ["ALTER TABLE ziwei_connect_runs ADD COLUMN configuration_revision TEXT", "ALTER TABLE ziwei_connect_runs ADD COLUMN execution_id TEXT"]) try { db.exec(statement); } catch(error) { if(!/duplicate column name/.test(error.message)) throw error; }
+  repo.preservation?.protectEmployeeTable('ziwei_connect_bindings');
+  repo.preservation?.protectEmployeeTable('ziwei_connect_runs');
 
   const parse = (value, fallback = null) => {
     if (value == null) return fallback;
@@ -222,6 +224,7 @@ export function createZiweiConnect(repo, options = {}) {
     return row;
   };
   const employee = (ws, employeeId) => {
+    repo.preservation?.assert({employeeId});
     const row = db.prepare('SELECT * FROM employees WHERE id=? AND workspace_id=?').get(employeeId, ws.id);
     if (!row) throw Object.assign(new Error('数字员工不存在或不属于当前工作区'), { status: 404 });
     return row;
@@ -343,6 +346,7 @@ export function createZiweiConnect(repo, options = {}) {
       const ws = workspace(slug);
       const binding = db.prepare('SELECT * FROM ziwei_connect_bindings WHERE id=? AND workspace_id=?').get(bindingId, ws.id);
       if (!binding) throw externalError('当前工作区的手机绑定不存在', 404);
+      repo.preservation?.assert({employeeId:binding.employee_id});
       db.prepare('DELETE FROM ziwei_connect_bindings WHERE id=? AND workspace_id=?').run(bindingId, ws.id);
       notify(slug, 'ziwei_connect.binding.deleted', { bindingId, employeeId: binding.employee_id, deviceId: binding.device_id });
       return { deleted: true, id: bindingId };

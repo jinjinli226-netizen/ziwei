@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { WebSocketServer } from 'ws';
 import { createRepository } from './repository.mjs';
+import {guardRepository} from './version-preservation.mjs';
 import { RealtimeHub } from './realtime.mjs';
 import { exportDocumentsToGit, importDocumentsFromGit } from './git-sync.mjs';
 import { createAuthService } from './auth.mjs';
@@ -239,7 +240,7 @@ function assertApiKeyWorkspace(req, res, next) {
 export function createApp(options = {}) {
   const app = express();
   const realtime = new RealtimeHub();
-  const repo = options.repository || createRepository({ ...options, onEvent: event => realtime.publish(event) });
+  const repo = guardRepository(options.repository || createRepository({ ...options, onEvent: event => realtime.publish(event) }),options.preservation);
   const ziweiConnect = createZiweiConnect(repo, {
     apiBase: options.ziweiConnectApiBase,
     auth: options.ziweiConnectAuth,
@@ -803,6 +804,7 @@ export function createApp(options = {}) {
   app.post('/a2a/v1/actions', (req, res, next) => { const workspace = String(req.body.workspace || req.body.workspace_slug || '').trim(); if (!workspace) return res.status(400).json({ error: 'A2A action 必须明确 workspace' }); try { const action=repo.createA2AAction(workspace, req.body); return res.status(action.duplicate ? 200 : 201).json(action); } catch (error) { return next(error); } });
   app.get('/a2a/v1/actions', (req, res, next) => { const workspace=String(req.query.workspace || '').trim(); if (!workspace) return res.status(400).json({ error: 'A2A poll 必须明确 workspace' }); try { return res.json({ actions:repo.listA2AActions(workspace,{agentId:req.query.agent || req.query.agent_id,status:req.query.status || 'pending',includeAcked:req.query.includeAcked ?? req.query.include_acked,includeResult:String(req.query.includeResult || '').toLowerCase() !== 'false',deviceId:req.deviceCredential?.deviceId}) }); } catch (error) { return next(error); } });
   app.post('/a2a/v1/actions/:id/ack', (req, res) => { if (!assertA2AActionWorkspace(repo, req, res)) return; return res.json(repo.ackA2AAction(req.params.id, { ...(req.body || {}), deviceId:req.deviceCredential?.deviceId })); });
+  app.post('/a2a/v1/actions/:id/execution-admission',(req,res)=>{if(!assertA2AActionWorkspace(repo,req,res))return;res.json(repo.authorizeActionExecution(req.params.id,{deviceId:req.deviceCredential?.deviceId}));});
   app.post('/a2a/v1/actions/:id/bot-start',(req,res)=>{if(!assertA2AActionWorkspace(repo,req,res))return;res.json(repo.authorizeBotStart(req.params.id,{deviceId:req.deviceCredential?.deviceId}));});
   app.post('/a2a/v1/actions/:id/bot-gateway-lease',(req,res)=>{if(!assertA2AActionWorkspace(repo,req,res))return;res.json(repo.authorizeBotGateway(req.params.id,{deviceId:req.deviceCredential?.deviceId}));});
   app.post('/a2a/v1/actions/:id/bot-gateway-ingress',(req,res)=>{if(!assertA2AActionWorkspace(repo,req,res))return;res.status(202).json(repo.receiveBotGateway(req.params.id,{...req.body,deviceId:req.deviceCredential?.deviceId}));});

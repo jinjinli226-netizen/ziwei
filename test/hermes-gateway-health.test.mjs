@@ -59,3 +59,12 @@ test('unconfirmed Slack receive probe propagates and closes both admission gates
   await assert.rejects(f.manager.operate({id:'send'},{...f.options,operation:{operation:'outbound',input:{platform:'slack',chatId:'chat',content:'fixture'}}}),/Gateway/);
   assert.equal(requests,0);f.emit({event:'connected',status:'connected'});assert.equal(f.manager.status(f.context)[0].status,'connected');
 });
+
+test('maintenance sees resident workers and retains exact exit identity',async t=>{
+  const f=await fixture(t);
+  assert.equal(typeof f.manager.maintenanceStatus,'function');
+  assert.equal(f.manager.maintenanceStatus().safe,false);
+  f.finish({launched:true,rootExitCode:0});await new Promise(resolve=>setImmediate(resolve));
+  const status=f.manager.maintenanceStatus();assert.equal(status.safe,true);
+  assert.equal(status.workers[0].sourceActionId,'connection');assert.ok(status.workers[0].workerNonce);
+});

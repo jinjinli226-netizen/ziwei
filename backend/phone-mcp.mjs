@@ -24,6 +24,7 @@ export function createPhoneMcpService(repo, connect, management, options = {}) {
   };
   const assertEnabled = (slug,id) => { const cfg=configuration(slug,id);if(!cfg.enabled) fail('请先安装手机技能并配置员工与手机绑定','PHONE_MCP_NOT_CONFIGURED');return cfg; };
   const save = async (slug,id,input={}) => {
+    repo.preservation?.assert({employeeId:id});
     const previous=configuration(slug,id);const item=employee(slug,id);const installed=skill(slug);const enabled=input.enabled !== false;
     if(enabled && !installed?.installed) fail('请先从技能中心安装手机操控技能','PHONE_SKILL_NOT_INSTALLED');
     const targetDeviceId=input.targetDeviceId ?? previous.target_device_id;
@@ -75,6 +76,7 @@ export function createPhoneMcpService(repo, connect, management, options = {}) {
   };
   const sign = value => { const body=Buffer.from(JSON.stringify(value)).toString('base64url');return `${body}.${crypto.createHmac('sha256',key).update(body).digest('base64url')}`; };
   const bootstrap = (slug,input,credential) => {
+    repo.preservation?.assert({employeeId:input.employeeId,actionId:input.actionId});
     if(!credential || credential.workspace!==slug) fail('需要当前工作区独立电脑凭证','PHONE_DEVICE_UNAUTHORIZED',401);
     const id=required(input.employeeId,'employeeId');const cfg=assertEnabled(slug,id);const action=repo.getA2AAction(required(input.actionId,'actionId'),{workspaceSlug:slug});
     if(!action || !['pending','acked'].includes(action.status) || Date.parse(action.expires_at)<=Date.now() || action.payload.employeeId!==id || action.payload.deviceId!==credential.deviceId || credential.deviceId!==cfg.target_device_id || action.payload.runtime!==cfg.runtime || (action.payload.profile || null)!==(cfg.runtime_profile || null) || action.payload.terminalMcp?.configurationRevision!==cfg.revision || action.payload.terminalMcp?.deviceId!==cfg.phone_device_id || action.payload.terminalMcp?.enabled!==true || input.deviceId!==cfg.phone_device_id) fail('手机 MCP bootstrap 与当前员工、电脑、手机或执行不匹配','PHONE_EXECUTION_SCOPE_MISMATCH',403);
@@ -83,6 +85,7 @@ export function createPhoneMcpService(repo, connect, management, options = {}) {
     return {...capability,token:sign(capability),baseUrl:`${publicBase}/terminal-mcp/v1/workspaces/${encodeURIComponent(slug)}/employees/${encodeURIComponent(id)}`};
   };
   const authorize = (slug,id,token) => {
+    repo.preservation?.assert({employeeId:id});
     const [body,signature,...extra]=String(token || '').split('.');if(extra.length || !body || !signature || !safeTokenEqual(signature,crypto.createHmac('sha256',key).update(body).digest('base64url'))) fail('需要有效的员工手机执行凭据','PHONE_CAPABILITY_INVALID',401);
     const cap=parse(Buffer.from(body,'base64url').toString());if(cap.workspace!==slug || cap.employeeId!==id || Date.parse(cap.expiresAt)<=Date.now()) fail('手机执行凭据已过期或超出员工/工作区scope','PHONE_CAPABILITY_SCOPE',403);
     const cfg=configuration(slug,id);const action=repo.getA2AAction(cap.actionId,{workspaceSlug:slug});const credential=db.prepare('SELECT revoked_at FROM device_credentials WHERE id=? AND device_id=?').get(cap.credentialId,cap.computerDeviceId);

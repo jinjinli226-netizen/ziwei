@@ -31,11 +31,13 @@ function safeProcessExit(value) {
 export class ActionDispatcher {
   #completed = new Map();
   #completedIdentity = new Map();
+  #residentExits = new Map();
   #legacyCompleted = new Set();
   #started = new Map();
   #inFlight = new Map();
   #controllers = new Map();
   #execute;
+  #authorizeExecute;
   #now;
   #workdir;
   #onEvent;
@@ -46,9 +48,10 @@ export class ActionDispatcher {
   #stopGraceMs;
   #canExecute;
   #quarantines = new Set();
-  constructor({execute, now = () => Date.now(), workdir = process.cwd(), onEvent = () => {}, stateFile = null, workspace = '', deviceId = '', stopGraceMs = 10000, canExecute = () => true} = {}) {
+  constructor({execute, authorizeExecute = async()=>{}, now = () => Date.now(), workdir = process.cwd(), onEvent = () => {}, stateFile = null, workspace = '', deviceId = '', stopGraceMs = 10000, canExecute = () => true} = {}) {
     if (typeof execute !== 'function') throw new TypeError('ActionDispatcher requires an execute function');
     this.#execute = execute; this.#now = now; this.#workdir = process.platform === 'win32' ? resolveWindowsWorkdirPath(process.cwd(), workdir) : path.resolve(workdir); this.#onEvent = onEvent;
+    this.#authorizeExecute=authorizeExecute;
     this.#workspace = String(workspace || ''); this.#deviceId = String(deviceId || '');
     this.#stopGraceMs = Math.max(1, Number(stopGraceMs) || 10000); this.#canExecute = canExecute;
     this.#stateFile = stateFile ? path.resolve(stateFile) : null; this.#loadState();
@@ -134,7 +137,7 @@ export class ActionDispatcher {
     return {status: 'duplicate', actionId: action?.id, originalStatus: result.status, result: result.result, error: result.error, completedAt: result.completedAt, ...(result.code ? {code: result.code} : {}), ...(result.reason ? {reason: result.reason} : {}), ...(result.executionState ? {executionState: result.executionState} : {})};
   }
   #markStarted(action, key, identity) {
-    this.#started.set(key, {key, actionId: action?.id ?? null, identity, startedAt: this.#now(), ...(isNativeRuntimeAction(action) ? {nativeRuntime: true} : {})});
+    this.#started.set(key, {key, actionId: action?.id ?? null, identity, startedAt: this.#now(), ...(isNativeRuntimeAction(action) ? {nativeRuntime: true,resourceBinding:{type:action.type,employeeId:action.payload?.employeeId||null,revision:action.payload?.hermesBot?.revision||null,controlEpoch:action.payload?.hermesBot?.controlEpoch||null,resource:action.payload?.nativeOperation?.resource||null,operation:action.payload?.nativeOperation?.operation||null,platform:action.payload?.nativeOperation?.input?.platform||null}} : {})});
     try { this.#saveState(); }
     catch (error) { throw Object.assign(new Error(error?.message || String(error)), {code: 'ACTION_STATE_WRITE_FAILED'}); }
   }
@@ -194,6 +197,9 @@ export class ActionDispatcher {
     const actionId = action?.id; const controller = new AbortController(); let hardTimeoutHandle = null; let idleWatchdogHandle = null; this.#controllers.set(String(actionId), controller);
     try {
       if (!action || typeof action !== 'object') throw new Error('A2A action must be an object');
+      // Verify the original wire payload before this trusted dispatcher adds
+      // local working-directory defaults or handles an action.cancel itself.
+      await this.#authorizeExecute(action);
       const actionType = String(action.type || '').toLowerCase();
       if (actionType === 'agent.cancel' || actionType === 'action.cancel') {
         this.#markStarted(action, key, identity);
@@ -225,6 +231,18 @@ export class ActionDispatcher {
       this.#markStarted(action, key, identity);
       this.#onEvent('action.started', {actionId, type: action.type});
       let stopReason = null; let resolveStop; let supervision = null; let stopInvoked = false;
+      let residentExit=null;
+      const onResidentExit=proof=>{
+        const worker=proof?.worker,p=action.payload||{};
+        if(!worker||!proof.processExit||action.type!=='hermes.bot.native'||p.nativeOperation?.resource!=='gateway'||worker.workspace!==identity.workspace||worker.employeeId!==p.employeeId||worker.revision!==p.hermesBot?.revision||worker.controlEpoch!==p.hermesBot?.controlEpoch||worker.platform!==p.nativeOperation.input?.platform||p.nativeOperation.operation==='connect'&&worker.sourceActionId!==action.id)return;
+        residentExit=proof;
+        this.#residentExits.set(key,proof);
+        const completed=this.#completed.get(key);
+        if(completed&&this.#sameIdentity(this.#completedIdentity.get(key),identity,completed.actionId,action)){
+          completed.result={...completed.result,residentExit:proof};
+          try{this.#saveState();}catch(error){this.#stateError=error;this.#onEvent('action.state_write_failed',{actionId,error:error.message});}
+        }
+      };
       let executionSettled = false; let stoppedEvidence = null; let latestEvidence = null; let resolveConfirmed;
       const stopRequested = new Promise(resolve => { resolveStop = resolve; });
       const confirmed = new Promise(resolve => { resolveConfirmed = resolve; });
@@ -272,6 +290,7 @@ export class ActionDispatcher {
       }, intervalMs);
       const execution = Promise.resolve().then(() => controller.signal.aborted ? {status: 'failed', code: 'cancelled'} : this.#execute(executableAction, {
         signal: controller.signal,
+        onResidentExit,
         onActivity: refreshIdleTimeout,
         onSupervision: value => {
           if (supervision || !value || typeof value.stop !== 'function' || !value.completionEvidence || typeof value.completionEvidence.then !== 'function') throw new Error('Invalid runtime supervision registration');
@@ -348,7 +367,7 @@ export class ActionDispatcher {
         return this.#failure(action, `Local executor returned non-terminal status: ${executorStatus}`, {result, code: 'execution_not_completed'});
       }
       const output = executorStatus === 'succeeded' && Object.prototype.hasOwnProperty.call(result, 'result') ? result.result : result;
-      return {status: 'succeeded', actionId, result: output, completedAt: this.#now()};
+      return {status: 'succeeded', actionId, result: residentExit?{...output,residentExit}:output, completedAt: this.#now()};
     } catch (error) { const failed = error?.code === 'ACTION_STATE_WRITE_FAILED' ? this.#uncertain(action, error.code, error) : this.#failure(action, error); this.#onEvent('action.failed', {actionId, type: action?.type, error: failed.error}); return failed; }
     finally { if (hardTimeoutHandle) clearTimeout(hardTimeoutHandle); if (idleWatchdogHandle) clearInterval(idleWatchdogHandle); this.#controllers.delete(String(actionId)); }
   }
@@ -376,6 +395,7 @@ export class ActionDispatcher {
     entry.promise = Promise.resolve().then(async () => {
       const result = await this.#run(action, key, identity);
       if (result.code === 'EXECUTION_UNCERTAIN') return result;
+      if(this.#residentExits.has(key))result.result={...result.result,residentExit:this.#residentExits.get(key)};
       this.#completed.set(key, result); this.#completedIdentity.set(key, identity);
       try { this.#saveState(); }
       catch (error) {

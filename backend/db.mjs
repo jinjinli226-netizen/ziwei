@@ -1,15 +1,19 @@
 import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
+import {createPreservation} from './version-preservation.mjs';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 
-export function openDatabase({ memory = false, filename = path.join(ROOT, 'data', 'ziwei.sqlite') } = {}) {
+export function openDatabase({ memory = false, filename = process.env.ZIWEI_DB_FILE || path.join(ROOT, 'data', 'ziwei.sqlite'), preservation } = {}) {
   if (!memory) fs.mkdirSync(path.dirname(filename), { recursive: true });
   const db = new DatabaseSync(memory ? ':memory:' : filename);
   // Read-only backups briefly hold shared locks. Give normal writes a bounded
   // opportunity to commit after that reader releases its snapshot.
   db.exec('PRAGMA busy_timeout = 5000');
+  // Register guard functions before historical startup migrations can touch a
+  // DB containing persistent protection triggers from a previous package.
+  createPreservation(db,preservation);
   // An emptied installation is still an installation. Inspect the schema
   // before creating tables, rather than using the number of workspace rows.
   const existingInstallation = Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='workspaces'").get());

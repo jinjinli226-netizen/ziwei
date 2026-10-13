@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import {guardBotService} from './version-preservation.mjs';
 import {botProfileBinding,botProfileView,assertBotProfileReady} from './bot-profiles.mjs';
 import {normalizeNativeOperation,nativeIsExecution,nativeNeedsTools} from '../src/hermes-native-contract.mjs';
 import { normalizeBotConfig, botFailure, BOT_CAPABILITY_CATALOG } from '../src/hermes-bot-config.mjs';
@@ -111,7 +112,7 @@ export function createBotService(repo, management) {
     return {id,employee_id:id,workspace:slug,employee,instance:botProfileView(db,row,employee),configuration_state:'initialized',kind:'employee',config:parse(row.config_json),revision:row.revision,control_state:row.control_state,control_epoch:row.control_epoch,main_conversation_id:row.main_conversation_id,nativeResources,scheduler_authority:'ziwei',validation:{status:validationStatus,action_id:row.validation_action_id,revision:validationAction?.payload?.hermesBot?.revision ?? null,error:validationAction?.error || null},latest_run:botRuns[0] || null,stop_action:row.stop_action_id?repo.getA2AAction(row.stop_action_id,{workspaceSlug:slug}):null,capabilities:botCapabilities,effect:{savedRevision:row.revision,validatedRevision:row.validated_revision,scope:'next_execution',pendingReason:row.validated_revision!==row.revision?'目标电脑尚未验证本版本':row.control_state!=='active'?'Bot 尚未启用':null}};
   };
   const routine = (slug,id,autoId,context={}) => {const {ws}=resolve(slug,id,context);const binding=db.prepare('SELECT * FROM bot_routines WHERE automation_id=? AND employee_id=? AND workspace_id=?').get(autoId,id,ws.id);if(!binding)throw botFailure('ROUTINE_NOT_FOUND','Routine 不属于当前 Bot',404);return {...repo.getAutomation(slug,autoId),...binding,last_result:repo.listAutomationRuns(autoId)[0] || null};};
-  return {
+  return guardBotService(repo,{
     capabilities,get,runs,
     native(slug,id,input={},context={}) {return {action:idempotent(slug,`native:${id}`,input,context,()=>{
       if(Object.keys(input).some(key=>!['expectedRevision','expectedControlEpoch','idempotencyKey','resource','operation','input','workspace'].includes(key)))throw botFailure('BOT_NATIVE_INPUT_INVALID','原生请求包含未知字段',400);
@@ -265,5 +266,5 @@ export function createBotService(repo, management) {
     updateRoutine(slug,id,autoId,input={},context={}) {routine(slug,id,autoId,context);repo.updateAutomation(autoId,input);return routine(slug,id,autoId,context);},
     deleteRoutine(slug,id,autoId,context={}) {routine(slug,id,autoId,context);return repo.deleteAutomation(autoId);},
     runRoutine(slug,id,autoId,input={},context={}) {routine(slug,id,autoId,context);return idempotent(slug,`routine-run:${autoId}`,input,context,()=>repo.runAutomation(autoId,'manual'),runId=>repo.listAutomationRuns(autoId).find(item=>item.id===runId));},
-  };
+  });
 }
