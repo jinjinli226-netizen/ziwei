@@ -1,6 +1,6 @@
 # R01 正式发布准备与保留数据回退检查点
 
-状态：**PREPARATION ONLY / 未放行 / 未正式变更**。北京时间 2026-10-14。
+状态：历史准备时点记录；当前 Git push、包 P1、服务器现状以 [当前检查点](2026-10-14-r01-push-staging-server-checkpoint.md) 为准。北京时间 2026-10-14。
 
 R01 是唯一正式发布执行会话。用户已授权验收达到上线条件后直接推送 GitHub 并部署服务器及必要本机客户端，无需重复申请同一发布批准。该授权不把未通过的候选变成已签收版本。本轮先提交可审查的运维准备；不发布 Release、metadata，不切服务、不更新客户端、不执行模型或手机业务。
 
@@ -52,7 +52,7 @@ fresh `git ls-remote`：rollback `8556aec`、E03 `667a4f8`、旧provider QA `63f
 3. 总控准确签收candidate SHA、QA evidence commit/hash、同批两角色×API/frontend/Windows六产物SHA、两manifest SHA、API role/content identity、installed/running Windows build、固定FROZEN版本语义。candidate与历史v1/v2基线字段分开。
 4. 各机器原API/client root、原生入口、配置/userHome/runtime/baseHOME绝对路径、设备/workspace/shared bindings、原PID+创建时间+nonce私有引用、服务管理器身份；不能仅存PID或HTTP200，不能以非原生MSIX cache替换配置。
 5. 同operation、同DB一致投影、原device/HOME/marker/初始provision/action关联的机器端proof。Linux DB controller不能假定本地可读Windows HOME；传输safe proof并验证可信来源、哈希、operation/设备/DB/root身份与新鲜度，密钥只引用原private文件。
-6. prepare后新工作持久fence；drain覆盖被切换实例**全部作用域**，原worker/Job树、缓存、原payload/ACK/结果补传。停机/collector缺失/损坏/uncertain/blocked retainEvidence/旧终态无PID树证明都拒切，不能按expiry视为退出。
+6. 原实例先受控 pause/drain/stop，覆盖被切换实例**全部作用域**；原 scope proof 完成后离线正式 prepare 建立持久 fence，原worker/Job树、缓存、原payload/ACK/结果补传。停机/collector缺失/损坏/uncertain/blocked retainEvidence/旧终态无PID树证明都拒切，不能按expiry视为退出。
 7. `state.db` driver pending对应settled/source action/原tree；Gateway inbound pending/accepted/delivery_started及未知发送；全量Kanban task/run及claim；Group完整events/成员结算；collaboration outbox/claimed。不能只核UI最近100条、内存active0或此次未使用。已settled历史保留关联，不能清pending key造zero。
 8. 文件/目录与process最终复核、seal时一致性；phase提交丢回执后原operation回读。已提交状态必须可辨，不自动重复变更；abort不能擅自启用Bot、重放业务或删除unknown证据。
 
@@ -64,7 +64,7 @@ fresh `git ls-remote`：rollback `8556aec`、E03 `667a4f8`、旧provider QA `63f
 
 备份范围包括主/控制SQLite的一致backup API副本、当前增量和墓碑清单/稳定PK摘要、对象存储完整内容、data/.local所指持久目录、source/旧Creator/owned profiles与HOME全部文件含logs/state/kanban/session/memory、action journals/result cache/delivery/gateway/group/collaboration records、客户端config/原凭据引用与实际安装目录/入口、发布三文件和静态资源、原signing/key与必要私有材料、服务unit/Nginx配置、独立observer源码/状态和历史日志。不能直接cp正在写入的SQLite主文件而遗漏WAL，不能保存半套HOME。
 
-最终一致性窗口在freeze、全实例排空、写入方退出或已证明暂停之后：用SQLite backup API生成新副本；在独立离线副本跑integrity/FK、核每表PK/稳定列与当前schema、新附表；对象每项hash与DB引用可读；HOME全清单hash与marker/provision/会话/记忆摘要；恢复到隔离目录后只读打开SQLite及抽取对象/HOME，不启动业务、模型、gateway或手机；首次/结束投影一致。正式备份与restore读取本轮 **NOT_RUN**。
+最终一致性窗口在原生命周期暂停/停写、全实例排空、写入方退出或已证明暂停之后；正式 prepare 本身也要求先取得原停止 proof：用SQLite backup API生成新副本；在独立离线副本跑integrity/FK、核每表PK/稳定列与当前schema、新附表；对象每项hash与DB引用可读；HOME全清单hash与marker/provision/会话/记忆摘要；恢复到隔离目录后只读打开SQLite及抽取对象/HOME，不启动业务、模型、gateway或手机；首次/结束投影一致。正式备份与restore读取本轮 **NOT_RUN**。
 
 这些备份用于取证/灾难恢复。版本回退始终沿同一当前DB及全部新附表/对象/HOME，**不把生产整库恢复为发布前快照**；不得恢复已删除员工或丢弃期间增量，也不清新HOME。若出现物理数据损坏，先保存损坏原物，再提出明确数据级恢复方案；不能混为普通代码回退。
 
@@ -76,9 +76,9 @@ fresh `git ls-remote`：rollback `8556aec`、E03 `667a4f8`、旧provider QA `63f
 | --- | --- | --- |
 | P0 放行与Git | 总控明确Q通过、正式门槛通过、准确SHA/六产物/manifest/可用范围；fresh远端与auto-deploy审查；只推最终代码/安全QA/运维记录，正常非force，远端读回SHA；main仅最终关系可FF且符合既有发布方式时推进 | 无准确放行或push结果不明，先远端读回，不部署、不force |
 | P1 staging | 从GitHub确切SHA/验收包建立新release目录；离线hash/role/manifests/依赖运行环境/DB schema兼容核实；沿原data/.local links、4178/20242端口与原native入口；准备compat及V2双方产物、旧层备份 | staging不合格不影响当前运行；保留失败产物与日志，不改current |
-| P2 freeze/drain | E02正式入口持久prepare fence；首装bootstrap不能产生无fence工作；原实例pause排空，核原PID/创建时间/nonce、所有scope原动作/后台worker、tree/cache/result_pending与原生claims；只补原结果，无新model/native调用 | preparing/unknown保留；不改failed/expired、不清队列、不换key重跑；回读原phase和原实例 |
-| P3 backup/seal | 完整一致备份及隔离restore-read通过；native proof对同operation/DB/原HOME；最终文件/目录/process复核后seal原子提交 | 备份/claims/proof不明拒seal；提交丢回执先inspect/plan读原operation |
-| P4 版本切换 | 仅需变层：API/front/官方Windows包与必要本机实装；停原已排空实例并证明退出后切current/原安装；控制/Nginx保留；Windows沿原maintenance/update-worker入口，精确tgz/SHA与原prefix，更新metadata最后且公开读回 | 更新queued只表示受理；等同job结果并核实际安装/运行build。失败用同批保护包代码/原安装回退，保留当前DB/HOME与停止/运行状态；不盲start、不重配对 |
+| P2 原实例 pause/drain/stop | 先通过原 lifecycle 受控暂停、排空与停止；核原PID/创建时间/nonce、所有scope原动作/后台worker、tree/cache/result_pending与原生claims，取得完整原 stopped/scope proof；只补原结果，无新model/native调用 | unknown保留；不改failed/expired、不清队列、不换key重跑；缺 proof 不进入正式 prepare，不启动新调度器 |
+| P3 offline prepare/backup/seal | 原实例停写及 signed collect/fresh recheck/真实债务核验通过后，离线正式 prepare；再执行完整一致备份和隔离 restore-read；native proof 对同 operation/DB/原 HOME；最终复核后 seal 原子提交 | prepare 首次 schema 写入前仍核全部 source proof；备份/claims/proof不明拒 seal，丢回执先回读原 operation |
+| P4 版本切换 | 仅需变层：API/front/官方Windows包与必要本机实装；复核 P2 的旧实例仍退出后切current/原安装；控制/Nginx保留；Windows沿原maintenance/update-worker入口，精确tgz/SHA与原prefix，更新metadata最后且公开读回 | 更新queued只表示受理；等同job结果并核实际安装/运行build。失败用同批保护包代码/原安装回退，保留当前DB/HOME与停止/运行状态；不盲start、不重配对 |
 | P5 compat保持 | 回退目标为**同批v1-compat** API/frontend/Windows角色包；新PID/root/installed/running identity核验；DB/HOME仍sealed，旧default/Creator/普通员工功能仅在排空证明后继续 | 不使用裸V1接V2数据；compat安装下仅inspect/plan，不能restore |
 | P6 回到V2 | 再排空compat所有共享实例、核原tree和期间增量；停compat、安装/运行同批V2仍sealed；核API role/client build/DB/HOME/operation/snapshot身份；调用V2正式restore，保持Bot/Routine暂停、未来时间重算 | 任何错身份/部分状态应仍sealed；不能通过改snapshot/清HOME恢复 |
 | P7 联验与交付 | 准确API/UI/static/client running版本；核心owned开通/配置/启用暂停/主聊天/普通任务/promptRoutine/session/memory/数据保留链；原scope只复用未变provider证据，必要一次有界真实gpt-6.1-sol/max请求沿127.0.0.1:7890；QA精确新manifest清理；新实例observer/心跳/退出诊断留证 | 保留真实401/timeout/overload失败，不当降档依据；Source auth先核实，不克隆/修改源auth；失败保持暂停并按P2–P6保护回读/回退 |

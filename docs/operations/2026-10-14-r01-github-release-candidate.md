@@ -20,12 +20,12 @@ E02 本次有限直接资格为 6 pass、4 Windows-native skip、lint 132 source
 
 fresh 公共 refs 的 main 仍为 `339b1db1862882c5305ebddceead85d487c8c9d0`，rollback 为 `8556aecb6a37385d9fc7061f989e97071bfd6cf9`；main 是该正常组合的祖先。origin 已恢复为 `https://github.com/jinjinli226-netizen/ziwei.git`。只收已提交 repo-owned 安全代码/tests/docs，逐路径排除 .local、DB、HOME、auth、依赖安装、产物、错误 capture 和原项目未提交修改；未用 git add -A。
 
-Mac 初始 Git keychain 没有可用 GitHub 凭据、SSH agent 没有 identities；已连接 GitHub 账号只有 pull、没有该 repo Write。用户选择切换到可写账号，R 用经官方 asset digest/checksums 校验的临时 GitHub CLI 2.102.0 开启正常网页 device login，由用户本人完成。工具仅位于 R .local，不全局安装，不读取或导出 token。必须核实际授权账号的 repo push 权限，正常推送本分支并读回 exact SHA 后才可报告上传完成。此文档的提交本身不是 push 回执。
+Mac 初始 Git keychain 没有可用 GitHub 凭据、SSH agent 没有 identities；已连接 GitHub 账号只有 pull、没有该 repo Write。用户选择切换到可写账号，R 用经官方 asset digest/checksums 校验的临时 GitHub CLI 2.102.0 开启正常网页 device login，由用户本人完成。工具仅位于 R .local，不全局安装，不读取或导出 token。实际网页授权账号为 `jinjinli226-netizen`，repo admin/push 权限核实成功，已配置官方 Git credential helper。版本分支正常非 force 推送完成；远端 refs 与 GitHub commit API 读回 `7467eed41f8eee0614d2020d74bb93460a335d19`、tree `9427705c1cbe64ec500a26379affabc3e283e081` 精确匹配。main、GitHub Release 和公开客户端 metadata 未推进。后续增量仍以实际 push/readback 为准。
 
 ## 产物与部署边界
 
-最终六产物和两 manifest 只能从本组合的 clean commit 生成，builder拒绝 tracked WIP；原 Windows .local 私有回执没有迁移，本轮不能重新宣称已核其 bytes/hash。Git 源码保存不等本机 Windows 实测，也不等完整 Mac 平台测试。
+7467eed clean commit 的六产物及两 manifest 已生成，归档 SHA/size/源码成员及实解压只读维护入口通过有限检查。但 Q01 独立空缓存离线安装证实两角色 TGZ 均遗漏 Express 5.2.1 的 28 项直接依赖，加载报缺少 body-parser；本批包存在真实 P1，不能签收、启动、切 current 或更新公开 metadata。详见 [Q01 包检查点](../qa/2026-10-14-q01-7467eed-package-checkpoint.md)。E02 修复 builder 后须以新 clean SHA 和新产物重新核依赖加载，不能复用旧包 pins 或把维护 CLI PASS 当服务运行依赖 PASS。原 Windows .local 私有回执没有迁移，不能从安全文档 hash 重建。
 
-服务器须另行使用确认属于紫薇的 SSH host/user/key reference 做 fresh 只读预检、真实备份/恢复读取和原在途状态核验。当前 Mac 没有迁移原 Windows SSH reference；现有部署 key 只有公钥名称和别项目式 comment，tracked 项目未提供 host/key 归属关系，正式 DNS 的代理地址也不能用于认定 key 归属。R未猜 host/user、尝试未知 key 或宣称服务器已可达。
+用户提供准确服务器与 root 登录身份后，已成功执行 SSH fresh 只读预检；首次已授权目标 host key 登记后使用 strict RejectPolicy。原 current 为 `/opt/ziwei/releases/a66df9c-sqlite-179d0d46`，API/control/Nginx PID 与持久链接稳定。四个旧批 API archive/manifest 仅暂存于 `/opt/ziwei-staging/v2-7467eed`，未解包安装或切服务。当前具体事实及私有保护副本摘要见 [发布与服务器检查点](2026-10-14-r01-push-staging-server-checkpoint.md)。
 
 Linux 新两个角色 root 必须复用真实 data/.local links，并核实际 cwd/ZIWEI_DB_FILE/ZIWEI_OBJECT_STORE_DIR，保持原 DB/objects/HOME，compat回退只换同批代码而不恢复整旧DB覆盖增量/墓碑。ordinary --apply 没有注入 proofProvider；正式代码 runner必须实际传独立 trust/transport/backup与legacy policy，不能用plan或回读旧receipt冒充新mutation。control/Nginx/terminal-mcp与原端口保持。暂无真实服务器或 Windows 服务切换、主机重启、模型/设备动作。
