@@ -1,15 +1,17 @@
 import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import crypto from 'node:crypto';import {pathToFileURL} from 'node:url';
 import {createProductionProofProvider,createSourceCliTransport,createProductionPhaseController,createNamespaceCaptureWriter} from './r01-production-wire.mjs';
-const modulePath=process.env.R01_PRODUCT_MODULE;
-assert.ok(modulePath,'Set R01_PRODUCT_MODULE to the independently pinned clean product module');
-assert.equal(crypto.createHash('sha256').update(fs.readFileSync(modulePath)).digest('hex'),'9a8ad9567fb130517c96cad390c7dff417ce9ca5fe08e6979041c971cdaa86d6');
+// E02 clean cad5886 product bytes, LF-normalized for Git/package line endings.
+// This is code ABI qualification; it does not assert native Windows execution.
+const modulePath=process.env.R01_PRODUCT_MODULE||path.resolve(import.meta.dirname,'../../backend/production-preservation.mjs');
+const codeSha=file=>crypto.createHash('sha256').update(fs.readFileSync(file,'utf8').replaceAll('\r\n','\n')).digest('hex');
+assert.equal(codeSha(modulePath),'264c1a5d51ae0b896f363979f274ac405800f8f275e0d8ae94e6d0c93db29c6d');
 const namespacePath=path.join(path.dirname(modulePath),'preservation-source-namespace.mjs');
-assert.equal(crypto.createHash('sha256').update(fs.readFileSync(namespacePath)).digest('hex'),'dafcbce34bfc427ad067db131f50d79c9716183fb45d2db2e2f0c3813e8d4c2e');
+assert.equal(codeSha(namespacePath),'ee332e50a78fd61a765ea2b721093e34311016be17d855ed2c71657611c4a6ac');
 const product=await import(pathToFileURL(modulePath));const namespace=await import(pathToFileURL(namespacePath));
 const sha=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
 function fixture(t){
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'r01-wire-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
- const keys=['api_fixture','windows_fixture'].map(hostId=>{const keyRef=path.join(root,hostId+'.key');fs.writeFileSync(keyRef,crypto.randomBytes(32));return{hostId,keyId:hostId+'_key',keyRef};});
+ const keys=['api_fixture','windows_fixture'].map(hostId=>{const keyRef=path.join(root,hostId+'.key');fs.writeFileSync(keyRef,crypto.randomBytes(32),{mode:0o600});return{hostId,keyId:hostId+'_key',keyRef};});
  const bindings=keys.map(row=>({hostId:row.hostId,deviceIds:[],workspaceIds:[],clients:[],apiInstances:[]}));
  const trust={schemaVersion:1,algorithm:'hmac-sha256',hosts:keys.map((row,i)=>({...row,bindingDigest:product.digestProduction(bindings[i])})),approvedSpecs:[{operationId:'wire_fixture',specHash:'a'.repeat(64)}],backupHostId:keys[0].hostId};
  const context={operationId:'wire_fixture',specHash:'a'.repeat(64),databaseIdentity:{databaseId:crypto.randomUUID()},freezeDigest:'b'.repeat(64),requiredHosts:keys.map(row=>row.hostId)};
@@ -96,4 +98,12 @@ test('default boot-nonce capture without nativeBirth binds actual createdAt and 
  const writer=createNamespaceCaptureWriter({product,namespace,trust:f.trust,binding:f.bindings[0],producerPath:producer,producerSha256,observeNative:async()=>({instances:[{kind:'api',bindingDigest:product.digestProduction(original),originalInstance:original.originalInstance,nonceDigest:observedNonce,process:{pid:7,createdAt:observedCreatedAt,entryPath:original.entryPath},namespace:{kind:'systemd-cgroup',unit:'fixture.service',controlGroup:'/fixture.service',InvocationID:'1234567890abcdef1234567890abcdef',KillMode:'control-group',Delegate:false,SendSIGKILL:true,ActiveState:'active',members:[7],bootId:crypto.randomUUID(),NRestarts:0,ExecMainStartTimestampMonotonic:'1000',ActiveEnterTimestampMonotonic:'1001'}}],workerFacts:null})});
  const request=f.requests()[0];await assert.rejects(writer.capture({phase:'before-stop',request}),/OPS_NATIVE_CAPTURE_INCOMPLETE/);observedNonce=nonceDigest;observedCreatedAt='2026-10-10T10:40:39.885Z';await assert.rejects(writer.capture({phase:'before-stop',request}),/OPS_NATIVE_CAPTURE_INCOMPLETE/);
  observedCreatedAt=createdAt;const before=await writer.capture({phase:'before-stop',request});assert.equal(before.envelope.payload.instances[0].nonceDigest,nonceDigest);assert.equal('nativeBirth' in before.envelope.payload.instances[0].process,false);
+});
+
+test('trusted legacy policy reaches product second code argument without entering signed JSON',async t=>{
+ const f=fixture(t),spec={schemaVersion:1,mode:'production',operationId:f.context.operationId};spec.specHash=product.digestProduction(spec);
+ const policy=Object.freeze({actionId:'approved_legacy_fixture'});let received=null,request=null;
+ const adapter={...product,validateProductionSpec:()=>({spec}),async runProductionPreservation(input,options){request=input;received=options;return{mode:'plan',willApply:false,command:input.command,operationId:spec.operationId,specHash:spec.specHash,role:'v2',state:'absent',receipt:null};}};
+ const controller=createProductionPhaseController({privateRoot:f.root,journalDirectory:path.join(f.root,'journal'),product:adapter,legacyActionPolicy:policy});
+ await controller.run({command:'inspect',spec,trust:f.trust});assert.equal(received.legacyActionPolicy,policy);assert.equal('legacyActionPolicy' in request,false);assert.equal('legacyActionPolicy' in request.spec,false);
 });

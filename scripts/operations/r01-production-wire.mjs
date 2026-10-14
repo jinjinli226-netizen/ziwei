@@ -89,7 +89,7 @@ export function createSourceCliTransport({privateRoot,product,timeoutMs=30000,ma
  };
 }
 
-export function createProductionPhaseController({privateRoot,journalDirectory,product,packageRoot,proofProvider,verifyReleaseGate,verifyBackupProof}){
+export function createProductionPhaseController({privateRoot,journalDirectory,product,packageRoot,proofProvider,verifyReleaseGate,verifyBackupProof,legacyActionPolicy=null}){
  productCode(product,['canonicalProduction','digestProduction','validateProductionSpec','runProductionPreservation']);
  const root=plain(privateRoot),directory=path.resolve(journalDirectory||'');if(!inside(root,directory))fail('OPS_PRIVATE_OUTPUT_REQUIRED');plain(path.dirname(directory));if(packageRoot!==undefined)plain(packageRoot);
  const ledgerFile=path.join(directory,'ledger.json'),read=()=>fs.existsSync(ledgerFile)?JSON.parse(fs.readFileSync(plain(ledgerFile),'utf8')):null;
@@ -101,7 +101,7 @@ export function createProductionPhaseController({privateRoot,journalDirectory,pr
   if(!rawTrust||rawTrust===raw)fail('OPS_INDEPENDENT_TRUST_REQUIRED');const spec=frozen(product,raw),trust=frozen(product,rawTrust),backup=backupProof===undefined?undefined:frozen(product,backupProof);
   const {specHash,...body}=spec;if(product.digestProduction(body)!==specHash)fail('OPS_SPEC_HASH_MISMATCH');product.validateProductionSpec({spec,trust,...(packageRoot?{packageRoot}:{})});
   const prior=read();if(prior&&(prior.operationId!==spec.operationId||prior.specHash!==specHash))fail('OPS_JOURNAL_OPERATION_CONFLICT');if(apply&&prior?.pending)fail('OPS_INSPECT_REQUIRED');
-  const call=(requested,willApply)=>product.runProductionPreservation({command:requested,apply:willApply,spec,trust,proofProvider,...(backup?{backupProof:backup}:{}),...(packageRoot?{packageRoot}:{})});
+  const call=(requested,willApply)=>product.runProductionPreservation({command:requested,apply:willApply,spec,trust,proofProvider,...(backup?{backupProof:backup}:{}),...(packageRoot?{packageRoot}:{})},{legacyActionPolicy});
   if(!apply){
    const requested=command==='inspect'&&prior?.pending?prior.pending.command:command,result=await call(requested,false);
    if(result.mode!=='plan'||result.willApply!==false||result.command!==requested||result.operationId!==spec.operationId||result.specHash!==specHash||!['absent','preparing','sealed','restored'].includes(result.state))fail('OPS_PLAN_INVALID');
