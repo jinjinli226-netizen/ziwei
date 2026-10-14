@@ -30,7 +30,7 @@ function fixture(t, {rowPatch = {}, withPolicy = true, policyPatch = {}, proofPa
   const row = () => db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(original.id);
   const files = ['archive.bin', 'logger.jsonl'].map(name => {
     const file = path.join(root, name), bytes = Buffer.from(`immutable fixture ${name}`); fs.writeFileSync(file, bytes);
-    const stat = fs.lstatSync(file);
+    const stat = fs.lstatSync(file, {bigint: true});
     return {path: file, exists: true, sha256: sha(bytes), bytes: bytes.length, identity: {dev: String(stat.dev), ino: String(stat.ino)}};
   });
   const policy = {actionId: original.id, actionDigest: nativeActionDigest(row()), hostId: 'fixture-host', workspaceId: original.workspace_id, deviceId: 'fixture-device', origin: 'http://127.0.0.1:6387',
