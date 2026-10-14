@@ -1,0 +1,445 @@
+{
+  "schemaVersion": 1,
+  "candidateCommit": "7467eed41f8eee0614d2020d74bb93460a335d19",
+  "candidateTree": "9427705c1cbe64ec500a26379affabc3e283e081",
+  "checkedAt": "2026-10-14T03:13:31.961Z",
+  "reviewer": "Q01 independent final-package finite check",
+  "packageDirectory": "/Users/zhangjie/Documents/ChatGPT/紫薇/.codex-worktrees/v2-r01-release-preparation/.local/preservation-packages",
+  "sourceCleanBeforeAndAfter": true,
+  "acceptedScope": "Actual manifest/hash/size/source/archive membership and extracted readonly maintenance CLI only",
+  "overallPackageVerdict": "FAIL",
+  "findings": [
+    {
+      "priority": "P1",
+      "title": "Both final TGZ archives omit required Express dependencies",
+      "sourceLocation": "scripts/build-preservation-packages.mjs:81-84",
+      "trigger": "Install final TGZ with an empty npm cache using --offline --ignore-scripts, then require its bundled express",
+      "observed": "MODULE_NOT_FOUND: Cannot find module body-parser in both roles",
+      "effect": "Manifest API dependency procedure cannot load backend/app.mjs because it imports express at line 1",
+      "offlineClaimInvalid": true,
+      "notMacAdaptation": true,
+      "notWindowsFieldAcceptance": true
+    }
+  ],
+  "archiveClosure": [
+    {
+      "role": "v1-compat",
+      "manifestSha256": "31990437fcd8672221462346c6cdcf76f9f2ddfa75f3313fd786f55c733a6fad",
+      "candidate": "7467eed41f8eee0614d2020d74bb93460a335d19",
+      "baseline": "2ebe3dfee2f438a0b6aa3045d46c83bb67d7341b",
+      "buildDigest": "3ff3e62ede3b4d518d6ad1e8d8c088f2f5d5ce3c918d511398d4d971fbfa8bc1",
+      "sourceClientBuild": "f64c24c07a36496d133363fa137c6ec5d99bb71a6203b4dc1eab27bdd7159703",
+      "clientBuild": "039b0c6dd071c4449871132777ad6704971e0618d9670a492ca7176d3669d7ee",
+      "artifacts": [
+        {
+          "name": "v1-compat-windows-client.tgz",
+          "sha256": "b9a4784192b48230f256a56984f4362e56463f3630420abcbb64d3dbb4b1b1bc",
+          "bytes": 413658
+        },
+        {
+          "name": "v1-compat-frontend.zip",
+          "sha256": "307b89b2a246a60636223eff06a9a946694d34bb684683bc71d59d23fa01221d",
+          "bytes": 487364
+        },
+        {
+          "name": "v1-compat-api.zip",
+          "sha256": "5149f70cf366b8261ad116c56b4884a9fe4ebbb2dfac2935d2b786221faada4a",
+          "bytes": 515034
+        }
+      ],
+      "apiSourceFilesVerified": 107,
+      "frontendFilesVerified": 5,
+      "clientSourceFilesVerified": 53,
+      "bundleFiles": 262,
+      "overlayFiles": 33,
+      "installationChanges": [
+        {
+          "path": "scripts/ziwei-user.mjs",
+          "sha256": "a4ea5debf3b5c3bd0b9367808585e557923479a0863964b481d7425d7198b08a",
+          "sourceSha256": "5509d7a0ec8b15f886c083b7b6ca7508dd89f29ec76ced4430e9af45d1ac77b9"
+        }
+      ],
+      "closedArchivePaths": true,
+      "archiveMetadataAndRolesMatch": true,
+      "helperPinMatches": true,
+      "noPrivateRuntimePaths": true,
+      "scope": "File and declared bundled-dependency membership only; not transitive runtime/SCA or Windows installed build acceptance"
+    },
+    {
+      "role": "v2",
+      "manifestSha256": "1caf82d91e7fc442e38cca29598234b24f1aee30868d39a2f2afc9b80150366c",
+      "candidate": "7467eed41f8eee0614d2020d74bb93460a335d19",
+      "baseline": "5643d5d36c3cd85d74ab849c77f52b6f69555093",
+      "buildDigest": "da1737df6df53f166e38dae290d6526be643cd3ede1e9bce568443ae4fbc9923",
+      "sourceClientBuild": "00e2bb1fbe6b002e10d324983ba2898c934e34d98a15144921392f76e61841b1",
+      "clientBuild": "fed59ef0e6434f4dec5c590e8f785ac1df5370082e9f917f751caf651dacf7e6",
+      "artifacts": [
+        {
+          "name": "v2-windows-client.tgz",
+          "sha256": "9054025cf1a879b2c548d6d2c1d5919b840271a1956cae01ab6f2ed3408d74b2",
+          "bytes": 461204
+        },
+        {
+          "name": "v2-frontend.zip",
+          "sha256": "4c03cd1f2c99568276c0c282be3ae03bfff669b185c6416e575f872c7e1b97ac",
+          "bytes": 558640
+        },
+        {
+          "name": "v2-api.zip",
+          "sha256": "efa8400c42a4813d0e8cc51a42775f588121099f5cf4cca9a05c612d6764f134",
+          "bytes": 616300
+        }
+      ],
+      "apiSourceFilesVerified": 128,
+      "frontendFilesVerified": 12,
+      "clientSourceFilesVerified": 66,
+      "bundleFiles": 262,
+      "overlayFiles": 33,
+      "installationChanges": [
+        {
+          "path": "scripts/ziwei-user.mjs",
+          "sha256": "a4ea5debf3b5c3bd0b9367808585e557923479a0863964b481d7425d7198b08a",
+          "sourceSha256": "5509d7a0ec8b15f886c083b7b6ca7508dd89f29ec76ced4430e9af45d1ac77b9"
+        }
+      ],
+      "closedArchivePaths": true,
+      "archiveMetadataAndRolesMatch": true,
+      "helperPinMatches": true,
+      "noPrivateRuntimePaths": true,
+      "scope": "File and declared bundled-dependency membership only; not transitive runtime/SCA or Windows installed build acceptance"
+    }
+  ],
+  "wrongCandidateRefused": true,
+  "apiEntryIndependent": {
+    "candidate": "7467eed41f8eee0614d2020d74bb93460a335d19",
+    "verifiedAt": "2026-10-14T03:05:46.547Z",
+    "node": "v24.14.0",
+    "platform": "darwin",
+    "scope": "independent actual extracted readonly API entry; no listener/native field acceptance",
+    "pins": {
+      "v1-compat-manifest.json": "31990437fcd8672221462346c6cdcf76f9f2ddfa75f3313fd786f55c733a6fad",
+      "v1-compat-windows-client.tgz": "b9a4784192b48230f256a56984f4362e56463f3630420abcbb64d3dbb4b1b1bc",
+      "v1-compat-frontend.zip": "307b89b2a246a60636223eff06a9a946694d34bb684683bc71d59d23fa01221d",
+      "v1-compat-api.zip": "5149f70cf366b8261ad116c56b4884a9fe4ebbb2dfac2935d2b786221faada4a",
+      "v2-manifest.json": "1caf82d91e7fc442e38cca29598234b24f1aee30868d39a2f2afc9b80150366c",
+      "v2-windows-client.tgz": "9054025cf1a879b2c548d6d2c1d5919b840271a1956cae01ab6f2ed3408d74b2",
+      "v2-frontend.zip": "4c03cd1f2c99568276c0c282be3ae03bfff669b185c6416e575f872c7e1b97ac",
+      "v2-api.zip": "efa8400c42a4813d0e8cc51a42775f588121099f5cf4cca9a05c612d6764f134"
+    },
+    "receipt": {
+      "schemaVersion": 1,
+      "kind": "actual-extracted-api-readonly-entry",
+      "results": [
+        {
+          "role": "v1-compat",
+          "archiveSha256": "5149f70cf366b8261ad116c56b4884a9fe4ebbb2dfac2935d2b786221faada4a",
+          "commands": [
+            {
+              "command": "inspect",
+              "mode": "plan",
+              "willApply": false,
+              "role": "v1-compat"
+            },
+            {
+              "command": "prepare",
+              "mode": "plan",
+              "willApply": false,
+              "role": "v1-compat"
+            }
+          ],
+          "productionCommands": [
+            {
+              "command": "inspect",
+              "mode": "plan",
+              "willApply": false,
+              "role": "v1-compat"
+            },
+            {
+              "command": "prepare",
+              "mode": "plan",
+              "willApply": false,
+              "role": "v1-compat"
+            },
+            {
+              "command": "prepare",
+              "apply": true,
+              "refused": "PRODUCTION_COMPAT_READ_ONLY"
+            }
+          ],
+          "productionScope": "Exact actual artifact pins and independent ephemeral key/spec; readonly plan and no-transport/compat first-write refusal only; not native namespace approval",
+          "sourceDatabaseUnchanged": true,
+          "sourceWalShmUnchanged": true,
+          "noNewSchema": true,
+          "noQaMarker": true,
+          "noNetworkOrHelper": true,
+          "missingDependencyRefused": true
+        },
+        {
+          "role": "v2",
+          "archiveSha256": "efa8400c42a4813d0e8cc51a42775f588121099f5cf4cca9a05c612d6764f134",
+          "commands": [
+            {
+              "command": "inspect",
+              "mode": "plan",
+              "willApply": false,
+              "role": "v2"
+            },
+            {
+              "command": "prepare",
+              "mode": "plan",
+              "willApply": false,
+              "role": "v2"
+            }
+          ],
+          "productionCommands": [
+            {
+              "command": "inspect",
+              "mode": "plan",
+              "willApply": false,
+              "role": "v2"
+            },
+            {
+              "command": "prepare",
+              "mode": "plan",
+              "willApply": false,
+              "role": "v2"
+            },
+            {
+              "command": "prepare",
+              "apply": true,
+              "refused": "PRODUCTION_TRANSPORT_REQUIRED"
+            }
+          ],
+          "productionScope": "Exact actual artifact pins and independent ephemeral key/spec; readonly plan and no-transport/compat first-write refusal only; not native namespace approval",
+          "sourceDatabaseUnchanged": true,
+          "sourceWalShmUnchanged": true,
+          "noNewSchema": true,
+          "noQaMarker": true,
+          "noNetworkOrHelper": true,
+          "missingDependencyRefused": true
+        }
+      ]
+    }
+  },
+  "cleanOfflineInstallIndependent": {
+    "candidate": "7467eed41f8eee0614d2020d74bb93460a335d19",
+    "verifiedAt": "2026-10-14T03:13:31.961Z",
+    "node": "v24.14.0",
+    "platform": "darwin",
+    "roles": [
+      {
+        "role": "v1-compat",
+        "archiveSha256": "b9a4784192b48230f256a56984f4362e56463f3630420abcbb64d3dbb4b1b1bc",
+        "emptyCacheBefore": true,
+        "offlineInstallSucceeded": true,
+        "ignoreScripts": true,
+        "prefix": "/Users/zhangjie/Documents/ChatGPT/紫薇/.codex-worktrees/v2-q01-preservation-acceptance/.local/q01-7467eed-package-checkpoint/install-1791947480083/v1-compat",
+        "installedSourceFilesVerified": 53,
+        "installedBuild": "039b0c6dd071c4449871132777ad6704971e0618d9670a492ca7176d3669d7ee",
+        "manifestBuild": "039b0c6dd071c4449871132777ad6704971e0618d9670a492ca7176d3669d7ee",
+        "dependencyImports": [
+          {
+            "name": "express",
+            "loaded": false,
+            "code": "MODULE_NOT_FOUND",
+            "message": "Cannot find module 'body-parser'"
+          },
+          {
+            "name": "ws",
+            "loaded": true
+          },
+          {
+            "name": "yaml",
+            "loaded": true
+          }
+        ],
+        "expressVersion": "5.2.1",
+        "expressRequiredDependencies": [
+          "accepts",
+          "body-parser",
+          "content-disposition",
+          "content-type",
+          "cookie",
+          "cookie-signature",
+          "debug",
+          "depd",
+          "encodeurl",
+          "escape-html",
+          "etag",
+          "finalhandler",
+          "fresh",
+          "http-errors",
+          "merge-descriptors",
+          "mime-types",
+          "on-finished",
+          "once",
+          "parseurl",
+          "proxy-addr",
+          "qs",
+          "range-parser",
+          "router",
+          "send",
+          "serve-static",
+          "statuses",
+          "type-is",
+          "vary"
+        ],
+        "platform": "darwin",
+        "scope": "Clean isolated offline installation on Darwin; pure package dependency resolution, not actual Windows running identity"
+      },
+      {
+        "role": "v2",
+        "archiveSha256": "9054025cf1a879b2c548d6d2c1d5919b840271a1956cae01ab6f2ed3408d74b2",
+        "emptyCacheBefore": true,
+        "offlineInstallSucceeded": true,
+        "ignoreScripts": true,
+        "prefix": "/Users/zhangjie/Documents/ChatGPT/紫薇/.codex-worktrees/v2-q01-preservation-acceptance/.local/q01-7467eed-package-checkpoint/install-1791947480083/v2",
+        "installedSourceFilesVerified": 66,
+        "installedBuild": "fed59ef0e6434f4dec5c590e8f785ac1df5370082e9f917f751caf651dacf7e6",
+        "manifestBuild": "fed59ef0e6434f4dec5c590e8f785ac1df5370082e9f917f751caf651dacf7e6",
+        "dependencyImports": [
+          {
+            "name": "express",
+            "loaded": false,
+            "code": "MODULE_NOT_FOUND",
+            "message": "Cannot find module 'body-parser'"
+          },
+          {
+            "name": "ws",
+            "loaded": true
+          },
+          {
+            "name": "yaml",
+            "loaded": true
+          }
+        ],
+        "expressVersion": "5.2.1",
+        "expressRequiredDependencies": [
+          "accepts",
+          "body-parser",
+          "content-disposition",
+          "content-type",
+          "cookie",
+          "cookie-signature",
+          "debug",
+          "depd",
+          "encodeurl",
+          "escape-html",
+          "etag",
+          "finalhandler",
+          "fresh",
+          "http-errors",
+          "merge-descriptors",
+          "mime-types",
+          "on-finished",
+          "once",
+          "parseurl",
+          "proxy-addr",
+          "qs",
+          "range-parser",
+          "router",
+          "send",
+          "serve-static",
+          "statuses",
+          "type-is",
+          "vary"
+        ],
+        "platform": "darwin",
+        "scope": "Clean isolated offline installation on Darwin; pure package dependency resolution, not actual Windows running identity"
+      }
+    ],
+    "modelOrDeviceActions": 0,
+    "listenersStarted": 0,
+    "verdict": "FAIL"
+  },
+  "missingArchiveDependencies": [
+    {
+      "role": "v1-compat",
+      "expressVersion": "5.2.1",
+      "requiredDirectDependencies": 28,
+      "missingDirectDependencies": [
+        "accepts",
+        "body-parser",
+        "content-disposition",
+        "content-type",
+        "cookie",
+        "cookie-signature",
+        "debug",
+        "depd",
+        "encodeurl",
+        "escape-html",
+        "etag",
+        "finalhandler",
+        "fresh",
+        "http-errors",
+        "merge-descriptors",
+        "mime-types",
+        "on-finished",
+        "once",
+        "parseurl",
+        "proxy-addr",
+        "qs",
+        "range-parser",
+        "router",
+        "send",
+        "serve-static",
+        "statuses",
+        "type-is",
+        "vary"
+      ],
+      "bodyParserMembers": 0
+    },
+    {
+      "role": "v2",
+      "expressVersion": "5.2.1",
+      "requiredDirectDependencies": 28,
+      "missingDirectDependencies": [
+        "accepts",
+        "body-parser",
+        "content-disposition",
+        "content-type",
+        "cookie",
+        "cookie-signature",
+        "debug",
+        "depd",
+        "encodeurl",
+        "escape-html",
+        "etag",
+        "finalhandler",
+        "fresh",
+        "http-errors",
+        "merge-descriptors",
+        "mime-types",
+        "on-finished",
+        "once",
+        "parseurl",
+        "proxy-addr",
+        "qs",
+        "range-parser",
+        "router",
+        "send",
+        "serve-static",
+        "statuses",
+        "type-is",
+        "vary"
+      ],
+      "bodyParserMembers": 0
+    }
+  ],
+  "archiveAndManifestPinsUnchanged": true,
+  "productModified": false,
+  "modelsOrPhonesRun": 0,
+  "listenersStarted": 0,
+  "pushedOrDeployed": false,
+  "negativeAttemptNotes": [
+    "Initial installation-change assertion incorrectly expected normalization of all CRLF lines. Actual npm only normalizes the bin shebang newline; source/installed pins match that exact one-newline transformation.",
+    "The first V1 dependency import command stopped with exit 1 on missing body-parser; installed files and logs were preserved, then V2 was independently installed and both dependency failures were recorded."
+  ],
+  "limits": [
+    "API verifier launches extracted scripts/v2-preservation.mjs under network/child-helper denial; it does not import backend/app.mjs or prove actual API service startup.",
+    "Fresh installation and dependency import ran on Darwin with Node v24.14.0. The archive itself lacks these pure JavaScript dependencies in both roles; no platform override or Mac runtime adaptation was used.",
+    "No actual Windows SDK, new-kernel restart, installed/running Windows client, Linux deployment or G1-G5 full-chain validation.",
+    "No UI behavior, full transitive SCA or paid model/device testing.",
+    "R Git push/readback and 87 operations tests are coordinator/author evidence, not rerun or counted here."
+  ]
+}
