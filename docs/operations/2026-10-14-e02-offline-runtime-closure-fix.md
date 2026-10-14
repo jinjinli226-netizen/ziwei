@@ -10,6 +10,8 @@ The new verifier installs the actual client TGZ into an external disposable pref
 
 The verifier links extracted API node_modules to **the installed client's node_modules**, namely `<prefix>/node_modules/ziwei/node_modules`. It actually loads Express/ws/yaml and extracted backend/app.mjs, instantiates createApp with memory:true, scheduler disabled, explicit disposable encryption key and object path, and closes that in-memory DB. A process guard rejects listen, outbound sockets/fetch and helper processes. No runtime service is started and no formal data or HOME/config/auth is used. This is package runtime verification, not Mac adaptation or actual server/Windows deployment acceptance.
 
+The same cold-installed client then executes its actual ziwei_user version entry under a guard rejecting network, listeners and helper processes, with disposable HOME and no connection startup. Its output must match the installed package version.
+
 Only after this succeeds does the builder write offlineDependenciesBundled and offlineRuntimeClosure metadata into each manifest. The receipts pin both archives, installed source build, dependency package JSON hashes/versions/edges and the actual API factory result. Client source and installed source identities remain separate; the verifier does not normalize arbitrary source bytes to make identities match.
 
 ## Observed evidence and reproduction
