@@ -39,6 +39,13 @@ try {
 try {
  $ziweiPhase='SOURCE_WINDOWS_NATIVE_UNREADABLE'
  $ziweiInput=[Console]::In.ReadToEnd()|Microsoft.PowerShell.Utility\ConvertFrom-Json
+ if($ziweiInput.kind -eq 'os-boot') {
+  $ziweiBootTime=(CimCmdlets\Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime()
+  $ziweiBootHasher=[Security.Cryptography.SHA256]::Create()
+  try{$ziweiBootId=[BitConverter]::ToString($ziweiBootHasher.ComputeHash([Text.Encoding]::UTF8.GetBytes($ziweiBootTime.ToString('o')))).Replace('-','').ToLowerInvariant()}finally{$ziweiBootHasher.Dispose()}
+  [pscustomobject]@{bootId=$ziweiBootId;startedAt=$ziweiBootTime.ToString('yyyy-MM-ddTHH:mm:ss.fffZ')}|Microsoft.PowerShell.Utility\ConvertTo-Json -Compress
+  exit 0
+ }
  $ziweiTargetId=[int]$ziweiInput.pid
  if($ziweiTargetId -lt 1 -or $ziweiTargetId -eq $PID){throw 'SOURCE_WINDOWS_PID_INVALID'}
  $ziweiRecord=CimCmdlets\Get-CimInstance Win32_Process -Filter "ProcessId = $ziweiTargetId"
