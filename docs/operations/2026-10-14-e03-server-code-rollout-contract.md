@@ -85,3 +85,8 @@ macOS, Node v24.14.0:
 The tests use isolated package/SQLite/source fixtures, project lockfile dependencies, and an explicitly separate constructor IO seam for the simulated already-open DB handle. They are not Mac native adaptation or actual Linux handle/deployment evidence. The compatibility fixture uses the role-patched API code; actual builder archives and Linux same-batch compatibility startup require Q/R's separate package validation. Unit checks cover wrong-path/no-file effects; missing config preserving DB/WAL/SHM; source/approval/handle mismatch; old/missing/spoofed devices; zero-action Bot draft; pure pause; fixed scheduler; original expired+ACK row bytes/debt; legitimate results; current document object/tombstone preservation; repository branding and forged-receiver retry/webhook refusal.
 
 No local listener, real model/phone, Windows restart, production stop or server deployment was performed by E03. R remains the sole publisher/operator; user has already authorized server deployment after finite package acceptance.
+
+2026-10-14 a1d69c3 四项收尾：冻结 V1 overlay 同步 management bootstrap 拒绝、事件不续租、草稿设备选择；repository 使用构造器私有来源和最终函数身份校验，公开 guard 不可为复制对象登记。
+服务器模式模块及其 CLI 保留于 API/shared，移出客户端显式 files，以免引入服务器 repository 依赖。
+有限验证：`node --test test/server-code-rollout.test.mjs` 8/8；包含冻结 V1 实际源码 overlay 锚点与 bootstrap 调用，以及复制/descriptor复制/替换存储函数负例。草稿分支和事件续租目前为严格源码锚点证据，实际 V1 Linux 运行探针仍由 Q 完成。
+本提交未建包、未停止或切换生产；R 必须创建全新批次，禁止复用 a1d69c3 的 NO_GO 产物。

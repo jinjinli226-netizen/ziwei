@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import {PRODUCT_ROLE,FROZEN_VERSIONS} from './version-preservation.mjs';
 import {readDatabaseSnapshot} from './preservation-native-databases.mjs';
 import {readApiDatabaseConnectionIdentity} from './preservation-source-namespace.mjs';
+import {isRepositoryConstructedForRollout} from './repository.mjs';
 
 const ROOT=path.resolve(import.meta.dirname,'..');
 const states=new WeakMap(),repositories=new WeakMap();
@@ -64,7 +65,7 @@ export function preflightServerCodeRollout(options={}){
  const present=readDatabaseSnapshot(filename,db=>table(db,'server_code_rollout'));
  if(present&&!approved)fail('SERVER_CODE_ROLLOUT_REQUIRED','该数据库已绑定服务器代码升级模式；必须保留原批准配置和同批兼容代码');return approved;
 }
-export function assertServerCodeRolloutRepository(repo,options={}){const state=states.get(repo.db),approved=configuration(options);if((approved||table(repo.db,'server_code_rollout'))&&(!state||repositories.get(repo)!==state))fail('SERVER_CODE_ROLLOUT_REPOSITORY','必须先用同一批准模式构造 repository，不能后装门禁或替换存储');if(state&&(!approved||approved.pin!==state.configSha256))fail('SERVER_CODE_ROLLOUT_REQUIRED');return repo;}
+export function assertServerCodeRolloutRepository(repo,options={}){const state=states.get(repo.db),approved=configuration(options);if((approved||table(repo.db,'server_code_rollout'))&&(!state||repositories.get(repo)!==state||!isRepositoryConstructedForRollout(repo,state)))fail('SERVER_CODE_ROLLOUT_REPOSITORY','必须先用同一批准模式构造 repository，不能后装门禁或替换存储');if(state&&(!approved||approved.pin!==state.configSha256))fail('SERVER_CODE_ROLLOUT_REQUIRED');return repo;}
 /** Must run before preservation registration or any startup migration writes. */
 export function initializeServerCodeRollout(db,options={}, {readConnectionIdentity=readApiDatabaseConnectionIdentity}={}){
  const saved=table(db,'server_code_rollout')?db.prepare('SELECT * FROM server_code_rollout WHERE singleton=1').get():null,approved=configuration(options);
@@ -90,7 +91,7 @@ export function installServerCodeRolloutActionGuards(db){
  db.exec(`CREATE TRIGGER IF NOT EXISTS server_code_rollout_action_update BEFORE UPDATE ON a2a_actions WHEN NOT ((${same} AND OLD.status='acked' AND NEW.status IN ('succeeded','failed')) OR (${noop})) BEGIN SELECT RAISE(ABORT,'SERVER_CODE_ROLLOUT_ACTION_PRESERVED'); END`);
 }
 export function guardServerCodeRolloutRepository(repo){
- const state=states.get(repo.db);if(!state)return repo;if(repositories.get(repo)===state)return repo;if(Object.hasOwn(repo,'serverCodeRollout'))fail('SERVER_CODE_ROLLOUT_REPOSITORY');Object.defineProperty(repo,'serverCodeRollout',{value:state});repositories.set(repo,state);
+ const state=states.get(repo.db);if(!state)return repo;if(!isRepositoryConstructedForRollout(repo,state))fail('SERVER_CODE_ROLLOUT_REPOSITORY');if(repositories.get(repo)===state)return repo;if(Object.hasOwn(repo,'serverCodeRollout'))fail('SERVER_CODE_ROLLOUT_REPOSITORY');Object.defineProperty(repo,'serverCodeRollout',{value:state});repositories.set(repo,state);
  const wrap=(name,check)=>{if(typeof repo[name]!=='function')return;const original=repo[name];repo[name]=function(...args){check(...args);return original.apply(repo,args);};};
  for(const name of ['createA2AAction','authorizeActionExecution','authorizeBotStart','authorizeBotGateway','receiveBotGateway','botGatewayDelivery','deviceAction','dispatchBotCollaboration','runAutomation','queueAutomationRetry','createDeviceDirectoryAction','createConversationDirectoryAction','requestManagementMcpRetry','createA2ATask'])wrap(name,()=>state.assertExecution());
  wrap('createTask',(_slug,input={})=>{if(input.execute===true||input.runtime||input.model)state.assertExecution();});

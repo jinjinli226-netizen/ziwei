@@ -26,6 +26,22 @@ import {botReasoningProof} from '../src/hermes-bot-reasoning.mjs';
 import { botFailure } from '../src/hermes-bot-config.mjs';
 import { CREATOR_BOT_GUIDANCE } from './employees/creator-template.mjs';
 
+// Constructor provenance is private; exported queries cannot register callers.
+const repositoryOrigins=new WeakMap();
+export function isRepositoryConstructedForRollout(repo,state){
+ const origin=repositoryOrigins.get(repo),descriptors=Object.getOwnPropertyDescriptors(repo);
+ if(!origin||origin.rollout!==state||descriptors.db?.value!==origin.db)return false;
+ if(!origin.methods)return true;
+ const methods=Object.entries(descriptors).filter(([,row])=>typeof row.value==='function');
+ return methods.length===origin.methods.size&&methods.every(([name,row])=>origin.methods.get(name)===row.value);
+}
+function finishRepository(repo,rollout){
+ const origin={db:repo.db,rollout,methods:null};repositoryOrigins.set(repo,origin);
+ guardServerCodeRolloutRepository(repo);
+ origin.methods=new Map(Object.entries(Object.getOwnPropertyDescriptors(repo)).filter(([,row])=>typeof row.value==='function').map(([name,row])=>[name,row.value]));
+ return repo;
+}
+// End constructor provenance.
 const now = () => new Date().toISOString();
 const id = prefix => `${prefix}_${crypto.randomUUID()}`;
 const hashSecret = value => crypto.createHash('sha256').update(String(value || '')).digest('hex');
@@ -528,7 +544,7 @@ export function createRepository(options = {}, io={}) {
     const workspaceRow = db.prepare('SELECT slug FROM workspaces WHERE id=?').get(task.workspace_id);
     if (workspaceRow) audit(workspaceRow.slug, 'ziwei_user', 'task.execution.started', { taskId, from:task.state, to:'in_progress' });
   };
-  return guardServerCodeRolloutRepository(guardRepository({
+  return finishRepository(guardRepository({
     db,
     withEmployeeTemplateTransaction(create) {
       // This service owns its commit so notifications cannot escape a rollback.
@@ -2113,5 +2129,5 @@ export function createRepository(options = {}, io={}) {
       if (actorUserId && payload.userId && String(payload.userId) !== String(actorUserId)) throw new Error('无权查看该 A2A action');
       return actionView(row, { includeEvents: true });
     }
-  }, options.preservation));
+  }, options.preservation),rollout);
 }

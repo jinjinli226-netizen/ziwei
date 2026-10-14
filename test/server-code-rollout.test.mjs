@@ -5,6 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {pathToFileURL} from 'node:url';
+import {execFileSync} from 'node:child_process';
+import {v1Overlay} from '../scripts/build-preservation-packages.mjs';
 import {productionSemanticIssues} from '../backend/production-preservation.mjs';
 import {FROZEN_VERSIONS} from '../backend/version-preservation.mjs';
 const ROOT=path.resolve(import.meta.dirname,'..'),sha=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
@@ -73,4 +75,28 @@ test('borrowed completion methods cannot queue retries or webhooks with a spoofe
  f.repo.db.prepare('INSERT INTO automation_runs(id,automation_id,workspace_id,status,mode,created_at,max_attempts) VALUES(?,?,?,?,?,?,?)').run(runId,auto.id,auto.workspace_id,'running','manual',new Date().toISOString(),3);
  let dispatched=0;const receiver={queueAutomationRetry(){dispatched++;return{queued:true};},queueWebhookDelivery(){dispatched++;return{queued:true};},dispatchWebhookDeliveries(){dispatched++;}};
  const result=f.repo.completeAutomationRun.call(receiver,runId,{status:'failed',error:'original failure'});assert.equal(dispatched,0);assert.equal(result.status,'failed');assert.equal(result.attempt,0);assert.equal(result.next_retry_at,null);
+});
+
+test('public guard cannot brand copied, descriptor-copied or changed storage closures',async t=>{
+ const f=await fixture(t);let foreign=0;const foreignWrite=()=>{foreign++;};
+ assert.equal(f.api.guardServerCodeRolloutRepository(f.repo),f.repo);
+ for(const copy of [{...f.repo,createDocument:foreignWrite},Object.create(Object.getPrototypeOf(f.repo),Object.getOwnPropertyDescriptors(f.repo)),{db:f.repo.db,createDocument:foreignWrite}]){
+  assert.throws(()=>f.api.guardServerCodeRolloutRepository(copy),{code:'SERVER_CODE_ROLLOUT_REPOSITORY'});
+  assert.throws(()=>f.appModule.createApp({...f.options,repository:copy,memory:true}),{code:'SERVER_CODE_ROLLOUT_REPOSITORY'});
+ }
+ const original=f.repo.createDocument;f.repo.createDocument=foreignWrite;
+ assert.throws(()=>f.api.guardServerCodeRolloutRepository(f.repo),{code:'SERVER_CODE_ROLLOUT_REPOSITORY'});
+ assert.throws(()=>f.appModule.createApp({...f.options,repository:f.repo,memory:true}),{code:'SERVER_CODE_ROLLOUT_REPOSITORY'});
+ f.repo.createDocument=original;assert.equal(foreign,0);
+});
+test('frozen V1 overlay has strict event lease and draft anchors and refuses management bootstrap',async t=>{
+ const f=await fixture(t),directory=path.join(f.base,'actual-v1'),archive=path.join(f.base,'v1.tar');fs.mkdirSync(directory);
+ execFileSync('git',['archive','--format=tar',FROZEN_VERSIONS.v1,'--output='+archive],{cwd:ROOT});execFileSync('tar',['-xf',archive,'-C',directory]);
+ v1Overlay(directory);
+ const source=fs.readFileSync(path.join(directory,'backend/repository.mjs'),'utf8');
+ assert.match(source,/if\(!rollout\)db\.prepare\("UPDATE a2a_actions SET expires_at=\?/);
+ assert.match(source,/return finishRepository\(guardRepository/);
+ const management=fs.readFileSync(path.join(directory,'backend/management.mjs'),'utf8');assert.match(management,/if\(repo\.serverCodeRollout\)\{const device=discovery/);
+ const bootstrap=await import(pathToFileURL(path.join(directory,'backend/management-bootstrap.mjs')));
+ assert.throws(()=>bootstrap.createManagementBootstrap(f.repo,{memory:true}).bootstrap('test-111',{workspace:'test-111'}),{code:'SERVER_CODE_ROLLOUT_CLIENT_REQUIRED'});
 });
