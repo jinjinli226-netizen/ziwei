@@ -50,6 +50,7 @@ export function createManagementService(repo) {
     const runtimeName = String(input.runtime || '').trim();
     if (!runtimeName) fail('必须明确 runtime，例如 Codex 或 Hermes；不会自动替换运行时。', 'RUNTIME_REQUIRED');
     const deviceId = deviceInput(input);
+    if(repo.serverCodeRollout){const device=discovery(slug,{deviceId,userId:context.actorUserId,deviceScope:context.deviceScope}).devices[0];if(!deviceId||!device)fail('目标电脑必须属于当前工作区','DEVICE_NOT_IN_WORKSPACE');if(context.deviceScope&&context.deviceScope!==deviceId)fail('目标电脑不属于当前设备身份','DEVICE_NOT_IN_WORKSPACE');return {runtime:runtimeName,targetDeviceId:deviceId,runtimeProfile:normalizeRuntimeProfile(profileInput(input)),executionAdmission:repo.serverCodeRollout.status()};}
     if (!deviceId) fail('必须选择当前工作区的目标电脑 targetDeviceId，请先调用 ziwei_discover_environment。', 'DEVICE_REQUIRED');
     const device = discovery(slug, { deviceId, userId: context.actorUserId, deviceScope: context.deviceScope }).devices[0];
     if (!device) fail('目标设备不属于当前工作区，请重新发现并选择工作区电脑。', 'DEVICE_NOT_IN_WORKSPACE');

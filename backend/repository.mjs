@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { guardRepository } from './version-preservation.mjs';
+import {serverCodeRolloutFor,guardServerCodeRolloutRepository} from './server-code-rollout.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { openDatabase } from './db.mjs';
@@ -305,10 +306,11 @@ const ownDevice = devices => {
     || null;
 };
 
-export function createRepository(options = {}) {
-  const db = openDatabase(options);
+export function createRepository(options = {}, io={}) {
+  const db = openDatabase(options,io);
   const allowLocalNetwork = options.memory === true;
-  const employeeEnvKey = encryptionKey(options);
+  const rollout=serverCodeRolloutFor(db);if(rollout)options={...options,objectStoreDir:rollout.objectStoreDir};
+  const employeeEnvKey = rollout?rollout.environmentKey():encryptionKey(options);
   const objectStore = objectStoreFromOptions(options);
   const discover = options.discoverLocalVersions || discoverLocalVersions;
   const workspace = slug => db.prepare('SELECT * FROM workspaces WHERE slug = ?').get(slug);
@@ -485,7 +487,7 @@ export function createRepository(options = {}) {
     const row = candidates.find(candidate => parse(candidate.payload_json)?.conversationId === conversationId);
     if (!row) return null;
     let current = row;
-    if (['pending','acked'].includes(current.status) && current.expires_at && Date.parse(current.expires_at) <= Date.now() && db.prepare('SELECT ziwei_v2_admitted(?) admitted').get(current.id).admitted===1) {
+    if (!rollout && ['pending','acked'].includes(current.status) && current.expires_at && Date.parse(current.expires_at) <= Date.now() && db.prepare('SELECT ziwei_v2_admitted(?) admitted').get(current.id).admitted===1) {
       const timestamp = now();
       db.prepare("UPDATE a2a_actions SET status='expired',completed_at=? WHERE id=? AND ziwei_v2_admitted(id)=1 AND status IN ('pending','acked')").run(timestamp, current.id);
       current = { ...current, status:'expired', completed_at:timestamp };
@@ -526,7 +528,7 @@ export function createRepository(options = {}) {
     const workspaceRow = db.prepare('SELECT slug FROM workspaces WHERE id=?').get(task.workspace_id);
     if (workspaceRow) audit(workspaceRow.slug, 'ziwei_user', 'task.execution.started', { taskId, from:task.state, to:'in_progress' });
   };
-  return guardRepository({
+  return guardServerCodeRolloutRepository(guardRepository({
     db,
     withEmployeeTemplateTransaction(create) {
       // This service owns its commit so notifications cannot escape a rollback.
@@ -769,7 +771,7 @@ export function createRepository(options = {}) {
       // and has reported/located it on this computer.  No vendor catalog is
       // substituted when discovery has no answer; the UI can accept a manual
       // model ID in that case.
-      const discovery = device?.status === 'online' ? discover() : null;
+      const discovery = !rollout && device?.status === 'online' ? discover() : null;
       const metadata = Object.fromEntries(db.prepare('SELECT * FROM runtime_metadata WHERE workspace_id=?').all(ws.id).map(item => [item.runtime_name, item]));
       const mergedDiscovery = discovery || { agents: {} };
       for (const [name, item] of Object.entries(metadata)) {
@@ -1087,8 +1089,8 @@ export function createRepository(options = {}) {
       const run=db.prepare('SELECT * FROM automation_runs WHERE id=?').get(runId); if(!run) throw new Error('Automation run not found'); if(['completed','failed'].includes(run.status)) return {...run,duplicate:true,result:jsonObject(run.result_json)};
       if(botUncertain(input.result)) {db.prepare("UPDATE automation_runs SET status='uncertain',result_json=?,error=?,message=?,finished_at=? WHERE id=?").run(JSON.stringify(input.result),input.error || '执行未确认','执行不确定；只允许查询原回执，不重跑业务',now(),runId);return {...db.prepare('SELECT * FROM automation_runs WHERE id=?').get(runId),result:input.result};}
       const status=String(input.status || (input.error ? 'failed' : 'completed')); if(!['completed','failed'].includes(status)) throw new Error('Automation run status must be completed or failed'); const result=input.result === undefined ? null : JSON.stringify(input.result); const error=input.error ? String(input.error) : null; const finished=now();
-      if(status==='failed' && !db.prepare('SELECT 1 FROM bot_routines WHERE automation_id=?').get(run.automation_id) && Number(run.attempt || 0)+1 < Number(run.max_attempts || 1)) { const nextAttempt=Number(run.attempt || 0)+1; const auto=db.prepare('SELECT * FROM automations WHERE id=?').get(run.automation_id); const retryAt=new Date(Date.now()+Number(auto?.retry_backoff_ms || 1000)*2**Math.max(0,nextAttempt-1)).toISOString(); db.prepare("UPDATE automation_runs SET status='retrying',error=?,result_json=?,attempt=?,next_retry_at=?,message=?,finished_at=? WHERE id=?").run(error,result,nextAttempt,retryAt,'执行失败，已安排重试',null,runId); return this.queueAutomationRetry(runId,retryAt); }
-      db.prepare('UPDATE automation_runs SET status=?,error=?,result_json=?,finished_at=?,message=? WHERE id=?').run(status,error,result,finished,status==='completed'?'执行完成':'执行失败',runId); const ws=db.prepare('SELECT slug FROM workspaces WHERE id=?').get(run.workspace_id); audit(ws.slug,'ziwei_user',`automation.${status}`,{automationId:run.automation_id,runId,error}); const delivery=this.queueWebhookDelivery(runId,status,input.result,error); if (delivery) void this.dispatchWebhookDeliveries(); return {...db.prepare('SELECT * FROM automation_runs WHERE id=?').get(runId),result:jsonObject(result),webhook:delivery};
+      if(!rollout && status==='failed' && !db.prepare('SELECT 1 FROM bot_routines WHERE automation_id=?').get(run.automation_id) && Number(run.attempt || 0)+1 < Number(run.max_attempts || 1)) { const nextAttempt=Number(run.attempt || 0)+1; const auto=db.prepare('SELECT * FROM automations WHERE id=?').get(run.automation_id); const retryAt=new Date(Date.now()+Number(auto?.retry_backoff_ms || 1000)*2**Math.max(0,nextAttempt-1)).toISOString(); db.prepare("UPDATE automation_runs SET status='retrying',error=?,result_json=?,attempt=?,next_retry_at=?,message=?,finished_at=? WHERE id=?").run(error,result,nextAttempt,retryAt,'执行失败，已安排重试',null,runId); return this.queueAutomationRetry(runId,retryAt); }
+      db.prepare('UPDATE automation_runs SET status=?,error=?,result_json=?,finished_at=?,message=? WHERE id=?').run(status,error,result,finished,status==='completed'?'执行完成':'执行失败',runId); const ws=db.prepare('SELECT slug FROM workspaces WHERE id=?').get(run.workspace_id); audit(ws.slug,'ziwei_user',`automation.${status}`,{automationId:run.automation_id,runId,error}); const delivery=rollout?null:this.queueWebhookDelivery(runId,status,input.result,error); if (delivery) void this.dispatchWebhookDeliveries(); return {...db.prepare('SELECT * FROM automation_runs WHERE id=?').get(runId),result:jsonObject(result),webhook:delivery};
     },
     queueAutomationRetry(runId, retryAt = now()) { const run=db.prepare('SELECT * FROM automation_runs WHERE id=?').get(runId); if(!run) throw new Error('Automation run not found'); if(run.status==='uncertain' || db.prepare('SELECT 1 FROM bot_routines WHERE automation_id=?').get(run.automation_id))throw botFailure('BOT_RETRY_FORBIDDEN','Bot Routine 不自动重试；先核对原执行证据'); const auto=db.prepare('SELECT * FROM automations WHERE id=?').get(run.automation_id); const ws=db.prepare('SELECT slug FROM workspaces WHERE id=?').get(run.workspace_id); const action=this.createA2AAction(ws.slug,{type:'automation.execute',dedupeKey:`automation:${run.automation_id}:${run.id}:${run.attempt}`,payload:{automationId:run.automation_id,runId:run.id,prompt:auto.prompt,outputMode:auto.output_mode,webhookUrl:auto.webhook_url,attempt:run.attempt}}); db.prepare('UPDATE automation_runs SET status=\'queued\',action_id=?,next_retry_at=? WHERE id=?').run(action.id,retryAt,runId); return {...db.prepare('SELECT * FROM automation_runs WHERE id=?').get(runId),action_id:action.id}; },
     listMembers(slug) { const ws=workspace(slug); if (!ws) throw new Error('Workspace not found'); return db.prepare('SELECT * FROM members WHERE workspace_id=? ORDER BY joined_at').all(ws.id); },
@@ -1991,7 +1993,7 @@ export function createRepository(options = {}) {
             event = { id:eventId, action_id:actionId, type, message, data, created_at:timestamp };
             db.prepare('INSERT INTO a2a_action_events(id,action_id,type,message,data_json,created_at) VALUES(?,?,?,?,?,?)').run(event.id,event.action_id,type,message,dataJson,event.created_at);
             const leaseExpiry = new Date(Date.parse(timestamp) + a2aExecutionTimeoutMs(parse(row.payload_json)) + A2A_EXECUTION_LEASE_BUFFER_MS).toISOString();
-            db.prepare("UPDATE a2a_actions SET expires_at=? WHERE id=? AND ziwei_v2_admitted(id)=1 AND status IN ('pending','acked')").run(leaseExpiry,actionId);
+            if(!rollout)db.prepare("UPDATE a2a_actions SET expires_at=? WHERE id=? AND ziwei_v2_admitted(id)=1 AND status IN ('pending','acked')").run(leaseExpiry,actionId);
             const ws = db.prepare('SELECT slug FROM workspaces WHERE id=?').get(row.workspace_id);
             if (ws) audit(ws.slug,'ziwei_user','a2a.action.event',{actionId,type,message},deferredEvents);
           }
@@ -2076,7 +2078,7 @@ export function createRepository(options = {}) {
         if(status==='succeeded'&&payload.collaborationManifest&&payload.collaborationManifest.mode!=='group'){
           const receipt=result?.nativeOperation || result?.result?.nativeOperation;
           if(receipt?.status!=='succeeded'||receipt.resource!=='collaboration'||receipt.employeeId!==payload.employeeId||receipt.revision!==payload.hermesBot.revision)throw botFailure('BOT_COLLABORATION_RECEIPT_REQUIRED','原生协作回执不匹配');
-          try{assertBotExecution(db,row.workspace_id,payload,{actionId});const actions=this.dispatchBotCollaboration(ws.slug,{...payload.collaborationManifest,sourceActionId:actionId},payload.nativeOperation.requestId);result={...result,collaboration:{actions:actions.map(action=>({id:action.id,status:action.status,employeeId:action.payload.employeeId})),groupId:payload.collaborationManifest.groupId}};}catch(dispatchError){status='failed';error=dispatchError.code || 'BOT_COLLABORATION_DISPATCH_FAILED';result={...result,collaboration:{dispatched:false,code:error}};}
+          if(!rollout)try{assertBotExecution(db,row.workspace_id,payload,{actionId});const actions=this.dispatchBotCollaboration(ws.slug,{...payload.collaborationManifest,sourceActionId:actionId},payload.nativeOperation.requestId);result={...result,collaboration:{actions:actions.map(action=>({id:action.id,status:action.status,employeeId:action.payload.employeeId})),groupId:payload.collaborationManifest.groupId}};}catch(dispatchError){status='failed';error=dispatchError.code || 'BOT_COLLABORATION_DISPATCH_FAILED';result={...result,collaboration:{dispatched:false,code:error}};}
         }
         db.prepare('UPDATE a2a_actions SET status=?,completed_at=?,result_json=?,error=? WHERE id=?').run(status, timestamp, result === undefined ? null : JSON.stringify(result), error, actionId);
         if(payload.hermesBot) {
@@ -2111,5 +2113,5 @@ export function createRepository(options = {}) {
       if (actorUserId && payload.userId && String(payload.userId) !== String(actorUserId)) throw new Error('无权查看该 A2A action');
       return actionView(row, { includeEvents: true });
     }
-  }, options.preservation);
+  }, options.preservation));
 }

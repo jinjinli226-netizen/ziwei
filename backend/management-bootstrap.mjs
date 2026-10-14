@@ -44,6 +44,7 @@ export function createManagementBootstrap(repo, options = {}) {
     return `${prefix}${body}.${crypto.createHmac('sha256', key).update(prefix + body).digest('base64url')}`;
   };
   const bootstrap = (workspace, credential) => {
+    repo.serverCodeRollout?.assertExecution();
     if (!credential || credential.workspace !== workspace) fail('需要当前工作区有效的电脑连接凭据', 'MANAGEMENT_DEVICE_UNAUTHORIZED');
     contextFor(credential.credentialId, credential.deviceId, workspace);
     const payload = { audience, workspace, deviceId: credential.deviceId, credentialId: credential.credentialId, expiresAt: new Date(now() + ttl).toISOString() };

@@ -11,27 +11,30 @@ const root=path.resolve(import.meta.dirname,'..'),sha=bytes=>createHash('sha256'
 const run=(command,args,cwd=root)=>execFileSync(command,args,{cwd,encoding:'utf8',windowsHide:true,maxBuffer:20*1024*1024});
 function replace(text,needle,value,file){const count=text.split(needle).length-1;if(count!==1)throw new Error(`Baseline anchor mismatch ${file}: ${count}`);return text.replace(needle,value);}
 function patch(file,apply){fs.writeFileSync(file,apply(fs.readFileSync(file,'utf8').replace(/\r\n/g,'\n')));}
-const shared=['daemon/private-preservation-identity.mjs','backend/version-preservation.mjs','backend/preservation-native-evidence.mjs','backend/preservation-native-databases.mjs','backend/preservation-legacy-archive.mjs','backend/preservation-legacy-source.mjs','backend/preservation-source-namespace.mjs','backend/preservation-legacy-coverage.mjs','backend/preservation-legacy-integration.mjs','backend/preservation-source-native-windows.ps1','backend/production-preservation.mjs','scripts/production-source-proof.mjs','src/execution-admission.mjs','src/hermes-profile-binding.py','scripts/preservation-profile-patch.mjs','scripts/client-lifecycle.mjs','scripts/v2-preservation.mjs','scripts/verify-preservation-packages.mjs'];
+const shared=['backend/server-code-rollout.mjs','backend/server.mjs','scripts/server-code-rollout.mjs','daemon/private-preservation-identity.mjs','backend/version-preservation.mjs','backend/preservation-native-evidence.mjs','backend/preservation-native-databases.mjs','backend/preservation-legacy-archive.mjs','backend/preservation-legacy-source.mjs','backend/preservation-source-namespace.mjs','backend/preservation-legacy-coverage.mjs','backend/preservation-legacy-integration.mjs','backend/preservation-source-native-windows.ps1','backend/production-preservation.mjs','scripts/production-source-proof.mjs','src/execution-admission.mjs','src/hermes-profile-binding.py','scripts/preservation-profile-patch.mjs','scripts/client-lifecycle.mjs','scripts/v2-preservation.mjs','scripts/verify-preservation-packages.mjs'];
 function v1Overlay(directory){
-  patch(path.join(directory,'backend/db.mjs'),text=>{
-    text=replace(text,"import path from 'node:path';","import path from 'node:path';\nimport {createPreservation} from './version-preservation.mjs';",'db import');
-    text=replace(text,"export function openDatabase({ memory = false, filename = path.join(ROOT, 'data', 'ziwei.sqlite') } = {}) {","export function openDatabase({ memory = false, filename = process.env.ZIWEI_DB_FILE || path.join(ROOT, 'data', 'ziwei.sqlite'), preservation } = {}) {",'db path');
-    return replace(text,"db.exec('PRAGMA busy_timeout = 5000');","db.exec('PRAGMA busy_timeout = 5000');\n  createPreservation(db,preservation);",'db registration');
-  });
+  fs.copyFileSync(path.join(root,'backend/db.mjs'),path.join(directory,'backend/db.mjs'));
   patch(path.join(directory,'backend/repository.mjs'),text=>{
-    text=replace(text,"import crypto from 'node:crypto';","import crypto from 'node:crypto';\nimport {guardRepository} from './version-preservation.mjs';",'repository import');
-    text=replace(text,'  return {\n    db,','  return guardRepository({\n    db,','repository return');
-    text=replace(text,'  };\n}\n','  },options.preservation);\n}\n','repository end');
+    text=replace(text,"import crypto from 'node:crypto';","import crypto from 'node:crypto';\nimport {guardRepository} from './version-preservation.mjs';\nimport {serverCodeRolloutFor,guardServerCodeRolloutRepository} from './server-code-rollout.mjs';",'repository import');
+    text=replace(text,'  return {\n    db,','  return guardServerCodeRolloutRepository(guardRepository({\n    db,','repository return');
+    text=replace(text,'  };\n}\n','  },options.preservation));\n}\n','repository end');
+    text=replace(text,'  const employeeEnvKey = encryptionKey(options);','  const rollout=serverCodeRolloutFor(db);if(rollout)options={...options,objectStoreDir:rollout.objectStoreDir};\n  const employeeEnvKey=rollout?rollout.environmentKey():encryptionKey(options);','rollout key');
+    text=text.replace("if(status==='failed' && Number(run.attempt","if(!rollout && status==='failed' && Number(run.attempt");
+    text=text.replace("const discovery = device?.status === 'online' ? discover() : null;","const discovery = !rollout && device?.status === 'online' ? discover() : null;");
+    text=text.replace('const delivery=this.queueWebhookDelivery(runId,status,input.result,error);','const delivery=rollout?null:this.queueWebhookDelivery(runId,status,input.result,error);');
     text=text.replaceAll("WHERE id=? AND status IN ('pending','acked')","WHERE id=? AND ziwei_v2_admitted(id)=1 AND status IN ('pending','acked')");
     text=replace(text,"WHERE workspace_id=? AND status IN ('pending','acked') AND expires_at","WHERE workspace_id=? AND ziwei_v2_admitted(id)=1 AND status IN ('pending','acked') AND expires_at",'poll expiry');
-    text=replace(text,"Date.parse(current.expires_at) <= Date.now()) {","Date.parse(current.expires_at) <= Date.now() && db.prepare('SELECT ziwei_v2_admitted(?) admitted').get(current.id).admitted===1) {",'history expiry');
+    text=replace(text,"Date.parse(current.expires_at) <= Date.now()) {","Date.parse(current.expires_at) <= Date.now() && !rollout && db.prepare('SELECT ziwei_v2_admitted(?) admitted').get(current.id).admitted===1) {",'history expiry');
     text=replace(text,"WHERE status IN ('queued','retrying') AND (next_retry_at","WHERE ziwei_v2_automation_admitted(automation_id)=1 AND status IN ('queued','retrying') AND (next_retry_at",'webhook dispatch');
     text=replace(text,"for (const item of items) due.push(this.runAutomation(item.id,'scheduled'));","for (const item of items) if(db.prepare('SELECT ziwei_v2_automation_admitted(?) admitted').get(item.id).admitted===1)due.push(this.runAutomation(item.id,'scheduled'));",'scheduler');
     return text;
   });
   patch(path.join(directory,'backend/app.mjs'),text=>{
-    text=replace(text,"import { createRepository } from './repository.mjs';","import { createRepository } from './repository.mjs';\nimport {guardRepository} from './version-preservation.mjs';",'app import');
-    text=replace(text,"const repo = options.repository || createRepository({ ...options, onEvent: event => realtime.publish(event) });","const repo = guardRepository(options.repository || createRepository({ ...options, onEvent: event => realtime.publish(event) }),options.preservation);",'app injection');
+    text=replace(text,"import { createRepository } from './repository.mjs';","import { createRepository } from './repository.mjs';\nimport {guardRepository} from './version-preservation.mjs';\nimport {assertServerCodeRolloutRepository,guardServerCodeRolloutRepository} from './server-code-rollout.mjs';",'app import');
+    text=replace(text,"const repo = options.repository || createRepository({ ...options, onEvent: event => realtime.publish(event) });","const supplied=options.repository;if(supplied)assertServerCodeRolloutRepository(supplied,options);\n  const repo = guardServerCodeRolloutRepository(guardRepository(supplied || createRepository({ ...options, onEvent: event => realtime.publish(event) }),options.preservation));",'app injection');
+    text=text.replace('const scheduler = options.memory || options.enableScheduler === false ?','const scheduler = repo.serverCodeRollout || options.memory || options.enableScheduler === false ?');
+    text=text.replace('actions:repo.listA2AActions(workspace,{agentId:','actions:repo.listA2AActions(workspace,{executionDelivery:true,agentId:');
+    text=text.replace("time: new Date().toISOString() }));","time: new Date().toISOString(), ...(repo.serverCodeRollout?{serverCodeRollout:repo.serverCodeRollout.status()}:{}) }));");
     const anchor="  app.post('/a2a/v1/actions/:id/ack',";const offset=text.indexOf(anchor),end=text.indexOf('\n',offset);if(offset<0)throw new Error('ACK route absent');
     return text.slice(0,end)+"\n  app.post('/a2a/v1/actions/:id/execution-admission',(req,res)=>{if(!assertA2AActionWorkspace(repo,req,res))return;res.json(repo.authorizeActionExecution(req.params.id,{deviceId:req.deviceCredential?.deviceId}));});"+text.slice(end);
   });
@@ -55,13 +58,13 @@ function v1Overlay(directory){
   });
   patch(path.join(directory,'src/runtime-adapters.mjs'),patchRuntimeProfileBinding);
   patch(path.join(directory,'src/hermes-mcp-bootstrap.py'),patchNativeProfileBinding);
-  patch(path.join(directory,'frontend/index.html'),text=>replace(text,'<body>','<body>\n    <div role="status" style="background:#eef6ff;color:#174e88;padding:8px 16px;font:14px sans-serif">V2 Bot 已封存，数据保留。原员工功能继续可用；恢复 V2 后可显式恢复 Bot。</div>','frontend notice'));
+  patch(path.join(directory,'frontend/index.html'),text=>replace(text,'<body>','<body>\n    <div role="status" style="background:#eef6ff;color:#174e88;padding:8px 16px;font:14px sans-serif">V2 Bot 已封存，数据保留。原员工和历史数据保留；设备执行以服务器准入状态为准。</div>','frontend notice'));
 }
 function fileList(directory,prefix=''){return fs.readdirSync(path.join(directory,prefix),{withFileTypes:true}).flatMap(entry=>{const relative=path.posix.join(prefix,entry.name);if(['node_modules','.git','data','.local'].includes(entry.name))return [];return entry.isDirectory()?fileList(directory,relative):[{path:relative,sha256:sha(fs.readFileSync(path.join(directory,relative)))}];});}
 export function buildPackages({output=path.join(root,'.local','preservation-packages')}={}){
   if(run('git',['status','--porcelain','--untracked-files=no']).trim())throw new Error('Commit tracked changes before freezing publication packages');
   if(fs.existsSync(output))throw new Error('Output already exists; use a fresh directory to preserve history');fs.mkdirSync(output,{recursive:true});
-  const overlays=shared.concat(['backend/db.mjs','backend/repository.mjs','backend/app.mjs','backend/bots.mjs','backend/management.mjs','backend/ziwei-connect.mjs','backend/phone-mcp.mjs','src/local-action.mjs','src/daemon.mjs','src/management-bootstrap.mjs','src/runtime-adapters.mjs','src/hermes-gateway-runtime.mjs','daemon/ziwei_user.mjs']);
+  const overlays=shared.concat(['frontend/src/components/BotWorkbench.vue','frontend/src/bot-owned-profile.js','backend/bot-profiles.mjs','backend/management-bootstrap.mjs','backend/db.mjs','backend/repository.mjs','backend/app.mjs','backend/bots.mjs','backend/management.mjs','backend/ziwei-connect.mjs','backend/phone-mcp.mjs','src/local-action.mjs','src/daemon.mjs','src/management-bootstrap.mjs','src/runtime-adapters.mjs','src/hermes-gateway-runtime.mjs','daemon/ziwei_user.mjs']);
   overlays.push('src/hermes-mcp-bootstrap.py','src/hermes-native-bridge.py');
   const candidateCommit=run('git',['rev-parse','HEAD']).trim(),overlay=overlays.map(file=>({path:file,sha256:sha(fs.readFileSync(path.join(root,file)))})),packages=[];
   const npmCli=preservationNpmCli();
@@ -71,7 +74,7 @@ export function buildPackages({output=path.join(root,'.local','preservation-pack
     for(const file of shared){fs.mkdirSync(path.dirname(path.join(directory,file)),{recursive:true});fs.copyFileSync(path.join(root,file),path.join(directory,file));}
     if(role==='v1-compat')v1Overlay(directory);else for(const file of overlays)fs.copyFileSync(path.join(root,file),path.join(directory,file));
     patch(path.join(directory,'src/execution-admission.mjs'),text=>text.replace("PRODUCT_ROLE='v2'",`PRODUCT_ROLE='${role}'`));
-    const meta=JSON.parse(fs.readFileSync(path.join(directory,'package.json')));meta.files=[...new Set([...meta.files,'backend/version-preservation.mjs','backend/preservation-native-evidence.mjs','backend/preservation-native-databases.mjs','backend/preservation-legacy-archive.mjs','backend/preservation-legacy-source.mjs','backend/preservation-source-namespace.mjs','backend/preservation-legacy-coverage.mjs','backend/preservation-legacy-integration.mjs','backend/preservation-source-native-windows.ps1','backend/production-preservation.mjs','scripts/production-source-proof.mjs','scripts/v2-preservation.mjs','scripts/verify-preservation-packages.mjs','preservation-package.json'])];meta.bundleDependencies=Object.keys(meta.dependencies);
+    const meta=JSON.parse(fs.readFileSync(path.join(directory,'package.json')));meta.files=[...new Set([...meta.files,'backend/server-code-rollout.mjs','scripts/server-code-rollout.mjs','backend/version-preservation.mjs','backend/preservation-native-evidence.mjs','backend/preservation-native-databases.mjs','backend/preservation-legacy-archive.mjs','backend/preservation-legacy-source.mjs','backend/preservation-source-namespace.mjs','backend/preservation-legacy-coverage.mjs','backend/preservation-legacy-integration.mjs','backend/preservation-source-native-windows.ps1','backend/production-preservation.mjs','scripts/production-source-proof.mjs','scripts/v2-preservation.mjs','scripts/verify-preservation-packages.mjs','preservation-package.json'])];meta.bundleDependencies=Object.keys(meta.dependencies);
     fs.writeFileSync(path.join(directory,'package.json'),JSON.stringify(meta,null,2)+'\n');
     const descriptor={schemaVersion:1,product:role==='v2'?'V2':'V1 data-preserving compatibility',productRole:role,packageSemver:meta.version,baseline,candidateCommit,versions:FROZEN_VERSIONS,overlay,productionApplied:false};fs.writeFileSync(path.join(directory,'preservation-package.json'),JSON.stringify(descriptor,null,2));
     fs.symlinkSync(path.join(root,'node_modules'),path.join(directory,'node_modules'),process.platform==='win32'?'junction':'dir');

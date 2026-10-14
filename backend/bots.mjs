@@ -92,6 +92,7 @@ export function createBotService(repo, management) {
     const device=management.discovery(slug,{deviceId:input.deviceId,userId:context.actorUserId,deviceScope:context.deviceScope}).devices.find(item=>item.id===input.deviceId) || null;
     const runtime=device?.runtimes.find(item=>item.name==='Hermes') || null;
     const integrated=new Set(['groups_mentions','delegation','gateway','voice','goals','heartbeat','kanban','bot_identity','persistent_chat','profile_memory','model_provider','skills','tools_mcp','routines','multimodal','session_search','observability']);
+    if(repo.serverCodeRollout)return {schemaVersion:1,workspace:slug,deviceId:input.deviceId||null,runtime,capabilities:BOT_CAPABILITY_CATALOG.map(([id,label])=>({id,label,status:'requires_configuration',configurable:integrated.has(id),reason:'等待客户端验证或更新；当前设备执行已关闭',evidence:['server-code-rollout-v1']}))};
     return {schemaVersion:1,workspace:slug,deviceId:input.deviceId || null,runtime,capabilities:BOT_CAPABILITY_CATALOG.map(([id,label])=>({id,label,status:!integrated.has(id)?'not_integrated':(!runtime?'unknown':(!runtime.available?'requires_dependency':'requires_configuration')),configurable:integrated.has(id),reason:!integrated.has(id)?'原生能力尚未接入紫薇控制与结果链；不能由此入口启用':(!runtime?'目标电脑尚未提供 Hermes 发现证据':(!runtime.available?runtime.issues.map(item=>item.message).join('；'):'需保存配置并在目标电脑验证；执行成功由实际回执确认')),evidence:[...(runtime?.version?[`device_heartbeat:${runtime.version}`]:[]),'ziwei.bot.schema:1']}))};
   };
   const runs = (slug,id,context={}) => { const {ws}=resolve(slug,id,context); return db.prepare('SELECT id,payload_json FROM a2a_actions WHERE workspace_id=? ORDER BY created_at DESC,rowid DESC').all(ws.id).filter(row=>parse(row.payload_json)?.hermesBot?.employeeId===id).slice(0,100).map(row=>repo.getA2AAction(row.id,{workspaceSlug:slug})); };
@@ -108,8 +109,8 @@ export function createBotService(repo, management) {
     const validationStatus=!validationAction?'not_checked':validationAction.payload.hermesBot.revision!==row.revision?'stale':validationAction.status==='succeeded'&&row.validated_revision===row.revision?'succeeded':['failed','expired','succeeded'].includes(validationAction.status)?'failed':'pending';
     const configured=validationStatus==='succeeded', botRuns=runs(slug,id,context),nativeResources={};
     for(const action of botRuns){const receipt=action.result?.nativeOperation || action.result?.result?.nativeOperation;if(receipt?.revision===row.revision&&!nativeResources[receipt.resource])nativeResources[receipt.resource]={...receipt,actionId:action.id,actionStatus:action.status,completedAt:action.completed_at};}
-    const botCapabilities=capabilities(slug,{deviceId:employee.target_device_id},context).capabilities.map(item=>({...item,...(configured && item.status==='requires_configuration' && ['bot_identity','persistent_chat','profile_memory','model_provider','routines','observability'].includes(item.id)?{status:'available',reason:'本版本已通过目标电脑原生配置检查；模型运行结果仍以实际执行回执为准',evidence:[...item.evidence,`validation:${row.validation_action_id}:revision:${row.revision}`]}:{})}));
-    return {id,employee_id:id,workspace:slug,employee,instance:botProfileView(db,row,employee),configuration_state:'initialized',kind:'employee',config:parse(row.config_json),revision:row.revision,control_state:row.control_state,control_epoch:row.control_epoch,main_conversation_id:row.main_conversation_id,nativeResources,scheduler_authority:'ziwei',validation:{status:validationStatus,action_id:row.validation_action_id,revision:validationAction?.payload?.hermesBot?.revision ?? null,error:validationAction?.error || null},latest_run:botRuns[0] || null,stop_action:row.stop_action_id?repo.getA2AAction(row.stop_action_id,{workspaceSlug:slug}):null,capabilities:botCapabilities,effect:{savedRevision:row.revision,validatedRevision:row.validated_revision,scope:'next_execution',pendingReason:row.validated_revision!==row.revision?'目标电脑尚未验证本版本':row.control_state!=='active'?'Bot 尚未启用':null}};
+    const botCapabilities=capabilities(slug,{deviceId:employee.target_device_id},context).capabilities.map(item=>({...item,...(!repo.serverCodeRollout && configured && item.status==='requires_configuration' && ['bot_identity','persistent_chat','profile_memory','model_provider','routines','observability'].includes(item.id)?{status:'available',reason:'本版本已通过目标电脑原生配置检查；模型运行结果仍以实际执行回执为准',evidence:[...item.evidence,`validation:${row.validation_action_id}:revision:${row.revision}`]}:{})}));
+    return {id,employee_id:id,workspace:slug,employee,instance:botProfileView(db,row,employee),configuration_state:'initialized',kind:'employee',config:parse(row.config_json),revision:row.revision,control_state:row.control_state,control_epoch:row.control_epoch,main_conversation_id:row.main_conversation_id,nativeResources,scheduler_authority:'ziwei',validation:{status:validationStatus,action_id:row.validation_action_id,revision:validationAction?.payload?.hermesBot?.revision ?? null,error:validationAction?.error || null},latest_run:botRuns[0] || null,stop_action:row.stop_action_id?repo.getA2AAction(row.stop_action_id,{workspaceSlug:slug}):null,capabilities:botCapabilities,effect:{savedRevision:row.revision,validatedRevision:row.validated_revision,scope:repo.serverCodeRollout?'draft_waiting_client':'next_execution',executionAdmission:repo.serverCodeRollout?.status()||null,pendingReason:repo.serverCodeRollout?'等待客户端验证或更新；专属 Profile/HOME 仅保存规划，尚未在电脑创建':row.validated_revision!==row.revision?'目标电脑尚未验证本版本':row.control_state!=='active'?'Bot 尚未启用':null}};
   };
   const routine = (slug,id,autoId,context={}) => {const {ws}=resolve(slug,id,context);const binding=db.prepare('SELECT * FROM bot_routines WHERE automation_id=? AND employee_id=? AND workspace_id=?').get(autoId,id,ws.id);if(!binding)throw botFailure('ROUTINE_NOT_FOUND','Routine 不属于当前 Bot',404);return {...repo.getAutomation(slug,autoId),...binding,last_result:repo.listAutomationRuns(autoId)[0] || null};};
   return guardBotService(repo,{
@@ -188,9 +189,10 @@ export function createBotService(repo, management) {
         const employee=management.createEmployee(slug,{...input,runtimeProfile:input.sourceProfile || input.runtimeProfile,config:undefined,runtime:'Hermes',ownerUserId:actor.actorUserId,status:'draft',idempotencyKey:`bot:${actor.actorUserId || actor.deviceCredentialDeviceId || 'authorized-mcp'}:${input.idempotencyKey}`},actor);
         const conversation=management.createConversation(slug,{employeeId:employee.id,title:`${employee.name} · 主聊天`},actor);
         const stamp=now();db.prepare('INSERT INTO hermes_bots(employee_id,workspace_id,config_json,main_conversation_id,created_at,updated_at) VALUES(?,?,?,?,?,?)').run(employee.id,employee.workspace_id,JSON.stringify(config),conversation.id,stamp,stamp);
-        const binding={mode:'owned_profile',profile:'bot-'+crypto.createHash('sha256').update(JSON.stringify([slug,employee.id,employee.target_device_id])).digest('hex').slice(0,24),templateProfile:employee.runtime_profile,ownershipId:crypto.randomUUID()};
+        const binding={mode:'owned_profile',...(repo.serverCodeRollout?{waitingForClient:true}:{}),profile:'bot-'+crypto.createHash('sha256').update(JSON.stringify([slug,employee.id,employee.target_device_id])).digest('hex').slice(0,24),templateProfile:employee.runtime_profile,ownershipId:crypto.randomUUID()};
         db.prepare('UPDATE employees SET runtime_profile=? WHERE id=?').run(binding.profile,employee.id);
         db.prepare('UPDATE hermes_bots SET profile_binding_json=? WHERE employee_id=?').run(JSON.stringify(binding),employee.id);
+        if(repo.serverCodeRollout)return get(slug,employee.id,actor);
         const action=repo.createA2AAction(slug,{type:'hermes.bot.provision',payload:{employeeId:employee.id},dedupeKey:`bot-provision:${employee.id}:initial`,botInternal:BOT_INTERNAL});
         binding.provisionActionId=action.id;
         db.prepare('UPDATE hermes_bots SET profile_binding_json=? WHERE employee_id=?').run(JSON.stringify(binding),employee.id);
@@ -200,7 +202,7 @@ export function createBotService(repo, management) {
         return get(slug,employee.id,actor);
       },id=>get(slug,id,context));
     },
-    provision(slug,id,input={},context={}) {
+    provision(slug,id,input={},context={}) {repo.serverCodeRollout?.assertExecution();
       const {row,employee}=resolve(slug,id,context);revision(row,input);
       if(botProfileBinding(row).mode!=='owned_profile')throw botFailure('BOT_PROFILE_MODE_INVALID','现有 Bot 不自动迁移到 owned Profile');
       const current=botProfileView(db,row,employee);
@@ -224,17 +226,18 @@ export function createBotService(repo, management) {
       else db.prepare('UPDATE hermes_bots SET updated_at=? WHERE employee_id=?').run(now(),id);
       return get(slug,id,context);
     });},
-    validate(slug,id,input={},context={}) {resolve(slug,id,context);return {action:idempotent(slug,`validate:${id}`,input,context,()=>{
+    validate(slug,id,input={},context={}) {repo.serverCodeRollout?.assertExecution();resolve(slug,id,context);return {action:idempotent(slug,`validate:${id}`,input,context,()=>{
       const {row,employee}=resolve(slug,id,context);revision(row,input);
       assertBotProfileReady(db,row,employee);
       management.validateSelection(slug,{runtime:'Hermes',targetDeviceId:employee.target_device_id,runtimeProfile:employee.runtime_profile},{context,requireProfile:botProfileBinding(row).mode!=='owned_profile'});
       const action=repo.createA2AAction(slug,{type:'hermes.bot.validate',payload:{employeeId:id},dedupeKey:`bot-validate:${id}:${row.revision}:${input.idempotencyKey}`,botInternal:BOT_INTERNAL});
       db.prepare('UPDATE hermes_bots SET validation_action_id=? WHERE employee_id=?').run(action.id,id);return action;
     },actionId=>management.action(slug,actionId,context))};},
-    control(slug,id,input={},context={}) {return atomic(()=>{
+    control(slug,id,input={},context={}) {if(repo.serverCodeRollout && input.operation!=='pause')repo.serverCodeRollout.assertExecution();return atomic(()=>{
       const {row}=resolve(slug,id,context);revision(row,input);
       if(input.expectedControlEpoch!==row.control_epoch)throw botFailure('BOT_CONTROL_CONFLICT','expectedControlEpoch 已变化；请刷新后再控制 Bot');
       if(!['activate','resume','pause','stop'].includes(input.operation))throw botFailure('BOT_CONTROL_INVALID','控制操作无效',400);
+      if(repo.serverCodeRollout){db.prepare("UPDATE hermes_bots SET control_state='paused',control_epoch=control_epoch+1,updated_at=? WHERE employee_id=?").run(now(),id);db.prepare("UPDATE employees SET status='paused' WHERE id=?").run(id);return get(slug,id,context);}
       if(['activate','resume'].includes(input.operation)) {
         assertBotExecution(db,row.workspace_id,{employeeId:id},{validation:true});
         if(row.validated_revision!==row.revision)throw botFailure('BOT_NOT_VALIDATED','先验证当前配置，再明确启用');

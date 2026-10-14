@@ -162,6 +162,7 @@ export function createZiweiConnect(repo, options = {}) {
   };
   const send = async (path, init = {}, sessionCookie = cookie) => {
     try {
+      repo.serverCodeRollout?.assertExecution();
       return await fetch(`${apiBase}${path}`, {
         ...init,
         headers: {
@@ -336,6 +337,7 @@ export function createZiweiConnect(repo, options = {}) {
     },
     async listDevices() { return listExternalDevices({ detailed: false }); },
     async terminal(slug, method, path, body = {}) {
+      repo.serverCodeRollout?.assertExecution();
       workspace(slug);
       const target = terminalRequest(method, path, body);
       return requestResponse(target, { method, ...(method === 'POST' ? { body: JSON.stringify(body) } : {}) });
@@ -356,6 +358,7 @@ export function createZiweiConnect(repo, options = {}) {
       return bindVerified(slug,input,devices);
     },
     async run(slug, input = {}, { fullToolset = false, configurationRevision = null, executionId = null } = {}) {
+      repo.serverCodeRollout?.assertExecution();
       const ws = workspace(slug); const employeeId = text(input.employeeId || input.employee_id, 'employeeId'); employee(ws, employeeId);
       const action = text(input.action, 'action', 32).toLowerCase();
       if (!(fullToolset ? terminalActions.has(action) : ['health', 'screenshot', 'dry-run'].includes(action))) throw Object.assign(new Error('不支持该手机动作'), { status: 400 });
@@ -399,6 +402,7 @@ export function createZiweiConnect(repo, options = {}) {
       }
     },
     async toolCall(slug,scope,name,args={}) {
+      repo.serverCodeRollout?.assertExecution();
       const phoneId=scope.phoneDeviceId;const path=`/android-devices/${encodeURIComponent(phoneId)}`;
       const terminal=async(method,suffix,body={})=>{const result=await this.terminal(slug,method,suffix,body);if(result.status>=400) throw externalError(result.body.error || result.body.message || '手机工具请求失败',result.status);return result.body;};
       const syncReceipt=async device=>{
@@ -434,6 +438,7 @@ export function createZiweiConnect(repo, options = {}) {
     },
     async refresh(slug, runId) {
       const { row } = getRun(slug, runId);
+      if(repo.serverCodeRollout)return {...outputRun(row),readOnly:true,serverCodeRollout:repo.serverCodeRollout.status()};
       if (!row.command_id || row.action === 'dry-run' || settledCommandStatuses.has(row.status)) return outputRun(row);
       try {
         const payload = await request(`/android-devices/${encodeURIComponent(row.device_id)}/status?commandId=${encodeURIComponent(row.command_id)}`);

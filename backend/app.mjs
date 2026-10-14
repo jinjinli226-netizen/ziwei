@@ -4,6 +4,7 @@ import path from 'node:path';
 import { WebSocketServer } from 'ws';
 import { createRepository } from './repository.mjs';
 import {guardRepository} from './version-preservation.mjs';
+import {assertServerCodeRolloutRepository,guardServerCodeRolloutRepository} from './server-code-rollout.mjs';
 import {createProductionApiIdentityHandler} from './preservation-source-namespace.mjs';
 import { RealtimeHub } from './realtime.mjs';
 import { exportDocumentsToGit, importDocumentsFromGit } from './git-sync.mjs';
@@ -269,7 +270,8 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   const privateIdentity=privatePreservationIdentityConfiguration(options);
   const app = express();
   const realtime = new RealtimeHub();
-  const repo = guardRepository(options.repository || createRepository({ ...options, onEvent: event => realtime.publish(event) }),options.preservation);
+  const supplied=options.repository;if(supplied)assertServerCodeRolloutRepository(supplied,options);
+  const repo = guardServerCodeRolloutRepository(guardRepository(supplied || createRepository({ ...options, onEvent: event => realtime.publish(event) }),options.preservation));
   const ziweiConnect = createZiweiConnect(repo, {
     apiBase: options.ziweiConnectApiBase,
     auth: options.ziweiConnectAuth,
@@ -393,7 +395,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   });
   app.post('/api/auth/logout', (req, res) => { auth.logout(req); auth.clearCookie(res, req); res.json({ ok: true }); });
   app.get('/api/auth/me', (req, res) => { const principal = auth.authenticate(req); if (!principal) return res.status(401).json({ error: '请先登录紫薇' }); res.json(principal); });
-  app.get('/healthz', (_req, res) => res.json({ ok: true, service: 'ziwei-api', cli: 'ziwei_user', time: new Date().toISOString() }));
+  app.get('/healthz', (_req, res) => res.json({ ok: true, service: 'ziwei-api', cli: 'ziwei_user', time: new Date().toISOString(), ...(repo.serverCodeRollout?{serverCodeRollout:repo.serverCodeRollout.status()}: {}) }));
   app.get('/api/workspaces', (req, res) => {
     const principal = req.auth || auth.authenticate(req);
     if (!principal) return res.status(401).json({ error: '请先登录紫薇' });
@@ -408,8 +410,9 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   });
   // The scheduler is repository backed: every workspace is scanned from its
   // durable next_run value, and webhook retries are drained in the same tick.
-  const scheduler = options.memory || options.enableScheduler === false ? null : setInterval(() => { try { repo.tickAutomations(); } catch {} }, Number(process.env.ZIWEI_SCHEDULER_MS || 15000));
+  const scheduler = repo.serverCodeRollout || options.memory || options.enableScheduler === false ? null : setInterval(() => { try { repo.tickAutomations(); } catch {} }, Number(process.env.ZIWEI_SCHEDULER_MS || 15000));
   scheduler?.unref?.();
+  app.locals.scheduler=scheduler;
 
   app.get('/api/workspaces/:slug/summary', (req, res) => res.json(repo.getSummary(req.params.slug, { userId: req.auth?.user_id })));
   app.get('/api/workspaces/:slug/tasks', (req, res) => res.json({ tasks: repo.listTasks(req.params.slug, req.query) }));
@@ -835,7 +838,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   app.get('/a2a/v1/agents', (_req, res) => res.json({ agents: [{ id:'ziwei_user', name:'ziwei_user', description:'紫薇工作区本机 daemon，负责心跳、轮询和 A2A 任务', url:'/a2a/v1', capabilities:['tasks','messages','heartbeat','actions','ack','result'] }] }));
   app.post('/a2a/v1/register', (req, res, next) => { const workspace = String(req.body.workspace || req.body.workspace_slug || '').trim(); if (!workspace) return res.status(400).json({ error: 'A2A register 必须明确 workspace' }); try { return res.json({ ok:true, agent:repo.registerA2AAgent(workspace, req.body), card:{id:'ziwei_user',capabilities:['tasks','messages','heartbeat','actions','ack','result']} }); } catch (error) { return next(error); } });
   app.post('/a2a/v1/actions', (req, res, next) => { const workspace = String(req.body.workspace || req.body.workspace_slug || '').trim(); if (!workspace) return res.status(400).json({ error: 'A2A action 必须明确 workspace' }); try { const action=repo.createA2AAction(workspace, req.body); return res.status(action.duplicate ? 200 : 201).json(action); } catch (error) { return next(error); } });
-  app.get('/a2a/v1/actions', (req, res, next) => { const workspace=String(req.query.workspace || '').trim(); if (!workspace) return res.status(400).json({ error: 'A2A poll 必须明确 workspace' }); try { return res.json({ actions:repo.listA2AActions(workspace,{agentId:req.query.agent || req.query.agent_id,status:req.query.status || 'pending',includeAcked:req.query.includeAcked ?? req.query.include_acked,includeResult:String(req.query.includeResult || '').toLowerCase() !== 'false',deviceId:req.deviceCredential?.deviceId}) }); } catch (error) { return next(error); } });
+  app.get('/a2a/v1/actions', (req, res, next) => { const workspace=String(req.query.workspace || '').trim(); if (!workspace) return res.status(400).json({ error: 'A2A poll 必须明确 workspace' }); try { return res.json({ actions:repo.listA2AActions(workspace,{executionDelivery:true,agentId:req.query.agent || req.query.agent_id,status:req.query.status || 'pending',includeAcked:req.query.includeAcked ?? req.query.include_acked,includeResult:String(req.query.includeResult || '').toLowerCase() !== 'false',deviceId:req.deviceCredential?.deviceId}) }); } catch (error) { return next(error); } });
   app.post('/a2a/v1/actions/:id/ack', (req, res) => { if (!assertA2AActionWorkspace(repo, req, res)) return; return res.json(repo.ackA2AAction(req.params.id, { ...(req.body || {}), deviceId:req.deviceCredential?.deviceId })); });
   app.post('/a2a/v1/actions/:id/execution-admission',(req,res)=>{if(!assertA2AActionWorkspace(repo,req,res))return;res.json(repo.authorizeActionExecution(req.params.id,{deviceId:req.deviceCredential?.deviceId}));});
   app.post('/a2a/v1/actions/:id/bot-start',(req,res)=>{if(!assertA2AActionWorkspace(repo,req,res))return;res.json(repo.authorizeBotStart(req.params.id,{deviceId:req.deviceCredential?.deviceId}));});
