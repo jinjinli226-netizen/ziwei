@@ -1,0 +1,15 @@
+# Production 原始 namespace 观察接口缺项
+
+状态：E03 ABI已读；不能凭当前输入诚实输出 namespaceComplete/workerScopeComplete/runningV2=true。本页给root/E03/R01准确缺项，不把接口存在或PID消失当作已排空。
+
+E03 source CLI调用同步 `observeOriginalNativeScopes({binding,inventory,request})`，request为已经验签的payload。binding的originalInstance严格只有 pid/createdAt/nonceDigest；API serviceManager只是非空字符串。Windows inventory只有当前PID/PPID/name/executable/command/ISO birth；Linux birth字段是proc start ticks，不是ISO，当前没有boot_id/btime/CLK_TCK换算来源。
+
+这些输入未包含原nonce/启动停止记录、完整pre-stop lineage/原生namespace/Job或cgroup/service-manager覆盖、detached/raw-spawn worker与updater边界，也没有新running V2的实际监听owner/nonce/build/database/fence响应。原PID缺失不证明旧子孙退出；同PID新代次要按原birth判别；command substring也不能覆盖原无HOME参数或脱离父进程的SDK/MCP/terminal/委托工作。
+
+可复用client-lifecycle的Windows argv解析；现有异步 inspectNativeClientProcess核精确node entry+birth+commandHash，inspectNativeHealthListener核监听owner，validateHealth核nonce/root/config/start/workspace/device/build。它们需要实际独立native观察，不能由JSON声称constant true。stopClient是真实排空动作，source只读observer不得调用来造证明；其回执也不等价完整旧树覆盖。
+
+原API healthz目前只返回 ok/service/time，无实际pid/nonce/build/database/fence identity。若restore要证明实际新V2仍在sealed fence，需独立可核的启动/实际进程与private健康身份来源；不能从磁盘包描述符+PID字符串推断运行中的模块版本或DB身份。E03目前要求两轮source observations相等、collect/recheck稳定evidenceDigest；来源应保存稳定原身份/coverage digest，不把本次challenge/observedAt混入稳定observations。
+
+至少要增加可信source producer能够读取的准确路径/原proof schema或代码参数，而不是spec布尔标签：原启动/停止/全worker coverage原证据、service/namespace身份与隔离能力，原HOME/shared/Creator/override范围，新V2实际进程/监听/DB/fence身份。签名会绑定这些来源，但签名本身不会补出缺失事实。具备何种可靠历史namespace来源由原native环境/服务管理器决定；无来源必须unknown，不能因为API契约要求true就默认满足。
+
+另一个窄接口是R01已核的一条legacy never-dispatched subject：E03传productionRequest给scanNativeFiles并按kind/actionDigest/op/spec/challenge/host消费originalActionProofs；当前scanner尚无该解释器。其code/cache/logger/archive/history证据要作为明确已绑定root/path进入全量file manifest，不能跨root偷偷读任意路径；原expired/空result保持，不造Job/tree。ordinary legacy不重新归类V2；native source debt解释、最终guard绑定/全projection复核仍需接通。其余普通legacy终态的协议缺字段也不能整体伪造成40条活跃树。

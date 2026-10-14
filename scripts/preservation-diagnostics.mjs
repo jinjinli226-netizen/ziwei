@@ -14,6 +14,9 @@ export function observeNativeProcess({entry,args=[],cwd,env=process.env,director
   save('running');append({event:'started',pid:child.pid,parentPid:process.pid,entry,heartbeatMs,healthUrl:healthUrl||null});
   child.stdout.on('data',bytes=>append({event:'stdout',pid:child.pid,text:String(bytes)}));child.stderr.on('data',bytes=>append({event:'stderr',pid:child.pid,text:String(bytes)}));child.on('error',error=>append({event:'spawn_error',pid:child.pid,error:error.stack}));
   const timer=setInterval(async()=>{save('running');let health=null;try{if(healthUrl)health=(await fetch(healthUrl,{signal:AbortSignal.timeout(2000),redirect:'error'})).status;}catch{health='unreachable';}append({event:'heartbeat',pid:child.pid,processAlive:child.exitCode===null,health,heartbeatMs});},heartbeatMs);
-  const exited=new Promise(resolve=>child.once('exit',(code,signal)=>{clearInterval(timer);save('exited');append({event:'exit_observed',pid:child.pid,code,signal:signal||null});resolve({code,signal,pid:child.pid,log:file});}));
+  child.once('exit',(code,signal)=>{clearInterval(timer);save('exited');append({event:'exit_observed',pid:child.pid,code,signal:signal||null});});
+  // Completion includes the child pipes closing, so the receipt cannot precede
+  // the final stderr/stdio diagnostics. The OS exit code is preserved verbatim.
+  const exited=new Promise(resolve=>child.once('close',(code,signal)=>{clearInterval(timer);append({event:'stdio_closed',pid:child.pid,code,signal:signal||null});resolve({code,signal,pid:child.pid,log:file});}));
   return {child,exited,log:file,instance};
 }

@@ -1,0 +1,15 @@
+# Final preservation integration implementation plan
+
+**Goal:** Integrate the approved native source and private client ABI, the finite independently qualified legacy logger callback, and freeze one final six-artifact candidate for independent acceptance.
+
+**Architecture:** Existing app and daemon own their actual database/runtime state. The private factories accept only immutable startup facts and code getters. Approved static source refs pin the one legacy policy and all original evidence; the source collector constructs the interpreter, and the coordinator registers only fully validated exact-kind records and passes an independent final guard policy. Unknown namespace/process/debt remains a refusal.
+
+**Tech stack:** Node ES modules, native SQLite, Windows native read-only helper, existing local diagnostics, offline package installation, installed Hermes 0.21.3 with loopback synthetic provider.
+
+1. Import only E03 clean bc77674/fd8baa5/912d45 and its later explicitly approved final source checkpoint. Read the pinned R01 handoff/qualification source; preserve original private artifacts. No draft source becomes a release input.
+2. Add `daemon/private-preservation-identity.mjs`: strict explicit private file configuration; synchronous complete connection/drain/debt reader; bounded loopback POST adapter for the E03 handler. Add meaningful malformed/getter/debt and actual daemon route tests first, record RED, then attach startup loadedConfigSha256/nonce/current Map. No client DB/fence assertion.
+3. Import the exact reviewed finite logger verifier as product source and bind its independent pins to approved nativeSourceRefs. Add source/guard integration tests first: one original raw row passes, clone/foreign/missing pin/false coverage/changed bytes/mixed pending refuses; retain global projection coverage. Wire source CLI and final guard without request callback selectors.
+4. Include every new JS/PS helper and both CLIs in npm files/shared/build identity/source closure. Run required targeted native/default source/client/legacy/production checks, then full regression and lint. Retain all failures, fix actual implementation/fixture omissions without weakening gates.
+5. Wait for E03's final clean handoff, commit the clean combined candidate, then run `node scripts/build-preservation-packages.mjs --output <fresh-private-directory>` once. Verify actual six archives/two manifests, extracted API CLI default entry behavior and installed client imports.
+6. Run the existing real SDK loopback four-phase rehearsal plus second seal/restore, legacy cache/new daemon and private identity checks against that same frozen candidate. Do not run it concurrently with the full suite. Preserve SDK/source/auth hashes, deletion state, memory and HOME data; record independent exit diagnostics and leave 6387–6389 free.
+7. Produce final immutable handoff with exact source SHA, archive/manifest hashes, commands/results and concrete remaining actual-source gaps. Release the execution slot for Q01. E02 does not push, deploy, alter formal services, use paid models or operate phones.

@@ -567,32 +567,36 @@ def run_operation(request, context):
     pending_db = None
     pending_key = 'ziwei.driver.pending:' + request_id + ':' + resource
     prior_heartbeat = None
-    if resource in {'goals', 'heartbeat', 'kanban'} and op == '_prepare':
-        from hermes_state_registry import acquire
-        pending_db = acquire(home_path('state.db'))
-        if pending_db.get_meta(pending_key):
-            raise NativeOperationError('EXECUTION_UNCERTAIN')
-        if resource == 'heartbeat':
-            from hermes_cli.heartbeat import load_heartbeat
-            sid = native_session(context, create=False)
-            prior_heartbeat = plain(load_heartbeat(sid)) if sid else None
-    if resource == 'memory': data = memory(op, args)
-    elif resource == 'sessions': data = sessions(op, args)
-    elif resource == 'skills': data = skills(op, args, request_id)
-    elif resource == 'mcp': data = mcp(op, args)
-    elif resource in {'goals', 'heartbeat'}: data = control(resource, op, args, context, request_id)
-    elif resource == 'kanban': data = kanban(op, args, context, request_id)
-    elif resource == 'voice': data = voice(op, args, context)
-    elif resource == 'gateway': data = gateway(op, args)
-    elif resource == 'collaboration': data = collaboration(op, args, context, request_id)
-    elif resource == 'groups': data = groups(op, args)
-    else: raise NativeOperationError('NATIVE_RESOURCE_UNSUPPORTED')
-    if pending_db is not None and data.get('run'):
-        pending_db.set_meta(pending_key, json.dumps({**data, 'priorHeartbeat': prior_heartbeat}))
-        if not pending_db.get_meta(pending_key): raise NativeOperationError('DRIVER_CLAIM_NOT_SAVED')
-    import hermes_cli
-    status = 'requires_authorization' if isinstance(data, dict) and (data.get('requiresReview') or (data.get('mutation') or {}).get('staged')) else 'succeeded'
-    return {'schemaVersion': 2, 'resource': resource, 'operation': op, 'employeeId': context['employeeId'], 'revision': context['revision'], 'nativeVersion': hermes_cli.__version__, 'status': status, 'data': data}
+    try:
+        if resource in {'goals', 'heartbeat', 'kanban'} and op == '_prepare':
+            from hermes_state_registry import acquire
+            pending_db = acquire(home_path('state.db'))
+            if pending_db.get_meta(pending_key):
+                raise NativeOperationError('EXECUTION_UNCERTAIN')
+            if resource == 'heartbeat':
+                from hermes_cli.heartbeat import load_heartbeat
+                sid = native_session(context, create=False)
+                prior_heartbeat = plain(load_heartbeat(sid)) if sid else None
+        if resource == 'memory': data = memory(op, args)
+        elif resource == 'sessions': data = sessions(op, args)
+        elif resource == 'skills': data = skills(op, args, request_id)
+        elif resource == 'mcp': data = mcp(op, args)
+        elif resource in {'goals', 'heartbeat'}: data = control(resource, op, args, context, request_id)
+        elif resource == 'kanban': data = kanban(op, args, context, request_id)
+        elif resource == 'voice': data = voice(op, args, context)
+        elif resource == 'gateway': data = gateway(op, args)
+        elif resource == 'collaboration': data = collaboration(op, args, context, request_id)
+        elif resource == 'groups': data = groups(op, args)
+        else: raise NativeOperationError('NATIVE_RESOURCE_UNSUPPORTED')
+        if pending_db is not None and data.get('run'):
+            pending_db.set_meta(pending_key, json.dumps({**data, 'priorHeartbeat': prior_heartbeat}))
+            if not pending_db.get_meta(pending_key): raise NativeOperationError('DRIVER_CLAIM_NOT_SAVED')
+        import hermes_cli
+        status = 'requires_authorization' if isinstance(data, dict) and (data.get('requiresReview') or (data.get('mutation') or {}).get('staged')) else 'succeeded'
+        return {'schemaVersion': 2, 'resource': resource, 'operation': op, 'employeeId': context['employeeId'], 'revision': context['revision'], 'nativeVersion': hermes_cli.__version__, 'status': status, 'data': data}
+    finally:
+        if pending_db is not None:
+            pending_db.close()
 
 
 def platform_call(isolation, body):
@@ -858,25 +862,29 @@ def run_gateway_worker(request, context):
             return None
         from hermes_state_registry import acquire
         db = acquire(home_path('state.db'))
-        inbound_key = 'ziwei.gateway.inbound:' + hashlib.sha256(json.dumps([platform_name, str(event.source.chat_id), message_id]).encode()).hexdigest()
-        record = {'platform': platform_name, 'sourceActionId': request['actionId'], 'messageId': message_id, 'content': event.text, 'chatId': str(event.source.chat_id), 'revision': context['revision'], 'controlEpoch': context.get('controlEpoch'), 'state': 'pending'}
-        previous = db.get_meta(inbound_key)
-        if previous:
-            record = json.loads(previous)
-            if record.get('platform') != platform_name or record.get('sourceActionId') != request['actionId']:
-                emit('inbound_rejected', code='GATEWAY_INBOUND_REQUIRES_AUTHORIZATION');return None
-            if record.get('state') not in {'pending', 'accepted'}: return None
-        else:
-            db.set_meta(inbound_key, json.dumps(record))
-            if db.get_meta(inbound_key) != json.dumps(record): raise NativeOperationError('GATEWAY_INBOUND_NOT_SAVED')
-        emit('inbound', **{key: record[key] for key in ('messageId', 'content', 'chatId')})
-        # Parent provides a terminal reply command only after the original
-        # platform action result. Receipt acceptance alone never becomes text.
-        return None
+        try:
+            inbound_key = 'ziwei.gateway.inbound:' + hashlib.sha256(json.dumps([platform_name, str(event.source.chat_id), message_id]).encode()).hexdigest()
+            record = {'platform': platform_name, 'sourceActionId': request['actionId'], 'messageId': message_id, 'content': event.text, 'chatId': str(event.source.chat_id), 'revision': context['revision'], 'controlEpoch': context.get('controlEpoch'), 'state': 'pending'}
+            previous = db.get_meta(inbound_key)
+            if previous:
+                record = json.loads(previous)
+                if record.get('platform') != platform_name or record.get('sourceActionId') != request['actionId']:
+                    emit('inbound_rejected', code='GATEWAY_INBOUND_REQUIRES_AUTHORIZATION');return None
+                if record.get('state') not in {'pending', 'accepted'}: return None
+            else:
+                db.set_meta(inbound_key, json.dumps(record))
+                if db.get_meta(inbound_key) != json.dumps(record): raise NativeOperationError('GATEWAY_INBOUND_NOT_SAVED')
+            emit('inbound', **{key: record[key] for key in ('messageId', 'content', 'chatId')})
+            # Parent provides a terminal reply command only after the original
+            # platform action result. Receipt acceptance alone never becomes text.
+            return None
+        finally:
+            db.close()
     adapter.set_message_handler(handler)
     async def worker():
         nonlocal accepting, closing
         connected = False
+        db = None
         try:
             connected = await asyncio.wait_for(adapter.connect(), timeout=45)
             if not connected:
@@ -947,6 +955,10 @@ def run_gateway_worker(request, context):
             try:
                 await asyncio.wait_for(adapter.disconnect(), timeout=10)
             finally:
-                if health['status'] != 'failed': update_health('disconnected', health['code'])
-                state(**health);emit('disconnected', pid=os.getpid(), **health)
+                try:
+                    if health['status'] != 'failed': update_health('disconnected', health['code'])
+                    state(**health);emit('disconnected', pid=os.getpid(), **health)
+                finally:
+                    if db is not None:
+                        db.close()
     asyncio.run(worker())

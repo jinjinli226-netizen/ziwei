@@ -1,0 +1,23 @@
+# E02 legacy scanner 接口检查点
+
+状态：普通旧协议 terminal history 解释已写，35/35联合targeted与985/985全量PASS（0fail/0skip）；当前源码只读复审未发现本轮新增可证实P1。准确新冻结包/独审尚待。单subject never-dispatched解释与额外artifact scope尚待合同接入，不作正式排空或发布签收。
+
+现有 scanner 增加独立代码参数 productionRequest（E03调用时已经验签的payload），支持原version1 completed-only与version2 legacy:true迁移行。必须匹配原request的host/workspace/device/origin、实际原配置hash/唯一connection，以及实际原client下六个0349b91已review协议module的完整normalized SHA。它核原dedupe/action/status/result/raw绑定，并从原payload明确device aliases或同workspace employee的target_device_id解析设备；缺失、矛盾设备/协议源码不匹配/未知原action拒绝。源clientBuild及config/native namespace proof仍由sourceCLI另核。
+
+通过的输出 kind=legacy-terminal-history-v1 / conclusion=terminal-history-retained，绑定operation/spec/challenge/host/nativeActionDigest/原instance digest/原source policy+file digest/cache record digest。它没有processExit或synthetic identity/tree字段，不代表旧树已退出。该历史通过仅取消对应普通终态的 ACTION_STATE_BINDING_MISSING；pending/acked/expired+ACK均不豁免。输出也放入 originalActionProofs 供E03保留稳定签名证据，kind与never-dispatched不同，不能解除它的expired ACK debt。
+
+为避免一个legacy正例隐藏混合新协议债务，整份state先核completed key唯一、modern完成行必须与原started配对、完整identity字符串类型、nativeRuntime/quarantine字段类型；legacy wrapper仅原协议允许字段。任何损坏先state=null，避免此前invalid version1被catch后仍迭代started的异常。明确unknown/uncertain/retainEvidence、旧树未确认/active>0、重复key、unpaired现代记录均拒绝；unmapped现代记录即使nativeRuntime=false，只要有明确未排空进程证据也拒绝。mapped Gateway resident仍走原worker/lifecycle专门证明，不能被这项parser拒绝策略错误当作普通原生完成树。
+
+实际保留文件通过原完整files/directories清单记录hash/dev/ino并重核。这里只解释协议已有终态数据；不能在缺少source namespace/pre-stop lineage/updater/SDK范围时替代完整观察。当前legacy source代码仅识别实际原V1源码root；restore若已换成新V2，必须有经过批准的准确旧archive/source证据接口，不能拿新源码的不同bytes猜成旧协议证明。
+
+复审及反例闭合：mixed现代completion未配对/重复key、wrapper retain/blocked、unmapped modern明确未排空树而nativeRuntime=false、identity非string/nativeRuntime非boolean/quarantine非法、保留executionState=unknown、设备alias冲突均先观察red后拒绝转绿。missing device只在同workspace employee原投影有准确target绑定时才接受。原缓存与action逐字节保留。复审读到scanner SHA=2c8570e1bce2b6515c1426b5d790ffbfb47589746a323923b54d591585d91e39、tests SHA=c5e26dab4a07382295bd116e4931267f6dc47d5427d1998fd06c2264eb30f62a，均读取前后稳定；这是source review，不是Q01动态签收。
+
+单条R01 before-dispatch ACK transport timeout还需要明确输入scope：R01原history artifacts/旧archive在其他workspace树，不位于现E03允许的client/API/HOME根内。建议E03增加host下精确legacyAssessments记录或统一准确evidence pins（白名单字段、准确path+SHA+kind/action/originalInstance/policy），纳入immutable specHash与bindingDigest，并仅允许这些准确文件进入source manifest。路径是来源数据，不是插件/可执行入口/peer key。
+
+解释器必须自己核archive实际installed build与六module/code顺序、固定原history capture、完整cache byte/prefix身份与按真实dedupe缺失、同boot已枚举log完整覆盖/唯一目标ACK失败/no started；单个JSON assessment标志不能清debt。产生legacy-never-dispatched-v1证明后，E03外层HMAC collect/recheck仍绑定purpose/op/spec/challenge/DB/freeze/原action摘要，guard最终事务必须消费exact proof并保持原expired/empty result不变。普通legacy仍不归类V2；其他debts/claims/Inbox/worker未知继续拒绝。
+
+Root/E03可独立承接新namespace observer模块；E02保留既有native scanner/legacy和SDK HOME/shared范围解析。observer准确输入缺项在同目录 2026-10-14-e02-source-observer-input-gap.md，不能plain相信PIDgone/argv=全worker零。
+
+当前有限交接：已按root明确顺序合入E03 6358f286b0361809020462b13d52a8d7e28099ab与2b45d693b207e2dffe81ac5dcf9f1f942b98c838，对应本树f6db9fd、75905ee。producer缺的namespace observer尚未导入。两修复加CLI/hook/legacy/crypto联合41/41 PASS；新全量993/993 PASS（0fail/0skip），lint126源码PASS。实际API入口验证fixture随approved installTargets合同同步，需用新的准确6产物/2manifest复核后冻结。旧155四阶段仅其原批作者证据，不外推为本新production候选的Q签字。
+
+组合包e9a4a1f0c63bee783292fe5bd2d9fb00f7fdaa4c只包含前一production CLI/package检查点，不含本parser增量：其6准确产物/2manifest在 `.local/preservation-production-entry-checkpoint`，两API实际解压入口已证明rehearsal与production inspect/prepare plan/source DB+WAL+SHM和目录零变化、无network/helper，兼容apply拒绝且V2无transport首写前拒绝。初次生产plan fixture只有sentinel而缺真实V1核心表，按PRODUCTION_DATABASE_SCHEMA拒绝；现验证器补齐隔离fixture核心表并保留sentinel原字节后通过，没有修改product/schema gate。该批仍缺production namespace/legacy assessment/backup/恢复实际身份等签收，不是发布候选。

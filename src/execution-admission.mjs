@@ -23,6 +23,27 @@ export function assertNoOwnedBotResource(action,{hermesHome,protectedHomes=[],ru
     }
   }
 }
+/** Trusted executor closure. Never accept this policy or a binding from wire payloads. */
+export function createHermesExecutionGuard(action,options={}) {
+  const refused=()=>Object.assign(new Error('Hermes 执行资源在准备期间发生变化'),{code:'EXECUTION_RESOURCE_CHANGED',definitelyNotStarted:true});
+  const check=home=>assertNoOwnedBotResource({type:action.type,payload:{env:{HERMES_HOME:home},profile:'default'}},options);
+  const resolve=home=>{check(home);try{return fs.realpathSync.native(home);}catch{throw refused();}};
+  let binding;
+  return Object.freeze({select({sourceHome,profile='default',baseHome}) {
+    const home=resolve(sourceHome);
+    if(binding){binding.verify();if(home!==binding.home||profile!==binding.profile)throw refused();return binding;}
+    const stat=fs.statSync(home,{bigint:true}),identity=`${stat.dev}:${stat.ino}`;
+    binding=Object.freeze({home,profile,baseHome:path.resolve(baseHome||(profile==='default'?sourceHome:path.dirname(path.dirname(sourceHome)))),identity:{dev:String(stat.dev),ino:String(stat.ino)},requestedHome:path.resolve(sourceHome),overlayDirectory:path.join(options.runtimeDir||process.cwd(),'hermes-bound-overlays'),protectedHomes:[...(options.protectedHomes||[])],verify({env={},cwd}={}) {
+      if(resolve(sourceHome)!==home||resolve(home)!==home)throw refused();
+      const current=fs.statSync(home,{bigint:true});if(`${current.dev}:${current.ino}`!==identity)throw refused();
+      for(const key of ['HERMES_HOME','HERMES_MANAGED_DIR','ZIWEI_CREATOR_HOME','ZIWEI_CREATOR_SOURCE_HOME'])if(env[key])check(env[key]);
+      if(env.HERMES_HOME&&resolve(env.HERMES_HOME)!==home)throw refused();
+      if(env.ZIWEI_CREATOR_SOURCE_HOME&&resolve(env.ZIWEI_CREATOR_SOURCE_HOME)!==home)throw refused();
+      if(cwd)check(cwd);
+    }});
+    return binding;
+  }});
+}
 export async function authorizeNativeExecution(action,{apiBase,workspace,deviceId,deviceToken,signal,hermesHome,runtimeDir,defaultWorkdir}={}) {
   const refused=(message,code='EXECUTION_ADMISSION_REFUSED')=>Object.assign(new Error(message),{code,definitelyNotStarted:true});
   if(PRODUCT_ROLE==='v1-compat'&&(String(action.type).startsWith('hermes.bot.')||action.payload?.hermesBot))throw refused('V2 Bot 在 V1 兼容客户端中已封存','V2_OBJECT_SEALED');

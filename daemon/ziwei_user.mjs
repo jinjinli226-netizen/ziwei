@@ -12,7 +12,9 @@ import { discoverInstalledRuntimes, terminalMcpStatus } from '../src/runtime-ada
 import { readA2AToken } from '../backend/a2a-auth.mjs';
 import { createManagementBootstrap, clientBuildIdentity } from '../src/management-bootstrap.mjs';
 import { defaultUserDir, resolveConfigPath, resolveDaemonDataDirectory, resolveWorkspaceConnections, claimWorkspaceGrant } from './config.mjs';
-import {scanNativeFiles} from '../backend/preservation-native-evidence.mjs';
+import {inspectLocalDaemonMaintenanceFiles} from '../backend/preservation-native-evidence.mjs';
+import {createProductionClientIdentityHandler} from '../backend/preservation-source-namespace.mjs';
+import {loadPrivateClientIdentityConfiguration,privateClientConnections,createPrivateClientStateReader,createPrivateIdentityHttpRoute} from './private-preservation-identity.mjs';
 
 const ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const packageMeta = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
@@ -26,9 +28,14 @@ const runtimeDir = standaloneHome ? path.join(standaloneHome, 'runtime') : path.
 const configPath = resolveConfigPath({ root: ROOT, env: process.env });
 const lifecycleNonce = randomBytes(24).toString('hex');
 const lifecycleStartedAt = new Date().toISOString();
-const config = fs.existsSync(configPath)
-  ? JSON.parse(fs.readFileSync(configPath, 'utf8'))
+// Keep the digest of the exact bytes parsed at startup. A later disk read may
+// inspect current configuration but cannot stand in for loaded configuration.
+const loadedConfigBytes = fs.existsSync(configPath) ? fs.readFileSync(configPath) : null;
+const loadedConfigSha256 = loadedConfigBytes ? createHash('sha256').update(loadedConfigBytes).digest('hex') : null;
+const config = loadedConfigBytes
+  ? JSON.parse(loadedConfigBytes.toString('utf8'))
   : { agentId: 'ziwei_user', serviceName: 'ziwei_user', workspace: process.env.ZIWEI_WORKSPACE || '', apiBase: process.env.ZIWEI_API_BASE || 'http://127.0.0.1:4178', healthHost: '127.0.0.1', healthPort: 20242, heartbeatMs: 15000, pollMs: 5000 };
+const privateIdentityConfiguration=loadPrivateClientIdentityConfiguration();
 if (config.connectionState === 'disconnected') { console.error('ziwei_user 已明确断开全部工作区；拒绝环境变量回退和轮询，请使用 connect 重新配对。'); process.exit(1); }
 fs.mkdirSync(dataDir, { recursive: true });
 fs.mkdirSync(logDir, { recursive: true });
@@ -38,7 +45,9 @@ const logPath = path.join(logDir, 'daemon.log');
 function log(event, extra = {}) {
   const line = redactSecrets(JSON.stringify({ at: new Date().toISOString(), pid: process.pid, event, service: 'ziwei_user', version: VERSION, agentId: 'ziwei_user', ...extra }));
   fs.appendFileSync(logPath, line + '\n');
-  console.log(line);
+  // The exit event can only perform synchronous cleanup. Do not enqueue a
+  // final pipe write while Node is tearing down native handles on Windows.
+  if (event !== 'exited') console.log(line);
 }
 function rotate() { try { if (fs.statSync(logPath).size > 5 * 1024 * 1024) fs.renameSync(logPath, `${logPath}.${Date.now()}`); } catch {} }
 const connections = new Map();
@@ -51,7 +60,7 @@ function installConnections() {
   for (const config of resolved.connections) {
     if (connections.has(config.workspace)) continue;
     const connectionRuntimeDir = config.primary ? runtimeDir : path.join(runtimeDir, 'shared-workspaces', config.workspace, config.deviceId);
-    const state = { config, runtimeDir:connectionRuntimeDir, polling: false, lastHeartbeat: null, lastHeartbeatAt: 0, lastPoll: null };
+    const state = { config, runtimeDir:connectionRuntimeDir, hermesHomePath:config.hermesHome || process.env.HERMES_HOME || null, polling: false, lastHeartbeat: null, lastHeartbeatAt: 0, lastPoll: null };
     state.managementBootstrap = createManagementBootstrap({ workspace: config.workspace, deviceId: config.deviceId, deviceToken: config.deviceToken, apiBase: config.apiBase, cacheDirectory: path.join(dataDir, 'management-mcp-credentials') });
     const localExecutor = createLocalActionExecutor({
       runtimeDir: connectionRuntimeDir,
@@ -61,7 +70,7 @@ function installConnections() {
       executorCommand: config.executorCommand || process.env.ZIWEI_EXECUTOR_COMMAND || null,
       executorArgs: Array.isArray(config.executorArgs) ? config.executorArgs : [],
       defaultRuntime: config.defaultRuntime || process.env.ZIWEI_DEFAULT_RUNTIME || null,
-      hermesHomePath: config.hermesHome || process.env.HERMES_HOME || null,
+      hermesHomePath: state.hermesHomePath,
       managementBootstrap: state.managementBootstrap,
       terminalMcpConfig: config.terminalMcp || {},
       workspace: config.workspace, apiBase: config.apiBase,
@@ -120,6 +129,8 @@ let runtimeDiscovery = discoverInstalledRuntimes({ force: true });
 let heartbeatTimer;
 let pollTimer;
 let draining = false;
+const shutdownAbort = new AbortController();
+const activeHeartbeats = new Set();
 process.on('uncaughtException', error => log('uncaught_exception', { error: error.stack || error.message }));
 process.on('unhandledRejection', error => log('unhandled_rejection', { error: error?.stack || String(error) }));
 async function heartbeat() {
@@ -133,10 +144,18 @@ async function heartbeat() {
   runtimeDiscovery = discoverInstalledRuntimes();
   await Promise.allSettled([...connections.values()].map(heartbeatConnection));
 }
-async function heartbeatConnection(connection) {
+function heartbeatConnection(connection) {
+  if (draining || shutdownAbort.signal.aborted) return Promise.resolve();
+  const pending = performHeartbeatConnection(connection);
+  activeHeartbeats.add(pending);
+  pending.then(() => activeHeartbeats.delete(pending), () => activeHeartbeats.delete(pending));
+  return pending;
+}
+async function performHeartbeatConnection(connection) {
   if (draining) return;
   const config = connection.config;
-  try { await connection.managementBootstrap.prepare(); } catch {}
+  try { await connection.managementBootstrap.prepare({signal: shutdownAbort.signal}); } catch {}
+  if (draining || shutdownAbort.signal.aborted) return;
   connection.managementStatus = connection.managementBootstrap.status();
   connection.terminalStatus = terminalMcpStatus({ config: config.terminalMcp, workspace: config.workspace, apiBase: config.apiBase, deviceToken: config.deviceToken });
   const payload = {
@@ -165,12 +184,12 @@ async function heartbeatConnection(connection) {
   };
   try {
     const response = await fetch(`${config.apiBase}/api/workspaces/${encodeURIComponent(config.workspace)}/heartbeat`, {
-      method: 'POST', headers: daemonHeaders(connection, { json: true }), body: JSON.stringify(payload), signal: AbortSignal.timeout(3000)
+      method: 'POST', headers: daemonHeaders(connection, { json: true }), body: JSON.stringify(payload), signal: AbortSignal.any([AbortSignal.timeout(3000), shutdownAbort.signal])
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok || body.ok !== true) throw new Error(body.error || `heartbeat HTTP ${response.status}`);
     if (connection.managementBootstrap.noteRetry(body.device?.management_mcp_retry_at)) {
-      try { await connection.managementBootstrap.prepare(); } catch {}
+      try { await connection.managementBootstrap.prepare({signal: shutdownAbort.signal}); } catch {}
       connection.managementStatus = connection.managementBootstrap.status();
     }
     connection.lastHeartbeat = new Date().toISOString();
@@ -179,11 +198,13 @@ async function heartbeatConnection(connection) {
     // New servers persist runtime discovery separately. Older local servers
     // may not expose this endpoint; a heartbeat remains sufficient for them.
     try {
-      await fetch(`${config.apiBase}/api/workspaces/${encodeURIComponent(config.workspace)}/runtimes/register`, {
+      if (draining || shutdownAbort.signal.aborted) return;
+      const registered = await fetch(`${config.apiBase}/api/workspaces/${encodeURIComponent(config.workspace)}/runtimes/register`, {
         method: 'POST', headers: daemonHeaders(connection, { json: true }),
         body: JSON.stringify({ agentId: 'ziwei_user', deviceId: payload.deviceId, clientBuild: CLIENT_BUILD, runtimeDiscovery: payload.runtimeDiscovery, runtimes: runtimeDiscovery.runtimes }),
-        signal: AbortSignal.timeout(3000)
+        signal: AbortSignal.any([AbortSignal.timeout(3000), shutdownAbort.signal])
       });
+      await registered.arrayBuffer();
     } catch {}
     log('heartbeat', { ok: true, workspace: config.workspace, apiBase: config.apiBase, deviceId: body.device?.id || payload.deviceId, status: body.device?.status || 'online', runtimes: Object.fromEntries(Object.entries(runtimeDiscovery.runtimes).map(([name, item]) => [name, item.status === 'available' ? item.version : item.detection?.reasonCode || item.status])) });
   } catch (error) { log('heartbeat_failed', { workspace: config.workspace, error: error.message, apiBase: config.apiBase }); } finally { rotate(); }
@@ -257,7 +278,7 @@ function healthPayload() {
   const executionQuarantined = !executionAllowed();
   const quarantinedActionCount = [...connections.values()].reduce((total, connection) => total + connection.dispatcher.quarantinedActionIds.length, 0);
   const gateway=[...connections.values()].map(connection=>connection.localExecutor.maintenanceStatus());
-  const fileEvidence=scanNativeFiles({connections:[...connections.values()].map(connection=>({workspace:connection.config.workspace,deviceId:connection.config.deviceId,apiBase:connection.config.apiBase,runtimeDir:connection.runtimeDir}))});
+  const fileEvidence=inspectLocalDaemonMaintenanceFiles({connections:[...connections.values()].map(connection=>({workspace:connection.config.workspace,deviceId:connection.config.deviceId,apiBase:connection.config.apiBase,runtimeDir:connection.runtimeDir}))});
   const maintenance={safe:fileEvidence.safe&&gateway.every(row=>row.safe)&&quarantinedActionCount===0,pendingDeliveryCount:[...connections.values()].reduce((n,c)=>n+c.actionDelivery.pendingCount,0),blockedDeliveryCount:[...connections.values()].reduce((n,c)=>n+c.actionDelivery.blockedCount,0),gatewayWorkers:gateway.flatMap(row=>row.workers),fileIssues:fileEvidence.issues};
   return { service: 'ziwei_user', version: VERSION, clientBuild: CLIENT_BUILD, bridge: 'ziwei_user', agentId: 'ziwei_user', workspace: config.workspace, deviceId: config.deviceId, runtimes: runtimeDiscovery.runtimes, managementMcp: primaryConnection?.managementBootstrap.status(), terminalMcp: primaryConnection?.terminalStatus, lastHeartbeat, lastHeartbeatAgeMs: lastHeartbeatAt ? Math.max(0, Date.now() - lastHeartbeatAt) : null, lastPoll, pid: process.pid,
     lifecycle: { nonce: lifecycleNonce, root: ROOT, configPath, configSha256: lifecycleConfigurationHash(), runtimeDir, startedAt: lifecycleStartedAt, managedAuxiliaryCount: maintenance.gatewayWorkers.filter(row=>row.processAlive!==false).length }, maintenance,
@@ -265,7 +286,10 @@ function healthPayload() {
     connections: [...connections.values()].map(connection => ({ workspace: connection.config.workspace, deviceId: connection.config.deviceId, primary: connection.config.primary, configured: true, ready: !draining && !executionQuarantined && connection.lastHeartbeatAt > 0 && Date.now() - connection.lastHeartbeatAt <= Math.max(45_000, (Number(config.heartbeatMs) || 15_000) * 3), lastHeartbeat: connection.lastHeartbeat, managementMcp: connection.managementBootstrap.status(), terminalMcp: connection.terminalStatus })), connectionErrors,
   };
 }
+const privateIdentityHandler=privateIdentityConfiguration?createProductionClientIdentityHandler({...privateIdentityConfiguration,boot:{nonce:lifecycleNonce,startedAt:lifecycleStartedAt,clientBuild:CLIENT_BUILD,configPath,runtimeDir,loadedConfigSha256,connections:privateClientConnections(connections)},readState:createPrivateClientStateReader({connections,isDraining:()=>draining,connectionErrors:()=>connectionErrors})}):null;
+const privateIdentityRoute=createPrivateIdentityHttpRoute(privateIdentityHandler);
 const health = http.createServer((req, res) => {
+  if(privateIdentityRoute(req,res))return;
   if (req.url === '/local/connection-control') {
     const supplied = Buffer.from(String(req.headers['x-ziwei-local-control'] || '')); const expected = Buffer.from(String(config.deviceToken || ''));
     const local = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
@@ -307,15 +331,36 @@ health.on('error', error => {
 });
 health.listen(config.healthPort, config.healthHost, () => log('started', { health: `http://${config.healthHost}:${config.healthPort}`, apiBase: config.apiBase, heartbeatMs: config.heartbeatMs, pollMs: config.pollMs }));
 await heartbeat();
-heartbeatTimer = setInterval(heartbeat, Math.max(1000, Number(config.heartbeatMs) || 15000));
-pollTimer = setInterval(poll, Math.max(1000, Number(config.pollMs) || 5000));
-void poll();
+// A local stop may arrive while the initial heartbeat is still awaiting IO.
+// That continuation must not install timers after shutdown has begun.
+if (!stopping) {
+  heartbeatTimer = setInterval(heartbeat, Math.max(1000, Number(config.heartbeatMs) || 15000));
+  pollTimer = setInterval(poll, Math.max(1000, Number(config.pollMs) || 5000));
+  void poll();
+}
 function stop(signal) {
   if (stopping) return;
   stopping = true;
+  draining = true;
   clearInterval(heartbeatTimer); clearInterval(pollTimer);
-  const finish = () => { log('stopped', { signal }); process.exit(0); };
-  if (health.listening) health.close(finish); else finish();
+  shutdownAbort.abort();
+  for (const connection of connections.values()) connection.pollAbort?.abort();
+  const closed = new Promise(resolve => { if (health.listening) health.close(resolve); else resolve(); });
+  // Signal shutdown also owns any registered resident Gateway. Its existing
+  // close method waits for the supervised completion; no arbitrary PID is used.
+  const executors = [...connections.values()].map(connection => Promise.resolve().then(async () => {
+    await connection.localExecutor.close();
+    // Supervision resolves even when a receipt/tree is unknown. Keep that
+    // registered uncertainty visible instead of reporting successful shutdown.
+    if (connection.localExecutor.maintenanceStatus()?.safe !== true) throw new Error('REGISTERED_GATEWAY_EXIT_UNCONFIRMED');
+  }));
+  void Promise.allSettled([closed, ...activeHeartbeats, ...executors]).then(results => {
+    const failed = results.filter(result => result.status === 'rejected').length;
+    log('stopped', { signal, ...(failed ? { cleanupFailures: failed } : {}) });
+    // Let outbound fetch, pipe writes and native close callbacks drain. The
+    // server close callback alone is not a whole-process quiescence boundary.
+    process.exitCode = failed ? 1 : 0;
+  });
 }
 process.on('SIGINT', () => stop('SIGINT'));
 process.on('SIGTERM', () => stop('SIGTERM'));
