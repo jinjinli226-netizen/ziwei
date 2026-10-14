@@ -7,7 +7,7 @@ import {canonicalProduction,digestProduction,signProductionEnvelope,verifyProduc
 import * as nativeEvidence from '../backend/preservation-native-evidence.mjs';
 import {scanOwnedNativeDatabases,nativeActionDigest,attestNativeVersion} from '../backend/preservation-native-databases.mjs';
 import {clientBuildIdentity} from '../src/management-bootstrap.mjs';
-import {observePreservationSourceNamespace} from '../backend/preservation-source-namespace.mjs';
+import {observePreservationSourceNamespace,getQualifiedWindowsKernelArchive} from '../backend/preservation-source-namespace.mjs';
 import {loadApprovedLegacySource} from '../backend/preservation-legacy-integration.mjs';
 
 const fail=code=>{throw Object.assign(new Error(code),{code});};
@@ -27,7 +27,7 @@ function directoryProof(directory,directories){
 }
 function namespaceCheck(binding){
  const paths=[...binding.clients.flatMap(row=>[row.root,row.entryPath,row.configPath,row.userHome,row.runtimeDir,row.baseHome]),...binding.apiInstances.flatMap(row=>[row.root,row.entryPath]),...[...binding.clients,...binding.apiInstances].flatMap(row=>Object.values(row.installTargets).flatMap(target=>[target.root,target.entryPath]))];
- if(!['win32','linux'].includes(process.platform)||paths.some(value=>!path.isAbsolute(value)||process.platform==='linux'&&path.win32.isAbsolute(value))||process.platform==='win32'&&/WindowsApps|AppData[\\/]Local[\\/]Packages/i.test(process.execPath))fail('SOURCE_NAMESPACE_INVALID');
+ if(!['win32','linux'].includes(process.platform)||paths.some(value=>!path.isAbsolute(value))||process.platform==='win32'&&/WindowsApps|AppData[\\/]Local[\\/]Packages/i.test(process.execPath))fail('SOURCE_NAMESPACE_INVALID');
 }
 /** Native observation only. No network, stop/start, model or helper client. */
 export function observeSourceProcesses(binding,request){
@@ -68,12 +68,12 @@ export function observeSourceProcesses(binding,request){
  if(scoped)sourceScopeRecords.set(observation,scoped);
  return observation;
 }
-function connectionsFor(payload,files,directories,issues){
+function connectionsFor(payload,files,directories,issues,observation){
  const connections=[];
  for(const client of payload.binding.clients){
   const bytes=fileProof(client.configPath,files);
   const expectedBuild=payload.command==='restore'?payload.installed?.clientBuild:client.clientBuild;
-  const target=payload.command==='restore'?payload.installed.targets.find(row=>row.kind==='client'&&row.bindingDigest===digestProduction(client)):client;
+  const target=payload.command==='restore'?payload.installed.targets.find(row=>row.kind==='client'&&row.bindingDigest===digestProduction(client)):(getQualifiedWindowsKernelArchive(observation,digestProduction(client))||client);
   if(!bytes||sha(bytes)!==client.configSha256||!target||clientBuildIdentity(target.root)!==expectedBuild){issues.push({code:'SOURCE_CLIENT_IDENTITY_CHANGED'});continue;}
   if(!fileProof(target.entryPath,files))issues.push({code:'SOURCE_CLIENT_ENTRY_MISSING'});directoryProof(client.runtimeDir,directories);
   const config=decode(bytes),entries=[config,...(config.sharedWorkspaces||[]).filter(row=>row.enabled!==false)];
@@ -115,8 +115,8 @@ export function collectProductionSourceProof({request,trust,previous=null,observ
   if(prior.challenge===payload.challenge||prior.evidenceDigest!==productionEvidenceDigest(prior))fail('SOURCE_PREVIOUS_BINDING');
   recheckRecords(prior);
  }
- const files=[],directories=[],issues=[],actions=productionHostActions(payload.binding,payload.actionProjection),connections=connectionsFor(payload,files,directories,issues);
- const observations=observe(payload.binding,payload);
+ const files=[],directories=[],issues=[],actions=productionHostActions(payload.binding,payload.actionProjection);
+ const observations=observe(payload.binding,payload),connections=connectionsFor(payload,files,directories,issues,observations);
  if(observations.originalStopped!==true||observations.workerScopeComplete!==true||observations.namespaceComplete!==true||observations.restarted!==false||observations.unresolved?.length)issues.push({code:'SOURCE_WORKERS_NOT_PROVEN_STOPPED'});
  const scoped=sourceScopeRecords.get(observations);
  if(scoped){files.push(...scoped.files);directories.push(...scoped.directories);connections.push(...scoped.connections.filter(row=>!connections.some(existing=>equal(existing,row))));}
@@ -183,11 +183,11 @@ export function collectProductionSourceProof({request,trust,previous=null,observ
  return signProductionEnvelope({hostId:request.hostId,trust,payload:result});
 }
 export async function collectVerifiedProductionSourceProof({request,trust,previous=null},native){
- const payload=validateProductionRequest({request,trust}),before=await observePreservationSourceNamespace({binding:payload.binding,request:payload,trust},native);
+ const payload=validateProductionRequest({request,trust}),before=await observePreservationSourceNamespace({binding:payload.binding,request:payload,trust,sourceRequest:request},native);
  const observation=before.observations;
  sourceScopeRecords.set(observation,{files:before.files,directories:before.directories,homes:before.homes,connections:before.connections,proofs:before.proofs});
  const envelope=collectProductionSourceProof({request,trust,previous,observe:()=>observation});
- const after=await observePreservationSourceNamespace({binding:payload.binding,request:payload,trust},native);
+ const after=await observePreservationSourceNamespace({binding:payload.binding,request:payload,trust,sourceRequest:request},native);
  if(!equal(before.observations,after.observations)||!equal(before.files,after.files)||!equal(before.proofs,after.proofs))throw Object.assign(new Error('SOURCE_NAMESPACE_CHANGED'),{code:'SOURCE_NAMESPACE_CHANGED',details:{beforeIssues:before.issues,afterIssues:after.issues,observationsChanged:!equal(before.observations,after.observations),filesChanged:!equal(before.files,after.files),proofsChanged:!equal(before.proofs,after.proofs)}});
  envelope.payload.runtimeProofs=before.runtimeProofs;
  envelope.payload.evidenceDigest=productionEvidenceDigest(envelope.payload);

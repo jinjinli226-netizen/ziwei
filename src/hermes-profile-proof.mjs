@@ -7,7 +7,7 @@ export const successfulProfileExit=exit=>exit?.launched===true&&exit.rootConfirm
 // Shared by the device and server; never accept a directory-only success.
 export function ownedProfileProofMatches(context,receipt,exit){
   const binding=context?.instance;
-  const paths=path.win32.isAbsolute(receipt?.home || '')?path.win32:path.posix;
+  const paths=path.posix.isAbsolute(receipt?.home || '')?path.posix:path.win32;
   return Boolean(binding?.mode==='owned_profile'&&receipt?.schemaVersion===1&&receipt.mode==='owned_profile'
     &&receipt.employeeId===context.employeeId&&receipt.workspace===context.workspace&&receipt.deviceId===context.deviceId
     &&receipt.profile===binding.profile&&receipt.ownershipId===binding.ownershipId

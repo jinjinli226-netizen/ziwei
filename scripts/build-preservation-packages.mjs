@@ -58,11 +58,13 @@ function v1Overlay(directory){
 }
 function fileList(directory,prefix=''){return fs.readdirSync(path.join(directory,prefix),{withFileTypes:true}).flatMap(entry=>{const relative=path.posix.join(prefix,entry.name);if(['node_modules','.git','data','.local'].includes(entry.name))return [];return entry.isDirectory()?fileList(directory,relative):[{path:relative,sha256:sha(fs.readFileSync(path.join(directory,relative)))}];});}
 export function buildPackages({output=path.join(root,'.local','preservation-packages')}={}){
+  if(run('git',['status','--porcelain','--untracked-files=no']).trim())throw new Error('Commit tracked changes before freezing publication packages');
   if(fs.existsSync(output))throw new Error('Output already exists; use a fresh directory to preserve history');fs.mkdirSync(output,{recursive:true});
   const overlays=shared.concat(['backend/db.mjs','backend/repository.mjs','backend/app.mjs','backend/bots.mjs','backend/management.mjs','backend/ziwei-connect.mjs','backend/phone-mcp.mjs','src/local-action.mjs','src/daemon.mjs','src/management-bootstrap.mjs','src/runtime-adapters.mjs','src/hermes-gateway-runtime.mjs','daemon/ziwei_user.mjs']);
   overlays.push('src/hermes-mcp-bootstrap.py','src/hermes-native-bridge.py');
   const candidateCommit=run('git',['rev-parse','HEAD']).trim(),overlay=overlays.map(file=>({path:file,sha256:sha(fs.readFileSync(path.join(root,file)))})),packages=[];
-  const npmCli=path.join(path.dirname(process.execPath),'node_modules/npm/bin/npm-cli.js');
+  const npmCli=[path.join(path.dirname(process.execPath),'node_modules/npm/bin/npm-cli.js'),path.resolve(path.dirname(process.execPath),'../lib/node_modules/npm/bin/npm-cli.js')].find(file=>fs.existsSync(file));
+  if(!npmCli)throw new Error('npm CLI unavailable beside the current Node runtime');
   for(const role of ['v1-compat','v2']){
     const baseline=role==='v2'?FROZEN_VERSIONS.v2:FROZEN_VERSIONS.v1,directory=path.join(output,role),archive=path.join(output,`${role}-baseline.tar`);fs.mkdirSync(directory);
     run('git',['archive','--format=tar',baseline,`--output=${archive}`]);run('tar',['-xf',archive,'-C',directory]);
@@ -72,7 +74,7 @@ export function buildPackages({output=path.join(root,'.local','preservation-pack
     const meta=JSON.parse(fs.readFileSync(path.join(directory,'package.json')));meta.files=[...new Set([...meta.files,'backend/version-preservation.mjs','backend/preservation-native-evidence.mjs','backend/preservation-native-databases.mjs','backend/preservation-legacy-archive.mjs','backend/preservation-legacy-source.mjs','backend/preservation-source-namespace.mjs','backend/preservation-legacy-coverage.mjs','backend/preservation-legacy-integration.mjs','backend/preservation-source-native-windows.ps1','backend/production-preservation.mjs','scripts/production-source-proof.mjs','scripts/v2-preservation.mjs','scripts/verify-preservation-packages.mjs','preservation-package.json'])];meta.bundleDependencies=Object.keys(meta.dependencies);
     fs.writeFileSync(path.join(directory,'package.json'),JSON.stringify(meta,null,2)+'\n');
     const descriptor={schemaVersion:1,product:role==='v2'?'V2':'V1 data-preserving compatibility',productRole:role,packageSemver:meta.version,baseline,candidateCommit,versions:FROZEN_VERSIONS,overlay,productionApplied:false};fs.writeFileSync(path.join(directory,'preservation-package.json'),JSON.stringify(descriptor,null,2));
-    fs.symlinkSync(path.join(root,'node_modules'),path.join(directory,'node_modules'),'junction');
+    fs.symlinkSync(path.join(root,'node_modules'),path.join(directory,'node_modules'),process.platform==='win32'?'junction':'dir');
     run(process.execPath,[path.join(root,'node_modules/vite/bin/vite.js'),'build','--config','frontend/vite.config.mjs'],directory);
     const pack=JSON.parse(run(process.execPath,[npmCli,'pack','--json','--ignore-scripts','--offline','--pack-destination',output],directory));
     const clientFile=path.join(output,`${role}-windows-client.tgz`);fs.renameSync(path.join(output,pack[0].filename),clientFile);
