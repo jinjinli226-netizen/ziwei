@@ -6,6 +6,7 @@ import {pathToFileURL} from 'node:url';
 import {FROZEN_VERSIONS} from '../backend/version-preservation.mjs';
 import {clientBuildIdentity} from '../src/management-bootstrap.mjs';
 import {patchRuntimeProfileBinding,patchNativeProfileBinding} from './preservation-profile-patch.mjs';
+import {preservationNpmCli,verifyOfflineRuntimeClosure} from './verify-preservation-runtime-closure.mjs';
 const root=path.resolve(import.meta.dirname,'..'),sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 const run=(command,args,cwd=root)=>execFileSync(command,args,{cwd,encoding:'utf8',windowsHide:true,maxBuffer:20*1024*1024});
 function replace(text,needle,value,file){const count=text.split(needle).length-1;if(count!==1)throw new Error(`Baseline anchor mismatch ${file}: ${count}`);return text.replace(needle,value);}
@@ -63,8 +64,7 @@ export function buildPackages({output=path.join(root,'.local','preservation-pack
   const overlays=shared.concat(['backend/db.mjs','backend/repository.mjs','backend/app.mjs','backend/bots.mjs','backend/management.mjs','backend/ziwei-connect.mjs','backend/phone-mcp.mjs','src/local-action.mjs','src/daemon.mjs','src/management-bootstrap.mjs','src/runtime-adapters.mjs','src/hermes-gateway-runtime.mjs','daemon/ziwei_user.mjs']);
   overlays.push('src/hermes-mcp-bootstrap.py','src/hermes-native-bridge.py');
   const candidateCommit=run('git',['rev-parse','HEAD']).trim(),overlay=overlays.map(file=>({path:file,sha256:sha(fs.readFileSync(path.join(root,file)))})),packages=[];
-  const npmCli=[path.join(path.dirname(process.execPath),'node_modules/npm/bin/npm-cli.js'),path.resolve(path.dirname(process.execPath),'../lib/node_modules/npm/bin/npm-cli.js')].find(file=>fs.existsSync(file));
-  if(!npmCli)throw new Error('npm CLI unavailable beside the current Node runtime');
+  const npmCli=preservationNpmCli();
   for(const role of ['v1-compat','v2']){
     const baseline=role==='v2'?FROZEN_VERSIONS.v2:FROZEN_VERSIONS.v1,directory=path.join(output,role),archive=path.join(output,`${role}-baseline.tar`);fs.mkdirSync(directory);
     run('git',['archive','--format=tar',baseline,`--output=${archive}`]);run('tar',['-xf',archive,'-C',directory]);
@@ -76,12 +76,16 @@ export function buildPackages({output=path.join(root,'.local','preservation-pack
     const descriptor={schemaVersion:1,product:role==='v2'?'V2':'V1 data-preserving compatibility',productRole:role,packageSemver:meta.version,baseline,candidateCommit,versions:FROZEN_VERSIONS,overlay,productionApplied:false};fs.writeFileSync(path.join(directory,'preservation-package.json'),JSON.stringify(descriptor,null,2));
     fs.symlinkSync(path.join(root,'node_modules'),path.join(directory,'node_modules'),process.platform==='win32'?'junction':'dir');
     run(process.execPath,[path.join(root,'node_modules/vite/bin/vite.js'),'build','--config','frontend/vite.config.mjs'],directory);
+    // A linked node_modules makes npm pack omit hoisted transitive bundles.
+    // Only this staging link is removed; the original installation is untouched.
+    fs.unlinkSync(path.join(directory,'node_modules'));
+    run(process.execPath,[npmCli,'ci','--omit=dev','--offline','--ignore-scripts','--no-audit','--no-fund'],directory);
     const pack=JSON.parse(run(process.execPath,[npmCli,'pack','--json','--ignore-scripts','--offline','--pack-destination',output],directory));
     const clientFile=path.join(output,`${role}-windows-client.tgz`);fs.renameSync(path.join(output,pack[0].filename),clientFile);
-    const installPrefix=path.join(output,role+'-installation-proof');fs.mkdirSync(installPrefix);run(process.execPath,[npmCli,'install','--offline','--ignore-scripts','--no-audit','--no-fund','--prefix',installPrefix,clientFile]);const installedRoot=path.join(installPrefix,'node_modules/ziwei'),clientContents=fileList(installedRoot),installationChanges=clientContents.filter(row=>fs.existsSync(path.join(directory,row.path))&&sha(fs.readFileSync(path.join(directory,row.path)))!==row.sha256).map(row=>({...row,sourceSha256:sha(fs.readFileSync(path.join(directory,row.path)))}));
     const frontendFile=path.join(output,`${role}-frontend.zip`);run('tar',['-a','-cf',frontendFile,'-C',path.join(directory,'frontend/dist'),'.']);
     const apiFile=path.join(output,`${role}-api.zip`);run('tar',['-a','-cf',apiFile,'-C',directory,'backend','src','scripts','skills','daemon','package.json','package-lock.json','preservation-package.json']);
-    const contents=fileList(directory),manifest={...descriptor,sourceClientBuild:clientBuildIdentity(directory),clientBuild:clientBuildIdentity(installedRoot),clientContents,installationChanges,contents,buildDigest:sha(JSON.stringify(contents)),artifacts:[clientFile,frontendFile,apiFile].map(file=>({path:file,sha256:sha(fs.readFileSync(file)),bytes:fs.statSync(file).size})),offlineDependenciesBundled:true,apiDependencies:'Install bundled local client into an isolated prefix; use its node_modules for API. No global installation.'};
+    const runtime=verifyOfflineRuntimeClosure({clientFile,apiFile}),clientContents=runtime.clientContents,installationChanges=clientContents.filter(row=>fs.existsSync(path.join(directory,row.path))&&sha(fs.readFileSync(path.join(directory,row.path)))!==row.sha256).map(row=>({...row,sourceSha256:sha(fs.readFileSync(path.join(directory,row.path)))}));
+    const contents=fileList(directory),manifest={...descriptor,sourceClientBuild:clientBuildIdentity(directory),clientBuild:runtime.clientBuild,clientContents,installationChanges,contents,buildDigest:sha(JSON.stringify(contents)),artifacts:[clientFile,frontendFile,apiFile].map(file=>({path:file,sha256:sha(fs.readFileSync(file)),bytes:fs.statSync(file).size})),offlineDependenciesBundled:runtime.receipt.verified,offlineRuntimeClosure:runtime.receipt,apiDependencies:'Install bundled local client into an isolated prefix; link API node_modules to the installed node_modules/ziwei/node_modules. No global installation.'};
     fs.writeFileSync(path.join(output,`${role}-manifest.json`),JSON.stringify(manifest,null,2));packages.push({role,directory,manifest});
   }
   fs.writeFileSync(path.join(output,'build-receipt.json'),JSON.stringify({schemaVersion:1,candidateCommit,output,packages:packages.map(({role,directory,manifest})=>({role,directory,buildDigest:manifest.buildDigest,artifacts:manifest.artifacts}))},null,2));return packages;
