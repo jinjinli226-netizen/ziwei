@@ -15,7 +15,7 @@ export function verifyApiEntries(directory){
  for(const role of ['v1-compat','v2']){
   const manifest=JSON.parse(fs.readFileSync(path.join(directory,role+'-manifest.json'))),archive=path.join(directory,role+'-api.zip'),artifact=manifest.artifacts.find(row=>path.basename(row.path)===role+'-api.zip');
   if(!artifact||sha(fs.readFileSync(archive))!==artifact.sha256)throw Error('Archive hash mismatch');
-  let db;const temp=fs.mkdtempSync(path.join(os.tmpdir(),'ziwei-api-entry-')),extracted=path.join(temp,'api');fs.mkdirSync(extracted);
+  let db;const temp=fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(),'ziwei-api-entry-'))),extracted=path.join(temp,'api');fs.mkdirSync(extracted);
   try{
    execFileSync('tar',['-xf',archive,'-C',extracted],{windowsHide:true});
    const file=path.join(temp,'original.sqlite');db=new DatabaseSync(file);db.exec('CREATE TABLE sentinel(id TEXT PRIMARY KEY,value TEXT);INSERT INTO sentinel VALUES(\'original\',\'retained\');CREATE TABLE workspaces(id TEXT PRIMARY KEY,slug TEXT);INSERT INTO workspaces VALUES(\'ws_archive_fixture\',\'archive-fixture\');CREATE TABLE employees(id TEXT PRIMARY KEY,workspace_id TEXT,runtime TEXT,status TEXT);CREATE TABLE tasks(id TEXT PRIMARY KEY,assignee TEXT);CREATE TABLE conversations(id TEXT PRIMARY KEY,employee_id TEXT);CREATE TABLE a2a_actions(id TEXT PRIMARY KEY,workspace_id TEXT,type TEXT,payload_json TEXT,result_json TEXT,status TEXT,acked_at TEXT);CREATE TABLE management_requests(workspace_id TEXT,kind TEXT,request_key TEXT,fingerprint TEXT,resource_id TEXT,PRIMARY KEY(workspace_id,kind,request_key));PRAGMA journal_mode=WAL;PRAGMA wal_autocheckpoint=0;INSERT INTO sentinel VALUES(\'wal-original\',\'retained in WAL\')');
@@ -62,7 +62,7 @@ export function verifyApiEntries(directory){
    results.push({role,archiveSha256:artifact.sha256,commands,...(productionSpec?{productionCommands,productionScope:'Exact actual artifact pins and independent ephemeral key/spec; readonly plan and no-transport/compat first-write refusal only; not native namespace approval'}:{}),sourceDatabaseUnchanged:true,sourceWalShmUnchanged:true,noNewSchema:true,noQaMarker:true,noNetworkOrHelper:true,missingDependencyRefused:true});
   }finally{
    db?.close();
-   const target=path.resolve(temp),parent=path.resolve(os.tmpdir());if(path.dirname(target)!==parent||!path.basename(target).startsWith('ziwei-api-entry-'))throw Error('Cleanup scope invalid');
+   const target=path.resolve(temp),parent=fs.realpathSync.native(os.tmpdir());if(path.dirname(target)!==parent||!path.basename(target).startsWith('ziwei-api-entry-'))throw Error('Cleanup scope invalid');
    fs.rmSync(target,{recursive:true,force:true,maxRetries:8,retryDelay:100});
   }
  }
