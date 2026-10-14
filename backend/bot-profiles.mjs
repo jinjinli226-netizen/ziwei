@@ -11,7 +11,7 @@ export function botProfileView(db,row,employee){
   const action=row.provision_action_id?db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(row.provision_action_id):null;
   const result=parse(action?.result_json),receipt=result?.botProvision || result?.result?.botProvision;
   const confirmed=action?.status==='succeeded'&&receipt?.ownershipId===binding.ownershipId;
-  const status=confirmed?'provisioned':uncertain(result)||action?.status==='expired'&&action.acked_at?'uncertain':action?.status || 'not_started';
+  const status=confirmed?'provisioned':binding.waitingForClient?'waiting_client':uncertain(result)||action?.status==='expired'&&action.acked_at?'uncertain':action?.status || 'not_started';
   return{...binding,authMode:'source-native-store',home:confirmed?receipt.home:null,provisioning:{actionId:action?.id || null,status,authentication:confirmed?receipt.authentication:null,error:action?.error || null}};
 }
 

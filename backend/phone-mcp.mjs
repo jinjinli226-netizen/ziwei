@@ -76,6 +76,7 @@ export function createPhoneMcpService(repo, connect, management, options = {}) {
   };
   const sign = value => { const body=Buffer.from(JSON.stringify(value)).toString('base64url');return `${body}.${crypto.createHmac('sha256',key).update(body).digest('base64url')}`; };
   const bootstrap = (slug,input,credential) => {
+    repo.serverCodeRollout?.assertExecution();
     repo.preservation?.assert({employeeId:input.employeeId,actionId:input.actionId});
     if(!credential || credential.workspace!==slug) fail('需要当前工作区独立电脑凭证','PHONE_DEVICE_UNAUTHORIZED',401);
     const id=required(input.employeeId,'employeeId');const cfg=assertEnabled(slug,id);const action=repo.getA2AAction(required(input.actionId,'actionId'),{workspaceSlug:slug});

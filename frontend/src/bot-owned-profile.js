@@ -26,6 +26,7 @@ export function botInstanceStatus(bot,discovery) {
   const instance=bot?.instance,owned=instance?.mode==='owned_profile',profile=instance?.profile||bot?.employee?.runtime_profile||'',base={mode:owned?'owned_profile':'legacy_private_home',profile,templateProfile:instance?.templateProfile||profile,home:null,provisioned:false,canValidate:false,canRecover:false,modelReady:false,authentication:null,actionId:instance?.provisioning?.actionId||null,error:instance?.provisioning?.error||''};
   if(!owned)return{...base,stage:'legacy',label:'来源 Profile + 独立实例',home:instance?.home||null,canValidate:true};
   const provision=instance.provisioning||{},identity=Boolean(profile&&profile===bot.employee?.runtime_profile&&instance.ownershipId&&provision.actionId),confirmed=identity&&provision.status==='provisioned'&&typeof instance.home==='string'&&Boolean(instance.home.trim());
+  if(provision.status==='waiting_client' && bot.effect?.executionAdmission?.deviceExecution==='blocked')return {...base,stage:'waiting_client',label:'已保存规划 · 等待客户端验证或更新',canValidate:false,canRecover:false};
   if(!confirmed){const failed=['failed','cancelled','expired'].includes(provision.status),unknown=provision.status==='uncertain'||provision.status==='provisioned';return{...base,stage:unknown?'uncertain':failed?'failed':'provisioning',label:unknown?'专属 Profile 结果待核实':failed?'专属 Profile 创建失败':'正在创建专属 Profile',canRecover:identity&&failed};}
   // Running an owned Profile and selecting a template are different purposes.
   // Its initialization_source=false flag must never hide its runtime discovery.
@@ -57,7 +58,7 @@ export function createOwnedBotRequest({api,wrap=value=>value,namespace='',origin
       const value=entry.botId?await api.bot(entry.botId,entry.workspace):await api.createBot(body(entry),entry.workspace);
       if(!value?.id||(entry.botId&&value.id!==entry.botId)||value.employee?.id!==value.id||value.workspace!==entry.workspace||value.employee?.target_device_id!==entry.deviceId||!value.main_conversation_id)throw new Error('Bot 创建回执的员工、工作区、电脑或主聊天与原请求不一致。');
       entry.botId=value.id;update('saved');
-      if(value.instance?.mode!=='owned_profile'||value.instance.templateProfile!==entry.sourceProfile||value.employee.runtime_profile!==value.instance.profile||!value.instance.provisioning?.actionId)throw new Error('Bot 已保存，但专属 Profile 创建身份尚未确认，请查询同一 Bot。');
+      if(value.instance?.mode!=='owned_profile'||value.instance.templateProfile!==entry.sourceProfile||value.employee.runtime_profile!==value.instance.profile||(!value.instance.provisioning?.actionId && !(value.instance.provisioning?.status==='waiting_client' && value.effect?.executionAdmission?.deviceExecution==='blocked' && value.instance.ownershipId)))throw new Error('Bot 已保存，但专属 Profile 创建身份尚未确认，请查询同一 Bot。');
       if(!current(visit))return false;state.bot=value;return true;
     }catch(error){if(current(visit))state.bot=null;if(!recovering&&!entry.botId&&entry.phase!=='unknown'&&error.status>=400&&error.status<500&&error.status!==408){registry.delete(entry.workspace);persist();if(current(visit))Object.assign(state,{pending:null,phase:'failed',error:error.message});}else update('unknown',error.message||'Bot 创建结果未知，请按原请求查询。');return false;}
     finally{busy.delete(entry.workspace);if(!disposed&&state.workspace===entry.workspace)state.busy=false;}

@@ -2,12 +2,16 @@ import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
 import {createPreservation} from './version-preservation.mjs';
+import {preflightServerCodeRollout,initializeServerCodeRollout,installServerCodeRolloutActionGuards} from './server-code-rollout.mjs';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 
-export function openDatabase({ memory = false, filename = process.env.ZIWEI_DB_FILE || path.join(ROOT, 'data', 'ziwei.sqlite'), preservation } = {}) {
+export function openDatabase(options = {}, {serverCodeRolloutIo={}}={}) {
+  const {memory=false,filename=process.env.ZIWEI_DB_FILE || path.join(ROOT,'data','ziwei.sqlite'),preservation}=options;
+  preflightServerCodeRollout(options);
   if (!memory) fs.mkdirSync(path.dirname(filename), { recursive: true });
   const db = new DatabaseSync(memory ? ':memory:' : filename);
+  let rollout;try{rollout=initializeServerCodeRollout(db,options,serverCodeRolloutIo);}catch(error){db.close();throw error;}
   // Read-only backups briefly hold shared locks. Give normal writes a bounded
   // opportunity to commit after that reader releases its snapshot.
   db.exec('PRAGMA busy_timeout = 5000');
@@ -398,6 +402,7 @@ export function openDatabase({ memory = false, filename = process.env.ZIWEI_DB_F
     ,"ALTER TABLE automations ADD COLUMN executor TEXT NOT NULL DEFAULT 'ziwei_user'"
     ,"ALTER TABLE automations ADD COLUMN webhook_secret TEXT"
   ]) { try { db.exec(statement); } catch {} }
+  if(rollout){installServerCodeRolloutActionGuards(db);return db;}
   // Management is a default platform capability. Upgrade historical switches
   // once, preserving employee timestamps, phone configuration and receipts.
   const managementMigration = '2026-10-09-default-management-mcp';
