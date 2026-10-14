@@ -1,0 +1,81 @@
+{
+  "at": "2026-10-13T13:03:30.421Z",
+  "candidate": "8556aecb6a37385d9fc7061f989e97071bfd6cf9",
+  "scope": "real packaged v1-compat local executor + installed Hermes + own HOME + loopback provider; server admission response is a controlled fixture for an initially ordinary profile",
+  "role": "v1-compat",
+  "source": "C:\\Users\\25941\\.codex\\worktrees\\v2-q01-preservation-acceptance\\灵光爸爸拆解\\.local\\q01-preservation\\author-package-snapshot\\v1-compat\\src\\local-action.mjs",
+  "expected": "V2_OBJECT_SEALED before native spawn after alias changes during asynchronous bootstrap",
+  "actual": {
+    "status": "succeeded",
+    "profile": "ordinary-alias",
+    "processExit": {
+      "platform": "win32",
+      "supervisor": "windows-job",
+      "launched": true,
+      "rootPid": 54344,
+      "rootConfirmed": true,
+      "rootExitCode": 0,
+      "treeConfirmed": true,
+      "activeProcesses": 0,
+      "cancelled": false,
+      "failureCode": null,
+      "hostExitCode": 0,
+      "streamsComplete": true,
+      "hostSignal": null
+    },
+    "response": "LOCAL-REHEARSAL-OK memory=false\r\n"
+  },
+  "events": [
+    {
+      "event": "bootstrap-entered-after-executor-fence",
+      "aliasReal": "C:\\Users\\25941\\.codex\\worktrees\\v2-q01-preservation-acceptance\\灵光爸爸拆解\\.local\\q01-preservation\\profile-window-1791896595485\\hermes\\profiles\\ordinary"
+    },
+    {
+      "event": "alias-now-owned",
+      "aliasReal": "C:\\Users\\25941\\.codex\\worktrees\\v2-q01-preservation-acceptance\\灵光爸爸拆解\\.local\\q01-preservation\\profile-window-1791896595485\\hermes\\profiles\\bot-owned"
+    }
+  ],
+  "supervision": {
+    "observedCount": 1,
+    "rawChildHandlesExcluded": true
+  },
+  "ownedBeforeFiles": [
+    ".env",
+    ".no-bundled-skills",
+    "auth.json",
+    "config.yaml",
+    "ziwei-instance.json"
+  ],
+  "ownedAfterFiles": [
+    ".env",
+    ".mcp-discovery.lock",
+    ".no-bundled-skills",
+    ".skills_prompt_snapshot.json",
+    "audio_cache",
+    "auth.json",
+    "backups",
+    "cache",
+    "config.yaml",
+    "cron",
+    "hooks",
+    "image_cache",
+    "logs",
+    "memories",
+    "pairing",
+    "sandboxes",
+    "sessions",
+    "skills",
+    "SOUL.md",
+    "state.db",
+    "state.db.fts_rebuild.lock",
+    "ziwei-instance.json"
+  ],
+  "postFenceCheck": {
+    "rejected": true,
+    "code": "V2_OBJECT_SEALED"
+  },
+  "providerClosed": true,
+  "externalRequests": false,
+  "originalPrivateReceipt": ".local/q01-preservation/profile-window-1791896595485/receipt.json",
+  "firstTwoAttempts": "incomplete due to QA management config/JSON fixture; preserved separately, not product protection passes"
+}

@@ -1,0 +1,1474 @@
+{
+  "schemaVersion": 1,
+  "candidate": "8556aecb6a37385d9fc7061f989e97071bfd6cf9",
+  "at": "2026-10-13T14:22:19.893Z",
+  "productionApplied": false,
+  "network": "loopback synthetic provider; no repeat paid model",
+  "decision": "FAIL_P1_NO_FORMAL_RELEASE",
+  "regression": {
+    "tests": 922,
+    "passed": 922,
+    "failed": 0,
+    "skipped": 0,
+    "lintFiles": 124,
+    "buildModules": 1787
+  },
+  "packageVerification": {
+    "at": "2026-10-13T12:56:59.673Z",
+    "candidate": "8556aecb6a37385d9fc7061f989e97071bfd6cf9",
+    "verifiedArtifacts": 6,
+    "roles": [
+      {
+        "role": "v1-compat",
+        "sourceBuild": "7562457493b14d7c781647f776bc7fc1253e8589e97b24acfeff224c867d6b76",
+        "installedBuild": "006573c242a5498eff490644c28d472eaeaf6d34695769c8e09bffb6eda6ecf3",
+        "buildDigest": "73b1d6ac3e2adab8c7c21755b1bbbc38bc4e26caac92455102174001f0a01fd2",
+        "artifacts": [
+          {
+            "name": "v1-compat-windows-client.tgz",
+            "sha256": "9252d2b73499719bcb04a63ab4a5fe45eb4503de62a7db33f22cf955c2b72d90",
+            "bytes": 327829
+          },
+          {
+            "name": "v1-compat-frontend.zip",
+            "sha256": "38709827878f198a0ce02bfae7ced76071ef4dec0760454e588c04e8943f587d",
+            "bytes": 487340
+          },
+          {
+            "name": "v1-compat-api.zip",
+            "sha256": "0ec805c1a39c2e1919c6aab7c70dcd8c9c8d5c273622ee205108512d69743d36",
+            "bytes": 406112
+          }
+        ]
+      },
+      {
+        "role": "v2",
+        "sourceBuild": "abf0dd45f7bfe2fbd83f558cc7ecfd83a5229e72378d0ace2b23608f35b49860",
+        "installedBuild": "a7329be3dabde8f68fbe200e37031cd97456faf4efc2e6ec1b0a5890efb81ec3",
+        "buildDigest": "1443b4cf433a4f61693cf1a7810c72f903de1c125f7050129ee77f8480116c06",
+        "artifacts": [
+          {
+            "name": "v2-windows-client.tgz",
+            "sha256": "f3c6612fac42ab6daf4149b48af59f43668bb1ac0fb2ac3abd87b057cb91fabf",
+            "bytes": 374731
+          },
+          {
+            "name": "v2-frontend.zip",
+            "sha256": "f24eaf58eeb22dd5c7eacba0fc638701e2018e0748e706b868610ee364863a2d",
+            "bytes": 558609
+          },
+          {
+            "name": "v2-api.zip",
+            "sha256": "a5479702dc6fb7db2c7b12da1d1d5ecc3cc87fc97d4e3834ccf572f74d0eefcb",
+            "bytes": 505941
+          }
+        ]
+      }
+    ]
+  },
+  "coldInstall": {
+    "schemaVersion": 1,
+    "complete": true,
+    "at": "2026-10-13T14:06:15.667Z",
+    "root": "C:\\Users\\25941\\.codex\\worktrees\\v2-q01-preservation-acceptance\\灵光爸爸拆解\\.local\\q01-preservation\\cold-install-1791900371492",
+    "proof": [
+      {
+        "role": "v1-compat",
+        "emptyCacheBefore": true,
+        "offline": true,
+        "ignoreScripts": true,
+        "installedClientBuild": "006573c242a5498eff490644c28d472eaeaf6d34695769c8e09bffb6eda6ecf3",
+        "manifestClientBuild": "006573c242a5498eff490644c28d472eaeaf6d34695769c8e09bffb6eda6ecf3",
+        "cache": "C:\\Users\\25941\\.codex\\worktrees\\v2-q01-preservation-acceptance\\灵光爸爸拆解\\.local\\q01-preservation\\cold-install-1791900371492\\cache-v1-compat",
+        "prefix": "C:\\Users\\25941\\.codex\\worktrees\\v2-q01-preservation-acceptance\\灵光爸爸拆解\\.local\\q01-preservation\\cold-install-1791900371492\\v1-compat"
+      },
+      {
+        "role": "v2",
+        "emptyCacheBefore": true,
+        "offline": true,
+        "ignoreScripts": true,
+        "installedClientBuild": "a7329be3dabde8f68fbe200e37031cd97456faf4efc2e6ec1b0a5890efb81ec3",
+        "manifestClientBuild": "a7329be3dabde8f68fbe200e37031cd97456faf4efc2e6ec1b0a5890efb81ec3",
+        "cache": "C:\\Users\\25941\\.codex\\worktrees\\v2-q01-preservation-acceptance\\灵光爸爸拆解\\.local\\q01-preservation\\cold-install-1791900371492\\cache-v2",
+        "prefix": "C:\\Users\\25941\\.codex\\worktrees\\v2-q01-preservation-acceptance\\灵光爸爸拆解\\.local\\q01-preservation\\cold-install-1791900371492\\v2"
+      }
+    ]
+  },
+  "mainRehearsal": {
+    "complete": true,
+    "cleanupConfirmed": true,
+    "versions": [
+      "Original V1 public archive",
+      "V2",
+      "V1 data-preserving compatibility",
+      "V2 restored"
+    ],
+    "root": "C:\\Users\\25941\\.codex\\worktrees\\v2-q01-preservation-acceptance\\灵光爸爸拆解\\.local\\q01-preservation\\runs\\1791896780966",
+    "checkpoints": [
+      {
+        "name": "Interrupted unACKed action naturally expires through API; original identity and payload preserved, no journal startup or replay",
+        "actionId": "action_aa43b286-c5e8-47cc-9d3f-424cd199f6ae"
+      },
+      {
+        "name": "Prior original V1 and V2 11 real native actions retain succeeded and Windows Job tree-zero evidence",
+        "actionId": null
+      },
+      {
+        "name": "Original real ACKed native completion settles while preparing; active action refuses seal",
+        "actionId": "action_dbf7d3bb-7b48-4ea1-a43f-feccfbf766d6"
+      },
+      {
+        "name": "Q01 same-batch frontend UI checkpoint v1-compat-sealed",
+        "actionId": null
+      },
+      {
+        "name": "V1 compatibility preserves V2 identities, HOME bytes, history and credentials; legacy executes",
+        "actionId": null
+      },
+      {
+        "name": "Q01 same-batch frontend UI checkpoint v2-restored-paused",
+        "actionId": null
+      },
+      {
+        "name": "Second prepare/drain/seal/restore cycle preserves bytes and starts no work",
+        "actionId": null
+      },
+      {
+        "name": "V2 restore retains identity and memory; explicit resume only; no historical tick/action replay",
+        "actionId": "action_135383f8-fc15-4525-b4e2-1c785c69b3c1"
+      }
+    ],
+    "negativeRequests": [
+      {
+        "url": "/api/workspaces/test-111/tasks",
+        "method": "POST",
+        "code": "V2_OBJECT_SEALED",
+        "expected": true,
+        "httpStatus": 409,
+        "caseId": "browser_bot_task",
+        "requestVariant": "employeeId plus execute"
+      },
+      {
+        "url": "/mcp/v1/workspaces/test-111/tasks",
+        "method": "POST",
+        "code": "V2_OBJECT_SEALED",
+        "expected": true,
+        "httpStatus": 409,
+        "caseId": "mcp_bot_task",
+        "requestVariant": "management MCP employeeId plus execute"
+      },
+      {
+        "url": "/api/conversations/conv_a88b9b93-255a-4a13-9861-e5dd25b288c5/messages",
+        "method": "POST",
+        "code": "V2_OBJECT_SEALED",
+        "expected": true,
+        "httpStatus": 409,
+        "caseId": "chat_dispatch_omitted",
+        "requestVariant": "dispatch omitted"
+      },
+      {
+        "url": "/api/conversations/conv_a88b9b93-255a-4a13-9861-e5dd25b288c5/messages",
+        "method": "POST",
+        "code": "V2_OBJECT_SEALED",
+        "expected": true,
+        "httpStatus": 409,
+        "caseId": "chat_dispatch_true",
+        "requestVariant": "dispatch true"
+      },
+      {
+        "url": "/api/conversations/conv_a88b9b93-255a-4a13-9861-e5dd25b288c5/messages",
+        "method": "POST",
+        "code": "V2_OBJECT_SEALED",
+        "expected": true,
+        "httpStatus": 409,
+        "caseId": "chat_dispatch_false",
+        "requestVariant": "dispatch false"
+      },
+      {
+        "url": "/api/automations/auto_c93cb6c9-3bdd-4f47-afdf-5b3e71b8c90f/run",
+        "method": "POST",
+        "code": "V2_OBJECT_SEALED",
+        "expected": true,
+        "httpStatus": 409,
+        "caseId": "manual_routine_run",
+        "requestVariant": "generic automation run"
+      },
+      {
+        "url": "/api/automations/auto_c93cb6c9-3bdd-4f47-afdf-5b3e71b8c90f",
+        "method": "PATCH",
+        "code": "V2_OBJECT_SEALED",
+        "expected": true,
+        "httpStatus": 409,
+        "caseId": "routine_patch",
+        "requestVariant": "PATCH status active"
+      },
+      {
+        "url": "/api/automations/auto_c93cb6c9-3bdd-4f47-afdf-5b3e71b8c90f",
+        "method": "DELETE",
+        "code": "V2_OBJECT_SEALED",
+        "expected": true,
+        "httpStatus": 409,
+        "caseId": "routine_delete",
+        "requestVariant": "DELETE bound routine"
+      },
+      {
+        "url": "/api/employees/employee_07b7841b-272b-4e69-82f1-5c7d85a7836c",
+        "method": "PATCH",
+        "code": "V2_OBJECT_SEALED",
+        "expected": true,
+        "httpStatus": 409,
+        "caseId": "employee_runtime_patch",
+        "requestVariant": "PATCH runtime Codex"
+      },
+      {
+        "url": "/a2a/v1/actions",
+        "method": "POST",
+        "code": "V2_OBJECT_SEALED",
+        "expected": true,
+        "httpStatus": 409,
+        "caseId": "a2a_conversation_default",
+        "requestVariant": "runtime.execute with original conversation plus profile default"
+      },
+      {
+        "url": "/a2a/v1/actions",
+        "method": "POST",
+        "code": "V2_OBJECT_SEALED",
+        "expected": true,
+        "httpStatus": 409,
+        "caseId": "a2a_profile_upper_device",
+        "requestVariant": "runtime.execute with uppercase owned profile plus original device"
+      }
+    ],
+    "negativeBatchSideEffects": {
+      "protectedRowsUnchanged": true,
+      "actionStateShaUnchanged": true,
+      "providerCallsUnchanged": true,
+      "comparisonScope": "11-request batch; no separate per-request snapshots"
+    },
+    "builds": [
+      {
+        "role": "v1-compat",
+        "installedClientBuild": "006573c242a5498eff490644c28d472eaeaf6d34695769c8e09bffb6eda6ecf3",
+        "manifestClientBuild": "006573c242a5498eff490644c28d472eaeaf6d34695769c8e09bffb6eda6ecf3",
+        "apiContentsVerified": true,
+        "installationFromInterruptedRun": true
+      },
+      {
+        "role": "v2",
+        "installedClientBuild": "a7329be3dabde8f68fbe200e37031cd97456faf4efc2e6ec1b0a5890efb81ec3",
+        "manifestClientBuild": "a7329be3dabde8f68fbe200e37031cd97456faf4efc2e6ec1b0a5890efb81ec3",
+        "apiContentsVerified": true,
+        "installationFromInterruptedRun": true
+      },
+      {
+        "role": "v2",
+        "apiListener": {
+          "pid": 532,
+          "port": 6397,
+          "entryVerifiedByOwnedChild": true
+        },
+        "apiRoot": "C:\\Users\\25941\\.codex\\worktrees\\v2-q01-preservation-acceptance\\灵光爸爸拆解\\.local\\q01-preservation\\runs\\1791896780966\\v2-api"
+      },
+      {
+        "role": "v2",
+        "runningClientBuild": "a7329be3dabde8f68fbe200e37031cd97456faf4efc2e6ec1b0a5890efb81ec3",
+        "pid": 9988,
+        "lifecycleEvidenceRetainedPrivately": true,
+        "nonceExcluded": true
+      },
+      {
+        "role": "v1-compat",
+        "apiListener": {
+          "pid": 10636,
+          "port": 6397,
+          "entryVerifiedByOwnedChild": true
+        },
+        "apiRoot": "C:\\Users\\25941\\.codex\\worktrees\\v2-q01-preservation-acceptance\\灵光爸爸拆解\\.local\\q01-preservation\\runs\\1791896780966\\v1-compat-api"
+      },
+      {
+        "role": "v1-compat",
+        "runningClientBuild": "006573c242a5498eff490644c28d472eaeaf6d34695769c8e09bffb6eda6ecf3",
+        "pid": 36024,
+        "lifecycleEvidenceRetainedPrivately": true,
+        "nonceExcluded": true
+      },
+      {
+        "role": "v2",
+        "apiListener": {
+          "pid": 31376,
+          "port": 6397,
+          "entryVerifiedByOwnedChild": true
+        },
+        "apiRoot": "C:\\Users\\25941\\.codex\\worktrees\\v2-q01-preservation-acceptance\\灵光爸爸拆解\\.local\\q01-preservation\\runs\\1791896780966\\v2-api"
+      },
+      {
+        "role": "v2",
+        "runningClientBuild": "a7329be3dabde8f68fbe200e37031cd97456faf4efc2e6ec1b0a5890efb81ec3",
+        "pid": 39460,
+        "lifecycleEvidenceRetainedPrivately": true,
+        "nonceExcluded": true
+      }
+    ],
+    "transitions": [
+      {
+        "command": "prepare",
+        "mode": "applied",
+        "state": "preparing",
+        "operationId": "four-phase-preserve",
+        "issues": [
+          {
+            "code": "ACTION_NOT_DRAINED",
+            "actionId": "action_dbf7d3bb-7b48-4ea1-a43f-feccfbf766d6",
+            "status": "acked"
+          }
+        ]
+      },
+      {
+        "command": "drain",
+        "mode": "applied",
+        "state": null,
+        "operationId": null,
+        "issues": null
+      },
+      {
+        "command": "seal",
+        "mode": "applied",
+        "state": "sealed",
+        "operationId": "four-phase-preserve",
+        "issues": []
+      },
+      {
+        "command": "seal",
+        "mode": "applied",
+        "state": "sealed",
+        "operationId": "four-phase-preserve",
+        "issues": []
+      },
+      {
+        "command": "restore",
+        "mode": "applied",
+        "state": "restored",
+        "operationId": "four-phase-preserve",
+        "issues": []
+      },
+      {
+        "command": "restore",
+        "mode": "applied",
+        "state": "restored",
+        "operationId": "four-phase-preserve",
+        "issues": []
+      },
+      {
+        "command": "prepare",
+        "mode": "applied",
+        "state": "preparing",
+        "operationId": "second-preservation-cycle",
+        "issues": []
+      },
+      {
+        "command": "drain",
+        "mode": "applied",
+        "state": null,
+        "operationId": null,
+        "issues": null
+      },
+      {
+        "command": "seal",
+        "mode": "applied",
+        "state": "sealed",
+        "operationId": "second-preservation-cycle",
+        "issues": []
+      },
+      {
+        "command": "restore",
+        "mode": "applied",
+        "state": "restored",
+        "operationId": "second-preservation-cycle",
+        "issues": []
+      }
+    ],
+    "provider": {
+      "calls": 5,
+      "activeCalls": 0
+    },
+    "interruption": {
+      "firstExecutionReceiptMissing": true,
+      "originalUnACKedAction": "action_aa43b286-c5e8-47cc-9d3f-424cd199f6ae",
+      "originalJournalStarted": false,
+      "naturallyExpiredThroughApi": true,
+      "newDelayedIntentDistinct": true,
+      "originalFailureEvidencePreserved": true
+    },
+    "uiProxyFault": {
+      "originalExitCode": 1,
+      "reason": "ERR_HTTP_HEADERS_SENT while old SSE upstream closed during QA API version switch",
+      "qaHelperOnlyFixed": true,
+      "productChanged": false
+    }
+  },
+  "nativeRetry": {
+    "complete": true,
+    "cleanupConfirmed": true,
+    "simulation": "Explicit device-reported failure after actual native HOME publication; not an actual Hermes provisioning failure",
+    "employeeId": "employee_a954f170-5ecd-40b7-b170-5369f83c89a4",
+    "firstId": "action_35bd4f89-7c9e-4ee6-868e-96248771cf8f",
+    "firstNativeExit": {
+      "platform": "win32",
+      "supervisor": "windows-job",
+      "launched": true,
+      "rootPid": 54360,
+      "rootConfirmed": true,
+      "rootExitCode": 0,
+      "treeConfirmed": true,
+      "activeProcesses": 0,
+      "cancelled": false,
+      "failureCode": null,
+      "hostExitCode": 0,
+      "streamsComplete": true,
+      "hostSignal": null
+    },
+    "wrongActionId": "action_f6878a7f-4865-4df9-a7d3-340993ece696",
+    "wrongStatus": "failed",
+    "wrongError": "BOT_PROFILE_OWNERSHIP_CONFLICT",
+    "wrongProcessExit": {
+      "platform": "win32",
+      "supervisor": "windows-job",
+      "launched": true,
+      "rootPid": 15472,
+      "rootConfirmed": true,
+      "rootExitCode": 0,
+      "treeConfirmed": true,
+      "activeProcesses": 0,
+      "cancelled": false,
+      "failureCode": null,
+      "hostExitCode": 0,
+      "streamsComplete": true,
+      "hostSignal": null
+    },
+    "correctActionId": "action_05583cc4-01c7-4962-8847-e05f98b28b4b",
+    "correctNativeExit": {
+      "platform": "win32",
+      "supervisor": "windows-job",
+      "launched": true,
+      "rootPid": 13916,
+      "rootConfirmed": true,
+      "rootExitCode": 0,
+      "treeConfirmed": true,
+      "activeProcesses": 0,
+      "cancelled": false,
+      "failureCode": null,
+      "hostExitCode": 0,
+      "streamsComplete": true,
+      "hostSignal": null
+    },
+    "correctProvision": {
+      "schemaVersion": 1,
+      "mode": "owned_profile",
+      "workspace": "test-111",
+      "employeeId": "employee_a954f170-5ecd-40b7-b170-5369f83c89a4",
+      "deviceId": "device_2c305950-6be1-4edd-bba3-c59651b86492",
+      "ownershipId": "68d0ea3a-6e83-44fe-9223-dd76ae8a498a",
+      "profile": "bot-2f28d47cac043e51a1c473c2",
+      "home": "C:\\Users\\25941\\.codex\\worktrees\\v2-q01-preservation-acceptance\\灵光爸爸拆解\\.local\\q01-preservation\\runs\\1791896780966\\hermes-source\\profiles\\bot-2f28d47cac043e51a1c473c2",
+      "profileHome": "C:\\Users\\25941\\.codex\\worktrees\\v2-q01-preservation-acceptance\\灵光爸爸拆解\\.local\\q01-preservation\\runs\\1791896780966\\hermes-source\\profiles\\bot-2f28d47cac043e51a1c473c2",
+      "nativeVersion": "0.21.3",
+      "authentication": "configured",
+      "authMode": "source-native-store",
+      "templateProfile": "default",
+      "duplicate": true,
+      "provisionActionId": "action_35bd4f89-7c9e-4ee6-868e-96248771cf8f"
+    },
+    "initialBindingActionId": "action_35bd4f89-7c9e-4ee6-868e-96248771cf8f",
+    "latestRowActionId": "action_05583cc4-01c7-4962-8847-e05f98b28b4b",
+    "markerByteUnchanged": true,
+    "nonLogHomeBytesUnchangedOnBothRetries": true,
+    "homeHashExcludes": [
+      "logs"
+    ],
+    "transitions": [
+      {
+        "command": "prepare",
+        "mode": "applied",
+        "state": "preparing"
+      },
+      {
+        "command": "drain",
+        "mode": "applied",
+        "state": null
+      },
+      {
+        "command": "seal",
+        "mode": "applied",
+        "state": "sealed"
+      },
+      {
+        "command": "restore",
+        "mode": "applied",
+        "state": "restored"
+      }
+    ]
+  },
+  "actions": [
+    {
+      "id": "action_10ac6e28-96fe-4392-a03d-117263c620bd",
+      "type": "conversation.execute",
+      "status": "succeeded",
+      "employeeId": "employee_3051b08a-b94b-4007-9e08-89198f555d1a",
+      "ackedAt": "2026-10-13T13:06:45.257Z",
+      "completedAt": "2026-10-13T13:06:57.151Z",
+      "expiresAt": "2026-10-13T13:22:57.138Z",
+      "error": null,
+      "processExit": {
+        "platform": "win32",
+        "supervisor": "windows-job",
+        "launched": true,
+        "rootPid": 26052,
+        "rootConfirmed": true,
+        "rootExitCode": 0,
+        "treeConfirmed": true,
+        "activeProcesses": 0,
+        "cancelled": false,
+        "failureCode": null,
+        "hostExitCode": 0,
+        "streamsComplete": true,
+        "hostSignal": null
+      },
+      "botProvision": null,
+      "nativeSessionId": null,
+      "q01ExplicitSimulation": null
+    },
+    {
+      "id": "action_0721e1ba-6452-46df-a664-a57f3e012499",
+      "type": "conversation.execute",
+      "status": "succeeded",
+      "employeeId": "employee_644369b5-3761-410a-a37a-c44f966da848",
+      "ackedAt": "2026-10-13T13:06:58.381Z",
+      "completedAt": "2026-10-13T13:07:09.940Z",
+      "expiresAt": "2026-10-13T13:23:09.931Z",
+      "error": null,
+      "processExit": {
+        "platform": "win32",
+        "supervisor": "windows-job",
+        "launched": true,
+        "rootPid": 15368,
+        "rootConfirmed": true,
+        "rootExitCode": 0,
+        "treeConfirmed": true,
+        "activeProcesses": 0,
+        "cancelled": false,
+        "failureCode": null,
+        "hostExitCode": 0,
+        "streamsComplete": true,
+        "hostSignal": null
+      },
+      "botProvision": null,
+      "nativeSessionId": null,
+      "q01ExplicitSimulation": null
+    },
+    {
+      "id": "action_0df32896-a3be-4bc2-8cb2-6cc760ff4f90",
+      "type": "task.execute",
+      "status": "succeeded",
+      "employeeId": "employee_3051b08a-b94b-4007-9e08-89198f555d1a",
+      "ackedAt": "2026-10-13T13:07:10.500Z",
+      "completedAt": "2026-10-13T13:07:16.797Z",
+      "expiresAt": "2026-10-13T13:23:16.786Z",
+      "error": null,
+      "processExit": {
+        "platform": "win32",
+        "supervisor": "windows-job",
+        "launched": true,
+        "rootPid": 10612,
+        "rootConfirmed": true,
+        "rootExitCode": 0,
+        "treeConfirmed": true,
+        "activeProcesses": 0,
+        "cancelled": false,
+        "failureCode": null,
+        "hostExitCode": 0,
+        "streamsComplete": true,
+        "hostSignal": null
+      },
+      "botProvision": null,
+      "nativeSessionId": null,
+      "q01ExplicitSimulation": null
+    },
+    {
+      "id": "action_f0e65f13-dccf-4414-b881-5c31ffbba345",
+      "type": "hermes.bot.provision",
+      "status": "succeeded",
+      "employeeId": "employee_07b7841b-272b-4e69-82f1-5c7d85a7836c",
+      "ackedAt": "2026-10-13T13:07:26.126Z",
+      "completedAt": "2026-10-13T13:07:27.330Z",
+      "expiresAt": "2026-10-13T13:23:27.318Z",
+      "error": null,
+      "processExit": {
+        "platform": "win32",
+        "supervisor": "windows-job",
+        "launched": true,
+        "rootPid": 32924,
+        "rootConfirmed": true,
+        "rootExitCode": 0,
+        "treeConfirmed": true,
+        "activeProcesses": 0,
+        "cancelled": false,
+        "failureCode": null,
+        "hostExitCode": 0,
+        "streamsComplete": true,
+        "hostSignal": null
+      },
+      "botProvision": {
+        "profile": "bot-232d760db603a0db4ffa58cb",
+        "home": "C:\\Users\\25941\\.codex\\worktrees\\v2-q01-preservation-acceptance\\灵光爸爸拆解\\.local\\q01-preservation\\runs\\1791896780966\\hermes-source\\profiles\\bot-232d760db603a0db4ffa58cb",
+        "ownershipId": "a9308ab4-7e7f-4763-bb52-bfbe1ba1a192",
+        "provisionActionId": "action_f0e65f13-dccf-4414-b881-5c31ffbba345",
+        "duplicate": false
+      },
+      "nativeSessionId": null,
+      "q01ExplicitSimulation": null
+    },
+    {
+      "id": "action_f7986fa0-7943-44f5-9833-4a158e4b6752",
+      "type": "hermes.bot.validate",
+      "status": "succeeded",
+      "employeeId": "employee_07b7841b-272b-4e69-82f1-5c7d85a7836c",
+      "ackedAt": "2026-10-13T13:07:28.181Z",
+      "completedAt": "2026-10-13T13:07:29.646Z",
+      "expiresAt": "2026-10-13T13:23:29.635Z",
+      "error": null,
+      "processExit": {
+        "platform": "win32",
+        "supervisor": "windows-job",
+        "launched": true,
+        "rootPid": 45996,
+        "rootConfirmed": true,
+        "rootExitCode": 0,
+        "treeConfirmed": true,
+        "activeProcesses": 0,
+        "cancelled": false,
+        "failureCode": null,
+        "hostExitCode": 0,
+        "streamsComplete": true,
+        "hostSignal": null
+      },
+      "botProvision": null,
+      "nativeSessionId": null,
+      "q01ExplicitSimulation": null
+    },
+    {
+      "id": "action_160fb34b-159f-48f9-bd60-b872cc9e5261",
+      "type": "conversation.execute",
+      "status": "succeeded",
+      "employeeId": "employee_07b7841b-272b-4e69-82f1-5c7d85a7836c",
+      "ackedAt": "2026-10-13T13:07:30.186Z",
+      "completedAt": "2026-10-13T13:07:35.211Z",
+      "expiresAt": "2026-10-13T13:23:35.199Z",
+      "error": null,
+      "processExit": {
+        "platform": "win32",
+        "supervisor": "windows-job",
+        "launched": true,
+        "rootPid": 44068,
+        "rootConfirmed": true,
+        "rootExitCode": 0,
+        "treeConfirmed": true,
+        "activeProcesses": 0,
+        "cancelled": false,
+        "failureCode": null,
+        "hostExitCode": 0,
+        "streamsComplete": true,
+        "hostSignal": null
+      },
+      "botProvision": null,
+      "nativeSessionId": "20261013_210731_cb56d6",
+      "q01ExplicitSimulation": null
+    },
+    {
+      "id": "action_c2e1b48a-b079-4043-8518-a5806e093b1e",
+      "type": "automation.execute",
+      "status": "succeeded",
+      "employeeId": "employee_07b7841b-272b-4e69-82f1-5c7d85a7836c",
+      "ackedAt": "2026-10-13T13:07:36.196Z",
+      "completedAt": "2026-10-13T13:07:40.757Z",
+      "expiresAt": "2026-10-13T13:23:40.747Z",
+      "error": null,
+      "processExit": {
+        "platform": "win32",
+        "supervisor": "windows-job",
+        "launched": true,
+        "rootPid": 56148,
+        "rootConfirmed": true,
+        "rootExitCode": 0,
+        "treeConfirmed": true,
+        "activeProcesses": 0,
+        "cancelled": false,
+        "failureCode": null,
+        "hostExitCode": 0,
+        "streamsComplete": true,
+        "hostSignal": null
+      },
+      "botProvision": null,
+      "nativeSessionId": "20261013_210731_cb56d6",
+      "q01ExplicitSimulation": null
+    },
+    {
+      "id": "action_86ff7735-d259-4ab5-9136-3686c2fef503",
+      "type": "hermes.bot.provision",
+      "status": "succeeded",
+      "employeeId": "employee_38f66f79-52f4-4b7e-88a3-e6b1eafda8fd",
+      "ackedAt": "2026-10-13T13:07:41.266Z",
+      "completedAt": "2026-10-13T13:07:42.406Z",
+      "expiresAt": "2026-10-13T13:23:42.394Z",
+      "error": null,
+      "processExit": {
+        "platform": "win32",
+        "supervisor": "windows-job",
+        "launched": true,
+        "rootPid": 35160,
+        "rootConfirmed": true,
+        "rootExitCode": 0,
+        "treeConfirmed": true,
+        "activeProcesses": 0,
+        "cancelled": false,
+        "failureCode": null,
+        "hostExitCode": 0,
+        "streamsComplete": true,
+        "hostSignal": null
+      },
+      "botProvision": {
+        "profile": "bot-2d6593e94446155657d2f69d",
+        "home": "C:\\Users\\25941\\.codex\\worktrees\\v2-q01-preservation-acceptance\\灵光爸爸拆解\\.local\\q01-preservation\\runs\\1791896780966\\hermes-source\\profiles\\bot-2d6593e94446155657d2f69d",
+        "ownershipId": "c6c7b248-415f-481b-9a6a-1c5ad88ba624",
+        "provisionActionId": "action_86ff7735-d259-4ab5-9136-3686c2fef503",
+        "duplicate": false
+      },
+      "nativeSessionId": null,
+      "q01ExplicitSimulation": null
+    },
+    {
+      "id": "action_eaaaae4d-cacb-4fbe-888b-89bf4cf1db57",
+      "type": "hermes.bot.validate",
+      "status": "succeeded",
+      "employeeId": "employee_38f66f79-52f4-4b7e-88a3-e6b1eafda8fd",
+      "ackedAt": "2026-10-13T13:07:43.305Z",
+      "completedAt": "2026-10-13T13:07:44.763Z",
+      "expiresAt": "2026-10-13T13:23:44.752Z",
+      "error": null,
+      "processExit": {
+        "platform": "win32",
+        "supervisor": "windows-job",
+        "launched": true,
+        "rootPid": 49916,
+        "rootConfirmed": true,
+        "rootExitCode": 0,
+        "treeConfirmed": true,
+        "activeProcesses": 0,
+        "cancelled": false,
+        "failureCode": null,
+        "hostExitCode": 0,
+        "streamsComplete": true,
+        "hostSignal": null
+      },
+      "botProvision": null,
+      "nativeSessionId": null,
+      "q01ExplicitSimulation": null
+    },
+    {
+      "id": "action_68455f9e-00a5-4788-a0d2-fbe07eef3870",
+      "type": "conversation.execute",
+      "status": "succeeded",
+      "employeeId": "employee_38f66f79-52f4-4b7e-88a3-e6b1eafda8fd",
+      "ackedAt": "2026-10-13T13:07:45.315Z",
+      "completedAt": "2026-10-13T13:07:50.588Z",
+      "expiresAt": "2026-10-13T13:23:50.576Z",
+      "error": null,
+      "processExit": {
+        "platform": "win32",
+        "supervisor": "windows-job",
+        "launched": true,
+        "rootPid": 54368,
+        "rootConfirmed": true,
+        "rootExitCode": 0,
+        "treeConfirmed": true,
+        "activeProcesses": 0,
+        "cancelled": false,
+        "failureCode": null,
+        "hostExitCode": 0,
+        "streamsComplete": true,
+        "hostSignal": null
+      },
+      "botProvision": null,
+      "nativeSessionId": "20261013_210746_927178",
+      "q01ExplicitSimulation": null
+    },
+    {
+      "id": "action_2fd27abc-0944-46cd-90b8-dfd5f1e2a1f8",
+      "type": "task.execute",
+      "status": "succeeded",
+      "employeeId": "employee_07b7841b-272b-4e69-82f1-5c7d85a7836c",
+      "ackedAt": "2026-10-13T13:07:51.348Z",
+      "completedAt": "2026-10-13T13:07:57.349Z",
+      "expiresAt": "2026-10-13T13:23:57.338Z",
+      "error": null,
+      "processExit": {
+        "platform": "win32",
+        "supervisor": "windows-job",
+        "launched": true,
+        "rootPid": 40516,
+        "rootConfirmed": true,
+        "rootExitCode": 0,
+        "treeConfirmed": true,
+        "activeProcesses": 0,
+        "cancelled": false,
+        "failureCode": null,
+        "hostExitCode": 0,
+        "streamsComplete": true,
+        "hostSignal": null
+      },
+      "botProvision": null,
+      "nativeSessionId": "20261013_210731_cb56d6",
+      "q01ExplicitSimulation": null
+    },
+    {
+      "id": "action_aa43b286-c5e8-47cc-9d3f-424cd199f6ae",
+      "type": "conversation.execute",
+      "status": "expired",
+      "employeeId": "employee_07b7841b-272b-4e69-82f1-5c7d85a7836c",
+      "ackedAt": null,
+      "completedAt": "2026-10-13T13:52:27.441Z",
+      "expiresAt": "2026-10-13T13:29:22.623Z",
+      "error": null,
+      "processExit": null,
+      "botProvision": null,
+      "nativeSessionId": null,
+      "q01ExplicitSimulation": null
+    },
+    {
+      "id": "action_dbf7d3bb-7b48-4ea1-a43f-feccfbf766d6",
+      "type": "conversation.execute",
+      "status": "succeeded",
+      "employeeId": "employee_07b7841b-272b-4e69-82f1-5c7d85a7836c",
+      "ackedAt": "2026-10-13T13:52:28.548Z",
+      "completedAt": "2026-10-13T13:52:40.174Z",
+      "expiresAt": "2026-10-13T14:08:31.769Z",
+      "error": null,
+      "processExit": {
+        "platform": "win32",
+        "supervisor": "windows-job",
+        "launched": true,
+        "rootPid": 43924,
+        "rootConfirmed": true,
+        "rootExitCode": 0,
+        "treeConfirmed": true,
+        "activeProcesses": 0,
+        "cancelled": false,
+        "failureCode": null,
+        "hostExitCode": 0,
+        "streamsComplete": true,
+        "hostSignal": null
+      },
+      "botProvision": null,
+      "nativeSessionId": "20261013_210731_cb56d6",
+      "q01ExplicitSimulation": null
+    },
+    {
+      "id": "action_59dc0bdd-6f52-4137-b876-69ab2ce43099",
+      "type": "conversation.execute",
+      "status": "succeeded",
+      "employeeId": "employee_3051b08a-b94b-4007-9e08-89198f555d1a",
+      "ackedAt": "2026-10-13T13:55:02.547Z",
+      "completedAt": "2026-10-13T13:55:11.148Z",
+      "expiresAt": "2026-10-13T14:11:11.051Z",
+      "error": null,
+      "processExit": {
+        "platform": "win32",
+        "supervisor": "windows-job",
+        "launched": true,
+        "rootPid": 29892,
+        "rootConfirmed": true,
+        "rootExitCode": 0,
+        "treeConfirmed": true,
+        "activeProcesses": 0,
+        "cancelled": false,
+        "failureCode": null,
+        "hostExitCode": 0,
+        "streamsComplete": true,
+        "hostSignal": null
+      },
+      "botProvision": null,
+      "nativeSessionId": null,
+      "q01ExplicitSimulation": null
+    },
+    {
+      "id": "action_417c0e75-c88d-4b5b-935e-c457b870f321",
+      "type": "conversation.execute",
+      "status": "succeeded",
+      "employeeId": "employee_644369b5-3761-410a-a37a-c44f966da848",
+      "ackedAt": "2026-10-13T13:55:11.542Z",
+      "completedAt": "2026-10-13T13:55:17.874Z",
+      "expiresAt": "2026-10-13T14:11:17.820Z",
+      "error": null,
+      "processExit": {
+        "platform": "win32",
+        "supervisor": "windows-job",
+        "launched": true,
+        "rootPid": 43420,
+        "rootConfirmed": true,
+        "rootExitCode": 0,
+        "treeConfirmed": true,
+        "activeProcesses": 0,
+        "cancelled": false,
+        "failureCode": null,
+        "hostExitCode": 0,
+        "streamsComplete": true,
+        "hostSignal": null
+      },
+      "botProvision": null,
+      "nativeSessionId": null,
+      "q01ExplicitSimulation": null
+    },
+    {
+      "id": "action_a98a8966-b9df-4668-8a5a-90839414d558",
+      "type": "task.execute",
+      "status": "succeeded",
+      "employeeId": "employee_3051b08a-b94b-4007-9e08-89198f555d1a",
+      "ackedAt": "2026-10-13T13:55:18.577Z",
+      "completedAt": "2026-10-13T13:55:24.183Z",
+      "expiresAt": "2026-10-13T14:11:24.070Z",
+      "error": null,
+      "processExit": {
+        "platform": "win32",
+        "supervisor": "windows-job",
+        "launched": true,
+        "rootPid": 38592,
+        "rootConfirmed": true,
+        "rootExitCode": 0,
+        "treeConfirmed": true,
+        "activeProcesses": 0,
+        "cancelled": false,
+        "failureCode": null,
+        "hostExitCode": 0,
+        "streamsComplete": true,
+        "hostSignal": null
+      },
+      "botProvision": null,
+      "nativeSessionId": null,
+      "q01ExplicitSimulation": null
+    },
+    {
+      "id": "action_135383f8-fc15-4525-b4e2-1c785c69b3c1",
+      "type": "conversation.execute",
+      "status": "succeeded",
+      "employeeId": "employee_07b7841b-272b-4e69-82f1-5c7d85a7836c",
+      "ackedAt": "2026-10-13T14:00:14.648Z",
+      "completedAt": "2026-10-13T14:00:24.324Z",
+      "expiresAt": "2026-10-13T14:16:24.313Z",
+      "error": null,
+      "processExit": {
+        "platform": "win32",
+        "supervisor": "windows-job",
+        "launched": true,
+        "rootPid": 29648,
+        "rootConfirmed": true,
+        "rootExitCode": 0,
+        "treeConfirmed": true,
+        "activeProcesses": 0,
+        "cancelled": false,
+        "failureCode": null,
+        "hostExitCode": 0,
+        "streamsComplete": true,
+        "hostSignal": null
+      },
+      "botProvision": null,
+      "nativeSessionId": "20261013_210731_cb56d6",
+      "q01ExplicitSimulation": null
+    },
+    {
+      "id": "action_35bd4f89-7c9e-4ee6-868e-96248771cf8f",
+      "type": "hermes.bot.provision",
+      "status": "failed",
+      "employeeId": "employee_a954f170-5ecd-40b7-b170-5369f83c89a4",
+      "ackedAt": "2026-10-13T14:02:49.541Z",
+      "completedAt": "2026-10-13T14:02:50.967Z",
+      "expiresAt": "2026-10-13T14:18:50.953Z",
+      "error": "QA_INJECTED_POST_PUBLISH_FAILURE",
+      "processExit": {
+        "platform": "win32",
+        "supervisor": "windows-job",
+        "launched": true,
+        "rootPid": 54360,
+        "rootConfirmed": true,
+        "rootExitCode": 0,
+        "treeConfirmed": true,
+        "activeProcesses": 0,
+        "cancelled": false,
+        "failureCode": null,
+        "hostExitCode": 0,
+        "streamsComplete": true,
+        "hostSignal": null
+      },
+      "botProvision": {
+        "profile": "bot-2f28d47cac043e51a1c473c2",
+        "home": "C:\\Users\\25941\\.codex\\worktrees\\v2-q01-preservation-acceptance\\灵光爸爸拆解\\.local\\q01-preservation\\runs\\1791896780966\\hermes-source\\profiles\\bot-2f28d47cac043e51a1c473c2",
+        "ownershipId": "68d0ea3a-6e83-44fe-9223-dd76ae8a498a",
+        "provisionActionId": "action_35bd4f89-7c9e-4ee6-868e-96248771cf8f",
+        "duplicate": false
+      },
+      "nativeSessionId": null,
+      "q01ExplicitSimulation": "post_publish_reported_failure"
+    },
+    {
+      "id": "action_f6878a7f-4865-4df9-a7d3-340993ece696",
+      "type": "hermes.bot.provision",
+      "status": "failed",
+      "employeeId": "employee_a954f170-5ecd-40b7-b170-5369f83c89a4",
+      "ackedAt": "2026-10-13T14:02:51.504Z",
+      "completedAt": "2026-10-13T14:02:52.606Z",
+      "expiresAt": "2026-10-13T14:18:52.594Z",
+      "error": "BOT_PROFILE_OWNERSHIP_CONFLICT",
+      "processExit": {
+        "platform": "win32",
+        "supervisor": "windows-job",
+        "launched": true,
+        "rootPid": 15472,
+        "rootConfirmed": true,
+        "rootExitCode": 0,
+        "treeConfirmed": true,
+        "activeProcesses": 0,
+        "cancelled": false,
+        "failureCode": null,
+        "hostExitCode": 0,
+        "streamsComplete": true,
+        "hostSignal": null
+      },
+      "botProvision": null,
+      "nativeSessionId": null,
+      "q01ExplicitSimulation": null
+    },
+    {
+      "id": "action_05583cc4-01c7-4962-8847-e05f98b28b4b",
+      "type": "hermes.bot.provision",
+      "status": "succeeded",
+      "employeeId": "employee_a954f170-5ecd-40b7-b170-5369f83c89a4",
+      "ackedAt": "2026-10-13T14:02:53.514Z",
+      "completedAt": "2026-10-13T14:02:54.495Z",
+      "expiresAt": "2026-10-13T14:18:54.483Z",
+      "error": null,
+      "processExit": {
+        "platform": "win32",
+        "supervisor": "windows-job",
+        "launched": true,
+        "rootPid": 13916,
+        "rootConfirmed": true,
+        "rootExitCode": 0,
+        "treeConfirmed": true,
+        "activeProcesses": 0,
+        "cancelled": false,
+        "failureCode": null,
+        "hostExitCode": 0,
+        "streamsComplete": true,
+        "hostSignal": null
+      },
+      "botProvision": {
+        "profile": "bot-2f28d47cac043e51a1c473c2",
+        "home": "C:\\Users\\25941\\.codex\\worktrees\\v2-q01-preservation-acceptance\\灵光爸爸拆解\\.local\\q01-preservation\\runs\\1791896780966\\hermes-source\\profiles\\bot-2f28d47cac043e51a1c473c2",
+        "ownershipId": "68d0ea3a-6e83-44fe-9223-dd76ae8a498a",
+        "provisionActionId": "action_35bd4f89-7c9e-4ee6-868e-96248771cf8f",
+        "duplicate": true
+      },
+      "nativeSessionId": null,
+      "q01ExplicitSimulation": null
+    }
+  ],
+  "bots": [
+    {
+      "employeeId": "employee_07b7841b-272b-4e69-82f1-5c7d85a7836c",
+      "binding": {
+        "mode": "owned_profile",
+        "profile": "bot-232d760db603a0db4ffa58cb",
+        "templateProfile": "default",
+        "ownershipId": "a9308ab4-7e7f-4763-bb52-bfbe1ba1a192",
+        "provisionActionId": "action_f0e65f13-dccf-4414-b881-5c31ffbba345"
+      },
+      "latestProvisionActionId": "action_f0e65f13-dccf-4414-b881-5c31ffbba345",
+      "controlState": "paused",
+      "controlEpoch": 6,
+      "expectedHome": "C:\\Users\\25941\\.codex\\worktrees\\v2-q01-preservation-acceptance\\灵光爸爸拆解\\.local\\q01-preservation\\runs\\1791896780966\\hermes-source\\profiles\\bot-232d760db603a0db4ffa58cb",
+      "nativeProvisionHome": "C:\\Users\\25941\\.codex\\worktrees\\v2-q01-preservation-acceptance\\灵光爸爸拆解\\.local\\q01-preservation\\runs\\1791896780966\\hermes-source\\profiles\\bot-232d760db603a0db4ffa58cb",
+      "markerCoordinateMatch": true,
+      "markerSha256": "068b77e7597ea0b562e03cc6574b21c88e618a99cbc24331951619860efcb7d0",
+      "memoryFileExists": true,
+      "containsSyntheticAMemory": true
+    },
+    {
+      "employeeId": "employee_38f66f79-52f4-4b7e-88a3-e6b1eafda8fd",
+      "binding": {
+        "mode": "owned_profile",
+        "profile": "bot-2d6593e94446155657d2f69d",
+        "templateProfile": "default",
+        "ownershipId": "c6c7b248-415f-481b-9a6a-1c5ad88ba624",
+        "provisionActionId": "action_86ff7735-d259-4ab5-9136-3686c2fef503"
+      },
+      "latestProvisionActionId": "action_86ff7735-d259-4ab5-9136-3686c2fef503",
+      "controlState": "paused",
+      "controlEpoch": 5,
+      "expectedHome": "C:\\Users\\25941\\.codex\\worktrees\\v2-q01-preservation-acceptance\\灵光爸爸拆解\\.local\\q01-preservation\\runs\\1791896780966\\hermes-source\\profiles\\bot-2d6593e94446155657d2f69d",
+      "nativeProvisionHome": "C:\\Users\\25941\\.codex\\worktrees\\v2-q01-preservation-acceptance\\灵光爸爸拆解\\.local\\q01-preservation\\runs\\1791896780966\\hermes-source\\profiles\\bot-2d6593e94446155657d2f69d",
+      "markerCoordinateMatch": true,
+      "markerSha256": "8d97b57a11e90950d90adcdf63c97e3c939263535228ca71990888bbcd17b749",
+      "memoryFileExists": false,
+      "containsSyntheticAMemory": false
+    },
+    {
+      "employeeId": "employee_a954f170-5ecd-40b7-b170-5369f83c89a4",
+      "binding": {
+        "mode": "owned_profile",
+        "profile": "bot-2f28d47cac043e51a1c473c2",
+        "templateProfile": "default",
+        "ownershipId": "68d0ea3a-6e83-44fe-9223-dd76ae8a498a",
+        "provisionActionId": "action_35bd4f89-7c9e-4ee6-868e-96248771cf8f"
+      },
+      "latestProvisionActionId": "action_05583cc4-01c7-4962-8847-e05f98b28b4b",
+      "controlState": "paused",
+      "controlEpoch": 2,
+      "expectedHome": "C:\\Users\\25941\\.codex\\worktrees\\v2-q01-preservation-acceptance\\灵光爸爸拆解\\.local\\q01-preservation\\runs\\1791896780966\\hermes-source\\profiles\\bot-2f28d47cac043e51a1c473c2",
+      "nativeProvisionHome": "C:\\Users\\25941\\.codex\\worktrees\\v2-q01-preservation-acceptance\\灵光爸爸拆解\\.local\\q01-preservation\\runs\\1791896780966\\hermes-source\\profiles\\bot-2f28d47cac043e51a1c473c2",
+      "markerCoordinateMatch": true,
+      "markerSha256": "c9ec8e187e4e17966f759cd1080deba2dcd8615c9e05c4ce28a3766d6c0c2151",
+      "memoryFileExists": false,
+      "containsSyntheticAMemory": false
+    }
+  ],
+  "integrity": {
+    "integrity": "ok",
+    "foreignKeyViolations": 0
+  },
+  "protection": {
+    "installedCodeFiles": 6685,
+    "installedCodeChanged": 0,
+    "globalSourceFilesCompared": 3,
+    "globalSourceChanged": 0
+  },
+  "diagnostics": [
+    {
+      "file": "forced-exit-fixture-1791896788060-1422c36d.jsonl",
+      "pid": 4000,
+      "observerPid": 53548,
+      "startedAt": "2026-10-13T13:06:28.064Z",
+      "heartbeatCount": 1,
+      "healthyCount": 0,
+      "exit": {
+        "at": "2026-10-13T13:06:38.577Z",
+        "code": null,
+        "signal": "SIGKILL"
+      },
+      "previousUnclean": false,
+      "exceptionCount": 0
+    },
+    {
+      "file": "loopback-provider-1791896786260-59e7e59a.jsonl",
+      "pid": 36160,
+      "observerPid": 53548,
+      "startedAt": "2026-10-13T13:06:26.266Z",
+      "heartbeatCount": 41,
+      "healthyCount": 41,
+      "exit": null,
+      "previousUnclean": false,
+      "exceptionCount": 0
+    },
+    {
+      "file": "loopback-provider-1791899541448-f79b24d3.jsonl",
+      "pid": 11208,
+      "observerPid": 39568,
+      "startedAt": "2026-10-13T13:52:21.457Z",
+      "heartbeatCount": 48,
+      "healthyCount": 48,
+      "exit": {
+        "at": "2026-10-13T14:00:30.473Z",
+        "code": null,
+        "signal": "SIGTERM"
+      },
+      "previousUnclean": true,
+      "exceptionCount": 0
+    },
+    {
+      "file": "original-api-1791896798578-e28ce41c.jsonl",
+      "pid": 26412,
+      "observerPid": 53548,
+      "startedAt": "2026-10-13T13:06:38.583Z",
+      "heartbeatCount": 4,
+      "healthyCount": 4,
+      "exit": {
+        "at": "2026-10-13T13:07:20.413Z",
+        "code": null,
+        "signal": "SIGTERM"
+      },
+      "previousUnclean": false,
+      "exceptionCount": 1
+    },
+    {
+      "file": "original-client-1791896801441-92ae107a.jsonl",
+      "pid": 8772,
+      "observerPid": 53548,
+      "startedAt": "2026-10-13T13:06:41.446Z",
+      "heartbeatCount": 3,
+      "healthyCount": 3,
+      "exit": {
+        "at": "2026-10-13T13:07:19.248Z",
+        "code": 0,
+        "signal": null
+      },
+      "previousUnclean": false,
+      "exceptionCount": 0
+    },
+    {
+      "file": "q01-profile-window-provider-1791896423973-07e5aefa.jsonl",
+      "pid": 28472,
+      "observerPid": 12740,
+      "startedAt": "2026-10-13T13:00:23.980Z",
+      "heartbeatCount": 0,
+      "healthyCount": 0,
+      "exit": {
+        "at": "2026-10-13T13:00:26.298Z",
+        "code": null,
+        "signal": "SIGTERM"
+      },
+      "previousUnclean": false,
+      "exceptionCount": 0
+    },
+    {
+      "file": "q01-profile-window-provider-1791896539275-da067377.jsonl",
+      "pid": 32096,
+      "observerPid": 1736,
+      "startedAt": "2026-10-13T13:02:19.282Z",
+      "heartbeatCount": 0,
+      "healthyCount": 0,
+      "exit": {
+        "at": "2026-10-13T13:02:21.596Z",
+        "code": null,
+        "signal": "SIGTERM"
+      },
+      "previousUnclean": false,
+      "exceptionCount": 0
+    },
+    {
+      "file": "q01-profile-window-provider-1791896595541-73bd2f86.jsonl",
+      "pid": 26640,
+      "observerPid": 20876,
+      "startedAt": "2026-10-13T13:03:15.550Z",
+      "heartbeatCount": 1,
+      "healthyCount": 1,
+      "exit": {
+        "at": "2026-10-13T13:03:30.420Z",
+        "code": null,
+        "signal": "SIGTERM"
+      },
+      "previousUnclean": false,
+      "exceptionCount": 0
+    },
+    {
+      "file": "q01-ui-artifacts-1791896877493-bd6ea932.jsonl",
+      "pid": 57244,
+      "observerPid": 53548,
+      "startedAt": "2026-10-13T13:07:57.497Z",
+      "heartbeatCount": 32,
+      "healthyCount": 32,
+      "exit": null,
+      "previousUnclean": false,
+      "exceptionCount": 0
+    },
+    {
+      "file": "q01-ui-artifacts-1791899570857-9d53df1b.jsonl",
+      "pid": 48964,
+      "observerPid": 39568,
+      "startedAt": "2026-10-13T13:52:50.862Z",
+      "heartbeatCount": 15,
+      "healthyCount": 15,
+      "exit": {
+        "at": "2026-10-13T13:55:27.552Z",
+        "code": 1,
+        "signal": null
+      },
+      "previousUnclean": true,
+      "exceptionCount": 1
+    },
+    {
+      "file": "q01-ui-resumed-1791899869387-f257c79b.jsonl",
+      "pid": 27696,
+      "observerPid": 6400,
+      "startedAt": "2026-10-13T13:57:49.395Z",
+      "heartbeatCount": 42,
+      "healthyCount": 42,
+      "exit": {
+        "at": "2026-10-13T14:04:55.248Z",
+        "code": 1,
+        "signal": null
+      },
+      "previousUnclean": false,
+      "exceptionCount": 0
+    },
+    {
+      "file": "retry-loopback-provider-1791900163868-0ca3496d.jsonl",
+      "pid": 2940,
+      "observerPid": 21808,
+      "startedAt": "2026-10-13T14:02:43.876Z",
+      "heartbeatCount": 1,
+      "healthyCount": 1,
+      "exit": {
+        "at": "2026-10-13T14:03:00.084Z",
+        "code": null,
+        "signal": "SIGTERM"
+      },
+      "previousUnclean": false,
+      "exceptionCount": 0
+    },
+    {
+      "file": "retry-v2-api-with-explicit-fault-1791900164158-84041d8c.jsonl",
+      "pid": 43420,
+      "observerPid": 21808,
+      "startedAt": "2026-10-13T14:02:44.164Z",
+      "heartbeatCount": 1,
+      "healthyCount": 1,
+      "exit": {
+        "at": "2026-10-13T14:03:00.078Z",
+        "code": null,
+        "signal": "SIGTERM"
+      },
+      "previousUnclean": false,
+      "exceptionCount": 1
+    },
+    {
+      "file": "v1-compat-api-1791899565965-929248f1.jsonl",
+      "pid": 10636,
+      "observerPid": 39568,
+      "startedAt": "2026-10-13T13:52:45.969Z",
+      "heartbeatCount": 16,
+      "healthyCount": 16,
+      "exit": {
+        "at": "2026-10-13T13:55:27.554Z",
+        "code": null,
+        "signal": "SIGTERM"
+      },
+      "previousUnclean": false,
+      "exceptionCount": 1
+    },
+    {
+      "file": "v1-compat-client-1791899567983-f2a6e9f9.jsonl",
+      "pid": 36024,
+      "observerPid": 39568,
+      "startedAt": "2026-10-13T13:52:47.990Z",
+      "heartbeatCount": 15,
+      "healthyCount": 15,
+      "exit": {
+        "at": "2026-10-13T13:55:26.545Z",
+        "code": 0,
+        "signal": null
+      },
+      "previousUnclean": false,
+      "exceptionCount": 0
+    },
+    {
+      "file": "v2-api-1791896840414-52c7e365.jsonl",
+      "pid": 36816,
+      "observerPid": 53548,
+      "startedAt": "2026-10-13T13:07:20.418Z",
+      "heartbeatCount": 36,
+      "healthyCount": 36,
+      "exit": null,
+      "previousUnclean": false,
+      "exceptionCount": 1
+    },
+    {
+      "file": "v2-api-1791899543362-79b8dfeb.jsonl",
+      "pid": 532,
+      "observerPid": 39568,
+      "startedAt": "2026-10-13T13:52:23.367Z",
+      "heartbeatCount": 2,
+      "healthyCount": 2,
+      "exit": {
+        "at": "2026-10-13T13:52:45.965Z",
+        "code": null,
+        "signal": "SIGTERM"
+      },
+      "previousUnclean": true,
+      "exceptionCount": 1
+    },
+    {
+      "file": "v2-api-1791899727554-2a99c7f5.jsonl",
+      "pid": 31376,
+      "observerPid": 39568,
+      "startedAt": "2026-10-13T13:55:27.557Z",
+      "heartbeatCount": 30,
+      "healthyCount": 30,
+      "exit": {
+        "at": "2026-10-13T14:00:30.467Z",
+        "code": null,
+        "signal": "SIGTERM"
+      },
+      "previousUnclean": false,
+      "exceptionCount": 1
+    },
+    {
+      "file": "v2-client-1791896842967-cc653c82.jsonl",
+      "pid": 52424,
+      "observerPid": 53548,
+      "startedAt": "2026-10-13T13:07:22.972Z",
+      "heartbeatCount": 35,
+      "healthyCount": 35,
+      "exit": null,
+      "previousUnclean": false,
+      "exceptionCount": 0
+    },
+    {
+      "file": "v2-client-1791899545375-6f1170c5.jsonl",
+      "pid": 9988,
+      "observerPid": 39568,
+      "startedAt": "2026-10-13T13:52:25.384Z",
+      "heartbeatCount": 1,
+      "healthyCount": 1,
+      "exit": {
+        "at": "2026-10-13T13:52:44.990Z",
+        "code": 0,
+        "signal": null
+      },
+      "previousUnclean": true,
+      "exceptionCount": 0
+    },
+    {
+      "file": "v2-client-1791899729879-9ff6f5f9.jsonl",
+      "pid": 39460,
+      "observerPid": 39568,
+      "startedAt": "2026-10-13T13:55:29.883Z",
+      "heartbeatCount": 29,
+      "healthyCount": 29,
+      "exit": {
+        "at": "2026-10-13T14:00:29.532Z",
+        "code": 0,
+        "signal": null
+      },
+      "previousUnclean": false,
+      "exceptionCount": 0
+    },
+    {
+      "file": "v2-client-1791900166120-7971352c.jsonl",
+      "pid": 5428,
+      "observerPid": 21808,
+      "startedAt": "2026-10-13T14:02:46.125Z",
+      "heartbeatCount": 1,
+      "healthyCount": 1,
+      "exit": {
+        "at": "2026-10-13T14:02:59.161Z",
+        "code": 0,
+        "signal": null
+      },
+      "previousUnclean": false,
+      "exceptionCount": 0
+    }
+  ],
+  "cleanup": {
+    "ownedAlive": [],
+    "allRecordedPidCount": 47,
+    "oldUnobservedExitsKeptUnknown": true,
+    "qaUiControlledStopExitCode": 1
+  }
+}

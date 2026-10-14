@@ -1,0 +1,16 @@
+{
+  "desktop": {
+    "banner": true,
+    "bodyWidth": 1265,
+    "botPaused": true,
+    "legacyAvailable": true,
+    "url": "http://127.0.0.1:6400/test-111/members",
+    "width": 1280
+  },
+  "mobile": {
+    "banner": true,
+    "bodyWidth": 375,
+    "url": "http://127.0.0.1:6400/test-111/members",
+    "width": 390
+  }
+}

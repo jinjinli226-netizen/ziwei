@@ -1,0 +1,194 @@
+{
+  "schemaVersion": 1,
+  "checkedAt": "2026-10-14T02:35:52Z",
+  "reviewer": "Q01 independent finite checkpoint",
+  "candidateCommit": "cad5886d3dd5e6192bead8b85d40cc0d3ef4210f",
+  "reviewBase": "794ba7f6e2393bb85ffca114a23eb36ef9d16350",
+  "sourceCheckout": "/Users/zhangjie/Documents/ChatGPT/紫薇/.codex-worktrees/v2-e02-data-preserving-rollback",
+  "qaCheckout": "/Users/zhangjie/Documents/ChatGPT/紫薇/.codex-worktrees/v2-q01-preservation-acceptance",
+  "sourceCleanBeforeAndAfterTests": true,
+  "changedFiles": [
+    {
+      "path": "backend/preservation-source-namespace.mjs",
+      "gitBlob": "6f362ad7b7160e6c1f2ddd43691dac067f86453d",
+      "gitObjectSha256": "ee332e50a78fd61a765ea2b721093e34311016be17d855ed2c71657611c4a6ac",
+      "worktreeSha256": "166088bf137e97bdc8ebd86a523c49cbf57c6ee0c5fa755624edb0349ad137ac",
+      "sha256NormalizedLF": "ee332e50a78fd61a765ea2b721093e34311016be17d855ed2c71657611c4a6ac",
+      "rawBytesEqual": false,
+      "matchesAfterLFNormalization": true
+    },
+    {
+      "path": "backend/preservation-source-native-windows.ps1",
+      "gitBlob": "6d7f54d141f7de2296846b9042a01eb272de4379",
+      "gitObjectSha256": "3e4f6b41ed21a9d4fefccb69ad2acf4d7e1284e69bc70a9002bf4531fd42b658",
+      "worktreeSha256": "125e985d61bb2e59110f71ad24215de7c79a57677eb48fb525b1602d47eeb5ca",
+      "sha256NormalizedLF": "3e4f6b41ed21a9d4fefccb69ad2acf4d7e1284e69bc70a9002bf4531fd42b658",
+      "rawBytesEqual": false,
+      "matchesAfterLFNormalization": true
+    },
+    {
+      "path": "backend/production-preservation.mjs",
+      "gitBlob": "a5a384a671ab064fe2ee3bfd18caf147f906aae2",
+      "gitObjectSha256": "264c1a5d51ae0b896f363979f274ac405800f8f275e0d8ae94e6d0c93db29c6d",
+      "worktreeSha256": "264c1a5d51ae0b896f363979f274ac405800f8f275e0d8ae94e6d0c93db29c6d",
+      "sha256NormalizedLF": "264c1a5d51ae0b896f363979f274ac405800f8f275e0d8ae94e6d0c93db29c6d",
+      "rawBytesEqual": true,
+      "matchesAfterLFNormalization": true
+    },
+    {
+      "path": "backend/version-preservation.mjs",
+      "gitBlob": "5d8283ce86abb01806e7ad97fcb2fb833689c632",
+      "gitObjectSha256": "42f31fc1f7f48096553d7b0e13c0326540dc086b1eefecbb4923f577eec03868",
+      "worktreeSha256": "42f31fc1f7f48096553d7b0e13c0326540dc086b1eefecbb4923f577eec03868",
+      "sha256NormalizedLF": "42f31fc1f7f48096553d7b0e13c0326540dc086b1eefecbb4923f577eec03868",
+      "rawBytesEqual": true,
+      "matchesAfterLFNormalization": true
+    },
+    {
+      "path": "docs/operations/2026-10-14-e02-final-cli-checkpoint.md",
+      "gitBlob": "5713a5cb74f3f9a3613ec4886c4984695e2f2427",
+      "gitObjectSha256": "9dac103842fc8169a678a22e713896ad34b84ef5b30be8eb866132836ec52772",
+      "worktreeSha256": "9dac103842fc8169a678a22e713896ad34b84ef5b30be8eb866132836ec52772",
+      "sha256NormalizedLF": "9dac103842fc8169a678a22e713896ad34b84ef5b30be8eb866132836ec52772",
+      "rawBytesEqual": true,
+      "matchesAfterLFNormalization": true
+    },
+    {
+      "path": "docs/operations/2026-10-14-e03-windows-kernel-restart-abi.md",
+      "gitBlob": "ee4d26afc6576bfd32ff06200df79246970fd2b9",
+      "gitObjectSha256": "18a1508dd419c6757664bcb1e38a96094c58d851ed1dcbe07c6b976990b81920",
+      "worktreeSha256": "c9714574b6232a15671ba2f79fab41e1d8f6bd7427880434933cd0a70a07e53d",
+      "sha256NormalizedLF": "18a1508dd419c6757664bcb1e38a96094c58d851ed1dcbe07c6b976990b81920",
+      "rawBytesEqual": false,
+      "matchesAfterLFNormalization": true
+    },
+    {
+      "path": "scripts/build-preservation-packages.mjs",
+      "gitBlob": "e05625df258081df9b5ccafc8a1c0b6aa78b9c85",
+      "gitObjectSha256": "a862d2ef1baf4307f92173d20a89c06f23535be30167df07585bf88d8c023449",
+      "worktreeSha256": "a862d2ef1baf4307f92173d20a89c06f23535be30167df07585bf88d8c023449",
+      "sha256NormalizedLF": "a862d2ef1baf4307f92173d20a89c06f23535be30167df07585bf88d8c023449",
+      "rawBytesEqual": true,
+      "matchesAfterLFNormalization": true
+    },
+    {
+      "path": "scripts/production-source-proof.mjs",
+      "gitBlob": "ad36ac35c413b6e2c033fe87b0cb89a712576370",
+      "gitObjectSha256": "26816703840d83e9a7d6a76ad9f7e860aaa40abf4f5ba25b76ada8ae597ce9f4",
+      "worktreeSha256": "26816703840d83e9a7d6a76ad9f7e860aaa40abf4f5ba25b76ada8ae597ce9f4",
+      "sha256NormalizedLF": "26816703840d83e9a7d6a76ad9f7e860aaa40abf4f5ba25b76ada8ae597ce9f4",
+      "rawBytesEqual": true,
+      "matchesAfterLFNormalization": true
+    },
+    {
+      "path": "scripts/verify-preservation-api-entry.mjs",
+      "gitBlob": "5a383821c1857510de24648e98c3d2273845e244",
+      "gitObjectSha256": "e0c346689f70611b4b95f5bf01a5a81b0a9b5639df0ab78b6f408bb4973fc65b",
+      "worktreeSha256": "e0c346689f70611b4b95f5bf01a5a81b0a9b5639df0ab78b6f408bb4973fc65b",
+      "sha256NormalizedLF": "e0c346689f70611b4b95f5bf01a5a81b0a9b5639df0ab78b6f408bb4973fc65b",
+      "rawBytesEqual": true,
+      "matchesAfterLFNormalization": true
+    },
+    {
+      "path": "src/hermes-profile-proof.mjs",
+      "gitBlob": "1c072b2e91d40659e86afdffe9ba63dd8a2ec329",
+      "gitObjectSha256": "531374556f3a3db83e655f258f4322a91b9ef7ddb51758930a4a6e7b3360844b",
+      "worktreeSha256": "531374556f3a3db83e655f258f4322a91b9ef7ddb51758930a4a6e7b3360844b",
+      "sha256NormalizedLF": "531374556f3a3db83e655f258f4322a91b9ef7ddb51758930a4a6e7b3360844b",
+      "rawBytesEqual": true,
+      "matchesAfterLFNormalization": true
+    },
+    {
+      "path": "test/preservation-windows-kernel-boundary.test.mjs",
+      "gitBlob": "f4b6767c17d0fc2e4e3dcf0fdeeb7d64663d32c7",
+      "gitObjectSha256": "a940035ecbb153d36462d62cf6b6a720f89c8896ce74729c78fffa8a469f924e",
+      "worktreeSha256": "91ed038188b687b02e0679b31215c8e77faccf68caa95ae908d14b67d3fd2d07",
+      "sha256NormalizedLF": "a940035ecbb153d36462d62cf6b6a720f89c8896ce74729c78fffa8a469f924e",
+      "rawBytesEqual": false,
+      "matchesAfterLFNormalization": true
+    },
+    {
+      "path": "test/preservation-windows-native-source.test.mjs",
+      "gitBlob": "781bf1417427f542d0c8b4ad6caa3261423b4c6c",
+      "gitObjectSha256": "247517a60aa814c7a97f8363d930f4def89cf30cbb14820ffeb1de6ea65f9442",
+      "worktreeSha256": "f508a35b1175cc9e733382b42aea5adb633022d4cdb139b64027cf78c52f4af8",
+      "sha256NormalizedLF": "247517a60aa814c7a97f8363d930f4def89cf30cbb14820ffeb1de6ea65f9442",
+      "rawBytesEqual": false,
+      "matchesAfterLFNormalization": true
+    }
+  ],
+  "nativeHelperNormalizedSha256": "3e4f6b41ed21a9d4fefccb69ad2acf4d7e1284e69bc70a9002bf4531fd42b658",
+  "sourceReview": {
+    "confirmedNewP1OrP2": [],
+    "secondReadonlyReviewerAgrees": true,
+    "areas": [
+      "actual standalone entry/root/non-SDK identity",
+      "signed original request at both native observations",
+      "qualified archive WeakMap result; JSON copies have no authority",
+      "prepare/seal archive versus restore actual installed target",
+      "authenticated stopped logger identity/prefix and action-start rejection",
+      "actual boot, entry fence and repeated observation checks",
+      "POSIX/drive/UNC path handling"
+    ]
+  },
+  "directRegression": {
+    "command": "node --test test/preservation-windows-kernel-boundary.test.mjs test/preservation-windows-native-source.test.mjs",
+    "node": "v24.14.0",
+    "platform": "darwin",
+    "exitCode": 0,
+    "tests": 10,
+    "pass": 6,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 4,
+    "durationMs": 358.523833,
+    "passedTestNames": [
+      "native reference, capture and runtime path flavour preserves POSIX and canonical Windows paths",
+      "authenticated simulated new-kernel consumer closes only the old epoch and independently resamples it for recheck",
+      "kernel consumer refuses bad authentication, chronology, source, fence, current writer and repeated epoch changes",
+      "kernel producer accepts no caller boot, callback or arbitrary original selector",
+      "kernel archive qualification rejects other identical copies, forged before provenance, and SDK identity downgraded to literal",
+      "authenticated stopped logger prefixes allow only identity-preserving restore appends and retain no-action checks"
+    ],
+    "skippedTestNames": [
+      "default native OS boot agrees with a held isolated process; actual same kernel cannot mint a restart boundary",
+      "default Windows native reader obtains held-handle birth/entry and only approved path variables for an isolated child",
+      "native closed-source interpretation refuses execution overrides without retaining their values",
+      "default native namespace closes an audited real no-worker process and rejects changed provenance"
+    ],
+    "evidenceLevel": "Independent execution of existing finite fixtures; not actual Windows kernel/SDK positive"
+  },
+  "additionalChecks": {
+    "lintSourceFiles": 132,
+    "lintExitCode": 0,
+    "syntaxChecked": [
+      "scripts/production-source-proof.mjs",
+      "scripts/build-preservation-packages.mjs",
+      "scripts/verify-preservation-api-entry.mjs",
+      "backend/preservation-source-namespace.mjs",
+      "backend/production-preservation.mjs"
+    ],
+    "syntaxExitCode": 0,
+    "frozenDiffWhitespaceExitCode": 0,
+    "darwinRefusals": [
+      {
+        "method": "readProcess",
+        "code": "SOURCE_NATIVE_PLATFORM"
+      },
+      {
+        "method": "readNamespace",
+        "code": "SOURCE_NATIVE_PLATFORM"
+      }
+    ]
+  },
+  "listenersStarted": 0,
+  "productSourceModified": false,
+  "sdkAuthHomeModified": false,
+  "modelOrPhoneCalls": 0,
+  "newPackagesBuiltOrVerified": false,
+  "pushedOrDeployed": false,
+  "acceptance": "No confirmed source-level P1/P2 blocker in this selected checkpoint; G1-G5, final six archives and Windows field acceptance are not signed",
+  "historicalWindowsEvidence": "794ba7f 1235 pass / 0 fail / 2 Linux skips is author historical evidence only; it predates this diff",
+  "userScope": "No Mac product runtime adaptation; Windows user will test after release; R remains sole publisher/deployer",
+  "rawByteCheckNote": "An initial all-byte comparison failed because five migrated working files retain CRLF. All 12 changed files match frozen Git objects after LF normalization; raw and normalized hashes are listed separately. This is not an archive-byte identity claim."
+}

@@ -1,0 +1,16 @@
+{
+  "mobile": {
+    "bodyWidth": 390,
+    "paused": false,
+    "retained": true,
+    "url": "http://127.0.0.1:6400/test-111/inbox/conv_a88b9b93-255a-4a13-9861-e5dd25b288c5?employee=employee_07b7841b-272b-4e69-82f1-5c7d85a7836c&bot=employee_07b7841b-272b-4e69-82f1-5c7d85a7836c",
+    "width": 390
+  },
+  "desktop": {
+    "bodyWidth": 1280,
+    "paused": false,
+    "retained": true,
+    "url": "http://127.0.0.1:6400/test-111/inbox/conv_a88b9b93-255a-4a13-9861-e5dd25b288c5?employee=employee_07b7841b-272b-4e69-82f1-5c7d85a7836c&bot=employee_07b7841b-272b-4e69-82f1-5c7d85a7836c",
+    "width": 1280
+  }
+}
