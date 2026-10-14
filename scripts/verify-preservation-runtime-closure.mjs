@@ -22,16 +22,15 @@ export function inspectRuntimeDependencyClosure(installedRoot){
   const file=path.join(directory,'package.json'),bytes=fs.readFileSync(file),meta=JSON.parse(bytes),require=createRequire(file);
   if(!inside(dependencyRoot,directory)||!semver.valid(meta.version))fail('OFFLINE_DEPENDENCY_INVALID',meta.name||directory);
   packages.push({path:path.relative(dependencyRoot,directory).replaceAll('\\','/'),name:meta.name,version:meta.version,packageJsonSha256:sha(bytes)});
-  const dependencies={...meta.dependencies,...meta.optionalDependencies,...meta.peerDependencies};
-  for(const [name,range] of Object.entries(dependencies||{})){
+  const dependencies=[...Object.entries({...meta.dependencies,...meta.optionalDependencies}).map(([name,range])=>({name,range,optional:Object.hasOwn(meta.optionalDependencies||{},name),relationship:'dependency'})),...Object.entries(meta.peerDependencies||{}).map(([name,range])=>({name,range,optional:meta.peerDependenciesMeta?.[name]?.optional===true,relationship:'peer'}))];
+  for(const {name,range,optional,relationship} of dependencies){
    if(!/^(?:@[a-z0-9_.-]+\/)?[a-z0-9_.-]+$/i.test(name))fail('OFFLINE_DEPENDENCY_INVALID',name);
-   const optional=Object.hasOwn(meta.optionalDependencies||{},name)||meta.peerDependenciesMeta?.[name]?.optional===true;
    const candidate=(require.resolve.paths(name)||[]).map(base=>path.join(base,name)).find(value=>fs.existsSync(path.join(value,'package.json')));
    if(!candidate){if(optional)continue;fail('OFFLINE_DEPENDENCY_MISSING',`${meta.name} -> ${name}`);}
    const target=fs.realpathSync.native(candidate),value=JSON.parse(fs.readFileSync(path.join(target,'package.json')));
    if(!inside(dependencyRoot,target))fail('OFFLINE_DEPENDENCY_ESCAPE',`${meta.name} -> ${name}`);
    if(!semver.satisfies(value.version,range))fail('OFFLINE_DEPENDENCY_VERSION',`${meta.name} -> ${name}@${value.version} requires ${range}`);
-   edges.push({from:path.relative(dependencyRoot,directory).replaceAll('\\','/'),name,range,to:path.relative(dependencyRoot,target).replaceAll('\\','/'),version:value.version,optional});queue.push(target);
+   edges.push({from:path.relative(dependencyRoot,directory).replaceAll('\\','/'),name,range,to:path.relative(dependencyRoot,target).replaceAll('\\','/'),version:value.version,optional,relationship});queue.push(target);
   }
  }
  packages.sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0);edges.sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)));
