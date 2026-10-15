@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { parseDocument, parse as parseYaml } from 'yaml';
 import { redactSecrets } from './redaction.mjs';
 import { normalizeRuntimeProfile } from './employee-runtime.mjs';
@@ -399,11 +399,13 @@ const DEFINITIONS = {
   Hermes: {
     aliases: ['hermes', 'Hermes'],
     versionArgs: ['--version'],
-    invoke: ({ prompt, model, images = [] }) => ({
+    invoke: ({ prompt, model, images = [] }) => images.length>1?{
+      args:['--yolo','chat','--query-file','-','--format','stream-json',...(model?['--model',model]:[])],stdin:prompt,format:'json-lines',inputImages:[...images],
+    }:{
       args: images.length ? ['--yolo','chat','-q',prompt,'-Q','--image',images[0],...(model ? ['--model',model] : [])] : ['-z', prompt, '--yolo', ...(model ? ['--model', model] : [])],
       stdin: null,
       format: 'text',
-    }),
+    },
   },
 };
 
@@ -620,15 +622,17 @@ export function runtimeDiscoverySpawnSpec(binary,args) {
   return runtimeSpawnSpec(binary,args);
 }
 
-export function hermesMcpSpawnSpec(binary, args, { env = process.env, boundProfile } = {}) {
+export function hermesMcpSpawnSpec(binary, args, { env = process.env, boundProfile, inputImages = [] } = {}) {
+  if(!Array.isArray(inputImages)||inputImages.length>20||inputImages.length===1)throw new Error('Hermes 多图清单必须包含 2–20 张受控图片');
+  const multiImages=inputImages.length>1;
   const interpreter=boundHermesInterpreter(binary);
   let binding;
   try {
-    const output = execFileSync(interpreter, [HERMES_MCP_BOOTSTRAP, '--probe', path.resolve(binary)], { env, encoding: 'utf8', timeout: 5000, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    const output = execFileSync(interpreter, [HERMES_MCP_BOOTSTRAP, multiImages?'--probe-images':'--probe', path.resolve(binary)], { env, encoding: 'utf8', timeout: 5000, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     binding = JSON.parse(output);
     if (!binding.paths?.main || !binding.paths?.mcp_startup || !binding.paths?.managed_scope || !binding.fingerprint) throw new Error();
   } catch { throw new Error('Hermes 原生入口不兼容 managed MCP discovery 或安装已变化；请更新 Hermes/ziwei_user，不会替代运行时'); }
-  return { command: interpreter, args: [HERMES_MCP_BOOTSTRAP, '--launcher', path.resolve(binary), '--binding', JSON.stringify(binding), ...(boundProfile ? ['--bound-profile', JSON.stringify({home:boundProfile.home,profile:boundProfile.profile,baseHome:boundProfile.baseHome,identity:boundProfile.identity,requestedHome:boundProfile.requestedHome,protectedHomes:boundProfile.protectedHomes})] : []), '--', ...args.map(String)], nativeBinding: { binary, interpreter, entrypoint: binding.paths.main, mode: 'effective-mcp-gate' } };
+  return { command: interpreter, args: [HERMES_MCP_BOOTSTRAP, '--launcher', path.resolve(binary), '--binding', JSON.stringify(binding), ...(boundProfile ? ['--bound-profile', JSON.stringify({home:boundProfile.home,profile:boundProfile.profile,baseHome:boundProfile.baseHome,identity:boundProfile.identity,requestedHome:boundProfile.requestedHome,protectedHomes:boundProfile.protectedHomes})] : []), ...(multiImages?['--input-images',JSON.stringify(inputImages)]:[]), '--', ...args.map(String)], nativeBinding: { binary, interpreter, entrypoint: binding.paths.main, mode: multiImages?'effective-mcp-gate-native-images':'effective-mcp-gate' } };
 }
 
 function readPrivateJson(file) {
@@ -910,6 +914,7 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
   if (!content) return Promise.reject(new Error('agent.execute 需要非空 prompt'));
   if (imageArtifacts) content += imageArtifactInstructions(imageArtifacts);
   let invocation;
+  const controlledImages=[];
   try {
     invocation = runtimeInvocation(resolvedRuntime,{prompt:content,model,attachments});
     let total = 0;
@@ -919,6 +924,7 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
       const bytes = fs.readFileSync(input.path);
       validateImageBytes(bytes,/^image\//i.test(input.mimeType || '') ? input.mimeType : null);
       total += bytes.length;if (total > MAX_CONVERSATION_IMAGE_BYTES) throw new Error('输入图片总大小不能超过 10 MiB');
+      controlledImages.push({path:path.resolve(input.path),size:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')});
     }
   } catch (error) { return Promise.reject(error); }
   const discovered = discoverInstalledRuntimes().runtimes[resolvedRuntime];
@@ -984,7 +990,7 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
       if(resolvedRuntime!=='Hermes')throw new Error('Bot 必须使用 Hermes');
       botPrepared=prepareHermesBotHome({context:hermesBot,sourceHome:hermesProfileHome(profile || 'default',{baseHome:profileBaseHome}),privateDirectory:botInstanceDirectory,workspace:managementMcp?.workspace,apiBase:managementMcp?.apiBase});
       reasoningProvider=botPrepared.provider;
-      invocation={args:['chat','--query-file','-','-c','Ziwei '+String(hermesBot.conversationId || 'Bot Chat'),'--create-if-missing','--format','stream-json','--model',botPrepared.effectiveModel,'--provider',botPrepared.provider,'--max-turns',String(hermesBot.config.maxTurns),'--run-budget','840',...imageInputs.flatMap(item=>['--image',item.path])],stdin:content,format:'json-lines'};
+      invocation={args:['chat','--query-file','-','-c','Ziwei '+String(hermesBot.conversationId || 'Bot Chat'),'--create-if-missing','--format','stream-json','--model',botPrepared.effectiveModel,'--provider',botPrepared.provider,'--max-turns',String(hermesBot.config.maxTurns),'--run-budget','840',...(imageInputs.length===1?['--image',imageInputs[0].path]:[])],stdin:content,format:'json-lines'};
     }
     const launch = hermesBot && (hermesBot.config.permissions.mode==='read_only'||hermesBot.config.permissions.management===false) ? {invocation,env:childEnv,receipt:null} : prepareManagementMcpLaunch({ runtime: resolvedRuntime, profile, model, invocation, env: childEnv, ...(managementMcp || {}), creatorInstance, creatorInstanceDirectory, selectedProfileHome });
     invocation = launch.invocation; childEnv = launch.env; receipt = launch.receipt;
@@ -1010,13 +1016,18 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
       childEnv.HERMES_HOME=overlay.sourceHome;childEnv.HERMES_MANAGED_DIR=overlay.home;launch.overlayHome=overlay.home;cleanupOverlay=overlay.cleanup;
       invocation.args.unshift('--profile',profile || 'default');
     }
+    if(resolvedRuntime==='Hermes'&&controlledImages.length>1&&!launch.overlayHome){
+      const overlay=createHermesExecutionOverlay({profile,baseHome:profileBaseHome,selectedProfileHome,managedDirectory:childEnv.HERMES_MANAGED_DIR,privateDirectory:path.join(os.tmpdir(),'ziwei-hermes-image-overlays')});
+      childEnv.HERMES_HOME=overlay.sourceHome;childEnv.HERMES_MANAGED_DIR=overlay.home;launch.overlayHome=overlay.home;cleanupOverlay=overlay.cleanup;
+      invocation.args.unshift('--profile',profile || 'default');
+    }
     const phoneLaunch = prepareTerminalMcpLaunch({ runtime: resolvedRuntime, profile, invocation, env: childEnv, profileBaseHome, hermesOverlayHome: launch.overlayHome, ...(terminalMcp || {}), selectedProfileHome });
     invocation = phoneLaunch.invocation; childEnv = phoneLaunch.env; phoneReceipt = phoneLaunch.receipt;
     if(hermesBot&&phoneReceipt){const index=invocation.args.indexOf('--toolsets');if(index<0)invocation.args.push('--toolsets','ziwei-terminal');else invocation.args[index+1]+=',ziwei-terminal';}
     if (resolvedRuntime === 'Hermes' && !receipt && !phoneReceipt && !hermesBot) childEnv.HERMES_HOME = selectedProfileHome || hermesProfileHome(profile || 'default', { baseHome: profileBaseHome });
   } catch (error) { cleanupOverlay(); return Promise.reject(error); }
   let spec;
-  try { spec = resolvedRuntime === 'Hermes' && childEnv.HERMES_MANAGED_DIR && (receipt || hermesBot || profileBinding) ? hermesMcpSpawnSpec(discovered.binary, invocation.args, { env: childEnv, boundProfile:profileBinding }) : runtimeSpawnSpec(discovered.binary, invocation.args); }
+  try { spec = resolvedRuntime === 'Hermes' && childEnv.HERMES_MANAGED_DIR && (receipt || hermesBot || profileBinding || controlledImages.length>1) ? hermesMcpSpawnSpec(discovered.binary, invocation.args, { env: childEnv, boundProfile:profileBinding, inputImages:controlledImages.length>1?controlledImages:[] }) : runtimeSpawnSpec(discovered.binary, invocation.args); }
   catch (error) { cleanupOverlay(); return Promise.reject(error); }
   // The desktop user session may have a proxy configured in Windows Internet
   // Settings while the daemon process has no proxy variables in its service
@@ -1137,7 +1148,7 @@ export function runtimeInvocation(runtime, { prompt, model = null, attachments =
   if (!resolvedRuntime) throw new Error(`未知本机运行时: ${runtime || '(empty)'}`);
   const images = attachments.filter(item=>/^image\//i.test(item?.mimeType || '') || /\.(?:png|jpe?g|gif|webp)$/i.test(item?.path || '')).map(item=>String(item.path || ''));
   if (images.length && !['Codex','Hermes'].includes(resolvedRuntime)) throw new Error(`${resolvedRuntime} 图片输入尚未实现原生视觉通道；不能把图片路径当作视觉输入`);
-  if (resolvedRuntime === 'Hermes' && images.length > 1) throw new Error('Hermes 原生单次查询仅支持一张输入图片；不会丢弃图片或伪装文字路径');
+  if (images.length > 20) throw new Error('每条消息最多附加 20 张图片');
   if (images.some(file=>!file)) throw new Error('图片输入缺少本机文件路径');
   return DEFINITIONS[resolvedRuntime].invoke({ prompt: String(prompt ?? ''), model: model ? String(model) : null,images });
 }

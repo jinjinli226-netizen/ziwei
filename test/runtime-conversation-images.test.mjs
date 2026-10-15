@@ -71,9 +71,9 @@ test('bad uploaded image bytes fail before any CLI execution',windowsOnly,async 
   await assert.rejects(()=>f.execute(f.action),/图片格式|魔数/);
   assert.equal(fs.existsSync(path.join(f.cwd,'fake-cli-invocations.txt')),false);
 });
-test('Hermes multiple images fail before discovery and profile/model execution',windowsOnly,async t=>{
+test('Hermes multiple images cannot fall back to a different installed runtime',windowsOnly,async t=>{
   const f=fixture(t);f.action.payload.runtime='Hermes';f.action.payload.attachments.push({...f.action.payload.attachments[0],name:'second.png'});
-  await assert.rejects(()=>f.execute(f.action),/Hermes.*一张|Hermes.*single/);
+  await assert.rejects(()=>f.execute(f.action),/Hermes CLI 不可用/);
   assert.equal(fs.existsSync(path.join(f.cwd,'fake-cli-invocations.txt')),false);
 });
 test('trusted executor can disable global Codex MCP by quoted key while action payload cannot',windowsOnly,async t=>{

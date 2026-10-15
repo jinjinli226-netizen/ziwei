@@ -36,8 +36,15 @@ test('Hermes one image uses single-query chat image input', () => {
   assert.equal(invocation.args[invocation.args.indexOf('--image')+1],'C:\\one.png');
   assert.ok(invocation.args.includes('-Q'));
 });
-test('Hermes multiple image input fails instead of dropping images', () => {
-  assert.throws(()=>runtimeInvocation('Hermes',{prompt:'Inspect images',attachments:[{path:'one.png',mimeType:'image/png'},{path:'two.png',mimeType:'image/png'}]}),/Hermes.*一张|Hermes.*single/);
+test('Hermes multiple images use the controlled native input route without scalar image flags', () => {
+  const images=[{path:'one.png',mimeType:'image/png'},{path:'two.png',mimeType:'image/png'}];
+  const prompt='Inspect both images in order.\nKeep this literal: $(image).';
+  const invocation=runtimeInvocation('Hermes',{prompt,attachments:images});
+  assert.deepEqual(invocation.args,['--yolo','chat','--query-file','-','--format','stream-json']);
+  assert.equal(invocation.args.includes('--image'),false);
+  assert.equal(invocation.stdin,prompt);
+  assert.equal(invocation.format,'json-lines');
+  assert.deepEqual(invocation.inputImages,images.map(image=>image.path));
 });
 test('unverified runtimes refuse images instead of sending text paths as vision', () => {
   for(const runtime of ['Claude','Gemini']) assert.throws(()=>runtimeInvocation(runtime,{prompt:'Inspect image',attachments:[{path:'one.png',mimeType:'image/png'}]}),/图片输入|image input/);

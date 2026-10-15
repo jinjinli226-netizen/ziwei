@@ -6,6 +6,7 @@ executions additionally route native employee state to a persistent private
 home while retaining the selected profile's single native auth store.
 """
 import ast
+import base64
 import hashlib
 import importlib
 import importlib.util
@@ -20,7 +21,7 @@ class UnsupportedNativeHermes(Exception):
     pass
 
 
-def _binding(launcher):
+def _binding(launcher, multi_images=False):
     launcher = Path(launcher).resolve(strict=True)
     if zipfile.is_zipfile(launcher):
         with zipfile.ZipFile(launcher) as archive:
@@ -113,15 +114,103 @@ def _binding(launcher):
                 classes=[node for node in ast.parse(target.read_text(encoding='utf-8')).body if isinstance(node,ast.ClassDef) and node.name=='ResponsesApiTransport']
                 if not classes or not {'build_kwargs','preflight_kwargs'}.issubset({node.name for node in classes[0].body if isinstance(node,ast.FunctionDef)}):raise UnsupportedNativeHermes('bot reasoning transport shape')
             paths[name]=str(target)
+    if multi_images:
+        root = Path(paths['main']).parent.parent
+        required = [('image_cli', root / 'cli.py', {'_collect_query_images': ['query', 'image_arg'], '_route_single_query_images': ['cli', 'query', 'effective_query', 'single_query_images', 'single_query_image_urls']}),
+                    ('image_routing', root / 'agent' / 'image_routing.py', {'decide_image_input_mode': ['provider', 'model', 'cfg'], 'build_native_content_parts': ['user_text', 'image_paths', 'image_urls']})]
+        main_tree = ast.parse(Path(paths['main']).read_text(encoding='utf-8'))
+        functions = {node.name: node for node in main_tree.body if isinstance(node, ast.FunctionDef)}
+        if not {'cmd_chat', '_read_query_file'}.issubset(functions) or not any(isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == '_read_query_file' for node in ast.walk(functions['cmd_chat'])):
+            raise UnsupportedNativeHermes('multi image chat shape')
+        for name, target, signatures in required:
+            target = target.resolve(strict=True)
+            if target.suffix != '.py' or not target.is_relative_to(root):
+                raise UnsupportedNativeHermes('multi image package')
+            functions = {node.name: node for node in ast.parse(target.read_text(encoding='utf-8')).body if isinstance(node, ast.FunctionDef)}
+            if any(key not in functions or [arg.arg for arg in functions[key].args.args] != args for key, args in signatures.items()):
+                raise UnsupportedNativeHermes('multi image shape')
+            paths[name] = str(target)
     sources = [launcher, *(Path(value) for value in paths.values())]
     return {'paths': paths, 'fingerprint': hashlib.sha256(b'\0'.join(p.read_bytes() for p in sources)).hexdigest()}
 
 
-def binding(launcher):
+def binding(launcher, multi_images=False):
     try:
-        return _binding(launcher)
+        return _binding(launcher, multi_images)
     except Exception:
         raise UnsupportedNativeHermes('binding') from None
+
+
+def install_multi_image_input(native, current, descriptors):
+    """Execution-local attachment transport; the installed native builder owns vision parts."""
+    if not isinstance(descriptors, list) or not 2 <= len(descriptors) <= 20:
+        raise UnsupportedNativeHermes('multi image count')
+    if any(not isinstance(item, dict) or set(item) != {'path', 'size', 'sha256'} or not isinstance(item['path'], str) or not Path(item['path']).is_absolute() or type(item['size']) is not int or not 0 < item['size'] <= 10 * 1024 * 1024 or not isinstance(item['sha256'], str) or len(item['sha256']) != 64 or any(ch not in '0123456789abcdef' for ch in item['sha256']) for item in descriptors):
+        raise UnsupportedNativeHermes('multi image manifest')
+    if sum(item['size'] for item in descriptors) > 10 * 1024 * 1024:
+        raise UnsupportedNativeHermes('multi image size')
+
+    def checked_paths():
+        paths = []
+        for item in descriptors:
+            target = Path(item['path'])
+            try:
+                if target.is_symlink() or not target.is_file() or target.stat().st_size != item['size']:
+                    raise ValueError()
+                raw = target.read_bytes()
+                if len(raw) != item['size'] or hashlib.sha256(raw).hexdigest() != item['sha256']:
+                    raise ValueError()
+            except (OSError, ValueError):
+                raise UnsupportedNativeHermes('multi image input changed') from None
+            paths.append(target)
+        return paths
+
+    original_read = native._read_query_file
+
+    def read_query_file(args):
+        original_read(args)
+        if getattr(args, 'output_format', None) != 'stream-json' or not getattr(args, 'query', None) or getattr(args, 'image', None) or getattr(args, 'tui', False):
+            raise UnsupportedNativeHermes('multi image query route')
+        checked_paths()
+        # This is the native cmd_chat import point, after profile/query setup.
+        cli_module = importlib.import_module('cli')
+        routing = importlib.import_module('agent.image_routing')
+        if str(Path(cli_module.__file__).resolve()) != current['paths'].get('image_cli') or str(Path(routing.__file__).resolve()) != current['paths'].get('image_routing'):
+            raise UnsupportedNativeHermes('multi image module changed')
+
+        def collect(query, image_arg=None):
+            if image_arg:
+                raise UnsupportedNativeHermes('multi image duplicate CLI flags')
+            return query or '', checked_paths()
+
+        def route(cli, query, effective_query, single_query_images, single_query_image_urls):
+            paths = checked_paths()
+            if not isinstance(single_query_images, (list, tuple)) or list(single_query_images) != paths or single_query_image_urls:
+                raise UnsupportedNativeHermes('multi image attachment mismatch')
+            cfg = importlib.import_module('hermes_cli.config').load_config()
+            mode = routing.decide_image_input_mode((cli.provider or '').strip(), (cli.model or '').strip(), cfg, requested_provider=(cli.requested_provider or '').strip())
+            if mode != 'native':
+                raise UnsupportedNativeHermes('multi image model requires native vision')
+            parts, skipped = routing.build_native_content_parts(query if isinstance(query, str) else '', [str(item) for item in paths])
+            images = [part for part in parts if isinstance(part, dict) and part.get('type') == 'image_url'] if isinstance(parts, list) else []
+            if skipped or len(images) != len(descriptors):
+                raise UnsupportedNativeHermes('multi image incomplete native content')
+            # Fail before agent startup on dropped, reordered, changed or text-only images.
+            for item, part in zip(descriptors, images):
+                try:
+                    url = part.get('image_url', {}).get('url', '')
+                    prefix, encoded = url.split(',', 1)
+                    raw = base64.b64decode(encoded, validate=True)
+                    if not prefix.startswith('data:image/') or not prefix.endswith(';base64') or len(raw) != item['size'] or hashlib.sha256(raw).hexdigest() != item['sha256']:
+                        raise ValueError()
+                except (AttributeError, TypeError, ValueError):
+                    raise UnsupportedNativeHermes('multi image native bytes or order changed') from None
+            return parts
+
+        cli_module._collect_query_images = collect
+        cli_module._route_single_query_images = route
+
+    native._read_query_file = read_query_file
 
 
 def finalize_owned_storage(current, isolation):
@@ -290,14 +379,15 @@ def run():
             raise UnsupportedNativeHermes('version package')
         print('Hermes ' + hermes_cli.__version__)
         return 0
-    if len(sys.argv) == 3 and sys.argv[1] == '--probe':
-        print(json.dumps(binding(sys.argv[2])))
+    if len(sys.argv) == 3 and sys.argv[1] in {'--probe', '--probe-images'}:
+        print(json.dumps(binding(sys.argv[2], sys.argv[1] == '--probe-images')))
         return 0
     if len(sys.argv) < 5 or sys.argv[1] != '--launcher' or sys.argv[3] != '--binding':
         raise UnsupportedNativeHermes('arguments')
     launcher = sys.argv[2]
     expected = json.loads(sys.argv[4])
-    current = binding(launcher)
+    multi_images = isinstance(expected, dict) and 'image_cli' in expected.get('paths', {})
+    current = binding(launcher, multi_images)
     if current != expected:
         raise UnsupportedNativeHermes('changed')
     native_args = sys.argv[5:]
@@ -305,6 +395,12 @@ def run():
     if native_args and native_args[0] == '--bound-profile':
         bound_profile = json.loads(native_args[1])
         native_args = native_args[2:]
+    input_images = None
+    if native_args and native_args[0] == '--input-images':
+        input_images = json.loads(native_args[1])
+        native_args = native_args[2:]
+    if multi_images != (input_images is not None):
+        raise UnsupportedNativeHermes('multi image binding')
     if native_args and native_args[0] == '--owned-profile-provision':
         profiles = importlib.import_module('hermes_cli.profiles')
         if str(Path(profiles.__file__).resolve()) != current['paths'].get('profiles'):
@@ -469,6 +565,10 @@ def run():
             raise UnsupportedNativeHermes('effective config') from None
 
     startup._has_configured_mcp_servers = effective_mcp_gate
+    if input_images is not None:
+        if discover_only or config_only or native_operation or gateway_worker:
+            raise UnsupportedNativeHermes('multi image execution route')
+        install_multi_image_input(native, current, input_images)
     if discover_only:
         import logging
         startup.set_mcp_server_filter('all')
@@ -497,6 +597,9 @@ def run():
 
 if __name__ == '__main__':
     def fail_safe(reason=None):
+        if isinstance(reason, UnsupportedNativeHermes) and str(reason).startswith('multi image'):
+            print('Hermes native multi-image input rejected: ' + str(reason) + '; all images must be attached natively, with no text-only fallback.', file=sys.stderr)
+            sys.exit(125)
         if os.environ.get('ZIWEI_INSTANCE_KIND') == 'hermes-bot':
             code = str(reason) if isinstance(reason, UnsupportedNativeHermes) else type(reason).__name__
             stage = ' before model startup' if code.startswith('BOT_REASONING_') else ''

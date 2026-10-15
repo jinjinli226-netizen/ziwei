@@ -1,5 +1,13 @@
 export const CONVERSATION_IMAGE_LIMIT = 10 * 1024 * 1024;
 
+export function clipboardImageFiles(clipboardData) {
+  const images=Array.from(clipboardData?.items || [])
+    .filter(item=>item.kind==='file' && /^image\//i.test(item.type || ''))
+    .map(item=>item.getAsFile()).filter(Boolean);
+  if(images.length)return images;
+  return Array.from(clipboardData?.files || []).filter(file=>/^image\//i.test(file.type || '') || (!file.type && /\.(png|jpe?g|gif|webp)$/i.test(file.name || '')));
+}
+
 export function createConversationComposerStore({makeId=()=>crypto.randomUUID(),wrap=value=>value}={}) {
   const entries=new Map();
   function get(key) {

@@ -6,7 +6,7 @@ import {chatLocalTime,conversationFiles} from '../bot-main-chat.js';
 import {ownedBotChatBlockReason} from '../bot-owned-profile.js';
 import {executionPresentation} from '../conversation-execution-state.mjs';
 const props=defineProps({bot:Object,conversation:Object,execution:Object,events:{type:Array,default:()=>[]},draft:{type:String,default:''},attachments:{type:Array,default:()=>[]},device:Object,modelLabel:String,workingDirectory:String,sendPending:Boolean,attachmentReading:Boolean,statusLoading:Boolean,sendError:String,stopBusy:Boolean,reconcileBusy:Boolean,canStop:Boolean,preview:Boolean,work:{type:Object,default:()=>({runs:[],routines:[],tasks:[]})},workLoading:Boolean,workError:String,previewSrc:Function,sizeLabel:Function});
-const emit=defineEmits(['retry-message','update:draft','send','settings','return','directory','attachment','remove-attachment','preview-image','download','stop','reconcile','refresh-work','phone','workspace-tasks']);
+const emit=defineEmits(['retry-message','update:draft','send','settings','return','directory','attachment','paste-attachment','remove-attachment','preview-image','download','stop','reconcile','refresh-work','phone','workspace-tasks']);
 const panel=ref(typeof window!=='undefined'&&window.innerWidth>=1100),menu=ref(''),popoverStyle=ref({}),fileInput=ref(null),timeline=ref(null),followLatest=ref(true);
 const uncertain=computed(()=>executionUncertain(props.execution));
 const recoveryEvent=computed(()=>botRecoveryEvent(props.execution));
@@ -50,7 +50,7 @@ onBeforeUnmount(()=>{window.removeEventListener('resize',resized);document.remov
         </div>
         <footer class="bot-chat-compose">
           <div v-if="attachments.length" class="bot-chat-draft-files"><div v-for="(attachment,index) in attachments" :key="index"><button :aria-label="'查看待发送图片：'+attachment.name" @click="emit('preview-image',attachment)"><img :src="previewSrc?.(attachment)" :alt="attachment.name"/></button><span>{{attachment.name}}</span><button :aria-label="'移除图片：'+attachment.name" @click="emit('remove-attachment',index)"><X :size="13"/></button></div></div>
-          <div class="bot-chat-editor"><textarea :value="draft" rows="3" aria-label="主聊天消息" :placeholder="'继续交给 '+name+'…'" @input="emit('update:draft',$event.target.value)" @keydown="keydown"/>
+          <div class="bot-chat-editor"><textarea :value="draft" rows="3" aria-label="主聊天消息" :placeholder="'继续交给 '+name+'…'" @input="emit('update:draft',$event.target.value)" @paste="emit('paste-attachment',$event)" @keydown="keydown"/>
             <div class="bot-chat-compose-tools"><button class="bot-chat-add" aria-label="添加图片" title="添加图片" :disabled="sendPending||attachmentReading" @click="fileInput?.click()"><Plus :size="20"/></button><input ref="fileInput" hidden type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple @change="emit('attachment',$event)"/>
               <div class="bot-chat-chips">
                 <div class="bot-chat-chip-menu"><button class="bot-chat-chip" aria-label="会话模型" :aria-expanded="menu==='model'" @click="toggleMenu('model',$event)"><span>{{modelLabel||'沿用 Profile 模型'}}</span><ChevronDown :size="12"/></button><div v-if="menu==='model'" class="bot-chat-popover" :style="popoverStyle"><strong>当前模型</strong><p>{{modelLabel||'沿用已绑定 Profile 的模型配置'}}</p><small>模型跟随这位 Bot 的运行绑定。</small><button @click="menu='';emit('settings','settings')">在 Bot 设置调整模型</button></div></div>
@@ -60,7 +60,7 @@ onBeforeUnmount(()=>{window.removeEventListener('resize',resized);document.remov
               <button v-if="canStop" class="bot-chat-stop" aria-label="请求停止当前执行" :disabled="stopBusy||reconcileBusy" @click="emit('stop')"><Square :size="16"/>{{stopBusy?'请求中':'停止'}}</button><button v-else class="bot-chat-send" aria-label="发送" :disabled="Boolean(blockedReason)||sendPending||attachmentReading||statusLoading||(!draft.trim()&&!attachments.length)" @click="emit('send')"><ArrowUp :size="21"/></button>
             </div>
           </div>
-          <p v-if="blockedReason" class="bot-chat-error" role="status">{{blockedReason}} <button class="bot-chat-text-link" @click="emit('settings','activity')">打开 Bot 设置</button></p><p v-if="sendError" class="bot-chat-error" role="alert">{{sendError}}</p><p class="bot-chat-compose-note">{{attachmentReading?'正在读取图片…':sendPending?'正在核对原发送请求…':uncertain?'先核对原执行结果，再发送新的工作':'Enter 发送 · Shift + Enter 换行'}}<span>图片合计最多 10 MB；Hermes 每条支持一张。</span></p>
+          <p v-if="blockedReason" class="bot-chat-error" role="status">{{blockedReason}} <button class="bot-chat-text-link" @click="emit('settings','activity')">打开 Bot 设置</button></p><p v-if="sendError" class="bot-chat-error" role="alert">{{sendError}}</p><p class="bot-chat-compose-note">{{attachmentReading?'正在读取图片…':sendPending?'正在核对原发送请求…':uncertain?'先核对原执行结果，再发送新的工作':'Enter 发送 · Shift + Enter 换行'}}<span>每条最多 20 张图片，合计最多 10 MB。</span></p>
         </footer>
       </main>
       <aside v-if="panel" class="bot-chat-work" aria-label="Bot 工作面板"><div class="bot-chat-work-heading"><strong>工作面板</strong><button aria-label="关闭工作面板" @click="panel=false"><X :size="18"/></button></div><button class="bot-chat-work-refresh" :disabled="workLoading" @click="emit('refresh-work')"><RefreshCw :size="14"/>{{workLoading?'同步中…':'刷新实际记录'}}</button><p v-if="workError" class="bot-chat-error">{{workError}}</p>
