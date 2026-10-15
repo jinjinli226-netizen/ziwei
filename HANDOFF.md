@@ -4,6 +4,20 @@
 
 **换电脑接手先读本节。** 下方按日期保留历史记录，其中“V2 未上线／方案中”描述的是当时状态，不代表当前生产。设备状态以各条标注的 2026-10-15 快照为准（Asia/Shanghai），接手后应重新查询。本文记录可复核的项目进度，不包含完整 Codex 聊天。
 
+### 18:49 更新：历史回执阻塞停止与升级的修复已发布
+
+源码 `6ddb51daa6090656a29cec5c09a3ba9d676c7ca5` 已先推 GitHub，再发布官方 Windows 包；新 build `a996e94aebec66b15636d526be8013746617950fab1858d4815720c7b93cb5f1`，包 SHA-256 `86525d20f9239af0a30e867ac3bd72dbc7fb81a1ad0f7e95c67cd048a37f6bcf`。主站/API、三个服务 PID、Nginx 和数据库文件身份保持；备份 `/opt/ziwei-staging/backups/retained-stop-client-20261015T104907Z`，官方包与元数据已公网读回核对。
+
+已定位旧 stop 409：执行/轮询/隔离均为 0，但两条历史 blocked 回执使 strict safe=false。其中一条经原回执恢复 confirmed，另一条原员工已硬删除、原会话 employee_id=null，服务器拒收原结果。新版本独立计算允许停止的 stopSafe；真实完整退出的回执保留后可停，不伪造上传成功。为避免旧 stop 阻塞升级，官方下载入口含仅用于已核验旧空闲实例的恢复通道。[专项记录](docs/operations/2026-10-15-retained-receipt-stop.md)。
+
+**李金晋电脑尚未确认完成本次升级。** 应在 Windows PowerShell 执行以下入口，由它下载新 updater；重复旧 `ziwei_user update` 仍会走旧停止逻辑：
+
+```powershell
+irm https://qzelynth.top/downloads/cli/update-windows.ps1 | iex
+```
+
+本次 124 项相关回归通过，12 项 Windows 专用测试跳过；真实 Windows 句柄退出/升级和后续 Bot 订阅调用仍需设备实际结果，不能以 Mac 模拟验收替代。新包已包含 17:51 的登录续期修复。
+
 ### 17:51 更新：Bot 登录续期修复已发布
 
 客户端源码 `b78889c8696931e64fb255605845f8c680cb2314` 已先推 GitHub，再发布官方 Windows 包。真实失败原因是 `bot source authentication refresh required`：早期隔离代码拦截了原生登录续期写回。现已恢复唯一来源认证文件的原生持锁刷新，Bot 独立 Profile/HOME 保持，错误摘要也显示真正原因。[故障、修复与验证记录](docs/operations/2026-10-15-bot-source-auth-refresh.md)。
@@ -13,9 +27,9 @@
 ### 代码、生产与客户端
 
 - GitHub 仓库：[jinjinli226-netizen/ziwei](https://github.com/jinjinli226-netizen/ziwei)，当前发布分支为 `codex/v2-20261014-release`；不要假定默认分支已包含这些提交。
-- 最近主站/API 代码提交：`ead2ac9281c47624929f433bc190b44e2659498c`，已先推 GitHub，于 **2026-10-15 15:51:16** 完成服务器发布。客户端与交接文档可以领先此主站提交；17:51 的修复仅发布客户端，主站/API 未切换。
+- 最近主站/API 代码提交：`ead2ac9281c47624929f433bc190b44e2659498c`，已先推 GitHub，于 **2026-10-15 15:51:16** 完成服务器发布。客户端与交接文档可以领先此主站提交；17:51 和 18:49 的修复仅发布客户端，主站/API 未切换。
 - 正式站：[紫薇](https://qzelynth.top)。服务器 `/opt/ziwei/current` 指向 `/opt/ziwei/releases/v2-hotfix-ead2ac9281c4/v2`。上一产品提交为 `0f54339e3714c9be579482932a6fc294d73d6cca`，该次发布备份在 `/opt/ziwei-staging/backups/bot-stop-20261015T075113Z`；数据库结构未变。本次保留上一版代码，不等于已验证可直接退回 V1.0。
-- [官方 Windows 包](https://qzelynth.top/downloads/cli/ziwei-latest.tgz)与[发布元数据](https://qzelynth.top/downloads/cli/release.json)已经公网回读核对。预期 `clientBuild` 为 `63c8cd609af93163402f0aa896cd353c7f84f23b7af9d9c7f254b5ea9dc3bed6`，包 SHA-256 为 `609a7cf4948737ff7f2c68bbb7736d7debd13f4997a1c18c89ba044e2a6d21ec`。版本号仍可能显示 `0.1.0`，必须比较实际运行的 build。
+- [官方 Windows 包](https://qzelynth.top/downloads/cli/ziwei-latest.tgz)与[发布元数据](https://qzelynth.top/downloads/cli/release.json)已经公网回读核对。预期 `clientBuild` 为 `a996e94aebec66b15636d526be8013746617950fab1858d4815720c7b93cb5f1`，包 SHA-256 为 `86525d20f9239af0a30e867ac3bd72dbc7fb81a1ad0f7e95c67cd048a37f6bcf`。版本号仍可能显示 `0.1.0`，必须比较实际运行的 build。
 
 ### 已完成与验收边界
 
@@ -28,11 +42,11 @@
 
 | 设备 / 范围 | 已核实状态 | 接手时下一步 |
 | --- | --- | --- |
-| 李金晋电脑 | 17:31 在线且运行此前多图 build `855e4fa…`、PID 8832；“闲鱼运营大神”仍绑定此机。早先用户执行 `ziwei_user stop` 得到 HTTP 409。PowerShell 的 `status --json \| ConvertFrom-Json` 因乱码解析失败，未取得完整维护阻塞原因。 | 精确核对该机实际 build、在途动作与维护状态；修复小体积诊断及编码问题后再判断 409。已直接确认本机多图版本升级；旧 stop 409 未取得原因，不能声称已修复。当前优先升级至登录续期修复版 `63c8cd…`。 |
+| 李金晋电脑 | 本轮用户本机确认运行 `855e4fa…`、PID 8832，active/polling/quarantined=0、blocked=2。已定位旧停止逻辑混用了回执交付检查；一条回执恢复 confirmed，剩余回执原员工已硬删除。 | 用上方官方 PowerShell 入口升级至 `a996e94…`，核对实际 build、停止/升级结果，再验收 Bot 真实订阅调用。新包已发布，不等于该机已经升级。 |
 | 公司台式 | 17:31 在线且运行多图 build `855e4fa…`。16:27 的探测记录中 Codex CLI 与认证/provider 就绪，Hermes 探测是 `cli_version_timeout / ETIMEDOUT`，3 秒限制；显示的 0.18.2 来自安装元数据，并非版本命令成功。Claude/Gemini 为未发现。 | 用户尚未回复手动 `hermes --version` 的结果和耗时。先确定慢启动/失败原因；版本探测不调用模型，不能直接归因代理。当前探测同步执行，不宜只把 3 秒改为长等待而阻塞心跳、停止与事件处理；应评估异步探测。此修复尚未实现。 |
-| Windows 多图真模型验收 | 网页、服务端及多图客户端包已发布；17:31 两台电脑均已确认多图 build，但本次登录续期修复仍须更新至 `63c8cd…`。 | 在实际 Bot 绑定的设备确认新 build，再由真实聊天一次发送两张内容不同的图片，让模型按顺序分别描述，并核对同条消息与附件。验收前不要标记完成。 |
+| Windows 多图真模型验收 | 网页、服务端及多图客户端包已发布；17:31 两台电脑均已确认多图 build，但本次登录续期及停止修复仍须更新至 `a996e94…`。 | 在实际 Bot 绑定的设备确认新 build，再由真实聊天一次发送两张内容不同的图片，让模型按顺序分别描述，并核对同条消息与附件。验收前不要标记完成。 |
 
-停止问题尚未取得足够证据定位；最近一个动作完成不代表所有本地连接的维护检查均通过。本轮没有强制杀进程、清空执行记录或伪造终态。Windows 重启会结束当时进程，但自启动可以重新启动客户端，也不能证明旧状态已修复。
+停止问题已定位并发布修复，Windows 现场升级仍待用户执行。没有清空原回执、重建已删员工或伪造业务终态；旧版恢复入口只在重新核实已空闲且回执完整退出时退出原客户端。Windows 重启与旧版再次自启动不能替代升级验收。
 
 ### 新电脑接手方法与继续工作的约束
 

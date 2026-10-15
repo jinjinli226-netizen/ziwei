@@ -30,3 +30,9 @@ irm https://qzelynth.top/downloads/cli/update-windows.ps1 | iex
 最终相关回归 124 项通过、0 失败，12 项 Windows 专用测试跳过；HTTP 下载 fixture 因本轮不分配监听服务而排除，下载代码未改。Mac 临时目录使用规范绝对路径消除系统路径别名，未做 Mac 产品适配。lint 144 个源码文件、改动脚本语法与 diff 检查通过。独立审查确认候选 inspector 的 11 个模块依赖均已打包；历史包 build 的计算结果保持兼容。大批量回执证据通过 stdin 输入 PowerShell，600 个 Unicode 路径测试不增加命令行长度。
 
 本次按先推 GitHub、再发布官方 Windows 客户端执行。沿用主站/API `ead2ac9`，不切换网页/API、不变更数据库结构。客户端同时包含前次 Bot 登录续期修复；设备更新之后仍需真实订阅调用验收。
+
+## 18:49 发布回读
+
+源码 `6ddb51daa6090656a29cec5c09a3ba9d676c7ca5` 已推送并与远端发布分支一致。官方客户端于 `2026-10-15T10:49:07.723241Z` 发布，build `a996e94aebec66b15636d526be8013746617950fab1858d4815720c7b93cb5f1`，包 SHA-256 `86525d20f9239af0a30e867ac3bd72dbc7fb81a1ad0f7e95c67cd048a37f6bcf`，1,056,759 bytes。离线依赖闭包验证通过；官方包和 release.json 公网回读一致。
+
+备份 `/opt/ziwei-staging/backups/retained-stop-client-20261015T104907Z`。当前主站仍 `/opt/ziwei/releases/v2-hotfix-ead2ac9281c4/v2`，主 API、控制 API、Nginx 进程及 Nginx 配置、数据库 inode 均保持。现有官方 `update-windows.ps1` 与仓库字节一致，SHA-256 `579fdeac68b92e24a62069c173af193f5b45bbb0ef220206004d7888ffa99b8a`，其既有流程会先拉新包并使用新 updater，无须替换脚本文本。现场旧 Windows 客户端尚未确认升级，不报告真实模型已恢复。
