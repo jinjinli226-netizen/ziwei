@@ -227,7 +227,7 @@ export function createZiweiConnect(repo, options = {}) {
   const employee = (ws, employeeId) => {
     repo.preservation?.assert({employeeId});
     const row = db.prepare('SELECT * FROM employees WHERE id=? AND workspace_id=?').get(employeeId, ws.id);
-    if (!row) throw Object.assign(new Error('数字员工不存在或不属于当前工作区'), { status: 404 });
+    if (!row || row.status==='deleted') throw Object.assign(new Error('数字员工不存在或已删除'), { status: 404, code:'EMPLOYEE_NOT_FOUND' });
     return row;
   };
   const requestResponse = async (path, init = {}) => {
@@ -281,7 +281,7 @@ export function createZiweiConnect(repo, options = {}) {
     const ws = workspace(slug);
     return db.prepare(`SELECT b.*, e.name AS employee_name, e.runtime AS employee_runtime
       FROM ziwei_connect_bindings b JOIN employees e ON e.id=b.employee_id
-      WHERE b.workspace_id=? ORDER BY b.updated_at DESC`).all(ws.id).map(row => ({
+      WHERE b.workspace_id=? AND e.status<>'deleted' ORDER BY b.updated_at DESC`).all(ws.id).map(row => ({
       id: row.id, employeeId: row.employee_id, employeeName: row.employee_name,
       employeeRuntime: row.employee_runtime, deviceId: row.device_id,
       accountId: row.account_id, accountLabel: row.account_label,
@@ -354,6 +354,7 @@ export function createZiweiConnect(repo, options = {}) {
       return { deleted: true, id: bindingId };
     },
     async bind(slug, input = {}) {
+      employee(workspace(slug),text(input.employeeId || input.employee_id,'employeeId'));
       const devices = await listExternalDevices({ detailed: false });
       return bindVerified(slug,input,devices);
     },
@@ -403,6 +404,7 @@ export function createZiweiConnect(repo, options = {}) {
     },
     async toolCall(slug,scope,name,args={}) {
       repo.serverCodeRollout?.assertExecution();
+      employee(workspace(slug),scope.employeeId);
       const phoneId=scope.phoneDeviceId;const path=`/android-devices/${encodeURIComponent(phoneId)}`;
       const terminal=async(method,suffix,body={})=>{const result=await this.terminal(slug,method,suffix,body);if(result.status>=400) throw externalError(result.body.error || result.body.message || '手机工具请求失败',result.status);return result.body;};
       const syncReceipt=async device=>{

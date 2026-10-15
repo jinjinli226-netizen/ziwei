@@ -33,6 +33,7 @@ export function createEmployeeTemplateService(repo, management) {
     customized:item.origin === 'adopted-existing' || item.initial_config_hash !== configurationHash(employee),
     templateApplied:item.origin === 'template',
   });
+  const deletedInstance = item => Boolean(item && db.prepare("SELECT 1 FROM employees WHERE id=? AND workspace_id=? AND owner_user_id=? AND status='deleted'").get(item.employee_id,item.workspace_id,item.owner_user_id));
   const ownEmployee = (slug, item, context) => {
     const employee=repo.getEmployee(item.employee_id,context);
     if (!employee || employee.workspace_id !== item.workspace_id || employee.owner_user_id !== context.actorUserId) fail('模板实例员工已不属于当前成员，请检查原实例。','TEMPLATE_INSTANCE_CONFIG_CONFLICT',409);
@@ -93,7 +94,7 @@ export function createEmployeeTemplateService(repo, management) {
     list(slug, context = {}) {
       const trusted=actor(slug,context);
       return {templates:listEmployeeTemplates().map(catalog => {
-        const item=repo.getEmployeeTemplateInstance(slug,trusted.actorUserId,catalog.id);
+        const saved=repo.getEmployeeTemplateInstance(slug,trusted.actorUserId,catalog.id),item=deletedInstance(saved)?null:saved;
         const employee=item ? ownEmployee(slug,item,trusted) : null;
         const info=item ? provenance(catalog,item,employee) : null;
         const conversation=item?.conversation_id ? repo.getConversation(item.conversation_id,trusted) : null;
@@ -115,6 +116,7 @@ export function createEmployeeTemplateService(repo, management) {
         let item=repo.getEmployeeTemplateInstance(slug,trusted.actorUserId,catalog.id);
         let employee,duplicate=Boolean(item);
         if (item) {
+          if (deletedInstance(item)) fail('此模板的原员工已删除，原安装请求不会恢复或重新创建员工。','TEMPLATE_INSTANCE_DELETED',409);
           employee=ownEmployee(slug,item,trusted);
           assertExplicitMatches(input,employee);
         } else {

@@ -1,6 +1,7 @@
 import {executionUncertain,botPresence,capabilityPresentation,botStopPresentation,botRecoveryEvent} from './bot-presentation.js';
 export {executionUncertain,botPresence,capabilityPresentation};
 import {createBotRequestScope, botErrorMessage} from './bot-state.js';
+import {employeeRemovalNotice} from './employee-removal.js';
 
 const clone = value => JSON.parse(JSON.stringify(value));
 const pendingRuns=new Map();
@@ -14,7 +15,7 @@ export function botDraft(bot) {
 }
 export function createBotWorkbench({api,wrap=value=>value}) {
   const scope=createBotRequestScope();let workspaceGeneration=0,listGeneration=0;
-  const state=wrap({workspace:'',selectedId:'',bots:[],bot:null,draft:null,runs:[],routines:[],loading:false,reading:false,busy:false,error:'',notice:'',conflict:false,writeUnknown:false,pendingOperation:null});
+  const state=wrap({workspace:'',selectedId:'',bots:[],bot:null,draft:null,runs:[],routines:[],loading:false,reading:false,busy:false,error:'',errorCode:'',notice:'',conflict:false,writeUnknown:false,pendingOperation:null});
   const apply = bot => {
     if (!bot || bot.id!==state.selectedId || (bot.workspace && bot.workspace!==state.workspace)) throw new Error('Bot 响应归属与当前选择不一致');
     state.bot=bot;
@@ -52,7 +53,7 @@ export function createBotWorkbench({api,wrap=value=>value}) {
   }
   async function select(id) {
     if(state.selectedId===id && state.bot)return;
-    scope.select(state.workspace,id);state.selectedId=id;state.bot=null;state.draft=null;state.runs=[];state.routines=[];state.error='';state.notice='';state.conflict=false;state.writeUnknown=false;state.busy=false;
+    scope.select(state.workspace,id);state.selectedId=id;state.bot=null;state.draft=null;state.runs=[];state.routines=[];state.error='';state.errorCode='';state.notice='';state.conflict=false;state.writeUnknown=false;state.busy=false;
     state.pendingOperation=readPending(pendingKey(state.workspace,id));state.writeUnknown=Boolean(state.pendingOperation);
     if(id)await refresh({resetDraft:true});
   }
@@ -64,7 +65,7 @@ export function createBotWorkbench({api,wrap=value=>value}) {
     if(state.busy || (state.writeUnknown&&!recovering) || !state.bot)return false;
     const request=scope.begin('write'),workspace=state.workspace,id=state.selectedId;
     scope.begin('read');state.reading=false;
-    state.busy=true;state.error='';state.notice='';
+    state.busy=true;state.error='';state.errorCode='';state.notice='';
     let accepted=false;
     try {
       const result=await operation(id,workspace);accepted=true;
@@ -82,6 +83,7 @@ export function createBotWorkbench({api,wrap=value=>value}) {
     }catch(error){
       if(scope.current(request)){
         state.error=accepted?`操作已受理，但读回未确认。${botErrorMessage(error)}`:botErrorMessage(error,{mutation:true});
+        state.errorCode=error.code||'';
         state.conflict=error.status===409&&(!error.code||error.code==='BOT_REVISION_CONFLICT');state.writeUnknown=accepted || !error.status;
       }
       return false;
@@ -93,6 +95,13 @@ export function createBotWorkbench({api,wrap=value=>value}) {
     const config=clone(state.draft.config);
     const idempotencyKey='bot-initialize-'+state.selectedId;
     return mutate((id,workspace)=>api.initializeEmployeeBot(id,{idempotencyKey,config},workspace),'原员工 Bot 能力已初始化并读回。员工 ID 和既有聊天保持；请检查并启用。',{readback:true,resetDraft:true});
+  }
+  async function removeEmployee({force=false}={}) {
+    const request=scope.begin('remove'),target=state.selectedId;let receipt;
+    const ok=await mutate(async(id,workspace)=>{receipt=await api.deleteEmployee(id,workspace,force?{force:true}:{});if(receipt?.deleted!==true)throw new Error('删除结果未确认，请刷新员工列表后核对。');return receipt;},()=>employeeRemovalNotice(receipt));
+    if(!ok||!scope.current(request))return false;
+    const notice=state.notice;state.bots=state.bots.filter(bot=>bot.id!==target);void select('');state.notice=notice;
+    return true;
   }
   async function save() {
     if(!state.draft)return false;
@@ -134,5 +143,5 @@ export function createBotWorkbench({api,wrap=value=>value}) {
   }
   async function recoverRoutine(){const pending=state.pendingOperation;if(pending?.kind==='routine_run')return runRoutine(pending.routineId,{recovering:true});return false;}
   function dispose(){workspaceGeneration++;scope.dispose();}
-  return {state,setWorkspace,select,list,refresh,initialize,save,control,reconcile,validate,mutate,runRoutine,recoverRoutine,dispose};
+  return {state,setWorkspace,select,list,refresh,initialize,removeEmployee,save,control,reconcile,validate,mutate,runRoutine,recoverRoutine,dispose};
 }

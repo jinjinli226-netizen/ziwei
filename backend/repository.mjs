@@ -346,6 +346,7 @@ export function createRepository(options = {}, io={}) {
     actorRole: String(input?.actorRole || input?.role || '').trim().toLowerCase()
   });
   const employeeVisible = (row, input = {}) => {
+    if (row?.status === 'deleted') return false;
     if (!row || row.visibility !== 'personal' || !input.enforceVisibility) return Boolean(row);
     if (['owner', 'admin'].includes(input.actorRole)) return true;
     return Boolean(input.actorUserId && row.owner_user_id && row.owner_user_id === input.actorUserId);
@@ -360,12 +361,12 @@ export function createRepository(options = {}, io={}) {
     if (employeeId) return assertEmployeeVisible(db.prepare('SELECT * FROM employees WHERE id=? AND workspace_id=?').get(employeeId, workspaceId) || null, input);
     const assignee = String(input.assignee || '').trim();
     if (!assignee) return null;
-    const row = db.prepare('SELECT * FROM employees WHERE workspace_id=? AND (id=? OR lower(name)=lower(?)) ORDER BY created_at DESC LIMIT 1').get(workspaceId, assignee, assignee) || null;
+    const row = db.prepare('SELECT * FROM employees WHERE workspace_id=? AND status<>\'deleted\' AND (id=? OR lower(name)=lower(?)) ORDER BY created_at DESC LIMIT 1').get(workspaceId, assignee, assignee) || null;
     return row ? assertEmployeeVisible(row, input) : null;
   };
   const trustedTemplatePayload = (workspaceId, payload) => {
     const { employeeTemplateId: _untrustedTemplate, employeePersona: _untrustedPersona, employeeInstructions: _untrustedInstructions, employeeDescription: _untrustedDescription, ...rest }=payload;
-    const instance=payload.employeeId ? db.prepare("SELECT i.template_id,e.name,e.persona,e.instructions,e.description FROM employee_template_instances i JOIN employees e ON e.id=i.employee_id AND e.workspace_id=i.workspace_id AND e.owner_user_id=i.owner_user_id WHERE i.employee_id=? AND i.workspace_id=? AND i.template_id='ziwei-employee-creator'").get(String(payload.employeeId),workspaceId) : null;
+    const instance=payload.employeeId ? db.prepare("SELECT i.template_id,e.name,e.persona,e.instructions,e.description FROM employee_template_instances i JOIN employees e ON e.id=i.employee_id AND e.workspace_id=i.workspace_id AND e.owner_user_id=i.owner_user_id WHERE i.employee_id=? AND i.workspace_id=? AND e.status<>'deleted' AND i.template_id='ziwei-employee-creator'").get(String(payload.employeeId),workspaceId) : null;
     return instance ? {...rest,employeeTemplateId:instance.template_id,employeeName:instance.name,employeePersona:instance.persona,employeeInstructions:instance.instructions,employeeDescription:instance.description} : rest;
   };
   const creatorConversationBinding = (employee, conversationId, messageId = null) => {
@@ -1459,7 +1460,7 @@ export function createRepository(options = {}, io={}) {
       return employee;
     },
     updateEmployee(employeeId, input = {}, context = {}) {
-      const row = db.prepare('SELECT * FROM employees WHERE id=?').get(employeeId); if (!row) throw new Error('数字员工不存在');
+      const row = db.prepare('SELECT * FROM employees WHERE id=?').get(employeeId); if (!row || row.status==='deleted') throw botFailure('EMPLOYEE_DELETED','数字员工已移除或不存在',404);
       if (db.prepare('SELECT 1 FROM hermes_bots WHERE employee_id=?').get(employeeId) && !context.botConfigurationWrite) throw botFailure('BOT_CONFIG_ROUTE_REQUIRED','请从 Bot 版本化配置入口修改此员工');
       const ws = db.prepare('SELECT * FROM workspaces WHERE id=?').get(row.workspace_id); if (!ws) throw new Error('Workspace not found');
       const name=String(input.name ?? row.name).trim(); if (!name) throw new Error('数字员工名称不能为空');
@@ -1482,21 +1483,48 @@ export function createRepository(options = {}, io={}) {
       audit(ws.slug,'user','employee.updated',{employeeId,name,runtime,modelId,runtimeProfile,status});
       const saved=db.prepare('SELECT * FROM employees WHERE id=?').get(employeeId); return employeeView(saved);
     },
-    deleteEmployee(employeeId) {
+    deleteEmployee(employeeId, input = {}) {
       const row=db.prepare('SELECT * FROM employees WHERE id=?').get(employeeId); if (!row) throw new Error('数字员工不存在');
+      const removed=()=>({id:employeeId,name:row.name,deleted:true,forced:true,executionConfirmedStopped:false,retained:{executionRecords:true,profile:true,home:true}});
+      // Explicit purge is irreversible; native files require a separate, device-confirmed cleanup.
+      if(input.force===true && input.purge===true) {
+        const ws=db.prepare('SELECT * FROM workspaces WHERE id=?').get(row.workspace_id);if(!ws)throw new Error('Workspace not found');
+        db.exec('SAVEPOINT employee_purge');
+        try {
+          db.prepare("UPDATE automations SET status='paused',next_run=NULL,executor='ziwei_bot' WHERE id IN (SELECT automation_id FROM bot_routines WHERE employee_id=?)").run(employeeId);
+          db.prepare('DELETE FROM employees WHERE id=?').run(employeeId);
+          audit(ws.slug,'user','employee.purged',{employeeId,name:row.name,executionConfirmedStopped:false,nativeCleanupConfirmed:false});
+          db.exec('RELEASE employee_purge');
+        }catch(error){db.exec('ROLLBACK TO employee_purge; RELEASE employee_purge');throw error;}
+        return {id:employeeId,name:row.name,deleted:true,forced:true,purged:true,executionConfirmedStopped:false,nativeCleanupConfirmed:false};
+      }
+      // A tombstone preserves ownership and late receipts. Repeating ordinary DELETE must never hard-delete it.
+      if(row.status==='deleted')return removed();
+      if(input.force===true) {
+        const ws=db.prepare('SELECT * FROM workspaces WHERE id=?').get(row.workspace_id);if(!ws)throw new Error('Workspace not found');
+        const timestamp=now();db.exec('SAVEPOINT employee_force_remove');
+        try {
+          db.prepare("UPDATE employees SET status='deleted',updated_at=? WHERE id=?").run(timestamp,employeeId);
+          db.prepare("UPDATE hermes_bots SET control_state='paused',control_epoch=control_epoch+1,updated_at=? WHERE employee_id=?").run(timestamp,employeeId);
+          db.prepare("UPDATE automations SET status='paused',next_run=NULL,executor='ziwei_bot' WHERE id IN (SELECT automation_id FROM bot_routines WHERE employee_id=?)").run(employeeId);
+          audit(ws.slug,'user','employee.force_removed',{employeeId,name:row.name,executionConfirmedStopped:false,retained:removed().retained});
+          db.exec('RELEASE employee_force_remove');
+        } catch(error) {db.exec('ROLLBACK TO employee_force_remove; RELEASE employee_force_remove');throw error;}
+        return removed();
+      }
       if(db.prepare('SELECT 1 FROM hermes_bots WHERE employee_id=?').get(employeeId))assertBotExecution(db,row.workspace_id,{employeeId},{validation:true});
       const ws=db.prepare('SELECT * FROM workspaces WHERE id=?').get(row.workspace_id); if (!ws) throw new Error('Workspace not found');
       db.prepare("UPDATE automations SET status='paused',next_run=NULL,executor='ziwei_bot' WHERE id IN (SELECT automation_id FROM bot_routines WHERE employee_id=?)").run(employeeId);
       db.prepare('DELETE FROM employees WHERE id=?').run(employeeId); audit(ws.slug,'user','employee.deleted',{employeeId,name:row.name}); return {id:employeeId,name:row.name,deleted:true};
     },
     listEmployeeEnvironment(employeeId) {
-      const employee = db.prepare('SELECT id,workspace_id FROM employees WHERE id=?').get(employeeId);
+      const employee = db.prepare('SELECT id,workspace_id FROM employees WHERE id=? AND status<>\'deleted\'').get(employeeId);
       if (!employee) throw new Error('数字员工不存在');
       const rows = db.prepare('SELECT * FROM employee_environment_variables WHERE employee_id=? ORDER BY key').all(employeeId);
       return { employee_id: employeeId, variables: rows.map(row => environmentView(row, employeeEnvKey)), local_source: { source: 'ziwei_user', scope: 'runtime', variables: [...LOCAL_RUNTIME_VARIABLES] } };
     },
     upsertEmployeeEnvironment(employeeId, input = {}) {
-      const employee = db.prepare('SELECT id,workspace_id FROM employees WHERE id=?').get(employeeId);
+      const employee = db.prepare('SELECT id,workspace_id FROM employees WHERE id=? AND status<>\'deleted\'').get(employeeId);
       if (!employee) throw new Error('数字员工不存在');
       const key = String(input.key || '').trim().toUpperCase();
       if (!ENV_KEY_PATTERN.test(key)) throw new Error('环境变量名无效：必须是大写字母、数字或下划线，且以字母开头');
@@ -1513,19 +1541,19 @@ export function createRepository(options = {}, io={}) {
       return environmentView(saved, employeeEnvKey);
     },
     deleteEmployeeEnvironment(employeeId, keyValue) {
-      const employee = db.prepare('SELECT id,workspace_id FROM employees WHERE id=?').get(employeeId); if (!employee) throw new Error('数字员工不存在');
+      const employee = db.prepare('SELECT id,workspace_id FROM employees WHERE id=? AND status<>\'deleted\'').get(employeeId); if (!employee) throw new Error('数字员工不存在');
       const key = String(keyValue || '').trim().toUpperCase(); const row = db.prepare('SELECT * FROM employee_environment_variables WHERE employee_id=? AND key=?').get(employeeId, key); if (!row) throw new Error('环境变量不存在');
       db.prepare('DELETE FROM employee_environment_variables WHERE id=?').run(row.id); const ws = db.prepare('SELECT slug FROM workspaces WHERE id=?').get(employee.workspace_id); audit(ws.slug, 'user', 'employee.environment.deleted', { employeeId, key }); return { id: row.id, employee_id: employeeId, key, deleted: true };
     },
     getEmployeeCustomParams(employeeId) {
-      if (!db.prepare('SELECT id FROM employees WHERE id=?').get(employeeId)) throw new Error('数字员工不存在');
+      if (!db.prepare('SELECT id FROM employees WHERE id=? AND status<>\'deleted\'').get(employeeId)) throw new Error('数字员工不存在');
       const rows = db.prepare('SELECT key,value_json FROM employee_custom_params WHERE employee_id=? ORDER BY key').all(employeeId); const values = {};
       for (const row of rows) { try { values[row.key] = JSON.parse(row.value_json); } catch { values[row.key] = null; } }
       const updated = db.prepare('SELECT MAX(updated_at) AS updated_at FROM employee_custom_params WHERE employee_id=?').get(employeeId);
       return { employee_id: employeeId, values, updated_at: updated?.updated_at || null };
     },
     replaceEmployeeCustomParams(employeeId, input = {}) {
-      const employee = db.prepare('SELECT id,workspace_id FROM employees WHERE id=?').get(employeeId); if (!employee) throw new Error('数字员工不存在');
+      const employee = db.prepare('SELECT id,workspace_id FROM employees WHERE id=? AND status<>\'deleted\'').get(employeeId); if (!employee) throw new Error('数字员工不存在');
       const values = input && typeof input === 'object' && !Array.isArray(input) && input.values && typeof input.values === 'object' && !Array.isArray(input.values) ? input.values : input;
       if (!values || typeof values !== 'object' || Array.isArray(values)) throw new Error('自定义参数必须是 JSON 对象');
       const entries = Object.entries(values); if (entries.length > 100) throw new Error('自定义参数不能超过 100 项'); const normalized = [];
@@ -1653,7 +1681,7 @@ export function createRepository(options = {}, io={}) {
     createEmployeeTemplateInstance(slug, input) {
       const ws=workspace(slug); if (!ws) throw new Error('Workspace not found');
       const employee=db.prepare('SELECT * FROM employees WHERE id=? AND workspace_id=? AND owner_user_id=?').get(input.employeeId, ws.id, input.ownerUserId);
-      if (!employee) throw new Error('模板实例员工不属于当前工作区和成员');
+      if (!employee || employee.status==='deleted') throw new Error('模板实例员工不属于当前工作区和成员');
       const item={id:id('template'),workspace_id:ws.id,owner_user_id:input.ownerUserId,employee_id:employee.id,template_id:input.templateId,template_version:input.templateVersion ?? null,origin:input.origin,initial_config_hash:input.initialConfigHash,conversation_id:null,created_at:now()};
       db.prepare('INSERT INTO employee_template_instances(id,workspace_id,owner_user_id,employee_id,template_id,template_version,origin,initial_config_hash,conversation_id,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)').run(item.id,item.workspace_id,item.owner_user_id,item.employee_id,item.template_id,item.template_version,item.origin,item.initial_config_hash,null,item.created_at);
       return item;
@@ -1968,7 +1996,7 @@ export function createRepository(options = {}, io={}) {
         else if (['succeeded','failed'].includes(row.status)) response = { ...a2aResponseView(row, { receiptOnly, includeResult:!receiptOnly }), duplicate:true };
         else {
           const timestamp = now();
-          if(row.status==='pending')assertBotExecution(db,row.workspace_id,parse(row.payload_json),{validation:botActionMaintenance(row.type,parse(row.payload_json)),provisioning:row.type==='hermes.bot.provision',requireProfile:row.type!=='hermes.bot.provision',actionId});
+          if(row.status==='pending')assertBotExecution(db,row.workspace_id,{...parse(row.payload_json),...(!actionTargetDevice(row)&&(input.deviceId||input.device_id)?{deviceId:String(input.deviceId||input.device_id).trim()}:{})},{validation:botActionMaintenance(row.type,parse(row.payload_json)),provisioning:row.type==='hermes.bot.provision',requireProfile:row.type!=='hermes.bot.provision',actionId});
           if (row.expires_at && Date.parse(row.expires_at) <= Date.parse(timestamp)) {
             db.prepare("UPDATE a2a_actions SET status='expired',completed_at=? WHERE id=?").run(timestamp, actionId);
             expired = true;

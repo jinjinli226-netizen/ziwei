@@ -166,7 +166,7 @@ export const api = {
   hermesProfiles: (deviceId = '', slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/hermes/profiles${deviceId ? `?deviceId=${encodeURIComponent(deviceId)}` : ''}`),
   createHermesProfile: (body, idempotencyKey = '', slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/hermes/profiles/requests`, { method:'POST', body:JSON.stringify({ ...(body || {}), ...(idempotencyKey ? { idempotencyKey } : {}) }) }),
   hermesProfileAction: (id, slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/hermes/profiles/requests/${encodeURIComponent(id)}`),
-  deleteEmployee: (id, slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/employees/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  deleteEmployee: (id, slug = workspaceSlug(), options = {}) => request(`/api/workspaces/${encodeURIComponent(slug)}/employees/${encodeURIComponent(id)}`, { method: 'DELETE', ...(options.force===true?{body:JSON.stringify({force:true})}:{}) }),
   calendar: () => request(`/api/workspaces/${encodeURIComponent(workspaceSlug())}/calendar`),
   calendarEvents: () => request(`/api/workspaces/${encodeURIComponent(workspaceSlug())}/calendar/events`),
   createCalendarEvent: body => request(`/api/workspaces/${encodeURIComponent(workspaceSlug())}/calendar/events`, { method:'POST', body:JSON.stringify(body) }),

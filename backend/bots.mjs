@@ -18,6 +18,14 @@ export const botSnapshot = (db, employeeId, workspaceId) => {
   return {schemaVersion:1,employeeId,workspace,revision:row.revision,controlEpoch:row.control_epoch,config:parse(row.config_json),sourceProfile:employee.runtime_profile,instance:botProfileBinding(row),deviceId:employee.target_device_id,model:employee.model_id,persona:employee.persona,instructions:employee.instructions,description:employee.description,name:employee.name,conversationId:row.main_conversation_id};
 };
 export function assertBotExecution(db, workspaceId, payload, { validation = false, provisioning = false, requireProfile = !validation, actionId = null } = {}) {
+  // Retired owned profiles cannot be addressed through a raw action without employeeId.
+  const targetDeviceId=payload.deviceId || payload.targetDeviceId || payload.device_id || payload.target_device_id;
+  const targetProfile=payload.profile || payload.runtimeProfile || payload.runtime_profile || payload.hermesProfile || payload.hermes_profile;
+  const targetRuntime=payload.runtime || payload.agent || payload.runtimeName;
+  if(targetDeviceId && targetProfile && (!targetRuntime || String(targetRuntime).trim().toLowerCase()==='hermes')) {
+    const retired=db.prepare("SELECT b.profile_binding_json FROM employees e JOIN hermes_bots b ON b.employee_id=e.id WHERE e.status='deleted' AND e.target_device_id=? AND e.runtime_profile=?").all(targetDeviceId,targetProfile);
+    if(retired.some(item=>parse(item.profile_binding_json)?.mode==='owned_profile'))throw botFailure('EMPLOYEE_PROFILE_DELETED','该专属 Profile 属于已移除员工，不能重新执行',409);
+  }
   const conversation=payload.conversationId?db.prepare('SELECT employee_id,workspace_id FROM conversations WHERE id=?').get(payload.conversationId):null;
   const routine=payload.automationId?db.prepare('SELECT employee_id,workspace_id FROM bot_routines WHERE automation_id=?').get(payload.automationId):null;
   if(payload.automationId && !routine && db.prepare("SELECT 1 FROM automations WHERE id=? AND executor='ziwei_bot'").get(payload.automationId))throw botFailure('BOT_NOT_FOUND','Routine 原 Bot 已删除或解绑；禁止降级为通用执行',404);
@@ -26,6 +34,8 @@ export function assertBotExecution(db, workspaceId, payload, { validation = fals
   if(linkedBot && (linked.some(item=>item.workspace_id!==workspaceId || item.employee_id!==linkedBot.employee_id) || payload.employeeId && payload.employeeId!==linkedBot.employee_id))throw botFailure('BOT_BINDING_CONFLICT','会话、Routine 与员工身份不一致');
   const employeeId = linkedBot?.employee_id || payload.employeeId || null;
   if (!employeeId) { if (payload.hermesBot) throw botFailure('BOT_IDENTITY_INVALID','Bot 配置缺少可信员工绑定'); return null; }
+  const employee = db.prepare('SELECT * FROM employees WHERE id=? AND workspace_id=?').get(employeeId,workspaceId);
+  if(employee?.status==='deleted')throw botFailure('EMPLOYEE_DELETED','数字员工已移除，不能接收新任务',404);
   const row = db.prepare('SELECT * FROM hermes_bots WHERE employee_id=?').get(employeeId);
   if (!row) { if (payload.hermesBot) throw botFailure('BOT_NOT_FOUND','Bot 已删除或不存在',404); return null; }
   if (row.workspace_id !== workspaceId) throw botFailure('BOT_NOT_FOUND','Bot 不属于当前工作区',404);
@@ -35,7 +45,7 @@ export function assertBotExecution(db, workspaceId, payload, { validation = fals
     if(!routine || !run || run.workspace_id!==workspaceId || run.automation_id!==payload.automationId || run.action_id && run.action_id!==actionId)throw botFailure('BOT_RUN_BINDING_CONFLICT','Routine 运行与当前 action 不一致');
     if(db.prepare('SELECT status FROM automations WHERE id=?').get(payload.automationId)?.status!=='active')throw botFailure('BOT_NOT_ACTIVE','Routine 已暂停');
   }
-  const employee = db.prepare('SELECT * FROM employees WHERE id=? AND workspace_id=?').get(employeeId,workspaceId);
+  if(!employee)throw botFailure('BOT_NOT_FOUND','Bot 员工不存在',404);
   if(!provisioning&&requireProfile)assertBotProfileReady(db,row,employee);
   if (payload.runtime && payload.runtime !== 'Hermes' || payload.deviceId && payload.deviceId !== employee.target_device_id || payload.profile && payload.profile !== employee.runtime_profile || payload.model && payload.model !== employee.model_id) throw botFailure('BOT_BINDING_CONFLICT','Bot 执行不可覆盖已验证的运行绑定');
   if (payload.conversationId && !db.prepare('SELECT id FROM conversations WHERE id=? AND workspace_id=? AND employee_id=?').get(payload.conversationId,workspaceId,employeeId)) throw botFailure('BOT_CONVERSATION_CONFLICT','Bot 会话归属不一致');

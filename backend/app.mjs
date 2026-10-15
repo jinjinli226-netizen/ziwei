@@ -534,9 +534,16 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
     return employee;
   };
   app.patch('/api/employees/:id', requireRole('owner','admin','member'), (req, res) => { const employee = ensureEmployeeVisibleById(req, req.params.id); const slug = repo.db.prepare('SELECT slug FROM workspaces WHERE id=?').get(employee.workspace_id)?.slug; res.json(management.updateEmployee(slug, req.params.id, req.body || {}, employeeContext(req))); });
-  app.delete('/api/employees/:id', requireRole('owner','admin'), (req, res) => res.json(repo.deleteEmployee(req.params.id)));
+  const removeEmployee = (req,res) => {
+    const row=repo.db.prepare('SELECT e.*,w.slug FROM employees e JOIN workspaces w ON w.id=e.workspace_id WHERE e.id=?').get(req.params.id);
+    if(!row || req.params.slug && row.slug!==req.params.slug) {const error=new Error('数字员工不存在');error.status=404;throw error;}
+    // Resource/workspace membership and owner/admin roles are checked by the route guards.
+    if(row.status!=='deleted')ensureEmployeeVisibleById(req,req.params.id);
+    return res.json(repo.deleteEmployee(req.params.id,{force:req.body?.force===true,...(req.body?.force===true&&req.body?.purge===true?{purge:true}:{})}));
+  };
+  app.delete('/api/employees/:id', requireRole('owner','admin'), removeEmployee);
   app.patch('/api/workspaces/:slug/employees/:id', requireRole('owner','admin','member'), (req, res) => { ensureEmployeeInWorkspace(req.params.slug, req.params.id, req); res.json(management.updateEmployee(req.params.slug, req.params.id, req.body || {}, employeeContext(req))); });
-  app.delete('/api/workspaces/:slug/employees/:id', requireRole('owner','admin'), (req, res) => res.json(repo.deleteEmployee(req.params.id)));
+  app.delete('/api/workspaces/:slug/employees/:id', requireRole('owner','admin'), removeEmployee);
   // Employee configuration is kept separate from the ordinary employee list.
   // Environment values are encrypted at rest and returned only as metadata or
   // a mask; custom parameters are JSON values validated by the repository.

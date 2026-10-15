@@ -66,6 +66,21 @@ test('a delayed receipt recovery cannot change another selected Bot',async()=>{
   const delayed=deferred();const ui=fixture({bot:async id=>bot(id),botRuns:async()=>({runs:[recoveryRun()]}),reconcileBotAction:()=>delayed.promise});
   await ui.setWorkspace('qa','a');const recovery=ui.reconcile(ui.state.runs[0]);await ui.select('b');delayed.resolve(bot('a'));assert.equal(await recovery,false);assert.equal(ui.state.bot.id,'b');assert.equal(ui.state.notice,'');
 });
+
+test('normal deletion preserves a busy employee and force removal clears the shared Bot selection without claiming stopped',async()=>{
+  const calls=[];const ui=fixture({deleteEmployee:async(id,workspace,options)=>{calls.push({id,workspace,options});if(!options.force)throw Object.assign(new Error('原执行未结束'),{status:409,code:'BOT_BUSY'});return {deleted:true,forced:true,executionConfirmedStopped:false,retained:{profile:true,home:true}};}});
+  await ui.setWorkspace('qa','a');ui.state.draft.employee.name='Kept draft';assert.equal(await ui.removeEmployee(),false);
+  assert.equal(ui.state.bot.id,'a');assert.equal(ui.state.selectedId,'a');assert.equal(ui.state.errorCode,'BOT_BUSY');assert.equal(ui.state.draft.employee.name,'Kept draft');assert.equal(calls.length,1);
+  assert.equal(await ui.removeEmployee({force:true}),true);assert.deepEqual(calls[1],{id:'a',workspace:'qa',options:{force:true}});assert.equal(ui.state.bot,null);assert.equal(ui.state.selectedId,'');assert.deepEqual(ui.state.bots,[]);assert.match(ui.state.notice,/禁止新任务.*保留.*停止状态未确认/);assert.doesNotMatch(ui.state.notice,/进程已停止/);
+});
+
+test('ordinary deletion keeps its existing request and clears the employee without forcing',async()=>{
+  const calls=[];const ui=fixture({deleteEmployee:async(...args)=>{calls.push(args);return {deleted:true};}});await ui.setWorkspace('qa','a');assert.equal(await ui.removeEmployee(),true);assert.deepEqual(calls,[['a','qa',{}]]);assert.equal(ui.state.bot,null);assert.equal(ui.state.notice,'数字员工已删除。');
+});
+
+test('a late deletion response cannot clear a newly selected Bot',async()=>{
+  const delayed=deferred();const ui=fixture({bot:async id=>bot(id),deleteEmployee:()=>delayed.promise});await ui.setWorkspace('qa','a');const removal=ui.removeEmployee({force:true});await ui.select('b');delayed.resolve({deleted:true,forced:true,executionConfirmedStopped:false});assert.equal(await removal,false);assert.equal(ui.state.bot.id,'b');assert.equal(ui.state.selectedId,'b');assert.equal(ui.state.notice,'');
+});
 test('Bot status distinguishes execution uncertainty from ordinary failure and device availability',()=>{
   assert.match(module.botPresence({...bot(),latest_run:{status:'failed',result:{code:'EXECUTION_UNCERTAIN'}}}).label,/待核实/);
   assert.match(module.botPresence({...bot(),control_state:'active',latest_run:null}).label,/待命/);

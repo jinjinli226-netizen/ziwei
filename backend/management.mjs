@@ -15,7 +15,7 @@ export function createManagementService(repo) {
   const ws = slug => { const value = db.prepare('SELECT * FROM workspaces WHERE slug=?').get(slug); if (!value) fail('工作区不存在', 'WORKSPACE_NOT_FOUND', 404); return value; };
   const trustedContext = context => ({ actorRole: 'owner', ...context, userId: context?.actorUserId || null, user_id: context?.actorUserId || null, actor_user_id: context?.actorUserId || null, actor_role: context?.actorRole || 'owner', enforceEmployeeVisibility: true, enforceDeviceOwnership: true });
   const employee = (slug, id, context = {}) => {
-    const item = repo.listEmployees(slug, trustedContext(context)).find(row => row.id === id);
+    const item = repo.listEmployees(slug, trustedContext(context)).find(row => row.id === id && row.status !== 'deleted');
     if (!item) fail('数字员工不存在于当前工作区', 'EMPLOYEE_NOT_FOUND', 404);
     return item;
   };
@@ -50,6 +50,8 @@ export function createManagementService(repo) {
     const runtimeName = String(input.runtime || '').trim();
     if (!runtimeName) fail('必须明确 runtime，例如 Codex 或 Hermes；不会自动替换运行时。', 'RUNTIME_REQUIRED');
     const deviceId = deviceInput(input);
+    const requestedProfile = normalizeRuntimeProfile(profileInput(input));
+    if (runtimeName.toLowerCase()==='hermes' && deviceId && requestedProfile && db.prepare("SELECT b.profile_binding_json FROM hermes_bots b JOIN employees e ON e.id=b.employee_id WHERE e.target_device_id=? AND e.runtime_profile=? AND e.status='deleted'").all(deviceId,requestedProfile).some(row=>botProfileBinding(row).mode==='owned_profile')) fail('此专属 Profile 保留属于已删除的员工，不能绑定给新员工或模板。','EMPLOYEE_PROFILE_DELETED',409);
     if(repo.serverCodeRollout){const device=discovery(slug,{deviceId,userId:context.actorUserId,deviceScope:context.deviceScope}).devices[0];if(!deviceId||!device)fail('目标电脑必须属于当前工作区','DEVICE_NOT_IN_WORKSPACE');if(context.deviceScope&&context.deviceScope!==deviceId)fail('目标电脑不属于当前设备身份','DEVICE_NOT_IN_WORKSPACE');return {runtime:runtimeName,targetDeviceId:deviceId,runtimeProfile:normalizeRuntimeProfile(profileInput(input)),executionAdmission:repo.serverCodeRollout.status()};}
     if (!deviceId) fail('必须选择当前工作区的目标电脑 targetDeviceId，请先调用 ziwei_discover_environment。', 'DEVICE_REQUIRED');
     const device = discovery(slug, { deviceId, userId: context.actorUserId, deviceScope: context.deviceScope }).devices[0];
@@ -84,7 +86,8 @@ export function createManagementService(repo) {
     const existing = db.prepare('SELECT * FROM management_requests WHERE workspace_id=? AND kind=? AND request_key=?').get(workspace.id, kind, key);
     if (existing) {
       if (existing.fingerprint !== digest) fail('同一 idempotencyKey 已用于不同请求，请使用新的请求标识。', 'IDEMPOTENCY_CONFLICT', 409);
-      const value = read(existing.resource_id); if (!value) fail('原请求资源已被删除，请使用新的请求标识。', 'IDEMPOTENCY_RESOURCE_GONE', 409);
+      let value;try { value=read(existing.resource_id); } catch(error) { if(error.status!==404)throw error; }
+      if (!value) fail('原请求资源已被删除，请使用新的请求标识。', 'IDEMPOTENCY_RESOURCE_GONE', 409);
       return { ...value, duplicate: true };
     }
     db.exec('SAVEPOINT management_create');
