@@ -623,8 +623,10 @@ export function createRepository(options = {}, io={}) {
     createTask(slug, input = {}) {
       const ws = workspace(slug); if (!ws) throw new Error('Workspace not found'); const created = now();
       const executionEmployee = input.runtime || input.model || input.execute === true ? employeeForInput(ws.id, input) : null;
-      if(executionEmployee)assertBotExecution(db,ws.id,{employeeId:executionEmployee.id,runtime:input.runtime || executionEmployee.runtime,model:input.model || executionEmployee.model_id,profile:input.runtimeProfile || input.profile || executionEmployee.runtime_profile,deviceId:input.targetDeviceId || input.deviceId || executionEmployee.target_device_id});
-      creatorConversationBinding(executionEmployee,input.conversationId || input.conversation_id || null);
+      const executionBot=executionEmployee?assertBotExecution(db,ws.id,{employeeId:executionEmployee.id,runtime:input.runtime || executionEmployee.runtime,model:input.model || executionEmployee.model_id,profile:input.runtimeProfile || input.profile || executionEmployee.runtime_profile,deviceId:input.targetDeviceId || input.deviceId || executionEmployee.target_device_id}):null;
+      const conversationId=input.conversationId || input.conversation_id || executionBot?.snapshot.conversationId || null;
+      if(executionBot&&!conversationId)throw botFailure('BOT_CONVERSATION_CONFLICT','Bot 任务缺少绑定的持久会话');
+      creatorConversationBinding(executionEmployee,conversationId);
       const targetDeviceId = String(input.targetDeviceId || input.target_device_id || input.deviceId || input.device_id || executionEmployee?.target_device_id || '').trim() || null;
       if (targetDeviceId) {
         const device = db.prepare('SELECT * FROM devices WHERE id=? AND workspace_id=?').get(targetDeviceId, ws.id);
@@ -649,7 +651,7 @@ export function createRepository(options = {}, io={}) {
           profile: input.profile ?? input.runtimeProfile ?? input.runtime_profile ?? input.hermesProfile ?? input.hermes_profile,
           taskId: task.id,
           cwd: input.cwd || null,
-          conversationId: input.conversationId || input.conversation_id || null,
+          conversationId,
         });
         if (targetDeviceId) payload.deviceId = targetDeviceId;
         this.createA2AAction(slug,{agentId:'ziwei_user',taskId:task.id,type:'task.execute',dedupeKey:`task:${task.id}:execute`,payload});

@@ -5,6 +5,17 @@ const bot = (id='a',revision=1) => ({id,workspace:'qa',revision,employee:{id,nam
 const deferred=()=>{let resolve;return {promise:new Promise(r=>resolve=r),resolve};};
 function fixture(overrides={}) {let current=bot();const calls=[];const api={bots:async()=>({bots:[current]}),bot:async()=>current,botRuns:async()=>({runs:[]}),botRoutines:async()=>({routines:[]}),updateBot:async(id,body,ws)=>{calls.push({id,body,ws});current={...current,revision:2,employee:{...current.employee,...body.employee},config:body.config};return current;},controlBot:async()=>current,...overrides};return {...module.createBotWorkbench({api}),calls};}
 
+test('new editor defaults enable the shared builtin tools without sharing mutable configuration',()=>{
+  const first=module.defaultBotConfig(),second=module.defaultBotConfig();
+  assert.equal(first.permissions.mode,'execute');assert.deepEqual(first.toolsets,['web','browser','file','terminal','vision','skills','todo','memory','session_search','code_execution']);
+  first.toolsets.length=0;first.memory.enabled=false;assert.equal(second.toolsets.length,10);assert.equal(second.memory.enabled,true);
+});
+test('loading and saving an existing readonly empty-tool draft never fills new creation defaults',async()=>{
+  const ui=fixture();await ui.setWorkspace('qa','a');assert.equal(ui.state.draft.config.permissions.mode,'read_only');assert.deepEqual(ui.state.draft.config.toolsets,[]);
+  ui.state.draft.employee.name='Existing employee';await ui.refresh();assert.equal(ui.state.draft.employee.name,'Existing employee');assert.deepEqual(ui.state.draft.config.toolsets,[]);
+  assert.equal(await ui.save(),true);assert.equal(ui.calls[0].body.config.permissions.mode,'read_only');assert.deepEqual(ui.calls[0].body.config.toolsets,[]);
+});
+
 test('Bot save verifies persisted readback and keeps complete config with expected revision',async()=>{
   const ui=fixture();await ui.setWorkspace('qa','a');ui.state.draft.employee.name='Updated';
   assert.equal(await ui.save(),true);

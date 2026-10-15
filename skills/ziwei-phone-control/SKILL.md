@@ -1,7 +1,7 @@
 ---
 name: 紫薇·互联手机操控
 description: 使用 ziwei-terminal MCP 操作当前员工明确绑定的真实手机，按观察、动作、回执与新截图核实结果。
-version: 1.0.0
+version: 1.0.1
 ---
 
 # 紫薇·互联手机操控
@@ -19,7 +19,7 @@ version: 1.0.0
 ## 观察 → 动作 → 原回执
 
 1. `ziwei_phone_list` 确认绑定手机，`ziwei_phone_status` 检查Agent/Updater在线、无障碍、亮屏未锁、控制角色和活动事务。健康条件不足时停止动作并说明恢复步骤。
-2. `ziwei_phone_screenshot` 获取当前画面。仅根据这次图片判断界面，使用返回原始width/height计算坐标；不把历史截图当成当前状态。
+2. `ziwei_phone_screenshot` 获取当前画面。若工具只返回 `MEDIA:<本地图片路径>` 或本地图片路径，在 Hermes 中调用 `vision_analyze`，将本次返回的实际路径作为 `image_url`、当前需要观察的问题作为 `question`，读取图片后再描述画面或确定操作坐标；图片已直接进入视觉上下文时无需重复加载。缺少读图工具或读取失败时说明具体缺项，不能仅凭路径声称已经看过图片。仅根据这次图片判断界面，使用返回原始width/height计算坐标；不把历史截图当成当前状态。
 3. `ziwei_phone_action` 执行用户授权的有限操作，记录返回的 `command.id`。tap传 `{x,y,width,height}`；swipe传 `{x1,y1,x2,y2,width,height,durationMs}`；text传 `{text}`；global传 `{key:"back"|"home"|"recents"}`；launch传 `{packageName}`。
 4. `ziwei_phone_receipt` 或 `ziwei_phone_wait` 查询原commandId。queued/delivered/executing只是进行中；succeeded才是成功回执。动作后重新截图确认实际界面变化，不能把受理或回执成功直接等同业务目标完成。
 5. 超时、断连、uncertain先查原回执和活动状态，不盲目重放点击、输入、启动、升级或批准。failed/expired按真实错误报告，修正原因后才执行新的明确动作。
@@ -33,3 +33,5 @@ version: 1.0.0
 ## 结果与交接
 
 报告目标手机、动作、commandId、当前状态、实际观察和下一步。涉及截图时指出是否为本次回传；分别报告MCP已加载、工具已调用、手机回执与业务目标是否达成。保留运行时/profile及工作区边界，失败如实交接，禁止伪造成功。
+
+需要向用户交付截图时，读图后遵循本次运行环境提供的图片输出目录和 manifest 约定，复制本次截图并登记为附件；不能只返回本地路径，也不能把未回传的图片说成已交付。

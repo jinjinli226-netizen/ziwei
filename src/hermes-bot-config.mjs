@@ -1,6 +1,7 @@
 // Shared wire validation: never forward unknown fields to a native runtime.
 export const BOT_SCHEMA_VERSION = 1;
 export const BOT_REASONING_EFFORTS=['minimal','low','medium','high','xhigh','max','ultra'];
+export const BOT_DEFAULT_TOOLSETS=Object.freeze(['web','browser','file','terminal','vision','skills','todo','memory','session_search','code_execution']);
 export function botFailure(code, message, status = 409) { return Object.assign(new Error(message), { code, status }); }
 const object = value => value && typeof value === 'object' && !Array.isArray(value);
 function keys(value, allowed, label) {
@@ -14,6 +15,13 @@ const names = (value, label) => {
 };
 const bool = (value, fallback, label) => { if (value === undefined) return fallback; if (typeof value !== 'boolean') throw botFailure('BOT_CONFIG_INVALID', `${label} 必须是布尔值`, 400); return value; };
 export const permittedCredentialName=name=>typeof name==='string'&&/^[A-Z][A-Z0-9_]*$/.test(name)&&! /^(ZIWEI_|CONTROL_MCP_|HERMES_|PYTHON|NODE_OPTIONS$|HOME$|USERPROFILE$)/.test(name);
+// Creation policy is separate from the legacy wire/runtime interpretation below.
+export function createDefaultBotConfig(input = {}) {
+  if(!object(input))return normalizeBotConfig(input);
+  const permissions=input.permissions ?? {};keys(permissions,['mode','management'],'permissions');
+  const mode=permissions.mode ?? 'execute';
+  return normalizeBotConfig({...input,permissions:{...permissions,mode},toolsets:Object.hasOwn(input,'toolsets')?input.toolsets:mode==='read_only'?[]:[...BOT_DEFAULT_TOOLSETS]});
+}
 export function normalizeBotConfig(input = {}) {
   validateCredentialPlaceholders(input);
   keys(input, ['provider','reasoningEffort','toolsets','maxTurns','memory','skills','mcpServers','permissions','gateway','voice','collaboration','drivers'], 'Bot config');

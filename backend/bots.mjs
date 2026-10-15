@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import {guardBotService} from './version-preservation.mjs';
 import {botProfileBinding,botProfileView,assertBotProfileReady} from './bot-profiles.mjs';
 import {normalizeNativeOperation,nativeIsExecution,nativeNeedsTools} from '../src/hermes-native-contract.mjs';
-import { normalizeBotConfig, botFailure, BOT_CAPABILITY_CATALOG } from '../src/hermes-bot-config.mjs';
+import { normalizeBotConfig, createDefaultBotConfig, botFailure, BOT_CAPABILITY_CATALOG } from '../src/hermes-bot-config.mjs';
 import {deriveBotCapabilities} from './bot-capabilities.mjs';
 
 const parse = value => { try { return JSON.parse(value); } catch { return null; } };
@@ -131,7 +131,7 @@ export function createBotService(repo, management) {
       if(existingEmployee.runtime!=='Hermes')throw botFailure('BOT_RUNTIME_UNSUPPORTED','此员工没有 Hermes Bot 能力',400);
       const isCreator=Boolean(db.prepare("SELECT 1 FROM employee_template_instances WHERE employee_id=? AND template_id='ziwei-employee-creator'").get(id));
       const conversation=db.prepare('SELECT id FROM conversations WHERE employee_id=? AND workspace_id=? ORDER BY updated_at DESC LIMIT 1').get(id,existingEmployee.workspace_id);
-      const environment=capabilities(slug,{deviceId:existingEmployee.target_device_id},actor),view={id,employee_id:id,workspace:slug,employee:existingEmployee,configuration_state:'uninitialized',kind:isCreator?'creator':'employee',config:normalizeBotConfig(),revision:0,control_epoch:0,control_state:existingEmployee.status==='paused'?'paused':'draft',main_conversation_id:conversation?.id || null,scheduler_authority:'ziwei',validation:{status:'not_checked',action_id:null,revision:null,error:null},latest_run:null,effect:{savedRevision:0,validatedRevision:null,scope:'not_initialized',pendingReason:isCreator?'Creator 保持原管理身份；普通岗位 Bot 初始化不适用':'从同一员工记录初始化 Bot 能力；不会新建员工或复制旧记忆'}};
+      const environment=capabilities(slug,{deviceId:existingEmployee.target_device_id},actor),view={id,employee_id:id,workspace:slug,employee:existingEmployee,configuration_state:'uninitialized',kind:isCreator?'creator':'employee',config:createDefaultBotConfig(),revision:0,control_epoch:0,control_state:existingEmployee.status==='paused'?'paused':'draft',main_conversation_id:conversation?.id || null,scheduler_authority:'ziwei',validation:{status:'not_checked',action_id:null,revision:null,error:null},latest_run:null,effect:{savedRevision:0,validatedRevision:null,scope:'not_initialized',pendingReason:isCreator?'Creator 保持原管理身份；普通岗位 Bot 初始化不适用':'从同一员工记录初始化 Bot 能力；不会新建员工或复制旧记忆'}};
       return{...view,...deriveBotCapabilities({bot:view,capabilities:environment.capabilities,device:environment.device,runtime:environment.runtime})};
     }
     const {row,employee}=resolve(slug,id,context), validationAction=row.validation_action_id?repo.getA2AAction(row.validation_action_id,{workspaceSlug:slug}):null;
@@ -209,7 +209,7 @@ export function createBotService(repo, management) {
         if(inFlight)throw botFailure('BOT_BUSY','员工仍有在途动作，先核对原回执再初始化');
         const conversation=db.prepare("SELECT id,device_id,model_id FROM conversations WHERE employee_id=? AND workspace_id=? AND status='active' ORDER BY updated_at DESC LIMIT 1").get(id,employee.workspace_id) || management.createConversation(slug,{employeeId:id,title:`${employee.name} · 主聊天`},actor);
         if(conversation.device_id && conversation.device_id!==employee.target_device_id || conversation.model_id && conversation.model_id!==employee.model_id)throw botFailure('BOT_CONVERSATION_CONFLICT','现有主聊天模型或电脑与员工绑定不一致，请先核对聊天设置');
-        const stamp=now();db.prepare('INSERT INTO hermes_bots(employee_id,workspace_id,config_json,main_conversation_id,created_at,updated_at) VALUES(?,?,?,?,?,?)').run(id,employee.workspace_id,JSON.stringify(normalizeBotConfig(input.config || {})),conversation.id,stamp,stamp);
+        const stamp=now();db.prepare('INSERT INTO hermes_bots(employee_id,workspace_id,config_json,main_conversation_id,created_at,updated_at) VALUES(?,?,?,?,?,?)').run(id,employee.workspace_id,JSON.stringify(createDefaultBotConfig(input.config || {})),conversation.id,stamp,stamp);
         db.prepare("UPDATE employees SET status='draft' WHERE id=?").run(id);
         return get(slug,id,actor);
       },savedId=>get(slug,savedId,context));
@@ -218,7 +218,7 @@ export function createBotService(repo, management) {
       const allowed=['idempotencyKey','name','targetDeviceId','runtimeProfile','sourceProfile','runtime','model','persona','description','instructions','visibility','skills','avatar','config','workspace'];
       if(Object.keys(input).some(key=>!allowed.includes(key)))throw botFailure('BOT_CREATE_UNSUPPORTED','Bot 创建包含未支持字段；身份与归属由当前认证工作区决定',400);
       if(input.workspace && input.workspace!==slug)throw botFailure('BOT_WORKSPACE_CONFLICT','请求与认证工作区不一致',403);
-      const config=normalizeBotConfig(input.config || {});
+      const config=createDefaultBotConfig(input.config || {});
       if (input.runtime && input.runtime!=='Hermes') throw botFailure('BOT_RUNTIME_UNSUPPORTED','Bot 目标运行时必须为 Hermes',400);
       if(input.sourceProfile&&input.runtimeProfile&&input.sourceProfile!==input.runtimeProfile)throw botFailure('BOT_BINDING_CONFLICT','sourceProfile 与 runtimeProfile 初始化来源不一致');
       return idempotent(slug,'create',input,context,()=>{

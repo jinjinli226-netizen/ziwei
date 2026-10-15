@@ -3,13 +3,14 @@ export {executionUncertain,botPresence,capabilityPresentation};
 import {createBotRequestScope, botErrorMessage} from './bot-state.js';
 import {employeeRemovalNotice} from './employee-removal.js';
 import {enabledCapabilityConfig,capabilitySavedEnabled} from './bot-capability-actions.js';
+import {createDefaultBotConfig} from '../../src/hermes-bot-config.mjs';
 
 const clone = value => JSON.parse(JSON.stringify(value));
 const pendingRuns=new Map();
 function pendingKey(workspace,id){return `ziwei.bot.pending.${encodeURIComponent(workspace)}.${encodeURIComponent(id)}`;}
 function readPending(key){try{const stored=JSON.parse(sessionStorage.getItem(key));if(stored?.kind==='routine_run')return stored;}catch{}return pendingRuns.get(key)||null;}
 function writePending(key,value){if(value)pendingRuns.set(key,value);else pendingRuns.delete(key);try{if(value)sessionStorage.setItem(key,JSON.stringify(value));else sessionStorage.removeItem(key);}catch{}}
-export const defaultBotConfig = () => ({provider:null,toolsets:[],maxTurns:20,memory:{enabled:true,userProfile:true},skills:{disabled:[]},mcpServers:{},permissions:{mode:'read_only'}});
+export const defaultBotConfig = () => createDefaultBotConfig();
 export function botDraft(bot) {
   const employee=bot.employee || {};
   return {revision:bot.revision,employee:{name:employee.name || '',description:employee.description || '',instructions:employee.instructions || '',persona:employee.persona || '',avatar:employee.avatar || null,visibility:employee.visibility || 'personal',model:employee.model_id || null,skills:[...(employee.skills || [])]},config:clone(bot.config)};

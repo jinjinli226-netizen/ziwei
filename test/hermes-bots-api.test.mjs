@@ -4,6 +4,7 @@ import { createApp } from '../backend/app.mjs';
 import { createMcpClient } from '../scripts/ziwei-mcp.mjs';
 import { createAuthService } from '../backend/auth.mjs';
 import {completeOwnedProfile} from '../test-support/owned-profile.mjs';
+import {BOT_DEFAULT_TOOLSETS} from '../src/hermes-bot-config.mjs';
 
 test('manual API and Creator MCP use one Bot record, native validation, controls and Routine backend',async()=>{
   const token='isolated-bot-mcp-test-token',app=createApp({memory:true,mcpToken:token,mcpWorkspace:'test-111',mcpRole:'admin'}),repo=app.locals.repo;
@@ -23,7 +24,7 @@ test('manual API and Creator MCP use one Bot record, native validation, controls
     repo.resultA2AAction(validation.action.id,{status:'succeeded',result:{botValidation:{valid:true,schemaVersion:1,employeeId:bot.id,revision:1,nativeVersion:'0.21.3'}}});
     const enabled=await client.bot({operation:'control',id:bot.id,data:{expectedRevision:1,expectedControlEpoch:1,operation:'activate'}});assert.equal(enabled.control_state,'active');
     const chat=await request('POST',`/api/conversations/${bot.main_conversation_id}/messages`,{content:'test work',clientMessageId:'one'});assert.equal(chat.status,201);
-    const action=repo.getA2AAction(chat.body.execution.id);assert.equal(action.payload.hermesBot.config.permissions.mode,'read_only');
+    const action=repo.getA2AAction(chat.body.execution.id);assert.equal(action.payload.hermesBot.config.permissions.mode,'execute');assert.deepEqual(action.payload.hermesBot.config.toolsets,BOT_DEFAULT_TOOLSETS);
     repo.resultA2AAction(action.id,{status:'succeeded',result:{output:'fixture result'}});
     const routine=await client.bot({operation:'createRoutine',id:bot.id,data:{name:'daily',prompt:'test report',schedule:'每天 9:00',timezone:'Asia/Shanghai',idempotencyKey:'routine'}});
     assert.equal(routine.authority,'ziwei');assert.equal(routine.employee_id,bot.id);

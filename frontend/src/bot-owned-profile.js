@@ -1,5 +1,5 @@
 // Version 1 stays fixed even if the ordinary editor defaults change later.
-const creationDefaults=version=>{if(version!==1)throw new Error('原创建请求的默认配置版本不受当前页面支持，请保留原请求核实。');return{provider:null,toolsets:[],maxTurns:20,memory:{enabled:true,userProfile:true},skills:{disabled:[]},mcpServers:{},permissions:{mode:'read_only'}};};
+const creationDefaults=version=>{if(version===2)return{provider:null,toolsets:['web','browser','file','terminal','vision','skills','todo','memory','session_search','code_execution'],maxTurns:20,memory:{enabled:true,userProfile:true},skills:{disabled:[]},mcpServers:{},permissions:{mode:'execute'}};if(version!==1)throw new Error('原创建请求的默认配置版本不受当前页面支持，请保留原请求核实。');return{provider:null,toolsets:[],maxTurns:20,memory:{enabled:true,userProfile:true},skills:{disabled:[]},mcpServers:{},permissions:{mode:'read_only'}};};
 export function ownedBotChatBlockReason(bot){
   if(bot?.instance?.mode!=='owned_profile')return '';
   if(!botInstanceStatus(bot).provisioned)return '专属 Profile 与 HOME 尚未确认，请在 Bot 设置查询原创建回执。';
@@ -67,7 +67,7 @@ export function createOwnedBotRequest({api,wrap=value=>value,namespace='',origin
     if(registry.has(state.workspace)){state.error='原 Bot 创建请求尚未确认，请先继续查询。';return false;}
     const name=String(form.name||'').trim(),sourceProfile=String(form.sourceProfile||'').trim(),admission=botCreateAdmission(getDiscovery(),{workspace:state.workspace,deviceId:form.targetDeviceId,sourceProfile});
     if(!name||name.length>100||!admission.ready){state.error=!name?'请填写 Bot 名称。':admission.issues.join('；')||'Bot 名称过长。';return false;}
-    const entry=metadata({workspace:state.workspace,name,deviceId:form.targetDeviceId,sourceProfile,model:form.model||null,visibility:form.visibility||'personal',requestKey:'bot-owned-'+keyFactory(),phase:'pending'});registry.set(entry.workspace,entry);persist();state.pending=entry;return run(entry);
+    const entry=metadata({workspace:state.workspace,name,deviceId:form.targetDeviceId,sourceProfile,model:form.model||null,visibility:form.visibility||'personal',defaultsVersion:2,requestKey:'bot-owned-'+keyFactory(),phase:'pending'});registry.set(entry.workspace,entry);persist();state.pending=entry;return run(entry);
   }
   return{state,select,submit,recover(){const entry=registry.get(state.workspace);return entry?run(entry,{recovering:true}):Promise.resolve(false);},acknowledge(id){const entry=registry.get(state.workspace);if(entry?.botId===id){registry.delete(state.workspace);persist();state.pending=null;return true;}return false;},dispose(){disposed=true;generation++;}};
 }

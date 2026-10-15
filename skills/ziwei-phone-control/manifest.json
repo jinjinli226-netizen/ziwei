@@ -3,7 +3,7 @@
   "catalog_id": "ziwei-phone-control",
   "name": "紫薇·互联手机操控",
   "description": "通过员工专属 MCP 观察、操控已绑定的真实手机，并按原命令回执核对结果。",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "category": "automation",
   "scope": "platform",
   "author": "紫薇平台团队",
