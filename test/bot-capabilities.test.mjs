@@ -5,6 +5,8 @@ import {BOT_CAPABILITY_CATALOG} from '../src/hermes-bot-config.mjs';
 import {createRepository} from '../backend/repository.mjs';
 import {createManagementService} from '../backend/management.mjs';
 import {completeOwnedProfile} from '../test-support/owned-profile.mjs';
+import {createZiweiConnect} from '../backend/ziwei-connect.mjs';
+import {createPhoneMcpService} from '../backend/phone-mcp.mjs';
 
 const now=Date.parse('2026-10-15T04:00:00Z');
 const exit={platform:'win32',supervisor:'windows-job',launched:true,rootPid:99,rootConfirmed:true,rootExitCode:0,treeConfirmed:true,activeProcesses:0,cancelled:false,failureCode:null};
@@ -94,6 +96,78 @@ test('goals, heartbeat and kanban successful reads do not claim that a model tic
     assert.equal(cap(f,id).state,'enabled');assert.match(cap(f,id).reason,/未触发模型/);assert.equal(cap(f,'model_provider').state,'needs_check');
   }
   const f=fixture();native(f,'kanban','list',{items:[{id:'task',status:'blocked'}]});assert.equal(cap(f,'kanban').state,'ready');assert.match(cap(f,'kanban').reason,/按每次派发/);
+});
+
+test('unread native drivers need a check; only an actual empty read means configuration is missing',()=>{
+  for(const id of ['goals','heartbeat','kanban']){
+    const f=fixture();assert.equal(cap(f,id).state,'needs_check');assert.match(cap(f,id).reason,/尚未读取/);
+    native(f,id,id==='kanban'?'list':'status',id==='kanban'?{items:[]}:{state:null});assert.equal(cap(f,id).state,'needs_configuration');
+  }
+});
+
+test('configured but disabled voice and gateway stay disabled despite prior successful receipts',()=>{
+  const f=fixture();
+  native(f,'voice','synthesize',{success:true,files:[{mimeType:'audio/wav',audioBase64:'YQ=='}]});f.bot.config.voice.tts.enabled=false;
+  const connect=native(f,'gateway','connect',{connected:true});native(f,'gateway','status',{runtime:[{platform:'telegram',employeeId:f.bot.id,revision:3,controlEpoch:6,status:'connected',lastHeartbeat:now/1000-5,sourceActionId:connect.id}]},{created_at:'2026-10-15T03:59:05Z'});f.bot.config.gateway.platforms.telegram.enabled=false;
+  for(const id of ['voice','gateway']){assert.equal(cap(f,id).state,'disabled');assert.equal(cap(f,id).enabled,false);assert.match(cap(f,id).reason,/均已关闭/);}
+});
+
+function phoneFixture(){
+  const f=fixture();f.bot.employee.runtime='Hermes';f.bot.config.mcpServers={};
+  f.phoneMcp={enabled:true,installed:true,attached:true,bound:true,workspace:f.bot.workspace,employeeId:f.bot.id,targetDeviceId:'pc',runtime:'Hermes',runtimeProfile:'bot-one',phoneDeviceId:'phone-one',revision:'phone-revision'};
+  return f;
+}
+function phoneTurn(f){
+  const a=native(f,'memory','read',{});a.id='phone-check';a.type='conversation.execute';delete a.payload.nativeOperation;delete a.result.nativeOperation;
+  a.payload.runtime='Hermes';a.payload.terminalMcp={enabled:true,workspace:f.bot.workspace,employeeId:f.bot.id,deviceId:'phone-one',configurationRevision:f.phoneMcp.revision};
+  a.result.terminalMcp={configured:true,injected:true,loaded:true,serverName:'ziwei-terminal',workspace:f.bot.workspace,employeeId:f.bot.id,targetDeviceId:'phone-one',runtime:'Hermes',profile:'bot-one',runtimeProfile:'bot-one',actionId:a.id,toolCalls:[{toolName:'ziwei_phone_list',ok:true},{toolName:'ziwei_phone_status',ok:true,deviceId:'phone-one'}]};return a;
+}
+
+test('bound and installed phone MCP is configured but only current scoped read-only calls prove its check',()=>{
+  const f=phoneFixture();assert.equal(cap(f,'tools_mcp').state,'needs_check');assert.match(cap(f,'tools_mcp').reason,/手机 MCP 已绑定/);assert.doesNotMatch(cap(f,'tools_mcp').reason,/尚未添加/);
+  const a=phoneTurn(f);assert.equal(cap(f,'tools_mcp').state,'ready');assert.equal(cap(f,'tools_mcp').reason,'手机 MCP 已连接，绑定手机状态读取成功。');assert.equal(cap(f,'tools_mcp').evidence.at(-1).actionId,a.id);
+  a.result={result:a.result};assert.equal(cap(f,'tools_mcp').state,'ready');
+});
+
+test('phone MCP rejects stale, foreign, injected-only, unsuccessful and unconfirmed evidence',()=>{
+  const cases={
+    oldRevision:(f,a)=>a.payload.hermesBot.revision--,oldEpoch:(f,a)=>a.payload.hermesBot.controlEpoch--,
+    foreignEmployee:(f,a)=>a.payload.employeeId='other',foreignWorkspace:(f,a)=>a.payload.terminalMcp.workspace='other',foreignComputer:(f,a)=>a.payload.deviceId='other',
+    changedPhone:(f)=>f.phoneMcp.phoneDeviceId='phone-two',changedConfig:(f)=>f.phoneMcp.revision='new-config',
+    receiptEmployee:(f,a)=>a.result.terminalMcp.employeeId='other',receiptPhone:(f,a)=>a.result.terminalMcp.targetDeviceId='other',receiptAction:(f,a)=>a.result.terminalMcp.actionId='other',
+    receiptProfile:(f,a)=>a.result.terminalMcp.runtimeProfile='other',fixture:(f,a)=>a.result.fixture=true,nestedFixture:(f,a)=>a.result.terminalMcp.fixture=true,
+    injectedOnly:(f,a)=>a.result.terminalMcp.loaded=false,loadedOnly:(f,a)=>a.result.terminalMcp.injected=false,
+    failedCalls:(f,a)=>a.result.terminalMcp.toolCalls.forEach(call=>call.ok=false),mixedCalls:(f,a)=>a.result.terminalMcp.toolCalls[1].ok=false,noCalls:(f,a)=>a.result.terminalMcp.toolCalls=[],malformedCalls:(f,a)=>a.result.terminalMcp.toolCalls={ok:true},nullCalls:(f,a)=>a.result.terminalMcp.toolCalls=[null],
+    foreignCall:(f,a)=>a.result.terminalMcp.toolCalls=[{toolName:'ziwei_phone_status',ok:true,deviceId:'other'}],
+    unconfirmed:(f,a)=>a.result.processExit.treeConfirmed=false,uncertain:(f,a)=>a.result.code='EXECUTION_UNCERTAIN',
+    removedSkill:f=>f.phoneMcp.attached=false,uninstalled:f=>f.phoneMcp.installed=false,unbound:f=>f.phoneMcp.bound=false,
+  };
+  for(const [name,mutate]of Object.entries(cases)){const f=phoneFixture(),a=phoneTurn(f);mutate(f,a);assert.notEqual(cap(f,'tools_mcp').state,'ready',name);}
+  const f=phoneFixture(),a=phoneTurn(f);a.result.terminalMcp.tool_calls=a.result.terminalMcp.toolCalls;delete a.result.terminalMcp.toolCalls;assert.equal(cap(f,'tools_mcp').state,'ready');
+});
+
+test('phone proof coexists with manual MCP and cannot conceal its failed native check or override tool permissions',()=>{
+  const f=phoneFixture();f.bot.config.mcpServers={manual:{enabled:true}};phoneTurn(f);assert.equal(cap(f,'tools_mcp').state,'ready');assert.match(cap(f,'tools_mcp').reason,/另有 1 个 MCP 服务待检查/);
+  native(f,'mcp','inspect',{}, {status:'failed',error:'manual server failed'});assert.equal(cap(f,'tools_mcp').state,'failed');assert.match(cap(f,'tools_mcp').reason,/manual server failed/);
+  f.bot.config.permissions.mode='read_only';assert.equal(cap(f,'tools_mcp').state,'disabled');assert.equal(cap(f,'tools_mcp').action.key,'tools_permission');
+});
+
+test('real Bot facade derives phone configuration from installed attached skill and current binding hash',async()=>{
+  const repo=createRepository({memory:true}),management=createManagementService(repo),bots=management.bots;
+  try{
+    const heartbeat=profiles=>repo.heartbeatDevice('test-111',{deviceId:'phone-bot-pc',terminalMcp:{configured:true,workspace:'test-111',supportedRuntimes:['Hermes']},runtimes:{Hermes:{status:'available',version:'0.21.3',profiles:profiles.map(name=>({name,provider_configured:true,authentication_configured:true})),models:[{id:'test-model'}]}}});
+    heartbeat(['default']);let bot=bots.create('test-111',{name:'手机证据',sourceProfile:'default',targetDeviceId:'phone-bot-pc',model:'test-model',idempotencyKey:'phone-capability-create',config:{permissions:{mode:'execute'}}});completeOwnedProfile(repo,bot);heartbeat(['default',bot.instance.profile]);
+    const connect=createZiweiConnect(repo,{apiBase:'https://phones.invalid/api',cookie:'fixture-only'});connect.listDevices=async()=>[{id:'phone-one'},{id:'phone-two'}];
+    const phone=createPhoneMcpService(repo,connect,management,{memory:true,phoneMcpSecret:'phone-capability-fixture-only'}),skill=repo.listSkills('test-111').find(item=>item.catalog_id==='ziwei-phone-control');repo.setSkillInstalled(skill.id,true);
+    const saved=await phone.save('test-111',bot.id,{enabled:true,phoneDeviceId:'phone-one'});bot=bots.get('test-111',bot.id);assert.match(bot.capabilities.find(c=>c.id==='tools_mcp').reason,/手机 MCP 已绑定/);
+    const {action}=bots.validate('test-111',bot.id,{expectedRevision:bot.revision,idempotencyKey:'phone-capability-validate'});repo.ackA2AAction(action.id,{deviceId:'phone-bot-pc'});repo.resultA2AAction(action.id,{status:'succeeded',result:{botValidation:{valid:true,schemaVersion:1,employeeId:bot.id,revision:bot.revision}}});bot=bots.control('test-111',bot.id,{expectedRevision:bot.revision,expectedControlEpoch:bot.control_epoch,operation:'activate'});
+    const turn=repo.addConversationMessage(bot.main_conversation_id,{content:'只读检查手机'}).execution;assert.equal(turn.payload.terminalMcp.configurationRevision,saved.configuration.revision);repo.ackA2AAction(turn.id,{deviceId:'phone-bot-pc'});
+    repo.resultA2AAction(turn.id,{deviceId:'phone-bot-pc',status:'succeeded',result:{processExit:exit,terminalMcp:{configured:true,injected:true,loaded:true,serverName:'ziwei-terminal',workspace:'test-111',employeeId:bot.id,targetDeviceId:'phone-one',runtime:'Hermes',profile:bot.instance.profile,runtimeProfile:bot.instance.profile,actionId:turn.id,toolCalls:[{toolName:'ziwei_phone_status',ok:true,deviceId:'phone-one'}]}}});
+    assert.equal(bots.get('test-111',bot.id).capabilities.find(c=>c.id==='tools_mcp').state,'ready');
+    repo.db.prepare('UPDATE ziwei_connect_bindings SET device_id=? WHERE employee_id=?').run('phone-two',bot.id);assert.equal(bots.get('test-111',bot.id).capabilities.find(c=>c.id==='tools_mcp').state,'needs_check');
+    repo.db.prepare('UPDATE ziwei_connect_bindings SET device_id=? WHERE employee_id=?').run('phone-one',bot.id);repo.db.prepare('UPDATE skills SET version=? WHERE id=?').run('updated-version',skill.id);assert.equal(bots.get('test-111',bot.id).capabilities.find(c=>c.id==='tools_mcp').state,'needs_check');
+    repo.setSkillInstalled(skill.id,false);assert.equal(bots.get('test-111',bot.id).capabilities.find(c=>c.id==='tools_mcp').state,'needs_configuration');
+  }finally{repo.db.close();}
 });
 
 test('shared global gate reflects saved-but-unvalidated settings and paused state without repeating generic reasons',()=>{

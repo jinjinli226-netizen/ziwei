@@ -112,6 +112,18 @@ export function createBotService(repo, management) {
     if (prior && ['pending','acked'].includes(prior.status) && (!prior.expires_at || Date.parse(prior.expires_at)>Date.now())) return repo.getA2AAction(prior.id,{workspaceSlug:slug});
     return repo.createA2AAction(slug,{type:'action.cancel',dedupeKey:prior?`${prefix}:${action.id}:retry:${prior.id}`:`${prefix}:${action.id}`,payload:{actionId:action.id,deviceId:action.payload.deviceId}});
   };
+  const phoneMcpConfiguration = (slug,employee) => {
+    if(!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='ziwei_connect_bindings'").get())return null;
+    const cfg=db.prepare('SELECT enabled FROM employee_phone_mcp WHERE employee_id=? AND workspace_id=?').get(employee.id,employee.workspace_id);
+    const binding=db.prepare('SELECT device_id,account_id FROM ziwei_connect_bindings WHERE employee_id=? AND workspace_id=?').get(employee.id,employee.workspace_id);
+    const skill=repo.listSkills(slug).find(item=>item.catalog_id==='ziwei-phone-control');
+    const installed=Boolean(skill?.installed),attached=Boolean(installed&&employee.skills?.includes(skill.id));
+    const enabled=Boolean(cfg?.enabled&&attached&&binding);
+    // Match phone-mcp.configuration and executionPayload using current skill/binding data,
+    // rather than the saved hash, which predates later skill or phone changes.
+    const revision=crypto.createHash('sha256').update(JSON.stringify([enabled,skill?.id||null,skill?.version||null,employee.target_device_id,employee.runtime,employee.runtime_profile,binding?.device_id||null,binding?.account_id||null])).digest('hex');
+    return{workspace:slug,employeeId:employee.id,enabled,installed,attached,bound:Boolean(binding),revision,targetDeviceId:employee.target_device_id,runtime:employee.runtime,runtimeProfile:employee.runtime_profile,phoneDeviceId:binding?.device_id||null};
+  };
   const get = (slug,id,context={}) => {
     const {context:actor}=scope(slug,context), existingEmployee=management.employee(slug,id,actor);
     if(actor.deviceScope && existingEmployee.target_device_id!==actor.deviceScope)throw botFailure('BOT_NOT_FOUND','Bot 不在当前电脑授权范围',404);
@@ -130,7 +142,7 @@ export function createBotService(repo, management) {
     const view={id,employee_id:id,workspace:slug,employee,instance:botProfileView(db,row,employee),configuration_state:'initialized',kind:'employee',config:parse(row.config_json),revision:row.revision,control_state:row.control_state,control_epoch:row.control_epoch,main_conversation_id:row.main_conversation_id,nativeResources,scheduler_authority:'ziwei',validation:{status:validationStatus,action_id:row.validation_action_id,revision:validationAction?.payload?.hermesBot?.revision ?? null,error:validationAction?.error || null},latest_run:botRuns[0] || null,stop_action:row.stop_action_id?repo.getA2AAction(row.stop_action_id,{workspaceSlug:slug}):null,effect:{savedRevision:row.revision,validatedRevision:row.validated_revision,scope:repo.serverCodeRollout?'draft_waiting_client':'next_execution',executionAdmission:repo.serverCodeRollout?.status()||null,pendingReason:repo.serverCodeRollout?'等待客户端验证或更新；专属 Profile/HOME 仅保存规划，尚未在电脑创建':row.validated_revision!==row.revision?'目标电脑尚未验证本版本':row.control_state!=='active'?'Bot 尚未启用':null}};
     const savedRoutines=db.prepare('SELECT automation_id FROM bot_routines WHERE employee_id=?').all(id).map(item=>routine(slug,id,item.automation_id,context));
     const activeAction=row.active_action_id?botRuns.find(action=>action.id===row.active_action_id)||repo.getA2AAction(row.active_action_id,{workspaceSlug:slug}):null;
-    return{...view,...deriveBotCapabilities({bot:view,capabilities:botCapabilities,device:environment.device,runtime:environment.runtime,actions:botRuns,activeAction,routines:savedRoutines})};
+    return{...view,...deriveBotCapabilities({bot:view,capabilities:botCapabilities,device:environment.device,runtime:environment.runtime,actions:botRuns,activeAction,routines:savedRoutines,phoneMcp:phoneMcpConfiguration(slug,employee)})};
   };
   const routine = (slug,id,autoId,context={}) => {const {ws}=resolve(slug,id,context);const binding=db.prepare('SELECT * FROM bot_routines WHERE automation_id=? AND employee_id=? AND workspace_id=?').get(autoId,id,ws.id);if(!binding)throw botFailure('ROUTINE_NOT_FOUND','Routine 不属于当前 Bot',404);return {...repo.getAutomation(slug,autoId),...binding,last_result:repo.listAutomationRuns(autoId)[0] || null};};
   return guardBotService(repo,{

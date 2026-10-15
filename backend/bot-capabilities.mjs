@@ -11,7 +11,7 @@ const items=data=>Array.isArray(data)?data:Array.isArray(data?.items)?data.items
 const operationsMatch=(request,receipt)=>request?.resource===receipt?.resource&&request.operation===receipt.operation||['goals.step','heartbeat.step','kanban.dispatch'].includes(request?.resource+'.'+request?.operation)&&request.resource===receipt?.resource&&['_prepare','_settle','_fail'].includes(receipt.operation)||request?.resource==='groups'&&request.operation==='step'&&(receipt?.resource==='groups'&&receipt.operation==='read'||receipt?.resource==='collaboration'&&receipt.operation==='publish');
 
 /** Saved switches, bounded native checks and live connection observations are separate evidence. */
-export function deriveBotCapabilities({bot,capabilities=[],device=null,runtime=null,actions=[],activeAction=null,routines=[],now=Date.now()}={}) {
+export function deriveBotCapabilities({bot,capabilities=[],device=null,runtime=null,actions=[],activeAction=null,routines=[],phoneMcp=null,now=Date.now()}={}) {
   const config=bot?.config||{},employee=bot?.employee||{},validation=bot?.validation||{};
   const configured=validation.status==='succeeded'&&validation.revision===bot?.revision;
   const identity=action=>{const p=action?.payload,b=p?.hermesBot;return Boolean(b&&b.employeeId===bot?.id&&p.employeeId===bot.id&&b.workspace===bot.workspace&&b.deviceId===employee.target_device_id&&p.deviceId===employee.target_device_id&&(!p.profile||p.profile===employee.runtime_profile)&&!fixture(action));};
@@ -75,6 +75,21 @@ export function deriveBotCapabilities({bot,capabilities=[],device=null,runtime=n
   const validationAction=ordered.find(action=>identity(action)&&action.id===validation.action_id&&action.payload.hermesBot.revision===bot?.revision);
   const completedTurn=action=>['conversation.execute','runtime.execute','agent.execute','task.execute','automation.execute'].includes(action.type)&&action.status==='succeeded'&&!uncertain(action.result)&&exited(action);
   const actualTurn=currentActions.find(completedTurn);
+  function phoneCheck() {
+    if(!phoneMcp?.enabled||!phoneMcp.installed||!phoneMcp.attached||!phoneMcp.bound||!phoneMcp.revision||!phoneMcp.phoneDeviceId||phoneMcp.workspace!==bot.workspace||phoneMcp.employeeId!==bot.id||phoneMcp.targetDeviceId!==employee.target_device_id||phoneMcp.runtime!==employee.runtime||phoneMcp.runtimeProfile!==employee.runtime_profile)return null;
+    const base={state:'needs_check',reason:'手机 MCP 已绑定并附加技能，尚未取得当前配置的只读工具检查回执。',action:navigate('查看 MCP 与工具','knowledge'),checkedAt:null};
+    const action=currentActions.find(item=>{const p=item.payload,t=p.terminalMcp;return ['conversation.execute','runtime.execute','agent.execute','task.execute','automation.execute'].includes(item.type)&&t?.enabled===true&&t.workspace===bot.workspace&&t.employeeId===bot.id&&t.deviceId===phoneMcp.phoneDeviceId&&t.configurationRevision===phoneMcp.revision&&p.runtime===phoneMcp.runtime&&(p.profile||null)===(phoneMcp.runtimeProfile||null);});
+    if(!action)return base;
+    const receipt=resultValue(action).terminalMcp,evidence=[{type:'phone_mcp_action',actionId:action.id,status:action.status,revision:bot.revision,controlEpoch:bot.control_epoch,configurationRevision:phoneMcp.revision}];
+    const checked={...base,evidence,checkedAt:time(action)};
+    if(uncertain(action.result)||action.status==='expired'&&action.acked_at)return{...checked,state:'failed',reason:'手机 MCP 的原执行结果待核实。',action:navigate('查看原执行','activity')};
+    if(inFlight(action))return{...checked,state:'checking',reason:'正在等待手机 MCP 的本次检查结果。'};
+    if(action.status==='failed'||action.status==='expired')return{...checked,state:'failed',reason:'手机 MCP 的本次执行检查失败，请查看原回执。',action:navigate('查看原执行','activity')};
+    if(!completedTurn(action)||!receipt||receipt.fixture===true||receipt.executionSource==='fixture'||receipt.workspace!==bot.workspace||receipt.employeeId!==bot.id||receipt.targetDeviceId!==phoneMcp.phoneDeviceId||receipt.actionId!==action.id||receipt.runtime!==phoneMcp.runtime||(receipt.profile||null)!==(phoneMcp.runtimeProfile||null)||(receipt.runtimeProfile||null)!==(phoneMcp.runtimeProfile||null)||receipt.serverName!=='ziwei-terminal')return{...checked,reason:'手机 MCP 尚无匹配本员工、手机与完整退出证明的检查回执。'};
+    const calls=Array.isArray(receipt.toolCalls)?receipt.toolCalls:Array.isArray(receipt.tool_calls)?receipt.tool_calls:[],reads=calls.filter(call=>['ziwei_phone_list','ziwei_phone_status'].includes(call?.toolName));
+    const read=reads.length>0&&reads.every(call=>call.ok===true&&(!call.deviceId||call.deviceId===phoneMcp.phoneDeviceId)&&(!call.ids?.deviceId||call.ids.deviceId===phoneMcp.phoneDeviceId));
+    return receipt.loaded===true&&receipt.injected===true&&read?{...checked,state:'ready',reason:'手机 MCP 已连接，绑定手机状态读取成功。'}:checked;
+  }
   const result=capabilities.map(capability=>{
     let cap={...capability,state:'needs_check',enabled:null,reason:'',action:null,checkedAt:null};
     if(capability.status==='not_integrated')return{...cap,state:'unavailable',reason:`当前版本尚未接入${capability.label}。`};
@@ -89,7 +104,17 @@ export function deriveBotCapabilities({bot,capabilities=[],device=null,runtime=n
       case 'skills':cap=withCheck({...cap,reason:'尚未读取此 Bot 的原生技能目录。',action:navigate('管理技能','knowledge')},check('skills',['list','read','install','hub_install','update','remove','check_updates']),'技能','knowledge',({data,action})=>({state:items(data).length?'ready':action.payload.nativeOperation.operation==='list'?'needs_configuration':'needs_check',reason:action.payload.nativeOperation.operation==='list'?(items(data).length?`已发现 ${items(data).length} 项技能；技能执行需按任务确认。`:'原生技能目录为空。'):'技能操作已返回，重新读取目录核对当前内容。',action:navigate(items(data).length?'管理技能':'安装技能','knowledge')}));break;
       case 'tools_mcp':{
         cap={...cap,enabled:toolPermission,state:toolPermission?servers.length||(config.toolsets||[]).length?'needs_check':'needs_configuration':'disabled',reason:!toolPermission?'当前只允许无工具对话。':servers.length?`已配置 ${servers.length} 个 MCP 服务，尚未检查连接与工具。`:(config.toolsets||[]).length?'已选择工具集，尚未取得实际加载结果。':'尚未添加工具集或 MCP 服务。',action:!toolPermission?enable('tools_permission','允许使用工具','knowledge'):navigate(servers.length?'检查 MCP 工具':'添加 MCP','knowledge')};
-        if(toolPermission)cap=withCheck(cap,check('mcp',['inspect','call']),'MCP','knowledge',({data,action})=>({state:action.payload.nativeOperation.operation==='call'?'ready':data.connected===true&&Array.isArray(data.tools)?'ready':'needs_check',reason:action.payload.nativeOperation.operation==='call'?'所选 MCP 工具已有调用回执。':data.connected===true?`MCP 连接检查通过，发现 ${data.tools?.length||0} 个工具；其他工具需分别确认。`:'MCP 尚未确认连接。'}));break;
+        if(toolPermission){
+          const manual=check('mcp',['inspect','call']),phone=phoneCheck();
+          cap=withCheck(cap,manual,'MCP','knowledge',({data,action})=>({state:action.payload.nativeOperation.operation==='call'?'ready':data.connected===true&&Array.isArray(data.tools)?'ready':'needs_check',reason:action.payload.nativeOperation.operation==='call'?'所选 MCP 工具已有调用回执。':data.connected===true?`MCP 连接检查通过，发现 ${data.tools?.length||0} 个工具；其他工具需分别确认。`:'MCP 尚未确认连接。'}));
+          if(phone){
+            const evidence=[...(cap.evidence||[]),...(phone.evidence||[])];
+            if(phone.state==='ready'&&servers.length&&cap.state!=='ready'&&!(manual&&observed(manual,'MCP','knowledge')))phone.reason+=` 另有 ${servers.length} 个 MCP 服务待检查。`;
+            if(manual&&observed(manual,'MCP','knowledge'))cap={...cap,reason:cap.reason+' '+phone.reason,evidence};
+            else if(phone.state==='ready'||cap.state!=='ready'||['failed','checking'].includes(phone.state))cap={...cap,...phone,evidence};
+            else cap={...cap,reason:cap.reason+' '+phone.reason,evidence};
+          }
+        }break;
       }
       case 'routines':{
         const active=routines.filter(item=>item.status==='active'),scheduled=active.filter(item=>item.next_run),last=routines.map(item=>item.last_result).filter(Boolean).sort((a,b)=>String(b.finished_at||b.started_at||'').localeCompare(String(a.finished_at||a.started_at||'')))[0];
@@ -101,7 +126,8 @@ export function deriveBotCapabilities({bot,capabilities=[],device=null,runtime=n
         if(collaboration&&toolPermission&&targets.length)cap=withCheck(cap,check(groups?'groups':'collaboration'),groups?'群组':'伙伴协作','collaboration',({data,action})=>groups?{state:items(data).length||data.room?'ready':'needs_configuration',reason:items(data).length?`已读取 ${items(data).length} 个群组。`:data.room?'已读取当前群组与成员。':'尚未创建原生群组。'}:{state:'ready',reason:action.result?.collaboration?.actions?.length?'委派已取得目标执行标识，结果分别核实。':'原生协作操作已返回，目标结果仍需分别核实。'});break;
       }
       case 'gateway':{
-        const platforms=Object.entries(config.gateway?.platforms||{}).filter(([,value])=>value.enabled);cap={...cap,enabled:platforms.length>0,state:platforms.length?'needs_check':'needs_configuration',reason:platforms.length?'渠道配置已保存，尚未确认在线连接。':'尚未配置并连接消息渠道。',action:navigate('连接渠道','channels')};
+        const configuredPlatforms=Object.entries(config.gateway?.platforms||{}),platforms=configuredPlatforms.filter(([,value])=>value.enabled);cap={...cap,enabled:platforms.length>0,state:platforms.length?'needs_check':configuredPlatforms.length?'disabled':'needs_configuration',reason:platforms.length?'渠道配置已保存，尚未确认在线连接。':configuredPlatforms.length?'已配置的消息渠道均已关闭。':'尚未配置并连接消息渠道。',action:navigate('连接渠道','channels')};
+        if(configuredPlatforms.length&&!platforms.length)break;
         cap=withCheck(cap,check('gateway'),'消息渠道','channels',({data,action})=>{
           const rows=Array.isArray(data.runtime)?data.runtime:[],connects=currentActions.filter(item=>{const receipt=nativeReceipt(item);return item.payload.nativeOperation?.resource==='gateway'&&item.payload.nativeOperation.operation==='connect'&&item.status==='succeeded'&&!uncertain(item.result)&&!resultValue(item).residentExit&&receipt?.schemaVersion===2&&receipt.employeeId===bot.id&&receipt.revision===bot.revision&&receipt.resource==='gateway'&&receipt.operation==='connect'&&receipt.status==='succeeded'&&receipt.data?.connected===true;});
           const connected=rows.some(worker=>platforms.some(([platform])=>platform===worker.platform)&&worker.employeeId===bot.id&&(worker.workspace===undefined||worker.workspace===bot.workspace)&&worker.revision===bot.revision&&worker.controlEpoch===bot.control_epoch&&worker.status==='connected'&&worker.processAlive!==false&&Number.isFinite(worker.lastHeartbeat)&&now-worker.lastHeartbeat*1000>=0&&now-worker.lastHeartbeat*1000<=20000&&connects.some(item=>item.id===worker.sourceActionId));
@@ -109,7 +135,8 @@ export function deriveBotCapabilities({bot,capabilities=[],device=null,runtime=n
         });break;
       }
       case 'voice':{
-        const modes=Object.entries(config.voice||{}).filter(([,value])=>value.enabled!==false&&value.provider);cap={...cap,enabled:modes.length>0,state:modes.length?'needs_check':'needs_configuration',reason:modes.length?'语音服务商已配置，尚未验证实际音频调用。':'尚未配置语音识别或合成服务商。',action:navigate('配置语音','channels')};
+        const configuredModes=Object.entries(config.voice||{}).filter(([,value])=>value.provider),modes=configuredModes.filter(([,value])=>value.enabled!==false);cap={...cap,enabled:modes.length>0,state:modes.length?'needs_check':configuredModes.length?'disabled':'needs_configuration',reason:modes.length?'语音服务商已配置，尚未验证实际音频调用。':configuredModes.length?'已配置的语音服务商均已关闭。':'尚未配置语音识别或合成服务商。',action:navigate('配置语音','channels')};
+        if(configuredModes.length&&!modes.length)break;
         cap=withCheck(cap,check('voice'),'语音','channels',({action,data})=>{const op=action.payload.nativeOperation.operation,output=op==='transcribe'?Boolean(String(data.transcript||data.text||'').trim()):op==='synthesize'&&data.files?.some(file=>String(file.mimeType||'').startsWith('audio/')&&file.audioBase64);return output&&data.success!==false?{state:'ready',reason:op==='transcribe'?'语音识别已取得一次实际调用回执。':'语音合成已取得一次实际调用回执。'}:{state:modes.length?'needs_check':'needs_configuration',reason:modes.length?'语音已配置，仍需取得实际音频调用产物。':'语音服务商尚未配置。'};});break;
       }
       case 'multimodal':{
@@ -118,8 +145,8 @@ export function deriveBotCapabilities({bot,capabilities=[],device=null,runtime=n
       }
       case 'session_search':cap=withCheck({...cap,reason:'尚未检查此 Bot 的原生会话目录。',action:navigate('检索会话','knowledge')},check('sessions'),'会话检索','knowledge',({action})=>({state:'ready',reason:action.payload.nativeOperation.operation==='search'?'原生会话检索已返回结果。':'原生会话目录读取检查通过。'}));break;
       case 'goals':case 'heartbeat':case 'kanban':{
-        const label=cap.id==='goals'?'目标':cap.id==='heartbeat'?'主动检查':'原生工作';
-        cap=withCheck({...cap,state:'needs_configuration',reason:`尚未设置${label}。`,action:navigate(cap.id==='goals'?'设置目标':cap.id==='heartbeat'?'配置主动检查':'创建原生工作','proactive')},check(cap.id),label,'proactive',({data,action})=>{
+        const label=cap.id==='goals'?'目标':cap.id==='heartbeat'?'主动检查':'工作';
+        cap=withCheck({...cap,state:'needs_check',reason:`尚未读取此 Bot 的原生${label}状态。`,action:navigate('读取'+label+'状态','proactive')},check(cap.id),label,'proactive',({data,action})=>{
           const state=data.state?.status||data.state?.state,enabled=state==='active'||state==='running';
           if(cap.id==='kanban')return{state:items(data).length||data.task?'ready':'needs_configuration',reason:data.task?`原生工作状态：${short(data.task.status)||'已保存'}。`:items(data).length?`已读取 ${items(data).length} 项原生工作；执行按每次派发确认。`:'尚无原生工作。'};
           return{enabled,state:!data.state?'needs_configuration':enabled?'enabled':'disabled',reason:!data.state?`尚未设置${label}。`:enabled?`${label}状态已开启；${data.run===false?'本次未触发模型回合。':'持续推进需配置例行工作。'}`:`${label}当前状态：${short(state)||'已暂停'}。`,action:navigate(enabled?'管理主动工作':'配置'+label,'proactive')};
