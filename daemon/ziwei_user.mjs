@@ -4,7 +4,7 @@ import http from 'node:http';
 import { timingSafeEqual, randomBytes, createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { ActionDispatcher } from '../src/daemon.mjs';
-import { createActionScheduler } from '../src/daemon-action-scheduler.mjs';
+import { createActionScheduler, isCancellationAction } from '../src/daemon-action-scheduler.mjs';
 import { createActionDelivery, ACTION_TRANSPORT_BUDGETS } from '../src/daemon-action-delivery.mjs';
 import { createLocalActionExecutor } from '../src/local-action.mjs';
 import { redactSecrets } from '../src/redaction.mjs';
@@ -97,6 +97,7 @@ function installConnections() {
       onEvent: (event, extra) => {
         log(event, { workspace: config.workspace, ...extra });
         if (extra?.actionId && ['action.started', 'action.output', 'action.progress', 'action.stage', 'action.waiting'].includes(event)) state.actionDelivery?.recordEvent(extra.actionId, event, extra);
+        if (extra?.actionId && event === 'action.result_recovered') void state.actionDelivery?.recoverOriginal(extra.actionId).catch(error => log('a2a_recovered_result_pending', { workspace: config.workspace, actionId: extra.actionId, error: error.message }));
       },
     });
     state.actionDelivery = createActionDelivery({
@@ -104,12 +105,13 @@ function installConnections() {
       identity: { apiBase: config.apiBase, workspace: config.workspace, deviceId: config.deviceId },
       post: (pathname, body, options) => postAction(state, pathname, body, options),
       dispatch: action => state.dispatcher.dispatch(action),
+      recoverResult: action => state.dispatcher.completedResult(action),
       onSuccess: async action => { if (action.type === 'hermes.profile.create') await refreshRuntimeDiscovery(state); },
       onEvent: (event, extra) => log(event, { workspace: config.workspace, ...extra }),
     });
     state.actionScheduler = createActionScheduler({
       execute: action => state.actionDelivery.execute(action),
-      canStart: action => executionAllowed() || state.actionDelivery.canDeliverWithoutExecution(action),
+      canStart: action => isCancellationAction(action) || executionAllowed() || state.actionDelivery.canDeliverWithoutExecution(action),
       quarantinedActionIds: () => state.dispatcher.quarantinedActionIds,
       onError: (error, action) => log('a2a_action_failed', { workspace: config.workspace, actionId: action.id, error: error.message }),
     });

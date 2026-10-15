@@ -66,3 +66,14 @@ test('a failed action releases its slot and reports a safe error through the cal
  scheduler.schedule([action('bad','A')]);await scheduler.whenIdle();assert.equal(scheduler.activeCount,0);
  scheduler.schedule([action('good','A')]);await scheduler.whenIdle();assert.deepEqual(calls,['bad','good']);assert.deepEqual(failures,[['bad','request failed']]);
 });
+
+test('one cancellation control bypasses full execution slots and employee serialization',async t=>{
+ const running=deferred(),control=deferred(),calls=[];t.after(()=>{running.resolve();control.resolve();});
+ const scheduler=createActionScheduler({concurrency:1,execute:async a=>{calls.push(a.id);await (a.type==='action.cancel'?control.promise:running.promise);}});
+ scheduler.schedule([action('target','A')]);await flush();
+ assert.deepEqual(scheduler.schedule([action('stop','A','action.cancel'),action('extra-stop','B','action.cancel'),action('other','B')]),['stop']);
+ await flush();assert.deepEqual(calls,['target','stop']);assert.equal(scheduler.activeCount,2);
+ control.resolve();await flush();
+ assert.deepEqual(scheduler.schedule([action('extra-stop','B','action.cancel')]),['extra-stop']);
+ running.resolve();await scheduler.whenIdle();
+});

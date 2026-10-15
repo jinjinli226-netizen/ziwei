@@ -47,6 +47,15 @@ const id = prefix => `${prefix}_${crypto.randomUUID()}`;
 const hashSecret = value => crypto.createHash('sha256').update(String(value || '')).digest('hex');
 const parse = value => { try { return JSON.parse(value); } catch { return []; } };
 const explicitBoolean = value => value === true || value === 1 || (typeof value === 'string' && ['true', '1'].includes(value.trim().toLowerCase()));
+const botReplayEvent = Symbol('server stored Bot completion event');
+const uncertainCompletion = value => Boolean(value && typeof value === 'object' && (value.code === 'EXECUTION_UNCERTAIN' || value.executionState === 'uncertain' || value.status === 'uncertain' || Object.values(value).some(uncertainCompletion)));
+const recoverableBotCompletion = row => Boolean(row?.acked_at && parse(row.payload_json)?.hermesBot && (row.status === 'expired' || row.status === 'failed' && uncertainCompletion(parse(row.result_json))));
+function confirmedBotCompletion(result, status) {
+  const exit = result?.processExit || result?.result?.processExit;
+  if (uncertainCompletion(result) || !exit || exit.launched !== true || !Number.isSafeInteger(exit.rootPid) || exit.rootPid <= 0 || exit.rootConfirmed !== true || exit.treeConfirmed !== true || exit.activeProcesses !== 0) return false;
+  if (status === 'succeeded') return exit.rootExitCode === 0 && exit.cancelled !== true && !exit.failureCode && !exit.signal && (exit.hostExitCode == null || exit.hostExitCode === 0);
+  return status === 'failed' && (Number.isSafeInteger(exit.rootExitCode) || exit.rootExitCode === null && (exit.cancelled === true || typeof exit.signal === 'string' && Boolean(exit.signal)));
+}
 const canonicalJson = value => JSON.stringify(value, (_key, item) => item && typeof item === 'object' && !Array.isArray(item) ? Object.fromEntries(Object.keys(item).sort().map(key => [key, item[key]])) : item);
 const conversationAttachmentMetadata = attachments => Array.isArray(attachments) ? attachments.map(item => ({ name:item?.name ?? item?.filename, mimeType:item?.mimeType ?? item?.mime_type, size:item?.size })) : [];
 const conversationResultView = result => {
@@ -66,6 +75,7 @@ const a2aReceiptView = (row, { includeResult = false } = {}) => {
     id:row.id, status:row.status, acked_at:row.acked_at, expires_at:row.expires_at, completed_at:row.completed_at,
     deviceId:String(payload.deviceId || payload.device_id || payload.targetDeviceId || payload.target_device_id || '').trim() || null
   };
+  if (recoverableBotCompletion(row)) view.reconciliationRequired = true;
   if (includeResult) {
     const result = parse(row.result_json);
     const output = typeof result === 'string' ? result : (result?.output || result?.text || result?.result?.output || result?.result?.text || '');
@@ -487,6 +497,19 @@ export function createRepository(options = {}, io={}) {
     const deviceId = String(input.deviceId || input.device_id || '').trim();
     if (target && deviceId && target !== deviceId) throw new Error('A2A action is assigned to another device');
     return target;
+  };
+  const assertBotCompletionReceipt = (row, input) => {
+    const payload = parse(row.payload_json), snapshot = payload?.hermesBot;
+    const employee = snapshot?.employeeId ? db.prepare('SELECT * FROM employees WHERE id=? AND workspace_id=?').get(snapshot.employeeId, row.workspace_id) : null;
+    const bot = employee ? db.prepare('SELECT * FROM hermes_bots WHERE employee_id=? AND workspace_id=?').get(employee.id, row.workspace_id) : null;
+    const slug = db.prepare('SELECT slug FROM workspaces WHERE id=?').get(row.workspace_id)?.slug;
+    if (!row.acked_at || !employee || !bot || !input.deviceId || input.deviceId !== actionTargetDevice(row) || input.deviceId !== snapshot.deviceId || employee.target_device_id !== input.deviceId || payload.employeeId !== employee.id || snapshot.workspace !== slug || payload.profile !== snapshot.sourceProfile || employee.runtime_profile !== snapshot.sourceProfile || !Number.isInteger(snapshot.revision) || !Number.isInteger(snapshot.controlEpoch)) throw botFailure('BOT_RECOVERY_BINDING_CONFLICT', '原完成回执的设备、员工、工作区或 Profile 绑定不一致');
+    for (const result of [input.result,input.result?.result].filter(Boolean)) {
+      for (const receipt of [result.botValidation,result.botProvision,result.nativeOperation].filter(Boolean)) if (receipt.employeeId !== employee.id || receipt.revision !== undefined && receipt.revision !== snapshot.revision || receipt.workspace !== undefined && receipt.workspace !== slug || receipt.deviceId !== undefined && receipt.deviceId !== input.deviceId) throw botFailure('BOT_RECOVERY_BINDING_CONFLICT', '完成回执中的员工、工作区、设备或配置版本与原执行不一致');
+      if (result.targetActionId !== undefined && result.targetActionId !== row.id) throw botFailure('BOT_RECOVERY_BINDING_CONFLICT', '停止证据不属于原执行标识');
+    }
+    if (!confirmedBotCompletion(input.result, input.status)) throw botFailure('BOT_RECOVERY_RECEIPT_REQUIRED', '核实原执行需要同一设备的完整进程及执行树退出证明，不能使用待核实结果');
+    return payload;
   };
   // Conversation messages are dispatched through a2a_actions.  Expose the
   // latest dispatch and its progress events alongside the messages so the UI
@@ -1938,8 +1961,11 @@ export function createRepository(options = {}, io={}) {
         if (!row) throw new Error('A2A action not found');
         if (input.agentId && String(input.agentId) !== row.agent_id) throw new Error('A2A agent mismatch');
         assertActionDevice(row, input);
-        if (row.status === 'expired') throw new Error('A2A action expired');
-        if (['succeeded','failed'].includes(row.status)) response = { ...a2aResponseView(row, { receiptOnly, includeResult:!receiptOnly }), duplicate:true };
+        if (row.status === 'expired') {
+          if (!receiptOnly || !recoverableBotCompletion(row) || !input.deviceId || input.deviceId !== actionTargetDevice(row)) throw new Error('A2A action expired');
+          response = { ...a2aResponseView(row, { receiptOnly, includeResult:false }), duplicate:true, deliveryOnly:true, leaseRenewed:false };
+        }
+        else if (['succeeded','failed'].includes(row.status)) response = { ...a2aResponseView(row, { receiptOnly, includeResult:!receiptOnly }), duplicate:true };
         else {
           const timestamp = now();
           if(row.status==='pending')assertBotExecution(db,row.workspace_id,parse(row.payload_json),{validation:botActionMaintenance(row.type,parse(row.payload_json)),provisioning:row.type==='hermes.bot.provision',requireProfile:row.type!=='hermes.bot.provision',actionId});
@@ -2042,13 +2068,32 @@ export function createRepository(options = {}, io={}) {
         db.exec('RELEASE bot_collaboration');return actions;
       }catch(error){db.exec('ROLLBACK TO bot_collaboration; RELEASE bot_collaboration');throw error;}
     },
+    reconcileBotActionFromEvent(actionId, { eventId, workspaceSlug, employeeId } = {}) {
+      const row = db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId), payload = parse(row?.payload_json);
+      if (!row || !workspaceSlug || !employeeId || payload?.hermesBot?.employeeId !== employeeId || payload.employeeId !== employeeId || payload.hermesBot.workspace !== workspaceSlug || db.prepare('SELECT slug FROM workspaces WHERE id=?').get(row.workspace_id)?.slug !== workspaceSlug) throw botFailure('BOT_RECOVERY_BINDING_CONFLICT', '原动作不属于当前 Bot 或工作区');
+      this.preservation?.assertAction(actionId);
+      this.serverCodeRollout?.assertExecution();
+      const event = typeof eventId === 'string' && db.prepare('SELECT * FROM a2a_action_events WHERE id=? AND action_id=?').get(eventId, actionId), data = parse(event?.data_json);
+      if (!event || !['succeeded','failed'].includes(event.type) || !data || !Object.hasOwn(data, 'result') || !row.acked_at || Date.parse(event.created_at)<Date.parse(row.acked_at)) throw botFailure('BOT_RECOVERY_RECEIPT_REQUIRED', '请选择此原动作在服务器已保存的完整终态事件');
+      const input = { status:event.type, result:data.result, error:data.error || null, deviceId:actionTargetDevice(row) };
+      assertBotCompletionReceipt(row, input);
+      if (['succeeded','failed'].includes(row.status) && !recoverableBotCompletion(row)) {
+        const prior = db.prepare("SELECT data_json FROM a2a_action_events WHERE action_id=? AND type='action.reconciled'").all(actionId).find(item => parse(item.data_json)?.sourceEventId === event.id);
+        if (prior) return { ...this.getA2AAction(actionId, { workspaceSlug }), duplicate:true };
+        throw botFailure('BOT_RECOVERY_NOT_REQUIRED', '原动作已取得明确终态，不会覆盖既有结果');
+      }
+      if (row.status !== 'acked' && !recoverableBotCompletion(row)) throw botFailure('BOT_RECOVERY_RECEIPT_REQUIRED', '只允许核实原已领取且缺少明确完成结果的动作');
+      return this.resultA2AAction(actionId, { ...input, [botReplayEvent]:event.id });
+    },
     resultA2AAction(actionId, input = {}) {
       const row = db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId);
       if (!row) throw new Error('A2A action not found');
       if (input.agentId && String(input.agentId) !== row.agent_id) throw new Error('A2A agent mismatch');
       assertActionDevice(row, input);
       const receiptOnly = explicitBoolean(input.receiptOnly);
-      if (['succeeded', 'failed', 'expired'].includes(row.status)) return { ...a2aResponseView(row, { receiptOnly }), duplicate: true };
+      const recovering = recoverableBotCompletion(row);
+      const reconciliation = recovering || Boolean(input[botReplayEvent]);
+      if (['succeeded', 'failed', 'expired'].includes(row.status) && !recovering) return { ...a2aResponseView(row, { receiptOnly }), duplicate: true };
       let status = String(input.status || (input.error ? 'failed' : 'succeeded'));
       if (!['succeeded', 'failed'].includes(status)) throw new Error('A2A result status must be succeeded or failed');
       const payload = parse(row.payload_json);
@@ -2061,6 +2106,12 @@ export function createRepository(options = {}, io={}) {
       if (error) status = 'failed';
       if (status === 'failed' && !error) error = '员工执行失败，未提供具体错误';
       let result = input.result;
+      if (reconciliation) {
+        this.preservation?.assertAction(actionId);
+        this.serverCodeRollout?.assertExecution();
+        assertBotCompletionReceipt(row, { ...input, status });
+      }
+      if (status === 'failed' && confirmedBotCompletion(result, status) && (result?.processExit || result?.result?.processExit)?.cancelled === true) result = { ...result, stopConfirmed:true };
       let outputArtifacts = [];
       // `attachments` contains materialized user input paths in older CLI
       // results. Only the explicit outputArtifacts contract can become a new
@@ -2082,36 +2133,47 @@ export function createRepository(options = {}, io={}) {
           outputArtifacts = [];
         }
       }
+      if (reconciliation) assertBotCompletionReceipt(row, { ...input, status, result });
       const timestamp = now();
       db.exec('SAVEPOINT conversation_result');
       try {
         if(row.type==='hermes.bot.provision'&&status==='succeeded')verifyBotProvisionReceipt(payload,result);
         if(row.type==='hermes.bot.validate'&&status==='succeeded'&&payload.hermesBot?.config.reasoningEffort){
           const validation=result?.botValidation || result?.result?.botValidation;
-          const proof=botReasoningProof(validation?.effective?.reasoning,payload.hermesBot);
+          const effectiveModel=payload.hermesBot.model ?? validation?.effective?.model;
+          const proof=typeof effectiveModel==='string'&&effectiveModel.trim()?botReasoningProof(validation?.effective?.reasoning,payload.hermesBot,{model:effectiveModel}):null;
           if(!proof||proof.status!=='matched'||proof.phase!=='preflight')throw botFailure('BOT_REASONING_RECEIPT_REQUIRED','明确推理等级缺少匹配原生实际值的验证回执');
         }
         if(status==='succeeded'&&payload.collaborationManifest&&payload.collaborationManifest.mode!=='group'){
           const receipt=result?.nativeOperation || result?.result?.nativeOperation;
           if(receipt?.status!=='succeeded'||receipt.resource!=='collaboration'||receipt.employeeId!==payload.employeeId||receipt.revision!==payload.hermesBot.revision)throw botFailure('BOT_COLLABORATION_RECEIPT_REQUIRED','原生协作回执不匹配');
-          if(!rollout)try{assertBotExecution(db,row.workspace_id,payload,{actionId});const actions=this.dispatchBotCollaboration(ws.slug,{...payload.collaborationManifest,sourceActionId:actionId},payload.nativeOperation.requestId);result={...result,collaboration:{actions:actions.map(action=>({id:action.id,status:action.status,employeeId:action.payload.employeeId})),groupId:payload.collaborationManifest.groupId}};}catch(dispatchError){status='failed';error=dispatchError.code || 'BOT_COLLABORATION_DISPATCH_FAILED';result={...result,collaboration:{dispatched:false,code:error}};}
+          if(reconciliation){status='failed';error='BOT_COLLABORATION_RECOVERY_REQUIRES_REVIEW';result={...result,collaboration:{...result?.collaboration,dispatched:false,reconciledWithoutDispatch:true,code:error}};}
+          else if(!rollout)try{assertBotExecution(db,row.workspace_id,payload,{actionId});const actions=this.dispatchBotCollaboration(ws.slug,{...payload.collaborationManifest,sourceActionId:actionId},payload.nativeOperation.requestId);result={...result,collaboration:{actions:actions.map(action=>({id:action.id,status:action.status,employeeId:action.payload.employeeId})),groupId:payload.collaborationManifest.groupId}};}catch(dispatchError){status='failed';error=dispatchError.code || 'BOT_COLLABORATION_DISPATCH_FAILED';result={...result,collaboration:{dispatched:false,code:error}};}
         }
         db.prepare('UPDATE a2a_actions SET status=?,completed_at=?,result_json=?,error=? WHERE id=?').run(status, timestamp, result === undefined ? null : JSON.stringify(result), error, actionId);
+        if (reconciliation) {
+          const evidence = { sourceEventId:input[botReplayEvent] || null, previousStatus:row.status, previousCompletedAt:row.completed_at, expiresAt:row.expires_at, deviceId:input.deviceId, resultSha256:hashSecret(JSON.stringify(result)) };
+          db.prepare('INSERT INTO a2a_action_events(id,action_id,type,message,data_json,created_at) VALUES(?,?,?,?,?,?)').run(id('action-event'),actionId,'action.reconciled','已根据原设备完成及退出证据核实原执行',JSON.stringify(evidence),timestamp);
+          audit(ws.slug, 'ziwei_user', 'a2a.action.reconciled', { actionId, ...evidence });
+        }
         if(payload.hermesBot) {
           const validation=result?.botValidation || result?.result?.botValidation;
           if(row.type==='hermes.bot.validate' && status==='succeeded' && validation?.valid===true && validation.schemaVersion===1 && validation.employeeId===payload.employeeId && validation.revision===payload.hermesBot.revision) db.prepare('UPDATE hermes_bots SET validated_revision=? WHERE employee_id=? AND revision=? AND control_epoch=? AND validation_action_id=?').run(validation.revision,payload.employeeId,validation.revision,payload.hermesBot.controlEpoch,actionId);
           if(!botUncertain(result))db.prepare('UPDATE hermes_bots SET active_action_id=NULL WHERE employee_id=? AND active_action_id=?').run(payload.employeeId,actionId);
         }
         audit(ws.slug, 'ziwei_user', `a2a.action.${status}`, { actionId, type: row.type, error });
-        if (row.task_id) taskExecutionMessage(row.task_id, status, error, result);
-        if (conversation) {
+        if (row.task_id && !(reconciliation && row.status==='failed')) taskExecutionMessage(row.task_id, status, error, result);
+        if (conversation && !(reconciliation && row.status==='failed')) {
           const content = error ? `执行失败：${error}` : (typeof result === 'string' ? result : (result?.output || result?.text || result?.result?.output || result?.result?.text || (outputArtifacts.length ? '已返回图片' : '执行完成')));
           const messageId = id('convmsg');
           db.prepare('INSERT INTO conversation_messages(id,conversation_id,role,content,attachment_json,created_at) VALUES(?,?,?,?,?,?)').run(messageId, conversation.id, 'assistant', String(content), JSON.stringify(outputArtifacts), timestamp);
           db.prepare('UPDATE conversations SET updated_at=? WHERE id=?').run(timestamp, conversation.id);
           audit(ws.slug, 'assistant', 'conversation.message.created', { conversationId: conversation.id, messageId, actionId, dispatch: false });
         }
-        if (['automation.execute','hermes.bot.native'].includes(row.type) && payload.runId) this.completeAutomationRun(payload.runId, { status: status === 'succeeded' ? 'completed' : 'failed', result, error, botInternal:BOT_INTERNAL,sourceActionId:actionId });
+        if (['automation.execute','hermes.bot.native'].includes(row.type) && payload.runId) {
+          if (reconciliation) db.prepare("UPDATE automation_runs SET status=?,result_json=?,error=?,finished_at=?,message=? WHERE id=? AND action_id=? AND status NOT IN ('completed','failed')").run(status==='succeeded'?'completed':'failed',JSON.stringify(result),error,timestamp,'已核实原执行终态；未重新派发或重试',payload.runId,actionId);
+          else this.completeAutomationRun(payload.runId, { status: status === 'succeeded' ? 'completed' : 'failed', result, error, botInternal:BOT_INTERNAL,sourceActionId:actionId });
+        }
         db.exec('RELEASE conversation_result');
       } catch (writeError) {
         db.exec('ROLLBACK TO conversation_result; RELEASE conversation_result');

@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
 import {imageArtifactDeliveryBody,imageArtifactEventResult} from './conversation-image-artifacts.mjs';
+import {isCancellationAction} from './daemon-action-scheduler.mjs';
 
 // The production 10 MiB image roundtrip took 472 seconds. Polling can also
 // contain full image input. Small authenticated receipts have a separate budget.
@@ -28,7 +29,7 @@ function minimalAction(action){const p=action.payload||{};return {...Object.from
  * A journal cannot authorize execution: every recovery first checks an authenticated
  * server ACK, and terminal ACKs never reach the executor.
  */
-export function createActionDelivery({directory,identity,post,dispatch,retryDelays=[250,1000],onEvent=()=>{},onSuccess=async()=>{},maxConfirmedRecords=1000,confirmedRetentionMs=7*24*60*60*1000,now=()=>Date.now()}={}){
+export function createActionDelivery({directory,identity,post,dispatch,recoverResult=()=>null,retryDelays=[250,1000],onEvent=()=>{},onSuccess=async()=>{},maxConfirmedRecords=1000,confirmedRetentionMs=7*24*60*60*1000,now=()=>Date.now()}={}){
  if(!directory||typeof post!=='function'||typeof dispatch!=='function')throw new TypeError('Action delivery requires directory, transport and dispatcher');
  const connection=scope(identity||{}),records=new Map(),active=new Map(),activeBindings=new Map(),eventFlushes=new Map();
  const fileFor=id=>path.join(directory,`${hash(String(id))}.json`);
@@ -108,53 +109,107 @@ export function createActionDelivery({directory,identity,post,dispatch,retryDela
   void flushEvents(record).catch(error=>report('a2a_event_pending',{actionId:id,error:error.message}));
   return true;
  }
+ function resultBody(result){
+  const status=result.status==='succeeded'||(result.status==='duplicate'&&result.originalStatus==='succeeded')?'succeeded':'failed';
+  const outcome=result.result??result;
+  const wireResult=result.code==='EXECUTION_UNCERTAIN'||result.executionState==='uncertain'
+   ? {...(outcome&&typeof outcome==='object'&&!Array.isArray(outcome)?outcome:{result:outcome}),code:'EXECUTION_UNCERTAIN',executionState:'uncertain',...(typeof result.reason==='string'&&/^[A-Z0-9_]{1,100}$/.test(result.reason)?{reason:result.reason}:{})}
+   : outcome;
+  return imageArtifactDeliveryBody({status,result:wireResult,error:status==='failed'?(result.error||'ziwei_user execution failed'):null,receiptOnly:true});
+ }
+ function definitive(delivery){
+  const value=delivery?.result,exit=value?.processExit;
+  if(!['succeeded','failed'].includes(delivery?.status)||value?.code==='EXECUTION_UNCERTAIN'||value?.executionState==='uncertain'||exit?.launched!==true||!Number.isSafeInteger(exit.rootPid)||exit.rootPid<=0||exit.rootConfirmed!==true||exit.treeConfirmed!==true||exit.activeProcesses!==0)return false;
+  if(delivery.status==='succeeded')return exit.rootExitCode===0&&exit.cancelled!==true&&!exit.failureCode&&!exit.signal&&!exit.hostSignal;
+  return Number.isSafeInteger(exit.rootExitCode)||(exit.rootExitCode===null&&exit.cancelled===true);
+ }
+ function stageResult(record,result){
+  const delivery=resultBody(result);
+  record.resultDigest=writeBlob(record.action.id,'result',delivery);
+  record.retainEvidence=result.code==='EXECUTION_UNCERTAIN'||result.executionState==='uncertain'||delivery.result?.code==='EXECUTION_UNCERTAIN'||delivery.result?.executionState==='uncertain';
+  record.dispatcherStatus=result.status;record.state='result_pending';delete record.blockedStatus;save(record);
+  return delivery;
+ }
+ function restoreCompleted(record){
+  const result=recoverResult(record.action);
+  if(!result||!definitive(resultBody(result)))return false;
+  // A previously confirmed uncertain record retains its original binding blob.
+  // A definitive terminal receipt must never reopen an ordinary server final.
+  if(record.state==='confirmed'&&!record.retainEvidence){
+   if(record.serverStatus!=='expired')return false;
+   record.actionDigest=writeBlob(record.action.id,'action',{identity:connection,binding:record.binding,action:record.action});
+  }
+  stageResult(record,result);return true;
+ }
+ async function recoverOriginal(actionId,{waitForActive=true}={}){
+  const id=String(actionId||'');if(!id)return {state:'unconfirmed',status:null};
+  // Late evidence may arrive while the first uncertain upload is still in
+  // flight. Wait for it before replacing the retained result atomically.
+  if(active.has(id)){
+   if(!waitForActive)return {state:'pending',status:null};
+   try{await active.get(id);}catch{}
+  }
+  let metadata;try{metadata=JSON.parse(fs.readFileSync(fileFor(id),'utf8'));}catch(error){if(error.code==='ENOENT')return {state:'unconfirmed',status:null};throw error;}
+  const record=read(metadata.action,{create:false});
+  if(!record)return {state:'unconfirmed',status:null};
+  const restored=restoreCompleted(record);
+  if(!restored&&!(record.state==='result_pending'&&definitive(readBlob(record,'result'))))return {state:record.state==='confirmed'&&!record.retainEvidence?'confirmed':'unconfirmed',status:record.serverStatus||null};
+  return execute(record.action);
+ }
  async function run(action){
   const record=read(action);
   if(['confirmed','blocked'].includes(record.state))return {state:record.state,status:record.serverStatus||null};
   try{
-   const resumingResult=record.state==='result_pending';
+   let resumingResult=record.state==='result_pending',reconciling=false;
    const receipt=await retry(()=>post(`/a2a/v1/actions/${encodeURIComponent(action.id)}/ack`,{agentId:'ziwei_user',receiptOnly:true,renewLease:resumingResult&&Boolean(connection.deviceId)},{timeoutMs:ACTION_TRANSPORT_BUDGETS.ack}));
    if(receipt?.id!==action.id||!['acked',...terminal].includes(receipt?.status))throw new Error('Invalid action ACK receipt; execution was not authorized');
    if(receipt.deviceId&&connection.deviceId&&receipt.deviceId!==connection.deviceId)throw new Error('Action ACK identity mismatch');
-   if(terminal.has(receipt.status)){
+   if(receipt.status==='expired'||receipt.reconciliationRequired===true){
+    restoreCompleted(record);
+    if(!(receipt.acked_at||record.action.acked_at)||record.state!=='result_pending'||!definitive(readBlob(record,'result'))){
+     report('a2a_expired_result_unconfirmed',{actionId:action.id,status:receipt.status});return {state:'unconfirmed',status:receipt.status};
+    }
+    reconciling=true;resumingResult=true;
+   }else if(terminal.has(receipt.status)){
     confirm(record,receipt.status);
     report('a2a_terminal_confirmed',{actionId:action.id,status:receipt.status});return {state:'confirmed',status:receipt.status};
    }
    const lease=receipt.expires_at||receipt.expiresAt;
-   if(!lease||!Number.isFinite(Date.parse(lease))||Date.parse(lease)<=now())throw new Error('Invalid or expired action ACK lease; execution was not authorized');
+   if(!reconciling&&(!lease||!Number.isFinite(Date.parse(lease))||Date.parse(lease)<=now()))throw new Error('Invalid or expired action ACK lease; execution was not authorized');
    record.action={...record.action,status:'acked',acked_at:receipt.acked_at||record.action.acked_at,expires_at:lease,expiresAt:lease,...(receipt.deviceId?{payload:{...record.action.payload,deviceId:receipt.deviceId}}:{})};
    if(record.state!=='result_pending'){record.state='acked';save(record);
     const original=readBlob(record,'action').action;
     const result=await dispatch({...original,...record.action,payload:{...original.payload,...record.action.payload}});
-    const status=result.status==='succeeded'||(result.status==='duplicate'&&result.originalStatus==='succeeded')?'succeeded':'failed';
-    const outcome=result.result??result;
-    const wireResult=result.code==='EXECUTION_UNCERTAIN'||result.executionState==='uncertain'
-      ? {...(outcome&&typeof outcome==='object'&&!Array.isArray(outcome)?outcome:{result:outcome}),code:'EXECUTION_UNCERTAIN',executionState:'uncertain',...(typeof result.reason==='string'&&/^[A-Z0-9_]{1,100}$/.test(result.reason)?{reason:result.reason}:{})}
-      : outcome;
-    const delivery=imageArtifactDeliveryBody({status,result:wireResult,error:status==='failed'?(result.error||'ziwei_user execution failed'):null,receiptOnly:true});
-    record.resultDigest=writeBlob(action.id,'result',delivery);
-    record.retainEvidence=result.code==='EXECUTION_UNCERTAIN'||result.executionState==='uncertain'||delivery.result?.code==='EXECUTION_UNCERTAIN'||delivery.result?.executionState==='uncertain';
-    record.dispatcherStatus=result.status;record.state='result_pending';save(record);
+    if(isCancellationAction(action)&&result.result?.targetActionId&&String(result.result.targetActionId)!==String(action.id)){
+     try{
+      const targetReceipt=result.result.cancellationRequested&&!result.result.targetResultAvailable?{state:'pending',status:null}:await recoverOriginal(result.result.targetActionId,{waitForActive:false});
+      result.result={...result.result,targetReceipt,stopConfirmed:targetReceipt.state==='confirmed'&&['succeeded','failed'].includes(targetReceipt.status)&&result.result.targetResultAvailable===true};
+     }catch(error){result.result={...result.result,targetReceipt:{state:'pending',status:null},stopConfirmed:false};report('a2a_cancel_target_delivery_pending',{actionId:action.id,targetActionId:result.result.targetActionId,error:error.message});}
+    }
+    const delivery=stageResult(record,result),status=delivery.status;
     recordEvent(action.id,delivery.status,{result:imageArtifactEventResult(delivery.result),error:delivery.error});
     if(status==='succeeded')await onSuccess(record.action,result);
    }
-   try{await flushEvents(record);}catch(error){report('a2a_progress_delivery_incomplete',{actionId:action.id,pendingEvents:record.events.length,error:error.message});}
+   if(!reconciling)try{await flushEvents(record);}catch(error){report('a2a_progress_delivery_incomplete',{actionId:action.id,pendingEvents:record.events.length,error:error.message});}
    if(!resumingResult&&connection.deviceId){
     // A model may have used most of its original lease. The authenticated ACK
     // renewal marks delivery of a durable completed result, not fake execution
     // progress, and leaves the original ACK timestamp intact.
     const renewal=await retry(()=>post(`/a2a/v1/actions/${encodeURIComponent(action.id)}/ack`,{agentId:'ziwei_user',receiptOnly:true,renewLease:true},{timeoutMs:ACTION_TRANSPORT_BUDGETS.ack}));
     if(renewal?.id!==action.id||!['acked',...terminal].includes(renewal?.status)|| (renewal.deviceId&&connection.deviceId&&renewal.deviceId!==connection.deviceId))throw new Error('Invalid result delivery ACK receipt');
-    if(terminal.has(renewal.status)){confirm(record,renewal.status);return {state:'confirmed',status:renewal.status};}
+    if(renewal.status==='expired'||renewal.reconciliationRequired===true){
+     if(!(renewal.acked_at||record.action.acked_at)||!definitive(readBlob(record,'result'))){report('a2a_expired_result_unconfirmed',{actionId:action.id,status:renewal.status});return {state:'unconfirmed',status:renewal.status};}
+     reconciling=true;
+    }else if(terminal.has(renewal.status)){confirm(record,renewal.status);return {state:'confirmed',status:renewal.status};}
     record.action={...record.action,expires_at:renewal.expires_at,expiresAt:renewal.expires_at};save(record);
    }
    const remainingLease=Date.parse(record.action.expires_at)-now();
-   if(!Number.isFinite(remainingLease)||remainingLease<ACTION_TRANSPORT_BUDGETS.result+30_000)throw new Error('Insufficient result delivery lease; durable result retained');
+   if(!reconciling&&(!Number.isFinite(remainingLease)||remainingLease<ACTION_TRANSPORT_BUDGETS.result+30_000))throw new Error('Insufficient result delivery lease; durable result retained');
    // One full upload per scheduling pass. After an ambiguous failure the next
    // pass ACKs again, which can observe a committed terminal result. This avoids
    // blindly sending a 10 MiB body repeatedly while its receipt is missing.
    const confirmation=await retry(()=>post(`/a2a/v1/actions/${encodeURIComponent(action.id)}/result`,readBlob(record,'result'),{timeoutMs:ACTION_TRANSPORT_BUDGETS.result}),{attempts:1});
-   if(confirmation?.id!==action.id||!terminal.has(confirmation.status))throw new Error('Invalid action result receipt; durable result retained');
+   if(confirmation?.id!==action.id||!terminal.has(confirmation.status)||confirmation.reconciliationRequired===true||reconciling&&confirmation.status==='expired')throw new Error('Invalid action result receipt; durable result retained');
    if(confirmation.deviceId&&connection.deviceId&&confirmation.deviceId!==connection.deviceId)throw new Error('Action result identity mismatch; durable result retained');
    confirm(record,confirmation.status);
    report('a2a_result',{actionId:action.id,status:confirmation.status,dispatcherStatus:record.dispatcherStatus});return {state:'confirmed',status:confirmation.status};
@@ -164,15 +219,17 @@ export function createActionDelivery({directory,identity,post,dispatch,retryDela
    throw error;
   }
  }
+ function execute(action){if(!action?.id)return Promise.reject(new TypeError('Action ID required'));try{validateTarget(action);}catch(error){return Promise.reject(error);}const actionBinding=binding(action,connection);if(active.has(action.id))return activeBindings.get(action.id)===actionBinding?active.get(action.id):Promise.reject(new Error(`Action delivery identity mismatch: ${action.id}`));const promise=Promise.resolve().then(()=>run(action)).finally(()=>{active.delete(action.id);activeBindings.delete(action.id);});active.set(action.id,promise);activeBindings.set(action.id,actionBinding);return promise;}
  return {
-  canDeliverWithoutExecution(action){try{return Boolean(action?.id&&read(action,{create:false})?.state==='result_pending');}catch{return false;}},
-  execute(action){if(!action?.id)return Promise.reject(new TypeError('Action ID required'));try{validateTarget(action);}catch(error){return Promise.reject(error);}const actionBinding=binding(action,connection);if(active.has(action.id))return activeBindings.get(action.id)===actionBinding?active.get(action.id):Promise.reject(new Error(`Action delivery identity mismatch: ${action.id}`));const promise=Promise.resolve().then(()=>run(action)).finally(()=>{active.delete(action.id);activeBindings.delete(action.id);});active.set(action.id,promise);activeBindings.set(action.id,actionBinding);return promise;},
+  canDeliverWithoutExecution(action){try{const record=action?.id&&read(action,{create:false});return Boolean(record&&(record.state==='result_pending'||definitive(resultBody(recoverResult(record.action)||{}))));}catch{return false;}},
+  execute,
+  recoverOriginal,
   recordEvent,
   recoverActions(){
    if(!fs.existsSync(directory))return [];
    const actions=[];
    for(const name of fs.readdirSync(directory).filter(n=>/^[a-f0-9]{64}\.json$/.test(n))){
-    try{const data=JSON.parse(fs.readFileSync(path.join(directory,name),'utf8'));if(!data.action?.id||name!==path.basename(fileFor(data.action.id)))throw new Error('Action delivery journal corrupt');const record=read(data.action,{create:false});if(record&&!['confirmed','blocked'].includes(record.state))actions.push(record.action);}
+    try{const data=JSON.parse(fs.readFileSync(path.join(directory,name),'utf8'));if(!data.action?.id||name!==path.basename(fileFor(data.action.id)))throw new Error('Action delivery journal corrupt');const record=read(data.action,{create:false});if(record?.state==='confirmed'&&(record.retainEvidence||record.serverStatus==='expired'))restoreCompleted(record);if(record&&!['confirmed','blocked'].includes(record.state))actions.push(record.action);}
     catch(error){report('a2a_journal_recovery_refused',{file:name,error:error.message});}
    }
    pruneConfirmed();return actions;

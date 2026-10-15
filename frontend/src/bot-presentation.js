@@ -1,10 +1,34 @@
 export function executionUncertain(run) {
   return run?.result?.code==='EXECUTION_UNCERTAIN' || run?.code==='EXECUTION_UNCERTAIN' || run?.result?.executionState==='uncertain' || run?.executionState==='uncertain' || run?.status==='uncertain' || (run?.status==='expired'&&Boolean(run?.acked_at));
 }
+export function processExitConfirmed(result) {
+  const proof=result?.processExit || result?.result?.processExit;
+  return !executionUncertain({result}) && !executionUncertain({result:result?.result}) && proof?.rootConfirmed===true && proof.treeConfirmed===true && proof.activeProcesses===0;
+}
+export function botRecoveryEvent(run) {
+  if(!run?.id || !executionUncertain(run))return null;
+  return [...(run.events || [])].reverse().find(event=>event.id && ['succeeded','failed'].includes(event.type) && !event.data?.result?.fixture && processExitConfirmed(event.data?.result)) || null;
+}
+export function botRecoveryDetail(run) {
+  return botRecoveryEvent(run)?'服务器已保存终态与进程退出证据，可核实并恢复原回执。':'服务器尚未收到可恢复的终态与进程退出证据。请检查原电脑上的客户端及执行进程；保留原执行，勿重复派发。';
+}
+export function botStopPresentation(bot,run=bot?.latest_run) {
+  if(['failed','cancelled'].includes(run?.status) && (run.result?.stopConfirmed===true || run.result?.result?.stopConfirmed===true) && !executionUncertain(run) && processExitConfirmed(run.result))return {confirmed:true,label:'原执行已停止，根进程与进程树退出均已确认。',tone:'success'};
+  if(['succeeded','failed','cancelled'].includes(run?.status) && !executionUncertain(run) && processExitConfirmed(run.result))return {confirmed:false,ended:true,label:'原执行已结束，根进程与进程树退出均已确认。',tone:'muted'};
+  if(run?.result?.code==='BOT_CANCELLED_BEFORE_START' && !run.acked_at)return {confirmed:false,label:'本次执行尚未启动，已取消派发。',tone:'muted'};
+  const stop=bot?.stop_action;
+  if(stop?.payload?.actionId===run?.id && stop?.id){
+    if(['pending','acked'].includes(stop.status))return {confirmed:false,label:'停止请求已下发，尚未确认原执行的进程树退出。',tone:'warning'};
+    return {confirmed:false,label:'停止请求已有回执，但原执行的退出证据尚未确认。请检查原电脑上的执行进程。',tone:'warning'};
+  }
+  const paused=bot?.control_state==='paused';
+  return {confirmed:false,label:run?`${paused?'Bot 已暂停；':''}服务器未返回本次执行的停止请求或退出确认。请检查原电脑上的执行进程。`:paused?'Bot 已暂停，当前没有可停止的执行。':'服务器尚未返回可核实的停止状态。',tone:run||!paused?'warning':'muted'};
+}
 export function botPresence(bot) {
   const run=bot?.latest_run;
   if(bot?.configuration_state==='uninitialized')return {label:bot.kind==='creator'?'Creator · 管理伙伴':'Bot 能力待初始化',tone:'muted',detail:bot.kind==='creator'?'Creator 沿用原管理身份与记忆。':'这是团队管理中的同一位员工；初始化只增加 Bot 配置，不创建第二位员工。'};
-  if (executionUncertain(run)) return {label:'执行待核实',tone:'warning',detail:'尚未确认执行结果或所属进程已退出；请核实原执行，勿重复派发。'};
+  if (executionUncertain(run)) return {label:'执行待核实',tone:'warning',detail:botRecoveryDetail(run)};
+  if (botStopPresentation(bot,run).confirmed)return {label:'原执行已停止',tone:'muted',detail:botStopPresentation(bot,run).label};
   if (run?.type==='hermes.bot.validate') {
     if(['pending','acked'].includes(run.status))return {label:'配置检查中',tone:'running',detail:'无模型配置检查正在等待本机回执。'};
     if(run.status==='failed')return {label:'配置检查失败',tone:'error',detail:run.error || '查看检查回执，修正配置后再检查。'};

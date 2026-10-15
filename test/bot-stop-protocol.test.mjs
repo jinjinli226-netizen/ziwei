@@ -1,0 +1,53 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {createRepository} from '../backend/repository.mjs';
+import {createManagementService} from '../backend/management.mjs';
+import {completeOwnedProfile} from '../test-support/owned-profile.mjs';
+import {ActionDispatcher} from '../src/daemon.mjs';
+import {createActionDelivery} from '../src/daemon-action-delivery.mjs';
+
+test('real repository and durable client recover a lost expired result through a new stop without running the task twice',async t=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'ziwei-stop-protocol-'));
+  const repo=createRepository({memory:true}),bots=createManagementService(repo).bots;
+  t.after(()=>{repo.db.close();fs.rmSync(root,{recursive:true,force:true});});
+  const slug='test-111',deviceId='protocol-pc';
+  repo.heartbeatDevice(slug,{deviceId,runtimes:{Hermes:{status:'available',version:'0.21.3',profiles:[{name:'default'}]}}});
+  let bot=bots.create(slug,{name:'Protocol recovery',sourceProfile:'default',targetDeviceId:deviceId,model:'gpt-6.1-sol',idempotencyKey:'create'});
+  completeOwnedProfile(repo,bot);
+  const validation=bots.validate(slug,bot.id,{expectedRevision:1,idempotencyKey:'validate'}).action;
+  repo.ackA2AAction(validation.id,{deviceId});
+  repo.resultA2AAction(validation.id,{deviceId,status:'succeeded',result:{botValidation:{valid:true,schemaVersion:1,employeeId:bot.id,revision:1}}});
+  bot=bots.control(slug,bot.id,{expectedRevision:1,expectedControlEpoch:1,operation:'activate'});
+  const message=repo.addConversationMessage(bot.main_conversation_id,{content:'Execute exactly once'}),original=repo.getA2AAction(message.execution.id);
+  const proof={platform:'win32',supervisor:'windows-job',launched:true,rootPid:5678,rootConfirmed:true,rootExitCode:null,treeConfirmed:true,activeProcesses:0,cancelled:true,failureCode:null};
+  let executeCount=0,loseResult=true;
+  const dispatcher=new ActionDispatcher({workspace:slug,deviceId,workdir:root,stateFile:path.join(root,'actions.json'),execute:async(_action,context)=>{
+    executeCount++;context.onSupervision({completionEvidence:Promise.resolve(proof),stop:async()=>proof});
+    return {status:'failed',code:'cancelled',error:'Verified cancellation',result:{processExit:proof}};
+  }});
+  const delivery=createActionDelivery({directory:path.join(root,'delivery'),identity:{apiBase:'https://example.invalid',workspace:slug,deviceId},retryDelays:[],dispatch:a=>dispatcher.dispatch(a),recoverResult:a=>dispatcher.completedResult(a),post:async(url,body)=>{
+    const id=decodeURIComponent(url.split('/')[4]),input={...body,deviceId};
+    if(url.endsWith('/ack'))return repo.ackA2AAction(id,input);
+    if(url.endsWith('/events'))return repo.recordA2AEvent(id,input);
+    if(loseResult&&id===original.id)throw new Error('Simulated result connection loss');
+    return repo.resultA2AAction(id,input);
+  }});
+  await assert.rejects(delivery.execute(original),/connection loss/);
+  repo.db.prepare("UPDATE a2a_actions SET status='expired',completed_at=?,expires_at=? WHERE id=?").run('2026-01-01T00:16:00.000Z','2026-01-01T00:15:00.000Z',original.id);
+  const current=bots.get(slug,bot.id);
+  const stopped=bots.control(slug,bot.id,{expectedRevision:current.revision,expectedControlEpoch:current.control_epoch,operation:'stop'});
+  assert.equal(stopped.stop_action.payload.actionId,original.id);loseResult=false;
+  await delivery.execute(stopped.stop_action);
+  const settled=repo.getA2AAction(original.id),cancel=repo.getA2AAction(stopped.stop_action.id);
+  assert.equal(settled.status,'failed');assert.equal(settled.result.stopConfirmed,true);
+  assert.equal(cancel.result.stopConfirmed,true);assert.equal(cancel.result.targetReceipt.status,'failed');
+  assert.equal(bots.get(slug,bot.id).control_state,'paused');
+  assert.equal(repo.db.prepare('SELECT active_action_id FROM hermes_bots WHERE employee_id=?').get(bot.id).active_action_id,null);
+  assert.equal(executeCount,1);assert.equal(repo.db.prepare("SELECT COUNT(*) n FROM a2a_actions WHERE type='conversation.execute'").get().n,1);
+  const count=repo.getConversation(bot.main_conversation_id).messages.length;
+  await delivery.execute(stopped.stop_action);
+  assert.equal(repo.getConversation(bot.main_conversation_id).messages.length,count);assert.equal(executeCount,1);
+});

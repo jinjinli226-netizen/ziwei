@@ -1,4 +1,4 @@
-import {executionUncertain,botPresence,capabilityPresentation} from './bot-presentation.js';
+import {executionUncertain,botPresence,capabilityPresentation,botStopPresentation,botRecoveryEvent} from './bot-presentation.js';
 export {executionUncertain,botPresence,capabilityPresentation};
 import {createBotRequestScope, botErrorMessage} from './bot-state.js';
 
@@ -77,7 +77,7 @@ export function createBotWorkbench({api,wrap=value=>value}) {
         apply(persisted);
       } else if(result?.id===id && result?.employee)apply(result);
       if(resetDraft){state.draft=botDraft(state.bot);state.conflict=false;}
-      state.notice=notice;
+      state.notice=typeof notice==='function'?notice(state.bot,result):notice;
       return true;
     }catch(error){
       if(scope.current(request)){
@@ -102,7 +102,16 @@ export function createBotWorkbench({api,wrap=value=>value}) {
   }
   async function control(operation) {
     const revision=state.bot?.revision,epoch=state.bot?.control_epoch;
-    return mutate((id,workspace)=>api.controlBot(id,{expectedRevision:revision,expectedControlEpoch:epoch,operation},workspace),operation==='stop'?'停止请求已受理。请刷新或查看原执行记录，等待真实停止确认。':operation==='pause'?'Bot 已暂停；已有执行仍需单独确认。':'启用请求已受理；运行与工具生效仍以实际回执为准。');
+    return mutate((id,workspace)=>api.controlBot(id,{expectedRevision:revision,expectedControlEpoch:epoch,operation},workspace),operation==='stop'?bot=>botStopPresentation(bot).label:operation==='pause'?'Bot 已暂停；已有执行仍需单独确认。':'启用请求已受理；运行与工具生效仍以实际回执为准。');
+  }
+  async function reconcile(run) {
+    if(state.busy || state.writeUnknown || !state.bot)return false;
+    const event=botRecoveryEvent(run);
+    if(!event || !state.runs.some(item=>item.id===run.id))return false;
+    const request=scope.begin('reconcile'),revision=state.bot?.revision,epoch=state.bot?.control_epoch;
+    const ok=await mutate((botId,slug)=>api.reconcileBotAction(botId,run.id,{eventId:event.id,expectedRevision:revision,expectedControlEpoch:epoch},slug),'服务端已核实并恢复原执行回执。');
+    if(scope.current(request)){const error=state.error;await refresh();if(scope.current(request)&&!ok)state.error=error;}
+    return ok;
   }
   async function validate() {
     const revision=state.bot?.revision,key=`bot-validate-${state.selectedId}-${revision}-${crypto.randomUUID()}`;
@@ -125,5 +134,5 @@ export function createBotWorkbench({api,wrap=value=>value}) {
   }
   async function recoverRoutine(){const pending=state.pendingOperation;if(pending?.kind==='routine_run')return runRoutine(pending.routineId,{recovering:true});return false;}
   function dispose(){workspaceGeneration++;scope.dispose();}
-  return {state,setWorkspace,select,list,refresh,initialize,save,control,validate,mutate,runRoutine,recoverRoutine,dispose};
+  return {state,setWorkspace,select,list,refresh,initialize,save,control,reconcile,validate,mutate,runRoutine,recoverRoutine,dispose};
 }

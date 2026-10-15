@@ -95,8 +95,9 @@ test('late reliable stop evidence releases quarantine durably without turning th
   stopped.resolve(evidence(true)); await delay(20);
   assert.equal(dispatcher.quarantined, false);
   const saved = JSON.parse(fs.readFileSync(f.stateFile));
-  assert.equal(saved.completed.length, 0); assert.equal(saved.started[0].quarantine.stopConfirmed, true);
-  assert.equal((await dispatcher.dispatch(action('late'))).code, 'EXECUTION_UNCERTAIN');
+  assert.equal(saved.completed.length, 1); assert.equal(saved.started[0].quarantine.stopConfirmed, true);
+  assert.equal(saved.completed[0].result.status, 'failed'); assert.equal(saved.completed[0].result.result.processExit.treeConfirmed, true);
+  const duplicate = await dispatcher.dispatch(action('late')); assert.equal(duplicate.status, 'duplicate'); assert.equal(duplicate.originalStatus, 'failed');
   assert.equal((await dispatcher.dispatch(action('new'))).status, 'succeeded');
   const recovered = new ActionDispatcher({ ...f, execute: async () => ({}) }); assert.equal(recovered.quarantined, false);
 });
@@ -190,4 +191,49 @@ test('cancel control receipt describes only the accepted request while target sh
   assert.equal(response.status,'succeeded');assert.equal(response.result.cancellationRequested,true);assert.equal(response.result.stopConfirmed,false);
   assert.notEqual(response.result.cancelled,true);assert.equal(events.includes('action.cancelled'),false);
   assert.equal((await running).code,'EXECUTION_UNCERTAIN');stopped.resolve(evidence(true));await delay(10);
+});
+
+test('a missing controller cannot claim a target stopped after an uncertain restart',async t=>{
+ const f=fixture(t),stopped=deferred();
+ const first=new ActionDispatcher({...f,stopGraceMs:10,execute:async(_a,context)=>{
+  context.onSupervision({completionEvidence:stopped.promise,stop:()=>stopped.promise});
+  await new Promise(resolve=>context.signal.addEventListener('abort',resolve,{once:true}));return {};
+ }});
+ await first.dispatch(action('unknown-restart',{idleTimeoutMs:100}));
+ const recovered=new ActionDispatcher({...f,execute:async()=>{throw new Error('no execution');}});
+ const response=await recovered.dispatch({id:'unknown-stop',type:'action.cancel',payload:{actionId:'unknown-restart'}});
+ assert.equal(response.status,'failed');assert.equal(response.code,'CANCEL_TARGET_UNCONFIRMED');
+ assert.equal(response.result.stopConfirmed,false);assert.equal(response.result.cancellationRequested,false);
+ assert.equal(recovered.quarantined,true);assert.match(response.result.message,/无法确认/);
+ stopped.resolve(evidence(true));await delay(10);
+});
+
+test('cancellation can stop a quarantined runtime after its controller has been removed',async()=>{
+ const stopped=deferred();let stops=0;
+ const dispatcher=new ActionDispatcher({stopGraceMs:10,execute:async(_a,context)=>{
+  context.onSupervision({completionEvidence:stopped.promise,stop:async()=>{stops++;stopped.resolve({...evidence(true),cancelled:true,rootExitCode:null});return stopped.promise;}});
+  return {};
+ }});
+ assert.equal((await dispatcher.dispatch(action('root-unknown'))).code,'EXECUTION_UNCERTAIN');
+ assert.equal(dispatcher.quarantined,true);
+ const response=await dispatcher.dispatch({id:'root-stop',type:'action.cancel',payload:{actionId:'root-unknown'}});
+ assert.equal(response.result.cancellationRequested,true);await delay(10);
+ assert.equal(stops,1);assert.equal(dispatcher.quarantined,false);
+ assert.equal(dispatcher.completedResult(action('root-unknown')).originalStatus,'failed');
+});
+
+test('a new cancel can retry a settled unconfirmed stop without executing the original action again',async()=>{
+ let stops=0,executions=0;
+ const dispatcher=new ActionDispatcher({stopGraceMs:10,execute:async(_a,context)=>{
+  executions++;context.onSupervision({completionEvidence:new Promise(()=>{}),stop:async()=>{
+   stops++;return {...evidence(stops>1),rootExitCode:null,cancelled:true};
+  }});
+  await new Promise(resolve=>context.signal.addEventListener('abort',resolve,{once:true}));return {};
+ }});
+ assert.equal((await dispatcher.dispatch(action('stop-retry',{idleTimeoutMs:100}))).code,'EXECUTION_UNCERTAIN');
+ assert.equal(stops,1);assert.equal(dispatcher.quarantined,true);
+ const response=await dispatcher.dispatch({id:'retry-stop-control',type:'action.cancel',payload:{actionId:'stop-retry'}});
+ assert.equal(response.result.cancellationRequested,true);await delay(10);
+ assert.equal(stops,2);assert.equal(executions,1);assert.equal(dispatcher.quarantined,false);
+ assert.equal(dispatcher.completedResult(action('stop-retry')).originalStatus,'failed');
 });

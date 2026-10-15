@@ -36,6 +36,35 @@ test('stop acceptance is shown as pending confirmation and does not invent cance
   const ui=fixture({controlBot:async()=>({...bot(),control_state:'paused',latest_run:{id:'run',status:'acked'}})});
   await ui.setWorkspace('qa','a');await ui.control('stop');
   assert.match(ui.state.notice,/停止.*确认|确认.*停止/);assert.notEqual(ui.state.bot.latest_run?.status,'cancelled');
+  assert.doesNotMatch(ui.state.notice,/已受理|正在核对/);
+});
+
+const recoveryRun=()=>({id:'original',type:'hermes.bot.validate',status:'expired',acked_at:'2026-10-14T00:00:00Z',events:[{id:'stored-terminal',type:'succeeded',data:{result:{validated:true,processExit:{rootConfirmed:true,treeConfirmed:true,activeProcesses:0}}}}]});
+test('receipt recovery uses only the stored event identity and current revision, then refreshes without dispatching work',async()=>{
+  let current={...bot(),control_epoch:3,latest_run:recoveryRun()},runs=[current.latest_run];const calls=[];
+  const ui=fixture({bot:async()=>current,botRuns:async()=>({runs}),reconcileBotAction:async(id,actionId,body,workspace)=>{calls.push({id,actionId,body,workspace});current={...current,validation:{status:'succeeded'},latest_run:{...runs[0],status:'succeeded'}};runs=[current.latest_run];return current;}});
+  await ui.setWorkspace('qa','a');ui.state.draft.employee.name='Keep draft';
+  assert.equal(await ui.reconcile(ui.state.runs[0]),true);
+  assert.deepEqual(calls,[{id:'a',actionId:'original',body:{eventId:'stored-terminal',expectedRevision:1,expectedControlEpoch:3},workspace:'qa'}]);
+  assert.equal(ui.state.runs[0].status,'succeeded');assert.equal(ui.state.bot.validation.status,'succeeded');assert.equal(ui.state.draft.employee.name,'Keep draft');assert.match(ui.state.notice,/服务端已核实并恢复/);
+});
+
+test('missing recovery proof never submits an invented terminal result',async()=>{
+  let calls=0;const uncertain={...recoveryRun(),events:[]};
+  const ui=fixture({botRuns:async()=>({runs:[uncertain]}),reconcileBotAction:async()=>{calls++;}});
+  await ui.setWorkspace('qa','a');assert.equal(await ui.reconcile(uncertain),false);assert.equal(calls,0);
+});
+
+test('recovery conflict refreshes current state and preserves error and draft without retrying',async()=>{
+  let current={...bot(),control_epoch:3},calls=0;
+  const ui=fixture({bot:async()=>current,botRuns:async()=>({runs:[recoveryRun()]}),reconcileBotAction:async()=>{calls++;current={...current,control_epoch:4};throw Object.assign(new Error('控制状态已变化'),{status:409,code:'BOT_CONTROL_CONFLICT'});}});
+  await ui.setWorkspace('qa','a');ui.state.draft.employee.name='Keep draft';
+  assert.equal(await ui.reconcile(ui.state.runs[0]),false);assert.equal(calls,1);assert.equal(ui.state.bot.control_epoch,4);assert.match(ui.state.error,/控制状态已变化/);assert.equal(ui.state.draft.employee.name,'Keep draft');
+});
+
+test('a delayed receipt recovery cannot change another selected Bot',async()=>{
+  const delayed=deferred();const ui=fixture({bot:async id=>bot(id),botRuns:async()=>({runs:[recoveryRun()]}),reconcileBotAction:()=>delayed.promise});
+  await ui.setWorkspace('qa','a');const recovery=ui.reconcile(ui.state.runs[0]);await ui.select('b');delayed.resolve(bot('a'));assert.equal(await recovery,false);assert.equal(ui.state.bot.id,'b');assert.equal(ui.state.notice,'');
 });
 test('Bot status distinguishes execution uncertainty from ordinary failure and device availability',()=>{
   assert.match(module.botPresence({...bot(),latest_run:{status:'failed',result:{code:'EXECUTION_UNCERTAIN'}}}).label,/待核实/);

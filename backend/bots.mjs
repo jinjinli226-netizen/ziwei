@@ -96,6 +96,11 @@ export function createBotService(repo, management) {
     return {schemaVersion:1,workspace:slug,deviceId:input.deviceId || null,runtime,capabilities:BOT_CAPABILITY_CATALOG.map(([id,label])=>({id,label,status:!integrated.has(id)?'not_integrated':(!runtime?'unknown':(!runtime.available?'requires_dependency':'requires_configuration')),configurable:integrated.has(id),reason:!integrated.has(id)?'原生能力尚未接入紫薇控制与结果链；不能由此入口启用':(!runtime?'目标电脑尚未提供 Hermes 发现证据':(!runtime.available?runtime.issues.map(item=>item.message).join('；'):'需保存配置并在目标电脑验证；执行成功由实际回执确认')),evidence:[...(runtime?.version?[`device_heartbeat:${runtime.version}`]:[]),'ziwei.bot.schema:1']}))};
   };
   const runs = (slug,id,context={}) => { const {ws}=resolve(slug,id,context); return db.prepare('SELECT id,payload_json FROM a2a_actions WHERE workspace_id=? ORDER BY created_at DESC,rowid DESC').all(ws.id).filter(row=>parse(row.payload_json)?.hermesBot?.employeeId===id).slice(0,100).map(row=>repo.getA2AAction(row.id,{workspaceSlug:slug})); };
+  const requestStop = (slug, action, prefix='bot-stop') => {
+    const prior = db.prepare("SELECT * FROM a2a_actions WHERE workspace_id=? AND type='action.cancel' ORDER BY rowid DESC").all(action.workspace_id || workspace(slug).id).find(row=>parse(row.payload_json)?.actionId===action.id);
+    if (prior && ['pending','acked'].includes(prior.status) && (!prior.expires_at || Date.parse(prior.expires_at)>Date.now())) return repo.getA2AAction(prior.id,{workspaceSlug:slug});
+    return repo.createA2AAction(slug,{type:'action.cancel',dedupeKey:prior?`${prefix}:${action.id}:retry:${prior.id}`:`${prefix}:${action.id}`,payload:{actionId:action.id,deviceId:action.payload.deviceId}});
+  };
   const get = (slug,id,context={}) => {
     const {context:actor}=scope(slug,context), existingEmployee=management.employee(slug,id,actor);
     if(actor.deviceScope && existingEmployee.target_device_id!==actor.deviceScope)throw botFailure('BOT_NOT_FOUND','Bot 不在当前电脑授权范围',404);
@@ -106,7 +111,7 @@ export function createBotService(repo, management) {
       return {id,employee_id:id,workspace:slug,employee:existingEmployee,configuration_state:'uninitialized',kind:isCreator?'creator':'employee',config:normalizeBotConfig(),revision:0,control_epoch:0,control_state:existingEmployee.status==='paused'?'paused':'draft',main_conversation_id:conversation?.id || null,scheduler_authority:'ziwei',validation:{status:'not_checked',action_id:null,revision:null,error:null},latest_run:null,capabilities:capabilities(slug,{deviceId:existingEmployee.target_device_id},actor).capabilities,effect:{savedRevision:0,validatedRevision:null,scope:'not_initialized',pendingReason:isCreator?'Creator 保持原管理身份；普通岗位 Bot 初始化不适用':'从同一员工记录初始化 Bot 能力；不会新建员工或复制旧记忆'}};
     }
     const {row,employee}=resolve(slug,id,context), validationAction=row.validation_action_id?repo.getA2AAction(row.validation_action_id,{workspaceSlug:slug}):null;
-    const validationStatus=!validationAction?'not_checked':validationAction.payload.hermesBot.revision!==row.revision?'stale':validationAction.status==='succeeded'&&row.validated_revision===row.revision?'succeeded':['failed','expired','succeeded'].includes(validationAction.status)?'failed':'pending';
+    const validationStatus=!validationAction?'not_checked':validationAction.payload.hermesBot.revision!==row.revision?'stale':validationAction.status==='succeeded'&&row.validated_revision===row.revision?'succeeded':validationAction.status==='succeeded'&&validationAction.payload.hermesBot.controlEpoch!==row.control_epoch?'stale':['failed','expired','succeeded'].includes(validationAction.status)?'failed':'pending';
     const configured=validationStatus==='succeeded', botRuns=runs(slug,id,context),nativeResources={};
     for(const action of botRuns){const receipt=action.result?.nativeOperation || action.result?.result?.nativeOperation;if(receipt?.revision===row.revision&&!nativeResources[receipt.resource])nativeResources[receipt.resource]={...receipt,actionId:action.id,actionStatus:action.status,completedAt:action.completed_at};}
     const botCapabilities=capabilities(slug,{deviceId:employee.target_device_id},context).capabilities.map(item=>({...item,...(!repo.serverCodeRollout && configured && item.status==='requires_configuration' && ['bot_identity','persistent_chat','profile_memory','model_provider','routines','observability'].includes(item.id)?{status:'available',reason:'本版本已通过目标电脑原生配置检查；模型运行结果仍以实际执行回执为准',evidence:[...item.evidence,`validation:${row.validation_action_id}:revision:${row.revision}`]}:{})}));
@@ -115,6 +120,14 @@ export function createBotService(repo, management) {
   const routine = (slug,id,autoId,context={}) => {const {ws}=resolve(slug,id,context);const binding=db.prepare('SELECT * FROM bot_routines WHERE automation_id=? AND employee_id=? AND workspace_id=?').get(autoId,id,ws.id);if(!binding)throw botFailure('ROUTINE_NOT_FOUND','Routine 不属于当前 Bot',404);return {...repo.getAutomation(slug,autoId),...binding,last_result:repo.listAutomationRuns(autoId)[0] || null};};
   return guardBotService(repo,{
     capabilities,get,runs,
+    reconcile(slug,id,actionId,input={},context={}) { return atomic(()=>{
+      if (Object.keys(input).some(key=>!['eventId','expectedRevision','expectedControlEpoch'].includes(key))) throw botFailure('BOT_RECOVERY_INPUT_INVALID','核实只接受原服务器事件标识与当前配置版本，不接受自填结果或退出证明',400);
+      const {row}=resolve(slug,id,context);revision(row,input);
+      if(input.expectedControlEpoch!==row.control_epoch)throw botFailure('BOT_CONTROL_CONFLICT','expectedControlEpoch 已变化；请刷新后再核实原执行');
+      management.action(slug,actionId,context);
+      const action=repo.reconcileBotActionFromEvent(actionId,{eventId:input.eventId,workspaceSlug:slug,employeeId:id});
+      return {...get(slug,id,context),reconciliation:{actionId:action.id,eventId:input.eventId,status:action.status,duplicate:Boolean(action.duplicate)}};
+    });},
     native(slug,id,input={},context={}) {return {action:idempotent(slug,`native:${id}`,input,context,()=>{
       if(Object.keys(input).some(key=>!['expectedRevision','expectedControlEpoch','idempotencyKey','resource','operation','input','workspace'].includes(key)))throw botFailure('BOT_NATIVE_INPUT_INVALID','原生请求包含未知字段',400);
       if(input.workspace&&input.workspace!==slug)throw botFailure('BOT_WORKSPACE_CONFLICT','原生请求工作区不一致',403);
@@ -249,11 +262,11 @@ export function createBotService(repo, management) {
         db.prepare("UPDATE employees SET status='paused' WHERE id=?").run(id);
         const active=row.active_action_id?repo.getA2AAction(row.active_action_id,{workspaceSlug:slug}):null;
         if(active?.status==='pending')repo.resultA2AAction(active.id,{status:'failed',error:'Bot 已暂停，未启动本次执行',result:{code:'BOT_CANCELLED_BEFORE_START',stopConfirmed:true}});
-        else if(input.operation==='stop' && active?.status==='acked') {
-          const stop=repo.createA2AAction(slug,{type:'action.cancel',dedupeKey:`bot-stop:${active.id}`,payload:{actionId:active.id,deviceId:active.payload.deviceId}});
+        else if(input.operation==='stop' && active && (active.status==='acked' || botUncertain(active.result) || active.status==='expired' && active.acked_at)) {
+          const stop=requestStop(slug,active);
           db.prepare('UPDATE hermes_bots SET stop_action_id=? WHERE employee_id=?').run(stop.id,id);
         }
-        if(input.operation==='stop')for(const descendant of repo.listA2AActions(slug,{status:'all'}).filter(action=>action.payload.collaboration?.sourceEmployeeId===id&&['pending','acked'].includes(action.status))){if(descendant.status==='pending')repo.resultA2AAction(descendant.id,{status:'failed',error:'来源 Bot 已停止，协作未启动',result:{stopConfirmed:true}});else repo.createA2AAction(slug,{type:'action.cancel',dedupeKey:`bot-stop-descendant:${descendant.id}`,payload:{actionId:descendant.id,deviceId:descendant.payload.deviceId}});}
+        if(input.operation==='stop')for(const descendant of repo.listA2AActions(slug,{status:'all'}).filter(action=>action.payload.collaboration?.sourceEmployeeId===id&&(['pending','acked'].includes(action.status)||botUncertain(action.result)||action.status==='expired'&&action.acked_at))){if(descendant.status==='pending')repo.resultA2AAction(descendant.id,{status:'failed',error:'来源 Bot 已停止，协作未启动',result:{stopConfirmed:true}});else requestStop(slug,descendant,'bot-stop-descendant');}
       }
       return get(slug,id,context);
     });},
