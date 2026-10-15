@@ -1,5 +1,15 @@
 # 紫薇项目 HandOff
 
+## 2026-10-16 最新接手状态
+
+**公司台式 Hermes 0.22 创建 Bot 的启动器兼容修复已发布。** 源码 `528361d80bf7ac3976bff621cb9d5ac044129cb7` 先推 GitHub，再于 **00:24:43（Asia/Shanghai）** 更新官方下载包；新 build `c3ec583e44396579a8d4bd601061a62de69e184931adc22691917021fd1c3c48`，包 SHA-256 `0448b7baf714159007578f69601557de05ae5baac9539a44219d9c289bd304ca`。主站/API 仍为 `ead2ac9281c47624929f433bc190b44e2659498c`。
+
+这次失败已定位在原生启动器识别：公司台式实际上已运行 `a996e94…` 客户端，Hermes 0.22.0 的 `--version` 成功；不能再沿用下方历史“CLI 探测超时”解释。新版本支持官方 distlib EXE 的 `-I` 和原生依赖初始化，修复 PE 中伪 shebang 的误命中，并保留独立 Profile/HOME。
+
+73 项相关测试已验证，官方 v0.22.0 源码与 distlib 模板的实际 JS 创建、重复创建和配置检查通过。该原生验证在 Mac Python 离线执行，PM 依赖选择有测试替代，**公司 Windows 升级与实机创建尚待回执**。不将样本测试称为 Windows 真机成功。完整范围、发布及回退见[专项记录](docs/operations/2026-10-16-hermes-windows-launcher.md)。
+
+下一步在公司台式 PowerShell 运行 `irm https://qzelynth.top/downloads/cli/update-windows.ps1 | iex`，核对新 build，再重试原员工 `employee_6479482e-0842-41ed-98b8-3dd944228a4c` 的创建；不重复创建员工、不覆盖原 HOME。下方 10 月 15 日各设备状态为历史快照，其他未完成事项保留。
+
 ## 2026-10-15 最新接手状态
 
 **换电脑接手先读本节。** 下方按日期保留历史记录，其中“V2 未上线／方案中”描述的是当时状态，不代表当前生产。设备状态以各条标注的 2026-10-15 快照为准（Asia/Shanghai），接手后应重新查询。本文记录可复核的项目进度，不包含完整 Codex 聊天。
