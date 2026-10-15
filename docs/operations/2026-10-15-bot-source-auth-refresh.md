@@ -26,3 +26,13 @@ Bot 的独立 Profile/HOME 原本引用同一份来源模型登录。早期预�
 修复在 Windows 执行客户端。先推 GitHub，随后发布官方客户端包，主站/API/数据库无需变更。设备必须从终端执行 `ziwei_user update` 并核对新 build，之后再进行真实 Bot 运行验收；本机无网络回归不能代替该验收。
 
 如果此前被阻断的刷新已经消费旧 token，升级后仍可能收到原生 `refresh_token_reused` 或 `invalid_grant`。这时需要在运行电脑重新登录对应来源 Profile 的 Codex 订阅；不能回灌旧认证备份或不断复用失效 token。没有证据时不要求用户重建员工或删除 HOME。
+
+## 发布回执
+
+2026-10-15 **17:51:03（Asia/Shanghai）** 已完成客户端包发布。源码 `b78889c8696931e64fb255605845f8c680cb2314` 已先推 GitHub 并核对远端；离线安装闭包检查及打包构建通过。
+
+- 客户端 build：`63c8cd609af93163402f0aa896cd353c7f84f23b7af9d9c7f254b5ea9dc3bed6`。
+- 官方包 SHA-256：`609a7cf4948737ff7f2c68bbb7736d7debd13f4997a1c18c89ba044e2a6d21ec`，1,049,435 字节。
+- 官方包和 `release.json` 均经公网回读核对；前一包与元数据备份于 `/opt/ziwei-staging/backups/bot-auth-client-20261015T095103Z`。
+- 主站/API 仍为 `ead2ac9281c47624929f433bc190b44e2659498c`。三服务/PID、主站链接、Nginx 配置及数据库文件身份均保持；没有重启 API 或改业务数据。
+- Windows 运行设备升级到本 build 后的真实 Bot 调用尚待完成，不能把本次发布视为真实订阅恢复已验收。
