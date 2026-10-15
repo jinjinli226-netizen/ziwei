@@ -1,11 +1,14 @@
 """Actual installed Hermes layout/resolver; temporary roots and no model/network."""
 import importlib.util
+import base64
+import hashlib
 import json
 import os
 import subprocess
 import sys
 from pathlib import Path
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -73,38 +76,106 @@ class OwnedProfile(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError,'BOT_PROFILE_'):self.module.provision(self.request())
         self.assertEqual((home/'config.yaml').read_text(),'USER DATA')
 
-    def test_owned_bootstrap_refuses_both_native_auth_write_paths(self):
-        request=self.request();result=self.module.provision(request)
-        with (self.root/'.env').open('a') as file:file.write('HTTP_PROXY=http://127.0.0.1:19001\nHTTPS_PROXY=http://127.0.0.1:19001\n')
+    def tokens(self,label,fresh=False):
+        claims=json.dumps({'sub':'fixture-'+label,'exp':4102444800 if fresh else 1},separators=(',',':')).encode()
+        access='eyJhbGciOiJub25lIn0.'+base64.urlsafe_b64encode(claims).decode().rstrip('=')+'.fixture-signature'
+        return {'access_token':access,'refresh_token':'fixture-'+label+('-rotated' if fresh else '-expired')}
+
+    def seed_auth(self,label='shared',source=None):
+        source=source or self.root
+        old,fresh=self.tokens(label),self.tokens(label,True)
+        (source/'auth.json').write_text(json.dumps({'version':1,'providers':{'openai-codex':{'tokens':old,'auth_mode':'chatgpt'}}}))
+        (source/'.env').write_text('HTTP_PROXY=http://127.0.0.1:19001\nHTTPS_PROXY=http://127.0.0.1:19001\n')
+        return old,fresh
+
+    def auth_child(self,result,mode,old,fresh,source=None,**extra):
+        source=source or self.root
+        managed=self.root/'fixture-managed';managed.mkdir(exist_ok=True)
+        env={key:value for key,value in os.environ.items() if key in {'PATH','SYSTEMROOT','SystemRoot','WINDIR','TEMP','TMP','PYTHONPATH'}}
+        env.update({'HERMES_HOME':str(source),'HERMES_MANAGED_DIR':str(managed),
+                    'HOME':str(self.root/'empty-user'),'USERPROFILE':str(self.root/'empty-user'),'CODEX_HOME':str(self.root/'empty-codex'),
+                    'ZIWEI_CREATOR_HOME':result['home'],'ZIWEI_CREATOR_SOURCE_HOME':str(source),
+                    'ZIWEI_CREATOR_KEY':result['ownershipId'],'ZIWEI_CREATOR_WORKSPACE':'fixture',
+                    'ZIWEI_CREATOR_EMPLOYEE_ID':result['employeeId'],'ZIWEI_CREATOR_PROFILE':result['profile'],
+                    'ZIWEI_INSTANCE_KIND':'hermes-bot','ZIWEI_BOT_PROFILE_MODE':'owned_profile','PYTHONDONTWRITEBYTECODE':'1'})
         bootstrap=Path(__file__).resolve().parents[2]/'src/hermes-mcp-bootstrap.py'
-        env={**os.environ,'ZIWEI_CREATOR_HOME':result['home'],'ZIWEI_CREATOR_SOURCE_HOME':str(self.root),
-             'ZIWEI_CREATOR_KEY':'owner-bot-first','ZIWEI_CREATOR_WORKSPACE':'fixture',
-             'ZIWEI_CREATOR_EMPLOYEE_ID':'employee_bot-first','ZIWEI_CREATOR_PROFILE':'bot-first',
-             'ZIWEI_INSTANCE_KIND':'hermes-bot','ZIWEI_BOT_PROFILE_MODE':'owned_profile','PYTHONDONTWRITEBYTECODE':'1'}
-        program='''import importlib.util,sys,json,os
-from pathlib import Path
-spec=importlib.util.spec_from_file_location('bootstrap',sys.argv[1])
-bootstrap=importlib.util.module_from_spec(spec);spec.loader.exec_module(bootstrap)
-current=bootstrap.binding(Path(sys.executable).with_name('hermes.exe'))
-bootstrap.prepare_creator_home(current)
-assert os.environ.get('HTTP_PROXY')=='http://127.0.0.1:19001'
-assert os.environ.get('HTTPS_PROXY')=='http://127.0.0.1:19001'
-from hermes_cli import auth,auth_codex
-assert auth._auth_file_path()==Path(os.environ['ZIWEI_CREATOR_SOURCE_HOME'])/'auth.json'
-blocked=[]
-for name,write in [('auth',auth._save_auth_store),('codex',auth_codex._save_codex_tokens)]:
- try:write({})
- except bootstrap.UnsupportedNativeHermes:blocked.append(name)
-assert blocked==['auth','codex']
-print(json.dumps({'blocked':blocked}))
-'''
+        request={'mode':mode,'oldTokens':old,'freshTokens':fresh,'journal':str(self.root/'refresh-journal'),**extra}
+        return subprocess.Popen([sys.executable,str(Path(__file__).with_name('hermes-source-auth-child.py')),str(bootstrap),json.dumps(request)],env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+
+    def auth_result(self,process):
+        try:stdout,stderr=process.communicate(timeout=30)
+        except subprocess.TimeoutExpired:
+            process.kill();process.communicate();self.fail('Synthetic native auth child timed out')
+        self.assertEqual(process.returncode,0,stderr)
+        return json.loads(stdout)
+
+    def test_owned_bootstrap_preserves_native_source_save_paths_and_isolated_bot_state(self):
+        result=self.module.provision(self.request());old,fresh=self.seed_auth()
+        config=(Path(result['home'])/'config.yaml').read_bytes();env=(self.root/'.env').read_bytes()
+        proof=self.auth_result(self.auth_child(result,'write',old,fresh))
+        self.assertEqual(proof['refreshCalls'],0)
+        self.assertEqual(len(proof['atomicWritePaths']),2)
+        self.assertEqual((self.root/'.env').read_bytes(),env)
+        self.assertEqual((Path(result['home'])/'config.yaml').read_bytes(),config)
+        self.assertFalse((Path(result['home'])/'auth.json').exists())
+
+    def test_two_bots_rotate_one_native_store_once_and_reuse_rotated_pair(self):
+        results=[self.module.provision(self.request(name)) for name in ['bot-first','bot-second']]
+        old,fresh=self.seed_auth();go=self.root/'go';ready=[self.root/('ready-'+str(index)) for index in range(2)]
+        configs=[(Path(result['home'])/'config.yaml').read_bytes() for result in results]
+        children=[self.auth_child(result,'stale',old,fresh,ready=str(ready[index]),go=str(go)) for index,result in enumerate(results)]
+        try:
+            deadline=time.monotonic()+20
+            while not all(marker.exists() for marker in ready):
+                self.assertTrue(all(process.poll() is None for process in children),'Synthetic child exited before refresh barrier')
+                self.assertLess(time.monotonic(),deadline,'Synthetic refresh barrier timed out')
+                time.sleep(0.02)
+            go.touch()
+            proofs=[self.auth_result(process) for process in children]
+        finally:
+            for process in children:
+                if process.poll() is None:process.kill();process.communicate()
+        self.assertEqual(sum(proof['refreshCalls'] for proof in proofs),1)
+        self.assertEqual(len({proof['source'] for proof in proofs}),1)
+        self.assertEqual(len({proof['home'] for proof in proofs}),2)
+        again=self.auth_result(self.auth_child(results[1],'resolve',old,fresh))
+        self.assertEqual(again['refreshCalls'],0)
+        self.assertEqual((self.root/'refresh-journal').read_text().splitlines(),['refresh'])
+        self.assertEqual(json.loads((self.root/'auth.json').read_text())['providers']['openai-codex']['tokens'],fresh)
+        for index,result in enumerate(results):
+            home=Path(result['home'])
+            self.assertEqual((home/'config.yaml').read_bytes(),configs[index])
+            self.assertEqual((home/'memories/MEMORY.md').read_text(),'MEMORY '+result['profile'])
+            import sqlite3
+            with sqlite3.connect(home/'state.db') as database:self.assertEqual(database.execute('SELECT name FROM fixture_identity').fetchall(),[(result['profile'],)])
+            self.assertFalse((home/'auth.json').exists())
+
+    def test_different_source_stores_never_reuse_another_sources_rotated_credentials(self):
+        first=self.module.provision(self.request());old,fresh=self.seed_auth('source-one')
+        self.auth_result(self.auth_child(first,'resolve',old,fresh))
+        first_auth=(self.root/'auth.json').read_bytes()
+        other=self.root/'other-source';other.mkdir();(other/'config.yaml').write_text('model:\n  provider: openai-codex\n  default: fixture\n')
+        request=self.request('bot-other');request['metadata']['sourceHome']=str(other.resolve())
+        with patch.dict(os.environ,{'HERMES_HOME':str(other)}):second=self.module.provision(request)
+        other_old,other_fresh=self.seed_auth('source-two',other)
+        proof=self.auth_result(self.auth_child(second,'resolve',other_old,other_fresh,source=other))
+        self.assertEqual(proof['refreshCalls'],1)
+        self.assertEqual(proof['accessDigest'],hashlib.sha256(other_fresh['access_token'].encode()).hexdigest())
+        self.assertNotEqual(proof['accessDigest'],hashlib.sha256(fresh['access_token'].encode()).hexdigest())
+        self.assertEqual((self.root/'auth.json').read_bytes(),first_auth)
+        self.assertEqual(json.loads((other/'auth.json').read_text())['providers']['openai-codex']['tokens'],other_fresh)
+
+    def test_invalid_grant_preserves_native_auth_error_and_original_source_store(self):
+        result=self.module.provision(self.request());old,fresh=self.seed_auth('invalid-grant')
         before=(self.root/'auth.json').read_bytes()
-        env_before=(self.root/'.env').read_bytes()
-        completed=subprocess.run([sys.executable,'-c',program,str(bootstrap)],env=env,capture_output=True,text=True,timeout=30)
-        self.assertEqual(completed.returncode,0,completed.stderr)
-        self.assertEqual(json.loads(completed.stdout)['blocked'],['auth','codex'])
+        proof=self.auth_result(self.auth_child(result,'invalid_grant',old,fresh))
+        self.assertEqual(proof['failure'],{'code':'invalid_grant','relogin_required':True})
+        self.assertFalse(proof['credentialsResolved'])
+        self.assertIsNone(proof['accessDigest'])
+        self.assertEqual(proof['refreshCalls'],1)
+        self.assertEqual(proof['externalLoginProbeCalls'],1)
+        self.assertEqual(proof['atomicWritePaths'],[])
         self.assertEqual((self.root/'auth.json').read_bytes(),before)
-        self.assertEqual((self.root/'.env').read_bytes(),env_before)
         self.assertFalse((Path(result['home'])/'auth.json').exists())
 
 if __name__=='__main__':unittest.main(verbosity=2)

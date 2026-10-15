@@ -72,7 +72,7 @@ try{
   const native=spawnSupervisedRuntime({command:path.join(installed,'venv/Scripts/python.exe'),args:[path.resolve('test/fixtures/hermes-owned-profile.py')],cwd:root,env:process.env});
   let nativeOutput='';native.child.on('error',()=>{});for(const stream of [native.child.stdout,native.child.stderr])stream.on('data',data=>{nativeOutput+=String(data);});native.child.stdin.end();
   const timer=setTimeout(()=>void native.stop(),60000);let nativeExit;try{nativeExit=await native.completionEvidence;}finally{clearTimeout(timer);}
-  fs.writeFileSync(path.join(root,'native-fixtures.log'),nativeOutput);assert.equal(successfulProfileExit(nativeExit),true,nativeOutput);assert.match(nativeOutput,/Ran 6 tests/);assert.match(nativeOutput,/\nOK\s*$/);
+  fs.writeFileSync(path.join(root,'native-fixtures.log'),nativeOutput);assert.equal(successfulProfileExit(nativeExit),true,nativeOutput);const nativeTestCount=Number(nativeOutput.match(/Ran (\d+) tests?\b/)?.[1]);assert.ok(nativeTestCount>=9,'Expected at least 9 native owned-profile/auth fixtures; got '+nativeTestCount);assert.match(nativeOutput,/\nOK\s*$/);
   executor=makeExecutor();const created=[];
   for(const role of ['a','b']){
     let bot=bots.create('test-111',{name:'Owned '+role,sourceProfile:'default',targetDeviceId:device.deviceId,model:'fixture-'+role,idempotencyKey:'owned-'+role,config:{maxTurns:4,toolsets:['memory'],permissions:{mode:'execute',management:false}}});

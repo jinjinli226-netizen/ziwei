@@ -112,3 +112,99 @@ test('runtime failures preserve a safe actionable CLI diagnostic', () => {
   assert.match(message, /Hermes CLI exited with code 1: Profile 'test333' is not connected/);
   assert.doesNotMatch(message, /secret-value/);
 });
+
+test('Hermes failure skips session resume notices and selects the bootstrap rejection', () => {
+  const message = formatRuntimeFailure('Hermes', 125, [
+    '\u001b[32mResumed session: xiangyu-main\u001b[0m',
+    'Preparing local runtime',
+    'Hermes Bot bootstrap rejected: bot source authentication refresh required',
+    'session_id: native-session-123'
+  ].join('\n'));
+  assert.equal(message, 'Hermes CLI exited with code 125: Hermes Bot bootstrap rejected: bot source authentication refresh required');
+  assert.equal(formatRuntimeFailure('Hermes', 125, 'Resumed session: xiangyu-main\n'), 'Hermes CLI exited with code 125');
+  assert.equal(formatRuntimeFailure('Hermes', 125, '↻ Resumed session xiangyu-main\nsession_id: native-session-123'), 'Hermes CLI exited with code 125');
+});
+
+test('explicit bootstrap or provider rejection outranks assistant Error examples', () => {
+  for (const rejection of [
+    'Hermes Bot bootstrap rejected: bot source authentication refresh required',
+    "Profile 'test333' is not connected to any AI provider yet.",
+    'Provider error: authentication rejected'
+  ]) {
+    const state = { output: '', response: '', bytes: 0, truncated: false };
+    parseRuntimeStreamLine('↻ Resumed session xiangyu-main', state);
+    parseRuntimeStreamLine(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'Error: example quoted by assistant\nValueError: another example' } }), state);
+    assert.equal(state.runtimeError, undefined);
+    parseRuntimeStreamLine(rejection, state);
+    parseRuntimeStreamLine('session_id: native-session-123', state);
+    assert.equal(formatRuntimeFailure('Hermes', 125, state.output, state.runtimeError), `Hermes CLI exited with code 125: ${rejection}`);
+  }
+});
+
+test('known bootstrap and provider failures outrank ordinary startup diagnostics', () => {
+  for (const detail of [
+    'Hermes native multi-image input rejected: invalid input',
+    'Hermes Creator isolation was not confirmed',
+    'Hermes native MCP bootstrap is incompatible or changed',
+    "Profile 'test333' is not connected to any AI provider yet.",
+    'litellm.AuthenticationError: provider rejected credentials',
+    'Provider error: service unavailable'
+  ]) {
+    assert.equal(formatRuntimeFailure('Hermes', 1, `Starting runtime\n${detail}\nsession_id: ignored`), `Hermes CLI exited with code 1: ${detail}`);
+  }
+});
+
+test('structured runtime failures outrank text and do not stringify error objects', () => {
+  for (const event of [
+    { type: 'result', text: 'Partial assistant output', error: 'Provider rejected request token=secret-value' },
+    { type: 'turn.failed', error: { message: 'Provider rejected request token=secret-value' } },
+    { type: 'error', message: 'Provider rejected request token=secret-value' }
+  ]) {
+    const state = { output: '', response: '', bytes: 0, truncated: false };
+    parseRuntimeStreamLine(JSON.stringify(event), state);
+    assert.match(state.output, /\[error\] Provider rejected request token=\[REDACTED\]/);
+    assert.doesNotMatch(state.output, /secret-value|\[object Object\]/);
+    assert.equal(formatRuntimeFailure('Hermes', 1, state.output, state.runtimeError), 'Hermes CLI exited with code 1: Provider rejected request token=[REDACTED]');
+    if (event.text) {
+      assert.equal(state.response, event.text);
+      assert.match(state.output, /Partial assistant output\n\[error\]/);
+    }
+    assert.equal(formatRuntimeFailure('Hermes', 1, `Resumed session: test\n${JSON.stringify(event)}\nsession_id: ignored`), 'Hermes CLI exited with code 1: Provider rejected request token=[REDACTED]');
+  }
+});
+
+test('a single tool error does not replace the actual runtime failure', () => {
+  const state = { output: '', response: '', bytes: 0, truncated: false };
+  parseRuntimeStreamLine(JSON.stringify({ type: 'tool_result', is_error: true, text: 'recoverable tool failure' }), state);
+  assert.equal(state.runtimeError, undefined);
+  parseRuntimeStreamLine(JSON.stringify({ type: 'result', text: 'Partial answer', error: 'Provider error: final request failed' }), state);
+  assert.equal(formatRuntimeFailure('Hermes', 1, state.output, state.runtimeError), 'Hermes CLI exited with code 1: Provider error: final request failed');
+});
+
+test('terminal runtime errors override recoverable errors and resist later nonterminal noise', () => {
+  for (const terminal of [
+    { type: 'result', text: 'Partial answer', error: 'Provider error: final request failed' },
+    { type: 'turn.failed', error: { message: 'Provider error: final request failed' } }
+  ]) {
+    const state = { output: '', response: '', bytes: 0, truncated: false };
+    parseRuntimeStreamLine(JSON.stringify({ type: 'error', message: 'Reconnecting after a temporary transport error' }), state);
+    assert.equal(state.runtimeError, 'Reconnecting after a temporary transport error');
+    parseRuntimeStreamLine(JSON.stringify(terminal), state);
+    parseRuntimeStreamLine(JSON.stringify({ type: 'error', message: 'Cleanup diagnostic' }), state);
+    assert.equal(state.runtimeErrorTerminal, true);
+    assert.equal(formatRuntimeFailure('Hermes', 1, state.output, state.runtimeError), 'Hermes CLI exited with code 1: Provider error: final request failed');
+  }
+});
+
+test('runtime error summary survives output truncation and remains redacted and bounded', () => {
+  const state = { output: 'earlier output', response: '', bytes: 4 * 1024 * 1024, truncated: true };
+  parseRuntimeStreamLine(JSON.stringify({ type: 'result', text: 'partial', error: { message: `Error: token=secret-value ${'x'.repeat(1000)}` } }), state);
+  const message = formatRuntimeFailure('Codex', 1, state.output, state.runtimeError);
+  assert.match(message, /^Codex CLI exited with code 1: Error: token=\[REDACTED\]/);
+  assert.equal(message.length, 'Codex CLI exited with code 1: '.length + 600);
+  assert.doesNotMatch(message, /secret-value/);
+});
+
+test('other runtime diagnostics retain the first meaningful line rather than the last line', () => {
+  assert.equal(formatRuntimeFailure('Gemini', 1, 'First useful diagnostic\nordinary final output'), 'Gemini CLI exited with code 1: First useful diagnostic');
+});

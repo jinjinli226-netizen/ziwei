@@ -282,18 +282,11 @@ def prepare_creator_home(current):
     for name, module in [('auth', auth)]:
         if str(Path(module.__file__).resolve()) != current['paths'][name]:
             raise UnsupportedNativeHermes('changed')
-    # Only the file selector is replaced. Hermes still owns locks, transactions,
-    # atomic writes and OAuth refresh; no refresh token is cloned into the instance.
+    # All instances referencing this source share one native authentication store.
+    # Hermes owns its per-path lock, refresh transaction and atomic write-back;
+    # no refresh token is cloned into the isolated instance. Never block the save
+    # after OAuth refresh: rotation may already have consumed the previous token.
     auth._auth_file_path = lambda: source / 'auth.json'
-    if is_bot:
-        # This preview uses source authentication as a read-only reference.
-        # A required refresh must ask for source-side authorization, never
-        # silently mutate the user's original store from an isolated Bot.
-        def refuse_source_auth_write(*args, **kwargs):
-            raise UnsupportedNativeHermes('bot source authentication refresh required')
-        auth._save_auth_store = refuse_source_auth_write
-        auth_codex = importlib.import_module('hermes_cli.auth_codex')
-        auth_codex._save_codex_tokens = refuse_source_auth_write
     # Load the selected profile's .env into this execution's memory only. Never
     # persist it or allow it to replace trusted scope/home/MCP routing values.
     from dotenv import dotenv_values

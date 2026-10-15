@@ -519,9 +519,49 @@ function firstLine(value) {
   return String(value || '').split(/\r?\n/).map(item => item.trim()).find(Boolean) || null;
 }
 
-export function formatRuntimeFailure(runtime, code, diagnostics = '') {
+function runtimeErrorText(value, depth = 0) {
+  if (typeof value === 'string') return value.trim() || null;
+  if (!value || typeof value !== 'object' || depth > 3) return null;
+  for (const key of ['message', 'error', 'detail']) {
+    const text = runtimeErrorText(value[key], depth + 1);
+    if (text) return text;
+  }
+  return null;
+}
+
+function runtimeStreamError(value) {
+  if (!value || typeof value !== 'object' || (value.type !== 'error' && !value.error)) return null;
+  return runtimeErrorText(value.error) || runtimeErrorText(value.message) || (value.type === 'error' ? runtimeErrorText(value.text) : null);
+}
+
+function runtimeDiagnosticLine(value) {
+  return String(value || '').replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '').trim();
+}
+
+function isRoutineRuntimeDiagnostic(line) {
+  return /^(?:(?:↻\s*)?Resumed session(?:\s|:|$)|session_id\s*:)/i.test(line);
+}
+
+function isBootstrapOrProviderFailure(line) {
+  return /^(?:Hermes(?: Bot| MCP)? bootstrap rejected\b|Hermes native (?:multi-image input rejected|MCP bootstrap is incompatible or changed)\b|Hermes Creator isolation was not confirmed\b|Profile ['"][^'"]+['"] is not connected to any AI provider\b|(?:provider error|authentication error|authorization error)\s*:)/i.test(line);
+}
+
+function isExplicitRuntimeFailure(line) {
+  return /^(?:\[error\]\s*|(?:error|fatal)\s*:|(?:[\w.]+(?:Error|Exception))\s*:)/i.test(line);
+}
+
+export function formatRuntimeFailure(runtime, code, diagnostics = '', streamError = null) {
   const base = `${String(runtime || 'Runtime')} CLI exited with code ${code ?? 'unknown'}`;
-  const detail = firstLine(redactSecrets(diagnostics));
+  const lines = String(diagnostics || '').split(/\r?\n/).map(runtimeDiagnosticLine).filter(Boolean);
+  let diagnostic = runtimeErrorText(streamError);
+  if (!diagnostic) {
+    for (const line of lines) {
+      try { diagnostic = runtimeStreamError(JSON.parse(line)); } catch {}
+      if (diagnostic) break;
+    }
+  }
+  diagnostic ||= lines.find(isBootstrapOrProviderFailure) || lines.find(isExplicitRuntimeFailure) || lines.find(line => !isRoutineRuntimeDiagnostic(line));
+  const detail = firstLine(redactSecrets(runtimeDiagnosticLine(diagnostic)));
   return detail ? `${base}: ${detail.slice(0, 600)}` : base;
 }
 
@@ -896,9 +936,18 @@ export function parseRuntimeStreamLine(line, state, onOutput = () => {}, onStage
         state.response = `${state.response || ''}${state.response ? '\n' : ''}${text}`;
       }
     }
-    else if (value?.type === 'error' || value?.error) appendOutput(state, `[error] ${value.error || value.message || 'runtime error'}\n`, onOutput);
+    if (value?.type === 'error' || value?.error) {
+      const error = runtimeStreamError(value);
+      const detail = firstLine(redactSecrets(runtimeDiagnosticLine(error)))?.slice(0, 600);
+      const terminalError = value.type === 'result' || value.type === 'turn.failed';
+      if (detail && (!state.runtimeError || (terminalError && !state.runtimeErrorTerminal))) {
+        state.runtimeError = detail;
+        state.runtimeErrorTerminal = terminalError;
+      }
+      appendOutput(state, `${state.output && !state.output.endsWith('\n') ? '\n' : ''}[error] ${detail || 'runtime error'}\n`, onOutput);
+    }
   } catch {
-    appendOutput(state, `${line}\n`, onOutput);
+    appendOutput(state, `${state.output && !state.output.endsWith('\n') ? '\n' : ''}${line}\n`, onOutput);
   }
 }
 
@@ -1127,7 +1176,7 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
       if (code === 0 && creatorPrepared && !creatorIsolation) return finish({ status: 'failed', code: 'creator_isolation_unconfirmed', error: 'Hermes 未确认实例状态隔离；不能报告执行成功', result });
       const mcpFailure = code === 0 ? managementMcpExecutionFailure(result.managementMcp) || terminalMcpExecutionFailure(result.terminalMcp) : null;
       if (mcpFailure) return finish({ status: 'failed', ...mcpFailure, result });
-      if (code !== 0) return finish({ status: 'failed', code: 'runtime_failed', error: formatRuntimeFailure(resolvedRuntime, code, state.output), result });
+      if (code !== 0) return finish({ status: 'failed', code: 'runtime_failed', error: formatRuntimeFailure(resolvedRuntime, code, state.output, state.runtimeError), result });
       if (imageArtifacts) {
         try { result.outputArtifacts = readImageArtifacts(imageArtifacts); }
         catch (error) { return finish({status:'failed',code:error.code || 'image_artifact_invalid',error:error.message,result}); }
