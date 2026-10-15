@@ -2,6 +2,7 @@ import {executionUncertain,botPresence,capabilityPresentation,botStopPresentatio
 export {executionUncertain,botPresence,capabilityPresentation};
 import {createBotRequestScope, botErrorMessage} from './bot-state.js';
 import {employeeRemovalNotice} from './employee-removal.js';
+import {enabledCapabilityConfig,capabilitySavedEnabled} from './bot-capability-actions.js';
 
 const clone = value => JSON.parse(JSON.stringify(value));
 const pendingRuns=new Map();
@@ -13,9 +14,10 @@ export function botDraft(bot) {
   const employee=bot.employee || {};
   return {revision:bot.revision,employee:{name:employee.name || '',description:employee.description || '',instructions:employee.instructions || '',persona:employee.persona || '',avatar:employee.avatar || null,visibility:employee.visibility || 'personal',model:employee.model_id || null,skills:[...(employee.skills || [])]},config:clone(bot.config)};
 }
-export function createBotWorkbench({api,wrap=value=>value}) {
+export function botDraftDirty(bot,draft) {return Boolean(bot&&draft&&JSON.stringify(draft)!==JSON.stringify(botDraft(bot)));}
+export function createBotWorkbench({api,wrap=value=>value,wait=ms=>new Promise(resolve=>setTimeout(resolve,ms)),capabilityCheckAttempts=60}) {
   const scope=createBotRequestScope();let workspaceGeneration=0,listGeneration=0;
-  const state=wrap({workspace:'',selectedId:'',bots:[],bot:null,draft:null,runs:[],routines:[],loading:false,reading:false,busy:false,error:'',errorCode:'',notice:'',conflict:false,writeUnknown:false,pendingOperation:null});
+  const state=wrap({workspace:'',selectedId:'',bots:[],bot:null,draft:null,runs:[],routines:[],loading:false,reading:false,busy:false,capabilityBusy:false,error:'',errorCode:'',notice:'',conflict:false,writeUnknown:false,pendingOperation:null});
   const apply = bot => {
     if (!bot || bot.id!==state.selectedId || (bot.workspace && bot.workspace!==state.workspace)) throw new Error('Bot 响应归属与当前选择不一致');
     state.bot=bot;
@@ -53,7 +55,7 @@ export function createBotWorkbench({api,wrap=value=>value}) {
   }
   async function select(id) {
     if(state.selectedId===id && state.bot)return;
-    scope.select(state.workspace,id);state.selectedId=id;state.bot=null;state.draft=null;state.runs=[];state.routines=[];state.error='';state.errorCode='';state.notice='';state.conflict=false;state.writeUnknown=false;state.busy=false;
+    scope.select(state.workspace,id);state.selectedId=id;state.bot=null;state.draft=null;state.runs=[];state.routines=[];state.error='';state.errorCode='';state.notice='';state.conflict=false;state.writeUnknown=false;state.busy=false;state.capabilityBusy=false;
     state.pendingOperation=readPending(pendingKey(state.workspace,id));state.writeUnknown=Boolean(state.pendingOperation);
     if(id)await refresh({resetDraft:true});
   }
@@ -61,7 +63,7 @@ export function createBotWorkbench({api,wrap=value=>value}) {
     workspaceGeneration++;state.workspace=workspace;state.bots=[];state.selectedId='';
     await Promise.all([select(id),list()]);
   }
-  async function mutate(operation,notice,{readback=false,resetDraft=false,recovering=false}={}) {
+  async function mutate(operation,notice,{readback=false,resetDraft=false,recovering=false,verifyReadback=null}={}) {
     if(state.busy || (state.writeUnknown&&!recovering) || !state.bot)return false;
     const request=scope.begin('write'),workspace=state.workspace,id=state.selectedId;
     scope.begin('read');state.reading=false;
@@ -75,6 +77,7 @@ export function createBotWorkbench({api,wrap=value=>value}) {
         const persisted=await api.bot(id,workspace);
         if(!scope.current(request))return false;
         if(result?.revision && persisted.revision<result.revision)throw new Error('读回配置版本落后于保存回执');
+        if(verifyReadback)verifyReadback(persisted,result);
         apply(persisted);
       } else if(result?.id===id && result?.employee)apply(result);
       if(resetDraft){state.draft=botDraft(state.bot);state.conflict=false;}
@@ -107,11 +110,32 @@ export function createBotWorkbench({api,wrap=value=>value}) {
     if(!state.draft)return false;
     const draft=clone(state.draft);
     draft.config.provider=draft.config.provider?.trim() || null;
-    return mutate((id,workspace)=>api.updateBot(id,{expectedRevision:draft.revision,employee:draft.employee,config:draft.config},workspace),'配置已保存并读回。仅作用于当前 Bot；生效范围与是否需要重新检查见服务端状态。',{readback:true,resetDraft:true});
+    return mutate((id,workspace)=>api.updateBot(id,{expectedRevision:draft.revision,employee:draft.employee,config:draft.config},workspace),'配置已保存。',{readback:true,resetDraft:true});
+  }
+  async function enableCapability(key) {
+    if(!state.bot||state.busy||state.capabilityBusy||state.writeUnknown)return false;
+    if(botDraftDirty(state.bot,state.draft)){state.error='有未保存的修改，请先保存当前草稿，再开启此能力。';return false;}
+    let config;try{config=enabledCapabilityConfig(state.bot,key);}catch(error){state.error=error.message;return false;}
+    const request=scope.begin('capability'),revision=state.bot.revision,wasActive=state.bot.control_state==='active';
+    state.capabilityBusy=true;
+    try{
+      const saved=await mutate((id,workspace)=>api.updateBot(id,{expectedRevision:revision,config},workspace),'设置已保存，正在检查配置。',{readback:true,resetDraft:true,verifyReadback:(bot,response)=>{if(bot.revision!==response?.revision||bot.control_epoch!==response?.control_epoch)throw new Error('配置或控制状态在保存后已变化，请刷新后核对；本次不会继续检查或启用。');if(!capabilitySavedEnabled(bot,key))throw new Error('未能确认此能力设置已保存，请刷新后核对。');}});
+      if(!saved||!scope.current(request))return false;
+      const savedRevision=state.bot.revision,savedEpoch=state.bot.control_epoch;
+      const current=()=>scope.current(request)&&state.bot?.revision===savedRevision&&state.bot?.control_epoch===savedEpoch&&!state.writeUnknown&&!botDraftDirty(state.bot,state.draft);
+      if(!current()||!await validate()||!current())return false;
+      for(let i=0;i<capabilityCheckAttempts&&current()&&state.bot.validation?.status==='pending';i++){await wait(1000);if(!current())return false;await refresh();}
+      if(!current())return false;
+      if(state.bot.validation?.status==='pending'){state.notice='设置已保存，配置仍在检查中。完成后可在运行记录启用 Bot。';return false;}
+      if(state.bot.validation?.status!=='succeeded'||state.bot.validation.revision!==savedRevision){state.error=state.bot.validation?.error||'配置检查未通过，请查看运行记录后重试。';return false;}
+      if(!wasActive){state.notice='设置已保存并通过检查。启用 Bot 后即可使用。';return true;}
+      const restored=await mutate((id,workspace)=>api.controlBot(id,{operation:'activate',expectedRevision:savedRevision,expectedControlEpoch:savedEpoch},workspace),bot=>bot.control_state==='active'?'设置已生效，Bot 已恢复工作。':'设置已保存，Bot 尚未恢复工作。');
+      return restored;
+    }finally{if(scope.current(request))state.capabilityBusy=false;}
   }
   async function control(operation) {
     const revision=state.bot?.revision,epoch=state.bot?.control_epoch;
-    return mutate((id,workspace)=>api.controlBot(id,{expectedRevision:revision,expectedControlEpoch:epoch,operation},workspace),operation==='stop'?bot=>botStopPresentation(bot).label:operation==='pause'?'Bot 已暂停；已有执行仍需单独确认。':'启用请求已受理；运行与工具生效仍以实际回执为准。');
+    return mutate((id,workspace)=>api.controlBot(id,{expectedRevision:revision,expectedControlEpoch:epoch,operation},workspace),operation==='stop'?bot=>botStopPresentation(bot).label:operation==='pause'?'Bot 已暂停；已有执行仍需单独确认。':bot=>bot.control_state==='active'?'Bot 已启用。':'启用状态尚未确认，请刷新。');
   }
   async function reconcile(run) {
     if(state.busy || state.writeUnknown || !state.bot)return false;
@@ -124,7 +148,7 @@ export function createBotWorkbench({api,wrap=value=>value}) {
   }
   async function validate() {
     const revision=state.bot?.revision,key=`bot-validate-${state.selectedId}-${revision}-${crypto.randomUUID()}`;
-    const ok=await mutate((id,workspace)=>api.validateBot(id,{expectedRevision:revision,idempotencyKey:key},workspace),'配置检查已提交；这是无模型检查，请等待回执。');
+    const ok=await mutate((id,workspace)=>api.validateBot(id,{expectedRevision:revision,idempotencyKey:key},workspace),'正在检查配置。');
     if(ok)await refresh();return ok;
   }
   async function runRoutine(routineId,{recovering=false}={}) {
@@ -143,5 +167,5 @@ export function createBotWorkbench({api,wrap=value=>value}) {
   }
   async function recoverRoutine(){const pending=state.pendingOperation;if(pending?.kind==='routine_run')return runRoutine(pending.routineId,{recovering:true});return false;}
   function dispose(){workspaceGeneration++;scope.dispose();}
-  return {state,setWorkspace,select,list,refresh,initialize,removeEmployee,save,control,reconcile,validate,mutate,runRoutine,recoverRoutine,dispose};
+  return {state,setWorkspace,select,list,refresh,initialize,removeEmployee,save,enableCapability,control,reconcile,validate,mutate,runRoutine,recoverRoutine,dispose};
 }

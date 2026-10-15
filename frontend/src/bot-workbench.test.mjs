@@ -10,7 +10,7 @@ test('Bot save verifies persisted readback and keeps complete config with expect
   assert.equal(await ui.save(),true);
   assert.equal(ui.calls[0].body.expectedRevision,1);
   assert.equal(ui.calls[0].ws,'qa');assert.equal(ui.state.bot.revision,2);
-  assert.equal(ui.state.draft.employee.name,'Updated');assert.match(ui.state.notice,/读回/);
+  assert.equal(ui.state.draft.employee.name,'Updated');assert.equal(ui.state.notice,'配置已保存。');
 });
 test('a late Bot read or save cannot replace another selected Bot',async()=>{
   const pending=deferred();let count=0;

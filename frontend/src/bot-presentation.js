@@ -32,16 +32,18 @@ export function botPresence(bot) {
   if (run?.type==='hermes.bot.validate') {
     if(['pending','acked'].includes(run.status))return {label:'配置检查中',tone:'running',detail:'无模型配置检查正在等待本机回执。'};
     if(run.status==='failed')return {label:'配置检查失败',tone:'error',detail:run.error || '查看检查回执，修正配置后再检查。'};
-    return {label:bot?.control_state==='active'?'已启用 · 待命':bot?.control_state==='paused'?'已暂停':'待启用',tone:'muted',detail:'配置检查与实际工作分开；尚需实际执行验证模型和工具。'};
+    return {label:bot?.control_state==='active'?'已启用 · 待命':bot?.control_state==='paused'?'已暂停':'待启用',tone:'muted',detail:bot?.control_state==='active'?'可以在主聊天交任务。':'配置检查已通过，启用后即可交任务。'};
   }
   if (['pending','acked','running','queued'].includes(run?.status)) return {label:run.status==='pending'||run.status==='queued'?'等待执行':'正在执行',tone:'running',detail:bot?.control_state==='paused'?'Bot 已暂停，当前执行仍需等待结束或停止确认。':'展开活动查看本次执行。'};
   if (bot?.control_state==='paused') return {label:'已暂停',tone:'muted',detail:'暂停后不派发新工作。'};
   if (bot?.control_state==='draft') return {label:'待配置启用',tone:'muted',detail:'保存后检查配置，再明确启用。'};
   if (run?.status==='failed'||run?.status==='expired') return {label:'上次执行失败',tone:'error',detail:run.error || '查看运行记录了解原因。'};
-  if (run?.status==='succeeded') return {label:'上次已完成',tone:'success',detail:'上次工作已有成功回执；设备在线情况单独显示。'};
-  return {label:bot?.control_state==='active'?'已启用 · 待命':'状态待确认',tone:'muted',detail:'待命不代表模型正在运行；执行需要指定电脑及客户端在线。'};
+  if (run?.status==='succeeded') return {label:'上次已完成',tone:'success',detail:'可以查看结果或继续交任务。'};
+  return {label:bot?.control_state==='active'?'已启用 · 待命':'状态待确认',tone:'muted',detail:bot?.control_state==='active'?'在主聊天开始工作。':'请刷新状态。'};
 }
 export function capabilityPresentation(capability) {
+  const states={ready:['可用','success'],enabled:['已开启','success'],disabled:['未开启','muted'],needs_configuration:['需要配置','warning'],needs_check:['待检查','warning'],checking:['检查中','running'],offline:['电脑离线','warning'],failed:['检查失败','error'],unavailable:['暂不可用','muted']};
+  if(capability?.state){const [label,tone]=states[capability.state]||['状态待确认','muted'];return {label,tone};}
   const map={available:['已接入','success'],requires_configuration:['需要配置','warning'],requires_dependency:['缺少依赖','warning'],unsupported_version:['版本不支持','muted'],not_integrated:['尚未接入','muted'],unknown:['待验证','muted']};
   const [label,tone]=map[capability?.status] || ['未知状态','muted'];
   return {label,tone};
