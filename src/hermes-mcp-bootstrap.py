@@ -21,8 +21,37 @@ class UnsupportedNativeHermes(Exception):
     pass
 
 
-def _binding(launcher, multi_images=False):
+def _binding(launcher, multi_images=False, launcher_binding=None):
     launcher = Path(launcher).resolve(strict=True)
+    wrapper = None
+    if launcher_binding is not None:
+        if not isinstance(launcher_binding, dict) or launcher_binding.get('schemaVersion') != 1 or not set(launcher_binding).issubset({'schemaVersion', 'wrapper', 'resource', 'isolated', 'installation'}) or not ({'wrapper', 'resource', 'isolated'} & set(launcher_binding)):
+            raise UnsupportedNativeHermes('launcher binding')
+        if 'wrapper' in launcher_binding:
+            reference = launcher_binding['wrapper']
+            if not isinstance(reference, dict) or set(reference) != {'path', 'sha256'} or not Path(reference['path']).is_absolute():
+                raise UnsupportedNativeHermes('launcher wrapper')
+            wrapper = Path(reference['path']).resolve(strict=True)
+            if not wrapper.is_file() or hashlib.sha256(wrapper.read_bytes()).hexdigest() != reference['sha256']:
+                raise UnsupportedNativeHermes('launcher wrapper changed')
+    launcher_resource = (launcher_binding or {}).get('resource')
+    if launcher_resource is not None:
+        raw = launcher.read_bytes()
+        required = {'kind', 'offset', 'size', 'sha256', 'launcherSha256', 'interpreter'}
+        if not isinstance(launcher_resource, dict) or set(launcher_resource) != required or launcher_resource['kind'] != 'uv-pe-resource':
+            raise UnsupportedNativeHermes('launcher resource')
+        offset, size = launcher_resource['offset'], launcher_resource['size']
+        if type(offset) is not int or type(size) is not int or offset < 0 or not 0 < size <= 1024 * 1024 or offset + size > len(raw) or raw[:2] != b'MZ' or hashlib.sha256(raw).hexdigest() != launcher_resource['launcherSha256'] or Path(launcher_resource['interpreter']).resolve(strict=True) != Path(sys.executable).resolve(strict=True):
+            raise UnsupportedNativeHermes('launcher resource binding')
+        data = raw[offset:offset + size]
+        if hashlib.sha256(data).hexdigest() != launcher_resource['sha256']:
+            raise UnsupportedNativeHermes('launcher resource changed')
+    isolated = (launcher_binding or {}).get('isolated')
+    if isolated is not None:
+        if not isinstance(isolated, dict) or set(isolated) != {'kind', 'interpreter', 'launcherSha256'} or isolated['kind'] != 'distlib-isolated' or not sys.flags.isolated or hashlib.sha256(launcher.read_bytes()).hexdigest() != isolated['launcherSha256'] or Path(isolated['interpreter']).resolve(strict=True) != Path(sys.executable).resolve(strict=True) or not zipfile.is_zipfile(launcher):
+            raise UnsupportedNativeHermes('isolated launcher binding')
+    elif (launcher_binding or {}).get('installation') is not None:
+        raise UnsupportedNativeHermes('installation binding')
     if zipfile.is_zipfile(launcher):
         with zipfile.ZipFile(launcher) as archive:
             console = archive.read('__main__.py').decode('utf-8')
@@ -32,6 +61,9 @@ def _binding(launcher, multi_images=False):
     if not any(isinstance(node, ast.ImportFrom) and node.module == 'hermes_cli.main'
                and any(item.name == 'main' for item in node.names) for node in ast.walk(tree)):
         raise UnsupportedNativeHermes('entrypoint')
+    installation = _activate_launcher_installation(tree, launcher, launcher_binding) if isolated is not None else None
+    if installation is not None:
+        launcher_binding = {**launcher_binding, 'installation': installation}
     paths = {}
     for name in ('main', 'mcp_startup', 'managed_scope', 'config'):
         spec = importlib.util.find_spec('hermes_cli.' + name)
@@ -43,6 +75,10 @@ def _binding(launcher, multi_images=False):
         paths[name] = str(target)
     if len({str(Path(value).parent) for value in paths.values()}) != 1:
         raise UnsupportedNativeHermes('package')
+    if installation is not None:
+        if Path(paths['main']).parent != Path(installation['root']) / 'hermes_cli':
+            raise UnsupportedNativeHermes('installation package')
+        paths['bootstrap'] = str(Path(installation['root']) / 'hermes_bootstrap.py')
     startup = Path(paths['mcp_startup']).read_text(encoding='utf-8')
     managed = Path(paths['managed_scope']).read_text(encoding='utf-8')
     if '_has_configured_mcp_servers' not in startup or 'HERMES_MANAGED_DIR' not in managed:
@@ -130,13 +166,81 @@ def _binding(launcher, multi_images=False):
             if any(key not in functions or [arg.arg for arg in functions[key].args.args] != args for key, args in signatures.items()):
                 raise UnsupportedNativeHermes('multi image shape')
             paths[name] = str(target)
-    sources = [launcher, *(Path(value) for value in paths.values())]
-    return {'paths': paths, 'fingerprint': hashlib.sha256(b'\0'.join(p.read_bytes() for p in sources)).hexdigest()}
+    sources = [launcher, *([wrapper] if wrapper is not None else []), *(Path(value) for value in paths.values())]
+    return {'paths': paths, 'fingerprint': hashlib.sha256(b'\0'.join(p.read_bytes() for p in sources)).hexdigest(), **({'launcherBinding': launcher_binding} if launcher_binding is not None else {})}
 
 
-def binding(launcher, multi_images=False):
+
+def _activate_launcher_installation(tree, launcher, launcher_binding):
+    """Restore the published store launcher's native bootstrap without executing its script."""
+    roots, pins = [], []
+    for node in tree.body:
+        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
+            call = node.value
+            if isinstance(call.func, ast.Attribute) and call.func.attr == 'insert' and isinstance(call.func.value, ast.Attribute) and call.func.value.attr == 'path' and isinstance(call.func.value.value, ast.Name) and call.func.value.value.id == 'sys':
+                if len(call.args) != 2 or call.keywords or not isinstance(call.args[0], ast.Constant) or type(call.args[0].value) is not int or call.args[0].value != 0 or not isinstance(call.args[1], ast.Constant) or not isinstance(call.args[1].value, str):
+                    raise UnsupportedNativeHermes('installation path shape')
+                roots.append((call.args[1].value, node.lineno))
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Attribute) and isinstance(node.targets[0].value, ast.Name) and node.targets[0].value.id == 'sys' and node.targets[0].attr == '_hermes_pin_default_home' and isinstance(node.value, ast.Constant) and node.value.value is True:
+            pins.append(node.lineno)
+    imports = [node.lineno for node in ast.walk(tree) if isinstance(node, ast.Import) and any(item.name == 'hermes_bootstrap' and item.asname is None for item in node.names)]
+    if len(roots) != 1 or len(pins) != 1 or len(imports) != 1 or not roots[0][1] < pins[0] < imports[0] or not Path(roots[0][0]).is_absolute():
+        raise UnsupportedNativeHermes('installation bootstrap shape')
+    root = Path(roots[0][0]).resolve(strict=True)
+    git = root / '.git'
+    if git.is_file():
+        raw = git.read_bytes()
+        if len(raw) > 16384 or not raw.decode('utf-8-sig').strip().startswith('gitdir:'):
+            raise UnsupportedNativeHermes('installation git directory')
+        git = root / raw.decode('utf-8-sig').strip()[7:].strip()
+    if os.path.lexists(root / '.hermes-update-zip-swap') or os.path.lexists(git / 'hermes-update-pull'):
+        raise UnsupportedNativeHermes('installation update incomplete')
+    bootstrap = (root / 'hermes_bootstrap.py').resolve(strict=True)
+    if not root.is_dir() or bootstrap.parent != root or not bootstrap.is_file():
+        raise UnsupportedNativeHermes('installation bootstrap source')
+    installation = {'root': str(root), 'bootstrapSha256': hashlib.sha256(bootstrap.read_bytes()).hexdigest()}
+    if launcher_binding.get('installation') is not None and launcher_binding['installation'] != installation:
+        raise UnsupportedNativeHermes('installation changed')
+    for name in ('PYTHONHOME', 'PYTHONPATH'):
+        os.environ.pop(name, None)
+    sys.path.insert(0, str(root))
+    spec = importlib.util.find_spec('hermes_bootstrap')
+    if not spec or not spec.origin or Path(spec.origin).resolve(strict=True) != bootstrap:
+        raise UnsupportedNativeHermes('installation bootstrap module')
+    sys._hermes_pin_default_home = True
+    original_argv, original_home = sys.argv, os.environ.get('HERMES_HOME')
+    original_lazy = os.environ.get('HERMES_DISABLE_LAZY_INSTALLS')
+    native_args = original_argv[original_argv.index('--', 5) + 1:] if len(original_argv) > 5 and '--' in original_argv[5:] else ['--version']
+    sys.argv = [str(launcher), *(native_args or ['--version'])]
+    # The controller must retain this supervised root; an installation repair may
+    # request a native restart, but cannot replace it or launch an unbound child.
+    import subprocess
+    class NativeRelaunchRequired(BaseException):
+        pass
+    def reject_relaunch(*args, **kwargs):
+        raise NativeRelaunchRequired()
+    original_execv, original_call = os.execv, subprocess.call
+    os.execv, subprocess.call = reject_relaunch, reject_relaunch
+    os.environ['HERMES_DISABLE_LAZY_INSTALLS'] = '1'
     try:
-        return _binding(launcher, multi_images)
+        native = importlib.import_module('hermes_bootstrap')
+    except NativeRelaunchRequired:
+        raise UnsupportedNativeHermes('installation restart required') from None
+    finally:
+        sys.argv = original_argv
+        os.execv, subprocess.call = original_execv, original_call
+        if original_lazy is None:
+            os.environ.pop('HERMES_DISABLE_LAZY_INSTALLS', None)
+        else:
+            os.environ['HERMES_DISABLE_LAZY_INSTALLS'] = original_lazy
+    if Path(native.__file__).resolve(strict=True) != bootstrap or original_home and os.environ.get('HERMES_HOME') != original_home:
+        raise UnsupportedNativeHermes('installation home binding')
+    return installation
+
+
+def binding(launcher, multi_images=False, launcher_binding=None):
+    try:
+        return _binding(launcher, multi_images, launcher_binding)
     except Exception:
         raise UnsupportedNativeHermes('binding') from None
 
@@ -365,22 +469,27 @@ def confirm_creator_home(current, config, prepared):
 
 
 def run():
-    if len(sys.argv) == 3 and sys.argv[1] == '--version-probe':
-        current = binding(sys.argv[2])
+    probe_resource = None
+    if len(sys.argv) == 5 and sys.argv[1] in {'--version-probe', '--probe', '--probe-images'}:
+        if sys.argv[3] != '--launcher-binding':
+            raise UnsupportedNativeHermes('arguments')
+        probe_resource = json.loads(sys.argv[4])
+    if len(sys.argv) in {3, 5} and sys.argv[1] == '--version-probe':
+        current = binding(sys.argv[2], launcher_binding=probe_resource)
         import hermes_cli
         if Path(hermes_cli.__file__).resolve().parent != Path(current['paths']['main']).parent:
             raise UnsupportedNativeHermes('version package')
         print('Hermes ' + hermes_cli.__version__)
         return 0
-    if len(sys.argv) == 3 and sys.argv[1] in {'--probe', '--probe-images'}:
-        print(json.dumps(binding(sys.argv[2], sys.argv[1] == '--probe-images')))
+    if len(sys.argv) in {3, 5} and sys.argv[1] in {'--probe', '--probe-images'}:
+        print(json.dumps(binding(sys.argv[2], sys.argv[1] == '--probe-images', probe_resource)))
         return 0
     if len(sys.argv) < 5 or sys.argv[1] != '--launcher' or sys.argv[3] != '--binding':
         raise UnsupportedNativeHermes('arguments')
     launcher = sys.argv[2]
     expected = json.loads(sys.argv[4])
     multi_images = isinstance(expected, dict) and 'image_cli' in expected.get('paths', {})
-    current = binding(launcher, multi_images)
+    current = binding(launcher, multi_images, expected['launcherBinding']) if expected.get('launcherBinding') is not None else binding(launcher, True) if multi_images else binding(launcher)
     if current != expected:
         raise UnsupportedNativeHermes('changed')
     native_args = sys.argv[5:]

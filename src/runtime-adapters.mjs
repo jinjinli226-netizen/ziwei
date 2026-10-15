@@ -14,6 +14,7 @@ import { spawnSupervisedRuntime } from './runtime-process.mjs';
 import { prepareHermesBotHome, BOT_RUNTIME_ENV_KEYS } from './hermes-bot-runtime.mjs';
 import { normalizeBotConfig } from './hermes-bot-config.mjs';
 import {parseBotReasoningProof} from './hermes-bot-reasoning.mjs';
+import {resolveHermesLauncher} from './hermes-launcher.mjs';
 export {parseBotReasoningProof} from './hermes-bot-reasoning.mjs';
 export { prepareHermesBotHome } from './hermes-bot-runtime.mjs';
 
@@ -643,20 +644,9 @@ export function hermesProfileHome(profile, { baseHome = null } = {}) {
   return candidate;
 }
 
-/** Bind the actual native launcher interpreter, never a Python discovered separately on PATH. */
-function boundHermesInterpreter(binary) {
-  let interpreter;
-  try {
-    const header = fs.readFileSync(binary).toString('latin1').match(/#!([^\r\n]+)/)?.[1]?.trim();
-    interpreter = header?.replace(/^"(.+)"$/, '$1');
-    if (!interpreter || !path.isAbsolute(interpreter) || /(?:^|[\\/])env(?:\s|$)/.test(interpreter) || !fs.statSync(interpreter).isFile()) throw new Error();
-  } catch { throw new Error('Hermes 原生入口未绑定可核实的绝对解释器；请更新 Hermes 安装，不会改用系统 Python'); }
-  return interpreter;
-}
-
 export function runtimeDiscoverySpawnSpec(binary,args) {
-  if(/^hermes(?:\.exe)?$/i.test(path.basename(binary)) && args.length===1 && args[0]==='--version') {
-    try {return {command:boundHermesInterpreter(binary),args:[HERMES_MCP_BOOTSTRAP,'--version-probe',path.resolve(binary)]};}
+  if(/^hermes(?:\.(?:exe|cmd))?$/i.test(path.basename(binary)) && args.length===1 && args[0]==='--version') {
+    try {const selected=resolveHermesLauncher(binary);return {command:selected.interpreter,args:[...(selected.pythonArgs||[]),HERMES_MCP_BOOTSTRAP,'--version-probe',selected.launcher,...(selected.binding?['--launcher-binding',JSON.stringify(selected.binding)]:[])]};}
     catch { /* Other supported launchers retain their own native --version path. */ }
   }
   return runtimeSpawnSpec(binary,args);
@@ -665,14 +655,14 @@ export function runtimeDiscoverySpawnSpec(binary,args) {
 export function hermesMcpSpawnSpec(binary, args, { env = process.env, boundProfile, inputImages = [] } = {}) {
   if(!Array.isArray(inputImages)||inputImages.length>20||inputImages.length===1)throw new Error('Hermes 多图清单必须包含 2–20 张受控图片');
   const multiImages=inputImages.length>1;
-  const interpreter=boundHermesInterpreter(binary);
+  const selected=resolveHermesLauncher(binary),interpreter=selected.interpreter;
   let binding;
   try {
-    const output = execFileSync(interpreter, [HERMES_MCP_BOOTSTRAP, multiImages?'--probe-images':'--probe', path.resolve(binary)], { env, encoding: 'utf8', timeout: 5000, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    const output = execFileSync(interpreter, [...(selected.pythonArgs||[]),HERMES_MCP_BOOTSTRAP, multiImages?'--probe-images':'--probe', selected.launcher,...(selected.binding?['--launcher-binding',JSON.stringify(selected.binding)]:[])], { env, encoding: 'utf8', timeout: 5000, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     binding = JSON.parse(output);
     if (!binding.paths?.main || !binding.paths?.mcp_startup || !binding.paths?.managed_scope || !binding.fingerprint) throw new Error();
   } catch { throw new Error('Hermes 原生入口不兼容 managed MCP discovery 或安装已变化；请更新 Hermes/ziwei_user，不会替代运行时'); }
-  return { command: interpreter, args: [HERMES_MCP_BOOTSTRAP, '--launcher', path.resolve(binary), '--binding', JSON.stringify(binding), ...(boundProfile ? ['--bound-profile', JSON.stringify({home:boundProfile.home,profile:boundProfile.profile,baseHome:boundProfile.baseHome,identity:boundProfile.identity,requestedHome:boundProfile.requestedHome,protectedHomes:boundProfile.protectedHomes})] : []), ...(multiImages?['--input-images',JSON.stringify(inputImages)]:[]), '--', ...args.map(String)], nativeBinding: { binary, interpreter, entrypoint: binding.paths.main, mode: multiImages?'effective-mcp-gate-native-images':'effective-mcp-gate' } };
+  return { command: interpreter, modeInsertIndex:5+(selected.pythonArgs?.length||0), args: [...(selected.pythonArgs||[]),HERMES_MCP_BOOTSTRAP, '--launcher', selected.launcher, '--binding', JSON.stringify(binding), ...(boundProfile ? ['--bound-profile', JSON.stringify({home:boundProfile.home,profile:boundProfile.profile,baseHome:boundProfile.baseHome,identity:boundProfile.identity,requestedHome:boundProfile.requestedHome,protectedHomes:boundProfile.protectedHomes})] : []), ...(multiImages?['--input-images',JSON.stringify(inputImages)]:[]), '--', ...args.map(String)], nativeBinding: { binary, interpreter, entrypoint: binding.paths.main, mode: multiImages?'effective-mcp-gate-native-images':'effective-mcp-gate' } };
 }
 
 function readPrivateJson(file) {
@@ -696,7 +686,7 @@ export async function validateHermesBotRuntimeSupervised({context,baseHome,priva
   const env={...process.env,HERMES_HOME:overlay.sourceHome,HERMES_MANAGED_DIR:overlay.home,...prepared.env};
   try {
     const launcher=binary || discoverInstalledRuntimes().runtimes.Hermes?.binary;if(!launcher)throw new Error('目标电脑未发现 Hermes CLI');
-    const spec=hermesMcpSpawnSpec(launcher,['--profile',profile],{env});spec.args.splice(5,0,'--config-only');
+    const spec=hermesMcpSpawnSpec(launcher,['--profile',profile],{env});spec.args.splice(spec.modeInsertIndex??5,0,'--config-only');
     const execution=await runBotValidationProcess({...spec,cwd:process.cwd(),env},{signal,onSupervision});
     const result=execution.output.trim().split(/\r?\n/).map(line=>{try{return JSON.parse(line);}catch{return null;}}).find(item=>item?.botValidation);
     if(!result?.botValidation?.valid)throw Object.assign(new Error('缺少 Hermes 原生配置验证回执'),{processExit:execution.processExit,stderr:execution.stderr});
@@ -719,7 +709,7 @@ export function validateHermesBotRuntime({context,baseHome,privateDirectory,work
     const launcher=binary || discoverInstalledRuntimes().runtimes.Hermes?.binary;
     if(!launcher)throw new Error('目标电脑未发现 Hermes CLI');
     const spec=hermesMcpSpawnSpec(launcher,['--profile',profile],{env});
-    spec.args.splice(5,0,'--config-only');
+    spec.args.splice(spec.modeInsertIndex??5,0,'--config-only');
     const output=execFileSync(spec.command,spec.args,{env,encoding:'utf8',timeout:30_000,windowsHide:true,stdio:['ignore','pipe','pipe']});
     const result=output.trim().split(/\r?\n/).map(line=>{try{return JSON.parse(line);}catch{return null;}}).find(item=>item?.botValidation);
     if(!result?.botValidation?.valid)throw new Error('缺少 Hermes 原生配置验证回执');

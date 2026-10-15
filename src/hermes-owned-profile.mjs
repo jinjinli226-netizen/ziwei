@@ -43,7 +43,7 @@ export async function provisionHermesBotProfile({context,baseHome,workspace,apiB
   for(const key of Object.keys(childEnv))if(key.startsWith('ZIWEI_')&&key!=='ZIWEI_BOT_PROFILE_MODE'||key.startsWith('CONTROL_MCP_'))delete childEnv[key];
   const launcher=binary || discoverInstalledRuntimes().runtimes.Hermes?.binary;
   if(!launcher)throw botFailure('BOT_RUNTIME_UNAVAILABLE','目标电脑未发现 Hermes');
-  const spec=hermesMcpSpawnSpec(launcher,[],{env:childEnv});spec.args.splice(5,0,'--owned-profile-provision');
+  const spec=hermesMcpSpawnSpec(launcher,[],{env:childEnv});spec.args.splice(spec.modeInsertIndex??5,0,'--owned-profile-provision');
   if(beforeSpawn)await beforeSpawn();
   if(signal?.aborted)throw signal.reason;
   const supervision=spawnSupervisedRuntime({...spec,env:childEnv}),{child}=supervision;onSupervision?.(supervision);

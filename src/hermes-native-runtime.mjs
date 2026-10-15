@@ -11,7 +11,7 @@ export function nativeSpawn({context,baseHome,privateDirectory,workspace,apiBase
   const childEnv={...process.env,...env,HERMES_HOME:overlay.sourceHome,HERMES_MANAGED_DIR:overlay.home,...prepared.env,HERMES_KANBAN_HOME:prepared.home,HERMES_KANBAN_DB:path.join(prepared.home,'kanban.db')};
   const launcher=binary || discoverInstalledRuntimes().runtimes.Hermes?.binary;
   if(!launcher){overlay.cleanup();throw new Error('目标电脑未发现 Hermes CLI');}
-  try {const spec=hermesMcpSpawnSpec(launcher,['--profile',profile],{env:childEnv});spec.args.splice(5,0,worker?'--gateway-worker':'--native-operation');return{...spec,env:childEnv,cwd,prepared,cleanup:overlay.cleanup};}
+  try {const spec=hermesMcpSpawnSpec(launcher,['--profile',profile],{env:childEnv});spec.args.splice(spec.modeInsertIndex??5,0,worker?'--gateway-worker':'--native-operation');return{...spec,env:childEnv,cwd,prepared,cleanup:overlay.cleanup};}
   catch(error){overlay.cleanup();throw error;}
 }
 
