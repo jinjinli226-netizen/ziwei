@@ -12,6 +12,26 @@ const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 const samePath = (a, b) => typeof a === 'string' && typeof b === 'string' && path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
 const psQuote = value => "'" + String(value).replaceAll("'", "''") + "'";
 const failure = (code, message) => Object.assign(new Error(message), { code });
+// Keep diagnostics small and never echo arbitrary response text, paths or credentials.
+export function localControlRejection(status, body) {
+  const labels = {
+    BOOT_IDENTITY_MISMATCH: '客户端已重启，请重试',
+    CONNECTION_NOT_DRAINING: '尚未暂停接收任务',
+    ACTIVE_ACTIONS: '仍有任务执行', ACTIVE_POLLS: '仍在接收任务',
+    EXECUTION_QUARANTINED: '任务进程退出尚未确认',
+    REGISTERED_GATEWAY_NOT_DRAINED: '后台网关尚未退出',
+    DELIVERY_NOT_DRAINED: '历史回执缺少可核验的退出记录',
+    FILE_EVIDENCE_UNSAFE: '本地状态记录需要检查',
+    MAINTENANCE_STOP_UNSAFE: '本地退出状态需要检查',
+  };
+  const supported = status === 409 && ['CLIENT_STOP_UNSAFE', 'CLIENT_CONTROL_IDENTITY_CHANGED'].includes(body?.error);
+  const reasons = supported && Array.isArray(body.reasons) ? body.reasons.slice(0, 6).map(row => {
+    const label = Object.hasOwn(labels, row?.code) ? labels[row.code] : '本地状态记录需要检查';
+    const count = Number.isSafeInteger(row?.count) && row.count > 0 && row.count <= 1_000_000 ? `（${row.count}）` : '';
+    return label + count;
+  }) : [];
+  return Object.assign(failure('CONTROL_REJECTED', `本机控制请求被拒绝（HTTP ${status}）${reasons.length ? '：' + [...new Set(reasons)].join('；') : ''}；未强制结束进程`), { httpStatus: status });
+}
 let legacyModule;
 const legacyIdentity = () => legacyModule ||= import('./client-legacy-identity.mjs');
 function windowsOnly() { if (process.platform !== 'win32') throw failure('WINDOWS_ONLY', 'stop/uninstall 当前仅支持 Windows，未修改此平台客户端'); }
@@ -165,7 +185,7 @@ async function stopPreIdentityClient(context, { env, initial, allowLegacyStop, l
 }
 
 /** Stop preserves pairing/config/auth/state. It never starts or forgets a client. */
-export async function stopClient({ root, env = process.env, configPath, expectedPid, expectedNonce, expectedBuild, timeoutMs = 30000, drainTimeoutMs, shutdownTimeoutMs = 8000, allowLegacyStop = false, legacyProof } = {}) {
+export async function stopClient({ root, env = process.env, configPath, expectedPid, expectedNonce, expectedBuild, timeoutMs = 30000, drainTimeoutMs, shutdownTimeoutMs = 8000, allowLegacyStop = false, legacyProof, retainedRecoveryRoot } = {}) {
   windowsOnly(); root = path.resolve(root); noLinks(root);
   if (!Number.isFinite(timeoutMs) || timeoutMs < 1 || !Number.isFinite(shutdownTimeoutMs) || shutdownTimeoutMs < 1 || (drainTimeoutMs !== undefined && (!Number.isFinite(drainTimeoutMs) || drainTimeoutMs < 1))) throw failure('INVALID_TIMEOUT', '停止超时参数无效');
   const file = configPath ? path.resolve(configPath) : resolveConfigPath({ root, env }); noLinks(file);
@@ -194,7 +214,7 @@ export async function stopClient({ root, env = process.env, configPath, expected
   const exitedReceipt = () => ({ stopped: true, wasRunning: true, pid: record.pid, creationTime: record.creationTime, activeActionCount: 0, pollingCount: 0, legacyIdentity: !initial.lifecycle });
   const control = async (operation, allowConfigurationChange = false) => {
     const response = await fetch(origin + '/local/connection-control', { method: 'POST', redirect: 'error', headers: { 'content-type': 'application/json', 'x-ziwei-local-control': snapshot.config.deviceToken }, body: JSON.stringify({ operation, ...(initial.lifecycle ? { nonce: initial.lifecycle.nonce } : {}) }), signal: AbortSignal.timeout(2500) });
-    if (!response.ok) throw failure('CONTROL_REJECTED', `本机控制请求被拒绝（HTTP ${response.status}），未强制结束进程`);
+    if (!response.ok) throw localControlRejection(response.status, await response.json().catch(() => null));
     if (operation === 'pause') paused = true;
     const body = await response.json().catch(() => null); validateHealth(body, { ...context, ...(allowConfigurationChange ? { snapshot: { ...snapshot, hash: body?.lifecycle?.configSha256 } } : {}), pinned: initial }); return body;
   };
@@ -210,7 +230,29 @@ export async function stopClient({ root, env = process.env, configPath, expected
     assertConfig(); await assertProcessUnchanged(record, root);
     const final = validateHealth(await health(origin), { ...context, pinned: initial });
     if (final.connectionState !== 'draining' || final.activeActionCount || final.pollingCount) throw failure('CLIENT_BUSY', '客户端执行状态变化；未强制结束进程');
-    if (initial.lifecycle) await control('stop'); else { await boundLegacyTermination(record, root); stoppedClientReceipt = exitedReceipt(); }
+    if (initial.lifecycle) {
+      try { await control('stop'); }
+      catch (error) {
+        // Only the verified candidate in an update supplies this internal path.
+        // Normal stop/uninstall and rollback never terminate a refused daemon.
+        if (!retainedRecoveryRoot || error.code !== 'CONTROL_REJECTED' || error.httpStatus !== 409) throw error;
+        const { recoverRetainedClientStop } = await import('./client-retained-stop-recovery.mjs');
+        const assertCurrent = async () => {
+          assertConfig(); await assertProcessUnchanged(record, root);
+          await inspectNativeHealthListener(origin, record.pid);
+          if (clientBuildIdentity(root) !== build) throw failure('INSTALL_CHANGED', '升级核验期间客户端安装已变化');
+          return validateHealth(await health(origin), { ...context, pinned: initial, processRecord: record });
+        };
+        try {
+          const recovered = await recoverRetainedClientStop({ recoveryRoot: retainedRecoveryRoot, context, record, health: final, assertCurrent, timeoutMs: Math.min(shutdownTimeoutMs, timeoutMs) });
+          if (recovered?.stopped !== true) throw failure('STOP_UNCONFIRMED', '旧版客户端退出尚未确认');
+          stoppedClientReceipt = exitedReceipt();
+        } catch (recoveryError) {
+          if (recoveryError.stoppedClientReceipt) stoppedClientReceipt = recoveryError.stoppedClientReceipt;
+          throw recoveryError;
+        }
+      }
+    } else { await boundLegacyTermination(record, root); stoppedClientReceipt = exitedReceipt(); }
     const stoppedDeadline = Date.now() + Math.min(shutdownTimeoutMs, timeoutMs);
     while (Date.now() < stoppedDeadline) {
       const currentProcess = await inspectNativeClientProcess(record.pid, root);

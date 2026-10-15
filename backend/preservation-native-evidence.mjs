@@ -61,8 +61,8 @@ export function scanNativeFiles(options={}, {legacySource=null}={}) {
 
 /** Current daemon admission only; this cannot attest a production namespace. */
 export function inspectLocalDaemonMaintenanceFiles({connections=[]}={}) {
-  const {safe,issues,files,directories}=scanFileEvidence({connections},true);
-  return {safe,issues,files,directories};
+  const {safe,stopSafe,issues,stopIssues,retainedDeliveryCount,files,directories}=scanFileEvidence({connections},true);
+  return {safe,stopSafe,issues,stopIssues,retainedDeliveryCount,files,directories};
 }
 
 function explicitExitUnknown(value){
@@ -71,10 +71,37 @@ function explicitExitUnknown(value){
   return Object.values(value).some(item=>Array.isArray(item)?item.some(explicitExitUnknown):explicitExitUnknown(item));
 }
 
+function syntheticEvidence(value){
+  if(!value||typeof value!=='object')return false;
+  return value.fixture===true||value.executionSource==='fixture'||Object.values(value).some(item=>Array.isArray(item)?item.some(syntheticEvidence):syntheticEvidence(item));
+}
+
+// This permits only process shutdown with the original queue left on disk. It
+// is neither a delivery confirmation nor a production preservation proof.
+function retainableLocalDelivery(record,original,result,identity){
+  if(!['blocked','result_pending'].includes(record.state)||record.retainEvidence||!original||!result||legacyHistoryUncertain(record)||legacyHistoryUncertain(result)||explicitExitUnknown(result)||syntheticEvidence(result)||!exitedTree(executionExit(result)))return false;
+  for(const action of [record.action,original]){
+    if(typeof action?.id!=='string'||!action.id||typeof action.type!=='string'||!action.type||action.id!==record.action.id)return false;
+    const p=action.payload||{},targets=['deviceId','device_id','targetDeviceId','target_device_id'].map(key=>p[key]).filter(value=>value!==undefined&&value!==null&&value!=='');
+    if(targets.some(value=>value!==identity.deviceId)||['workspace','workspace_slug'].some(key=>action[key]!==undefined&&action[key]!==identity.workspace)||p.hermesBot?.workspace!==undefined&&p.hermesBot.workspace!==identity.workspace||p.hermesBot?.deviceId!==undefined&&p.hermesBot.deviceId!==identity.deviceId)return false;
+  }
+  if(result.result?.actionId!==undefined&&result.result.actionId!==record.action.id)return false;
+  const ids=new Set();
+  for(const event of record.events){
+    if(!event||!/^[-a-f0-9]{36}$/i.test(event.eventId||'')||event.agentId!=='ziwei_user'||typeof event.type!=='string'||!event.type||typeof event.message!=='string'||!event.data||typeof event.data!=='object'||Array.isArray(event.data)||ids.has(event.eventId))return false;
+    ids.add(event.eventId);
+  }
+  const receipt=result.result?.nativeOperation,worker=receipt?.data?.residentWorker;
+  if(original.type==='hermes.bot.native'&&original.payload?.nativeOperation?.resource==='gateway'&&(!gatewayResultMatches(original,result.result)||original.payload.nativeOperation.operation==='connect'&&(!worker||!result.result.residentExit)))return false;
+  if(receipt?.resource==='gateway'&&receipt.data?.connected===true&&(!worker||!result.result.residentExit))return false;
+  if(worker&&(!gatewayResultMatches(original,result.result)||worker.workspace!==identity.workspace||typeof worker.workerNonce!=='string'||!worker.workerNonce))return false;
+  return true;
+}
+
 /** Read-only evidence. Zero in-memory counters cannot replace these files.
  * localMaintenance is lexical code state, never selected by input JSON. */
 function scanFileEvidence({connections=[],actions=[],homes=[],productionRequest}={},localMaintenance,legacyInterpreter=null) {
-  const issues=[],files=[],directories=[],gatewayExits=[],legacyHistoryProofs=[],legacyNeverDispatchedProofs=[],originals=new Map(actions.map(row=>[row.id,normalizedAction(row)]));
+  const issues=[],files=[],directories=[],gatewayExits=[],legacyHistoryProofs=[],legacyNeverDispatchedProofs=[],retainedDeliveries=new Set(),originals=new Map(actions.map(row=>[row.id,normalizedAction(row)]));
   const issue=(code,detail={})=>issues.push({code,...detail});
   const read=file=>{try{const stat=fs.lstatSync(file,{bigint:true});if(!stat.isFile()||stat.isSymbolicLink()||stat.nlink!==1n)throw new Error('not regular file');const bytes=fs.readFileSync(file);files.push({path:path.resolve(file),exists:true,sha256:hash(bytes),bytes:bytes.length,identity:{dev:String(stat.dev),ino:String(stat.ino)}});return bytes.toString('utf8');}catch(error){if(error.code==='ENOENT')files.push({path:path.resolve(file),exists:false});throw error;}};
   const directoryProof=directory=>{try{const stat=fs.lstatSync(directory,{bigint:true});if(!stat.isDirectory()||stat.isSymbolicLink())throw Error('identity');const names=fs.readdirSync(directory).sort();directories.push({path:path.resolve(directory),exists:true,names,identity:{dev:String(stat.dev),ino:String(stat.ino)}});}catch(error){if(error.code==='ENOENT')directories.push({path:path.resolve(directory),exists:false,names:[]});else issue('DIRECTORY_UNREADABLE',{path:directory});}};
@@ -156,7 +183,7 @@ function scanFileEvidence({connections=[],actions=[],homes=[],productionRequest}
     try{names=fs.readdirSync(directory);}catch(error){if(error.code!=='ENOENT')issue('DELIVERY_DIRECTORY_UNREADABLE',{path:directory});}
     const consumed=new Set();
     for(const name of names.filter(name=>/^[a-f0-9]{64}\.json$/.test(name))){
-      const file=path.join(directory,name);let record;
+      const file=path.join(directory,name);let record,originalAction,deliveryResult;
       try{record=json(read(file));if(record?.version!==2||!record.action?.id||!Array.isArray(record.events)||!['awaiting_ack','acked','result_pending','confirmed','blocked'].includes(record.state)||name!==`${hash(JSON.stringify(String(record.action.id)))}.json`)throw new Error('invalid record');consumed.add(name);
         const identity={apiBase:connection.apiBase.replace(/\/$/,''),workspace,deviceId};
         if(!equal(record.identity,identity)||record.binding!==deliveryBinding(record.action,identity))throw new Error('identity mismatch');
@@ -164,12 +191,14 @@ function scanFileEvidence({connections=[],actions=[],homes=[],productionRequest}
           for(const kind of ['action','result']){if(kind==='result'&&!record.resultDigest&&record.state!=='result_pending')continue;const blobName=name.replace(/\.json$/,`.${kind}.json`),blobFile=path.join(directory,blobName),bytes=read(blobFile),blob=json(bytes);consumed.add(blobName);if(hash(bytes)!==record[`${kind}Digest`])throw new Error('blob digest mismatch');
             if(kind==='action'&&(!equal(blob?.identity,identity)||blob?.binding!==record.binding||deliveryBinding(blob?.action||{},identity)!==record.binding))throw new Error('original identity mismatch');
             if(kind==='result'&&(!['succeeded','failed'].includes(blob?.status)||!Object.hasOwn(blob,'result')||blob.receiptOnly!==true))throw new Error('result shape mismatch');
+            if(kind==='action')originalAction=blob.action;else deliveryResult=blob;
           }
         }
         // Unmapped/removed connections and queues are not guessed to be legacy.
         if(record.state!=='confirmed'||record.retainEvidence||record.events.length)issue('DELIVERY_NOT_DRAINED',{actionId:record.action.id,state:record.state,path:file});
         else if(!['succeeded','failed','expired'].includes(record.serverStatus)||!Number.isFinite(Date.parse(record.confirmedAt)))throw new Error('invalid terminal receipt');
         const original=originals.get(record.action.id);if(original&&original.status!==record.serverStatus)issue('DELIVERY_SERVER_MISMATCH',{actionId:record.action.id,path:file});
+        if(localMaintenance&&retainableLocalDelivery(record,originalAction,deliveryResult,identity))retainedDeliveries.add(file);
       }catch{issue('DELIVERY_CORRUPT',{path:file,actionId:record?.action?.id||null});}
     }
     for(const name of names)if(!consumed.has(name))issue('DELIVERY_ORPHAN_OR_TEMP',{path:path.join(directory,name)});
@@ -192,7 +221,8 @@ function scanFileEvidence({connections=[],actions=[],homes=[],productionRequest}
     }
     for(const action of [...originals.values()].filter(row=>row.type==='hermes.bot.native'&&row.payload.employeeId===item.employeeId&&row.payload.nativeOperation?.resource==='gateway'&&row.payload.nativeOperation.operation==='connect'&&row.acked_at))if(!starts.some(entry=>entry.sourceActionId===action.id))issue('GATEWAY_LIFECYCLE_MISSING',{actionId:action.id,path:file});
   }
-  return {safe:issues.length===0,issues,files,directories,gatewayExits,legacyHistoryProofs,originalActionProofs:[...legacyHistoryProofs,...legacyNeverDispatchedProofs]};
+  const stopIssues=localMaintenance?issues.filter(item=>item.code!=='DELIVERY_NOT_DRAINED'||!retainedDeliveries.has(item.path)):null;
+  return {safe:issues.length===0,issues,files,directories,gatewayExits,legacyHistoryProofs,originalActionProofs:[...legacyHistoryProofs,...legacyNeverDispatchedProofs],...(localMaintenance?{stopSafe:stopIssues.length===0,stopIssues,retainedDeliveryCount:retainedDeliveries.size}:{})};
 }
 
 /** Only actual native maintenance inspection + loopback health is accepted. */

@@ -22,6 +22,7 @@
     "scripts/ziwei-user.mjs",
     "scripts/start-ziwei-user.mjs",
     "scripts/client-lifecycle.mjs",
+    "scripts/client-retained-stop-recovery.mjs",
     "scripts/production-source-proof.mjs",
     "scripts/v2-preservation.mjs",
     "scripts/verify-preservation-packages.mjs",

@@ -244,7 +244,7 @@ async function performClientUpdateInternal({ root, env = process.env, directory,
   };
   try {
     progress.stage = 'stop_client';
-    stopped = await stop({ root, env, ...(allowLegacyStop ? { allowLegacyStop: true, legacyProof } : {}) });
+    stopped = await stop({ root, env, retainedRecoveryRoot: candidate, ...(allowLegacyStop ? { allowLegacyStop: true, legacyProof } : {}) });
     progress.stage = 'verify_original';
     assertConfiguration(configFile, configBefore);
     if (clientBuildIdentity(root) !== oldBuild) throw failure('INSTALL_CHANGED', '原程序在准备期间已变化，未覆盖另一维护任务的安装');
@@ -322,7 +322,7 @@ export async function launchClientUpdate({ codeRoot, root = codeRoot, args = {},
   const directory = path.join(home, 'maintenance', `update-${randomUUID()}`);
   fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
   const helperRoot = path.join(directory, 'helper'); fs.mkdirSync(helperRoot);
-  for (const relative of ['package.json', 'daemon/config.mjs', 'src/management-bootstrap.mjs', 'scripts/client-update.mjs', 'scripts/client-update-worker.mjs', 'scripts/client-lifecycle.mjs', 'scripts/client-legacy-identity.mjs', 'scripts/client-legacy-identity.ps1']) {
+  for (const relative of ['package.json', 'daemon/config.mjs', 'src/management-bootstrap.mjs', 'scripts/client-update.mjs', 'scripts/client-update-worker.mjs', 'scripts/client-lifecycle.mjs', 'scripts/client-retained-stop-recovery.mjs', 'scripts/client-legacy-identity.mjs', 'scripts/client-legacy-identity.ps1']) {
     const target = path.join(helperRoot, relative); fs.mkdirSync(path.dirname(target), { recursive: true }); fs.copyFileSync(path.join(codeRoot, relative), target);
   }
   const job = { root: path.resolve(root), parentPid: process.pid, directory, npmCli, ...legacyConsent, ...(args.package ? { artifactFile: path.resolve(String(args.package)), sha256: args.sha256 } : {}) };

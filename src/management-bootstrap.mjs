@@ -87,7 +87,7 @@ export function createManagementBootstrap({ workspace, deviceId, deviceToken, ap
 /** Compare actual packaged source, because historical packages reused version 0.1.0. */
 export function clientBuildIdentity(root) {
   const hash = createHash('sha256');
-  const files = ['package.json', 'backend/a2a-auth.mjs', 'scripts/ziwei-user.mjs', 'scripts/ziwei-cli.mjs', 'scripts/start-ziwei-user.mjs', 'scripts/ziwei-mcp.mjs', 'scripts/ziwei-terminal-mcp.mjs', 'scripts/client-lifecycle.mjs', 'scripts/client-legacy-identity.mjs', 'scripts/client-legacy-identity.ps1', 'scripts/client-maintenance-helper.mjs', 'scripts/client-update.mjs', 'scripts/client-update-worker.mjs'];
+  const files = ['package.json', 'backend/a2a-auth.mjs', 'scripts/ziwei-user.mjs', 'scripts/ziwei-cli.mjs', 'scripts/start-ziwei-user.mjs', 'scripts/ziwei-mcp.mjs', 'scripts/ziwei-terminal-mcp.mjs', 'scripts/client-lifecycle.mjs', 'scripts/client-retained-stop-recovery.mjs', 'scripts/client-legacy-identity.mjs', 'scripts/client-legacy-identity.ps1', 'scripts/client-maintenance-helper.mjs', 'scripts/client-update.mjs', 'scripts/client-update-worker.mjs'];
   files.push('backend/version-preservation.mjs','backend/preservation-native-evidence.mjs','backend/preservation-native-databases.mjs','backend/preservation-legacy-archive.mjs','backend/preservation-legacy-source.mjs','backend/preservation-source-namespace.mjs','backend/preservation-legacy-coverage.mjs','backend/preservation-legacy-integration.mjs','backend/preservation-source-native-windows.ps1','backend/production-preservation.mjs','scripts/production-source-proof.mjs','scripts/v2-preservation.mjs','scripts/verify-preservation-packages.mjs');
   function walk(directory) {
     if (!fs.existsSync(directory)) return [];

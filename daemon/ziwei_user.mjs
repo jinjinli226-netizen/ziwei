@@ -281,12 +281,25 @@ function healthPayload() {
   const quarantinedActionCount = [...connections.values()].reduce((total, connection) => total + connection.dispatcher.quarantinedActionIds.length, 0);
   const gateway=[...connections.values()].map(connection=>connection.localExecutor.maintenanceStatus());
   const fileEvidence=inspectLocalDaemonMaintenanceFiles({connections:[...connections.values()].map(connection=>({workspace:connection.config.workspace,deviceId:connection.config.deviceId,apiBase:connection.config.apiBase,runtimeDir:connection.runtimeDir}))});
-  const maintenance={safe:fileEvidence.safe&&gateway.every(row=>row.safe)&&quarantinedActionCount===0,pendingDeliveryCount:[...connections.values()].reduce((n,c)=>n+c.actionDelivery.pendingCount,0),blockedDeliveryCount:[...connections.values()].reduce((n,c)=>n+c.actionDelivery.blockedCount,0),gatewayWorkers:gateway.flatMap(row=>row.workers),fileIssues:fileEvidence.issues};
+  const gatewaySafe=gateway.every(row=>row.safe===true);
+  const maintenance={safe:fileEvidence.safe&&gatewaySafe&&quarantinedActionCount===0,stopSafe:fileEvidence.stopSafe&&gatewaySafe&&quarantinedActionCount===0,retainedDeliveryCount:fileEvidence.retainedDeliveryCount,pendingDeliveryCount:[...connections.values()].reduce((n,c)=>n+c.actionDelivery.pendingCount,0),blockedDeliveryCount:[...connections.values()].reduce((n,c)=>n+c.actionDelivery.blockedCount,0),gatewaySafe,gatewayWorkers:gateway.flatMap(row=>row.workers),fileIssues:fileEvidence.issues,stopIssues:fileEvidence.stopIssues.map(({code})=>({code}))};
   return { service: 'ziwei_user', version: VERSION, clientBuild: CLIENT_BUILD, bridge: 'ziwei_user', agentId: 'ziwei_user', workspace: config.workspace, deviceId: config.deviceId, runtimes: runtimeDiscovery.runtimes, managementMcp: primaryConnection?.managementBootstrap.status(), terminalMcp: primaryConnection?.terminalStatus, lastHeartbeat, lastHeartbeatAgeMs: lastHeartbeatAt ? Math.max(0, Date.now() - lastHeartbeatAt) : null, lastPoll, pid: process.pid,
     lifecycle: { nonce: lifecycleNonce, root: ROOT, configPath, configSha256: lifecycleConfigurationHash(), runtimeDir, startedAt: lifecycleStartedAt, managedAuxiliaryCount: maintenance.gatewayWorkers.filter(row=>row.processAlive!==false).length }, maintenance,
     connectionState: draining ? 'draining' : executionQuarantined ? 'quarantined' : 'connected', executionQuarantined, quarantinedActionCount, activeActionCount: [...connections.values()].reduce((total, connection) => total + connection.actionScheduler.activeCount, 0), pollingCount: [...connections.values()].filter(connection => connection.polling).length,
     connections: [...connections.values()].map(connection => ({ workspace: connection.config.workspace, deviceId: connection.config.deviceId, primary: connection.config.primary, configured: true, ready: !draining && !executionQuarantined && connection.lastHeartbeatAt > 0 && Date.now() - connection.lastHeartbeatAt <= Math.max(45_000, (Number(config.heartbeatMs) || 15_000) * 3), lastHeartbeat: connection.lastHeartbeat, managementMcp: connection.managementBootstrap.status(), terminalMcp: connection.terminalStatus })), connectionErrors,
   };
+}
+function localStopRefusal(state) {
+  const reasons=new Map(),add=(code,count=1)=>reasons.set(code,(reasons.get(code)||0)+count);
+  if(state.connectionState!=='draining')add('CONNECTION_NOT_DRAINING');
+  if(state.activeActionCount)add('ACTIVE_ACTIONS',state.activeActionCount);
+  if(state.pollingCount)add('ACTIVE_POLLS',state.pollingCount);
+  if(state.quarantinedActionCount)add('EXECUTION_QUARANTINED',state.quarantinedActionCount);
+  if(state.maintenance.gatewaySafe!==true)add('REGISTERED_GATEWAY_NOT_DRAINED');
+  for(const issue of state.maintenance.stopIssues||[])add(/^[A-Z][A-Z0-9_]{0,63}$/.test(issue.code)?issue.code:'FILE_EVIDENCE_UNSAFE');
+  if(state.maintenance.stopSafe!==true&&!reasons.size)add('MAINTENANCE_STOP_UNSAFE');
+  const all=[...reasons].map(([code,count])=>({code,count}));
+  return {error:'CLIENT_STOP_UNSAFE',activeActionCount:state.activeActionCount,pollingCount:state.pollingCount,quarantinedActionCount:state.quarantinedActionCount,maintenance:{safe:state.maintenance.safe,stopSafe:state.maintenance.stopSafe,pendingDeliveryCount:state.maintenance.pendingDeliveryCount,blockedDeliveryCount:state.maintenance.blockedDeliveryCount,retainedDeliveryCount:state.maintenance.retainedDeliveryCount},reasons:all.slice(0,16),...(all.length>16?{moreReasonCount:all.length-16}:{})};
 }
 const privateIdentityHandler=privateIdentityConfiguration?createProductionClientIdentityHandler({...privateIdentityConfiguration,boot:{nonce:lifecycleNonce,startedAt:lifecycleStartedAt,clientBuild:CLIENT_BUILD,configPath,runtimeDir,loadedConfigSha256,connections:privateClientConnections(connections)},readState:createPrivateClientStateReader({connections,isDraining:()=>draining,connectionErrors:()=>connectionErrors})}):null;
 const privateIdentityRoute=createPrivateIdentityHttpRoute(privateIdentityHandler);
@@ -302,10 +315,10 @@ const health = http.createServer((req, res) => {
       if (!['pause', 'resume', 'stop'].includes(operation)) { res.writeHead(400); res.end(); return; }
       // Legacy pause/resume remains token authenticated. Stop always binds this
       // boot; supplying a wrong nonce can never silently use legacy behavior.
-      if ((nonce !== undefined && nonce !== lifecycleNonce) || (operation === 'stop' && nonce !== lifecycleNonce)) { res.writeHead(409); res.end(); return; }
+      if ((nonce !== undefined && nonce !== lifecycleNonce) || (operation === 'stop' && nonce !== lifecycleNonce)) { res.writeHead(409, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify({error:'CLIENT_CONTROL_IDENTITY_CHANGED',reasons:[{code:'BOOT_IDENTITY_MISMATCH',count:1}]})); return; }
       if (operation === 'stop') {
         const state = healthPayload();
-        if (!draining || state.activeActionCount || state.pollingCount || !state.maintenance.safe) { res.writeHead(409); res.end(); return; }
+        if (!draining || state.activeActionCount || state.pollingCount || !state.maintenance.stopSafe) { res.writeHead(409, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(localStopRefusal(state))); return; }
         res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(state));
         setImmediate(() => stop('local_maintenance'));
         return;
@@ -356,7 +369,8 @@ function stop(signal) {
     // registered uncertainty visible instead of reporting successful shutdown.
     if (connection.localExecutor.maintenanceStatus()?.safe !== true) throw new Error('REGISTERED_GATEWAY_EXIT_UNCONFIRMED');
   }));
-  void Promise.allSettled([closed, ...activeHeartbeats, ...executors]).then(results => {
+  const actions=[...connections.values()].map(connection=>connection.actionScheduler.whenIdle());
+  void Promise.allSettled([closed, ...activeHeartbeats, ...actions, ...executors]).then(results => {
     const failed = results.filter(result => result.status === 'rejected').length;
     log('stopped', { signal, ...(failed ? { cleanupFailures: failed } : {}) });
     // Let outbound fetch, pipe writes and native close callbacks drain. The
