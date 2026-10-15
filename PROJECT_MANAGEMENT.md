@@ -2,7 +2,9 @@
 
 ## 当前接手入口（2026-10-16）
 
-最新生产状态、GitHub 分支、Windows 客户端 build、真实验收范围及未解决问题统一维护在 [HANDOFF.md 的最新接手状态](HANDOFF.md#2026-10-16-最新接手状态)。V2 已发布，最近主站/API 提交为 `ead2ac9281c47624929f433bc190b44e2659498c`；客户端及文档提交可以领先主站。
+最新生产状态、GitHub 分支、Windows 客户端 build、真实验收范围及未解决问题统一维护在 [HANDOFF.md 的最新接手状态](HANDOFF.md#2026-10-16-最新接手状态)。V2 已发布，最近主站/API 和客户端提交均为 `cd610444ce793d6e5fbebfa7ed1b982c070ad9a3`；文档提交可以领先产品。
+
+00:49 已发布聊天图片兼容修复，允许完整图片后的附加数据并保留原字节，界面明确支持 JPG/JPEG，错误指出具体文件。三图真实 HTTP 传输回归通过；Windows 现场图片读图仍待原机确认。新 build `6de43142…` 已包含下述启动器、续期和停止修复。首次发布遇到 SQLite journal 只读恢复错误并出现短暂 502，已恢复、通过完整性检查后重新发布；详见[图片兼容及发布恢复记录](docs/operations/2026-10-16-chat-image-container-compatibility.md)。
 
 00:24 已发布 Hermes 0.22 Windows 启动器兼容修复 `528361d`，新 build `c3ec583…`，含此前登录续期及停止修复。公司台式已核实 Hermes 0.22 能正常探测，创建失败在启动器适配；已完成官方源码样本的创建与配置检查，等待公司台式更新并重试原 Bot。详见[本次记录](docs/operations/2026-10-16-hermes-windows-launcher.md)。李金晋电脑旧停止问题的实际更新及真模型双图验收仍以新的设备回执为准，见[停止修复记录](docs/operations/2026-10-15-retained-receipt-stop.md)。
 

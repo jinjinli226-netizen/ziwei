@@ -2,6 +2,16 @@
 
 ## 2026-10-16 最新接手状态
 
+### 00:49 更新：PNG/JPG 误拒收兼容修复已上线
+
+主站、API 和官方客户端现均来自 `cd610444ce793d6e5fbebfa7ed1b982c070ad9a3`，已先推 GitHub 再于 **00:49:35（Asia/Shanghai）** 发布。当前目录 `/opt/ziwei/releases/v2-hotfix-cd610444ce79/v2`；新 build `6de43142dce43675f6b8c8c56fd8d306eec0b0dcea8920091936c1b6c1a1b829`，包 SHA-256 `7d1a231f6bedd897baf314a9e66339f58abdb2fc8d695bffb535fd04dc49282d`。
+
+修复完整 PNG/JPEG/GIF/WebP 末尾有附加数据时被误拒的问题，入站和返回图片共用结构识别，保留原字节；界面明确 JPG/JPEG，错误定位具体文件。三张真实图片的登录态 HTTP 发送、幂等、设备下发和回传逐字节通过；相关回归 313 项通过、8 项 Windows 专用未执行。用户截图中的三张原图未取得，不能断言其具体字节特征。网页上传修复刷新即生效；Windows 返回图片兼容需新客户端。公司台式原生创建和真模型多图仍待设备实际回执。
+
+首次发布曾因 SQLite rollback journal 阻止只读备份及旧服务启动而出现 502，已保留原文件、让 SQLite 自动恢复并验证完整性，修正发布步骤后重新上线。公网健康、前端资源、下载元数据及包哈希均已回读通过。备份 `/opt/ziwei-staging/backups/image-container-20261015T164930Z`，完整验证、恢复经过和后续回退见[图片兼容记录](docs/operations/2026-10-16-chat-image-container-compatibility.md)。
+
+### 00:24 更新：Hermes 0.22 启动器兼容
+
 **公司台式 Hermes 0.22 创建 Bot 的启动器兼容修复已发布。** 源码 `528361d80bf7ac3976bff621cb9d5ac044129cb7` 先推 GitHub，再于 **00:24:43（Asia/Shanghai）** 更新官方下载包；新 build `c3ec583e44396579a8d4bd601061a62de69e184931adc22691917021fd1c3c48`，包 SHA-256 `0448b7baf714159007578f69601557de05ae5baac9539a44219d9c289bd304ca`。主站/API 仍为 `ead2ac9281c47624929f433bc190b44e2659498c`。
 
 这次失败已定位在原生启动器识别：公司台式实际上已运行 `a996e94…` 客户端，Hermes 0.22.0 的 `--version` 成功；不能再沿用下方历史“CLI 探测超时”解释。新版本支持官方 distlib EXE 的 `-I` 和原生依赖初始化，修复 PE 中伪 shebang 的误命中，并保留独立 Profile/HOME。
