@@ -1,5 +1,58 @@
 # 紫薇项目 HandOff
 
+## 2026-10-15 最新接手状态
+
+**换电脑接手先读本节。** 下方按日期保留历史记录，其中“V2 未上线／方案中”描述的是当时状态，不代表当前生产。设备状态取自 2026-10-15 约 16:27（Asia/Shanghai）的检查，接手后应重新查询。本文记录可复核的项目进度，不包含完整 Codex 聊天。
+
+### 代码、生产与客户端
+
+- GitHub 仓库：[jinjinli226-netizen/ziwei](https://github.com/jinjinli226-netizen/ziwei)，当前发布分支为 `codex/v2-20261014-release`；不要假定默认分支已包含这些提交。
+- 最近产品代码提交：`ead2ac9281c47624929f433bc190b44e2659498c`，已先推 GitHub，于 **2026-10-15 15:51:16** 完成服务器发布。后续交接文档提交可以领先生产；本次仅更新文档，不另行部署。
+- 正式站：[紫薇](https://qzelynth.top)。服务器 `/opt/ziwei/current` 指向 `/opt/ziwei/releases/v2-hotfix-ead2ac9281c4/v2`。上一产品提交为 `0f54339e3714c9be579482932a6fc294d73d6cca`，该次发布备份在 `/opt/ziwei-staging/backups/bot-stop-20261015T075113Z`；数据库结构未变。本次保留上一版代码，不等于已验证可直接退回 V1.0。
+- [官方 Windows 包](https://qzelynth.top/downloads/cli/ziwei-latest.tgz)与[发布元数据](https://qzelynth.top/downloads/cli/release.json)已经公网回读核对。预期 `clientBuild` 为 `855e4fa7602b58de3b5eb93799834d67dc2afa7b85b24f0c55acbd8f5e89f78a`，包 SHA-256 为 `9f7376ffd700587988a92301ce318af4f0287f72d0e13bd55f2d4afba6664ae4`。版本号仍可能显示 `0.1.0`，必须比较实际运行的 build。
+
+### 已完成与验收边界
+
+1. Bot 与团队管理共用数字员工身份；Bot 主聊天、配置、原生 Profile/HOME、能力状态与手机 MCP 已有生产实现。早期方案和合同中的“未实现”不能直接当作当前功能清单；具体能力仍要检查当前配置及执行结果。
+2. 手机读图已使用真实 Windows、真实 Codex 订阅 `gpt-6.1-sol / max` 验证：“闲鱼运营大神”调用“闲鱼1”截图并通过 `vision_analyze` 读取图片。发布后成功动作 `action_b6cba77e-b8d8-410e-9b89-624b22261b87`、截图命令 `device-command-92fa88bb-d2a2-490f-9c3b-8da23f960106`；描述的紫薇映界 Agent 页面与实际截图一致，附件回传成功。该验证只截图、读图，没有操作商品或发送消息。实现与此前验收详见[手机读图记录](docs/operations/2026-10-15-phone-vision-default-tools.md)。
+3. 新建 Bot 默认启用核心工具与 `execute`，包含 vision；既有保存配置、显式空工具列表和仅对话设置不自动覆盖。外部服务仍需账号、设备绑定和相应配置。
+4. Bot 主聊天和普通员工聊天已发布剪贴板粘贴、多图预览/删除与同条消息多图发送；每条最多 20 张、合计 10 MiB。Hermes 多图在执行内兼容层校验数量、原始字节及顺序，单图/无图入口保持。前端 226 项、真实 Vue 浏览器 7 项、运行时/附件最终回归 64 项通过，9 项 Windows 专用测试在 Mac 跳过；lint/build 通过。**Windows 真模型双图验收尚未完成**，不能把浏览器与运行时测试称为完整实测。详见[剪贴板与多图记录](docs/operations/2026-10-15-chat-clipboard-multiple-images.md)。
+
+### 当前未解决的问题
+
+| 设备 / 范围 | 已核实状态 | 接手时下一步 |
+| --- | --- | --- |
+| 李金晋电脑 | 在线快照仍运行旧 build `fed59ef0e6434f4dec5c590e8f785ac1df5370082e9f917f751caf651dacf7e6`；“闲鱼运营大神”仍绑定此机。用户执行 `ziwei_user stop` 得到 HTTP 409。PowerShell 的 `status --json \| ConvertFrom-Json` 因乱码解析失败，未取得完整维护阻塞原因。 | 精确核对该机实际 build、在途动作与维护状态；修复小体积诊断及编码问题后再判断 409。不能据另一台电脑已更新就称此机升级完成，也不能声称重启已解决。 |
+| 公司台式 | 在线且已运行新 build `855e4fa…`；Codex CLI 与认证/provider 就绪。Hermes 探测是 `cli_version_timeout / ETIMEDOUT`，3 秒限制；显示的 0.18.2 来自安装元数据，并非版本命令成功。Claude/Gemini 为未发现。 | 用户尚未回复手动 `hermes --version` 的结果和耗时。先确定慢启动/失败原因；版本探测不调用模型，不能直接归因代理。当前探测同步执行，不宜只把 3 秒改为长等待而阻塞心跳、停止与事件处理；应评估异步探测。此修复尚未实现。 |
+| Windows 多图真模型验收 | 网页、服务端及客户端包已发布；公司台式的新 build 已确认，但原 Bot 所在的李金晋电脑仍是旧 build。 | 在实际 Bot 绑定的设备确认新 build，再由真实聊天一次发送两张内容不同的图片，让模型按顺序分别描述，并核对同条消息与附件。验收前不要标记完成。 |
+
+停止问题尚未取得足够证据定位；最近一个动作完成不代表所有本地连接的维护检查均通过。本轮没有强制杀进程、清空执行记录或伪造终态。Windows 重启会结束当时进程，但自启动可以重新启动客户端，也不能证明旧状态已修复。
+
+### 新电脑接手方法与继续工作的约束
+
+有仓库权限的账号可直接拉取当前分支，在“紫薇”文件夹继续：
+
+```sh
+git clone --branch codex/v2-20261014-release https://github.com/jinjinli226-netizen/ziwei.git 紫薇
+cd 紫薇
+git status --short --branch
+git log -5 --oneline
+```
+
+已有本地项目时先检查未提交修改与当前分支，再 fetch/切换；不要为接手执行覆盖式 reset。阅读顺序：本文件最新节 → 对应专项运维记录 → [项目管理手册](PROJECT_MANAGEMENT.md)及[历史 V2 会话台账](docs/handoffs/V2_SESSION_LEDGER.md)。
+
+GitHub 可恢复已提交代码、提交历史和交接文档；完整 Codex 聊天、忽略的本地验证文件、服务器业务数据库、Windows Profile/HOME、登录态、代理和密钥不会随 clone 自动迁移。生产与设备访问权限另行配置，凭据不得写进仓库或交接文档。
+
+- 产品改动仍按“验证通过 → 推 GitHub 并核对远端 → 从同一源码部署”执行；保留用户当前数据。本次文档同步不触发产品部署。
+- 现阶段运行目标是现有 Windows 电脑持续开机；没有要求做 Mac 产品适配。“达到单次轮数上限自动续跑”用户明确要求先别做，仍暂停，不能擅自启动。
+- Bot 模型使用现有 Codex 订阅与电脑代理，优先 `gpt-6.1-sol / max`，用户允许不支持时降为 `xhigh`；`ultra` 已被该 Bot 接口拒绝。研发 Codex 任务的模型设置与 Bot 实际运行配置分别核对。
+- 本机 Mac 任何新增测试/预览监听服务都须先纳入用户的统一端口中心；接手文档更新不需要启动服务。
+- 下方早期会话分工和仅预览要求是历史阶段记录；执行以当前用户明确要求及当前环境指令为准，不为旧台账机械创建新会话。
+
+其他已发布修复可追溯：[停止与回执](docs/operations/2026-10-15-bot-stop-receipt-hotfix.md)、[员工强制删除](docs/operations/2026-10-15-employee-force-removal.md)、[能力状态](docs/operations/2026-10-15-bot-capability-status.md)、[手机能力状态](docs/operations/2026-10-15-bot-phone-capability-status.md)、[手机 MCP 身份](docs/operations/2026-10-15-phone-mcp-bot-identity.md)、[10 月 14 日发布交接](docs/operations/2026-10-14-r01-final-source-server-handoff.md)。
+
+## 以下为历史记录
+
 ## 2026-10-12 V2 E02 同一员工的 Hermes Bot 后端候选
 
 基线6eaf7de，隔离分支codex/v2-e02-hermes-bot。已实现Bot附加能力与统一员工身份、配置实际原生生效、Hermes连续聊天/同session恢复、Creator同后端MCP、单一automation Routine与不确定执行保护；普通现有Hermes幂等初始化保持ID和旧聊天，Creator不转普通岗位。候选只交本地预览，E03负责最终集成与唯一预览启动；不发布或更换正式服务/客户端。证据、完整能力缺口、独立Q步骤与启动参数见[交付](docs/handoffs/2026-10-12-e02-hermes-bot-preview.md)及[API](docs/contracts/2026-10-12-hermes-bot-api.md)。725全量、16专项、lint82/build1764和真实CLI+本地假模型两轮证据；外部模型、跨Bot/Gateway/语音/Goals/Heartbeat/Kanban、24小时耐久仍待后续接入/验证。
