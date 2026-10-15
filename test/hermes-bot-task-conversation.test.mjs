@@ -1,10 +1,11 @@
+import {rasterFixtures} from './fixtures/raster-images.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createRepository} from '../backend/repository.mjs';
 import {createManagementService} from '../backend/management.mjs';
 import {completeOwnedProfile} from '../test-support/owned-profile.mjs';
 
-const png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a6gAAAABJRU5ErkJggg==';
+const png=rasterFixtures.png.toString('base64');
 const image=()=>({name:'task-result.png',mimeType:'image/png',contentEncoding:'base64',content:png});
 function fixture(t){
   const repo=createRepository({memory:true,envEncryptionKey:'task-conversation-fixture-only'});t.after(()=>repo.db.close());

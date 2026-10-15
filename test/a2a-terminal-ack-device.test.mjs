@@ -1,9 +1,10 @@
+import {rasterFixtures} from './fixtures/raster-images.mjs';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import test from 'node:test';
 import { createApp } from '../backend/app.mjs';
 
-const content = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a6gAAAABJRU5ErkJggg==';
+const content = rasterFixtures.png.toString('base64');
 const image = name => ({ name, mimeType: 'image/png', contentEncoding: 'base64', content });
 const sha = value => crypto.createHash('sha256').update(Buffer.from(value, 'base64')).digest('hex');
 

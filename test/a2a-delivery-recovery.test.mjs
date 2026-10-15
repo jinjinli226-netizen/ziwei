@@ -1,3 +1,4 @@
+import {rasterFixtures} from './fixtures/raster-images.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
@@ -118,7 +119,7 @@ test('HTTP event retry persists once and remains retryable after the result, wit
   const { repo, deviceA, deviceB, request } = await httpFixture(t);
   const employee = repo.createEmployee('test-111', { name: 'Delivery fixture employee', runtime: 'Codex', targetDeviceId: deviceA.deviceId });
   const conversation = repo.createConversation('test-111', { employeeId: employee.id, modelId: 'fixture-model', workingDirectory: 'C:/isolated-delivery-fixture' });
-  const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a6gAAAABJRU5ErkJggg==';
+  const png = rasterFixtures.png.toString('base64');
   const image = { name: 'delivered.png', mimeType: 'image/png', contentEncoding: 'base64', content: png };
   const sent = repo.addConversationMessage(conversation.id, { content: 'Isolated delivery', attachments: [image] });
   const actionId = sent.execution.id;

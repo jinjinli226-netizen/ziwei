@@ -56,3 +56,17 @@ test('file bytes determine supported MIME and oversize/type errors are specific'
   await assert.rejects(readConversationImages([{name:'fake.png',size:3,arrayBuffer:async()=>Uint8Array.from([1,2,3]).buffer}]),/PNG.*JPEG.*GIF.*WebP/);
   await assert.rejects(readConversationImages([{name:'big.png',size:10*1024*1024+1}]),/10 MB/);
 });
+
+test('JPG filename and browser MIME aliases preserve real JPEG bytes and normalize the wire MIME',async()=>{
+  const {rasterFixtures}=await import('../../test/fixtures/raster-images.mjs');
+  const samples=[{name:'微信图片_1.jpg',type:'',bytes:rasterFixtures.jpeg},{name:'微信图片_2.JPG',type:'image/jpg',bytes:rasterFixtures.progressiveJpeg},{name:'微信图片_3.jpeg',type:'image/pjpeg',bytes:rasterFixtures.jpegWithExifThumbnail}];
+  const files=samples.map(sample=>({...sample,size:sample.bytes.length,arrayBuffer:async()=>sample.bytes.buffer.slice(sample.bytes.byteOffset,sample.bytes.byteOffset+sample.bytes.byteLength)}));
+  const attachments=JSON.parse(JSON.stringify(await readConversationImages(files)));
+  assert.deepEqual(attachments.map(item=>item.name),samples.map(item=>item.name));
+  for(let i=0;i<samples.length;i++){
+    assert.equal(attachments[i].mimeType,'image/jpeg');
+    assert.equal(attachments[i].contentEncoding,'base64');
+    assert.equal(attachments[i].size,samples[i].bytes.length);
+    assert.deepEqual(Buffer.from(attachments[i].content,'base64'),samples[i].bytes);
+  }
+});

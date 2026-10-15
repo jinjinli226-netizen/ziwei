@@ -1,3 +1,4 @@
+import {rasterFixtures} from './fixtures/raster-images.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -7,7 +8,7 @@ import crypto from 'node:crypto';
 import { createLocalActionExecutor } from '../src/local-action.mjs';
 import { discoverInstalledRuntimes,resetRuntimeDiscovery,executeRuntime } from '../src/runtime-adapters.mjs';
 
-const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/lM8AAAAASUVORK5CYII=','base64');
+const png=rasterFixtures.png;
 function fixture(t,executorOptions={}) {
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'ziwei-native-image-test-'));
   const bin=path.join(root,'bin');const cwd=path.join(root,'cwd');const runtimeDir=path.join(root,'runtime');

@@ -1,3 +1,4 @@
+import {rasterFixtures} from './fixtures/raster-images.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import crypto from 'node:crypto';
@@ -5,7 +6,7 @@ import { createRepository } from '../backend/repository.mjs';
 import { createApp } from '../backend/app.mjs';
 import { normalizeConversationAttachments } from '../backend/conversation-attachments.mjs';
 
-const pngContent = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a6gAAAABJRU5ErkJggg==';
+const pngContent = rasterFixtures.png.toString('base64');
 const image = (extra = {}) => ({ name: 'image.png', mimeType: 'image/png', contentEncoding: 'base64', content: pngContent, ...extra });
 
 function fixture(t) {

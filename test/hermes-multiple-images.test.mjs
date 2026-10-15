@@ -1,3 +1,4 @@
+import {rasterFixtures} from './fixtures/raster-images.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -7,7 +8,7 @@ import {createHash} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import {hermesMcpSpawnSpec,runtimeInvocation,executeRuntime,resetRuntimeDiscovery} from '../src/runtime-adapters.mjs';
 
-const pngs=['iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a6gAAAABJRU5ErkJggg==','iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/lM8AAAAASUVORK5CYII='].map(value=>Buffer.from(value,'base64'));
+const pngs=[rasterFixtures.png,Buffer.concat([rasterFixtures.png,Buffer.from('\r\n')])];
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 function python(){for(const command of ['python3','python']){const p=spawnSync(command,['-c','import sys;print(sys.executable)'],{encoding:'utf8',windowsHide:true});if(p.status===0&&path.isAbsolute(p.stdout.trim()))return p.stdout.trim();}return null;}
 function fixture(t){

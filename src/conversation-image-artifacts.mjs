@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import {rasterImageMimeType,canonicalRasterMimeType} from './raster-image.mjs';
 
 export const MAX_CONVERSATION_IMAGE_BYTES = 10 * 1024 * 1024;
 export const MAX_ACTION_RESULT_JSON_BYTES = 15 * 1024 * 1024;
@@ -12,21 +13,13 @@ const inside = (root, candidate) => {
 };
 const sameFile = (a,b) => a.dev === b.dev && a.ino === b.ino && a.size === b.size && a.mtimeMs === b.mtimeMs;
 
-export function imageMimeType(bytes) {
-  // Match the server raster boundary: header, dimensions where available and
-  // trailer/container size, rather than accepting a signature-only file.
-  if (bytes.length >= 45 && bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])) && bytes.toString('ascii',12,16) === 'IHDR' && bytes.readUInt32BE(16) > 0 && bytes.readUInt32BE(20) > 0 && bytes.toString('ascii',bytes.length-8,bytes.length-4) === 'IEND') return 'image/png';
-  if (bytes.length >= 4 && bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255 && bytes[bytes.length-2] === 255 && bytes[bytes.length-1] === 217) return 'image/jpeg';
-  if (bytes.length >= 14 && ['GIF87a','GIF89a'].includes(bytes.toString('ascii',0,6)) && bytes.readUInt16LE(6) > 0 && bytes.readUInt16LE(8) > 0 && bytes[bytes.length-1] === 59) return 'image/gif';
-  if (bytes.length >= 20 && bytes.toString('ascii',0,4) === 'RIFF' && bytes.readUInt32LE(4)+8 === bytes.length && bytes.toString('ascii',8,12) === 'WEBP' && ['VP8 ','VP8L','VP8X'].includes(bytes.toString('ascii',12,16))) return 'image/webp';
-  return null;
-}
+export const imageMimeType = rasterImageMimeType;
 
 export function validateImageBytes(bytes, declaredMime = null) {
   if (!bytes.length || bytes.length > MAX_CONVERSATION_IMAGE_BYTES) throw failure('图片大小必须大于 0，且不能超过 10 MiB');
   const mimeType = imageMimeType(bytes);
   if (!mimeType) throw failure('图片格式或魔数无效；仅支持 PNG、JPEG、GIF、WebP');
-  if (declaredMime && String(declaredMime).toLowerCase() !== mimeType) throw failure('图片 MIME 类型与实际格式不匹配');
+  if (declaredMime && canonicalRasterMimeType(declaredMime) !== mimeType) throw failure('图片 MIME 类型与实际格式不匹配');
   return mimeType;
 }
 
@@ -98,10 +91,10 @@ export function readImageArtifacts(session) {
     const key = process.platform === 'win32' ? entry.path.replace(/\\/g,'/').toLowerCase() : entry.path;
     if (declared.has(key)) throw failure('图片清单不能重复声明同一个文件');
     declared.add(key);
-    const bytes = readDeclaredFile(session,entry.path,MAX_CONVERSATION_IMAGE_BYTES);
-    const mimeType = validateImageBytes(bytes,entry.mimeType);
-    total += bytes.length;if (total > MAX_CONVERSATION_IMAGE_BYTES) throw failure('图片输出总大小不能超过 10 MiB');
     const name = path.win32.basename(String(entry.name || entry.path)).replace(/[\u0000-\u001f\u007f]/g,'_').slice(0,180) || `image-${output.length+1}`;
+    let bytes,mimeType;
+    try {bytes=readDeclaredFile(session,entry.path,MAX_CONVERSATION_IMAGE_BYTES);mimeType=validateImageBytes(bytes,entry.mimeType);} catch(error) {throw failure(`${name}：${error.message}`);}
+    total += bytes.length;if (total > MAX_CONVERSATION_IMAGE_BYTES) throw failure(`${name}：图片输出总大小不能超过 10 MiB`);
     output.push({name,mimeType,size:bytes.length,contentEncoding:'base64',content:bytes.toString('base64')});
   }
   return output;

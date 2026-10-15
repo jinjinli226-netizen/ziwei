@@ -33,3 +33,16 @@ test('failed workspace load cannot authorize prior workspace model and skill opt
   await load();assert.equal(refs.loading.value,false);assert.equal(refs.summary.value.workspace.slug,'b');assert.equal(refs.loadedBotOptionsWorkspace.value,'a');
   assert.match(app,/:models="loadedBotOptionsWorkspace===botWorkspace\?/);assert.match(app,/:skills="loadedBotOptionsWorkspace===botWorkspace\?/);
 });
+
+test('actual Bot send keeps three real PNG/JPG attachments ordered and byte-identical through JSON and retry',async()=>{
+  const {readConversationImages}=await import('./conversation-compose.js');
+  const {rasterFixtures}=await import('../../test/fixtures/raster-images.mjs');
+  const source=[['微信图片_1.png',rasterFixtures.png],['微信图片_2.jpg',rasterFixtures.jpeg],['微信图片_3.jpeg',rasterFixtures.jpegWithExifThumbnail]];
+  const attachments=await readConversationImages(source.map(([name,bytes])=>({name,type:'',size:bytes.length,arrayBuffer:async()=>bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength)})));
+  const composer=createConversationComposerStore(),writes=[],conversation={id:'chat',employee_id:'bot',device_id:'fixed-device',messages:[]};composer.updateDraft('qa\0chat','比较这三张图片');composer.setAttachments('qa\0chat',attachments);
+  const send=actual('sendConversationMessage',{selectedConversation:{value:conversation},employees:{value:[{id:'bot',runtime:'Hermes'}]},conversationDeviceId:{value:'fixed-device'},devices:{value:[]},conversationSettingsSnapshot,botBindingPending:{value:false},conversationBotBinding:{value:{id:'bot'}},conversationModelId:{value:''},conversationWorkingDirectory:{value:''},conversationComposeKey:()=> 'qa\0chat',conversationComposer:composer,api:{addConversationMessage:async(_id,body)=>{writes.push(JSON.parse(JSON.stringify(body)));if(writes.length===1)throw new Error('retry fixture');return {id:'msg'};}},refreshSelectedConversation:async()=>{},startConversationPolling:()=>{},notify:()=>{}});
+  await send();assert.equal(composer.get('qa\0chat').attachments.length,3);await send();assert.equal(writes.length,2);
+  assert.equal(writes[0].clientMessageId,writes[1].clientMessageId);
+  for(const body of writes){assert.deepEqual(body.attachments.map(item=>item.name),source.map(([name])=>name));for(let i=0;i<source.length;i++)assert.deepEqual(Buffer.from(body.attachments[i].content,'base64'),source[i][1]);}
+  assert.equal(composer.get('qa\0chat').attachments.length,0);
+});

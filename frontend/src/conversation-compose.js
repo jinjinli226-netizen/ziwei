@@ -59,7 +59,7 @@ export async function readConversationImages(files) {
   for(const file of files) {
     const bytes=new Uint8Array(await file.arrayBuffer());
     const mimeType=imageMimeFromBytes(bytes);
-    if(!mimeType)throw new Error(`${file.name}：请选择 PNG、JPEG、GIF 或 WebP 图片`);
+    if(!mimeType)throw new Error(`${file.name}：请选择 PNG、JPG/JPEG、GIF 或 WebP 图片`);
     if(bytes.byteLength>CONVERSATION_IMAGE_LIMIT)throw new Error('每条消息的图片合计不能超过 10 MB');
     let binary='';for(let index=0;index<bytes.length;index+=0x8000)binary+=String.fromCharCode(...bytes.subarray(index,index+0x8000));
     attachments.push({name:file.name,mimeType,size:bytes.byteLength,content:btoa(binary),contentEncoding:'base64'});

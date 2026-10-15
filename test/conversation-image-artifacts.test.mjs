@@ -1,3 +1,4 @@
+import {rasterFixtures} from './fixtures/raster-images.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -9,7 +10,7 @@ const artifacts = await import('../src/conversation-image-artifacts.mjs').catch(
   if (error.code !== 'ERR_MODULE_NOT_FOUND') throw error;
   return {};
 });
-const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/lM8AAAAASUVORK5CYII=', 'base64');
+const png = rasterFixtures.png;
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ziwei-image-artifact-test-'));
   t.after(() => fs.rmSync(root, {recursive:true,force:true}));
@@ -105,15 +106,17 @@ test('invalid image bytes and claimed MIME mismatches fail with concrete errors'
 });
 test('raster validation rejects signature-only, truncated and zero-dimension images', () => {
   const zeroPng=Buffer.from(png);zeroPng.writeUInt32BE(0,16);
-  const gif=Buffer.from('474946383961010001008000000000002c00000000010001000002024401003b','hex');
+  const gif=rasterFixtures.gif;
   const webp=Buffer.alloc(20);webp.write('RIFF');webp.writeUInt32LE(12,4);webp.write('WEBPVP8 ',8);
   for(const bytes of [png.subarray(0,8),png.subarray(0,png.length-2),zeroPng,Buffer.from([255,216,255,0]),gif.subarray(0,gif.length-1),Buffer.concat([webp,Buffer.from([0])])]) {
     assert.throws(()=>artifacts.validateImageBytes(bytes),/图片格式|魔数|结构/);
   }
   assert.equal(artifacts.validateImageBytes(png),'image/png');
-  assert.equal(artifacts.validateImageBytes(Buffer.from([255,216,255,217])),'image/jpeg');
+  assert.throws(()=>artifacts.validateImageBytes(Buffer.from([255,216,255,217])),/图片格式|魔数|结构/);
+  assert.equal(artifacts.validateImageBytes(rasterFixtures.jpeg),'image/jpeg');
   assert.equal(artifacts.validateImageBytes(gif),'image/gif');
-  assert.equal(artifacts.validateImageBytes(webp),'image/webp');
+  assert.throws(()=>artifacts.validateImageBytes(webp),/图片格式|魔数|结构/);
+  assert.equal(artifacts.validateImageBytes(rasterFixtures.webp),'image/webp');
 });
 test('single image and combined image bytes cannot exceed 10 MiB', t => {
   const s=session(t);const one=Buffer.alloc(10*1024*1024+1);png.copy(one);
