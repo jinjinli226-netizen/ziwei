@@ -12,27 +12,32 @@ export function createPhoneMcpService(repo, connect, management, options = {}) {
   const db=repo.db; const key=keyFor(options);
   const publicBase=String(options.publicApiBase || process.env.ZIWEI_APP_URL || 'https://qzelynth.top').replace(/\/$/,'');
   const ws = slug => { const item=repo.getWorkspace(slug); if(!item) fail('工作区不存在','WORKSPACE_NOT_FOUND',404); return item; };
-  const employee = (slug,id) => management.employee(slug,id);
+  const employee = (slug,id,context={}) => {
+    const item=management.employee(slug,id,context);
+    if(context.deviceCredentialDeviceId && context.deviceScope!==context.deviceCredentialDeviceId) fail('设备身份必须限制到已授权电脑','PHONE_DEVICE_SCOPE',403);
+    if(context.deviceScope && item.target_device_id!==context.deviceScope) fail('数字员工不在当前电脑授权范围内','PHONE_DEVICE_SCOPE',403);
+    return item;
+  };
   const skill = slug => repo.listSkills(slug).find(item=>item.catalog_id==='ziwei-phone-control');
-  const configuration = (slug,id) => {
-    const item=employee(slug,id);const installed=skill(slug); const cfg=db.prepare('SELECT * FROM employee_phone_mcp WHERE employee_id=? AND workspace_id=?').get(id,item.workspace_id);
+  const configuration = (slug,id,context={}) => {
+    const item=employee(slug,id,context);const installed=skill(slug); const cfg=db.prepare('SELECT * FROM employee_phone_mcp WHERE employee_id=? AND workspace_id=?').get(id,item.workspace_id);
     const binding=connect.listBindings(slug).find(row=>row.employeeId===id) || null;
     const attached=Boolean(installed?.installed && item.skills.includes(installed.id));
     const state={employee_id:id,workspace:slug,enabled:Boolean(cfg?.enabled && attached && binding),skill_id:installed?.id || null,skill_version:installed?.version || null,target_device_id:item.target_device_id,runtime:item.runtime,runtime_profile:item.runtime_profile,phone_device_id:binding?.deviceId || null,binding};
     const revision=digest([state.enabled,state.skill_id,state.skill_version,state.target_device_id,state.runtime,state.runtime_profile,state.phone_device_id,binding?.accountId || null]);
     return {...state,saved:Boolean(cfg),revision,credential:{configured:Boolean(cfg?.enabled && attached && binding),managed:true,mode:'execution_capability'}};
   };
-  const assertEnabled = (slug,id) => { const cfg=configuration(slug,id);if(!cfg.enabled) fail('请先安装手机技能并配置员工与手机绑定','PHONE_MCP_NOT_CONFIGURED');return cfg; };
-  const save = async (slug,id,input={}) => {
+  const assertEnabled = (slug,id,context={}) => { const cfg=configuration(slug,id,context);if(!cfg.enabled) fail('请先安装手机技能并配置员工与手机绑定','PHONE_MCP_NOT_CONFIGURED');return cfg; };
+  const save = async (slug,id,input={},context={}) => {
     repo.preservation?.assert({employeeId:id});
-    const previous=configuration(slug,id);const item=employee(slug,id);const installed=skill(slug);const enabled=input.enabled !== false;
+    const previous=configuration(slug,id,context);const item=employee(slug,id,context);const installed=skill(slug);const enabled=input.enabled !== false;
     if(enabled && !installed?.installed) fail('请先从技能中心安装手机操控技能','PHONE_SKILL_NOT_INSTALLED');
     const targetDeviceId=input.targetDeviceId ?? previous.target_device_id;
     const runtime=input.runtime ?? item.runtime;const runtimeProfile=Object.hasOwn(input,'runtimeProfile') ? input.runtimeProfile : item.runtime_profile;
     let phones=[];
     if(enabled) {
-      management.validateSelection(slug,{runtime,runtimeProfile,targetDeviceId,managementMcpEnabled:item.management_mcp_enabled});
-      const computer=management.discovery(slug,{deviceId:targetDeviceId}).devices[0];
+      management.validateSelection(slug,{runtime,runtimeProfile,targetDeviceId,managementMcpEnabled:item.management_mcp_enabled},{context});
+      const computer=management.discovery(slug,{deviceId:targetDeviceId,userId:context.actorUserId,deviceScope:context.deviceScope}).devices[0];
       if(!['codex','hermes'].includes(String(runtime).toLowerCase())) fail('手机 MCP 当前支持 Codex 或 Hermes，不能静默替换运行时','PHONE_RUNTIME_UNSUPPORTED');
       if(!computer?.terminal_mcp?.configured || computer.terminal_mcp.workspace!==slug || !computer.terminal_mcp.supportedRuntimes?.some(name=>name.toLowerCase()===String(runtime).toLowerCase())) fail('目标电脑尚未支持当前工作区的员工手机 MCP bootstrap，请更新原 ziwei_user 并等待心跳','PHONE_MCP_ADAPTER_UNAVAILABLE');
       if(runtime.toLowerCase()==='hermes' && (!runtimeProfile || runtimeProfile==='default')) fail('手机 MCP 必须使用 Hermes 独立 profile','INDEPENDENT_PROFILE_REQUIRED');
@@ -43,28 +48,29 @@ export function createPhoneMcpService(repo, connect, management, options = {}) {
     try {
       if(enabled) connect.bindVerified(slug,{employeeId:id,deviceId:input.phoneDeviceId ?? previous.phone_device_id,accountId:input.accountId ?? previous.binding?.accountId,accountLabel:input.accountLabel ?? previous.binding?.accountLabel},phones);
       const skills=item.skills.filter(value=>value!==installed?.id);if(enabled) skills.push(installed.id);
-      management.updateEmployee(slug,id,{...(enabled ? {runtime,runtimeProfile,targetDeviceId} : {}),skills});
+      management.updateEmployee(slug,id,{...(enabled ? {runtime,runtimeProfile,targetDeviceId} : {}),skills},context);
       db.prepare('INSERT INTO employee_phone_mcp(employee_id,workspace_id,enabled,revision,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(employee_id) DO UPDATE SET enabled=excluded.enabled,revision=excluded.revision,updated_at=excluded.updated_at').run(id,item.workspace_id,enabled?1:0,'',at());
-      const cfg=configuration(slug,id);db.prepare('UPDATE employee_phone_mcp SET revision=? WHERE employee_id=?').run(cfg.revision,id);db.exec('RELEASE phone_config');
+      const cfg=configuration(slug,id,context);db.prepare('UPDATE employee_phone_mcp SET revision=? WHERE employee_id=?').run(cfg.revision,id);db.exec('RELEASE phone_config');
       return {configuration:cfg};
     } catch(error) {db.exec('ROLLBACK TO phone_config');db.exec('RELEASE phone_config');throw error;}
   };
   const latestAction = (slug,id,cfg) => db.prepare('SELECT * FROM a2a_actions WHERE workspace_id=? ORDER BY created_at DESC,rowid DESC').all(ws(slug).id).find(row=>{const p=parse(row.payload_json);return p.employeeId===id && p.terminalMcp?.enabled && p.terminalMcp.workspace===slug && p.terminalMcp.deviceId===cfg.phone_device_id && p.deviceId===cfg.target_device_id && p.runtime===cfg.runtime && (p.profile || null)===(cfg.runtime_profile || null) && p.terminalMcp.configurationRevision===cfg.revision;});
-  const status = async (slug,id) => {
-    const cfg=configuration(slug,id);let api={status:'healthy',error:null};try{await connect.listDevices();}catch(error){api={status:'unavailable',error:error.message};}
+  const status = async (slug,id,context={}) => {
+    const cfg=configuration(slug,id,context);let api={status:'healthy',error:null};try{await connect.listDevices();}catch(error){api={status:'unavailable',error:error.message};}
     const latest=cfg.enabled ? latestAction(slug,id,cfg) : null;const result=parse(latest?.result_json);const receipt=result.terminalMcp || result.result?.terminalMcp || {};
     const missing=latest?.status==='succeeded' && receipt.loaded!==true;
     const run=connect.listRuns(slug,100).find(row=>row.employeeId===id && row.deviceId===cfg.phone_device_id && row.configurationRevision===cfg.revision && row.executionId===latest?.id);
     const missingImage=run?.action==='screenshot' && run.status==='succeeded' && !(run.result?.snapshot?.data || run.result?.device?.snapshot?.data);
     return {configuration:cfg,api,receipt:{status:!latest?'never_run':latest.status==='failed'||latest.status==='expired'||missing?'failed':receipt.loaded?'loaded':receipt.injected?'injected':'pending',loaded:receipt.loaded===true,injected:receipt.injected===true,action_id:latest?.id || null,error:latest?.error || (missing?'缺少实际手机 MCP 握手及工具加载回执':null),tool_calls:receipt.toolCalls || receipt.tool_calls || []},verification:{status:!run?'never_run':missingImage?'failed':run.status==='succeeded'?'succeeded':['uncertain','expired'].includes(run.status)?'uncertain':run.status==='failed'?'failed':'pending',command_id:run?.commandId || null,device_id:cfg.phone_device_id,configuration_revision:cfg.revision,result:run?.result || null,error:missingImage?'截图命令已成功，但缺少本次截图图片证据，请只读回读原命令结果':run?.error || null}};
   };
-  const trial = (slug,id,input={},check=false) => {
-    const cfg=assertEnabled(slug,id);management.validateSelection(slug,{runtime:cfg.runtime,runtimeProfile:cfg.runtime_profile,targetDeviceId:cfg.target_device_id});
+  const trial = (slug,id,input={},check=false,context={}) => {
+    const cfg=assertEnabled(slug,id,context);management.validateSelection(slug,{runtime:cfg.runtime,runtimeProfile:cfg.runtime_profile,targetDeviceId:cfg.target_device_id},{context});
     const action=input.action || 'screenshot';if(!check && !['health','screenshot'].includes(action)) fail('员工试运行仅选择 health 或 screenshot，正式会话可使用已授权完整工具集','TRIAL_ACTION_INVALID');
     const requestKey=String(input.idempotencyKey || crypto.randomUUID()).trim();if(requestKey.length>200) fail('idempotencyKey 太长','IDEMPOTENCY_KEY_INVALID');const kind=`phone-${check?'check':'trial'}:${id}`;const fingerprint=digest([cfg.revision,action,check]);const previous=db.prepare('SELECT * FROM management_requests WHERE workspace_id=? AND kind=? AND request_key=?').get(ws(slug).id,kind,requestKey);if(previous){if(previous.fingerprint!==fingerprint)fail('同一幂等键已经用于不同手机配置或试运行','IDEMPOTENCY_CONFLICT',409);const existing=repo.getA2AAction(previous.resource_id,{workspaceSlug:slug});if(!existing)fail('原试运行已删除','IDEMPOTENCY_RESOURCE_GONE',409);return{action:existing,conversation_id:existing.payload.conversationId,duplicate:true};}
     const prompt=check?`检测手机 MCP：实际调用 ziwei_phone_list、ziwei_phone_status，目标手机 ${cfg.phone_device_id}。只读取状态，不执行手机命令，报告真实工具结果。`:`通过手机 MCP 调用 ${action==='screenshot'?'ziwei_phone_screenshot':'ziwei_phone_action'}，仅对 ${cfg.phone_device_id} 执行 ${action}，回读原 commandId、状态${action==='screenshot'?'和截图':''}，不得重复提交不确定命令。`;
-    const conversation=repo.createConversation(slug,{employeeId:id,title:check?'手机 MCP 检测':'手机 MCP 员工试运行',deviceId:cfg.target_device_id,actorRole:'owner'});
-    const result=repo.addConversationMessage(conversation.id,{content:prompt,role:'user',dispatch:true,actorRole:'owner'});
+    const conversation=management.createConversation(slug,{employeeId:id,title:check?'手机 MCP 检测':'手机 MCP 员工试运行',deviceId:cfg.target_device_id},context);
+    const ownDevice=Boolean(context.deviceCredentialDeviceId && context.deviceCredentialDeviceId===context.deviceScope && context.deviceScope===cfg.target_device_id);
+    const result=repo.addConversationMessage(conversation.id,{...context,content:prompt,role:'user',dispatch:true,enforceEmployeeVisibility:true,enforceDeviceOwnership:!ownDevice});
     const created=result.execution || repo.listA2AActions(slug,{status:'all'}).find(row=>row.payload.conversationId===conversation.id);
     const row=created?.action || created;
     if(!row?.id) fail('员工试运行没有建立执行请求','TRIAL_DISPATCH_FAILED',500);
@@ -122,5 +128,5 @@ export function createPhoneMcpService(repo, connect, management, options = {}) {
     const token=`zwd_${crypto.randomBytes(32).toString('base64url')}`;const result={workspace:g.workspace,deviceId:g.target_device_id,deviceToken:token,apiBase:publicBase};
     db.exec('SAVEPOINT workspace_claim');try{db.prepare('INSERT INTO device_credentials(id,device_id,workspace_id,token_hash,token_prefix,created_at) VALUES(?,?,?,?,?,?)').run(`device-credential_${crypto.randomUUID()}`,g.target_device_id,g.target_workspace_id,crypto.createHash('sha256').update(token).digest('hex'),token.slice(0,12),at());db.prepare('UPDATE device_workspace_grants SET secret_json=?,claimed_at=? WHERE id=?').run(encrypt(result),at(),id);db.exec('RELEASE workspace_claim');return result;}catch(error){db.exec('ROLLBACK TO workspace_claim');db.exec('RELEASE workspace_claim');throw error;}
   };
-  return {configuration,save,status,trial,bootstrap,call,grants,grant,claim,async setup(slug,context={}){let phones=[],api={status:'healthy',error:null};try{phones=await connect.listDevices();}catch(error){api={status:'unavailable',error:error.message};}return{workspace:slug,skill:skill(slug),computers:management.discovery(slug,context).devices,phones,employees:repo.listEmployees(slug,context).map(row=>({...row,phone_mcp:configuration(slug,row.id)})),api};}};
+  return {configuration,save,status,trial,bootstrap,call,grants,grant,claim,async setup(slug,context={}){let phones=[],api={status:'healthy',error:null};try{phones=await connect.listDevices();}catch(error){api={status:'unavailable',error:error.message};}return{workspace:slug,skill:skill(slug),computers:management.discovery(slug,{...context,userId:context.actorUserId ?? context.userId}).devices,phones,employees:repo.listEmployees(slug,context).filter(row=>!context.deviceScope || row.target_device_id===context.deviceScope).map(row=>({...row,phone_mcp:configuration(slug,row.id,context)})),api};}};
 }

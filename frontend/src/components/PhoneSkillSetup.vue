@@ -4,16 +4,19 @@ import { ZiModal, ZiStatusTag } from '@ziwei/ui';
 import ZiSelect from './ZiSelect.vue';
 import { api } from '../api.js';
 import { phoneConfigurationMatches, phoneErrorText, phoneOnline, phoneRuntimeReadiness, phoneSetupPhase } from '../phone-skill.js';
+import { phoneBotReadiness, readPhoneSkillBot } from '../phone-skill-bot.js';
 
 const props = defineProps({ workspace:{type:String,required:true}, workspaces:{type:Array,default:()=>[]}, employeeId:{type:String,default:''}, phoneDeviceId:{type:String,default:''}, canManage:{type:Boolean,default:false} });
 const emit = defineEmits(['close','changed','workspace','create-employee']);
-const setup = ref(null); const status = ref(null); const loading = ref(false); const busy = ref(''); const error = ref('');
+const setup = ref(null); const status = ref(null); const botState = ref(null); const savedFromActive = ref(false); const loading = ref(false); const busy = ref(''); const error = ref('');
 const form = ref({ employeeId:'',enabled:true,targetDeviceId:'',runtime:'',phoneDeviceId:'',accountId:'',accountLabel:'' });
 const profileChoice = ref(''); const allowTrial = ref(false); const actionJob = ref(null); const trialKey = ref('');
 const sourceWorkspace = ref(''); const sourceDeviceId = ref(''); const sourceComputers = ref([]); const sourceLoading = ref(false); const grant = ref(null); const grantError = ref(''); const grantBusy = ref(false);
 let disposed = false; let scopeEpoch = 0; let readGeneration = 0; let sourceGeneration = 0; let actionTimer; let grantTimer;
 const selection = computed(() => ({ ...form.value,runtimeProfile:profileChoice.value === '__default__' ? '' : profileChoice.value }));
 const employees = computed(() => setup.value?.employees || []);
+const selectedEmployee = computed(() => employees.value.find(employee => employee.id === form.value.employeeId));
+const botReadiness = computed(() => phoneBotReadiness(botState.value,{employee:selectedEmployee.value,workspace:props.workspace,savedFromActive:savedFromActive.value}));
 const computers = computed(() => setup.value?.computers || []);
 const phones = computed(() => setup.value?.phones || []);
 const selectedComputer = computed(() => computers.value.find(device => device.id === form.value.targetDeviceId));
@@ -31,14 +34,14 @@ const phoneOptions = computed(() => phones.value.map(phone => ({label:`${phone.a
 const owner = computed(() => props.workspaces.some(item => item.slug === props.workspace && item.role === 'owner'));
 const sourceOptions = computed(() => props.workspaces.filter(item => item.slug !== props.workspace && item.role === 'owner').map(item => ({label:`${item.name || item.slug} · ${item.slug}`,value:item.slug})));
 const sourceComputerOptions = computed(() => sourceComputers.value.map(device => ({label:`${device.name || device.id} · ${device.status === 'online' ? '在线' : '离线'}`,value:device.id})));
-const phase = computed(() => phoneSetupPhase(status.value,setup.value,selection.value));
+const phase = computed(() => matches.value && selection.value.enabled && !botReadiness.value.ready ? {code:'bot_not_ready',label:'等待 Bot 就绪',tone:'neutral',reason:botReadiness.value.reason} : phoneSetupPhase(status.value,setup.value,selection.value));
 const matches = computed(() => phoneConfigurationMatches(status.value?.configuration,selection.value));
 const readiness = computed(() => phoneRuntimeReadiness(setup.value,selection.value));
 const terminalStates = new Set(['succeeded','failed','cancelled','expired','uncertain']);
 const actionActive = computed(() => Boolean(actionJob.value?.id && !terminalStates.has(actionJob.value.status)));
 const canEdit = computed(() => props.canManage && !busy.value);
 const canSave = computed(() => canEdit.value && form.value.employeeId && (form.value.enabled ? selectedComputer.value && selectedRuntime.value && profileChoice.value && profileOptions.value.some(option => option.value === profileChoice.value) && selectedPhone.value && readiness.value.ready : status.value?.configuration?.saved));
-const canCheck = computed(() => props.canManage && matches.value && selection.value.enabled && readiness.value.ready && status.value?.api?.status === 'healthy' && !busy.value && !actionActive.value);
+const canCheck = computed(() => props.canManage && matches.value && selection.value.enabled && readiness.value.ready && status.value?.api?.status === 'healthy' && botReadiness.value.ready && !loading.value && !busy.value && !actionActive.value);
 const canTrial = computed(() => canCheck.value && status.value?.receipt?.loaded === true && phoneOnline(selectedPhone.value) && allowTrial.value);
 const grantedComputerConnected = computed(() => Boolean(grant.value?.target_device_id && computers.value.some(device => device.id === grant.value.target_device_id && device.status === 'online' && device.healthy !== false)));
 
@@ -58,20 +61,20 @@ async function refresh({ initial=false } = {}) {
     setup.value=data;
     const employeeId = initial ? props.employeeId : form.value.employeeId;
     const employee=data.employees?.find(item=>item.id===employeeId);
-    if (!employee) { if (employeeId) error.value='当前工作区未发现该员工，请明确选择当前工作区员工。'; status.value=null; form.value.employeeId=''; return; }
-    const evidence=await api.phoneMcpStatus(employee.id,workspace);
+    if (!employee) { if (employeeId) error.value='当前工作区未发现该员工，请明确选择当前工作区员工。'; status.value=null; botState.value=null; form.value.employeeId=''; return; }
+    const [evidence,bot]=await Promise.all([api.phoneMcpStatus(employee.id,workspace),readPhoneSkillBot(api,employee,workspace)]);
     if(disposed || epoch!==scopeEpoch || generation!==readGeneration) return;
-    status.value=evidence;
+    status.value=evidence; botState.value=bot;
     if(initial) hydrate(employee,evidence.configuration);
-  } catch(cause) { if(!disposed && epoch===scopeEpoch && generation===readGeneration) { error.value=cause.message || '配置读取失败'; status.value=null; } }
+  } catch(cause) { if(!disposed && epoch===scopeEpoch && generation===readGeneration) { error.value=cause.message || '配置读取失败'; status.value=null; botState.value=null; } }
   finally { if(!disposed && generation===readGeneration) loading.value=false; }
 }
 async function selectEmployee(id) {
   if(busy.value) return;
-  clearAction(); const employee=employees.value.find(item=>item.id===id); status.value=null;
+  clearAction(); const employee=employees.value.find(item=>item.id===id); status.value=null; botState.value=null; savedFromActive.value=false;
   if(!employee) { form.value.employeeId=''; return; }
   hydrate(employee,null); const generation=++readGeneration; const epoch=scopeEpoch; loading.value=true; error.value='';
-  try { const value=await api.phoneMcpStatus(id,props.workspace); if(!disposed && generation===readGeneration && epoch===scopeEpoch) { status.value=value; hydrate(employee,value.configuration); } }
+  try { const [value,bot]=await Promise.all([api.phoneMcpStatus(id,props.workspace),readPhoneSkillBot(api,employee,props.workspace)]); if(!disposed && generation===readGeneration && epoch===scopeEpoch) { status.value=value; botState.value=bot; hydrate(employee,value.configuration); } }
   catch(cause) { if(!disposed && generation===readGeneration) error.value=cause.message; }
   finally { if(!disposed && generation===readGeneration) loading.value=false; }
 }
@@ -79,12 +82,12 @@ function selectComputer(id) { form.value.targetDeviceId=id; form.value.runtime='
 function selectRuntime(name) { form.value.runtime=name; profileChoice.value=''; allowTrial.value=false; }
 async function save() {
   if(!canSave.value) return;
-  const epoch=scopeEpoch; const employeeId=form.value.employeeId; const workspace=props.workspace; const {enabled,phoneDeviceId,targetDeviceId,runtime,runtimeProfile,accountId,accountLabel}=selection.value; busy.value='save'; error.value='';
+  const epoch=scopeEpoch; const employeeId=form.value.employeeId; const workspace=props.workspace; const wasActive=botState.value?.bot?.control_state==='active'; const {enabled,phoneDeviceId,targetDeviceId,runtime,runtimeProfile,accountId,accountLabel}=selection.value; busy.value='save'; error.value='';
   try {
     if(!setup.value.skill?.installed) { await api.toggleSkill(setup.value.skill.id,true); if(disposed || epoch!==scopeEpoch) return; setup.value.skill.installed=true; }
     await api.savePhoneMcp(employeeId,{enabled,phoneDeviceId,targetDeviceId,runtime,runtimeProfile:runtimeProfile || null,accountId,accountLabel},workspace);
     if(disposed || epoch!==scopeEpoch) return;
-    clearAction(); await refresh(); emit('changed');
+    clearAction(); busy.value='save'; savedFromActive.value=wasActive; await refresh(); if(!disposed && epoch===scopeEpoch) emit('changed');
   } catch(cause) { if(!disposed && epoch===scopeEpoch) error.value=cause.message; }
   finally { if(!disposed && epoch===scopeEpoch) busy.value=''; }
 }
@@ -132,7 +135,7 @@ async function authorizeComputer() {
   finally { if(!disposed && epoch===scopeEpoch) grantBusy.value=false; }
 }
 watch(()=>[props.workspace,props.employeeId,props.phoneDeviceId],()=>{
-  scopeEpoch++; readGeneration++; sourceGeneration++; clearAction(); clearTimeout(grantTimer); setup.value=null; status.value=null; sourceWorkspace.value=''; sourceDeviceId.value=''; sourceComputers.value=[]; sourceLoading.value=false; grantBusy.value=false; grant.value=null; grantError.value=''; form.value={employeeId:'',enabled:true,targetDeviceId:'',runtime:'',phoneDeviceId:'',accountId:'',accountLabel:''}; profileChoice.value=''; void refresh({initial:true});
+  scopeEpoch++; readGeneration++; sourceGeneration++; clearAction(); clearTimeout(grantTimer); setup.value=null; status.value=null; botState.value=null; savedFromActive.value=false; sourceWorkspace.value=''; sourceDeviceId.value=''; sourceComputers.value=[]; sourceLoading.value=false; grantBusy.value=false; grant.value=null; grantError.value=''; form.value={employeeId:'',enabled:true,targetDeviceId:'',runtime:'',phoneDeviceId:'',accountId:'',accountLabel:''}; profileChoice.value=''; void refresh({initial:true});
 },{immediate:true});
 onUnmounted(()=>{disposed=true;scopeEpoch++;readGeneration++;sourceGeneration++;clearTimeout(actionTimer);clearTimeout(grantTimer);});
 </script>
@@ -141,10 +144,10 @@ onUnmounted(()=>{disposed=true;scopeEpoch++;readGeneration++;sourceGeneration++;
   <ZiModal title="手机技能配置" wide @close="emit('close')">
     <section class="phone-skill-setup" data-testid="phone-skill-setup">
       <header class="phone-setup-heading"><div><h2>配置手机 MCP 技能</h2><p>选择精确员工、电脑和手机，由平台安全配置，再核对实际加载与实机回执。</p></div><button type="button" class="pill" aria-label="关闭配置向导" @click="emit('close')">关闭</button></header>
-      <div class="phone-setup-stage" data-testid="phone-setup-stage"><ZiStatusTag :status="phase.tone" :label="phase.label" dot/><p>{{ phase.reason }}</p></div>
+      <div class="phone-setup-stage" data-testid="phone-setup-stage"><ZiStatusTag :status="phase.tone" :label="phase.label" dot/><p>{{ phase.reason }}</p><a v-if="phase.code==='bot_not_ready' && canManage && botReadiness.href && !busy && !loading" class="pill" data-testid="phone-bot-activity" :href="botReadiness.href">{{ botReadiness.label }}</a></div>
       <p v-if="loading" role="status">正在读取保存配置、设备心跳和动作回执…</p>
       <p v-if="error" role="alert" class="phone-setup-error">{{ error }}</p>
-      <div class="phone-setup-tools"><button type="button" class="pill" :disabled="loading" @click="refresh()">刷新配置状态</button><button v-if="actionActive && !busy" type="button" class="pill" @click="resumeAction">继续读取本次回执</button></div>
+      <div class="phone-setup-tools"><button type="button" class="pill" :disabled="loading || Boolean(busy)" @click="refresh()">刷新配置状态</button><button v-if="actionActive && !busy" type="button" class="pill" @click="resumeAction">继续读取本次回执</button></div>
       <template v-if="setup">
         <section class="phone-setup-section"><h3>1 · 工作区与员工</h3><div class="phone-setup-fields">
           <label><span>工作区</span><ZiSelect :model-value="workspace" :options="workspaceOptions" :disabled="Boolean(busy) || grantBusy" aria-label="工作区" @update:model-value="emit('workspace',$event)"/></label>
@@ -184,6 +187,7 @@ label input:not([type="checkbox"]) { box-sizing:border-box; min-width:0; width:1
 .phone-setup-primary { color:#fff; border-color:#2f6fca; background:#2f6fca; }
 button:disabled { opacity:.5; cursor:default; }
 .phone-setup-error { padding:10px 12px; border:1px solid #efcaca; border-radius:8px; color:#a43142; background:#fff6f7; }
+.phone-setup-stage a { display:inline-flex; margin-top:8px; text-decoration:none; }
 .phone-computer-grant { margin-top:14px; padding:12px; border:1px solid var(--ziwei-line); border-radius:8px; background:var(--ziwei-canvas); }
 .phone-computer-grant summary { cursor:pointer; color:var(--ziwei-violet); }
 .phone-setup-evidence article { min-width:0; padding:14px; border:1px solid var(--ziwei-line); border-radius:9px; background:var(--ziwei-canvas); }
