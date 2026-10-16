@@ -24,7 +24,7 @@ function classifyOutputStage(chunk) {
 function safeProcessExit(value,depth=0) {
   if (!value || typeof value !== 'object' || depth>4) return null;
   const result = {};
-  for (const key of ['launched', 'rootConfirmed', 'treeConfirmed', 'cancelled']) if (typeof value[key] === 'boolean') result[key] = value[key];
+  for (const key of ['launched', 'rootConfirmed', 'treeConfirmed', 'cancelled', 'backgroundProcessesRetained']) if (typeof value[key] === 'boolean') result[key] = value[key];
   for (const key of ['rootPid', 'rootExitCode', 'activeProcesses', 'hostExitCode']) if (value[key] === null || Number.isSafeInteger(value[key])) result[key] = value[key];
   for (const key of ['platform', 'supervisor', 'failureCode', 'signal', 'hostSignal']) if (typeof value[key] === 'string' && /^[a-zA-Z0-9_-]{1,100}$/.test(value[key])) result[key] = value[key];
   if(value.supervisor==='runtime-group'&&Array.isArray(value.children)&&value.children.length<=64)result.children=value.children.map(child=>safeProcessExit(child,depth+1));

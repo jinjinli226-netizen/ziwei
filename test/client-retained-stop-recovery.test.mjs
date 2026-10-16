@@ -9,28 +9,30 @@ import {EventEmitter} from 'node:events';
 import {ActionDispatcher} from '../src/daemon.mjs';
 import {createActionDelivery} from '../src/daemon-action-delivery.mjs';
 import {inspectLocalDaemonMaintenanceFiles} from '../backend/preservation-native-evidence.mjs';
-import {createRetainedClientStopRecovery,createRetainedHandleTerminator,recoverRetainedClientStop} from '../scripts/client-retained-stop-recovery.mjs';
+import {createRetainedClientStopRecovery,createRetainedHandleTerminator,recoverRetainedClientStop,shouldAttemptRetainedClientStopRecovery} from '../scripts/client-retained-stop-recovery.mjs';
 
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 const recoveryRoot=fileURLToPath(new URL('../',import.meta.url));
 const snapshot=root=>Object.fromEntries(fs.readdirSync(root,{recursive:true}).filter(name=>fs.statSync(path.join(root,name)).isFile()).sort().map(name=>[name,sha(fs.readFileSync(path.join(root,name)))]));
-async function fixture(t){
+async function fixture(t,{background=false}={}){
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'ziwei-retained-recovery-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
   const runtime=path.join(root,'runtime');fs.mkdirSync(runtime);
   const identity={apiBase:'https://retained.invalid',workspace:'recovery-test',deviceId:'recovery-pc'};
   const config={...identity,deviceToken:'synthetic-control-secret'},file=path.join(root,'config.json');fs.writeFileSync(file,JSON.stringify(config));
   const action={id:'original-retained',type:'conversation.execute',payload:{deviceId:identity.deviceId,employeeId:'employee-original',hermesBot:{employeeId:'employee-original',workspace:identity.workspace,deviceId:identity.deviceId,revision:1,controlEpoch:2}}};
-  const dispatcher=new ActionDispatcher({workdir:root,workspace:identity.workspace,deviceId:identity.deviceId,stateFile:path.join(runtime,'action-state.json'),execute:async()=>({status:'failed',error:'synthetic bootstrap rejected',result:{processExit:{launched:true,rootPid:6000,rootConfirmed:true,rootExitCode:125,treeConfirmed:true,activeProcesses:0}}})});
+  const dispatcher=new ActionDispatcher({workdir:root,workspace:identity.workspace,deviceId:identity.deviceId,stateFile:path.join(runtime,'action-state.json'),execute:async()=>background?({status:'succeeded',result:{runtime:'Hermes',configurationRevision:1,botIsolation:{enabled:true,kind:'hermes-bot',employeeId:'employee-original',workspace:identity.workspace,revision:1},processExit:{platform:'win32',supervisor:'windows-job',launched:true,rootPid:6000,rootConfirmed:true,rootExitCode:0,treeConfirmed:false,activeProcesses:1,cancelled:false,hostExitCode:0}}}):({status:'failed',error:'synthetic bootstrap rejected',result:{processExit:{launched:true,rootPid:6000,rootConfirmed:true,rootExitCode:125,treeConfirmed:true,activeProcesses:0}}})});
   const delivery=createActionDelivery({directory:path.join(runtime,'action-delivery'),identity,retryDelays:[],dispatch:value=>dispatcher.dispatch(value),recoverResult:value=>dispatcher.completedResult(value),post:async(url,body)=>{
     if(url.endsWith('/ack'))return{id:action.id,status:'acked',acked_at:'2026-10-15T10:00:00Z',deviceId:identity.deviceId,expires_at:new Date(Date.now()+16*60*1000).toISOString()};
     if(url.endsWith('/events'))return{id:body.eventId};
+    if(background)return{id:action.id,status:'succeeded'};
     throw Object.assign(new Error('synthetic permanent delivery failure'),{status:400});
   }});
-  await assert.rejects(delivery.execute(action),/synthetic permanent/);await delivery.whenIdle();
+  if(background)await delivery.execute(action);else await assert.rejects(delivery.execute(action),/synthetic permanent/);await delivery.whenIdle();
   const evidence=inspectLocalDaemonMaintenanceFiles({connections:[{...identity,runtimeDir:runtime}]});assert.equal(evidence.stopSafe,true);
   const record={pid:8832,creationTime:'2026-10-15T10:00:00.000Z',commandHash:'a'.repeat(64),executable:process.execPath};
-  const context={root,file,build:'b'.repeat(64),origin:'http://127.0.0.1:20242',snapshot:{config,hash:sha(fs.readFileSync(file))}};
+  const context={root,file,build:background?'993639eb3840f257830c2fc8f1400339f2d3ad60a085ab27f4d547824f6b10f9':'b'.repeat(64),origin:'http://127.0.0.1:20242',snapshot:{config,hash:sha(fs.readFileSync(file))}};
   const health={service:'ziwei_user',agentId:'ziwei_user',pid:record.pid,clientBuild:context.build,workspace:identity.workspace,deviceId:identity.deviceId,connectionState:'draining',activeActionCount:0,pollingCount:0,quarantinedActionCount:0,executionQuarantined:false,lifecycle:{nonce:'fixture-nonce-bound-to-boot',root,configPath:file,configSha256:context.snapshot.hash,runtimeDir:runtime,startedAt:record.creationTime,managedAuxiliaryCount:0},maintenance:{safe:false,pendingDeliveryCount:0,blockedDeliveryCount:1,fileIssues:evidence.issues,gatewayWorkers:[]},connections:[{workspace:identity.workspace,deviceId:identity.deviceId,primary:true}]};
+  if(background)health.maintenance={safe:false,stopSafe:false,pendingDeliveryCount:0,blockedDeliveryCount:0,retainedDeliveryCount:0,gatewaySafe:true,gatewayWorkers:[],fileIssues:[{code:'ACTION_STATE_CORRUPT',path:path.join(runtime,'action-state.json')}],stopIssues:[{code:'ACTION_STATE_CORRUPT'}]};
   let kills=0,checks=0,lastData;
   const input={recoveryRoot,context,record,health,assertCurrent:async()=>{checks++;return structuredClone(health);}};
   const make=(options={})=>createRetainedClientStopRecovery({platform:'win32',terminate:async data=>{kills++;lastData=data;return{stopped:true,pid:record.pid,creationTime:record.creationTime};},...options});
@@ -112,4 +114,30 @@ test('hundreds of evidence files travel through stdin and never enlarge the enco
   assert(invocations[1].args.join(' ').length<32_000);assert.equal(invocations[1].data.files.length,600);assert.equal(invocations[1].data.files[599].path,'C:\\回执\\very-long-private-evidence-599.result.json');
   const program=Buffer.from(invocations[0].args.at(-1),'base64').toString('utf16le');
   assert.match(program,/\[Console\]::In\.ReadToEnd\(\)/);assert.match(program,/\$heldHandle=\$p\.Handle/);assert.match(program,/\$p\.Kill\(\)/);assert.match(program,/\$p\.WaitForExit/);assert.doesNotMatch(program,/Stop-Process|taskkill|original-retained/);
+});
+
+
+test('an audited idle daemon can update while its original background completion stays unchanged',async t=>{
+  const f=await fixture(t,{background:true}),before=snapshot(f.root);
+  assert.equal(shouldAttemptRetainedClientStopRecovery(f.health),true);
+  const result=await f.make()(f.input);
+  assert.equal(result.stopped,true);assert.equal(result.executionConfirmedStopped,false);
+  assert.equal(result.backgroundProcessesPreserved,true);assert.equal(result.retainedBackgroundCount,1);
+  assert.equal(f.kills,1);assert.equal(f.lastData.retainedBackground,true);assert.equal(f.lastData.pid,f.record.pid);
+  assert.deepEqual(snapshot(f.root),before);
+  const original=JSON.parse(fs.readFileSync(path.join(f.runtime,'action-state.json'),'utf8')).completed[0].result;
+  assert.equal(original.result.processExit.treeConfirmed,false);assert.equal(original.result.processExit.activeProcesses,1);
+});
+
+for(const [name,change] of Object.entries({
+  'unreviewed installed build':f=>{f.context.build=f.health.clientBuild='c'.repeat(64);},
+  'active current action':f=>{f.health.activeActionCount=1;},
+  'extra damaged delivery':f=>{f.health.maintenance.fileIssues.push({code:'DELIVERY_CORRUPT'});},
+  'pending delivery':f=>{f.health.maintenance.pendingDeliveryCount=1;},
+  'real malformed JSON':f=>{fs.writeFileSync(path.join(f.runtime,'action-state.json'),'{');},
+  'changed foreground failure':f=>{const file=path.join(f.runtime,'action-state.json'),v=JSON.parse(fs.readFileSync(file));v.completed[0].result.status='failed';fs.writeFileSync(file,JSON.stringify(v));},
+  'different state file':f=>{f.health.maintenance.fileIssues[0].path=path.join(f.runtime,'other.json');}
+}))test(`background recovery rejects ${name} without stopping any process`,async t=>{
+  const f=await fixture(t,{background:true});change(f);const before=snapshot(f.root);
+  await assert.rejects(f.make()(f.input),error=>error.code==='RETAINED_STOP_RECOVERY_REFUSED');assert.equal(f.kills,0);assert.deepEqual(snapshot(f.root),before);
 });

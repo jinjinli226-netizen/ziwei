@@ -10,7 +10,7 @@ import { PassThrough } from 'node:stream';
 const helper = fileURLToPath(new URL('./runtime-process.ps1', import.meta.url));
 const START_TIMEOUT_MS = 30000;
 const STOP_TIMEOUT_MS = 15000;
-const baseEvidence = () => ({ platform: process.platform, supervisor: process.platform === 'win32' ? 'windows-job' : 'direct', launched: null, rootPid: null, rootConfirmed: false, rootExitCode: null, treeConfirmed: false, activeProcesses: null, cancelled: false, failureCode: null, hostExitCode: null });
+const baseEvidence = () => ({ platform: process.platform, supervisor: process.platform === 'win32' ? 'windows-job' : 'direct', launched: null, rootPid: null, rootConfirmed: false, rootExitCode: null, treeConfirmed: false, activeProcesses: null, cancelled: false, backgroundProcessesRetained: false, failureCode: null, hostExitCode: null });
 
 function nativeCommand(command, cwd, env) {
   if (typeof command !== 'string' || !command || command.includes('\0')) throw new TypeError('Runtime command must be a nonempty executable path');
@@ -103,6 +103,13 @@ export function spawnSupervisedRuntime({ command, args = [], cwd = process.cwd()
     if (receipt && typeof receipt.launched === 'boolean' && typeof receipt.rootConfirmed === 'boolean' && typeof receipt.treeConfirmed === 'boolean' && (receipt.rootExitCode === null || Number.isSafeInteger(receipt.rootExitCode)) && (receipt.activeProcesses === null || Number.isSafeInteger(receipt.activeProcesses))) {
       evidence = { ...evidence, launched: receipt.launched, rootPid: receipt.rootPid, rootConfirmed: receipt.rootConfirmed, rootExitCode: receipt.rootExitCode, treeConfirmed: receipt.treeConfirmed && receipt.activeProcesses === 0, activeProcesses: receipt.activeProcesses, cancelled: evidence.cancelled || receipt.cancelled, failureCode: receipt.failureCode || null, streamsComplete: receipt.streamsComplete === true };
     } else evidence.failureCode = failure || evidence.failureCode || 'RUNTIME_SUPERVISOR_UNCONFIRMED';
+    // Only the successful supervisor handoff can assert intentional retention.
+    // A missing legacy marker or contradictory receipt must remain unproven.
+    evidence.backgroundProcessesRetained = receipt?.backgroundProcessesRetained === true
+      && receipt.treeConfirmed === false && evidence.launched === true && evidence.rootConfirmed === true
+      && Number.isSafeInteger(evidence.rootPid) && evidence.rootPid > 0
+      && Number.isSafeInteger(evidence.rootExitCode) && evidence.activeProcesses > 0
+      && evidence.cancelled === false && receipt.failureCode === null && !evidence.failureCode && !failure && hostCode === 0 && !hostSignal;
     evidence.hostExitCode = hostCode;
     evidence.hostSignal = hostSignal || null;
     child.stdin.unpipe(host.stdin);

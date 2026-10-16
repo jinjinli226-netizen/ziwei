@@ -69,7 +69,7 @@ public static class ZiweiRuntimeJob {
   static bool Cancelled(string directory,string nonce) { try { return File.ReadAllText(Path.Combine(directory,"cancel"))==nonce; } catch(FileNotFoundException) { return false; } }
   public static int Run(string nonce,string directory) {
     string jobName="Local\\Ziwei.Runtime."+nonce;
-    Dictionary<string,object> result=new Dictionary<string,object> { {"schema",1},{"nonce",nonce},{"jobName",jobName},{"hostPid",System.Diagnostics.Process.GetCurrentProcess().Id},{"launched",false},{"rootPid",null},{"rootConfirmed",false},{"rootExitCode",null},{"treeConfirmed",false},{"activeProcesses",null},{"cancelled",false},{"failureCode",null},{"streamsComplete",false} };
+    Dictionary<string,object> result=new Dictionary<string,object> { {"schema",1},{"nonce",nonce},{"jobName",jobName},{"hostPid",System.Diagnostics.Process.GetCurrentProcess().Id},{"launched",false},{"rootPid",null},{"rootConfirmed",false},{"rootExitCode",null},{"treeConfirmed",false},{"activeProcesses",null},{"cancelled",false},{"backgroundProcessesRetained",false},{"failureCode",null},{"streamsComplete",false} };
     IntPtr job=IntPtr.Zero,parent=IntPtr.Zero,inputRead=IntPtr.Zero,inputWrite=IntPtr.Zero,outputRead=IntPtr.Zero,outputWrite=IntPtr.Zero,errorRead=IntPtr.Zero,errorWrite=IntPtr.Zero,environment=IntPtr.Zero,attributes=IntPtr.Zero,handleList=IntPtr.Zero;
     PROCESS_INFORMATION process=new PROCESS_INFORMATION();
     FileStream runtimeInput=null,runtimeOutput=null,runtimeError=null;
@@ -166,8 +166,10 @@ public static class ZiweiRuntimeJob {
         // Keep kill-on-close through all waits; release only at terminal handoff.
         step="RELEASE_COMPLETED_JOB"; limits.basic.flags=0;
         Check(SetInformationJobObject(job,9,ref limits,(uint)Marshal.SizeOf(typeof(EXTENDED_LIMIT))),step);
+        result["backgroundProcessesRetained"]=count>0 && (bool)result["rootConfirmed"] && result["failureCode"]==null;
       }
     } catch(Exception error) {
+      result["backgroundProcessesRetained"]=false;
       Win32Exception native=error as Win32Exception;
       result["failureCode"]="RUNTIME_"+step+"_"+(native==null?error.GetType().Name:native.NativeErrorCode.ToString());
       // No unsupervised program is ever resumed, including an assignment failure.

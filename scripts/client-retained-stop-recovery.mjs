@@ -13,14 +13,20 @@ const requireFact=value=>{if(!value)throw fail();};
 const within=(file,root)=>{const relative=path.relative(root,file);return !relative||relative!=='..'&&!relative.startsWith('..'+path.sep)&&!path.isAbsolute(relative);};
 const auditedBuild='a996e94aebec66b15636d526be8013746617950fab1858d4815720c7b93cb5f1';
 const prelaunchHealth=body=>body?.clientBuild===auditedBuild&&body.maintenance?.safe===false&&body.maintenance.stopSafe===false&&Array.isArray(body.maintenance.fileIssues)&&body.maintenance.fileIssues.length===1&&body.maintenance.fileIssues[0]?.code==='UNMAPPED_NATIVE_EXECUTION'&&typeof body.maintenance.fileIssues[0].actionId==='string'&&body.maintenance.fileIssues[0].actionId.length>0;
-export function shouldAttemptRetainedClientStopRecovery(body){return Boolean(body?.maintenance&&(!Object.hasOwn(body.maintenance,'stopSafe')||prelaunchHealth(body)));}
+// Reviewed packages use the original successful-root/background handoff.
+// This stops only an idle daemon and never attests background child exit.
+const backgroundReleaseBuilds=new Set(['993639eb3840f257830c2fc8f1400339f2d3ad60a085ab27f4d547824f6b10f9','6b8449d952039abf08bde26c3b3a840e297a250cf684378cd4c4c1371699a8b1','ba86b25db751ac6322d74c6c7e1353a7984b69d5a18a97c7e87beee46c6f195a']);
+const backgroundHealth=body=>backgroundReleaseBuilds.has(body?.clientBuild)&&body.maintenance?.safe===false&&body.maintenance.stopSafe===false&&Array.isArray(body.maintenance.fileIssues)&&body.maintenance.fileIssues.length===1&&body.maintenance.fileIssues[0]?.code==='ACTION_STATE_CORRUPT'&&samePath(body.maintenance.fileIssues[0].path,path.join(body.lifecycle?.runtimeDir||'','action-state.json'));
+export function shouldAttemptRetainedClientStopRecovery(body){return Boolean(body?.maintenance&&(!Object.hasOwn(body.maintenance,'stopSafe')||prelaunchHealth(body)||backgroundHealth(body)));}
 
 function assertOldIdleHealth(body,context,pinned){
   const config=context.snapshot.config,lifecycle=body?.lifecycle,maintenance=body?.maintenance;
   requireFact(body?.service==='ziwei_user'&&body.agentId==='ziwei_user'&&body.pid===pinned.pid&&body.clientBuild===context.build&&body.workspace===config.workspace&&body.deviceId===config.deviceId);
   requireFact(body.connectionState==='draining'&&body.activeActionCount===0&&body.pollingCount===0&&body.quarantinedActionCount===0&&body.executionQuarantined!==true);
   requireFact(lifecycle&&lifecycle.nonce===pinned.lifecycle.nonce&&samePath(lifecycle.root,context.root)&&samePath(lifecycle.configPath,context.file)&&lifecycle.configSha256===context.snapshot.hash&&samePath(lifecycle.runtimeDir,pinned.lifecycle.runtimeDir)&&lifecycle.managedAuxiliaryCount===0&&lifecycle.startedAt===pinned.lifecycle.startedAt);
-  if(prelaunchHealth(body)){
+  if(backgroundHealth(body)){
+    requireFact(backgroundReleaseBuilds.has(context.build)&&maintenance.gatewaySafe===true&&maintenance.gatewayWorkers?.length===0&&maintenance.pendingDeliveryCount===0&&maintenance.blockedDeliveryCount===0&&maintenance.retainedDeliveryCount===0&&Array.isArray(maintenance.stopIssues)&&maintenance.stopIssues.length===1&&maintenance.stopIssues[0]?.code==='ACTION_STATE_CORRUPT'&&samePath(maintenance.fileIssues[0].path,pinned.maintenance.fileIssues[0].path));
+  }else if(prelaunchHealth(body)){
     requireFact(context.build===auditedBuild&&maintenance.gatewaySafe===true&&maintenance.gatewayWorkers?.length===0&&maintenance.pendingDeliveryCount===0&&maintenance.blockedDeliveryCount===0&&maintenance.retainedDeliveryCount===0&&Array.isArray(maintenance.stopIssues)&&maintenance.stopIssues.length===1&&maintenance.stopIssues[0]?.code==='UNMAPPED_NATIVE_EXECUTION'&&maintenance.fileIssues[0].actionId===pinned.maintenance.fileIssues[0].actionId);
   }else requireFact(maintenance?.safe===false&&!Object.hasOwn(maintenance,'stopSafe')&&Array.isArray(maintenance.fileIssues)&&maintenance.fileIssues.length>0&&maintenance.fileIssues.every(issue=>issue?.code==='DELIVERY_NOT_DRAINED'));
   requireFact(Array.isArray(maintenance.gatewayWorkers)&&maintenance.gatewayWorkers.every(worker=>worker?.processAlive===false&&worker.pendingCommands===0&&worker.inFlight===0&&worker.pendingInbound===0));
@@ -40,9 +46,10 @@ function connectionsFor(context,health){
   });
 }
 
-function verifiedEvidence(inspect,connections,runtimeDir,prelaunchId){
+function verifiedEvidence(inspect,connections,runtimeDir,prelaunchId,retainedBackground=false){
   const evidence=inspect({connections});
-  if(prelaunchId)requireFact(evidence.safe===false&&evidence.issues?.length===1&&evidence.issues[0].code==='UNMAPPED_NATIVE_EXECUTION'&&evidence.issues[0].actionId===prelaunchId&&evidence.retainedDeliveryCount===0&&((evidence.stopSafe===false&&evidence.stopIssues?.length===1&&evidence.stopIssues[0].code==='UNMAPPED_NATIVE_EXECUTION')||(evidence.stopSafe===true&&evidence.stopIssues?.length===0&&evidence.retainedPrelaunchCount===1)));
+  if(retainedBackground)requireFact(evidence.safe===false&&evidence.stopSafe===true&&Number.isSafeInteger(evidence.retainedBackgroundCount)&&evidence.retainedBackgroundCount>0&&evidence.retainedDeliveryCount===0&&Array.isArray(evidence.stopIssues)&&evidence.stopIssues.length===0&&Array.isArray(evidence.issues)&&evidence.issues.length>0&&evidence.issues.every(issue=>issue.code==='BACKGROUND_PROCESS_RETAINED'));
+  else if(prelaunchId)requireFact(evidence.safe===false&&evidence.issues?.length===1&&evidence.issues[0].code==='UNMAPPED_NATIVE_EXECUTION'&&evidence.issues[0].actionId===prelaunchId&&evidence.retainedDeliveryCount===0&&((evidence.stopSafe===false&&evidence.stopIssues?.length===1&&evidence.stopIssues[0].code==='UNMAPPED_NATIVE_EXECUTION')||(evidence.stopSafe===true&&evidence.stopIssues?.length===0&&evidence.retainedPrelaunchCount===1)));
   else requireFact(evidence.safe===false&&evidence.stopSafe===true&&Number.isSafeInteger(evidence.retainedDeliveryCount)&&evidence.retainedDeliveryCount>0&&Array.isArray(evidence.stopIssues)&&evidence.stopIssues.length===0&&Array.isArray(evidence.issues)&&evidence.issues.length>0&&evidence.issues.every(issue=>issue.code==='DELIVERY_NOT_DRAINED'));
   requireFact(Array.isArray(evidence.files)&&evidence.files.length>0&&Array.isArray(evidence.directories)&&evidence.directories.length>0);
   for(const item of [...evidence.files,...evidence.directories])requireFact(typeof item.path==='string'&&path.isAbsolute(item.path)&&within(item.path,runtimeDir)&&typeof item.exists==='boolean');
@@ -50,7 +57,7 @@ function verifiedEvidence(inspect,connections,runtimeDir,prelaunchId){
   for(const item of evidence.directories)requireFact(Array.isArray(item.names)&&item.names.every(name=>typeof name==='string'));
   return evidence;
 }
-const evidenceFingerprint=evidence=>digest(JSON.stringify({files:evidence.files,directories:evidence.directories,retainedDeliveryCount:evidence.retainedDeliveryCount}));
+const evidenceFingerprint=evidence=>digest(JSON.stringify({files:evidence.files,directories:evidence.directories,retainedDeliveryCount:evidence.retainedDeliveryCount,retainedBackgroundCount:evidence.retainedBackgroundCount}));
 
 // All final checks occur while this exact System.Diagnostics.Process handle is
 // held. Neither Stop-Process nor taskkill is allowed to resolve a fresh PID.
@@ -81,7 +88,13 @@ try{
  Assert-Fact ($health.connectionState -ceq 'draining' -and $health.activeActionCount -eq 0 -and $health.pollingCount -eq 0 -and $health.quarantinedActionCount -eq 0 -and $health.executionQuarantined -ne $true)
  Assert-Fact ($health.lifecycle.nonce -ceq $d.nonce -and $health.lifecycle.root -ieq $d.root -and $health.lifecycle.configPath -ieq $d.configPath -and $health.lifecycle.configSha256 -ceq $d.configSha256 -and $health.lifecycle.runtimeDir -ieq $d.runtimeDir -and $health.lifecycle.startedAt -ceq $d.startedAt -and $health.lifecycle.managedAuxiliaryCount -eq 0)
  Assert-Fact ($health.maintenance.fileIssues -is [Array] -and $health.maintenance.gatewayWorkers -is [Array])
- if($d.prelaunchActionId){
+ if($d.retainedBackground){
+  Assert-Fact (@('993639eb3840f257830c2fc8f1400339f2d3ad60a085ab27f4d547824f6b10f9','6b8449d952039abf08bde26c3b3a840e297a250cf684378cd4c4c1371699a8b1','ba86b25db751ac6322d74c6c7e1353a7984b69d5a18a97c7e87beee46c6f195a') -ccontains $d.build)
+  Assert-Fact ($health.maintenance.safe -eq $false -and $health.maintenance.stopSafe -eq $false -and $health.maintenance.gatewaySafe -eq $true)
+  Assert-Fact (@($health.maintenance.gatewayWorkers).Count -eq 0 -and $health.maintenance.pendingDeliveryCount -eq 0 -and $health.maintenance.blockedDeliveryCount -eq 0 -and $health.maintenance.retainedDeliveryCount -eq 0)
+  Assert-Fact (@($health.maintenance.fileIssues).Count -eq 1 -and $health.maintenance.fileIssues[0].code -ceq 'ACTION_STATE_CORRUPT' -and $health.maintenance.fileIssues[0].path -ieq (Join-Path $d.runtimeDir 'action-state.json'))
+  Assert-Fact ($health.maintenance.stopIssues -is [Array] -and @($health.maintenance.stopIssues).Count -eq 1 -and $health.maintenance.stopIssues[0].code -ceq 'ACTION_STATE_CORRUPT')
+ }elseif($d.prelaunchActionId){
   Assert-Fact ($d.build -ceq 'a996e94aebec66b15636d526be8013746617950fab1858d4815720c7b93cb5f1' -and $health.maintenance.safe -eq $false -and $health.maintenance.stopSafe -eq $false)
   Assert-Fact ($health.maintenance.gatewaySafe -eq $true -and @($health.maintenance.gatewayWorkers).Count -eq 0 -and $health.maintenance.pendingDeliveryCount -eq 0 -and $health.maintenance.blockedDeliveryCount -eq 0 -and $health.maintenance.retainedDeliveryCount -eq 0)
   Assert-Fact (@($health.maintenance.fileIssues).Count -eq 1 -and $health.maintenance.fileIssues[0].code -ceq 'UNMAPPED_NATIVE_EXECUTION' -and $health.maintenance.fileIssues[0].actionId -ceq $d.prelaunchActionId)
@@ -95,7 +108,7 @@ try{
  foreach($item in $d.files){if(!$item.exists){Assert-Fact (!(Test-Path -LiteralPath $item.path));continue};No-Link $item.path;Assert-Fact ((File-Hash $item.path) -ceq $item.sha256)}
  Assert-Fact ((File-Hash $d.configPath) -ceq $d.configSha256)
  Assert-Fact (!$p.HasExited)
- if($d.prelaunchActionId){Assert-Fact (@(Get-CimInstance Win32_Process -Filter ('ParentProcessId = '+$d.pid) -ErrorAction Stop).Count -eq 0)}
+ if($d.prelaunchActionId -or $d.retainedBackground){Assert-Fact (@(Get-CimInstance Win32_Process -Filter ('ParentProcessId = '+$d.pid) -ErrorAction Stop).Count -eq 0)}
  $p.Kill()
  Assert-Fact ($p.WaitForExit($d.waitMs) -and $p.HasExited)
  [pscustomobject]@{stopped=$true;pid=[int]$d.pid;creationTime=$d.creationTime}|ConvertTo-Json -Compress
@@ -122,23 +135,23 @@ export function createRetainedClientStopRecovery({platform=process.platform,impo
     requireFact(health?.pid===record.pid&&health.lifecycle&&/^[A-Za-z0-9_-]{16,128}$/.test(health.lifecycle.nonce||'')&&Math.abs(Date.parse(health.lifecycle.startedAt)-Date.parse(record.creationTime))<=15_000);
     assertOldIdleHealth(health,context,health);
     requireFact(digest(fs.readFileSync(context.file))===context.snapshot.hash);
-    const pinned=structuredClone(health),connections=connectionsFor(context,pinned),module=await importInspector(recoveryRoot),prelaunchId=prelaunchHealth(pinned)?pinned.maintenance.fileIssues[0].actionId:null;
+    const pinned=structuredClone(health),connections=connectionsFor(context,pinned),module=await importInspector(recoveryRoot),prelaunchId=prelaunchHealth(pinned)?pinned.maintenance.fileIssues[0].actionId:null,retainedBackground=backgroundHealth(pinned);
     requireFact(typeof module.inspectLocalDaemonMaintenanceFiles==='function');
     let prepared;
     if(prelaunchId){try{requireFact(typeof module.inspectAuditedPrelaunchRecovery==='function'&&typeof module.retainAuditedPrelaunchRecovery==='function');prepared=module.inspectAuditedPrelaunchRecovery({root:context.root,build:context.build,connections,bootStartedAt:record.creationTime});requireFact(prepared.subject.actionId===prelaunchId);}catch{throw fail();}}
-    const evidence=verifiedEvidence(module.inspectLocalDaemonMaintenanceFiles,connections,pinned.lifecycle.runtimeDir,prelaunchId),fingerprint=evidenceFingerprint(evidence);
+    const evidence=verifiedEvidence(module.inspectLocalDaemonMaintenanceFiles,connections,pinned.lifecycle.runtimeDir,prelaunchId,retainedBackground),fingerprint=evidenceFingerprint(evidence);
     if(prepared)requireFact(evidenceFingerprint(prepared.evidence)===fingerprint);
     const current=await assertCurrent();assertOldIdleHealth(current,context,pinned);
-    const second=verifiedEvidence(module.inspectLocalDaemonMaintenanceFiles,connections,pinned.lifecycle.runtimeDir,prelaunchId);requireFact(evidenceFingerprint(second)===fingerprint);
+    const second=verifiedEvidence(module.inspectLocalDaemonMaintenanceFiles,connections,pinned.lifecycle.runtimeDir,prelaunchId,retainedBackground);requireFact(evidenceFingerprint(second)===fingerprint);
     if(prepared){let fresh;try{fresh=module.inspectAuditedPrelaunchRecovery({root:context.root,build:context.build,connections,bootStartedAt:record.creationTime});}catch{throw fail();}requireFact(digest(JSON.stringify(fresh.subject))===digest(JSON.stringify(prepared.subject))&&digest(JSON.stringify(fresh.sourceFiles))===digest(JSON.stringify(prepared.sourceFiles))&&evidenceFingerprint(fresh.evidence)===fingerprint);}
     requireFact(digest(fs.readFileSync(context.file))===context.snapshot.hash);
     const url=new URL(context.origin),host=url.hostname.replace(/^\[|\]$/g,'');requireFact(url.protocol==='http:'&&['127.0.0.1','::1'].includes(host)&&!url.username&&!url.password&&!url.search&&!url.hash&&url.pathname==='/'&&Number(url.port)>0);
     let output;
-    try{output=await terminate({pid:record.pid,creationTime:record.creationTime,commandHash:record.commandHash,executable:record.executable,host,port:Number(url.port),origin:url.origin,root:context.root,configPath:context.file,configSha256:context.snapshot.hash,build:context.build,workspace:context.snapshot.config.workspace,deviceId:context.snapshot.config.deviceId,nonce:pinned.lifecycle.nonce,runtimeDir:pinned.lifecycle.runtimeDir,startedAt:pinned.lifecycle.startedAt,files:[...evidence.files,...(prepared?.sourceFiles||[])],directories:evidence.directories,...(prelaunchId?{prelaunchActionId:prelaunchId}:{}),waitMs:Math.floor(timeoutMs)});}catch{throw fail();}
+    try{output=await terminate({pid:record.pid,creationTime:record.creationTime,commandHash:record.commandHash,executable:record.executable,host,port:Number(url.port),origin:url.origin,root:context.root,configPath:context.file,configSha256:context.snapshot.hash,build:context.build,workspace:context.snapshot.config.workspace,deviceId:context.snapshot.config.deviceId,nonce:pinned.lifecycle.nonce,runtimeDir:pinned.lifecycle.runtimeDir,startedAt:pinned.lifecycle.startedAt,files:[...evidence.files,...(prepared?.sourceFiles||[])],directories:evidence.directories,...(prelaunchId?{prelaunchActionId:prelaunchId}:{}),...(retainedBackground?{retainedBackground:true}:{}),waitMs:Math.floor(timeoutMs)});}catch{throw fail();}
     requireFact(output?.stopped===true&&output.pid===record.pid&&output.creationTime===record.creationTime);
-    const stoppedClientReceipt={stopped:true,wasRunning:true,pid:record.pid,creationTime:record.creationTime,retainedDeliveryCount:evidence.retainedDeliveryCount,retainedReceiptRecovery:true,executionConfirmedStopped:false};
+    const stoppedClientReceipt={stopped:true,wasRunning:true,pid:record.pid,creationTime:record.creationTime,retainedDeliveryCount:evidence.retainedDeliveryCount,retainedReceiptRecovery:true,executionConfirmedStopped:false,...(retainedBackground?{retainedBackgroundCount:evidence.retainedBackgroundCount,backgroundProcessesPreserved:true}:{})};
     try{
-      requireFact(evidenceFingerprint(verifiedEvidence(module.inspectLocalDaemonMaintenanceFiles,connections,pinned.lifecycle.runtimeDir,prelaunchId))===fingerprint);
+      requireFact(evidenceFingerprint(verifiedEvidence(module.inspectLocalDaemonMaintenanceFiles,connections,pinned.lifecycle.runtimeDir,prelaunchId,retainedBackground))===fingerprint);
       requireFact(digest(fs.readFileSync(context.file))===context.snapshot.hash);
       if(prelaunchId){const retained=module.retainAuditedPrelaunchRecovery(prepared,output);requireFact(retained.stopSafe===true&&retained.retainedPrelaunchCount===1);stoppedClientReceipt.prelaunchHistoryRetained=true;}
     }catch{const error=fail();error.stoppedClientReceipt=stoppedClientReceipt;throw error;}

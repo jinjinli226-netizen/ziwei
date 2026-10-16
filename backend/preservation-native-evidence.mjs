@@ -61,8 +61,8 @@ export function scanNativeFiles(options={}, {legacySource=null}={}) {
 
 /** Current daemon admission only; this cannot attest a production namespace. */
 export function inspectLocalDaemonMaintenanceFiles({connections=[]}={}) {
-  const {safe,stopSafe,issues,stopIssues,retainedDeliveryCount,retainedPrelaunchCount,files,directories}=scanFileEvidence({connections},true);
-  return {safe,stopSafe,issues,stopIssues,retainedDeliveryCount,retainedPrelaunchCount,files,directories};
+  const {safe,stopSafe,issues,stopIssues,retainedDeliveryCount,retainedPrelaunchCount,retainedBackgroundCount,files,directories}=scanFileEvidence({connections},true);
+  return {safe,stopSafe,issues,stopIssues,retainedDeliveryCount,retainedPrelaunchCount,retainedBackgroundCount,files,directories};
 }
 
 // One audited historical defect, not a general interpretation of failed work.
@@ -139,6 +139,41 @@ function syntheticEvidence(value){
   return value.fixture===true||value.executionSource==='fixture'||Object.values(value).some(item=>Array.isArray(item)?item.some(syntheticEvidence):syntheticEvidence(item));
 }
 
+// A normal Windows CLI exit historically released its Job while intentional
+// background work survived. Only this one direct exit is omitted from the
+// local inspection view; every other nested uncertainty remains significant.
+function backgroundCompletionView(completed){
+  const {processExit: _exit,...result}=completed.result.result;
+  return {...completed,result:{...completed.result,result}};
+}
+
+function backgroundControlUnknown(value){
+  if(!value||typeof value!=='object')return false;
+  if(['nativeOperation','residentExit','residentWorker','quarantine'].some(key=>Object.hasOwn(value,key))||Object.hasOwn(value,'quarantined')&&value.quarantined!==false||Object.hasOwn(value,'processAlive')&&value.processAlive!==false)return true;
+  return Object.values(value).some(item=>Array.isArray(item)?item.some(backgroundControlUnknown):backgroundControlUnknown(item));
+}
+
+/** Local daemon shutdown only. This never proves the retained child exited. */
+export function isRetainedBackgroundCompletion({started,completed,identity,action}={}){
+  if(!identity||typeof identity.workspace!=='string'||!identity.workspace||typeof identity.deviceId!=='string'||!identity.deviceId)return false;
+  if(!exactKeys(started,['key','actionId','identity','startedAt','nativeRuntime','resourceBinding'])||!exactKeys(completed,['key','identity','result'])||started.nativeRuntime!==true||typeof started.key!=='string'||!started.key||started.key!==completed.key||typeof started.actionId!=='string'||!started.actionId||completed.result?.actionId!==started.actionId||completed.result.status!=='succeeded'||completed.result.error!=null||!Number.isFinite(started.startedAt)||!Number.isFinite(completed.result.completedAt)||completed.result.completedAt<started.startedAt)return false;
+  const stored=started.identity,binding=started.resourceBinding,result=completed.result.result,exit=result?.processExit;
+  if(!stored||typeof stored!=='object'||Array.isArray(stored)||!equal(stored,completed.identity)||Object.keys(stored).some(key=>!['workspace','deviceId','workspaceId','actionWorkspace','targetDeviceId'].includes(key))||Object.values(stored).some(value=>typeof value!=='string'||!value)||stored.workspace!==identity.workspace||stored.deviceId!==identity.deviceId||stored.targetDeviceId!==undefined&&stored.targetDeviceId!==identity.deviceId||stored.actionWorkspace!==undefined&&stored.actionWorkspace!==identity.workspace)return false;
+  if(!exactKeys(binding,['type','employeeId','revision','controlEpoch','resource','operation','platform'])||!['conversation.execute','agent.execute','runtime.execute','automation.execute','task.execute'].includes(binding.type)||binding.resource!==null||binding.operation!==null||binding.platform!==null||binding.employeeId!==null&&(typeof binding.employeeId!=='string'||!binding.employeeId)||![binding.revision,binding.controlEpoch].every(value=>value===null||Number.isSafeInteger(value)&&value>0)||(binding.revision===null)!==(binding.controlEpoch===null)||binding.revision!==null&&binding.employeeId===null)return false;
+  if(!result||typeof result!=='object'||Array.isArray(result)||Object.hasOwn(result,'nativeOperation')||Object.hasOwn(result,'residentExit')||!exit||Object.keys(exit).some(key=>!['platform','supervisor','launched','rootPid','rootConfirmed','rootExitCode','treeConfirmed','activeProcesses','cancelled','failureCode','hostExitCode','signal','hostSignal','streamsComplete','backgroundProcessesRetained'].includes(key))||exit.platform!=='win32'||exit.supervisor!=='windows-job'||exit.launched!==true||exit.rootConfirmed!==true||!Number.isSafeInteger(exit.rootPid)||exit.rootPid<=0||exit.rootExitCode!==0||exit.hostExitCode!==0||exit.cancelled!==false||exit.treeConfirmed!==false||!Number.isSafeInteger(exit.activeProcesses)||exit.activeProcesses<=0||exit.failureCode!=null||exit.signal!=null||exit.hostSignal!=null||exit.streamsComplete!==undefined&&exit.streamsComplete!==true||exit.backgroundProcessesRetained!==undefined&&exit.backgroundProcessesRetained!==true)return false;
+  if(result.configurationRevision!==undefined&&result.configurationRevision!==binding.revision)return false;
+  if(binding.revision!==null&&(result.configurationRevision!==binding.revision||!result.botIsolation))return false;
+  if(result.botIsolation&&(result.botIsolation.kind!=='hermes-bot'||result.botIsolation.employeeId!==binding.employeeId||result.botIsolation.revision!==binding.revision||result.botIsolation.workspace!==identity.workspace))return false;
+  const view=backgroundCompletionView(completed);
+  if(legacyHistoryUncertain(view)||explicitExitUnknown(view)||syntheticEvidence(view)||backgroundControlUnknown(view))return false;
+  if(action!==undefined){
+    const payload=action?.payload||{},bot=payload.hermesBot;
+    const expectedIdentity=Object.fromEntries(Object.entries({workspace:identity.workspace,deviceId:identity.deviceId,workspaceId:action?.workspace_id??action?.workspaceId,actionWorkspace:action?.workspace??action?.workspace_slug,targetDeviceId:payload.deviceId??payload.device_id??payload.targetDeviceId??payload.target_device_id}).filter(([,value])=>value!==undefined&&value!==null&&String(value)!=='').map(([key,value])=>[key,String(value)]));
+    if(action?.id!==started.actionId||String(action.dedupe_key??action.dedupeKey??action.id)!==started.key||action.type!==binding.type||(payload.employeeId||null)!==binding.employeeId||payload.nativeOperation||!equal(stored,expectedIdentity)||['deviceId','device_id','targetDeviceId','target_device_id'].some(key=>payload[key]!==undefined&&payload[key]!==identity.deviceId)||['employee_id','assignee'].some(key=>payload[key]!==undefined&&payload[key]!==binding.employeeId)||bot&&(bot.employeeId!==binding.employeeId||bot.workspace!==identity.workspace||bot.deviceId!==identity.deviceId||bot.revision!==binding.revision||bot.controlEpoch!==binding.controlEpoch))return false;
+  }
+  return true;
+}
+
 // This permits only process shutdown with the original queue left on disk. It
 // is neither a delivery confirmation nor a production preservation proof.
 function retainableLocalDelivery(record,original,result,identity){
@@ -164,7 +199,7 @@ function retainableLocalDelivery(record,original,result,identity){
 /** Read-only evidence. Zero in-memory counters cannot replace these files.
  * localMaintenance is lexical code state, never selected by input JSON. */
 function scanFileEvidence({connections=[],actions=[],homes=[],productionRequest}={},localMaintenance,legacyInterpreter=null) {
-  const issues=[],files=[],directories=[],gatewayExits=[],legacyHistoryProofs=[],legacyNeverDispatchedProofs=[],retainedDeliveries=new Set(),retainedPrelaunch=new Set(),originals=new Map(actions.map(row=>[row.id,normalizedAction(row)]));
+  const issues=[],files=[],directories=[],gatewayExits=[],legacyHistoryProofs=[],legacyNeverDispatchedProofs=[],retainedDeliveries=new Set(),retainedPrelaunch=new Set(),retainedBackground=new Set(),originals=new Map(actions.map(row=>[row.id,normalizedAction(row)]));
   const issue=(code,detail={})=>issues.push({code,...detail});
   const read=file=>{try{const stat=fs.lstatSync(file,{bigint:true});if(!stat.isFile()||stat.isSymbolicLink()||stat.nlink!==1n)throw new Error('not regular file');const bytes=fs.readFileSync(file);files.push({path:path.resolve(file),exists:true,sha256:hash(bytes),bytes:bytes.length,identity:{dev:String(stat.dev),ino:String(stat.ino)}});return bytes.toString('utf8');}catch(error){if(error.code==='ENOENT')files.push({path:path.resolve(file),exists:false});throw error;}};
   const directoryProof=directory=>{try{const stat=fs.lstatSync(directory,{bigint:true});if(!stat.isDirectory()||stat.isSymbolicLink())throw Error('identity');const names=fs.readdirSync(directory).sort();directories.push({path:path.resolve(directory),exists:true,names,identity:{dev:String(stat.dev),ino:String(stat.ino)}});}catch(error){if(error.code==='ENOENT')directories.push({path:path.resolve(directory),exists:false,names:[]});else issue('DIRECTORY_UNREADABLE',{path:directory});}};
@@ -172,7 +207,7 @@ function scanFileEvidence({connections=[],actions=[],homes=[],productionRequest}
     const {runtimeDir,workspace,deviceId}=connection,scope={workspace,deviceId};
     directoryProof(runtimeDir);directoryProof(path.join(runtimeDir,'action-delivery'));directoryProof(path.join(runtimeDir,'shared-workspaces'));
     const relevant=[...originals.values()].filter(action=>!action.payload.deviceId||action.payload.deviceId===deviceId);
-    const stateFile=path.join(runtimeDir,'action-state.json');let state;
+    const stateFile=path.join(runtimeDir,'action-state.json');let state;const backgroundCompletions=new Set();
     try{
       state=json(read(stateFile));
       const legacyShape=state?.version===1&&Array.isArray(state.completed)&&(localMaintenance&&state.updatedAt===undefined||Number.isFinite(Date.parse(state.updatedAt||'')))&&Object.keys(state).every(key=>['version','updatedAt','completed'].includes(key));
@@ -186,10 +221,13 @@ function scanFileEvidence({connections=[],actions=[],homes=[],productionRequest}
       }
       const completedKeys=new Set();
       for(const completed of state.completed){
-        if(!completed||typeof completed.key!=='string'||!completed.key||completedKeys.has(completed.key)||!completed.result||!['succeeded','failed'].includes(completed.result.status)||typeof completed.result.actionId!=='string'||!completed.result.actionId||!validIdentity(completed.identity)||legacyHistoryUncertain(completed,localMaintenance||state.version===1||completed.legacy===true)||localMaintenance&&explicitExitUnknown(completed))throw Error('invalid completed record');
+        const background=localMaintenance&&state.version===2&&state.started.filter(row=>row?.actionId===completed?.result?.actionId).length===1&&state.completed.filter(row=>row?.result?.actionId===completed?.result?.actionId).length===1&&isRetainedBackgroundCompletion({started:state.started.find(row=>row?.key===completed?.key),completed,identity:scope});
+        const inspected=background?backgroundCompletionView(completed):completed;
+        if(!completed||typeof completed.key!=='string'||!completed.key||completedKeys.has(completed.key)||!completed.result||!['succeeded','failed'].includes(completed.result.status)||typeof completed.result.actionId!=='string'||!completed.result.actionId||!validIdentity(completed.identity)||legacyHistoryUncertain(inspected,localMaintenance||state.version===1||completed.legacy===true)||localMaintenance&&explicitExitUnknown(inspected))throw Error('invalid completed record');
         if((state.version===1||completed.legacy===true)&&Object.keys(completed).some(key=>!(state.version===1?['key','result']:['key','result','legacy']).includes(key)))throw Error('unknown legacy wrapper');
         completedKeys.add(completed.key);
         if(state.version===2&&completed.legacy!==true&&(!completed.identity||!(state.started||[]).some(started=>started?.key===completed.key&&started.actionId===completed.result.actionId)))throw Error('unpaired completed record');
+        if(background)backgroundCompletions.add(completed.key);
       }
     }
     catch(error){state=null;if(error.code!=='ENOENT')issue('ACTION_STATE_CORRUPT',{path:stateFile});else if(relevant.some(action=>action.acked_at))issue('ACTION_STATE_MISSING',{path:stateFile});}
@@ -227,6 +265,7 @@ function scanFileEvidence({connections=[],actions=[],homes=[],productionRequest}
         if(gateway?.resource==='gateway'&&worker){const originalConnection=state.completed.find(row=>row.result?.actionId===worker.sourceActionId),originalWorker=originalConnection?.result?.result?.nativeOperation?.data?.residentWorker;
           if(worker.workspace!==workspace||!worker.workerNonce||!Number.isInteger(worker.rootPid)||gateway.operation==='connect'&&worker.sourceActionId!==started.actionId||gateway.operation!=='connect'&&!equal(worker,originalWorker))issue('GATEWAY_CACHE_IDENTITY_MISMATCH',{actionId:started.actionId,path:stateFile});
         }
+        if(backgroundCompletions.has(started.key)){issue('BACKGROUND_PROCESS_RETAINED',{actionId:started.actionId,path:stateFile});retainedBackground.add(stateFile+'\0'+started.actionId);continue;}
         if(!originals.has(started.actionId)){const exit=executionExit(completed.result);if((started.nativeRuntime||exit)&&!exitedTree(exit)){
           issue('UNMAPPED_NATIVE_EXECUTION',{actionId:started.actionId,path:stateFile});
           if(localMaintenance){
@@ -296,8 +335,8 @@ function scanFileEvidence({connections=[],actions=[],homes=[],productionRequest}
     }
     for(const action of [...originals.values()].filter(row=>row.type==='hermes.bot.native'&&row.payload.employeeId===item.employeeId&&row.payload.nativeOperation?.resource==='gateway'&&row.payload.nativeOperation.operation==='connect'&&row.acked_at))if(!starts.some(entry=>entry.sourceActionId===action.id))issue('GATEWAY_LIFECYCLE_MISSING',{actionId:action.id,path:file});
   }
-  const stopIssues=localMaintenance?issues.filter(item=>!(item.code==='DELIVERY_NOT_DRAINED'&&retainedDeliveries.has(item.path))&&!(item.code==='UNMAPPED_NATIVE_EXECUTION'&&retainedPrelaunch.has(item.path+'\0'+item.actionId))):null;
-  return {safe:issues.length===0,issues,files,directories,gatewayExits,legacyHistoryProofs,originalActionProofs:[...legacyHistoryProofs,...legacyNeverDispatchedProofs],...(localMaintenance?{stopSafe:stopIssues.length===0,stopIssues,retainedDeliveryCount:retainedDeliveries.size,retainedPrelaunchCount:retainedPrelaunch.size}:{})};
+  const stopIssues=localMaintenance?issues.filter(item=>!(item.code==='DELIVERY_NOT_DRAINED'&&retainedDeliveries.has(item.path))&&!(item.code==='UNMAPPED_NATIVE_EXECUTION'&&retainedPrelaunch.has(item.path+'\0'+item.actionId))&&!(item.code==='BACKGROUND_PROCESS_RETAINED'&&retainedBackground.has(item.path+'\0'+item.actionId))):null;
+  return {safe:issues.length===0,issues,files,directories,gatewayExits,legacyHistoryProofs,originalActionProofs:[...legacyHistoryProofs,...legacyNeverDispatchedProofs],...(localMaintenance?{stopSafe:stopIssues.length===0,stopIssues,retainedDeliveryCount:retainedDeliveries.size,retainedPrelaunchCount:retainedPrelaunch.size,retainedBackgroundCount:retainedBackground.size}:{})};
 }
 
 /** Only actual native maintenance inspection + loopback health is accepted. */

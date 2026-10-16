@@ -134,14 +134,26 @@ test('a root that never launched with a confirmed empty tree does not quarantine
   assert.equal(dispatcher.quarantined, false);
 });
 
-test('normal successful root exit can intentionally leave background children', async () => {
-  let stops = 0;
-  const dispatcher = new ActionDispatcher({ execute: async (_a, context) => {
-    context.onSupervision({ completionEvidence: Promise.resolve({ ...evidence(false), activeProcesses: 1 }), stop: async () => { stops++; return evidence(true); } });
+for (const retained of [true, false, undefined]) test(`normal root exit preserves background retention evidence ${retained} through durable completion`, async t => {
+  const f = fixture(t); let stops = 0;
+  const processExit = { ...evidence(false), rootExitCode: 0, activeProcesses: 1, cancelled: false, failureCode: null, ...(retained === undefined ? {} : { backgroundProcessesRetained: retained }) };
+  const dispatcher = new ActionDispatcher({ ...f, execute: async (_a, context) => {
+    context.onSupervision({ completionEvidence: Promise.resolve(processExit), stop: async () => { stops++; return evidence(true); } });
     return { status: 'succeeded', result: { backgroundStarted: true } };
   } });
-  assert.equal((await dispatcher.dispatch(action('background'))).status, 'succeeded');
+  const result = await dispatcher.dispatch(action('background'));
+  assert.equal(result.status, 'succeeded');
+  assert.equal(result.result.processExit.backgroundProcessesRetained, retained);
+  assert.equal(result.result.processExit.treeConfirmed, false);
+  assert.equal(result.result.processExit.activeProcesses, 1);
   assert.equal(stops, 0); assert.equal(dispatcher.quarantined, false);
+  const saved = JSON.parse(fs.readFileSync(f.stateFile));
+  assert.deepEqual(saved.completed[0].result.result.processExit, result.result.processExit);
+  const recovered = new ActionDispatcher({ ...f, execute: async () => { throw new Error('must not execute completed action'); } });
+  assert.equal(recovered.quarantined, false);
+  const duplicate = await recovered.dispatch(action('background'));
+  assert.equal(duplicate.status, 'duplicate');
+  assert.deepEqual(duplicate.result.processExit, result.result.processExit);
 });
 
 test('stop receipt alone cannot release executor cleanup or permit late output events', async () => {

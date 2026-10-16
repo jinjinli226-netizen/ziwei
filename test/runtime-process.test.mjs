@@ -45,6 +45,7 @@ test('supervisor preserves root exit code, binary streams, cwd, environment and 
   assert.equal(evidence.rootConfirmed, true);
   assert.equal(evidence.treeConfirmed, windows);
   assert.equal(evidence.activeProcesses, windows ? 0 : null);
+  assert.equal(evidence.backgroundProcessesRetained, false);
   assert.deepEqual(JSON.parse(stdout), { cwd: dir, value: 'value 中文', args, input: input.toString('base64') });
   assert.equal(stderr, 'stderr sentinel');
 });
@@ -98,6 +99,7 @@ test('Windows cancel terminates the owned root and detached descendant and confi
   assert.ok(pids.every(exists));
   const evidence = await runtime.stop();
   assert.equal(evidence.cancelled, true);
+  assert.equal(evidence.backgroundProcessesRetained, false);
   assert.equal(evidence.rootConfirmed, true);
   assert.equal(evidence.treeConfirmed, true);
   assert.equal(evidence.activeProcesses, 0);
@@ -122,6 +124,9 @@ test('Windows normal root exit preserves an intentional detached service and rep
   assert.equal(evidence.rootConfirmed, true);
   assert.equal(evidence.treeConfirmed, false);
   assert.ok(evidence.activeProcesses > 0);
+  assert.equal(evidence.backgroundProcessesRetained, true);
+  assert.equal(evidence.cancelled, false);
+  assert.equal(evidence.failureCode, null);
   const descendantPid = Number(fs.readFileSync(pidFile, 'utf8'));
   assert.equal(exists(descendantPid), true);
   await until(() => !exists(descendantPid), 5000);
@@ -179,6 +184,7 @@ test('Windows cancellation before supervisor readiness prevents the requested ru
   const runtime = launch({ command: process.execPath, args: ['-e', `require('fs').writeFileSync(${JSON.stringify(marker)},'ran')`], cwd: dir, env: process.env });
   const evidence = await runtime.stop();
   assert.equal(evidence.cancelled, true);
+  assert.equal(evidence.backgroundProcessesRetained, false);
   assert.equal(evidence.launched, false);
   assert.equal(evidence.treeConfirmed, true);
   assert.equal(fs.existsSync(marker), false);
@@ -197,6 +203,7 @@ test('Windows cancel arriving during root-exit bookkeeping still empties the own
   await until(() => !exists(rootPid), 3000);
   const evidence = await runtime.stop();
   assert.equal(evidence.cancelled, true);
+  assert.equal(evidence.backgroundProcessesRetained, false);
   assert.equal(evidence.rootConfirmed, true);
   assert.equal(evidence.treeConfirmed, true);
   assert.equal(evidence.activeProcesses, 0);
