@@ -217,7 +217,7 @@ export function terminalMcpExecutionFailure(receipt) {
   const unresolved = incomplete.some(item => !failureStatuses.has(item.status) || item.executionState === 'uncertain') || unconfirmedSubmissions.some(item => item.executionState !== 'not_started');
   if (incomplete.length || unconfirmedSubmissions.length) {
     // A known failure must not hide a second command whose effects are unknown.
-    const phoneExecutionState = unresolved ? 'uncertain' : [...incomplete, ...unconfirmedSubmissions].every(item => item.executionState === 'not_started') ? 'not_started' : 'failed';
+    const phoneExecutionState = unresolved ? 'uncertain' : issued.size === incomplete.length && [...incomplete, ...unconfirmedSubmissions].every(item => item.executionState === 'not_started') ? 'not_started' : 'failed';
     const ids = { commandIds: incomplete.filter(item => item.kind === 'command').map(item => item.id), updateIds: incomplete.filter(item => item.kind === 'update').map(item => item.id) };
     const detail = [...incomplete.map(item => `${item.id}: ${item.executionState === 'not_started' ? '未执行' : item.status || 'unknown'}${item.error ? `，${item.error}` : ''}`), ...unconfirmedSubmissions.map(item => `${item.toolName}: ${item.error}`)].join('、');
     return { code: unresolved ? 'terminal_mcp_receipt_incomplete' : 'terminal_mcp_receipt_failed', phoneExecutionState, retryAllowed: false, error: `${receipt.runtime} 手机动作${phoneExecutionState === 'uncertain' ? '执行结果待核实' : phoneExecutionState === 'not_started' ? '未执行' : '执行失败'}（${detail}）；${unresolved ? '请查询原回执，不要重放动作' : '已保留原回执，不自动重试'}`, ...ids };

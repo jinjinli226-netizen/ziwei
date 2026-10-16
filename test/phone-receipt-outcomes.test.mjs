@@ -4,6 +4,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
+import childProcess from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
 import { createTerminalMcpClient, handleTerminalJsonRpc, runTerminalStdio } from '../scripts/ziwei-terminal-mcp.mjs';
 import { terminalMcpReceipt, terminalMcpExecutionFailure, executeRuntime, resetRuntimeDiscovery } from '../src/runtime-adapters.mjs';
 import { createRepository } from '../backend/repository.mjs';
@@ -127,7 +129,7 @@ test('remote phone uncertainty preserves the original summary without quarantini
   assert.equal((await dispatcher.dispatch(action)).status, 'duplicate'); assert.equal(calls, 1);
 });
 
-test('CLI exit zero cannot turn an uncertain phone receipt into success or lose its summary', { skip: process.platform === 'win32' }, async t => {
+test('CLI zero and nonzero exits preserve phone uncertainty and the employee summary', { skip: process.platform === 'win32' }, async t => {
   const f = fixture(t), bin = path.join(f.root, 'bin'), codexHome = path.join(f.root, 'codex');
   fs.mkdirSync(bin); fs.mkdirSync(codexHome); fs.writeFileSync(path.join(codexHome, 'auth.json'), JSON.stringify({ OPENAI_API_KEY: 'fixture-private-only' }));
   const entry = path.join(f.root, 'fixture-cli.cjs');
@@ -135,8 +137,16 @@ test('CLI exit zero cannot turn an uncertain phone receipt into success or lose 
   const quote = value => "'" + value.replaceAll("'", "'\"'\"'") + "'";
   fs.writeFileSync(path.join(bin, 'codex'), `#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then\n  echo 'codex-cli 0.162.0'\n  exit 0\nfi\nexec ${quote(process.execPath)} ${quote(entry)} \"$@\"\n`, { mode: 0o700 });
   const env = { PATH: `${bin}:/usr/bin:/bin`, CODEX_HOME: codexHome, HERMES_HOME: path.join(f.root, 'hermes') }, previous = new Map(Object.keys(env).map(key => [key, process.env[key]]));
-  Object.assign(process.env, env); t.mock.method(os, 'homedir', () => f.root); resetRuntimeDiscovery();
-  t.after(() => { for (const [key, value] of previous) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } resetRuntimeDiscovery(); });
+  Object.assign(process.env, env); t.mock.method(os, 'homedir', () => f.root);
+  // Discovery is deterministic and isolated from installed host CLIs. The
+  // selected fixture below still launches and exits as a real child process.
+  const spawnSync = childProcess.spawnSync;
+  t.mock.method(childProcess, 'spawnSync', (command, args, options) => command === 'which'
+    ? { status: args[0] === 'codex' ? 0 : 1, stdout: args[0] === 'codex' ? path.join(bin, 'codex') : '', stderr: '' }
+    : command === path.join(bin, 'codex') && args[0] === '--version'
+      ? { status: 0, stdout: 'codex-cli 0.162.0', stderr: '' } : spawnSync(command, args, options));
+  syncBuiltinESMExports(); resetRuntimeDiscovery();
+  t.after(() => { for (const [key, value] of previous) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } t.mock.restoreAll(); syncBuiltinESMExports(); resetRuntimeDiscovery(); });
   for (const [exitCode, phoneStatus] of [[0, 'uncertain'], [7, 'uncertain'], [7, 'succeeded']]) {
   const outcome = await executeRuntime({ runtime: 'Codex', env: { ZIWEI_FIXTURE_CLI_EXIT: String(exitCode), ZIWEI_FIXTURE_PHONE_STATUS: phoneStatus }, prompt: 'isolated fixture', cwd: f.root, terminalMcp: { runtime: 'Codex', config: { enabled: true, tokenFile: f.tokenFile, baseUrl: f.scope.baseUrl }, workspace: f.scope.workspace, request: { enabled: true, workspace: f.scope.workspace, employeeId: f.scope.employeeId, deviceId: f.scope.deviceId }, actionId: f.scope.actionId, auditDirectory: f.root } });
   assert.equal(outcome.status, 'failed'); assert.equal(outcome.code, exitCode === 0 ? 'terminal_mcp_receipt_incomplete' : 'runtime_failed'); assert.equal(outcome.executionState, undefined);
@@ -152,4 +162,23 @@ test('a later CLI failure cannot replay phone actions that already succeeded', (
   const result = { output: summary, terminalMcp: { retryAllowed: false, toolCalls: [{ toolName: 'ziwei_phone_action', commandId: 'command_done', status: 'succeeded', ok: true }] } };
   const completed = repo.completeAutomationRun(run.id, { status: 'failed', error: 'CLI exited with code 7', result });
   assert.equal(completed.status, 'failed'); assert.equal(repo.listA2AActions('test-111', { status: 'all' }).length, count);
+});
+
+
+for (const status of [404, 409]) test(`HTTP ${status} after phone admission cannot prove that no action started`, async t => {
+  const f = fixture(t); let calls = 0;
+  const client = createTerminalMcpClient({ tokenFile: f.tokenFile, fetchImpl: async () => { calls++; return new Response(JSON.stringify({ error: '命令已受理，但后续状态读取失败' }), { status }); } });
+  const recorded = await audit(t, [request('ziwei_phone_action', { deviceId: f.scope.deviceId, action: 'tap', args: {}, waitSeconds: 3 })], (...args) => client.call(...args));
+  const failure = terminalMcpExecutionFailure(recorded.receipt);
+  assert.equal(calls, 1); assert.equal(failure.phoneExecutionState, 'uncertain'); assert.equal(failure.retryAllowed, false);
+  assert.match(failure.error, /命令已受理/);
+});
+
+test('successful earlier actions prevent an aggregate claim that phone work never started', () => {
+  const failure = terminalMcpExecutionFailure({ runtime: 'Hermes', loaded: true, toolCalls: [
+    { toolName: 'ziwei_phone_action', ok: true, commandId: 'command_tap', status: 'succeeded' },
+    { toolName: 'ziwei_phone_action', ok: true, commandId: 'command_text', status: 'failed', commandExecutionState: 'not_started', commandError: '请先聚焦可编辑输入框' },
+  ] });
+  assert.equal(failure.phoneExecutionState, 'failed'); assert.match(failure.error, /command_text: 未执行/);
+  assert.doesNotMatch(failure.error, /手机动作未执行/);
 });

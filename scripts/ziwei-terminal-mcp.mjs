@@ -125,7 +125,7 @@ export function createTerminalMcpClient(options = {}) {
       let value;
       try { value = await response.json(); }
       catch { throw Object.assign(new Error('手机 MCP 响应无法解析；请查询原回执，不要重放动作'), { phoneExecutionState: 'uncertain' }); }
-      if (!response.ok) throw Object.assign(new Error(scrub(value?.error || value?.message || `手机 MCP HTTP ${response.status}`)), { phoneExecutionState: response.status >= 500 ? 'uncertain' : 'not_started' });
+      if (!response.ok) throw Object.assign(new Error(scrub(value?.error || value?.message || `手机 MCP HTTP ${response.status}`)), { phoneExecutionState: 'uncertain' });
       return value;
     }
   };
