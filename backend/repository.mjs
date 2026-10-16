@@ -13,7 +13,7 @@ import { extractSkillMarkdownArchive } from './skills/archive.mjs';
 import { objectStoreFromOptions } from './storage.mjs';
 import { sanitizeHtml } from './sanitize.mjs';
 import { composeEmployeePrompt, normalizeRuntimeProfile } from '../src/employee-runtime.mjs';
-import { listHermesProfiles, validateHermesProfile } from '../src/runtime-adapters.mjs';
+import { listHermesProfiles, validateHermesProfile, terminalMcpExecutionFailure } from '../src/runtime-adapters.mjs';
 import { fetchSafeUrl, validateSafeUrl } from './ssrf.mjs';
 import { acceptInvitationMembership } from './invitation-membership.mjs';
 import { syncPhoneSkill } from './skills/catalog.mjs';
@@ -48,7 +48,13 @@ const hashSecret = value => crypto.createHash('sha256').update(String(value || '
 const parse = value => { try { return JSON.parse(value); } catch { return []; } };
 const explicitBoolean = value => value === true || value === 1 || (typeof value === 'string' && ['true', '1'].includes(value.trim().toLowerCase()));
 const botReplayEvent = Symbol('server stored Bot completion event');
-const uncertainCompletion = value => Boolean(value && typeof value === 'object' && (value.code === 'EXECUTION_UNCERTAIN' || value.executionState === 'uncertain' || value.status === 'uncertain' || Object.values(value).some(uncertainCompletion)));
+const uncertainCompletion = value => Boolean(value && typeof value === 'object' && (value.code === 'EXECUTION_UNCERTAIN' || value.executionState === 'uncertain' || value.status === 'uncertain' || Object.entries(value).some(([key, item]) => {
+  // Phone audit calls are observations over time. A later receipt for the same
+  // submitted ID supersedes its earlier uncertainty; an unrelated success does not.
+  if (key === 'terminalMcp' && item?.loaded === true && Array.isArray(item.toolCalls || item.tool_calls))
+    return terminalMcpExecutionFailure(item)?.phoneExecutionState === 'uncertain';
+  return uncertainCompletion(item);
+})));
 const recoverableBotCompletion = row => Boolean(row?.acked_at && parse(row.payload_json)?.hermesBot && (row.status === 'expired' || row.status === 'failed' && uncertainCompletion(parse(row.result_json))));
 function confirmedBotCompletion(result, status) {
   const exit = result?.processExit || result?.result?.processExit;

@@ -155,3 +155,26 @@ test('reconcile HTTP routes share the existing Bot authorization guard without s
     assert.equal(reconcile.route.stack.length,control.route.stack.length);
   }
 });
+
+
+for (const finalStatus of ['succeeded','failed']) test(`expired recovery accepts the final ${finalStatus} receipt for a previously uncertain original phone command`, t => {
+  const f = fixture(t), action = f.conversation(); f.expire(action.id);
+  const terminalMcp = { loaded:true, runtime:'Hermes', toolCalls:[
+    { toolName:'ziwei_phone_action', ok:true, commandId:'original_phone_command', status:'uncertain' },
+    { toolName:'ziwei_phone_receipt', ok:true, commandId:'original_phone_command', status:finalStatus },
+  ] };
+  const settled = f.repo.resultA2AAction(action.id, { deviceId, status:finalStatus, ...(finalStatus === 'failed' ? {error:'Original command failed'} : {}), result:{processExit:{...exitProof},output:'Original phone outcome recovered automatically',terminalMcp} });
+  assert.equal(settled.status, finalStatus);
+  assert.equal(f.repo.db.prepare('SELECT active_action_id FROM hermes_bots WHERE employee_id=?').get(f.bot.id).active_action_id,null);
+  assert.equal(f.repo.getA2AAction(action.id).events.filter(event=>event.type==='action.reconciled').length,1);
+});
+
+test('expired recovery keeps unresolved phone uncertainty when a different command succeeded', t => {
+  const f = fixture(t), action = f.conversation(); f.expire(action.id);
+  const terminalMcp = { loaded:true, runtime:'Hermes', toolCalls:[
+    { toolName:'ziwei_phone_action', ok:true, commandId:'original_phone_command', status:'uncertain' },
+    { toolName:'ziwei_phone_receipt', ok:true, commandId:'different_command', status:'succeeded' },
+  ] };
+  assert.throws(()=>f.repo.resultA2AAction(action.id,{deviceId,status:'succeeded',result:{processExit:{...exitProof},terminalMcp}}),{code:'BOT_RECOVERY_RECEIPT_REQUIRED'});
+  assert.equal(f.repo.getA2AAction(action.id).status,'expired');
+});
