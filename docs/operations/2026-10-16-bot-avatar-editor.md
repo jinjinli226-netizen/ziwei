@@ -17,4 +17,12 @@
 - 当前 API 路径仍为 `/opt/ziwei/releases/v2-hotfix-eabe098af3b6/v2`；该目录下前端静态内容已更新，不能仅凭主目录名判断前端版本。官方客户端下载版本仍为 `5db7d83`。
 
 
-回退只恢复本次发布备份中的 index.html 和原 FRONTEND_RELEASE.json（原来不存在则移除该记录），保留业务数据库与旧资源，无需重启 API。
+17:15 最终补丁 `bf35c45fa2499c04da3f5e415366f0668e6e2538` 已先推 GitHub 再发布。首轮线上检查发现父组件 scoped CSS 不会覆盖新子组件内部按钮，已将按钮尺寸、边框、颜色、悬停、禁用和焦点样式完整归入头像组件。最终提交构建及 CSS 产物检查、独立审查通过。
+
+- 当前首页 SHA-256：`6725f56922040f973dd9373dba2608736fa275df59b126bab2777f9a55d449ef`
+- 最终发布证据：`/opt/ziwei-staging/frontend-avatar-bf35c45fa249/publish-result.json`
+- 最终补丁回退备份：`/opt/ziwei-staging/backups/frontend-avatar-bf35c45fa249-20261016T091516Z-37080240`
+- 公开首页、资源、元数据均校验通过，受保护服务/客户端下载/数据库 inode 均未变化。
+- 刷新正式站 TikTokTrendS 基础配置后，已看到头像预览、“已保存”及完整样式的更换/移除按钮；实际按钮为36px最小高度、9px圆角、浅紫背景。线上截图保存在本机 `output/imagegen/bot-avatar-editor-fixed-20261016.jpg`。核验未修改员工资料。
+
+回退只恢复对应发布备份中的 index.html 和原 FRONTEND_RELEASE.json（原来不存在则移除该记录），保留业务数据库与旧资源，无需重启 API。最后一次备份对应首轮头像编辑器，最初备份对应本轮修改前的前端。
