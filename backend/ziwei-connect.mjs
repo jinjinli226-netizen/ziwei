@@ -409,12 +409,59 @@ export function createZiweiConnect(repo, options = {}) {
       const terminal=async(method,suffix,body={})=>{const result=await this.terminal(slug,method,suffix,body);if(result.status>=400) throw externalError(result.body.error || result.body.message || '手机工具请求失败',result.status);return result.body;};
       const syncReceipt=async device=>{
         const rows=db.prepare('SELECT * FROM ziwei_connect_runs WHERE workspace_id=? AND employee_id=? AND device_id=? AND execution_id=? AND command_id IS NOT NULL').all(workspace(slug).id,scope.employeeId,phoneId,scope.actionId);
-        for(const row of rows){const command=device?.commands?.find(item=>item.id===row.command_id);if(!command)continue;const previous=parse(row.result_json,{});let snapshot=previous.snapshot || previous.device?.snapshot || null;if(row.action==='screenshot'&&command.status==='succeeded'&&!snapshot?.data) snapshot=(await terminal('GET',`${path}/snapshot`)).snapshot || null;updateRun(row,{status:commandStatus(command),result:{command,device,snapshot},error:command.error || null});}
+        for(const row of rows){const command=device?.commands?.find(item=>item.id===row.command_id);if(!command)continue;const previous=parse(row.result_json,{});let snapshot=previous.snapshot || previous.device?.snapshot || null;let snapshotError;if(row.action==='screenshot'&&command.status==='succeeded'&&!snapshot?.data){try{snapshot=(await terminal('GET',`${path}/snapshot`)).snapshot || null;}catch(error){snapshotError=error.message;}}updateRun(row,{status:commandStatus(command),result:{command,device,snapshot,...snapshotError?{snapshotError}:{}},error:command.error || null});}
         return device;
       };
       const detail=async()=>syncReceipt((await terminal('GET',`${path}/status${args.commandId || args.updateId ? `?${new URLSearchParams({...args.commandId?{commandId:args.commandId}:{},...args.updateId?{updateId:args.updateId}:{}})}`:''}`)).device);
       const wait=async(commandId,updateId,seconds)=>{const deadline=Date.now()+Math.min(30,seconds || 0)*1000;let device;do{device=await syncReceipt((await terminal('GET',`${path}/status?${new URLSearchParams({...commandId?{commandId}:{},...updateId?{updateId}:{}})}`)).device);const record=commandId?device?.commands?.find(row=>row.id===commandId):device?.updates?.find(row=>row.id===updateId);if(record && ['succeeded','committed','failed','cancelled','expired','uncertain','acknowledged'].includes(record.status || record.state)) break;if(Date.now()>=deadline) break;await sleep(500);}while(true);return device;};
-      const action=async(action,argsValue={},seconds=0)=>{let run;try{run=await this.run(slug,{employeeId:scope.employeeId,deviceId:phoneId,action,args:argsValue},{fullToolset:true,configurationRevision:scope.configurationRevision,executionId:scope.actionId});}catch(error){if(error.run?.commandId) return{command:{id:error.run.commandId,status:error.run.status},device:{id:phoneId},runId:error.run.id,verificationError:'命令已受理但读取失败，请查询原 commandId，勿重复提交'};throw error;}let device=run.result?.device || {id:phoneId};let command=run.result?.command || {id:run.commandId,status:run.status};if(seconds && !settledCommandStatuses.has(command.status)){device=await wait(run.commandId,null,seconds);command=device?.commands?.find(row=>row.id===run.commandId)||command;}if(action==='screenshot'&&command.status==='succeeded') device={...device,snapshot:run.result?.snapshot || (await terminal('GET',`${path}/snapshot`)).snapshot};const row=db.prepare('SELECT * FROM ziwei_connect_runs WHERE id=?').get(run.id);updateRun(row,{status:commandStatus(command),result:{command,device,snapshot:device.snapshot || null},error:command.error || null});return{command,device,runId:run.id};};
+      const readOriginalReceipt=async commandId=>{
+        for(let attempt=0;attempt<2;attempt++){
+          if(attempt) await sleep(300);
+          try{
+            const device=await syncReceipt((await terminal('GET',`${path}/status?${new URLSearchParams({commandId})}`)).device);
+            const command=device?.commands?.find(item=>item.id===commandId);
+            if(command) return {device,command};
+          }catch{/* Retry only the read of this exact command, never the phone action. */}
+        }
+        return null;
+      };
+      const unknownReceipt=(run,error)=>{
+        const command={id:run.commandId,status:'uncertain',error:run.error || error.message,result:{executionState:'uncertain',errorCode:'RECEIPT_READ_FAILED'}};
+        const row=db.prepare('SELECT * FROM ziwei_connect_runs WHERE id=?').get(run.id);
+        if(row) updateRun(row,{status:'uncertain',result:{command,device:{id:phoneId}},error:command.error});
+        return{command,device:{id:phoneId},runId:run.id,verificationError:'原命令回执暂不可读；已自动回查，继续只读观察，不重复提交手机动作',recovery:{attempts:2,nextAction:'observe',retryAllowed:false}};
+      };
+      const action=async(action,argsValue={},seconds=0)=>{
+        let run;
+        try{
+          run=await this.run(slug,{employeeId:scope.employeeId,deviceId:phoneId,action,args:argsValue},{fullToolset:true,configurationRevision:scope.configurationRevision,executionId:scope.actionId});
+        }catch(error){
+          if(!error.run?.commandId) throw error;
+          const recovered=await readOriginalReceipt(error.run.commandId);
+          if(!recovered) return unknownReceipt(error.run,error);
+          run={...error.run,status:commandStatus(recovered.command),result:recovered,error:recovered.command.error || null};
+        }
+        let device=run.result?.device || {id:phoneId};
+        let command=run.result?.command || {id:run.commandId,status:run.status};
+        if(seconds && !settledCommandStatuses.has(command.status)){
+          try{
+            device=await wait(run.commandId,null,seconds);
+            command=device?.commands?.find(row=>row.id===run.commandId)||command;
+          }catch(error){
+            const recovered=await readOriginalReceipt(run.commandId);
+            if(!recovered) return unknownReceipt(run,error);
+            device=recovered.device;command=recovered.command;
+          }
+        }
+        let verificationError;
+        if(action==='screenshot'&&command.status==='succeeded'){
+          try{device={...device,snapshot:run.result?.snapshot || (await terminal('GET',`${path}/snapshot`)).snapshot};}
+          catch(error){verificationError=`手机已完成截图，图片读取暂失败；继续读取现有截图：${error.message}`;}
+        }
+        const row=db.prepare('SELECT * FROM ziwei_connect_runs WHERE id=?').get(run.id);
+        updateRun(row,{status:commandStatus(command),result:{command,device,snapshot:device.snapshot || null},error:command.error || null});
+        return{command,device,runId:run.id,...verificationError?{verificationError,nextAction:'observe'}:{}};
+      };
       if(name==='ziwei_phone_list') return {devices:(await listExternalDevices()).filter(row=>row.id===phoneId)};
       if(name==='ziwei_phone_status') return detail();
       if(name==='ziwei_phone_receipt'){const device=await detail();const command=device?.commands?.find(row=>row.id===args.commandId);if(!command) throw externalError('未找到该手机的命令回执',404);return{deviceId:phoneId,command};}
