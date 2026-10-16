@@ -6,6 +6,7 @@ import {permittedCredentialName,botFailure} from './hermes-bot-config.mjs';
 import {hermesProfileHome,hermesProfileReadiness,hermesMcpSpawnSpec,discoverInstalledRuntimes} from './runtime-adapters.mjs';
 import {spawnSupervisedRuntime} from './runtime-process.mjs';
 import {successfulProfileExit,ownedProfileProofMatches} from './hermes-profile-proof.mjs';
+import {profileProvisionFailure} from './hermes-profile-diagnostic.mjs';
 
 function endpoint(value){
   if(value===undefined)return undefined;
@@ -15,7 +16,10 @@ function endpoint(value){
 
 export function finalizeOwnedProfileProvision({context,baseHome,receipt,processExit}){
   if(!successfulProfileExit(processExit)||!['succeeded','failed'].includes(receipt?.status)||receipt.status==='succeeded'&&!ownedProfileProofMatches(context,receipt.botProvision,processExit))return{status:'failed',code:'EXECUTION_UNCERTAIN',executionState:'uncertain',error:'Profile 创建终态未确认；请查询原动作，不要另建实例',result:{code:'EXECUTION_UNCERTAIN',processExit}};
-  if(receipt.status!=='succeeded')return{status:'failed',code:receipt.code || 'BOT_PROFILE_PROVISION_FAILED',error:receipt.code || 'BOT_PROFILE_PROVISION_FAILED',result:{processExit}};
+  if(receipt.status!=='succeeded'){
+    const {code,error,diagnostic}=profileProvisionFailure(receipt);
+    return{status:'failed',code,error,result:{processExit,...(diagnostic?{diagnostic}:{})}};
+  }
   // The requested provider can differ from the template provider. Resolve the
   // newly published config and its verified source credential reference.
   const readiness=hermesProfileReadiness(context.instance.profile,{baseHome});

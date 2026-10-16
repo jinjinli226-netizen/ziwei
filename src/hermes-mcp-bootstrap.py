@@ -13,6 +13,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import sys
 import zipfile
 
@@ -510,11 +511,16 @@ def run():
         module = importlib.util.spec_from_file_location('ziwei_owned_profile', Path(__file__).with_name('hermes-owned-profile.py'))
         bridge = importlib.util.module_from_spec(module); module.loader.exec_module(bridge)
         try:
-            receipt = bridge.provision(json.loads(sys.stdin.readline()))
+            # The controller writes UTF-8 JSON, independently of the host locale
+            # and the isolated interpreter's ignored PYTHONIOENCODING setting.
+            raw = getattr(sys.stdin, 'buffer', sys.stdin).readline()
+            request = json.loads(raw.decode('utf-8') if isinstance(raw, bytes) else raw)
+            receipt = bridge.provision(request)
             print('ZIWEI_BOT_PROVISION:' + json.dumps({'status': 'succeeded', 'botProvision': receipt}), flush=True)
         except Exception as error:
-            code = str(error) if str(error).startswith('BOT_PROFILE_') else 'BOT_PROFILE_CREATE_FAILED'
-            print('ZIWEI_BOT_PROVISION:' + json.dumps({'status': 'failed', 'code': code}), flush=True)
+            message = str(error)
+            code = message if re.fullmatch(r'BOT_PROFILE_[A-Z0-9_]{1,64}', message) else 'BOT_PROFILE_CREATE_FAILED'
+            print('ZIWEI_BOT_PROVISION:' + json.dumps({'status': 'failed', 'code': code, 'diagnostic': bridge.failure_diagnostic(error)}), flush=True)
         return 0
     discover_only = bool(native_args and native_args[0] == '--discover-only')
     config_only = bool(native_args and native_args[0] == '--config-only')
