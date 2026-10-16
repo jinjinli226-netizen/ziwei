@@ -5,6 +5,7 @@ import ModalDialog from './TerminalModal.vue'
 import { androidDeviceApi } from '../../api/android-devices'
 import type { AndroidCommand, AndroidCommandAction, AndroidCredentials, AndroidDevice, AndroidEnrollmentRequest, AndroidNode, AndroidRole, AndroidUpdate, AndroidUpdateStatus } from '../../api/android-devices'
 import { formatTerminalTime as formatTime } from './format.js'
+import { runtimeDiagnosticsView } from './runtime-diagnostics.js'
 
 const props = defineProps<{ canManage: boolean; selectedDeviceId?: string }>()
 const emit = defineEmits<{ 'devices-change': [devices: AndroidDevice[]]; 'select-device': [device: AndroidDevice | null]; 'command-resolved': [receipt: { deviceId: string; commandId: string }] }>()
@@ -116,6 +117,7 @@ function stateClass(status: string) {
 }
 
 function nodeFor(role: AndroidRole) { return selected.value?.nodes.find(node => node.role === role) }
+const nodeDiagnostics = computed(() => Object.fromEntries(roles.map(role => [role, runtimeDiagnosticsView(nodeFor(role), { syncInterrupted: !!syncError.value })])))
 function healthValue(node: AndroidNode | undefined, key: keyof AndroidNode['health'], yes: string, no: string) {
   return !node || typeof node.health?.[key] !== 'boolean' ? '尚未上报' : node.health[key] ? yes : no
 }
@@ -641,7 +643,27 @@ onUnmounted(() => {
         <section class="panel">
           <div class="panel-header device-heading"><div><h2>{{ selected.alias }}</h2><p class="mono">{{ selected.id }}</p></div><div class="device-heading-actions"><span class="state-tag" :class="syncError ? 'neutral' : selected.control.draining ? 'queued' : selected.control.role ? 'running' : 'neutral'">{{ syncError ? '控制状态待确认' : selected.control.draining ? '等待授权结束' : `当前控制端：${roleName(selected.control.role)}` }}</span><button v-if="canManage" class="danger-button" data-testid="archive-phone" :disabled="busy" @click="archiveSelected">移除手机</button></div></div>
           <slot name="device-binding" :device="selected" />
-          <div class="node-grid"><article v-for="role in roles" :key="role" class="node-card"><header><b>{{ roleName(role) }}</b><span class="state-tag" :class="syncError ? 'neutral' : nodeFor(role)?.status === 'online' ? 'online' : 'offline'">{{ syncError ? '状态待确认' : nodeFor(role)?.status === 'online' ? '在线' : '离线' }}</span></header><p class="version-line">{{ nodeFor(role)?.versionName ? `v${nodeFor(role)?.versionName}` : '版本未上报' }} <span v-if="nodeFor(role)?.versionCode != null"> · code {{ nodeFor(role)?.versionCode }}</span></p><dl><div><dt>无障碍</dt><dd>{{ healthValue(nodeFor(role), 'accessibility', '已开启', '未开启') }}</dd></div><div><dt>安装能力</dt><dd>{{ healthValue(nodeFor(role), 'canInstall', '可请求安装', '未授权') }}</dd></div><div><dt>屏幕 / 锁屏</dt><dd>{{ healthValue(nodeFor(role), 'screenOn', '亮屏', '息屏') }} / {{ healthValue(nodeFor(role), 'locked', '已锁定', '未锁定') }}</dd></div><div><dt>对端连接</dt><dd>{{ healthValue(nodeFor(role), 'peerBound', '已绑定', '未绑定') }}</dd></div><div><dt>最近心跳</dt><dd>{{ formatTime(nodeFor(role)?.lastSeen) }}</dd></div></dl><p v-if="nodeFor(role)?.health?.lastError" class="form-error">{{ nodeFor(role)?.health.lastError }}</p></article></div>
+          <div class="node-grid"><article v-for="role in roles" :key="role" class="node-card"><header><b>{{ roleName(role) }}</b><span class="state-tag" :class="syncError ? 'neutral' : nodeFor(role)?.status === 'online' ? 'online' : 'offline'">{{ syncError ? '状态待确认' : nodeFor(role)?.status === 'online' ? '在线' : '离线' }}</span></header><p class="version-line">{{ nodeFor(role)?.versionName ? `v${nodeFor(role)?.versionName}` : '版本未上报' }} <span v-if="nodeFor(role)?.versionCode != null"> · code {{ nodeFor(role)?.versionCode }}</span></p><dl><div><dt>无障碍</dt><dd>{{ healthValue(nodeFor(role), 'accessibility', '已开启', '未开启') }}</dd></div><div><dt>安装能力</dt><dd>{{ healthValue(nodeFor(role), 'canInstall', '可请求安装', '未授权') }}</dd></div><div><dt>屏幕 / 锁屏</dt><dd>{{ healthValue(nodeFor(role), 'screenOn', '亮屏', '息屏') }} / {{ healthValue(nodeFor(role), 'locked', '已锁定', '未锁定') }}</dd></div><div><dt>对端连接</dt><dd>{{ healthValue(nodeFor(role), 'peerBound', '已绑定', '未绑定') }}</dd></div><div><dt>最近心跳</dt><dd>{{ formatTime(nodeFor(role)?.lastSeen) }}</dd></div></dl>
+            <details class="runtime-diagnostics" :data-testid="`runtime-diagnostics-${role}`">
+              <summary>系统运行诊断</summary>
+              <p class="runtime-recorded-at">{{ nodeDiagnostics[role].source }} · {{ nodeDiagnostics[role].recordedAt }}</p>
+              <template v-if="nodeDiagnostics[role].reported">
+                <p class="runtime-model">{{ nodeDiagnostics[role].model }} · {{ nodeDiagnostics[role].android }}</p>
+                <dl><div v-for="status in nodeDiagnostics[role].statuses" :key="status.label"><dt>{{ status.label }}</dt><dd>{{ status.value }}</dd></div></dl>
+                <p v-if="nodeDiagnostics[role].historyStatus" class="runtime-history-status">{{ nodeDiagnostics[role].historyStatus }}</p>
+                <div v-if="nodeDiagnostics[role].latestExit" class="runtime-latest-exit">
+                  <b>最近一次系统退出</b>
+                  <p>{{ nodeDiagnostics[role].latestExit.reason }} · {{ nodeDiagnostics[role].latestExit.time }}<span v-if="nodeDiagnostics[role].latestExit.updateNote"> · {{ nodeDiagnostics[role].latestExit.updateNote }}</span></p>
+                </div>
+                <details v-if="nodeDiagnostics[role].earlierExits.length" class="runtime-exit-history">
+                  <summary>更早退出记录（{{ nodeDiagnostics[role].earlierExits.length }} 条）</summary>
+                  <ol><li v-for="exit in nodeDiagnostics[role].earlierExits" :key="exit.key">{{ exit.reason }} · {{ exit.time }}<span v-if="exit.updateNote"> · {{ exit.updateNote }}</span></li></ol>
+                </details>
+                <p class="runtime-record-note">系统退出记录不等同于本次离线原因。</p>
+              </template>
+              <p v-else class="runtime-history-status">当前端点尚未上报系统运行诊断。</p>
+            </details>
+            <p v-if="nodeFor(role)?.health?.lastError" class="form-error">{{ nodeFor(role)?.health.lastError }}</p></article></div>
           <div class="control-row"><div><b>选择控制端</b><p>切换需等待旧授权结束与在途动作完成。暂停只停止新指令。</p></div><div class="button-row"><button v-for="role in roles" :key="role" class="secondary-button" :class="{ 'chosen-control': selected.control.role === role && !selected.control.draining }" :disabled="controlUnavailable || (selected.control.role === role && !selected.control.draining)" @click="changeControl(role)">切换至 {{ roleName(role) }}</button><button class="secondary-button" :disabled="controlUnavailable || (!selected.control.role && !selected.control.draining)" @click="changeControl(null)">暂停新指令</button></div></div>
           <p v-if="selected.control.draining" class="waiting-note" role="status">正在释放原控制端{{ selected.control.leaseExpiresAt ? `（授权截止：${formatTime(selected.control.leaseExpiresAt)}）` : '' }}。释放完成后即可重新切换控制端或提交升级。</p>
         </section>
@@ -792,6 +814,15 @@ td small { display: block; color: #a0abad; margin-top: 4px; font-size: 10px; }
 .node-card dl > div { display: flex; justify-content: space-between; gap: 9px; font-size: 10px; }
 .node-card dt { color: var(--muted); }
 .node-card dd { margin: 0; text-align: right; color: var(--ink-soft); }
+.runtime-diagnostics { margin-top: 15px; padding-top: 12px; border-top: 1px solid var(--line); overflow-wrap: anywhere; font-size: 10px; }
+.runtime-diagnostics summary { color: var(--violet); cursor: pointer; line-height: 1.7; }
+.runtime-diagnostics p { margin: 9px 0; line-height: 1.8; }
+.runtime-recorded-at, .runtime-history-status, .runtime-record-note { color: var(--muted); }
+.runtime-model { color: var(--ink-soft); }
+.runtime-latest-exit { margin-top: 13px; color: var(--ink-soft); }
+.runtime-latest-exit b { font-size: 10px; font-weight: 550; }
+.runtime-exit-history ol { padding-left: 18px; margin: 8px 0; }
+.runtime-exit-history li { padding: 3px 0; color: var(--ink-soft); line-height: 1.8; }
 .node-card .form-error { margin: 12px 0 0; overflow-wrap: anywhere; }
 .control-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--line); }
 .control-row b { font-size: 12px; font-weight: 550; }
