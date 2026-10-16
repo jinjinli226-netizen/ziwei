@@ -37,3 +37,9 @@ artifacts/*.tgz
 # Runtime database journals and root-level review captures
 data/*.sqlite-*
 /*.png
+
+# Signing material stays private; ignored files do not clear existing Git history
+*.keystore
+*.jks
+*.p12
+*.pfx

@@ -1,12 +1,30 @@
 # 紫薇项目管理与 AI 接手手册
 
-## 2026-10-16 11:15 手机链路接手更新
+## 2026-10-16 代码、构建和发布完成，真机验收未完成，已自动接续等待连接恢复
 
-主站/API 和官方客户端包当前源码为 `891685f`（`codex/android-stability-main`），中控源码为私有 `ziwei-system` 的 `8be4604`（`codex/android-input-lifecycle`），均已先推 GitHub 后发布。Android code16 双端源码和自动回归已完成，原签名待用户提供，手机仍为 code15，不能把编译通过称为手机已修好。用户要求无人值守，正常故障由程序自动只读回查和系统允许的恢复处理；不盲目重放手机业务，不覆盖用户明确停止。详见 [最新 HANDOFF](HANDOFF.md) 和[专项记录](docs/operations/2026-10-16-phone-input-lifecycle.md)。下方 10:00 客户端发布为历史状态，原生 YAML 修复已包含在当前包内。
+当前手机为 Agent17 / Updater16，自 **13:01:19** 后双端无 HTTP 且离线；code18 原 Agent 事务 `21866c8a-7d0d-4bad-ae35-76a529106451` 为 submitted=1 / awaiting_user_action、无 installed_at。尚无新退出或 TLS 失败证据，不归因 WebSocket 或被杀；原事务继续只读跟踪，不重提安装。code18 安装、自动恢复和中文输入均未验收。
+
+本轮未等到手机恢复，完整任务未完成；已创建本对话 heartbeat“闲鱼1恢复后自动接续验收”（id 1，ACTIVE，每 10 分钟），私有接续状态保存原事务与证据，恢复后完成双端 code18 和实机输入、通过后停用。运行依赖本 Mac 开机和 Codex App 运行，不承诺无条件云端接续。关联电脑只读查询同样离线，最后心跳 12:59:40、未见活动任务；未操作其他电脑或修改 allowlist。
+
+生产公开证书的磁盘与实际回读 SHA 一致，mtime 为 10 月 4 日，有效期 2026-10-04 至 2027-01-02；13:01 附近无 Nginx reload，Android 无叶证书 pin。仅排除该观察端所见证书过期 / 轮换，不证明手机端网络或 TLS 正常，也不解释离线原因。
+
+主站/API 和官方客户端包本轮 11:09 发布基准为 `891685f`（`codex/android-stability-main`），于 11:09:08（Asia/Shanghai）发布；中控生产源码为私有 `ziwei-system` 的 `1b26b115`（`codex/android-input-lifecycle`），已先推 GitHub 并于 11:50:25 发布，最终远端集成 52/52。原签名已经获得并验证：`0.4.5 / code16`（`8be4604`、76/76 JUnit）双端原事务均已 committed；code17 `0.4.6`（`1e7977b`、86/86 JUnit）已于 12:20:17 用同一原证书 `6292cfac…` 发布，Agent code17 原事务也已 committed，12:38 快照 Agent=17 / Updater=16。历史包和回执保留，发布时 `deviceVerified=false` 未改成通过。
+
+13:16:21 的最终只读快照显示，主站已由另一项后续发布推进到 `eabe098af3b6c0e7d76cf4121052e3606e022888`（`/opt/ziwei/releases/v2-hotfix-eabe098af3b6/v2`），该提交继承本轮 `891685f` 手机修复；已核对 ancestry 和 phone MCP 差异，未覆盖原回执机制。官方下载客户端元数据为源码 `5db7d834deaf3524adfada59a434bc764fda750a`、build `208f2350ff390bbf7506e6baaef60eb7c8d467f2c8630a86c670ce01aada1044`、包 SHA-256 `2aadef1b066953fb81ff247ec16cd1a5e5e91a8d34490b66b8d47f11fa13d734`。这些后续发布保持现状，不回退为 11:09 的历史包。中控仍为 `1b26b115`；双服务、公开健康与 Android index 在最终检查中正常，手机双端仍离线，活动手机命令为 0、原安装事务为 1。
+
+12:45 的 code17 真实闲鱼输入原命令 `5309ba7c…` 返回 `failed / not_started / INPUT_EDITOR_FOCUS_REQUIRED`；此前 code16 `0ad2168c…` 为 `INPUT_UNSUPPORTED`，均不能以 executing ACK 或升级成功替代输入成功。code18 源码 `c54ec5332c1686d6478aca14aa23cb25166713ce` 已冻结并推送 GitHub，归档 SHA-256 `bca0a4e87d299341ef2a56fd4dafa53fa6ef6c771efaca467612f90b2e186b08`；远端各角色 53 项、共 106/106 JUnit（0 failures / errors / skipped）、双 Debug R8、双 Release 完整 Lint / compile / Dex / assemble 均已通过，完整构建 2m31s / 159 个任务全部执行；已完成原证书签名，并于 12:56:34 公网发布 `v0.4.7-code18`，publicVerified=true、历史文件保持，未改服务或数据库；安装 / 文本验收待补，尚未取得 code18 实机通过证据。搜索框验收使用中文+数字搜索词、不提交搜索；公开文档仅保留原命令 ID、状态及校验位，不放原词、手机截图或业务数据。
+
+Updater code16 有 `package_replaced` / `updateRelated=true` 自动恢复证据；Agent code16 的 `explicit` 来源未证实，code17 又出现 reason 10 比包更新时间晚 15ms。旧 reason 13 原因未知。code18 使用首次 MY 广播精确标记、不同 PID / 本进程 / 窄时间窗和版本 summary 加强判断，同 / 高版本或坏 summary 拒绝豁免；旧 code17 无 summary 时仍有首 MY 前 reason 10 因果歧义，不宣称绝对识别。
+
+`1b26b115` 的恢复分支已在 code17 实机走通：Agent17 已安装但离线 awaiting_health 时交接 Updater / epoch 5，Updater16 旧 poll 得到正常 lease，launch 原命令 `288d2de9…` succeeded；AI 允许打开并点 Start（`1094e3b2…` succeeded）后 Agent17 健康并 committed，12:42 已恢复 Agent / epoch 6。这证明兼容恢复分支，仍依赖 AI 显式 Start，不能叫 Agent17 自动复活。早期 code16 交接脚本的断言停止不是当前全部验收结论。焦点 / 键盘与断网 / 熄屏 / 重启、长期存活验收仍待补。11:50 中控发布备份 `android-control-20261016T035025Z`，该次 schema、历史行摘要、inode、主站 + Nginx 保持；APK 下载索引随后更新到 code18，13:10 的 Nginx 变更另列如下。
+
+13:10:38 已部署已推源码 `98db76d4fa0e42f019e81bf446d382891ec1253f` 的 10 行精确 channel block，仅修 Nginx WebSocket 代理。nginx -t / graceful reload、无凭证 Upgrade 401 空 body、有 Origin 403 空 body 均通过；主站 / 中控 PID 与 current、code18 index 保持，无 DB 写，备份 `android-websocket-20261016T051038Z`。此前“Nginx 未改”仅指之前主站 / 中控发版；认证手机 101 与恢复仍 pending，程序继续独立调查 TLS 和绑定电脑恢复通道。
+
+签名材料已从公开 `main` 最新文件树删除，历史暴露仍须后续独立处理。用户要求无人值守，正常故障由程序自动只读回查和系统允许的恢复处理；不盲目重放手机业务，不覆盖用户明确停止。详见 [最新 HANDOFF](HANDOFF.md) 和[专项记录](docs/operations/2026-10-16-phone-input-lifecycle.md)。下方 10:00 客户端发布为历史状态，原生 YAML 修复已包含在当前包内。
 
 ## 当前接手入口（2026-10-16）
 
-最新生产状态、GitHub 分支、Windows 客户端 build、真实验收范围及未解决问题统一维护在 [HANDOFF.md 的最新接手状态](HANDOFF.md#2026-10-16-最新接手状态)。V2 已发布，主站/API 为 `cd610444ce793d6e5fbebfa7ed1b982c070ad9a3`；10:00 官方客户端已更新至原生 YAML 修复 `d915129bf45bbb555cb1a089593c9c9cdc940d59`（build `993639eb…`）。文档提交可以领先产品。
+最新生产状态、GitHub 分支、Windows 客户端 build、真实验收范围及未解决问题统一维护在 [HANDOFF 顶部的最新发布记录](HANDOFF.md)。当前主站/API 与客户端为 `891685f70e9e4bfc2c56821ee2cc9a28a356f548`（客户端 build `6b8449d9…`），中控为 `1b26b115`；Android 官方最新包是 `c54ec533` 构建的原证书 `0.4.7 / code18`，12:56:34 已发布，13:10:38 另发 Nginx channel 修复。Agent17 / Updater16 当前离线，code18 原事务仍待系统安装确认，code17 原 text 命令因焦点未证明而未执行。106 项单测、完整构建、发布和无凭证 WS 探针通过，不能写成 code18 已安装、手机已 101 连接或输入已通过。文档提交可以领先产品；下方 10:00 及更早内容保留为历史记录。
 
 10:00 已发布创建及工具配置的原生 YAML 兼容修复。公司机最新回执确认上一版已生效且走 isolated 分支；真正缺口是紫薇硬依赖 PyYAML，而官方 0.22 使用 hermes_yaml/ruamel。41/41 回归、无 PyYAML 的真实 PM 创建/重试/读回及独立审查通过，已先推 GitHub 再发布；Windows 实机仍待更新后重试原 Bot。见[本次根因纠正与发布记录](docs/operations/2026-10-16-profile-native-yaml.md)。
 
