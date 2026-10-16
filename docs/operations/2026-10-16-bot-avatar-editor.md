@@ -8,6 +8,13 @@
 
 验证：现有 Bot 工作台/作用域/API 测试26/26通过，lint通过，前端构建通过。独立浏览器组件验收覆盖上传、移除、保存后的状态、同图重选、错误格式清理、保存待确认时禁止操作；375px宽度页面scrollWidth=clientWidth=375，头像64px，无横向溢出。临时前端使用端口中心登记223/3109，验收后停止并释放。源码独立审查通过。
 
-发布方式：先推 GitHub，再只发布前端静态资源；保留旧哈希资源以兼容已打开页面，备份并原子切换 index.html。主站/API 仍为 eabe098，官方 Windows 包仍为5db7d83，不重启任何服务。发布后校验公开首页和资源哈希、服务身份、数据库inode、客户端下载包与元数据不变。发布完成记录将在下一提交补充。
+发布方式：先推 GitHub，再只发布前端静态资源；保留旧哈希资源以兼容已打开页面，备份并原子切换 index.html。主站/API 仍为 eabe098，官方 Windows 包仍为5db7d83，不重启任何服务。发布后校验公开首页和资源哈希、服务身份、数据库inode、客户端下载包与元数据不变。2026-10-16 17:05（Asia/Shanghai）已发布产品提交 `bb760056afbf9de6415e4d26033f4b462657122a`，推送 GitHub 后执行前端发布。公开首页与全部资源、前端元数据校验通过；受保护服务/客户端下载/数据库inode均未变化。
+
+- 前端版本记录：`https://qzelynth.top/FRONTEND_RELEASE.json`
+- 新首页 SHA-256：`5095adb074f20c377c107af155bbc18dde37114822137176a359d09b26023f21`
+- 发布证据：`/opt/ziwei-staging/frontend-avatar-bb760056afbf/publish-result.json`
+- 回退备份：`/opt/ziwei-staging/backups/frontend-avatar-bb760056afbf-20261016T090501Z-d25e3640`
+- 当前 API 路径仍为 `/opt/ziwei/releases/v2-hotfix-eabe098af3b6/v2`；该目录下前端静态内容已更新，不能仅凭主目录名判断前端版本。官方客户端下载版本仍为 `5db7d83`。
+
 
 回退只恢复本次发布备份中的 index.html 和原 FRONTEND_RELEASE.json（原来不存在则移除该记录），保留业务数据库与旧资源，无需重启 API。
