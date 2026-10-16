@@ -160,6 +160,15 @@ export function prepareTerminalMcpLaunch({ runtime, profile, config = {}, worksp
   return { invocation: { ...invocation, args }, env: childEnv, receipt: { configured: true, injected: true, loaded: false, transport: 'stdio', serverName: 'ziwei-terminal', workspace, runtime, profile: profile || null, runtimeProfile: profile || null, employeeId: request.employeeId, targetDeviceId: request.deviceId, actionId, auditFile } };
 }
 
+const phoneExecutionStates = new Set(['not_started', 'succeeded', 'failed', 'uncertain', 'pending']);
+const phoneDiagnostic = value => typeof value === 'string' ? redactSecrets(value).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '').trim().slice(0, 800) : '';
+const phoneReceiptMetadata = (value, prefix = '') => {
+  const error = phoneDiagnostic(value?.[`${prefix}Error`] ?? value?.error);
+  const executionState = value?.[`${prefix}ExecutionState`] ?? value?.executionState;
+  const executingConfirmed = value?.[`${prefix}ExecutingConfirmed`] ?? value?.executingConfirmed;
+  const errorCode = value?.[`${prefix}ErrorCode`] ?? value?.errorCode;
+  return { ...(error ? { error } : {}), ...(phoneExecutionStates.has(executionState) ? { executionState } : {}), ...(typeof executingConfirmed === 'boolean' ? { executingConfirmed } : {}), ...(typeof errorCode === 'string' && /^[A-Z0-9_]{1,100}$/.test(errorCode) ? { errorCode } : {}) };
+};
 export function terminalMcpReceipt(receipt) {
   if (!receipt) return null;
   const { auditFile, ...safe } = receipt;
@@ -170,13 +179,13 @@ export function terminalMcpReceipt(receipt) {
     const status = String(item.status || item.commandStatus || item.state || '');
     const receipts = (Array.isArray(item.receipts) ? item.receipts : []).slice(0, 200).flatMap(value => {
       const safeIds = Object.fromEntries(['commandId', 'updateId'].map(key => [key, value?.[key]]).filter(([, id]) => typeof id === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/.test(id)));
-      return Object.keys(safeIds).length && /^[a-z_]{1,40}$/.test(value.status || '') ? [{ ...safeIds, status: value.status }] : [];
+      return Object.keys(safeIds).length && /^[a-z_]{1,40}$/.test(value.status || '') ? [{ ...safeIds, status: value.status, ...phoneReceiptMetadata(value) }] : [];
     });
     const specificStatuses = Object.fromEntries(['commandStatus', 'updateStatus'].map(key => [key, item[key]]).filter(([, value]) => typeof value === 'string' && /^[a-z_]{1,40}$/.test(value)));
-    return { toolName: item.toolName || item.tool, ok: item.ok === true, ...ids, ...(Object.keys(ids).length ? { ids } : {}), ...(/^[a-z_]{1,40}$/.test(status) ? { status } : {}), ...specificStatuses, ...(receipts.length ? { receipts } : {}) };
+    return { toolName: item.toolName || item.tool, ok: item.ok === true, ...ids, ...(Object.keys(ids).length ? { ids } : {}), ...(/^[a-z_]{1,40}$/.test(status) ? { status } : {}), ...specificStatuses, ...Object.fromEntries(Object.entries(phoneReceiptMetadata(item, 'command')).map(([key, value]) => [`command${key[0].toUpperCase()}${key.slice(1)}`, value])), ...(phoneDiagnostic(item.error) ? { error: phoneDiagnostic(item.error) } : {}), ...(receipts.length ? { receipts } : {}) };
   });
   const loaded = events.some(item => ['initialize', 'tools/list'].includes(item.method) && item.ok === true);
-  return { ...safe, loaded, status: loaded ? 'loaded' : 'not_loaded', toolCalls, tool_calls: toolCalls };
+  return { ...safe, loaded, status: loaded ? 'loaded' : 'not_loaded', toolCalls, tool_calls: toolCalls, ...(toolCalls.some(call => ['ziwei_phone_action', 'ziwei_phone_screenshot', 'ziwei_phone_upgrade'].includes(call.toolName)) ? { retryAllowed: false } : {}) };
 }
 
 export function terminalMcpExecutionFailure(receipt) {
@@ -184,31 +193,36 @@ export function terminalMcpExecutionFailure(receipt) {
   if (!receipt.loaded) return { code: 'terminal_mcp_not_loaded', error: `${receipt.runtime} 已退出但未收到手机 MCP 实际握手；请检查独立 profile、工具配置和本机 MCP 日志` };
   const calls = receipt.toolCalls || receipt.tool_calls || [];
   const issued = new Map();
+  const unconfirmedSubmissions = [];
   for (const call of calls) {
     const submits = ['ziwei_phone_action', 'ziwei_phone_screenshot', 'ziwei_phone_upgrade'].includes(call.toolName);
+    if (submits && call.ok !== true && !call.commandId && !call.updateId && !call.ids?.commandId && !call.ids?.updateId) unconfirmedSubmissions.push({ toolName: call.toolName, ...phoneReceiptMetadata(call, 'command'), error: phoneDiagnostic(call.error) || '工具请求未成功' });
     for (const kind of ['command', 'update']) {
       const id = call[`${kind}Id`] || call.ids?.[`${kind}Id`];
       if (!id) continue;
       const key = `${kind}:${id}`;
       if (submits && !issued.has(key)) issued.set(key, { kind, id, status: null });
       const item = issued.get(key);
-      if (item && call.ok === true && (call[`${kind}Status`] || call.status)) item.status = call[`${kind}Status`] || call.status;
+      if (item && call.ok === true && (call[`${kind}Status`] || call.status)) Object.assign(item, { status: call[`${kind}Status`] || call.status }, kind === 'command' ? phoneReceiptMetadata(call, 'command') : {});
     }
     if (call.ok === true) for (const original of call.receipts || []) {
       for (const kind of ['command', 'update']) {
         const item = issued.get(`${kind}:${original[`${kind}Id`]}`);
-        if (item && original.status) item.status = original.status;
+        if (item && original.status) Object.assign(item, { status: original.status }, kind === 'command' ? phoneReceiptMetadata(original) : {});
       }
     }
   }
-  const failed = [...issued.values()].filter(item => ['failed', 'expired', 'cancelled', 'superseded', 'aborted', 'rejected', 'timed_out'].includes(item.status));
+  const failureStatuses = new Set(['failed', 'expired', 'cancelled', 'superseded', 'aborted', 'rejected', 'timed_out']);
   const incomplete = [...issued.values()].filter(item => item.status !== (item.kind === 'update' ? 'committed' : 'succeeded'));
-  if (incomplete.length) {
-    const items = failed.length ? failed : incomplete;
-    const ids = { commandIds: items.filter(item => item.kind === 'command').map(item => item.id), updateIds: items.filter(item => item.kind === 'update').map(item => item.id) };
-    return { code: failed.length ? 'terminal_mcp_receipt_failed' : 'terminal_mcp_receipt_incomplete', error: `${receipt.runtime} 手机 MCP 已下发动作，但原回执${failed.length ? '确认失败' : '尚未全部成功或升级尚未 committed'}（${items.map(item => `${item.id}: ${item.status || 'unknown'}`).join('、')}）；请查询原回执，不要重放动作`, ...ids };
+  const unresolved = incomplete.some(item => !failureStatuses.has(item.status) || item.executionState === 'uncertain') || unconfirmedSubmissions.some(item => item.executionState !== 'not_started');
+  if (incomplete.length || unconfirmedSubmissions.length) {
+    // A known failure must not hide a second command whose effects are unknown.
+    const phoneExecutionState = unresolved ? 'uncertain' : [...incomplete, ...unconfirmedSubmissions].every(item => item.executionState === 'not_started') ? 'not_started' : 'failed';
+    const ids = { commandIds: incomplete.filter(item => item.kind === 'command').map(item => item.id), updateIds: incomplete.filter(item => item.kind === 'update').map(item => item.id) };
+    const detail = [...incomplete.map(item => `${item.id}: ${item.executionState === 'not_started' ? '未执行' : item.status || 'unknown'}${item.error ? `，${item.error}` : ''}`), ...unconfirmedSubmissions.map(item => `${item.toolName}: ${item.error}`)].join('、');
+    return { code: unresolved ? 'terminal_mcp_receipt_incomplete' : 'terminal_mcp_receipt_failed', phoneExecutionState, retryAllowed: false, error: `${receipt.runtime} 手机动作${phoneExecutionState === 'uncertain' ? '执行结果待核实' : phoneExecutionState === 'not_started' ? '未执行' : '执行失败'}（${detail}）；${unresolved ? '请查询原回执，不要重放动作' : '已保留原回执，不自动重试'}`, ...ids };
   }
-  if (calls.length && !calls.some(item => item.ok === true)) return { code: 'terminal_mcp_tools_failed', error: `${receipt.runtime} 手机 MCP 已加载，但实际尝试的工具全部失败；请核对手机绑定、技能安装和执行授权` };
+  if (calls.length && !calls.some(item => item.ok === true)) return { code: 'terminal_mcp_tools_failed', phoneExecutionState: 'not_started', error: `${receipt.runtime} 手机 MCP 已加载，但实际尝试的工具全部失败；${calls.map(item => phoneDiagnostic(item.error)).filter(Boolean).join('、') || '请核对手机绑定、技能安装和执行授权'}` };
   return null;
 }
 
@@ -1153,6 +1167,14 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
       if (launchError) return finish(null, launchError);
       if (signal?.aborted) return finish({ status: 'failed', code: 'cancelled', error: 'runtime execution cancelled; completed tool writes may already exist', result: exitResult });
     const result = { runtime: resolvedRuntime, model: selectedModel, profile: profile || null, binary: discovered.binary, code, signal: childSignal, processExit, output: state.response.trim() || state.output, diagnostics: state.response.trim() ? state.output : null, truncated: state.truncated, ...(spec.nativeBinding ? { hermesBootstrap: spec.nativeBinding } : {}), ...(creatorPrepared ? { creatorIsolation: creatorIsolation || { ...creatorPrepared, enabled: false, reasonCode: 'native_isolation_unconfirmed' } } : {}), ...(receipt ? { managementMcp: managementMcpReceipt(receipt) } : {}), ...(phoneReceipt ? { terminalMcp: terminalMcpReceipt(phoneReceipt) } : {}), ...(attachments.length ? {inputAttachments:attachments} : {}) };
+      const phoneFailure = terminalMcpExecutionFailure(result.terminalMcp);
+      if (phoneFailure?.phoneExecutionState) {
+        result.terminalMcp = { ...result.terminalMcp, executionState: phoneFailure.phoneExecutionState, failure: phoneFailure };
+        // The workstation CLI has exited. Keep remote phone uncertainty in
+        // the result so automation will not replay it, without quarantining
+        // this healthy workstation as an unconfirmed local process.
+        if (phoneFailure.phoneExecutionState === 'uncertain') result.executionState = 'uncertain';
+      }
       if(hermesBot)Object.assign(result,{botIsolation:creatorIsolation,configurationRevision:hermesBot.revision,nativeSessionId:state.sessionId || null});
       if(hermesBot?.config.reasoningEffort){
         result.reasoning=botReasoning?{...botReasoning,requests:reasoningRequests}:{requested:hermesBot.config.reasoningEffort,actual:null,status:'unconfirmed',requests:0};
@@ -1164,9 +1186,10 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
         if(code===0&&(!botReasoning||botReasoning.phase!=='request'||reasoningRequests<1))return finish({status:'failed',code:'BOT_REASONING_UNCONFIRMED',error:'缺少原生请求边界的实际推理等级回执',result});
       }
       if (code === 0 && creatorPrepared && !creatorIsolation) return finish({ status: 'failed', code: 'creator_isolation_unconfirmed', error: 'Hermes 未确认实例状态隔离；不能报告执行成功', result });
-      const mcpFailure = code === 0 ? managementMcpExecutionFailure(result.managementMcp) || terminalMcpExecutionFailure(result.terminalMcp) : null;
-      if (mcpFailure) return finish({ status: 'failed', ...mcpFailure, result });
-      if (code !== 0) return finish({ status: 'failed', code: 'runtime_failed', error: formatRuntimeFailure(resolvedRuntime, code, state.output, state.runtimeError), result });
+      const managementFailure = code === 0 ? managementMcpExecutionFailure(result.managementMcp) : null;
+      const mcpFailure = code === 0 ? phoneFailure || managementFailure : null;
+      if (mcpFailure) return finish({ status: 'failed', ...mcpFailure, ...(phoneFailure && managementFailure ? { error: `${phoneFailure.error}\n${managementFailure.error}` } : {}), result });
+      if (code !== 0) return finish({ status: 'failed', code: 'runtime_failed', error: `${formatRuntimeFailure(resolvedRuntime, code, state.output, state.runtimeError)}${phoneFailure ? `\n${phoneFailure.error}` : ''}`, result });
       if (imageArtifacts) {
         try { result.outputArtifacts = readImageArtifacts(imageArtifacts); }
         catch (error) { return finish({status:'failed',code:error.code || 'image_artifact_invalid',error:error.message,result}); }

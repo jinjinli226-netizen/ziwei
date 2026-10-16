@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
+import { redactSecrets } from '../src/redaction.mjs';
 
 const protocolVersion = '2024-11-05';
 const roleValues = ['agent', 'updater'];
@@ -111,25 +112,35 @@ export function createTerminalMcpClient(options = {}) {
     config: { workspace: config.workspace, employeeId: config.employeeId, deviceId: config.deviceId },
     async call(name, args = {}) {
       const definition = toolDefinitions.find(tool => tool.name === name);
-      if (!definition) throw new Error('未知手机 MCP 工具');
-      if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('手机工具参数必须是对象');
-      if (args.deviceId !== undefined && args.deviceId !== config.deviceId) throw new Error('手机工具目标与已绑定手机 scope 不匹配');
-      for (const key of definition.inputSchema.required || []) if (!Object.hasOwn(args, key)) throw new Error(`手机工具缺少 ${key}`);
-      if (Object.keys(args).some(key => !Object.hasOwn(definition.inputSchema.properties, key))) throw new Error('手机工具含未知参数');
-      if (config.expiresAt <= Date.now()) throw new Error('手机 MCP 执行凭据已过期，请重启本次员工执行');
+      if (!definition) throw Object.assign(new Error('未知手机 MCP 工具'), { phoneExecutionState: 'not_started' });
+      if (!args || typeof args !== 'object' || Array.isArray(args)) throw Object.assign(new Error('手机工具参数必须是对象'), { phoneExecutionState: 'not_started' });
+      if (args.deviceId !== undefined && args.deviceId !== config.deviceId) throw Object.assign(new Error('手机工具目标与已绑定手机 scope 不匹配'), { phoneExecutionState: 'not_started' });
+      for (const key of definition.inputSchema.required || []) if (!Object.hasOwn(args, key)) throw Object.assign(new Error(`手机工具缺少 ${key}`), { phoneExecutionState: 'not_started' });
+      if (Object.keys(args).some(key => !Object.hasOwn(definition.inputSchema.properties, key))) throw Object.assign(new Error('手机工具含未知参数'), { phoneExecutionState: 'not_started' });
+      if (config.expiresAt <= Date.now()) throw Object.assign(new Error('手机 MCP 执行凭据已过期，请重启本次员工执行'), { phoneExecutionState: 'not_started' });
       let response;
       try {
         response = await fetchImpl(`${config.baseUrl}/call`, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(90000), headers: { authorization: `Bearer ${config.token}`, accept: 'application/json', 'content-type': 'application/json' }, body: JSON.stringify({ name, arguments: args }) });
-      } catch { throw new Error('手机 MCP 连接中断或超时；动作可能已受理，请查询原回执，不要重放'); }
+      } catch { throw Object.assign(new Error('手机 MCP 连接中断或超时；动作可能已受理，请查询原回执，不要重放'), { phoneExecutionState: 'uncertain' }); }
       let value;
       try { value = await response.json(); }
-      catch { throw new Error('手机 MCP 响应无法解析；请查询原回执，不要重放动作'); }
-      if (!response.ok) throw new Error(scrub(value?.error || value?.message || `手机 MCP HTTP ${response.status}`));
+      catch { throw Object.assign(new Error('手机 MCP 响应无法解析；请查询原回执，不要重放动作'), { phoneExecutionState: 'uncertain' }); }
+      if (!response.ok) throw Object.assign(new Error(scrub(value?.error || value?.message || `手机 MCP HTTP ${response.status}`)), { phoneExecutionState: response.status >= 500 ? 'uncertain' : 'not_started' });
       return value;
     }
   };
 }
 
+const executionStates = new Set(['not_started', 'succeeded', 'failed', 'uncertain', 'pending']);
+const safeDiagnostic = value => typeof value === 'string' ? redactSecrets(value).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '').trim().slice(0, 800) : '';
+function commandOutcome(command) {
+  if (!command || typeof command !== 'object') return null;
+  const declared = command.executionState || command.execution_state || command.result?.executionState;
+  const state = executionStates.has(declared) ? declared : command.status === 'succeeded' ? 'succeeded' : command.status === 'uncertain' ? 'uncertain' : ['failed', 'expired', 'cancelled', 'rejected', 'aborted', 'timed_out'].includes(command.status) ? 'failed' : 'pending';
+  const confirmed = command.executingConfirmed ?? command.executing_confirmed;
+  const errorCode = command.errorCode || command.result?.errorCode;
+  return { state, ...(typeof errorCode === 'string' && /^[A-Z0-9_]{1,100}$/.test(errorCode) ? { errorCode } : {}), ...(typeof command.id === 'string' ? { commandId: command.id } : {}), ...(typeof command.status === 'string' ? { status: command.status } : {}), ...([true, false, 0, 1].includes(confirmed) ? { executingConfirmed: Boolean(confirmed) } : {}), ...(safeDiagnostic(command.error) ? { error: safeDiagnostic(command.error) } : {}), ...(state === 'uncertain' || state === 'pending' ? { retryAllowed: false } : {}) };
+}
 function rpcError(id, code, message) { return { jsonrpc: '2.0', id, error: { code, message } }; }
 export async function handleTerminalJsonRpc(message, client) {
   const id = message?.id ?? null;
@@ -141,20 +152,22 @@ export async function handleTerminalJsonRpc(message, client) {
   if (message.method !== 'tools/call') return rpcError(id, -32601, '未知 MCP 方法');
   try {
     const name = message.params?.name;
-    if (!toolDefinitions.some(tool => tool.name === name)) throw new Error('未知手机 MCP 工具');
+    if (!toolDefinitions.some(tool => tool.name === name)) throw Object.assign(new Error('未知手机 MCP 工具'), { phoneExecutionState: 'not_started' });
     const args = message.params?.arguments ?? {};
     let value = await client.call(name, args);
+    const phoneExecution = commandOutcome(value?.command);
+    if (phoneExecution) value = { ...value, phoneExecution };
     const content = [{ type: 'text', text: JSON.stringify(value, null, 2) }];
     if (name === 'ziwei_phone_screenshot' || (name === 'ziwei_phone_action' && args.action === 'screenshot')) {
       const snapshot = value?.device?.snapshot || value?.snapshot;
       if (snapshot?.data && ['image/png', 'image/jpeg'].includes(snapshot.mime || snapshot.mimeType)) {
-        value = { command: value.command, deviceId: value.device?.id || value.deviceId || args.deviceId, capturedAt: snapshot.capturedAt, width: snapshot.width, height: snapshot.height };
+        value = { command: value.command, ...(phoneExecution ? { phoneExecution } : {}), deviceId: value.device?.id || value.deviceId || args.deviceId, capturedAt: snapshot.capturedAt, width: snapshot.width, height: snapshot.height };
         content[0].text = JSON.stringify(value, null, 2);
         content.push({ type: 'image', data: snapshot.data, mimeType: snapshot.mime || snapshot.mimeType });
       }
     }
     return { jsonrpc: '2.0', id, result: { content, structuredContent: value, isError: false } };
-  } catch (error) { return { jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: error?.message || '手机 MCP 工具失败' }], isError: true } }; }
+  } catch (error) { return { jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: error?.message || '手机 MCP 工具失败' }], structuredContent: { phoneExecution: { state: executionStates.has(error?.phoneExecutionState) ? error.phoneExecutionState : 'uncertain', retryAllowed: false } }, isError: true } }; }
 }
 
 export async function runTerminalStdio(options = {}) {
@@ -176,10 +189,18 @@ export async function runTerminalStdio(options = {}) {
       const safeStatus = value => typeof value === 'string' && /^[a-z_]{1,40}$/.test(value) ? value : undefined;
       const device = value.device || value;
       const receipts = [
-        ...(Array.isArray(device.commands) ? device.commands : []).map(item => ({ commandId: safeId(item.id), status: safeStatus(item.status) })),
+        ...(Array.isArray(device.commands) ? device.commands : []).map(item => { const outcome = commandOutcome(item); return { commandId: safeId(item.id), status: safeStatus(item.status), ...(outcome?.error ? { error: outcome.error } : {}), ...(outcome?.errorCode ? { errorCode: outcome.errorCode } : {}), ...(outcome && executionStates.has(item.executionState || item.execution_state || item.result?.executionState) ? { executionState: outcome.state } : {}), ...(typeof outcome?.executingConfirmed === 'boolean' ? { executingConfirmed: outcome.executingConfirmed } : {}) }; }),
         ...(Array.isArray(device.updates) ? device.updates : []).map(item => ({ updateId: safeId(item.id), status: safeStatus(item.state || item.status) }))
       ].filter(item => (item.commandId || item.updateId) && item.status).slice(0, 200);
       const event = { at: new Date().toISOString(), method: message.method, ...(message.method === 'tools/call' ? { toolName: toolDefinitions.some(tool => tool.name === message.params?.name) ? message.params.name : 'unknown_tool' } : {}), ok: Boolean(response && !response.error && !response.result?.isError), workspace: options.workspace || process.env.ZIWEI_TERMINAL_WORKSPACE || '', deviceId: safeId(value.device?.id || value.deviceId || message.params?.arguments?.deviceId), commandId: safeId(value.command?.id), commandStatus: safeStatus(value.command?.status), updateId: safeId(value.update?.id), updateStatus: safeStatus(value.update?.state || value.update?.status), ...(safeStatus(status) ? { status } : {}), ...(receipts.length ? { receipts } : {}) };
+      // `ok` describes the MCP/API request. Only the original command receipt
+      // establishes whether a phone action succeeded; never treat HTTP 200 as it.
+      const outcome = value.phoneExecution;
+      if (outcome && executionStates.has(outcome.state)) event.commandExecutionState = outcome.state;
+      if (typeof outcome?.executingConfirmed === 'boolean') event.commandExecutingConfirmed = outcome.executingConfirmed;
+      if (outcome?.error) event.commandError = safeDiagnostic(outcome.error);
+      if (outcome?.errorCode) event.commandErrorCode = outcome.errorCode;
+      if (!event.ok) event.error = safeDiagnostic(response?.result?.content?.find(item => item.type === 'text')?.text || response?.error?.message);
       fs.mkdirSync(path.dirname(auditFile), { recursive: true });
       fs.appendFileSync(auditFile, `${JSON.stringify(event)}\n`, { mode: 0o600 });
     }

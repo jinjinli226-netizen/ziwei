@@ -56,6 +56,16 @@ function confirmedBotCompletion(result, status) {
   if (status === 'succeeded') return exit.rootExitCode === 0 && exit.cancelled !== true && !exit.failureCode && !exit.signal && (exit.hostExitCode == null || exit.hostExitCode === 0);
   return status === 'failed' && (Number.isSafeInteger(exit.rootExitCode) || exit.rootExitCode === null && (exit.cancelled === true || typeof exit.signal === 'string' && Boolean(exit.signal)));
 }
+const phoneRetryForbidden = result => result?.terminalMcp?.retryAllowed === false || result?.terminalMcp?.failure?.retryAllowed === false || result?.result?.terminalMcp?.retryAllowed === false || result?.result?.terminalMcp?.failure?.retryAllowed === false;
+const executionOutput = result => [typeof result === 'string' ? result : null, result?.output, result?.text, result?.result?.output, result?.result?.text].find(value => typeof value === 'string' && value.trim()) || '';
+const executionResultMessage = (status, error, result, fallback = '执行完成') => {
+  const output = executionOutput(result);
+  if (status === 'succeeded') return output || fallback;
+  const phoneState = result?.terminalMcp?.executionState || result?.result?.terminalMcp?.executionState;
+  const label = botUncertain(result) || phoneState === 'uncertain' ? '执行结果待核实' : phoneState === 'not_started' ? '手机动作未执行' : '执行失败';
+  const detail = `${label}：${error || '员工未提供具体错误'}`;
+  return output && output.trim() !== String(error || '').trim() ? `${detail}\n\n${output}` : detail;
+};
 const canonicalJson = value => JSON.stringify(value, (_key, item) => item && typeof item === 'object' && !Array.isArray(item) ? Object.fromEntries(Object.keys(item).sort().map(key => [key, item[key]])) : item);
 const conversationAttachmentMetadata = attachments => Array.isArray(attachments) ? attachments.map(item => ({ name:item?.name ?? item?.filename, mimeType:item?.mimeType ?? item?.mime_type, size:item?.size })) : [];
 const conversationResultView = result => {
@@ -540,12 +550,10 @@ export function createRepository(options = {}, io={}) {
     const task = db.prepare('SELECT * FROM tasks WHERE id=?').get(taskId);
     if (!task) return null;
     const timestamp = now();
-    const output = typeof result === 'string'
-      ? result
-      : (result?.output || result?.text || result?.result?.output || result?.result?.text || '');
+    const output = executionOutput(result);
     const detail = status === 'succeeded'
-      ? `数字员工执行完成${output ? `：${String(output).slice(0, 3800)}` : ''}`
-      : `数字员工执行失败：${String(error || '未知执行错误').slice(0, 3900)}`;
+      ? `数字员工执行完成${output ? `：${output.slice(0, 3800)}` : ''}`
+      : `数字员工${executionResultMessage(status, String(error || '未知执行错误').slice(0, 800), { ...(result && typeof result === 'object' ? result : {}), output: output.slice(0, 3800) })}`;
     const message = { id:id('msg'), task_id:taskId, role:'assistant', content:detail, created_at:timestamp };
     db.prepare('INSERT INTO task_messages(id,task_id,role,content,created_at) VALUES(?,?,?,?,?)').run(message.id, message.task_id, message.role, message.content, message.created_at);
     // A terminal runtime result is authoritative for an execution-backed task.
@@ -1131,10 +1139,10 @@ export function createRepository(options = {}, io={}) {
       const run=db.prepare('SELECT * FROM automation_runs WHERE id=?').get(runId); if(!run) throw new Error('Automation run not found'); if(['completed','failed'].includes(run.status)) return {...run,duplicate:true,result:jsonObject(run.result_json)};
       if(botUncertain(input.result)) {db.prepare("UPDATE automation_runs SET status='uncertain',result_json=?,error=?,message=?,finished_at=? WHERE id=?").run(JSON.stringify(input.result),input.error || '执行未确认','执行不确定；只允许查询原回执，不重跑业务',now(),runId);return {...db.prepare('SELECT * FROM automation_runs WHERE id=?').get(runId),result:input.result};}
       const status=String(input.status || (input.error ? 'failed' : 'completed')); if(!['completed','failed'].includes(status)) throw new Error('Automation run status must be completed or failed'); const result=input.result === undefined ? null : JSON.stringify(input.result); const error=input.error ? String(input.error) : null; const finished=now();
-      if(!rollout && status==='failed' && !db.prepare('SELECT 1 FROM bot_routines WHERE automation_id=?').get(run.automation_id) && Number(run.attempt || 0)+1 < Number(run.max_attempts || 1)) { const nextAttempt=Number(run.attempt || 0)+1; const auto=db.prepare('SELECT * FROM automations WHERE id=?').get(run.automation_id); const retryAt=new Date(Date.now()+Number(auto?.retry_backoff_ms || 1000)*2**Math.max(0,nextAttempt-1)).toISOString(); db.prepare("UPDATE automation_runs SET status='retrying',error=?,result_json=?,attempt=?,next_retry_at=?,message=?,finished_at=? WHERE id=?").run(error,result,nextAttempt,retryAt,'执行失败，已安排重试',null,runId); return this.queueAutomationRetry(runId,retryAt); }
+      if(!rollout && status==='failed' && !phoneRetryForbidden(input.result) && !db.prepare('SELECT 1 FROM bot_routines WHERE automation_id=?').get(run.automation_id) && Number(run.attempt || 0)+1 < Number(run.max_attempts || 1)) { const nextAttempt=Number(run.attempt || 0)+1; const auto=db.prepare('SELECT * FROM automations WHERE id=?').get(run.automation_id); const retryAt=new Date(Date.now()+Number(auto?.retry_backoff_ms || 1000)*2**Math.max(0,nextAttempt-1)).toISOString(); db.prepare("UPDATE automation_runs SET status='retrying',error=?,result_json=?,attempt=?,next_retry_at=?,message=?,finished_at=? WHERE id=?").run(error,result,nextAttempt,retryAt,'执行失败，已安排重试',null,runId); return this.queueAutomationRetry(runId,retryAt); }
       db.prepare('UPDATE automation_runs SET status=?,error=?,result_json=?,finished_at=?,message=? WHERE id=?').run(status,error,result,finished,status==='completed'?'执行完成':'执行失败',runId); const ws=db.prepare('SELECT slug FROM workspaces WHERE id=?').get(run.workspace_id); audit(ws.slug,'ziwei_user',`automation.${status}`,{automationId:run.automation_id,runId,error}); const delivery=rollout?null:this.queueWebhookDelivery(runId,status,input.result,error); if (delivery) void this.dispatchWebhookDeliveries(); return {...db.prepare('SELECT * FROM automation_runs WHERE id=?').get(runId),result:jsonObject(result),webhook:delivery};
     },
-    queueAutomationRetry(runId, retryAt = now()) { const run=db.prepare('SELECT * FROM automation_runs WHERE id=?').get(runId); if(!run) throw new Error('Automation run not found'); if(run.status==='uncertain' || db.prepare('SELECT 1 FROM bot_routines WHERE automation_id=?').get(run.automation_id))throw botFailure('BOT_RETRY_FORBIDDEN','Bot Routine 不自动重试；先核对原执行证据'); const auto=db.prepare('SELECT * FROM automations WHERE id=?').get(run.automation_id); const ws=db.prepare('SELECT slug FROM workspaces WHERE id=?').get(run.workspace_id); const action=this.createA2AAction(ws.slug,{type:'automation.execute',dedupeKey:`automation:${run.automation_id}:${run.id}:${run.attempt}`,payload:{automationId:run.automation_id,runId:run.id,prompt:auto.prompt,outputMode:auto.output_mode,webhookUrl:auto.webhook_url,attempt:run.attempt}}); db.prepare('UPDATE automation_runs SET status=\'queued\',action_id=?,next_retry_at=? WHERE id=?').run(action.id,retryAt,runId); return {...db.prepare('SELECT * FROM automation_runs WHERE id=?').get(runId),action_id:action.id}; },
+    queueAutomationRetry(runId, retryAt = now()) { const run=db.prepare('SELECT * FROM automation_runs WHERE id=?').get(runId); if(!run) throw new Error('Automation run not found'); if(phoneRetryForbidden(parse(run.result_json)))throw botFailure('PHONE_RETRY_FORBIDDEN','手机动作已有原回执；请核实原结果，不允许重放整轮业务'); if(run.status==='uncertain' || db.prepare('SELECT 1 FROM bot_routines WHERE automation_id=?').get(run.automation_id))throw botFailure('BOT_RETRY_FORBIDDEN','Bot Routine 不自动重试；先核对原执行证据'); const auto=db.prepare('SELECT * FROM automations WHERE id=?').get(run.automation_id); const ws=db.prepare('SELECT slug FROM workspaces WHERE id=?').get(run.workspace_id); const action=this.createA2AAction(ws.slug,{type:'automation.execute',dedupeKey:`automation:${run.automation_id}:${run.id}:${run.attempt}`,payload:{automationId:run.automation_id,runId:run.id,prompt:auto.prompt,outputMode:auto.output_mode,webhookUrl:auto.webhook_url,attempt:run.attempt}}); db.prepare('UPDATE automation_runs SET status=\'queued\',action_id=?,next_retry_at=? WHERE id=?').run(action.id,retryAt,runId); return {...db.prepare('SELECT * FROM automation_runs WHERE id=?').get(runId),action_id:action.id}; },
     listMembers(slug) { const ws=workspace(slug); if (!ws) throw new Error('Workspace not found'); return db.prepare('SELECT * FROM members WHERE workspace_id=? ORDER BY joined_at').all(ws.id); },
     createMember(slug, input = {}) {
       const ws=workspace(slug); if (!ws) throw new Error('Workspace not found');
@@ -2194,7 +2202,7 @@ export function createRepository(options = {}, io={}) {
         audit(ws.slug, 'ziwei_user', `a2a.action.${status}`, { actionId, type: row.type, error });
         if (row.task_id && !(reconciliation && row.status==='failed')) taskExecutionMessage(row.task_id, status, error, result);
         if (conversation && !(reconciliation && row.status==='failed')) {
-          const content = error ? `执行失败：${error}` : (typeof result === 'string' ? result : (result?.output || result?.text || result?.result?.output || result?.result?.text || (outputArtifacts.length ? '已返回图片' : '执行完成')));
+          const content = executionResultMessage(status, error, result, outputArtifacts.length ? '已返回图片' : '执行完成');
           const messageId = id('convmsg');
           db.prepare('INSERT INTO conversation_messages(id,conversation_id,role,content,attachment_json,created_at) VALUES(?,?,?,?,?,?)').run(messageId, conversation.id, 'assistant', String(content), JSON.stringify(outputArtifacts), timestamp);
           db.prepare('UPDATE conversations SET updated_at=? WHERE id=?').run(timestamp, conversation.id);
