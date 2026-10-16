@@ -12,6 +12,7 @@ import {canForceRemoveEmployee,employeeRemovalPrompt,forceEmployeeRemovalDetail}
 import {nativeRoutineDriver,routineDriver} from '../bot-native-data.js';
 import {createOwnedBotRequest,botCreateAdmission,botInstanceStatus} from '../bot-owned-profile.js';
 import BotInstancePanel from './BotInstancePanel.vue';
+import BotAvatarEditor from './BotAvatarEditor.vue';
 const BotNativeWorkspace=defineAsyncComponent(()=>import('./BotNativeWorkspace.vue'));
 
 const props=defineProps({workspace:{type:String,required:true},actorId:{type:String,default:''},botId:{type:String,default:''},models:{type:Array,default:()=>[]},skills:{type:Array,default:()=>[]},initialTab:{type:String,default:'chat'}});
@@ -20,7 +21,7 @@ const previewMode=import.meta.env.VITE_ZIWEI_PREVIEW==='true';
 const nativePreview=import.meta.env.VITE_ZIWEI_NATIVE_PREVIEW==='true';
 const fixtureBot=computed(()=>previewMode&&(!nativePreview||s.bot?.employee?.runtime_profile==='preview-fixture'));
 const workbench=createBotWorkbench({api,wrap:reactive});const s=workbench.state;
-const workbenchRoot=ref(null);
+const workbenchRoot=ref(null),avatarReading=ref(false);
 const tab=ref(props.initialTab),search=ref(''),discovery=ref(null),discoveryError=ref(''),discoveryLoading=ref(false);
 const showCreate=ref(false),createForm=ref({}),preparing=ref(false);
 let ownedCreate=createOwnedBotRequest({api,wrap:reactive,namespace:props.actorId,origin:API_BASE,getDiscovery:()=>discovery.value});
@@ -75,7 +76,7 @@ function clearTransientDrafts(){routineEditor.value=null;routineScope.value=null
 function selectBot(id){if(id===s.selectedId)return;if(configDirty.value&&!window.confirm('当前 Bot 有未保存修改，切换会丢弃草稿。继续切换？'))return;tab.value='chat';clearTransientDrafts();emit('select',id);void workbench.select(id);}
 function chat(){if(s.bot?.main_conversation_id)emit('chat',{workspace:props.workspace,employee:s.bot.employee,conversation:{id:s.bot.main_conversation_id},botId:s.bot.id});}
 async function refresh(){await Promise.all([workbench.list(),workbench.refresh(),loadDiscovery()]);}
-async function save(){if(nativeBlocked.value){s.error='仍有原生操作待核实，请先查看原回执。';return;}if(await workbench.save())emit('changed');}
+async function save(){if(avatarReading.value)return;if(nativeBlocked.value){s.error='仍有原生操作待核实，请先查看原回执。';return;}if(await workbench.save())emit('changed');}
 async function refreshNativeBot(){const reset=!configDirty.value;await workbench.refresh({resetDraft:reset});emit('changed');}
 function changeSection(value){if(tab.value===value)return;routineEditor.value=null;tab.value=value;emit('section',value);}
 function capabilityActionDisabled(capability){const action=botCapabilityAction(capability);return s.busy||s.capabilityBusy||(action?.kind!=='navigate'&&s.writeUnknown);}
@@ -125,13 +126,6 @@ async function prepareInstance(){
   const visit=generation,workspace=props.workspace,id=s.selectedId;preparing.value=true;
   try{if(!await workbench.validate())return;for(let i=0;i<20&&s.bot?.validation?.status==='pending';i++){await new Promise(resolve=>setTimeout(resolve,500));if(!scopeCurrent(visit,workspace)||s.selectedId!==id)return;await workbench.refresh();}if(scopeCurrent(visit,workspace)&&s.selectedId===id&&checkedCurrent.value&&!configDirty.value&&['draft','paused'].includes(s.bot.control_state))await control(s.bot.control_state==='paused'?'resume':'activate');}
   finally{preparing.value=false;}
-}
-async function readAvatar(event) {
-  const file=event.target.files?.[0];if(!file)return;
-  const visit=generation,id=s.selectedId;
-  if(!['image/png','image/jpeg','image/webp'].includes(file.type)||file.size>2*1024*1024){s.error='头像只支持 2 MiB 内的 PNG、JPEG、WebP。';event.target.value='';return;}
-  try{const value=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(new Error('头像读取失败'));reader.readAsDataURL(file);});if(!disposed&&visit===generation&&id===s.selectedId&&s.draft)s.draft.employee.avatar=value;}catch(error){if(visit===generation&&id===s.selectedId)s.error=error.message;}
-  event.target.value='';
 }
 async function deleteRoutine(routine){if(!window.confirm('删除计划“'+routine.name+'”？已存在的执行结果仍保留。'))return;const ok=await workbench.mutate((id,workspace)=>api.deleteBotRoutine(id,routine.id,workspace),'计划已删除。');if(ok)await workbench.refresh();}
 function editRoutine(routine=null,driver=null){const native=driver||routineDriver(routine);routineKind.value=native?.resource||'prompt';routineTarget.value=native?.input?.taskId||native?.input?.groupId||'';routineScope.value={workspace:props.workspace,botId:s.selectedId};routineEditor.value=routine?.id || 'new';routineForm.value={name:routine?.name || '',prompt:routine?.prompt || '',schedule:routine?.schedule || '每天 09:00',timezone:routine?.timezone || 'Asia/Shanghai'};routineKey.value=`bot-routine-${crypto.randomUUID()}`;}
@@ -189,10 +183,10 @@ onBeforeUnmount(()=>{disposed=true;generation++;ownedCreate.dispose();clearTimeo
           </section>
           <section v-else-if="tab==='settings'&&s.draft" class="bot-form-section">
             <div class="bot-section-heading"><div><h3>身份与工作方式</h3><p>这些设置只作用于当前工作区的这个 Bot。</p></div><span class="bot-status" :data-tone="checkedCurrent?'success':'warning'">{{validationLabel}}</span></div>
-            <fieldset :disabled="s.busy||s.writeUnknown||s.bot.configuration_state==='uninitialized'||(instanceStatus.mode==='owned_profile'&&!instanceStatus.provisioned)"><div class="bot-fields"><label>名称<input v-model="s.draft.employee.name" maxlength="100"/></label><label>岗位 / 简介<input v-model="s.draft.employee.description" maxlength="1000"/></label><label>头像<input type="file" accept="image/png,image/jpeg,image/webp" @change="readAvatar"/><span v-if="s.draft.employee.avatar" class="bot-avatar"><img :src="s.draft.employee.avatar" alt="头像草稿"/></span><button v-if="s.draft.employee.avatar" type="button" class="bot-link" @click="s.draft.employee.avatar=null">恢复姓名头像</button></label><label>可见范围<ZiSelect v-model="s.draft.employee.visibility" :options="[{value:'personal',label:'仅自己'},{value:'workspace',label:'工作区'}]" aria-label="Bot 可见范围"/></label><label class="wide">人格<textarea v-model="s.draft.employee.persona" rows="3" placeholder="希望它以怎样的方式与你协作"/></label><label class="wide">长期职责与交付标准<textarea v-model="s.draft.employee.instructions" aria-label="岗位职责" rows="5" placeholder="它负责什么，怎样算完成，需要遵守哪些边界"/></label><label>模型<ZiSelect :model-value="s.draft.employee.model||''" :options="modelOptions" aria-label="Bot 模型" @update:model-value="s.draft.employee.model=$event||null"/></label><label>Provider<input v-model="s.draft.config.provider" placeholder="留空沿用来源 profile"/></label><label>推理强度<ZiSelect v-model="reasoningEffort" :options="reasoningOptions" aria-label="Bot 推理强度"/></label><p class="wide bot-help">选择模型支持的推理强度，留空使用模型默认值。</p></div>
+            <fieldset :disabled="s.busy||s.writeUnknown||s.bot.configuration_state==='uninitialized'||(instanceStatus.mode==='owned_profile'&&!instanceStatus.provisioned)"><div class="bot-fields"><label>名称<input v-model="s.draft.employee.name" maxlength="100"/></label><label>岗位 / 简介<input v-model="s.draft.employee.description" maxlength="1000"/></label><BotAvatarEditor :key="`${workspace}:${s.selectedId}`" v-model="s.draft.employee.avatar" :saved-value="s.bot.employee.avatar" :name="s.draft.employee.name" :disabled="s.busy||s.writeUnknown" :saving="s.busy" :uncertain="s.writeUnknown" @reading="avatarReading=$event"/><label>可见范围<ZiSelect v-model="s.draft.employee.visibility" :options="[{value:'personal',label:'仅自己'},{value:'workspace',label:'工作区'}]" aria-label="Bot 可见范围"/></label><label class="wide">人格<textarea v-model="s.draft.employee.persona" rows="3" placeholder="希望它以怎样的方式与你协作"/></label><label class="wide">长期职责与交付标准<textarea v-model="s.draft.employee.instructions" aria-label="岗位职责" rows="5" placeholder="它负责什么，怎样算完成，需要遵守哪些边界"/></label><label>模型<ZiSelect :model-value="s.draft.employee.model||''" :options="modelOptions" aria-label="Bot 模型" @update:model-value="s.draft.employee.model=$event||null"/></label><label>Provider<input v-model="s.draft.config.provider" placeholder="留空沿用来源 profile"/></label><label>推理强度<ZiSelect v-model="reasoningEffort" :options="reasoningOptions" aria-label="Bot 推理强度"/></label><p class="wide bot-help">选择模型支持的推理强度，留空使用模型默认值。</p></div>
               <details class="bot-advanced"><summary>高级运行设置</summary><div class="bot-fields"><label>单次最多轮数<input v-model.number="s.draft.config.maxTurns" type="number" min="1" max="100"/></label><label>主动工作累计回合上限<input v-model="driverBudget" type="number" min="1" max="1000"/></label><label>主动工作截止时间<input v-model="driverExpiry" placeholder="例如 2026-10-14T18:00:00+08:00"/></label><label class="bot-check"><input v-model="managementAllowed" type="checkbox"/>允许使用工作区管理能力</label><label>工具权限<ZiSelect v-model="s.draft.config.permissions.mode" :options="[{value:'read_only',label:'仅对话（不启用工具）'},{value:'execute',label:'启用明确选择的工具'}]" aria-label="Bot 工具权限"/></label></div><p>运行电脑：{{selectedDevice?.name||s.bot.employee.target_device_id}}；Profile：{{s.bot.employee.runtime_profile||'默认'}}。</p></details>
             </fieldset>
-            <div class="bot-save-bar"><p>修改运行设置后需要检查配置。</p><button class="bot-button primary" :disabled="s.busy||s.writeUnknown||s.bot.configuration_state==='uninitialized'||(instanceStatus.mode==='owned_profile'&&!instanceStatus.provisioned)||s.conflict||!s.draft.employee.name.trim()" @click="save">{{s.busy?'处理中…':'保存配置'}}</button></div>
+            <div class="bot-save-bar"><p>修改运行设置后需要检查配置。</p><button class="bot-button primary" :disabled="avatarReading||s.busy||s.writeUnknown||s.bot.configuration_state==='uninitialized'||(instanceStatus.mode==='owned_profile'&&!instanceStatus.provisioned)||s.conflict||!s.draft.employee.name.trim()" @click="save">{{s.busy?'处理中…':'保存配置'}}</button></div>
           </section>
           <section v-else-if="tab==='capabilities'&&s.draft" class="bot-form-section">
             <div class="bot-section-heading"><h3>能力组合</h3><button class="bot-button" :disabled="s.reading||s.busy||s.capabilityBusy" @click="workbench.refresh()"><RefreshCw :size="15"/>刷新状态</button></div>
