@@ -2,7 +2,9 @@
 
 ## 当前接手入口（2026-10-16）
 
-最新生产状态、GitHub 分支、Windows 客户端 build、真实验收范围及未解决问题统一维护在 [HANDOFF.md 的最新接手状态](HANDOFF.md#2026-10-16-最新接手状态)。V2 已发布，主站/API 为 `cd610444ce793d6e5fbebfa7ed1b982c070ad9a3`；09:43 官方客户端已更新至原生依赖修复 `bb52bbe235aa0e5ab92d4f229021f01f6279ef61`（build `12932d5c…`）。文档提交可以领先产品。
+最新生产状态、GitHub 分支、Windows 客户端 build、真实验收范围及未解决问题统一维护在 [HANDOFF.md 的最新接手状态](HANDOFF.md#2026-10-16-最新接手状态)。V2 已发布，主站/API 为 `cd610444ce793d6e5fbebfa7ed1b982c070ad9a3`；10:00 官方客户端已更新至原生 YAML 修复 `d915129bf45bbb555cb1a089593c9c9cdc940d59`（build `993639eb…`）。文档提交可以领先产品。
+
+10:00 已发布创建及工具配置的原生 YAML 兼容修复。公司机最新回执确认上一版已生效且走 isolated 分支；真正缺口是紫薇硬依赖 PyYAML，而官方 0.22 使用 hermes_yaml/ruamel。41/41 回归、无 PyYAML 的真实 PM 创建/重试/读回及独立审查通过，已先推 GitHub 再发布；Windows 实机仍待更新后重试原 Bot。见[本次根因纠正与发布记录](docs/operations/2026-10-16-profile-native-yaml.md)。
 
 09:43 已修复非 isolated Bot 创建入口漏加载 Hermes 原生依赖。现场诊断明确失败在 `import yaml`，用户确认原生 `hermes profile list` 正常；40/40 回归与真实官方 PM 激活专项通过，已先推 GitHub 再发布客户端。公司台式需更新后重试原 Bot，实机创建尚待回执；主站/API 保持。见[原生依赖修复记录](docs/operations/2026-10-16-profile-native-dependencies.md)。
 

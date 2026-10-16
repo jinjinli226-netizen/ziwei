@@ -2,6 +2,14 @@
 
 ## 2026-10-16 最新接手状态
 
+### 10:00 更新：确认公司机使用新版 YAML，修正创建及工具配置调用
+
+公司机已运行 `12932d5c…`，09:47 重试回执仍缺 `yaml`，且明确 `distlib-isolated / bootstrapBound=true`。上一版非 isolated 初始化修复未覆盖公司机实际根因。官方 0.22 使用 `hermes_yaml → ruamel.yaml`，紫薇创建和启用工具配置仍硬导入可选的 PyYAML，现已统一跟随已绑定原生 YAML 接口。
+
+源码 `d915129bf45bbb555cb1a089593c9c9cdc940d59` 已先推 GitHub，再于 **10:00:28** 发布客户端。新 build `993639eb3840f257830c2fc8f1400339f2d3ad60a085ab27f4d547824f6b10f9`，包 SHA-256 `702c9027b04a67a23e918c8ce0da7ed727f2ea355f224eb015fcf8885bda2657`。41/41 回归通过；真实官方 PM 在仅有 ruamel、无 PyYAML 的普通及 isolated 入口完成创建/重试/读回，官方固定依赖 0.18.16 另验 5/5。主站/API 保持，服务未重启。
+
+**公司台式仍需更新后实测，不能把离线通过称为 Windows 已成功。** 核对 `993639eb…` 心跳后重试原 Bot，直接读取回执，无需重建员工或安装 PyYAML。上轮测试人为补 PyYAML 的盲点已纠正，详见[原生 YAML 修复记录](docs/operations/2026-10-16-profile-native-yaml.md)。
+
 ### 09:43 更新：Bot 创建缺少原生依赖的修复已发布
 
 公司台式已运行诊断版，09:28 的新建动作确认失败在 `native_imports / ModuleNotFoundError`、`import yaml`；用户确认 `hermes profile list` 正常。已修复紫薇非 isolated 创建入口绕过原生 bootstrap、漏加载 PM 依赖的问题，并增加受限模块名和启动方式回执。实际公司机的启动分支仍待新回执，不能将离线复现称为 Windows 创建已成功。
