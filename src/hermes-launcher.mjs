@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
+import {markHermesLauncherFailure} from './runtime-launch-evidence.mjs';
 
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 const error=()=>Object.assign(new Error('Hermes 原生入口未绑定可核实的绝对解释器；请更新 Hermes 安装，不会改用系统 Python'),{code:'HERMES_LAUNCHER_UNBOUND'});
@@ -90,5 +91,5 @@ export function resolveHermesLauncher(binary,{platform=process.platform,io=fs}={
     }
     need(interpreter&&paths.isAbsolute(interpreter)&&!/[\0\r\n"]/.test(interpreter)&&!/(?:^|[\\/])env(?:\s|$)/.test(interpreter)&&io.statSync(interpreter).isFile());
     return {launcher,interpreter,...(isolated?{pythonArgs:['-I']}:{}),...(resource?{resource}:{}),...((resource||wrapper||isolated)?{binding:{schemaVersion:1,...(resource?{resource}:{}),...(wrapper?{wrapper}:{}),...(isolated?{isolated:{kind:'distlib-isolated',interpreter,launcherSha256:sha(bytes)}}:{})}}:{}),kind:uv?'uv-resource':isolated?'distlib-isolated':delegated?'official-cmd':'absolute-shebang'};
-  }catch{throw error();}
+  }catch{throw markHermesLauncherFailure(error());}
 }

@@ -12,12 +12,13 @@ const source = fs.readFileSync(new URL('../scripts/client-lifecycle.mjs', import
 const start = source.indexOf('export async function stopClient(');
 const end = source.indexOf('/** Only the installed ziwei', start);
 const body = source.slice(start, end).replace('export async function', 'async function').replace("await import('./client-retained-stop-recovery.mjs')", 'await recoveryModule()');
-function fixture({ status = 409, recoveryError } = {}) {
+function fixture({ status = 409, recoveryError,modern=false } = {}) {
   const operations = [], recoveries = [], build = 'a'.repeat(64), command = 'verified-node verified-entry';
   const digest = value => createHash('sha256').update(value).digest('hex');
   const record = { pid: 4242, creationTime: '2026-10-15T00:00:00Z', commandHash: digest(command) };
   let alive = true;
   const health = { pid: record.pid, connectionState: 'connected', lifecycle: { nonce: 'bound-boot' }, activeActionCount: 0, pollingCount: 0, quarantinedActionCount: 0, maintenance: { safe: false, blockedDeliveryCount: 1 } };
+  if(modern)health.maintenance.stopSafe=false;
   const ctx = vm.createContext({ process: { env: {} }, path, Date, Number, AbortSignal,
     failure: (code, message) => Object.assign(new Error(message), { code }),
     windowsOnly() {}, noLinks() {}, resolveConfigPath: () => '/private/config',
@@ -35,7 +36,7 @@ function fixture({ status = 409, recoveryError } = {}) {
       health.connectionState = operation === 'pause' ? 'draining' : 'connected';
       return { ok: true, json: async () => ({ ...health }) };
     },
-    recoveryModule: async () => ({ recoverRetainedClientStop: async input => {
+    recoveryModule: async () => ({ shouldAttemptRetainedClientStopRecovery:value=>!Object.hasOwn(value.maintenance,'stopSafe'),recoverRetainedClientStop: async input => {
       recoveries.push(input); assert.equal(health.connectionState, 'draining');
       assert.equal((await input.assertCurrent()).pid, record.pid);
       if (recoveryError) throw recoveryError;
@@ -66,6 +67,12 @@ for (const status of [401, 403, 500]) test(`HTTP ${status} cannot trigger retain
 
 test('failed recovery validation preserves the original process and resumes reception', async () => {
   const f = fixture({ recoveryError: Object.assign(new Error('evidence changed'), { code: 'PROCESS_CHANGED' }) });
-  await assert.rejects(f.stop({ retainedRecoveryRoot: '/verified/candidate' }), error => error.code === 'PROCESS_CHANGED' && error.resumed === true);
+  await assert.rejects(f.stop({ retainedRecoveryRoot: '/verified/candidate' }), error => error.code === 'PROCESS_CHANGED' && error.resumed === true && error.cause?.code==='CONTROL_REJECTED');
   assert.equal(f.alive, true); assert.deepEqual(f.operations, ['pause', 'stop', 'resume']);
+});
+
+test('an unsupported modern refusal preserves the original 409 instead of entering legacy recovery',async()=>{
+  const f=fixture({modern:true});
+  await assert.rejects(f.stop({retainedRecoveryRoot:'/verified/candidate'}),error=>error.code==='CONTROL_REJECTED'&&error.httpStatus===409&&error.resumed===true);
+  assert.equal(f.alive,true);assert.equal(f.recoveries.length,0);assert.deepEqual(f.operations,['pause','stop','resume']);
 });

@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import {consumeRuntimePrelaunchEvidence,completeRuntimeExit} from './runtime-launch-evidence.mjs';
 import { isNativeRuntimeAction, resolveWindowsWorkdir, resolveWindowsWorkdirPath } from './windows-workdir.mjs';
 
 function needsNativeCwd(action) {
@@ -19,12 +20,13 @@ function classifyOutputStage(chunk) {
   return { stage: 'response', message: '生成结果', detail: 'CLI 输出' };
 }
 
-function safeProcessExit(value) {
-  if (!value || typeof value !== 'object') return null;
+function safeProcessExit(value,depth=0) {
+  if (!value || typeof value !== 'object' || depth>4) return null;
   const result = {};
   for (const key of ['launched', 'rootConfirmed', 'treeConfirmed', 'cancelled']) if (typeof value[key] === 'boolean') result[key] = value[key];
   for (const key of ['rootPid', 'rootExitCode', 'activeProcesses', 'hostExitCode']) if (value[key] === null || Number.isSafeInteger(value[key])) result[key] = value[key];
   for (const key of ['platform', 'supervisor', 'failureCode', 'signal', 'hostSignal']) if (typeof value[key] === 'string' && /^[a-zA-Z0-9_-]{1,100}$/.test(value[key])) result[key] = value[key];
+  if(value.supervisor==='runtime-group'&&Array.isArray(value.children)&&value.children.length<=64)result.children=value.children.map(child=>safeProcessExit(child,depth+1));
   return result;
 }
 
@@ -251,17 +253,20 @@ export class ActionDispatcher {
         }
       };
       let executionSettled = false; let stoppedEvidence = null; let latestEvidence = null; let resolveConfirmed;
+      let executionError=null,completeEvidence=null,resolveComplete,supervisionRejected=false;
+      const completeConfirmed=new Promise(resolve=>{resolveComplete=resolve;});
       const stopRequested = new Promise(resolve => { resolveStop = resolve; });
       const confirmed = new Promise(resolve => { resolveConfirmed = resolve; });
       const rootFinished = value => value?.rootConfirmed === true || (value?.launched === false && value.treeConfirmed === true);
       const reliableStop = value => rootFinished(value) && (value.treeConfirmed === true || (process.platform !== 'win32' && value.platform && value.platform !== 'win32'));
       const finalizeStopped = () => {
-        if (!executionSettled || (supervision ? !stoppedEvidence : !stopReason)) return;
+        if (!executionSettled || (supervision ? !stoppedEvidence : !stopReason) || executionError&&(supervisionRejected||!completeEvidence)) return;
         const cancelled = stopReason === 'cancelled';
-        this.#confirmQuarantineStopped(key, this.#failure(action, '原动作已确认退出；工具可能已经产生影响，请核实后再决定是否重新提交', {code: cancelled ? 'cancelled' : stopReason ? 'action_timeout' : 'execution_stopped', result: {processExit: safeProcessExit(stoppedEvidence), partialEffectsPossible: true}}));
+        this.#confirmQuarantineStopped(key, this.#failure(action, executionError || '原动作已确认退出；工具可能已经产生影响，请核实后再决定是否重新提交', {code: executionError ? 'executor_failed' : cancelled ? 'cancelled' : stopReason ? 'action_timeout' : 'execution_stopped', result: {processExit: safeProcessExit(executionError?completeEvidence:stoppedEvidence), partialEffectsPossible: true}}));
       };
       const observeEvidence = promise => Promise.resolve(promise).then(value => {
         latestEvidence = value;
+        if(completeRuntimeExit(value)){completeEvidence=value;resolveComplete(true);}
         if (reliableStop(value)) {
           stoppedEvidence = value; resolveConfirmed(true); finalizeStopped();
         }
@@ -306,7 +311,7 @@ export class ActionDispatcher {
         onResidentExit,
         onActivity: refreshIdleTimeout,
         onSupervision: value => {
-          if (supervision || !value || typeof value.stop !== 'function' || !value.completionEvidence || typeof value.completionEvidence.then !== 'function') throw new Error('Invalid runtime supervision registration');
+          if (supervision || !value || typeof value.stop !== 'function' || !value.completionEvidence || typeof value.completionEvidence.then !== 'function') {supervisionRejected=true;throw new Error('Invalid runtime supervision registration');}
           supervision = value; observeEvidence(value.completionEvidence);
           this.#stopHandlers.set(String(actionId), () => stopReason ? invokeStop(true) : requestStop('cancelled'));
           if (stopReason) invokeStop();
@@ -361,6 +366,24 @@ export class ActionDispatcher {
         const error = cancelled ? 'A2A action cancelled' : stopReason === 'idle' ? `A2A action timed out after no activity for ${idleTimeoutMs}ms` : `A2A action timed out after ${hardTimeoutMs}ms`;
         return this.#failure(action, `${error}；工具可能已经写入或产生其他影响，请核实后再决定是否重新提交`, {code: cancelled ? 'cancelled' : 'action_timeout', ...receipt});
       }
+      if (Object.hasOwn(outcome,'error')) {
+        const error=outcome.error instanceof Error?outcome.error:new Error(String(outcome.error)),prelaunch=!supervision&&!supervisionRejected?consumeRuntimePrelaunchEvidence(error):null;
+        let failed;
+        if(prelaunch)failed=this.#failure(action,error,{code:error.code || 'RUNTIME_PRELAUNCH_REJECTED',result:{...prelaunch,processExit:safeProcessExit(prelaunch.processExit)}});
+        else if(supervision){
+          executionError=error;
+          if(supervisionRejected||!completeEvidence){requestStop('executor_error');if(!supervisionRejected)await bounded(completeConfirmed);}
+          if(supervisionRejected||!completeEvidence){
+            this.#quarantine(key,'EXECUTOR_EXIT_UNCONFIRMED');
+            failed=this.#uncertain(action,'EXECUTOR_EXIT_UNCONFIRMED',error,{result:{processExit:safeProcessExit(latestEvidence),partialEffectsPossible:true}});
+          }else failed=this.#failure(action,error,{code:'executor_failed',result:{processExit:safeProcessExit(completeEvidence),partialEffectsPossible:true}});
+        }else if(nativeRuntime){
+          this.#quarantine(key,'EXECUTOR_WITHOUT_EXIT_EVIDENCE');
+          failed=this.#uncertain(action,'EXECUTOR_WITHOUT_EXIT_EVIDENCE',error,{result:{processExit:null,partialEffectsPossible:true}});
+        }else throw error;
+        try{this.#onEvent('action.failed',{actionId,type:action?.type,error:failed.error});}catch{}
+        return failed;
+      }
       if (supervision && !rootFinished(latestEvidence)) {
         await bounded(observeEvidence(supervision.completionEvidence));
         if (!rootFinished(latestEvidence)) {
@@ -368,7 +391,6 @@ export class ActionDispatcher {
           return this.#uncertain(action, 'ROOT_EXIT_UNCONFIRMED', '运行时返回但未能确认原进程退出', {result: {processExit: safeProcessExit(latestEvidence), partialEffectsPossible: true}});
         }
       }
-      if (outcome.error) throw outcome.error;
       const result = outcome.value;
       const executorStatus = result && typeof result === 'object' ? String(result.status || '') : '';
       if (executorStatus && executorStatus !== 'succeeded') {

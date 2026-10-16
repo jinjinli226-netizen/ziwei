@@ -13,8 +13,7 @@ const samePath = (a, b) => typeof a === 'string' && typeof b === 'string' && pat
 const psQuote = value => "'" + String(value).replaceAll("'", "''") + "'";
 const failure = (code, message) => Object.assign(new Error(message), { code });
 // Keep diagnostics small and never echo arbitrary response text, paths or credentials.
-export function localControlRejection(status, body) {
-  const labels = {
+const localStopLabels = {
     BOOT_IDENTITY_MISMATCH: '客户端已重启，请重试',
     CONNECTION_NOT_DRAINING: '尚未暂停接收任务',
     ACTIVE_ACTIONS: '仍有任务执行', ACTIVE_POLLS: '仍在接收任务',
@@ -23,14 +22,23 @@ export function localControlRejection(status, body) {
     DELIVERY_NOT_DRAINED: '历史回执缺少可核验的退出记录',
     FILE_EVIDENCE_UNSAFE: '本地状态记录需要检查',
     MAINTENANCE_STOP_UNSAFE: '本地退出状态需要检查',
+    UNMAPPED_NATIVE_EXECUTION: '历史原生任务缺少进程状态记录',
+    ACTION_STATE_CORRUPT: '本地任务状态记录损坏或不完整',
+    STARTED_WITHOUT_RESULT: '任务尚未留下终态记录',
+    ACTION_RESULT_UNCERTAIN: '历史任务执行结果尚未确认',
+    DELIVERY_CORRUPT: '本地回执记录损坏或不完整',
+    DELIVERY_ORPHAN_OR_TEMP: '回执目录留有未完成的临时记录',
   };
+export function safeLocalStopReasons(value) {
+  return Array.isArray(value)?value.slice(0,6).map(row=>({code:Object.hasOwn(localStopLabels,row?.code)?row.code:'FILE_EVIDENCE_UNSAFE',...(Number.isSafeInteger(row?.count)&&row.count>0&&row.count<=1_000_000?{count:row.count}:{})})):[];
+}
+export function localStopReasonMessage(value) {
+  return [...new Set(safeLocalStopReasons(value).map(row=>localStopLabels[row.code]+(row.count?`（${row.count}）`:'')))].join('；');
+}
+export function localControlRejection(status, body) {
   const supported = status === 409 && ['CLIENT_STOP_UNSAFE', 'CLIENT_CONTROL_IDENTITY_CHANGED'].includes(body?.error);
-  const reasons = supported && Array.isArray(body.reasons) ? body.reasons.slice(0, 6).map(row => {
-    const label = Object.hasOwn(labels, row?.code) ? labels[row.code] : '本地状态记录需要检查';
-    const count = Number.isSafeInteger(row?.count) && row.count > 0 && row.count <= 1_000_000 ? `（${row.count}）` : '';
-    return label + count;
-  }) : [];
-  return Object.assign(failure('CONTROL_REJECTED', `本机控制请求被拒绝（HTTP ${status}）${reasons.length ? '：' + [...new Set(reasons)].join('；') : ''}；未强制结束进程`), { httpStatus: status });
+  const stopReasons=supported?safeLocalStopReasons(body.reasons):[],reason=localStopReasonMessage(stopReasons);
+  return Object.assign(failure('CONTROL_REJECTED', `本机控制请求被拒绝（HTTP ${status}）${reason ? '：' + reason : ''}；未强制结束进程`), { httpStatus: status,...(stopReasons.length?{stopReasons}:{}) });
 }
 let legacyModule;
 const legacyIdentity = () => legacyModule ||= import('./client-legacy-identity.mjs');
@@ -236,7 +244,8 @@ export async function stopClient({ root, env = process.env, configPath, expected
         // Only the verified candidate in an update supplies this internal path.
         // Normal stop/uninstall and rollback never terminate a refused daemon.
         if (!retainedRecoveryRoot || error.code !== 'CONTROL_REJECTED' || error.httpStatus !== 409) throw error;
-        const { recoverRetainedClientStop } = await import('./client-retained-stop-recovery.mjs');
+        const { recoverRetainedClientStop,shouldAttemptRetainedClientStopRecovery } = await import('./client-retained-stop-recovery.mjs');
+        if(!shouldAttemptRetainedClientStopRecovery(final))throw error;
         const assertCurrent = async () => {
           assertConfig(); await assertProcessUnchanged(record, root);
           await inspectNativeHealthListener(origin, record.pid);
@@ -249,6 +258,7 @@ export async function stopClient({ root, env = process.env, configPath, expected
           stoppedClientReceipt = exitedReceipt();
         } catch (recoveryError) {
           if (recoveryError.stoppedClientReceipt) stoppedClientReceipt = recoveryError.stoppedClientReceipt;
+          if(!recoveryError.cause)recoveryError.cause=error;
           throw recoveryError;
         }
       }

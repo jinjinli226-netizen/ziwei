@@ -6,6 +6,7 @@ import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { resolveConfigPath, defaultUserDir } from '../daemon/config.mjs';
 import { clientBuildIdentity } from '../src/management-bootstrap.mjs';
+import {safeLocalStopReasons,localStopReasonMessage} from './client-lifecycle.mjs';
 
 const run = promisify(execFile);
 export const OFFICIAL_UPDATE_SOURCE = 'https://qzelynth.top/downloads/cli/ziwei-latest.tgz';
@@ -15,8 +16,11 @@ const failure = (code, message, details = {}) => Object.assign(new Error(message
 const UPDATE_STAGES = new Set(['validate_installation', 'resolve_npm', 'validate_paths', 'verify_archive', 'read_release_manifest', 'download_package', 'stage_install', 'validate_candidate', 'prepare_candidate', 'stop_client', 'verify_original', 'backup_original', 'activate_candidate', 'verify_installation', 'restart_client', 'verify_configuration', 'stop_failed_candidate', 'restore_original', 'restart_original', 'read_restoration_configuration', 'wait_parent', 'acquire_lock', 'unknown']);
 const SAFE_ERROR_CODES = new Set(['EBUSY', 'EPERM', 'EACCES', 'ENOENT', 'ENOTDIR', 'ENOSPC', 'EIO', 'EROFS', 'EEXIST', 'ETIMEDOUT', 'ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND', 'EAI_AGAIN', 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER', 'ERR_MODULE_NOT_FOUND', 'MODULE_NOT_FOUND', 'ERR_INVALID_PACKAGE_CONFIG', 'WINDOWS_ONLY', 'USERDATA_IN_PACKAGE', 'UNSAFE_PATH', 'CONFIG_UNREADABLE', 'CONFIG_INVALID', 'PID_MISMATCH', 'PROCESS_IDENTITY_MISMATCH', 'PROCESS_CHANGED', 'NON_LOCAL_CONTROL', 'INVALID_HEALTH_PORT', 'HEALTH_UNREACHABLE', 'FOREIGN_LISTENER', 'CLIENT_IDENTITY_MISMATCH', 'LIFECYCLE_IDENTITY_MISMATCH', 'LIFECYCLE_DOWNGRADE', 'INVALID_TIMEOUT', 'BUILD_INVALID', 'HEALTH_MISSING', 'PROCESS_MISSING', 'CONTROL_AUTH_MISSING', 'CONFIG_CHANGED', 'CONTROL_REJECTED', 'CLIENT_BUSY', 'CLIENT_RESTARTED', 'STOP_TIMEOUT', 'STOP_FAILED', 'NOT_GLOBAL_INSTALL', 'PACKAGE_MISMATCH', 'BIN_MISMATCH', 'NPM_UNAVAILABLE', 'MAINTENANCE_BUSY', 'INSTALL_CHANGED', 'INVALID_PARENT', 'PARENT_STILL_RUNNING', 'UPDATE_SOURCE_INVALID', 'UPDATE_HASH_INVALID', 'UPDATE_HTTP_FAILED', 'UPDATE_TOO_LARGE', 'UPDATE_MANIFEST_INVALID', 'UPDATE_BUILD_MISMATCH']);
 const SAFE_SIGNALS = new Set(['SIGTERM', 'SIGKILL', 'SIGABRT', 'SIGINT', 'SIGBREAK']);
+SAFE_ERROR_CODES.add('RETAINED_STOP_RECOVERY_REFUSED');
 for (const code of ['LEGACY_STOP_CONFIRMATION_REQUIRED', 'LEGACY_CONFIRMATION_INVALID', 'LEGACY_IDENTITY_UNVERIFIED', 'LEGACY_PROTOCOL_MISMATCH', 'LEGACY_PROOF_INVALID', 'LEGACY_PROOF_EXPIRED', 'LEGACY_IDENTITY_CHANGED', 'LEGACY_SOURCE_UNRECOGNIZED', 'LEGACY_CONFIG_MISMATCH', 'LEGACY_CONFIG_NAMESPACE_UNVERIFIED', 'LEGACY_STOP_PROOF_REQUIRED', 'LEGACY_STOP_FAILED']) SAFE_ERROR_CODES.add(code);
 const FAILURE_REASONS = {
+  CONTROL_REJECTED: '客户端拒绝停止，请查看具体阻塞记录',
+  RETAINED_STOP_RECOVERY_REFUSED: '历史记录未满足自动恢复条件，客户端未被强制停止',
   LEGACY_STOP_CONFIRMATION_REQUIRED: '旧版无法报告当前任务，执行状态未知；须先核验实例并明确确认停止后迁移',
   LEGACY_CONFIRMATION_INVALID: '旧版迁移需要本次明确确认与同一实例的检查凭据',
   LEGACY_IDENTITY_UNVERIFIED: '无法完整核验旧版进程、配置或监听端口，未执行停止',
@@ -37,7 +41,7 @@ const FAILURE_REASONS = {
 // The cause chain is bounded; only public codes and small numeric facts may leave it.
 export function describeUpdateFailure(error, stage = 'unknown') {
   const failureStage = UPDATE_STAGES.has(stage) ? stage : 'unknown';
-  let reasonCode = null, exitCode, signal, httpStatus;
+  let reasonCode = null, exitCode, signal, httpStatus,stopReasons;
   const seen = new Set();
   for (let current = error, depth = 0; current && typeof current === 'object' && depth < 4 && !seen.has(current); current = current.cause, depth++) {
     seen.add(current);
@@ -45,11 +49,12 @@ export function describeUpdateFailure(error, stage = 'unknown') {
     if (!reasonCode && ['TimeoutError', 'AbortError'].includes(current.name)) reasonCode = current.name === 'TimeoutError' ? 'OPERATION_TIMEOUT' : 'OPERATION_ABORTED';
     if (exitCode === undefined && typeof current.cmd === 'string' && Number.isInteger(current.code) && current.code !== 0 && Math.abs(current.code) <= 2147483647) exitCode = current.code;
     if (!signal && SAFE_SIGNALS.has(current.signal)) signal = current.signal;
-    if (httpStatus === undefined && current.code === 'UPDATE_HTTP_FAILED' && Number.isInteger(current.httpStatus) && current.httpStatus >= 100 && current.httpStatus <= 599) httpStatus = current.httpStatus;
+    if (httpStatus === undefined && ['UPDATE_HTTP_FAILED','CONTROL_REJECTED'].includes(current.code) && Number.isInteger(current.httpStatus) && current.httpStatus >= 100 && current.httpStatus <= 599) httpStatus = current.httpStatus;
+    if(!stopReasons&&current.code==='CONTROL_REJECTED'&&current.httpStatus===409){const reasons=safeLocalStopReasons(current.stopReasons);if(reasons.length)stopReasons=reasons;}
   }
   reasonCode ||= exitCode !== undefined ? 'PROCESS_EXIT_NONZERO' : signal ? 'PROCESS_TERMINATED' : failureStage.toUpperCase() + '_FAILED';
-  const reason = FAILURE_REASONS[reasonCode] || (SAFE_ERROR_CODES.has(reasonCode) ? '客户端安全核验或维护操作失败' : '此维护阶段未完成；未记录未经核验的原始输出');
-  return { failureStage, reasonCode, reason, ...(exitCode !== undefined ? { exitCode } : {}), ...(signal ? { signal } : {}), ...(httpStatus !== undefined ? { httpStatus } : {}) };
+  const reason = (FAILURE_REASONS[reasonCode] || (SAFE_ERROR_CODES.has(reasonCode) ? '客户端安全核验或维护操作失败' : '此维护阶段未完成；未记录未经核验的原始输出'))+(stopReasons?'：'+localStopReasonMessage(stopReasons):'');
+  return { failureStage, reasonCode, reason, ...(exitCode !== undefined ? { exitCode } : {}), ...(signal ? { signal } : {}), ...(httpStatus !== undefined ? { httpStatus } : {}),...(stopReasons?{stopReasons}:{}) };
 }
 
 function diagnosticMessage(diagnostic) {

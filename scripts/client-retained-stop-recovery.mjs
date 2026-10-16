@@ -11,13 +11,18 @@ const samePath=(left,right)=>typeof left==='string'&&typeof right==='string'&&pa
 const fail=()=>Object.assign(new Error('旧客户端不符合仅保留已退出回执的升级条件；未强制停止'),{code:'RETAINED_STOP_RECOVERY_REFUSED'});
 const requireFact=value=>{if(!value)throw fail();};
 const within=(file,root)=>{const relative=path.relative(root,file);return !relative||relative!=='..'&&!relative.startsWith('..'+path.sep)&&!path.isAbsolute(relative);};
+const auditedBuild='a996e94aebec66b15636d526be8013746617950fab1858d4815720c7b93cb5f1';
+const prelaunchHealth=body=>body?.clientBuild===auditedBuild&&body.maintenance?.safe===false&&body.maintenance.stopSafe===false&&Array.isArray(body.maintenance.fileIssues)&&body.maintenance.fileIssues.length===1&&body.maintenance.fileIssues[0]?.code==='UNMAPPED_NATIVE_EXECUTION'&&typeof body.maintenance.fileIssues[0].actionId==='string'&&body.maintenance.fileIssues[0].actionId.length>0;
+export function shouldAttemptRetainedClientStopRecovery(body){return Boolean(body?.maintenance&&(!Object.hasOwn(body.maintenance,'stopSafe')||prelaunchHealth(body)));}
 
 function assertOldIdleHealth(body,context,pinned){
   const config=context.snapshot.config,lifecycle=body?.lifecycle,maintenance=body?.maintenance;
   requireFact(body?.service==='ziwei_user'&&body.agentId==='ziwei_user'&&body.pid===pinned.pid&&body.clientBuild===context.build&&body.workspace===config.workspace&&body.deviceId===config.deviceId);
   requireFact(body.connectionState==='draining'&&body.activeActionCount===0&&body.pollingCount===0&&body.quarantinedActionCount===0&&body.executionQuarantined!==true);
   requireFact(lifecycle&&lifecycle.nonce===pinned.lifecycle.nonce&&samePath(lifecycle.root,context.root)&&samePath(lifecycle.configPath,context.file)&&lifecycle.configSha256===context.snapshot.hash&&samePath(lifecycle.runtimeDir,pinned.lifecycle.runtimeDir)&&lifecycle.managedAuxiliaryCount===0&&lifecycle.startedAt===pinned.lifecycle.startedAt);
-  requireFact(maintenance?.safe===false&&!Object.hasOwn(maintenance,'stopSafe')&&Array.isArray(maintenance.fileIssues)&&maintenance.fileIssues.length>0&&maintenance.fileIssues.every(issue=>issue?.code==='DELIVERY_NOT_DRAINED'));
+  if(prelaunchHealth(body)){
+    requireFact(context.build===auditedBuild&&maintenance.gatewaySafe===true&&maintenance.gatewayWorkers?.length===0&&maintenance.pendingDeliveryCount===0&&maintenance.blockedDeliveryCount===0&&maintenance.retainedDeliveryCount===0&&Array.isArray(maintenance.stopIssues)&&maintenance.stopIssues.length===1&&maintenance.stopIssues[0]?.code==='UNMAPPED_NATIVE_EXECUTION'&&maintenance.fileIssues[0].actionId===pinned.maintenance.fileIssues[0].actionId);
+  }else requireFact(maintenance?.safe===false&&!Object.hasOwn(maintenance,'stopSafe')&&Array.isArray(maintenance.fileIssues)&&maintenance.fileIssues.length>0&&maintenance.fileIssues.every(issue=>issue?.code==='DELIVERY_NOT_DRAINED'));
   requireFact(Array.isArray(maintenance.gatewayWorkers)&&maintenance.gatewayWorkers.every(worker=>worker?.processAlive===false&&worker.pendingCommands===0&&worker.inFlight===0&&worker.pendingInbound===0));
 }
 
@@ -35,9 +40,10 @@ function connectionsFor(context,health){
   });
 }
 
-function verifiedEvidence(inspect,connections,runtimeDir){
+function verifiedEvidence(inspect,connections,runtimeDir,prelaunchId){
   const evidence=inspect({connections});
-  requireFact(evidence.safe===false&&evidence.stopSafe===true&&Number.isSafeInteger(evidence.retainedDeliveryCount)&&evidence.retainedDeliveryCount>0&&Array.isArray(evidence.stopIssues)&&evidence.stopIssues.length===0&&Array.isArray(evidence.issues)&&evidence.issues.length>0&&evidence.issues.every(issue=>issue.code==='DELIVERY_NOT_DRAINED'));
+  if(prelaunchId)requireFact(evidence.safe===false&&evidence.issues?.length===1&&evidence.issues[0].code==='UNMAPPED_NATIVE_EXECUTION'&&evidence.issues[0].actionId===prelaunchId&&evidence.retainedDeliveryCount===0&&((evidence.stopSafe===false&&evidence.stopIssues?.length===1&&evidence.stopIssues[0].code==='UNMAPPED_NATIVE_EXECUTION')||(evidence.stopSafe===true&&evidence.stopIssues?.length===0&&evidence.retainedPrelaunchCount===1)));
+  else requireFact(evidence.safe===false&&evidence.stopSafe===true&&Number.isSafeInteger(evidence.retainedDeliveryCount)&&evidence.retainedDeliveryCount>0&&Array.isArray(evidence.stopIssues)&&evidence.stopIssues.length===0&&Array.isArray(evidence.issues)&&evidence.issues.length>0&&evidence.issues.every(issue=>issue.code==='DELIVERY_NOT_DRAINED'));
   requireFact(Array.isArray(evidence.files)&&evidence.files.length>0&&Array.isArray(evidence.directories)&&evidence.directories.length>0);
   for(const item of [...evidence.files,...evidence.directories])requireFact(typeof item.path==='string'&&path.isAbsolute(item.path)&&within(item.path,runtimeDir)&&typeof item.exists==='boolean');
   for(const item of evidence.files)if(item.exists)requireFact(/^[a-f0-9]{64}$/.test(item.sha256)&&Number.isSafeInteger(item.bytes)&&item.bytes>=0);
@@ -74,14 +80,22 @@ try{
  Assert-Fact ($health.service -ceq 'ziwei_user' -and $health.agentId -ceq 'ziwei_user' -and $health.pid -eq $d.pid -and $health.clientBuild -ceq $d.build -and $health.workspace -ceq $d.workspace -and $health.deviceId -ceq $d.deviceId)
  Assert-Fact ($health.connectionState -ceq 'draining' -and $health.activeActionCount -eq 0 -and $health.pollingCount -eq 0 -and $health.quarantinedActionCount -eq 0 -and $health.executionQuarantined -ne $true)
  Assert-Fact ($health.lifecycle.nonce -ceq $d.nonce -and $health.lifecycle.root -ieq $d.root -and $health.lifecycle.configPath -ieq $d.configPath -and $health.lifecycle.configSha256 -ceq $d.configSha256 -and $health.lifecycle.runtimeDir -ieq $d.runtimeDir -and $health.lifecycle.startedAt -ceq $d.startedAt -and $health.lifecycle.managedAuxiliaryCount -eq 0)
- Assert-Fact ($health.maintenance.safe -eq $false -and !($health.maintenance.PSObject.Properties.Name -contains 'stopSafe'))
  Assert-Fact ($health.maintenance.fileIssues -is [Array] -and $health.maintenance.gatewayWorkers -is [Array])
- Assert-Fact (@($health.maintenance.fileIssues).Count -gt 0 -and @($health.maintenance.fileIssues|Where-Object {$_.code -cne 'DELIVERY_NOT_DRAINED'}).Count -eq 0)
+ if($d.prelaunchActionId){
+  Assert-Fact ($d.build -ceq 'a996e94aebec66b15636d526be8013746617950fab1858d4815720c7b93cb5f1' -and $health.maintenance.safe -eq $false -and $health.maintenance.stopSafe -eq $false)
+  Assert-Fact ($health.maintenance.gatewaySafe -eq $true -and @($health.maintenance.gatewayWorkers).Count -eq 0 -and $health.maintenance.pendingDeliveryCount -eq 0 -and $health.maintenance.blockedDeliveryCount -eq 0 -and $health.maintenance.retainedDeliveryCount -eq 0)
+  Assert-Fact (@($health.maintenance.fileIssues).Count -eq 1 -and $health.maintenance.fileIssues[0].code -ceq 'UNMAPPED_NATIVE_EXECUTION' -and $health.maintenance.fileIssues[0].actionId -ceq $d.prelaunchActionId)
+  Assert-Fact ($health.maintenance.stopIssues -is [Array] -and @($health.maintenance.stopIssues).Count -eq 1 -and $health.maintenance.stopIssues[0].code -ceq 'UNMAPPED_NATIVE_EXECUTION')
+ }else{
+  Assert-Fact ($health.maintenance.safe -eq $false -and !($health.maintenance.PSObject.Properties.Name -contains 'stopSafe'))
+  Assert-Fact (@($health.maintenance.fileIssues).Count -gt 0 -and @($health.maintenance.fileIssues|Where-Object {$_.code -cne 'DELIVERY_NOT_DRAINED'}).Count -eq 0)
+ }
  Assert-Fact (@($health.maintenance.gatewayWorkers|Where-Object {$_.processAlive -ne $false -or $_.pendingCommands -ne 0 -or $_.inFlight -ne 0 -or $_.pendingInbound -ne 0}).Count -eq 0)
  foreach($item in $d.directories){if(!$item.exists){Assert-Fact (!(Test-Path -LiteralPath $item.path));continue};No-Link $item.path;$actual=@(Get-ChildItem -LiteralPath $item.path -Force|ForEach-Object {$_.Name}|Sort-Object);$expected=@($item.names|Sort-Object);Assert-Fact ($actual.Count -eq $expected.Count);for($i=0;$i -lt $actual.Count;$i++){Assert-Fact ($actual[$i] -ceq $expected[$i])}}
  foreach($item in $d.files){if(!$item.exists){Assert-Fact (!(Test-Path -LiteralPath $item.path));continue};No-Link $item.path;Assert-Fact ((File-Hash $item.path) -ceq $item.sha256)}
  Assert-Fact ((File-Hash $d.configPath) -ceq $d.configSha256)
  Assert-Fact (!$p.HasExited)
+ if($d.prelaunchActionId){Assert-Fact (@(Get-CimInstance Win32_Process -Filter ('ParentProcessId = '+$d.pid) -ErrorAction Stop).Count -eq 0)}
  $p.Kill()
  Assert-Fact ($p.WaitForExit($d.waitMs) -and $p.HasExited)
  [pscustomobject]@{stopped=$true;pid=[int]$d.pid;creationTime=$d.creationTime}|ConvertTo-Json -Compress
@@ -108,20 +122,25 @@ export function createRetainedClientStopRecovery({platform=process.platform,impo
     requireFact(health?.pid===record.pid&&health.lifecycle&&/^[A-Za-z0-9_-]{16,128}$/.test(health.lifecycle.nonce||'')&&Math.abs(Date.parse(health.lifecycle.startedAt)-Date.parse(record.creationTime))<=15_000);
     assertOldIdleHealth(health,context,health);
     requireFact(digest(fs.readFileSync(context.file))===context.snapshot.hash);
-    const pinned=structuredClone(health),connections=connectionsFor(context,pinned),module=await importInspector(recoveryRoot);
+    const pinned=structuredClone(health),connections=connectionsFor(context,pinned),module=await importInspector(recoveryRoot),prelaunchId=prelaunchHealth(pinned)?pinned.maintenance.fileIssues[0].actionId:null;
     requireFact(typeof module.inspectLocalDaemonMaintenanceFiles==='function');
-    const evidence=verifiedEvidence(module.inspectLocalDaemonMaintenanceFiles,connections,pinned.lifecycle.runtimeDir),fingerprint=evidenceFingerprint(evidence);
+    let prepared;
+    if(prelaunchId){try{requireFact(typeof module.inspectAuditedPrelaunchRecovery==='function'&&typeof module.retainAuditedPrelaunchRecovery==='function');prepared=module.inspectAuditedPrelaunchRecovery({root:context.root,build:context.build,connections,bootStartedAt:record.creationTime});requireFact(prepared.subject.actionId===prelaunchId);}catch{throw fail();}}
+    const evidence=verifiedEvidence(module.inspectLocalDaemonMaintenanceFiles,connections,pinned.lifecycle.runtimeDir,prelaunchId),fingerprint=evidenceFingerprint(evidence);
+    if(prepared)requireFact(evidenceFingerprint(prepared.evidence)===fingerprint);
     const current=await assertCurrent();assertOldIdleHealth(current,context,pinned);
-    const second=verifiedEvidence(module.inspectLocalDaemonMaintenanceFiles,connections,pinned.lifecycle.runtimeDir);requireFact(evidenceFingerprint(second)===fingerprint);
+    const second=verifiedEvidence(module.inspectLocalDaemonMaintenanceFiles,connections,pinned.lifecycle.runtimeDir,prelaunchId);requireFact(evidenceFingerprint(second)===fingerprint);
+    if(prepared){let fresh;try{fresh=module.inspectAuditedPrelaunchRecovery({root:context.root,build:context.build,connections,bootStartedAt:record.creationTime});}catch{throw fail();}requireFact(digest(JSON.stringify(fresh.subject))===digest(JSON.stringify(prepared.subject))&&digest(JSON.stringify(fresh.sourceFiles))===digest(JSON.stringify(prepared.sourceFiles))&&evidenceFingerprint(fresh.evidence)===fingerprint);}
     requireFact(digest(fs.readFileSync(context.file))===context.snapshot.hash);
     const url=new URL(context.origin),host=url.hostname.replace(/^\[|\]$/g,'');requireFact(url.protocol==='http:'&&['127.0.0.1','::1'].includes(host)&&!url.username&&!url.password&&!url.search&&!url.hash&&url.pathname==='/'&&Number(url.port)>0);
     let output;
-    try{output=await terminate({pid:record.pid,creationTime:record.creationTime,commandHash:record.commandHash,executable:record.executable,host,port:Number(url.port),origin:url.origin,root:context.root,configPath:context.file,configSha256:context.snapshot.hash,build:context.build,workspace:context.snapshot.config.workspace,deviceId:context.snapshot.config.deviceId,nonce:pinned.lifecycle.nonce,runtimeDir:pinned.lifecycle.runtimeDir,startedAt:pinned.lifecycle.startedAt,files:evidence.files,directories:evidence.directories,waitMs:Math.floor(timeoutMs)});}catch{throw fail();}
+    try{output=await terminate({pid:record.pid,creationTime:record.creationTime,commandHash:record.commandHash,executable:record.executable,host,port:Number(url.port),origin:url.origin,root:context.root,configPath:context.file,configSha256:context.snapshot.hash,build:context.build,workspace:context.snapshot.config.workspace,deviceId:context.snapshot.config.deviceId,nonce:pinned.lifecycle.nonce,runtimeDir:pinned.lifecycle.runtimeDir,startedAt:pinned.lifecycle.startedAt,files:[...evidence.files,...(prepared?.sourceFiles||[])],directories:evidence.directories,...(prelaunchId?{prelaunchActionId:prelaunchId}:{}),waitMs:Math.floor(timeoutMs)});}catch{throw fail();}
     requireFact(output?.stopped===true&&output.pid===record.pid&&output.creationTime===record.creationTime);
     const stoppedClientReceipt={stopped:true,wasRunning:true,pid:record.pid,creationTime:record.creationTime,retainedDeliveryCount:evidence.retainedDeliveryCount,retainedReceiptRecovery:true,executionConfirmedStopped:false};
     try{
-      requireFact(evidenceFingerprint(verifiedEvidence(module.inspectLocalDaemonMaintenanceFiles,connections,pinned.lifecycle.runtimeDir))===fingerprint);
+      requireFact(evidenceFingerprint(verifiedEvidence(module.inspectLocalDaemonMaintenanceFiles,connections,pinned.lifecycle.runtimeDir,prelaunchId))===fingerprint);
       requireFact(digest(fs.readFileSync(context.file))===context.snapshot.hash);
+      if(prelaunchId){const retained=module.retainAuditedPrelaunchRecovery(prepared,output);requireFact(retained.stopSafe===true&&retained.retainedPrelaunchCount===1);stoppedClientReceipt.prelaunchHistoryRetained=true;}
     }catch{const error=fail();error.stoppedClientReceipt=stoppedClientReceipt;throw error;}
     return stoppedClientReceipt;
   };
