@@ -2,6 +2,14 @@
 
 ## 2026-10-16 最新接手状态
 
+### 09:43 更新：Bot 创建缺少原生依赖的修复已发布
+
+公司台式已运行诊断版，09:28 的新建动作确认失败在 `native_imports / ModuleNotFoundError`、`import yaml`；用户确认 `hermes profile list` 正常。已修复紫薇非 isolated 创建入口绕过原生 bootstrap、漏加载 PM 依赖的问题，并增加受限模块名和启动方式回执。实际公司机的启动分支仍待新回执，不能将离线复现称为 Windows 创建已成功。
+
+源码 `bb52bbe235aa0e5ab92d4f229021f01f6279ef61` 已先推 GitHub，再于 **09:43:17（Asia/Shanghai）** 发布客户端。新 build `12932d5c024d1bb36584a96f2e06c6d334f5cee5c74fd60fc4d73e8999f3550f`，包 SHA-256 `7b657cc60fb7f26cc4eb6767ef03f97d81896f086971049c153d48f8f1a8c13a`。主站/API 未切换，服务未重启。
+
+最终 40/40 相关回归、真实官方 PM 依赖激活及创建/重试专项 3/3、独立审查、lint、构建和离线包检查通过。下一步在公司台式运行官方更新入口，确认 `12932d5c…` 心跳后重试**原 Bot**，读取新创建结果；无需重建员工。发布、测试边界和回退见[原生依赖修复记录](docs/operations/2026-10-16-profile-native-dependencies.md)。
+
 ### 09:24 更新：公司台式已升级，创建仍失败；诊断补丁已发布
 
 现场已确认公司台式运行上一版 `74405c88…`、PID 1528。新员工 TiktokTrendSreach 的两次原生创建均完整退出，但只返回 `BOT_PROFILE_CREATE_FAILED`；旧代码丢弃具体 Python 异常，不能据此归因权限、代理或模型。
