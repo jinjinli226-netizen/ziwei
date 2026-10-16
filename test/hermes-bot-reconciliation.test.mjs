@@ -178,3 +178,9 @@ test('expired recovery keeps unresolved phone uncertainty when a different comma
   assert.throws(()=>f.repo.resultA2AAction(action.id,{deviceId,status:'succeeded',result:{processExit:{...exitProof},terminalMcp}}),{code:'BOT_RECOVERY_RECEIPT_REQUIRED'});
   assert.equal(f.repo.getA2AAction(action.id).status,'expired');
 });
+
+
+test('expired recovery does not erase an explicit phone uncertainty marker without original command evidence', t => {
+  const f = fixture(t), action = f.conversation(); f.expire(action.id);
+  assert.throws(()=>f.repo.resultA2AAction(action.id,{deviceId,status:'succeeded',result:{processExit:{...exitProof},terminalMcp:{loaded:true,executionState:'uncertain',toolCalls:[]}}}),{code:'BOT_RECOVERY_RECEIPT_REQUIRED'});
+});
