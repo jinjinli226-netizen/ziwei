@@ -1,5 +1,14 @@
 # 紫薇项目 HandOff
 
+## 2026-10-16 12:14 长任务默认 24 小时已发布
+
+用户明确要求取消原 15 分钟上限。已先推 GitHub `codex/v2-20261014-release` 的 `eabe098af3b6c0e7d76cf4121052e3606e022888`，再发布主站/API 和 Windows 客户端包。生产目录 `/opt/ziwei/releases/v2-hotfix-eabe098af3b6/v2`；新客户端 build `ba86b25db751ac6322d74c6c7e1353a7984b69d5a18a97c7e87beee46c6f195a`。已包含 E04 主站 `891685f` 的手机回执和终端诊断修复；本轮未修改中控/Android。
+
+执行硬时限、服务器租约、Hermes 软预算、Gateway 结果等待和手机执行授权已同步。默认单次原生模型执行最长 24 小时，手动停止、显式较短 timeout、轮数预算、退出证据与去重仍保留。安装/维护和单条手机命令不随之变为 24 小时。141 项回归通过、1 项 Windows 专项跳过，构建与离线依赖检查通过；这不是已经连续运行 24 小时的实机结论。
+
+**服务器发布不会更新已经运行的 Windows 客户端。公司台式需要用官方 PowerShell 更新入口升级，确认新 build 后再次发起任务；旧进程已启动任务的 15 分钟计时不能追溯更改。** 无需重建 Bot/Profile/HOME。根因、发布校验、测试边界、回退见[24 小时执行记录](docs/operations/2026-10-16-24h-execution-budget.md)。下方为历史记录，以本节为当前主站/客户端版本。
+
+
 ## 2026-10-16 11:15 手机输入与自动恢复修复
 
 主站/API 与官方 Windows 客户端包已发布 `891685f70e9e4bfc2c56821ee2cc9a28a356f548`（分支 `codex/android-stability-main`）；当前 `/opt/ziwei/releases/v2-hotfix-891685f70e9e/v2`。客户端 build `6b8449d9…`，包 SHA `4d993a13…`；发布包不代表电脑已安装。中控私有仓库 `ziwei-system` 的 `8be4604`（分支 `codex/android-input-lifecycle`）也已发布，当前 `/opt/ziwei-control/releases/phone-stability-8be4604f2938`。
