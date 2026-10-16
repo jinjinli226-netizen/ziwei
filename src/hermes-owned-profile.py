@@ -1,5 +1,6 @@
 """Owned native profile layout. No clone, alias, gateway notification or login."""
 import json
+import importlib.util
 import os
 from pathlib import Path
 import re
@@ -23,6 +24,8 @@ _DIAGNOSTIC_EXCEPTIONS = frozenset({
 }) | frozenset({
     ('json.decoder', 'JSONDecodeError'), ('yaml.representer', 'RepresenterError'),
     ('yaml.parser', 'ParserError'), ('yaml.scanner', 'ScannerError'), ('yaml.reader', 'ReaderError'),
+    ('ruamel.yaml.representer', 'RepresenterError'), ('ruamel.yaml.parser', 'ParserError'),
+    ('ruamel.yaml.scanner', 'ScannerError'), ('ruamel.yaml.reader', 'ReaderError'),
 })
 _DIAGNOSTIC_SOURCES = {
     'hermes-owned-profile.py': frozenset({'provision', '_provision', 'verify'}),
@@ -84,7 +87,10 @@ def provision(request):
 def _provision(request, state):
     from hermes_cli import __version__
     from hermes_cli import profiles
-    import yaml
+    yaml_spec = importlib.util.spec_from_file_location('ziwei_yaml_compat', Path(__file__).with_name('hermes-yaml-compat.py'))
+    yaml_bridge = importlib.util.module_from_spec(yaml_spec)
+    yaml_spec.loader.exec_module(yaml_bridge)
+    yaml = yaml_bridge.load_native_yaml()
     state['stage'] = 'identity'
     context, metadata = request['context'], request['metadata']
     requested_effort=context.get('config',{}).get('reasoningEffort')

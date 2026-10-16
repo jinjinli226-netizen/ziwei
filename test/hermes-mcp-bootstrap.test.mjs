@@ -63,6 +63,23 @@ test('Hermes bootstrap refuses missing/unbound interpreters and foreign console 
   assert.throws(() => runtime.hermesMcpSpawnSpec(f.launcher, [], { env: f.env }), /入口/);
 });
 
+test('Bot enabled-tool overlay uses its bound native YAML interface without importing PyYAML', t => {
+  const f = fixture(t); if (!f) return;
+  const yamlFile = path.join(f.directory, 'hermes_yaml.py');
+  fs.writeFileSync(yamlFile, `import json,sys\nclass NoLegacyYaml:\n def find_spec(self, fullname, path=None, target=None):\n  if fullname == 'yaml' or fullname.startswith('yaml.'):\n   raise AssertionError('Legacy PyYAML must not be imported')\nsys.meta_path.insert(0, NoLegacyYaml())\ndef safe_load(value):\n return json.loads(value)\ndef safe_dump(value, **kwargs):\n return json.dumps(value)\n`);
+  fs.writeFileSync(path.join(f.directory, 'hermes_cli', 'main.py'), `import hermes_yaml\n` + fs.readFileSync(path.join(f.directory, 'hermes_cli', 'main.py'), 'utf8'));
+  fs.writeFileSync(path.join(f.env.HERMES_MANAGED_DIR, 'config.yaml'), JSON.stringify({mcp_servers:{ziwei_management:{},'ziwei-terminal':{}}}));
+  f.env.ZIWEI_INSTANCE_KIND = 'hermes-bot';
+  const spec = runtime.hermesMcpSpawnSpec(f.launcher, f.args, {env:f.env});
+  const output = spawnSync(spec.command, spec.args, {env:f.env,encoding:'utf8',windowsHide:true});
+  assert.equal(output.status,0,output.stderr);
+  const result=JSON.parse(output.stdout);
+  assert.equal(result.managementVisible,true);assert.equal(result.phoneDisabled,true);assert.equal(result.gateTriggered,true);
+  fs.appendFileSync(yamlFile,'\n# changed-native-yaml\n');
+  const changed=spawnSync(spec.command,spec.args,{env:f.env,encoding:'utf8',windowsHide:true});
+  assert.equal(changed.status,125);assert.match(changed.stderr,/changed/);
+});
+
 test('Hermes bootstrap fails clearly when native managed overlay or gate support is unavailable', t => {
   assert.equal(typeof runtime.hermesMcpSpawnSpec, 'function');
   const f = fixture(t); if (!f) return;

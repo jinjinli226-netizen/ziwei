@@ -13,7 +13,7 @@ test('owned Profile Python receipts keep bounded diagnostics, primary failure an
   if(!python){t.skip('Python is required for the isolated provision receipt fixture');return;}
   const result=spawnSync(python,['-I','-B',path.resolve(import.meta.dirname,'fixtures/hermes-owned-diagnostics.py')],{encoding:'utf8',windowsHide:true,timeout:20000});
   assert.equal(result.status,0,result.stdout+'\n'+result.stderr);
-  assert.match(result.stderr,/Ran 14 tests/);
+  assert.match(result.stderr,/Ran 15 tests/);
   assert.match(result.stderr,/\bOK\b/);
   const line=result.stdout.split(/\r?\n/).find(value=>value.startsWith('ZIWEI_DIAGNOSTIC_RECEIPTS:'));
   assert.ok(line,'The actual Python receipt must reach the JS finalizer');

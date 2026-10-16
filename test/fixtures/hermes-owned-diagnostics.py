@@ -55,8 +55,12 @@ def _finish_profile_layout(profile_dir, *, no_skills, clone_all, description):
         self.profiles.ROOT = self.home
         package = types.ModuleType('hermes_cli')
         package.__version__ = '0.22.0'
-        package.__path__ = [str(self.root)]
+        native_package = self.root / 'hermes_cli'
+        native_package.mkdir()
+        package.__path__ = [str(native_package)]
         package.profiles = self.profiles
+        (native_package / 'main.py').write_text('# bound legacy source\n', encoding='utf-8')
+        (native_package / 'config.py').write_text('import yaml\n', encoding='utf-8')
         yaml = types.ModuleType('yaml')
         yaml.safe_dump = lambda value, **kwargs: json.dumps(value, ensure_ascii=False)
         constants = types.ModuleType('hermes_constants')
@@ -155,6 +159,13 @@ def _finish_profile_layout(profile_dir, *, no_skills, clone_all, description):
             diagnostic = self.diagnostic(receipt, 'native_imports', 'ModuleNotFoundError')
         self.assertEqual(diagnostic['missingModule'], 'yaml')
         PROOF_RECEIPTS.append(receipt)
+        self.assertFalse((self.home / 'profiles' / 'bot-fixture').exists())
+
+    def test_missing_native_yaml_wrapper_cannot_be_mistaken_for_a_legacy_install(self):
+        (self.root / 'hermes_cli/config.py').write_text('import hermes_yaml as yaml\n', encoding='utf-8')
+        receipt = self.execute()
+        diagnostic = self.diagnostic(receipt, 'native_imports', 'ModuleNotFoundError')
+        self.assertEqual(diagnostic['missingModule'], 'hermes_yaml')
         self.assertFalse((self.home / 'profiles' / 'bot-fixture').exists())
 
     def test_private_or_unbounded_missing_module_names_are_not_returned(self):

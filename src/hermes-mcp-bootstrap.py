@@ -96,6 +96,13 @@ def _binding(launcher, multi_images=False, launcher_binding=None, expected=None)
                     raise UnsupportedNativeHermes('installation package changed')
         elif expected is not None and expected.get('sourceBootstrap') is not None:
             raise UnsupportedNativeHermes('installation changed')
+    root = Path(paths['main']).parent.parent
+    yaml_interface = root / 'hermes_yaml.py'
+    if os.path.lexists(yaml_interface):
+        target = yaml_interface.resolve(strict=True)
+        if not target.is_file() or target.parent != root:
+            raise UnsupportedNativeHermes('native yaml source')
+        paths['native_yaml'] = str(target)
     startup = Path(paths['mcp_startup']).read_text(encoding='utf-8')
     managed = Path(paths['managed_scope']).read_text(encoding='utf-8')
     if '_has_configured_mcp_servers' not in startup or 'HERMES_MANAGED_DIR' not in managed:
@@ -603,7 +610,10 @@ def run():
             if raw.get('agent', {}).get('disabled_toolsets') == ['all']:
                 effective['mcp_servers'] = {}
             else:
-                import yaml
+                yaml_spec = importlib.util.spec_from_file_location('ziwei_yaml_compat', Path(__file__).with_name('hermes-yaml-compat.py'))
+                yaml_bridge = importlib.util.module_from_spec(yaml_spec)
+                yaml_spec.loader.exec_module(yaml_bridge)
+                yaml = yaml_bridge.load_native_yaml()
                 policy = yaml.safe_load((Path(overlay) / 'config.yaml').read_text(encoding='utf-8')) or {}
                 requested.update(name for name in policy.get('mcp_servers', {}) if name in {'ziwei_management', 'ziwei-terminal'})
                 effective['mcp_servers'] = {name: value for name, value in effective.get('mcp_servers', {}).items() if name in requested}

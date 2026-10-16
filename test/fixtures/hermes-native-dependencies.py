@@ -12,7 +12,7 @@ import unittest
 import zipfile
 
 
-PROJECT, OFFICIAL_SOURCE, YAML_SOURCE = map(lambda value: Path(value).resolve(), sys.argv[1:4])
+PROJECT, OFFICIAL_SOURCE, RUAMEL_SOURCE = map(lambda value: Path(value).resolve(), sys.argv[1:4])
 sys.argv = sys.argv[:1]
 GUARD = r'''
 import atexit,importlib.util,json,os,runpy,sys
@@ -39,11 +39,16 @@ def profile(frame,event,arg):
 sys.setprofile(profile)
 @atexit.register
 def report():
-    yaml=sys.modules.get('yaml')
+    yaml=sys.modules.get('hermes_yaml')
+    ruamel=sys.modules.get('ruamel.yaml')
     marker=importlib.util.find_spec('native_generation_marker')
+    config=private/'home/profiles/bot-native-pm/config.yaml'
     Path(os.environ['FIXTURE_AUDIT']).write_text(json.dumps({
         'initialYamlAbsent':True,'activateDependenciesCalls':calls,
         'yamlFile':getattr(yaml,'__file__',None),
+        'ruamelFile':getattr(ruamel,'__file__',None),
+        'pyYamlAvailable':importlib.util.find_spec('yaml') is not None,
+        'readBack':yaml.safe_load(config.read_text(encoding='utf-8')) if yaml and config.is_file() else None,
         'pthModule':marker.origin if marker else None,
         'home':os.environ.get('HERMES_HOME'),'lazy':os.environ.get('HERMES_DISABLE_LAZY_INSTALLS'),
         'pmSource':getattr(sys.modules.get('pm.environments'),'__file__',None),
@@ -72,7 +77,7 @@ class NativeDependencies(unittest.TestCase):
         (self.generation / 'pyvenv.cfg').write_text('version = %s.%s.%s\n' % sys.version_info[:3], encoding='utf-8')
         self.site = self.generation / ('Lib/site-packages' if os.name == 'nt' else 'lib/python%s.%s/site-packages' % sys.version_info[:2])
         self.site.mkdir(parents=True)
-        shutil.copytree(YAML_SOURCE, self.site / 'yaml', ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+        shutil.copytree(RUAMEL_SOURCE, self.site / 'ruamel', ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
         extra = self.site / 'native-extra'
         extra.mkdir()
         (extra / 'native_generation_marker.py').write_text('SELECTED = True\n', encoding='utf-8')
@@ -84,6 +89,7 @@ class NativeDependencies(unittest.TestCase):
         self.python = Path(getattr(sys, '_base_executable', sys.executable)).resolve()
         self.launcher = self.private / 'hermes'
         self.launcher.write_text('#!"' + str(self.python) + '"\nfrom hermes_cli.main import main\n', encoding='utf-8')
+        self.launcher_binding = None
         self.env = {key: os.environ[key] for key in ('PATH', 'LANG', 'SystemRoot', 'SYSTEMROOT', 'WINDIR') if key in os.environ}
         self.env.update({'HERMES_HOME': str(self.home), 'HOME': str(self.private / 'user'), 'USERPROFILE': str(self.private / 'user'),
                          'CODEX_HOME': str(self.private / 'empty-codex'), 'HERMES_DISABLE_LAZY_INSTALLS': '0',
@@ -118,16 +124,21 @@ class NativeDependencies(unittest.TestCase):
         return output, proof
 
     def probe(self):
-        output, audit = self.run_native('probe', ['--probe', str(self.launcher)])
+        args = ['--probe', str(self.launcher)]
+        if self.launcher_binding is not None:
+            args += ['--launcher-binding', json.dumps(self.launcher_binding)]
+        output, audit = self.run_native('probe', args)
         self.assertEqual(output.returncode, 0, output.stderr.decode())
         proof = json.loads(output.stdout)
         self.assertEqual(proof['paths']['bootstrap'], str(self.source / 'hermes_bootstrap.py'))
-        self.assertEqual(proof['sourceBootstrap']['bootstrapSha256'], hashlib.sha256((self.source / 'hermes_bootstrap.py').read_bytes()).hexdigest())
+        installation = proof['launcherBinding']['installation'] if self.launcher_binding else proof['sourceBootstrap']
+        self.assertEqual(installation['bootstrapSha256'], hashlib.sha256((self.source / 'hermes_bootstrap.py').read_bytes()).hexdigest())
+        self.assertEqual(proof['paths']['native_yaml'], str(self.source / 'hermes_yaml.py'))
         self.assertTrue(audit['activateDependenciesCalls'])
         self.assertEqual(Path(audit['pthModule']), self.site / 'native-extra/native_generation_marker.py')
         return proof
 
-    def test_real_official_pm_selects_committed_generation_before_create_and_duplicate(self):
+    def create_and_duplicate(self):
         proof = self.probe()
         args = ['--launcher', str(self.launcher), '--binding', json.dumps(proof), '--owned-profile-provision', '--']
         output, audit = self.run_native('create', args, self.request)
@@ -135,7 +146,10 @@ class NativeDependencies(unittest.TestCase):
         receipt = json.loads(next(line.split(b':', 1)[1] for line in output.stdout.splitlines() if line.startswith(b'ZIWEI_BOT_PROVISION:')))
         self.assertEqual(receipt['status'], 'succeeded', receipt)
         self.assertTrue(audit['activateDependenciesCalls'])
-        self.assertEqual(Path(audit['yamlFile']), self.site / 'yaml/__init__.py')
+        self.assertEqual(Path(audit['yamlFile']), self.source / 'hermes_yaml.py')
+        self.assertEqual(Path(audit['ruamelFile']), self.site / 'ruamel/yaml/__init__.py')
+        self.assertFalse(audit['pyYamlAvailable'])
+        self.assertEqual(audit['readBack']['model'], self.request['seedConfig']['model'])
         self.assertEqual(audit['home'], str(self.home))
         self.assertEqual(audit['lazy'], '0')
         home = Path(receipt['botProvision']['home'])
@@ -150,7 +164,41 @@ class NativeDependencies(unittest.TestCase):
         self.assertTrue(duplicate['botProvision']['duplicate'])
         self.assertEqual(memory.read_text(), 'persistent memory')
         self.assertEqual((home / 'config.yaml').read_bytes(), original_config)
-        self.assertEqual(Path(audit['yamlFile']), self.site / 'yaml/__init__.py')
+        self.assertEqual(Path(audit['ruamelFile']), self.site / 'ruamel/yaml/__init__.py')
+        self.assertFalse(audit['pyYamlAvailable'])
+        self.assertEqual(audit['readBack']['model'], self.request['seedConfig']['model'])
+
+    def test_real_official_pm_selects_only_ruamel_before_create_and_duplicate(self):
+        self.create_and_duplicate()
+
+    def test_isolated_store_launcher_creates_and_reloads_without_pyyaml(self):
+        self.launcher = self.private / 'hermes.exe'
+        script = ('import sys\nsys.path.insert(0, ' + repr(str(self.source)) + ')\n'
+                  'sys._hermes_pin_default_home = True\nimport hermes_bootstrap\nfrom hermes_cli.main import main\n')
+        with self.launcher.open('wb') as stream:
+            stream.write(b'MZ' + b'\0' * 62)
+            stream.write(('#!"' + str(self.python) + '" -I\r\n').encode('utf-8'))
+            with zipfile.ZipFile(stream, 'w') as archive:
+                archive.writestr('__main__.py', script)
+        self.launcher_binding = {'schemaVersion': 1, 'isolated': {'kind': 'distlib-isolated',
+                                'interpreter': str(self.python), 'launcherSha256': hashlib.sha256(self.launcher.read_bytes()).hexdigest()}}
+        self.create_and_duplicate()
+
+    def test_missing_native_ruamel_does_not_fall_back_to_available_pyyaml(self):
+        proof = self.probe()
+        shutil.rmtree(self.site / 'ruamel')
+        trap = self.site / 'yaml'
+        trap.mkdir()
+        marker = self.private / 'forbidden-pyyaml-fallback'
+        (trap / '__init__.py').write_text('from pathlib import Path\nPath(' + repr(str(marker)) + ').write_text("wrong fallback")\n', encoding='utf-8')
+        args = ['--launcher', str(self.launcher), '--binding', json.dumps(proof), '--owned-profile-provision', '--']
+        output, audit = self.run_native('missing-ruamel', args, self.request)
+        self.assertEqual(output.returncode, 0, output.stderr.decode())
+        receipt = json.loads(next(line.split(b':', 1)[1] for line in output.stdout.splitlines() if line.startswith(b'ZIWEI_BOT_PROVISION:')))
+        self.assertEqual(receipt['status'], 'failed')
+        self.assertEqual(receipt['diagnostic']['missingModule'], 'ruamel')
+        self.assertFalse(marker.exists())
+        self.assertFalse((self.home / 'profiles/bot-native-pm').exists())
 
     def test_bootstrap_change_is_rejected_before_its_new_code_runs(self):
         proof = self.probe()
