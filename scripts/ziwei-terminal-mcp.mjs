@@ -117,16 +117,25 @@ export function createTerminalMcpClient(options = {}) {
       if (args.deviceId !== undefined && args.deviceId !== config.deviceId) throw Object.assign(new Error('手机工具目标与已绑定手机 scope 不匹配'), { phoneExecutionState: 'not_started' });
       for (const key of definition.inputSchema.required || []) if (!Object.hasOwn(args, key)) throw Object.assign(new Error(`手机工具缺少 ${key}`), { phoneExecutionState: 'not_started' });
       if (Object.keys(args).some(key => !Object.hasOwn(definition.inputSchema.properties, key))) throw Object.assign(new Error('手机工具含未知参数'), { phoneExecutionState: 'not_started' });
-      if (config.expiresAt <= Date.now()) throw Object.assign(new Error('手机 MCP 执行凭据已过期，请重启本次员工执行'), { phoneExecutionState: 'not_started' });
-      let response;
-      try {
-        response = await fetchImpl(`${config.baseUrl}/call`, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(90000), headers: { authorization: `Bearer ${config.token}`, accept: 'application/json', 'content-type': 'application/json' }, body: JSON.stringify({ name, arguments: args }) });
-      } catch { throw Object.assign(new Error('手机 MCP 连接中断或超时；动作可能已受理，请查询原回执，不要重放'), { phoneExecutionState: 'uncertain' }); }
-      let value;
-      try { value = await response.json(); }
-      catch { throw Object.assign(new Error('手机 MCP 响应无法解析；请查询原回执，不要重放动作'), { phoneExecutionState: 'uncertain' }); }
-      if (!response.ok) throw Object.assign(new Error(scrub(value?.error || value?.message || `手机 MCP HTTP ${response.status}`)), { phoneExecutionState: 'uncertain' });
-      return value;
+      if (config.expiresAt <= Date.now()) throw Object.assign(new Error('手机 MCP 执行凭据已过期；恢复执行授权后继续原回执观察，不重跑整轮业务'), { phoneExecutionState: 'not_started' });
+      const readAttempts = ['ziwei_phone_status', 'ziwei_phone_receipt', 'ziwei_phone_wait'].includes(name) ? 2 : 1;
+      for (let attempt = 0; attempt < readAttempts; attempt++) {
+        try {
+          let response;
+          try {
+            response = await fetchImpl(`${config.baseUrl}/call`, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(90000), headers: { authorization: `Bearer ${config.token}`, accept: 'application/json', 'content-type': 'application/json' }, body: JSON.stringify({ name, arguments: args }) });
+          } catch { throw Object.assign(new Error('手机 MCP 连接中断或超时；受理状态未确认，系统仅继续只读观察，不重放动作'), { phoneExecutionState: 'uncertain', retryableRead: true }); }
+          let value;
+          try { value = await response.json(); }
+          catch { throw Object.assign(new Error('手机 MCP 响应无法解析；系统仅继续读取原回执和当前页面，不重放动作'), { phoneExecutionState: 'uncertain', retryableRead: true }); }
+          if (!response.ok) throw Object.assign(new Error(scrub(value?.error || value?.message || `手机 MCP HTTP ${response.status}`)), { phoneExecutionState: 'uncertain', retryableRead: response.status >= 500 });
+          return value;
+        } catch (error) {
+          // Only repeat observations. A POST /call can itself submit an action,
+          // so transport retries must never include an action/upgrade/control.
+          if (!error.retryableRead || attempt + 1 >= readAttempts) throw error;
+        }
+      }
     }
   };
 }
@@ -139,7 +148,7 @@ function commandOutcome(command) {
   const state = executionStates.has(declared) ? declared : command.status === 'succeeded' ? 'succeeded' : command.status === 'uncertain' ? 'uncertain' : ['failed', 'expired', 'cancelled', 'rejected', 'aborted', 'timed_out'].includes(command.status) ? 'failed' : 'pending';
   const confirmed = command.executingConfirmed ?? command.executing_confirmed;
   const errorCode = command.errorCode || command.result?.errorCode;
-  return { state, ...(typeof errorCode === 'string' && /^[A-Z0-9_]{1,100}$/.test(errorCode) ? { errorCode } : {}), ...(typeof command.id === 'string' ? { commandId: command.id } : {}), ...(typeof command.status === 'string' ? { status: command.status } : {}), ...([true, false, 0, 1].includes(confirmed) ? { executingConfirmed: Boolean(confirmed) } : {}), ...(safeDiagnostic(command.error) ? { error: safeDiagnostic(command.error) } : {}), ...(state === 'uncertain' || state === 'pending' ? { retryAllowed: false } : {}) };
+  return { state, ...(typeof errorCode === 'string' && /^[A-Z0-9_]{1,100}$/.test(errorCode) ? { errorCode } : {}), ...(typeof command.id === 'string' ? { commandId: command.id } : {}), ...(typeof command.status === 'string' ? { status: command.status } : {}), ...([true, false, 0, 1].includes(confirmed) ? { executingConfirmed: Boolean(confirmed) } : {}), ...(safeDiagnostic(command.error) ? { error: safeDiagnostic(command.error) } : {}), ...(state === 'uncertain' || state === 'pending' ? { retryAllowed: false, nextAction: 'observe', receiptTool: 'ziwei_phone_receipt', observationTool: 'ziwei_phone_screenshot' } : {}) };
 }
 function rpcError(id, code, message) { return { jsonrpc: '2.0', id, error: { code, message } }; }
 export async function handleTerminalJsonRpc(message, client) {
@@ -147,7 +156,7 @@ export async function handleTerminalJsonRpc(message, client) {
   if (!message || message.jsonrpc !== '2.0' || typeof message.method !== 'string') return rpcError(id, -32600, '无效 JSON-RPC 请求');
   if (message.method.startsWith('notifications/')) return null;
   if (message.method === 'ping') return { jsonrpc: '2.0', id, result: {} };
-  if (message.method === 'initialize') return { jsonrpc: '2.0', id, result: { protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'ziwei-terminal', version: '1.0.0' }, instructions: '只使用当前员工明确绑定的手机。先 list/status 确认目标与健康，再 screenshot 观察当前画面、action 执行已授权动作，按原 commandId 查询 receipt/wait。受理不等于成功；超时或 uncertain 不重复下发。已有用户授权持续有效，缺少必要目标或配置时明确报告。' } };
+  if (message.method === 'initialize') return { jsonrpc: '2.0', id, result: { protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'ziwei-terminal', version: '1.0.0' }, instructions: '只使用当前员工明确绑定的手机。先 list/status 确认目标与健康，再 screenshot 观察当前画面、action 执行已授权动作，按原 commandId 查询 receipt/wait。受理不等于成功；超时或 uncertain 时自动按原 commandId 查询 receipt/wait，再截图观察当前页面并继续恢复；不重复下发原动作，不重跑整轮业务，不把常规故障核查转交用户。not_started 时观察并重新定位后只补尚未执行的步骤。只有锁屏、系统权限或用户主动停止等确实需要本机操作的情况才提示用户处理。已有用户授权持续有效，缺少必要目标或配置时明确报告。' } };
   if (message.method === 'tools/list') return { jsonrpc: '2.0', id, result: { tools: toolDefinitions } };
   if (message.method !== 'tools/call') return rpcError(id, -32601, '未知 MCP 方法');
   try {
@@ -167,7 +176,7 @@ export async function handleTerminalJsonRpc(message, client) {
       }
     }
     return { jsonrpc: '2.0', id, result: { content, structuredContent: value, isError: false } };
-  } catch (error) { return { jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: error?.message || '手机 MCP 工具失败' }], structuredContent: { phoneExecution: { state: executionStates.has(error?.phoneExecutionState) ? error.phoneExecutionState : 'uncertain', retryAllowed: false } }, isError: true } }; }
+  } catch (error) { return { jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: error?.message || '手机 MCP 工具失败' }], structuredContent: { phoneExecution: { state: executionStates.has(error?.phoneExecutionState) ? error.phoneExecutionState : 'uncertain', retryAllowed: false, nextAction: 'observe', statusTool: 'ziwei_phone_status', observationTool: 'ziwei_phone_screenshot', ...(typeof message.params?.arguments?.commandId === 'string' ? { commandId: message.params.arguments.commandId, receiptTool: 'ziwei_phone_receipt' } : {}) } }, isError: true } }; }
 }
 
 export async function runTerminalStdio(options = {}) {

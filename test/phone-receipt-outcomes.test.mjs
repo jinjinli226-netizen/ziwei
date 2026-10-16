@@ -59,7 +59,7 @@ test('a confirmed failed command cannot hide another uncertain command', () => {
   assert.equal(failure.code, 'terminal_mcp_receipt_incomplete'); assert.equal(failure.phoneExecutionState, 'uncertain');
   assert.deepEqual(failure.commandIds, ['command_failed', 'command_unknown']);
   assert.match(failure.error, /请先聚焦可编辑输入框/); assert.match(failure.error, /文本已提交但读回未确认/);
-  assert.match(failure.error, /不要重放动作/);
+  assert.match(failure.error, /不重放动作/);
 });
 
 test('a later success on the original command resolves its earlier uncertainty', () => {
@@ -84,10 +84,10 @@ test('pre-request action rejection and read-only transport errors do not imply p
   const rejected = await audit(t, [request('ziwei_phone_action', { deviceId: 'foreign-phone', action: 'tap' })], (...args) => client.call(...args));
   assert.equal(calls, 0); assert.equal(terminalMcpExecutionFailure(rejected.receipt).phoneExecutionState, 'not_started');
   const readOnly = await audit(t, [request('ziwei_phone_status', { deviceId: f.scope.deviceId })], (...args) => client.call(...args));
-  assert.equal(calls, 1); assert.equal(terminalMcpExecutionFailure(readOnly.receipt).code, 'terminal_mcp_tools_failed');
+  assert.equal(calls, 2); assert.equal(terminalMcpExecutionFailure(readOnly.receipt).code, 'terminal_mcp_tools_failed');
 });
 
-for (const [state, label] of [['uncertain', '执行结果待核实'], ['not_started', '手机动作未执行'], ['failed', '执行失败']]) test(`chat preserves detailed employee summary and readable error for ${state}`, () => {
+for (const [state, label] of [['uncertain', '执行结果未确认'], ['not_started', '手机动作未执行'], ['failed', '执行失败']]) test(`chat preserves detailed employee summary and readable error for ${state}`, () => {
   const repo = createRepository({ memory: true }), conversation = repo.createConversation('test-111', { title: '手机回执' });
   const submitted = repo.addConversationMessage(conversation.id, { role: 'user', content: '检查手机', runtime: 'Codex' });
   const result = { output: summary, terminalMcp: { executionState: state }, ...(state === 'uncertain' ? { executionState: state } : {}) };
@@ -102,7 +102,7 @@ test('task failure keeps the employee summary as well as receipt details', () =>
   const action = repo.listA2AActions('test-111', { status: 'pending' }).find(row => row.task_id === task.id);
   repo.resultA2AAction(action.id, { status: 'failed', error: '结果待核实', result: { executionState: 'uncertain', output: summary } });
   const content = repo.getTaskMessages(task.id).at(-1).content;
-  assert.match(content, /执行结果待核实/); assert.ok(content.includes(summary)); assert.equal(repo.getTask(task.id).state, 'blocked');
+  assert.match(content, /执行结果未确认/); assert.ok(content.includes(summary)); assert.equal(repo.getTask(task.id).state, 'blocked');
 });
 
 for (const state of ['uncertain', 'not_started', 'failed']) test(`automation cannot replay the whole phone workflow after ${state}`, () => {
@@ -181,4 +181,35 @@ test('successful earlier actions prevent an aggregate claim that phone work neve
   ] });
   assert.equal(failure.phoneExecutionState, 'failed'); assert.match(failure.error, /command_text: 未执行/);
   assert.doesNotMatch(failure.error, /手机动作未执行/);
+});
+
+
+test('transient receipt reads recover automatically without resubmitting any phone action', async t => {
+  const f = fixture(t), names = [];
+  const client = createTerminalMcpClient({ tokenFile: f.tokenFile, fetchImpl: async (_url, init) => {
+    names.push(JSON.parse(init.body).name);
+    if (names.length === 1) throw new Error('transient read disconnect');
+    return new Response(JSON.stringify({ command: { id: 'command_original', status: 'succeeded' } }), { status: 200 });
+  } });
+  const result = await client.call('ziwei_phone_receipt', { deviceId: f.scope.deviceId, commandId: 'command_original' });
+  assert.equal(result.command.status, 'succeeded'); assert.deepEqual(names, ['ziwei_phone_receipt', 'ziwei_phone_receipt']);
+});
+
+test('uncertain MCP guidance directs the agent to observe automatically instead of asking the user', async () => {
+  const response = await handleTerminalJsonRpc(request('ziwei_phone_action', { action: 'text' }), { call: async () => ({ command: { id: 'command_original', status: 'uncertain' } }) });
+  const recovery = response.result.structuredContent.phoneExecution;
+  assert.equal(recovery.nextAction, 'observe'); assert.equal(recovery.receiptTool, 'ziwei_phone_receipt'); assert.equal(recovery.observationTool, 'ziwei_phone_screenshot');
+  const initialized = await handleTerminalJsonRpc({ jsonrpc: '2.0', id: 2, method: 'initialize' }, {});
+  assert.match(initialized.result.instructions, /自动按原 commandId/); assert.match(initialized.result.instructions, /不把常规故障核查转交用户/);
+});
+
+
+test('failed observations preserve their cause without claiming the original action never started', () => {
+  const observed = { toolName: 'ziwei_phone_receipt', ok: false, error: '原回执连接中断' };
+  const readOnly = terminalMcpExecutionFailure({ runtime: 'Hermes', loaded: true, toolCalls: [observed] });
+  assert.equal(readOnly.phoneExecutionState, undefined); assert.equal(readOnly.nextAction, 'observe');
+  const pending = terminalMcpExecutionFailure({ runtime: 'Hermes', loaded: true, toolCalls: [
+    { toolName: 'ziwei_phone_action', ok: true, commandId: 'command_original', status: 'queued' }, observed,
+  ] });
+  assert.equal(pending.phoneExecutionState, 'uncertain'); assert.match(pending.error, /原回执连接中断/);
 });

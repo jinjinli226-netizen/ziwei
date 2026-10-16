@@ -190,7 +190,7 @@ export function terminalMcpReceipt(receipt) {
 
 export function terminalMcpExecutionFailure(receipt) {
   if (!receipt) return null;
-  if (!receipt.loaded) return { code: 'terminal_mcp_not_loaded', error: `${receipt.runtime} 已退出但未收到手机 MCP 实际握手；请检查独立 profile、工具配置和本机 MCP 日志` };
+  if (!receipt.loaded) return { code: 'terminal_mcp_not_loaded', error: `${receipt.runtime} 已退出但未收到手机 MCP 实际握手；恢复目标为独立 profile、工具配置及本机 MCP 连接` };
   const calls = receipt.toolCalls || receipt.tool_calls || [];
   const issued = new Map();
   const unconfirmedSubmissions = [];
@@ -219,10 +219,11 @@ export function terminalMcpExecutionFailure(receipt) {
     // A known failure must not hide a second command whose effects are unknown.
     const phoneExecutionState = unresolved ? 'uncertain' : issued.size === incomplete.length && [...incomplete, ...unconfirmedSubmissions].every(item => item.executionState === 'not_started') ? 'not_started' : 'failed';
     const ids = { commandIds: incomplete.filter(item => item.kind === 'command').map(item => item.id), updateIds: incomplete.filter(item => item.kind === 'update').map(item => item.id) };
-    const detail = [...incomplete.map(item => `${item.id}: ${item.executionState === 'not_started' ? '未执行' : item.status || 'unknown'}${item.error ? `，${item.error}` : ''}`), ...unconfirmedSubmissions.map(item => `${item.toolName}: ${item.error}`)].join('、');
-    return { code: unresolved ? 'terminal_mcp_receipt_incomplete' : 'terminal_mcp_receipt_failed', phoneExecutionState, retryAllowed: false, error: `${receipt.runtime} 手机动作${phoneExecutionState === 'uncertain' ? '执行结果待核实' : phoneExecutionState === 'not_started' ? '未执行' : '执行失败'}（${detail}）；${unresolved ? '请查询原回执，不要重放动作' : '已保留原回执，不自动重试'}`, ...ids };
+    const observationErrors = calls.filter(call => !call.ok && !['ziwei_phone_action', 'ziwei_phone_screenshot', 'ziwei_phone_upgrade'].includes(call.toolName)).map(call => phoneDiagnostic(call.error)).filter(Boolean);
+    const detail = [...incomplete.map(item => `${item.id}: ${item.executionState === 'not_started' ? '未执行' : item.status || 'unknown'}${item.error ? `，${item.error}` : ''}`), ...unconfirmedSubmissions.map(item => `${item.toolName}: ${item.error}`), ...observationErrors.map(error => `回执观察：${error}`)].join('、');
+    return { code: unresolved ? 'terminal_mcp_receipt_incomplete' : 'terminal_mcp_receipt_failed', phoneExecutionState, retryAllowed: false, nextAction: 'observe', error: `${receipt.runtime} 手机动作${phoneExecutionState === 'uncertain' ? '执行结果未确认' : phoneExecutionState === 'not_started' ? '未执行' : '执行失败'}（${detail}）；${unresolved ? '系统继续读取原回执和当前页面，不重放动作' : '已保留原回执，恢复时只补未完成步骤，不重跑整轮业务'}`, ...ids };
   }
-  if (calls.length && !calls.some(item => item.ok === true)) return { code: 'terminal_mcp_tools_failed', phoneExecutionState: 'not_started', error: `${receipt.runtime} 手机 MCP 已加载，但实际尝试的工具全部失败；${calls.map(item => phoneDiagnostic(item.error)).filter(Boolean).join('、') || '请核对手机绑定、技能安装和执行授权'}` };
+  if (calls.length && !calls.some(item => item.ok === true)) return { code: 'terminal_mcp_tools_failed', nextAction: 'observe', error: `${receipt.runtime} 手机 MCP 已加载，但实际尝试的工具全部失败；${calls.map(item => phoneDiagnostic(item.error)).filter(Boolean).join('、') || '手机绑定、技能安装或执行授权尚未恢复'}` };
   return null;
 }
 
