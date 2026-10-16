@@ -2,7 +2,9 @@
 
 ## 当前接手入口（2026-10-16）
 
-最新生产状态、GitHub 分支、Windows 客户端 build、真实验收范围及未解决问题统一维护在 [HANDOFF.md 的最新接手状态](HANDOFF.md#2026-10-16-最新接手状态)。V2 已发布，最近主站/API 和客户端提交均为 `cd610444ce793d6e5fbebfa7ed1b982c070ad9a3`；文档提交可以领先产品。
+最新生产状态、GitHub 分支、Windows 客户端 build、真实验收范围及未解决问题统一维护在 [HANDOFF.md 的最新接手状态](HANDOFF.md#2026-10-16-最新接手状态)。V2 已发布，主站/API 为 `cd610444ce793d6e5fbebfa7ed1b982c070ad9a3`；09:02 官方客户端已更新至 `40cefe91672b62abe14b8348022e5116803f33de`（build `74405c88…`）。文档提交可以领先产品。
+
+09:02 已发布公司台式旧创建失败记录阻塞停止与更新的恢复修复，保留原记录并支持更新回退后重试；未来纯解析失败正确记录未启动，更新输出实际阻塞原因。需用户在公司台式重新运行官方 PowerShell 更新入口并核对运行 build；发布不等于该机升级完成。主站/API 未切换，详见[停止更新恢复记录](docs/operations/2026-10-16-prelaunch-stop-recovery.md)。
 
 00:49 已发布聊天图片兼容修复，允许完整图片后的附加数据并保留原字节，界面明确支持 JPG/JPEG，错误指出具体文件。三图真实 HTTP 传输回归通过；Windows 现场图片读图仍待原机确认。新 build `6de43142…` 已包含下述启动器、续期和停止修复。首次发布遇到 SQLite journal 只读恢复错误并出现短暂 502，已恢复、通过完整性检查后重新发布；详见[图片兼容及发布恢复记录](docs/operations/2026-10-16-chat-image-container-compatibility.md)。
 

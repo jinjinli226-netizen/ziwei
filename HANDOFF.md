@@ -2,6 +2,14 @@
 
 ## 2026-10-16 最新接手状态
 
+### 09:02 更新：公司台式旧创建失败记录阻塞更新的修复已发布
+
+官方客户端已更新到源码 `40cefe91672b62abe14b8348022e5116803f33de`，先推 GitHub 再于 **09:02:55（Asia/Shanghai）** 发布。新 build `74405c8827b7a1248c57fecfa45ab14f83890a27e5dd504525089785f9258509`，包 SHA-256 `99f6da3729ba51369e91a1ce5c1550d93421aac7fc4b4f2e1775ab87571815d5`。主站/API 仍为下方 `cd610444`；服务未重启，数据库未迁移。
+
+公司台式的 stop 409 已定位为原 Hermes 创建动作 `action_a4ad606b-74ce-4a9e-afd3-e55722945cf4` 的 `UNMAPPED_NATIVE_EXECUTION`，并非待交付回执。新候选 updater 能对已审旧版本、精确失败和原进程进行核验，停止后保留恢复证明，使升级后停止不再被同一条记录卡住；未来纯解析失败也会正确记录未启动。更新错误现在保留实际阻塞原因。
+
+相关新失败回归 137 项、历史恢复 71 项、更新诊断 20 项分别通过；12 项 Windows 原生测试未执行。官方旧安装包的模拟恢复通过，不等于公司台式已升级。请在该机重新运行官方 `update-windows.ps1`，核对新 build 后重试原员工创建，不重建员工或删除执行记录。两项扩展基线失败、完整恢复限制、发布和回退见[停止更新恢复记录](docs/operations/2026-10-16-prelaunch-stop-recovery.md)。
+
 ### 00:49 更新：PNG/JPG 误拒收兼容修复已上线
 
 主站、API 和官方客户端现均来自 `cd610444ce793d6e5fbebfa7ed1b982c070ad9a3`，已先推 GitHub 再于 **00:49:35（Asia/Shanghai）** 发布。当前目录 `/opt/ziwei/releases/v2-hotfix-cd610444ce79/v2`；新 build `6de43142dce43675f6b8c8c56fd8d306eec0b0dcea8920091936c1b6c1a1b829`，包 SHA-256 `7d1a231f6bedd897baf314a9e66339f58abdb2fc8d695bffb535fd04dc49282d`。
