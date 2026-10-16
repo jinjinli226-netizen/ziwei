@@ -1,5 +1,13 @@
 # 紫薇项目管理与 AI 接手手册
 
+## 2026-10-16 Android 管理 App 首版内部测试已发布
+
+独立 Android 管理应用的产品源码为 `3edb4df5c9de2eba90e51fab42688ea742ba0f6b`，已先推 GitHub `codex/android-manager`，再分发 [0.1.0 内部测试包](https://github.com/jinjinli226-netizen/ziwei/releases/tag/android-manager-v0.1.0-internal)。代码、原生壳、构建和维护说明集中在 [mobile-manager](mobile-manager/README.md)，不替换正式站/API，不改变电脑客户端或受控手机 Agent/Updater。
+
+App 简化员工原聊天、多图、逐个汇报与追问、汇总待办、工作状态和设备截图。继续使用同一账号、工作区、员工、任务与长期会话；Hermes 在原绑定常开电脑执行。27 项专项测试、15 条浏览器隔离流程、55 项原生 URL 边界检查通过；Android API35 模拟器已验证同包安装、匿名真实接口引导、键盘、返回和前后台，多图原生选择器通过隔离测试包验证。真实账号登录后的员工/手机业务、用户真机与认证 Cookie 跨进程保留尚未验收。模拟器在主动退出后有 WebView124 renderer code -1 日志，两轮时序对照未见前台失败；保留原始记录，不声称系统日志零错误。
+
+主站/API、Windows 包和 Android 管理 App 的发布身份分别记录；后续仅文档提交可以领先该 APK 产品提交。构建产物在 `mobile-manager/dist/`，本机交付副本在根项目 `output/android-manager/v0.1.0-internal/`；临时测试端口已按端口中心规则登记、停止并释放。
+
 ## 2026-10-16 12:57 公司台式更新阻塞修复已发布
 
 公司台式仍运行 `993639eb…`，升级 24 小时客户端时被 `ACTION_STATE_CORRUPT` / HTTP 409 阻塞。根因是旧版允许正常 CLI 完成后留下后台进程，而维护扫描又将该合法历史当成文件损坏：原动作 `action_5b4dc026-2a9e-45db-8169-a08086e6e525` 的 root/host exit 均 0，treeConfirmed=false、activeProcesses=1。不能宣称这个后台进程已退出。

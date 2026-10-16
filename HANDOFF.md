@@ -1,10 +1,10 @@
 # 紫薇项目 HandOff
 
-## 2026-10-16 Android 管理 App 首版内部候选
+## 2026-10-16 Android 管理 App 首版内部测试
 
 用户已确认先做 Android，并认可浅色紫色视觉。独立分支 `codex/android-manager` 新增 `mobile-manager/`：员工原聊天、多图、工作与状态、既有 Bot 停止、员工常用编辑、例行工作、互联状态与截图，以及「选员工排序 → 逐个汇报/追问 → 汇总和计划待办」。复用原账号、工作区和员工数据；不创建第二套员工/Profile/HOME。Hermes 仍在绑定电脑执行。
 
-只新增独立 Android 管理应用，不替换正式站、不改 API/schema，不合并受控手机 Agent / Updater 职责。27 项无监听专项测试及 15 条浏览器隔离流程通过，独立审查发现的 5 项恢复/重复提交问题已修复并复核。浏览器使用真实内存 repository 与合成回执，不能称为正式员工业务实测；Android 安装和原生验证按 APK 对应证据另计。结构、构建、安装和边界见 [Android 管理 App](mobile-manager/README.md)。
+只新增独立 Android 管理应用，不替换正式站、不改 API/schema，不合并受控手机 Agent / Updater 职责。27 项无监听专项测试及 15 条浏览器隔离流程通过，独立审查发现的 5 项恢复/重复提交问题已修复并复核。浏览器使用真实内存 repository 与合成回执，不能称为正式员工业务实测；Android 安装和原生验证按 APK 对应证据另计。结构、构建、安装和边界见 [Android 管理 App](mobile-manager/README.md)。产品源码 `3edb4df` 已先推 GitHub 后发布独立 [内部测试 APK](https://github.com/jinjinli226-netizen/ziwei/releases/tag/android-manager-v0.1.0-internal)；当前文档可领先该产品提交，主站/API 和电脑客户端未因此替换。
 
 ## 2026-10-16 17:15 Bot 头像编辑器前端修复已发布
 
