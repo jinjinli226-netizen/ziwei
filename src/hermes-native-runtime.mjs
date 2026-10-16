@@ -28,7 +28,7 @@ export async function executeHermesNative(options={}) {
   child.stdout.on('data',chunk=>{bytes+=chunk.length;if(bytes>9*1024*1024){exceeded=true;abort();}else output+=String(chunk);});
   // Native diagnostics can contain provider request bodies. Keep only a code.
   child.stderr.on('data',()=>{});
-  child.stdin.end(JSON.stringify({...options.operation,context:options.context})+'\n');
+  child.stdin.end(JSON.stringify({...options.operation,context:{...options.context,runBudgetSeconds:spec.prepared.config.agent.run_budget_seconds}})+'\n');
   let evidence;
   try{evidence=await supervision.completionEvidence;}
   finally{signal?.removeEventListener('abort',abort);spec.cleanup();}

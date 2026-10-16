@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { actionExecutionLeaseMs } from './action-execution-budget.mjs';
 import path from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {nativeSpawn,appendNativeLifecycle} from './hermes-native-runtime.mjs';
@@ -38,7 +39,7 @@ export function createBotGatewayManager({apiBase,workspace,deviceToken}={},depen
       appendNativeLifecycle(worker.home,{event:'gateway.inbound.accepted',actionId:action.id,messageId:event.messageId});
       // The source delivery ID has durable server dedupe. Read only the one
       // original action; a timeout never dispatches a second execution.
-      const deadline=Date.now()+840000;
+      const deadline=Date.now()+actionExecutionLeaseMs(action);
       while(Date.now()<deadline && accepting(worker)){
         const current=await api('GET',`/a2a/v1/actions/${action.id}?workspace=${encodeURIComponent(workspace)}`);
         if(!accepting(worker))return;

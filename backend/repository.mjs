@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import {actionExecutionLeaseMs} from '../src/action-execution-budget.mjs';
 import { guardRepository } from './version-preservation.mjs';
 import {serverCodeRolloutFor,guardServerCodeRolloutRepository} from './server-code-rollout.mjs';
 import fs from 'node:fs';
@@ -118,13 +119,6 @@ function toSkillRecord(row) {
 }
 const configuredHeartbeatTimeout = Number(process.env.ZIWEI_HEARTBEAT_TIMEOUT_MS);
 const HEARTBEAT_TIMEOUT_MS = Number.isFinite(configuredHeartbeatTimeout) && configuredHeartbeatTimeout > 0 ? configuredHeartbeatTimeout : 45_000;
-const A2A_MIN_EXECUTION_TIMEOUT_MS = 15 * 60 * 1000;
-const A2A_EXECUTION_LEASE_BUFFER_MS = 60 * 1000;
-const a2aExecutionTimeoutMs = payload => {
-  const requested = Number(payload?.timeoutMs ?? payload?.timeout_ms);
-  if (!Number.isFinite(requested)) return A2A_MIN_EXECUTION_TIMEOUT_MS;
-  return Math.max(A2A_MIN_EXECUTION_TIMEOUT_MS, requested);
-};
 const ownVersion = () => process.env.ZIWEI_USER_VERSION || '0.1.0';
 const appOrigin = () => String(process.env.ZIWEI_APP_URL || process.env.FRONTEND_ORIGIN || 'http://127.0.0.1:5178').replace(/\/$/, '');
 const invitationExpiry = input => {
@@ -1924,7 +1918,7 @@ export function createRepository(options = {}, io={}) {
         }
         payload={...payload,employeeId:bot.employee.id,runtime:'Hermes',model:bot.employee.model_id,profile:bot.employee.runtime_profile,deviceId:bot.employee.target_device_id,hermesBot:{...bot.snapshot,conversationId:payload.conversationId || bot.snapshot.conversationId}};
       }
-      const action = { id:id('action'), workspace_id:ws.id, agent_id:agentId, task_id:input.taskId || input.task_id || null, type:String(input.type || 'task.execute'), payload, dedupe_key:dedupeKey, status:'pending', expires_at:input.expiresAt || input.expires_at || new Date(Date.now()+a2aExecutionTimeoutMs(payload)+A2A_EXECUTION_LEASE_BUFFER_MS).toISOString(), created_at:now(), acked_at:null, completed_at:null, result_json:null, error:null };
+      const action = { id:id('action'), workspace_id:ws.id, agent_id:agentId, task_id:input.taskId || input.task_id || null, type:String(input.type || 'task.execute'), payload, dedupe_key:dedupeKey, status:'pending', expires_at:input.expiresAt || input.expires_at || new Date(Date.now()+actionExecutionLeaseMs({type:input.type || 'task.execute',payload})).toISOString(), created_at:now(), acked_at:null, completed_at:null, result_json:null, error:null };
       db.prepare('INSERT INTO a2a_actions(id,workspace_id,agent_id,task_id,type,payload_json,dedupe_key,status,expires_at,created_at,acked_at,completed_at,result_json,error) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(action.id,action.workspace_id,action.agent_id,action.task_id,action.type,JSON.stringify(action.payload),action.dedupe_key,action.status,action.expires_at,action.created_at,null,null,null,null);
       if(bot)db.prepare('UPDATE hermes_bots SET active_action_id=? WHERE employee_id=?').run(action.id,bot.employee.id);
       audit(slug,'user','a2a.action.created',{actionId:action.id,type:action.type,dedupeKey}); return action;
@@ -2020,7 +2014,7 @@ export function createRepository(options = {}, io={}) {
             if (input.renewLease === true) {
               const deviceId = String(input.deviceId || input.device_id || '').trim();
               if (!deviceId || !actionTargetDevice(row)) throw new Error('A2A lease renewal requires the assigned device credential');
-              const leaseExpiry = new Date(Date.parse(timestamp) + a2aExecutionTimeoutMs(parse(row.payload_json)) + A2A_EXECUTION_LEASE_BUFFER_MS).toISOString();
+              const leaseExpiry = new Date(Date.parse(timestamp) + actionExecutionLeaseMs({type:row.type,payload:parse(row.payload_json)})).toISOString();
               const expiresAt = Date.parse(row.expires_at || '') > Date.parse(leaseExpiry) ? row.expires_at : leaseExpiry;
               db.prepare("UPDATE a2a_actions SET expires_at=? WHERE id=? AND status='acked'").run(expiresAt, actionId);
               response = { ...a2aResponseView({ ...row, expires_at:expiresAt }, { receiptOnly, includeResult:!receiptOnly }), duplicate:true, leaseRenewed:true };
@@ -2030,7 +2024,7 @@ export function createRepository(options = {}, io={}) {
             const payload = parse(row.payload_json);
             const deviceId = String(input.deviceId || input.device_id || '').trim();
             if (!actionTargetDevice(row) && deviceId) payload.deviceId = deviceId;
-            const executionLeaseMs = a2aExecutionTimeoutMs(payload) + A2A_EXECUTION_LEASE_BUFFER_MS;
+            const executionLeaseMs = actionExecutionLeaseMs({type:row.type,payload});
             const leaseExpiry = new Date(Date.parse(timestamp) + executionLeaseMs).toISOString();
             const expiresAt = row.expires_at && Date.parse(row.expires_at) > Date.parse(leaseExpiry) ? row.expires_at : leaseExpiry;
             db.prepare("UPDATE a2a_actions SET status='acked',acked_at=?,expires_at=?,payload_json=? WHERE id=? AND status='pending'").run(timestamp, expiresAt, JSON.stringify(payload), actionId);
@@ -2078,7 +2072,7 @@ export function createRepository(options = {}, io={}) {
           } else {
             event = { id:eventId, action_id:actionId, type, message, data, created_at:timestamp };
             db.prepare('INSERT INTO a2a_action_events(id,action_id,type,message,data_json,created_at) VALUES(?,?,?,?,?,?)').run(event.id,event.action_id,type,message,dataJson,event.created_at);
-            const leaseExpiry = new Date(Date.parse(timestamp) + a2aExecutionTimeoutMs(parse(row.payload_json)) + A2A_EXECUTION_LEASE_BUFFER_MS).toISOString();
+            const leaseExpiry = new Date(Date.parse(timestamp) + actionExecutionLeaseMs({type:row.type,payload:parse(row.payload_json)})).toISOString();
             if(!rollout)db.prepare("UPDATE a2a_actions SET expires_at=? WHERE id=? AND ziwei_v2_admitted(id)=1 AND status IN ('pending','acked')").run(leaseExpiry,actionId);
             const ws = db.prepare('SELECT slug FROM workspaces WHERE id=?').get(row.workspace_id);
             if (ws) audit(ws.slug,'ziwei_user','a2a.action.event',{actionId,type,message},deferredEvents);

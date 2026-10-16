@@ -374,7 +374,7 @@ def kanban(op, args, context, request_id):
             tid = kb.create_task(conn, title=args['title'], body=args.get('body'), tenant=context['employeeId'],
                      created_by=context['employeeId'], priority=args.get('priority', 0), parents=args.get('parents', []),
                      triage=args.get('triage', False), idempotency_key=request_id, max_retries=0,
-                     goal_max_turns=args.get('maxTurns', context['config']['maxTurns']), max_runtime_seconds=840, workspace_kind='scratch')
+                     goal_max_turns=args.get('maxTurns', context['config']['maxTurns']), max_runtime_seconds=context['runBudgetSeconds'], workspace_kind='scratch')
             return {'task': asdict(kb.get_task(conn, tid))}
         tid = args['taskId']
         task = kb.get_task(conn, tid)
@@ -383,7 +383,7 @@ def kanban(op, args, context, request_id):
         if op in {'claim', '_prepare'}:
             if len(kb.list_runs(conn, tid)) >= min(task.goal_max_turns or 100, context['config'].get('drivers', {}).get('maxTotalTurns', 100)):
                 raise NativeOperationError('KANBAN_TOTAL_TURN_BUDGET')
-            claimed = kb.claim_task(conn, tid, ttl_seconds=900, claimer=context['employeeId'])
+            claimed = kb.claim_task(conn, tid, ttl_seconds=context['runBudgetSeconds'] + 60, claimer=context['employeeId'])
             if not claimed:
                 raise NativeOperationError('KANBAN_CLAIM_CONFLICT')
             return {'task': asdict(claimed), 'prompt': kb.build_worker_context(conn, tid), 'run': True}

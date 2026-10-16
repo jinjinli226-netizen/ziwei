@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { NATIVE_LONG_TASK_TIMEOUT_MS } from './action-execution-budget.mjs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { parseDocument, stringify } from 'yaml';
@@ -58,7 +59,7 @@ export function prepareHermesBotHome({context,sourceHome,privateDirectory,worksp
     model:{provider,default:model,...(endpoint?{base_url:endpoint}:{}),...(apiMode?{api_mode:apiMode}:{})},
     ...(custom?{providers:{[providerName]:Object.fromEntries(['base_url','api_mode','default_model','key_env','context_length'].filter(key=>custom[key]!==undefined).map(key=>[key,custom[key]]).concat([['discover_models',false]]))}}:{}),
     fallback_providers:[],updates:{check:false},...(sourceConfig.models_dev?.url?{models_dev:{url:sourceConfig.models_dev.url}}:{}),
-    agent:{max_turns:config.maxTurns,run_budget_seconds:840,bot_mode_protocol:false,coding_context:'off',disabled_toolsets:readOnly?['all']:['cronjob','delegation','kanban'],...(config.reasoningEffort?{reasoning_effort:config.reasoningEffort}:{})},
+    agent:{max_turns:config.maxTurns,run_budget_seconds:NATIVE_LONG_TASK_TIMEOUT_MS / 1000,bot_mode_protocol:false,coding_context:'off',disabled_toolsets:readOnly?['all']:['cronjob','delegation','kanban'],...(config.reasoningEffort?{reasoning_effort:config.reasoningEffort}:{})},
     platform_toolsets:{cli:[...config.toolsets,...(config.collaboration?.enabled&&!readOnly?['ziwei_collaboration']:[])]},
     memory:{provider:'',memory_enabled:config.memory.enabled,user_profile_enabled:config.memory.userProfile,...(config.memory.charLimit?{memory_char_limit:config.memory.charLimit}:{}),...(config.memory.userCharLimit?{user_char_limit:config.memory.userCharLimit}:{})},
     skills:{disabled:config.skills.disabled,project_discovery:false,external_dirs:[],create_dir:'',auto_load:config.skills.autoLoad || []},

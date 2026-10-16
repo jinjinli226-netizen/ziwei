@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import {actionExecutionTimeoutMs,ACTION_EXECUTION_LEASE_BUFFER_MS} from './action-execution-budget.mjs';
 import {consumeRuntimePrelaunchEvidence,completeRuntimeExit} from './runtime-launch-evidence.mjs';
 import { isNativeRuntimeAction, resolveWindowsWorkdir, resolveWindowsWorkdirPath } from './windows-workdir.mjs';
 
@@ -226,9 +227,9 @@ export class ActionDispatcher {
       const nativeRuntime = isNativeRuntimeAction(action);
       const requestedTimeout = action.payload?.timeoutMs ?? action.payload?.timeout_ms;
       const hasHardTimeout = requestedTimeout !== undefined && requestedTimeout !== null && String(requestedTimeout).trim() !== '' && Number.isFinite(Number(requestedTimeout));
-      let hardTimeoutMs = hasHardTimeout ? Math.max(100, Number(requestedTimeout)) : nativeRuntime ? 15 * 60 * 1000 : null;
+      let hardTimeoutMs = hasHardTimeout || nativeRuntime ? actionExecutionTimeoutMs(action) : null;
       if (nativeRuntime && expiresAt) {
-        const remaining = Date.parse(String(expiresAt)) - this.#now() - 60000;
+        const remaining = Date.parse(String(expiresAt)) - this.#now() - ACTION_EXECUTION_LEASE_BUFFER_MS;
         if (!Number.isFinite(remaining) || remaining < 100) return this.#failure(action, 'A2A action lease leaves insufficient time for execution and confirmed shutdown', {code: 'ACTION_LEASE_INSUFFICIENT'});
         hardTimeoutMs = Math.min(hardTimeoutMs, remaining);
       }

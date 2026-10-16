@@ -17,6 +17,7 @@ test('Bot home adapter exists and configuration is applied without cloning auth 
     assert.notEqual(first.home,second.home);
     const config=yaml(fs.readFileSync(path.join(first.home,'config.yaml'),'utf8'));
     assert.equal(config.model.default,'configured-model');assert.equal(config.memory.memory_enabled,false);assert.equal(config.agent.max_turns,7);
+    assert.equal(config.agent.run_budget_seconds,86400);
     assert.deepEqual(config.agent.disabled_toolsets,['all']);assert.equal(config.agent.bot_mode_protocol,false);
     assert.equal(fs.existsSync(path.join(first.home,'auth.json')),false);assert.equal(fs.existsSync(path.join(first.home,'memories','MEMORY.md')),false);
     assert.match(fs.readFileSync(path.join(first.home,'SOUL.md'),'utf8'),/独立人格/);

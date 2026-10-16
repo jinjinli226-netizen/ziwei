@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { readA2AToken, safeTokenEqual } from './a2a-auth.mjs';
+import { actionExecutionTimeoutMs } from '../src/action-execution-budget.mjs';
 
 const at = () => new Date().toISOString();
 const parse = (value, fallback = {}) => { try { return JSON.parse(value) ?? fallback; } catch { return fallback; } };
@@ -81,14 +82,17 @@ export function createPhoneMcpService(repo, connect, management, options = {}) {
     db.prepare('INSERT INTO management_requests(workspace_id,kind,request_key,fingerprint,resource_id,created_at) VALUES(?,?,?,?,?,?)').run(ws(slug).id,kind,requestKey,fingerprint,row.id,at());
     return {action:repo.getA2AAction(row.id,{workspaceSlug:slug}),conversation_id:conversation.id};
   };
+  const actionExpiry = (slug,id) => Date.parse(db.prepare('SELECT expires_at FROM a2a_actions WHERE id=? AND workspace_id=?').get(id,ws(slug).id)?.expires_at);
   const sign = value => { const body=Buffer.from(JSON.stringify(value)).toString('base64url');return `${body}.${crypto.createHmac('sha256',key).update(body).digest('base64url')}`; };
   const bootstrap = (slug,input,credential) => {
     repo.serverCodeRollout?.assertExecution();
     repo.preservation?.assert({employeeId:input.employeeId,actionId:input.actionId});
     if(!credential || credential.workspace!==slug) fail('需要当前工作区独立电脑凭证','PHONE_DEVICE_UNAUTHORIZED',401);
     const id=required(input.employeeId,'employeeId');const cfg=assertEnabled(slug,id);const action=repo.getA2AAction(required(input.actionId,'actionId'),{workspaceSlug:slug});
-    if(!action || !['pending','acked'].includes(action.status) || Date.parse(action.expires_at)<=Date.now() || action.payload.employeeId!==id || action.payload.deviceId!==credential.deviceId || credential.deviceId!==cfg.target_device_id || action.payload.runtime!==cfg.runtime || (action.payload.profile || null)!==(cfg.runtime_profile || null) || action.payload.terminalMcp?.configurationRevision!==cfg.revision || action.payload.terminalMcp?.deviceId!==cfg.phone_device_id || action.payload.terminalMcp?.enabled!==true || input.deviceId!==cfg.phone_device_id) fail('手机 MCP bootstrap 与当前员工、电脑、手机或执行不匹配','PHONE_EXECUTION_SCOPE_MISMATCH',403);
-    const expiresAt=new Date(Date.now()+30*60*1000).toISOString();
+    const executionExpiresAt=action ? actionExpiry(slug,action.id) : NaN;
+    if(!action || !['pending','acked'].includes(action.status) || !Number.isFinite(executionExpiresAt) || executionExpiresAt<=Date.now() || action.payload.employeeId!==id || action.payload.deviceId!==credential.deviceId || credential.deviceId!==cfg.target_device_id || action.payload.runtime!==cfg.runtime || (action.payload.profile || null)!==(cfg.runtime_profile || null) || action.payload.terminalMcp?.configurationRevision!==cfg.revision || action.payload.terminalMcp?.deviceId!==cfg.phone_device_id || action.payload.terminalMcp?.enabled!==true || input.deviceId!==cfg.phone_device_id) fail('手机 MCP bootstrap 与当前员工、电脑、手机或执行不匹配','PHONE_EXECUTION_SCOPE_MISMATCH',403);
+    const lifetime=Math.max(30*60*1000,actionExecutionTimeoutMs(action));
+    const expiresAt=new Date(Math.min(Date.now()+lifetime,executionExpiresAt)).toISOString();
     const capability={workspace:slug,employeeId:id,deviceId:cfg.phone_device_id,actionId:action.id,computerDeviceId:credential.deviceId,credentialId:credential.credentialId,revision:cfg.revision,checkOnly:action.payload.terminalMcp.checkOnly===true,expiresAt};
     return {...capability,token:sign(capability),baseUrl:`${publicBase}/terminal-mcp/v1/workspaces/${encodeURIComponent(slug)}/employees/${encodeURIComponent(id)}`};
   };
@@ -97,7 +101,8 @@ export function createPhoneMcpService(repo, connect, management, options = {}) {
     const [body,signature,...extra]=String(token || '').split('.');if(extra.length || !body || !signature || !safeTokenEqual(signature,crypto.createHmac('sha256',key).update(body).digest('base64url'))) fail('需要有效的员工手机执行凭据','PHONE_CAPABILITY_INVALID',401);
     const cap=parse(Buffer.from(body,'base64url').toString());if(cap.workspace!==slug || cap.employeeId!==id || Date.parse(cap.expiresAt)<=Date.now()) fail('手机执行凭据已过期或超出员工/工作区scope','PHONE_CAPABILITY_SCOPE',403);
     const cfg=configuration(slug,id);const action=repo.getA2AAction(cap.actionId,{workspaceSlug:slug});const credential=db.prepare('SELECT revoked_at FROM device_credentials WHERE id=? AND device_id=?').get(cap.credentialId,cap.computerDeviceId);
-    if(!credential || credential.revoked_at || !cfg.enabled || cfg.revision!==cap.revision || cfg.phone_device_id!==cap.deviceId || cfg.target_device_id!==cap.computerDeviceId || !action || !['pending','acked'].includes(action.status) || Date.parse(action.expires_at)<=Date.now()) fail('手机配置已改变、卸载或执行已结束，请重新发起员工执行','PHONE_CAPABILITY_REVOKED',403);
+    const executionExpiresAt=action ? actionExpiry(slug,action.id) : NaN;
+    if(!credential || credential.revoked_at || !cfg.enabled || cfg.revision!==cap.revision || cfg.phone_device_id!==cap.deviceId || cfg.target_device_id!==cap.computerDeviceId || !action || !['pending','acked'].includes(action.status) || !Number.isFinite(executionExpiresAt) || executionExpiresAt<=Date.now()) fail('手机配置已改变、卸载或执行已结束，请重新发起员工执行','PHONE_CAPABILITY_REVOKED',403);
     return cap;
   };
   const call = async (slug,id,token,input) => {

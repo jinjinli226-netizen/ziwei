@@ -1044,7 +1044,7 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
       if(resolvedRuntime!=='Hermes')throw new Error('Bot 必须使用 Hermes');
       botPrepared=prepareHermesBotHome({context:hermesBot,sourceHome:hermesProfileHome(profile || 'default',{baseHome:profileBaseHome}),privateDirectory:botInstanceDirectory,workspace:managementMcp?.workspace,apiBase:managementMcp?.apiBase});
       reasoningProvider=botPrepared.provider;
-      invocation={args:['chat','--query-file','-','-c','Ziwei '+String(hermesBot.conversationId || 'Bot Chat'),'--create-if-missing','--format','stream-json','--model',botPrepared.effectiveModel,'--provider',botPrepared.provider,'--max-turns',String(hermesBot.config.maxTurns),'--run-budget','840',...(imageInputs.length===1?['--image',imageInputs[0].path]:[])],stdin:content,format:'json-lines'};
+      invocation={args:['chat','--query-file','-','-c','Ziwei '+String(hermesBot.conversationId || 'Bot Chat'),'--create-if-missing','--format','stream-json','--model',botPrepared.effectiveModel,'--provider',botPrepared.provider,'--max-turns',String(hermesBot.config.maxTurns),'--run-budget',String(botPrepared.config.agent.run_budget_seconds),...(imageInputs.length===1?['--image',imageInputs[0].path]:[])],stdin:content,format:'json-lines'};
     }
     const launch = hermesBot && (hermesBot.config.permissions.mode==='read_only'||hermesBot.config.permissions.management===false) ? {invocation,env:childEnv,receipt:null} : prepareManagementMcpLaunch({ runtime: resolvedRuntime, profile, model, invocation, env: childEnv, ...(managementMcp || {}), creatorInstance, creatorInstanceDirectory, selectedProfileHome });
     invocation = launch.invocation; childEnv = launch.env; receipt = launch.receipt;

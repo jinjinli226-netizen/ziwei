@@ -68,3 +68,23 @@ test('maintenance sees resident workers and retains exact exit identity',async t
   const status=f.manager.maintenanceStatus();assert.equal(status.safe,true);
   assert.equal(status.workers[0].sourceActionId,'connection');assert.ok(status.workers[0].workerNonce);
 });
+
+test('a reply completed after 31 minutes is delivered from the original inbound action without redispatch',async t=>{
+  const f=await fixture(t),epoch=Date.parse('2026-10-16T10:00:00Z');let now=epoch,reads=0,ingress=0;
+  const requests=[];t.mock.method(Date,'now',()=>now);
+  t.mock.method(globalThis,'fetch',async(url,init)=>{
+    const request=new URL(url);requests.push({path:request.pathname,method:init.method});
+    if(request.pathname.endsWith('/bot-gateway-ingress')){ingress++;return{ok:true,json:async()=>({delivery:{status:'dispatched',action:{id:'original-long-task',type:'conversation.execute',payload:{runtime:'Hermes'}}}})};}
+    if(request.pathname.endsWith('/bot-gateway-lease'))return{ok:true,json:async()=>({allowed:true})};
+    assert.equal(request.pathname,'/a2a/v1/actions/original-long-task');assert.equal(init.method,'GET');reads++;
+    if(reads===1){now=epoch+31*60*1000;return{ok:true,json:async()=>({status:'acked'})};}
+    return{ok:true,json:async()=>({status:'succeeded',result:{output:'Original result after 31 minutes'}})};
+  });
+  f.emit({event:'inbound',chatId:'original-chat',messageId:'original-message',content:'long task'});
+  for(let attempt=0;attempt<30&&!f.writes.some(item=>item.operation==='send');attempt++)await new Promise(resolve=>setTimeout(resolve,100));
+  const sends=f.writes.filter(item=>item.operation==='send');assert.equal(sends.length,1);assert.equal(reads,2);assert.equal(ingress,1);
+  assert.equal(sends[0].content,'Original result after 31 minutes');assert.equal(sends[0].chatId,'original-chat');assert.equal(sends[0].replyTo,'original-message');assert.equal(sends[0].messageId,'original-message');
+  assert.deepEqual(requests.filter(item=>item.method==='POST').map(item=>item.path),['/a2a/v1/actions/connection/bot-gateway-ingress','/a2a/v1/actions/connection/bot-gateway-lease']);
+  f.emit({event:'command_result',commandId:sends[0].commandId,success:true});await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(f.manager.maintenanceStatus().workers[0].inFlight,0);assert.equal(f.manager.status(f.context)[0].status,'connected');
+});
