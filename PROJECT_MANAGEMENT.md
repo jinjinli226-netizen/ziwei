@@ -1,5 +1,9 @@
 # 紫薇项目管理与 AI 接手手册
 
+## 2026-10-16 11:15 手机链路接手更新
+
+主站/API 和官方客户端包当前源码为 `891685f`（`codex/android-stability-main`），中控源码为私有 `ziwei-system` 的 `8be4604`（`codex/android-input-lifecycle`），均已先推 GitHub 后发布。Android code16 双端源码和自动回归已完成，原签名待用户提供，手机仍为 code15，不能把编译通过称为手机已修好。用户要求无人值守，正常故障由程序自动只读回查和系统允许的恢复处理；不盲目重放手机业务，不覆盖用户明确停止。详见 [最新 HANDOFF](HANDOFF.md) 和[专项记录](docs/operations/2026-10-16-phone-input-lifecycle.md)。下方 10:00 客户端发布为历史状态，原生 YAML 修复已包含在当前包内。
+
 ## 当前接手入口（2026-10-16）
 
 最新生产状态、GitHub 分支、Windows 客户端 build、真实验收范围及未解决问题统一维护在 [HANDOFF.md 的最新接手状态](HANDOFF.md#2026-10-16-最新接手状态)。V2 已发布，主站/API 为 `cd610444ce793d6e5fbebfa7ed1b982c070ad9a3`；10:00 官方客户端已更新至原生 YAML 修复 `d915129bf45bbb555cb1a089593c9c9cdc940d59`（build `993639eb…`）。文档提交可以领先产品。

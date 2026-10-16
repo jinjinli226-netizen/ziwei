@@ -1,5 +1,13 @@
 # 紫薇项目 HandOff
 
+## 2026-10-16 11:15 手机输入与自动恢复修复
+
+主站/API 与官方 Windows 客户端包已发布 `891685f70e9e4bfc2c56821ee2cc9a28a356f548`（分支 `codex/android-stability-main`）；当前 `/opt/ziwei/releases/v2-hotfix-891685f70e9e/v2`。客户端 build `6b8449d9…`，包 SHA `4d993a13…`；发布包不代表电脑已安装。中控私有仓库 `ziwei-system` 的 `8be4604`（分支 `codex/android-input-lifecycle`）也已发布，当前 `/opt/ziwei-control/releases/phone-stability-8be4604f2938`。
+
+已修原命令自动回查、底层 cause / 详细总结保留和重复业务动作保护，补正式终端运行诊断。Android 已修安全焦点与中文读回、超时门禁、退出诊断、停止意图、伙伴退避、升级阻塞心跳和日志主线程负担；76/76 JUnit、50/50 中控集成、72 项主站相关验证及构建通过。**手机仍运行 code15；code16 待原签名文件，尚未发布或实机验收，现场被杀根因未取得证据。** 用户要求正常故障由程序自动观察 / 恢复，不默认让用户逐次核实。旧回执、数据、APK 和 Nginx 保留。
+
+完整证据、备份、回退和接续见[手机输入与生命周期记录](docs/operations/2026-10-16-phone-input-lifecycle.md)。本修复工作树 `/Users/zhangjie/Documents/ChatGPT/紫薇/.codex-worktrees/android-stability-main`；Android 树为同父目录 `ziwei-system-android-stability`。原主目录未提交修改保留。
+
 ## 2026-10-16 最新接手状态
 
 ### 10:00 更新：确认公司机使用新版 YAML，修正创建及工具配置调用
