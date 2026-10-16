@@ -63,6 +63,11 @@ onBeforeUnmount(()=>{request++;reader?.abort();emit('reading',false);});
 .bot-avatar-editor__preview:disabled{cursor:default;}
 .bot-avatar-editor__controls{min-width:0;}
 .bot-avatar-editor__actions{display:flex;flex-wrap:wrap;gap:8px;}
+.bot-avatar-editor__actions .bot-button{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:36px;padding:8px 13px;border:1px solid #e3ddec;border-radius:9px;background:white;color:#61576e;font:inherit;font-size:13px;line-height:1.4;white-space:nowrap;cursor:pointer;}
+.bot-avatar-editor__actions .bot-button:first-child{border-color:#dfd3f7;background:#f4effc;color:#7355d7;}
+.bot-avatar-editor__actions .bot-button:hover{background:#eee7fa;}
+.bot-avatar-editor__actions .bot-button:disabled{opacity:.48;cursor:not-allowed;}
+.bot-avatar-editor__actions .bot-button:focus-visible{outline:2px solid #9379dc;outline-offset:3px;}
 .bot-avatar-editor__hint{margin:8px 0 0;color:#857b92;font-size:12px;line-height:1.5;}
 .bot-avatar-editor__error{margin:12px 0 0;color:#b34d65;font-size:12px;line-height:1.5;}
 .bot-avatar-editor input[hidden]{display:none;}
