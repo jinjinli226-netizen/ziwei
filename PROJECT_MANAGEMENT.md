@@ -1,5 +1,14 @@
 # 紫薇项目管理与 AI 接手手册
 
+## 2026-10-16 12:57 公司台式更新阻塞修复已发布
+
+公司台式仍运行 `993639eb…`，升级 24 小时客户端时被 `ACTION_STATE_CORRUPT` / HTTP 409 阻塞。根因是旧版允许正常 CLI 完成后留下后台进程，而维护扫描又将该合法历史当成文件损坏：原动作 `action_5b4dc026-2a9e-45db-8169-a08086e6e525` 的 root/host exit 均 0，treeConfirmed=false、activeProcesses=1。不能宣称这个后台进程已退出。
+
+已先推 GitHub 产品提交 `5db7d834deaf3524adfada59a434bc764fda750a`，再于 12:57 发布官方 Windows 更新包，build `208f2350ff390bbf7506e6baaef60eb7c8d467f2c8630a86c670ce01aada1044`。新增精确后台完成分类与旧版更新恢复：仅停止闲置、身份绑定的原 daemon，保留后台程序、Profile/HOME、配置和原回执字节；不伪造整树退出。真实损坏/在途/隔离/未知 Gateway 等仍拒绝。
+
+**用户再运行同一官方更新命令即可，无需先 stop、手工编辑状态文件或重建 Bot。新包包含 24 小时修复；公司台式实际升级仍待新 build 心跳确认。** 本轮仅更新客户端，主站/API 继续 `eabe098`；中控、Nginx、数据库和服务进程未变。详见[后台历史与更新恢复](docs/operations/2026-10-16-background-stop-recovery.md)。
+
+
 ## 2026-10-16 12:14 长任务默认 24 小时已发布
 
 用户明确要求取消原 15 分钟上限。已先推 GitHub `codex/v2-20261014-release` 的 `eabe098af3b6c0e7d76cf4121052e3606e022888`，再发布主站/API 和 Windows 客户端包。生产目录 `/opt/ziwei/releases/v2-hotfix-eabe098af3b6/v2`；新客户端 build `ba86b25db751ac6322d74c6c7e1353a7984b69d5a18a97c7e87beee46c6f195a`。已包含 E04 主站 `891685f` 的手机回执和终端诊断修复；本轮未修改中控/Android。
