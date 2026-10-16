@@ -101,7 +101,7 @@ def _finish_profile_layout(profile_dir, *, no_skills, clone_all, description):
         self.assertEqual(diagnostic['stage'], stage)
         self.assertEqual(diagnostic['exception'], exception)
         self.assertLessEqual(set(diagnostic), {'schemaVersion', 'stage', 'exception', 'errno', 'winerror',
-                                               'source', 'cleanupFailed'})
+                                               'source', 'cleanupFailed', 'missingModule'})
         if 'source' in diagnostic:
             source = diagnostic['source']
             self.assertEqual(set(source), {'file', 'function', 'line'})
@@ -148,6 +148,22 @@ def _finish_profile_layout(profile_dir, *, no_skills, clone_all, description):
         self.assertEqual(diagnostic['winerror'], 5)
         self.assertFalse((self.home / 'profiles' / 'bot-fixture').exists())
         self.assertEqual(list((self.home / 'profiles').iterdir()), [])
+
+    def test_missing_yaml_import_keeps_the_exact_bounded_module_name(self):
+        with patch.dict(sys.modules, {'yaml': None}):
+            receipt = self.execute()
+            diagnostic = self.diagnostic(receipt, 'native_imports', 'ModuleNotFoundError')
+        self.assertEqual(diagnostic['missingModule'], 'yaml')
+        PROOF_RECEIPTS.append(receipt)
+        self.assertFalse((self.home / 'profiles' / 'bot-fixture').exists())
+
+    def test_private_or_unbounded_missing_module_names_are_not_returned(self):
+        for name in ('private/module', 'private module', 'yaml\n', 'a' * 121, None):
+            with self.subTest(name=name):
+                error = ModuleNotFoundError(SECRET, name=name)
+                with patch.object(self.profiles, '_bootstrap_profile_dir', side_effect=error):
+                    diagnostic = self.diagnostic(self.execute(), 'native_bootstrap', 'ModuleNotFoundError')
+                self.assertNotIn('missingModule', diagnostic)
 
     def test_actual_native_helper_signature_error_is_identified_without_its_text(self):
         with patch.object(self.profiles, '_finish_profile_layout', lambda: None):

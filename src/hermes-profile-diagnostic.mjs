@@ -14,6 +14,7 @@ const sourceFunctions = new Set(['provision','_provision','verify','_bootstrap_p
 export function safeProfileProvisionDiagnostic(value) {
   if (!value || value.schemaVersion !== 1 || !Object.hasOwn(stages,value.stage) || !exceptions.has(value.exception)) return null;
   const result={schemaVersion:1,stage:value.stage,exception:value.exception};
+  if(value.exception==='ModuleNotFoundError'&&typeof value.missingModule==='string'&&value.missingModule.length<=120&&/^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$/.test(value.missingModule))result.missingModule=value.missingModule;
   for(const [key,max] of [['errno',255],['winerror',65535]]) if(Number.isSafeInteger(value[key])&&value[key]>=0&&value[key]<=max)result[key]=value[key];
   if(value.cleanupFailed===true)result.cleanupFailed=true;
   const source=value.source;
@@ -30,7 +31,7 @@ export function profileProvisionFailure(receipt) {
     :diagnostic.winerror===112||diagnostic.errno===28?'磁盘空间不足；释放空间后重试'
     :diagnostic.winerror===206||diagnostic.errno===36?'目录路径过长；需要缩短 Hermes 的安装或工作目录'
     :diagnostic.exception==='FileNotFoundError'?'所需文件或目录不存在；检查 Hermes 安装及所选初始化来源'
-    :['ImportError','ModuleNotFoundError'].includes(diagnostic.exception)?'Hermes 组件加载失败；需要检查其安装依赖'
+    :['ImportError','ModuleNotFoundError'].includes(diagnostic.exception)?`Hermes 组件加载失败${diagnostic.missingModule?'，缺少 '+diagnostic.missingModule:''}；需要检查其安装依赖`
     :diagnostic.exception==='FileExistsError'?'目标目录已存在；需要核对其归属，不能覆盖'
     :'已保留具体失败阶段和异常类型，可据此继续排查';
   const system=diagnostic.winerror!==undefined?`，Windows ${diagnostic.winerror}`:diagnostic.errno!==undefined?`，errno ${diagnostic.errno}`:'';

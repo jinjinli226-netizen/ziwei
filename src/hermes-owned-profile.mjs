@@ -57,5 +57,7 @@ export async function provisionHermesBotProfile({context,baseHome,workspace,apiB
   child.stdin.end(JSON.stringify({context,metadata,seedConfig,authentication:'required'})+'\n');
   let processExit;try{processExit=await supervision.completionEvidence;}finally{clearTimeout(timer);signal?.removeEventListener('abort',abort);}
   let receipt;try{receipt=JSON.parse(output.split(/\r?\n/).find(line=>line.startsWith('ZIWEI_BOT_PROVISION:')).slice('ZIWEI_BOT_PROVISION:'.length));}catch{}
-  return finalizeOwnedProfileProvision({context,baseHome,receipt,processExit});
+  const result=finalizeOwnedProfileProvision({context,baseHome,receipt,processExit});
+  result.result.runtimeStartup={launcherKind:spec.nativeBinding.launcherKind,bootstrapBound:spec.nativeBinding.bootstrapBound};
+  return result;
 }

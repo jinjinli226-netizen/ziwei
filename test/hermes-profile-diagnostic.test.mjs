@@ -27,6 +27,13 @@ test('legacy and explicit ownership failures keep their code without claiming cr
   assert.deepEqual(profileProvisionFailure({code:'BOT_PROFILE_OWNERSHIP_CONFLICT'}),{code:'BOT_PROFILE_OWNERSHIP_CONFLICT',error:'BOT_PROFILE_OWNERSHIP_CONFLICT'});
   assert.deepEqual(profileProvisionFailure({code:'BOT_PROFILE_CREATE_FAILED'}),{code:'BOT_PROFILE_CREATE_FAILED',error:'BOT_PROFILE_CREATE_FAILED'});
 });
+test('a missing native module is bounded and preserved without paths or exception messages',()=>{
+  const diagnostic={schemaVersion:1,stage:'native_imports',exception:'ModuleNotFoundError',missingModule:'yaml'};
+  assert.equal(safeProfileProvisionDiagnostic(diagnostic).missingModule,'yaml');
+  assert.match(profileProvisionFailure({code:'BOT_PROFILE_CREATE_FAILED',diagnostic}).error,/缺少 yaml/);
+  for(const missingModule of ['C:/private/token','https://private?token=x','name\nsecret','a'.repeat(121),'..outside'])assert.equal(safeProfileProvisionDiagnostic({...diagnostic,missingModule}).missingModule,undefined);
+  assert.equal(safeProfileProvisionDiagnostic({...diagnostic,exception:'PermissionError'}).missingModule,undefined);
+});
 test('the production result path retains diagnostic detail in the Bot view and retries the same profile',t=>{
   const repo=createRepository({memory:true}),bots=createManagementService(repo).bots;t.after(()=>repo.db.close());
   repo.heartbeatDevice('test-111',{deviceId:'diagnostic-pc',runtimes:{Hermes:{status:'available',profiles:[{name:'default'}]}}});

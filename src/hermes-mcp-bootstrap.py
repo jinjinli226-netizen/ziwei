@@ -22,7 +22,7 @@ class UnsupportedNativeHermes(Exception):
     pass
 
 
-def _binding(launcher, multi_images=False, launcher_binding=None):
+def _binding(launcher, multi_images=False, launcher_binding=None, expected=None):
     launcher = Path(launcher).resolve(strict=True)
     wrapper = None
     if launcher_binding is not None:
@@ -76,10 +76,26 @@ def _binding(launcher, multi_images=False, launcher_binding=None):
         paths[name] = str(target)
     if len({str(Path(value).parent) for value in paths.values()}) != 1:
         raise UnsupportedNativeHermes('package')
+    source_bootstrap = None
     if installation is not None:
         if Path(paths['main']).parent != Path(installation['root']) / 'hermes_cli':
             raise UnsupportedNativeHermes('installation package')
         paths['bootstrap'] = str(Path(installation['root']) / 'hermes_bootstrap.py')
+    else:
+        root = Path(paths['main']).parent.parent
+        if os.path.lexists(root / 'hermes_bootstrap.py'):
+            prior = expected.get('sourceBootstrap') if expected is not None else None
+            if expected is not None and prior is None:
+                raise UnsupportedNativeHermes('installation changed')
+            source_bootstrap = _activate_native_installation(root, launcher, prior)
+            paths['bootstrap'] = str(root / 'hermes_bootstrap.py')
+            # PM may change import paths, but cannot replace the bound native source.
+            for name in ('main', 'mcp_startup', 'managed_scope', 'config'):
+                spec = importlib.util.find_spec('hermes_cli.' + name)
+                if not spec or not spec.origin or str(Path(spec.origin).resolve(strict=True)) != paths[name]:
+                    raise UnsupportedNativeHermes('installation package changed')
+        elif expected is not None and expected.get('sourceBootstrap') is not None:
+            raise UnsupportedNativeHermes('installation changed')
     startup = Path(paths['mcp_startup']).read_text(encoding='utf-8')
     managed = Path(paths['managed_scope']).read_text(encoding='utf-8')
     if '_has_configured_mcp_servers' not in startup or 'HERMES_MANAGED_DIR' not in managed:
@@ -168,7 +184,7 @@ def _binding(launcher, multi_images=False, launcher_binding=None):
                 raise UnsupportedNativeHermes('multi image shape')
             paths[name] = str(target)
     sources = [launcher, *([wrapper] if wrapper is not None else []), *(Path(value) for value in paths.values())]
-    return {'paths': paths, 'fingerprint': hashlib.sha256(b'\0'.join(p.read_bytes() for p in sources)).hexdigest(), **({'launcherBinding': launcher_binding} if launcher_binding is not None else {})}
+    return {'paths': paths, 'fingerprint': hashlib.sha256(b'\0'.join(p.read_bytes() for p in sources)).hexdigest(), **({'launcherBinding': launcher_binding} if launcher_binding is not None else {}), **({'sourceBootstrap': source_bootstrap} if source_bootstrap is not None else {})}
 
 
 
@@ -188,6 +204,11 @@ def _activate_launcher_installation(tree, launcher, launcher_binding):
     if len(roots) != 1 or len(pins) != 1 or len(imports) != 1 or not roots[0][1] < pins[0] < imports[0] or not Path(roots[0][0]).is_absolute():
         raise UnsupportedNativeHermes('installation bootstrap shape')
     root = Path(roots[0][0]).resolve(strict=True)
+    return _activate_native_installation(root, launcher, launcher_binding.get('installation'))
+
+
+def _activate_native_installation(root, launcher, expected_installation=None):
+    """Use this source's native bootstrap to select its committed dependencies."""
     git = root / '.git'
     if git.is_file():
         raw = git.read_bytes()
@@ -200,7 +221,7 @@ def _activate_launcher_installation(tree, launcher, launcher_binding):
     if not root.is_dir() or bootstrap.parent != root or not bootstrap.is_file():
         raise UnsupportedNativeHermes('installation bootstrap source')
     installation = {'root': str(root), 'bootstrapSha256': hashlib.sha256(bootstrap.read_bytes()).hexdigest()}
-    if launcher_binding.get('installation') is not None and launcher_binding['installation'] != installation:
+    if expected_installation is not None and expected_installation != installation:
         raise UnsupportedNativeHermes('installation changed')
     for name in ('PYTHONHOME', 'PYTHONPATH'):
         os.environ.pop(name, None)
@@ -239,9 +260,9 @@ def _activate_launcher_installation(tree, launcher, launcher_binding):
     return installation
 
 
-def binding(launcher, multi_images=False, launcher_binding=None):
+def binding(launcher, multi_images=False, launcher_binding=None, expected=None):
     try:
-        return _binding(launcher, multi_images, launcher_binding)
+        return _binding(launcher, multi_images, launcher_binding, expected)
     except Exception:
         raise UnsupportedNativeHermes('binding') from None
 
@@ -490,7 +511,7 @@ def run():
     launcher = sys.argv[2]
     expected = json.loads(sys.argv[4])
     multi_images = isinstance(expected, dict) and 'image_cli' in expected.get('paths', {})
-    current = binding(launcher, multi_images, expected['launcherBinding']) if expected.get('launcherBinding') is not None else binding(launcher, True) if multi_images else binding(launcher)
+    current = binding(launcher, multi_images, expected.get('launcherBinding'), expected)
     if current != expected:
         raise UnsupportedNativeHermes('changed')
     native_args = sys.argv[5:]

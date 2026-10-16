@@ -43,6 +43,10 @@ def _make_failure_diagnostic(error, stage):
         value = getattr(error, key, None)
         if type(value) is int and 0 <= value <= maximum:
             result[key] = value
+    if type(error) is ModuleNotFoundError:
+        name = getattr(error, 'name', None)
+        if isinstance(name, str) and len(name) <= 120 and re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*', name):
+            result['missingModule'] = name
     frame = error.__traceback__
     remaining = 64
     while frame is not None and remaining:
