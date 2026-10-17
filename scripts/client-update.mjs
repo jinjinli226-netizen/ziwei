@@ -551,7 +551,16 @@ export async function readUpdateResult({ env = process.env, resultFile, inspectP
     if (!identity && Number.isSafeInteger(result.workerPid || event?.pid) && (result.workerPid || event?.pid) > 0) identity = {operation:'update',pid:result.workerPid || event.pid,jobFile:path.join(pointer.directory,'job.json')};
     const owner = identity ? await maintenanceOwnerStatus(identity, { inspectProcess }) : { state: 'unknown' };
     if (['queued', 'running'].includes(result.state)) { const {finishedAt:_staleFinishedAt,...nonterminal}=result; result=nonterminal; }
-    if (['queued', 'running'].includes(result.state) && ['exited', 'pid_reused'].includes(owner.state)) result = { ...result, state: 'interrupted', code: 'MAINTENANCE_WORKER_EXITED', reason: '维护worker已退出，更新未完成；下次官方更新会自动归档失效维护锁', message: '维护worker已退出，更新未完成；下次官方更新会自动归档失效维护锁', finishedAt: event?.at || null };
+    if (['queued', 'running'].includes(result.state) && ['exited', 'pid_reused'].includes(owner.state)) {
+      // The native probe awaits another process. This worker can publish its
+      // real terminal state and exit while that probe is running. Re-read this
+      // exact job before calling its earlier queued/running snapshot interrupted.
+      let terminal;
+      for (const file of [path.join(pointer.directory, 'terminal.json'), pointer.resultFile]) {
+        try { const current = readMaintenanceJson(file); if (['complete', 'failed'].includes(current.state) && current.operation === 'update') { terminal = current; break; } } catch {}
+      }
+      result = terminal || terminalMaintenanceFailure(pointer.directory) || { ...result, state: 'interrupted', code: 'MAINTENANCE_WORKER_EXITED', reason: '维护worker已退出，更新未完成；下次官方更新会自动归档失效维护锁', message: '维护worker已退出，更新未完成；下次官方更新会自动归档失效维护锁', finishedAt: event?.at || null };
+    }
     return { ...result, ...details, workerStatus: owner.state, ...(identity ? { workerPid: identity.pid } : {}), ...(event ? { lastEvent: event.event, lastProgressAt: event.at } : {}) };
   } catch (error) { if (error.code === 'ENOENT') return { state: 'none', operation: 'update' }; throw error; }
 }

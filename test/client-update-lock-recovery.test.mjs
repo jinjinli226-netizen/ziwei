@@ -86,6 +86,30 @@ test('a crashed worker is interrupted and an unknown probe remains explicitly un
   assert.equal(status.state,'running'); assert.equal(status.workerStatus,'unknown'); assert.equal(Object.hasOwn(status,'finishedAt'),false);
 });
 
+test('a worker finishing during the awaited native probe reports its exact new terminal result', async t => {
+  for (const source of ['result', 'terminal', 'log']) {
+    for (const outcome of source === 'log' ? ['failed'] : ['complete', 'failed']) {
+      const f = fixture(t), before = JSON.stringify({state:'running',operation:'update',workerPid:61536});
+      fs.writeFileSync(f.resultFile,before);fs.writeFileSync(f.lockFile,JSON.stringify(f.legacy()));
+      const expected = {state:outcome,operation:'update',code:outcome==='failed'?'UPDATE_FAILED':undefined,reasonCode:outcome==='failed'?'CLIENT_FORCE_ABANDON_REFUSED':undefined,recoveryPhase:outcome==='failed'?'offline_prepare':undefined,finishedAt:'2026-10-18T01:00:00.000Z'};
+      let probes=0;
+      const inspectProcess=async()=>{
+        probes++;await new Promise(resolve=>setImmediate(resolve));
+        if(source==='log') fs.writeFileSync(path.join(f.directory,'maintenance.jsonl'),JSON.stringify({at:expected.finishedAt,pid:61536,event:'maintenance_failed',failureStage:'recover_history',reasonCode:'CLIENT_FORCE_ABANDON_REFUSED'})+'\n');
+        else writeMaintenanceResult(source==='result'?f.resultFile:path.join(f.directory,'terminal.json'),expected);
+        return {state:'exited'};
+      };
+      const status=await readUpdateResult({env:{ZIWEI_USER_HOME:f.home},inspectProcess});
+      assert.equal(probes,1);assert.equal(status.state,outcome);assert.equal(status.workerStatus,'exited');assert.equal(status.finishedAt,expected.finishedAt);
+      assert.notEqual(status.code,'MAINTENANCE_WORKER_EXITED');
+      if(source==='log') {assert.equal(status.recoveredFrom,'maintenance-log');assert.equal(status.reasonCode,'CLIENT_FORCE_ABANDON_REFUSED');}
+      else {assert.equal(status.recoveryPhase,expected.recoveryPhase);assert.equal(status.reasonCode,expected.reasonCode);}
+      if(source!=='result') assert.equal(fs.readFileSync(f.resultFile,'utf8'),before,'reading status never rewrites the original running snapshot');
+      assert.deepEqual(JSON.parse(fs.readFileSync(f.lockFile)),f.legacy(),'reading status never retires a maintenance lock');
+    }
+  }
+});
+
 test('the reported old failure is recovered from a safe log projection while stale result says running', async t => {
   const f = fixture(t), at = '2026-10-17T16:08:15.684Z';
   fs.writeFileSync(f.resultFile,JSON.stringify({state:'running',operation:'update'}));fs.writeFileSync(f.lockFile,JSON.stringify(f.legacy()));

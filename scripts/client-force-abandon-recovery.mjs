@@ -17,24 +17,65 @@ function durable(file,bytes,{exclusive=false}={}){noLinks(file);fs.mkdirSync(pat
 const write=(file,value,options)=>durable(file,canonical(value),options);
 function originFor(config,env){const host=String(config.healthHost||env.ZIWEI_HEALTH_HOST||'127.0.0.1').replace(/^localhost$/,'127.0.0.1'),port=Number(config.healthPort||env.ZIWEI_HEALTH_PORT||20242);fact(['127.0.0.1','::1','[::1]'].includes(host)&&Number.isSafeInteger(port)&&port>0&&port<65536);return`http://${host.includes(':')?'[::1]':host}:${port}`;}
 function targetFiles(runtimeDir){const base=hash(JSON.stringify(ACTION)),delivery=path.join(runtimeDir,'action-delivery');return[['action-state',path.join(runtimeDir,'action-state.json')],['delivery-journal',path.join(delivery,base+'.json')],['delivery-action',path.join(delivery,base+'.action.json')],['delivery-result',path.join(delivery,base+'.result.json')]];}
+export const FORCE_ABANDON_LOCAL_RULES=Object.freeze([
+ 'LOCAL_STATE_READ','LOCAL_JOURNAL_READ','LOCAL_ACTION_READ','LOCAL_RESULT_READ','STATE_SCHEMA','STARTED_KEY','STARTED_ACTION_ID','STARTED_IDENTITY','STARTED_TIMESTAMP','STARTED_NATIVE_FLAG','STARTED_QUARANTINE','COMPLETED_KEY','COMPLETED_RESULT','COMPLETED_IDENTITY','TARGET_STARTED_COUNT','TARGET_COMPLETED_COUNT','TARGET_NATIVE_RECORD','TARGET_WORKSPACE','TARGET_DEVICE','TARGET_BINDING','TARGET_QUARANTINE','ACTIVE_NATIVE_COUNT','LOCAL_SCOPE_URL','JOURNAL_SCHEMA','JOURNAL_ACTION','JOURNAL_IDENTITY','JOURNAL_BINDING','JOURNAL_EVENTS','JOURNAL_TERMINAL','JOURNAL_TARGET','JOURNAL_DEDUPE','ORPHAN_DELIVERY_BLOBS','ACTION_BLOB_DIGEST','ACTION_IDENTITY','ACTION_BINDING','ACTION_TARGET','ACTION_PROFILE','ACTION_HERMES_BINDING','ACTION_BINDING_DIGEST','RESULT_BLOB_DIGEST','RESULT_RECEIPT','RESULT_STATUS'
+]);
+const localFact=(value,ruleId)=>{if(!value){const error=fail();error.recoveryRule=ruleId;throw error;}};
 function readLocal(runtimeDir,config,{saved}={}){
- const rows=targetFiles(runtimeDir).map(([role,file],i)=>({role,...(saved?.[role]||read(file,{optional:i>0}))})),state=rows[0],value=state.value;fact(value?.version===2&&Array.isArray(value.started)&&Array.isArray(value.completed));const validIdentity=item=>item===undefined||item&&typeof item==='object'&&!Array.isArray(item)&&Object.values(item).every(v=>typeof v==='string'),startedKeys=new Set(),completedKeys=new Set();for(const item of value.started){fact(item&&typeof item.key==='string'&&item.key&&!startedKeys.has(item.key)&&(['string','number'].includes(typeof item.actionId)||item.actionId===null)&&item.identity&&validIdentity(item.identity)&&Number.isFinite(item.startedAt)&&(item.nativeRuntime===undefined||typeof item.nativeRuntime==='boolean')&&(item.quarantine===undefined||item.quarantine&&typeof item.quarantine.stopConfirmed==='boolean'));startedKeys.add(item.key);}for(const item of value.completed){fact(item&&typeof item.key==='string'&&item.key&&!completedKeys.has(item.key)&&item.result&&['succeeded','failed'].includes(item.result.status)&&validIdentity(item.identity)&&(item.identity||item.legacy===true));completedKeys.add(item.key);}const targets=value.started.filter(item=>item?.actionId===ACTION);fact(targets.length===1&&value.completed.filter(item=>item?.result?.actionId===ACTION).length===0);const started=targets[0];fact(typeof started.key==='string'&&started.key&&started.nativeRuntime===true&&Number.isFinite(started.startedAt)&&started.identity?.workspace===config.workspace&&started.identity.deviceId===config.deviceId&&started.identity.targetDeviceId===config.deviceId&&started.resourceBinding?.type==='conversation.execute'&&started.resourceBinding.employeeId===POLICY.subject.employeeId&&started.resourceBinding.revision===POLICY.subject.originalRevision&&started.resourceBinding.controlEpoch===POLICY.subject.originalControlEpoch&&started.quarantine?.stopConfirmed===false);
- fact(value.started.filter(item=>!value.completed.some(done=>done?.key===item?.key)&&(item?.nativeRuntime===true||item?.quarantine)&&item.quarantine?.stopConfirmed!==true).length===1);
- const journal=rows[1],action=rows[2],result=rows[3],scope={apiBase:new URL(config.apiBase).origin,workspace:config.workspace,deviceId:config.deviceId};
- if(journal.exists){const j=journal.value;fact(j.version===2&&j.action?.id===ACTION&&j.action.type==='conversation.execute'&&same(j.identity,scope)&&hex(j.binding)&&Array.isArray(j.events)&&j.state==='confirmed'&&j.serverStatus==='failed');const p=j.action.payload||{};fact(p.deviceId===config.deviceId&&p.employeeId===POLICY.subject.employeeId&&String(j.action.dedupe_key??j.action.dedupeKey??j.action.id)===started.key);}
- else fact(!action.exists&&!result.exists);
- if(action.exists){const a=action.value,j=journal.value,p=a.action?.payload,b=p?.hermesBot;fact(j.actionDigest===action.sha256&&same(a.identity,scope)&&a.binding===j.binding&&a.action.id===ACTION&&a.action.type==='conversation.execute'&&p?.deviceId===config.deviceId&&p.employeeId===POLICY.subject.employeeId&&p.profile===POLICY.subject.profile&&b?.workspace===config.workspace&&b.deviceId===config.deviceId&&b.employeeId===POLICY.subject.employeeId&&b.revision===POLICY.subject.originalRevision&&b.controlEpoch===POLICY.subject.originalControlEpoch);const binding=hash(JSON.stringify({id:ACTION,type:a.action.type,agent:a.action.agent_id||a.action.agentId||'ziwei_user',workspace:a.action.workspace_id||config.workspace,device:config.deviceId,employee:p.employeeId||null,conversation:p.conversationId||p.conversation_id||null,message:p.messageId||p.message_id||null,dedupe:a.action.dedupe_key||a.action.dedupeKey||null}));fact(binding===j.binding&&started.key===String(a.action.dedupe_key??a.action.dedupeKey??ACTION));}
- if(result.exists)fact(journal.value.resultDigest===result.sha256&&result.value?.receiptOnly===true&&result.value.status==='failed');
+ const rules=['LOCAL_STATE_READ','LOCAL_JOURNAL_READ','LOCAL_ACTION_READ','LOCAL_RESULT_READ'];
+ const rows=targetFiles(runtimeDir).map(([role,file],i)=>{try{return{role,...(saved?.[role]||read(file,{optional:i>0}))};}catch(error){if(!FORCE_ABANDON_LOCAL_RULES.includes(error.recoveryRule))error.recoveryRule=rules[i];throw error;}}),state=rows[0],value=state.value;
+ localFact(value?.version===2&&Array.isArray(value.started)&&Array.isArray(value.completed),'STATE_SCHEMA');
+ const validIdentity=item=>item===undefined||item&&typeof item==='object'&&!Array.isArray(item)&&Object.values(item).every(v=>typeof v==='string'),startedKeys=new Set(),completedKeys=new Set();
+ for(const item of value.started){
+  localFact(item&&typeof item.key==='string'&&item.key&&!startedKeys.has(item.key),'STARTED_KEY');
+  localFact(['string','number'].includes(typeof item.actionId)||item.actionId===null,'STARTED_ACTION_ID');
+  localFact(item.identity&&validIdentity(item.identity),'STARTED_IDENTITY');
+  localFact(Number.isFinite(item.startedAt),'STARTED_TIMESTAMP');
+  localFact(item.nativeRuntime===undefined||typeof item.nativeRuntime==='boolean','STARTED_NATIVE_FLAG');
+  localFact(item.quarantine===undefined||item.quarantine&&typeof item.quarantine.stopConfirmed==='boolean','STARTED_QUARANTINE');startedKeys.add(item.key);
+ }
+ for(const item of value.completed){
+  localFact(item&&typeof item.key==='string'&&item.key&&!completedKeys.has(item.key),'COMPLETED_KEY');
+  localFact(item.result&&['succeeded','failed'].includes(item.result.status),'COMPLETED_RESULT');
+  localFact(validIdentity(item.identity)&&(item.identity||item.legacy===true),'COMPLETED_IDENTITY');completedKeys.add(item.key);
+ }
+ const targets=value.started.filter(item=>item?.actionId===ACTION);
+ localFact(targets.length===1,'TARGET_STARTED_COUNT');localFact(value.completed.filter(item=>item?.result?.actionId===ACTION).length===0,'TARGET_COMPLETED_COUNT');const started=targets[0];
+ localFact(typeof started.key==='string'&&started.key&&started.nativeRuntime===true&&Number.isFinite(started.startedAt),'TARGET_NATIVE_RECORD');
+ localFact(started.identity?.workspace===config.workspace,'TARGET_WORKSPACE');
+ localFact(started.identity.deviceId===config.deviceId&&started.identity.targetDeviceId===config.deviceId,'TARGET_DEVICE');
+ localFact(started.resourceBinding?.type==='conversation.execute'&&started.resourceBinding.employeeId===POLICY.subject.employeeId&&started.resourceBinding.revision===POLICY.subject.originalRevision&&started.resourceBinding.controlEpoch===POLICY.subject.originalControlEpoch,'TARGET_BINDING');
+ localFact(started.quarantine?.stopConfirmed===false,'TARGET_QUARANTINE');
+ localFact(value.started.filter(item=>!value.completed.some(done=>done?.key===item?.key)&&(item?.nativeRuntime===true||item?.quarantine)&&item.quarantine?.stopConfirmed!==true).length===1,'ACTIVE_NATIVE_COUNT');
+ const journal=rows[1],action=rows[2],result=rows[3];let scope;try{scope={apiBase:new URL(config.apiBase).origin,workspace:config.workspace,deviceId:config.deviceId};}catch(error){error.recoveryRule='LOCAL_SCOPE_URL';throw error;}
+ if(journal.exists){
+  const j=journal.value;localFact(j?.version===2,'JOURNAL_SCHEMA');localFact(j.action?.id===ACTION&&j.action.type==='conversation.execute','JOURNAL_ACTION');localFact(same(j.identity,scope),'JOURNAL_IDENTITY');localFact(hex(j.binding),'JOURNAL_BINDING');localFact(Array.isArray(j.events),'JOURNAL_EVENTS');localFact(j.state==='confirmed'&&j.serverStatus==='failed','JOURNAL_TERMINAL');const p=j.action.payload||{};
+  localFact(p.deviceId===config.deviceId&&p.employeeId===POLICY.subject.employeeId,'JOURNAL_TARGET');localFact(String(j.action.dedupe_key??j.action.dedupeKey??j.action.id)===started.key,'JOURNAL_DEDUPE');
+ }else localFact(!action.exists&&!result.exists,'ORPHAN_DELIVERY_BLOBS');
+ if(action.exists){
+  const a=action.value,j=journal.value,p=a?.action?.payload,b=p?.hermesBot;
+  localFact(j.actionDigest===action.sha256,'ACTION_BLOB_DIGEST');localFact(same(a?.identity,scope),'ACTION_IDENTITY');localFact(a.binding===j.binding,'ACTION_BINDING');localFact(a.action.id===ACTION&&a.action.type==='conversation.execute'&&p?.deviceId===config.deviceId&&p.employeeId===POLICY.subject.employeeId,'ACTION_TARGET');localFact(p.profile===POLICY.subject.profile,'ACTION_PROFILE');
+  localFact(b?.workspace===config.workspace&&b.deviceId===config.deviceId&&b.employeeId===POLICY.subject.employeeId&&b.revision===POLICY.subject.originalRevision&&b.controlEpoch===POLICY.subject.originalControlEpoch,'ACTION_HERMES_BINDING');
+  const binding=hash(JSON.stringify({id:ACTION,type:a.action.type,agent:a.action.agent_id||a.action.agentId||'ziwei_user',workspace:a.action.workspace_id||config.workspace,device:config.deviceId,employee:p.employeeId||null,conversation:p.conversationId||p.conversation_id||null,message:p.messageId||p.message_id||null,dedupe:a.action.dedupe_key||a.action.dedupeKey||null}));localFact(binding===j.binding&&started.key===String(a.action.dedupe_key??a.action.dedupeKey??ACTION),'ACTION_BINDING_DIGEST');
+ }
+ if(result.exists){localFact(journal.value.resultDigest===result.sha256,'RESULT_BLOB_DIGEST');localFact(result.value?.receiptOnly===true,'RESULT_RECEIPT');localFact(result.value.status==='failed','RESULT_STATUS');}
  return{rows,state,started,journal,action,result};
+}
+export function inspectForceAbandonLocalFacts(runtimeDir,config,{saved}={}){
+ try{const local=readLocal(runtimeDir,config,{saved});return{state:'passed',startedCount:local.state.value.started.length,completedCount:local.state.value.completed.length,files:local.rows.map(row=>({role:row.role,present:row.exists}))};}
+ catch(error){return{state:'failed',reasonCode:'EVIDENCE_MISMATCH',ruleId:FORCE_ABANDON_LOCAL_RULES.includes(error?.recoveryRule)?error.recoveryRule:'LOCAL_STATE_READ'};}
 }
 function assertHealth(body,c,pinned,{draining=false}={}){const l=body?.lifecycle,m=body?.maintenance;fact(body?.service==='ziwei_user'&&body.agentId==='ziwei_user'&&body.clientBuild===POLICY.holderBuild&&body.pid===c.record.pid&&body.workspace===c.config.workspace&&body.deviceId===c.config.deviceId&&l&&l.nonce===pinned.lifecycle.nonce&&/^[a-f0-9]{48}$/.test(l.nonce)&&samePath(l.root,c.root)&&samePath(l.configPath,c.configPath)&&l.configSha256===c.configHash&&samePath(l.runtimeDir,c.runtimeDir)&&l.startedAt===pinned.lifecycle.startedAt&&Math.abs(Date.parse(l.startedAt)-Date.parse(c.record.creationTime))<=15000&&l.managedAuxiliaryCount===0);fact(body.executionQuarantined===true&&body.quarantinedActionCount===1&&Number.isSafeInteger(body.activeActionCount)&&body.activeActionCount-body.quarantinedActionCount===0&&Number.isSafeInteger(body.pollingCount)&&body.pollingCount>=0);if(draining)fact(body.connectionState==='draining'&&body.pollingCount===0);fact(m?.gatewaySafe===true&&Array.isArray(m.gatewayWorkers)&&m.gatewayWorkers.length===0&&m.pendingDeliveryCount===0&&m.blockedDeliveryCount===0);}
 function sourceSnapshot(root){const files=[];for(const directory of ['src','daemon']){const walk=folder=>{noLinks(folder);for(const row of fs.readdirSync(folder,{withFileTypes:true})){const file=path.join(folder,row.name);noLinks(file);if(row.isDirectory())walk(file);else if(/\.(mjs|py|ps1)$/.test(row.name)){const st=fs.lstatSync(file);fact(st.isFile()&&st.nlink===1);files.push({path:file,exists:true,sha256:hash(fs.readFileSync(file))});}}};walk(path.join(root,directory));}const file=path.join(root,'package.json');noLinks(file);files.push({path:file,exists:true,sha256:hash(fs.readFileSync(file))});return files.sort((a,b)=>a.path.localeCompare(b.path));}
 export const FORCE_ABANDON_INVENTORY_PROGRAM = "$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); $rows=@(Get-CimInstance Win32_Process -Filter \"Name = 'node.exe'\" -ErrorAction Stop | ForEach-Object {[pscustomobject]@{pid=[int]$_.ProcessId;executable=$_.ExecutablePath;command=$_.CommandLine;creationTime=$_.CreationDate.ToUniversalTime().ToString('o')}}); ConvertTo-Json -InputObject $rows -Compress";
+export const FORCE_ABANDON_NATIVE_RULES=Object.freeze(['NATIVE_COMMAND_UNAVAILABLE','NATIVE_COMMAND_FAILED','NATIVE_JSON_EMPTY','NATIVE_JSON_INVALID','NATIVE_ARRAY_REQUIRED','NATIVE_PID_INVALID','NATIVE_COMMAND_UNREADABLE','NATIVE_EXECUTABLE_UNREADABLE','NATIVE_CREATION_INVALID','NATIVE_ENTRY_ARGUMENTS','NATIVE_SOURCE_EXECUTABLE','LISTENER_COUNT_EMPTY','LISTENER_COUNT_INVALID']);
+const nativeFailure=(ruleId,unreadableCount)=>Object.assign(fail(),{recoveryRule:ruleId,...(Number.isSafeInteger(unreadableCount)&&unreadableCount>0?{unreadableCount}:{})});
 export function createForceAbandonInventory({runCommand=run}={}) {return async root=>{
- const {stdout}=await runCommand('powershell.exe',['-NoProfile','-NonInteractive','-Command',FORCE_ABANDON_INVENTORY_PROGRAM],{encoding:'utf8',windowsHide:true,timeout:8000,maxBuffer:4*1024*1024});
- const parsed=JSON.parse(stdout.replace(/^\uFEFF/,'').trim());fact(Array.isArray(parsed));
- for(const row of parsed)fact(Number.isSafeInteger(row?.pid)&&row.pid>0&&typeof row.command==='string'&&row.command.length>0&&typeof row.executable==='string'&&row.executable.length>0&&Number.isFinite(Date.parse(row.creationTime)));
- return parsed.filter(row=>windowsCommandArguments(row.command).some(arg=>samePath(arg,path.join(root,'daemon/ziwei_user.mjs')))).map(row=>{const args=windowsCommandArguments(row.command);fact(samePath(row.executable,process.execPath)&&args.length===2&&samePath(args[0],process.execPath));return{pid:row.pid,creationTime:row.creationTime,commandHash:hash(row.command),executable:row.executable};});
+ let stdout;try{({stdout}=await runCommand('powershell.exe',['-NoProfile','-NonInteractive','-Command',FORCE_ABANDON_INVENTORY_PROGRAM],{encoding:'utf8',windowsHide:true,timeout:8000,maxBuffer:4*1024*1024}));}catch(error){throw nativeFailure(error?.code==='ENOENT'?'NATIVE_COMMAND_UNAVAILABLE':'NATIVE_COMMAND_FAILED');}
+ const output=stdout.replace(/^\uFEFF/,'').trim();if(!output)throw nativeFailure('NATIVE_JSON_EMPTY');let parsed;try{parsed=JSON.parse(output);}catch{throw nativeFailure('NATIVE_JSON_INVALID');}if(!Array.isArray(parsed))throw nativeFailure('NATIVE_ARRAY_REQUIRED');
+ const unreadableCount=parsed.filter(row=>!(Number.isSafeInteger(row?.pid)&&row.pid>0&&typeof row.command==='string'&&row.command.length>0&&typeof row.executable==='string'&&row.executable.length>0&&Number.isFinite(Date.parse(row.creationTime)))).length;
+ for(const row of parsed){if(!Number.isSafeInteger(row?.pid)||row.pid<=0)throw nativeFailure('NATIVE_PID_INVALID',unreadableCount);if(typeof row.command!=='string'||!row.command)throw nativeFailure('NATIVE_COMMAND_UNREADABLE',unreadableCount);if(typeof row.executable!=='string'||!row.executable)throw nativeFailure('NATIVE_EXECUTABLE_UNREADABLE',unreadableCount);if(!Number.isFinite(Date.parse(row.creationTime)))throw nativeFailure('NATIVE_CREATION_INVALID',unreadableCount);}
+ return parsed.filter(row=>windowsCommandArguments(row.command).some(arg=>samePath(arg,path.join(root,'daemon/ziwei_user.mjs')))).map(row=>{const args=windowsCommandArguments(row.command);if(!samePath(row.executable,process.execPath)||!samePath(args[0],process.execPath))throw nativeFailure('NATIVE_SOURCE_EXECUTABLE');if(args.length!==2)throw nativeFailure('NATIVE_ENTRY_ARGUMENTS');return{pid:row.pid,creationTime:row.creationTime,commandHash:hash(row.command),executable:row.executable};});
 };}
 const inventory=createForceAbandonInventory();
 
@@ -72,14 +113,35 @@ try{
 export function createForceAbandonHandleTerminator({runCommand=run}={}){return async data=>{const pending=runCommand('powershell.exe',['-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(FORCE_ABANDON_HANDLE_PROGRAM,'utf16le').toString('base64')],{encoding:'utf8',windowsHide:true,timeout:data.waitMs+15000,maxBuffer:64*1024});if(!pending.child?.stdin){await pending;throw fail();}pending.child.stdin.on('error',()=>{});pending.child.stdin.end(JSON.stringify(data));const{stdout}=await pending;return JSON.parse(stdout.replace(/^\uFEFF/,'').trim());};}
 const nativeTerminate=createForceAbandonHandleTerminator();
 function verifyArchive(directory,wal,runtimeDir){fact((wal?.schemaVersion===1&&wal.policyDigest===POLICY_DIGEST||wal?.schemaVersion===2&&wal.policyDigest===ABSENT_DIGEST)&&wal.actionId===ACTION&&Array.isArray(wal.files)&&wal.files.length===4);const expected=targetFiles(runtimeDir);return Object.fromEntries(wal.files.map((item,index)=>{fact(item.role===expected[index][0]&&samePath(item.path,expected[index][1])&&typeof item.exists==='boolean');if(!item.exists){fact(item.sha256===null&&item.bytes===null);return[item.role,{...item,value:null}];}const original=read(path.join(directory,item.role+'.original.json'));fact(original.sha256===item.sha256&&original.bytes.length===item.bytes);return[item.role,{...original,path:item.path}];}));}
+const OFFLINE_WAL_STAGES=new Set(['prepared','stopping','daemon_exited','receipt_saved','applied']);
+export function inspectForceAbandonOfflineArtifacts({root,configPath,configHash,config,runtimeDir}={}){
+ const directory=path.join(runtimeDir,'force-abandon',hash(JSON.stringify(ACTION))),walFile=path.join(directory,'journal.json'),exitFile=path.join(directory,'current-daemon-exit.json'),checks=[];
+ const check=(ruleId,value)=>{checks.push({ruleId,state:value?'passed':'failed'});return value;};
+ let wal=null,original=null,saved;
+ try{if(fs.existsSync(walFile)){original=read(walFile);wal=original.value;check('WAL_READ',true);}else check('WAL_ABSENT',true);}catch{check('WAL_READ',false);}
+ const summary={present:original!==null,schemaVersion:wal?.schemaVersion===1||wal?.schemaVersion===2?wal.schemaVersion:null,stage:OFFLINE_WAL_STAGES.has(wal?.stage)?wal.stage:wal?'unknown':null,hasReceipt:Boolean(wal?.receipt),exitEvidencePresent:fs.existsSync(exitFile),previousHolderJournalPresent:fs.existsSync(path.join(directory,'previous-holder-journal.original.json'))};
+ if(original){
+  check('WAL_SCOPE',samePath(wal?.root,root)&&samePath(wal?.runtimeDir,runtimeDir)&&samePath(wal?.configPath,configPath));
+  check('WAL_CONFIG',wal?.stage==='applied'||wal?.configHash===configHash);
+  try{saved=verifyArchive(directory,wal,runtimeDir);check('WAL_ARCHIVE',true);}catch{check('WAL_ARCHIVE',false);}
+  if(wal?.schemaVersion===1){
+   check('WAL_OFFLINE_TRANSITION',!wal.receipt&&!summary.exitEvidencePresent);
+   if(summary.previousHolderJournalPresent){try{check('WAL_PREVIOUS_HOLDER_MATCH',read(path.join(directory,'previous-holder-journal.original.json')).sha256===original.sha256);}catch{check('WAL_PREVIOUS_HOLDER_MATCH',false);}}
+   saved=undefined; // The real absent-holder branch retains v1, then reads live files.
+  }
+ }
+ const local=inspectForceAbandonLocalFacts(runtimeDir,config,{saved:wal?.schemaVersion===2?saved:undefined});
+ return{wal:summary,checks,local,remoteGrantCheck:'not_queried'};
+}
+
 function assertPrepared(prepared,holder,local,config){const s=prepared?.subject;fact(prepared?.applicable===true&&prepared.completed===false&&typeof prepared.challenge==='string'&&Number.isFinite(Date.parse(prepared.expiresAt))&&same(prepared.policy,POLICY)&&prepared.policyDigest===POLICY_DIGEST&&prepared.subjectDigest===digest(s)&&forceAbandonSubjectAllowed(s)&&same(s.holder,holder)&&s.deviceId===config.deviceId&&s.workspace===config.workspace&&s.dedupeKey===local.started.key&&s.employeeId===local.started.resourceBinding.employeeId);if(local.action.exists)fact(digest(local.action.value.action.payload)===s.originalDeliveredPayloadDigest&&same(local.action.value.action.payload.hermesBot.instance,s.profileBinding));}
 
-async function nativeListenerCount(origin) {
- const port=Number(new URL(origin).port);
- fact(Number.isSafeInteger(port)&&port>0&&port<65536);
- const {stdout}=await run('powershell.exe',['-NoProfile','-NonInteractive','-Command',`$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); @(Get-NetTCPConnection -State Listen | Where-Object {$_.LocalPort -eq ${port}}).Count`],{encoding:'utf8',windowsHide:true,timeout:8000,maxBuffer:64*1024});
- const output=stdout.replace(/^\uFEFF/,'').trim();fact(/^\d+$/.test(output));return Number(output);
-}
+export function createForceAbandonListenerCount({runCommand=run}={}){return async origin=>{
+ const port=Number(new URL(origin).port);fact(Number.isSafeInteger(port)&&port>0&&port<65536);
+ let stdout;try{({stdout}=await runCommand('powershell.exe',['-NoProfile','-NonInteractive','-Command',`$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); @(Get-NetTCPConnection -State Listen | Where-Object {$_.LocalPort -eq ${port}}).Count`],{encoding:'utf8',windowsHide:true,timeout:8000,maxBuffer:64*1024}));}catch(error){throw nativeFailure(error?.code==='ENOENT'?'NATIVE_COMMAND_UNAVAILABLE':'NATIVE_COMMAND_FAILED');}
+ const output=stdout.replace(/^\uFEFF/,'').trim();if(!output)throw nativeFailure('LISTENER_COUNT_EMPTY');if(!/^\d+$/.test(output)||!Number.isSafeInteger(Number(output)))throw nativeFailure('LISTENER_COUNT_INVALID');return Number(output);
+};}
+const nativeListenerCount=createForceAbandonListenerCount();
 
 // This branch observes an already absent daemon. It does not manufacture an
 // exit receipt, restart the old instance, or claim the old execution stopped.
@@ -170,3 +232,5 @@ export function createForceAbandonRecovery({platform=process.platform,installedB
  }catch(error){const result=error?.code===FORCE_ABANDON_REFUSED?error:fail();if(!stoppedReceipt&&wal&&fs.existsSync(exitFile)){try{const exit=read(exitFile).value;fact(exit.scope==='daemon-root-only'&&exit.stopped===true&&exit.pid===wal.record.pid&&exit.creationTime===wal.record.creationTime&&Date.parse(exit.exitedAt)<=now());stoppedReceipt={stopped:true,wasRunning:true,pid:exit.pid,creationTime:exit.creationTime};}catch{}}if(stoppedReceipt)result.stoppedClientReceipt=stoppedReceipt;else if(pauseAttempted){try{const record=wal?.record||pauseIdentity?.record,pinned=wal?.pinned||pauseIdentity?.pinned;fact(record&&same(await inspectProcess(record.pid,root),record)&&read(configPath).sha256===configHash);await inspectListener(origin,record.pid);const h=await request(origin+'/healthz');fact(h?.lifecycle?.nonce===pinned.lifecycle.nonce);await request(origin+'/local/connection-control',{operation:'resume',nonce:pinned.lifecycle.nonce},{local:true});result.resumed=true;}catch{result.resumeFailed=true;}}throw result;}
 };return async input=>{const progress={phase:'configuration'};try{return await recover({...input,progress});}catch(error){const result=error?.code===FORCE_ABANDON_REFUSED?error:fail();result.recoveryPhase=progress.phase;throw result;}};}
 export const recoverForceAbandonForUpdate=createForceAbandonRecovery();
+
+export {inventory as inspectForceAbandonInstalledProcesses,nativeListenerCount as inspectForceAbandonListenerCount,sourceSnapshot as inspectForceAbandonSourceSnapshot,originFor as forceAbandonHealthOrigin};

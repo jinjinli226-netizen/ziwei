@@ -229,3 +229,12 @@ API/前端于UTC16:54:04切换到 /opt/ziwei/releases/maintenance-recovery-874fc
 官方Windows包于UTC16:54:35发布，实际build f888c61360fd9a1292a01e57526c6e8b753d14393379e950d8108a5a325310b6；tgz1126097字节，SHA256 eec3341adc85b66b36ebeecaae0b085797b192be5900abe84287543c75831033。独立update-windows.ps1共6390字节，SHA256 526882bbed69de976a546e4d1cff122d55ab838d5d3ab4bad621121dd7cdd9bd；与同包和Git归档字节一致，release.json摘要c98495eee9d9aecf0c1999126f7a36db8a1d8a6d2155207df27d1e955928e6b5。本地及服务器Linux空缓存离线检查通过；公开PS/tgz/metadata已回读确认。独立postcheck全部通过，无失败项。
 
 此刻知微仍为授权requested、恢复回执0，不宣称设备已更新或已解除占用。已请用户在CMD调用一次新版官方PowerShell外部入口；它可装入新worker回收经证实失效的旧锁。旧c477普通update无法在自己加锁前装入这一修复，不能继续循环重试。明确看到Ziwei update complete后再启动客户端；之后仍需核实独立恢复回执和一次真实新模型消息。Windows原生测试仍待该设备执行。私有发布证据完整保存在 .local/operator-force-abandon-maintenance-release/；临时node_modules链接已移除，本机端口中心check通过（无本项目冲突或未登记监听）。
+
+
+### 874现场终态与只读诊断（2026-10-18）
+
+用户实际回传新外部bootstrap job update-7587a999-3482-4c29-83bb-0e7ea191823b 的terminal.json：UTC17:00:19.033Z已failed，recover_history / CLIENT_FORCE_ABANDON_REFUSED，recoveryPhase offline_observation、recoveryReasonCode EVIDENCE_MISMATCH；原安装保留。脚本先前的“worker已退出，更新未完成”遮蔽了实际保存的failed；状态读取先看running、等待原生进程查询期间worker落终态并退出的竞态已可复现，但尚未将本次现场唯一定因于该竞态。修复为：判中断前重读同job独立terminal/result/有限失败日志，不能据此宣称实际恢复成功。
+
+服务端UTC17:02只读核验：目标设备offline，最后心跳16:24:26，仍c477；原r3e8暂停/active2805，grant1/receipt0，原hash保持。17:00:15一次prepare409表明新worker越过维护锁并进入恢复探测；不能只凭409判断是哪条校验拒绝。offline_observation还包括WAL与readLocal，不能误判一定是进程或端口。
+
+因此新增一次官方只读诊断，不再让用户重复升级碰运气：复用实际本地校验器的静态ruleID，输出前后本机health拒连/状态、native inventory与listener数量或明确unknown、源码/配置/build是否相等、WAL及旧任务四份记录的失败规则。只读本机文件、loopback GET和原生清点；不提交prepare/commit、不暂停/停止、不中断任务、不改员工资料或业务记录，不输出密钥/原配置/聊天/命令行/原始子进程输出。PowerShell独立入口下载固定官方URL并校验SHA；诊断为单文件Node bundle，无需npm安装或正常更新，临时文件仅清理本次新建目录。源码先推GitHub，再仅发布3个静态诊断文件，正式API与CLI更新包保持874。现场具体拒绝规则须等目标电脑实际诊断，不预设根因。
