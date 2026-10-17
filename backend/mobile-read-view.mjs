@@ -2,10 +2,37 @@ import {createHash} from 'node:crypto';
 import {canonicalRasterMimeType,rasterImageMimeType} from '../src/raster-image.mjs';
 
 const terminalEventTypes=new Set(['succeeded','failed','cancelled','expired']);
+// Mobile run metadata omits recognized inline raster bytes from these explicit
+// attachment slots. Stored originals, full text and every other proof field,
+// including unknown future receipt evidence, remain intact.
+function mobileRunAttachments(values) {
+  if(!Array.isArray(values))return values;
+  let changed=false;
+  const attachments=values.map(value=>{
+    const source=attachmentImageSource(value);
+    if(!source)return value;
+    changed=true;
+    const metadata={...value};
+    for(const field of inlineImageFields(value,source))delete metadata[field];
+    return {...metadata,...(!Object.hasOwn(metadata,'size')?{size:source.bytes.length}:{}),...(!Object.hasOwn(metadata,'mimeType')?{mimeType:source.mimeType}:{})};
+  });
+  return changed?attachments:values;
+}
+function mobileRunResult(value) {
+  if(!value||typeof value!=='object'||Array.isArray(value))return value;
+  const artifacts=mobileRunAttachments(value.outputArtifacts),nested=mobileRunResult(value.result);
+  return artifacts===value.outputArtifacts&&nested===value.result?value:{...value,...(artifacts!==value.outputArtifacts?{outputArtifacts:artifacts}:{}),...(nested!==value.result?{result:nested}:{})};
+}
 export function mobileRunView(value) {
-  if(!Array.isArray(value?.events))return value;
-  const last=value.events.length-1;
-  return {...value,events:value.events.filter((event,index)=>index===last||terminalEventTypes.has(event?.type)),event_count:Number.isSafeInteger(value.event_count)&&value.event_count>=value.events.length?value.event_count:value.events.length};
+  if(!value||typeof value!=='object'||Array.isArray(value))return value;
+  const attachments=mobileRunAttachments(value.payload?.attachments),result=mobileRunResult(value.result);
+  const view=attachments===value.payload?.attachments&&result===value.result?value:{...value,...(attachments!==value.payload?.attachments?{payload:{...value.payload,attachments}}:{}),...(result!==value.result?{result}:{})};
+  if(!Array.isArray(value.events))return view;
+  const last=value.events.length-1,events=value.events.filter((event,index)=>index===last||terminalEventTypes.has(event?.type)).map(event=>{
+    const result=mobileRunResult(event?.data?.result);
+    return result===event?.data?.result?event:{...event,data:{...event.data,result}};
+  });
+  return {...view,events,event_count:Number.isSafeInteger(value.event_count)&&value.event_count>=value.events.length?value.event_count:value.events.length};
 }
 
 // Read projections never mutate the stored employee, conversation or receipt.
@@ -92,12 +119,16 @@ export function createMobileReadView(repo) {
     return values.map(value=>({...employee(slug,value),main_conversation_id:mainConversationId(value)}));
   }
   function bot(slug,value) {
-    return value?.employee?{...value,employee:employee(slug,value.employee)}:value;
+    if(!value||typeof value!=='object'||Array.isArray(value))return value;
+    const latest=mobileRunView(value.latest_run),stop=mobileRunView(value.stop_action);
+    return value.employee||latest!==value.latest_run||stop!==value.stop_action?{...value,...(value.employee?{employee:employee(slug,value.employee)}:{}),...(latest!==value.latest_run?{latest_run:latest}:{}),...(stop!==value.stop_action?{stop_action:stop}:{})}:value;
   }
   function conversation(value) {
     if(!value)return value;
     const slug=value.employee?db.prepare('SELECT slug FROM workspaces WHERE id=?').get(value.workspace_id)?.slug:null;
+    const execution=mobileRunView(value.execution);
     let view=slug?{...value,employee:employee(slug,value.employee)}:value;
+    if(execution!==value.execution)view={...view,execution};
     if(!value.id||!Array.isArray(value.messages))return view;
     let changed=false;
     const messages=value.messages.map(message=>{

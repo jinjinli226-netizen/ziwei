@@ -81,6 +81,7 @@ test('mobile Bot list/detail project avatars and run events while conversation p
       const expected={...a[index],employee:b[index].employee};
       if(a[index].latest_run)expected.latest_run=mobileRunView(a[index].latest_run);
       if(a[index].stop_action)expected.stop_action=mobileRunView(a[index].stop_action);
+      if(a[index].execution)expected.execution=mobileRunView(a[index].execution);
       if(a[index].messages) {
         const {content,...metadata}=a[index].messages[1].attachments[0];
         const url=b[index].messages[1].attachments[0].url;
