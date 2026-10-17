@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {computed,ref,watch} from 'vue';
-import {createConversationRequestSequence,mergeConversationDetail,mergeConversationLists} from './conversation-execution-state.mjs';
+import {createConversationRequestSequence,mergeConversationDetail,mergeConversationLists,executionNeedsPolling} from './conversation-execution-state.mjs';
 import {conversationSettingsSnapshot,mergeConversationSettingsDraft} from './workdir.js';
 
 const app=await readFile(new URL('./App.vue',import.meta.url),'utf8');
@@ -196,7 +196,7 @@ function navigationHarness() {
   const state=Object.fromEntries([...sources.matchAll(/(\w+)\.value/g)].map(match=>[match[1],ref(null)]));
   Object.assign(state,{authState:ref({user:{id:'owner'}}),conversationEmployeeId:ref('instrends'),conversations:ref([{id:'chat-instrends',employee_id:'instrends'}]),employees:ref([{id:'instrends'},{id:'secretary'},{id:'other'}]),devices:ref([{id:'device',status:'online',workdir:'D:/Work'}]),page:ref('bots'),selectedConversation:ref(null),conversationExecutionBusy:ref(false)});
   const details=[],lists=[],notices=[];let location='/bigtron/bots/secretary';
-  const context={...state,watch,workspaceSlug:()=> 'bigtron',createConversationRequestSequence,mergeConversationDetail,mergeConversationLists,conversationSettingsSnapshot,mergeConversationSettingsDraft,
+  const context={...state,watch,workspaceSlug:()=> 'bigtron',createConversationRequestSequence,mergeConversationDetail,mergeConversationLists,executionNeedsPolling,conversationSettingsSnapshot,mergeConversationSettingsDraft,
     api:{conversation:id=>{const request={id,...deferred()};details.push(request);return request.promise;},conversations:employee=>{const request={employee,...deferred()};lists.push(request);return request.promise;},bot:id=>Promise.resolve(bot(id))},
     history:{pushState:(_state,_title,url)=>{location=url;},replaceState:(_state,_title,url)=>{location=url;}},
     routePath:(page,id='')=>`/bigtron/${page}${id?'/'+id:''}`,
@@ -225,6 +225,7 @@ test('late old employee list cannot change the explicit main-chat scope or selec
   ui.lists[0].resolve({conversations:[detail('chat-instrends','instrends')]});await oldList;
   assert.equal(ui.details.length,1);assert.equal(ui.conversationEmployeeId.value,'secretary');assert.deepEqual(ui.conversations.value,[]);
   ui.details[0].resolve(detail('chat-secretary','secretary'));await opening;await settle();
+  assert.deepEqual(ui.notices,[],'successful detail load must not conceal a missing harness dependency');
   assert.equal(ui.selectedConversation.value.id,'chat-secretary');assert.equal(ui.conversationEmployeeId.value,'secretary');assert.equal(ui.botChatIntent.value.opening,false);
 });
 
