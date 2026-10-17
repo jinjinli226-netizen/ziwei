@@ -1,5 +1,5 @@
 import { escapeHtml, employeeName } from './model.js';
-import { mobileGroupCandidates, mobileGroupGate } from './mobile-groups.js';
+import { mobileGroupCandidates, mobileGroupStateGate } from './mobile-groups.js';
 
 const rows = value => Array.isArray(value) ? value : [];
 const phases = { idle: '尚未读取', reading: '正在读取', submitting: '正在提交', queued: '等待目标电脑回执', succeeded: '已读回原生回执', failed: '本次未完成', uncertain: '执行待核实', unknown: '送达情况待核实', upgrade_required: '需要更新电脑端', requires_dependency: '运行环境尚未就绪', requires_authorization: '需要补齐授权' };
@@ -11,7 +11,7 @@ export function renderMobileGroups(state, helpers = {}) {
   const name = id => candidates.find(employee => employee.id === id)?.name || rows(g.members).find(member => member.id === id)?.name || id;
   const busy = Boolean(g.busy || g.pending || g.storageBlocked), disabled = busy ? ' disabled' : '';
   const source = candidates.find(employee => employee.id === g.sourceId);
-  const gate = mobileGroupGate(g.bot, { sending: true });
+  const gate = mobileGroupStateGate(g);
   const authorized = new Set(rows(g.bot?.config?.collaboration?.targetEmployeeIds));
   const choices = candidates.filter(employee => employee.id !== g.sourceId && authorized.has(employee.id));
   const selected = rows(g.selectedTargetIds), mentions = rows(g.mentionIds);

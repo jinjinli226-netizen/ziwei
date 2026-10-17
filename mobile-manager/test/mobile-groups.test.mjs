@@ -63,6 +63,77 @@ test('legacy unpaged history is rejected visibly, without a whole-history fallba
   assert.deepEqual(f.state.groups.events, []); assert.equal(f.posts.length, 1); assert.equal(f.state.groups.pending, null);
 });
 
+async function legacyRead(f,module=f.module) {
+  f.api.botNativeAction=async(ws,sourceId,body)=>{f.posts.push({body});return {action:f.makeAction(sourceId,body,'succeeded',{room:f.room,events:{events:[{event_id:'old',seq:1}]}})};};
+  await module.open({sourceEmployeeId:'source'});assert.equal(await module.actions['group-open']({id:roomId}),false);
+}
+async function tryNewGroupSend(f,module=f.module,target='target') {
+  f.state.page='groups';await module.actions['group-new']();await module.actions['group-target']({id:target});await module.change({name:'groupContent',value:'新的协作正文'});
+  return module.actions['group-send']();
+}
+
+test('legacy read then back/new/target/send keeps the host capability gate and sends no collaboration POST',async()=>{
+  const f=fixture();let sends=0;f.api.collaborateBot=async()=>{sends++;throw new Error('must not dispatch');};
+  await legacyRead(f);assert.equal(await tryNewGroupSend(f),false);assert.equal(sends,0);
+  assert.match(f.state.groups.error,/更新电脑端/);assert.equal(f.state.groups.phase,'idle');
+  assert.match(renderMobileGroups(f.state),/data-action="group-send" disabled/);
+  const saved=[...f.store.values.entries()].find(([key])=>key.startsWith('ziwei.manager.group-capability.v1:'));
+  assert(saved);const record=JSON.parse(saved[1]);assert.equal(record.binding.sourceId,'source');assert.equal(record.binding.revision,4);
+  assert(!saved[1].includes('新的协作正文'));
+});
+
+test('unsupported source remains blocked after reselect/reopen/reset/logout and controller recreation',async()=>{
+  const f=fixture();await legacyRead(f);
+  await f.module.actions['groups-source']({id:'source'});assert.equal(await tryNewGroupSend(f),false);
+  await f.module.open({sourceEmployeeId:'source'});assert.equal(await tryNewGroupSend(f),false);
+  f.module.reset({clearAccount:true});await f.module.open({sourceEmployeeId:'source'});assert.equal(await tryNewGroupSend(f),false);
+  f.module.dispose();const rebuilt=f.create();await rebuilt.open({sourceEmployeeId:'source'});assert.equal(await tryNewGroupSend(f,rebuilt),false);
+  assert.equal(f.posts.filter(post=>post.body.mode==='group').length,0);
+});
+
+test('capability storage failure cannot lose the account-scoped negative gate on logout/relogin',async()=>{
+  const store=storage(),write=store.setItem;
+  store.setItem=(key,value)=>{if(key.startsWith('ziwei.manager.group-capability.v1:'))throw new Error('quota');write(key,value);};
+  const f=fixture({storage:store});await legacyRead(f);f.module.reset({clearAccount:true});
+  await f.module.open({sourceEmployeeId:'source'});assert.equal(await tryNewGroupSend(f),false);
+  assert.equal(f.posts.filter(post=>post.body.mode==='group').length,0);
+  f.state.user={user_id:'another-account'};await f.module.open({sourceEmployeeId:'source'});
+  assert.equal(f.state.groups.capabilityError,null,'a different principal never inherits another account capability state');
+});
+
+test('revision/device/profile metadata changes alone cannot clear known unsupported capability',async()=>{
+  const f=fixture(),original=f.api.bot;
+  f.api.bot=async(ws,id)=>({...await original(ws,id),employee:{...f.bot(id).employee,target_device_id:'computer_one',runtime_profile:'physical_profile'},instance:{mode:'owned_profile',profile:'employee_profile',ownershipId:'owned_one'}});
+  await legacyRead(f);
+  const saved=JSON.parse([...f.store.values.entries()].find(([key])=>key.startsWith('ziwei.manager.group-capability.v1:'))[1]);
+  assert.equal(saved.binding.deviceId,'computer_one');assert.equal(saved.binding.profile,'employee_profile');assert.equal(saved.binding.ownershipId,'owned_one');
+  f.api.bot=async(ws,id)=>({...await original(ws,id),revision:5,employee:{...f.bot(id).employee,target_device_id:'computer_two',runtime_profile:'other_profile'}});
+  await f.module.actions['groups-source']({id:'source'});assert.equal(await tryNewGroupSend(f),false);
+});
+
+test('a fresh matched paged read clears the unsupported capability and permits a subsequent explicit send',async()=>{
+  const f=fixture();await legacyRead(f);
+  f.api.botNativeAction=async(ws,sourceId,body)=>({action:f.makeAction(sourceId,body)});
+  assert.equal(await f.module.actions['group-refresh'](),true);
+  assert.equal(f.state.groups.capabilityError,null);assert.equal([...f.store.values.keys()].some(key=>key.startsWith('ziwei.manager.group-capability.v1:')),false);
+  assert.equal(await tryNewGroupSend(f),true);assert.equal(f.posts.filter(post=>post.body.mode==='group').length,1);
+});
+
+test('another freshly verified source can send while the original unsupported source remains blocked',async()=>{
+  const f=fixture();await legacyRead(f);
+  await f.module.actions['groups-source']({id:'second'});assert.equal(await tryNewGroupSend(f,f.module,'source'),true);
+  await f.module.actions['groups-source']({id:'source'});assert.equal(await tryNewGroupSend(f),false);
+});
+
+test('typed old-host errors from the exact pending action poll persist across a new group',async()=>{
+  const f=fixture();await selected(f);
+  f.api.botNativeAction=async(ws,sourceId,body)=>({action:f.makeAction(sourceId,body,'pending')});
+  await f.module.actions['group-open']({id:roomId});
+  f.api.managementAction=async()=>{throw Object.assign(new Error('需要更新电脑端'),{status:409,code:'GROUP_HOST_UPGRADE_REQUIRED'});};
+  assert.equal(await f.module.poll(),false);assert.equal(f.state.groups.pending,null);
+  assert.equal(await tryNewGroupSend(f),false);assert.equal(f.posts.filter(post=>post.body.mode==='group').length,0);
+});
+
 test('read pages validate original scope, epoch, request identity, cursor and event order before display', async () => {
   for (const change of [action => { action.payload.hermesBot.workspace = 'other'; }, action => { action.payload.hermesBot.controlEpoch = 99; }, action => { action.payload.nativeOperation.requestId = 'other'; }, action => { action.result.nativeOperation.revision = 3; }, action => { action.result.nativeOperation.data.pagination.afterSeq = 6; }, action => { action.result.nativeOperation.data.events.events[0].seq = 0; }]) {
     const f = fixture(); await selected(f);

@@ -8,6 +8,8 @@ const clone = value => JSON.parse(JSON.stringify(value));
 const terminal = new Set(['succeeded', 'failed', 'cancelled', 'expired', 'rejected']);
 const active = new Set(['pending', 'acked', 'queued', 'running']);
 const prefix = 'ziwei.manager.groups.v1:';
+const capabilityPrefix = 'ziwei.manager.group-capability.v1:';
+const upgradeIssue = Object.freeze({code:'GROUP_HOST_UPGRADE_REQUIRED',message:'目标电脑暂不支持手机分页群记录，请先更新电脑端并成功读取群记录后再发送'});
 const failure = (message, code = 'GROUP_RECEIPT_INVALID') => Object.assign(new Error(message), { code });
 const receiptOf = action => action?.result?.nativeOperation || action?.result?.result?.nativeOperation;
 const keyFor = (account, workspace, source) => prefix + JSON.stringify([account, workspace, source]);
@@ -20,11 +22,19 @@ export function mobileGroupCandidates(state) {
   return [...map.values()].filter(employee => employee.runtime === 'Hermes' && employee.bot?.kind !== 'creator' && employee.kind !== 'creator' && stable(employee.id) && employee.status !== 'deleted');
 }
 
-export function mobileGroupGate(bot, { sending = false } = {}) {
+function capabilityBinding(bot) {
+  return {sourceId:bot?.id||'',deviceId:bot?.employee?.target_device_id??null,
+    profileMode:bot?.instance?.mode||'legacy_private_home',profile:bot?.instance?.profile??bot?.employee?.runtime_profile??null,
+    ownershipId:bot?.instance?.ownershipId??null,revision:bot?.revision??null};
+}
+const capabilityBindingKey = bot => JSON.stringify(capabilityBinding(bot));
+export function mobileGroupGate(bot, { sending = false, capabilityError = null, paginationVerified = false } = {}) {
   if (!bot || bot.configuration_state !== 'initialized') return '这位员工尚未完成 Bot 配置';
   if (!Number.isSafeInteger(bot.revision) || !Number.isSafeInteger(bot.control_epoch)) return '员工版本尚未读全，请重新选择员工';
   if (!sending) return '';
-  const readIssue=bot.mobileReadError||bot.latest_run?.mobileReadError||bot.nativeResources?.groups?.readError||bot.nativeResources?.groups?.mobileReadError||bot.nativeResources?.collaboration?.readError||bot.nativeResources?.collaboration?.mobileReadError;
+  if(capabilityError)return capabilityError.message;
+  const readIssue=[bot.mobileReadError,bot.latest_run?.mobileReadError,bot.nativeResources?.groups?.readError,bot.nativeResources?.groups?.mobileReadError,bot.nativeResources?.collaboration?.readError,bot.nativeResources?.collaboration?.mobileReadError]
+    .find(issue=>issue&&!(paginationVerified&&issue.code==='GROUP_HOST_UPGRADE_REQUIRED'));
   if(readIssue)return readIssue.message||'群组原记录暂时无法核对，请先更新电脑端并刷新';
   if (bot.config?.permissions?.mode !== 'execute' || bot.config?.collaboration?.enabled !== true) return '请先在模型与能力中保存伙伴协作和工具权限';
   if (bot.control_state !== 'active' || bot.validation?.status !== 'succeeded') return '请先检查并启用当前员工配置';
@@ -32,6 +42,10 @@ export function mobileGroupGate(bot, { sending = false } = {}) {
   if (executionUncertain(run) || run?.status === 'expired' && run.acked_at) return '员工原执行仍待核实，请先核对原回执';
   if (active.has(run?.status)) return '员工正在执行，请先等待本次工作结束';
   return '';
+}
+export function mobileGroupStateGate(g, {sending=true}={}) {
+  return mobileGroupGate(g?.bot,{sending,capabilityError:g?.capabilityError,
+    paginationVerified:g?.verifiedCapabilityKey===capabilityBindingKey(g?.bot)});
 }
 
 async function fingerprint(body) {
@@ -81,15 +95,52 @@ function checkedPage(data, pending) {
 /** No timers or scheduler: refresh/paging are explicit native reads; poll only GETs original actions. */
 export function createMobileGroups({ state, api, current, valid, draw = () => {}, fail = () => {}, storage = globalThis.localStorage } = {}) {
   let generation = 0, disposed = false, lastAccount = '';
-  const registry = new Map();
+  const registry = new Map(), capabilityErrors = new Map();
   const capture = () => current?.() || { scope: scopeKey(state) };
   const scope = () => ({ account: accountId(state), workspace: workspaceId(state) });
   const live = (g, token, visit) => !disposed && state.groups === g && generation === visit && ['groups', 'group'].includes(state.page)
     && (valid ? valid(token) : token.scope === scopeKey(state)) && g.scope === scopeKey(state);
   const initial = () => ({ scope: scopeKey(state), sourceId: '', bot: null, rooms: [], room: null, roomVerified: false, events: [], members: [], cursor: 0, hasMore: false,
-    selectedTargetIds: [], mentionIds: [], content: '', newGroup: false, busy: false, storageBlocked: false, phase: 'idle', error: '', notice: '', pending: null, lastAction: null, memberRuns: [] });
+    selectedTargetIds: [], mentionIds: [], content: '', newGroup: false, busy: false, storageBlocked: false, capabilityError:null,verifiedCapabilityKey:null,phase: 'idle', error: '', notice: '', pending: null, lastAction: null, memberRuns: [] });
   const ensure = () => state.groups ||= initial();
   const pendingKey = g => keyFor(accountId(state), workspaceId(state), g.sourceId);
+  const capabilityKey = sourceId => capabilityPrefix+JSON.stringify([accountId(state),workspaceId(state),sourceId]);
+  function restoreCapability(g) {
+    const key=capabilityKey(g.sourceId);
+    if(!capabilityErrors.has(key)) {
+      try {
+        if(!storage?.getItem)throw new Error();
+        const raw=storage.getItem(key);
+        if(raw!==null&&raw!==undefined) {
+          if(typeof raw!=='string')throw new Error();
+          if(raw.length>4096)throw new Error();
+          const value=JSON.parse(raw),binding=value.binding;
+          if(value.schemaVersion!==1||value.accountId!==accountId(state)||value.workspace!==workspaceId(state)||value.sourceId!==g.sourceId||value.code!=='GROUP_HOST_UPGRADE_REQUIRED'
+              ||!binding||binding.sourceId!==g.sourceId||!Number.isSafeInteger(binding.revision)||binding.revision<0
+              ||['deviceId','profileMode','profile','ownershipId'].some(name=>binding[name]!==null&&(typeof binding[name]!=='string'||binding[name].length>512)))throw new Error();
+          capabilityErrors.set(key,{...upgradeIssue,binding});
+        } else capabilityErrors.set(key,null);
+      } catch {
+        capabilityErrors.set(key,{code:'GROUP_CAPABILITY_STATE_UNAVAILABLE',message:'本机群能力记录无法读取，请先成功读取当前群记录后再发送'});
+      }
+    }
+    // A revision/configuration change alone does not prove that the host was updated.
+    g.capabilityError=capabilityErrors.get(key);
+    if(g.capabilityError)g.phase='upgrade_required';
+  }
+  function rememberUpgrade(g,pending,token) {
+    if(disposed||!(valid?valid(token):token.scope===scopeKey(state))||g.scope!==scopeKey(state)||!pending)return;
+    const binding=pending.capabilityBinding||capabilityBinding(g.bot),key=capabilityKey(pending.sourceId);
+    const value={schemaVersion:1,accountId:accountId(state),workspace:workspaceId(state),sourceId:pending.sourceId,code:upgradeIssue.code,binding};
+    capabilityErrors.set(key,{...upgradeIssue,binding});g.capabilityError=capabilityErrors.get(key);g.verifiedCapabilityKey=null;
+    try {if(!storage?.setItem)throw new Error();storage.setItem(key,JSON.stringify(value));}
+    catch {g.capabilityError={...g.capabilityError,message:'本机无法保存群能力检查，暂不能发送，请恢复存储后重新读取群记录'};}
+  }
+  function confirmPagination(g,pending) {
+    if(!pending.capabilityBinding||JSON.stringify(pending.capabilityBinding)!==capabilityBindingKey(g.bot))return;
+    const key=capabilityKey(g.sourceId);capabilityErrors.set(key,null);g.capabilityError=null;g.verifiedCapabilityKey=capabilityBindingKey(g.bot);
+    try {storage?.removeItem(key);}catch {g.notice='当前群分页已核实；本机旧能力记录未清理，重启后需重新核对';}
+  }
   function store(pending) {
     const value = Object.fromEntries(Object.entries(pending).filter(([key]) => !['body', 'action'].includes(key)));
     try { if (!storage?.setItem) throw new Error(); storage.setItem(pending.storageKey, JSON.stringify(value)); }
@@ -134,6 +185,7 @@ export function createMobileGroups({ state, api, current, valid, draw = () => {}
       if (!live(g, token, visit)) return false;
       if (bot?.id !== sourceId || bot.workspace !== workspaceId(state) || bot.kind === 'creator') throw failure('员工归属无法核对');
       g.bot = bot;
+      restoreCapability(g);
       const pending = restore(g); displayPending(g, pending);
       if (pending) { g.phase = pending.actionId ? 'queued' : 'unknown'; g.notice = '保留了原请求，请先查询本次回执'; }
       return true;
@@ -193,6 +245,7 @@ export function createMobileGroups({ state, api, current, valid, draw = () => {}
       if (pending.afterSeq !== 0 && (g.room?.room_id !== pending.groupId || g.cursor !== pending.afterSeq)) throw failure('群记录已变化，请重新读取这段群记录');
       g.room = page.room; g.events = pending.afterSeq === 0 ? page.events : [...g.events, ...page.events]; g.cursor = page.cursor; g.hasMore = page.hasMore;
       g.roomVerified = true;
+      confirmPagination(g,pending);
       setMembers(g, page.room); state.page = 'group'; g.newGroup = false;
     } else {
       // A send/step receipt may carry the native manager's complete history.
@@ -211,7 +264,7 @@ export function createMobileGroups({ state, api, current, valid, draw = () => {}
     if (disposed || !['groups', 'group'].includes(state.page)) return false;
     const g = ensure(), token = capture(), visit = generation, workspace = workspaceId(state);
     if (g.busy || g.storageBlocked || pendingFor(g) || g.phase === 'unknown' && !g.pending) return false;
-    const gate = mobileGroupGate(g.bot, { sending });
+    const gate = mobileGroupStateGate(g, { sending });
     if (gate) { g.error = gate; draw(); return false; }
     g.busy = true; g.error = ''; g.notice = ''; g.phase = sending ? 'submitting' : 'reading'; draw();
     let pending, started = false;
@@ -233,6 +286,7 @@ export function createMobileGroups({ state, api, current, valid, draw = () => {}
         input = { groupId: roomId };
       } else body = { expectedRevision: g.bot.revision, expectedControlEpoch: g.bot.control_epoch, idempotencyKey: requestId, resource, operation, input };
       pending = { storageKey: pendingKey(g), workspace, sourceId: g.sourceId, revision: g.bot.revision, controlEpoch: g.bot.control_epoch,
+        capabilityBinding:capabilityBinding(g.bot),
         requestId, resource, operation, groupId: input?.groupId || null, afterSeq, targetIds: sending ? body.targetEmployeeIds : [], fingerprint: await fingerprint(body), actionId: null, body };
       if (!live(g, token, visit)) return false;
       store(pending); registry.set(pending.storageKey, pending); displayPending(g, pending); draw(); started = true;
@@ -240,6 +294,7 @@ export function createMobileGroups({ state, api, current, valid, draw = () => {}
       return await accept(g, pending, response, token, visit);
     } catch (error) {
       if (pending && error.code === 'GROUP_HOST_UPGRADE_REQUIRED') remove(pending);
+      if(error.code==='GROUP_HOST_UPGRADE_REQUIRED')rememberUpgrade(g,pending,token);
       if (pending && started && error.status && error.status < 500 && error.status !== 408 && !/IDEMPOTENCY.*CONFLICT/.test(error.code || '')) remove(pending);
       if (live(g, token, visit)) { g.phase = error.code === 'GROUP_HOST_UPGRADE_REQUIRED' ? 'upgrade_required' : pending && registry.has(pending.storageKey) ? 'unknown' : 'failed'; displayPending(g, pendingFor(g)); }
       report(g, error, token, visit); return false;
@@ -261,6 +316,7 @@ export function createMobileGroups({ state, api, current, valid, draw = () => {}
       return await accept(g, pending, response, token, visit);
     } catch (error) {
       if (error.code === 'GROUP_HOST_UPGRADE_REQUIRED') { remove(pending); if (live(g, token, visit)) { g.phase = 'upgrade_required'; displayPending(g, null); } }
+      if(error.code==='GROUP_HOST_UPGRADE_REQUIRED')rememberUpgrade(g,pending,token);
       report(g, error, token, visit); return false;
     }
     finally { if (live(g, token, visit)) { g.busy = false; draw(); } }
@@ -302,6 +358,8 @@ export function createMobileGroups({ state, api, current, valid, draw = () => {}
     if (clearAccount && lastAccount) {
       try { const keys = []; for (let index = 0; index < storage.length; index++) keys.push(storage.key(index)); for (const key of keys) { try { if (key?.startsWith(prefix) && JSON.parse(key.slice(prefix.length))[0] === lastAccount) storage.removeItem(key); } catch {} } } catch {}
       for (const [key] of registry) { try { if (JSON.parse(key.slice(prefix.length))[0] === lastAccount) registry.delete(key); } catch {} }
+      // Host incompatibility is capability evidence, not a pending business
+      // request. Logging out cannot turn an unsupported host into a supported one.
     }
     state.groups = null;
   }

@@ -165,6 +165,14 @@ try {
     await click(page, 'back'); control.legacyNext = true; await click(page, 'group-open', existing); await settleNative(page);
     await page.getByText('目标电脑暂不支持手机分页群记录，请先更新电脑端', { exact: true }).waitFor();
     assert.equal(await page.locator('[data-group-event-id]').count(), 0); assert.equal(await page.locator('[data-action=group-send]').isDisabled(), true);
+    const sendsBeforeLegacyBypass=control.sends.length;
+    await click(page,'back');await click(page,'group-new');await click(page,'group-target','partner');
+    await page.locator('[name=groupContent]').fill('旧电脑能力错误不能通过新建群绕过');
+    assert.equal(await page.locator('[data-action=group-send]').isDisabled(),true);
+    // Exercise the controller guard even if a stale/mutated button looks enabled.
+    await page.locator('[data-action=group-send]').evaluate(button=>{button.removeAttribute('disabled');button.click();});await raf(page);
+    assert.equal(control.sends.length,sendsBeforeLegacyBypass,'Known unsupported host cannot dispatch via back/new/member/send');
+    await page.getByText(/目标电脑暂不支持手机分页群记录/).first().waitFor();
     const count = control.nativePosts.length; await page.evaluate(() => window.dispatchEvent(new Event('ziwei:resume'))); await raf(page); assert.equal(control.nativePosts.length, count, 'Resume/periodic polling cannot dispatch a fresh groups.read');
     await click(page, 'back'); await click(page, 'back');
     await page.locator('.bottom-nav [data-action=navigate][data-tab=work]').click(); await page.locator('.task-filters').waitFor();
