@@ -1,0 +1,89 @@
+plugins {
+    id 'com.android.application' version '8.7.3'
+    id 'com.google.gms.google-services' version '4.4.2' apply false
+    id 'com.huawei.agconnect' version '1.9.1.301' apply false
+}
+
+def moduleRoot = file(providers.gradleProperty('ziweiModuleRoot').getOrElse('..'))
+def client = { String key ->
+    String value = System.getenv('ZIWEI_PUSH_' + key) ?: ''
+    if (!(value ==~ /[A-Za-z0-9_:\-.]{0,256}/)) throw new GradleException('Invalid push client configuration')
+    value
+}
+def huaweiConfigured = file('agconnect-services.json').isFile()
+def fcmConfigured = file('google-services.json').isFile()
+if (huaweiConfigured) apply plugin: 'com.huawei.agconnect'
+if (fcmConfigured) apply plugin: 'com.google.gms.google-services'
+
+def generatedManifest = file('build/inputs/AndroidManifest.xml')
+generatedManifest.parentFile.mkdirs()
+generatedManifest.text = new File(moduleRoot, 'android/AndroidManifest.xml').getText('UTF-8').replaceFirst(/\s+package="com\.ziwei\.manager"/, '')
+
+android {
+    namespace 'com.ziwei.manager'
+    compileSdk 35
+    buildToolsVersion '35.0.0'
+    defaultConfig {
+        applicationId 'com.ziwei.manager'
+        minSdk 26
+        targetSdk 35
+        versionCode Integer.parseInt(providers.gradleProperty('ziweiVersionCode').getOrElse('11'))
+        versionName providers.gradleProperty('ziweiVersionName').getOrElse('0.4.0-internal')
+        manifestPlaceholders = [XG_ACCESS_ID: '0', XG_ACCESS_KEY: '', VIVO_APPID: client('VIVO_APP_ID'), VIVO_APPKEY: client('VIVO_APP_KEY'), HONOR_APPID: client('HONOR_APP_ID')]
+        ['MI_APP_ID','MI_APP_KEY','MZ_APP_ID','MZ_APP_KEY','OPPO_APP_KEY','OPPO_APP_SECRET','VIVO_APP_ID','VIVO_APP_KEY','HONOR_APP_ID'].each {
+            buildConfigField 'String', it, '"' + client(it) + '"'
+        }
+        buildConfigField 'boolean', 'HUAWEI_CONFIGURED', huaweiConfigured.toString()
+        buildConfigField 'boolean', 'FCM_CONFIGURED', fcmConfigured.toString()
+        ndk { abiFilters 'armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64' }
+    }
+    buildFeatures { buildConfig true }
+    sourceSets {
+        main {
+            manifest.srcFile generatedManifest
+            java.srcDirs = [new File(moduleRoot, 'android/src')]
+            res.srcDirs = [new File(moduleRoot, 'android/res')]
+            assets.srcDirs = [new File(moduleRoot, 'web')]
+        }
+        release {
+            manifest.srcFile new File(moduleRoot, 'android/profiles/tpns/AndroidManifest.xml')
+            java.srcDirs = [new File(moduleRoot, 'android/profiles/tpns')]
+        }
+    }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_1_8; targetCompatibility JavaVersion.VERSION_1_8 }
+    buildTypes { release { debuggable false; minifyEnabled false; shrinkResources false } }
+    packaging { jniLibs { useLegacyPackaging true }; resources { excludes += ['META-INF/DEPENDENCIES', 'META-INF/LICENSE*', 'META-INF/NOTICE*'] } }
+}
+
+dependencies {
+    ['tpns','xiaomi','huawei','honor','oppo','vivo','meizu','fcm'].each { implementation "com.tencent.tpns:${it}:1.4.4.12-release" }
+    implementation 'com.huawei.hms:push:6.12.0.300'
+    implementation 'com.google.firebase:firebase-messaging:24.1.0'
+    implementation 'com.google.code.gson:gson:2.11.0'
+    implementation 'commons-codec:commons-codec:1.15'
+}
+
+def pinnedTpns = [
+    tpns:'64b20eae819bcf9013f9e1780697d5a3840d4c5f351854bcdd5231de3fbc7439',
+    xiaomi:'bc535c10abbad42e0d40aa9d6d41ad46b54107f9e8c44acc3b273ee15c01d6ac',
+    huawei:'22cc308d26fd09b561015da76ba5c1f46e72334c7471770176315c1e59913d62',
+    honor:'1579be5af580f22189bec4c8fcb0e424b286f6a4da8d5fce4a4a5fa875904bb0',
+    oppo:'ab27d8a2d6e46714be19469d9a0f9566938609f18c3b1d785dc3ccd4387977f0',
+    vivo:'4bff3c638dabc70bff1b20760c3a90aaa929f67b14ef1a337ef9eae20792fd79',
+    meizu:'0f6d958a3ba6877e884bd80dffd6db5041f965b85ffde4c19192c093c2a7f24c',
+    fcm:'6aa175fd0f4610d1a0bf115936b20be6575012f0fbe5018440fe6854de9441a9'
+]
+tasks.register('verifyPushDependencies') {
+    doLast {
+        def found = [] as Set
+        configurations.releaseRuntimeClasspath.resolvedConfiguration.resolvedArtifacts.each { artifact ->
+            if (artifact.moduleVersion.id.group == 'com.tencent.tpns') {
+                String actual = java.security.MessageDigest.getInstance('SHA-256').digest(artifact.file.bytes).encodeHex().toString()
+                if (actual != pinnedTpns[artifact.name]) throw new GradleException('Official TPNS artifact checksum mismatch: ' + artifact.name)
+                found.add(artifact.name)
+            }
+        }
+        if (found != pinnedTpns.keySet()) throw new GradleException('Incomplete TPNS vendor integration')
+    }
+}
+tasks.named('preBuild').configure { dependsOn 'verifyPushDependencies' }

@@ -59,6 +59,11 @@ public final class NotificationBridge {
         MainActivity current = trusted(true);
         return current == null ? "null" : NativeNotifications.consume(current);
     }
+    @JavascriptInterface public String setForeground(String conversationId) {
+        MainActivity current = trusted(true);
+        if (current != null) NativePush.setForeground(current, conversationId);
+        return getStatus();
+    }
     void emit() {
         MainActivity current = activity.get();
         if (current != null) current.runOnUiThread(() -> {

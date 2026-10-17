@@ -1,74 +1,59 @@
 # 紫薇 Android 管理 App 原生层
 
-首版是独立手机界面加原生 Java `Activity` / `WebView`，连接现有紫薇账号和工作区。
-包名 `com.ziwei.manager`，最低 Android 8.0（API 26），target API 35。
-它与 `com.ziwei.device.agent` / `com.ziwei.device.updater` 是独立应用；没有手机受控服务、无障碍能力或常驻执行进程。Hermes 仍由已有绑定电脑执行。
+包名 `com.ziwei.manager`，最低 Android 8.0（API 26），target API 35。管理界面与 `com.ziwei.device.agent` / updater 独立；Hermes 继续由已有绑定电脑执行。原生层不运行员工任务，没有无障碍、设备管理员或保活前台服务。
 
 ## 构建
 
-在仓库根目录运行，Python 3.9+：
+在仓库根目录执行：
 
 ```sh
-python3 mobile-manager/scripts/android-tools.py
+python3 mobile-manager/scripts/android-tools.py --push
 python3 mobile-manager/scripts/test-android.py
-python3 mobile-manager/scripts/build-android.py --version-code 10 --version-name 0.3.0-internal
+python3 mobile-manager/scripts/build-android.py --profile tpns --version-code 11 --version-name 0.4.0-internal
 ```
 
-自动工具准备支持 Apple Silicon Mac。固定使用 Temurin JDK 17.0.20.1、Android SDK platform 35 r02 和 build-tools 35.0.0；下载文件逐一比对官方校验值，缓存位于 `~/.cache/ziwei-manager-android`。
-已有工具可传 `--java-home /path/to/jdk --sdk-root /path/to/sdk`。
-构建按 `javac → D8 → AAPT2 → zipalign → apksigner` 执行，不使用 Gradle、adb、模拟器或本地监听服务。
+默认 `tpns` profile 编译并合并实际官方 TPNS 1.4.4.12-release、六家 OEM 适配器及 FCM 适配器，另含 HMS Push 6.12.0.300 / Firebase Messaging 24.1.0。不是反射占位实现。固定 Gradle 8.10.2、AGP 8.7.3、Temurin JDK 17.0.20.1、Android SDK 35 r02 / build-tools 35.0.0；Gradle 分发包及八个 TPNS AAR 检查固定 SHA-256。原生四种 ABI 均打包。签名继续复用缓存中独立的内部测试身份，私钥和密码不得提交或发布。
 
-产物在 `mobile-manager/dist/`，包含 APK、SHA-256 文件和 `manifest.json`。
-脚本核对包名、版本、SDK、`INTERNET` / `POST_NOTIFICATIONS` / `ACCESS_NETWORK_STATE` 三项权限、v2/v3 签名、对齐及每个打包界面文件的字节一致性。
-后续发包递增 `versionCode`，并在最后一次界面修改后重新打包。
+`--profile minimal` 仅用于明确需要的无推送 SDK 构建。该 profile 返回不可用，绝不以构建失败自动降级后宣称具有系统推送。输出默认 `mobile-manager/dist/`，另可通过 `--output` 指定；包含 APK、SHA-256、manifest。脚本检查包名、版本、权限、非调试构建、签名、对齐、SDK DEX 标记/ABI，以及打包 web 文件逐字一致性。
 
-内部测试签名首次构建自动创建，持久保存在缓存 `signing/`，目录权限 0700、私钥/密码文件 0600。
-该身份与原有 Agent 的签名分离。保留并安全备份它，后续内部升级继续复用；不把私钥或密码提交到 Git、上传至发布附件或输出到日志。
+Mac 的 Gradle 内部 TCP/UDP 监听也受端口中心管理。构建脚本先 list/allocate，专用 Gradle home 使用预登记 loopback 端口，期间检查归属，结束停止仅自有进程并 release 临时登记。端口中心工具不可用时构建失败；不能绕过。脚本不启动 adb/模拟器。
 
-## 安装
+## 推送配置与准确状态
 
-将 APK 传到 Android 手机，打开文件，按系统提示授权本次来源安装，启动「紫薇」并使用现有账号登录。
-系统允许同签名、更大 `versionCode` 的管理 App 覆盖升级。升级不需要卸载员工受控 Agent，也不需要重新创建员工、Profile 或电脑身份。
+客户端配置是应用公开 SDK 配置，与后端 TPNS SecretKey 分开。下列环境变量只在正式凭据齐备后注入构建：
 
-内部签名可供直接安装测试；没有声称已完成商店上架或正式分发签名配置。
-`manifest.json` 的 `deviceVerified: false` 表示尚无此构建的物理手机验收；模拟器和隔离测试证据按版本另行记录。
+| 通道 | 构建输入 |
+| --- | --- |
+| 小米 / Redmi | `ZIWEI_PUSH_MI_APP_ID`、`ZIWEI_PUSH_MI_APP_KEY` |
+| 华为 | `--agconnect-services /absolute/path/agconnect-services.json` |
+| 荣耀 | `ZIWEI_PUSH_HONOR_APP_ID` |
+| OPPO / Realme / OnePlus | `ZIWEI_PUSH_OPPO_APP_KEY`、`ZIWEI_PUSH_OPPO_APP_SECRET` |
+| vivo / iQOO | `ZIWEI_PUSH_VIVO_APP_ID`、`ZIWEI_PUSH_VIVO_APP_KEY` |
+| 魅族 | `ZIWEI_PUSH_MZ_APP_ID`、`ZIWEI_PUSH_MZ_APP_KEY` |
+| 其他 Google 服务设备 | `--google-services /absolute/path/google-services.json` |
 
-## 资源、登录与安全边界
+两个 JSON 必须是对应包名的 Android 客户端配置，不能传服务账号私钥。各厂商还需要开发者资格、对应包名/签名及 TPNS 控制台厂商通道设置；仅打包 SDK 不等于这些配置已经生效。服务端 `/api/mobile/push/config` 提供客户端 AccessId / AccessKey，服务端 SecretKey 永不下发。没有配置的候选包保持 `notConfigured`，不得称作已具备后台即时送达。
 
-- 将 `mobile-manager/web/` 原样打包为 APK assets。`https://qzelynth.top/__ziwei_manager__/index.html` 和该目录下资源由 `shouldInterceptRequest` 返回本地字节；路径缺失/越界不会回退到远端页面。
-- `/api/`、同源头像/截图仍经正常 HTTPS 请求到现有后端，`CookieManager` 接受一方 Cookie 并在退出前台时持久化，继续遵守服务器会话有效期。
-- 只允许正式 HTTPS 源在 WebView 中发出资源请求；没有 `file://` / `content://` 页面访问、混合内容、第三方 Cookie、TLS 错误放行或网页设备权限。通知专用桥的范围见下文。
-- 本地资源响应有 CSP。JS 只能来自同源模块，禁止 inline JS；图片支持同源、`data:`、`blob:`；样式允许内联样式，跨域 frame/object/form 被拒绝。
-- WebView 主文档只允许打包页面。其他文档导航、弹窗及下载均在 App 内阻止，不发出浏览器 `ACTION_VIEW` Intent；没有可从外部导入任意 URL 的 deep link。相册的系统文档选择器不受此限制。
-- 相册使用系统文档选择器，支持页面声明的多选，最多接收 20 张；只接收经用户选中的 `content://` 且 MIME 为 `image/*` 的 URI，不申请存储、摄像头或相册全量权限。
+系统通知由用户主动开启，Android 13+ 再请求系统权限。只有服务端配置、当前设备凭据、真实 TPNS 登记、实际 OEM/FCM `getOtherPushType` / `getOtherPushToken` 注册回执及服务器订阅均成功，状态才为 `deliveryMode: push`。只有 TPNS 在线长连 token 不算系统通道可用。否则通知开关保留 15 分钟 JobScheduler 补充检查，`deliveryMode: supplement` 明确说明；关闭为 `unavailable`。没有强制停止后仍保证送达的承诺。
 
-## 界面事件约定
+## 原生桥与生命周期
 
-原生层向受信任的本地页面发送标准 DOM 事件：
+受信本地主文档的 `ZiweiNotifications` 只提供 `getStatus`、`configure`、`requestPermission`、`openSystemSettings`、`clear`、`setForeground(conversationId|'')` 和一次性 `consumePendingTarget`。没有 JS Cookie、安装秘密、任意 HTTP、文件、Intent 或员工操作接口。状态增加 `pushAvailable`、`pushConfigured`、`pushState`、`deliveryMode`；旧版状态按补充检查解释。
 
-- `window` 上 `ziwei:resume` / `ziwei:pause`，`detail.at` 是事件时间。界面恢复到前台时从真实 API 刷新，进入后台时停止轮询。
-- `window` 上可取消的 `ziwei:back`。界面同步调用 `event.preventDefault()` 表示已关闭抽屉、返回列表等；未处理时原生层回退 WebView 历史或退出当前 Activity。
-- 系统栏和软键盘由原生 WindowInsets 处理，WebView 可用视口不覆盖状态栏、导航条或键盘。
+`ManagerApplication.attachBaseContext` 在 provider 创建前以公开 API 关闭 TPNS 自动初始化，每次进程重建都执行；这也覆盖曾开启、离线关闭且厂商注销回执未到的情况。显式注册路径才启动 SDK，关闭时公开 `enableService(false)` 落地本机禁用，不依赖远端注销成功。SDK 仅在用户开启并取得服务端配置/本机所需凭据后初始化；移除 Firebase / AGConnect 自动初始化 provider，关闭额外定位、应用列表上报、跨应用拉起和自启动选项。通知文案固定为通用提醒，不放员工消息正文、报告或目标。可见性为 PRIVATE，点击不信任供应商提供的目标。
 
-## 用户选择开启的系统通知
+Native 的随机 installationId / 32 字节 secret 仅存应用私有偏好；正常 HTTPS 请求从系统 CookieManager 读取同源会话到内存，不给 JS、不创建第二份持久 Cookie、不输出日志。全部请求限定正式 HTTPS 源 `/api/mobile/push/`、禁止重定向、限制请求和响应大小、校验 schema/账号/工作区回执。注册操作持久保存单调 clientEpoch；订阅和前台回执带服务端 generation。可见原会话由网页续报，原生串行发送并持久提升 presenceSeq；离页/后台清除，失败不会延长服务端 60 秒 TTL。
 
-`ZiweiNotifications` 只供打包的本地主文档调用；主文档导航限制、同源资源限制及禁止 frame/object 的 CSP 继续生效。桥仅提供通知开关、权限请求、固定本 App 通知设置、状态读取与一次性目标消费，不提供 Cookie、任意 URL、Intent、HTTP、文件或员工操作接口。未经前台受信页面调用不会弹权限或打开设置。
+正常退出、登录过期及账号切换会清除旧订阅。若 Cookie 在进程之间变化且没有经过该清除流程，同 scope 的恢复会被服务器以 409 拒绝，保持补充检查状态；需要在当前登录下重新开启通知，不自动续活旧会话。
 
-- `getStatus()`、`configure(workspaceSlug, enabled)`、`requestPermission()`、`openSystemSettings()`、`clear()` 返回 JSON 字符串。`ziwei:notifications` 事件的 `detail` 是同份状态对象，包含 `available`、`enabled`、`subscriptionState`、`permission`、账号/工作区标识、`intervalMinutes: 15`、`pendingTarget` 和简短状态文案。`permission` 为 `granted` / `denied` / `channel_disabled`。App 内提醒不依赖通知权限。
-- Android 13 及以上仅在用户点击开启后请求 `POST_NOTIFICATIONS`。网络约束 Job 在 Android 14 及以上必须具备普通权限 `ACCESS_NETWORK_STATE`；没有新增无障碍、设备管理员、前台服务、WakeLock、启动广播或厂商 SDK。
-- 开启先通过正式 HTTPS 的只读 `GET /api/workspaces/{slug}/mobile/notifications?baseline=1` 绑定当前服务端账号和真实工作区 ID。首次只保存 head cursor，不发历史提醒。服务未上线、schema 不兼容、登录失效或工作区不可访问时不会声称已开启。
-- 只有一个 `JobScheduler` 周期任务，周期 15 分钟。系统可能因省电、网络、厂商策略或强制停止而延后，不能称为即时推送。任务只读现有事件，不运行模型、不执行员工任务。每次最多两页，每页请求 30 条，上限 50 条 / 64 KiB；有 45 秒执行期限检查及最多 10 秒的每段连接 / 读取超时。使用系统为 Job 分配的网络，没有连续重试。
-- Job 不持久跨手机重启，重新打开 App 会恢复已开启的单个任务，无需 `RECEIVE_BOOT_COMPLETED`。App 页面退到后台停止界面轮询，独立的系统 Job 由 Android 决定何时执行。
-- 身份只从系统 `CookieManager` 读取同源 Cookie 到请求内存，不创建第二份持久 Cookie，不给 JS 返回、不输出日志。每轮固定 Cookie 快照，回执前后校验 generation、账号和工作区；401 / 403、账号不符、退出登录 `clear()` 会取消 Job、清除点击目标并取消该 App 旧通知。迟到回执不能恢复旧订阅。TLS 正常校验，禁止跟随重定向。
-- 私有偏好仅保存 cursor、账号 / 工作区 / generation、有限去重哈希和安全目标元数据；不持久化 title / summary、消息正文、prompt / result 或 Cookie。通知为 `VISIBILITY_PRIVATE`。点击使用显式、不可变的 `PendingIntent`，只传 192 bit 随机 key；外部传任意 URL / 目标不能生成可消费目标。最多保留 64 个私有 key，24 小时过期，使用一次即失效。
-- 点击后先用当前会话 baseline 只读校验订阅身份，不推进 cursor，通过才排队等待界面启动和登录完成。`consumePendingTarget()` 返回 `{accountId,workspaceId,workspaceSlug,eventId,target}` 或 JSON `null`。界面再通过新鲜的事件 resolve API 检查权限并导航，不能信任缓存 target 直接读取私信，不写共享 `read_at`。
+关闭/退出先失效本地 scope、取消迟到请求和目标，再保留 durable revoke 意图直到服务端确认。登记 HTTP 发送前落盘 attempted 标记；从未登记的缺配置安装不用等待不存在的撤销。若曾发出登记，网络未知或 secret-only 404 均不能清除撤销。有效会话可由后端建立受账号配额约束的 absent-install revoked fence，阻止迟到旧 epoch 登记复活。
 
-参考：[通知运行时权限](https://developer.android.com/develop/ui/views/notifications/notification-permission)、[Android 14 的 Job 网络权限](https://developer.android.com/about/versions/14/behavior-changes-14#jobscheduler)、[JobInfo.Builder](https://developer.android.com/reference/android/app/job/JobInfo.Builder)、[WebView 原生桥安全](https://developer.android.com/privacy-and-security/risks/insecure-webview-native-bridges)。
+供应商只携带 opaque 32 字符 deliveryId。Huawei 点击兼容入口为 `ziwei-manager://push?deliveryId=...`，原生严格校验 scheme/host/路径/唯一 query，不接受 URL、正文或聊天目标；也接收本应用显式 immutable PendingIntent。私有待处理目标绑定账号、工作区、通知 generation，24 小时过期，本地只消费一次。进程回收后的同 scope 恢复复用注册 epoch，不会在 onResume 抹掉刚点击的目标。网页在登录 ready 后再次向当前会话的 delivery API fresh resolve，服务器仍校验 epoch/会话/权限，失败不导航。厂商 OS 直接展示的重复通知不能靠应用回调保证全部消除。
 
-## 验证边界
+## WebView 与验证
 
-`test-android.py` 在 JVM 上验证 URL 信任、伪装域名、账号/端口、协议、编码路径和目录穿越，以及通知 slug / ID / UTF-8 长度、目标字段、过期与 generation / Cookie 快照规则；构建验证 Android API 编译和安装包静态属性。
-这些结果不代替 Android 手机上的登录、重启后会话、系统返回、键盘、选图、后台恢复、截图及员工真实执行链路测试。需要按实际构建记录实机证据。
-若后续调试必须启动 adb、模拟器、Gradle daemon 或任何 Mac 本地监听服务，先遵守仓库统一端口登记流程；现有脚本没有启动这些进程。
+打包 `mobile-manager/web/` 原样 assets；仅正式 HTTPS 源下固定本地入口由拦截器返回，不给缺失资源回退到远端。禁止任意主文档/弹窗外跳、混合内容、第三方 Cookie、TLS 放行和网页设备权限。图片选择使用系统文档选择器，只接收用户选中图片，不申请全盘存储权限。标准 DOM `ziwei:resume` / `ziwei:pause` / `ziwei:back` 保持原行为。
 
-参考：[Android 本地资源加载](https://developer.android.com/develop/ui/views/layout/webapps/load-local-content)、[WebView 文件访问安全](https://developer.android.com/privacy-and-security/risks/webview-unsafe-file-inclusion)、[文件选择回调](https://developer.android.com/reference/android/webkit/WebChromeClient#onShowFileChooser(android.webkit.WebView,android.webkit.ValueCallback%3Candroid.net.Uri[]%3E,android.webkit.WebChromeClient.FileChooserParams))。
+JVM 检查覆盖 URL 信任、通知 receipt、严格 opaque URI/token，以及真实原生代码所用的冷启动恢复、scope、epoch 和撤销策略。编译和静态 APK 检查不代替厂商实机、真实凭据和实际投递验收；未配置时只能验收准确不可用状态，不能声称已完成实际离线推送。
+
+官方资料：[TPNS Android 集成](https://cloud.tencent.com/document/product/548/36652)、[SDK 更新记录](https://cloud.tencent.com/document/product/548/44520)、[厂商通道](https://cloud.tencent.com/document/product/548/61135)、[Huawei Push](https://cloud.tencent.com/document/product/548/45909)、[Android 通知权限](https://developer.android.com/develop/ui/views/notifications/notification-permission)。
