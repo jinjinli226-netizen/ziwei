@@ -461,7 +461,9 @@ export function createRepository(options = {}, io={}) {
     else options.onEvent?.(event);
     return eventId;
   };
-  const actionEvents = actionId => db.prepare('SELECT id,action_id,type,message,data_json,created_at FROM a2a_action_events WHERE action_id=? ORDER BY created_at,id').all(actionId).map(event => ({
+  const actionEvents = (actionId, eventView = 'full') => db.prepare(eventView === 'mobile'
+    ? "SELECT id,action_id,type,message,data_json,created_at FROM a2a_action_events WHERE action_id=? AND (type IN ('succeeded','failed','cancelled','expired') OR id=(SELECT id FROM a2a_action_events WHERE action_id=? ORDER BY created_at DESC,id DESC LIMIT 1)) ORDER BY created_at,id"
+    : 'SELECT id,action_id,type,message,data_json,created_at FROM a2a_action_events WHERE action_id=? ORDER BY created_at,id').all(...(eventView === 'mobile' ? [actionId,actionId] : [actionId])).map(event => ({
     id:event.id, action_id:event.action_id, type:event.type, message:event.message,
     data:parse(event.data_json), created_at:event.created_at
   }));
@@ -474,7 +476,7 @@ export function createRepository(options = {}, io={}) {
     const { managementMcp: _oldManagement, ...rest } = trusted;
     return employeeWorkspace ? { ...rest, managementMcp: { enabled: true, workspace: employeeWorkspace } } : rest;
   };
-  const actionView = (row, { includeEvents = false } = {}) => row ? ({
+  const actionView = (row, { includeEvents = false, eventView = 'full' } = {}) => row ? ({
     id: row.id,
     task_id: row.task_id,
     agent_id: row.agent_id,
@@ -487,7 +489,7 @@ export function createRepository(options = {}, io={}) {
     completed_at: row.completed_at,
     result: parse(row.result_json),
     error: row.error || null,
-    ...(includeEvents ? { events: actionEvents(row.id) } : {})
+    ...(includeEvents ? { events: actionEvents(row.id,eventView), ...(eventView === 'mobile' ? {event_count:db.prepare('SELECT COUNT(*) AS count FROM a2a_action_events WHERE action_id=?').get(row.id).count} : {}) } : {})
   }) : null;
   // Message attachments are the canonical image bytes. History/sidebar and
   // send-status views retain execution metadata without retransmitting them.
@@ -2260,14 +2262,14 @@ export function createRepository(options = {}, io={}) {
       const updated = db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId);
       return a2aResponseView(updated, { payload, receiptOnly });
     },
-    getA2AAction(actionId, { workspaceSlug = null, actorUserId = null } = {}) {
+    getA2AAction(actionId, { workspaceSlug = null, actorUserId = null, eventView = 'full' } = {}) {
       const row = db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(String(actionId || ''));
       if (!row) return null;
       const ws = db.prepare('SELECT slug FROM workspaces WHERE id=?').get(row.workspace_id);
       if (workspaceSlug && ws?.slug !== String(workspaceSlug)) throw new Error('A2A action 不属于当前工作区');
       const payload = parse(row.payload_json);
       if (actorUserId && payload.userId && String(payload.userId) !== String(actorUserId)) throw new Error('无权查看该 A2A action');
-      return actionView(row, { includeEvents: true });
+      return actionView(row, { includeEvents:eventView !== 'none', eventView });
     }
   }, options.preservation),rollout);
 }

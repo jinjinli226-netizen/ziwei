@@ -4,7 +4,7 @@ const terminalEventTypes=new Set(['succeeded','failed','cancelled','expired']);
 export function mobileRunView(value) {
   if(!Array.isArray(value?.events))return value;
   const last=value.events.length-1;
-  return {...value,events:value.events.filter((event,index)=>index===last||terminalEventTypes.has(event?.type)),event_count:value.events.length};
+  return {...value,events:value.events.filter((event,index)=>index===last||terminalEventTypes.has(event?.type)),event_count:Number.isSafeInteger(value.event_count)&&value.event_count>=value.events.length?value.event_count:value.events.length};
 }
 
 // Read projections never mutate the stored employee, conversation or receipt.

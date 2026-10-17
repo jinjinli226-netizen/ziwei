@@ -761,17 +761,17 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   function registerBotRoutes(prefix,guard,contextFor) {
     const base=`${prefix}/workspaces/:slug/bots`, bots=management.bots;
     app.get(`${base}/capabilities`,guard,(req,res)=>res.json(bots.capabilities(req.params.slug,req.query,contextFor(req))));
-    app.get(base,guard,(req,res)=>{const values=bots.list(req.params.slug,contextFor(req));res.json({bots:prefix==='/api'&&req.query.view==='mobile'?values.map(value=>mobileReadView.bot(req.params.slug,value)):values});});
+    app.get(base,guard,(req,res)=>{const mobile=prefix==='/api'&&req.query.view==='mobile',values=bots.list(req.params.slug,contextFor(req),mobile?{view:'mobile'}:undefined);res.json({bots:mobile?values.map(value=>mobileReadView.bot(req.params.slug,value)):values});});
     app.post(base,guard,(req,res)=>{const result=bots.create(req.params.slug,req.body,contextFor(req));res.status(result.duplicate?200:202).json(result);});
     app.post(`${prefix}/workspaces/:slug/employees/:id/bot`,guard,(req,res)=>res.json(bots.initialize(req.params.slug,req.params.id,req.body,contextFor(req))));
-    app.get(`${base}/:id`,guard,(req,res)=>{const value=bots.get(req.params.slug,req.params.id,contextFor(req));res.json(prefix==='/api'&&req.query.view==='mobile'?mobileReadView.bot(req.params.slug,value):value);});
+    app.get(`${base}/:id`,guard,(req,res)=>{const mobile=prefix==='/api'&&req.query.view==='mobile',value=bots.get(req.params.slug,req.params.id,contextFor(req),mobile?{view:'mobile'}:undefined);res.json(mobile?mobileReadView.bot(req.params.slug,value):value);});
     app.patch(`${base}/:id`,guard,(req,res)=>res.json(bots.update(req.params.slug,req.params.id,req.body,contextFor(req))));
     app.post(`${base}/:id/provision`,guard,(req,res)=>res.status(202).json(bots.provision(req.params.slug,req.params.id,req.body,contextFor(req))));
     app.post(`${base}/:id/validate`,guard,(req,res)=>res.status(202).json(bots.validate(req.params.slug,req.params.id,req.body,contextFor(req))));
     app.post(`${base}/:id/native/actions`,guard,(req,res)=>res.status(202).json(bots.native(req.params.slug,req.params.id,req.body,contextFor(req))));
     app.post(`${base}/:id/collaboration`,guard,(req,res)=>res.status(202).json(bots.collaboration(req.params.slug,req.params.id,req.body,contextFor(req))));
     app.post(`${base}/:id/control`,guard,(req,res)=>res.json(bots.control(req.params.slug,req.params.id,req.body,contextFor(req))));
-    app.get(`${base}/:id/runs`,guard,(req,res)=>{const mobile=prefix==='/api'&&req.query.view==='mobile',values=bots.runs(req.params.slug,req.params.id,contextFor(req),mobile?{limit:5}:undefined);res.json({runs:mobile?values.map(mobileReadView.run):values});});
+    app.get(`${base}/:id/runs`,guard,(req,res)=>{const mobile=prefix==='/api'&&req.query.view==='mobile',values=bots.runs(req.params.slug,req.params.id,contextFor(req),mobile?{limit:5,eventView:'mobile'}:undefined);res.json({runs:mobile?values.map(mobileReadView.run):values});});
     app.post(`${base}/:id/actions/:actionId/reconcile`,guard,(req,res)=>res.json(bots.reconcile(req.params.slug,req.params.id,req.params.actionId,req.body,contextFor(req))));
     app.get(`${base}/:id/routines`,guard,(req,res)=>res.json({routines:bots.routines(req.params.slug,req.params.id,contextFor(req))}));
     app.post(`${base}/:id/routines`,guard,(req,res)=>res.status(201).json(bots.createRoutine(req.params.slug,req.params.id,req.body,contextFor(req))));
