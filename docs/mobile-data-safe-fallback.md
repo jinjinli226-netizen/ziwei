@@ -54,8 +54,11 @@ node scripts/verify-mobile-data-safe-fallback.mjs \
   --report .local/mobile-data-safe-fallback/verification-result.json
 ```
 
-Both path arguments are optional when this checkout already contains the Git
-objects and has its normal `node_modules`. `--source-commit`, if provided, must
+This checkout must have its normal `node_modules`, since the tests also import
+its checked-out repository and application modules. `--dependencies` selects the
+dependency directory for the frozen archive copies; it does not replace that
+checkout prerequisite. Both path arguments are optional when this checkout
+already contains the Git objects and has its normal `node_modules`. `--source-commit`, if provided, must
 equal the fixed reviewed forward commit. No machine-specific path is built into
 the verifier. The report and adjacent TAP log are local evidence, not source
 inputs or release authorization.

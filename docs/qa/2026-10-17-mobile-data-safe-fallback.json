@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "checkedAt": "2026-10-17T20:58:03.428814+08:00",
+  "verdict": "isolated_fallback_round_trip_passed_not_deployed",
+  "baseCommit": "8629091c2993e32625b25cfe7835805541286f4f",
+  "forwardCommit": "20da8856beb7f008d8c3b85f65103f53b9deef19",
+  "fallbackImplementationCommit": "72a0dac428e8f16c1479258142c23dec7d67a687",
+  "onlyRuntimeFile": "backend/repository.mjs",
+  "runtimeBlob": "5afd5cb37d604e0b770cbdea56dbbeae98e80b60",
+  "runtimeCanonicalSha256": "f81d9aa44c3ebaf3c44df7280fff561a89fb59622e187311409f090062781878",
+  "pass": 11,
+  "fail": 0,
+  "skip": 0,
+  "compatibilityScenarios": 6,
+  "actualFixtureConnectionPhases": 13,
+  "rootEvidence": ".local/mobile-data-safe-fallback/root-final-verification-with-deps.json",
+  "rootEvidenceSha256": "7941d3b4aafad6e31dbc5e7ff8f046b3a5a8723b42c38a71b34b2fcbefba8373",
+  "independentEvidence": ".local/mobile-data-safe-fallback/independent-review-result.json",
+  "covered": [
+    "new → fallback → new uses real closed/reopened databases and rebinds A/B/A after a private alias takeover",
+    "negative control: the exact unpatched base writer really reproduces the stale A/B/A authorization gap",
+    "fallback unknown/null/new assignments retain explicit markers through roll-forward and never revive old proof",
+    "base task DTO/schema and legacy no-op SQLite echoes remain compatible without backfilling proof",
+    "fallback task/audit/notification failures roll back together, preserving proof and preventing callback escape",
+    "old authenticated public HTTP/SSE views hide new/historical proof, preserve raw evidence, and defer only public events"
+  ],
+  "environmentFailurePreserved": {
+    "evidence": ".local/mobile-data-safe-fallback/root-final-verification.json",
+    "reason": "The initial root invocation had no normal checkout node_modules. Providing --dependencies alone supplies archive dependencies but cannot resolve direct checked-out test imports. Both test modules failed to load; no round-trip scenario ran. After restoring the declared normal project dependency prerequisite, the same final implementation passed all eleven tests. The README now states the prerequisite explicitly."
+  },
+  "earlierAuthorFixtureFailuresRetained": [
+    "initial-canonical-path-failure-verification-result.json",
+    "initial-sqlite-numeric-echo-failure-verification-result.json"
+  ],
+  "limits": [
+    "No production data, deployed service, model execution or device was used.",
+    "Only this frozen source/data schema combination was exercised. Actual production packaging and code-switch rollback are untested.",
+    "If an unpatched old writer has already modified assignments, this source cannot reconstruct the missing provenance; a safe feed re-enable path is still required."
+  ],
+  "effects": {
+    "listenersStarted": 0,
+    "productionChanged": false,
+    "schemaChanged": false,
+    "businessDatabaseRestoredOrCleaned": false,
+    "fixturesRemoved": true
+  }
+}
