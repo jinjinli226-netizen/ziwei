@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-17",
+  "timezone": "Asia/Shanghai",
+  "verdict": "changes_required",
+  "scope": "Independent review of the frozen Android and shared mobile feature candidates; no candidate deployment or real business dispatch",
+  "sources": {
+    "publishedProduct": "4f26f450e6e1bcba6326fdaedd75937364eb5189",
+    "mainBeforeReview": "f587cdef4e82ebd03da7b8dcfb897a3a26801302",
+    "sharedCandidate": "b8ee17f51a56ece9239fb38ddbf1f63de43ee14b",
+    "androidCandidate": "bba9be85c8e55a8f3195673b16e41e330604119c",
+    "syntheticMergedTree": "c5113c64e66985db817d47a18ef763435d117465"
+  },
+  "findings": [
+    {
+      "priority": "P1",
+      "file": "backend/mobile-notifications.mjs",
+      "title": "Unresolved historical assignees expose private task notifications",
+      "reproduction": "Create a private employee and an unexecuted task assigned by employee ID or name. Ordinary repository deletion removes the employee row. A different member's notification list changes from zero to two visible items; resolving each item succeeds. Renaming private employee A to B separately exposes the unexecuted task whose assignee remains A.",
+      "required": "Fail closed when the historical assignee's current visibility cannot be proved. Cover real repository deletion and rename, not only status=deleted. Preserve demonstrably valid unassigned and human-member tasks.",
+      "evidence": [
+        ".local/mobile-notifications-review/hard-delete-proof-b8ee17f.json",
+        ".local/mobile-notifications-review/rename-proof-pinned-b8ee17f.json"
+      ]
+    },
+    {
+      "priority": "P1",
+      "file": "backend/app.mjs",
+      "title": "Omitting the mobile view bypasses group-member visibility on the new exact-action route",
+      "reproduction": "For the same member and action, use a visible source employee and a room containing another owner's private employee. GET /api/workspaces/:slug/actions/:id returns 200 and the private group-log marker; adding ?view=mobile returns 404 GROUP_MOBILE_SCOPE_REQUIRED.",
+      "required": "The new route must apply the same group visibility authorization for every response format. The view query must not control authorization.",
+      "evidenceInSharedCandidateWorktree": ".local/mobile-group-review-b8ee17f/b8ee17f-result.json"
+    },
+    {
+      "priority": "P2",
+      "file": "backend/mobile-group-action.mjs",
+      "title": "A visible employee ID can mask an unbound native logical profile",
+      "reproduction": "Keep a visible member_id but replace the room member or target logical profile with unbound-private-native-profile. The mobile projection still succeeds.",
+      "required": "Validate the Ziwei group logical-profile/member-ID mapping and target kind/profile contract. Do not compare the logical profile with the employee's physical runtime_profile.",
+      "evidenceInSharedCandidateWorktree": ".local/mobile-group-review-b8ee17f/b8ee17f-result.json"
+    },
+    {
+      "priority": "P2",
+      "file": "mobile-manager/web/mobile-groups.js",
+      "title": "Starting a new group clears the old-host upgrade gate",
+      "reproduction": "Receive an unpaged old-host read, observe upgrade_required, return to the group list, start a new group, select a target and send. The in-memory controller produces one collaborateBot POST.",
+      "required": "Retain the capability failure in a gate scoped to source/device/profile/revision. Starting another group must not clear it; clear only after fresh successful paged verification or a newly verified source.",
+      "evidence": [
+        ".local/mobile-notifications-review/group-upgrade-gate-proof-bba9be8.json"
+      ]
+    }
+  ],
+  "rootVerification": {
+    "combination": "git merge-tree of fixed main and shared candidate completed without conflict; temporary archive only, not merged into the release branch",
+    "combinedNodeTests": {"pass": 124, "fail": 0, "skip": 0},
+    "combinedNestedPythonOfficialStorageSkipped": 4,
+    "officialStorageRetry": {"nodePass": 2, "pythonPass": 12, "fail": 0, "skip": 0},
+    "excludedHypothesis": "Old clients do not call the native JS normalizer on this execution path. They pass pagination fields to the older Python bridge, which returns a full log. The proposed old-field-normalization-to-quarantine failure was excluded by fixed-source probes.",
+    "limits": "Passing existing tests does not resolve the reproduced findings. No production writes, model execution, real group dispatch, mobile feature deployment or public APK publication were performed."
+  },
+  "handoff": {
+    "destinationThread": "01a14488-274a-74b1-b3f4-47116f4002f5",
+    "action": "All four findings and the rename boundary were returned to the candidate owner for fixes and new regression evidence before another release review.",
+    "primaryIncident": "Zhiwei's historical action remains unresolved pending the original Windows host diagnostic; this mobile review does not provide its missing receipt."
+  }
+}
