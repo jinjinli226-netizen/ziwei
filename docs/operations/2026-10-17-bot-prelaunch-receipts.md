@@ -193,3 +193,13 @@ Windows下载build `c477b6bb9044ae181d97efaae9ee3188a985cc32805f5a8eedfe3df09660
 服务器新增独立operator_force_abandon回执，原action/result/error/failed-event字节保持；首次CAS解除该active并递增control_epoch到9，保持暂停，不派发旧消息。设备在取得有效回执后，仅将这条started/quarantine及配对delivery原字节移入持久归档，其余历史、聊天、Profile/HOME保留；中断后按WAL前向续办。网页显示“已强制放弃，原执行结果仍未知”，不再把这条已放弃记录当作当前占用或要求人工核实。
 
 当前c477没有可由服务器反向调用的维护控制通道，普通file.read等新任务也被quarantine拦住。维护helper必须在Windows实际运行一次；新候选保留旧updater已经使用的prelaunch导出入口，先检查独立放弃授权，无授权时沿用原恢复逻辑。安装/发布/授权本身都不等同于设备归档完成，须独立回执、重新上线及一条不重放的真实新模型消息分别验收。
+
+### 强制放弃版本发布与授权结果
+
+产品 `702c5ba326d57c0129e822a53ea2c7cef064e412` 已先推GitHub两条既有分支，再发布。最终冻结源码166项相关测试全部通过，静态检查191项通过，Vue编译与生产构建成功；独立审查核对4项API来源、完整48项客户端源码与真实归档字节。杀前授权不足30秒会拒绝并恢复接收；Windows在持有句柄的最终Kill前再核期限和等待余量，退出时间取同一Process.ExitTime，迟交不接受晚停。
+
+API/前端于UTC `2026-10-17T15:50:00Z`切换到 `/opt/ziwei/releases/operator-force-abandon-702c5ba326d5-2e3d2920/v2`，PID380630；上一501目录保留。精确4项API叠加，数据库文件身份/schema、MCP/继承源码/旧metadata、其他服务配置及身份保持，未恢复数据库。官方CLI于UTC15:51发布，build `957abd8caa3103757c1924c5f12af686f02a56a1c169c98ada0aa232ed1a18fa`，包1114675字节，SHA256 `39445ce54205b805d086efe74e343902192fc12fc70f346ad870cceabb546443`；release.json SHA256 `0857b0d2bb5da82b5ffcad1bef1d487b138687f9f59ecaab316e0b0fbcffe69c`。本地及Linux空缓存离线检查、公开包/13项前端资源核对通过。无本机新增监听，端口中心复查通过。
+
+网页原生确认弹窗使自动浏览器目标挂起，未重复点击或伪造actor。随后使用用户已授权账号正常登录API，核实其确为原员工所属工作区owner，正常POST精确强制放弃意图，退出本次临时登录；没有提取浏览器cookie或修改认证上下文。授权 `action-event_force-grant_25b9b7ae-3f2d-45e6-a261-c46fb46ea138` 已保存，另一个正常网页目标已显示“已授权强制恢复”。密码/会话凭据不保存到发布记录。
+
+UTC15:59:55只读复核仍为requested，grant1、receipt0，授权后prepare/commit均0；Windows仍为c477/PID27868在线，知微仍r3/e8暂停、active为原2805，原三项hash保持。已要求用户在该电脑运行一次普通 `ziwei_user update`（c477旧worker可通过新candidate薄包装进入独立force helper），无需用户查记录。此刻没有声称强停、归档、解除占用、启用或真实新模型消息验收已经完成。私有证据 `.local/operator-force-abandon-release/`；后续必须继续核实实际设备回执并用正常用户入口恢复Bot，再只发送一条不重放的无副作用验证消息。
