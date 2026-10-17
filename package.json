@@ -33,6 +33,7 @@
     "scripts/client-maintenance-helper.mjs",
     "scripts/client-update.mjs",
     "scripts/client-update-worker.mjs",
+    "scripts/update-windows.ps1",
     "scripts/ziwei-mcp.mjs",
     "scripts/ziwei-terminal-mcp.mjs",
     "src"
