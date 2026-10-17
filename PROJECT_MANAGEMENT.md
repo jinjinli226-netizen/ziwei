@@ -1,16 +1,28 @@
 # 紫薇项目管理与 AI 接手手册
 
-## 2026-10-17 已恢复连接并发布安装确认授权修复
+## 2026-10-17 code20发布完成，手机仍双19离线，真实输入尚未通过
 
-Agent18 原事务 `21866c8a…` 已于 **09:24:01.773** 安装并 committed，实际回传包替换恢复与 WebSocket 握手。**10:51:39** 最新快照仍为 Agent18 / Updater16 在线健康；原 Updater18 事务 `5537b65e-890d-4dc5-825c-36f678ba77bf` 仍为 failed / submitted=1、无 installed_at，此前系统状态 3，不据此归因用户取消。原安装未重提、未清锁，中文未测试。
+**12:23:58 最后只读复核：** Agent19 / Updater19 仍双端 offline，原因未知；活动手机命令、升级及主站动作均为0。code20 observe 继续 waiting_both_roles_healthy，原私有20状态无 commandId / updateId，未下发任何20手机命令或升级。既有19两条升级 committed 和输入失败均保留；code20 实机安装、中文读回及页面验收仍未完成，沿用户已提出的覆盖安装协助继续，不卸载或清数据。原定时实读 PAUSED，不承诺定时接续。私有证据 `v20-final-phone-readonly.json`、`v20-final-upgrade-observe.json`、`v20-final-upgrade-state.json`。
 
-中控源码 **`67c9b29b07a4975f5c632b724d2daea2afb983c9`** 已先推 GitHub，独立审查、73/73 远端回归及构建通过，**09:53:32** 保护发布。修复仅为绑定原升级、原安装端及原会话的单条打开动作提供有界租约；该次发布保留原历史、pending、DB inode、主站 / 客户端 / Nginx / APK。主站当前 `eabe098a…`、官方客户端源码 `5db7d834…` / build `208f2350…`，不回退旧版。
+**12:21:16 原电脑恢复通道探测结果：** 12:21:12只提交一次正常 `command.execute`（executable=`adb`、args=`["version"]`），原动作 `action_ab02baa5-5a9e-4582-a14e-d3f70f6c1a35` 返回 failed，错误 `executable is not allowlisted: adb`，没有stdout、未spawn。只证明该执行名被拒，不证明ADB未安装或USB不存在；未改allowlist、换路径、新建token或bot聊天，既有兼容A2A鉴权仅在内存使用。12:16最后手机观察仍双19离线，没有20手机动作或升级POST；0.4.9已准备，可沿用户已有授权请求覆盖安装协助，尚未发生，不称无人介入安装完成。整体任务未完成，定时继续PAUSED。
+
+**12:13 先前只读观察：手机仍为 Agent19 / Updater19，双端 offline，code20 尚未安装或实机输入验收。** code20 已于 **12:01:41** 原证书签名发布并公网核验；首轮 observe 被新电脑业务挡在 POST 前，没有20手机命令或升级提交。随后只读核实该精确任务是另一台 PC11af 的内容研究，不含手机请求、绑定或执行；本轮仅新增该动作 ID / payload SHA 的精确 scope，未知任务仍默认阻止。这是有限业务判断，不是操作系统能力隔离。再次 observe 因双19不健康等待，未下发手机动作。last_seen 为 NULL，runtime 仅为约12:11的缓存，无新退出原因，不能归因被杀或用户停止；原绑定电脑 bfd 在线。定时任务继续 PAUSED，整体任务未完成。
+
+**11:39:27** 快照确认 Agent19 / Updater19 双端 `0.4.8` 在线健康、控制 Agent / epoch 10，活动手机命令和升级均为0。原 Agent19 `88364dd5-ec9f-438b-9e6d-253806256240`、Updater19 `38fd8387-3249-443d-9ec8-1adbb3829ff8` 均 submitted=1 / committed，installed_at 分别为 **11:33:53.313 / 11:39:17.765**；两端均 package_replaced / updateRelated=true，进程19333 / 20596。code19 安装确认由 AI 按新截图执行，未新增用户安装协助；OPPO `com.oplus.appdetail` 页仍需 AI 处理，客户端自动确认策略的全程实机验收尚未完成。screenshot11 的原命令 `45db845e…` failed / not_started / COMMAND_NOT_STARTED、没有图片。Updater19 初启1.354秒时 socketConnected=false 为历史瞬时样本；**11:43:00.674** 双19已 socketConnected=true、进程未变、uptime为545352 / 219154ms，phoneIdle / mainIdle=true，仅证明该有限时段，不代替长期、重启、强停或用户 Stop 验收。
+
+code19 原文本命令 `device-command-2ba2c10e-1c30-4284-9dd1-3e458a26aa08` 仍 failed / not_started / INPUT_EDITOR_FOCUS_REQUIRED；主代理独立目视后续成功截图，搜索页和键盘仍在、请求文字未出现。两种系统焦点来源均返回非 editable 的 FrameLayout 容器，未与原 EditText 相等。code19 实机输入未通过；code20 的安装与真机输入结果仍待证据，不提前宣告修复。
+
+code20 / `0.4.9` 冻结源码 **`1ea60190d245e909bab5ff22d5d2198a023b4aa0`** 已独立审查、推送并核对 ls-remote，归档 SHA-256 `634ddf15d4989daa80eed73054189b4abb248897cbb04c4a36eeeb9fc84106f2`。FocusedEditorPolicy 采用两轮完整树、父节点身份及唯一原编辑节点绑定，保留原节点；256节点 / 24层 / 700ms、Stop 与实际效果期限限制保留，readbackSource 区分 same_node / bound_editor。新增12项测试；11:58:56已核306源码成员一致、81/81每角色、共162/162 JUnit且0 failures / errors / skipped，双 Debug R8、双 Release 完整 Lint / assemble通过，日志SHA `adfcbef6679601f14d103c0894f7ad6cec03127a20d3ad83d6e167312f0f4fa8`。原证书签名并于12:01:41发布，index `f97b251a…` / manifest `9ce73cfc…`；原15版本45历史文件、服务及DB保持，deviceVerified=false不变。尚无手机20安装或输入成功证据。
+
+Agent18 原事务 `21866c8a…` 已于 **09:24:01.773** 安装并 committed，实际回传包替换恢复与 WebSocket 握手。**11:06:06** 只读快照确认 Agent18 / Updater18 双端 `0.4.7` 在线健康，控制 Agent / epoch 8，活动手机命令和升级均为 0。原 Updater18 事务 `5537b65e-890d-4dc5-825c-36f678ba77bf` 自然 committed / submitted=1，installed_at 为 **11:05:33.454**；未重提、未创建 resolve，先前状态 3 失败事件保留。按新截图点击闲鱼搜索框后，两条原文本命令 `a987444f…`、`faa8139f…` 均确定 failed / not_started / INPUT_EDITOR_FOCUS_REQUIRED，未写入文字。
+
+中控源码 **`67c9b29b07a4975f5c632b724d2daea2afb983c9`** 已先推 GitHub，独立审查、73/73 远端回归及构建通过，**09:53:32** 保护发布。修复仅为绑定原升级、原安装端及原会话的单条打开动作提供有界租约；该次发布保留原历史、pending、DB inode、主站 / 客户端 / Nginx / APK。12:14:49只读复核的主站为其他发布推进的 `/opt/ziwei/releases/mobile-runs-1757bd819099-51e2a255-bf145367/v2`，PID340823、自11:02:13运行，保留现状不回退eabe；中控仍67c9/PID333172，Nginx master737，双公开健康和index20均200。12:11:35两条WS 101不能归属手机或证明断连原因。官方客户端仍源码 `5db7d834…` / build `208f2350…`。
 
 全局业务门禁最初在 POST 前阻止新手机操作。本轮两项电脑任务经只读核对无手机操作，临时范围限定精确动作 ID 和请求摘要，原 scope 保留、未知业务仍阻止。10:23:33 原安装端 launch `a47d6514…` succeeded / performed=true、executingConfirmed=true，随后成功截图见系统提醒；继续安装点击被瞬态新业务挡在 POST 前，未下发点击。后续 screenshot03 过期未投递、无图，旧失败保留。
 
-用户主动愿协助，已给出已验签的 Updater18 官方覆盖安装链接，不卸载或清数据；现有代码支持真实版本 / 签名核验后沿原 failed 事务报告 installed，再由新版本健康提交。此为人工安装协助路径，后续自动恢复和输入仍须真实证据，完整任务未完成。原 heartbeat（id 1）17日10:08曾恢复为 ACTIVE，但当前本机只读实查为 **PAUSED，按用户要求保持关闭**；本轮手动继续。用户覆盖安装后在原聊天回复即可接着验收，后续沿私有 `resume-state.json`，不承诺定时自动接续。
+此前 code18 安装包含用户协助覆盖安装，不算全程无人介入安装通过；Updater 后续 `package_replaced / updateRelated=true` 支持该次自动启动与健康恢复，旧失败和原事务自然推进证据保留。完整任务未完成。原 heartbeat（id 1）17日10:08曾恢复为 ACTIVE，但当前本机只读实查为 **PAUSED，按用户要求保持关闭**；本轮手动继续，沿私有 `resume-state.json` 保留原事务和证据，不承诺定时自动接续。
 
-另已独审并推送安装确认候选源码 **`1ad02efed4d0ac4ee6e6c25ef8c7feabea31a332`**，修复旧子串 / 任意祖先误选和 false 后继续点击：采用精确标签、最近单一正向按钮、整树歧义拒绝，重核 Stop / 原会话 / 新鲜节点及期限，false / exception 同样计入 Service 实例内去重。源码缺陷与现场状态 3 的因果未证明。**code19 / 0.4.8 隔离完整构建已通过：双角色各66/66、共132/132 JUnit（每角色新增13项，0 failures / errors / skipped）、双 Debug R8 和双 Release 完整 Lint / assemble，3m27s / 159项任务全部执行，成功标记已取得，304个归档源码成员摘要及双包19 / 0.4.8元数据核验一致；尚未签名、未发布或实机验收**。官方下载保持原 code18，先等人工覆盖安装后的真实回执。详细状态以 [HANDOFF 顶部](HANDOFF.md) 和[操作记录](docs/operations/2026-10-16-phone-input-lifecycle.md) 为准。以下 10月16日记录为历史状态。
+早期安装确认候选 **`1ad02efed4d0ac4ee6e6c25ef8c7feabea31a332`** 的 132/132 JUnit 及完整构建保留为历史证据，未签名或发布；源码缺陷与现场状态 3 的因果未证明。code19 / `0.4.8` 已发布源码 **`bb60a02c2d58aafa6c9826a4732fbd7a83f2d9d3`** 已独立审查并推送，包含安装确认修复及服务级 FOCUS_INPUT 的原节点精确焦点核验。冻结 code19b 归档 SHA-256 `10e23536ed07835e4e216f5581f6d6216d2bbea740878bc65ce66bcd211a4b83`；**11:27:00 已核304个源码成员逐项一致、每角色69/69、共138/138 JUnit（0 failures / errors / skipped）、双 Debug R8 与双 Release 完整 Lint / assemble通过**，日志 SHA-256 `dfde73b04bb4a4d9bf339da6e36fe9bdc39806519489a5b6f187e3ab64b1e62d`。原证书签名与官方发布已成功；新 index `44680a0f…`、manifest `94f5ba6c…`，历史文件 / 服务 / 数据库保持，manifest 的 deviceVerified=false 不改写。双端19安装和恢复不代替输入成功证据。详细状态以 [HANDOFF 顶部](HANDOFF.md) 和[操作记录](docs/operations/2026-10-16-phone-input-lifecycle.md) 为准。以下 10月16日记录为历史状态。
 
 ## 2026-10-16 历史快照：代码发布完成，真机验收等待连接恢复
 

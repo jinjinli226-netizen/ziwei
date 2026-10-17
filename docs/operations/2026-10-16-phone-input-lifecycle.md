@@ -4,7 +4,7 @@
 
 ## 10月17日接续进展
 
-用户恢复手机和电脑后，本对话手动继续工作。10月16日曾应用户要求暂停定时接续；10月17日 **10:08** 曾恢复原 heartbeat（id 1）为 ACTIVE，这是历史状态。当前只读本机 `automation.toml` 实查为 **PAUSED，按用户原先关闭定时的要求保持关闭**，不假定后续提示更新已持久化。本轮为手动接续，沿用本对话、原事务及私有 `resume-state.json`，不新建聊天或承诺定时自动继续；用户覆盖安装后在原聊天回复即可接着验收。
+用户恢复手机和电脑后，本对话手动继续工作。10月16日曾应用户要求暂停定时接续；10月17日 **10:08** 曾恢复原 heartbeat（id 1）为 ACTIVE，这是历史状态。当前只读本机 `automation.toml` 实查为 **PAUSED，按用户原先关闭定时的要求保持关闭**，不假定后续提示更新已持久化。本轮为手动接续，沿用本对话、原事务及私有 `resume-state.json`，不新建聊天或承诺定时自动继续；覆盖安装后的真实回执与输入复验见下方 11:06 后记录。
 
 09:25 至 09:33 的只读证据确认，原 Agent18 事务 `device-update-21866c8a-7d0d-4bad-ae35-76a529106451` 已 committed，submitted=1、installed_at 为 09:24:01.773；Agent=`0.4.7 / code18`、Updater=`0.4.5 / code16`，均在线健康。Agent 的 `startTrigger=package_replaced`，包更新时间与本次 reason 10 退出时间同为 `1792200237930`，标记 `updateRelated=true`；Updater 的启动来源为 `peer_recovery`。这证明本次包替换后的实际恢复，不等于杀进程、用户 Stop、重启或长期存活测试。
 
@@ -24,17 +24,65 @@
 
 **10:25:23 设备快照：** 原 `device-update-5537b65e-890d-4dc5-825c-36f678ba77bf` 已回报 failed / submitted=1、无 installed_at，错误为“系统安装失败，状态 3；请人工核实后重新建立事务”；仍是 Agent18 / Updater16 在线，中文尚未测试。不据状态 3 或时间先后推断用户取消或某个点击导致失败。后续 screenshot03 为 expired、未投递、无图，不能用它判断当前页面。原 `47b03653…` 未执行、`a47d6514…` 打开成功以及安装失败分别保留，不改写为同一结果。
 
-用户主动表示可以协助安装，已提供已校验原签名和摘要的 Updater18 官方包覆盖安装链接，不卸载或清数据。代码审查确认：Agent 的 PackageObserver 或同原 ID 的 poll 会触发 reconcile；它先核对真实已安装的版本18及原签名，再处理 failed 状态，因此可报告原 `5537b65e…` 的 installed。服务器只接受指定安装端的该原回执，随后等待 Updater18 新健康才 committed，旧 failed 事件摘要保留。当前没有手工安装成功或新版本健康证据，不新建 resolve、不清锁、不重提原升级；这是人工安装协助路径，后续自动恢复要另据 MY_PACKAGE_REPLACED / peer_recovery 和心跳实测，不能写成全程无人介入安装通过。
+用户主动表示可以协助安装，已提供已校验原签名和摘要的 Updater18 官方包覆盖安装链接，不卸载或清数据。代码审查确认：Agent 的 PackageObserver 或同原 ID 的 poll 会触发 reconcile；它先核对真实已安装的版本18及原签名，再处理 failed 状态，因此可报告原 `5537b65e…` 的 installed。服务器只接受指定安装端的该原回执，随后等待 Updater18 新健康才 committed，旧 failed 事件摘要保留。截至 10:51:39 尚无覆盖安装或新版本健康成功证据；11:06 后沿原事务取得的进展见下节，未新建 resolve、未清锁或重提原升级。这是人工安装协助路径，自动恢复另据 MY_PACKAGE_REPLACED / peer_recovery 和心跳实测，不能写成全程无人介入安装通过。
 
-截至 **10:51:39（02:51:39 UTC）** 最新设备快照仍为 Agent18 / Updater16 在线健康，原 `5537b65e…` 仍 failed / submitted=1、无 installed_at，没有用户覆盖安装或中文输入通过证据。本轮故障及回查私有证据为 `direct-fix-open-installer-03.json`、`direct-fix-device-03.json` 及对应截图命令记录；原 heartbeat id 1 当前实读 PAUSED、保持关闭，本轮手动继续，整体任务未完成。
+**10:51:39（02:51:39 UTC）的历史设备快照**为 Agent18 / Updater16 在线健康，原 `5537b65e…` 当时仍 failed / submitted=1、无 installed_at，没有用户覆盖安装或中文输入通过证据。本轮故障及回查私有证据为 `direct-fix-open-installer-03.json`、`direct-fix-device-03.json` 及对应截图命令记录；原 heartbeat id 1 当前实读 PAUSED、保持关闭，本轮手动继续，整体任务未完成。
 
-### 安装确认源码候选，尚未发布
+### 早期安装确认候选1ad（历史，后由bb60替代）
 
 静态审查确认旧路径按“安装”子串寻找标签，可能选中“取消安装 / 安装来源”等文字；任意 clickable 祖先及 false 回调后继续遍历也会扩大或重复点击。这里确认的是源码缺陷，**没有证明现场状态 3 由该缺陷或任何特定点击导致**。
 
 候选改为精确允许标签，仅归属最近单一正向按钮；保留 ColorOS 非 clickable TextView 的最近父按钮路径，拒绝冲突描述、混合子树、多目标和跨包 / 窗口。点击前重新取得整树、刷新原节点，并复核 Stop / enabled、原事务 / PackageInstaller 会话；两次扫描共享 700 ms 期限，最终 Binder 返回后再次检查期限。false 或 exception 也在派发前占用尝试，同一 Service 实例内按原事务 / 会话、控件身份及标签语义去重，任一重复均拒绝；不声称跨进程持久 exactly-once。现有会话检查不能单独证明安装器窗口必属该会话，此边界保留。
 
-源码 **`1ad02efed4d0ac4ee6e6c25ef8c7feabea31a332`** 已独立审查、提交并推送 GitHub；精确归档 SHA-256 为 `fef38854716476eacad67c7b44ff69e7da6d0692742f74592d1280b87c8a01b7`。**code19 / 0.4.8 远端隔离完整构建已通过：Agent66/66、Updater66/66，共132/132 JUnit，0 failures / errors / skipped；其中每角色新增13项，共26项，已包含原106项，不能再加总。双角色Java编译、双 Debug R8、双 Release 完整 Lint / assemble 的显式任务均完成；`BUILD SUCCESSFUL in 3m 27s`，159 actionable tasks 全部 executed，进程已结束并取得 `CODE19_BUILD_TESTS_SUCCESS`。尚未签名、未发布、未实机验收。** 最终构建日志见私有 `code19-build-check3.json`，完整核验证据为 `code19-build-proof.json`：304个归档源码成员逐项摘要一致，双包元数据均为19 / 0.4.8；buildSuccess=true、signed=false、published=false。官方下载仍为原 code18 字节，先等待用户覆盖安装18并回查原事务，再验证真实输入；若输入仍需修复，在未发布19候选中定稿，避免发布额外中间包。
+早期源码 **`1ad02efed4d0ac4ee6e6c25ef8c7feabea31a332`** 已独立审查、提交并推送 GitHub；精确归档 SHA-256 为 `fef38854716476eacad67c7b44ff69e7da6d0692742f74592d1280b87c8a01b7`。**该早期 code19 / 0.4.8 远端隔离完整构建通过：Agent66/66、Updater66/66，共132/132 JUnit，0 failures / errors / skipped；其中每角色新增13项，共26项，已包含原106项，不能再加总。双角色Java编译、双 Debug R8、双 Release 完整 Lint / assemble 的显式任务均完成；`BUILD SUCCESSFUL in 3m 27s`，159 actionable tasks 全部 executed，进程结束并取得 `CODE19_BUILD_TESTS_SUCCESS`，但未签名、未发布或实机验收。** 早期构建日志为私有 `code19-build-check3.json`，完整核验证据为 `code19-build-proof.json`：304个归档源码成员逐项摘要一致，双包元数据均为19 / 0.4.8；buildSuccess=true、signed=false、published=false。该阶段尚待用户覆盖安装18，现已由下节原事务进展及 bb60 输入候选更新；不将 1ad 的构建证据移作 bb60 证据。
+
+### 11:06 后覆盖安装与真实输入复验
+
+用户报告已安装后，11:06:06 只读样本确认 Agent18 / Updater18 双端 0.4.7、在线健康，控制 Agent / epoch 8，活动手机命令和升级均为 0。原 Updater18 `device-update-5537b65e-890d-4dc5-825c-36f678ba77bf` 自然推进为 committed，installed_at 为 11:05:33.454，submitted 仍为 1；未创建 resolve、未重提安装，旧失败事件保留。这次安装包含用户协助覆盖安装，不算全程无人介入安装通过；安装后的 Updater 启动来源为 package_replaced，退出记录 updateRelated=true、比包更新时间晚 5ms，支持本次自动启动与健康恢复。
+
+按新截图打开闲鱼搜索页，11:09 的原文本命令 `device-command-a987444f-ac41-4e5a-9877-aa28f93aeab3` 返回 failed / not_started / INPUT_EDITOR_FOCUS_REQUIRED。再次取得新图并明确点击实际搜索输入框后，约 1 秒内提交 `device-command-faa8139f-e2d4-4cc3-8b3b-048bb9170830`，仍为同一确定未写入错误；紧随其后的截图证明页面仍在输入框、键盘可见且请求文字未出现。位置识别及点击依据截图；故障发生在文字写入前的输入焦点验证，不以键盘可见或 executing ACK 当作写入成功。保留两条原失败回执，不继续盲目重复输入。
+
+输入补丁 `bb60a02c2d58aafa6c9826a4732fbd7a83f2d9d3` 已独立审查并先推 GitHub，在 code19 中纳入安装确认修复。保留原目标节点，补查服务级 FOCUS_INPUT，仅当节点身份、窗口及包名精确一致时确认焦点；任一来源指向另一有效可编辑节点仍拒绝。不把服务返回节点改为写入目标，不放宽为同包名、键盘显示或无障碍焦点。失败诊断增加有界节点属性，不含文字。新冻结归档 code19b SHA-256 `10e23536ed07835e4e216f5581f6d6216d2bbea740878bc65ce66bcd211a4b83`，旧安装候选归档保留；版本为 0.4.8 / code19。**11:27:00（03:27:00 UTC）已核完整19b构建通过：304个源码成员逐项一致，Agent / Updater 各69/69、共138/138 JUnit，0 failures / errors / skipped，双 Debug R8、双 Release 完整 Lint / assemble 均通过**。构建日志 SHA-256 为 `dfde73b04bb4a4d9bf339da6e36fe9bdc39806519489a5b6f187e3ab64b1e62d`。随后原签名发布、双端安装及输入复验结果见下一节，不以构建代替实机输入结论。
+
+### code19正式发布、双端安装与输入复验
+
+原证书签名的 `0.4.8 / code19` 已正式发布，源码为上述 bb60、冻结归档仍为 code19b。私有 `code19-publication.json` 确认 publicVerified=true、historicalFilesUnchanged=true、servicesChanged=false、databaseChanged=false；备份 `/opt/ziwei-staging/backups/android-apks-20261017T033028Z-6dbf0548`。新 index SHA-256 为 `44680a0fafb620b28b5d9c65e143115d92247fc2d35d5765b54071cc5db85d5f`，manifest SHA-256 为 `94f5ba6c4fd909a3813b961069c23b579886f95511a4ea9a81730027bf755ce0`。原14个历史版本与42个历史文件保持，发布未启停服务或写数据库；manifest 的 deviceVerified=false 保持原值，不把发布写成整体实机通过。
+
+| code19 官方角色 | 字节数 | SHA-256 |
+| --- | ---: | --- |
+| Agent | 877230 | `5314fbbace2a2a2716fd30e790428caa88485559fcd4f057a179a357753b6c32` |
+| Updater | 877234 | `794322fbbe57e05b8b1fefab23ba91e5a6fa7b0f9663ed17dab6945b801ac0af` |
+
+本次 code19 安装由 AI 根据新截图处理系统确认，没有新增用户安装协助。Agent19 的继续安装与扫描后确认原命令 `011e531e…`、`80d34ae9…` 均 succeeded / performed=true；完成页由 `1f662a3a…` 按新图关闭。Updater19 打开原安装端 `439022ef…`、继续安装 `5a1a08ba…`、扫描后确认 `b85595f9…` 均成功。OPPO `com.oplus.appdetail` 页面仍需 AI 按图处理；这些结果不能证明客户端自动确认策略已在该 OEM 页面全程实机走通，也不声称静默无系统确认安装。
+
+**11:34:05** 快照已确认原 Agent19 事务 `device-update-88364dd5-ec9f-438b-9e6d-253806256240` submitted=1 / committed，installed_at 为 **11:33:53.313**。**11:39:27** 快照确认原 Updater19 事务 `device-update-38fd8387-3249-443d-9ec8-1adbb3829ff8` 也 submitted=1 / committed，installed_at 为 **11:39:17.765**；Agent19 / Updater19 双端 `0.4.8` 在线健康，控制 Agent / epoch 10，活动手机命令和升级均为0。两端 `startTrigger=package_replaced`、新退出记录 updateRelated=true，进程19333 / 20596，支持本次包替换后的自动启动与健康恢复，不代替强停、重启或长期存活实验。
+
+Updater 安装转健康期间，screenshot11 原命令 `device-command-45db845e-aa8d-4403-b646-efa615391831` 为 **failed / not_started / COMMAND_NOT_STARTED**，错误“执行确认后授权已失效”，虽有 executing ACK 但无图片；不把它作为新页面证据。11:39:27 的 Agent19 socketConnected=true；Updater19 刚启动1.354秒、socketConnected=false、lastSuccessfulHeartbeatAt=0，该初始样本不作双端握手通过证据。随后 **11:43:00.674** 只读样本确认双19 socketConnected=true、进程19333 / 20596未变、uptime为545352 / 219154ms，控制仍Agent / epoch10、phoneIdle / mainIdle=true。它支持该有限时段的健康与握手，不覆盖长期、重启、强停或用户 Stop 场景；较早双18握手证据保留为历史时点。
+
+按新图明确点击实际搜索框后，code19 原文本命令 `device-command-2ba2c10e-1c30-4284-9dd1-3e458a26aa08` 仍为 **failed / not_started / INPUT_EDITOR_FOCUS_REQUIRED**。随后 screenshot03 原命令 `device-command-da0e4842-c526-4605-ad71-39dabbc92221` 成功，主代理独立目视搜索页与键盘仍在、请求文字未出现。root / service 两个焦点来源均返回同窗口同包名、focused=true 但 editable=false 的 FrameLayout 容器，原 EditText 不等于该焦点节点。保留原失败，不盲目重复输入，不宣告 code19 输入修复成功；code20 的安装和真机输入结果仍待后续证据，整体任务未完成。
+
+### code20完整构建、原签名发布与连接阻塞
+
+code20 / `0.4.9` 源码 **`1ea60190d245e909bab5ff22d5d2198a023b4aa0`** 已独立审查、提交推送，并由 ls-remote 核对；归档 SHA-256 为 `634ddf15d4989daa80eed73054189b4abb248897cbb04c4a36eeeb9fc84106f2`。FocusedEditorPolicy 通过两轮完整树、父节点身份和唯一原编辑节点绑定判断容器焦点，不改变原写入节点；保留256节点 / 24层 / 共享700ms边界，实际效果前仍复核 Stop 与期限，readbackSource 区分 same_node / bound_editor。新增12项测试；**11:58:56（03:58:56 UTC）完整构建核验通过：306个源码成员逐项一致，Agent81/81 / Updater81/81，共162/162 JUnit，0 failures / errors / skipped；双 Debug R8、双 Release 完整 Lint / assemble通过**。日志SHA-256 `adfcbef6679601f14d103c0894f7ad6cec03127a20d3ad83d6e167312f0f4fa8`，证据 `code20-build-proof.json`。原证书签名候选于12:00:42形成，`code20-sign-check-02.json`确认双包20 / 0.4.9、原证书 `6292cfac…`、signedCandidateReady=true。
+
+**12:01:41 正式发布**由 `code20-publication.json`确认 publicVerified=true、historicalFilesUnchanged=true、servicesChanged=false、databaseChanged=false，deviceVerified=false保持。备份 `/opt/ziwei-staging/backups/android-apks-20261017T040141Z-3a9f166e`；index SHA-256 `f97b251a921795253bfed77e544614d7ef5ab4afe16a798e92ad09b187952448`，manifest SHA-256 `9ce73cfc54dc5ac9297002b95527a810a73ec28281378500773ee9707ac0fdbe`，原15版本45历史文件保持。
+
+| code20 官方角色 | 字节数 | SHA-256 |
+| --- | ---: | --- |
+| Agent | 884562 | `465db6ba4b1e1b1c8e175302a2033d981486465d1d7bf23beff3a60a7c77bcee` |
+| Updater | 884566 | `8986157c800b2afb046048624fe8b07724383c8cfdc7a3b2ad485f9c638c6f02` |
+
+**12:13 最新只读观察：手机仍为 Agent19 / Updater19，双端 offline，code20 尚未安装或实机输入验收。** code20 已于 **12:01:41** 原证书签名发布并公网核验；首轮 observe 被新电脑业务挡在 POST 前，没有20手机命令或升级提交。随后只读核实该精确任务是另一台 PC11af 的内容研究，不含手机请求、绑定或执行；本轮仅新增该动作 ID / payload SHA 的精确 scope，未知任务仍默认阻止。这是有限业务判断，不是操作系统能力隔离。再次 observe 因双19不健康等待，未下发手机动作。last_seen 为 NULL，runtime 仅为约12:11的缓存，无新退出原因，不能归因被杀或用户停止；原绑定电脑 bfd 在线。定时任务继续 PAUSED，整体任务未完成。
+
+新电脑业务为 `action_364a54e0-0a60-498a-a2c8-8434ac75b74e`，payload SHA-256 `29f32ed75889a1d56cdcf759bf5dcc0b31d60a7546f1f3aefd37af086300c92c`。`code20-business-intent.json`将真实用户请求派生为另一电脑的内容研究，手机 / Android / 闲鱼 / 原设备 / 委派标志均false，员工无手机绑定、原execution无phone run。只在原5条精确规则上增加此1条，私有 `direct_fix_scope_v20.py` SHA-256 `9aa8ca2fc847ec56945eb4fb036f5d30c8ddb81743ceda05e6fc203d19878b32`，原scope不改；这不证明管理能力在OS层绝对隔离，不通配未来任务。原20 observe01在POST前被阻止，observe02仅返回 waiting_both_roles_healthy；没有20手机命令或升级POST。
+
+**12:14:49 服务复核**：生产主站已由其他发布推进至 `/opt/ziwei/releases/mobile-runs-1757bd819099-51e2a255-bf145367/v2`，PID340823、自11:02:13运行；不回退至历史eabe。中控仍 `/opt/ziwei-control/releases/phone-stability-67c9b29b07a4` / PID333172，Nginx master737，双公开健康、官方客户端元数据与Android index20均200。12:11:35两条WS 101不能归属手机；只凭可能延后记录的close日志不能归因断连。root正尝试已有电脑只读恢复通道，尚无手机20安装或输入结果。
+
+**12:23:58 最后只读复核：** Agent19 / Updater19 仍双端 offline，原因未知；活动手机命令、升级及主站动作均为0。code20 observe 继续 waiting_both_roles_healthy，原私有20状态无 commandId / updateId，未下发任何20手机命令或升级。既有19两条升级 committed 和输入失败均保留；code20 实机安装、中文读回及页面验收仍未完成，沿用户已提出的覆盖安装协助继续，不卸载或清数据。原定时实读 PAUSED，不承诺定时接续。私有证据 `v20-final-phone-readonly.json`、`v20-final-upgrade-observe.json`、`v20-final-upgrade-state.json`。
+
+**12:21:16 原电脑恢复通道探测结果：** 12:21:12只提交一次正常 `command.execute`（executable=`adb`、args=`["version"]`），原动作 `action_ab02baa5-5a9e-4582-a14e-d3f70f6c1a35` 返回 failed，错误 `executable is not allowlisted: adb`，没有stdout、未spawn。只证明该执行名被拒，不证明ADB未安装或USB不存在；未改allowlist、换路径、新建token或bot聊天，既有兼容A2A鉴权仅在内存使用。12:16最后手机观察仍双19离线，没有20手机动作或升级POST；0.4.9已准备，可沿用户已有授权请求覆盖安装协助，尚未发生，不称无人介入安装完成。整体任务未完成，定时继续PAUSED。 私有证据为 `original-pc-adb-version-code20-result.json`。
+
+以上证据保留在私有 `v19-device-observe-03.json`、`v19-device-observe-05.json`、`v19-device-observe-06.json`、原安装确认 JSONL 与 `v19-focus-text-screen-03.jsonl`；不公开原词或手机截图，不重写原事务或失败回执。
 
 ## 10月16日发布基线与当日待补项（历史）
 
@@ -46,11 +94,11 @@
 | Nginx WebSocket 代理 | 已推模板源码 `98db76d4fa0e42f019e81bf446d382891ec1253f`，仅 10 行精确 channel block | 13:10:38 部署，语法 / graceful reload / 无凭证 401 空 body / Origin 403 空 body 通过；认证手机 101 待补 |
 | Android code16（历史发布） | `8be4604f2938271bf54798db9e74ac3dfa0c3b37`；`0.4.5 / versionCode 16` | 11:24:57 原证书发布，11:58:24 双端均在线健康，两条原升级事务均 committed |
 | Android code17（历史发布） | `1e7977b43fda78eabc924e8a15c4502dc9a82131`；`0.4.6 / versionCode 17` | 12:20:17 原证书发布；Agent 原 code17 事务 committed，12:38:27 快照 Agent=17 / Updater=16；12:45 实际中文输入未执行 |
-| Android code18（当前官方下载） | `c54ec5332c1686d6478aca14aa23cb25166713ce`；`0.4.7 / versionCode 18` | 已冻结、推送 GitHub，106/106 JUnit / 双 R8 / 双 Release 完整构建通过；12:56:34 原证书签名发布，公网回读通过，安装 / 实机验收待补 |
+| Android code18（16日官方下载） | `c54ec5332c1686d6478aca14aa23cb25166713ce`；`0.4.7 / versionCode 18` | 已冻结、推送 GitHub，106/106 JUnit / 双 R8 / 双 Release 完整构建通过；12:56:34 原证书签名发布，公网回读通过，当时安装 / 实机验收待补 |
 
 10月16日 13:16:21 的最终只读快照显示，主站已由另一项后续发布推进到 `eabe098af3b6c0e7d76cf4121052e3606e022888`（`/opt/ziwei/releases/v2-hotfix-eabe098af3b6/v2`），该提交继承本轮 `891685f` 手机修复；已核对 ancestry 和 phone MCP 差异，未覆盖原回执机制。官方下载客户端元数据为源码 `5db7d834deaf3524adfada59a434bc764fda750a`、build `208f2350ff390bbf7506e6baaef60eb7c8d467f2c8630a86c670ce01aada1044`、包 SHA-256 `2aadef1b066953fb81ff247ec16cd1a5e5e91a8d34490b66b8d47f11fa13d734`。这些后续发布保持现状，不回退为 11:09 的历史包。该16日快照中控为 `1b26b115`；双服务、公开健康与 Android index 在最终检查中正常，该快照手机双端仍离线，活动手机命令为 0、原安装事务为 1。
 
-原签名已私下获得并验证。官方最新 APK 为 `0.4.7 / code18`，Agent / Updater 包名仍为 `com.ziwei.device.agent` / `com.ziwei.device.updater`；code16、code17 和 code18 均通过 `apksigner 35.0.0`、包名 / 版本 / 字节数 / SHA-256 校验，证书 SHA-256 与原版一致：`6292cfac129ee17f36d0c08ebc430fd4b0e502c7ccce99927ea70c3f149e80f8`。发布 manifest 保留 `deviceVerified=false`，没有把发包写成完整实机通过。
+原签名已私下获得并验证。10月16日官方最新 APK 为 `0.4.7 / code18`，Agent / Updater 包名仍为 `com.ziwei.device.agent` / `com.ziwei.device.updater`；code16、code17 和 code18 均通过 `apksigner 35.0.0`、包名 / 版本 / 字节数 / SHA-256 校验，证书 SHA-256 与原版一致：`6292cfac129ee17f36d0c08ebc430fd4b0e502c7ccce99927ea70c3f149e80f8`。发布 manifest 保留 `deviceVerified=false`，没有把发包写成完整实机通过；17日最新 code20 发布见顶部。
 
 | code16 历史安装包 | 字节数 | SHA-256 |
 | --- | --- | --- |
@@ -95,7 +143,7 @@ code18 冻结归档 SHA-256 为 `bca0a4e87d299341ef2a56fd4dafa53fa6ef6c771efaca4
 - code17 提交 `1e7977b` 在远端完成各角色 43 项 JUnit、共 86/86、0 failures / errors / skipped，R8 和 Release 构建通过。code18 `c54ec533` 已冻结并推送 GitHub；远端各角色 53 项、共 106/106 JUnit（0 failures / errors / skipped）、双 Debug R8 和双 Release 完整 Lint / compile / Dex / assemble 均已通过，完整构建 2m31s、159 个任务全部执行，日志有 CODE18_BUILD_TESTS_SUCCESS；原证书签名与 12:56:34 公网发布验证已完成，安装和实机证据待主代理补入，不将完整构建通过写成手机验收通过。
 - 中控 `8be4604` 的 Android 设备、轻量回执、终端控制及 MCP 集成 50/50；最终恢复提交 `1b26b115` 新增两项后，远端最终回归 52/52、0 skipped。中控 Vue 类型检查和构建通过；此次 server 修复没有重建或更换 code16 APK，Android 76/76 的源码基准仍为 `8be4604`。
 - Mac 未新增监听服务；需要监听的中控集成测试在服务器隔离 staging 数据目录运行，未使用生产库。
-- code16 双端实际升级和 code17 Agent 升级已完成，历史包逐文件摘要保持；APK 发布未启停服务、未改数据库。12:02 code16 与 12:45 code17 的真实闲鱼中文输入均未通过，返回确定未执行；16日尚未取得 code18 实机验收；17日 Agent18 的安装与恢复见顶部，实际输入仍待验。断网 / 熄屏 / 重启和长期存活证据仍待补。构建、单元测试和下载验签不能代替这些实机证据。未发布闲鱼商品、发送消息或修改历史回执冒充成功。
+- code16 双端实际升级和 code17 Agent 升级已完成，历史包逐文件摘要保持；APK 发布未启停服务、未改数据库。12:02 code16 与 12:45 code17 的真实闲鱼中文输入均未通过，返回确定未执行；16日尚未取得 code18 实机验收。17日双端18及19已健康，code18两次、code19一次真实文本命令均确定 not_started / INPUT_EDITOR_FOCUS_REQUIRED，code20 成功输入仍待后续实机验收，详见顶部。断网 / 熄屏 / 重启和长期存活证据仍待补。构建、单元测试和下载验签不能代替这些实机证据。未发布闲鱼商品、发送消息或修改历史回执冒充成功。
 
 ## 10月16日设备验收快照（历史）
 
@@ -141,7 +189,7 @@ code17 恢复时，`handoff_recovery_v17` 在 Agent 已安装、awaiting_health 
 - APK 发布备份：`/opt/ziwei-staging/backups/android-apks-20261016T032457Z-23bc1467`，保存原 index、拟发布 index 及结果。撤回下载索引时恢复该原 index，保留版本化产物供复核；不删除历史包。
 - 11:50:25 中控恢复发布确认 schema、全部旧 command / update / session 行摘要、数据库 inode、主站与 Nginx 服务及配置均保持；Android shared 下载目录与 index SHA-256 `1f64cec0f3eed435af75baafa8e96dd70de7adb95566407d82fc59878a7d5aa2` 保持。
 - 12:20:17 code17 原签名双包发布，保留 code16 及更早版本；备份 `/opt/ziwei-staging/backups/android-apks-20261016T042017Z-fcda5d01`。新 index SHA-256 `4015ae5a1f80545ac89ff4f098ef3c5f5741b1f3e0ac9d44f15f77780639a016`，manifest SHA-256 `9f1d5c99a2b501ed04f368fc5cb1be38374fe05a0d34924bc664b2dfb2ae443f`，公网回读通过；未修改服务或数据库。
-- 12:56:34 code18 原证书双包已发布，publicVerified=true、历史文件保持、servicesChanged=false / databaseChanged=false；备份 `/opt/ziwei-staging/backups/android-apks-20261016T045634Z-452e0449`。当前 index SHA-256 `49204ab39fa7843a12efcd0918581810b962ec98d393d13ef8e7c75805391ac2`，manifest SHA-256 `f286bdc0c7575b2e751e4bbf7139e04af9773f626ddab3ad7eda0d709bd85959`；安装验收仍待补。
+- 12:56:34 code18 原证书双包已发布，publicVerified=true、历史文件保持、servicesChanged=false / databaseChanged=false；备份 `/opt/ziwei-staging/backups/android-apks-20261016T045634Z-452e0449`。该次 index SHA-256 `49204ab39fa7843a12efcd0918581810b962ec98d393d13ef8e7c75805391ac2`，manifest SHA-256 `f286bdc0c7575b2e751e4bbf7139e04af9773f626ddab3ad7eda0d709bd85959`；安装验收待补为16日时点，17日双端18进展见顶部。
 - 13:10:38 仅向原 Nginx 配置插入源码 `98db76d4fa0e42f019e81bf446d382891ec1253f` 的 10 行精确 `/api/device/v1/channel` block。配置 SHA-256 `21a955cdfaef8d16837671b20ec07ddcf4c7f61d0c1feea9c1885a4a3dedd231` → `8c92827d0e8cae5377c04f33bc775c3c9ab39b156d924638abca7a7a25472aec`，其余配置字节保持；备份 `/opt/ziwei-staging/backups/android-websocket-20261016T051038Z`。发布脚本在 reload 前记录尝试状态并检查配置漂移，语法 / 探针失败时恢复原配置并 reload。实际 nginx -t、graceful reload、无凭证 Upgrade 401 空 body、有 Origin 403 空 body 验证通过；主站 / 中控 PID 和 current、code18 index 均保持，无 DB 写。authenticatedDevice101Verified=false，认证手机连接尚待观察。
 - 回退服务只切代码 current 链接并重启对应服务，必要时恢复客户端发布三文件；不覆盖当前业务数据库。手机覆盖更新不能直接降级，恢复旧逻辑需原签名与更高版本号。
 
