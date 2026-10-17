@@ -304,3 +304,11 @@ UTC18:02:13.492服务器保存并经严格reader核验独立恢复回执 ec66be0
 总预算仍为3，不按员工数无限启动进程；固定容量仅保留直接子任务空间，不能据此保证任意嵌套同步等待无死锁。服务器忙碌槽、独立Profile/HOME、既有隔离与进程退出规则保持。工作目录可由用户选择共享，并行本身不提供共享文件写入隔离。
 
 最终207项相关回归全部通过、0跳过，静态检查191项通过。新增集成用例实际运行两个独立Node子进程，经真实scheduler、delivery和ActionDispatcher同时ACK并持有在途执行，独立完成及交付；验证同员工后续消息保序、重复poll及重建delivery不重跑、持久未知状态不放行新执行。该集成只mock服务器传输，不连接模型、不操作员工电脑；本段不宣称新版已在Windows真机完成并行模型验收。源码先推GitHub，再仅发布CLI下载，API和网页无需切换；正式发布结果另记。
+
+### 多员工并行版本发布核验（北京时间 2026-10-18 02:33）
+
+产品提交 `df2f1943c67adae5f4073d831003320b056542dc` 已先推GitHub两条既有分支。独立审查64项定向回归全部通过，53项required客户端源码逐字节匹配Git归档和tgz；相对上一CLI776产品增量仅调度器。冻结manifest摘要 `f60e89cfb868fce3be2762bf0a7586aaffe5559306248a1e54f770888845a8c9`、payload摘要 `d1aca6fbf26e6d9bead825a574f7ca956e002a29dfe78d81b3a745ec73dafbea`，上传计划4项文件逐项校验，源码和发布范围未扩大。
+
+UTC18:32:52仅发布官方CLI，build `4291265f95770c7d8a9952325d3bb4bcd12c35b2fe485eef38645a662fde9ccb`；tgz1131470字节，SHA256 `0b232e72addfb0e026b3a33bfebf2c45fcb5fdd8e26a9958be36718d3536c467`。更新PS仍6390字节及原526882摘要，release.json摘要 `3aff09130350806042c2bf9677566eb1bbb693db8f2b2931147f7334e9cd86cc`。UTC18:33:07独立postcheck确认公开字节及metadata、API/前端874目录与PID383266、服务身份、DB inode/schema、其他CLI和三项诊断下载均保持。正式下载已可用；服务器发布没有自动更新Windows客户端，真机安装新版后的并行模型验收仍待执行。
+
+验证期间独立审查误跑了既有动态端口daemon integration用例，该用例已自行清理，未发现残留fixture进程或监听；实际临时端口未记录，不能事后补造。本轮root采用的207项验证及新增集成均未启动监听；最终端口中心check本worktree为ok、conflicts和unregistered均为空。临时依赖链接已移除、原依赖目录保留。私有证据位于 `.local/employee-parallel-release/`。
