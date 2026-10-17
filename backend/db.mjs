@@ -282,8 +282,16 @@ export function openDatabase(options = {}, {serverCodeRolloutIo={}}={}) {
     CREATE TABLE IF NOT EXISTS conversation_messages (
       id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, role TEXT NOT NULL,
       content TEXT NOT NULL, attachment_json TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL,
+      sender_user_id TEXT, forward_json TEXT,
       FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS conversation_reads (
+      workspace_id TEXT NOT NULL, conversation_id TEXT NOT NULL, user_id TEXT NOT NULL,
+      last_message_id TEXT, last_message_rowid INTEGER NOT NULL DEFAULT 0, last_read_at TEXT NOT NULL,
+      PRIMARY KEY(conversation_id,user_id),
+      FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_conversation_messages_chat ON conversation_messages(conversation_id,created_at);
     CREATE TABLE IF NOT EXISTS skill_versions (
       id TEXT PRIMARY KEY, skill_id TEXT NOT NULL, version TEXT, content TEXT NOT NULL DEFAULT '',
       content_hash TEXT, metadata_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL,
@@ -402,6 +410,28 @@ export function openDatabase(options = {}, {serverCodeRolloutIo={}}={}) {
     ,"ALTER TABLE automations ADD COLUMN executor TEXT NOT NULL DEFAULT 'ziwei_user'"
     ,"ALTER TABLE automations ADD COLUMN webhook_secret TEXT"
   ]) { try { db.exec(statement); } catch {} }
+  // Additive only: old INSERTs remain valid and existing message rowids remain
+  // stable for read watermarks. Unlike historical migrations above, a rejected
+  // new-column migration must stop startup instead of silently losing authors.
+  try {
+    db.exec('SAVEPOINT conversation_forward_schema');
+    const columns=db.prepare('PRAGMA table_info(conversation_messages)').all();
+    for(const name of ['sender_user_id','forward_json'])if(!columns.some(column=>column.name===name))db.exec(`ALTER TABLE conversation_messages ADD COLUMN ${name} TEXT`);
+    const actual=db.prepare('PRAGMA table_info(conversation_messages)').all();
+    for(const name of ['sender_user_id','forward_json']){
+      const column=actual.find(item=>item.name===name);
+      if(!column||String(column.type).toUpperCase()!=='TEXT'||column.notnull!==0||column.pk!==0||column.dflt_value!==null)throw Object.assign(new Error('聊天消息新增字段结构不兼容，已停止启动'),{code:'CONVERSATION_MESSAGE_SCHEMA_INVALID'});
+    }
+    const reads=db.prepare('PRAGMA table_info(conversation_reads)').all();
+    for(const [name,type,required,pk] of [['workspace_id','TEXT',1,0],['conversation_id','TEXT',1,1],['user_id','TEXT',1,2],['last_message_id','TEXT',0,0],['last_message_rowid','INTEGER',1,0],['last_read_at','TEXT',1,0]]){
+      const column=reads.find(item=>item.name===name);
+      if(!column||String(column.type).toUpperCase()!==type||column.notnull!==required||column.pk!==pk||(name==='last_message_rowid'?column.dflt_value!=='0':column.dflt_value!==null))throw Object.assign(new Error('聊天已读水位字段结构不兼容，已停止启动'),{code:'CONVERSATION_READ_SCHEMA_INVALID'});
+    }
+    const readForeignKeys=db.prepare('PRAGMA foreign_key_list(conversation_reads)').all();
+    if(readForeignKeys.length!==1||!readForeignKeys.some(key=>key.table==='conversations'&&key.from==='conversation_id'&&key.to==='id'&&key.on_delete==='CASCADE'))throw Object.assign(new Error('聊天已读水位外键结构不兼容，已停止启动'),{code:'CONVERSATION_READ_SCHEMA_INVALID'});
+    if(db.prepare('PRAGMA index_info(idx_conversation_messages_chat)').all().map(column=>column.name).join(',')!=='conversation_id,created_at'||!db.prepare('PRAGMA index_list(conversation_messages)').all().some(index=>index.name==='idx_conversation_messages_chat'&&index.unique===0))throw Object.assign(new Error('聊天消息索引结构不兼容，已停止启动'),{code:'CONVERSATION_MESSAGE_SCHEMA_INVALID'});
+    db.exec('RELEASE conversation_forward_schema');
+  } catch(error){try{db.exec('ROLLBACK TO conversation_forward_schema; RELEASE conversation_forward_schema');}finally{db.close();}throw error;}
   if(rollout){installServerCodeRolloutActionGuards(db);return db;}
   // Management is a default platform capability. Upgrade historical switches
   // once, preserving employee timestamps, phone configuration and receipts.

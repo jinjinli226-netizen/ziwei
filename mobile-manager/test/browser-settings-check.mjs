@@ -96,7 +96,7 @@ async function session(role){
       if(method!=='GET'){
         const allowed=method==='PATCH'&&[`${base}/bots/${hermes.id}`,`${base}/employees/${ordinary.id}`].includes(p)
           ||method==='PUT'&&p===`${base}/employees/${hermes.id}/phone-mcp`
-          ||method==='POST'&&[`${base}/devices/pairing`,`${connect}/bindings`,`${terminal}/phone-catalog-B/control`,`${terminal}/enrollment-requests/request-approve/approve`,`${terminal}/enrollment-requests/request-reject/reject`].includes(p);
+          ||method==='POST'&&([`${base}/devices/pairing`,`${connect}/bindings`,`${terminal}/phone-catalog-B/control`,`${terminal}/enrollment-requests/request-approve/approve`,`${terminal}/enrollment-requests/request-reject/reject`].includes(p)||/^\/api\/conversations\/[^/]+\/read$/.test(p));
         assert.ok(allowed,`Blocked non-settings operation ${method} ${p}`);
       }
       const body=request.postData()?JSON.parse(request.postData()):undefined,entry={role,method,path:p,body:body===undefined?undefined:clone(body)};requests.push(entry);
@@ -105,7 +105,7 @@ async function session(role){
       return route.fulfill({status:result.status,contentType:'application/json',body:JSON.stringify(result.body)});
     }catch(error){errors.push({role,message:error.stack||error.message});return route.fulfill({status:500,contentType:'application/json',body:JSON.stringify({error:error.message})});}
   });
-  await page.goto(`${origin}/__ziwei_manager__/index.html`);await page.getByRole('heading',{name:'我的员工',exact:true}).waitFor();
+  await page.goto(`${origin}/__ziwei_manager__/index.html`);await page.locator('.bottom-nav [data-action=navigate][data-tab=employees]').click();await page.getByRole('heading',{name:'我的员工',exact:true}).waitFor();
   await page.locator('[data-action=navigate][data-tab=me]').click();
   await page.locator('[data-action=settings]').click();await page.getByRole('heading',{name:'管理与设置',exact:true}).waitFor();
   return {page,context};

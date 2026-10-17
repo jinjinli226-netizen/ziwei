@@ -27,7 +27,7 @@ export function createApi({ fetchImpl = globalThis.fetch?.bind(globalThis), orig
     const text = typeof value === 'string' ? value.replace(/^\?/, '') : new URLSearchParams(Object.entries(value || {}).filter(([, v]) => v !== undefined && v !== null && v !== '')).toString();
     return text ? `?${text}` : '';
   };
-  async function request(path, { method = 'GET', body, signal } = {}) {
+  async function request(path, { method = 'GET', body, signal, invalidateReads = true } = {}) {
     const startedAt = Date.now();
     const epoch = cacheEpoch, cached = method === 'GET' ? readCache.get(path) : null;
     const readController = method === 'GET' && readTimeoutMs > 0 ? new AbortController() : null;
@@ -71,7 +71,7 @@ export function createApi({ fetchImpl = globalThis.fetch?.bind(globalThis), orig
         throw error;
       }
       if (method === 'GET') rememberRead(path, response.headers?.get?.('etag'), data, epoch);
-      else if (epoch === cacheEpoch) clearReads();
+      else if (invalidateReads && epoch === cacheEpoch) clearReads();
       return data;
     } catch (error) {
       // Metadata only: never retain request bodies, credentials or response text
@@ -129,6 +129,26 @@ export function createApi({ fetchImpl = globalThis.fetch?.bind(globalThis), orig
     rejectPhoneEnrollment: (workspace, id) => post(`${phonePath(workspace)}/enrollment-requests/${enc(id)}/reject`),
     phoneControl: (workspace, id, body) => post(`${phonePath(workspace, id)}/control`, body),
     conversations: (workspace, employeeId) => get(`${ws(workspace)}/conversations${query({ employeeId })}`),
+    chats: workspace => get(`${ws(workspace)}/chats`),
+    markConversationRead: (id, { messageId }) => request(`/api/conversations/${enc(id)}/read`, { method: 'POST', body: { messageId }, invalidateReads: false }),
+    forwardMessages: async (id, body) => {
+      const value = await post(`/api/conversations/${enc(id)}/forwards`, body);
+      const forward = value?.forward, message = value?.message, snapshot = message?.forward;
+      const stable = value => typeof value === 'string' && value.length > 0 && value.trim() === value;
+      const expectedIds = body?.messageIds;
+      const valid = stable(forward?.id) && forward.sourceConversationId === id && stable(forward.targetConversationId) &&
+        forward.targetEmployeeId === body?.targetEmployeeId && forward.mode === body?.mode && stable(message?.id) &&
+        snapshot?.schemaVersion === 1 && snapshot.id === forward.id && snapshot.source?.conversationId === id &&
+        (snapshot.source?.employeeId === null || stable(snapshot.source?.employeeId)) && typeof snapshot.source?.employeeName === 'string' && snapshot.mode === body.mode &&
+        (snapshot.note || '') === (body.note || '').trim() && Array.isArray(snapshot.messages) && Array.isArray(expectedIds) &&
+        snapshot.messages.length === expectedIds.length && new Set(snapshot.messages.map(item => item?.sourceMessageId)).size === expectedIds.length &&
+        snapshot.messages.every(item => expectedIds.includes(item?.sourceMessageId) &&
+          ['user', 'assistant'].includes(item.role) && typeof item.senderName === 'string' && typeof item.createdAt === 'string' &&
+          typeof item.content === 'string' && Array.isArray(item.attachments)) &&
+        (body.mode !== 'execute' || stable(value.execution?.id) && typeof value.execution.type === 'string' && typeof value.execution.status === 'string');
+      if (!valid) throw Object.assign(new Error('转发回执无法核对，请重试同一请求确认结果'), { code: 'FORWARD_RECEIPT_INVALID', uncertain: true });
+      return value;
+    },
     createConversation: (workspace, body) => post(`${ws(workspace)}/conversations`, body),
     conversation: async id => {
       const conversation = await get(mobile(`/api/conversations/${enc(id)}`));

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {IncomingMessage,ServerResponse} from 'node:http';
 import {Duplex} from 'node:stream';
-import {createHash} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 import {createApp} from './app.mjs';
 import {createManagementService} from './management.mjs';
 import {createMobileReadView,mobileRunView} from './mobile-read-view.mjs';
@@ -24,7 +24,7 @@ async function request(app,url,{cookie='',headers={}}={}) {
 }
 
 function fixture(t) {
-  const app=createApp({memory:true,requireAuth:true,mcpToken:'isolated-mobile-runs-mcp',mcpWorkspace:'mobile-read-view',mcpRole:'owner'}),repo=app.locals.repo,auth=app.locals.auth;
+  const mcpToken=randomUUID(),app=createApp({memory:true,requireAuth:true,mcpToken,mcpWorkspace:'mobile-read-view',mcpRole:'owner'}),repo=app.locals.repo,auth=app.locals.auth;
   t.after(()=>repo.db.close());
   const owner=auth.setup({email:'mobile-owner@fixture.test',password:'isolated-fixture-password'});
   const slug='mobile-read-view';auth.createWorkspace(owner.user_id,{slug,name:'Mobile read fixture',kind:'team'});
@@ -46,7 +46,7 @@ function fixture(t) {
   repo.addConversationMessage(bot.main_conversation_id,{role:'assistant',content:'Original assistant text',attachments:[{name:'original.png',mimeType:'image/png',contentEncoding:'base64',content:rasterFixtures.png.toString('base64')}],dispatch:false});
   const payload={employeeId:bot.id,conversationId:bot.main_conversation_id,hermesBot:{employeeId:bot.id,revision:bot.revision},unknown:{keep:true}},result={output:'Original execution receipt',unknown:{keep:true}};
   repo.db.prepare('INSERT INTO a2a_actions(id,workspace_id,agent_id,type,payload_json,dedupe_key,status,created_at,completed_at,result_json) VALUES(?,?,?,?,?,?,?,?,?,?)').run('mobile-read-receipt',ws.id,'ziwei_user','conversation.execute',JSON.stringify(payload),'mobile-read-receipt','succeeded','2027-01-01T00:00:00.000Z','2027-01-01T00:00:01.000Z',JSON.stringify(result));
-  return {app,repo,auth,slug,ws,owner,ownerCookie,memberCookie:`ziwei_session=${member.session.token}`,outsiderCookie:`ziwei_session=${outsider.session.token}`,bytes,avatar,bot,ordinary,privateEmployee,idle,conversation,archived};
+  return {app,repo,auth,mcpToken,slug,ws,owner,ownerCookie,memberCookie:`ziwei_session=${member.session.token}`,outsiderCookie:`ziwei_session=${outsider.session.token}`,bytes,avatar,bot,ordinary,privateEmployee,idle,conversation,archived};
 }
 
 test('mobile employee JSON removes inline image bytes and reuses only original main conversations',async t=>{
@@ -177,7 +177,7 @@ test('only API mobile runs select five and summarize events; default and MCP ret
     assert.deepEqual(actual[index].result,original[index].result);assert.deepEqual(actual[index].payload,original[index].payload);
     assert.deepEqual(actual[index].events[0].data.result,proof);assert.equal(actual[index].events.at(-1).id,original[index].events.at(-1).id);
   }
-  const unchanged=await request(f.app,base,{cookie:f.ownerCookie}),mcp=await request(f.app,`/mcp/v1/workspaces/${f.slug}/bots/${f.bot.id}/runs?view=mobile`,{headers:{authorization:'Bearer isolated-mobile-runs-mcp'}});
+  const unchanged=await request(f.app,base,{cookie:f.ownerCookie}),mcp=await request(f.app,`/mcp/v1/workspaces/${f.slug}/bots/${f.bot.id}/runs?view=mobile`,{headers:{authorization:`Bearer ${f.mcpToken}`}});
   assert.equal(mcp.status,200);assert.deepEqual(unchanged.bytes,raw.bytes);assert.deepEqual(mcp.bytes,raw.bytes);
   t.diagnostic(`run JSON bytes: default=${raw.bytes.length}, mobile=${mobile.bytes.length}`);
 });

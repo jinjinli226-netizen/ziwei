@@ -7,6 +7,8 @@ import {createRequire} from 'node:module';
 import {fileURLToPath} from 'node:url';
 import {createRepository} from '../../backend/repository.mjs';
 import {createManagementService} from '../../backend/management.mjs';
+import {createAuthService} from '../../backend/auth.mjs';
+import {createConversationReadService} from '../../backend/conversation-read-state.mjs';
 
 const require=createRequire(import.meta.url);
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'/Users/zhangjie/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
@@ -15,6 +17,9 @@ const web=path.join(root,'mobile-manager/web'),out=path.join(root,'.local/mobile
 await fs.mkdir(out,{recursive:true});
 const origin='https://ziwei-history.invalid',slug='test-111',deviceId='history-qa-pc';
 const repo=createRepository({memory:true}),bots=createManagementService(repo).bots;
+const principal=createAuthService(repo.db).setup({name:'隔离历史验收',email:'history-qa@fixture.test',password:'fixture-private-password'}),userId=principal.user_id;
+repo.db.prepare('INSERT INTO members(id,user_id,workspace_id,name,email,role,joined_at) VALUES(?,?,?,?,?,?,?)').run('history-browser-read-owner',userId,repo.getWorkspace(slug).id,'隔离历史验收','history-qa@fixture.test','owner',new Date().toISOString());
+const conversationReads=createConversationReadService(repo),readActor={actorUserId:userId,actorRole:'owner',enforceEmployeeVisibility:true};
 repo.heartbeatDevice(slug,{deviceId,name:'隔离历史验收电脑',runtimes:{Hermes:{status:'available',version:'0.21.3',profiles:[{name:'default'}],models:[{id:'history-qa-model'}]}}});
 const png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==';
 const marker='原主会话历史 HERMES-HISTORY-ORIGINAL';
@@ -34,6 +39,7 @@ repo.addConversationMessage(first.conversation.id,{role:'assistant',content:'原
 const second=createEmployee('TikTokTrendS · 隔离历史验收',secondMarker);
 const employeeIds=new Set([first.employee.id,second.employee.id]);
 const requests=[],errors=[],screenshots=[],checks=[],sessions=[];
+const inboxRows=()=>conversationReads.list(slug,readActor).chats.filter(chat=>employeeIds.has(chat.employeeId));
 const browser=await chromium.launch({executablePath:process.env.ZIWEI_BROWSER_EXECUTABLE||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
 let activePage;
 
@@ -59,10 +65,13 @@ async function fixture(name,{botMode='ok',auxMode='ok',firstHistoryFailures=0,ho
     }
     const entry={scenario:name,method,path:p};requests.push(entry);
     try{
+      const read=p.match(/^\/api\/conversations\/([^/]+)\/read$/);
+      if(read&&method==='POST')return json(route,conversationReads.read(read[1],request.postDataJSON(),readActor));
       if(method!=='GET')throw new Error(`Unexpected write ${method} ${p}`);
-      if(p==='/api/auth/me')return json(route,{user_id:'history-qa-user',user:{id:'history-qa-user',name:'隔离历史验收'},memberships:[{slug,name:'隔离历史验收',role:'owner'}]});
+      if(p==='/api/auth/me')return json(route,{user_id:userId,user:{id:userId,name:'隔离历史验收'},memberships:[{slug,name:'隔离历史验收',role:'owner'}]});
       if(p==='/api/workspaces')return json(route,{workspaces:[{slug,name:'隔离历史验收',role:'owner'}]});
       const base=`/api/workspaces/${slug}`;
+      if(p===`${base}/chats`){const chats=inboxRows();return json(route,{chats,unreadCount:chats.reduce((sum,chat)=>sum+chat.unreadCount,0)});}
       if(p===`${base}/employees`)return json(route,{employees:repo.listEmployees(slug).filter(employee=>employeeIds.has(employee.id))});
       if(p===`${base}/bots`)return json(route,{bots:bots.list(slug).filter(bot=>employeeIds.has(bot.id))});
       if(p===`${base}/tasks`)return json(route,{tasks:repo.listTasks(slug)});
@@ -92,6 +101,7 @@ async function fixture(name,{botMode='ok',auxMode='ok',firstHistoryFailures=0,ho
   const close=async()=>{release('history');release('botMode');release('auxMode');await context.close();};
   const session={page,control,pending,release,close};sessions.push(session);
   await page.goto(`${origin}/__ziwei_manager__/index.html`);
+  await page.locator('.bottom-nav [data-action=navigate][data-tab=employees]').click();
   await page.getByRole('heading',{name:'我的员工',exact:true}).waitFor();
   return session;
 }
@@ -166,8 +176,8 @@ try{
   await late.close();
 
   assert.deepEqual(errors,[]);
-  assert.ok(requests.every(request=>request.method==='GET'),'History checks must never write through an API');
-  const result={passed:true,checks,screenshots,requests:requests.length,conversationCreates:0,realDeviceActions:0,externalModelCalls:0,evidence:'real in-memory initialized Hermes Bot and conversation shapes; routed HTTP only; no listeners'};
+  assert.ok(requests.every(request=>request.method==='GET'||request.method==='POST'&&/^\/api\/conversations\/[^/]+\/read$/.test(request.path)),'History checks may only write account-local read cursors');
+  const result={passed:true,checks,screenshots,requests:requests.length,readCursorWrites:requests.filter(request=>request.method==='POST').length,conversationCreates:0,realDeviceActions:0,externalModelCalls:0,evidence:'real in-memory initialized Hermes Bot, original conversation and account-local read service; routed HTTP only; no listeners'};
   await fs.writeFile(path.join(out,'result.json'),JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify(result,null,2));
 }catch(error){
   const evidence={passed:false,error:error.stack||error.message,errors,requests,checks};

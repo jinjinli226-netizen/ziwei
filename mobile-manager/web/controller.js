@@ -1,6 +1,8 @@
 import { accountId, workspaceId, scopeKey, list, id, executionUncertain, initialResources, initialEmployeeResources } from './model.js';
 import { createBotSettings } from './bot-settings.js';
 import { createDeviceSettings } from './device-settings.js';
+import { createChatInbox } from './chat-inbox.js';
+import { createForwarding } from './forwarding.js';
 
 const IMAGE_LIMIT = 10 * 1024 * 1024;
 const avatarLimit = 2 * 1024 * 1024;
@@ -36,7 +38,7 @@ async function readImages(files) {
 
 /** UI effects are scoped to the authenticated account, workspace and selected employee. */
 export function createController({ state, api, render = () => {}, storage = globalThis.localStorage, reporting } = {}) {
-  let epoch = 0, employeeEpoch = 0, chatReadEpoch = 0, employeeReadEpoch = 0, phoneEpoch = 0, phoneRead = null, disposed = false, timer = null, attachmentEpoch = 0, nativePaused = false;
+  let epoch = 0, employeeEpoch = 0, chatReadEpoch = 0, chatConversationId = null, employeeReadEpoch = 0, phoneEpoch = 0, phoneRead = null, disposed = false, timer = null, attachmentEpoch = 0, nativePaused = false;
   const composers = new Map(), pendingMutations = new Set(), routineRequests = new Map(), messageKeys = new Set(), conversationReads = new Map();
   const resourceReads = new Map(), employeeReads = new Map(), employeeWrites = new Map();
   state.resources ||= initialResources();
@@ -46,7 +48,7 @@ export function createController({ state, api, render = () => {}, storage = glob
   const current = () => ({ epoch, scope: scopeKey(state), employeeEpoch, employeeId: state.selectedEmployee?.id });
   const valid = (token, employee = false) => !disposed && token.epoch === epoch && token.scope === scopeKey(state) && (!employee || (token.employeeEpoch === employeeEpoch && token.employeeId === state.selectedEmployee?.id));
   const validChat = (token, readEpoch) => valid(token, true) && readEpoch === chatReadEpoch;
-  const draw = () => { if (!disposed) render(state); };
+  const draw = () => { if (!disposed) { syncLoading(); render(state); } };
   const storeGet = key => { try { return storage?.getItem(key); } catch { return null; } };
   const storeSet = (key, value) => { try { storage?.setItem(key, value); } catch {} };
   function persistMessage(key, value) {
@@ -75,6 +77,7 @@ export function createController({ state, api, render = () => {}, storage = glob
   }
   function clearSelection() {
     employeeEpoch++; chatReadEpoch++; phoneEpoch++; attachmentEpoch++;
+    chatConversationId = null; forwarding.reset(); state.forwardDetail = null; state.chatReadError = '';
     conversationReads.clear(); employeeReadEpoch++; employeeReads.clear(); state.employeeResources = initialEmployeeResources();
     state.selectedEmployee = null; state.bot = null; state.conversation = null; state.messages = [];
     state.runs = []; state.routines = []; state.phone = null; state.draft = ''; state.attachments = [];
@@ -83,15 +86,16 @@ export function createController({ state, api, render = () => {}, storage = glob
   }
   function clearWorkspace() {
     clearSelection(); state.employees = []; state.bots = []; state.tasks = []; state.devices = []; state.phones = [];
+    inbox.reset(); state.chatSearch = '';
     resourceReads.clear(); employeeWrites.clear(); phoneRead = null; state.resources = initialResources();
-    state.report = null; state.reportSelection = []; state.page = 'home'; state.tab = 'employees'; state.imagePreview = null;
+    state.report = null; state.reportSelection = []; state.page = 'home'; state.tab = 'chat'; state.imagePreview = null;
     state.phoneCommand = null; state.phoneError = ''; state.loading = false; state.busy = false;
     state.botSettings = null; state.deviceSettings = null; state.settingsTrail = [];
   }
   function requireLogin(message = '', explicitLogout = false) {
     const userId = accountId(state);
     reporting?.clear?.(state);
-    if (explicitLogout && userId) clearAccountRequests(userId);
+    if (explicitLogout && userId) { clearAccountRequests(userId); forwarding.reset({ clearAccount: true }); }
     if (userId) { try { storage?.removeItem(workspaceKey(userId)); } catch {} }
     epoch++; composers.clear(); pendingMutations.clear(); routineRequests.clear(); clearWorkspace();
     state.user = null; state.workspace = null; state.workspaces = []; state.phase = 'login'; state.error = message; state.notice = ''; draw();
@@ -183,8 +187,18 @@ export function createController({ state, api, render = () => {}, storage = glob
   }
   const botSettings = createBotSettings({ state, api, current, valid, fail, draw, acceptBot: acceptSavedBot });
   const deviceSettings = createDeviceSettings({ state, api, current, valid, fail, draw });
-  const primaryResource = () => ['phones', 'devices'].includes(state.tab) || state.page === 'phone' ? 'devices' : ['work', 'tasks'].includes(state.tab) ? 'tasks' : 'employees';
-  const syncLoading = () => { state.loading = state.resources[primaryResource()]?.phase === 'loading'; };
+  const inbox = createChatInbox({ state, api, current, valid, draw, fail,
+    canMarkVisible: () => !nativePaused && !globalThis.document?.hidden && !state.forward && !state.forwardDetail && !state.imagePreview,
+  });
+  const forwarding = createForwarding({ state, api, current, valid, draw, fail, storage,
+    onAccepted: (_result, { token }) => { if (valid(token)) { inbox.invalidate(); void inbox.load(token); } },
+    onOpenTarget: ({ employeeId, conversationId }) => {
+      if (typeof conversationId !== 'string' || !conversationId.trim()) return fail(new Error('转发回执未提供目标聊天，请刷新后核对'));
+      return openEmployee(employeeId, 'chat', { conversationId });
+    },
+  });
+  function primaryResource() { return ['phones', 'devices'].includes(state.tab) || state.page === 'phone' ? 'devices' : ['work', 'tasks'].includes(state.tab) ? 'tasks' : state.tab === 'chat' ? 'chats' : 'employees'; }
+  function syncLoading() { state.loading = (primaryResource() === 'chats' ? state.chatThreadsResource : state.resources[primaryResource()])?.phase === 'loading'; }
   function readWorkspaceResource(name, token = current()) {
     if (!valid(token)) return Promise.resolve(false);
     // A pending mutation owns these rows until its authoritative response is accepted.
@@ -221,12 +235,14 @@ export function createController({ state, api, render = () => {}, storage = glob
     if (disposed || !state.user || !workspaceId(state) || state.phase !== 'ready') return false;
     const token = current(), primary = primaryResource();
     if (!silent) draw();
+    // The inbox has its own lifecycle. A slow index cannot hold employee/history reads open.
+    void inbox.load(token);
     const employees = readWorkspaceResource('employees', token);
     // The initial employee response is useful on its own. Full Bot histories are supplementary.
     void employees.then(ok => {
       if (ok && valid(token) && state.page === 'home' && state.tab === 'employees') return readWorkspaceResource('bots', token);
     });
-    const primaryWork = primary === 'employees' ? employees : readWorkspaceResource(primary, token);
+    const primaryWork = primary === 'chats' ? Promise.resolve() : primary === 'employees' ? employees : readWorkspaceResource(primary, token);
     const chatWork = state.page === 'chat' ? readChat(token) : Promise.resolve();
     if (['chat', 'detail', 'employee-detail'].includes(state.page)) void refreshEmployee(token, {skipConversation:true});
     const settingsWork = state.page === 'bot-settings' ? botSettings.load() : state.page === 'device-settings' ? deviceSettings.load() : Promise.resolve();
@@ -247,18 +263,19 @@ export function createController({ state, api, render = () => {}, storage = glob
     if (conversationReads.has(key)) return conversationReads.get(key);
     const workspace = workspaceId(state), initial = !state.conversation?.id;
     const cachedBot = state.bot?.id === employee.id ? state.bot : employee.bot;
-    const conversationId = state.conversation?.id || cachedBot?.main_conversation_id || employee.main_conversation_id;
+    const conversationId = state.conversation?.id || chatConversationId || cachedBot?.main_conversation_id || employee.main_conversation_id;
     state.employeeResources.conversation.phase = 'loading';
     if (initial) state.chatLoading = true;
     draw();
     const request = (async () => {
       try {
         // A cached authoritative main ID needs no Bot round-trip. Failed reads never create a replacement.
-        if (initial && cachedBot?.configuration_state === 'initialized' && !cachedBot.main_conversation_id) throw new Error('这位员工的主聊天尚未就绪，请在电脑版核对');
+        if (initial && !conversationId && cachedBot?.configuration_state === 'initialized' && !cachedBot.main_conversation_id) throw new Error('这位员工的主聊天尚未就绪，请在电脑版核对');
         const conversation = conversationId ? await api.conversation(conversationId) : await api.getEmployeeConversation(workspace, { ...employee, ...(cachedBot ? { bot: cachedBot } : {}) });
         if (!validChat(token, readEpoch)) return;
         if (conversation.employee_id && conversation.employee_id !== employee.id) throw new Error('聊天与当前员工身份不一致，请刷新核对');
         state.conversation = conversation; state.messages = conversation.messages || [];
+        forwarding.synchronize();
         employeeReadSucceeded('conversation');
         state.chatLoading = false;
         if (initial) state.busy = false;
@@ -338,16 +355,18 @@ export function createController({ state, api, render = () => {}, storage = glob
     if (workspace) await chooseWorkspace(workspace);
     else { state.phase = 'workspace'; state.page = 'workspaces'; state.workspace = null; draw(); }
   }
-  function enterEmployeePage(employeeId, page, busy = true) {
-    const employee = state.employees.find(item => item.id === employeeId);
+  function enterEmployeePage(employeeId, page, busy = true, { conversationId } = {}) {
+    const thread = state.chatThreads?.find(item => item.employeeId === employeeId && item.employee?.id === employeeId);
+    const employee = state.employees.find(item => item.id === employeeId) || thread?.employee;
     if (!employee) throw new Error('这位员工不在当前工作区中，请刷新');
     stashComposer(); clearSelection(); state.selectedEmployee = employee;
+    if (page === 'chat') chatConversationId = conversationId || thread?.conversationId || null;
     state.bot = employee.bot || state.bots.find(bot => (bot.employee_id || bot.id) === employeeId) || null;
     state.page = page; state.error = ''; state.busy = busy; state.chatLoading = page === 'chat'; restoreComposer(); draw();
     return current();
   }
-  async function openEmployee(employeeId, page) {
-    const token = enterEmployeePage(employeeId, page);
+  async function openEmployee(employeeId, page, options) {
+    const token = enterEmployeePage(employeeId, page, true, options);
     try {
       if (page === 'chat') {
         const primary = readChat(token);
@@ -397,6 +416,7 @@ export function createController({ state, api, render = () => {}, storage = glob
       // Store only a hash and request identity, never the message or its image bytes.
       persistMessage(requestKey, request);
       await api.sendMessage(conversationId, { content, attachments, clientMessageId: request.clientMessageId });
+      if (valid(token)) { inbox.invalidate(); void inbox.load(token); }
       // A different employee may now be open. Complete only the original composer's draft.
       if (item.request === request) {
         if (item.revision === revision) { item.draft = ''; item.attachments = []; }
@@ -411,7 +431,7 @@ export function createController({ state, api, render = () => {}, storage = glob
       state.employeeResources.conversation.phase = 'loading';
       try {
         const conversation = await api.conversation(conversationId);
-        if (validChat(token, sendEpoch)) { state.conversation = conversation; state.messages = conversation.messages || []; employeeReadSucceeded('conversation'); }
+        if (validChat(token, sendEpoch)) { state.conversation = conversation; state.messages = conversation.messages || []; forwarding.synchronize(); employeeReadSucceeded('conversation'); }
       } catch (error) { employeeReadFailed('conversation',error,token,() => validChat(token,sendEpoch)); }
     } catch (error) { if (error?.status === 401 || validChat(token, sendEpoch)) fail(error, token, true); }
     finally { finishWrite(); if (validChat(token, sendEpoch)) { state.sending = false; draw(); } }
@@ -501,12 +521,14 @@ export function createController({ state, api, render = () => {}, storage = glob
   }
   const actions = {
     navigate: action(async ({ tab }) => {
-      if (!['employees', 'work', 'tasks', 'phones', 'devices', 'me'].includes(tab)) return;
+      if (!['chat', 'employees', 'work', 'tasks', 'phones', 'devices', 'me'].includes(tab)) return;
       stashComposer(); clearSelection(); state.settingsTrail = []; state.tab = tab; state.page = 'home'; state.error = ''; draw();
       await refresh({ silent: true });
     }),
     back: action(async () => {
       if (state.imagePreview) { state.imagePreview = null; draw(); return; }
+      if (state.forwardDetail) { state.forwardDetail = null; draw(); return; }
+      if (state.forward) { await forwarding.actions['forward-back'](); return; }
       if (['settings', 'bot-settings', 'device-settings'].includes(state.page)) {
         const previous = state.settingsTrail?.pop() || { page: 'home', tab: 'me' };
         stashComposer(); clearSelection(); state.error = ''; state.tab = previous.tab || state.tab;
@@ -525,6 +547,18 @@ export function createController({ state, api, render = () => {}, storage = glob
     'switch-workspace': action(() => { stashComposer(); clearSelection(); state.phase = 'workspace'; state.page = 'workspaces'; draw(); }),
     'select-workspace': action(({ id: slug }) => chooseWorkspace(state.workspaces.find(item => item.slug === slug || item.workspace_id === slug))),
     chat: action(({ id: employeeId }) => { state.settingsTrail = []; return openEmployee(employeeId, 'chat'); }),
+    'mark-thread-read': action(({ conversationId, messageId }) => {
+      if (nativePaused || globalThis.document?.hidden || state.forward || state.forwardDetail || state.imagePreview) return false;
+      return inbox.markVisible({ conversationId, messageId });
+    }),
+    ...forwarding.actions,
+    'forward-detail': action(({ id: messageId }) => {
+      if (state.page !== 'chat' || !state.conversation?.id) return false;
+      const message = state.messages.find(item => item.id === messageId);
+      if (message?.forward?.schemaVersion !== 1 || !Array.isArray(message.forward.messages)) return false;
+      state.forwardDetail = { messageId }; draw(); return true;
+    }),
+    'forward-detail-close': action(() => { state.forwardDetail = null; draw(); }),
     'employee-detail': action(({ id: employeeId }) => { state.settingsTrail = []; return openEmployee(employeeId, 'detail'); }),
     settings: action(() => {
       rememberSettingsPage(); stashComposer(); clearSelection(); state.page = 'settings'; state.error = ''; draw();
@@ -646,7 +680,8 @@ export function createController({ state, api, render = () => {}, storage = glob
         state.busy = true; state.error = ''; draw();
         const principal = await api.login({ email: String(data.get('email') || data.get('username') || '').trim(), password: String(data.get('password') || '') });
         if (valid(token)) await loadPrincipal(principal);
-      } else if (name === 'chat') await sendChat(data);
+      } else if (name === 'forward') await forwarding.submit(data);
+      else if (name === 'chat') await sendChat(data);
       else if (name === 'employee') await saveEmployee(data);
       else if (name === 'routine') {
         const routineId = String(data.get('routineId') || data.get('id') || '');
@@ -662,9 +697,11 @@ export function createController({ state, api, render = () => {}, storage = glob
   async function change(event) {
     const target = event?.target || event;
     if (!target) return;
+    if (forwarding.change(event)) return;
     if (state.page === 'bot-settings') { await botSettings.change(event); return; }
     if (state.page === 'device-settings') { await deviceSettings.change(event); return; }
     if (target.name === 'search') { state.search = target.value; draw(); return; }
+    if (target.name === 'chatSearch') { state.chatSearch = String(target.value || ''); draw(); return; }
     if (['message','content','draft'].includes(target.name)) { state.draft = target.value; if (state.selectedEmployee && state.page === 'chat') { stashComposer(); composer().revision++; } return; }
     if (!['images', 'attachments', 'avatar'].includes(target.name) || !target.files?.length) return;
     const token = current(), readToken = ++attachmentEpoch, avatar = target.name === 'avatar', page = state.page, reportIndex = state.report?.index;
@@ -711,6 +748,7 @@ export function createController({ state, api, render = () => {}, storage = glob
   function dispose() {
     disposed = true; epoch++; clearInterval(timer); timer = null; composers.clear(); pendingMutations.clear(); routineRequests.clear(); resourceReads.clear(); employeeReads.clear(); employeeWrites.clear(); phoneRead = null;
     botSettings.dispose?.(); deviceSettings.dispose?.();
+    inbox.dispose(); forwarding.dispose();
     globalThis.document?.removeEventListener('visibilitychange', visibility);
     globalThis.removeEventListener?.('ziwei:resume', resume);
     globalThis.removeEventListener?.('ziwei:pause', pause);

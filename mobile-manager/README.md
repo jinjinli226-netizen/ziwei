@@ -1,12 +1,20 @@
 # 紫薇 Android 管理 App
 
-当前内部测试版：`0.1.5-internal`（code 6），包名 `com.ziwei.manager`，Android 8.0（API 26）及以上。它是现有紫薇的手机管理入口；受控手机上的 Agent / Updater 继续使用原应用，Hermes 继续在绑定的常开电脑执行。
+当前内部测试版：`0.2.0-internal`（code 7），包名 `com.ziwei.manager`，Android 8.0（API 26）及以上。它是现有紫薇的手机管理入口；受控手机上的 Agent / Updater 继续使用原应用，Hermes 继续在绑定的常开电脑执行。
 
 ## 安装和使用
 
-下载本次交付的 `ziwei-manager-0.1.5-internal-code6.apk`，传到安卓手机，打开安装；已安装首版时直接覆盖更新。系统询问时，仅为本次使用的下载或文件应用允许安装来源。安装后打开「紫薇」，登录原账号并选择原工作区。新应用只需要网络权限，不需要无障碍、设备管理员或常驻后台权限。
+下载本次交付的 `ziwei-manager-0.2.0-internal-code7.apk`，传到安卓手机，打开安装；已安装首版时直接覆盖更新。系统询问时，仅为本次使用的下载或文件应用允许安装来源。安装后打开「紫薇」，登录原账号并选择原工作区。新应用只需要网络权限，不需要无障碍、设备管理员或常驻后台权限。
 
 这是独立管理应用的内部签名，不覆盖或升级互联 Agent / Updater。后续更新管理应用须沿用同一签名；不要卸载应用来做常规升级，以免清除本机汇报队列。生产签名、应用商店发布不属于本次交付。
+
+## 0.2.0 聊天首页与记录转发
+
+默认首页为最近聊天，底部为聊天、员工、工作、我的；设备互联移入我的。会话索引复用服务端员工与原主聊天 ID，显示最近消息预览和当前用户真实未读。已读只提交当前屏幕显示的消息 ID；打开转发或图片、退到后台都不会把未看到的新消息自动标为已读。已读水位不改聊天更新时间、不派发工作，也不清空大型历史的条件读取缓存。
+
+聊天里长按文字消息或点击消息操作，可转发单条或多选最多20条，填写附言并选择另一位员工。默认“仅转发记录”保存服务端原文、图片、发送者与时间快照；“转发并请他处理”须明确选择。目标聊天中的记录卡片可以在 App 内展开和查看原图，源聊天草稿保留。服务端检查来源与目标权限并原子保存；没有收到回执时只能显式重试同一标识，后续权限变化或接口回滚不能被当成原请求未送达。本机只保留请求哈希和 ID，不持久化转发正文。
+
+本版需要共享后端的聊天转发、最近会话与已读接口；网页同步显示同一转发记录。
 
 ## 0.1.5 聊天读取恢复
 
@@ -62,6 +70,7 @@ node --test mobile-manager/test/*.test.mjs
 node mobile-manager/test/browser-check.mjs
 node mobile-manager/test/browser-history-check.mjs
 node mobile-manager/test/browser-settings-check.mjs
+node mobile-manager/test/browser-forwarding-check.mjs
 python3 mobile-manager/scripts/build-android.py
 ```
 

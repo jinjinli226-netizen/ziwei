@@ -142,3 +142,40 @@ test('read diagnostics identify the failed auxiliary route without saving reques
     return true;
   });
 });
+
+test('read watermarks preserve authenticated history ETags while forwards invalidate them', async () => {
+  const seen=[];
+  const body={messageIds:['source-message'],targetEmployeeId:'target',note:'参考',mode:'reference',clientRequestId:'same-request'};
+  const receipt={forward:{id:'forward-id',sourceConversationId:'source',targetConversationId:'target-main',targetEmployeeId:'target',mode:'reference'},message:{id:'saved',forward:{schemaVersion:1,id:'forward-id',source:{conversationId:'source',employeeId:'original',employeeName:'甲'},messages:[{sourceMessageId:'source-message',role:'assistant',senderName:'甲',createdAt:'2026-10-17T00:00:00Z',content:'保留原文',attachments:[]}],mode:'reference',note:'参考'}}};
+  const api=createApi({fetchImpl:async(url,options)=>{
+    seen.push({url,options});
+    if(url.endsWith('/read'))return response({conversationId:'source',lastReadMessageId:'source-message',unreadCount:0});
+    if(url.endsWith('/forwards'))return response(receipt);
+    if(url.endsWith('/chats'))return response({chats:[],unreadCount:0});
+    if(options.headers['If-None-Match'])return new Response(null,{status:304});
+    return new Response(JSON.stringify({id:'source',messages:[]}),{headers:{etag:'"original"'}});
+  }});
+  await api.conversation('source');await api.markConversationRead('source',{messageId:'source-message'});await api.conversation('source');
+  assert.equal(seen.at(-1).options.headers['If-None-Match'],'"original"');
+  assert.deepEqual(JSON.parse(seen[1].options.body),{messageId:'source-message'});
+  await api.forwardMessages('source',body);await api.conversation('source');
+  assert.equal(seen.at(-1).options.headers['If-None-Match'],undefined);
+  await api.chats('workspace/a');assert.equal(seen.at(-1).url,'/api/workspaces/workspace%2Fa/chats');
+});
+
+test('unverifiable accepted forwarding receipts stay uncertain and never trigger another business call', async () => {
+  const body={messageIds:['a'],targetEmployeeId:'target',note:'',mode:'execute',clientRequestId:'same'};
+  for(const value of [{},{forward:{id:'x'},message:{id:'y'}},{forward:{id:'f',sourceConversationId:'other',targetConversationId:'target-main',targetEmployeeId:'target',mode:'execute'},message:{id:'saved'}}]){
+    let calls=0;const api=createApi({fetchImpl:async()=>{calls++;return response(value);}});
+    await assert.rejects(api.forwardMessages('source',body),e=>e.uncertain===true&&e.code==='FORWARD_RECEIPT_INVALID');
+    assert.equal(calls,1);
+  }
+});
+
+test('forward receipt accepts server chat ordering, legacy null source and an omitted empty note',async()=>{
+  const receipt={forward:{id:'f',sourceConversationId:'legacy',targetConversationId:'canonical',targetEmployeeId:'target',mode:'execute'},execution:{id:'run',type:'conversation.execute',status:'pending'},message:{id:'saved',forward:{schemaVersion:1,id:'f',source:{conversationId:'legacy',employeeId:null,employeeName:'旧聊天'},mode:'execute',messages:['earlier','later'].map(sourceMessageId=>({sourceMessageId,role:'assistant',senderName:'原发送者',createdAt:'2026-10-17T00:00:00Z',content:'原文',attachments:[]}))}}};
+  const api=createApi({fetchImpl:async()=>response(receipt)});
+  const value=await api.forwardMessages('legacy',{messageIds:['later','earlier'],targetEmployeeId:'target',note:'',mode:'execute',clientRequestId:'request'});
+  assert.deepEqual(value.message.forward.messages.map(message=>message.sourceMessageId),['earlier','later']);
+  assert.equal(value.execution.id,'run');
+});

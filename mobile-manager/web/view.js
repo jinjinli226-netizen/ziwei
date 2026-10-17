@@ -1,6 +1,7 @@
 import { escapeHtml, employeeName, avatarUrl, presence, messageText, formatTime, executionUncertain, botStopPresentation } from './model.js';
 import { renderBotSettings } from './bot-settings.js';
 import { renderDeviceSettings } from './device-settings.js';
+import { isForwardableMessage, orderedForwardMessages, FORWARD_MESSAGE_LIMIT, FORWARD_NOTE_LIMIT } from './forwarding.js';
 
 const e = value => escapeHtml(String(value ?? ''));
 const rows = value => Array.isArray(value) ? value : [];
@@ -85,15 +86,48 @@ function employeeReadNotices(state, includeConversation=false) {
   }).join('');
 }
 
-function appHeader(state, title, subtitleText='') {
+function appHeader(state, title, subtitleText='', headingAction='') {
   const workspace=state.workspace?.name || state.workspace?.slug || '我的工作区';
-  return `<header class="home-header"><div class="workspace-line"><button class="workspace-picker" data-action="switch-workspace" aria-label="切换工作区"><img class="workspace-dot" src="./ziwei-logo.png" alt="" width="32" height="32">${e(workspace)}${icon('down')}</button><button class="icon-button light" data-action="refresh" aria-label="刷新页面"${disabled(state)}>${icon('refresh',state.busy?'rotating':'')}</button></div><div class="page-heading"><div><h1>${e(title)}</h1>${subtitleText ? `<p>${e(subtitleText)}</p>` : ''}</div></div></header>`;
+  return `<header class="home-header"><div class="workspace-line"><button class="workspace-picker" data-action="switch-workspace" aria-label="切换工作区"><img class="workspace-dot" src="./ziwei-logo.png" alt="" width="32" height="32">${e(workspace)}${icon('down')}</button><button class="icon-button light" data-action="refresh" aria-label="刷新页面"${disabled(state)}>${icon('refresh',state.busy?'rotating':'')}</button></div><div class="page-heading"><div><h1>${e(title)}</h1>${subtitleText ? `<p>${e(subtitleText)}</p>` : ''}</div>${headingAction}</div></header>`;
 }
 function pageHeader(state, title, sub='', extra='', employee=null) {
   return `<header class="detail-header"><button class="icon-button" data-action="back" aria-label="返回">${icon('back')}</button><div class="detail-header-title">${employee ? avatar(employee,'small') : ''}<div><h1>${e(title)}</h1>${sub ? `<p>${e(sub)}</p>` : ''}</div></div>${extra || '<span class="header-spacer"></span>'}</header>`;
 }
 function bottomNav(state) {
-  return `<nav class="bottom-nav" aria-label="主导航">${[['employees','员工'],['work','工作'],['devices','设备'],['me','我的']].map(([tab,label])=>`<button data-action="navigate" data-tab="${tab}" class="nav-item ${state.tab===tab?'active':''}" ${state.tab===tab?'aria-current="page"':''}>${icon(tab)}<span>${label}</span>${state.tab===tab?'<i></i>':''}</button>`).join('')}</nav>`;
+  const current=['devices','phones'].includes(state.tab)?'me':state.tab==='tasks'?'work':state.tab;
+  const unread=rows(state.chatThreads).reduce((total,thread)=>total+unreadCount(thread?.unreadCount),0);
+  return `<nav class="bottom-nav" aria-label="主导航">${[['chat','聊天'],['employees','员工'],['work','工作'],['me','我的']].map(([tab,label])=>`<button data-action="navigate" data-tab="${tab}" class="nav-item ${current===tab?'active':''}" ${current===tab?'aria-current="page"':''}${tab==='chat'&&unread?` aria-label="聊天，${unread} 条未读"`:''}><span class="nav-icon">${icon(tab)}${tab==='chat'&&unread?`<b class="nav-unread" aria-hidden="true">${unread>99?'99+':unread}</b>`:''}</span><span>${label}</span>${current===tab?'<i></i>':''}</button>`).join('')}</nav>`;
+}
+function unreadCount(value) { return typeof value==='number'&&Number.isFinite(value)&&value>0?Math.floor(value):0; }
+function threadEmployee(state, thread) {
+  return thread?.employee || rows(state.employees).find(employee=>employee.id===(thread?.employeeId || thread?.employee_id)) || {};
+}
+function threadTimestamp(thread) {
+  const value=thread?.updatedAt || thread?.updated_at;
+  const timestamp=value?new Date(value).getTime():NaN;
+  return Number.isFinite(timestamp)?timestamp:0;
+}
+function threadTime(thread) {
+  const timestamp=threadTimestamp(thread);
+  if(!timestamp)return '';
+  const date=new Date(timestamp),today=new Date();
+  const sameDay=date.toDateString()===today.toDateString();
+  const label=sameDay?date.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false}):date.toLocaleDateString('zh-CN',{...(date.getFullYear()!==today.getFullYear()?{year:'numeric'}:{}),month:'numeric',day:'numeric'});
+  return `<time class="thread-time" datetime="${e(date.toISOString())}" title="${e(formatTime(timestamp))}">${e(label)}</time>`;
+}
+function threadRow(state, thread) {
+  const employee=threadEmployee(state,thread),unread=unreadCount(thread.unreadCount);
+  const preview=typeof thread.preview==='string'?thread.preview.trim():'';
+  return `<button class="thread-row ${unread?'has-unread':''}" data-action="chat" data-id="${e(employee.id)}"${employee.id?'':' disabled'} aria-label="和${e(nameOf(employee))}聊天${unread?`，${unread} 条未读`:''}"><span class="thread-avatar">${avatar(employee,'chat-avatar')}${unread?`<b class="thread-unread" aria-hidden="true">${unread>99?'99+':unread}</b>`:''}</span><span class="thread-copy"><span class="thread-heading"><strong>${e(nameOf(employee))}</strong>${threadTime(thread)}</span><span class="thread-preview">${e(preview || '暂无消息')}</span></span></button>`;
+}
+function chatsPage(state) {
+  const resource=state.chatThreadsResource || {},search=String(state.chatSearch || '').trim().toLowerCase();
+  const all=rows(state.chatThreads).filter(thread=>thread&&typeof thread==='object').slice().sort((a,b)=>threadTimestamp(b)-threadTimestamp(a));
+  const threads=all.filter(thread=>`${nameOf(threadEmployee(state,thread))} ${typeof thread.preview==='string'?thread.preview:''}`.toLowerCase().includes(search));
+  const start=actionButton('navigate','发起聊天','plus','soft','data-tab="employees"');
+  const notice=resource.phase==='error'?`<div class="banner error" role="alert">${icon('alert')}<span>最近聊天同步失败：${e(resource.error || '请刷新重试')}</span><button class="icon-button" data-action="refresh" aria-label="重试同步最近聊天">${icon('refresh')}</button></div>`:resource.phase==='loading'&&!resource.lastUpdated?'<div class="banner notice" role="status"><span class="spinner small"></span><span>正在同步最近聊天…</span></div>':'';
+  const noRows=all.length?empty('search','没有找到相关聊天','试试员工名称或最近消息中的文字'):resource.phase==='error'?empty('chat','最近聊天暂未加载','恢复连接后会继续同步原聊天记录',actionButton('refresh','刷新重试','refresh','soft')):resource.phase==='loading'||resource.phase==='idle'?empty('chat','正在同步最近聊天','原有聊天记录会在这里显示'):empty('chat','最近聊天会显示在这里','选一位员工，继续原来的聊天',start);
+  return `${appHeader(state,'聊天','接着上次的话题，继续一起工作',`<button class="icon-button new-chat-button" data-action="navigate" data-tab="employees" aria-label="发起聊天">${icon('plus')}</button>`)}<main class="page-content chats-home">${alerts(state)}${notice}<label class="search-box">${icon('search')}<input type="search" name="chatSearch" value="${e(state.chatSearch || '')}" placeholder="搜索最近聊天" aria-label="搜索最近聊天" autocomplete="off"></label><div class="thread-list" aria-label="最近聊天">${threads.length?threads.map(thread=>threadRow(state,thread)).join(''):noRows}</div></main>`;
 }
 function employeesPage(state) {
   const all=rows(state.employees), filter=state.filter || 'all', search=String(state.search || '').toLowerCase();
@@ -105,9 +139,8 @@ function employeesPage(state) {
   return `${appHeader(state,'我的员工',all.length ? `${all.length} 位伙伴，随时交给他们` : '你的工作伙伴都在这里')}<main class="page-content employee-home">${alerts(state)}${resourceNotice(state,'employees','员工列表')}${all.length?resourceNotice(state,'bots','员工运行状态'):''}<button class="report-entry" data-action="report-setup"><span class="report-entry-icon">${icon('report')}</span><span class="report-entry-copy"><strong>听汇报</strong><small>召集员工，一个一个聊</small></span><span class="report-entry-arrow">${icon('arrow')}</span><span class="report-orbit" aria-hidden="true"></span></button><label class="search-box">${icon('search')}<input type="search" name="search" value="${e(state.search || '')}" placeholder="搜索员工" aria-label="搜索员工" autocomplete="off"></label><div class="segmented" role="group" aria-label="员工筛选">${[['all','全部'],['running','工作中'],['attention','待处理']].map(([key,label])=>`<button data-action="filter" data-filter="${key}" class="${filter===key?'active':''}" aria-pressed="${filter===key}">${label}${key==='all'?`<span>${all.length}</span>`:''}</button>`).join('')}</div><div class="employee-list">${employees.length ? employees.map(employee=>employeeCard(state,employee)).join('') : noRows}</div><p class="page-footnote">${icon('link')}与电脑端共用同一工作区</p></main>`;
 }
 function employeeCard(state, employee) {
-  const bot=botFor(state,employee), status=statusOf(bot), latest=bot?.latest_run || employee?.latest_run;
-  const detail=latest?.result?.summary || latest?.summary || latest?.error || latest?.prompt || status.detail || employee?.last_activity || '';
-  return `<article class="employee-card"><button class="employee-identity" data-action="employee-detail" data-id="${e(employee.id)}" aria-label="查看${e(nameOf(employee))}的详情">${avatar(employee,'large')}<span class="employee-card-copy"><span class="employee-title-line"><strong>${e(nameOf(employee))}</strong>${badge(status)}</span><span class="employee-description">${e(subtitle(employee))}</span>${detail ? `<span class="employee-activity">${icon(status.tone==='running'?'play':status.tone==='error'?'alert':'clock')}<span>${e(detail)}</span></span>` : ''}</span></button><div class="employee-actions">${actionButton('chat','打开聊天','chat','primary',`data-id="${e(employee.id)}"`)}${actionButton('employee-detail','查看详情','work','soft',`data-id="${e(employee.id)}"`)}</div></article>`;
+  const status=statusOf(botFor(state,employee));
+  return `<article class="employee-card contact-card"><button class="employee-identity" data-action="chat" data-id="${e(employee.id)}" aria-label="打开聊天：${e(nameOf(employee))}">${avatar(employee,'contact-avatar')}<span class="employee-card-copy"><span class="employee-title-line"><strong>${e(nameOf(employee))}</strong>${badge(status)}</span><span class="employee-description">${e(subtitle(employee))}</span></span></button><button class="icon-button contact-detail" data-action="employee-detail" data-id="${e(employee.id)}" aria-label="查看${e(nameOf(employee))}的详情">${icon('chevron')}</button></article>`;
 }
 
 const statusLabels={planned:'已计划',review:'待审核',pending:'等待执行',queued:'等待执行',acked:'执行中',running:'执行中',executing:'执行中',succeeded:'已完成',completed:'已完成',done:'已完成',failed:'执行失败',expired:'已过期',uncertain:'待核实',cancelled:'已取消',stopped:'已停止',blocked:'有阻碍',in_progress:'进行中',todo:'待开始',active:'已启用',paused:'已暂停',delivered:'已送达',acknowledged:'已确认'};
@@ -149,12 +182,28 @@ function imageAttachment(attachment) {
   if(!source && item.content && item.mimeType && item.contentEncoding==='base64') source=safeImage(`data:${item.mimeType};base64,${item.content}`);
   return source ? `<button class="message-image" data-action="image" data-src="${e(source)}" aria-label="放大图片"><img src="${e(source)}" alt="${e(item.name || item.filename || '聊天图片')}" loading="lazy"></button>` : `<span class="attachment-file">${icon('image')}${e(item.name || item.filename || '图片附件')}</span>`;
 }
-function messageCard(message, employee) {
+function forwardRecord(message) {
+  const record=message?.forward;
+  return record?.schemaVersion===1&&Array.isArray(record.messages)?record:null;
+}
+function forwardPreview(message) {
+  const text=messageText(message).trim();
+  return text?text.slice(0,180):rows(message.attachments).length?'[图片]':'[消息]';
+}
+function forwardRecordCard(message) {
+  const record=forwardRecord(message);
+  if(!record)return '';
+  return `${record.note?`<div class="prose forward-note">${e(record.note)}</div>`:''}<button type="button" class="forward-record-card" data-action="forward-detail" data-id="${e(message.id)}" aria-label="查看转发的聊天记录"><strong>${e(record.source?.employeeName || '员工')}的聊天记录</strong><span class="forward-record-preview">${rows(record.messages).slice(0,3).map(item=>`<span>${e(item.senderName || '消息')}：${e(forwardPreview(item))}</span>`).join('')}</span><span class="forward-record-footer">${icon('chat')}聊天记录 · ${record.messages.length} 条<span>${icon('chevron')}</span></span></button>`;
+}
+function messageCard(message, employee, state=null, allowForward=false) {
   const outgoing=['user','human'].includes(message.role || message.sender_role || message.senderRole) || message.type==='user';
   const system=['system','tool'].includes(message.role);
-  const content=messageText(message) || '', attachments=rows(message.attachments || message.images || message.metadata?.attachments);
-  if(system) return `<div class="system-message">${e(content)}</div>`;
-  return `<article class="message ${outgoing?'outgoing':'incoming'}">${outgoing?'':avatar(employee,'message-avatar')}<div class="message-body"><div class="message-bubble">${content ? `<div class="prose">${e(content)}</div>`:''}${attachments.length?`<div class="message-images ${attachments.length>1?'multiple':''}">${attachments.map(imageAttachment).join('')}</div>`:''}${!content&&!attachments.length?'<span class="muted">消息内容为空</span>':''}</div><span class="message-time">${shortTime(message.created_at || message.createdAt || message.timestamp)}${message.status==='failed'?' · 未发送':message.status==='sending'?' · 发送中':''}</span></div></article>`;
+  const stableId=typeof message.id==='string'?message.id.trim():'';
+  const record=forwardRecord(message),content=record?'':messageText(message) || '', attachments=record?[]:rows(message.attachments || message.images || message.metadata?.attachments);
+  if(system) return `<div class="system-message"${message.role==='system'&&stableId?` data-message-id="${e(stableId)}"`:''}>${e(content)}</div>`;
+  const forwardable=allowForward&&isForwardableMessage(message),selecting=state?.forward?.phase==='select';
+  const selected=selecting&&rows(state.forward.selectedIds).includes(String(message.id || '').trim());
+  return `<article class="message ${outgoing?'outgoing':'incoming'} ${forwardable&&selecting?'forward-selectable':''} ${selected?'forward-selected':''}"${stableId?` data-message-id="${e(stableId)}"`:''}>${forwardable&&selecting?`<button type="button" class="message-select" data-action="forward-toggle" data-id="${e(stableId)}" aria-label="${selected?'取消选择':'选择'}这条消息" aria-pressed="${selected}">${selected?icon('check'):''}</button>`:''}${outgoing?'':avatar(employee,'message-avatar')}<div class="message-body"><div class="message-bubble"${forwardable?` data-forwardable-message="${e(stableId)}"`:''}>${content ? `<div class="prose">${e(content)}</div>`:''}${forwardRecordCard(message)}${attachments.length?`<div class="message-images ${attachments.length>1?'multiple':''}">${attachments.map(imageAttachment).join('')}</div>`:''}${!content&&!attachments.length&&!record?'<span class="muted">消息内容为空</span>':''}</div><div class="message-meta"><span class="message-time">${shortTime(message.created_at || message.createdAt || message.timestamp)}${message.status==='failed'?' · 未发送':message.status==='sending'?' · 发送中':''}</span>${forwardable&&!selecting?`<button type="button" class="message-menu-button" data-action="message-menu" data-id="${e(stableId)}" aria-label="消息操作">${icon('more')}<span>消息操作</span></button>`:''}</div></div></article>`;
 }
 function composer(state, report=false) {
   const entry=rows(state.report?.queue)[state.report?.index || 0];
@@ -165,8 +214,39 @@ function composer(state, report=false) {
 function chatPage(state) {
   const employee=state.selectedEmployee || state.bot?.employee || state.bot || {}, status=statusOf(state.bot || {...employee,execution:state.conversation?.execution});
   const extra=`<button class="icon-button" data-action="employee-detail" data-id="${e(employee.id || state.bot?.id)}" aria-label="员工详情">${icon('more')}</button>`;
-  const history=rows(state.messages).length ? `<div class="conversation-start">${icon('link')}长期聊天 · 与电脑端同步</div>${state.messages.map(message=>messageCard(message,employee)).join('')}` : state.chatLoading ? '<div class="empty-state" role="status"><span class="spinner"></span><h3>正在读取原聊天记录</h3><p>稍等，正在与电脑端同步</p></div>' : !state.conversation?.id ? empty('alert','聊天记录暂未加载','请重新读取原聊天记录',actionButton('refresh','重新加载','refresh','soft')) : empty('chat',`和${nameOf(employee)}聊聊`,'交代一件事，或发送图片一起看');
-  return `${pageHeader(state,nameOf(employee),status.label,extra,employee)}<main class="chat-main">${alerts(state)}${employeeReadNotices(state,true)}<div class="chat-history chat-timeline" data-chat-scroll>${history}<div data-chat-end></div></div></main>${composer(state)}`;
+  const history=rows(state.messages).length ? `<div class="conversation-start">${icon('link')}长期聊天 · 与电脑端同步</div>${state.messages.map(message=>messageCard(message,employee,state,true)).join('')}` : state.chatLoading ? '<div class="empty-state" role="status"><span class="spinner"></span><h3>正在读取原聊天记录</h3><p>稍等，正在与电脑端同步</p></div>' : !state.conversation?.id ? empty('alert','聊天记录暂未加载','请重新读取原聊天记录',actionButton('refresh','重新加载','refresh','soft')) : empty('chat',`和${nameOf(employee)}聊聊`,'交代一件事，或发送图片一起看');
+  return `${pageHeader(state,nameOf(employee),status.label,extra,employee)}<main class="chat-main">${alerts(state)}${employeeReadNotices(state,true)}<div class="chat-history chat-timeline" data-chat-scroll>${history}<div data-chat-end></div></div></main>${state.forward?.phase==='select'?forwardSelectionBar(state):composer(state)}`;
+}
+function forwardSelectionBar(state) {
+  const selected=orderedForwardMessages(state.messages,state.forward?.selectedIds);
+  return `<div class="forward-selection-bar">${state.forward?.error?`<p class="forward-error" role="alert">${e(state.forward.error)}</p>`:''}<div><button type="button" class="text-button" data-action="forward-cancel">取消</button><span>已选 <strong>${selected.length}</strong> / ${FORWARD_MESSAGE_LIMIT} 条</span><button type="button" class="button primary" data-action="forward-next"${selected.length?'':' disabled'}>转发${icon('arrow')}</button></div></div>`;
+}
+function selectedForwardPreview(state) {
+  const selected=orderedForwardMessages(state.messages,state.forward?.selectedIds);
+  return `<div class="forward-selection-preview"><strong>${rows(state.forward?.selectedIds).length} 条聊天记录</strong>${selected.slice(0,2).map(message=>`<p>${e(forwardPreview(message))}</p>`).join('')}${selected.length>2?`<small>另有 ${selected.length-2} 条</small>`:''}</div>`;
+}
+function forwardingOverlay(state) {
+  const data=state.forward;
+  if(state.page!=='chat'||!data||data.phase==='select')return '';
+  const phase=data.phase,target=rows(state.employees).find(employee=>employee.id===data.targetEmployeeId),submitting=phase==='submitting';
+  const titles={menu:'消息操作',target:'转发给',confirm:'转发聊天记录',submitting:'正在转发',uncertain:'转发回执待确认',complete:'转发已送达'};
+  let body='';
+  if(phase==='menu')body=`${selectedForwardPreview(state)}<div class="forward-menu-actions"><button type="button" data-action="forward-single">${icon('arrow')}<span>转发</span>${icon('chevron')}</button><button type="button" data-action="forward-select">${icon('check')}<span>多选消息</span>${icon('chevron')}</button></div>`;
+  else if(phase==='target') {
+    const targets=rows(state.employees).filter(employee=>employee.id&&employee.id!==data.sourceEmployeeId);
+    body=`${selectedForwardPreview(state)}<p class="forward-hint">选择同一工作区里的另一位员工</p><div class="forward-target-list">${targets.length?targets.map(employee=>`<button type="button" data-action="forward-target" data-id="${e(employee.id)}">${avatar(employee,'medium')}<span><strong>${e(nameOf(employee))}</strong><small>${e(subtitle(employee))}</small></span>${icon('chevron')}</button>`).join(''):empty('employees','暂无其他员工','当前工作区至少需要两位员工才能转发')}</div>`;
+  } else if(phase==='complete')body=`<div class="forward-complete"><span>${icon('check')}</span><h3>已转发给${e(nameOf(target))}</h3><p>${data.mode==='execute'?'聊天记录已送达，并已提交处理请求':'聊天记录已保存，未发起执行'}</p></div><div class="forward-complete-actions">${actionButton('forward-open-target','查看目标聊天','chat','primary full')}${actionButton('forward-cancel','继续当前聊天','','secondary full')}</div>`;
+  else if(['confirm','submitting','uncertain'].includes(phase)) {
+    body=`<div class="forward-recipient">${avatar(target || {},'medium')}<span><small>转发给</small><strong>${e(nameOf(target))}</strong></span>${submitting||phase==='uncertain'?'':`<button type="button" class="text-button" data-action="forward-back">更换</button>`}</div>${selectedForwardPreview(state)}${phase==='uncertain'?`<div class="forward-uncertain" role="status">${icon('clock')}<p>还未确认是否送达。重试会沿用同一次转发标识，核对这次请求的结果。</p></div><div class="forward-complete-actions">${actionButton('forward-retry','重试同一请求','refresh','primary full')}${actionButton('forward-cancel','关闭','','secondary full')}</div>`:`<form data-form="forward" class="forward-form" data-state-fields><input type="hidden" name="targetEmployeeId" value="${e(data.targetEmployeeId)}"><label class="field-label">附言<textarea name="forward-note" rows="3" maxlength="${FORWARD_NOTE_LIMIT}" placeholder="可以补充背景，或交代希望他处理什么"${submitting?' disabled':''}>${e(data.note || '')}</textarea></label><fieldset class="forward-mode-list"${submitting?' disabled':''}><legend>转发方式</legend><label class="forward-mode ${data.mode!=='execute'?'selected':''}"><input type="radio" name="forward-mode" value="reference" ${data.mode!=='execute'?'checked':''}><span><strong>仅转发记录</strong><small>保存到对方聊天，不启动员工执行</small></span></label><label class="forward-mode ${data.mode==='execute'?'selected':''}"><input type="radio" name="forward-mode" value="execute" ${data.mode==='execute'?'checked':''}><span><strong>转发并请他处理</strong><small>将记录和附言交给员工继续处理</small></span></label></fieldset><button type="submit" class="button primary full large"${submitting?' disabled':''}>${submitting?'<span class="spinner small"></span>正在转发…':data.mode==='execute'?'转发并请他处理':'仅转发记录'}</button></form>`}`;
+  }
+  if(!body)return '';
+  return `<div class="forward-overlay"><button type="button" class="forward-backdrop" data-action="forward-cancel" aria-label="关闭转发面板"${submitting?' disabled':''}></button><section class="forward-sheet" role="dialog" aria-modal="true" aria-labelledby="forward-sheet-title"><header><h2 id="forward-sheet-title">${e(titles[phase] || '转发聊天记录')}</h2><button type="button" class="icon-button" data-action="forward-cancel" aria-label="关闭转发面板"${submitting?' disabled':''}>${icon('close')}</button></header><div class="forward-sheet-body">${data.error?`<p class="forward-error" role="alert">${e(data.error)}</p>`:''}${body}</div></section></div>`;
+}
+function forwardDetailOverlay(state) {
+  const messageId=state.forwardDetail?.messageId;
+  if(!messageId)return '';
+  const message=rows(state.messages).find(item=>item.id===messageId),record=forwardRecord(message);
+  return `<div class="forward-overlay forward-detail-overlay"><button type="button" class="forward-backdrop" data-action="forward-detail-close" aria-label="关闭聊天记录"></button><section class="forward-sheet forward-record-detail" role="dialog" aria-modal="true" aria-labelledby="forward-detail-title"><header><div><h2 id="forward-detail-title">聊天记录</h2>${record?.source?.employeeName?`<p>来自${e(record.source.employeeName)}</p>`:''}</div><button type="button" class="icon-button" data-action="forward-detail-close" aria-label="关闭聊天记录">${icon('close')}</button></header><div class="forward-detail-messages">${record?record.messages.map(item=>`<article class="forward-snapshot-message"><div><strong>${e(item.senderName || '消息')}</strong><span>${shortTime(item.createdAt)}</span></div>${item.content?`<div class="prose">${e(item.content)}</div>`:''}${rows(item.attachments).length?`<div class="message-images ${item.attachments.length>1?'multiple':''}">${item.attachments.map(imageAttachment).join('')}</div>`:''}</article>`).join(''):empty('chat','这段记录暂未加载','关闭后刷新当前聊天重试')}</div></section></div>`;
 }
 
 function detailPage(state) {
@@ -223,7 +303,7 @@ function phonePage(state) {
 }
 function mePage(state) {
   const user=state.user?.user || state.user || {}, username=user.name || user.display_name || user.username || user.email || '我的账号';
-  return `${appHeader(state,'我的')}<main class="page-content">${alerts(state)}<section class="account-card"><span class="account-avatar">${e(Array.from(username)[0])}</span><h2>${e(username)}</h2><p>${e(user.email || user.username || '')}</p></section><div class="panel account-menu"><button data-action="switch-workspace"><span class="menu-icon">${icon('employees')}</span><span><strong>当前工作区</strong><small>${e(state.workspace?.name || state.workspace?.slug || '未选择')}</small></span>${icon('chevron')}</button><button data-action="settings"><span class="menu-icon">${icon('settings')}</span><span><strong>管理与设置</strong><small>模型、能力与设备绑定</small></span>${icon('chevron')}</button></div><div class="app-about"><div class="about-brand"><img src="./ziwei-logo.png" alt="" width="40" height="40">紫薇</div><p>和数字员工，一起把事情做好。</p><small>Android 0.1.5 · 内部测试版</small></div><button class="button logout-button full" data-action="logout"${disabled(state)}>${icon('logout')}退出登录</button></main>`;
+  return `${appHeader(state,'我的')}<main class="page-content">${alerts(state)}<section class="account-card"><span class="account-avatar">${e(Array.from(username)[0])}</span><h2>${e(username)}</h2><p>${e(user.email || user.username || '')}</p></section><div class="panel account-menu"><button data-action="switch-workspace"><span class="menu-icon">${icon('employees')}</span><span><strong>当前工作区</strong><small>${e(state.workspace?.name || state.workspace?.slug || '未选择')}</small></span>${icon('chevron')}</button><button data-action="navigate" data-tab="devices"><span class="menu-icon">${icon('devices')}</span><span><strong>设备互联</strong><small>查看手机画面与运行电脑</small></span>${icon('chevron')}</button><button data-action="settings"><span class="menu-icon">${icon('settings')}</span><span><strong>管理与设置</strong><small>模型、能力与设备绑定</small></span>${icon('chevron')}</button></div><div class="app-about"><div class="about-brand"><img src="./ziwei-logo.png" alt="" width="40" height="40">紫薇</div><p>和数字员工，一起把事情做好。</p><small>Android 0.2.0 · 内部测试版</small></div><button class="button logout-button full" data-action="logout"${disabled(state)}>${icon('logout')}退出登录</button></main>`;
 }
 function settingsPage(state) {
   const employees=rows(state.employees);
@@ -256,22 +336,22 @@ export function render(state) {
   else if(page==='report-summary') content=summaryPage(state);
   else if(page==='phone') content=phonePage(state);
   else if(page==='task') content=taskPage(state);
-  else content=['work','tasks'].includes(state.tab)?workPage(state):['devices','phones'].includes(state.tab)?devicesPage(state):state.tab==='me'?mePage(state):employeesPage(state);
-  return `<div class="app-shell ${isChat?'chat-shell':''} ${page==='home'?'has-bottom-nav':''}" data-page="${e(page)}" data-view-key="${e([state.workspace?.slug,state.tab,page,state.selectedEmployee?.id,state.report?.index].join(':'))}" aria-busy="${Boolean(state.busy)}">${content}${page==='home'?bottomNav(state):''}${imageOverlay(state)}</div>`;
+  else content=state.tab==='chat'?chatsPage(state):['work','tasks'].includes(state.tab)?workPage(state):['devices','phones'].includes(state.tab)?devicesPage(state):state.tab==='me'?mePage(state):employeesPage(state);
+  return `<div class="app-shell ${isChat?'chat-shell':''} ${page==='home'?'has-bottom-nav':''}" data-page="${e(page)}" data-view-key="${e([state.workspace?.slug,state.tab,page,state.selectedEmployee?.id,state.report?.index,state.forward?.phase,state.forwardDetail?.messageId].join(':'))}" aria-busy="${Boolean(state.busy)}">${content}${page==='home'?bottomNav(state):''}${forwardingOverlay(state)}${forwardDetailOverlay(state)}${imageOverlay(state)}</div>`;
 }
 
 let savedFocus=null, savedView=null;
 export function captureDraft(root,state) {
-  savedView={key:root.querySelector('.app-shell')?.dataset.viewKey,details:[...root.querySelectorAll('details')].map(item=>item.open),scrolls:[...root.querySelectorAll('.page-content,.report-queue ol,.draft-attachments')].map(item=>({top:item.scrollTop,left:item.scrollLeft}))};
+  savedView={key:root.querySelector('.app-shell')?.dataset.viewKey,details:[...root.querySelectorAll('details')].map(item=>item.open),scrolls:[...root.querySelectorAll('.page-content,.report-queue ol,.draft-attachments,.forward-sheet-body,.forward-detail-messages')].map(item=>({top:item.scrollTop,left:item.scrollLeft}))};
   const field=root.querySelector('textarea[name="draft"]');
   if(field) state.draft=field.value;
   const active=globalThis.document?.activeElement;
-  savedFocus=active&&root.contains(active)&&['draft','search'].includes(active.name) ? {name:active.name,start:active.selectionStart,end:active.selectionEnd,scrollTop:active.scrollTop} : null;
+  savedFocus=active&&root.contains(active)&&['draft','search','chatSearch'].includes(active.name) ? {name:active.name,start:active.selectionStart,end:active.selectionEnd,scrollTop:active.scrollTop} : null;
 }
 export function restoreFocus() {
   if(savedView?.key && globalThis.document?.querySelector('.app-shell')?.dataset.viewKey===savedView.key) {
     [...document.querySelectorAll('details')].forEach((item,index)=>{if(savedView.details[index]!==undefined)item.open=savedView.details[index];});
-    [...document.querySelectorAll('.page-content,.report-queue ol,.draft-attachments')].forEach((item,index)=>{if(savedView.scrolls[index]){item.scrollTop=savedView.scrolls[index].top;item.scrollLeft=savedView.scrolls[index].left;}});
+    [...document.querySelectorAll('.page-content,.report-queue ol,.draft-attachments,.forward-sheet-body,.forward-detail-messages')].forEach((item,index)=>{if(savedView.scrolls[index]){item.scrollTop=savedView.scrolls[index].top;item.scrollLeft=savedView.scrolls[index].left;}});
   }
   savedView=null;
   if(!savedFocus) return;

@@ -6,17 +6,23 @@ import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 import {fileURLToPath} from 'node:url';
 import {createRepository} from '../../backend/repository.mjs';
+import {createAuthService} from '../../backend/auth.mjs';
+import {createConversationReadService} from '../../backend/conversation-read-state.mjs';
 const require=createRequire(import.meta.url);
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'/Users/zhangjie/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
 const root=path.resolve(fileURLToPath(new URL('../..',import.meta.url))),web=path.join(root,'mobile-manager/web'),out=path.join(root,'.local/mobile-manager-qa');
 await fs.mkdir(out,{recursive:true});
 const repo=createRepository({memory:true}),slug='test-111',deviceId='manager-qa-pc',origin='https://ziwei-manager.invalid';
+const principal=createAuthService(repo.db).setup({name:'隔离验收',email:'qa@example.test',password:'fixture-private-password'}),userId=principal.user_id;
+repo.db.prepare('INSERT INTO members(id,user_id,workspace_id,name,email,role,joined_at) VALUES(?,?,?,?,?,?,?)').run('manager-browser-read-owner',userId,repo.getWorkspace(slug).id,'隔离验收','qa@example.test','owner',new Date().toISOString());
+const conversationReads=createConversationReadService(repo),readActor={actorUserId:userId,actorRole:'owner',enforceEmployeeVisibility:true};
 repo.heartbeatDevice(slug,{deviceId,name:'隔离验收电脑',workdir:'/qa',runtimes:{Codex:{status:'available',version:'synthetic',profiles:[{name:'default'}]}}});
 const first=repo.createEmployee(slug,{name:'闲鱼运营大神 · 验收',description:'闲鱼运营与客户维护',runtime:'Codex',runtimeProfile:'default',targetDeviceId:deviceId,model:'gpt-6.1-sol'});
 const second=repo.createEmployee(slug,{name:'TikTokTrendS · 验收',description:'无限爆款探索员',runtime:'Codex',runtimeProfile:'default',targetDeviceId:deviceId,model:'gpt-6.1-sol'});
 const employeeIds=new Set([first.id,second.id]);
 const task=repo.createTask(slug,{title:'待核对的真实验收记录',description:'这条记录只存在于内存验收数据库。',assignee:first.id,state:'in_progress'});
 const requests=[],errors=[],screenshots=[],popups=[],newPages=[],documentNavigations=[],closedSurfaces=[];
+const chatRows=()=>conversationReads.list(slug,readActor).chats.filter(chat=>employeeIds.has(chat.employeeId));
 let authenticated=true,phoneCommands=0,emptyEmployees=false;
 const phone={id:'qa-phone',alias:'隔离验收手机',nodes:[{role:'agent',status:'offline',lastSeen:'2026-10-16T12:00:00Z',health:{accessibility:false}}],control:{role:'agent',epoch:1},commands:[],snapshot:null};
 const browser=await chromium.launch({executablePath:process.env.ZIWEI_BROWSER_EXECUTABLE||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
@@ -39,12 +45,15 @@ await context.route('**/*',async route=>{
   }
   requests.push({method,path:p,body});
   try{
-    if(p==='/api/auth/me')return json(route,authenticated?{user_id:'qa-user',user:{id:'qa-user',name:'隔离验收',email:'qa@example.test'},memberships:[{slug,name:'隔离验收',role:'owner'}]}:{error:'请登录'},authenticated?200:401);
-    if(p==='/api/auth/login'){authenticated=true;return json(route,{user_id:'qa-user',user:{id:'qa-user',name:'隔离验收'}});}
+    if(p==='/api/auth/me')return json(route,authenticated?{user_id:userId,user:{id:userId,name:'隔离验收',email:'qa@example.test'},memberships:[{slug,name:'隔离验收',role:'owner'}]}:{error:'请登录'},authenticated?200:401);
+    if(p==='/api/auth/login'){authenticated=true;return json(route,{user_id:userId,user:{id:userId,name:'隔离验收'}});}
     if(p==='/api/auth/logout'){authenticated=false;return json(route,{ok:true});}
     if(!authenticated)return json(route,{error:'请登录'},401);
     if(p==='/api/workspaces')return json(route,{workspaces:[{slug,name:'隔离验收',role:'owner'}]});
     const base=`/api/workspaces/${slug}`;
+    if(p===base+'/chats'){const chats=chatRows();return json(route,{chats,unreadCount:chats.reduce((sum,chat)=>sum+chat.unreadCount,0)});}
+    const read=p.match(/^\/api\/conversations\/([^/]+)\/read$/);
+    if(read&&method==='POST')return json(route,conversationReads.read(read[1],body,readActor));
     if(p===base+'/employees')return json(route,{employees:emptyEmployees?[]:repo.listEmployees(slug).filter(e=>employeeIds.has(e.id))});
     if(p===base+'/bots')return json(route,{bots:[]});
     if(p===base+'/tasks'){if(method==='POST')return json(route,repo.createTask(slug,body),201);return json(route,{tasks:repo.listTasks(slug)});}
@@ -56,7 +65,7 @@ await context.route('**/*',async route=>{
       return json(route,{conversations:repo.listConversations(slug,{conversationEmployeeId:url.searchParams.get('employeeId')})});
     }
     const conv=p.match(/^\/api\/conversations\/([^/]+)(\/messages)?$/);
-    if(conv){if(method==='POST')return json(route,repo.addConversationMessage(conv[1],body),201);return json(route,repo.getConversation(conv[1]));}
+    if(conv){if(method==='POST')return json(route,repo.addConversationMessage(conv[1],{...body,...readActor}),201);return json(route,repo.getConversation(conv[1]));}
     const taskMatch=p.match(/^\/api\/tasks\/([^/]+)(\/state)?$/);
     if(taskMatch){if(method==='PATCH')return json(route,repo.updateTask(taskMatch[1],body));if(method==='POST')return json(route,repo.transitionTask(taskMatch[1],body.state));return json(route,repo.getTask(taskMatch[1]));}
     if(p===base+'/ziwei-connect/terminal/android-devices')return json(route,{devices:[phone]});
@@ -76,8 +85,9 @@ const noBrowserShortcut=async surface=>{
 };
 const capture=async name=>{await staysInApp();await page.screenshot({path:path.join(out,`${name}.png`),fullPage:true});screenshots.push(name);};
 const click=async(action,id)=>{const locator=page.locator(`[data-action="${action}"]${id?`[data-id="${id}"]`:''}`).first();if(action==='refresh'&&!await locator.count())return page.evaluate(()=>window.dispatchEvent(new Event('ziwei:resume')));return locator.click();};
+const employeesHome=async()=>{await page.locator('.bottom-nav [data-action=navigate][data-tab=employees]').click();await page.getByRole('heading',{name:'我的员工',exact:true}).waitFor();};
 try{
-  await page.goto(`${origin}/__ziwei_manager__/index.html`);await page.getByRole('heading',{name:'我的员工',exact:true}).waitFor();await capture('01-employees');
+  await page.goto(`${origin}/__ziwei_manager__/index.html`);await employeesHome();await capture('01-employees');
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
   await click('chat',first.id);await page.locator('[name=draft]').fill('这是一条隔离验收消息');await page.locator('[data-form=chat]').evaluate(form=>form.requestSubmit());
   await page.waitForFunction(()=>document.body.innerText.includes('这是一条隔离验收消息'));
@@ -115,17 +125,17 @@ try{
   const followup=followupReceipt.execution;assert.equal(followup.id,repo.getConversation(conversation.id).execution.id);repo.ackA2AAction(followup.id,{deviceId});repo.resultA2AAction(followup.id,{deviceId,status:'succeeded',result:{output:'这是一条独立追问回执。'}});
   await click('refresh');await page.getByText('这是一条独立追问回执。',{exact:true}).waitFor();
   const sentBeforeReload=requests.filter(r=>r.method==='POST'&&r.path.endsWith('/messages')).length;
-  await page.reload();await page.getByRole('heading',{name:'我的员工',exact:true}).waitFor();await click('report-setup');await page.getByText('实际进展：任务进行中。',{exact:false}).first().waitFor();
+  await page.reload();await employeesHome();await click('report-setup');await page.getByText('实际进展：任务进行中。',{exact:false}).first().waitFor();
   assert.equal(requests.filter(r=>r.method==='POST'&&r.path.endsWith('/messages')).length,sentBeforeReload);
   await click('report-next');await page.getByRole('heading',{name:'汇报已整理',exact:true}).waitFor();await capture('05-summary');
   await click('report-todo','0');await page.getByText('已加入',{exact:true}).waitFor();assert.equal(requests.filter(r=>r.method==='POST'&&r.path===`/api/workspaces/${slug}/tasks`).length,1);
   await click('report-home');await page.locator('[data-action=navigate][data-tab=work]').click();await page.getByText(task.title,{exact:true}).waitFor();await capture('06-work');
   await click('task',task.id);await page.locator('[name=title]').fill('修改后的隔离任务');await page.getByRole('button',{name:'保存修改',exact:true}).click();await page.getByText('已保存',{exact:false}).first().waitFor();assert.equal(repo.getTask(task.id).title,'修改后的隔离任务');
-  await click('back');await page.locator('[data-action=navigate][data-tab=devices]').click();await page.getByText(phone.alias,{exact:true}).waitFor();await noBrowserShortcut('devices');await click('phone',phone.id);await capture('07-phone');assert.equal(phoneCommands,0);
+  await click('back');await page.locator('[data-action=navigate][data-tab=me]').click();await page.locator('[data-action=navigate][data-tab=devices]').click();await page.getByText(phone.alias,{exact:true}).waitFor();await noBrowserShortcut('devices');await click('phone',phone.id);await capture('07-phone');assert.equal(phoneCommands,0);
   await page.setViewportSize({width:360,height:740});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
   await click('back');await page.locator('[data-action=navigate][data-tab=me]').click();await noBrowserShortcut('account');
   await page.locator('.account-menu [data-action=switch-workspace]').click();await page.getByRole('heading',{name:'进入你的工作区',exact:true}).waitFor();await staysInApp();
-  await click('select-workspace',slug);await page.getByRole('heading',{name:'我的员工',exact:true}).waitFor();await page.locator(`[data-action=chat][data-id="${first.id}"]`).first().waitFor();await staysInApp();
+  await click('select-workspace',slug);await employeesHome();await page.locator(`[data-action=chat][data-id="${first.id}"]`).first().waitFor();await staysInApp();
   emptyEmployees=true;await click('refresh');await page.getByRole('heading',{name:'还没有数字员工',exact:true}).waitFor();await noBrowserShortcut('empty employees');await capture('10-empty-employees-in-app');
   await page.locator('[data-action=navigate][data-tab=me]').click();await click('logout');await page.locator('[data-form=login]').waitFor();await capture('08-login');
   await staysInApp();assert.deepEqual(closedSurfaces,['employee detail','devices','account','empty employees']);

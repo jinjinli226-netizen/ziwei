@@ -20,6 +20,7 @@ import { acceptInvitationMembership } from './invitation-membership.mjs';
 import { syncPhoneSkill } from './skills/catalog.mjs';
 import { redactSecrets } from '../src/redaction.mjs';
 import { normalizeConversationAttachments } from './conversation-attachments.mjs';
+import {forwardConversationMessages as forwardMessages,CONVERSATION_FORWARD_INTERNAL} from './conversation-forwarding.mjs';
 import { resolveEmployeeDefaultWorkdir } from './employee-workdir.mjs';
 import { assertBotExecution, botUncertain, BOT_INTERNAL, botActionMaintenance } from './bots.mjs';
 import {verifyBotProvisionReceipt} from './bot-profiles.mjs';
@@ -83,8 +84,9 @@ const conversationResultView = result => {
   return view;
 };
 const conversationMessageView = row => {
-  const { attachment_json: attachmentJson, ...view } = row;
-  return { ...view, attachments:parse(attachmentJson) };
+  const { attachment_json: attachmentJson, forward_json:forwardJson, ...view } = row;
+  const forward=parse(forwardJson);
+  return { ...view, attachments:parse(attachmentJson),...(forward?.schemaVersion===1&&Array.isArray(forward.messages)?{forward}:{}) };
 };
 const a2aReceiptView = (row, { includeResult = false } = {}) => {
   const payload = parse(row.payload_json);
@@ -1727,6 +1729,12 @@ export function createRepository(options = {}, io={}) {
           };
         });
     },
+    getConversationAccess(conversationId, input = {}) {
+      const row=db.prepare('SELECT id,workspace_id,employee_id,device_id FROM conversations WHERE id=?').get(conversationId); if(!row) return null;
+      const employee=row.employee_id ? db.prepare('SELECT status,visibility,owner_user_id FROM employees WHERE id=? AND workspace_id=?').get(row.employee_id,row.workspace_id) : null;
+      if (row.employee_id && !employeeVisible(employee, employeeAccessContext(input))) return null;
+      return row;
+    },
     getConversation(conversationId, input = {}) {
       const row=db.prepare('SELECT * FROM conversations WHERE id=?').get(conversationId); if(!row) return null;
       const employee = row.employee_id ? db.prepare('SELECT * FROM employees WHERE id=? AND workspace_id=?').get(row.employee_id,row.workspace_id) : null;
@@ -1737,7 +1745,7 @@ export function createRepository(options = {}, io={}) {
         employee_binding: employee ? 'bound' : 'unassigned_legacy',
         requires_employee_assignment: !employee,
         execution:conversationExecution(conversationId),
-        messages:db.prepare('SELECT * FROM conversation_messages WHERE conversation_id=? ORDER BY created_at').all(conversationId).map(conversationMessageView)
+        messages:db.prepare('SELECT * FROM conversation_messages WHERE conversation_id=? ORDER BY created_at,rowid').all(conversationId).map(conversationMessageView)
       };
     },
     createConversation(slug,input={}) {
@@ -1825,23 +1833,34 @@ export function createRepository(options = {}, io={}) {
       if (!action || action.type !== 'directory.inspect' || String(action.payload?.conversationId || '') !== String(conversationId)) return null;
       return action;
     },
+    forwardConversationMessages(sourceConversationId,input={},context={}) {
+      const parentEvents=templateAuditEvents,events=[];templateAuditEvents=events;
+      let result;
+      try{result=forwardMessages(this,sourceConversationId,input,context);}
+      finally{templateAuditEvents=parentEvents;}
+      if(parentEvents)parentEvents.push(...events);else for(const event of events)options.onEvent?.(event);
+      return result;
+    },
     addConversationMessage(conversationId, input = {}) {
+      if(['forward','forward_json','forwardJson'].some(key=>Object.hasOwn(input,key)))throw Object.assign(new Error('转发快照只能由原消息标识生成，请使用转发入口'),{code:'FORWARD_ROUTE_REQUIRED',status:400});
+      const forward=input[CONVERSATION_FORWARD_INTERNAL]||null;
+      const recordOnly=forward?.mode==='reference';
       const conversation = db.prepare('SELECT * FROM conversations WHERE id=?').get(conversationId);
       if (!conversation) throw new Error('Conversation not found');
       const ws = db.prepare('SELECT * FROM workspaces WHERE id=?').get(conversation.workspace_id);
       const employee = conversation.employee_id ? assertEmployeeVisible(db.prepare('SELECT * FROM employees WHERE id=? AND workspace_id=?').get(conversation.employee_id, conversation.workspace_id), input) : null;
       const targetDeviceId = String(input.targetDeviceId || input.target_device_id || input.deviceId || input.device_id || conversation.device_id || employee?.target_device_id || '').trim() || null;
-      if (targetDeviceId) {
+      if (targetDeviceId&&!recordOnly) {
         const device = db.prepare('SELECT * FROM devices WHERE id=? AND workspace_id=?').get(targetDeviceId, conversation.workspace_id);
         if (!device) throw new Error('目标设备不属于当前工作区');
         if (device.status === 'disabled') throw new Error('目标设备已停用');
         const privilegedDeviceRole = ['owner', 'admin'].includes(String(input.actorRole || '').toLowerCase());
         if (ws.kind === 'personal' && input.enforceDeviceOwnership && !privilegedDeviceRole && (!input.actorUserId || device.owner_user_id !== input.actorUserId)) throw new Error('个人工作区只能使用本人的设备');
       }
-      const message = { id: id('convmsg'), conversation_id: conversationId, role: ['user', 'assistant', 'system'].includes(input.role) ? input.role : 'user', content: String(input.content || '').trim(), attachments: normalizeConversationAttachments(input.attachments), created_at: now() };
+      const message = { id: id('convmsg'), conversation_id: conversationId, role: ['user', 'assistant', 'system'].includes(input.role) ? input.role : 'user', content: String(input.content || '').trim(), attachments: normalizeConversationAttachments(input.attachments), sender_user_id:typeof input.actorUserId==='string'?input.actorUserId.trim()||null:null,created_at: now(),...(forward?{forward}:{}) };
       if (!message.content && !message.attachments.length) throw new Error('消息内容不能为空');
       const dispatch = message.role === 'user' && input.dispatch !== false;
-      const executionSettings = {
+      const executionSettings = recordOnly?{}:{
         runtime: input.runtime || employee?.runtime || null,
         model: input.model || input.modelId || (employee && db.prepare('SELECT 1 FROM hermes_bots WHERE employee_id=?').get(employee.id) ? employee.model_id : conversation.model_id || employee?.model_id) || null,
         profile: normalizeRuntimeProfile(input.profile ?? input.runtimeProfile ?? input.runtime_profile ?? input.hermesProfile ?? input.hermes_profile ?? employee?.runtime_profile),
@@ -1866,7 +1885,7 @@ export function createRepository(options = {}, io={}) {
       // no saved message or audit claiming the upload succeeded.
       db.exec('SAVEPOINT conversation_message');
       try {
-        db.prepare('INSERT INTO conversation_messages(id,conversation_id,role,content,attachment_json,created_at) VALUES(?,?,?,?,?,?)').run(message.id, conversationId, message.role, message.content, JSON.stringify(message.attachments), message.created_at);
+        db.prepare('INSERT INTO conversation_messages(id,conversation_id,role,content,attachment_json,created_at,sender_user_id,forward_json) VALUES(?,?,?,?,?,?,?,?)').run(message.id, conversationId, message.role, message.content, JSON.stringify(message.attachments), message.created_at,message.sender_user_id,forward?JSON.stringify(forward):null);
         if (dispatch) {
           const defaultPrompt = message.attachments.some(item => item.mimeType?.startsWith('image/')) ? '请分析所附图片，说明其中的内容并回复用户。' : '请阅读所附文件并回复用户。';
           const payload = executionPayload({ prompt: message.content || defaultPrompt, employee, ...executionSettings, conversationId, targetDeviceId, messageId: message.id });
@@ -1874,7 +1893,7 @@ export function createRepository(options = {}, io={}) {
           this.createA2AAction(ws.slug, { type: 'conversation.execute', payload, dedupeKey: `conversation:${conversationId}:${message.id}` });
         }
         db.prepare('UPDATE conversations SET updated_at=? WHERE id=?').run(message.created_at, conversationId);
-        audit(ws.slug, message.role, 'conversation.message.created', { conversationId, messageId: message.id, dispatch });
+        audit(ws.slug, message.role, 'conversation.message.created', { conversationId, messageId: message.id, dispatch,...(forward?{forwardId:forward.id,forwardMode:forward.mode,sourceConversationId:forward.source.conversationId}:{}) });
         if (clientMessageId) db.prepare('INSERT INTO management_requests(workspace_id,kind,request_key,fingerprint,resource_id,created_at) VALUES(?,?,?,?,?,?)').run(ws.id, requestKind, clientMessageId, fingerprint, message.id, message.created_at);
         db.exec('RELEASE conversation_message');
       } catch (error) {
