@@ -1,5 +1,15 @@
 # 紫薇项目 HandOff
 
+## 2026-10-17 Agent18 已恢复，中控安装确认授权修复已发布，Updater 与中文输入待验
+
+手机和绑定电脑已恢复在线。Agent18 / `0.4.7` 原事务 `21866c8a…` 于 **09:24:01.773** installed 并 committed，回传 `package_replaced / updateRelated=true` 和真实 WebSocket 握手。Updater 目前仍为 `0.4.5 / code16`；原 code18 事务 `device-update-5537b65e-890d-4dc5-825c-36f678ba77bf` 已一次提交，awaiting_user_action / submitted=1、无 installed_at，不重提安装。
+
+打开原安装端的旧命令 `47b03653…` 确定未执行，促成中控最窄授权衔接修复 **`67c9b29b07a4975f5c632b724d2daea2afb983c9`**：先推 GitHub、独立审查、远端 **73/73** 接口回归及正式构建通过，**09:53:32** 保护发布至 `/opt/ziwei-control/releases/phone-stability-67c9b29b07a4`。仅新增内部可空列，单条 launch 绑定原事务 / installer / session / epoch；原事务、全部原历史旧列、DB inode、主站 / 客户端 / Nginx / APK 保持，回退仅恢复代码。备份 `control-installer-resume-20261017T015331Z`。
+
+发布后原电脑出现新的会话任务，可经管理工具派发到绑定手机；未修改的业务隔离检查在 POST 前阻止了新的打开请求，没有新手机 command ID。继续等待当前任务终态，不放宽未知业务，不重放原安装。Updater18 健康及真实中文搜索框输入仍未验收，**完整任务尚未完成**。定时任务按用户 10月16日要求仍 PAUSED；本轮是用户通知开机后的手动接续。
+
+生产主站仍为 `eabe098a…`，官方下载客户端仍为源码 `5db7d834…` / build `208f2350…`，未回退历史包。完整证据与限制见[操作记录](docs/operations/2026-10-16-phone-input-lifecycle.md)。下方 10月16日离线与 ACTIVE 描述均为当时历史状态。
+
 ## 2026-10-16 代码、构建和发布完成，真机验收未完成，已自动接续等待连接恢复
 
 **当前手机状态：** Agent17 / Updater16 自 **13:01:19** 后双端均无 HTTP 心跳并离线。code18 原 Agent 升级事务 `device-update-21866c8a-7d0d-4bad-ae35-76a529106451` 为 submitted=1 / awaiting_user_action、无 installed_at，不能写成已升级、已自动恢复或中文通过；保留原事务，不重复提交。尚无新退出或 TLS 失败证据，程序正在分别调查 TLS 与绑定电脑恢复通道，不归因于 WebSocket 或“被杀”。

@@ -2,6 +2,26 @@
 
 2026-10-16（Asia/Shanghai）。正常故障处理由程序自动观察原回执和当前页面；不把结果未确认默认转交用户，也不自动重放整轮手机业务。
 
+## 10月17日接续进展
+
+用户恢复手机和电脑后，本对话手动继续工作；10月16日应用户要求暂停的定时接续仍为 PAUSED，没有自动重新启用。
+
+09:25 至 09:33 的只读证据确认，原 Agent18 事务 `device-update-21866c8a-7d0d-4bad-ae35-76a529106451` 已 committed，submitted=1、installed_at 为 09:24:01.773；Agent=`0.4.7 / code18`、Updater=`0.4.5 / code16`，均在线健康。Agent 的 `startTrigger=package_replaced`，包更新时间与本次 reason 10 退出时间同为 `1792200237930`，标记 `updateRelated=true`；Updater 的启动来源为 `peer_recovery`。这证明本次包替换后的实际恢复，不等于杀进程、用户 Stop、重启或长期存活测试。
+
+两端持续报告 `socketConnected=true`；源码仅在 WebSocket `onOpen` 时置 true、关闭或失败时清 false，已取得原手机的实际鉴权握手证据。Nginx 09:23:57 另有真实 channel 101；访问日志不包含设备身份，且长连接可能在关闭时才写日志，不单凭这一行指定手机或角色。
+
+09:31:23 主站活动业务为 0 后，沿原门禁一次提交 Updater18 事务 `device-update-5537b65e-890d-4dc5-825c-36f678ba77bf`，预检原命令 `device-command-e8ff9f5d-bfdd-403e-a190-2d5ef119aeb1` succeeded。该事务 submitted=1 / awaiting_user_action、无 installed_at；没有重提安装。09:33 打开原安装端 Agent 的命令 `device-command-47b03653-cf52-4b0b-820f-9e7e4674acd7` 被 Android 拒绝，failed / not_started / COMMAND_NOT_STARTED，executingConfirmed=false；错误为“指令角色、期限或控制授权无效”。原因是等待安装确认时没有普通租约，客户端安装辅助仅接受截图和点击，launch 无法执行。该失败不改写为成功，后续只在修复授权后发起有独立 ID 的明确未执行动作，不重提原升级。
+
+09:31 前的新电脑业务先由原门禁阻止，待其自然 succeeded 后才开始升级。原业务门禁未修改，未知新业务仍默认阻止。私有证据为 `resume-20261017-device-01.json`、`resume-20261017-device-02.json`、`resume-20261017-ws-lifecycle-01.json`、`resume-scope-terminal-20261017.json` 和原升级 / 命令记录；不公开业务词或截图。下方 10月16日离线及“待取得握手”描述保留为当时的历史状态。
+
+**09:53:32 中控授权衔接修复已发布。** 源码 `67c9b29b07a4975f5c632b724d2daea2afb983c9` 已独立审查、先推 GitHub，完整源码归档 SHA-256 `c89773b567f9779acc2fe50a4f1faec5040057d3a8c0cae608ec4d143d2e3dcf`。远端隔离环境 73/73 回归（含新增 21 项）、0 failures / cancelled / skipped，正式类型检查与构建退出码 0。测试仅执行一次；Node 默认 spec 输出曾使报告解析器未识别总结，保留原失败报告及原日志摘要后，按实际 73/73 结果继续同源构建，没有重跑业务或伪造测试结果。部署前后核对全部 302 个源码成员和 20 个构建产物摘要。
+
+修复新增内部可空列 `android_commands.install_resume_update_id TEXT`，把打开原安装端的单条 launch 绑定原已提交、未安装、awaiting_user_action 的升级事务、原安装端当前 session / epoch 和自身包名。仅首次 queued 投递给有界正常租约，该次 poll 不重发 update 对象，兼容既有 APK；后续 poll / heartbeat 不续租或重投。executing ACK 再核同一绑定，终态缩短租约且保留在途隔离。其他应用、业务动作、角色或并发命令不能借用该租约；本机 enabled / Stop 继续优先。安装 session、原 confirmation 和原升级状态不被改写。
+
+生产中控 current 为 `/opt/ziwei-control/releases/phone-stability-67c9b29b07a4`，仅中控服务重启。备份为 `/opt/ziwei-staging/backups/control-installer-resume-20261017T015331Z`；所有原 commands / updates / sessions / update_events 的旧列逐行摘要、数据库 inode、原 `5537b65e…` pending 行均保持。唯一 schema 变化为上述可空列，全部旧命令此列为 NULL；主站、客户端、Nginx 和所有 APK 字节保持。旧 `1b26b115` 模块已在包含新列的隔离内存数据库完成入网、心跳、命令与回执兼容检查；回退仅切代码，不恢复数据库覆盖自然进展。
+
+09:54 后原电脑又出现新的目录与会话任务，未修改的业务门禁阻止了修复后的 launch，阻止发生在 POST 和持久提交意图之前，没有新手机命令 ID。继续核对业务范围或等待原任务终态，不放宽未知业务，也不重提 `5537b65e…` 安装。Updater18 安装和真实中文输入仍待实际结果。
+
 ## 已发布与待完成
 
 | 层 | 源码 / 产物 | 状态 |

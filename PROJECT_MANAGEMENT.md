@@ -1,5 +1,13 @@
 # 紫薇项目管理与 AI 接手手册
 
+## 2026-10-17 已恢复连接并发布安装确认授权修复
+
+Agent18 原事务 `21866c8a…` 已于 **09:24:01.773** 安装并 committed，实际回传包替换恢复与 WebSocket 握手。Updater 仍为 code16；原 code18 事务 `5537b65e-890d-4dc5-825c-36f678ba77bf` 为 submitted=1 / awaiting_user_action、无 installed_at，不重提安装。
+
+中控源码 **`67c9b29b07a4975f5c632b724d2daea2afb983c9`** 已先推 GitHub，独立审查、73/73 远端回归及构建通过，**09:53:32** 保护发布。修复仅为绑定原升级、原安装端及原会话的单条打开动作提供有界租约；原历史、pending、DB inode、主站 / 客户端 / Nginx / APK 保持。主站当前 `eabe098a…`、官方客户端源码 `5db7d834…` / build `208f2350…`，不回退旧版。
+
+新的电脑会话业务可派发手机任务，当前隔离门禁在 POST 前阻止了新手机操作；不把权限未隔离的新业务加入白名单。Updater18 安装和真实中文输入仍待原任务结束后验收，完整任务未完成。定时任务仍按用户要求 PAUSED，本轮手动接续；详细状态以 [HANDOFF 顶部](HANDOFF.md) 和[操作记录](docs/operations/2026-10-16-phone-input-lifecycle.md) 为准。以下 10月16日记录为历史状态。
+
 ## 2026-10-16 代码、构建和发布完成，真机验收未完成，已自动接续等待连接恢复
 
 当前手机为 Agent17 / Updater16，自 **13:01:19** 后双端无 HTTP 且离线；code18 原 Agent 事务 `21866c8a-7d0d-4bad-ae35-76a529106451` 为 submitted=1 / awaiting_user_action、无 installed_at。尚无新退出或 TLS 失败证据，不归因 WebSocket 或被杀；原事务继续只读跟踪，不重提安装。code18 安装、自动恢复和中文输入均未验收。
