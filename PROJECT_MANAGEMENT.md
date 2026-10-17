@@ -1,5 +1,14 @@
 # 紫薇项目管理与 AI 接手手册
 
+## 2026-10-17 Android 管理 App 0.1.2 高级设置已发布
+
+用户要求将模型、能力和设备绑定放进 App。四处旧电脑版入口已改为内部页面，原生浏览器 Intent 已删除。可保存原员工模型、工具权限、记忆、技能、工具集与 MCP，显式检查/启用/暂停新任务；设备页支持电脑配对、手机审批、员工手机/账号关联和控制端选择。已初始化 Hermes 的电脑与 Profile 按原规则固定，暂不支持迁移。配置冲突保留草稿；原手机配置未读取成功时禁止保存，旧读取不能覆盖新配置。
+
+产品源码 `8604145928b9f44ae04d537386a161d196e0037b` 已先推 GitHub，再构建发布 [0.1.2 / code 3 APK](https://github.com/jinjinli226-netizen/ziwei/releases/tag/android-manager-v0.1.2-internal)，公网回读 SHA-256 `b347559aad7994f4e504025919a147a9b714ce778b933f8efdab81d00a7e6f9f` 一致。同 code 1/2 内部证书，可直接覆盖安装。69 项单元、20 组基础流程、7 组历史、12 组高级设置浏览器验收与 73 项 URL 门禁通过；Android 模拟器覆盖升级、真实新版模块设置页、七类外跳拦截和系统两图选择通过。
+
+临时 SDK 服务全部停止，端口登记 245–249 已释放，最终 check 无冲突或未登记端口。用户真机、正式账号配置保存与真实业务执行未作已验收结论；主站/API、数据库、电脑客户端及互联 Agent/Updater 未替换。功能边界、发布与证据见[本轮记录](docs/operations/2026-10-17-android-manager-in-app-settings.md)。
+
+
 ## 2026-10-17 Android 管理 App 0.1.1 聊天修复
 
 [0.1.1 / code 2 内部测试更新](https://github.com/jinjinli226-netizen/ziwei/releases/tag/android-manager-v0.1.1-internal)修复原聊天历史被附加读取阻塞、首次失败后无法重试，以及旧刷新覆盖刚发送消息的问题。最终 APK 源码 `9fcb83c84652b09927e73172880bc32f1196e921` 已先推 GitHub，发布文件公网回读 SHA-256 `1deac0c3b087171dfa910bab560c4115ea508238dd4fea8f6e468b4b5abb91e1` 一致。沿用 code 1 内部证书，直接覆盖安装，不卸载。
