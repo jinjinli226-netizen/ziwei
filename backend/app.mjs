@@ -17,6 +17,8 @@ import { createEmployeeTemplateService } from './employees/templates.mjs';
 import { createPhoneMcpService } from './phone-mcp.mjs';
 import {createMobileReadView} from './mobile-read-view.mjs';
 import {createConversationReadService} from './conversation-read-state.mjs';
+import {createMobileNotificationReadService} from './mobile-notifications.mjs';
+import {createMobileGroupActionView} from './mobile-group-action.mjs';
 import { createManagementBootstrap } from './management-bootstrap.mjs';
 import {createBotMcpConnections} from './bot-mcp-connections.mjs';
 import { toolDefinitions as managementTools } from '../scripts/ziwei-mcp.mjs';
@@ -289,6 +291,8 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   const management = createManagementService(repo);
   const mobileReadView = createMobileReadView(repo);
   const conversationReads = createConversationReadService(repo);
+  const mobileNotifications = createMobileNotificationReadService(repo);
+  const mobileGroupAction = createMobileGroupActionView(repo);
   const employeeTemplates = createEmployeeTemplateService(repo, management);
   const managementBootstrap = createManagementBootstrap(repo, options);
   const botMcpConnections=createBotMcpConnections(repo,management.bots,{apiBase:managementBootstrap.apiBase,now:options.mcpOAuthNow});
@@ -605,6 +609,20 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   app.post('/api/notifications/:id/archive', (req, res) => res.json(repo.archiveNotification(req.params.id, req.body?.archived !== false)));
   app.get('/api/workspaces/:slug/notifications/stream', (req, res) => { res.statusCode=200; res.setHeader('Content-Type','text/event-stream'); res.setHeader('Cache-Control','no-cache'); res.setHeader('Connection','keep-alive'); res.flushHeaders?.(); const send=event=>res.write(`event: notification\ndata: ${JSON.stringify(event)}\n\n`); const unsubscribe=realtime.subscribe(req.params.slug,send); const timer=setInterval(()=>res.write(': heartbeat\n\n'),15000); req.on('close',()=>{clearInterval(timer);unsubscribe();}); send({type:'ready',workspace:req.params.slug}); });
   app.get('/api/workspaces/:slug/chats', (req,res)=>res.json(conversationReads.list(req.params.slug,employeeContext(req))));
+  app.get('/api/workspaces/:slug/mobile/notifications', (req,res)=>{
+    res.setHeader('Cache-Control','no-store');res.vary('Cookie');
+    const input={};
+    for(const key of Object.keys(req.query)) {
+      const value=req.query[key];
+      if(!['cursor','limit','baseline'].includes(key)||typeof value!=='string')throw Object.assign(new Error('提醒读取参数无效'),{status:400,code:'MOBILE_NOTIFICATION_INPUT_INVALID'});
+      if(key==='baseline') {
+        if(!['1','true','0','false'].includes(value))throw Object.assign(new Error('提醒基线参数无效'),{status:400,code:'MOBILE_NOTIFICATION_INPUT_INVALID'});
+        input.baseline=value==='1'||value==='true';
+      } else input[key]=value;
+    }
+    res.json(mobileNotifications.list(req.params.slug,input,employeeContext(req)));
+  });
+  app.get('/api/workspaces/:slug/mobile/notifications/:id', (req,res)=>{res.setHeader('Cache-Control','no-store');res.vary('Cookie');res.json(mobileNotifications.resolve(req.params.slug,req.params.id,employeeContext(req)));});
   app.post('/api/conversations/:id/read', (req,res)=>res.json(conversationReads.read(req.params.id,req.body||{},employeeContext(req))));
   app.post('/api/conversations/:id/forwards', requireRole('owner','admin','member'), (req,res)=>{
     const result=repo.forwardConversationMessages(req.params.id,req.body||{},employeeContext(req));
@@ -691,6 +709,14 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   app.get('/api/workspaces/:slug/employees/:id/phone-mcp/status',requireRole('owner','admin','member'),async(req,res,next)=>{try{ensureEmployeeInWorkspace(req.params.slug,req.params.id,req);res.json(await phoneMcp.status(req.params.slug,req.params.id,employeeContext(req)));}catch(error){next(error);}});
   for(const kind of ['check','trial']) app.post(`/api/workspaces/:slug/employees/:id/phone-mcp/${kind}`,requireRole('owner','admin','member'),(req,res,next)=>{try{ensureEmployeeInWorkspace(req.params.slug,req.params.id,req);res.status(202).json(phoneMcp.trial(req.params.slug,req.params.id,req.body || {},kind==='check',employeeContext(req)));}catch(error){next(error);}});
   app.get('/api/workspaces/:slug/phone-mcp/actions/:actionId',requireRole('owner','admin','member'),(req,res,next)=>{try{const action=management.action(req.params.slug,req.params.actionId,employeeContext(req));ensureEmployeeInWorkspace(req.params.slug,action.payload.employeeId,req);res.json({action});}catch(error){next(error);}});
+  app.get('/api/workspaces/:slug/actions/:id',requireRole('owner','admin','member'),(req,res,next)=>{
+    try {
+      res.setHeader('Cache-Control','no-store');
+      res.vary('Cookie');
+      const context=employeeContext(req),action=management.action(req.params.slug,req.params.id,context);
+      res.json(req.query.view==='mobile'?mobileGroupAction.project(req.params.slug,action,context):action);
+    } catch(error) {next(error);}
+  });
   app.get('/api/workspaces/:slug/device-workspace-grants',requireRole('owner','admin'),(req,res)=>res.json({grants:phoneMcp.grants(req.params.slug)}));
   app.post('/api/workspaces/:slug/device-workspace-grants',requireRole('owner'),(req,res,next)=>{
     try {

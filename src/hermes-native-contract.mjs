@@ -11,7 +11,7 @@ export const NATIVE_OPERATIONS={
   gateway:{status:[],configure:['config'],connect:['platform','durationSeconds'],disconnect:['platform'],inbound:['platform','route','body','headers'],outbound:['platform','chatId','content','replyTo']},
   voice:{status:[],configure:['config'],transcribe:['audioBase64','mimeType','model'],synthesize:['text','speed','instructions','provider']},
   collaboration:{message:['targets','content','mode','groupId'],publish:['groupId','task','status','result']},
-  groups:{list:[],read:['groupId'],step:['groupId']},
+  groups:{list:[],read:['groupId','limit','afterSeq'],step:['groupId']},
 };
 export function normalizeNativeOperation(value={}) {
   const {resource,operation,input={}}=value;
@@ -26,6 +26,7 @@ export function normalizeNativeOperation(value={}) {
   if(input.content!==undefined&&(typeof input.content!=='string'||input.content.length>200_000))throw botFailure('BOT_NATIVE_INPUT_INVALID','content 无效',400);
   if(resource==='memory'&&operation==='write'&&typeof input.content!=='string')throw botFailure('BOT_NATIVE_INPUT_INVALID','memory write 需要 content',400);
   if(input.limit!==undefined&&(!Number.isInteger(input.limit)||input.limit<1||input.limit>(resource==='sessions'?10:100)))throw botFailure('BOT_NATIVE_INPUT_INVALID','limit 超出范围',400);
+  if(resource==='groups'&&operation==='read'&&input.afterSeq!==undefined&&(!Number.isSafeInteger(input.afterSeq)||input.afterSeq<0||input.limit===undefined))throw botFailure('BOT_NATIVE_INPUT_INVALID','afterSeq 须为非负安全整数，并与 limit 一起使用',400);
   if(input.maxTurns!==undefined&&(!Number.isInteger(input.maxTurns)||input.maxTurns<1||input.maxTurns>100))throw botFailure('BOT_NATIVE_INPUT_INVALID','maxTurns 超出范围',400);
   if(input.intervalSeconds!==undefined&&(!Number.isInteger(input.intervalSeconds)||input.intervalSeconds<60||input.intervalSeconds>86400))throw botFailure('BOT_NATIVE_INPUT_INVALID','heartbeat 间隔须为60–86400秒',400);
   if(input.durationSeconds!==undefined&&(!Number.isInteger(input.durationSeconds)||input.durationSeconds<1||input.durationSeconds>86400))throw botFailure('BOT_NATIVE_INPUT_INVALID','Gateway 连接期限须为1–86400秒',400);
