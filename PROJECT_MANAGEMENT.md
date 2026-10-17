@@ -2,13 +2,15 @@
 
 ## 2026-10-17 已恢复连接并发布安装确认授权修复
 
-Agent18 原事务 `21866c8a…` 已于 **09:24:01.773** 安装并 committed，实际回传包替换恢复与 WebSocket 握手。**10:25:23** 快照仍为 Agent18 / Updater16；原 Updater18 事务 `5537b65e-890d-4dc5-825c-36f678ba77bf` 为 failed / submitted=1、无 installed_at，系统状态 3，不据此归因用户取消。原安装未重提、未清锁，中文未测试。
+Agent18 原事务 `21866c8a…` 已于 **09:24:01.773** 安装并 committed，实际回传包替换恢复与 WebSocket 握手。**10:51:39** 最新快照仍为 Agent18 / Updater16 在线健康；原 Updater18 事务 `5537b65e-890d-4dc5-825c-36f678ba77bf` 仍为 failed / submitted=1、无 installed_at，此前系统状态 3，不据此归因用户取消。原安装未重提、未清锁，中文未测试。
 
 中控源码 **`67c9b29b07a4975f5c632b724d2daea2afb983c9`** 已先推 GitHub，独立审查、73/73 远端回归及构建通过，**09:53:32** 保护发布。修复仅为绑定原升级、原安装端及原会话的单条打开动作提供有界租约；该次发布保留原历史、pending、DB inode、主站 / 客户端 / Nginx / APK。主站当前 `eabe098a…`、官方客户端源码 `5db7d834…` / build `208f2350…`，不回退旧版。
 
 全局业务门禁最初在 POST 前阻止新手机操作。本轮两项电脑任务经只读核对无手机操作，临时范围限定精确动作 ID 和请求摘要，原 scope 保留、未知业务仍阻止。10:23:33 原安装端 launch `a47d6514…` succeeded / performed=true、executingConfirmed=true，随后成功截图见系统提醒；继续安装点击被瞬态新业务挡在 POST 前，未下发点击。后续 screenshot03 过期未投递、无图，旧失败保留。
 
-用户主动愿协助，已给出已验签的 Updater18 官方覆盖安装链接，不卸载或清数据；现有代码支持真实版本 / 签名核验后沿原 failed 事务报告 installed，再由新版本健康提交。此为人工安装协助路径，后续自动恢复和输入仍须真实证据，完整任务未完成。原安静 heartbeat（id 1，ACTIVE，每10分钟）继续跟踪，完成后停用。详细状态以 [HANDOFF 顶部](HANDOFF.md) 和[操作记录](docs/operations/2026-10-16-phone-input-lifecycle.md) 为准。以下 10月16日记录为历史状态。
+用户主动愿协助，已给出已验签的 Updater18 官方覆盖安装链接，不卸载或清数据；现有代码支持真实版本 / 签名核验后沿原 failed 事务报告 installed，再由新版本健康提交。此为人工安装协助路径，后续自动恢复和输入仍须真实证据，完整任务未完成。原 heartbeat（id 1）17日10:08曾恢复为 ACTIVE，但当前本机只读实查为 **PAUSED，按用户要求保持关闭**；本轮手动继续。用户覆盖安装后在原聊天回复即可接着验收，后续沿私有 `resume-state.json`，不承诺定时自动接续。
+
+另已独审并推送安装确认候选源码 **`1ad02efed4d0ac4ee6e6c25ef8c7feabea31a332`**，修复旧子串 / 任意祖先误选和 false 后继续点击：采用精确标签、最近单一正向按钮、整树歧义拒绝，重核 Stop / 原会话 / 新鲜节点及期限，false / exception 同样计入 Service 实例内去重。源码缺陷与现场状态 3 的因果未证明。**code19 / 0.4.8 隔离完整构建已通过：双角色各66/66、共132/132 JUnit（每角色新增13项，0 failures / errors / skipped）、双 Debug R8 和双 Release 完整 Lint / assemble，3m27s / 159项任务全部执行，成功标记已取得，304个归档源码成员摘要及双包19 / 0.4.8元数据核验一致；尚未签名、未发布或实机验收**。官方下载保持原 code18，先等人工覆盖安装后的真实回执。详细状态以 [HANDOFF 顶部](HANDOFF.md) 和[操作记录](docs/operations/2026-10-16-phone-input-lifecycle.md) 为准。以下 10月16日记录为历史状态。
 
 ## 2026-10-16 历史快照：代码发布完成，真机验收等待连接恢复
 

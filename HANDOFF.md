@@ -2,7 +2,7 @@
 
 ## 2026-10-17 Agent18 已恢复，Updater 安装中止待覆盖安装回查，中文输入待验
 
-手机和绑定电脑已恢复在线。Agent18 / `0.4.7` 原事务 `21866c8a…` 于 **09:24:01.773** installed 并 committed，回传 `package_replaced / updateRelated=true` 和真实 WebSocket 握手。**10:25:23** 设备快照仍为 Agent18 / Updater16；原 Updater18 事务 `device-update-5537b65e-890d-4dc5-825c-36f678ba77bf` 为 **failed / submitted=1、无 installed_at**，系统回报状态 3，不能据此归因用户取消。没有重提安装或清锁，中文尚未测试。
+手机和绑定电脑已恢复在线。Agent18 / `0.4.7` 原事务 `21866c8a…` 于 **09:24:01.773** installed 并 committed，回传 `package_replaced / updateRelated=true` 和真实 WebSocket 握手。**10:51:39** 最新设备快照仍为 Agent18 / Updater16 在线健康；原 Updater18 事务 `device-update-5537b65e-890d-4dc5-825c-36f678ba77bf` 仍为 **failed / submitted=1、无 installed_at**，此前系统回报状态 3，不能据此归因用户取消。没有重提安装或清锁，中文尚未测试。
 
 打开原安装端的旧命令 `47b03653…` 确定未执行，促成中控最窄授权衔接修复 **`67c9b29b07a4975f5c632b724d2daea2afb983c9`**：先推 GitHub、独立审查、远端 **73/73** 接口回归及正式构建通过，**09:53:32** 保护发布至 `/opt/ziwei-control/releases/phone-stability-67c9b29b07a4`。仅新增内部可空列，单条 launch 绑定原事务 / installer / session / epoch；该次发布保留原事务、全部原历史旧列、DB inode、主站 / 客户端 / Nginx / APK，回退仅恢复代码。备份 `control-installer-resume-20261017T015331Z`。
 
@@ -10,7 +10,9 @@
 
 用户随后主动表示愿意协助安装，已提供经过校验的原签名 Updater18 官方包覆盖安装链接，不卸载或清数据。现有代码会核对真实已安装版本与签名，并支持原事务 failed → installed → 健康后 committed；当前尚无该安装或健康成功证据。此路径包含人工安装协助，后续自动恢复须另据真实启动来源和心跳验收，不能称无人介入安装已通过，**完整任务尚未完成**。
 
-原 heartbeat（id 1）10月16日曾按用户要求暂停，17日10:08恢复 ACTIVE、每10分钟；提示已更新为安静跟踪原事务，状态未变保持安静，验收完成后停用。
+源码审查另确认旧安装确认存在“安装”子串误选、任意 clickable 祖先和 false 回调后继续点击的缺陷，但未证明它们导致现场状态 3。候选源码 **`1ad02efed4d0ac4ee6e6c25ef8c7feabea31a332`** 已独立审查并推送：改为精确标签及最近单一正向按钮，整树歧义拒绝，重检 Stop / 原会话和新鲜节点，共享扫描期限；false / exception 也占用 Service 实例内的原事务 / 会话尝试，控件身份或语义任一重复即拒绝。**code19 / 0.4.8 隔离完整构建已通过：双角色各66/66、共132/132 JUnit（每角色新增13项，0 failures / errors / skipped）、双 Debug R8、双 Release 完整 Lint / assemble；3m27s，159项任务全部执行，成功标记已取得；304个归档源码成员摘要及双包19 / 0.4.8元数据核验一致。尚未签名、未发布、未实机验收**。官方下载仍为原 code18 字节，先等用户覆盖安装回查，不提前发布中间包。
+
+原 heartbeat（id 1）10月16日曾按用户要求暂停，17日10:08曾恢复为 ACTIVE；当前本机 `automation.toml` 只读回查为 **PAUSED，按用户要求保持关闭**。本轮为手动接续，不承诺定时自动继续；用户覆盖安装后在原聊天回复即可接着验收，沿私有 `resume-state.json` 保留的原事务和证据继续。
 
 生产主站仍为 `eabe098a…`，官方下载客户端仍为源码 `5db7d834…` / build `208f2350…`，未回退历史包。完整证据与限制见[操作记录](docs/operations/2026-10-16-phone-input-lifecycle.md)。下方 10月16日离线与 ACTIVE 描述均为当时历史状态。
 

@@ -4,7 +4,7 @@
 
 ## 10月17日接续进展
 
-用户恢复手机和电脑后，本对话先手动继续工作。10月16日曾应用户要求暂停定时接续；10月17日 **10:08**，为在新电脑业务结束后延续已恢复的无人介入验收，恢复原 heartbeat（id 1，ACTIVE，每10分钟），沿用本对话和原事务，不新建聊天。业务仍活跃或状态未变时保持安静，只在实际进展或故障时通知；完成验收后停用。
+用户恢复手机和电脑后，本对话手动继续工作。10月16日曾应用户要求暂停定时接续；10月17日 **10:08** 曾恢复原 heartbeat（id 1）为 ACTIVE，这是历史状态。当前只读本机 `automation.toml` 实查为 **PAUSED，按用户原先关闭定时的要求保持关闭**，不假定后续提示更新已持久化。本轮为手动接续，沿用本对话、原事务及私有 `resume-state.json`，不新建聊天或承诺定时自动继续；用户覆盖安装后在原聊天回复即可接着验收。
 
 09:25 至 09:33 的只读证据确认，原 Agent18 事务 `device-update-21866c8a-7d0d-4bad-ae35-76a529106451` 已 committed，submitted=1、installed_at 为 09:24:01.773；Agent=`0.4.7 / code18`、Updater=`0.4.5 / code16`，均在线健康。Agent 的 `startTrigger=package_replaced`，包更新时间与本次 reason 10 退出时间同为 `1792200237930`，标记 `updateRelated=true`；Updater 的启动来源为 `peer_recovery`。这证明本次包替换后的实际恢复，不等于杀进程、用户 Stop、重启或长期存活测试。
 
@@ -26,7 +26,15 @@
 
 用户主动表示可以协助安装，已提供已校验原签名和摘要的 Updater18 官方包覆盖安装链接，不卸载或清数据。代码审查确认：Agent 的 PackageObserver 或同原 ID 的 poll 会触发 reconcile；它先核对真实已安装的版本18及原签名，再处理 failed 状态，因此可报告原 `5537b65e…` 的 installed。服务器只接受指定安装端的该原回执，随后等待 Updater18 新健康才 committed，旧 failed 事件摘要保留。当前没有手工安装成功或新版本健康证据，不新建 resolve、不清锁、不重提原升级；这是人工安装协助路径，后续自动恢复要另据 MY_PACKAGE_REPLACED / peer_recovery 和心跳实测，不能写成全程无人介入安装通过。
 
-本轮故障及回查私有证据为 `direct-fix-open-installer-03.json`、`direct-fix-device-03.json` 及对应截图命令记录；原 heartbeat id 1 仍 ACTIVE，已更新提示为安静跟踪原失败事务和实际安装恢复，整体任务未完成。
+截至 **10:51:39（02:51:39 UTC）** 最新设备快照仍为 Agent18 / Updater16 在线健康，原 `5537b65e…` 仍 failed / submitted=1、无 installed_at，没有用户覆盖安装或中文输入通过证据。本轮故障及回查私有证据为 `direct-fix-open-installer-03.json`、`direct-fix-device-03.json` 及对应截图命令记录；原 heartbeat id 1 当前实读 PAUSED、保持关闭，本轮手动继续，整体任务未完成。
+
+### 安装确认源码候选，尚未发布
+
+静态审查确认旧路径按“安装”子串寻找标签，可能选中“取消安装 / 安装来源”等文字；任意 clickable 祖先及 false 回调后继续遍历也会扩大或重复点击。这里确认的是源码缺陷，**没有证明现场状态 3 由该缺陷或任何特定点击导致**。
+
+候选改为精确允许标签，仅归属最近单一正向按钮；保留 ColorOS 非 clickable TextView 的最近父按钮路径，拒绝冲突描述、混合子树、多目标和跨包 / 窗口。点击前重新取得整树、刷新原节点，并复核 Stop / enabled、原事务 / PackageInstaller 会话；两次扫描共享 700 ms 期限，最终 Binder 返回后再次检查期限。false 或 exception 也在派发前占用尝试，同一 Service 实例内按原事务 / 会话、控件身份及标签语义去重，任一重复均拒绝；不声称跨进程持久 exactly-once。现有会话检查不能单独证明安装器窗口必属该会话，此边界保留。
+
+源码 **`1ad02efed4d0ac4ee6e6c25ef8c7feabea31a332`** 已独立审查、提交并推送 GitHub；精确归档 SHA-256 为 `fef38854716476eacad67c7b44ff69e7da6d0692742f74592d1280b87c8a01b7`。**code19 / 0.4.8 远端隔离完整构建已通过：Agent66/66、Updater66/66，共132/132 JUnit，0 failures / errors / skipped；其中每角色新增13项，共26项，已包含原106项，不能再加总。双角色Java编译、双 Debug R8、双 Release 完整 Lint / assemble 的显式任务均完成；`BUILD SUCCESSFUL in 3m 27s`，159 actionable tasks 全部 executed，进程已结束并取得 `CODE19_BUILD_TESTS_SUCCESS`。尚未签名、未发布、未实机验收。** 最终构建日志见私有 `code19-build-check3.json`，完整核验证据为 `code19-build-proof.json`：304个归档源码成员逐项摘要一致，双包元数据均为19 / 0.4.8；buildSuccess=true、signed=false、published=false。官方下载仍为原 code18 字节，先等待用户覆盖安装18并回查原事务，再验证真实输入；若输入仍需修复，在未发布19候选中定稿，避免发布额外中间包。
 
 ## 10月16日发布基线与当日待补项（历史）
 
