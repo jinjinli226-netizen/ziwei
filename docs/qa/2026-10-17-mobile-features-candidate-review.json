@@ -52,6 +52,16 @@
         ".local/mobile-notifications-review/group-upgrade-gate-proof-bba9be8.json"
       ],
       "findingId": "F4"
+    },
+    {
+      "findingId": "F5",
+      "priority": "P1",
+      "introducedAt": "113355be748f35fa50f3798142521a97743a48b3",
+      "file": "backend/repository.mjs",
+      "title": "Private assignment proof is exposed by public audit, notification and realtime reads",
+      "reproduction": "With a real ordinary-member cookie in an isolated memory app, a private employee is absent from the employee list and its detail returns 404. An unexecuted task refers only to its unique name alias. Public audit, legacy notification raw payload_json and parsed payload, and member SSE task.created/task.updated events nevertheless disclose the new typed employee entityId and taskId association.",
+      "required": "Keep authoritative assignmentBinding in the audit database for internal reminder validation. Strip the new private field from public audit and notification projections, both raw and parsed fields, archive responses and onEvent payloads delivered through SSE/WebSocket. Preserve original task IDs, notification counts and unrelated fields; do not replace the assignment authorization repair or redesign all audit permissions.",
+      "evidenceInSharedCandidateWorktree": ".local/mobile-assignment-proof-read-review-113355b/113355b-result.json"
     }
   ],
   "rootVerification": {
@@ -114,6 +124,43 @@
       "candidateMergedIntoMain": false,
       "candidatePublished": false,
       "productionModifiedByReview": false
+    },
+    {
+      "checkedAt": "2026-10-17T20:22:27.631427+08:00",
+      "sharedCandidate": "113355be748f35fa50f3798142521a97743a48b3",
+      "androidCandidate": "ab5045a23c814032937bf4b4143fac2fc9f6012b",
+      "mainBeforeRecheck": "cb92779b62c2053490b48972a3fec98ac2604169",
+      "syntheticMergedTree": "ea29b5a96053f58524d836bdacd26a7759b88d65",
+      "verdict": "changes_required",
+      "fixedFindings": [
+        "F1",
+        "F2",
+        "F3",
+        "F4"
+      ],
+      "openFindings": [
+        "F5"
+      ],
+      "assignmentRecheck": "Fixed-source independent memory checks close original deletion, rename and all three canonical-ID-style alias rename/delete cases. New typed assignments work, historical nonempty assignments and same-value DTOs do not mint proof, latest invalid markers cannot reuse old proof, and later names cannot reinterpret typed identity.",
+      "assignmentEvidence": ".local/mobile-notifications-review/recheck-113355b.json",
+      "writerReview": "Server derives proof from actual persisted assignee values at the two official repository write boundaries. No public audit write entry point was found; client proof fields are ignored. The narrow savepoint buffers events until commit. This does not imply public reads of the new proof are safe.",
+      "rootCombinedNodeTests": {
+        "pass": 144,
+        "fail": 0,
+        "skip": 0
+      },
+      "rootCombinedPythonTests": {
+        "pass": 12,
+        "fail": 0,
+        "skip": 0,
+        "officialTemporaryStorageTests": 4
+      },
+      "rootTestEvidence": ".local/mobile-assignment-final-review/combined-tests.log",
+      "unchangedBaselineRepositoryFailures": "The candidate owner reproduced the same three runtime/model/profile discovery failures in its prior d6fbfbb archive. This recheck did not label the entire repository suite green.",
+      "candidateMergedIntoMain": false,
+      "candidatePublished": false,
+      "productionModifiedByReview": false,
+      "nextStep": "The candidate owner is fixing only the newly exposed private proof at public read/event boundaries, retaining the closed assignment authorization logic and the already-reviewed Android and group changes."
     }
   ]
 }
