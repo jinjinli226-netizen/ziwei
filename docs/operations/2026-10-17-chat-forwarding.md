@@ -75,4 +75,16 @@ node --test frontend/src/conversation-forward.test.mjs frontend/src/conversation
 
 本机验收服务通过端口中心登记260/9203，验收后已停止并释放；项目检查无冲突、无未登记监听。
 
-安卓 App `0.2.0-internal` / versionCode7 由独立 App 会话管理。本主站发布记录不代表 APK 已发布；应以该会话最终 APK 源提交、签名和下载元数据为准。
+## 安卓后续发布已完成
+
+安卓 App `0.2.0-internal` / versionCode7 已由独立 App 会话于2026-10-17 13:13:14（Asia/Shanghai）发布；没有再次部署主站。主控通过匿名 GitHub API 独立复核 Release 非草稿、标为 prerelease，APK 大小及 GitHub 记录的 SHA-256 与下列值一致。
+
+- 产品源码：`2ce1383a1cbe46737ea53cb56b9960c8f7cfccba`，先推 `codex/android-manager`。
+- 发布页：[android-manager-v0.2.0-internal](https://github.com/jinjinli226-netizen/ziwei/releases/tag/android-manager-v0.2.0-internal)。
+- [直接下载 APK](https://github.com/jinjinli226-netizen/ziwei/releases/download/android-manager-v0.2.0-internal/ziwei-manager-0.2.0-internal-code7.apk)，706114字节，SHA-256 `5a4b2a4a74b268a60dfb78c898beb31290881ba98bbc7cfec8c14a8c307059ff`。
+- 沿用证书 SHA-256 `507531ee91afe6369a2d519d653713a76d2fa54b8f5f76119672f668230ced35`，可覆盖安装。旧 `b7b…` 候选未公开。
+- 安卓详细验收文档提交 `9096f7d` 位于该分支 `docs/operations/2026-10-17-android-chat-forwarding.md`；不能假定它已合并到主控分支。
+
+App 会话报告193项单元、35项后端合同/迁移/移动读取、50组隔离浏览器流程通过。原AVD最终签名包覆盖安装保留登录；两位员工历史正文跨轮询稳定，800ms长按松手后菜单保持，后续新触摸可立即多选、选择目标并看到默认 reference 确认，模型能力/设备摘要读取与返回通过。此次补修兼容click误点遮罩，保留500ms长按与滚动取消。
+
+App 已对匿名下载的完整 APK 回读校验。真实账号验收仅读取及更新自身已读游标，没有提交真实转发、执行、消息、配置或设备命令；模拟器选1条记录，完整多条图文转发/重试在隔离真实Express与内存数据库完成。不能称为实体手机或生产模型执行验收。临时SDK/ADB已停止，261–265端口登记释放，AVD数据/登录保留。

@@ -4,7 +4,9 @@
 
 后端 `069b128c29248ec72094019e76bf49dc0b2964d5`、网页 `ed4991036a46a855f091f2913b959dc4a3c95cf8` 均已先推 GitHub，再分别于12:22:53和12:24:13发布。网页可单条/多选合并转发图文到已有员工，默认只保存记录；用户明确选择执行才派任务。新增轻量聊天列表与按用户已读游标供网页/安卓共用，私有员工访问范围保持。成功后可直接查看接收聊天。
 
-当前 `/opt/ziwei/current` 指向 `/opt/ziwei/releases/chat-records-069b128c2924-7a6f44a8/v2`；保留下节目录修复及现场移动接口。数据库只增加两列、已读表和索引，正式迁移前后原数据及消息 rowid 摘要一致。Windows包仍 `5db7d83`，本功能刷新网页即可。后端35项相关纯测试、网页回归、lint/build通过；隔离浏览器完成真实图文转发和接收展示，未在生产员工中派发模型任务。APK由“紫薇 App 设计与开发”会话独立发布，不能凭本节推定已上线。
+当前 `/opt/ziwei/current` 指向 `/opt/ziwei/releases/chat-records-069b128c2924-7a6f44a8/v2`；保留下节目录修复及现场移动接口。数据库只增加两列、已读表和索引，正式迁移前后原数据及消息 rowid 摘要一致。Windows包仍 `5db7d83`，本功能刷新网页即可。后端35项相关纯测试、网页回归、lint/build通过；隔离浏览器完成真实图文转发和接收展示，未在生产员工中派发模型任务。
+
+后续安卓 `0.2.0-internal` / code7 已由 App 会话发布：[GitHub Release](https://github.com/jinjinli226-netizen/ziwei/releases/tag/android-manager-v0.2.0-internal)。源码 `2ce1383a1cbe46737ea53cb56b9960c8f7cfccba` 先推 `codex/android-manager`，APK SHA-256 `5a4b2a4a74b268a60dfb78c898beb31290881ba98bbc7cfec8c14a8c307059ff`；沿用签名可覆盖安装。193项App单元、35项后端合同、50组浏览器流程通过，最终包在原AVD保留登录/历史并验证长按与转发确认页；未在实体手机验收，也未向真实员工提交转发或执行。安卓发布不再切换主站。
 
 API合同、版本证据、验收边界和保留新数据的回退方式见[聊天记录转发发布记录](docs/operations/2026-10-17-chat-forwarding.md)。下方为历史快照。
 
