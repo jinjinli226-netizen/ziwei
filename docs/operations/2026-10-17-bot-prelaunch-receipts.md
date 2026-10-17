@@ -246,3 +246,13 @@ API/前端于UTC16:54:04切换到 /opt/ziwei/releases/maintenance-recovery-874fc
 公开bundle为88256字节，SHA256 `c206051eecdb76facdc24e2cec9b465561fb9608d5b4050cfa24187559b42f4d`；独立PS为3090字节，SHA256 `3f4423fab616faa928c4b1e760dc90bb06d676f0c15ac7a8bc4442d4b212d55f`；诊断metadata为2155字节，SHA256 `748f81473ed46a0d0a45b76b57e3113f827073ed8982ad6308fdcbc48818ba8e`。UTC17:23独立postcheck重新核验全部公开字节、既有CLI文件及API服务身份、数据库inode/schema均保持；没有提交业务写入或调用目标设备。当前正式API及CLI更新包仍为874版本，不把诊断静态发布写成完整产品升级。
 
 已请用户在李金晋电脑运行一次官方只读诊断入口，等待精确rule结果；未要求再次更新。此刻知微恢复仍未验收，不声称slot已解除、员工已启用或真实模型新消息成功。私有证据在 `.local/operator-force-abandon-diagnostic-release/`，未将凭据或原始本机业务数据写入Git。
+
+### 现场明确规则与投递日志恢复修复（2026-10-18）
+
+用户已实际运行只读诊断：scopeMatched为true；46项source可读且未变；build匹配；前后health均实际connection_refused；Windows原生客户端清点为0、健康端口监听为0；配置未变，force-abandon WAL不存在。唯一明确失败为local / EVIDENCE_MISMATCH / JOURNAL_TERMINAL。此前4d19c58d更新仍使用旧874入口，重现同阶段；这次不再将错误归因于锁、代理或进程无法停止。
+
+根因已通过真实createActionDelivery持久化流程复现：uncertain结果先保存为result_pending / retainEvidence:true / dispatcherStatus:failed，后续收到服务端确认才写confirmed/serverStatus。响应丢失可留下result_pending，永久4xx会保存blocked；服务器已有失败记录不代表本机已完成确认。人工放弃恢复反而要求本机confirmed/failed，形成错误前置条件。
+
+新增的窄支路仅接受这条已授权原任务的result_pending或blocked：双blob必须存在，身份、绑定、SHA均有效，retainEvidence与dispatcherStatus正确，serverStatus不得为成功、过期或未知值；blockedStatus必须是永久4xx并排除408/429。结果的error和完整uncertain正文必须精确匹配固定原失败。仍归档原始四文件字节、不伪造confirmed/serverStatus/原进程退出，不重放消息；其余started/completed、聊天及Profile/HOME保留。既有confirmed/failed路径和服务端合同不变，不需切换API。正式更新失败回执同步增加有限白名单recoveryRule，避免再次只留下笼统EVIDENCE_MISMATCH；不输出原配置、命令行或错误原文。
+
+最终整合136项测试，131通过、5项Windows平台条件跳过、0失败；另排除未变的本机HTTP下载测试以免启动临时监听。包含真实writer产生的pending/blocked离线归档端到端、拒绝矛盾状态/错误结果/损坏blob、原字节与其他历史保留、只读诊断不写入、更新状态及安全错误投影。静态检查191项通过，未启动本机监听。Windows现场恢复仍待新版官方更新实际回执，不将这些测试写成知微已经恢复。源码先推GitHub，之后仅更新官方CLI下载；发布及真实设备结果另记。

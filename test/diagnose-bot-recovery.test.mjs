@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import {EventEmitter} from 'node:events';
+import {createActionDelivery} from '../src/daemon-action-delivery.mjs';
 import {BOT_FORCE_ABANDON_POLICY as POLICY,BOT_FORCE_ABANDON_POLICY_DIGEST as POLICY_DIGEST,forceAbandonBytesDigest as hash} from '../src/bot-force-abandon-contract.mjs';
 import {inspectForceAbandonLocalFacts,createForceAbandonInventory,createForceAbandonListenerCount} from '../scripts/client-force-abandon-recovery.mjs';
 import {diagnoseBotRecovery,runRecoveryDiagnostic,probeRecoveryHealth,resolveDiagnosticRoot} from '../scripts/diagnose-bot-recovery.mjs';
@@ -88,4 +89,19 @@ test('direct health probing only labels actual refused TCP as absent and has a t
 test('single diagnostic entry exits zero for failed checks and bounds all execution errors as ASCII JSON',async()=>{
  let output='';assert.equal(await runRecoveryDiagnostic({argv:['--root','fixture'],diagnose:async()=>({state:'diagnosed',readOnly:true,checks:[{ruleId:'COMPLETED_RESULT',state:'failed'}]}),write:value=>{output=value;}}),0);assert.equal(JSON.parse(output).checks[0].ruleId,'COMPLETED_RESULT');
  assert.equal(await runRecoveryDiagnostic({argv:[],diagnose:async()=>{throw Object.assign(Error(PRIVATE),{code:PRIVATE,stdout:PRIVATE});},write:value=>{output=value;}}),1);assert.deepEqual(JSON.parse(output),{schemaVersion:1,readOnly:true,state:'error',code:'DIAGNOSE_INTERNAL_FAILED'});assert.doesNotMatch(output,/PRIVATE_|[^\x00-\x7f]/);
+});
+
+
+for(const blocked of[false,true])test(`readonly diagnosis passes real ${blocked?'blocked':'result_pending'} uncertainty without changing source bytes`,async t=>{
+ const f=fixture(t);for(const file of[f.journalPath,f.actionPath,f.resultPath])fs.unlinkSync(file);
+ const now=Date.parse('2026-10-17T14:00:00.000Z');
+ const delivery=createActionDelivery({directory:path.dirname(f.journalPath),identity:{apiBase:f.config.apiBase,workspace:f.config.workspace,deviceId:f.config.deviceId},now:()=>now,retryDelays:[],post:async route=>{
+  if(route.endsWith('/ack'))return{id:ACTION,status:'acked',deviceId:f.config.deviceId,acked_at:new Date(now).toISOString(),expires_at:new Date(now+86400000).toISOString()};
+  if(route.endsWith('/events'))return{};
+  if(route.endsWith('/result'))throw Object.assign(new Error('PRIVATE_TRANSPORT_DETAIL'),blocked?{status:409}:{});
+  throw Error('unexpected fixture request');
+ },dispatch:async()=>({status:'failed',actionId:ACTION,error:POLICY.originalError,code:'EXECUTION_UNCERTAIN',executionState:'uncertain',reason:POLICY.originalResult.reason,result:{processExit:null,partialEffectsPossible:true}})});
+ await assert.rejects(delivery.execute(f.action));await delivery.whenIdle();
+ const journal=JSON.parse(fs.readFileSync(f.journalPath));assert.equal(journal.state,blocked?'blocked':'result_pending');assert.equal(Object.hasOwn(journal,'serverStatus'),false);
+ const before=f.snapshot(),report=await diagnoseBotRecovery(f.deps);assert.equal(report.offlineObservationPassed,true);assert.equal(report.artifacts.local.state,'passed');assert.deepEqual(f.snapshot(),before);assert.doesNotMatch(JSON.stringify(report),/PRIVATE_|deviceToken|content|executable|command/);
 });

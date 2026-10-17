@@ -18,7 +18,7 @@ const write=(file,value,options)=>durable(file,canonical(value),options);
 function originFor(config,env){const host=String(config.healthHost||env.ZIWEI_HEALTH_HOST||'127.0.0.1').replace(/^localhost$/,'127.0.0.1'),port=Number(config.healthPort||env.ZIWEI_HEALTH_PORT||20242);fact(['127.0.0.1','::1','[::1]'].includes(host)&&Number.isSafeInteger(port)&&port>0&&port<65536);return`http://${host.includes(':')?'[::1]':host}:${port}`;}
 function targetFiles(runtimeDir){const base=hash(JSON.stringify(ACTION)),delivery=path.join(runtimeDir,'action-delivery');return[['action-state',path.join(runtimeDir,'action-state.json')],['delivery-journal',path.join(delivery,base+'.json')],['delivery-action',path.join(delivery,base+'.action.json')],['delivery-result',path.join(delivery,base+'.result.json')]];}
 export const FORCE_ABANDON_LOCAL_RULES=Object.freeze([
- 'LOCAL_STATE_READ','LOCAL_JOURNAL_READ','LOCAL_ACTION_READ','LOCAL_RESULT_READ','STATE_SCHEMA','STARTED_KEY','STARTED_ACTION_ID','STARTED_IDENTITY','STARTED_TIMESTAMP','STARTED_NATIVE_FLAG','STARTED_QUARANTINE','COMPLETED_KEY','COMPLETED_RESULT','COMPLETED_IDENTITY','TARGET_STARTED_COUNT','TARGET_COMPLETED_COUNT','TARGET_NATIVE_RECORD','TARGET_WORKSPACE','TARGET_DEVICE','TARGET_BINDING','TARGET_QUARANTINE','ACTIVE_NATIVE_COUNT','LOCAL_SCOPE_URL','JOURNAL_SCHEMA','JOURNAL_ACTION','JOURNAL_IDENTITY','JOURNAL_BINDING','JOURNAL_EVENTS','JOURNAL_TERMINAL','JOURNAL_TARGET','JOURNAL_DEDUPE','ORPHAN_DELIVERY_BLOBS','ACTION_BLOB_DIGEST','ACTION_IDENTITY','ACTION_BINDING','ACTION_TARGET','ACTION_PROFILE','ACTION_HERMES_BINDING','ACTION_BINDING_DIGEST','RESULT_BLOB_DIGEST','RESULT_RECEIPT','RESULT_STATUS'
+ 'LOCAL_STATE_READ','LOCAL_JOURNAL_READ','LOCAL_ACTION_READ','LOCAL_RESULT_READ','STATE_SCHEMA','STARTED_KEY','STARTED_ACTION_ID','STARTED_IDENTITY','STARTED_TIMESTAMP','STARTED_NATIVE_FLAG','STARTED_QUARANTINE','COMPLETED_KEY','COMPLETED_RESULT','COMPLETED_IDENTITY','TARGET_STARTED_COUNT','TARGET_COMPLETED_COUNT','TARGET_NATIVE_RECORD','TARGET_WORKSPACE','TARGET_DEVICE','TARGET_BINDING','TARGET_QUARANTINE','ACTIVE_NATIVE_COUNT','LOCAL_SCOPE_URL','JOURNAL_SCHEMA','JOURNAL_ACTION','JOURNAL_IDENTITY','JOURNAL_BINDING','JOURNAL_EVENTS','JOURNAL_TERMINAL','JOURNAL_TARGET','JOURNAL_DEDUPE','ORPHAN_DELIVERY_BLOBS','ACTION_BLOB_DIGEST','ACTION_IDENTITY','ACTION_BINDING','ACTION_TARGET','ACTION_PROFILE','ACTION_HERMES_BINDING','ACTION_BINDING_DIGEST','RESULT_BLOB_DIGEST','RESULT_RECEIPT','RESULT_STATUS','RESULT_UNCERTAIN_BODY'
 ]);
 const localFact=(value,ruleId)=>{if(!value){const error=fail();error.recoveryRule=ruleId;throw error;}};
 function readLocal(runtimeDir,config,{saved}={}){
@@ -49,7 +49,14 @@ function readLocal(runtimeDir,config,{saved}={}){
  localFact(value.started.filter(item=>!value.completed.some(done=>done?.key===item?.key)&&(item?.nativeRuntime===true||item?.quarantine)&&item.quarantine?.stopConfirmed!==true).length===1,'ACTIVE_NATIVE_COUNT');
  const journal=rows[1],action=rows[2],result=rows[3];let scope;try{scope={apiBase:new URL(config.apiBase).origin,workspace:config.workspace,deviceId:config.deviceId};}catch(error){error.recoveryRule='LOCAL_SCOPE_URL';throw error;}
  if(journal.exists){
-  const j=journal.value;localFact(j?.version===2,'JOURNAL_SCHEMA');localFact(j.action?.id===ACTION&&j.action.type==='conversation.execute','JOURNAL_ACTION');localFact(same(j.identity,scope),'JOURNAL_IDENTITY');localFact(hex(j.binding),'JOURNAL_BINDING');localFact(Array.isArray(j.events),'JOURNAL_EVENTS');localFact(j.state==='confirmed'&&j.serverStatus==='failed','JOURNAL_TERMINAL');const p=j.action.payload||{};
+  const j=journal.value;localFact(j?.version===2,'JOURNAL_SCHEMA');localFact(j.action?.id===ACTION&&j.action.type==='conversation.execute','JOURNAL_ACTION');localFact(same(j.identity,scope),'JOURNAL_IDENTITY');localFact(hex(j.binding),'JOURNAL_BINDING');localFact(Array.isArray(j.events),'JOURNAL_EVENTS');
+  // A durable uncertain result is staged before its transport ACK. A lost ACK
+  // leaves result_pending; a permanent HTTP rejection leaves blocked. The
+  // explicit abandonment grant, not a fabricated local confirmation, releases
+  // this original task. Keep these retained bytes and their unconfirmed state.
+  const confirmedFailed=j.state==='confirmed'&&j.serverStatus==='failed';
+  const retainedUnconfirmed=['result_pending','blocked'].includes(j.state)&&j.retainEvidence===true&&j.dispatcherStatus==='failed'&&(j.serverStatus===undefined||j.serverStatus===null||j.serverStatus==='failed')&&action.exists&&result.exists&&hex(j.actionDigest)&&hex(j.resultDigest)&&(j.state!=='blocked'||Number.isInteger(j.blockedStatus)&&j.blockedStatus>=400&&j.blockedStatus<=499&&![408,429].includes(j.blockedStatus));
+  localFact(confirmedFailed||retainedUnconfirmed,'JOURNAL_TERMINAL');const p=j.action.payload||{};
   localFact(p.deviceId===config.deviceId&&p.employeeId===POLICY.subject.employeeId,'JOURNAL_TARGET');localFact(String(j.action.dedupe_key??j.action.dedupeKey??j.action.id)===started.key,'JOURNAL_DEDUPE');
  }else localFact(!action.exists&&!result.exists,'ORPHAN_DELIVERY_BLOBS');
  if(action.exists){
@@ -58,7 +65,7 @@ function readLocal(runtimeDir,config,{saved}={}){
   localFact(b?.workspace===config.workspace&&b.deviceId===config.deviceId&&b.employeeId===POLICY.subject.employeeId&&b.revision===POLICY.subject.originalRevision&&b.controlEpoch===POLICY.subject.originalControlEpoch,'ACTION_HERMES_BINDING');
   const binding=hash(JSON.stringify({id:ACTION,type:a.action.type,agent:a.action.agent_id||a.action.agentId||'ziwei_user',workspace:a.action.workspace_id||config.workspace,device:config.deviceId,employee:p.employeeId||null,conversation:p.conversationId||p.conversation_id||null,message:p.messageId||p.message_id||null,dedupe:a.action.dedupe_key||a.action.dedupeKey||null}));localFact(binding===j.binding&&started.key===String(a.action.dedupe_key??a.action.dedupeKey??ACTION),'ACTION_BINDING_DIGEST');
  }
- if(result.exists){localFact(journal.value.resultDigest===result.sha256,'RESULT_BLOB_DIGEST');localFact(result.value?.receiptOnly===true,'RESULT_RECEIPT');localFact(result.value.status==='failed','RESULT_STATUS');}
+ if(result.exists){localFact(journal.value.resultDigest===result.sha256,'RESULT_BLOB_DIGEST');localFact(result.value?.receiptOnly===true,'RESULT_RECEIPT');localFact(result.value.status==='failed','RESULT_STATUS');if(journal.value.state!=='confirmed')localFact(result.value.error===POLICY.originalError&&same(result.value.result,POLICY.originalResult),'RESULT_UNCERTAIN_BODY');}
  return{rows,state,started,journal,action,result};
 }
 export function inspectForceAbandonLocalFacts(runtimeDir,config,{saved}={}){

@@ -6,7 +6,7 @@ import os from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
-import { acquireUpdateMaintenanceLock, releaseUpdateMaintenanceLock, maintenanceOwnerStatus, readUpdateResult, writeMaintenanceResult, describeUpdateFailure, recoverBeforeClientUpdateStop, inspectMaintenanceProcess, retireMaintenanceLock } from '../scripts/client-update.mjs';
+import { acquireUpdateMaintenanceLock, releaseUpdateMaintenanceLock, maintenanceOwnerStatus, readUpdateResult, writeMaintenanceResult, describeUpdateFailure, updateFailureResult, recoverBeforeClientUpdateStop, inspectMaintenanceProcess, retireMaintenanceLock } from '../scripts/client-update.mjs';
 import { runClientUpdateWorker } from '../scripts/client-update-worker.mjs';
 
 const digest = value => createHash('sha256').update(value).digest('hex');
@@ -150,10 +150,13 @@ test('offline operator abandonment is accepted only with explicit false exit fac
   }
 });
 
-test('only allowlisted recovery phase and reason reach public update diagnostics',()=>{
-  const safe=describeUpdateFailure({code:'CLIENT_FORCE_ABANDON_REFUSED',recoveryPhase:'offline_observation',reasonCode:'EVIDENCE_MISMATCH',message:'PRIVATE'},'recover_history');
-  assert.equal(safe.recoveryPhase,'offline_observation');assert.equal(safe.recoveryReasonCode,'EVIDENCE_MISMATCH');assert.doesNotMatch(JSON.stringify(safe),/PRIVATE/);
-  const unsafe=describeUpdateFailure({code:'CLIENT_FORCE_ABANDON_REFUSED',recoveryPhase:'PRIVATE_TOKEN',reasonCode:'PRIVATE_TOKEN'},'recover_history');assert.equal(Object.hasOwn(unsafe,'recoveryPhase'),false);assert.equal(Object.hasOwn(unsafe,'recoveryReasonCode'),false);
+test('only allowlisted recovery phase, reason and precise local rule reach public update diagnostics',()=>{
+  const error={code:'CLIENT_FORCE_ABANDON_REFUSED',recoveryPhase:'offline_observation',reasonCode:'EVIDENCE_MISMATCH',recoveryRule:'JOURNAL_TERMINAL',message:'PRIVATE',stdout:'PRIVATE',configuration:'PRIVATE'};
+  const safe=describeUpdateFailure(error,'recover_history');
+  assert.equal(safe.recoveryPhase,'offline_observation');assert.equal(safe.recoveryReasonCode,'EVIDENCE_MISMATCH');assert.equal(safe.recoveryRule,'JOURNAL_TERMINAL');assert.doesNotMatch(JSON.stringify(safe),/PRIVATE/);
+  const result=updateFailureResult(error,'recover_history');assert.equal(result.recoveryRule,'JOURNAL_TERMINAL');assert.match(result.message,/JOURNAL_TERMINAL/);assert.doesNotMatch(JSON.stringify(result),/PRIVATE/);
+  const unsafe=describeUpdateFailure({code:'CLIENT_FORCE_ABANDON_REFUSED',recoveryPhase:'PRIVATE_TOKEN',reasonCode:'PRIVATE_TOKEN',recoveryRule:'PRIVATE_TOKEN'},'recover_history');assert.equal(Object.hasOwn(unsafe,'recoveryPhase'),false);assert.equal(Object.hasOwn(unsafe,'recoveryReasonCode'),false);assert.equal(Object.hasOwn(unsafe,'recoveryRule'),false);
+  const nested=describeUpdateFailure({code:'CLIENT_FORCE_ABANDON_REFUSED',cause:{recoveryRule:'ACTION_BLOB_DIGEST',stdout:'PRIVATE'}},'recover_history');assert.equal(nested.recoveryRule,'ACTION_BLOB_DIGEST');assert.doesNotMatch(JSON.stringify(nested),/PRIVATE/);
 });
 
 test('Windows native stale retirement holds the exact file and rejects live worker or changed bytes',{skip:process.platform!=='win32',timeout:30000},async t=>{
