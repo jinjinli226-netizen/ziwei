@@ -609,6 +609,15 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
     return res.status(201).json(repo.createConversation(req.params.slug, { ...(req.body || {}), employeeId, ...employeeContext(req), enforceDeviceOwnership: true }));
   });
   app.get('/api/conversations/:id', (req, res) => { const conversation=repo.getConversation(req.params.id, employeeContext(req)); if(!conversation) return res.status(404).json({error:'Conversation not found'}); res.json(req.query.view==='mobile'?mobileReadView.conversation(conversation):conversation); });
+  const conversationImage=(req,res)=>{
+    const image=mobileReadView.conversationImage(req.params.id,req.params.messageId,req.params.index,employeeContext(req),req.params.forwardIndex);
+    if(!image||req.query.v!==undefined&&req.query.v!==image.version)return res.status(404).json({error:'Conversation image not found'});
+    res.vary('Cookie');
+    res.set({'Content-Type':image.mimeType,'ETag':`"${image.version}"`,'Cache-Control':'private, no-cache, must-revalidate','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'; sandbox"});
+    return res.send(image.bytes);
+  };
+  app.get('/api/conversations/:id/messages/:messageId/images/:index',conversationImage);
+  app.get('/api/conversations/:id/messages/:messageId/forwards/:forwardIndex/images/:index',conversationImage);
   app.patch('/api/conversations/:id', (req, res) => { const context=employeeContext(req); const conversation=repo.getConversation(req.params.id, context); if(!conversation) return res.status(404).json({error:'Conversation not found'}); res.json(repo.updateConversationSettings(req.params.id, { ...(req.body || {}), ...context })); });
   app.post('/api/conversations/:id/workdir/inspect', requireRole('owner','admin','member'), (req, res, next) => {
     try {

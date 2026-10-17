@@ -9,16 +9,17 @@ import {createMobileReadView,mobileRunView} from './mobile-read-view.mjs';
 import {rasterFixtures} from '../test/fixtures/raster-images.mjs';
 
 // Exercise the real middleware and binary response without opening a listener.
-async function request(app,url,{cookie='',headers={}}={}) {
+async function request(app,url,{cookie='',headers={},method='GET',body}={}) {
   const socket=new Duplex({read(){},write(_chunk,_encoding,done){done();}});
   const req=new IncomingMessage(socket),res=new ServerResponse(req);
-  req.method='GET';req.url=url;req.headers={host:'mobile-read.fixture',cookie,...headers};
+  const input=body===undefined?null:Buffer.from(JSON.stringify(body));
+  req.method=method;req.url=url;req.headers={host:'mobile-read.fixture',cookie,...(input?{'content-type':'application/json','content-length':String(input.length)}:{}),...headers};
   const chunks=[];
   try {
     return await new Promise((resolve,reject)=>{
       res.write=(chunk,encoding,done)=>{if(chunk)chunks.push(Buffer.isBuffer(chunk)?chunk:Buffer.from(chunk,encoding));done?.();return true;};
       res.end=(chunk,encoding,done)=>{if(chunk)chunks.push(Buffer.isBuffer(chunk)?chunk:Buffer.from(chunk,typeof encoding==='string'?encoding:undefined));done?.();const bytes=Buffer.concat(chunks);resolve({status:res.statusCode,headers:res.getHeaders(),bytes,json:()=>JSON.parse(bytes.toString())});res.emit('finish');return res;};
-      req.on('error',reject);res.on('error',reject);app.handle(req,res,error=>reject(error||new Error('Unhandled fixture request')));req.push(null);
+      req.on('error',reject);res.on('error',reject);app.handle(req,res,error=>reject(error||new Error('Unhandled fixture request')));if(input)req.push(input);req.push(null);
     });
   }finally{socket.destroy();}
 }
@@ -68,7 +69,7 @@ test('mobile employee JSON removes inline image bytes and reuses only original m
   assert.deepEqual((await request(f.app,url+'?view=desktop',{cookie:f.ownerCookie})).bytes,original.bytes);
 });
 
-test('mobile Bot list/detail project avatars and run events while conversation preserves messages and execution receipts',async t=>{
+test('mobile Bot list/detail project avatars and run events while conversation preserves message metadata and execution receipts',async t=>{
   const f=fixture(t),paths=[`/api/workspaces/${f.slug}/bots`,`/api/workspaces/${f.slug}/bots/${f.bot.id}`,`/api/conversations/${f.bot.main_conversation_id}`];
   const before=f.repo.db.prepare('SELECT type,name,sql FROM sqlite_master ORDER BY type,name').all();
   for(const path of paths) {
@@ -80,11 +81,17 @@ test('mobile Bot list/detail project avatars and run events while conversation p
       const expected={...a[index],employee:b[index].employee};
       if(a[index].latest_run)expected.latest_run=mobileRunView(a[index].latest_run);
       if(a[index].stop_action)expected.stop_action=mobileRunView(a[index].stop_action);
+      if(a[index].messages) {
+        const {content,...metadata}=a[index].messages[1].attachments[0];
+        const url=b[index].messages[1].attachments[0].url;
+        assert.match(url,new RegExp(`^/api/conversations/${f.bot.main_conversation_id}/messages/${a[index].messages[1].id}/images/0\\?v=[a-f0-9]{64}$`));
+        expected.messages=[a[index].messages[0],{...a[index].messages[1],attachments:[{...metadata,url}]}];
+      }
       assert.deepEqual(b[index],expected);
     }
   }
   const chat=(await request(f.app,paths[2]+'?view=mobile',{cookie:f.ownerCookie})).json();
-  assert.equal(chat.messages.length,2);assert.equal(chat.messages[1].attachments[0].content,rasterFixtures.png.toString('base64'));assert.equal(chat.execution.id,'mobile-read-receipt');
+  assert.equal(chat.messages.length,2);assert(!Object.hasOwn(chat.messages[1].attachments[0],'content'));assert.equal(chat.execution.id,'mobile-read-receipt');
   assert.deepEqual(f.repo.db.prepare('SELECT type,name,sql FROM sqlite_master ORDER BY type,name').all(),before);
   assert.equal(f.repo.db.prepare('SELECT count(*) AS count FROM conversation_messages WHERE conversation_id=?').get(f.bot.main_conversation_id).count,2);
 });
@@ -292,4 +299,167 @@ test('mobile Bot list/detail preserve private employee, workspace membership and
     assert.equal(audit.reads.length,0);
   }finally{audit.restore();}
   assert.equal((await request(f.app,detail,{cookie:f.ownerCookie})).status,200);
+});
+
+const attachment=(bytes,mimeType,name)=>({name,mimeType,contentEncoding:'base64',content:bytes.toString('base64')});
+const storedMessages=(repo,id)=>repo.db.prepare('SELECT * FROM conversation_messages WHERE conversation_id=? ORDER BY rowid').all(id);
+
+test('mobile history serves PNG JPEG GIF and WebP as authenticated exact-byte images without altering stored or default JSON',async t=>{
+  const f=fixture(t),repo=f.repo,conversation=repo.createConversation(f.slug,{employeeId:f.idle.id});
+  const samples=[['png','image/png'],['jpeg','image/jpeg'],['gif','image/gif'],['webp','image/webp'],['animatedGif','image/gif'],['extendedWebp','image/webp'],['jpegWithExifThumbnail','image/jpeg']];
+  for(const [name,mimeType] of samples)repo.addConversationMessage(conversation.id,{role:'assistant',content:`Original ${name}`,attachments:[attachment(rasterFixtures[name],mimeType,`${name}.original`)],dispatch:false});
+  const before=storedMessages(repo,conversation.id),path=`/api/conversations/${conversation.id}`,original=await request(f.app,path,{cookie:f.ownerCookie}),mobile=await request(f.app,path+'?view=mobile',{cookie:f.ownerCookie});
+  assert.equal(original.status,200);assert.equal(mobile.status,200);
+  const initial=original.json(),actual=mobile.json();
+  for(let index=0;index<samples.length;index++) {
+    const [name,mimeType]=samples[index],raw=initial.messages[index],projected=actual.messages[index],{content,...metadata}=raw.attachments[0],image=projected.attachments[0];
+    assert.deepEqual(image,{...metadata,url:image.url});assert(!Object.hasOwn(image,'content'));assert.equal(image.size,rasterFixtures[name].length);
+    assert.match(image.url,new RegExp(`^/api/conversations/${conversation.id}/messages/${raw.id}/images/0\\?v=[a-f0-9]{64}$`));
+    assert.deepEqual(projected,{...raw,attachments:[image]});assert(!mobile.bytes.toString().includes(content));
+    const response=await request(f.app,image.url,{cookie:f.memberCookie});
+    assert.equal(response.status,200);assert.deepEqual(response.bytes,rasterFixtures[name]);assert.equal(response.headers['content-type'],mimeType);
+    assert.equal(response.headers.etag,`"${createHash('sha256').update(rasterFixtures[name]).digest('hex')}"`);
+    assert.equal(response.headers['cache-control'],'private, no-cache, must-revalidate');assert.match(response.headers.vary,/Cookie/);
+    assert.equal(response.headers['x-content-type-options'],'nosniff');assert.equal(response.headers['content-security-policy'],"default-src 'none'; sandbox");
+    const cached=await request(f.app,image.url,{cookie:f.memberCookie,headers:{'if-none-match':response.headers.etag}});
+    assert.equal(cached.status,304);assert.equal(cached.bytes.length,0);
+  }
+  assert.deepEqual({...actual,messages:initial.messages},initial);
+  assert.deepEqual((await request(f.app,path,{cookie:f.ownerCookie})).bytes,original.bytes);
+  assert.deepEqual((await request(f.app,path+'?view=desktop',{cookie:f.ownerCookie})).bytes,original.bytes);
+  assert.deepEqual(storedMessages(repo,conversation.id),before);
+});
+
+test('a one MiB mobile image transcript projects to metadata without loading a transcript again for image requests',async t=>{
+  const f=fixture(t),repo=f.repo,conversation=repo.createConversation(f.slug,{employeeId:f.idle.id});
+  const bytes=Buffer.concat([rasterFixtures.png,Buffer.alloc(768*1024,73)]);
+  repo.addConversationMessage(conversation.id,{content:'Original image caption',attachments:[attachment(bytes,'image/png','large-original.png')],dispatch:false});
+  const path=`/api/conversations/${conversation.id}`,raw=await request(f.app,path,{cookie:f.ownerCookie}),mobile=await request(f.app,path+'?view=mobile',{cookie:f.ownerCookie});
+  assert.equal(mobile.status,200);assert(raw.bytes.length>1024*1024);assert(mobile.bytes.length<2000);assert(mobile.bytes.length<raw.bytes.length/500);
+  const url=mobile.json().messages[0].attachments[0].url,originalGet=repo.getConversation;
+  repo.getConversation=()=>{throw new Error('Image route must not hydrate the transcript');};
+  try {
+    const response=await request(f.app,url,{cookie:f.ownerCookie});
+    assert.equal(response.status,200);assert.deepEqual(response.bytes,bytes);
+  }finally{repo.getConversation=originalGet;}
+  t.diagnostic(`image transcript JSON bytes: default=${raw.bytes.length}, mobile=${mobile.bytes.length}`);
+  const target=repo.createEmployee(f.slug,{name:'Forward size fixture without avatar',runtime:'Codex',visibility:'workspace',ownerUserId:f.owner.user_id});
+  const actionCount=repo.db.prepare('SELECT COUNT(*) AS count FROM a2a_actions').get().count;
+  const forwarded=repo.forwardConversationMessages(conversation.id,{messageIds:[raw.json().messages[0].id],targetEmployeeId:target.id,mode:'reference',clientRequestId:'large-mobile-image-reference'},{actorUserId:f.owner.user_id});
+  assert.equal(repo.db.prepare('SELECT COUNT(*) AS count FROM a2a_actions').get().count,actionCount);assert.equal(forwarded.execution,undefined);
+  const targetId=forwarded.forward.targetConversationId,targetPath=`/api/conversations/${targetId}`,before=storedMessages(repo,targetId);
+  const forwardRaw=await request(f.app,targetPath,{cookie:f.ownerCookie}),forwardMobile=await request(f.app,targetPath+'?view=mobile',{cookie:f.ownerCookie});
+  assert.equal(forwardRaw.status,200);assert.equal(forwardMobile.status,200);assert(!forwardRaw.json().employee.avatar);
+  const original=forwardRaw.json().messages[0],projected=forwardMobile.json().messages[0];
+  assert.equal(original.attachments[0].content,bytes.toString('base64'));assert.equal(original.forward.messages[0].attachments[0].content,bytes.toString('base64'));
+  assert(Buffer.byteLength(JSON.stringify({attachments:original.attachments,forward:original.forward}))>2*1024*1024);
+  assert(forwardRaw.bytes.length>2*1024*1024);assert(forwardMobile.bytes.length<8000);assert(forwardMobile.bytes.length<forwardRaw.bytes.length/200);
+  assert.equal(projected.attachments[0].url,projected.forward.messages[0].attachments[0].url);assert(!forwardMobile.bytes.toString().includes(bytes.toString('base64')));
+  const forwardedImage=await request(f.app,projected.attachments[0].url,{cookie:f.memberCookie});assert.equal(forwardedImage.status,200);assert.deepEqual(forwardedImage.bytes,bytes);
+  assert.deepEqual((await request(f.app,targetPath,{cookie:f.ownerCookie})).bytes,forwardRaw.bytes);assert.deepEqual(storedMessages(repo,targetId),before);
+  t.diagnostic(`forward image transcript JSON bytes without avatar: default=${forwardRaw.bytes.length}, mobile=${forwardMobile.bytes.length}`);
+});
+
+test('mobile image authorization and parent-message binding precede conditional caching, including revoked access and expired sessions',async t=>{
+  const f=fixture(t),repo=f.repo,conversation=repo.createConversation(f.slug,{employeeId:f.privateEmployee.id});
+  const message=repo.addConversationMessage(conversation.id,{content:'Private image',attachments:[attachment(rasterFixtures.png,'image/png','private.png')],dispatch:false});
+  const wrong=repo.addConversationMessage(f.conversation.id,{content:'Different conversation',attachments:[attachment(rasterFixtures.jpeg,'image/jpeg','other.jpg')],dispatch:false});
+  const path=`/api/conversations/${conversation.id}`,history=(await request(f.app,path+'?view=mobile',{cookie:f.ownerCookie})).json();
+  const url=history.messages[0].attachments[0].url,image=await request(f.app,url,{cookie:f.ownerCookie}),headers={'if-none-match':image.headers.etag};
+  assert.equal(image.status,200);
+  for(const [options,status] of [[{headers},401],[{cookie:f.memberCookie,headers},404],[{cookie:f.outsiderCookie,headers},403]]) {
+    const response=await request(f.app,url,options);assert.equal(response.status,status);assert(!response.headers.etag||response.headers.etag!==image.headers.etag);
+  }
+  const base=url.split('?')[0];
+  for(const invalid of [base.replace(message.id,wrong.id),base.replace(conversation.id,f.conversation.id),base.replace('/images/0','/images/1'),base.replace('/images/0','/images/-1'),base.replace('/images/0','/images/00'),base.replace('/images/0','/images/0.1'),base.replace('/images/0','/images/9007199254740992'),base.replace('/images/0','/forwards/0/images/0'),url.replace(/v=[a-f0-9]+/,'v=wrong'),base.replace(message.id,'missing-message')]) {
+    assert.equal((await request(f.app,invalid,{cookie:f.ownerCookie,headers})).status,404,invalid);
+  }
+  const missing=await request(f.app,base.replace(conversation.id,'missing-conversation'),{cookie:f.ownerCookie,headers});assert.equal(missing.status,404);
+  repo.db.prepare("UPDATE employees SET visibility='workspace' WHERE id=?").run(f.privateEmployee.id);
+  const allowed=await request(f.app,url,{cookie:f.memberCookie,headers});assert.equal(allowed.status,304);
+  repo.db.prepare('DELETE FROM members WHERE workspace_id=? AND user_id=(SELECT id FROM local_users WHERE email=?)').run(f.ws.id,'mobile-member@fixture.test');
+  assert.equal((await request(f.app,url,{cookie:f.memberCookie,headers})).status,403);
+  f.auth.logout({headers:{cookie:f.ownerCookie}});
+  assert.equal((await request(f.app,url,{cookie:f.ownerCookie,headers})).status,401);
+});
+
+test('image URLs invalidate on stored byte changes and never fetch supplied or stored remote addresses',async t=>{
+  const f=fixture(t),repo=f.repo,conversation=f.conversation;
+  const message=repo.addConversationMessage(conversation.id,{content:'Original',attachments:[attachment(rasterFixtures.png,'image/png','versioned.png')],dispatch:false});
+  const path=`/api/conversations/${conversation.id}?view=mobile`,first=(await request(f.app,path,{cookie:f.ownerCookie})).json().messages[0].attachments[0].url;
+  const image=await request(f.app,first,{cookie:f.ownerCookie});
+  repo.db.prepare('UPDATE conversation_messages SET attachment_json=? WHERE id=?').run(JSON.stringify([{...attachment(rasterFixtures.webp,'image/webp','versioned.png'),size:rasterFixtures.webp.length}]),message.id);
+  assert.equal((await request(f.app,first,{cookie:f.ownerCookie,headers:{'if-none-match':image.headers.etag}})).status,404);
+  const latest=(await request(f.app,path,{cookie:f.ownerCookie})).json().messages[0].attachments[0].url;
+  const fetched=await request(f.app,latest+'&url=https://caller-selected.invalid/private',{cookie:f.ownerCookie});
+  assert.equal(fetched.status,200);assert.deepEqual(fetched.bytes,rasterFixtures.webp);
+  repo.db.prepare('UPDATE conversation_messages SET attachment_json=? WHERE id=?').run(JSON.stringify([{name:'remote.png',mimeType:'image/png',url:'https://stored.invalid/private'}]),message.id);
+  assert.equal((await request(f.app,latest,{cookie:f.ownerCookie})).status,404);
+  assert.equal((await request(f.app,path,{cookie:f.ownerCookie})).json().messages[0].attachments[0].url,'https://stored.invalid/private');
+});
+
+test('mobile projection leaves unknown attachment forms intact, preserves metadata and replaces only recognized inline raster fields',async t=>{
+  const f=fixture(t),repo=f.repo,conversation=repo.createConversation(f.slug,{employeeId:f.idle.id});
+  const unknown=[{name:'metadata-only',size:9,path:'/original/local/path'},{name:'unsupported.svg',mimeType:'image/svg+xml',contentEncoding:'base64',content:Buffer.from('<svg/>').toString('base64')},{name:'invalid.png',mimeType:'image/png',contentEncoding:'base64',content:'not-base64'},{name:'unknown-encoding.png',mimeType:'image/png',contentEncoding:'custom',content:rasterFixtures.png.toString('base64')},{name:'mismatched.png',mimeType:'image/png',contentEncoding:'base64',content:rasterFixtures.jpeg.toString('base64')},{url:'https://original.invalid/a.png',unknown:{retain:true}},'legacy-string-value',null];
+  const recognized=[{name:'legacy-data.png',mime:'image/png',data:rasterFixtures.png.toString('base64'),size:123,unknown:{retain:true}},{name:'inline-data-url.gif',dataUrl:`data:image/gif;base64,${rasterFixtures.gif.toString('base64')}`,size:rasterFixtures.gif.length},{name:'inline-url.webp',url:`data:image/webp;base64,${rasterFixtures.webp.toString('base64')}`},{name:'legacy-base64.jpg',contentBase64:rasterFixtures.jpeg.toString('base64'),mimeType:'image/jpg'},{...attachment(rasterFixtures.png,'image/png','duplicate-inline.png'),dataUrl:`data:image/png;base64,${rasterFixtures.png.toString('base64')}`,previewUrl:`DATA:IMAGE/PNG;BASE64,${rasterFixtures.png.toString('base64')}`,preview:`data:image/jpeg;base64,${rasterFixtures.jpeg.toString('base64')}`,data:'unknown legacy value',mime:'image/png'}];
+  // Match code7's data+mime before content+mimeType priority when both exist.
+  recognized.push({...attachment(rasterFixtures.png,'image/png','different-inline-images'),data:rasterFixtures.jpeg.toString('base64'),mime:'image/jpeg'});
+  const message=repo.addConversationMessage(conversation.id,{content:'Legacy attachments',dispatch:false});
+  repo.db.prepare('UPDATE conversation_messages SET attachment_json=? WHERE id=?').run(JSON.stringify([...unknown,...recognized]),message.id);
+  const before=storedMessages(repo,conversation.id),path=`/api/conversations/${conversation.id}`,raw=await request(f.app,path,{cookie:f.ownerCookie}),mobile=await request(f.app,path+'?view=mobile',{cookie:f.ownerCookie}),values=mobile.json().messages[0].attachments;
+  assert.deepEqual(values.slice(0,unknown.length),unknown);
+  for(let index=0;index<recognized.length;index++) {
+    const actual=values[unknown.length+index];assert.match(actual.url,/^\/api\/conversations\//);assert.equal(actual.name,recognized[index].name);
+    assert(!Object.hasOwn(actual,['data','dataUrl','url','contentBase64','dataUrl','data'][index])||index===2);
+    const image=await request(f.app,actual.url,{cookie:f.ownerCookie});assert.equal(image.status,200);assert.deepEqual(image.bytes,[rasterFixtures.png,rasterFixtures.gif,rasterFixtures.webp,rasterFixtures.jpeg,rasterFixtures.png,rasterFixtures.jpeg][index]);
+  }
+  assert.equal(values[unknown.length].size,123);assert.deepEqual(values[unknown.length].unknown,{retain:true});
+  const duplicate=values[unknown.length+4];assert(!Object.hasOwn(duplicate,'content'));assert(!Object.hasOwn(duplicate,'previewUrl'));assert.equal(duplicate.data,'unknown legacy value');assert.equal(duplicate.preview,recognized[4].preview);
+  assert.equal(values.at(-1).content,rasterFixtures.png.toString('base64'));assert.equal(values.at(-1).mimeType,'image/png');
+  for(let index=0;index<unknown.length;index++)assert.equal((await request(f.app,`/api/conversations/${conversation.id}/messages/${message.id}/images/${index}`,{cookie:f.ownerCookie})).status,404);
+  assert.deepEqual((await request(f.app,path,{cookie:f.ownerCookie})).bytes,raw.bytes);assert.deepEqual(storedMessages(repo,conversation.id),before);
+});
+
+test('forwarded images authorize the target parent snapshot independently of private or deleted source chat access',async t=>{
+  const f=fixture(t),repo=f.repo,source=repo.createConversation(f.slug,{employeeId:f.privateEmployee.id});
+  const one=repo.addConversationMessage(source.id,{role:'user',content:'Private PNG',attachments:[attachment(rasterFixtures.png,'image/png','private.png'),attachment(rasterFixtures.jpeg,'image/jpeg','private.jpg')],dispatch:false,actorUserId:f.owner.user_id});
+  const two=repo.addConversationMessage(source.id,{role:'assistant',content:'Private GIF',attachments:[attachment(rasterFixtures.gif,'image/gif','private.gif'),attachment(rasterFixtures.webp,'image/webp','private.webp')],dispatch:false});
+  const forwarded=repo.forwardConversationMessages(source.id,{messageIds:[one.id,two.id],targetEmployeeId:f.ordinary.id,mode:'reference',clientRequestId:'mobile-image-forward'},{actorUserId:f.owner.user_id});
+  const targetId=forwarded.forward.targetConversationId,parentId=forwarded.message.id,path=`/api/conversations/${targetId}`;
+  const legacy=repo.db.prepare('SELECT attachment_json,forward_json FROM conversation_messages WHERE id=?').get(parentId),legacyAttachments=JSON.parse(legacy.attachment_json),legacyForward=JSON.parse(legacy.forward_json);
+  legacyAttachments[0].dataUrl=`data:image/png;base64,${rasterFixtures.png.toString('base64')}`;legacyForward.messages[0].attachments[0].dataUrl=legacyAttachments[0].dataUrl;
+  repo.db.prepare('UPDATE conversation_messages SET attachment_json=?,forward_json=? WHERE id=?').run(JSON.stringify(legacyAttachments),JSON.stringify(legacyForward),parentId);
+  assert.equal((await request(f.app,`/api/conversations/${source.id}?view=mobile`,{cookie:f.memberCookie})).status,404);
+  const before=storedMessages(repo,targetId),raw=await request(f.app,path,{cookie:f.ownerCookie}),mobile=await request(f.app,path+'?view=mobile',{cookie:f.memberCookie});
+  assert.equal(mobile.status,200);
+  const message=mobile.json().messages.find(row=>row.id===parentId),snapshot=message.forward;
+  assert.equal(snapshot.source.conversationId,source.id);assert.equal(snapshot.messages.length,2);
+  const expectedBytes=[rasterFixtures.png,rasterFixtures.jpeg,rasterFixtures.gif,rasterFixtures.webp],flat=snapshot.messages.flatMap(row=>row.attachments);
+  assert.equal(message.attachments.length,4);
+  for(let index=0;index<4;index++) {
+    const url=flat[index].url;
+    assert.match(url,new RegExp(`^/api/conversations/${targetId}/messages/${parentId}/forwards/${Math.floor(index/2)}/images/${index%2}\\?v=[a-f0-9]{64}$`));
+    assert.equal(message.attachments[index].url,url);assert(!mobile.bytes.toString().includes(expectedBytes[index].toString('base64')));
+    const image=await request(f.app,url,{cookie:f.memberCookie});assert.equal(image.status,200);assert.deepEqual(image.bytes,expectedBytes[index]);
+  }
+  const image=await request(f.app,flat[0].url,{cookie:f.memberCookie}),headers={'if-none-match':image.headers.etag};
+  const wrong=flat[0].url.replace(parentId,one.id),wrongConversation=flat[0].url.replace(targetId,source.id);
+  for(const url of [wrong,wrongConversation,flat[0].url.replace('/forwards/0/','/forwards/2/'),flat[0].url.replace('/forwards/0/','/forwards/-1/'),flat[0].url.replace('/images/0','/images/2')])assert.equal((await request(f.app,url,{cookie:f.ownerCookie,headers})).status,404);
+  assert.equal((await request(f.app,flat[0].url,{cookie:f.outsiderCookie,headers})).status,403);
+  repo.db.prepare('DELETE FROM conversations WHERE id=?').run(source.id);
+  const retained=await request(f.app,flat[0].url,{cookie:f.memberCookie});assert.equal(retained.status,200);assert.deepEqual(retained.bytes,rasterFixtures.png);
+  const actualRaw=(await request(f.app,path,{cookie:f.ownerCookie})).json(),initialRaw=raw.json();
+  assert.deepEqual(actualRaw,initialRaw);assert.deepEqual(storedMessages(repo,targetId),before);
+  repo.db.prepare("UPDATE employees SET visibility='personal',owner_user_id=? WHERE id=?").run(f.owner.user_id,f.ordinary.id);
+  assert.equal((await request(f.app,flat[0].url,{cookie:f.memberCookie,headers})).status,404);
+});
+
+test('MCP conversation idempotent reads keep inline image bytes even when view=mobile is supplied',async t=>{
+  const f=fixture(t),path=`/mcp/v1/workspaces/${f.slug}/conversations`,options={method:'POST',headers:{authorization:`Bearer ${f.mcpToken}`},body:{employeeId:f.idle.id,title:'MCP original conversation',idempotencyKey:'mobile-image-mcp-conversation'}};
+  const created=await request(f.app,path,options);assert.equal(created.status,201);
+  const id=created.json().id;f.repo.addConversationMessage(id,{content:'Original MCP image',attachments:[attachment(rasterFixtures.png,'image/png','original.png')],dispatch:false});
+  const before=storedMessages(f.repo,id),raw=await request(f.app,path,options),mobile=await request(f.app,path+'?view=mobile',options);
+  assert.equal(raw.status,200);assert.equal(mobile.status,200);assert.deepEqual(mobile.bytes,raw.bytes);
+  assert.equal(mobile.json().messages[0].attachments[0].content,rasterFixtures.png.toString('base64'));
+  assert.deepEqual(storedMessages(f.repo,id),before);
 });
