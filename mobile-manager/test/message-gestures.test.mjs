@@ -14,12 +14,23 @@ function fixture() {
   return {gestures,opened,handlers,timers,target,anchor,emit,fire,disable:()=>{enabled=false;}};
 }
 
-test('long press opens one stable message and suppresses only its synthetic click',()=>{
+test('long press opens one stable message and suppresses only its compatibility click',()=>{
   const f=fixture();f.emit('pointerdown');f.fire();assert.deepEqual(f.opened,['original']);
   let prevented=0,stopped=0;f.emit('click',{preventDefault:()=>prevented++,stopImmediatePropagation:()=>stopped++});
   assert.equal(prevented,1);assert.equal(stopped,1);
   f.emit('click',{preventDefault:()=>prevented++,stopImmediatePropagation:()=>stopped++});assert.equal(prevented,1);
   f.gestures.dispose();assert.equal(f.handlers.size,0);
+});
+
+test('touch release cannot click a newly inserted dialog backdrop, while the next intentional tap works',()=>{
+  const f=fixture();f.emit('pointerdown');f.fire();assert.deepEqual(f.opened,['original']);
+  const backdrop={closest:()=>null};f.emit('pointerup',{target:backdrop});
+  let prevented=0;f.emit('click',{target:backdrop,detail:1,preventDefault:()=>prevented++,stopImmediatePropagation:()=>{}});
+  assert.equal(prevented,1);
+  f.emit('pointerdown');f.fire();f.emit('pointerup',{target:backdrop});
+  f.emit('pointerdown',{target:backdrop});f.emit('pointerup',{target:backdrop});
+  f.emit('click',{target:backdrop,detail:1,preventDefault:()=>prevented++,stopImmediatePropagation:()=>{}});
+  assert.equal(prevented,1);f.gestures.dispose();
 });
 
 test('short tap, movement, scroll, cancellation, removed anchors and disabled views do not open a menu',()=>{

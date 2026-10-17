@@ -5,20 +5,27 @@ export function installMessageGestures(root, { enabled, openMenu, delay = 500, s
   function cancel() { if (press) clearTimer(press.timer); press = null; }
   function show(anchor) {
     if (!enabled() || !anchor?.isConnected) return;
-    suppressed = { id: anchor.dataset.messageId, until: now() + 900 };
+    suppressed = { id: anchor.dataset.messageId, pointerId: press?.pointerId, until: press ? Infinity : now() + 900 };
     cancel(); openMenu(anchor.dataset.messageId);
   }
   const down = event => {
+    // A fresh intentional press must work immediately, even when the previous
+    // platform omitted its compatibility click after a long press.
+    if (event.isPrimary !== false) suppressed = null;
     cancel();
     const anchor = anchorFor(event.target);
     if (!enabled() || !anchor || event.isPrimary === false || event.button !== 0 || event.target.closest('button,input,textarea,select,a')) return;
     press = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, timer: setTimer(() => show(anchor), delay) };
   };
   const move = event => { if (press && press.pointerId === event.pointerId && Math.hypot(event.clientX - press.x, event.clientY - press.y) > 10) cancel(); };
-  const up = event => { if (press?.pointerId === event.pointerId) cancel(); };
+  const up = event => {
+    if (press?.pointerId === event.pointerId) cancel();
+    if (suppressed?.pointerId === event.pointerId) suppressed.until = now() + 900;
+  };
   const click = event => {
-    const anchor = anchorFor(event.target);
-    if (suppressed && now() <= suppressed.until && anchor?.dataset.messageId === suppressed.id) {
+    // Touch release is hit-tested against the new dialog. Its compatibility
+    // click can land on the backdrop, so matching the original bubble misses it.
+    if (suppressed && now() <= suppressed.until && event.detail !== 0) {
       suppressed = null; event.preventDefault(); event.stopImmediatePropagation();
     }
   };
@@ -31,13 +38,13 @@ export function installMessageGestures(root, { enabled, openMenu, delay = 500, s
   root.addEventListener('pointerdown', down);
   root.addEventListener('pointermove', move);
   root.addEventListener('pointerup', up);
-  root.addEventListener('pointercancel', cancel);
+  root.addEventListener('pointercancel', up);
   root.addEventListener('scroll', cancel, true);
   root.addEventListener('click', click, true);
   root.addEventListener('contextmenu', context);
   return { cancel, dispose() {
     cancel(); root.removeEventListener('pointerdown', down); root.removeEventListener('pointermove', move);
-    root.removeEventListener('pointerup', up); root.removeEventListener('pointercancel', cancel);
+    root.removeEventListener('pointerup', up); root.removeEventListener('pointercancel', up);
     root.removeEventListener('scroll', cancel, true); root.removeEventListener('click', click, true); root.removeEventListener('contextmenu', context);
   } };
 }

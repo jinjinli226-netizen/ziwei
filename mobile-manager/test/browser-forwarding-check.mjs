@@ -8,6 +8,7 @@ import {createRequire} from 'node:module';
 import {fileURLToPath} from 'node:url';
 import {IncomingMessage,ServerResponse} from 'node:http';
 import {Duplex} from 'node:stream';
+import {createHash} from 'node:crypto';
 import {createApp} from '../../backend/app.mjs';
 
 const require=createRequire(import.meta.url);
@@ -15,7 +16,7 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'/Users/zhangjie/.cache/
 const root=path.resolve(fileURLToPath(new URL('../..',import.meta.url))),web=path.join(root,'mobile-manager/web'),out=path.join(root,'.local/mobile-manager-forwarding-qa');
 await fs.mkdir(out,{recursive:true});
 const origin='https://ziwei-forwarding.invalid',slug='forwarding-qa',deviceId='forwarding-fixture-pc';
-const requests=[],errors=[],checks=[],screenshots=[],navigations=[],externalCalls=[];
+const requests=[],errors=[],checks=[],screenshots=[],navigations=[],externalCalls=[],realTouchChecks=[],servedAssets={};
 const originalFetch=globalThis.fetch;
 globalThis.fetch=async(value,init={})=>{externalCalls.push({url:String(value),method:init.method||'GET'});throw new Error('External requests are disabled in this fixture');};
 const app=createApp({memory:true,requireAuth:true,enableScheduler:false}),repo=app.locals.repo;
@@ -54,13 +55,22 @@ page.setDefaultTimeout(8000);
 context.on('page',opened=>{if(opened!==page)popupCount++;});page.on('pageerror',error=>errors.push(error.message));
 page.on('framenavigated',frame=>{if(frame===page.mainFrame()){navigations.push(frame.url());if(frame.url()!==`${origin}/__ziwei_manager__/index.html`)errors.push(`Unexpected navigation ${frame.url()}`);}});
 await page.addInitScript(({userId,workspace})=>localStorage.setItem(`ziwei.mobile.workspace:${userId}`,workspace),{userId:principal.user_id,workspace:slug});
+await page.addInitScript(()=>{
+  window.__gestureMeta=[];window.__gestureStart=performance.now();
+  for(const type of ['pointerdown','pointermove','pointerup','pointercancel','touchstart','touchmove','touchend','touchcancel','contextmenu','mousedown','mouseup','click','scroll'])document.addEventListener(type,event=>{
+    if(window.__gestureMeta.length>=160)return;
+    const anchor=event.target?.closest?.('[data-forwardable-message]')?.closest('[data-message-id]');
+    window.__gestureMeta.push({type,ms:Math.round(performance.now()-window.__gestureStart),isTrusted:event.isTrusted,button:event.button??null,isPrimary:event.isPrimary??null,pointerType:event.pointerType||null,pointerId:event.pointerId??null,cancelable:event.cancelable,defaultPrevented:event.defaultPrevented,x:event.clientX??event.touches?.[0]?.clientX??null,y:event.clientY??event.touches?.[0]?.clientY??null,target:event.target?.tagName||'#document',anchorId:anchor?.dataset.messageId||null,scrollTop:document.querySelector('.chat-timeline')?.scrollTop??null});
+  },{capture:true,passive:true});
+});
 await context.route('**/*',async route=>{
   const request=route.request(),url=new URL(request.url()),p=url.pathname,method=request.method();
   if(url.origin!==origin){errors.push(`External browser request ${url.origin}${p}`);return route.abort();}
   try{
     if(p.startsWith('/__ziwei_manager__/')){
       const asset=p.slice('/__ziwei_manager__/'.length)||'index.html';assert.match(asset,/^[a-z-]+\.(html|js|css|png)$/);
-      return route.fulfill({contentType:asset.endsWith('.js')?'text/javascript':asset.endsWith('.css')?'text/css':asset.endsWith('.png')?'image/png':'text/html',body:await fs.readFile(path.join(web,asset))});
+      const bytes=await fs.readFile(path.join(web,asset));servedAssets[asset]=createHash('sha256').update(bytes).digest('hex');
+      return route.fulfill({contentType:asset.endsWith('.js')?'text/javascript':asset.endsWith('.css')?'text/css':asset.endsWith('.png')?'image/png':'text/html',body:bytes});
     }
     assert.ok(method==='GET'||method==='POST'&&/^\/api\/conversations\/[^/]+\/(read|forwards)$/.test(p),`Blocked unrelated write ${method} ${p}`);
     const body=request.postData()?request.postDataJSON():undefined,entry={method,path:p,...(body===undefined?{}:{body})};requests.push(entry);
@@ -86,6 +96,23 @@ async function singleForward(messageId,note){await action('message-menu',message
 async function submitForward(){await page.locator('[data-form=forward] button[type=submit]').click();}
 async function complete(){await page.getByRole('heading',{name:'转发已送达',exact:true}).waitFor();}
 async function pointer(locator,type,{pointerId=71,dx=0,dy=0}={}){const box=await locator.boundingBox();assert.ok(box,'Gesture target is visible');await locator.dispatchEvent(type,{pointerId,pointerType:'touch',isPrimary:true,button:0,clientX:box.x+Math.min(20,box.width/2)+dx,clientY:box.y+Math.min(20,box.height/2)+dy});}
+async function realTouchHold(locator,durationMs){
+  await locator.scrollIntoViewIfNeeded();await frame();
+  const box=await locator.boundingBox();assert.ok(box,'Real touch target is visible');
+  const point={x:box.x+Math.min(30,box.width/2),y:box.y+Math.min(25,box.height/2)};
+  const hit=await page.evaluate(({x,y})=>{window.__gestureMeta=[];window.__gestureStart=performance.now();const target=document.elementFromPoint(x,y),anchor=target?.closest?.('[data-forwardable-message]')?.closest('[data-message-id]');return{tag:target?.tagName||null,anchorId:anchor?.dataset.messageId||null};},point);
+  const cdp=await context.newCDPSession(page);
+  let openedWhileHeld=false;
+  try{await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{...point,id:1,radiusX:1,radiusY:1,force:1}]});await page.waitForTimeout(durationMs);openedWhileHeld=await page.locator('.forward-sheet').count()>0;await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});await page.waitForTimeout(100);}
+  finally{await cdp.detach();}
+  const observed=await page.evaluate(()=>({events:window.__gestureMeta,selectionType:window.getSelection()?.type||null,selectionRangeCount:window.getSelection()?.rangeCount||0,opened:!!document.querySelector('.forward-sheet')}));
+  const evidence={durationMs,point,hit,openedWhileHeld,...observed,sourceHashes:{gestures:servedAssets['message-gestures.js'],styles:servedAssets['styles.css'],app:servedAssets['app.js']},driver:'Playwright-owned Chromium CDP Input.dispatchTouchEvent; trusted browser input, no user-browser access'};
+  realTouchChecks.push(evidence);const text=JSON.stringify({observedAt:new Date().toISOString(),checks:realTouchChecks},null,2)+'\n';await fs.writeFile(path.join(out,'real-touch-evidence.json'),text);await fs.writeFile(path.join(out,`real-touch-evidence-${Date.now()}.json`),text);
+  assert.equal(openedWhileHeld,true,`Real Chromium ${durationMs}ms touch hold must open message operations before release; see real-touch-evidence.json`);
+  assert.equal(observed.opened,true,`Real Chromium ${durationMs}ms touch hold must keep message operations open after release; see real-touch-evidence.json`);
+  assert.ok(observed.events.some(event=>event.type==='pointerdown'&&event.isTrusted&&event.pointerType==='touch'),'Real touch must produce a trusted touch pointer event');
+  await action('forward-cancel').tap();await page.locator('.forward-sheet').waitFor({state:'detached'});
+}
 
 try{
   await page.goto(`${origin}/__ziwei_manager__/index.html`);await page.getByRole('heading',{name:'聊天',exact:true}).waitFor();await action('chat',sourceEmployee.id).waitFor();
@@ -102,6 +129,7 @@ try{
 
   await page.locator('[name=draft]').fill('原聊天草稿必须保留 SOURCE-DRAFT');
   const bubble=page.locator(`[data-message-id="${userMessage.id}"] .message-bubble`).first();await bubble.scrollIntoViewIfNeeded();
+  await realTouchHold(bubble,800);await realTouchHold(bubble,1200);checks.push('trusted Chromium800ms/1200ms holds keep the menu open through release; an immediate new intentional touch closes it normally');
   await pointer(bubble,'pointerdown');await pointer(bubble,'pointermove',{dx:22});await page.waitForTimeout(560);await pointer(bubble,'pointerup',{dx:22});assert.equal(await page.locator('.forward-sheet').count(),0,'Moving over10px cancels a long press');
   await pointer(bubble,'pointerdown',{pointerId:72});await timeline.evaluate(element=>{element.scrollTop+=20;element.dispatchEvent(new Event('scroll'));});await page.waitForTimeout(560);await pointer(bubble,'pointerup',{pointerId:72});assert.equal(await page.locator('.forward-sheet').count(),0,'Scrolling cancels a long press');
   await bubble.scrollIntoViewIfNeeded();await pointer(bubble,'pointerdown',{pointerId:73});await page.waitForTimeout(560);await pointer(bubble,'pointerup',{pointerId:73});await page.getByRole('heading',{name:'消息操作',exact:true}).waitFor();await action('forward-cancel').click();
@@ -136,8 +164,8 @@ try{
   checks.push('execute requires a separate explicit radio choice and creates exactly one queued in-memory action');
 
   await page.setViewportSize({width:360,height:740});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);assert.equal(context.pages().length,1);assert.equal(popupCount,0);assert.deepEqual(errors,[]);assert.deepEqual(externalCalls,[]);assert.equal(lostReceipts,1);assert.ok(readRequests().every(request=>request.status===200),'All visible read cursors require a successful server receipt');assert.ok(requests.every(request=>request.method==='GET'||/^\/api\/conversations\/[^/]+\/(read|forwards)$/.test(request.path)));checks.push('360px layout stays in one App document with no popup, external call or standalone message dispatch');
-  const result={passed:true,observedAt:new Date().toISOString(),checks,screenshots,requests:requests.length,forwardPosts:forwardRequests().length,lostReceipts,readCursorPosts:readRequests().length,popupCount,externalCalls,queuedFixtureActions:1,realDeviceActions:0,externalModelCalls:0,listenerCount:0,navigations,evidence:'Complete App DOM and authenticated real in-memory Express/repository. Pointer sequences are synthetic touch PointerEvents; image short tap is Chromium touch input. One server receipt is deliberately lost after commit; there is no production access or HTTP listener.'};
+  const result={passed:true,observedAt:new Date().toISOString(),checks,screenshots,requests:requests.length,forwardPosts:forwardRequests().length,lostReceipts,readCursorPosts:readRequests().length,popupCount,externalCalls,queuedFixtureActions:1,realDeviceActions:0,externalModelCalls:0,listenerCount:0,navigations,realTouchChecks,evidence:'Complete App DOM and authenticated real in-memory Express/repository. Long holds use trusted Chromium touch input through a Playwright-owned CDP pipe; movement/scroll isolation also uses synthetic PointerEvents. One server receipt is deliberately lost after commit; no production, user browser or HTTP listener.'};
   await fs.writeFile(path.join(out,'result.json'),JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify(result,null,2));
 }catch(error){
-  await capture('failure').catch(()=>{});await fs.writeFile(path.join(out,`failure-${Date.now()}.json`),JSON.stringify({passed:false,error:error.stack||error.message,errors,checks,requests,externalCalls,body:await page.locator('body').innerText().catch(()=>null)},null,2)+'\n');throw error;
+  await capture('failure').catch(()=>{});await fs.writeFile(path.join(out,`failure-${Date.now()}.json`),JSON.stringify({passed:false,error:error.stack||error.message,errors,checks,requests,externalCalls,realTouchChecks,body:await page.locator('body').innerText().catch(()=>null)},null,2)+'\n');throw error;
 }finally{await context.close();await browser.close();globalThis.fetch=originalFetch;repo.db.close();}
