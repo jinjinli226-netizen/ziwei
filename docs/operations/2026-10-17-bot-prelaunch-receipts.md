@@ -238,3 +238,11 @@ API/前端于UTC16:54:04切换到 /opt/ziwei/releases/maintenance-recovery-874fc
 服务端UTC17:02只读核验：目标设备offline，最后心跳16:24:26，仍c477；原r3e8暂停/active2805，grant1/receipt0，原hash保持。17:00:15一次prepare409表明新worker越过维护锁并进入恢复探测；不能只凭409判断是哪条校验拒绝。offline_observation还包括WAL与readLocal，不能误判一定是进程或端口。
 
 因此新增一次官方只读诊断，不再让用户重复升级碰运气：复用实际本地校验器的静态ruleID，输出前后本机health拒连/状态、native inventory与listener数量或明确unknown、源码/配置/build是否相等、WAL及旧任务四份记录的失败规则。只读本机文件、loopback GET和原生清点；不提交prepare/commit、不暂停/停止、不中断任务、不改员工资料或业务记录，不输出密钥/原配置/聊天/命令行/原始子进程输出。PowerShell独立入口下载固定官方URL并校验SHA；诊断为单文件Node bundle，无需npm安装或正常更新，临时文件仅清理本次新建目录。源码先推GitHub，再仅发布3个静态诊断文件，正式API与CLI更新包保持874。现场具体拒绝规则须等目标电脑实际诊断，不预设根因。
+
+### 只读诊断静态发布核验（北京时间 2026-10-18 01:23）
+
+提交 `1412c336496e65bb1e5019246c34a94d447735b4` 已先推GitHub两条既有分支，UTC17:21仅发布三个下载文件：`diagnose-bot-recovery.mjs`、`diagnose-windows-recovery.ps1`、`recovery-diagnostic.json`。单文件bundle由完整Git归档打包，9项输入逐字节比对；第二位审查者内存重建得到相同bundle。72项相关测试71通过、1项Windows平台条件跳过、0失败；Mac上原生ESM导入和CLI平台拒绝入口通过，未宣称Windows原生诊断已现场执行。
+
+公开bundle为88256字节，SHA256 `c206051eecdb76facdc24e2cec9b465561fb9608d5b4050cfa24187559b42f4d`；独立PS为3090字节，SHA256 `3f4423fab616faa928c4b1e760dc90bb06d676f0c15ac7a8bc4442d4b212d55f`；诊断metadata为2155字节，SHA256 `748f81473ed46a0d0a45b76b57e3113f827073ed8982ad6308fdcbc48818ba8e`。UTC17:23独立postcheck重新核验全部公开字节、既有CLI文件及API服务身份、数据库inode/schema均保持；没有提交业务写入或调用目标设备。当前正式API及CLI更新包仍为874版本，不把诊断静态发布写成完整产品升级。
+
+已请用户在李金晋电脑运行一次官方只读诊断入口，等待精确rule结果；未要求再次更新。此刻知微恢复仍未验收，不声称slot已解除、员工已启用或真实模型新消息成功。私有证据在 `.local/operator-force-abandon-diagnostic-release/`，未将凭据或原始本机业务数据写入Git。
