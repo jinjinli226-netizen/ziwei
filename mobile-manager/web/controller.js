@@ -41,6 +41,7 @@ export function createController({ state, api, render = () => {}, storage = glob
   let epoch = 0, employeeEpoch = 0, chatReadEpoch = 0, chatConversationId = null, employeeReadEpoch = 0, phoneEpoch = 0, phoneRead = null, disposed = false, timer = null, attachmentEpoch = 0, nativePaused = false;
   const composers = new Map(), pendingMutations = new Set(), routineRequests = new Map(), messageKeys = new Set(), conversationReads = new Map();
   const resourceReads = new Map(), employeeReads = new Map(), employeeWrites = new Map();
+  let employeeGets = new AbortController(), chatWriteEpoch = 0;
   state.resources ||= initialResources();
   state.employeeResources ||= initialEmployeeResources();
   const workspaceKey = userId => `ziwei.mobile.workspace:${userId}`;
@@ -75,8 +76,14 @@ export function createController({ state, api, render = () => {}, storage = glob
   function restoreComposer() {
     const item = composer(); state.draft = item.draft; state.attachments = item.attachments;
   }
+  function renewEmployeeGets() {
+    const previous = employeeGets;
+    employeeGets = new AbortController();
+    previous.abort();
+  }
   function clearSelection() {
-    employeeEpoch++; chatReadEpoch++; phoneEpoch++; attachmentEpoch++;
+    employeeEpoch++; chatReadEpoch++; chatWriteEpoch++; phoneEpoch++; attachmentEpoch++;
+    renewEmployeeGets();
     chatConversationId = null; forwarding.reset(); state.forwardDetail = null; state.chatReadError = '';
     conversationReads.clear(); employeeReadEpoch++; employeeReads.clear(); state.employeeResources = initialEmployeeResources();
     state.selectedEmployee = null; state.bot = null; state.conversation = null; state.messages = [];
@@ -143,13 +150,13 @@ export function createController({ state, api, render = () => {}, storage = glob
     if (!valid(token,true) || employeeWrites.has(employeeWriteKey(token))) return Promise.resolve(false);
     const existing = employeeReads.get(name);
     if (existing && valid(existing.token,true) && existing.generation === employeeReadEpoch) return existing.promise;
-    const entry = {token,generation:employeeReadEpoch}; employeeReads.set(name,entry);
+    const entry = {token,generation:employeeReadEpoch,signal:employeeGets.signal}; employeeReads.set(name,entry);
     const live = () => valid(token,true) && entry.generation === employeeReadEpoch && employeeReads.get(name) === entry;
     state.employeeResources[name].phase = 'loading'; draw();
     entry.promise = Promise.resolve().then(async () => {
       if (!live()) return false;
       try {
-        const value = await fetchValue();
+        const value = await fetchValue({ signal:entry.signal });
         if (!live()) return false;
         accept(value); employeeReadSucceeded(name); draw(); return true;
       } catch (error) { employeeReadFailed(name,error,token,live); return false; }
@@ -232,7 +239,7 @@ export function createController({ state, api, render = () => {}, storage = glob
     return entry.promise;
   }
   async function refresh({ silent = false } = {}) {
-    if (disposed || !state.user || !workspaceId(state) || state.phase !== 'ready') return false;
+    if (disposed || nativePaused || globalThis.document?.hidden || !state.user || !workspaceId(state) || state.phase !== 'ready') return false;
     const token = current(), primary = primaryResource();
     if (!silent) draw();
     // The inbox has its own lifecycle. A slow index cannot hold employee/history reads open.
@@ -259,6 +266,7 @@ export function createController({ state, api, render = () => {}, storage = glob
     const employee = state.selectedEmployee;
     if (!employee || state.page !== 'chat' || state.sending || !valid(token, true)) return Promise.resolve();
     const readEpoch = chatReadEpoch;
+    const options = { signal:employeeGets.signal };
     const key = `${token.epoch}:${token.scope}:${token.employeeEpoch}:${employee.id}:${readEpoch}`;
     if (conversationReads.has(key)) return conversationReads.get(key);
     const workspace = workspaceId(state), initial = !state.conversation?.id;
@@ -271,7 +279,7 @@ export function createController({ state, api, render = () => {}, storage = glob
       try {
         // A cached authoritative main ID needs no Bot round-trip. Failed reads never create a replacement.
         if (initial && !conversationId && cachedBot?.configuration_state === 'initialized' && !cachedBot.main_conversation_id) throw new Error('这位员工的主聊天尚未就绪，请在电脑版核对');
-        const conversation = conversationId ? await api.conversation(conversationId) : await api.getEmployeeConversation(workspace, { ...employee, ...(cachedBot ? { bot: cachedBot } : {}) });
+        const conversation = conversationId ? await api.conversation(conversationId, options) : await api.getEmployeeConversation(workspace, { ...employee, ...(cachedBot ? { bot: cachedBot } : {}) }, options);
         if (!validChat(token, readEpoch)) return;
         if (conversation.employee_id && conversation.employee_id !== employee.id) throw new Error('聊天与当前员工身份不一致，请刷新核对');
         state.conversation = conversation; state.messages = conversation.messages || [];
@@ -296,10 +304,10 @@ export function createController({ state, api, render = () => {}, storage = glob
     const hasBot = cachedBot?.configuration_state === 'initialized';
     const read = (name, fetchValue, accept) => readEmployeeResource(name,token,fetchValue,accept);
     const work = !skipConversation && state.page === 'chat' ? [readChat(token)] : [];
-    const readRuns = () => read('runs',() => api.botRuns(workspace, employee.id), value => { state.runs = list(value, 'runs'); });
-    const readRoutines = () => read('routines',() => api.botRoutines(workspace, employee.id), value => { state.routines = list(value, 'routines'); });
+    const readRuns = () => read('runs',options => api.botRuns(workspace, employee.id, options), value => { state.runs = list(value, 'runs'); });
+    const readRoutines = () => read('routines',options => api.botRoutines(workspace, employee.id, options), value => { state.routines = list(value, 'routines'); });
     if (hasBot) work.push(readRuns(), readRoutines());
-    if (employee.runtime === 'Hermes' || cachedBot) work.push(read('bot',() => api.bot(workspace, employee.id), bot => {
+    if (employee.runtime === 'Hermes' || cachedBot) work.push(read('bot',options => api.bot(workspace, employee.id, options), bot => {
       if (bot) acceptBot(bot);
     }).then(async ok => {
       // The first read can discover an initialized Bot that was not in the employee cache.
@@ -398,7 +406,9 @@ export function createController({ state, api, render = () => {}, storage = glob
     if (!content && !attachments.length) return;
     const fingerprint = JSON.stringify([state.conversation.id, content, attachments]);
     const token = current(), conversationId = state.conversation.id, revision = item.revision, requestKey = messageKey();
-    const sendEpoch = ++chatReadEpoch;
+    const sendEpoch = ++chatWriteEpoch;
+    const validSend = () => valid(token, true) && sendEpoch === chatWriteEpoch;
+    chatReadEpoch++;
     conversationReads.clear();
     const primaryResource = state.employeeResources.conversation;
     if (primaryResource.phase === 'loading') primaryResource.phase = primaryResource.error ? 'error' : primaryResource.lastUpdated ? 'ready' : 'idle';
@@ -406,7 +416,7 @@ export function createController({ state, api, render = () => {}, storage = glob
     state.sending = true; state.error = ''; draw();
     try {
       const fingerprintHash = await digest(fingerprint);
-      if (!validChat(token, sendEpoch)) return;
+      if (!validSend()) return;
       let stored = null;
       try { stored = JSON.parse(storeGet(requestKey) || 'null'); } catch {}
       if (item.request?.fingerprintHash !== fingerprintHash) {
@@ -425,16 +435,18 @@ export function createController({ state, api, render = () => {}, storage = glob
       try {
         if (JSON.parse(storeGet(requestKey) || 'null')?.clientMessageId === request.clientMessageId) storage?.removeItem(requestKey);
       } catch {}
-      if (!validChat(token, sendEpoch)) return;
+      if (!validSend()) return;
       restoreComposer();
       finishWrite();
+      if (nativePaused || globalThis.document?.hidden) return;
+      const readEpoch = chatReadEpoch, options = { signal:employeeGets.signal };
       state.employeeResources.conversation.phase = 'loading';
       try {
-        const conversation = await api.conversation(conversationId);
-        if (validChat(token, sendEpoch)) { state.conversation = conversation; state.messages = conversation.messages || []; forwarding.synchronize(); employeeReadSucceeded('conversation'); }
-      } catch (error) { employeeReadFailed('conversation',error,token,() => validChat(token,sendEpoch)); }
-    } catch (error) { if (error?.status === 401 || validChat(token, sendEpoch)) fail(error, token, true); }
-    finally { finishWrite(); if (validChat(token, sendEpoch)) { state.sending = false; draw(); } }
+        const conversation = await api.conversation(conversationId, options);
+        if (validChat(token, readEpoch)) { state.conversation = conversation; state.messages = conversation.messages || []; forwarding.synchronize(); employeeReadSucceeded('conversation'); }
+      } catch (error) { employeeReadFailed('conversation',error,token,() => validChat(token,readEpoch)); }
+    } catch (error) { if (error?.status === 401 || validSend()) fail(error, token, true); }
+    finally { finishWrite(); if (validSend()) { state.sending = false; draw(); } }
   }
   async function saveEmployee(form) {
     const employee = state.selectedEmployee;
@@ -722,8 +734,16 @@ export function createController({ state, api, render = () => {}, storage = glob
     finally { if (attachmentEpoch === readToken && valid(token)) { state.attachmentReading = false; draw(); } target.value = ''; }
   }
   const resume = () => { nativePaused = false; if (!disposed) void refresh({ silent: true }); };
-  const pause = () => { nativePaused = true; };
-  const visibility = () => { if (!globalThis.document?.hidden) resume(); };
+  const pause = () => {
+    if (disposed || nativePaused) return;
+    nativePaused = true;
+    chatReadEpoch++; conversationReads.clear(); invalidateEmployeeReads(); renewEmployeeGets();
+    const resource = state.employeeResources.conversation;
+    if (resource.phase === 'loading') resource.phase = resource.error ? 'error' : resource.lastUpdated ? 'ready' : 'idle';
+    state.chatLoading = false;
+    if (state.page === 'chat') state.busy = false;
+  };
+  const visibility = () => { if (globalThis.document?.hidden) pause(); else resume(); };
   function schedule() {
     if (timer) clearInterval(timer);
     timer = setInterval(() => { if (!nativePaused && !globalThis.document?.hidden) void refresh({ silent: true }); }, 8000);
@@ -747,6 +767,7 @@ export function createController({ state, api, render = () => {}, storage = glob
   }
   function dispose() {
     disposed = true; epoch++; clearInterval(timer); timer = null; composers.clear(); pendingMutations.clear(); routineRequests.clear(); resourceReads.clear(); employeeReads.clear(); employeeWrites.clear(); phoneRead = null;
+    employeeGets.abort();
     botSettings.dispose?.(); deviceSettings.dispose?.();
     inbox.dispose(); forwarding.dispose();
     globalThis.document?.removeEventListener('visibilitychange', visibility);

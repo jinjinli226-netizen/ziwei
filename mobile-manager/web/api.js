@@ -4,12 +4,17 @@ export function createApi({ fetchImpl = globalThis.fetch?.bind(globalThis), orig
   const base = String(origin || '').replace(/\/$/, '');
   // Keep only bounded, first-party response text. Revalidate every read against
   // the authenticated server; no cached response is accepted without its 304.
-  const readCache = new Map(), openingConversations = new Map(), cacheLimit = 32 * 1024 * 1024;
+  const readCache = new Map(), openingConversations = new Map(), creatingConversations = new Map(), cacheLimit = 32 * 1024 * 1024;
   let cacheBytes = 0, cacheEpoch = 0, authEpoch = 0;
   function clearReads() { cacheEpoch++; readCache.clear(); cacheBytes = 0; }
-  function clearAuthenticationReads() { authEpoch++; clearReads(); openingConversations.clear(); }
+  function clearAuthenticationReads() { authEpoch++; clearReads(); openingConversations.clear(); creatingConversations.clear(); }
   function requireSameAuthentication(epoch) { if (epoch !== authEpoch) throw new Error('登录状态已变化，请重新打开聊天'); }
   function forgetRead(key) { const previous = readCache.get(key); if (previous) cacheBytes -= previous.text.length * 2; readCache.delete(key); }
+  function touchRead(key, entry, epoch) {
+    // A concurrent read may already have replaced or evicted this snapshot.
+    if (epoch !== cacheEpoch || readCache.get(key) !== entry) return;
+    readCache.delete(key); readCache.set(key, entry);
+  }
   function rememberRead(key, etag, data, epoch) {
     if (epoch !== cacheEpoch) return;
     forgetRead(key);
@@ -27,6 +32,12 @@ export function createApi({ fetchImpl = globalThis.fetch?.bind(globalThis), orig
     const text = typeof value === 'string' ? value.replace(/^\?/, '') : new URLSearchParams(Object.entries(value || {}).filter(([, v]) => v !== undefined && v !== null && v !== '')).toString();
     return text ? `?${text}` : '';
   };
+  const readOptions = options => ({ signal: options?.signal });
+  function requireActiveRead(signal, path, startedAt) {
+    if (signal?.aborted) throw Object.assign(new Error('读取已取消'), {
+      code: 'READ_CANCELLED', uncertain: false, requestPath: path, method: 'GET', elapsedMs: Math.max(0, Date.now() - startedAt),
+    });
+  }
   async function request(path, { method = 'GET', body, signal, invalidateReads = true } = {}) {
     const startedAt = Date.now();
     const epoch = cacheEpoch, cached = method === 'GET' ? readCache.get(path) : null;
@@ -40,6 +51,7 @@ export function createApi({ fetchImpl = globalThis.fetch?.bind(globalThis), orig
     try {
       let response, data;
       try {
+        if (method === 'GET') requireActiveRead(signal, path, startedAt);
         response = await fetchImpl(`${base}${path}`, {
           method, credentials: 'include', cache: 'no-store',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...(cached ? { 'If-None-Match': cached.etag } : {}) },
@@ -49,6 +61,7 @@ export function createApi({ fetchImpl = globalThis.fetch?.bind(globalThis), orig
         if (response.status === 304) {
           if (!cached || epoch !== cacheEpoch) throw new Error('No current authenticated snapshot for 304');
           // Parse fresh text so callers cannot mutate the retained snapshot.
+          touchRead(path, cached, epoch);
           return JSON.parse(cached.text);
         }
         data = response.status === 204 ? {} : await response.json().catch(cause => {
@@ -56,10 +69,12 @@ export function createApi({ fetchImpl = globalThis.fetch?.bind(globalThis), orig
           throw cause;
         });
       } catch (cause) {
-        const error = new Error(timedOut ? '读取超时，请刷新重试' : method === 'GET' ? '连接失败或返回内容无法读取，请刷新重试' : '尚未收到操作回执，请先刷新核对；重试消息会沿用原请求标识');
+        const cancelled = method === 'GET' && signal?.aborted && !timedOut;
+        const error = new Error(timedOut ? '读取超时，请刷新重试' : cancelled ? '读取已取消' : method === 'GET' ? '连接失败或返回内容无法读取，请刷新重试' : '尚未收到操作回执，请先刷新核对；重试消息会沿用原请求标识');
         error.cause = cause;
         error.uncertain = method !== 'GET';
         if (timedOut) error.code = 'READ_TIMEOUT';
+        else if (cancelled) error.code = 'READ_CANCELLED';
         throw error;
       }
       if (!response.ok) {
@@ -101,8 +116,8 @@ export function createApi({ fetchImpl = globalThis.fetch?.bind(globalThis), orig
     hermesProfiles: (workspace, deviceId) => get(`${ws(workspace)}/hermes/profiles${query({ deviceId })}`),
     employeeMcpStatus: (workspace, id) => get(`${ws(workspace)}/employees/${enc(id)}/mcp/status`),
     bots: workspace => get(mobile(`${ws(workspace)}/bots`)),
-    bot: (workspace, id) => get(mobile(botPath(workspace, id))),
-    botRuns: (workspace, id) => get(mobile(`${botPath(workspace, id)}/runs`)),
+    bot: (workspace, id, options) => get(mobile(botPath(workspace, id)), readOptions(options)),
+    botRuns: (workspace, id, options) => get(mobile(`${botPath(workspace, id)}/runs`), readOptions(options)),
     botCapabilities: (workspace, deviceId) => get(`${ws(workspace)}/bots/capabilities${query({ deviceId })}`),
     validateBot: (workspace, id, body) => post(`${botPath(workspace, id)}/validate`, body),
     updateBot: (workspace, id, body) => patch(botPath(workspace, id), body),
@@ -128,7 +143,7 @@ export function createApi({ fetchImpl = globalThis.fetch?.bind(globalThis), orig
     approvePhoneEnrollment: (workspace, id) => post(`${phonePath(workspace)}/enrollment-requests/${enc(id)}/approve`),
     rejectPhoneEnrollment: (workspace, id) => post(`${phonePath(workspace)}/enrollment-requests/${enc(id)}/reject`),
     phoneControl: (workspace, id, body) => post(`${phonePath(workspace, id)}/control`, body),
-    conversations: (workspace, employeeId) => get(`${ws(workspace)}/conversations${query({ employeeId })}`),
+    conversations: (workspace, employeeId, options) => get(`${ws(workspace)}/conversations${query({ employeeId })}`, readOptions(options)),
     chats: workspace => get(`${ws(workspace)}/chats`),
     markConversationRead: (id, { messageId }) => request(`/api/conversations/${enc(id)}/read`, { method: 'POST', body: { messageId }, invalidateReads: false }),
     forwardMessages: async (id, body) => {
@@ -150,15 +165,15 @@ export function createApi({ fetchImpl = globalThis.fetch?.bind(globalThis), orig
       return value;
     },
     createConversation: (workspace, body) => post(`${ws(workspace)}/conversations`, body),
-    conversation: async id => {
-      const conversation = await get(mobile(`/api/conversations/${enc(id)}`));
+    conversation: async (id, options) => {
+      const conversation = await get(mobile(`/api/conversations/${enc(id)}`), readOptions(options));
       if (conversation?.id !== id || !Array.isArray(conversation.messages)) throw new Error('聊天记录返回异常，请刷新重试');
       return conversation;
     },
     sendMessage: (id, body) => post(`/api/conversations/${enc(id)}/messages`, {
       content: body.content || '', attachments: body.attachments || [], clientMessageId: body.clientMessageId,
     }),
-    botRoutines: (workspace, id) => get(`${botPath(workspace, id)}/routines`),
+    botRoutines: (workspace, id, options) => get(`${botPath(workspace, id)}/routines`, readOptions(options)),
     createRoutine: (workspace, id, body) => post(`${botPath(workspace, id)}/routines`, body),
     updateRoutine: (workspace, id, routineId, body) => patch(`${botPath(workspace, id)}/routines/${enc(routineId)}`, body),
     runRoutine: (workspace, id, routineId, body) => post(`${botPath(workspace, id)}/routines/${enc(routineId)}/run`, body),
@@ -168,28 +183,42 @@ export function createApi({ fetchImpl = globalThis.fetch?.bind(globalThis), orig
     phoneCommand: (workspace, id, action, args = {}) => post(`${phonePath(workspace, id)}/commands`, { action, args }),
   };
   /** Resolves the existing identity; this never initializes a Bot or provisions a Profile/HOME. */
-  async function resolveEmployeeConversation(workspace, employee, expectedAuthentication) {
+  async function resolveEmployeeConversation(workspace, employee, expectedAuthentication, options, key) {
     if (!employee?.id) throw new Error('请先选择数字员工');
+    const startedAt = Date.now(), lookupPath = `${ws(workspace)}/conversations${query({ employeeId: employee.id })}`;
     let bot = employee.bot || (Object.hasOwn(employee, 'configuration_state') ? employee : null);
-    if (!bot && !employee.main_conversation_id && employee.runtime === 'Hermes') bot = await api.bot(workspace, employee.id);
+    if (!bot && !employee.main_conversation_id && employee.runtime === 'Hermes') bot = await api.bot(workspace, employee.id, options);
     requireSameAuthentication(expectedAuthentication);
     const mainId = employee.main_conversation_id || bot?.main_conversation_id;
-    if (mainId) return api.conversation(mainId);
+    if (mainId) return api.conversation(mainId, options);
     if (bot?.configuration_state === 'initialized') throw new Error('这位员工的主聊天尚未就绪，请在电脑版核对');
-    const result = await api.conversations(workspace, employee.id);
+    const result = await api.conversations(workspace, employee.id, options);
     requireSameAuthentication(expectedAuthentication);
+    requireActiveRead(options.signal, lookupPath, startedAt);
     const existing = (result.conversations || []).find(row => row.employee_id === employee.id && row.status === 'active');
-    if (existing) return api.conversation(existing.id);
-    return api.createConversation(workspace, { employeeId: employee.id, title: `${employee.name || employee.employee?.name || '数字员工'} · 长期聊天` });
+    if (existing) return api.conversation(existing.id, options);
+    // Share a submitted creation until all concurrent opening scopes finish.
+    // A lookup may have captured an empty result before that creation committed.
+    if (!creatingConversations.has(key)) {
+      const creation = api.createConversation(workspace, { employeeId: employee.id, title: `${employee.name || employee.employee?.name || '数字员工'} · 长期聊天` });
+      creatingConversations.set(key, creation);
+    }
+    return creatingConversations.get(key);
   }
-  api.getEmployeeConversation = (workspace, employee) => {
+  api.getEmployeeConversation = (workspace, employee, options = {}) => {
     const expectedAuthentication = authEpoch;
     const key = `${expectedAuthentication}:${typeof workspace === 'object' ? workspace?.slug : workspace}:${employee?.id}`;
-    if (!openingConversations.has(key)) {
-      const opening = resolveEmployeeConversation(workspace, employee, expectedAuthentication).then(value => { requireSameAuthentication(expectedAuthentication); return value; }).finally(() => { if (openingConversations.get(key) === opening) openingConversations.delete(key); });
-      openingConversations.set(key, opening);
+    let scopes = openingConversations.get(key);
+    if (!scopes) { scopes = new Map(); openingConversations.set(key, scopes); }
+    const signal = options.signal || null;
+    if (!scopes.has(signal)) {
+      const opening = resolveEmployeeConversation(workspace, employee, expectedAuthentication, readOptions(options), key).then(value => { requireSameAuthentication(expectedAuthentication); return value; }).finally(() => {
+        if (scopes.get(signal) === opening) scopes.delete(signal);
+        if (!scopes.size && openingConversations.get(key) === scopes) { openingConversations.delete(key); creatingConversations.delete(key); }
+      });
+      scopes.set(signal, opening);
     }
-    return openingConversations.get(key);
+    return scopes.get(signal);
   };
   return api;
 }

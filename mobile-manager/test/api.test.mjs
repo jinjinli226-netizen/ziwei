@@ -51,6 +51,107 @@ test('a stalled history read times out and can retry the same conversation', asy
   assert(calls.every(call=>call.options.method==='GET'));
 });
 
+for(const readTimeoutMs of [0,20000])test(`employee GET scopes propagate abort and classify cancellation with timeout ${readTimeoutMs}`, async()=>{
+  const calls=[];
+  const api=createApi({readTimeoutMs,fetchImpl:async(url,options)=>{
+    calls.push({url,options});
+    return new Promise((_resolve,reject)=>options.signal.addEventListener('abort',()=>reject(new DOMException('Aborted','AbortError')),{once:true}));
+  }});
+  const reads=[
+    options=>api.bot('ws','employee',options),options=>api.botRuns('ws','employee',options),options=>api.botRoutines('ws','employee',options),
+    options=>api.conversation('main',options),options=>api.conversations('ws','employee',options),
+  ];
+  const scopes=reads.map(()=>new AbortController());
+  const pending=reads.map((read,index)=>read({signal:scopes[index].signal,method:'POST',body:{mustNotSend:true}}));
+  assert.equal(calls.length,reads.length);assert(calls.every(call=>call.options.method==='GET'&&call.options.body===undefined));
+  const rejected=pending.map((promise,index)=>assert.rejects(promise,error=>error.code==='READ_CANCELLED'&&error.uncertain===false&&error.method==='GET'&&error.requestPath===calls[index].url&&Number.isFinite(error.elapsedMs)));
+  scopes.forEach(scope=>scope.abort());assert(calls.every(call=>call.options.signal.aborted));await Promise.all(rejected);
+  assert.equal(calls.length,reads.length,'cancelling reads must not retry them');
+});
+
+test('an already cancelled GET scope starts no network request', async()=>{
+  let calls=0;const scope=new AbortController();scope.abort();
+  const api=createApi({fetchImpl:async()=>{calls++;return response({id:'main',messages:[]});}});
+  await assert.rejects(api.conversation('main',{signal:scope.signal}),error=>error.code==='READ_CANCELLED'&&error.requestPath==='/api/conversations/main?view=mobile');
+  assert.equal(calls,0);
+});
+
+test('opening an employee forwards its read scope through Bot, lookup and original history GETs', async()=>{
+  for(const runtime of ['Hermes','Other']){
+    const calls=[],scope=new AbortController();
+    const api=createApi({readTimeoutMs:0,fetchImpl:async(url,options)=>{
+      calls.push({url,options});
+      if(url.includes('/bots/'))return response({configuration_state:'draft'});
+      if(url.includes('/conversations?'))return response({conversations:[{id:'original',employee_id:'employee',status:'active'}]});
+      return response({id:'original',employee_id:'employee',messages:[]});
+    }});
+    assert.equal((await api.getEmployeeConversation('ws',{id:'employee',runtime},{signal:scope.signal})).id,'original');
+    assert.equal(calls.length,runtime==='Hermes'?3:2);assert(calls.every(call=>call.options.method==='GET'&&call.options.signal===scope.signal));
+  }
+});
+
+test('a fresh scope reopens the same employee before the aborted read promise settles', async()=>{
+  const calls=[];let rejectOld;
+  const api=createApi({fetchImpl:async(url,options)=>{
+    calls.push({url,options});
+    if(calls.length===1)return new Promise((_resolve,reject)=>{rejectOld=reject;});
+    return response({id:'main',messages:[{content:'fresh scope'}]});
+  }});
+  const employee={id:'employee',runtime:'Hermes',main_conversation_id:'main'},firstScope=new AbortController(),nextScope=new AbortController();
+  const old=api.getEmployeeConversation('ws',employee,{signal:firstScope.signal});
+  assert.equal(api.getEmployeeConversation('ws',employee,{signal:firstScope.signal}),old,'the same active scope remains single-flight');
+  const rejected=assert.rejects(old,error=>error.code==='READ_CANCELLED');firstScope.abort();
+  assert.equal(calls[0].options.signal.aborted,true);
+  const next=api.getEmployeeConversation('ws',employee,{signal:nextScope.signal});assert.notEqual(next,old);
+  assert.equal((await next).messages[0].content,'fresh scope');assert.equal(calls.length,2);assert.equal(calls[1].options.signal.aborted,false);
+  rejectOld(new DOMException('Aborted','AbortError'));await rejected;
+});
+
+test('cancelled ordinary lookup never starts creation and submitted creation remains uncancelled and single-flight', async()=>{
+  const cancelled=new AbortController();let cancelledPosts=0;
+  const cancelledApi=createApi({fetchImpl:async(_url,options)=>{
+    if(options.method==='POST'){cancelledPosts++;return response({});}
+    cancelled.abort();return response({conversations:[]});
+  }});
+  await assert.rejects(cancelledApi.getEmployeeConversation('ws',{id:'ordinary',runtime:'Other'},{signal:cancelled.signal}),error=>error.code==='READ_CANCELLED');
+  assert.equal(cancelledPosts,0);
+  const calls=[],firstScope=new AbortController(),nextScope=new AbortController();let finishCreation,creationStarted;
+  const started=new Promise(resolve=>{creationStarted=resolve;});
+  const api=createApi({fetchImpl:async(url,options)=>{
+    calls.push({url,options});
+    if(options.method==='GET')return response({conversations:[]});
+    creationStarted();return new Promise(resolve=>{finishCreation=resolve;});
+  }});
+  const employee={id:'ordinary',name:'甲',runtime:'Other'};
+  const first=api.getEmployeeConversation('ws',employee,{signal:firstScope.signal});await started;firstScope.abort();
+  const next=api.getEmployeeConversation('ws',employee,{signal:nextScope.signal});
+  await new Promise(resolve=>setImmediate(resolve));
+  const writes=calls.filter(call=>call.options.method==='POST');assert.equal(writes.length,1);assert.equal(writes[0].options.signal,undefined);
+  finishCreation(response({id:'new',messages:[]}));assert.deepEqual((await Promise.all([first,next])).map(value=>value.id),['new','new']);
+  assert.equal(calls.filter(call=>call.options.method==='POST').length,1,'no cancellation or retry may duplicate the creation');
+});
+
+test('a delayed empty lookup cannot create again after another scope creation has completed', async()=>{
+  let reads=0,posted=0,finishCreation,finishLateLookup,creationStarted,lateLookupStarted;
+  const started=new Promise(resolve=>{creationStarted=resolve;}),lookupStarted=new Promise(resolve=>{lateLookupStarted=resolve;});
+  const api=createApi({fetchImpl:async(_url,options)=>{
+    if(options.method==='GET'){
+      if(++reads!==2)return response({conversations:[]});
+      lateLookupStarted();return new Promise(resolve=>{finishLateLookup=resolve;});
+    }
+    if(++posted===1){creationStarted();return new Promise(resolve=>{finishCreation=resolve;});}
+    return response({id:'new-after-archive',messages:[]});
+  }});
+  const employee={id:'ordinary',runtime:'Other'},firstScope=new AbortController(),nextScope=new AbortController();
+  const first=api.getEmployeeConversation('ws',employee,{signal:firstScope.signal});await started;firstScope.abort();
+  const next=api.getEmployeeConversation('ws',employee,{signal:nextScope.signal});await lookupStarted;
+  finishCreation(response({id:'original',messages:[]}));assert.equal((await first).id,'original');
+  finishLateLookup(response({conversations:[]}));assert.equal((await next).id,'original');
+  assert.equal(posted,1,'the lookup captured before commit must share that completed creation');
+  const later=await api.getEmployeeConversation('ws',employee,{signal:new AbortController().signal});
+  assert.equal(later.id,'new-after-archive');assert.equal(posted,2,'the completed creation is released once concurrent opening scopes finish');
+});
+
 test('invalid history responses never masquerade as an empty conversation', async () => {
   for(const value of [{},{id:'original'},{id:'another',messages:[]}]) {
     const api=createApi({fetchImpl:async()=>response(value)});
@@ -73,6 +174,68 @@ test('unchanged large reads use server ETags and return independent, original sn
   assert.equal(calls[1]['If-None-Match'],'W/"revision-1"');version=2;
   assert.equal((await api.employees('original')).employees[0].name,'员工2');
   assert.equal((await api.employees('original')).employees[0].name,'员工2');assert.equal(calls[3]['If-None-Match'],'W/"revision-2"');
+});
+
+test('revalidated history stays recent across different routes while cold reads leave the eight-entry cache', async () => {
+  const seen=[];
+  const api=createApi({fetchImpl:async(url,options)=>{
+    seen.push({url,etag:options.headers['If-None-Match']});
+    if(options.headers['If-None-Match'])return new Response(null,{status:304});
+    return new Response(JSON.stringify(url.startsWith('/api/conversations/')?{id:'main',messages:[]}:{items:[]}),{headers:{etag:'"original"'}});
+  }});
+  await api.conversation('main');await api.employees('ws');await api.chats('ws');await api.bot('ws','employee');
+  await api.botRuns('ws','employee');await api.botRoutines('ws','employee');await api.models('ws');await api.skills('ws');
+  await api.conversation('main');assert.equal(seen.at(-1).etag,'"original"');
+  await api.devices('ws');
+  await api.conversation('main');assert.equal(seen.at(-1).etag,'"original"','recently revalidated history must survive visiting another resource');
+  await api.employees('ws');assert.equal(seen.at(-1).etag,undefined,'the oldest unused resource must be evicted');
+  await api.chats('ws');assert.equal(seen.at(-1).etag,undefined,'inserting the ninth resource must keep evicting cold entries');
+});
+
+test('an updated 200 response refreshes recency without keeping more than eight snapshots', async () => {
+  const seen=[];let updateHistory=false;
+  const api=createApi({fetchImpl:async(url,options)=>{
+    seen.push({url,etag:options.headers['If-None-Match']});
+    if(options.headers['If-None-Match']&&!updateHistory)return new Response(null,{status:304});
+    const isHistory=url.startsWith('/api/conversations/');
+    return new Response(JSON.stringify(isHistory?{id:'main',messages:[{content:updateHistory?'updated':'original'}]}:{}),{headers:{etag:updateHistory?'"updated"':'"original"'}});
+  }});
+  await api.conversation('main');await api.employees('ws');await api.chats('ws');await api.bot('ws','employee');
+  await api.botRuns('ws','employee');await api.botRoutines('ws','employee');await api.models('ws');await api.skills('ws');
+  updateHistory=true;assert.equal((await api.conversation('main')).messages[0].content,'updated');updateHistory=false;
+  await api.devices('ws');await api.conversation('main');assert.equal(seen.at(-1).etag,'"updated"');
+  await api.employees('ws');assert.equal(seen.at(-1).etag,undefined);
+});
+
+test('a late 304 cannot replace a newer snapshot when refreshing cache recency', async () => {
+  const seen=[];let releaseOld;
+  const api=createApi({fetchImpl:async(_url,options)=>{
+    seen.push(options.headers['If-None-Match']);
+    if(seen.length===2)return new Promise(resolve=>{releaseOld=resolve;});
+    if(seen.length===4)return new Response(null,{status:304});
+    const updated=seen.length===3;
+    return new Response(JSON.stringify({id:'main',messages:[{content:updated?'updated':'original'}]}),{headers:{etag:updated?'"updated"':'"original"'}});
+  }});
+  await api.conversation('main');const old=api.conversation('main');
+  assert.equal((await api.conversation('main')).messages[0].content,'updated');
+  releaseOld(new Response(null,{status:304}));assert.equal((await old).messages[0].content,'original');
+  assert.equal((await api.conversation('main')).messages[0].content,'updated');assert.equal(seen.at(-1),'"updated"');
+});
+
+test('LRU reads remain bounded by the 32 MiB response-text budget and skip oversized snapshots', async () => {
+  const seen=[],padding='x'.repeat(6*1024*1024),oversized='x'.repeat(17*1024*1024);
+  const api=createApi({fetchImpl:async(url,options)=>{
+    seen.push({url,etag:options.headers['If-None-Match']});
+    if(options.headers['If-None-Match'])return new Response(null,{status:304});
+    const value=url.startsWith('/api/conversations/')?{id:'main',messages:[],padding}:url.endsWith('/models')?{padding:oversized}:{padding};
+    return new Response(JSON.stringify(value),{headers:{etag:'"original"'}});
+  }});
+  await api.conversation('main');await api.employees('ws');
+  await api.conversation('main');assert.equal(seen.at(-1).etag,'"original"');
+  await api.chats('ws');
+  await api.conversation('main');assert.equal(seen.at(-1).etag,'"original"','the recent history should survive byte-budget eviction');
+  await api.employees('ws');assert.equal(seen.at(-1).etag,undefined,'three six-MiB texts exceed the 32 MiB string budget');
+  await api.models('ws');await api.models('ws');assert.equal(seen.at(-1).etag,undefined,'a seventeen-MiB text must never enter the cache');
 });
 
 test('authentication boundaries and accepted writes invalidate conditional read snapshots', async () => {

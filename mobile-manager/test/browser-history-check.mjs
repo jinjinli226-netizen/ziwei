@@ -38,7 +38,7 @@ const first=createEmployee('闲鱼运营大神 · 隔离历史验收',longHistor
 repo.addConversationMessage(first.conversation.id,{role:'assistant',content:'原聊天图片 HERMES-HISTORY-IMAGE',attachments:[{name:'original.png',mimeType:'image/png',size:Buffer.from(png,'base64').length,contentEncoding:'base64',content:png}],dispatch:false});
 const second=createEmployee('TikTokTrendS · 隔离历史验收',secondMarker);
 const employeeIds=new Set([first.employee.id,second.employee.id]);
-const requests=[],errors=[],screenshots=[],checks=[],sessions=[];
+const requests=[],errors=[],screenshots=[],checks=[],sessions=[],scopeProofs=[];
 const inboxRows=()=>conversationReads.list(slug,readActor).chats.filter(chat=>employeeIds.has(chat.employeeId));
 const browser=await chromium.launch({executablePath:process.env.ZIWEI_BROWSER_EXECUTABLE||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
 let activePage;
@@ -48,6 +48,15 @@ async function fixture(name,{botMode='ok',auxMode='ok',firstHistoryFailures=0,ho
   const page=await context.newPage(),pending=[];
   activePage=page;page.setDefaultTimeout(6000);
   page.on('pageerror',error=>errors.push({scenario:name,message:error.message}));
+  await page.addInitScript(()=>{
+    const nativeFetch=window.fetch.bind(window);window.__scopeReadEvents=[];
+    window.fetch=(input,options={})=>{
+      const event={path:new URL(typeof input==='string'?input:input.url,location.href).pathname,aborted:Boolean(options.signal?.aborted),status:null,error:null};
+      window.__scopeReadEvents.push(event);
+      options.signal?.addEventListener('abort',()=>{event.aborted=true;},{once:true});
+      return nativeFetch(input,options).then(response=>{event.status=response.status;return response;},error=>{event.error=error.name;throw error;});
+    };
+  });
   const control={botMode,auxMode,firstHistoryFailures,holdFirstHistory};
   const json=(route,data,status=200)=>route.fulfill({status,contentType:'application/json',body:JSON.stringify(data)});
   const gated=async(route,kind,data)=>{
@@ -166,18 +175,47 @@ try{
   await late.page.locator('[data-action=back]').first().click();
   await chat(late.page,second.employee.id);
   await late.page.getByText(secondMarker,{exact:true}).waitFor();
-  const oldResponse=late.page.waitForResponse(response=>new URL(response.url()).pathname===`/api/conversations/${first.conversation.id}`);
-  late.release('history');await oldResponse;
+  await late.page.waitForFunction(path=>window.__scopeReadEvents.some(event=>event.path===path&&event.aborted&&event.error==='AbortError'),`/api/conversations/${first.conversation.id}`);
   await late.page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
   assert.equal(await late.page.getByRole('heading',{name:second.employee.name,exact:true}).count(),1);
   assert.equal(await late.page.getByText(secondMarker,{exact:true}).count(),1);
   assert.equal(await late.page.getByText(marker,{exact:false}).count(),0);
-  await capture(late.page,'05-late-history-isolated');checks.push('late original history cannot overwrite another employee chat');
+  await capture(late.page,'05-old-history-aborted-and-new-employee-isolated');checks.push('switching employees truly aborts the old browser fetch while the new original history remains isolated');
+  late.control.holdFirstHistory=false;
+  await late.page.locator('[data-action=back]').first().click();await chat(late.page,first.employee.id);await showHistory(late.page);
+  assert.equal(await late.page.getByRole('heading',{name:first.employee.name,exact:true}).count(),1);
+  const reopened=await late.page.evaluate(path=>window.__scopeReadEvents.filter(event=>event.path===path),`/api/conversations/${first.conversation.id}`);
+  assert.ok(reopened.length>=2&&reopened.at(-1).status===200&&!reopened.at(-1).aborted,'reopening the employee must complete a fresh fetch before releasing the old routed request');
+  scopeProofs.push({scenario:'employee-switch-and-reopen',conversationId:first.conversation.id,fetchEvents:reopened});
+  await capture(late.page,'06-same-employee-reopened-before-old-route-release');checks.push('a new scope reopens the same canonical history before its cancelled old route settles');
+  late.release('history');
   await late.close();
+
+  const background=await fixture('native-background-cancel');
+  await chat(background.page,first.employee.id);await showHistory(background.page);
+  await background.page.locator('textarea[name=draft]').fill('KEEP-DRAFT-ON-PAUSE');
+  background.control.holdFirstHistory=true;
+  const polling=background.page.waitForRequest(request=>new URL(request.url()).pathname===`/api/conversations/${first.conversation.id}`);
+  await background.page.evaluate(()=>window.dispatchEvent(new CustomEvent('ziwei:resume')));await polling;
+  await background.page.evaluate(()=>window.dispatchEvent(new CustomEvent('ziwei:pause')));
+  await background.page.waitForFunction(path=>window.__scopeReadEvents.some(event=>event.path===path&&event.aborted&&event.error==='AbortError'),`/api/conversations/${first.conversation.id}`);
+  assert.equal(await background.page.locator('textarea[name=draft]').inputValue(),'KEEP-DRAFT-ON-PAUSE');
+  assert.equal(await background.page.getByText(/读取超时|读取已取消/).count(),0);
+  background.release('history');
+  const resumed=background.page.waitForResponse(response=>new URL(response.url()).pathname===`/api/conversations/${first.conversation.id}`);
+  await background.page.evaluate(()=>window.dispatchEvent(new CustomEvent('ziwei:resume')));await resumed;
+  await background.page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+  await showHistory(background.page);assert.equal(await background.page.locator('textarea[name=draft]').inputValue(),'KEEP-DRAFT-ON-PAUSE');
+  assert.equal(await background.page.getByText(/读取超时|读取已取消/).count(),0);
+  const backgroundEvents=await background.page.evaluate(path=>window.__scopeReadEvents.filter(event=>event.path===path),`/api/conversations/${first.conversation.id}`);
+  assert.equal(backgroundEvents.at(-1).status,200);assert.equal(backgroundEvents.at(-1).aborted,false);
+  scopeProofs.push({scenario:'native-background-cancel-and-resume',conversationId:first.conversation.id,fetchEvents:backgroundEvents});
+  await capture(background.page,'07-pause-resume-original-id-and-draft');checks.push('native pause aborts an in-flight history fetch and resume reloads the original ID with its draft and no timeout banner');
+  await background.close();
 
   assert.deepEqual(errors,[]);
   assert.ok(requests.every(request=>request.method==='GET'||request.method==='POST'&&/^\/api\/conversations\/[^/]+\/read$/.test(request.path)),'History checks may only write account-local read cursors');
-  const result={passed:true,checks,screenshots,requests:requests.length,readCursorWrites:requests.filter(request=>request.method==='POST').length,conversationCreates:0,realDeviceActions:0,externalModelCalls:0,evidence:'real in-memory initialized Hermes Bot, original conversation and account-local read service; routed HTTP only; no listeners'};
+  const result={passed:true,checks,screenshots,scopeProofs,requests:requests.length,readCursorWrites:requests.filter(request=>request.method==='POST').length,conversationCreates:0,realDeviceActions:0,externalModelCalls:0,evidence:'real in-memory initialized Hermes Bot, original conversation and account-local read service; routed HTTP only; no listeners; browser-native fetch abort is observed independently of route fulfillment'};
   await fs.writeFile(path.join(out,'result.json'),JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify(result,null,2));
 }catch(error){
   const evidence={passed:false,error:error.stack||error.message,errors,requests,checks};

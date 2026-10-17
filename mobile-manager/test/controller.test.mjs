@@ -689,3 +689,101 @@ test('polling skips conversation reads during a pending send and resumes after a
   assert.equal(f.state.sending,false);assert.equal(f.state.messages[0].id,'history-1');assert.equal(f.state.draft,'保留待发送消息');assert.match(f.state.error,/发送未获得确认/);
   await f.controller.refresh();assert.equal(reads,2);assert.equal(f.state.messages[0].id,'history-2');
 });
+
+function waitForAbort(signal) {
+  assert(signal instanceof AbortSignal);
+  return new Promise((_resolve,reject) => {
+    const abort=()=>reject(Object.assign(new Error('读取已取消'),{code:'READ_CANCELLED'}));
+    if(signal.aborted)abort();else signal.addEventListener('abort',abort,{once:true});
+  });
+}
+
+test('switching employees cancels every old employee GET before opening the new history', async t => {
+  const oldSignals=[],newSignals=[];
+  let f;
+  const read=(employeeId,options,value)=>{
+    (employeeId==='one'?oldSignals:newSignals).push(options.signal);
+    return employeeId==='one'?waitForAbort(options.signal):Promise.resolve(value);
+  };
+  f=initializedFixture({
+    conversation:(id,options)=>read(id==='original-main'?'one':'two',options,{id,employee_id:'two',messages:[{id:'new-history',content:'员工乙原历史'}]}),
+    bot:(_workspace,id,options)=>read(id,options,id==='one'?f.bot:other),
+    botRuns:(_workspace,id,options)=>read(id,options,{runs:[]}),
+    botRoutines:(_workspace,id,options)=>read(id,options,{routines:[]}),
+  });
+  const other={...f.bot,id:'two',employee_id:'two',employee:{id:'two',name:'员工乙',runtime:'Hermes'},main_conversation_id:'second-main'};
+  f.state.employees.push({...other.employee,bot:other});t.after(()=>f.controller.dispose());
+  const old=f.controller.actions.chat({id:'one'});await tick();
+  assert.equal(oldSignals.length,4);assert(oldSignals.every(signal=>!signal.aborted));
+  await promptly(f.controller.actions.chat({id:'two'}));await promptly(old);await tick();
+  assert(oldSignals.every(signal=>signal.aborted));assert(newSignals.every(signal=>!signal.aborted));
+  assert.equal(f.state.conversation.id,'second-main');assert.equal(f.state.messages[0].id,'new-history');
+  assert.equal(f.state.error,'');assert.equal(f.state.employeeResources.conversation.error,'');
+});
+
+test('leaving an unresolved ordinary chat cancels its canonical conversation lookup', async t => {
+  let lookupSignal;
+  const f=fixture({}, {getEmployeeConversation:(_workspace,_employee,options)=>{lookupSignal=options.signal;return waitForAbort(lookupSignal);}});
+  t.after(()=>f.controller.dispose());
+  const opening=f.controller.actions.chat({id:'one'});await tick();assert(!lookupSignal.aborted);
+  await f.controller.actions.navigate({tab:'chat'});await promptly(opening);
+  assert(lookupSignal.aborted);assert.equal(f.state.page,'home');assert.equal(f.state.conversation,null);assert.equal(f.state.error,'');
+});
+
+for(const kind of ['native','hidden'])test(`${kind} pause cancels stale GETs and resumes the same history without a timeout banner`,async t=>{
+  const oldDocument=globalThis.document,oldAdd=globalThis.addEventListener,oldRemove=globalThis.removeEventListener;
+  const native=new Map(),documentEvents=new Map();
+  globalThis.document={hidden:false,addEventListener:(name,handler)=>documentEvents.set(name,handler),removeEventListener(){}};
+  globalThis.addEventListener=(name,handler)=>native.set(name,handler);globalThis.removeEventListener=()=>{};
+  let calls=0,staleSignal;
+  const f=initializedFixture({
+    authMe:async()=>({user_id:'user-one'}),workspaces:async()=>({workspaces:[{slug:'workspace-one',role:'owner'}]}),
+    conversation:(id,options)=>{
+      calls++;
+      if(calls===2){staleSignal=options.signal;return waitForAbort(staleSignal);}
+      return Promise.resolve({id,employee_id:'one',messages:[{id:'history',content:`原历史${calls}`} ]});
+    },
+  });
+  t.after(()=>{f.controller.dispose();globalThis.document=oldDocument;globalThis.addEventListener=oldAdd;globalThis.removeEventListener=oldRemove;});
+  await f.controller.boot();f.state.employees=[{...f.bot.employee,bot:f.bot}];f.state.bots=[f.bot];
+  await f.controller.actions.chat({id:'one'});await tick();
+  const polling=f.controller.refresh();await tick();assert.equal(calls,2);
+  if(kind==='native')native.get('ziwei:pause')();else{globalThis.document.hidden=true;documentEvents.get('visibilitychange')();}
+  await promptly(polling);assert(staleSignal.aborted);
+  assert.equal(f.state.messages[0].content,'原历史1');assert.equal(f.state.employeeResources.conversation.phase,'ready');assert.equal(f.state.employeeResources.conversation.error,'');
+  await f.controller.refresh();assert.equal(calls,2,'paused app must not begin another background sync');
+  if(kind==='native')native.get('ziwei:resume')();else{globalThis.document.hidden=false;documentEvents.get('visibilitychange')();}
+  await tick();assert.equal(calls,3);assert.equal(f.state.conversation.id,'original-main');assert.equal(f.state.messages[0].content,'原历史3');assert.equal(f.state.error,'');
+});
+
+test('disposing the controller aborts outstanding employee reads',async()=>{
+  let signal;
+  const f=initializedFixture({conversation:(_id,options)=>{signal=options.signal;return waitForAbort(signal);}});
+  const opening=f.controller.actions.chat({id:'one'});await tick();f.controller.dispose();await promptly(opening);assert(signal.aborted);
+});
+
+for(const succeeds of [false,true])for(const resumeFirst of [false,true])test(`a pending send ${succeeds?'success':'failure'} ${resumeFirst?'after':'before'} resume keeps its receipt and unlocks history`,async t=>{
+  const oldAdd=globalThis.addEventListener,oldRemove=globalThis.removeEventListener,handlers=new Map();
+  globalThis.addEventListener=(name,handler)=>handlers.set(name,handler);globalThis.removeEventListener=()=>{};
+  const posted=deferred(),receipt=deferred();let reads=0,posts=0,clientMessageId;
+  const f=initializedFixture({
+    authMe:async()=>({user_id:'user-one'}),workspaces:async()=>({workspaces:[{slug:'workspace-one',role:'owner'}]}),
+    conversation:async id=>({id,employee_id:'one',messages:[{id:`history-${++reads}`,content:'原聊天'}]}),
+    sendMessage:(...args)=>{assert.equal(args.length,2);posts++;clientMessageId=args[1].clientMessageId;posted.resolve();return receipt.promise;},
+  });
+  t.after(()=>{f.controller.dispose();globalThis.addEventListener=oldAdd;globalThis.removeEventListener=oldRemove;});
+  await f.controller.boot();f.state.employees=[{...f.bot.employee,bot:f.bot}];f.state.bots=[f.bot];
+  await f.controller.actions.chat({id:'one'});await tick();
+  const sending=f.controller.submit('chat',form({draft:'原请求正文'}));await posted.promise;
+  handlers.get('ziwei:pause')();assert.equal(f.state.sending,true);
+  if(resumeFirst){handlers.get('ziwei:resume')();await tick();assert.equal(reads,1);}
+  receipt.resolve(succeeds?{id:'accepted'}:Promise.reject(new Error('发送未收到回执')));
+  await promptly(sending);assert.equal(f.state.sending,false);assert.equal(posts,1);
+  if(!resumeFirst){assert.equal(reads,1);handlers.get('ziwei:resume')();await tick();}
+  else if(!succeeds)await f.controller.refresh();
+  assert.equal(reads,2);assert.equal(f.state.conversation.id,'original-main');
+  assert.equal(f.state.employeeResources.conversation.error,'');
+  if(succeeds){assert.equal(f.state.draft,'');assert.equal(f.state.error,'');}
+  else{assert.equal(f.state.draft,'原请求正文');assert.match(f.state.error,/发送未收到回执/);assert([...f.storage.values.values()].some(value=>value.includes(clientMessageId)));}
+  assert.equal(posts,1,'foreground recovery must not resend a business request');
+});
