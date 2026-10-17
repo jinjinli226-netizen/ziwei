@@ -43,7 +43,7 @@ import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.Map;
 
-/** Management UI only. No device agent, accessibility service, background worker or JS bridge. */
+/** Management UI with optional bounded notification checks. No device agent or accessibility service. */
 public final class MainActivity extends Activity {
     private static final int PICK_IMAGES = 301;
     private static final int BACKGROUND = Color.rgb(248, 246, 253);
@@ -52,6 +52,9 @@ public final class MainActivity extends Activity {
     private ValueCallback<Uri[]> imageCallback;
     private boolean handlingBack;
     private OnBackInvokedCallback backCallback;
+    private NotificationBridge notificationBridge;
+    private volatile boolean trustedDocument;
+    private volatile boolean foreground;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -60,6 +63,7 @@ public final class MainActivity extends Activity {
         setContentView(root);
         configureInsets();
         createWebView(state);
+        NativeNotifications.click(this, getIntent());
         if (Build.VERSION.SDK_INT >= 33) {
             backCallback = this::handleBack;
             getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
@@ -90,6 +94,7 @@ public final class MainActivity extends Activity {
     @SuppressWarnings("deprecation")
     private void createWebView(Bundle state) {
         handlingBack = false;
+        trustedDocument = false;
         root.removeAllViews();
         webView = new WebView(this);
         webView.setBackgroundColor(BACKGROUND);
@@ -113,6 +118,9 @@ public final class MainActivity extends Activity {
         settings.setUserAgentString(settings.getUserAgentString() + " ZiweiManager/" + appVersion() + " Android");
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, false);
+        notificationBridge = new NotificationBridge(this);
+        NativeNotifications.listen(notificationBridge);
+        webView.addJavascriptInterface(notificationBridge, "ZiweiNotifications");
         webView.setWebViewClient(new AppWebViewClient());
         webView.setWebChromeClient(new AppChromeClient());
         webView.setDownloadListener((url, userAgent, disposition, type, length) -> showBlockedLink());
@@ -122,9 +130,19 @@ public final class MainActivity extends Activity {
     }
 
     private final class AppWebViewClient extends WebViewClient {
+        @Override public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
+            trustedDocument = view == webView && UrlPolicy.isAppDocument(url);
+        }
+
+        @Override public void onPageFinished(WebView view, String url) {
+            trustedDocument = view == webView && UrlPolicy.isAppDocument(url);
+            if (trustedDocument && notificationBridge != null) notificationBridge.emit();
+        }
+
         @Override public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
             String url = request.getUrl().toString();
             if (request.isForMainFrame() && !UrlPolicy.isAppDocument(url)) {
+                trustedDocument = false;
                 showBlockedLink();
                 return textResponse(403, "Forbidden", "Blocked document");
             }
@@ -170,6 +188,7 @@ public final class MainActivity extends Activity {
 
         @Override public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
             if (view == webView) {
+                trustedDocument = false;
                 cancelImagePicker();
                 root.removeView(view);
                 view.destroy();
@@ -260,6 +279,7 @@ public final class MainActivity extends Activity {
     private void showPageError(String message) {
         runOnUiThread(() -> {
             if (isFinishing() || isDestroyed()) return;
+            trustedDocument = false;
             root.removeAllViews();
             LinearLayout panel = new LinearLayout(this);
             panel.setOrientation(LinearLayout.VERTICAL);
@@ -306,10 +326,13 @@ public final class MainActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
+        foreground = true;
+        NativeNotifications.recover(this);
         if (webView != null) { webView.onResume(); dispatchLifecycle("resume"); }
     }
 
     @Override protected void onPause() {
+        foreground = false;
         dispatchLifecycle("pause");
         CookieManager.getInstance().flush();
         if (webView != null) webView.onPause();
@@ -322,6 +345,9 @@ public final class MainActivity extends Activity {
     }
 
     @Override protected void onDestroy() {
+        foreground = false;
+        trustedDocument = false;
+        if (notificationBridge != null) NativeNotifications.detach(notificationBridge);
         cancelImagePicker();
         if (Build.VERSION.SDK_INT >= 33 && backCallback != null) {
             getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(backCallback);
@@ -332,6 +358,28 @@ public final class MainActivity extends Activity {
             webView = null;
         }
         super.onDestroy();
+    }
+
+    boolean notificationDocumentTrusted() { return trustedDocument; }
+    boolean notificationForeground() { return foreground; }
+    void emitNotificationStatus(String json) {
+        if (trustedDocument && webView != null && UrlPolicy.isAppDocument(webView.getUrl())) {
+            webView.evaluateJavascript("window.dispatchEvent(new CustomEvent('ziwei:notifications',{detail:" + json + "}));", null);
+        }
+    }
+
+    @Override protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        NativeNotifications.click(this, intent);
+    }
+
+    @Override public void onRequestPermissionsResult(int request, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(request, permissions, grantResults);
+        if (request == NotificationBridge.PERMISSION_REQUEST) {
+            NativeNotifications.recover(this);
+            if (notificationBridge != null) notificationBridge.emit();
+        }
     }
 
     private static Map<String, String> assetHeaders() {

@@ -5,6 +5,9 @@ import { createChatInbox } from './chat-inbox.js';
 import { createForwarding } from './forwarding.js';
 import { createChatPreferences } from './chat-preferences.js';
 import { searchChatMessages } from './chat-search.js';
+import { createMobileGroups } from './mobile-groups.js';
+import { createMobileTasks } from './mobile-tasks.js';
+import { createMobileNotifications } from './mobile-notifications.js';
 
 const IMAGE_LIMIT = 10 * 1024 * 1024;
 const avatarLimit = 2 * 1024 * 1024;
@@ -39,7 +42,7 @@ async function readImages(files) {
 }
 
 /** UI effects are scoped to the authenticated account, workspace and selected employee. */
-export function createController({ state, api, render = () => {}, storage = globalThis.localStorage, reporting } = {}) {
+export function createController({ state, api, render = () => {}, storage = globalThis.localStorage, reporting, nativeNotifications = globalThis.ZiweiNotifications } = {}) {
   let epoch = 0, accountGeneration = 0, employeeEpoch = 0, chatReadEpoch = 0, chatConversationId = null, employeeReadEpoch = 0, phoneEpoch = 0, phoneRead = null, disposed = false, timer = null, attachmentEpoch = 0, nativePaused = false;
   const composers = new Map(), pendingMutations = new Set(), routineRequests = new Map(), messageKeys = new Set(), conversationReads = new Map();
   const resourceReads = new Map(), employeeReads = new Map(), employeeWrites = new Map();
@@ -127,7 +130,7 @@ export function createController({ state, api, render = () => {}, storage = glob
   }
   function clearWorkspace() {
     clearSelection(); state.employees = []; state.bots = []; state.tasks = []; state.devices = []; state.phones = [];
-    inbox.reset(); state.chatSearch = '';
+    inbox.reset(); groups.reset(); mobileTasks.reset(); notifications.reset(); state.chatSearch = '';
     resourceReads.clear(); employeeWrites.clear(); phoneRead = null; state.resources = initialResources();
     state.report = null; state.reportSelection = []; state.page = 'home'; state.tab = 'chat'; state.imagePreview = null;
     state.phoneCommand = null; state.phoneError = ''; state.loading = false; state.busy = false;
@@ -135,12 +138,13 @@ export function createController({ state, api, render = () => {}, storage = glob
   }
   function requireLogin(message = '', explicitLogout = false) {
     const userId = accountId(state);
+    notifications.reset({clearNative:true,clearAccount:explicitLogout});
     if (!explicitLogout) { stashComposer(); flushDrafts(); }
     for (const pending of draftTimers.values()) clearTimeout(pending); draftTimers.clear();
     accountGeneration++;
     reporting?.clear?.(state);
     if (explicitLogout && userId) {
-      clearAccountRequests(userId); forwarding.reset({ clearAccount: true });
+      clearAccountRequests(userId); forwarding.reset({ clearAccount: true }); groups.reset({clearAccount:true});
       const cleared = preferences.clearAccount(userId); if(!cleared.ok)message = cleared.error;
     }
     if (userId) { try { storage?.removeItem(workspaceKey(userId)); } catch {} }
@@ -244,13 +248,45 @@ export function createController({ state, api, render = () => {}, storage = glob
       return openEmployee(employeeId, 'chat', { conversationId });
     },
   });
+  const groups = createMobileGroups({state,api,current,valid,draw,fail,storage});
+  const mobileTasks = createMobileTasks({state,api,current,valid,draw,fail,
+    onSaved: (_task, token) => { if(valid(token))invalidateResources('tasks'); },
+  });
+  const notifications = createMobileNotifications({state,api,current,valid,draw,fail,storage,native:nativeNotifications,
+    onTarget: async (item,token) => {
+      if(!valid(token))return false;
+      const target=item.target;
+      if(target.kind==='conversation') {
+        if(!state.employees.some(row=>row.id===target.employeeId))await readWorkspaceResource('employees',token);
+        if(!valid(token))return false;
+        await openEmployee(target.employeeId,'chat',{conversationId:target.id});
+        if(!valid(token)||state.conversation?.id!==target.id||state.page!=='chat')return false;
+        if(target.messageId&&state.messages.some(row=>row.id===target.messageId)) {
+          state.chatJump={conversationId:target.id,messageId:target.messageId,quoteIndex:null,serial:id()};draw();
+        }
+        return true;
+      }
+      const detail=await api.task(target.id);
+      if(!valid(token))return false;
+      if(detail?.id!==target.id||detail.workspace_id&&detail.workspace_id!==state.workspace?.id)throw new Error('工作详情与提醒归属不一致，请重新读取');
+      stashComposer();clearSelection();state.task=detail;state.tab='work';state.page='task';state.error='';draw();return true;
+    },
+    onWorkspaceTarget: async (pending,token) => {
+      if(!valid(token)||accountId(state)!==pending.accountId)return false;
+      const workspace=state.workspaces.find(row=>row.slug===pending.workspaceSlug&&row.id===pending.workspaceId);
+      if(!workspace)throw new Error('提醒所属工作区当前不可查看');
+      await chooseWorkspace(workspace);
+      if(accountId(state)!==pending.accountId||workspaceId(state)!==pending.workspaceSlug)return false;
+      return notifications.resolvePending(pending);
+    },
+  });
   function primaryResource() { return ['phones', 'devices'].includes(state.tab) || state.page === 'phone' ? 'devices' : ['work', 'tasks'].includes(state.tab) ? 'tasks' : state.tab === 'chat' ? 'chats' : 'employees'; }
   function syncLoading() { state.loading = (primaryResource() === 'chats' ? state.chatThreadsResource : state.resources[primaryResource()])?.phase === 'loading'; }
   function readWorkspaceResource(name, token = current()) {
     if (!valid(token)) return Promise.resolve(false);
     // A pending mutation owns these rows until its authoritative response is accepted.
     if (['employees', 'bots'].includes(name) && (state.employeeSaving || state.stopBusy || (state.page === 'bot-settings' && state.botSettings?.saving))) return Promise.resolve(false);
-    if (name === 'tasks' && state.page === 'task' && state.busy) return Promise.resolve(false);
+    if (name === 'tasks' && (state.page === 'task' && state.busy || state.mobileTaskForm?.saving)) return Promise.resolve(false);
     const existing = resourceReads.get(name);
     if (existing && valid(existing.token)) return existing.promise;
     const workspace = workspaceId(state), resource = state.resources[name] ||= {phase:'idle',error:'',lastUpdated:null};
@@ -281,6 +317,8 @@ export function createController({ state, api, render = () => {}, storage = glob
   async function refresh({ silent = false } = {}) {
     if (disposed || nativePaused || globalThis.document?.hidden || !state.user || !workspaceId(state) || state.phase !== 'ready') return false;
     const token = current(), primary = primaryResource();
+    void groups.poll();
+    if(typeof api.mobileNotifications==='function')void notifications.poll();
     if (!silent) draw();
     // The inbox has its own lifecycle. A slow index cannot hold employee/history reads open.
     void inbox.load(token);
@@ -402,6 +440,7 @@ export function createController({ state, api, render = () => {}, storage = glob
     const workspace = state.workspaces.find(item => item.slug === preferred) || state.workspaces.find(item => item.slug === principal.workspace?.slug) || state.workspaces[0];
     if (workspace) await chooseWorkspace(workspace);
     else { state.phase = 'workspace'; state.page = 'workspaces'; state.workspace = null; draw(); }
+    if(state.phase==='ready')void notifications.handleNative();
   }
   function enterEmployeePage(employeeId, page, busy = true, { conversationId } = {}) {
     const thread = state.chatThreads?.find(item => item.employeeId === employeeId && item.employee?.id === employeeId);
@@ -582,6 +621,7 @@ export function createController({ state, api, render = () => {}, storage = glob
       if (state.forwardDetail) { state.forwardDetail = null; draw(); return; }
       if (state.chatFind) { state.chatFind = null; draw(); return; }
       if (state.forward) { await forwarding.actions['forward-back'](); return; }
+      if (state.page === 'group') { state.page='groups';draw();return; }
       if (['settings', 'bot-settings', 'device-settings'].includes(state.page)) {
         const previous = state.settingsTrail?.pop() || { page: 'home', tab: 'me' };
         stashComposer(); clearSelection(); state.error = ''; state.tab = previous.tab || state.tab;
@@ -625,6 +665,16 @@ export function createController({ state, api, render = () => {}, storage = glob
       return inbox.markVisible({ conversationId, messageId });
     }),
     ...forwarding.actions,
+    ...Object.fromEntries(Object.entries(groups.actions).map(([name, fn]) => [name, action(fn)])),
+    'groups-open': action(async () => { stashComposer();clearSelection();await groups.open(); }),
+    'groups-settings': action(async ({id:employeeId}) => {
+      if(state.groups?.busy)return false;
+      rememberSettingsPage();enterEmployeePage(employeeId,'bot-settings',false);await botSettings.load();
+    }),
+    ...Object.fromEntries(Object.entries(mobileTasks.actions).map(([name, fn]) => [name, action(fn)])),
+    'mobile-task-new': action(() => { stashComposer();clearSelection();return mobileTasks.open(); }),
+    ...Object.fromEntries(Object.entries(notifications.actions).map(([name, fn]) => [name, action(fn)])),
+    'notifications-open': action(() => { stashComposer();clearSelection();return notifications.open(); }),
     'forward-detail': action(({ id: messageId }) => {
       if (state.page !== 'chat' || !state.conversation?.id) return false;
       const message = state.messages.find(item => item.id === messageId);
@@ -761,6 +811,7 @@ export function createController({ state, api, render = () => {}, storage = glob
         if (routineId) await mutateRoutine(routineId, true); else await createRoutine(data);
       }
       else if (name === 'task') await saveTask(data);
+      else if (name === 'mobile-task') await mobileTasks.submit(data);
       else if (name === 'bot-settings') await botSettings.submit(data);
       else if (name === 'bot-phone-mcp') await botSettings.submitPhone(data);
       else if (['device-pairing', 'device-binding', 'device-phone-control'].includes(name)) await deviceSettings.submit(name, data);
@@ -771,6 +822,8 @@ export function createController({ state, api, render = () => {}, storage = glob
     const target = event?.target || event;
     if (!target) return;
     if (forwarding.change(event)) return;
+    if (mobileTasks.change(event)) return;
+    if (['groups','group'].includes(state.page)) { await groups.change(event);return; }
     if (state.page === 'bot-settings') { await botSettings.change(event); return; }
     if (state.page === 'device-settings') { await deviceSettings.change(event); return; }
     if (target.name === 'search') { state.search = target.value; draw(); return; }
@@ -795,11 +848,13 @@ export function createController({ state, api, render = () => {}, storage = glob
     } catch (error) { fail(error, token); }
     finally { if (attachmentEpoch === readToken && valid(token)) { state.attachmentReading = false; draw(); } target.value = ''; }
   }
-  const resume = () => { nativePaused = false; if (!disposed) void refresh({ silent: true }); };
+  const resume = () => { nativePaused = false; if (!disposed) {void refresh({ silent: true });if(state.phase==='ready')void notifications.handleNative();} };
+  const notificationEvent = event => { if(!disposed&&!nativePaused&&state.phase==='ready')void notifications.handleNative(event?.detail); };
   const pause = () => {
     if (disposed || nativePaused) return;
     stashComposer(); flushDrafts();
     nativePaused = true;
+    notifications.pause?.();
     chatReadEpoch++; conversationReads.clear(); invalidateEmployeeReads(); renewEmployeeGets();
     const resource = state.employeeResources.conversation;
     if (resource.phase === 'loading') resource.phase = resource.error ? 'error' : resource.lastUpdated ? 'ready' : 'idle';
@@ -817,6 +872,7 @@ export function createController({ state, api, render = () => {}, storage = glob
     globalThis.document?.addEventListener('visibilitychange', visibility);
     globalThis.addEventListener?.('ziwei:resume', resume);
     globalThis.addEventListener?.('ziwei:pause', pause);
+    globalThis.addEventListener?.('ziwei:notifications', notificationEvent);
     schedule();
     try {
       const principal = await api.authMe();
@@ -834,10 +890,11 @@ export function createController({ state, api, render = () => {}, storage = glob
     disposed = true; epoch++; clearInterval(timer); timer = null; composers.clear(); pendingMutations.clear(); routineRequests.clear(); resourceReads.clear(); employeeReads.clear(); employeeWrites.clear(); phoneRead = null;
     employeeGets.abort();
     botSettings.dispose?.(); deviceSettings.dispose?.();
-    inbox.dispose(); forwarding.dispose();
+    inbox.dispose(); forwarding.dispose(); groups.dispose(); mobileTasks.dispose(); notifications.dispose();
     globalThis.document?.removeEventListener('visibilitychange', visibility);
     globalThis.removeEventListener?.('ziwei:resume', resume);
     globalThis.removeEventListener?.('ziwei:pause', pause);
+    globalThis.removeEventListener?.('ziwei:notifications', notificationEvent);
   }
   return { actions, submit, change, refresh, boot, dispose };
 }
