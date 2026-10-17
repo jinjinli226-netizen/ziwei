@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Legacy fallback keeps the original website PNG and its transparent canvas. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@drawable/ic_launcher_background" />
+    <item>
+        <bitmap android:src="@drawable/ziwei_launcher_logo"
+            android:gravity="fill" android:filter="true" android:antialias="true" />
+    </item>
+</layer-list>

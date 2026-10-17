@@ -1,0 +1,20 @@
+import { escapeHtml as e, formatTime, accountId, workspaceId } from './model.js';
+
+export function renderMobileNotifications(state, helpers = {}) {
+  const icon = helpers.icon || (() => ''), data = state.notifications;
+  const header = helpers.pageHeader ? helpers.pageHeader(state, '最近提醒', '执行结果和待处理工作')
+    : '<header class="page-header"><button type="button" class="icon-button" data-action="back" aria-label="返回">‹</button><div><h1>最近提醒</h1><p>执行结果和待处理工作</p></div></header>';
+  if (!data || data.scope !== JSON.stringify([accountId(state), workspaceId(state)])) return `${header}<main class="page-content"><p role="status">提醒尚未载入，请返回后重新打开。</p></main>`;
+  const busy = data.phase === 'loading', native = data.native || {}, read = new Set(data.readIds || []);
+  const errors = [data.error, data.storageError, data.nativeError].filter(Boolean).map(error => `<div class="banner error" role="alert">${icon('alert')}<span>${e(error)}</span></div>`).join('');
+  const nativeLabel = !native.available ? 'App 内提醒可用' : native.subscriptionState === 'enabling' ? '正在开启系统提醒…' : native.enabled ? '系统提醒已开启' : '系统提醒未开启';
+  const source = native.enabled && native.workspaceSlug && native.workspaceSlug !== workspaceId(state) ? `<p>正在检查工作区：${e(native.workspaceSlug)}</p>` : '';
+  const nativeControls = native.available ? `<div class="notification-controls">${native.enabled || native.subscriptionState === 'enabling' ? '<button type="button" class="button secondary" data-action="notifications-disable">关闭系统提醒</button>' : '<button type="button" class="button primary" data-action="notifications-enable">开启系统提醒</button>'}<button type="button" class="text-button" data-action="notifications-settings">系统通知设置</button></div>` : '';
+  const system = `<section class="panel notification-settings"><h2>${nativeLabel}</h2>${source}${native.message ? `<p>${e(native.message)}</p>` : ''}${nativeControls}<p class="page-footnote">打开 App 时读取最近提醒。系统提醒约每 15 分钟安排检查，可能延后；手机重启后需再打开一次 App。</p></section>`;
+  const rows = (data.items || []).map(item => {
+    const isRead = read.has(item.id), resolving = data.resolvingId === item.id;
+    const label = item.kind === 'execution.completed' ? '已完成' : item.kind === 'execution.failed' ? '执行失败' : '需要处理';
+    return `<article class="panel notification-item${isRead ? ' is-read' : ' is-unread'}" data-notification-id="${e(item.id)}"><button type="button" class="notification-target" data-action="notifications-target" data-id="${e(item.id)}"${data.resolvingId ? ' disabled' : ''} aria-label="${e(`${isRead ? '已读' : '未读'}：${item.title}`)}"><div class="notification-item-heading"><strong>${e(item.title)}</strong>${isRead ? '' : '<span class="notification-unread-dot" aria-label="未读"></span>'}</div><p>${e(item.summary)}</p><div class="notification-item-meta"><span>${e(label)}</span><time datetime="${e(item.createdAt)}">${e(formatTime(item.createdAt))}</time></div><span class="notification-open-label">${resolving ? '正在核对查看权限…' : item.target.kind === 'conversation' ? '查看原聊天' : '查看工作'}</span></button></article>`;
+  }).join('');
+  return `${header}<main class="page-content mobile-notifications">${errors}${system}<div class="notification-toolbar"><p role="status">${busy ? '正在读取提醒…' : `最近 ${data.items.length} 条 · ${data.unreadCount} 条未读`}</p><button type="button" class="button secondary" data-action="notifications-refresh"${busy ? ' disabled' : ''}>重新读取</button><button type="button" class="text-button" data-action="notifications-read-all"${data.unreadCount ? '' : ' disabled'}>全部标为已读</button></div>${data.pendingTarget ? '<div class="banner notice"><span>有一条系统提醒等待查看。</span><button type="button" class="text-button" data-action="notifications-pending">查看提醒</button></div>' : ''}<section class="notification-list" aria-label="最近提醒">${rows || `<p class="empty-inline">${busy ? '正在读取…' : data.phase === 'idle' ? '点击重新读取，查看最近提醒。' : data.phase === 'error' ? '提醒暂未读回，请重试。' : '最近没有可查看的提醒。'}</p>`}</section>${data.hasMore ? `<button type="button" class="button secondary full" data-action="notifications-more"${busy ? ' disabled' : ''}>继续同步新提醒</button>` : ''}<p class="page-footnote">这里只展示最近可查看的执行结果和待处理工作。已读保存在本机，最多保留最近 200 条已读标记。</p></main>`;
+}

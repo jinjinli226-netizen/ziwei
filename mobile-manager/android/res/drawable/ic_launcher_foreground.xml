@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Relative insets keep the website artwork inside the adaptive-icon safe zone
+     as the launcher scales its 108dp layer. The source PNG is byte-for-byte intact. -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:insetLeft="14%" android:insetTop="14%"
+    android:insetRight="14%" android:insetBottom="14%">
+    <bitmap android:src="@drawable/ziwei_launcher_logo"
+        android:gravity="fill" android:filter="true" android:antialias="true" />
+</inset>
