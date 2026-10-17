@@ -1,5 +1,30 @@
 # 紫薇项目 HandOff
 
+## 2026-10-17 20:58 手机功能隔离集成与数据兼容回退已推 GitHub，尚未发布
+
+正式产品继续保持下节4f26客户端/网页与9393 API。本轮没有部署服务器、更新员工电脑、
+执行真实员工/手机/群组业务，也没有重打包或公开Android APK。
+
+隔离集成分支 `codex/mobile-features-integration` 已实际推送 `14f1979fb0157e2e4e5889eef5a66e4d1b538d75`：
+以8629091为基线完整合入已审查20da历史，只取Android ab5045a的固定mobile-manager
+子树fbb6cf70与指定3份文档。12个shared路径、67个Android文件和其余698个基线
+文件经逐blob/mode核对；保留原MCP、4f启动前证明和网页轮询，未整合Android旧backend分支。
+最终624项定向Node、12项Python官方存储、125项JVM规则通过，lint185与网页构建通过。
+旧导航测试夹具漏传真实polling helper的失败在原基线同样复现，修正夹具后67项通过；
+原失败记录保留，产品页面代码没有因此修改。
+
+数据兼容回退分支 `codex/mobile-data-safe-fallback` 已实际推送 `a942f3635517d33989b1cfb1b0f1b5dc6cc09406`：
+唯一运行时变化是repository，保留可信任务创建/实际改派证明、unresolved/unassigned
+失效marker、原子事件和公开字段隐藏；不新增feed、路由或schema。真实临时数据库
+新版→回退版→新版11项往返通过，含旧writer ABA负对照、私有别名接管、原proof保留、
+原子失败与公开HTTP/SSE隐藏，独立审查和主控重跑通过。此为隔离源码/数据验收，
+不是生产切换回退证明；不能用未修复旧版替代或回滚业务数据库。
+
+仍待实际API/Windows能力联调和准确code10 APK正常联网验收。准确APK cc2d17…
+本轮未变，原模拟器baseline/code10同TLS失败不算通过；不得据本轮公开APK/二维码。
+知微历史缺失回执也未被这次验收补足。完整记录见[手机候选审查与发布条件](docs/qa/2026-10-17-mobile-features-candidate-review.json)，
+其中链接到两个已推送分支的固定验收记录。下方为历史发布快照。
+
 ## 2026-10-17 19:16 启动前误判与待核实聊天刷新修复已发布
 
 产品 `4f26f450e6e1bcba6326fdaedd75937364eb5189` 已先推 GitHub 主发布分支，
