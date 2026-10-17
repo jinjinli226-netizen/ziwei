@@ -1,5 +1,30 @@
 # 紫薇项目 HandOff
 
+## 2026-10-17 19:16 启动前误判与待核实聊天刷新修复已发布
+
+产品 `4f26f450e6e1bcba6326fdaedd75937364eb5189` 已先推 GitHub 主发布分支，
+再于 **19:15:37 / 19:16:58（Asia/Shanghai）** 发布官方 Windows 安装包和网页。
+客户端 build `6067d6462aeb7d7752430bf6c21145aec59d78d84aa2e491c191c217e6df15b5`，
+包 SHA `0bf1a8159040f3d37d38ee8aaee31d474cb993c07d4c08c1d8929db1f9a7aa7e`；
+网页主入口 `index--E4XPmCF.js`。API仍为下节9393完整树/PID366044，没有重启服务
+或修改数据库、员工、Profile/HOME；保留24小时预算、MCP与手机功能。
+
+新客户端在可信bot-start最终spawn前被明确拒绝时，保存绑定原动作的一次性
+未启动证明，正常结算释放原占用并保留暂停；已启动辅助进程仍按真实树监督。
+网页直接进入待核实聊天及浏览器Back返回同一聊天后，会继续GET等待回执，
+有明确终态后停止轮询。142项最终串行回归、独立源码审查、5项真实隔离浏览器
+验收和57项发布工具离线检查通过；服务器冷缓存安装、公开包/网页及保护状态校验通过。
+19:19独立复核19项保护检查通过，公网CLI、13项前端清单、56个旧assets、API/
+中控/Nginx身份、数据库身份/逻辑schema和内外健康均保持。
+
+**知微的历史 `action_2805b4da-c082-49a2-b0f1-b43bdeb107fe` 尚未解除。**
+原任务缺乏可恢复的终态/退出证明，不能把一次409、设备在线或发布新包当成
+历史进程退出。已请求李金晋电脑一次只读原始状态输出；不得直接改数据库或
+伪造终态。19:19:34李金晋电脑仍上报旧build `7b4939c2…` / PID21480；原动作
+仍只有2条原事件、processExit:null、员工r3/e8暂停且原占用未释放。安装包发布
+不代表电脑已安装，Windows更新和现场验收仍需另行确认。
+完整现场、测试边界、发布及保留数据回退见[启动前回执记录](docs/operations/2026-10-17-bot-prelaunch-receipts.md)。下方为历史快照。
+
 ## 2026-10-17 18:06 移动运行记录重复图片减负已发布
 
 产品 `9393dcb0aab1c7afeacf368c7205f300264fa69e` 已合入并先推 GitHub 主发布分支，再于 **18:06:21（Asia/Shanghai）** 发布 API。当前 `/opt/ziwei/current` 为 `/opt/ziwei/releases/mobile-runs-projection-9393dcb0aab1-e0f199eb/v2`，API PID `366044`。复制下节完整 MCP 正式树，仅覆盖 `backend/mobile-read-view.mjs` 并增加发布记录；网页仍 `6666a63` / `index-DI_NO0_n.js`，官方 Windows 包仍 `6666a63` / build `7b4939c2…`。

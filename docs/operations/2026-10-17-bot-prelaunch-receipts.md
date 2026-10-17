@@ -72,3 +72,45 @@ completed证明的只读输出，由程序和维护人员判断；不能让用�
 发布前先推GitHub。此轮仅需Windows客户端包和网页；API仍沿用已发布的9393dcb，
 保留完整MCP、移动读取修复、现有数据库与中控。包发布不代表员工电脑已安装。
 回退时仅恢复对应代码/下载元数据，不能恢复旧业务数据库或清空原员工凭据。
+
+## 正式发布
+
+产品提交 `4f26f450e6e1bcba6326fdaedd75937364eb5189`（包含前一候选383d4cb）
+已实际推送 `codex/v2-20261014-release`，GitHub回读确认候选为远端HEAD后，
+主控顺序执行客户端与前端发布。未发布的383d候选包/构建证明单独留档。
+
+- Windows安装包于 **19:15:37（Asia/Shanghai）** 发布，build
+  `6067d6462aeb7d7752430bf6c21145aec59d78d84aa2e491c191c217e6df15b5`，
+  1,087,344字节，SHA256
+  `0bf1a8159040f3d37d38ee8aaee31d474cb993c07d4c08c1d8929db1f9a7aa7e`。
+  公开release.json SHA
+  `453a187fa6f3c07090be5d8b38389d770e382d87185766350b2940dcd015e3fe`。
+- 网页于 **19:16:58** 发布，主资源 `assets/index--E4XPmCF.js`，首页SHA
+  `5bf67ca1f4eb9e9909d49c85f7168a8e3fd566023398058dacd06728723e2a22`。
+  公网index、metadata、全部assets核验通过；保留旧chunks。
+- API保持 `/opt/ziwei/releases/mobile-runs-projection-9393dcb0aab1-e0f199eb/v2`，
+  PID366044，完整源树、MCP、旧发布记录、服务身份/配置、数据库文件身份与逻辑
+  schema均通过发布器前后保护检查；未重启API/中控/Nginx，未恢复数据库。
+
+本地发布记录在 `.local/zhiwei-prelaunch-repair/releases/`；服务器安装包备份
+`/opt/ziwei-staging/backups/zhiwei-prelaunch-client-d5ed87ec4d884f72a73901109103549f`，
+前端备份
+`/opt/ziwei-staging/backups/frontend-zhiwei-prelaunch-4f26f450e6e1-20261017T111658Z-0779a80d`。
+回退应核对当前发布版本，在发布锁内仅恢复旧下载包/release.json或网页index/meta；
+旧版本包与hash assets保留，业务数据库不回退。未知执行结果时先读原stage记录，
+不得重复运行execute。
+
+**Windows安装、实际模型执行及知微原任务恢复尚未验收。** 本轮没有远程更新或
+停止员工电脑，未在真实员工中重跑模型/手机/群组业务，未改历史不确定结果。
+
+19:19:42独立只读复核完成，19项保护检查全部通过。公网包精确匹配4f26/6067、
+75项包内容、43项runtime源码与固定commit的git archive、71项依赖manifest已验；
+npm bin入口仅首行shebang规范化去除1个CR，逐字匹配manifest，未忽略整文件差异。
+前端13项清单资源和根首页匹配，56个旧assets保留。API仍9393/PID366044，中控
+PID361304、Nginx737及启动身份/配置，完整非frontend源/MCP、DB文件身份和逻辑
+schema保持，内外health200。证据 `.local/zhiwei-prelaunch-repair/inspection-complete.json`。
+
+同次复核知微仍为r3/e8暂停、active为原2805；原动作仍
+`EXECUTION_UNCERTAIN / EXECUTOR_WITHOUT_EXIT_EVIDENCE`、processExit:null，只有
+原2条事件，没有新可信终态。李金晋电脑19:19:34心跳online，但仍为旧build
+`7b4939c2…` / PID21480，不能宣称已安装6067或历史任务已恢复。
