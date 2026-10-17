@@ -42,11 +42,33 @@ TPNS 的 `n_id` 仅作自建通道尽力替换，不承诺各厂商幂等。网�
 
 未满足配置时：`GET /api/mobile/push/config` 为 `notConfigured`，注册返回 503，worker 不访问供应商；页面继续使用原只读提醒。即便 config ready，也必须有匹配客户端厂商配置和实际通道回执才可称为该设备推送就绪。
 
+## 准确安装包
+
+| 项目 | 固定值 |
+| --- | --- |
+| APK | `mobile-manager/dist/ziwei-manager-0.4.0-internal-code11.apk` |
+| 源码 | `9f634d95c0139de003143722d212281982a481c1` |
+| SHA-256 | `949a89bb730fbebbc3757ca4b8651ea2b54d97f25889edc79184f312b3ae5fbc` |
+| 大小 | 5,414,054 字节 |
+| 签名 SHA-256 | `507531ee91afe6369a2d519d653713a76d2fa54b8f5f76119672f668230ced35` |
+| Profile | `tpns`，真实 TPNS 1.4.4.12-release 和全部适配器 |
+| 厂商客户端配置 | 未提供，`pushClientConfigurationProvided: false` |
+
+原始构建在 `.local/mobile-manager-push-build/sdk-compile/`；完整验证后按原字节复制到 dist，24 个 web assets 与源码和 APK 逐个比对。原 code 10 APK 和 `manifest-code10.json` 保留。`manifest.json` / `manifest-code11.json` 对应该准确候选，`deviceVerified: false` 不应因模拟器安装而改成真机通过。
+
+Java、lint、资源、DEX、四 ABI 官方库、签名、权限及非调试 APK 均通过。准确合并清单 SHA-256 为 `dcb39e9eb8cd6b59cdac7a7ea339c36b46b8e8a01d43c4e1f23ad8e9166445dd`。保留五个必要 Provider，删除 Firebase / AGConnect / HMS-AAID 自动初始化和 SDK 跨应用保活入口。Huawei 必要的 exported Provider 仅经本 App 声明的 signature 读写权限访问，不能以 exported 一个字段判断无保护暴露。
+
+独立审查发现并关闭“曾开启、离线关闭后重启时 SDK 自动初始化”的 P2：`Application.attachBaseContext` 在安装 Provider 前使用官方公开 `setAutoInit(false)`，显式注册路径保留；注销无论回执成功或失败都持久关闭本机服务。固定官方 SDK 字节码的实际分支序列反例在修复前调用 init，加入门禁后同样的旧持久状态两次均无新增 init。HMS-AAID 原默认即 false，移除其自动 Provider 是防遗留设置，不应声称未同意首次启动原来就会联网。
+
+构建期间几次端口检查或静态守门失败的日志保留；最终构建临时登记 343–346 的四次运行检查及结束检查全绿，已停止释放。具体收据：`.local/mobile-manager-push-build/native-sdk-candidate-evidence.json`。模拟器自身动态 UDP 曾中断前一轮构建，已单独准备预登记固定 UDP 池，不能绕过端口中心或把失败轮次称为通过。
+
 ## 已取得的代码与隔离证据
 
 - 后端固定 `2c2e4796`：联合 191 / 191 Node、12 / 12 官方 Hermes Python；独立 13 / 13 顺序反例和 84 / 84 既有 push / F1 / F5 / writer / public 检查。HTTP 采用 `app.handle`，无监听服务，供应商为夹具。
 - 独立反例覆盖历史重放、两 Cookie 人类伪回复、结果未知不重发、失效 lease、明确限流退避、迟到无效 token 不撤新代次、前台旧序列、账号 / 权限、absent fence、错误 secret、匿名不落库和 32 条配额。
-- Android 界面测试 398 / 398，通过通知鉴权 / 失权、原草稿保存、当前聊天前台租约、旧桥兼容及原手机功能回归；合成浏览器检查涵盖 390 / 320 宽度。最终原生构建和准确 APK 的模拟器记录另附。
+- Android 界面测试 398 / 398，通过通知鉴权 / 失权、原草稿保存、当前聊天前台租约、旧桥兼容及原手机功能回归；与新推送后端合并后的运行是 429 / 429。合成浏览器检查涵盖 390 / 320 宽度。
+- 固定原生代码独立审查 194 个 JVM 检查、83 个通知 / 页面联动检查通过。构建脚本后续修订不改变这批 Java、SDK 适配器和 web 运行代码；准确 SDK 包另经完整 Android 编译验证。独立记录在 `.local/mobile-system-push-native-independent/`。
+- 最终 `9f634d9` 二进制独立补验通过，24 项资产同时匹配固定源码、manifest 和 APK，签名、版本、非调试状态及最终 Provider / signature 权限一致；记录为 `.local/mobile-system-push-native-independent/binary-9f634d9/result.json`。
 - 后端独立记录：`.local/mobile-system-push-independent-review/result-2c2e47961b08.json`（在后端工作树）。首轮独立夹具时钟误设的失败原记录保留，修正夹具后通过，不掩盖原输出。
 
 ## 模拟器 HTTPS 修复及证据边界
@@ -55,7 +77,20 @@ TPNS 的 `n_id` 仅作自建通道尽力替换，不承诺各厂商幂等。网�
 
 准确旧候选 code 10（SHA-256 `cc2d17f5f445c27e09d967c7f5993811410aa9ff6a8808457c86bf9b0523bcad`）在新网络环境已打开两位原员工的原聊天，完成未发送本机草稿往返与只读汇报选择页；没有发送、停止或启动汇报。code 9 仅证实首页和 HTTPS，不能套用 code 10 的详细验收结论。
 
-基线索引：`.local/mobile-manager-code11-network-native-qa/baseline-evidence-index.sanitized.json`。原六个 AVD 磁盘的 SHA / 大小 / mtime 核对未变。准确 code 11 须另外安装和记录，不能以此基线替代。
+基线索引：`.local/mobile-manager-code11-network-native-qa/baseline-evidence-index.sanitized.json`。原六个 AVD 磁盘的 SHA / 大小 / mtime 核对未变。以下准确 code 11 记录基于另行安装，未用旧包基线替代。
+
+准确 code 11（上述 `949a89…`）现已另行安装并通过本次模拟器范围，观察区间为 2026-10-17 19:23:37–19:26:47 UTC：
+
+- `adb install -r` 原位覆盖，原 UID / appId `10149` 与首次安装时间 `2026-10-16 21:08:58` 保留；原登录有效。
+- 两位原员工原会话正文均可见，其中一位跨一次轮询仍正常；旧未发送草稿在升级后和 force-stop 冷启后均在原聊天输入框精确恢复。
+- 首页“汇报”进入员工选择页，保持 0 人，未启动汇报；没有发送业务消息或开始 / 停止员工任务。
+- 正式 API 未部署新提醒服务，页面如实显示 `请求失败（404）` 和“系统提醒未开启”，没有“消息通知已开启”。本次未点通知开启，所以不能把此记录称为 `notConfigured` 注册分支实测，更不能称为厂商即时推送验收；该分支的证据来自代码 / 隔离测试。
+- force-stop 后冷启动恢复首页和原聊天，日志中的 TLS handshake、`-100`、FATAL、renderer crash、ANR 均为 0。
+- 独立 QEMU shim 预登记固定 UDP 池处理 DNS / 出站隐式 bind，实测使用池内 9208 / 9210 / 9215，无随机 UDP 端口；未改变正式 Mac 网络、TLS、Gradle shim 或用户原 AVD。
+
+准确候选截图与收据均留在本机私有 `.local/mobile-manager-code11-network-native-qa/`，未上传含原聊天的图片。此范围证明实际 SDK 包能保留登录 / 草稿并读取原聊天，仍不代替物理手机和已配置供应商的后台 / 锁屏送达验收。
+
+最终脱敏索引为 `code11-sdk-native-qa-result.sanitized.json`。`cleanup-final-sdk.json` 记录 19:27:07 UTC 正常停止本轮 QEMU / ADB、无开放文件后销毁私有克隆、源六盘 SHA / 大小 / mtime 均不变，释放本轮 302–306 / 331–338 共 13 项登记，端口检查全绿。旧 PID 59582、原 267 / 268 / 271 以及其它项目 260 未动。两工作树临时依赖链接也已清理。
 
 ## 参考
 
