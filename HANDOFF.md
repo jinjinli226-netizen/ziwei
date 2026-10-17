@@ -1,8 +1,12 @@
 # 紫薇项目 HandOff
 
-## 2026-10-17 Bot MCP 远程网页授权候选
+## 2026-10-17 17:43 Bot MCP 远程网页授权已发布
 
-已实现现有 MCP 页面与管理接口的远程 OAuth 接入：中央公开配置、精确员工宿主下发、管理员浏览器批准、目标 Profile 原生凭据存储/复用/刷新，以及实际连接状态。修复服务名、工具集清单和设备 bootstrap 范围。用户无需去员工机改 YAML、复制 Token 或执行登录命令；旧客户端和原生依赖缺项明确报告，不能声称已自动升级。**本节是尚未部署的候选，当前正式版本仍为下节 mobile-images。真实 Windows 员工/外部账号授权及查询尚未验收。** 综合153项回归、另1项登记HTTP合同、9项隔离UI与两套原生SDK模拟传输验证通过。实现、边界、证据与发布结果见[远程 MCP 记录](docs/operations/2026-10-17-remote-mcp-oauth.md)。
+产品 `6666a63b46cd783d6a6537dd3295b37619ba4afa` 已先推 GitHub，再依次于 **17:34:11 / 17:41:37 / 17:43:53（Asia/Shanghai）** 发布 API、Windows 安装包和网页。现有 Bot MCP 页面支持远程 OAuth：中央保存公开配置，精确下发到员工宿主，管理员在自己的浏览器批准，目标 Profile 使用原生凭据存储、复用与刷新；下一次执行自动加载。修复服务名、工具集清单和设备 bootstrap 范围。
+
+当前 `/opt/ziwei/current` 为 `/opt/ziwei/releases/remote-mcp-oauth-6666a63b46cd-a5b46d87/v2`，API PID `364287`；网页入口 `index-DI_NO0_n.js`；官方客户端 build `7b4939c27eb485e0a1eff0635a698eb64b088dbff8ced84391ce1e87889bc212`，包 SHA `b2515f91a7d433d2acb43529a5a14ed21b6137ba4bead7dc1533cac40d4a2da9`。保留此前移动聊天图片、同步、转发与目录修复；未恢复旧数据库，未更新或停止任何 Windows 员工。
+
+**发布安装包不代表现有电脑已更新。旧客户端尚无网页远程升级入口，必须先完成一次更新；此后接 MCP 无需到员工电脑改 YAML、复制 Token、运行登录或手动重载。真实 Windows 员工、Team Planner / 爆款库账号授权及查询仍未验收。** 综合153项回归、另1项登记HTTP合同、9项隔离UI和两套原生SDK模拟传输验证通过；安装包冷缓存与服务器离线安装、发布公网哈希及保护状态验证通过。完整边界、证据与回退见[远程 MCP 记录](docs/operations/2026-10-17-remote-mcp-oauth.md)。下方为历史快照。
 
 ## 2026-10-17 13:43 移动聊天图片独立加载已发布
 
