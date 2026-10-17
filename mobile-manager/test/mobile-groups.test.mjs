@@ -115,6 +115,13 @@ test('permissions, inactive validation and unresolved stop evidence never automa
   }
 });
 
+test('unavailable auxiliary group history and a legacy paging warning block new execution',async()=>{
+  for(const patch of [bot=>{bot.latest_run={status:'succeeded',mobileReadError:{code:'GROUP_HOST_UPGRADE_REQUIRED',message:'请先更新电脑端'}};},bot=>{bot.nativeResources={collaboration:{resourceState:'unavailable',readError:{message:'原群组不可核对'}}};}]) {
+    const f=fixture();await newDraft(f);patch(f.state.groups.bot);
+    assert.equal(await f.module.actions['group-send'](),false);assert.equal(f.posts.length,0);assert(mobileGroupGate(f.state.groups.bot,{sending:true}));
+  }
+});
+
 test('double submit is single-flight, a lost receipt retains only a hash and IDs, and reload recovers without resending', async () => {
   const held = deferred(), f = fixture(); await newDraft(f, 'PRIVATE GROUP BODY 不可写入存储');
   let original;

@@ -11,6 +11,9 @@ import { createMobileNotifications } from './mobile-notifications.js';
 
 const IMAGE_LIMIT = 10 * 1024 * 1024;
 const avatarLimit = 2 * 1024 * 1024;
+const botReadWarning = value => [value?.mobileReadError,value?.latest_run?.mobileReadError,
+  ...['groups','collaboration'].map(key=>value?.nativeResources?.[key]?.readError||value?.nativeResources?.[key]?.mobileReadError)]
+  .find(error=>typeof error?.message==='string'&&error.message)?.message||'';
 async function digest(value) {
   if (!globalThis.crypto?.subtle) throw new Error('当前环境无法安全保存发送标识，请重新打开应用');
   const bytes = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
@@ -202,7 +205,9 @@ export function createController({ state, api, render = () => {}, storage = glob
       try {
         const value = await fetchValue({ signal:entry.signal });
         if (!live()) return false;
-        accept(value); employeeReadSucceeded(name); draw(); return true;
+        const warning=accept(value); employeeReadSucceeded(name);
+        if(typeof warning==='string'&&warning)Object.assign(state.employeeResources[name],{phase:'error',error:warning});
+        draw(); return true;
       } catch (error) { employeeReadFailed(name,error,token,live); return false; }
       finally { if (employeeReads.get(name) === entry) employeeReads.delete(name); }
     });
@@ -296,14 +301,22 @@ export function createController({ state, api, render = () => {}, storage = glob
     entry.promise = Promise.resolve().then(() => api[name](workspace)).then(result => {
       if (!valid(token) || resourceReads.get(name) !== entry) return false;
       const values = list(result, name);
+      let partialError='';
       if (name === 'employees') {
         state.employees = mergeEmployees(values);
         if (state.selectedEmployee) state.selectedEmployee = state.employees.find(employee => employee.id === state.selectedEmployee.id) || state.selectedEmployee;
       } else if (name === 'bots') {
-        state.bots = values; state.employees = mergeEmployees();
+        const previous=new Map(state.bots.map(bot=>[bot.id,bot])),accepted=[];
+        for(const value of values) {
+          if(value?.resourceState==='unavailable') {
+            partialError='部分员工运行状态暂时无法读取，已保留上次状态；请进入员工页核对';
+            if(previous.has(value.id))accepted.push(previous.get(value.id));
+          } else {accepted.push(value);partialError ||= botReadWarning(value);}
+        }
+        state.bots = accepted; state.employees = mergeEmployees();
         if (state.selectedEmployee) state.selectedEmployee = state.employees.find(employee => employee.id === state.selectedEmployee.id) || state.selectedEmployee;
       } else state[name] = values;
-      resource.phase = 'ready'; resource.error = ''; resource.lastUpdated = new Date().toISOString();
+      resource.phase = partialError?'error':'ready'; resource.error = partialError; resource.lastUpdated = new Date().toISOString();
       state.lastRefreshed = resource.lastUpdated;
       syncLoading(); draw(); return true;
     }).catch(error => {
@@ -386,7 +399,9 @@ export function createController({ state, api, render = () => {}, storage = glob
     const readRoutines = () => read('routines',options => api.botRoutines(workspace, employee.id, options), value => { state.routines = list(value, 'routines'); });
     if (hasBot) work.push(readRuns(), readRoutines());
     if (employee.runtime === 'Hermes' || cachedBot) work.push(read('bot',options => api.bot(workspace, employee.id, options), bot => {
+      if(bot?.resourceState==='unavailable')throw new Error(bot.readError?.message||'员工运行状态暂时无法读取，请保留原记录核对');
       if (bot) acceptBot(bot);
+      return botReadWarning(bot);
     }).then(async ok => {
       // The first read can discover an initialized Bot that was not in the employee cache.
       if (ok && valid(token, true) && !hasBot && state.bot?.configuration_state === 'initialized') await Promise.all([readRuns(), readRoutines()]);

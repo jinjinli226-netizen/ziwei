@@ -24,6 +24,8 @@ export function mobileGroupGate(bot, { sending = false } = {}) {
   if (!bot || bot.configuration_state !== 'initialized') return '这位员工尚未完成 Bot 配置';
   if (!Number.isSafeInteger(bot.revision) || !Number.isSafeInteger(bot.control_epoch)) return '员工版本尚未读全，请重新选择员工';
   if (!sending) return '';
+  const readIssue=bot.mobileReadError||bot.latest_run?.mobileReadError||bot.nativeResources?.groups?.readError||bot.nativeResources?.groups?.mobileReadError||bot.nativeResources?.collaboration?.readError||bot.nativeResources?.collaboration?.mobileReadError;
+  if(readIssue)return readIssue.message||'群组原记录暂时无法核对，请先更新电脑端并刷新';
   if (bot.config?.permissions?.mode !== 'execute' || bot.config?.collaboration?.enabled !== true) return '请先在模型与能力中保存伙伴协作和工具权限';
   if (bot.control_state !== 'active' || bot.validation?.status !== 'succeeded') return '请先检查并启用当前员工配置';
   const run = bot.active_run || bot.latest_run;

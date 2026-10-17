@@ -85,3 +85,12 @@ test('mobile APIs encode identifiers and request only explicit mobile action pro
     ['/api/workspaces/work%2Fone/bots/employee%2Fone/collaboration','POST'],
   ]);
 });
+
+test('an unavailable Bot list item preserves its prior execution and other employees still refresh',async t=>{
+  const old={id:'employee_one',configuration_state:'initialized',latest_run:{id:'original_action',status:'running'}},
+    f=fixture(t,{bots:async()=>({bots:[{id:'employee_one',employee_id:'employee_one',workspace:'work-one',resourceState:'unavailable',readError:{code:'GROUP_MOBILE_SCOPE_REQUIRED',message:'群组暂不可读'}},{id:'employee_two',configuration_state:'initialized',latest_run:{id:'second_action',status:'succeeded'}}]})});
+  f.state.bots=[old];f.state.employees=[{...employees[0],bot:old}];await f.controller.actions.navigate({tab:'employees'});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(f.state.bots.find(row=>row.id==='employee_one'),old);assert.equal(f.state.employees[0].bot.latest_run.status,'running');
+  assert.equal(f.state.bots.find(row=>row.id==='employee_two').latest_run.id,'second_action');assert.equal(f.state.resources.bots.phase,'error');
+});
