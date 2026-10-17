@@ -16,13 +16,13 @@ test('actual Bot device selector cannot rewrite its binding or launch directory 
   const select=actual('selectConversationDevice',{conversationDeviceId:device,botBindingPending:{value:false},conversationBotBinding:{value:{id:'bot'}},selectedConversation:{value:{employee_id:'bot'}},notify:message=>notices.push(message),openConversationDirectoryPicker:()=>inspections++});
   select('other');assert.equal(device.value,'fixed');assert.equal(inspections,0);assert.match(notices[0],/已绑定/);
 });
-test('actual Bot directory picker opens for its bound online device without changing runtime binding',()=>{
+test('ordinary employee directory picker opens without requesting a Bot binding again',async()=>{
   const opened={value:false},path={value:''},device={value:{id:'fixed-device',status:'online',workdir:'C:\\owned'}},notices=[];
-  const open=actual('openConversationDirectoryPicker',{botBindingPending:{value:false},conversationDirectoryEditorVersion:{value:0},conversationDirectoryPathDraft:path,conversationDirectoryCheck:{value:null},conversationWorkingDirectory:{value:'C:\\chat'},conversationDirectoryPickerOpen:opened,selectedConversationDevice:device,notify:message=>notices.push(message)});
-  open();assert.equal(opened.value,true);assert.equal(path.value,'C:\\chat');assert.equal(device.value.id,'fixed-device');assert.deepEqual(notices,[]);
+  const open=actual('openConversationDirectoryPicker',{botBindingPending:{value:false},selectedConversation:{value:{id:'chat',employee_id:'secretary'}},conversationBotBinding:{value:null},workspaceSlug:()=> 'qa',authState:{value:{user:{id:'owner'}}},conversationDirectoryEditorVersion:{value:0},conversationDirectoryPathDraft:path,conversationDirectoryCheck:{value:null},conversationWorkingDirectory:{value:'C:\\chat'},conversationDirectoryPickerOpen:opened,selectedConversationDevice:device,notify:message=>notices.push(message)});
+  await open();assert.equal(opened.value,true);assert.equal(path.value,'C:\\chat');assert.equal(device.value.id,'fixed-device');assert.deepEqual(notices,[]);
 });
-test('directory inspection remains unavailable while Bot binding is unresolved',()=>{
-  const opened={value:false},notices=[];const open=actual('openConversationDirectoryPicker',{botBindingPending:{value:true},conversationDirectoryPickerOpen:opened,notify:message=>notices.push(message)});open();assert.equal(opened.value,false);assert.match(notices[0],/正在核对/);
+test('directory inspection remains unavailable while employee binding is unresolved',async()=>{
+  const opened={value:false},notices=[];const open=actual('openConversationDirectoryPicker',{botBindingPending:{value:true},conversationDirectoryPickerOpen:opened,notify:message=>notices.push(message)});await open();assert.equal(opened.value,false);assert.match(notices[0],/正在读取/);
 });
 test('failed workspace load cannot authorize prior workspace model and skill options',async()=>{
   const refs=Object.fromEntries([...source('load').matchAll(/(\w+)\.value/g)].map(match=>[match[1],{value:[]}]));
@@ -45,4 +45,18 @@ test('actual Bot send keeps three real PNG/JPG attachments ordered and byte-iden
   assert.equal(writes[0].clientMessageId,writes[1].clientMessageId);
   for(const body of writes){assert.deepEqual(body.attachments.map(item=>item.name),source.map(([name])=>name));for(let i=0;i<source.length;i++)assert.deepEqual(Buffer.from(body.attachments[i].content,'base64'),source[i][1]);}
   assert.equal(composer.get('qa\0chat').attachments.length,0);
+});
+
+for(const outcome of ['success','failed','changed-employee','changed-page'])test(`Bot directory opener refreshes its revision: ${outcome}`,async()=>{
+  const page={value:'inbox'},path={value:''},opened={value:false},notices=[],binding={value:{id:'bot',revision:1,control_epoch:1}},selected={value:{id:'chat',employee_id:'bot'}};
+  let finish;const pending=new Promise(resolve=>{finish=resolve;});
+  const open=actual('openConversationDirectoryPicker',{botBindingPending:{value:false},selectedConversation:selected,page,conversationBotBinding:binding,workspaceSlug:()=> 'qa',authState:{value:{user:{id:'owner'}}},refreshBotChatBinding:async(employee,id)=>{assert.equal(employee,'bot');assert.equal(id,'chat');await pending;if(outcome==='failed')return false;binding.value={id:'bot',revision:2,control_epoch:3};return true;},conversationDirectoryEditorVersion:{value:0},conversationDirectoryPathDraft:path,conversationDirectoryCheck:{value:null},conversationWorkingDirectory:{value:'/work'},conversationDirectoryPickerOpen:opened,selectedConversationDevice:{value:{id:'fixed-device',status:'online',workdir:'/device-root'}},notify:message=>notices.push(message)});
+  const operation=open({useDeviceDefault:true});assert.equal(opened.value,false);
+  if(outcome==='changed-employee')selected.value={id:'secretary-chat',employee_id:'secretary'};
+  if(outcome==='changed-page')page.value='bots';
+  finish();await operation;
+  assert.equal(opened.value,outcome==='success');
+  if(outcome==='success'){assert.deepEqual(binding.value,{id:'bot',revision:2,control_epoch:3});assert.equal(path.value,'/device-root');}
+  if(outcome==='failed')assert.match(notices[0],/无法读取/);
+  if(outcome==='changed-employee')assert.deepEqual(notices,[]);
 });
