@@ -6,7 +6,7 @@ export function renderMobileNotifications(state, helpers = {}) {
     : '<header class="page-header"><button type="button" class="icon-button" data-action="back" aria-label="返回">‹</button><div><h1>最近提醒</h1><p>执行结果和待处理工作</p></div></header>';
   if (!data || data.scope !== JSON.stringify([accountId(state), workspaceId(state)])) return `${header}<main class="page-content"><p role="status">提醒尚未载入，请返回后重新打开。</p></main>`;
   const busy = data.phase === 'loading', native = data.native || {}, read = new Set(data.readIds || []);
-  const errors = [data.error, data.storageError, data.nativeError].filter(Boolean).map(error => `<div class="banner error" role="alert">${icon('alert')}<span>${e(error)}</span></div>`).join('');
+  const errors = [data.error, data.pushError, data.storageError, data.nativeError].filter(Boolean).map(error => `<div class="banner error" role="alert">${icon('alert')}<span>${e(error)}</span></div>`).join('');
   const realtime = native.deliveryMode === 'push' && native.pushConfigured === true && native.pushAvailable === true;
   const nativeLabel = !native.available ? 'App 内提醒可用' : native.subscriptionState === 'enabling' ? '正在开启系统提醒…' : native.enabled ? realtime ? '消息通知已开启' : '补充提醒已开启' : '系统提醒未开启';
   const source = native.enabled && native.workspaceSlug && native.workspaceSlug !== workspaceId(state) ? `<p>提醒工作区：${e(native.workspaceSlug)}</p>` : '';

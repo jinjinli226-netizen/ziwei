@@ -111,3 +111,15 @@ test('a system push opens its freshly authorized original employee message and k
   assert(f.calls.some(row=>row[0]==='push-resolve'&&row[1]===deliveryId));assert.equal(presence.at(-1),'original_chat');
   assert(f.state.notifications.readIds.includes('new-reply'));
 });
+
+test('a denied system push keeps the saved composer and shows the permission error in reminders',async t=>{
+  const deliveryId='f'.repeat(32),f=fixture(t,{mobilePushDelivery:async()=>{throw Object.assign(new Error('这条通知当前不可查看'),{status:404});}},{
+    getStatus:()=>JSON.stringify({available:true,enabled:true,subscriptionState:'enabled',permission:'granted',accountId:'user_one',workspaceSlug:'work-one',pendingTarget:true}),
+    consumePendingTarget:()=>JSON.stringify({accountId:'user_one',workspaceId:'workspace_1',workspaceSlug:'work-one',deliveryId}),
+  });
+  await f.controller.actions.chat({id:'employee_one'});await f.controller.change({name:'draft',value:'拒绝通知后也保留'});
+  await f.controller.actions['notifications-open']();
+  assert.equal(f.state.page,'notifications');assert.match(f.state.notifications.pushError,/当前不可查看/);
+  assert.equal(createChatPreferences({storage:f.storage}).getDraft({accountId:'user_one',workspaceId:'work-one'},'employee_one'),'拒绝通知后也保留');
+  assert.equal(f.calls.some(row=>row[0]==='conversation'),false);assert.deepEqual(f.state.notifications.readIds,[]);
+});

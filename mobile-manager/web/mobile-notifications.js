@@ -54,14 +54,14 @@ function checkedEnvelope(response, state, { eventId, deliveryId, incremental = f
 
 /** The read marker is a bounded, personal local preference, never the shared server read_at. */
 export function createMobileNotifications({ state, api, current = () => ({}), valid = () => true, draw = () => {}, fail = () => {},
-  storage = globalThis.localStorage, native = null, onTarget = () => false, onWorkspaceTarget = null } = {}) {
+  storage = globalThis.localStorage, native = null, onTarget = () => false, onWorkspaceTarget = null, onPendingPush = () => {} } = {}) {
   let generation = 0, disposed = false, pendingRead = null, pendingResolve = null, pendingEnable = null, handlingNative = false;
   let knownAccount = accountId(state), lastScope = null;
   const stores = new Map();
   const capture = () => ({ token: current(), scope: scopeOf(state), generation });
   const live = visit => !disposed && generation === visit.generation && valid(visit.token) && keyOf(scopeOf(state)) === keyOf(visit.scope) && scopeOf(state).workspaceDbId === visit.scope.workspaceDbId && state.phase === 'ready';
   const fresh = () => ({ scope: keyOf(scopeOf(state)), workspaceId: scopeOf(state).workspaceDbId, items: [], cursor: '', hasMore: false, historyWindow: false,
-    phase: 'idle', error: '', storageError: '', nativeError: '', native: { available: false, enabled: false }, readIds: [], unreadCount: 0,
+    phase: 'idle', error: '', pushError: '', storageError: '', nativeError: '', native: { available: false, enabled: false }, readIds: [], unreadCount: 0,
     resolvingId: '', lastUpdated: null, blocked: false, pendingTarget: null });
   function readStore(account) {
     if (stores.has(account)) return stores.get(account);
@@ -147,7 +147,7 @@ export function createMobileNotifications({ state, api, current = () => ({}), va
   async function resolveEvent(eventId) {
     const data = ensure(); if (!data || !identifier(eventId) || pendingResolve) return false;
     const visit = capture(), controller = typeof AbortController === 'function' ? new AbortController() : null;
-    const request = { controller }; pendingResolve = request; data.resolvingId = eventId; data.error = ''; draw();
+    const request = { controller }; pendingResolve = request; data.resolvingId = eventId; data.error = ''; data.pushError = ''; draw();
     try {
       const response = await api.mobileNotification(visit.scope.workspace, eventId, controller ? { signal: controller.signal } : {});
       if (!live(visit) || state.notifications !== data || pendingResolve !== request) return false;
@@ -163,7 +163,7 @@ export function createMobileNotifications({ state, api, current = () => ({}), va
   async function resolveDelivery(deliveryId) {
     const data = ensure(); if (!data || !DELIVERY.test(deliveryId) || pendingResolve) return false;
     const visit = capture(), controller = typeof AbortController === 'function' ? new AbortController() : null;
-    const request = { controller }; pendingResolve = request; data.resolvingId = deliveryId; data.error = ''; draw();
+    const request = { controller }; pendingResolve = request; data.resolvingId = deliveryId; data.pushError = ''; draw();
     try {
       if (typeof api.mobilePushDelivery !== 'function') throw invalid('请更新应用后查看这条消息通知');
       const response = await api.mobilePushDelivery(deliveryId, controller ? { signal: controller.signal } : {});
@@ -174,7 +174,13 @@ export function createMobileNotifications({ state, api, current = () => ({}), va
       const opened = await onTarget(item, visit.token);
       if (!live(visit) || state.notifications !== data || pendingResolve !== request || opened === false) return false;
       remember([item.id]); data.pendingTarget = null; return true;
-    } catch (error) { readError(error, visit, data); return false; }
+    } catch (error) {
+      if (error?.status === 401) readError(error, visit, data);
+      else if (live(visit) && state.notifications === data && error?.name !== 'AbortError') {
+        data.pushError = error?.message || '这条消息通知暂不可查看'; draw();
+      }
+      return false;
+    }
     finally { if (pendingResolve === request) { pendingResolve = null; data.resolvingId = ''; if (live(visit) && state.notifications === data) draw(); } }
   }
   function parseNative(value) {
@@ -212,7 +218,9 @@ export function createMobileNotifications({ state, api, current = () => ({}), va
     try {
       const pending = checkedPending(value); if (!pending) return false;
       if (pending.workspaceSlug !== workspaceId(state)) { data.pendingTarget = pending; data.nativeError = '请先切换到这条提醒所属的工作区'; draw(); return false; }
-      data.pendingTarget = pending; return pending.deliveryId ? resolveDelivery(pending.deliveryId) : resolveEvent(pending.eventId);
+      data.pendingTarget = pending;
+      if (pending.deliveryId) onPendingPush(current());
+      return pending.deliveryId ? resolveDelivery(pending.deliveryId) : resolveEvent(pending.eventId);
     } catch (error) { data.nativeError = error.message || '系统提醒已无法核对'; draw(); return false; }
   }
   async function handleNative(detail) {

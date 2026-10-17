@@ -260,6 +260,10 @@ export function createController({ state, api, render = () => {}, storage = glob
     onSaved: (_task, token) => { if(valid(token))invalidateResources('tasks'); },
   });
   const notifications = createMobileNotifications({state,api,current,valid,draw,fail,storage,native:nativeNotifications,
+    onPendingPush: token => {
+      if (!valid(token)) return;
+      stashComposer(); clearSelection(); state.page = 'notifications'; state.tab = 'me'; draw();
+    },
     onTarget: async (item,token) => {
       if(!valid(token))return false;
       const target=item.target;
