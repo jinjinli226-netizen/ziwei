@@ -12,7 +12,7 @@ const item=(target={kind:'conversation',id:'original_chat',employeeId:'employee_
 const envelope=(slug='work-one',extra={})=>({schemaVersion:1,accountId:'user_one',workspaceId:workspaces.find(row=>row.slug===slug).id,workspaceSlug:slug,...extra});
 function storageFixture(){const values=new Map();return {get length(){return values.size;},key:i=>[...values.keys()][i],getItem:k=>values.get(k)??null,setItem:(k,v)=>values.set(k,String(v)),removeItem:k=>values.delete(k),values};}
 function deferred(){let resolve;const promise=new Promise(yes=>{resolve=yes;});return {promise,resolve};}
-function fixture(t,overrides={}){
+function fixture(t,overrides={},nativeOverrides={}){
   const state={...initialState(),phase:'ready',user:{user_id:'user_one'},workspace:workspaces[0],workspaces,employees:[...employees]},storage=storageFixture(),calls=[],nativeCalls=[];
   const api={
     employees:async()=>({employees}),bots:async()=>({bots:[]}),tasks:async()=>({tasks:[]}),chats:async()=>({chats:[]}),
@@ -23,7 +23,7 @@ function fixture(t,overrides={}){
     task:async id=>({id,workspace_id:'workspace_1',title:'原待办',state:'planned'}),logout:async()=>({ok:true}),
     ...overrides,
   };
-  const native={getStatus:()=>JSON.stringify({available:false,enabled:false}),clear:()=>{nativeCalls.push('clear');}};
+  const native={getStatus:()=>JSON.stringify({available:false,enabled:false}),clear:()=>{nativeCalls.push('clear');},...nativeOverrides};
   const controller=createController({state,api,storage,nativeNotifications:native});t.after(()=>controller.dispose());return {state,storage,api,calls,nativeCalls,controller};
 }
 
@@ -93,4 +93,21 @@ test('an unavailable Bot list item preserves its prior execution and other emplo
   await new Promise(resolve=>setImmediate(resolve));
   assert.equal(f.state.bots.find(row=>row.id==='employee_one'),old);assert.equal(f.state.employees[0].bot.latest_run.status,'running');
   assert.equal(f.state.bots.find(row=>row.id==='employee_two').latest_run.id,'second_action');assert.equal(f.state.resources.bots.phase,'error');
+});
+
+test('a system push opens its freshly authorized original employee message and keeps the current draft',async t=>{
+  const deliveryId='e'.repeat(32),presence=[];
+  const f=fixture(t,{mobilePushDelivery:async id=>{
+    f.calls.push(['push-resolve',id]);return envelope('work-one',{item:{...item(),id:'new-reply',kind:'message.received',executionState:'not_applicable'}});
+  }},{
+    getStatus:()=>JSON.stringify({available:true,enabled:true,subscriptionState:'enabled',permission:'granted',accountId:'user_one',workspaceSlug:'work-one',pendingTarget:true,deliveryMode:'push',pushConfigured:true,pushAvailable:true}),
+    consumePendingTarget:()=>JSON.stringify({accountId:'user_one',workspaceId:'workspace_1',workspaceSlug:'work-one',deliveryId}),
+    setForeground:id=>presence.push(id),
+  });
+  await f.controller.actions.chat({id:'employee_one'});await f.controller.change({name:'draft',value:'尚未发送的草稿'});
+  await f.controller.actions['notifications-open']();
+  assert.equal(f.state.page,'chat');assert.equal(f.state.selectedEmployee.id,'employee_one');assert.equal(f.state.conversation.id,'original_chat');
+  assert.equal(f.state.chatJump.messageId,'original_message');assert.equal(f.state.draft,'尚未发送的草稿');
+  assert(f.calls.some(row=>row[0]==='push-resolve'&&row[1]===deliveryId));assert.equal(presence.at(-1),'original_chat');
+  assert(f.state.notifications.readIds.includes('new-reply'));
 });

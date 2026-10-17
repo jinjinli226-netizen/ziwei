@@ -7,10 +7,12 @@ export function renderMobileNotifications(state, helpers = {}) {
   if (!data || data.scope !== JSON.stringify([accountId(state), workspaceId(state)])) return `${header}<main class="page-content"><p role="status">提醒尚未载入，请返回后重新打开。</p></main>`;
   const busy = data.phase === 'loading', native = data.native || {}, read = new Set(data.readIds || []);
   const errors = [data.error, data.storageError, data.nativeError].filter(Boolean).map(error => `<div class="banner error" role="alert">${icon('alert')}<span>${e(error)}</span></div>`).join('');
-  const nativeLabel = !native.available ? 'App 内提醒可用' : native.subscriptionState === 'enabling' ? '正在开启系统提醒…' : native.enabled ? '系统提醒已开启' : '系统提醒未开启';
-  const source = native.enabled && native.workspaceSlug && native.workspaceSlug !== workspaceId(state) ? `<p>正在检查工作区：${e(native.workspaceSlug)}</p>` : '';
+  const realtime = native.deliveryMode === 'push' && native.pushConfigured === true && native.pushAvailable === true;
+  const nativeLabel = !native.available ? 'App 内提醒可用' : native.subscriptionState === 'enabling' ? '正在开启系统提醒…' : native.enabled ? realtime ? '消息通知已开启' : '补充提醒已开启' : '系统提醒未开启';
+  const source = native.enabled && native.workspaceSlug && native.workspaceSlug !== workspaceId(state) ? `<p>提醒工作区：${e(native.workspaceSlug)}</p>` : '';
   const nativeControls = native.available ? `<div class="notification-controls">${native.enabled || native.subscriptionState === 'enabling' ? '<button type="button" class="button secondary" data-action="notifications-disable">关闭系统提醒</button>' : '<button type="button" class="button primary" data-action="notifications-enable">开启系统提醒</button>'}<button type="button" class="text-button" data-action="notifications-settings">系统通知设置</button></div>` : '';
-  const system = `<section class="panel notification-settings"><h2>${nativeLabel}</h2>${source}${native.message ? `<p>${e(native.message)}</p>` : ''}${nativeControls}<p class="page-footnote">打开 App 时读取最近提醒。系统提醒约每 15 分钟安排检查，可能延后；手机重启后需再打开一次 App。</p></section>`;
+  const guidance = realtime ? '新消息和工作结果可在后台提醒，声音和振动可在系统通知设置中调整。定时检查仅作补充。' : '打开 App 时读取最近提醒。补充提醒约每 15 分钟安排检查，可能延后；手机重启后需再打开一次 App。';
+  const system = `<section class="panel notification-settings"><h2>${nativeLabel}</h2>${source}${native.message ? `<p>${e(native.message)}</p>` : ''}${nativeControls}<p class="page-footnote">${guidance}</p></section>`;
   const rows = (data.items || []).map(item => {
     const isRead = read.has(item.id), resolving = data.resolvingId === item.id;
     const label = item.kind === 'execution.completed' ? '已完成' : item.kind === 'execution.failed' ? '执行失败' : '需要处理';

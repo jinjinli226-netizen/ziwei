@@ -127,3 +127,9 @@ test('forward cards use the server snapshot without duplicating legacy fallback 
   const missing=render(chatState({messages:[forwarded],forwardDetail:{messageId:'another-employee-message'}}));
   assert.match(missing,/这段记录暂未加载/);
 });
+
+test('chat home keeps a direct report entry alongside groups and notifications',()=>{
+  const home=render(state({tab:'chat',chatThreads:threads}));
+  assert.match(home,/data-action="report-setup"[^>]*>[\s\S]*?<strong>汇报<\/strong>/);
+  assert.match(home,/逐个听员工汇报/);assert.match(home,/data-action="notifications-open"/);assert.match(home,/data-action="groups-open"/);
+});

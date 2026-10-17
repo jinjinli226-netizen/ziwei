@@ -294,3 +294,46 @@ test('a permission intent expires after two minutes even when the Activity pause
   f.mobile.pause();t.mock.timers.tick(120001);native.status.permission='granted';await f.mobile.handleNative(JSON.stringify(native.status));
   assert.equal(native.calls.some(call=>call[0]==='configure'||call[0]==='clear'),false);
 });
+
+test('an opaque push delivery resolves a fresh original message before navigation and never trusts cached Intent targets', async t => {
+  const deliveryId = 'a'.repeat(32), native = nativeStub({ pendingTarget: true, accountId: 'user-one' });
+  native.pending.push({ accountId: 'user-one', workspaceId: 'workspace-db-one', workspaceSlug: 'one', deliveryId, target: { id: 'forged-chat' } });
+  let f; f = fixture(t, { native, api: { mobilePushDelivery: async (id, options) => {
+    f.calls.push({ kind: 'delivery', id, options });
+    return f.envelope({ item: item('message-event', { kind: 'message.received', executionState: 'not_applicable', target: { kind: 'conversation', id: 'original-chat', employeeId: 'original-employee', messageId: 'original-message' } }) });
+  } } });
+  assert.equal(await f.mobile.handleNative(), true);
+  assert.equal(f.calls.length, 1); assert.equal(f.calls[0].kind, 'delivery'); assert.equal(f.calls[0].id, deliveryId);
+  assert.equal(f.opened.length, 1); assert.equal(f.opened[0].value.target.id, 'original-chat');
+  assert(f.state.notifications.readIds.includes('message-event'));
+});
+
+test('a push delivery cannot navigate after account/workspace change, pause or an unauthorized response', async t => {
+  for (const change of ['account', 'pause', 'denied', 'wrong-scope']) {
+    const delayed = deferred(), deliveryId = 'b'.repeat(32), f = fixture(t, { api: { mobilePushDelivery: () => delayed.promise } });
+    const pending = { accountId: 'user-one', workspaceId: 'workspace-db-one', workspaceSlug: 'one', deliveryId };
+    const opening = f.mobile.resolvePending(pending);
+    if (change === 'account') f.switchScope('user-two');
+    if (change === 'pause') f.mobile.pause();
+    if (change === 'denied') delayed.reject(Object.assign(new Error('not found'), { status: 404 }));
+    else delayed.resolve(f.envelope({ item: item() }, change === 'wrong-scope' ? { account: 'other-account' } : { account: 'user-one', slug: 'one', db: 'workspace-db-one' }));
+    assert.equal(await opening, false); assert.deepEqual(f.opened, []);
+  }
+});
+
+test('invalid or mixed push identifiers are rejected and message pushes cannot redirect to an unrelated task', async t => {
+  for (const extra of [{ deliveryId: 'invalid' }, { deliveryId: 'c'.repeat(32), eventId: 'event-one' }, { deliveryId: 'invalid', eventId: 'event-one' }]) {
+    const f = fixture(t); assert.equal(await f.mobile.resolvePending({ accountId: 'user-one', workspaceId: 'workspace-db-one', workspaceSlug: 'one', ...extra }), false);
+    assert.deepEqual(f.calls, []); assert.deepEqual(f.opened, []);
+  }
+  let f; f = fixture(t, { api: { mobilePushDelivery: async () => f.envelope({ item: item('new-message', { kind: 'message.received', executionState: 'not_applicable', target: { kind: 'task', id: 'unrelated' } }) }) } });
+  assert.equal(await f.mobile.resolvePending({ accountId: 'user-one', workspaceId: 'workspace-db-one', workspaceSlug: 'one', deliveryId: 'd'.repeat(32) }), false); assert.deepEqual(f.opened, []);
+});
+
+test('only verified native push support shows enabled message notifications; a timer-only bridge stays supplementary', async t => {
+  const native = nativeStub({ enabled: true, subscriptionState: 'enabled', deliveryMode: 'push', pushConfigured: true, pushAvailable: true }), f = fixture(t, { native });
+  await f.mobile.handleNative(); const html = renderMobileNotifications(f.state);
+  assert.match(html, /消息通知已开启/); assert.match(html, /定时检查仅作补充/); assert.doesNotMatch(html, /系统提醒约每 15 分钟/);
+  native.status.pushConfigured = false; await f.mobile.handleNative(); assert.doesNotMatch(renderMobileNotifications(f.state), /消息通知已开启/);
+  delete native.status.deliveryMode; await f.mobile.handleNative(); assert.match(renderMobileNotifications(f.state), /补充提醒已开启/);
+});

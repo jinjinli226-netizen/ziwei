@@ -4,6 +4,7 @@ export const MOBILE_NOTIFICATION_LIMITS = Object.freeze({ page: 20, items: 200, 
 const PREFIX = 'ziwei.manager.notification-read.v1:';
 const ID = /^[A-Za-z0-9._:-]{1,160}$/;
 const SLUG = /^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/;
+const DELIVERY = /^[A-Za-z0-9_-]{32,128}$/;
 const identifier = value => typeof value === 'string' && ID.test(value);
 const plainObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const bytes = value => new TextEncoder().encode(value).length;
@@ -15,35 +16,38 @@ const invalid = (message = '提醒返回内容无法核对，请重新读取') =
 const text = (value, max) => typeof value === 'string' && bytes(value) <= max && !/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069\ud800-\udfff]/u.test(value);
 const workspaceRecord = (state, slug) => typeof state.workspace === 'object' && state.workspace?.slug === slug ? state.workspace : (state.workspaces || []).find(row => row?.slug === slug);
 
-function checkedItem(value) {
-  if (!plainObject(value) || !identifier(value.id) || !['execution.completed', 'execution.failed', 'attention.required'].includes(value.kind)
+function checkedItem(value, push = false) {
+  if (!plainObject(value) || !identifier(value.id) || !['execution.completed', 'execution.failed', 'attention.required', ...(push ? ['message.received'] : [])].includes(value.kind)
       || !text(value.title, 120) || !value.title || !text(value.summary, 240)
       || typeof value.createdAt !== 'string' || value.createdAt.length > 40 || !Number.isFinite(Date.parse(value.createdAt))
       || !['confirmed', 'uncertain', 'not_applicable'].includes(value.executionState)
-      || value.kind !== 'attention.required' && value.executionState !== 'confirmed') throw invalid();
+      || ['execution.completed', 'execution.failed'].includes(value.kind) && value.executionState !== 'confirmed'
+      || value.kind === 'message.received' && value.executionState !== 'not_applicable') throw invalid();
   const target = value.target;
   if (!plainObject(target) || !['conversation', 'task'].includes(target.kind) || !identifier(target.id)
       || Object.keys(target).some(key => !['kind', 'id', 'employeeId', 'messageId', 'actionId'].includes(key))
       || ['employeeId', 'messageId', 'actionId'].some(key => target[key] !== undefined && !identifier(target[key]))
-      || target.kind === 'conversation' && !identifier(target.employeeId)) throw invalid();
+      || target.kind === 'conversation' && !identifier(target.employeeId)
+      || value.kind === 'message.received' && (target.kind !== 'conversation' || !identifier(target.messageId))) throw invalid();
   return { id: value.id, kind: value.kind, title: value.title, summary: value.summary, createdAt: value.createdAt,
     executionState: value.executionState, target: { ...target } };
 }
 
-function checkedEnvelope(response, state, { eventId, incremental = false } = {}) {
+function checkedEnvelope(response, state, { eventId, deliveryId, incremental = false } = {}) {
   const scope = scopeOf(state), workspace = workspaceRecord(state, scope.workspace);
   let size; try { size = bytes(JSON.stringify(response)); } catch { throw invalid(); }
   if (!plainObject(response) || size > MOBILE_NOTIFICATION_LIMITS.responseBytes || response.schemaVersion !== 1
       || response.accountId !== scope.account || response.workspaceSlug !== scope.workspace || !identifier(response.workspaceId)
       || !identifier(workspace?.id) || response.workspaceId !== workspace.id) throw invalid('提醒账号或工作区归属无法核对，请重新读取');
-  if (eventId) {
-    const item = checkedItem(response.item); if (item.id !== eventId) throw invalid('提醒与原事件不一致，请重新读取');
+  if (eventId || deliveryId) {
+    const item = checkedItem(response.item, Boolean(deliveryId));
+    if (eventId && item.id !== eventId || deliveryId && response.deliveryId !== undefined && response.deliveryId !== deliveryId) throw invalid('提醒与原事件不一致，请重新读取');
     return { item };
   }
   if (!Array.isArray(response.items) || response.items.length > 50 || typeof response.hasMore !== 'boolean'
       || typeof response.nextCursor !== 'string' || response.nextCursor.length < 1 || response.nextCursor.length > 2048 || !/^[A-Za-z0-9_-]+$/.test(response.nextCursor)
       || incremental && response.historyWindow !== undefined || !incremental && (response.historyWindow !== true || response.hasMore)) throw invalid();
-  const items = response.items.map(checkedItem);
+  const items = response.items.map(value => checkedItem(value));
   if (new Set(items.map(item => item.id)).size !== items.length) throw invalid('提醒事件重复，请重新读取');
   return { items, cursor: response.nextCursor, hasMore: response.hasMore, historyWindow: response.historyWindow === true };
 }
@@ -156,6 +160,23 @@ export function createMobileNotifications({ state, api, current = () => ({}), va
     } catch (error) { readError(error, visit, data); return false; }
     finally { if (pendingResolve === request) { pendingResolve = null; data.resolvingId = ''; if (live(visit) && state.notifications === data) draw(); } }
   }
+  async function resolveDelivery(deliveryId) {
+    const data = ensure(); if (!data || !DELIVERY.test(deliveryId) || pendingResolve) return false;
+    const visit = capture(), controller = typeof AbortController === 'function' ? new AbortController() : null;
+    const request = { controller }; pendingResolve = request; data.resolvingId = deliveryId; data.error = ''; draw();
+    try {
+      if (typeof api.mobilePushDelivery !== 'function') throw invalid('请更新应用后查看这条消息通知');
+      const response = await api.mobilePushDelivery(deliveryId, controller ? { signal: controller.signal } : {});
+      if (!live(visit) || state.notifications !== data || pendingResolve !== request) return false;
+      const { item } = checkedEnvelope(response, state, { deliveryId });
+      // An OS notification contains only an opaque delivery ID. Neither its
+      // Intent extras nor cached targets authorize a chat or message read.
+      const opened = await onTarget(item, visit.token);
+      if (!live(visit) || state.notifications !== data || pendingResolve !== request || opened === false) return false;
+      remember([item.id]); data.pendingTarget = null; return true;
+    } catch (error) { readError(error, visit, data); return false; }
+    finally { if (pendingResolve === request) { pendingResolve = null; data.resolvingId = ''; if (live(visit) && state.notifications === data) draw(); } }
+  }
   function parseNative(value) {
     if (typeof value === 'string') { if (bytes(value) > 16 * 1024) throw invalid(); value = JSON.parse(value); }
     if (!plainObject(value) || typeof value.available !== 'boolean' || typeof value.enabled !== 'boolean') throw invalid('系统提醒状态无法读取，请重新打开应用');
@@ -163,8 +184,13 @@ export function createMobileNotifications({ state, api, current = () => ({}), va
     if (!['disabled', 'enabling', 'enabled', 'unavailable', 'error'].includes(value.subscriptionState)
         || !['granted', 'denied', 'channel_disabled'].includes(value.permission) || !text(value.message || '', 1000)
         || value.workspaceSlug && !SLUG.test(value.workspaceSlug) || value.accountId && !identifier(value.accountId)) throw invalid('系统提醒状态无法读取，请重新打开应用');
+    const deliveryMode = value.deliveryMode === undefined ? 'supplement' : value.deliveryMode;
+    if (!['push', 'supplement', 'unavailable'].includes(deliveryMode)
+        || value.pushConfigured !== undefined && typeof value.pushConfigured !== 'boolean'
+        || value.pushAvailable !== undefined && typeof value.pushAvailable !== 'boolean') throw invalid('系统提醒状态无法核对');
     return { available: true, enabled: value.enabled, subscriptionState: value.subscriptionState, permission: value.permission,
-      workspaceSlug: value.workspaceSlug || '', accountId: value.accountId || '', message: value.message || '', intervalMinutes: 15, pendingTarget: value.pendingTarget === true };
+      workspaceSlug: value.workspaceSlug || '', accountId: value.accountId || '', message: value.message || '', intervalMinutes: 15, pendingTarget: value.pendingTarget === true,
+      deliveryMode, pushConfigured: value.pushConfigured === true, pushAvailable: value.pushAvailable === true };
   }
   async function callNative(method, ...args) {
     if (!native || typeof native[method] !== 'function') throw new Error('请在 Android App 中使用系统提醒');
@@ -173,17 +199,20 @@ export function createMobileNotifications({ state, api, current = () => ({}), va
   function checkedPending(value) {
     if (typeof value === 'string') { if (bytes(value) > 4096) throw invalid(); value = JSON.parse(value); }
     if (value === null || value === undefined) return null;
+    if (!plainObject(value)) throw invalid('这条系统提醒的账号或工作区已不可用');
     const workspace = workspaceRecord(state, value.workspaceSlug);
-    if (!plainObject(value) || value.accountId !== accountId(state) || !identifier(value.eventId) || !SLUG.test(value.workspaceSlug)
+    const pushed = typeof value?.deliveryId === 'string' && DELIVERY.test(value.deliveryId);
+    const hasDelivery = Object.hasOwn(value, 'deliveryId'), hasEvent = Object.hasOwn(value, 'eventId');
+    if (value.accountId !== accountId(state) || hasDelivery === hasEvent || hasDelivery && !pushed || hasEvent && !identifier(value.eventId) || !SLUG.test(value.workspaceSlug)
         || !identifier(value.workspaceId) || !workspace || workspace.id !== value.workspaceId) throw invalid('这条系统提醒的账号或工作区已不可用');
-    return { accountId: value.accountId, workspaceId: value.workspaceId, workspaceSlug: value.workspaceSlug, eventId: value.eventId };
+    return { accountId: value.accountId, workspaceId: value.workspaceId, workspaceSlug: value.workspaceSlug, ...(pushed ? { deliveryId: value.deliveryId } : { eventId: value.eventId }) };
   }
   async function resolvePending(value) {
     const data = ensure(); if (!data) return false;
     try {
       const pending = checkedPending(value); if (!pending) return false;
       if (pending.workspaceSlug !== workspaceId(state)) { data.pendingTarget = pending; data.nativeError = '请先切换到这条提醒所属的工作区'; draw(); return false; }
-      data.pendingTarget = pending; return resolveEvent(pending.eventId);
+      data.pendingTarget = pending; return pending.deliveryId ? resolveDelivery(pending.deliveryId) : resolveEvent(pending.eventId);
     } catch (error) { data.nativeError = error.message || '系统提醒已无法核对'; draw(); return false; }
   }
   async function handleNative(detail) {

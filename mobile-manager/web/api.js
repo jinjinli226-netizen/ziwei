@@ -123,6 +123,7 @@ export function createApi({ fetchImpl = globalThis.fetch?.bind(globalThis), orig
     managementAction: (workspace, id, options) => get(mobile(`${ws(workspace)}/actions/${enc(id)}`), readOptions(options)),
     mobileNotifications: (workspace, filters = {}, options) => get(`${ws(workspace)}/mobile/notifications${query(filters)}`, readOptions(options)),
     mobileNotification: (workspace, eventId, options) => get(`${ws(workspace)}/mobile/notifications/${enc(eventId)}`, readOptions(options)),
+    mobilePushDelivery: (deliveryId, options) => get(`/api/mobile/push/deliveries/${enc(deliveryId)}`, readOptions(options)),
     botCapabilities: (workspace, deviceId) => get(`${ws(workspace)}/bots/capabilities${query({ deviceId })}`),
     validateBot: (workspace, id, body) => post(`${botPath(workspace, id)}/validate`, body),
     updateBot: (workspace, id, body) => patch(botPath(workspace, id), body),

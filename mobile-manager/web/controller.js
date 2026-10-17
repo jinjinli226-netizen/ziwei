@@ -8,6 +8,7 @@ import { searchChatMessages } from './chat-search.js';
 import { createMobileGroups } from './mobile-groups.js';
 import { createMobileTasks } from './mobile-tasks.js';
 import { createMobileNotifications } from './mobile-notifications.js';
+import { createNotificationPresence } from './notification-presence.js';
 
 const IMAGE_LIMIT = 10 * 1024 * 1024;
 const avatarLimit = 2 * 1024 * 1024;
@@ -51,6 +52,7 @@ export function createController({ state, api, render = () => {}, storage = glob
   const resourceReads = new Map(), employeeReads = new Map(), employeeWrites = new Map();
   let employeeGets = new AbortController(), chatWriteEpoch = 0;
   const preferences = createChatPreferences({storage}), draftTimers = new Map();
+  const notificationPresence = createNotificationPresence({ state, native: nativeNotifications, visible: () => !nativePaused && !globalThis.document?.hidden });
   let preferencesScope = '';
   const localScope = () => ({accountId:accountId(state),workspaceId:workspaceId(state)});
   function syncChatPreferences(force = false) {
@@ -68,7 +70,7 @@ export function createController({ state, api, render = () => {}, storage = glob
   const current = () => ({ epoch, scope: scopeKey(state), employeeEpoch, employeeId: state.selectedEmployee?.id });
   const valid = (token, employee = false) => !disposed && token.epoch === epoch && token.scope === scopeKey(state) && (!employee || (token.employeeEpoch === employeeEpoch && token.employeeId === state.selectedEmployee?.id));
   const validChat = (token, readEpoch) => valid(token, true) && readEpoch === chatReadEpoch;
-  const draw = () => { if (!disposed) { syncChatPreferences(); syncLoading(); render(state); } };
+  const draw = () => { if (!disposed) { syncChatPreferences(); syncLoading(); notificationPresence.sync(); render(state); } };
   const storeGet = key => { try { return storage?.getItem(key); } catch { return null; } };
   const storeSet = (key, value) => { try { storage?.setItem(key, value); } catch {} };
   function persistMessage(key, value) {
@@ -869,6 +871,7 @@ export function createController({ state, api, render = () => {}, storage = glob
     if (disposed || nativePaused) return;
     stashComposer(); flushDrafts();
     nativePaused = true;
+    notificationPresence.pause();
     notifications.pause?.();
     chatReadEpoch++; conversationReads.clear(); invalidateEmployeeReads(); renewEmployeeGets();
     const resource = state.employeeResources.conversation;
@@ -905,7 +908,7 @@ export function createController({ state, api, render = () => {}, storage = glob
     disposed = true; epoch++; clearInterval(timer); timer = null; composers.clear(); pendingMutations.clear(); routineRequests.clear(); resourceReads.clear(); employeeReads.clear(); employeeWrites.clear(); phoneRead = null;
     employeeGets.abort();
     botSettings.dispose?.(); deviceSettings.dispose?.();
-    inbox.dispose(); forwarding.dispose(); groups.dispose(); mobileTasks.dispose(); notifications.dispose();
+    inbox.dispose(); forwarding.dispose(); groups.dispose(); mobileTasks.dispose(); notifications.dispose(); notificationPresence.dispose();
     globalThis.document?.removeEventListener('visibilitychange', visibility);
     globalThis.removeEventListener?.('ziwei:resume', resume);
     globalThis.removeEventListener?.('ziwei:pause', pause);
