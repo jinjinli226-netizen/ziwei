@@ -4,6 +4,7 @@ import {botProfileBinding,botProfileView,assertBotProfileReady} from './bot-prof
 import {normalizeNativeOperation,nativeIsExecution,nativeNeedsTools} from '../src/hermes-native-contract.mjs';
 import { normalizeBotConfig, createDefaultBotConfig, botFailure, BOT_CAPABILITY_CATALOG } from '../src/hermes-bot-config.mjs';
 import {deriveBotCapabilities} from './bot-capabilities.mjs';
+import {readHistoricalPrelaunchRecovery} from './bot-historical-recovery-view.mjs';
 
 const parse = value => { try { return JSON.parse(value); } catch { return null; } };
 const now = () => new Date().toISOString();
@@ -58,7 +59,7 @@ export function assertBotExecution(db, workspaceId, payload, { validation = fals
   if (!validation && row.validated_revision !== row.revision) throw botFailure('BOT_NOT_VALIDATED','Bot 当前配置尚未通过目标电脑验证');
   if (!readOnlyInspection && row.active_action_id && row.active_action_id !== actionId) {
     const active = db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(row.active_action_id);
-    if (active && (['pending','acked'].includes(active.status) || botUncertain(parse(active.result_json)) || active.status === 'expired' && active.acked_at)) throw botFailure('BOT_BUSY','Bot 仍有在途或未确认停止的执行，请查询原回执');
+    if (active && (['pending','acked'].includes(active.status) || botUncertain(parse(active.result_json)) || active.status === 'expired' && active.acked_at) && !readHistoricalPrelaunchRecovery(db,active)) throw botFailure('BOT_BUSY','Bot 仍有在途或未确认停止的执行，请查询原回执');
   }
   return {row,employee,snapshot:botSnapshot(db,employeeId,workspaceId)};
 }
@@ -215,7 +216,7 @@ export function createBotService(repo, management) {
           if(input.config && canonical(normalizeBotConfig(input.config))!==canonical(saved.config))throw botFailure('BOT_ALREADY_INITIALIZED','Bot 已初始化；修改配置请使用版本化编辑入口');
           return {...saved,duplicate:true};
         }
-        const inFlight=db.prepare('SELECT status,acked_at,result_json,payload_json FROM a2a_actions WHERE workspace_id=?').all(employee.workspace_id).some(row=>parse(row.payload_json)?.employeeId===id && (['pending','acked'].includes(row.status) || botUncertain(parse(row.result_json)) || row.status==='expired' && row.acked_at));
+        const inFlight=db.prepare('SELECT * FROM a2a_actions WHERE workspace_id=?').all(employee.workspace_id).some(row=>parse(row.payload_json)?.employeeId===id && (['pending','acked'].includes(row.status) || botUncertain(parse(row.result_json)) || row.status==='expired' && row.acked_at) && !readHistoricalPrelaunchRecovery(db,row));
         if(inFlight)throw botFailure('BOT_BUSY','员工仍有在途动作，先核对原回执再初始化');
         const conversation=db.prepare("SELECT id,device_id,model_id FROM conversations WHERE employee_id=? AND workspace_id=? AND status='active' ORDER BY updated_at DESC LIMIT 1").get(id,employee.workspace_id) || management.createConversation(slug,{employeeId:id,title:`${employee.name} · 主聊天`},actor);
         if(conversation.device_id && conversation.device_id!==employee.target_device_id || conversation.model_id && conversation.model_id!==employee.model_id)throw botFailure('BOT_CONVERSATION_CONFLICT','现有主聊天模型或电脑与员工绑定不一致，请先核对聊天设置');
@@ -299,11 +300,11 @@ export function createBotService(repo, management) {
         db.prepare("UPDATE employees SET status='paused' WHERE id=?").run(id);
         const active=row.active_action_id?repo.getA2AAction(row.active_action_id,{workspaceSlug:slug}):null;
         if(active?.status==='pending')repo.resultA2AAction(active.id,{status:'failed',error:'Bot 已暂停，未启动本次执行',result:{code:'BOT_CANCELLED_BEFORE_START',stopConfirmed:true}});
-        else if(input.operation==='stop' && active && (active.status==='acked' || botUncertain(active.result) || active.status==='expired' && active.acked_at)) {
+        else if(input.operation==='stop' && active && (active.status==='acked' || botUncertain(active.result) || active.status==='expired' && active.acked_at) && !readHistoricalPrelaunchRecovery(db,db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(active.id))) {
           const stop=requestStop(slug,active);
           db.prepare('UPDATE hermes_bots SET stop_action_id=? WHERE employee_id=?').run(stop.id,id);
         }
-        if(input.operation==='stop')for(const descendant of repo.listA2AActions(slug,{status:'all'}).filter(action=>action.payload.collaboration?.sourceEmployeeId===id&&(['pending','acked'].includes(action.status)||botUncertain(action.result)||action.status==='expired'&&action.acked_at))){if(descendant.status==='pending')repo.resultA2AAction(descendant.id,{status:'failed',error:'来源 Bot 已停止，协作未启动',result:{stopConfirmed:true}});else requestStop(slug,descendant,'bot-stop-descendant');}
+        if(input.operation==='stop')for(const descendant of repo.listA2AActions(slug,{status:'all'}).filter(action=>action.payload.collaboration?.sourceEmployeeId===id&&(['pending','acked'].includes(action.status)||botUncertain(action.result)||action.status==='expired'&&action.acked_at)&&!readHistoricalPrelaunchRecovery(db,db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(action.id)))){if(descendant.status==='pending')repo.resultA2AAction(descendant.id,{status:'failed',error:'来源 Bot 已停止，协作未启动',result:{stopConfirmed:true}});else requestStop(slug,descendant,'bot-stop-descendant');}
       }
       return get(slug,id,context);
     });},

@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {clientBuildIdentity} from '../src/management-bootstrap.mjs';
+import {isHistoricalPrelaunchCompletion} from '../src/bot-historical-prelaunch-completion.mjs';
 import {inspectClientMaintenance,inspectNativeClientProcess,inspectNativeHealthListener} from '../scripts/client-lifecycle.mjs';
 import {digest,uncertain,exitedTree,executionExit,gatewayResultMatches} from './version-preservation.mjs';
 import {scanOwnedNativeDatabases,nativeActionDigest,attestNativeVersion} from './preservation-native-databases.mjs';
@@ -265,6 +266,9 @@ function scanFileEvidence({connections=[],actions=[],homes=[],productionRequest}
         if(gateway?.resource==='gateway'&&worker){const originalConnection=state.completed.find(row=>row.result?.actionId===worker.sourceActionId),originalWorker=originalConnection?.result?.result?.nativeOperation?.data?.residentWorker;
           if(worker.workspace!==workspace||!worker.workerNonce||!Number.isInteger(worker.rootPid)||gateway.operation==='connect'&&worker.sourceActionId!==started.actionId||gateway.operation!=='connect'&&!equal(worker,originalWorker))issue('GATEWAY_CACHE_IDENTITY_MISMATCH',{actionId:started.actionId,path:stateFile});
         }
+        // An independently authenticated historical admission recovery only releases
+        // local maintenance. Formal preservation still requires its own evidence.
+        if(localMaintenance&&isHistoricalPrelaunchCompletion({started,completed,identity:scope}))continue;
         if(backgroundCompletions.has(started.key)){issue('BACKGROUND_PROCESS_RETAINED',{actionId:started.actionId,path:stateFile});retainedBackground.add(stateFile+'\0'+started.actionId);continue;}
         if(!originals.has(started.actionId)){const exit=executionExit(completed.result);if((started.nativeRuntime||exit)&&!exitedTree(exit)){
           issue('UNMAPPED_NATIVE_EXECUTION',{actionId:started.actionId,path:stateFile});

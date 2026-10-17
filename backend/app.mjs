@@ -19,6 +19,7 @@ import {createMobileReadView} from './mobile-read-view.mjs';
 import {createConversationReadService} from './conversation-read-state.mjs';
 import { createManagementBootstrap } from './management-bootstrap.mjs';
 import {createBotMcpConnections} from './bot-mcp-connections.mjs';
+import {createBotHistoricalRecovery} from './bot-historical-recovery.mjs';
 import { toolDefinitions as managementTools } from '../scripts/ziwei-mcp.mjs';
 
 const allowedOrigin = process.env.FRONTEND_ORIGIN || 'http://127.0.0.1:5178';
@@ -292,6 +293,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   const employeeTemplates = createEmployeeTemplateService(repo, management);
   const managementBootstrap = createManagementBootstrap(repo, options);
   const botMcpConnections=createBotMcpConnections(repo,management.bots,{apiBase:managementBootstrap.apiBase,now:options.mcpOAuthNow});
+  const botHistoricalRecovery=createBotHistoricalRecovery(repo,{readA2AToken:()=>readA2AToken({create:true})});
   const phoneMcp = createPhoneMcpService(repo,ziweiConnect,management,options);
   app.locals.repo = repo;
   app.locals.realtime = realtime;
@@ -300,6 +302,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   app.locals.phoneMcp = phoneMcp;
   app.locals.managementBootstrap = managementBootstrap;
   app.locals.botMcpConnections=botMcpConnections;
+  app.locals.botHistoricalRecovery=botHistoricalRecovery;
   app.locals.employeeTemplates = employeeTemplates;
   app.use(cors);
   app.use((_req, res, next) => {
@@ -884,6 +887,8 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
     deviceVerifier: req => verifyDeviceRequest(repo, req)
   }));
   app.get('/a2a/v1/agents', (_req, res) => res.json({ agents: [{ id:'ziwei_user', name:'ziwei_user', description:'紫薇工作区本机 daemon，负责心跳、轮询和 A2A 任务', url:'/a2a/v1', capabilities:['tasks','messages','heartbeat','actions','ack','result'] }] }));
+  app.post('/a2a/v1/actions/:id/prelaunch-recovery/prepare',(req,res)=>{res.setHeader('Cache-Control','no-store');if(!assertA2AActionWorkspace(repo,req,res))return;res.json(botHistoricalRecovery.prepare(req.params.id,req.deviceCredential,req.body));});
+  app.post('/a2a/v1/actions/:id/prelaunch-recovery/commit',(req,res)=>{res.setHeader('Cache-Control','no-store');if(!assertA2AActionWorkspace(repo,req,res))return;res.json(botHistoricalRecovery.commit(req.params.id,req.deviceCredential,req.body));});
   app.post('/a2a/v1/actions/:id/mcp-oauth/start',(req,res)=>{res.setHeader('Cache-Control','no-store');res.json(botMcpConnections.begin(req.params.id,req.deviceCredential));});
   app.post('/a2a/v1/actions/:id/mcp-oauth/authorization',(req,res)=>{res.setHeader('Cache-Control','no-store');res.json(botMcpConnections.publish(req.params.id,req.deviceCredential,req.body));});
   app.get('/a2a/v1/actions/:id/mcp-oauth/callback',(req,res)=>{res.setHeader('Cache-Control','no-store');res.json(botMcpConnections.callback(req.params.id,req.deviceCredential));});

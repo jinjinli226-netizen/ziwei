@@ -140,3 +140,16 @@ nativeRuntime是任务类型标记，不证明原进程当前仍在运行；stop
 
 去敏回传与边界保存在
 `.local/zhiwei-verification-diagnostic/user-state-output-20261017.json`。
+
+
+## 知微历史 admission 隔离恢复实现（2026-10-17）
+
+本次新增独立恢复机制，固定到原 action `action_2805b4da-c082-49a2-b0f1-b43bdeb107fe`、原设备、员工、Profile、失败事件及 `6666a63` 官方客户端的16份源文件。原 failed action/result/error/event 不改；恢复结果单独保存，不能解释成历史模型进程树已经退出。源审计能够确认的是正式 conversation runtime 的启动点未到达，授权前的探测及配置副作用仍可能存在。
+
+官方 Windows 更新器先核对同一 daemon generation、真实安装与原始本地记录，持有原 Windows Process handle 停止准确实例，然后凭设备身份提交独立 admission proof。原 started、delivery 和原始 action/result 字节保存在 runtime/history-recovery 下；新完成记录不覆盖其他员工历史，不删除 Profile/HOME，不重派原消息。持久化日志支持备份、停止、提交及本地写回各阶段中断重试。恢复或升级失败后不重启会重新堵住日志的旧实例；重新运行官方更新入口即可继续。
+
+客户端维护检查单独识别此类 admission 历史；普通 processExit、进程树退出证明及正式生产保全规则没有放宽。服务器首次恢复要求原 paused r3/e8 与精确 active；幂等取回仅返回原回执，不清除后来出现的新 active。页面从经过后端完整校验的独立投影展示“原模型未启动 · 已恢复”，保留原失败详情。
+
+旧版服务器投递会重排 managementMcp 并规范化员工模板元数据，故签名 subject 额外绑定实际投递格式的 canonical digest；原 raw payload SHA 仍固定保留。本例实机只读确认无模板实例且无四项模板元数据。首次恢复仍保留用户的暂停状态，恢复后可从正常启用入口继续使用，不自动恢复原业务消息。
+
+发布验收应分别记录：GitHub提交、API/前端/CLI发布、Windows实际更新、独立恢复事件和真实模型新消息。模拟测试与服务器发布不等同于知微现场已恢复；本 Mac 无法直接运行那台 Windows 的 held-handle 程序。

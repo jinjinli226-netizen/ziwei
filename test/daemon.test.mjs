@@ -89,19 +89,23 @@ test('fails an action after the configured idle timeout even before the hard dea
 });
 
 test('keeps an active action alive when progress arrives before the idle timeout', async () => {
+  // Advance the admission clock deterministically: a busy host must not turn
+  // this progress test into a scheduler-jitter test. The watchdog still runs.
+  let activityClock = 0;
   const dispatcher = new ActionDispatcher({
     execute: async (_action, context) => {
       for (let index = 0; index < 4; index += 1) {
-        await new Promise(resolve => setTimeout(resolve, 60));
+        await new Promise(resolve => setTimeout(resolve, 40));
+        activityClock += 60;
         context.onProgress({runtime: 'Codex', bytes: index + 1});
       }
       return {ok: true};
     },
-    now: () => Date.now()
+    now: () => activityClock
   });
   const result = await dispatcher.dispatch({
     id: 'a-active-timeout', dedupeKey: 'active-timeout', type: 'agent.execute',
-    payload: {prompt: 'progress', timeoutMs: 400, idleTimeoutMs: 100}
+    payload: {prompt: 'progress', timeoutMs: 2000, idleTimeoutMs: 100}
   });
   assert.equal(result.status, 'succeeded');
 });

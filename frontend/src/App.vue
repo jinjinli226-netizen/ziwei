@@ -1336,7 +1336,7 @@ function executionEventLabel(event) {
   if (event?.message && event.message !== 'CLI 输出已更新') return event.message;
   if (event?.message === 'CLI 输出已更新') return '生成结果';
   return ({
-    'action.started': '已启动本机 CLI',
+    'action.started': '本机已接收执行',
     'action.output': '生成结果',
     'action.progress': '数字员工正在执行',
     succeeded: '数字员工已完成',

@@ -24,6 +24,7 @@ import {forwardConversationMessages as forwardMessages,CONVERSATION_FORWARD_INTE
 import { resolveEmployeeDefaultWorkdir } from './employee-workdir.mjs';
 import { assertBotExecution, botUncertain, BOT_INTERNAL, botActionMaintenance, botActionReadOnlyInspection } from './bots.mjs';
 import {verifyBotProvisionReceipt} from './bot-profiles.mjs';
+import {readHistoricalPrelaunchRecovery} from './bot-historical-recovery-view.mjs';
 import {botReasoningProof} from '../src/hermes-bot-reasoning.mjs';
 import { botFailure } from '../src/hermes-bot-config.mjs';
 import { CREATOR_BOT_GUIDANCE } from './employees/creator-template.mjs';
@@ -476,6 +477,7 @@ export function createRepository(options = {}, io={}) {
     const { managementMcp: _oldManagement, ...rest } = trusted;
     return employeeWorkspace ? { ...rest, managementMcp: { enabled: true, workspace: employeeWorkspace } } : rest;
   };
+  const historicalActionMetadata = row => { const prelaunchRecovery=readHistoricalPrelaunchRecovery(db,row); return prelaunchRecovery ? {prelaunchRecovery} : {}; };
   const actionView = (row, { includeEvents = false, eventView = 'full' } = {}) => row ? ({
     id: row.id,
     task_id: row.task_id,
@@ -489,6 +491,7 @@ export function createRepository(options = {}, io={}) {
     completed_at: row.completed_at,
     result: parse(row.result_json),
     error: row.error || null,
+    ...historicalActionMetadata(row),
     ...(includeEvents ? { events: actionEvents(row.id,eventView), ...(eventView === 'mobile' ? {event_count:db.prepare('SELECT COUNT(*) AS count FROM a2a_action_events WHERE action_id=?').get(row.id).count} : {}) } : {})
   }) : null;
   // Message attachments are the canonical image bytes. History/sidebar and
@@ -1977,7 +1980,7 @@ export function createRepository(options = {}, io={}) {
       const deviceId = String(input.deviceId || input.device_id || '').trim();
       const rows=db.prepare(`SELECT * FROM a2a_actions WHERE workspace_id=? AND agent_id=? AND status IN (${placeholders}) ORDER BY created_at`).all(ws.id,agentId,...statuses);
       return rows.filter(row => !deviceId || !actionTargetDevice(row) || actionTargetDevice(row) === deviceId)
-        .map(row => a2aResponseView(row, { payload:executionActionPayload(row), includeResult:input.includeResult !== false }));
+        .map(row => ({...a2aResponseView(row, { payload:executionActionPayload(row), includeResult:input.includeResult !== false }),...historicalActionMetadata(row)}));
     },
     authorizeBotStart(actionId,input={}) {
       const row=db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId);

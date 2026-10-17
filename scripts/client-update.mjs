@@ -4,6 +4,7 @@ import os from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
+import { pathToFileURL } from 'node:url';
 import { resolveConfigPath, defaultUserDir } from '../daemon/config.mjs';
 import { clientBuildIdentity } from '../src/management-bootstrap.mjs';
 import {safeLocalStopReasons,localStopReasonMessage} from './client-lifecycle.mjs';
@@ -13,12 +14,14 @@ export const OFFICIAL_UPDATE_SOURCE = 'https://qzelynth.top/downloads/cli/ziwei-
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const pause = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
 const failure = (code, message, details = {}) => Object.assign(new Error(message), { code, ...details });
-const UPDATE_STAGES = new Set(['validate_installation', 'resolve_npm', 'validate_paths', 'verify_archive', 'read_release_manifest', 'download_package', 'stage_install', 'validate_candidate', 'prepare_candidate', 'stop_client', 'verify_original', 'backup_original', 'activate_candidate', 'verify_installation', 'restart_client', 'verify_configuration', 'stop_failed_candidate', 'restore_original', 'restart_original', 'read_restoration_configuration', 'wait_parent', 'acquire_lock', 'unknown']);
+const UPDATE_STAGES = new Set(['validate_installation', 'resolve_npm', 'validate_paths', 'verify_archive', 'read_release_manifest', 'download_package', 'stage_install', 'validate_candidate', 'prepare_candidate', 'recover_history', 'stop_client', 'verify_original', 'backup_original', 'activate_candidate', 'verify_installation', 'restart_client', 'verify_configuration', 'stop_failed_candidate', 'restore_original', 'restart_original', 'read_restoration_configuration', 'wait_parent', 'acquire_lock', 'unknown']);
 const SAFE_ERROR_CODES = new Set(['EBUSY', 'EPERM', 'EACCES', 'ENOENT', 'ENOTDIR', 'ENOSPC', 'EIO', 'EROFS', 'EEXIST', 'ETIMEDOUT', 'ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND', 'EAI_AGAIN', 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER', 'ERR_MODULE_NOT_FOUND', 'MODULE_NOT_FOUND', 'ERR_INVALID_PACKAGE_CONFIG', 'WINDOWS_ONLY', 'USERDATA_IN_PACKAGE', 'UNSAFE_PATH', 'CONFIG_UNREADABLE', 'CONFIG_INVALID', 'PID_MISMATCH', 'PROCESS_IDENTITY_MISMATCH', 'PROCESS_CHANGED', 'NON_LOCAL_CONTROL', 'INVALID_HEALTH_PORT', 'HEALTH_UNREACHABLE', 'FOREIGN_LISTENER', 'CLIENT_IDENTITY_MISMATCH', 'LIFECYCLE_IDENTITY_MISMATCH', 'LIFECYCLE_DOWNGRADE', 'INVALID_TIMEOUT', 'BUILD_INVALID', 'HEALTH_MISSING', 'PROCESS_MISSING', 'CONTROL_AUTH_MISSING', 'CONFIG_CHANGED', 'CONTROL_REJECTED', 'CLIENT_BUSY', 'CLIENT_RESTARTED', 'STOP_TIMEOUT', 'STOP_FAILED', 'NOT_GLOBAL_INSTALL', 'PACKAGE_MISMATCH', 'BIN_MISMATCH', 'NPM_UNAVAILABLE', 'MAINTENANCE_BUSY', 'INSTALL_CHANGED', 'INVALID_PARENT', 'PARENT_STILL_RUNNING', 'UPDATE_SOURCE_INVALID', 'UPDATE_HASH_INVALID', 'UPDATE_HTTP_FAILED', 'UPDATE_TOO_LARGE', 'UPDATE_MANIFEST_INVALID', 'UPDATE_BUILD_MISMATCH']);
 const SAFE_SIGNALS = new Set(['SIGTERM', 'SIGKILL', 'SIGABRT', 'SIGINT', 'SIGBREAK']);
 SAFE_ERROR_CODES.add('RETAINED_STOP_RECOVERY_REFUSED');
+SAFE_ERROR_CODES.add('HISTORICAL_PRELAUNCH_RECOVERY_REFUSED');
 for (const code of ['LEGACY_STOP_CONFIRMATION_REQUIRED', 'LEGACY_CONFIRMATION_INVALID', 'LEGACY_IDENTITY_UNVERIFIED', 'LEGACY_PROTOCOL_MISMATCH', 'LEGACY_PROOF_INVALID', 'LEGACY_PROOF_EXPIRED', 'LEGACY_IDENTITY_CHANGED', 'LEGACY_SOURCE_UNRECOGNIZED', 'LEGACY_CONFIG_MISMATCH', 'LEGACY_CONFIG_NAMESPACE_UNVERIFIED', 'LEGACY_STOP_PROOF_REQUIRED', 'LEGACY_STOP_FAILED']) SAFE_ERROR_CODES.add(code);
 const FAILURE_REASONS = {
+  HISTORICAL_PRELAUNCH_RECOVERY_REFUSED: '旧任务自动恢复尚未完成；原始记录已保留，请重试官方更新入口，系统会继续恢复',
   CONTROL_REJECTED: '客户端拒绝停止，请查看具体阻塞记录',
   RETAINED_STOP_RECOVERY_REFUSED: '历史记录未满足自动恢复条件，客户端未被强制停止',
   LEGACY_STOP_CONFIRMATION_REQUIRED: '旧版无法报告当前任务，执行状态未知；须先核验实例并明确确认停止后迁移',
@@ -248,8 +251,15 @@ async function performClientUpdateInternal({ root, env = process.env, directory,
     }
   };
   try {
-    progress.stage = 'stop_client';
-    stopped = await stop({ root, env, retainedRecoveryRoot: candidate, ...(allowLegacyStop ? { allowLegacyStop: true, legacyProof } : {}) });
+    progress.stage = 'recover_history';
+    const recovery = await recoverBeforeClientUpdateStop({ candidate, root, env, log });
+    // Historical quarantine is included in the old daemon's active count. Its
+    // audited recovery must run before the ordinary zero-active drain loop.
+    if (recovery.recovered) stopped = { ...recovery, stopped: true, wasRunning: true };
+    else {
+      progress.stage = 'stop_client';
+      stopped = await stop({ root, env, retainedRecoveryRoot: candidate, ...(allowLegacyStop ? { allowLegacyStop: true, legacyProof } : {}) });
+    }
     progress.stage = 'verify_original';
     assertConfiguration(configFile, configBefore);
     if (clientBuildIdentity(root) !== oldBuild) throw failure('INSTALL_CHANGED', '原程序在准备期间已变化，未覆盖另一维护任务的安装');
@@ -294,6 +304,11 @@ async function performClientUpdateInternal({ root, env = process.env, directory,
     }
     const originalInstallationRestored = recovered;
     let runningStateRestored = stopped?.wasRunning ? false : null;
+    // Once the audited holder has exited, a failed remote commit must keep
+    // that generation stopped. Restarting it would strand the durable recovery
+    // journal behind a new daemon that cannot own the original execution.
+    const historicalRecoveryPending = stopped?.prelaunchHistoryRetained === true || progress.stage === 'recover_history' && stopped?.stopped === true;
+    if (historicalRecoveryPending) recovered = false;
     if (recovered && stopped?.wasRunning) {
       let recoveryStage = 'read_restoration_configuration';
       try {
@@ -309,6 +324,16 @@ async function performClientUpdateInternal({ root, env = process.env, directory,
     log('update_failed', { ...describeUpdateFailure(captured, captured.failureStage), originalRestored: recovered, originalInstallationRestored, runningStateRestored, code: captured.code, ...(recoveryFailure ? { recoveryFailure } : {}), backup: moved ? backup : null });
     throw captured;
   }
+}
+
+export async function recoverBeforeClientUpdateStop({candidate,root,env=process.env,log=()=>{},load=specifier=>import(specifier)}={}) {
+  const module = await load(pathToFileURL(path.join(candidate,'scripts/client-historical-prelaunch-recovery.mjs')).href);
+  const receipt = await module.recoverHistoricalPrelaunchForUpdate({root,env});
+  if(receipt?.recovered===true) {
+    if(receipt.stopped!==true||receipt.wasRunning!==true)throw failure('HISTORICAL_PRELAUNCH_RECOVERY_REFUSED','历史恢复未给出可核验的停止结果');
+    log('historical_prelaunch_recovered',{actionId:receipt.actionId});
+  }
+  return receipt || {recovered:false};
 }
 
 export async function launchClientUpdate({ codeRoot, root = codeRoot, args = {}, env = process.env } = {}) {
