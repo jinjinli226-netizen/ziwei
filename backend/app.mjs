@@ -15,6 +15,7 @@ import { createZiweiConnect } from './ziwei-connect.mjs';
 import { createManagementService } from './management.mjs';
 import { createEmployeeTemplateService } from './employees/templates.mjs';
 import { createPhoneMcpService } from './phone-mcp.mjs';
+import {createMobileReadView} from './mobile-read-view.mjs';
 import { createManagementBootstrap } from './management-bootstrap.mjs';
 import { toolDefinitions as managementTools } from '../scripts/ziwei-mcp.mjs';
 
@@ -284,6 +285,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   });
   const auth = options.auth || createAuthService(repo.db, options.authOptions);
   const management = createManagementService(repo);
+  const mobileReadView = createMobileReadView(repo);
   const employeeTemplates = createEmployeeTemplateService(repo, management);
   const managementBootstrap = createManagementBootstrap(repo, options);
   const phoneMcp = createPhoneMcpService(repo,ziweiConnect,management,options);
@@ -526,7 +528,17 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   app.post('/api/workspaces/:slug/devices/:id/heartbeat', requireDeviceCredential(repo), (req, res) => res.json({ ok: true, device: repo.heartbeatDevice(req.params.slug, { ...req.body, deviceId: req.params.id }) }));
   app.post('/api/daemon/heartbeat', requireDeviceCredential(repo), (req, res, next) => { const slug = String(req.body.workspace || req.body.workspace_slug || '').trim(); if (!slug) return res.status(400).json({ error: 'heartbeat 必须明确 workspace' }); try { return res.json({ ok: true, device: repo.heartbeatDevice(slug, req.body) }); } catch (error) { return next(error); } });
   app.post('/api/devices/heartbeat', requireDeviceCredential(repo), (req, res, next) => { const slug = String(req.body.workspace || req.body.workspace_slug || '').trim(); if (!slug) return res.status(400).json({ error: 'heartbeat 必须明确 workspace' }); try { return res.json({ ok: true, device: repo.heartbeatDevice(slug, req.body) }); } catch (error) { return next(error); } });
-  app.get('/api/workspaces/:slug/employees', (req, res) => res.json({ employees: repo.listEmployees(req.params.slug, { actorUserId: req.auth?.user_id, actorRole: req.workspaceRole, enforceEmployeeVisibility: true }) }));
+  app.get('/api/workspaces/:slug/employees', (req, res) => {
+    const employees=repo.listEmployees(req.params.slug, { actorUserId:req.auth?.user_id,actorRole:req.workspaceRole,enforceEmployeeVisibility:true });
+    res.json({employees:req.query.view==='mobile'?mobileReadView.employees(req.params.slug,employees):employees});
+  });
+  app.get('/api/workspaces/:slug/employees/:id/avatar', (req,res) => {
+    const image=mobileReadView.avatar(req.params.slug,req.params.id,employeeContext(req));
+    if(!image||req.query.v!==undefined&&req.query.v!==image.version)return res.status(404).json({error:'Employee avatar not found'});
+    res.vary('Cookie');
+    res.set({'Content-Type':image.mimeType,'ETag':`"${image.version}"`,'Cache-Control':'private, max-age=60, must-revalidate','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'; sandbox"});
+    return res.send(image.bytes);
+  });
   app.post('/api/workspaces/:slug/employees', requireRole('owner','admin','member'), (req, res) => { const input = { ...(req.body || {}), ownerUserId: req.auth?.user_id }; if (input.targetDeviceId || input.target_device_id || input.deviceId || input.device_id || input.managementMcpEnabled || input.managementMcp?.enabled) { const saved = management.createEmployee(req.params.slug, { ...input, idempotencyKey: req.get('Idempotency-Key') || input.idempotencyKey || input.idempotency_key }, employeeContext(req)); return res.status(saved.duplicate ? 200 : 201).json(saved); } return res.status(201).json(repo.createEmployee(req.params.slug, input,employeeContext(req))); });
   const ensureEmployeeVisibleById = (req, idValue) => {
     const employee = repo.getEmployee(idValue, employeeContext(req));
@@ -588,7 +600,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
     if (!employeeId) return res.status(400).json({ error: '新建会话必须绑定数字员工' });
     return res.status(201).json(repo.createConversation(req.params.slug, { ...(req.body || {}), employeeId, ...employeeContext(req), enforceDeviceOwnership: true }));
   });
-  app.get('/api/conversations/:id', (req, res) => { const conversation=repo.getConversation(req.params.id, employeeContext(req)); if(!conversation) return res.status(404).json({error:'Conversation not found'}); res.json(conversation); });
+  app.get('/api/conversations/:id', (req, res) => { const conversation=repo.getConversation(req.params.id, employeeContext(req)); if(!conversation) return res.status(404).json({error:'Conversation not found'}); res.json(req.query.view==='mobile'?mobileReadView.conversation(conversation):conversation); });
   app.patch('/api/conversations/:id', (req, res) => { const context=employeeContext(req); const conversation=repo.getConversation(req.params.id, context); if(!conversation) return res.status(404).json({error:'Conversation not found'}); res.json(repo.updateConversationSettings(req.params.id, { ...(req.body || {}), ...context })); });
   app.post('/api/conversations/:id/workdir/inspect', requireRole('owner','admin','member'), (req, res, next) => {
     try {
@@ -647,7 +659,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
     create: options.mcpOptions?.create ?? false
   };
   app.get('/api/workspaces/:slug/mcp/discovery', requireRole('owner','admin','member'), (req, res) => res.json(management.discovery(req.params.slug, { ...req.query, userId: req.auth?.user_id })));
-  app.get('/api/workspaces/:slug/phone-mcp/setup',requireRole('owner','admin','member'),async(req,res,next)=>{try{res.json(await phoneMcp.setup(req.params.slug,{...employeeContext(req),userId:req.auth?.user_id}));}catch(error){next(error);}});
+  app.get('/api/workspaces/:slug/phone-mcp/setup',requireRole('owner','admin','member'),async(req,res,next)=>{try{const value=await phoneMcp.setup(req.params.slug,{...employeeContext(req),userId:req.auth?.user_id});res.json(req.query.view==='mobile'?{...value,employees:value.employees.map(employee=>mobileReadView.employee(req.params.slug,employee))}:value);}catch(error){next(error);}});
   app.put('/api/workspaces/:slug/employees/:id/phone-mcp',requireRole('owner','admin'),async(req,res,next)=>{
     try {ensureEmployeeInWorkspace(req.params.slug,req.params.id,req);res.json(await phoneMcp.save(req.params.slug,req.params.id,req.body || {},employeeContext(req)));} catch(error) {next(error);}
   });
@@ -741,10 +753,10 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   function registerBotRoutes(prefix,guard,contextFor) {
     const base=`${prefix}/workspaces/:slug/bots`, bots=management.bots;
     app.get(`${base}/capabilities`,guard,(req,res)=>res.json(bots.capabilities(req.params.slug,req.query,contextFor(req))));
-    app.get(base,guard,(req,res)=>res.json({bots:bots.list(req.params.slug,contextFor(req))}));
+    app.get(base,guard,(req,res)=>{const values=bots.list(req.params.slug,contextFor(req));res.json({bots:prefix==='/api'&&req.query.view==='mobile'?values.map(value=>mobileReadView.bot(req.params.slug,value)):values});});
     app.post(base,guard,(req,res)=>{const result=bots.create(req.params.slug,req.body,contextFor(req));res.status(result.duplicate?200:202).json(result);});
     app.post(`${prefix}/workspaces/:slug/employees/:id/bot`,guard,(req,res)=>res.json(bots.initialize(req.params.slug,req.params.id,req.body,contextFor(req))));
-    app.get(`${base}/:id`,guard,(req,res)=>res.json(bots.get(req.params.slug,req.params.id,contextFor(req))));
+    app.get(`${base}/:id`,guard,(req,res)=>{const value=bots.get(req.params.slug,req.params.id,contextFor(req));res.json(prefix==='/api'&&req.query.view==='mobile'?mobileReadView.bot(req.params.slug,value):value);});
     app.patch(`${base}/:id`,guard,(req,res)=>res.json(bots.update(req.params.slug,req.params.id,req.body,contextFor(req))));
     app.post(`${base}/:id/provision`,guard,(req,res)=>res.status(202).json(bots.provision(req.params.slug,req.params.id,req.body,contextFor(req))));
     app.post(`${base}/:id/validate`,guard,(req,res)=>res.status(202).json(bots.validate(req.params.slug,req.params.id,req.body,contextFor(req))));

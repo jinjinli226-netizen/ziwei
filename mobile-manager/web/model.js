@@ -27,8 +27,11 @@ export function formatTime(value) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? '时间未知' : date.toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});
 }
+export function initialResources() {
+  return Object.fromEntries(['employees','bots','tasks','devices','phones'].map(name=>[name,{phase:'idle',error:'',lastUpdated:null}]));
+}
 export function initialState() {
-  return {phase:'boot',user:null,workspaces:[],workspace:null,tab:'employees',page:'home',employees:[],bots:[],tasks:[],devices:[],phones:[],selectedEmployee:null,bot:null,conversation:null,messages:[],runs:[],routines:[],report:null,phone:null,draft:'',attachments:[],busy:false,chatLoading:false,error:'',notice:'',filter:'all',search:'',imagePreview:null,task:null,reportSelection:[],botSettings:null,deviceSettings:null,settingsTrail:[]};
+  return {phase:'boot',user:null,workspaces:[],workspace:null,tab:'employees',page:'home',employees:[],bots:[],tasks:[],devices:[],phones:[],resources:initialResources(),selectedEmployee:null,bot:null,conversation:null,messages:[],runs:[],routines:[],report:null,phone:null,draft:'',attachments:[],busy:false,chatLoading:false,error:'',notice:'',filter:'all',search:'',imagePreview:null,task:null,reportSelection:[],botSettings:null,deviceSettings:null,settingsTrail:[]};
 }
 export const id = () => globalThis.crypto?.randomUUID?.() || `mobile-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 export function accountId(state) { return String(state.user?.user_id || state.user?.user?.id || state.user?.id || ''); }

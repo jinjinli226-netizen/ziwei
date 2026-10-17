@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createController} from '../web/controller.js';
 import {initialState} from '../web/model.js';
+import {render as renderView} from '../web/view.js';
 
 function memoryStorage() {
   const values = new Map();
@@ -39,6 +40,79 @@ function initializedFixture(apiOverrides = {}, render = () => {}) {
   }, memoryStorage(), render);
   return {...f,bot};
 }
+
+test('employee rows render before a deferred Bot status read and unrelated lists are lazy', async t => {
+  const status = deferred(), frames = [], calls = [];
+  const employee = {id:'loaded',name:'已返回的员工',runtime:'Other'};
+  const f = fixture({employees:[]}, {
+    employees:async()=>({employees:[employee]}), bots:()=>{calls.push('bots');return status.promise;},
+    tasks:async()=>{calls.push('tasks');return {tasks:[]};}, devices:async()=>{calls.push('devices');return {devices:[]};},
+  }, memoryStorage(), state=>frames.push(renderView(state)));
+  t.after(()=>{f.controller.dispose();status.resolve({bots:[]});});
+  const refreshing = f.controller.refresh();await tick();
+  assert.equal(f.state.employees[0]?.id,'loaded','the employee response must be applied before auxiliary status settles');
+  assert(frames.some(html=>html.includes('已返回的员工')&&html.includes('打开聊天')));
+  assert.equal(f.state.loading,false);assert.deepEqual(calls,['bots']);
+  await promptly(refreshing);
+});
+
+test('first employee load distinguishes pending, failed, genuinely empty and retained rows', async t => {
+  const response=deferred();let attempts=0;
+  const f=fixture({employees:[]},{employees:async()=>++attempts===1?response.promise:{employees:[]}});
+  t.after(()=>f.controller.dispose());
+  const loading=f.controller.refresh();
+  assert.match(renderView(f.state),/正在读取员工/);assert.doesNotMatch(renderView(f.state),/还没有数字员工/);
+  response.resolve(Promise.reject(new Error('员工接口暂时失败')));await loading;
+  assert.match(renderView(f.state),/员工列表读取失败/);assert.match(renderView(f.state),/员工接口暂时失败/);assert.doesNotMatch(renderView(f.state),/还没有数字员工/);
+  await f.controller.refresh();assert.match(renderView(f.state),/还没有数字员工/);
+  f.state.employees=[{id:'cached',name:'缓存员工'}];f.api.employees=async()=>{throw new Error('员工列表超时');};
+  await f.controller.refresh();assert.match(renderView(f.state),/缓存员工/);assert.match(renderView(f.state),/员工列表超时/);
+});
+
+test('Bot status failure keeps employee rows visible with a separate retryable error', async t => {
+  const status=deferred();let attempts=0;
+  const f=fixture({}, {bots:async()=>++attempts===1?status.promise:{bots:[]}});t.after(()=>f.controller.dispose());
+  await f.controller.refresh();status.resolve(Promise.reject(new Error('状态读取超时')));await tick();
+  assert.equal(f.state.resources.employees.phase,'ready');assert.equal(f.state.resources.bots.phase,'error');assert.equal(f.state.error,'');
+  assert.match(renderView(f.state),/员工甲/);assert.match(renderView(f.state),/员工运行状态读取失败：状态读取超时/);
+  await f.controller.refresh();await tick();assert.equal(attempts,2);assert.equal(f.state.resources.bots.phase,'ready');
+});
+
+for(const [tab,resource] of [['work','tasks'],['devices','devices']]) test(`pending ${resource} reads cannot block returning to the employee tab`, async t => {
+  const slow=deferred();let reads=0;
+  const f=fixture({}, {[resource]:()=>{reads++;return slow.promise;},phones:async()=>({devices:[]})});
+  t.after(()=>{f.controller.dispose();slow.resolve({[resource]:[]});});
+  const navigation=f.controller.actions.navigate({tab});await tick();assert.equal(reads,1);assert.equal(f.state.resources[resource].phase,'loading');
+  assert.match(renderView(f.state),resource==='tasks'?/正在读取工作任务/:/正在读取运行电脑/);
+  assert.doesNotMatch(renderView(f.state),resource==='tasks'?/暂无工作任务/:/暂无运行电脑/);
+  await promptly(f.controller.actions.navigate({tab:'employees'}));assert.match(renderView(f.state),/员工甲/);assert.equal(f.state.loading,false);
+  slow.resolve(Promise.reject(new Error('该页面资源超时')));await navigation;
+  assert.equal(f.state.resources[resource].phase,'error');assert.equal(f.state.error,'');assert.doesNotMatch(renderView(f.state),/该页面资源超时/);
+  assert.match(renderView({...f.state,tab}),resource==='tasks'?/工作任务读取失败：该页面资源超时/:/运行电脑读取失败：该页面资源超时/);
+});
+
+test('a late Bot list cannot repopulate another workspace, while a current auxiliary 401 still requires login', async t => {
+  const old=deferred();const fresh={id:'fresh-bot',employee_id:'new-employee'};
+  const f=fixture({}, {bots:workspace=>workspace==='workspace-one'?old.promise:Promise.resolve({bots:[fresh]}),employees:async workspace=>({employees:[{id:workspace==='workspace-one'?'one':'new-employee'}]})});
+  t.after(()=>f.controller.dispose());
+  await f.controller.refresh();await f.controller.actions['select-workspace']({id:'workspace-two'});await tick();
+  old.resolve(Promise.reject(new Error('旧工作区状态超时')));await tick();
+  assert.equal(f.state.workspace.slug,'workspace-two');assert.equal(f.state.bots[0].id,'fresh-bot');assert.equal(f.state.resources.bots.phase,'ready');assert.equal(f.state.error,'');
+  f.api.bots=async()=>{throw Object.assign(new Error('expired'),{status:401});};
+  await f.controller.refresh();await tick();assert.equal(f.state.phase,'login');assert.equal(f.state.user,null);assert.deepEqual(f.state.employees,[]);assert.equal(f.state.resources.bots.phase,'idle');
+});
+
+for(const resource of ['employees','bots']) test(`an old ${resource} list cannot replace a saved employee or Bot revision`, async t => {
+  const old=deferred();let f;
+  f=initializedFixture({[resource]:()=>old.promise,updateBot:async(_workspace,_employee,body)=>({...f.bot,revision:4,employee:{...f.bot.employee,...body.employee}})});
+  t.after(()=>f.controller.dispose());
+  const refreshing=f.controller.refresh();await tick();
+  await f.controller.actions['employee-detail']({id:'one'});
+  await f.controller.submit('employee',form({name:'已保存的新名字',description:'新说明'}));
+  assert.equal(f.state.bot.revision,4);
+  old.resolve(resource==='employees'?{employees:[f.bot.employee]}:{bots:[f.bot]});await refreshing;await tick();
+  assert.equal(f.state.selectedEmployee.name,'已保存的新名字');assert.equal(f.state.employees[0].name,'已保存的新名字');assert.equal(f.state.bot.revision,4);assert.equal(f.state.bots[0].revision,4);
+});
 
 test('ordinary employee chat uses its existing identity and an employee switch ignores the old response', async t => {
   const old = deferred();
@@ -125,6 +199,47 @@ test('refresh reads an existing screenshot command without sending the command a
   let writes=0;const phone={id:'phone-one',commands:[{id:'command-one',status:'queued'}],nodes:[]};
   const f=fixture({tab:'devices',page:'phone',phone,phoneCommand:{id:'command-one',status:'queued'}}, {phones:async()=>({devices:[phone]}),phone:async()=>({device:phone}),phoneSnapshot:async()=>({snapshot:null}),phoneCommand:async()=>{writes++;return {command:{id:'unexpected'}};}});t.after(()=>f.controller.dispose());
   await f.controller.actions['phone-refresh']({id:phone.id});await f.controller.refresh();assert.equal(writes,0);
+});
+
+test('repeated device polling shares a pending phone read instead of overlapping snapshots', async t => {
+  const pending=deferred();let reads=0;
+  const f=fixture({tab:'devices'},{phones:()=>{reads++;return pending.promise;}});
+  t.after(()=>{f.controller.dispose();pending.resolve({devices:[]});});
+  await f.controller.refresh();await f.controller.refresh();
+  assert.equal(reads,1,'the phone list must have its own in-flight guard');
+  pending.resolve({devices:[]});await tick();
+  await f.controller.refresh();assert.equal(reads,2,'a settled read must allow the next poll');
+});
+
+for(const lateFailure of [false,true]) test(`a pre-command phone ${lateFailure?'error':'snapshot'} cannot roll back a new screenshot or its receipt`, async t => {
+  const old=deferred();let snapshots=0,details=0;
+  const phone={id:'phone-one',commands:[],nodes:[]},command={id:'new-command',status:'succeeded',action:'screenshot'};
+  const f=fixture({tab:'devices',page:'phone',phone,phones:[phone]}, {
+    phones:async()=>({devices:[phone]}),phone:async()=>({device:{...phone,alias:++details===1?'旧状态':'新状态',commands:details===1?[]:[command]}}),
+    phoneSnapshot:()=>++snapshots===1?old.promise:Promise.resolve({snapshot:{capturedAt:'new-snapshot'}}),
+    phoneCommand:async()=>({command:{...command,status:'queued'}}),
+  });t.after(()=>{f.controller.dispose();old.resolve({snapshot:{capturedAt:'old-snapshot'}});});
+  await f.controller.refresh();await tick();assert.equal(snapshots,1);
+  await f.controller.actions['phone-refresh']({id:phone.id});assert.equal(snapshots,2);
+  assert.equal(f.state.phone.snapshot.capturedAt,'new-snapshot');assert.equal(f.state.phoneCommand.status,'succeeded');
+  old.resolve(lateFailure?Promise.reject(new Error('旧截图超时')):{snapshot:{capturedAt:'old-snapshot'}});await tick();
+  assert.equal(f.state.phone.snapshot.capturedAt,'new-snapshot');assert.equal(f.state.phone.alias,'新状态');assert.deepEqual(f.state.phone.commands,[command]);assert.equal(f.state.phoneCommand.status,'succeeded');
+  assert.equal(f.state.phoneError,'');assert.equal(f.state.resources.phones.phase,'ready');
+});
+
+test('a deduplicated phone 401 clears the authenticated UI and allows no late phone write', async t => {
+  const pending=deferred();const f=fixture({tab:'devices'},{phones:()=>pending.promise});t.after(()=>f.controller.dispose());
+  await f.controller.refresh();await f.controller.refresh();pending.resolve(Promise.reject(Object.assign(new Error('expired'),{status:401})));await tick();
+  assert.equal(f.state.phase,'login');assert.equal(f.state.user,null);assert.deepEqual(f.state.phones,[]);assert.equal(f.state.resources.phones.phase,'idle');
+});
+
+test('background refresh keeps loaded rows in place without inserting a loading banner', async t => {
+  const pending=deferred();let attempts=0;
+  const f=fixture({}, {employees:async()=>++attempts===1?{employees:[{id:'one',name:'员工甲'}]}:pending.promise});
+  t.after(()=>{f.controller.dispose();pending.resolve({employees:[]});});
+  await f.controller.refresh();await tick();const polling=f.controller.refresh({silent:true});
+  assert.match(renderView(f.state),/员工甲/);assert.doesNotMatch(renderView(f.state),/正在更新员工列表/);
+  pending.resolve({employees:[{id:'one',name:'员工甲'}]});await polling;
 });
 
 for (const resource of ['bot','botRuns','botRoutines']) test(`cached main history renders and input unlocks while ${resource} remains pending`, async t => {

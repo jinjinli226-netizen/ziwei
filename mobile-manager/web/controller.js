@@ -1,4 +1,4 @@
-import { accountId, workspaceId, scopeKey, list, id, executionUncertain } from './model.js';
+import { accountId, workspaceId, scopeKey, list, id, executionUncertain, initialResources } from './model.js';
 import { createBotSettings } from './bot-settings.js';
 import { createDeviceSettings } from './device-settings.js';
 
@@ -36,8 +36,10 @@ async function readImages(files) {
 
 /** UI effects are scoped to the authenticated account, workspace and selected employee. */
 export function createController({ state, api, render = () => {}, storage = globalThis.localStorage, reporting } = {}) {
-  let epoch = 0, employeeEpoch = 0, chatReadEpoch = 0, phoneEpoch = 0, disposed = false, timer = null, refreshing = false, refreshToken = 0, attachmentEpoch = 0, nativePaused = false;
+  let epoch = 0, employeeEpoch = 0, chatReadEpoch = 0, phoneEpoch = 0, phoneRead = null, disposed = false, timer = null, attachmentEpoch = 0, nativePaused = false;
   const composers = new Map(), pendingMutations = new Set(), routineRequests = new Map(), messageKeys = new Set(), conversationReads = new Map();
+  const resourceReads = new Map();
+  state.resources ||= initialResources();
   const workspaceKey = userId => `ziwei.mobile.workspace:${userId}`;
   const messageKey = () => `ziwei.manager.message.v1:${encodeURIComponent(accountId(state))}:${encodeURIComponent(workspaceId(state))}:${encodeURIComponent(state.selectedEmployee?.id || '')}`;
   const current = () => ({ epoch, scope: scopeKey(state), employeeEpoch, employeeId: state.selectedEmployee?.id });
@@ -80,6 +82,7 @@ export function createController({ state, api, render = () => {}, storage = glob
   }
   function clearWorkspace() {
     clearSelection(); state.employees = []; state.bots = []; state.tasks = []; state.devices = []; state.phones = [];
+    resourceReads.clear(); phoneRead = null; state.resources = initialResources();
     state.report = null; state.reportSelection = []; state.page = 'home'; state.tab = 'employees'; state.imagePreview = null;
     state.phoneCommand = null; state.phoneError = ''; state.loading = false; state.busy = false;
     state.botSettings = null; state.deviceSettings = null; state.settingsTrail = [];
@@ -89,7 +92,7 @@ export function createController({ state, api, render = () => {}, storage = glob
     reporting?.clear?.(state);
     if (explicitLogout && userId) clearAccountRequests(userId);
     if (userId) { try { storage?.removeItem(workspaceKey(userId)); } catch {} }
-    epoch++; refreshing = false; refreshToken++; composers.clear(); pendingMutations.clear(); routineRequests.clear(); clearWorkspace();
+    epoch++; composers.clear(); pendingMutations.clear(); routineRequests.clear(); clearWorkspace();
     state.user = null; state.workspace = null; state.workspaces = []; state.phase = 'login'; state.error = message; state.notice = ''; draw();
   }
   function fail(error, token = current(), employee = false) {
@@ -114,39 +117,74 @@ export function createController({ state, api, render = () => {}, storage = glob
     state.employees = state.employees.map(employee => employee.id === bot.id ? { ...employee, ...(bot.employee || {}), bot } : employee);
     if (state.selectedEmployee?.id === bot.id) { state.bot = bot; state.selectedEmployee = state.employees.find(employee => employee.id === bot.id) || { ...state.selectedEmployee, ...bot.employee, bot }; }
   }
-  const botSettings = createBotSettings({ state, api, current, valid, fail, draw, acceptBot });
+  function invalidateResources(...names) {
+    for (const name of names) {
+      resourceReads.delete(name);
+      const resource = state.resources[name];
+      if (resource?.phase === 'loading') resource.phase = resource.lastUpdated ? 'ready' : 'idle';
+    }
+  }
+  function acceptSavedBot(bot) {
+    invalidateResources('employees', 'bots');
+    acceptBot(bot);
+  }
+  const botSettings = createBotSettings({ state, api, current, valid, fail, draw, acceptBot: acceptSavedBot });
   const deviceSettings = createDeviceSettings({ state, api, current, valid, fail, draw });
+  const primaryResource = () => ['phones', 'devices'].includes(state.tab) || state.page === 'phone' ? 'devices' : ['work', 'tasks'].includes(state.tab) ? 'tasks' : 'employees';
+  const syncLoading = () => { state.loading = state.resources[primaryResource()]?.phase === 'loading'; };
+  function readWorkspaceResource(name, token = current()) {
+    if (!valid(token)) return Promise.resolve(false);
+    // A pending mutation owns these rows until its authoritative response is accepted.
+    if (['employees', 'bots'].includes(name) && (state.employeeSaving || state.stopBusy || (state.page === 'bot-settings' && state.botSettings?.saving))) return Promise.resolve(false);
+    if (name === 'tasks' && state.page === 'task' && state.busy) return Promise.resolve(false);
+    const existing = resourceReads.get(name);
+    if (existing && valid(existing.token)) return existing.promise;
+    const workspace = workspaceId(state), resource = state.resources[name] ||= {phase:'idle',error:'',lastUpdated:null};
+    const entry = {token};
+    resourceReads.set(name, entry);
+    resource.phase = 'loading'; resource.error = ''; syncLoading(); draw();
+    entry.promise = Promise.resolve().then(() => api[name](workspace)).then(result => {
+      if (!valid(token) || resourceReads.get(name) !== entry) return false;
+      const values = list(result, name);
+      if (name === 'employees') {
+        state.employees = mergeEmployees(values);
+        if (state.selectedEmployee) state.selectedEmployee = state.employees.find(employee => employee.id === state.selectedEmployee.id) || state.selectedEmployee;
+      } else if (name === 'bots') {
+        state.bots = values; state.employees = mergeEmployees();
+        if (state.selectedEmployee) state.selectedEmployee = state.employees.find(employee => employee.id === state.selectedEmployee.id) || state.selectedEmployee;
+      } else state[name] = values;
+      resource.phase = 'ready'; resource.error = ''; resource.lastUpdated = new Date().toISOString();
+      state.lastRefreshed = resource.lastUpdated;
+      syncLoading(); draw(); return true;
+    }).catch(error => {
+      if (!valid(token) || resourceReads.get(name) !== entry) return false;
+      if (error?.status === 401) requireLogin('登录已过期，请重新登录');
+      else { resource.phase = 'error'; resource.error = error?.message || '读取失败，请刷新重试'; syncLoading(); draw(); }
+      return false;
+    }).finally(() => { if (resourceReads.get(name) === entry) resourceReads.delete(name); });
+    return entry.promise;
+  }
   async function refresh({ silent = false } = {}) {
-    if (disposed || !state.user || !workspaceId(state) || refreshing) return false;
-    const token = current(), workspace = workspaceId(state), requestId = ++refreshToken;
-    refreshing = true;
-    if (!silent) { state.loading = true; state.error = ''; draw(); }
-    // Chat history must progress even if a workspace list or another employee resource is slow.
-    const employeeWork = ['chat', 'detail', 'employee-detail'].includes(state.page) ? refreshEmployee(token) : Promise.resolve();
+    if (disposed || !state.user || !workspaceId(state) || state.phase !== 'ready') return false;
+    const token = current(), primary = primaryResource();
+    if (!silent) { state.error = ''; draw(); }
+    const employees = readWorkspaceResource('employees', token);
+    // The initial employee response is useful on its own. Full Bot histories are supplementary.
+    void employees.then(ok => {
+      if (ok && valid(token) && state.page === 'home' && state.tab === 'employees') return readWorkspaceResource('bots', token);
+    });
+    const primaryWork = primary === 'employees' ? employees : readWorkspaceResource(primary, token);
+    const chatWork = state.page === 'chat' ? readChat(token) : Promise.resolve();
+    if (['chat', 'detail', 'employee-detail'].includes(state.page)) void refreshEmployee(token, {skipConversation:true});
     const settingsWork = state.page === 'bot-settings' ? botSettings.load() : state.page === 'device-settings' ? deviceSettings.load() : Promise.resolve();
+    if (['phones', 'devices'].includes(state.tab) || state.page === 'phone') void refreshPhones(token).then(() => { if (valid(token)) draw(); }).catch(error => fail(error, token));
     try {
-      const results = await Promise.allSettled([api.employees(workspace), api.bots(workspace), api.tasks(workspace), api.devices(workspace)]);
-      if (!valid(token)) return false;
-      const authFailure = results.find(result => result.status === 'rejected' && result.reason?.status === 401);
-      if (authFailure) throw authFailure.reason;
-      const [employees, bots, tasks, devices] = results;
-      if (bots.status === 'fulfilled') state.bots = list(bots.value, 'bots');
-      if (employees.status === 'fulfilled') state.employees = mergeEmployees(list(employees.value, 'employees'), state.bots);
-      else state.employees = mergeEmployees(state.employees, state.bots);
-      if (tasks.status === 'fulfilled') state.tasks = list(tasks.value, 'tasks');
-      if (devices.status === 'fulfilled') state.devices = list(devices.value, 'devices');
-      if (state.selectedEmployee) state.selectedEmployee = state.employees.find(employee => employee.id === state.selectedEmployee.id) || state.selectedEmployee;
-      const failures = results.filter(result => result.status === 'rejected');
-      if (failures.length) state.error = failures.map(result => result.reason.message).join('；');
-      state.lastRefreshed = new Date().toISOString();
-      await Promise.all([employeeWork, settingsWork]);
-      if (!valid(token)) return false;
-      if (['phones', 'devices'].includes(state.tab) || state.page === 'phone') await refreshPhones(token);
+      await Promise.all([primaryWork, chatWork, settingsWork]);
       if (!valid(token)) return false;
       if (state.page.startsWith('report') && state.report?.status !== 'selecting') await reporting?.refresh?.(state);
       return true;
     } catch (error) { return fail(error, token); }
-    finally { if (requestId === refreshToken) refreshing = false; if (valid(token)) { state.loading = false; draw(); } }
+    finally { if (valid(token)) { syncLoading(); draw(); } }
   }
   function readChat(token = current()) {
     const employee = state.selectedEmployee;
@@ -199,30 +237,40 @@ export function createController({ state, api, render = () => {}, storage = glob
     }));
     await Promise.all(work);
   }
-  async function refreshPhones(token = current()) {
-    if (!canUsePhones()) { if (valid(token)) { state.phones = []; state.phone = null; state.phoneError = '手机互联需要工作区 Owner 或管理员权限'; } return; }
-    const workspace = workspaceId(state), phoneId = state.phone?.id, visit = phoneEpoch;
-    try {
+  function refreshPhones(token = current()) {
+    if (!valid(token)) return Promise.resolve();
+    if (!canUsePhones()) { state.phones = []; state.phone = null; state.phoneError = '手机互联需要工作区 Owner 或管理员权限'; state.resources.phones = {phase:'error',error:state.phoneError,lastUpdated:null}; draw(); return Promise.resolve(); }
+    const workspace = workspaceId(state), phoneId = state.page === 'phone' ? state.phone?.id : '', visit = phoneEpoch, commandId = state.phoneCommand?.id || '';
+    const key = `${token.epoch}:${token.scope}:${visit}:${phoneId}:${commandId}`;
+    if (phoneRead?.key === key) return phoneRead.promise;
+    const entry = {key}; phoneRead = entry;
+    const live = () => valid(token) && phoneRead === entry && visit === phoneEpoch && (!phoneId || (state.page === 'phone' && state.phone?.id === phoneId));
+    const resource = state.resources.phones;
+    resource.phase = 'loading'; resource.error = ''; draw();
+    entry.promise = (async () => { try {
       const result = await api.phones(workspace);
-      if (!valid(token)) return;
+      if (!live()) return;
       state.phones = list(result, 'devices'); state.phoneError = '';
-      if (state.page === 'phone' && phoneId) {
-        const [detail, snapshot] = await Promise.all([api.phone(workspace, phoneId, state.phoneCommand?.id || ''), api.phoneSnapshot(workspace, phoneId)]);
-        if (!valid(token) || visit !== phoneEpoch || state.phone?.id !== phoneId) return;
+      resource.phase = 'ready'; resource.lastUpdated = new Date().toISOString(); draw();
+      if (phoneId) {
+        const [detail, snapshot] = await Promise.all([api.phone(workspace, phoneId, commandId), api.phoneSnapshot(workspace, phoneId)]);
+        if (!live()) return;
         state.phone = { ...(detail.device || {}), snapshot: snapshot.snapshot || null };
         if (state.phoneCommand) {
           const receipt = state.phone.commands?.find(command => command.id === state.phoneCommand.id);
           if (receipt) state.phoneCommand = receipt;
         }
+        draw();
       }
     } catch (error) {
       if (error?.status === 401) throw error;
-      if (valid(token)) { state.phoneError = error.message; state.error = error.message; }
-    }
+      if (live()) { state.phoneError = error.message; resource.phase = 'error'; resource.error = error.message; draw(); }
+    } finally { if (phoneRead === entry) phoneRead = null; } })();
+    return entry.promise;
   }
   async function chooseWorkspace(workspace) {
     if (!workspace) throw new Error('工作区不存在或尚未授权');
-    stashComposer(); epoch++; refreshing = false; refreshToken++; clearWorkspace(); state.workspace = workspace;
+    stashComposer(); epoch++; clearWorkspace(); state.workspace = workspace;
     state.phase = 'ready'; state.error = ''; state.notice = '';
     storeSet(workspaceKey(accountId(state)), workspace.slug);
     state.report = reporting?.restore?.({ userId: accountId(state), workspace: workspace.slug }) || null;
@@ -318,18 +366,18 @@ export function createController({ state, api, render = () => {}, storage = glob
     if (!body.name) throw new Error('请输入员工名字');
     if (state.employeeAvatar !== undefined) body.avatar = state.employeeAvatar;
     else if (typeof form.get('avatar') === 'string') body.avatar = form.get('avatar');
-    state.employeeSaving = true; state.error = ''; draw();
+    invalidateResources('employees', 'bots'); state.employeeSaving = true; state.error = ''; draw();
     try {
       if (state.bot?.configuration_state === 'initialized') {
         const bot = await api.updateBot(workspace, employee.id, { expectedRevision: state.bot.revision, employee: body });
-        if (valid(token, true)) acceptBot(bot);
+        if (valid(token, true)) acceptSavedBot(bot);
       } else {
         const saved = await api.updateEmployee(workspace, employee.id, body);
         if (valid(token, true)) { state.employees = state.employees.map(row => row.id === employee.id ? { ...row, ...saved } : row); state.selectedEmployee = state.employees.find(row => row.id === employee.id); }
       }
       if (valid(token, true)) { state.employeeAvatar = undefined; state.notice = '已保存'; }
     } catch (error) { fail(error, token, true); }
-    finally { if (valid(token, true)) { state.employeeSaving = false; draw(); } }
+    finally { if (valid(token, true)) { invalidateResources('employees', 'bots'); state.employeeSaving = false; syncLoading(); draw(); } }
   }
   async function mutateRoutine(routineId, run = false) {
     if (!state.selectedEmployee || !routineId) throw new Error('请先选择例行工作');
@@ -354,7 +402,7 @@ export function createController({ state, api, render = () => {}, storage = glob
     if (!task || state.busy) return;
     const token = current(), title = String(form.get('title') || '').trim(), description = String(form.get('description') || '');
     if (!title) throw new Error('请输入任务名称');
-    state.busy = true; state.error = ''; draw();
+    invalidateResources('tasks'); state.busy = true; state.error = ''; draw();
     try {
       let saved = await api.updateTask(task.id, { title, description });
       const status = String(form.get('status') || form.get('state') || '');
@@ -365,7 +413,7 @@ export function createController({ state, api, render = () => {}, storage = glob
         state.notice = '任务已保存';
       }
     } catch (error) { fail(error, token); }
-    finally { if (valid(token)) { state.busy = false; draw(); } }
+    finally { if (valid(token)) { invalidateResources('tasks'); state.busy = false; syncLoading(); draw(); } }
   }
   async function createRoutine(form) {
     const employeeId = state.selectedEmployee?.id;
@@ -390,7 +438,7 @@ export function createController({ state, api, render = () => {}, storage = glob
     navigate: action(async ({ tab }) => {
       if (!['employees', 'work', 'tasks', 'phones', 'devices', 'me'].includes(tab)) return;
       stashComposer(); clearSelection(); state.settingsTrail = []; state.tab = tab; state.page = 'home'; state.error = ''; draw();
-      if (['phones', 'devices'].includes(tab)) { await refreshPhones(current()); draw(); } else await refresh({ silent: true });
+      await refresh({ silent: true });
     }),
     back: action(async () => {
       if (state.imagePreview) { state.imagePreview = null; draw(); return; }
@@ -456,15 +504,15 @@ export function createController({ state, api, render = () => {}, storage = glob
     'stop-run': action(async ({ id: employeeId = state.selectedEmployee?.id }) => {
       const workspace = workspaceId(state), token = current(), key = `${scopeKey(state)}:${employeeId}:stop`;
       if (!employeeId || pendingMutations.has(key)) return;
-      pendingMutations.add(key); state.stopBusy = true; state.error = ''; draw();
+      pendingMutations.add(key); invalidateResources('employees', 'bots'); state.stopBusy = true; state.error = ''; draw();
       try {
         const bot = await api.bot(workspace, employeeId);
         if (!valid(token)) return;
         if (bot.configuration_state !== 'initialized') throw new Error('这位员工尚未提供手机端停止入口，请在电脑版处理');
         const result = await api.controlBot(workspace, employeeId, { operation: 'stop', expectedRevision: bot.revision, expectedControlEpoch: bot.control_epoch });
-        if (valid(token)) { acceptBot(result); state.notice = '停止请求已提交，以电脑回执为准'; await refresh({ silent: true }); }
+        if (valid(token)) { acceptSavedBot(result); state.notice = '停止请求已提交，以电脑回执为准'; await refresh({ silent: true }); }
       } catch (error) { fail(error, token); }
-      finally { pendingMutations.delete(key); if (valid(token)) { state.stopBusy = false; draw(); } }
+      finally { pendingMutations.delete(key); if (valid(token)) { invalidateResources('employees', 'bots'); state.stopBusy = false; syncLoading(); draw(); } }
     }),
     'remove-attachment': action(({ id: index }) => { state.attachments = state.attachments.filter((_, i) => i !== Number(index)); if (state.selectedEmployee && state.page === 'chat') { stashComposer(); composer().revision++; } draw(); }),
     phone: action(async ({ id: phoneId }) => {
@@ -593,7 +641,7 @@ export function createController({ state, api, render = () => {}, storage = glob
     }
   }
   function dispose() {
-    disposed = true; epoch++; clearInterval(timer); timer = null; composers.clear(); pendingMutations.clear(); routineRequests.clear();
+    disposed = true; epoch++; clearInterval(timer); timer = null; composers.clear(); pendingMutations.clear(); routineRequests.clear(); resourceReads.clear(); phoneRead = null;
     botSettings.dispose?.(); deviceSettings.dispose?.();
     globalThis.document?.removeEventListener('visibilitychange', visibility);
     globalThis.removeEventListener?.('ziwei:resume', resume);
