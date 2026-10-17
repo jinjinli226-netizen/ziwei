@@ -594,10 +594,14 @@ def group_page(rooms, db, room, args):
         raise NativeOperationError('GROUP_PAGE_INVALID')
     if 'latest_seq' in room and (not safe_integer(room['latest_seq']) or latest < room['latest_seq']):
         raise NativeOperationError('GROUP_PAGE_INVALID')
-    previous = after_seq
+    previous, event_ids = after_seq, set()
     for event in page['events']:
         if not isinstance(event, dict) or event.get('room_id') != args['groupId'] or not safe_integer(event.get('seq')) or event['seq'] != previous + 1:
             raise NativeOperationError('GROUP_PAGE_INVALID')
+        event_id = event.get('event_id')
+        if not isinstance(event_id, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._:-]{0,127}', event_id) or event_id in event_ids:
+            raise NativeOperationError('GROUP_PAGE_INVALID')
+        event_ids.add(event_id)
         previous = event['seq']
     authority = page.get('authority')
     if cursor != previous or has_more != (cursor < latest) or has_more and cursor == after_seq:

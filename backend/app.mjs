@@ -634,7 +634,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
     if (!employeeId) return res.status(400).json({ error: '新建会话必须绑定数字员工' });
     return res.status(201).json(repo.createConversation(req.params.slug, { ...(req.body || {}), employeeId, ...employeeContext(req), enforceDeviceOwnership: true }));
   });
-  app.get('/api/conversations/:id', (req, res) => { const conversation=repo.getConversation(req.params.id, employeeContext(req)); if(!conversation) return res.status(404).json({error:'Conversation not found'}); res.json(req.query.view==='mobile'?mobileReadView.conversation(conversation):conversation); });
+  app.get('/api/conversations/:id', (req, res) => { const context=employeeContext(req),conversation=repo.getConversation(req.params.id, context); if(!conversation) return res.status(404).json({error:'Conversation not found'}); if(req.query.view==='mobile'){res.setHeader('Cache-Control','no-store');res.vary('Cookie');return res.json(mobileReadView.conversation(mobileGroupAction.conversation(conversation,context)));} res.json(conversation); });
   const conversationImage=(req,res)=>{
     const image=mobileReadView.conversationImage(req.params.id,req.params.messageId,req.params.index,employeeContext(req),req.params.forwardIndex);
     if(!image||req.query.v!==undefined&&req.query.v!==image.version)return res.status(404).json({error:'Conversation image not found'});
@@ -804,10 +804,10 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   function registerBotRoutes(prefix,guard,contextFor) {
     const base=`${prefix}/workspaces/:slug/bots`, bots=management.bots;
     app.get(`${base}/capabilities`,guard,(req,res)=>res.json(bots.capabilities(req.params.slug,req.query,contextFor(req))));
-    app.get(base,guard,(req,res)=>{const mobile=prefix==='/api'&&req.query.view==='mobile',values=bots.list(req.params.slug,contextFor(req),mobile?{view:'mobile'}:undefined);res.json({bots:mobile?values.map(value=>mobileReadView.bot(req.params.slug,value)):values});});
+    app.get(base,guard,(req,res)=>{const mobile=prefix==='/api'&&req.query.view==='mobile',context=contextFor(req),values=bots.list(req.params.slug,context,mobile?{view:'mobile'}:undefined);if(mobile){res.setHeader('Cache-Control','no-store');res.vary('Cookie');}res.json({bots:mobile?values.map(value=>mobileReadView.bot(req.params.slug,mobileGroupAction.bot(req.params.slug,value,context,{partial:true}))):values});});
     app.post(base,guard,(req,res)=>{const result=bots.create(req.params.slug,req.body,contextFor(req));res.status(result.duplicate?200:202).json(result);});
     app.post(`${prefix}/workspaces/:slug/employees/:id/bot`,guard,(req,res)=>res.json(bots.initialize(req.params.slug,req.params.id,req.body,contextFor(req))));
-    app.get(`${base}/:id`,guard,(req,res)=>{const mobile=prefix==='/api'&&req.query.view==='mobile',value=bots.get(req.params.slug,req.params.id,contextFor(req),mobile?{view:'mobile'}:undefined);res.json(mobile?mobileReadView.bot(req.params.slug,value):value);});
+    app.get(`${base}/:id`,guard,(req,res)=>{const mobile=prefix==='/api'&&req.query.view==='mobile',context=contextFor(req),value=bots.get(req.params.slug,req.params.id,context,mobile?{view:'mobile'}:undefined);if(mobile){res.setHeader('Cache-Control','no-store');res.vary('Cookie');}res.json(mobile?mobileReadView.bot(req.params.slug,mobileGroupAction.bot(req.params.slug,value,context)):value);});
     app.patch(`${base}/:id`,guard,(req,res)=>res.json(bots.update(req.params.slug,req.params.id,req.body,contextFor(req))));
     app.post(`${base}/:id/provision`,guard,(req,res)=>res.status(202).json(bots.provision(req.params.slug,req.params.id,req.body,contextFor(req))));
     app.post(`${base}/:id/validate`,guard,(req,res)=>res.status(202).json(bots.validate(req.params.slug,req.params.id,req.body,contextFor(req))));
@@ -817,7 +817,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
     app.delete(`${base}/:id/mcp/connections/:actionId`,guard,(req,res)=>{res.setHeader('Cache-Control','no-store');res.json(botMcpConnections.cancel(req.params.slug,req.params.id,req.params.actionId,contextFor(req)));});
     app.post(`${base}/:id/collaboration`,guard,(req,res)=>res.status(202).json(bots.collaboration(req.params.slug,req.params.id,req.body,contextFor(req))));
     app.post(`${base}/:id/control`,guard,(req,res)=>res.json(bots.control(req.params.slug,req.params.id,req.body,contextFor(req))));
-    app.get(`${base}/:id/runs`,guard,(req,res)=>{const mobile=prefix==='/api'&&req.query.view==='mobile',values=bots.runs(req.params.slug,req.params.id,contextFor(req),mobile?{limit:5,eventView:'mobile'}:undefined);res.json({runs:mobile?values.map(mobileReadView.run):values});});
+    app.get(`${base}/:id/runs`,guard,(req,res)=>{const mobile=prefix==='/api'&&req.query.view==='mobile',context=contextFor(req),values=bots.runs(req.params.slug,req.params.id,context,mobile?{limit:5,eventView:'mobile'}:undefined);if(mobile){res.setHeader('Cache-Control','no-store');res.vary('Cookie');}res.json({runs:mobile?values.map(value=>mobileReadView.run(mobileGroupAction.run(req.params.slug,value,context))):values});});
     app.post(`${base}/:id/actions/:actionId/reconcile`,guard,(req,res)=>res.json(bots.reconcile(req.params.slug,req.params.id,req.params.actionId,req.body,contextFor(req))));
     app.get(`${base}/:id/routines`,guard,(req,res)=>res.json({routines:bots.routines(req.params.slug,req.params.id,contextFor(req))}));
     app.post(`${base}/:id/routines`,guard,(req,res)=>res.status(201).json(bots.createRoutine(req.params.slug,req.params.id,req.body,contextFor(req))));

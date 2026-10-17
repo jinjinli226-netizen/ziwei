@@ -97,6 +97,18 @@ class MockPageTests(unittest.TestCase):
         result = bridge.groups('read', {'groupId': 'room-one', 'limit': 2})
         self.assertEqual(result['pagination']['afterSeq'], 0)
 
+    def test_native_event_id_contract_and_duplicates_are_checked_without_planning(self):
+        self.next_page['events'][0]['event_id'] = 'native.request:_-'
+        self.next_page['events'][1]['event_id'] = 'n' * 128
+        self.assertTrue(self.read()['pagedRead'])
+        for invalid in ['.request', '_request', ':request', 'n' * 129, 'native/id', None, 'native.request:_-']:
+            self.next_page['events'][1]['event_id'] = invalid
+            prior = len(self.calls)
+            with self.subTest(event_id=invalid), self.assertRaisesRegex(bridge.NativeOperationError, 'GROUP_PAGE_INVALID'):
+                self.read()
+            self.assertEqual(len(self.calls), prior + 1)
+        self.assertEqual(self.plans, [])
+
     def test_invalid_python_inputs_do_not_read_events(self):
         for args in [{'limit': True}, {'limit': 0}, {'limit': 101}, {'limit': '2'}, {'afterSeq': True},
                      {'afterSeq': -1}, {'afterSeq': 9007199254740992}, {'afterSeq': 1.5}]:
@@ -190,6 +202,35 @@ class OfficialRoomStorageTests(unittest.TestCase):
     def snapshot(self):
         with sqlite3.connect(self.db) as connection:
             return list(connection.iterdump())
+
+    def test_official_native_event_id_acceptance_matches_paged_read_contract(self):
+        for event_id in ['native.request:_-', 'n' * 128]:
+            self.rooms.append_event(self.db, room_id='room-one', event_id=event_id, kind='message.user',
+                                    actor={'kind': 'user', 'id': 'synthetic-user'}, payload={'text': 'Synthetic'},
+                                    authority_gateway_id='fixture-authority', authority_epoch=1)
+        for event_id in ['.request', '_request', ':request', 'n' * 129, 'native/id']:
+            before = self.snapshot()
+            with self.subTest(event_id=event_id), self.assertRaises(self.rooms.HostedRoomError):
+                self.rooms.append_event(self.db, room_id='room-one', event_id=event_id, kind='message.user',
+                                        actor={'kind': 'user', 'id': 'synthetic-user'}, payload={'text': 'Synthetic'},
+                                        authority_gateway_id='fixture-authority', authority_epoch=1)
+            self.assertEqual(self.snapshot(), before)
+        before = self.snapshot()
+        result = bridge.groups('read', {'groupId': 'room-one', 'limit': 30, 'afterSeq': 125})
+        self.assertEqual([event['event_id'] for event in result['events']['events']], ['native.request:_-', 'n' * 128])
+        self.assertEqual(self.snapshot(), before)
+
+    def test_official_list_retains_room_members_and_is_read_only(self):
+        before = self.snapshot()
+        result = bridge.groups('list', {})
+        self.assertEqual({item['room_id'] for item in result['items']}, {'room-one', 'room-other'})
+        for item in result['items']:
+            self.assertEqual([member['member_id'] for member in item['members']], ['fixture-one'])
+            self.assertEqual(item['authority_gateway_id'], 'fixture-authority')
+            self.assertEqual(item['authority_epoch'], 1)
+            self.assertIn('revision', item)
+            self.assertIn('latest_seq', item)
+        self.assertEqual(self.snapshot(), before)
 
     def test_real_native_storage_two_pages_empty_and_cross_room_are_read_only(self):
         before = self.snapshot()
