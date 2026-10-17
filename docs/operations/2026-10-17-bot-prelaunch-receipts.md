@@ -153,3 +153,15 @@ nativeRuntime是任务类型标记，不证明原进程当前仍在运行；stop
 旧版服务器投递会重排 managementMcp 并规范化员工模板元数据，故签名 subject 额外绑定实际投递格式的 canonical digest；原 raw payload SHA 仍固定保留。本例实机只读确认无模板实例且无四项模板元数据。首次恢复仍保留用户的暂停状态，恢复后可从正常启用入口继续使用，不自动恢复原业务消息。
 
 发布验收应分别记录：GitHub提交、API/前端/CLI发布、Windows实际更新、独立恢复事件和真实模型新消息。模拟测试与服务器发布不等同于知微现场已恢复；本 Mac 无法直接运行那台 Windows 的 held-handle 程序。
+
+
+### 本次正式发布结果（北京时间 2026-10-17 22:12）
+
+- 产品提交 `4bd14cb0772f6ddd47735be36bcd50f7a6fb50f9` 已先推 GitHub `codex/v2-20261014-release` 和 `codex/bot-historical-recovery`，再发布服务器。
+- 当前 API/前端目录 `/opt/ziwei/releases/historical-admission-4bd14cb0772f-cfcb8384/v2`，API PID `374987`。前一目录 `/opt/ziwei/releases/mobile-runs-projection-9393dcb0aab1-e0f199eb/v2` 保留。
+- API 从当时完整生产目录复制，只叠加10项本次来源与前端产物。生产 preservation 模块与 Git 源有既存差异，实际仅移植本次4行，不连带发布未请求的 background 恢复改动。DB inode/schema、data/.local/node_modules 归属、控制服务与 Nginx 保持；未恢复数据库。
+- 官方 Windows 客户端 build `6c9345a699c977dcc69f396f2aee96e7ca96e38fc7c9f686b9b49217ae09c8d9`。包 SHA256 `408fbf7f501025b0c290393b96902d70ad4bbc0ed82b305955995c494ba15703`，1101693 bytes；公开 release.json SHA256 `8449e0eb343d403d5d639db37c8c15e0411b39f406a4bd9af0ff07317908dbba`。本地空缓存离线安装/工厂检查及服务器 Linux 独立离线复核通过，公开下载内容逐字节核对。
+- 本次恢复相关最终53项测试通过，包含实际内存设备鉴权/数据库、客户端持久化中断恢复、dispatcher重启后新任务执行以及前端状态。更广145项回归中曾有既有模拟 CLI 版本探测超时，定向重跑通过；原始日志保留，没有把该次145项运行写成全绿。生产构建及静态检查通过。没有启动本机监听。
+- 官方 bootstrap 一次更新会先运行精确历史恢复，再安装并启动新客户端。旧 `ziwei_user update` 自身不具备这套机制，不能用它代替新 bootstrap。Windows 原生句柄段、真实员工恢复与新模型对话，仍须以那台设备的实际执行回执验收；服务器发布本身没有提交历史恢复，没有改原 action 或主动重跑消息。
+
+本轮私有发布证据位于实现工作树 `.local/historical-admission-release/`，服务器留存对应 staging、旧代码与旧客户端包。源码和公开记录已入 Git；真实设备是否完成更新、是否新增独立恢复事件及是否启用，应在后续验收中单独记录。
