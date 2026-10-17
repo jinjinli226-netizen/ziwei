@@ -1292,6 +1292,7 @@ export function createRepository(options = {}, io={}) {
       for(const key of ['platform','arch'])if(typeof rawDiscovery[key]==='string'&&/^[A-Za-z0-9_.-]{1,32}$/.test(rawDiscovery[key]))runtimeDiscovery[key]=rawDiscovery[key];
       if(typeof rawDiscovery.checkedAt==='string'&&Number.isFinite(Date.parse(rawDiscovery.checkedAt)))runtimeDiscovery.checkedAt=rawDiscovery.checkedAt;
       if(clientBuild)runtimeDiscovery.clientBuild=clientBuild;
+      if(Array.isArray(rawDiscovery.features))runtimeDiscovery.features=[...new Set(rawDiscovery.features.filter(value=>typeof value==='string'&&/^[a-z][a-z0-9_]{0,63}$/.test(value)))].slice(0,32);
       db.prepare('UPDATE devices SET client_build=COALESCE(?,client_build),arch=COALESCE(?,arch),runtime_discovery_json=COALESCE(?,runtime_discovery_json) WHERE id=? AND workspace_id=?').run(clientBuild,arch,Object.keys(runtimeDiscovery).length?JSON.stringify(runtimeDiscovery):null,deviceId,ws.id);
       ensureRuntimeCatalog(ws.id, timestamp);
       db.prepare("UPDATE runtimes SET status='online',last_seen=? WHERE workspace_id=?").run(timestamp, ws.id);

@@ -260,10 +260,43 @@ def mcp(op, args):
     from tools.mcp_tool_lifecycle import shutdown_mcp_servers
     from tools.registry import registry
     logical_server = args['server']
-    server = 'ziwei_external_' + logical_server
-    config = scoped_config().get('mcp_servers', {}).get(server)
-    if not config or config.get('enabled') is False or logical_server.startswith('ziwei'):
+    if not isinstance(logical_server, str) or not re.fullmatch(r'[a-z][a-z0-9_-]{0,63}', logical_server) or logical_server.startswith('ziwei'):
         raise NativeOperationError('MCP_SERVER_NOT_CONFIGURED')
+    servers = scoped_config().get('mcp_servers', {})
+    if not isinstance(servers, dict):
+        raise NativeOperationError('MCP_SERVER_NOT_CONFIGURED')
+    candidates = []
+    for name, oauth in [(logical_server, True), ('ziwei_external_' + logical_server, False)]:
+        entry = servers.get(name)
+        if isinstance(entry, dict) and entry.get('auth') in (('oauth',) if oauth else (None, 'header')) and entry.get('enabled', True) is True:
+            candidates.append((name, entry))
+    if len(candidates) != 1:
+        raise NativeOperationError('MCP_SERVER_NOT_CONFIGURED')
+    server, config = candidates[0]
+    if config.get('auth') == 'oauth':
+        from toolsets import TOOLSETS
+        if server == 'all' or server in TOOLSETS:
+            raise NativeOperationError('MCP_OAUTH_NAME_CONFLICT')
+    if op == 'authorize':
+        if config.get('auth') != 'oauth':
+            raise NativeOperationError('MCP_OAUTH_REQUIRED')
+        import importlib.util
+        import sys
+        public_codes = {'MCP_OAUTH_REQUIRES_DEPENDENCY', 'MCP_OAUTH_INVALID_CONFIGURATION', 'MCP_OAUTH_RELAY_FAILED',
+                        'MCP_OAUTH_RELAY_INVALID_RESPONSE', 'MCP_OAUTH_CANCELLED', 'MCP_OAUTH_EXPIRED',
+                        'MCP_OAUTH_STATE_MISMATCH', 'MCP_OAUTH_DENIED', 'MCP_OAUTH_CONNECTION_FAILED',
+                        'MCP_OAUTH_TOKEN_NOT_CONFIRMED', 'MCP_OAUTH_NO_TOOLS', 'MCP_OAUTH_FAILED'}
+        try:
+            spec = importlib.util.spec_from_file_location('ziwei_remote_mcp_oauth', Path(__file__).with_name('hermes-remote-mcp-oauth.py'))
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[spec.name] = module
+            spec.loader.exec_module(module)
+            return module.authorize_mcp(logical_server, server, config)
+        except (ImportError, FileNotFoundError):
+            raise NativeOperationError('MCP_OAUTH_REQUIRES_DEPENDENCY') from None
+        except Exception as error:
+            code = getattr(error, 'code', None)
+            raise NativeOperationError(code if isinstance(code, str) and code in public_codes else 'MCP_OAUTH_FAILED') from None
     try:
         names = register_mcp_servers({server: env_refs(config)})
         statuses = [{'name': item.get('name'), 'connected': item.get('connected') is True, 'status': item.get('status')} for item in get_mcp_status() or [] if item.get('name') == server]

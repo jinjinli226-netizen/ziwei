@@ -18,6 +18,7 @@ import { createPhoneMcpService } from './phone-mcp.mjs';
 import {createMobileReadView} from './mobile-read-view.mjs';
 import {createConversationReadService} from './conversation-read-state.mjs';
 import { createManagementBootstrap } from './management-bootstrap.mjs';
+import {createBotMcpConnections} from './bot-mcp-connections.mjs';
 import { toolDefinitions as managementTools } from '../scripts/ziwei-mcp.mjs';
 
 const allowedOrigin = process.env.FRONTEND_ORIGIN || 'http://127.0.0.1:5178';
@@ -290,6 +291,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   const conversationReads = createConversationReadService(repo);
   const employeeTemplates = createEmployeeTemplateService(repo, management);
   const managementBootstrap = createManagementBootstrap(repo, options);
+  const botMcpConnections=createBotMcpConnections(repo,management.bots,{apiBase:managementBootstrap.apiBase,now:options.mcpOAuthNow});
   const phoneMcp = createPhoneMcpService(repo,ziweiConnect,management,options);
   app.locals.repo = repo;
   app.locals.realtime = realtime;
@@ -297,6 +299,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   app.locals.ziweiConnect = ziweiConnect;
   app.locals.phoneMcp = phoneMcp;
   app.locals.managementBootstrap = managementBootstrap;
+  app.locals.botMcpConnections=botMcpConnections;
   app.locals.employeeTemplates = employeeTemplates;
   app.use(cors);
   app.use((_req, res, next) => {
@@ -309,6 +312,11 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   // limit plus encoding and envelope overhead without accepting unbounded
   // request bodies.
   app.use(express.json({ limit: '16mb' }));
+  app.get('/api/mcp-oauth/callback',(req,res)=>{
+    res.setHeader('Cache-Control','no-store');res.setHeader('Referrer-Policy','no-referrer');res.setHeader('Content-Security-Policy',"default-src 'none'; frame-ancestors 'none'; base-uri 'none'");
+    try {botMcpConnections.deliver(req.query);res.type('html').send('<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>紫薇 · MCP 授权</title><h2>已收到授权</h2><p>员工正在验证连接。请返回紫薇员工页面，结果会自动更新。</p></html>');}
+    catch(error){res.status(error.status||400).type('html').send('<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>紫薇 · MCP 授权</title><h2>此授权无法继续</h2><p>授权可能已到期、取消或已经处理。请返回紫薇员工页面查看连接状态。</p></html>');}
+  });
   if(privateIdentity){
     const handler=createProductionApiIdentityHandler({db:repo.db,hostId:privateIdentity.hostId,trust:privateIdentity.trust},productionIdentityIo);
     app.post('/internal/preservation/identity',handler);
@@ -778,6 +786,9 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
     app.post(`${base}/:id/provision`,guard,(req,res)=>res.status(202).json(bots.provision(req.params.slug,req.params.id,req.body,contextFor(req))));
     app.post(`${base}/:id/validate`,guard,(req,res)=>res.status(202).json(bots.validate(req.params.slug,req.params.id,req.body,contextFor(req))));
     app.post(`${base}/:id/native/actions`,guard,(req,res)=>res.status(202).json(bots.native(req.params.slug,req.params.id,req.body,contextFor(req))));
+    app.post(`${base}/:id/mcp/connections`,guard,(req,res)=>{res.setHeader('Cache-Control','no-store');res.status(202).json(botMcpConnections.start(req.params.slug,req.params.id,req.body,contextFor(req)));});
+    app.get(`${base}/:id/mcp/connections`,guard,(req,res)=>{res.setHeader('Cache-Control','no-store');res.json(botMcpConnections.list(req.params.slug,req.params.id,contextFor(req)));});
+    app.delete(`${base}/:id/mcp/connections/:actionId`,guard,(req,res)=>{res.setHeader('Cache-Control','no-store');res.json(botMcpConnections.cancel(req.params.slug,req.params.id,req.params.actionId,contextFor(req)));});
     app.post(`${base}/:id/collaboration`,guard,(req,res)=>res.status(202).json(bots.collaboration(req.params.slug,req.params.id,req.body,contextFor(req))));
     app.post(`${base}/:id/control`,guard,(req,res)=>res.json(bots.control(req.params.slug,req.params.id,req.body,contextFor(req))));
     app.get(`${base}/:id/runs`,guard,(req,res)=>{const mobile=prefix==='/api'&&req.query.view==='mobile',values=bots.runs(req.params.slug,req.params.id,contextFor(req),mobile?{limit:5,eventView:'mobile'}:undefined);res.json({runs:mobile?values.map(mobileReadView.run):values});});
@@ -873,6 +884,9 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
     deviceVerifier: req => verifyDeviceRequest(repo, req)
   }));
   app.get('/a2a/v1/agents', (_req, res) => res.json({ agents: [{ id:'ziwei_user', name:'ziwei_user', description:'紫薇工作区本机 daemon，负责心跳、轮询和 A2A 任务', url:'/a2a/v1', capabilities:['tasks','messages','heartbeat','actions','ack','result'] }] }));
+  app.post('/a2a/v1/actions/:id/mcp-oauth/start',(req,res)=>{res.setHeader('Cache-Control','no-store');res.json(botMcpConnections.begin(req.params.id,req.deviceCredential));});
+  app.post('/a2a/v1/actions/:id/mcp-oauth/authorization',(req,res)=>{res.setHeader('Cache-Control','no-store');res.json(botMcpConnections.publish(req.params.id,req.deviceCredential,req.body));});
+  app.get('/a2a/v1/actions/:id/mcp-oauth/callback',(req,res)=>{res.setHeader('Cache-Control','no-store');res.json(botMcpConnections.callback(req.params.id,req.deviceCredential));});
   app.post('/a2a/v1/register', (req, res, next) => { const workspace = String(req.body.workspace || req.body.workspace_slug || '').trim(); if (!workspace) return res.status(400).json({ error: 'A2A register 必须明确 workspace' }); try { return res.json({ ok:true, agent:repo.registerA2AAgent(workspace, req.body), card:{id:'ziwei_user',capabilities:['tasks','messages','heartbeat','actions','ack','result']} }); } catch (error) { return next(error); } });
   app.post('/a2a/v1/actions', (req, res, next) => { const workspace = String(req.body.workspace || req.body.workspace_slug || '').trim(); if (!workspace) return res.status(400).json({ error: 'A2A action 必须明确 workspace' }); try { const action=repo.createA2AAction(workspace, req.body); return res.status(action.duplicate ? 200 : 201).json(action); } catch (error) { return next(error); } });
   app.get('/a2a/v1/actions', (req, res, next) => { const workspace=String(req.query.workspace || '').trim(); if (!workspace) return res.status(400).json({ error: 'A2A poll 必须明确 workspace' }); try { return res.json({ actions:repo.listA2AActions(workspace,{executionDelivery:true,agentId:req.query.agent || req.query.agent_id,status:req.query.status || 'pending',includeAcked:req.query.includeAcked ?? req.query.include_acked,includeResult:String(req.query.includeResult || '').toLowerCase() !== 'false',deviceId:req.deviceCredential?.deviceId}) }); } catch (error) { return next(error); } });

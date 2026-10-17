@@ -179,7 +179,7 @@ async function performHeartbeatConnection(connection) {
     status: 'online',
     runtimes: runtimeDiscovery.runtimes,
     runtimeMetadata: runtimeDiscovery.runtimes,
-    runtimeDiscovery: { checkedAt: runtimeDiscovery.discoveredAt, platform: runtimeDiscovery.bridge.platform, arch: runtimeDiscovery.bridge.arch, clientBuild: CLIENT_BUILD },
+    runtimeDiscovery: { checkedAt: runtimeDiscovery.discoveredAt, platform: runtimeDiscovery.bridge.platform, arch: runtimeDiscovery.bridge.arch, clientBuild: CLIENT_BUILD, features:['bot_mcp_oauth_relay_v1'] },
     managementMcp: connection.managementStatus,
     terminalMcp: connection.terminalStatus,
     agentVersions: Object.fromEntries(Object.entries(runtimeDiscovery.runtimes).map(([name, item]) => [name, item.status === 'available' ? item.version || null : null]))
@@ -236,7 +236,7 @@ async function refreshRuntimeDiscovery(connection) {
   try {
     await fetch(`${config.apiBase}/api/workspaces/${encodeURIComponent(config.workspace)}/runtimes/register`, {
       method: 'POST', headers: daemonHeaders(connection, { json: true }),
-      body: JSON.stringify({ agentId: 'ziwei_user', deviceId: config.deviceId || 'device-ziwei-user', clientBuild: CLIENT_BUILD, runtimeDiscovery: { checkedAt: runtimeDiscovery.discoveredAt, platform: runtimeDiscovery.bridge.platform, arch: runtimeDiscovery.bridge.arch, clientBuild: CLIENT_BUILD }, runtimes: runtimeDiscovery.runtimes }),
+      body: JSON.stringify({ agentId: 'ziwei_user', deviceId: config.deviceId || 'device-ziwei-user', clientBuild: CLIENT_BUILD, runtimeDiscovery: { checkedAt: runtimeDiscovery.discoveredAt, platform: runtimeDiscovery.bridge.platform, arch: runtimeDiscovery.bridge.arch, clientBuild: CLIENT_BUILD, features:['bot_mcp_oauth_relay_v1'] }, runtimes: runtimeDiscovery.runtimes }),
       signal: AbortSignal.timeout(3000)
     });
   } catch (error) { log('runtime_discovery_refresh_failed', { error: error.message }); }

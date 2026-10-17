@@ -30,14 +30,16 @@ export function createManagementBootstrap(repo, options = {}) {
   const key = crypto.createHash('sha256').update(signingSecret(options)).update('ziwei-management-capability-v1').digest();
   const apiBase = String(options.publicApiBase || process.env.ZIWEI_APP_URL || 'https://qzelynth.top').replace(/\/$/, '');
   const contextFor = (credentialId, deviceId, workspace) => {
-    const row = db.prepare(`SELECT c.id,c.revoked_at,d.status,d.owner_user_id,w.slug,w.kind,m.role
+    const row = db.prepare(`SELECT c.id,c.revoked_at,d.status,d.owner_user_id,w.slug,m.role
       FROM device_credentials c JOIN devices d ON d.id=c.device_id AND d.workspace_id=c.workspace_id
       JOIN workspaces w ON w.id=c.workspace_id
       LEFT JOIN members m ON m.workspace_id=w.id AND m.user_id=d.owner_user_id
       WHERE c.id=? AND d.id=? AND w.slug=?`).get(credentialId, deviceId, workspace);
     if (!row || row.revoked_at || row.status === 'disabled') fail('管理 MCP 设备凭据已撤销或停用', 'MANAGEMENT_DEVICE_REVOKED');
     if (row.owner_user_id && !['owner', 'admin', 'member'].includes(row.role)) fail('设备所属账号已失去当前工作区成员权限', 'MANAGEMENT_MEMBERSHIP_REVOKED', 403);
-    return { actorUserId: row.owner_user_id || null, actorRole: row.role || 'member', deviceCredentialDeviceId: deviceId, ...(row.kind === 'personal' && !row.owner_user_id ? { deviceScope: deviceId } : {}), enforceEmployeeVisibility: true, enforceDeviceOwnership: true };
+    // A paired computer remains scoped to itself, including when its owner is
+    // a workspace admin. User role and workspace kind never widen this token.
+    return { actorUserId: row.owner_user_id || null, actorRole: row.role || 'member', deviceCredentialDeviceId: deviceId, deviceScope: deviceId, enforceEmployeeVisibility: true, enforceDeviceOwnership: true };
   };
   const sign = payload => {
     const body = Buffer.from(JSON.stringify(payload)).toString('base64url');

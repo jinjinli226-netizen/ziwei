@@ -22,6 +22,17 @@ class UnsupportedNativeHermes(Exception):
     pass
 
 
+def validate_bot_toolsets(selected, central, native_toolsets):
+    servers = central.get('mcp_servers', {})
+    if not isinstance(selected, list) or not isinstance(servers, dict):
+        raise UnsupportedNativeHermes('bot toolset unknown')
+    enabled = {name for name, entry in servers.items() if isinstance(entry, dict) and entry.get('enabled', True) is True}
+    if any(name in native_toolsets or name == 'all' for name in enabled if servers[name].get('auth') == 'oauth'):
+        raise UnsupportedNativeHermes('BOT_MCP_NAME_CONFLICT')
+    if any(not isinstance(name, str) or name == 'all' or name not in native_toolsets and name != 'ziwei_collaboration' and name not in enabled for name in selected):
+        raise UnsupportedNativeHermes('bot toolset unknown')
+
+
 def _binding(launcher, multi_images=False, launcher_binding=None, expected=None):
     launcher = Path(launcher).resolve(strict=True)
     wrapper = None
@@ -364,7 +375,7 @@ def finalize_owned_storage(current, isolation):
         raise UnsupportedNativeHermes('owned state storage remains open')
 
 
-def prepare_creator_home(current):
+def prepare_creator_home(current, *, preserve_oauth_relay=False):
     """Process-only routing; preserve the native lock/atomic refresh implementation."""
     home_value = os.environ.get('ZIWEI_CREATOR_HOME', '').strip()
     if not home_value:
@@ -403,6 +414,10 @@ def prepare_creator_home(current):
                     'ZIWEI_CREATOR_WORKSPACE', 'ZIWEI_CREATOR_EMPLOYEE_ID', 'ZIWEI_CREATOR_PROFILE',
                     'ZIWEI_INSTANCE_KIND', 'ZIWEI_BOT_REVISION', 'ZIWEI_BOT_ACTION_ID', 'ZIWEI_BOT_DEVICE_TOKEN', 'ZIWEI_BOT_PROFILE_MODE', 'ZIWEI_BOT_REASONING_EFFORT',
                     'HERMES_KANBAN_HOME', 'HERMES_KANBAN_DB'}
+    # Only an explicit mcp.authorize child may receive the trusted device relay.
+    # Native dotenv may not introduce these keys, and other modes lose them below.
+    if is_bot and preserve_oauth_relay:
+        routing_keys.update({'ZIWEI_MCP_OAUTH_API_BASE', 'ZIWEI_MCP_OAUTH_DEVICE_TOKEN', 'ZIWEI_MCP_OAUTH_ACTION_ID'})
     routing_env = {key: os.environ[key] for key in routing_keys if key in os.environ}
     constants = importlib.import_module('hermes_constants')
     if str(Path(constants.__file__).resolve()) != current['paths']['constants']:
@@ -561,6 +576,11 @@ def run():
     overlay = os.environ.get('HERMES_MANAGED_DIR', '').strip()
     if not overlay or not Path(overlay).is_absolute() or not Path(overlay).is_dir():
         raise UnsupportedNativeHermes('overlay')
+    # Read this one native request before sanitizing the environment so the relay
+    # credentials survive only the authorized operation; retain the same object
+    # for the normal identity checks before any native helper is invoked.
+    native_request = json.loads(sys.stdin.readline()) if native_operation else None
+    oauth_authorize = isinstance(native_request, dict) and native_request.get('resource') == 'mcp' and native_request.get('operation') == 'authorize'
     sys.argv = [launcher, *native_args[1:]]
     verify_profile = None
     if bound_profile is not None:
@@ -570,7 +590,7 @@ def run():
         spec = importlib.util.spec_from_file_location('ziwei_profile_binding', Path(__file__).with_name('hermes-profile-binding.py'))
         bridge = importlib.util.module_from_spec(spec); spec.loader.exec_module(bridge)
         verify_profile = bridge.install(bound_profile, profiles)
-    prepared_isolation = prepare_creator_home(current)
+    prepared_isolation = prepare_creator_home(current, preserve_oauth_relay=oauth_authorize)
     native = importlib.import_module('hermes_cli.main')
     if verify_profile is not None:
         verify_profile()
@@ -642,7 +662,7 @@ def run():
     if native_operation or gateway_worker:
         if not isolation or isolation.get('kind') != 'hermes-bot':
             raise UnsupportedNativeHermes('bot native operation scope')
-        request = json.loads(sys.stdin.readline())
+        request = native_request if native_operation else json.loads(sys.stdin.readline())
         context = request.pop('context')
         if context.get('employeeId') != isolation['employeeId'] or context.get('revision') != isolation['revision'] or context.get('workspace') != isolation['workspace']:
             raise UnsupportedNativeHermes('bot native operation identity')
@@ -675,8 +695,7 @@ def run():
         effective = config.load_config()
         selected = effective.get('platform_toolsets', {}).get('cli', [])
         from toolsets import TOOLSETS
-        if any(name not in TOOLSETS and name != 'ziwei_collaboration' and not name.startswith('mcp-') for name in selected):
-            raise UnsupportedNativeHermes('bot toolset unknown')
+        validate_bot_toolsets(selected, config.read_raw_config(), TOOLSETS)
         import hermes_cli
         print(json.dumps({'botValidation': {'valid': True, 'schemaVersion': 1,
               'employeeId': isolation['employeeId'], 'revision': isolation['revision'],

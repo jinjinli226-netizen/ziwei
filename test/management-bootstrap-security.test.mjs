@@ -130,3 +130,51 @@ test('ownerless personal device credentials discover and report only their own c
   assert.equal(ownTask.assignee, ownEmployee.id);
   assert.throws(() => f.management.createTask('security', { title: '伪造其他电脑目标', employeeId: ownEmployee.id, execute: true, targetDeviceId: other.id, actorRole: 'owner', deviceScope: other.id, deviceCredentialDeviceId: other.id }, context), error => error.code === 'DEVICE_NOT_IN_WORKSPACE');
 });
+
+for (const kind of ['team', 'personal']) for (const role of ['member', 'admin', 'owner']) {
+  test(`${kind} ${role} paired management credentials can use local Bot APIs but cannot manage another owned computer`, t => {
+    const f = fixture(t, { kind });
+    f.repo.db.prepare("UPDATE members SET role=? WHERE id='security-member'").run(role);
+    const other = f.repo.createDevice('security', { name: '同账号其他电脑', ownerUserId: 'security-user' });
+    f.repo.heartbeatDevice('security', { deviceId: other.id, runtimes: f.runtimes });
+    const issued = f.service.bootstrap('security', { ...f.identity, deviceScope: other.id, actorRole: 'owner' });
+    const context = f.service.authorize(issued.token, 'security');
+    assert.equal(context.actorRole, role);
+    assert.equal(context.actorUserId, 'security-user');
+    assert.equal(context.deviceCredentialDeviceId, f.device.deviceId);
+    assert.equal(context.deviceScope, f.device.deviceId);
+    assert.equal(context.enforceEmployeeVisibility, true);
+    assert.equal(context.enforceDeviceOwnership, true);
+    assert.equal(f.management.bots.capabilities('security', { deviceId: f.device.deviceId }, context).device.id, f.device.deviceId);
+    assert.equal(f.management.bots.capabilities('security', { deviceId: other.id }, context).device, null);
+    assert.deepEqual(f.management.discovery('security', { userId: context.actorUserId, deviceScope: context.deviceScope }).devices.map(row => row.id), [f.device.deviceId]);
+    assert.deepEqual(f.service.connections('security', context).map(row => row.device_id), [f.device.deviceId]);
+    const count = () => f.repo.db.prepare('SELECT count(*) AS count FROM a2a_actions').get().count;
+    const before = count();
+    assert.throws(() => f.management.createProfile('security', { profile: 'forbidden-other-computer', deviceId: other.id, actorRole: 'owner', deviceScope: other.id, deviceCredentialDeviceId: other.id }, context), { code: 'DEVICE_NOT_IN_WORKSPACE' });
+    assert.equal(count(), before);
+    const local = f.management.createProfile('security', { profile: 'permitted-current-computer', deviceId: f.device.deviceId }, context);
+    assert.equal(local.payload.deviceId, f.device.deviceId);
+    assert.equal(local.payload.userId, 'security-user');
+    f.repo.revokeDeviceCredential(f.device.deviceId);
+    assert.throws(() => f.service.authorize(issued.token, 'security'), { code: 'MANAGEMENT_DEVICE_REVOKED', status: 401 });
+  });
+}
+
+for (const kind of ['team', 'personal']) {
+  test(`ownerless ${kind} credentials retain local Bot access without widening ownership or device scope`, t => {
+    const f = fixture(t, { kind, owned: false });
+    const other = f.repo.createDevice('security', { name: '其他账号电脑', ownerUserId: 'other-user' });
+    f.repo.heartbeatDevice('security', { deviceId: other.id, runtimes: f.runtimes });
+    const issued = f.service.bootstrap('security', f.identity), context = f.service.authorize(issued.token, 'security');
+    assert.equal(context.actorUserId, null);
+    assert.equal(context.actorRole, 'member');
+    assert.equal(context.deviceScope, f.device.deviceId);
+    assert.equal(f.management.bots.capabilities('security', { deviceId: f.device.deviceId }, context).device.id, f.device.deviceId);
+    assert.equal(f.management.bots.capabilities('security', { deviceId: other.id }, context).device, null);
+    assert.deepEqual(f.service.connections('security', context).map(row => row.device_id), [f.device.deviceId]);
+    assert.throws(() => f.management.createProfile('security', { profile: 'forbidden-other-owner', deviceId: other.id }, context), { code: 'DEVICE_NOT_IN_WORKSPACE' });
+    f.repo.db.prepare("UPDATE devices SET status='disabled' WHERE id=?").run(f.device.deviceId);
+    assert.throws(() => f.service.authorize(issued.token, 'security'), { code: 'MANAGEMENT_DEVICE_REVOKED', status: 401 });
+  });
+}

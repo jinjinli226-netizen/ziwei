@@ -4,7 +4,7 @@ export const NATIVE_OPERATIONS={
   memory:{read:['scope'],write:['scope','content','expectedHash']},
   sessions:{list:['limit'],search:['query','limit','roleFilter','after','before','sort'],read:['sessionId','aroundMessageId','window']},
   skills:{list:[],read:['name','filePath'],install:['name','content','files'],update:['name','content','files','expectedHash'],remove:['name','expectedHash'],enable:['name'],disable:['name'],hub_search:['query','source','limit'],hub_install:['identifier','name'],check_updates:['name']},
-  mcp:{inspect:['server'],call:['server','tool','arguments']},
+  mcp:{inspect:['server'],authorize:['server'],call:['server','tool','arguments']},
   goals:{status:[],start:['objective','maxTurns','contract'],pause:[],resume:[],stop:[],step:[]},
   heartbeat:{status:[],start:['prompt','intervalSeconds'],pause:[],resume:[],stop:[],step:[]},
   kanban:{list:['status','limit'],create:['title','body','priority','parents','triage','maxTurns'],show:['taskId'],edit:['taskId','result','summary','title','body'],claim:['taskId'],complete:['taskId','runId','result','summary'],block:['taskId','runId','reason'],unblock:['taskId'],dispatch:['taskId']},

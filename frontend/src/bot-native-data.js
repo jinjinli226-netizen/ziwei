@@ -47,18 +47,40 @@ export function routineDriver(routine){if(routine?.nativeDriver)return routine.n
 const lines=value=>String(value||'').split(/[\n,]/).map(item=>item.trim()).filter(Boolean);
 function references(value,label){const result={};for(const line of lines(value)){const pair=line.match(/^([A-Za-z][A-Za-z0-9_-]*)=([A-Z][A-Z0-9_]*)$/);if(!pair)throw new Error(label+'只填写 本字段名=本机变量名，不填写密钥值');result[pair[1]]=String.fromCharCode(36)+'{'+pair[2]+'}';}return result;}
 export function referenceText(value){return Object.entries(value||{}).map(([key,item])=>key+'='+String(item).replace(/^\$\{(.*)\}$/,'$1')).join('\n');}
+const mcpOAuthPublicFields=['cimd','scope','client_id','client_name','client_metadata_url','redirect_uri','redirect_host','redirect_port','flow','timeout','user_agent','application_type','token_endpoint_auth_method'];
+function mcpBoolean(value,label){if(typeof value!=='boolean')throw new Error(label+'须为布尔值');return value;}
+export function mcpServerForm(name,server={}){
+  return {name,transport:server.transport||(server.url?'http':'stdio'),command:server.command||'',argsText:(server.args||[]).join('\n'),url:server.url||'',headersText:referenceText(server.headers),envText:referenceText(server.env),enabled:server.enabled??true,auth:server.auth||'header',oauthCimd:server.oauth?.cimd,oauthScope:server.oauth?.scope||'',includeText:(server.tools?.include||[]).join('\n'),excludeText:(server.tools?.exclude||[]).join('\n'),timeout:server.timeout??'',connectTimeout:server.connectTimeout??'',supportsParallelToolCalls:server.supportsParallelToolCalls,resources:server.tools?.resources,prompts:server.tools?.prompts};
+}
+export function viralMcpPreset(){return mcpServerForm('viral_library',{transport:'http',url:'https://viral.qzelynth.top/mcp',auth:'oauth',oauth:{cimd:false,scope:'library:read library:collect'},enabled:true});}
 export function buildMcpServer(form,existing={}){
   const transport=form.transport||'stdio',result={...existing,enabled:form.enabled??existing.enabled??true};
-  for(const field of ['command','args','url','headers','transport'])delete result[field];
+  if(!['stdio','http','sse'].includes(transport))throw new Error('MCP 传输方式须为 stdio、HTTP 或 SSE');
+  for(const field of ['command','args','url','headers','transport','auth','oauth'])delete result[field];
   if(transport==='stdio'){
     if(!form.command?.trim()||/[\n\r\0]/.test(form.command))throw new Error('请填写单行 MCP 命令');
     result.command=form.command.trim();result.args=String(form.argsText||'').split('\n').map(line=>line.trim()).filter(Boolean);
   }else{
     const url=new URL(form.url);if(!['http:','https:'].includes(url.protocol)||url.username||url.password||url.hash||[...url.searchParams.keys()].some(key=>/token|secret|password|api[_-]?key|authorization/i.test(key)))throw new Error('MCP URL 不可含凭据，请通过环境引用配置认证');
     result.transport=transport;result.url=url.href;result.headers=references(form.headersText,'HTTP header');
+    const auth=form.auth??existing.auth;
+    if(auth!==undefined&&!['oauth','header'].includes(auth))throw new Error('MCP 认证方式须为 OAuth 或 HTTP header');
+    if(auth!==undefined)result.auth=auth;
+    if(auth==='oauth'){
+      if(Object.keys(result.headers).some(name=>name.toLowerCase()==='authorization'))throw new Error('OAuth 不可同时配置 Authorization header，请移除此请求头引用');
+      const oauth=Object.fromEntries(Object.entries(existing.oauth||{}).filter(([name])=>mcpOAuthPublicFields.includes(name)));
+      if(form.oauthCimd!==undefined)oauth.cimd=mcpBoolean(form.oauthCimd,'OAuth CIMD');
+      if(form.oauthScope!==undefined){
+        if(typeof form.oauthScope!=='string'||form.oauthScope.length>4000||/[\u0000-\u001f\u007f]/.test(form.oauthScope))throw new Error('OAuth scope 须为最多 4000 字的单行文本，不可包含控制字符');
+        const scope=form.oauthScope.trim();if(scope)oauth.scope=scope;else delete oauth.scope;
+      }
+      result.oauth=oauth;
+    }
   }
   result.env=references(form.envText,'环境引用');
   if(form.includeText!==undefined||form.excludeText!==undefined)result.tools={...existing.tools,...(form.includeText!==undefined?{include:lines(form.includeText)}:{}),...(form.excludeText!==undefined?{exclude:lines(form.excludeText)}:{})};
+  if(form.supportsParallelToolCalls!==undefined)result.supportsParallelToolCalls=mcpBoolean(form.supportsParallelToolCalls,'并行工具调用');
+  for(const field of ['resources','prompts'])if(form[field]!==undefined)result.tools={...(result.tools||{}),[field]:mcpBoolean(form[field],'MCP '+field)};
   for(const field of ['timeout','connectTimeout'])if(form[field]!==undefined&&form[field]!==''){const value=Number(form[field]);if(!Number.isInteger(value)||value<1||value>(field==='timeout'?120:60))throw new Error('MCP 超时时间不在允许范围');result[field]=value;}
   return result;
 }

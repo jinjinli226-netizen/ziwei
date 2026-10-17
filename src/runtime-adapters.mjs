@@ -13,6 +13,7 @@ import { imageArtifactInstructions, readImageArtifacts, validateImageBytes, imag
 import { spawnSupervisedRuntime } from './runtime-process.mjs';
 import { prepareHermesBotHome, BOT_RUNTIME_ENV_KEYS } from './hermes-bot-runtime.mjs';
 import { normalizeBotConfig } from './hermes-bot-config.mjs';
+import {hermesBotToolsets} from './hermes-mcp-config.mjs';
 import {parseBotReasoningProof} from './hermes-bot-reasoning.mjs';
 import {resolveHermesLauncher} from './hermes-launcher.mjs';
 export {parseBotReasoningProof} from './hermes-bot-reasoning.mjs';
@@ -1059,7 +1060,7 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
       Object.assign(childEnv,botPrepared.env);creatorPrepared=botPrepared.receipt;
       if(botAuthority){if(typeof botAuthority.actionId!=='string'||typeof botAuthority.deviceToken!=='string'||!botAuthority.deviceToken)throw new Error('Bot 协作缺少受信执行凭据');Object.assign(childEnv,{ZIWEI_BOT_ACTION_ID:botAuthority.actionId,ZIWEI_BOT_DEVICE_TOKEN:botAuthority.deviceToken,ZIWEI_API_BASE:managementMcp.apiBase});}
       for(let i=invocation.args.length-2;i>=0;i--)if(invocation.args[i]==='--toolsets')invocation.args.splice(i,2);
-      const selected=[...hermesBot.config.toolsets,...(hermesBot.config.collaboration?.enabled?['ziwei_collaboration']:[]),...(receipt?['ziwei_management']:[]),...Object.entries(hermesBot.config.mcpServers).filter(([,entry])=>entry.enabled).map(([name])=>'ziwei_external_'+name)];
+      const selected=hermesBotToolsets(hermesBot.config,{management:Boolean(receipt)});
       if(selected.length)invocation.args.push('--toolsets',selected.join(','));
       selectedModel=botPrepared.effectiveModel;
     }

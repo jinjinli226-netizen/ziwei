@@ -34,7 +34,11 @@ export async function executeHermesNative(options={}) {
   finally{signal?.removeEventListener('abort',abort);spec.cleanup();}
   if(process.platform==='win32'&&(!evidence.rootConfirmed||!evidence.treeConfirmed))return{status:'failed',code:'EXECUTION_UNCERTAIN',executionState:'uncertain',error:'原生操作进程终态未确认',result:{code:'EXECUTION_UNCERTAIN',executionState:'uncertain',processExit:evidence}};
   const line=output.split(/\r?\n/).find(item=>item.startsWith('ZIWEI_NATIVE_RESULT:'));
-  const mutates=!['read','list','search','status','inspect','hub_search','check_updates','configure','enable','disable'].includes(options.operation.operation);
+  // OAuth connection setup invokes no business tool. Once its entire process
+  // tree has exited, another connection can safely inspect/reuse the target's
+  // token store even if the final setup receipt was interrupted.
+  const oauthSetup=options.operation.resource==='mcp'&&options.operation.operation==='authorize';
+  const mutates=!oauthSetup&&!['read','list','search','status','inspect','hub_search','check_updates','configure','enable','disable'].includes(options.operation.operation);
   const missingReceipt=()=>({status:'failed',...(mutates&&evidence.launched!==false?{code:'EXECUTION_UNCERTAIN',executionState:'uncertain'}:{}),error:'原生操作没有可验证回执；请核对原 action 和原生状态',result:{code:mutates&&evidence.launched!==false?'EXECUTION_UNCERTAIN':'NATIVE_OPERATION_REJECTED',processExit:evidence}});
   if(!line||evidence.rootExitCode!==0||exceeded)return missingReceipt();
   let receipt;try{receipt=JSON.parse(line.slice('ZIWEI_NATIVE_RESULT:'.length));}catch{return missingReceipt();}

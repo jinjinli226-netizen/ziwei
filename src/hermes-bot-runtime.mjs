@@ -4,6 +4,7 @@ import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { parseDocument, stringify } from 'yaml';
 import { normalizeBotConfig, botFailure, permittedCredentialName } from './hermes-bot-config.mjs';
+import {hermesBotToolsets,nativeHermesMcpServers} from './hermes-mcp-config.mjs';
 
 export const BOT_RUNTIME_ENV_KEYS=['ZIWEI_INSTANCE_KIND','ZIWEI_BOT_REVISION','ZIWEI_BOT_ACTION_ID','ZIWEI_BOT_DEVICE_TOKEN','ZIWEI_BOT_PROFILE_MODE','ZIWEI_BOT_REASONING_EFFORT'];
 const hash=value=>createHash('sha256').update(value).digest('hex');
@@ -60,11 +61,11 @@ export function prepareHermesBotHome({context,sourceHome,privateDirectory,worksp
     ...(custom?{providers:{[providerName]:Object.fromEntries(['base_url','api_mode','default_model','key_env','context_length'].filter(key=>custom[key]!==undefined).map(key=>[key,custom[key]]).concat([['discover_models',false]]))}}:{}),
     fallback_providers:[],updates:{check:false},...(sourceConfig.models_dev?.url?{models_dev:{url:sourceConfig.models_dev.url}}:{}),
     agent:{max_turns:config.maxTurns,run_budget_seconds:NATIVE_LONG_TASK_TIMEOUT_MS / 1000,bot_mode_protocol:false,coding_context:'off',disabled_toolsets:readOnly?['all']:['cronjob','delegation','kanban'],...(config.reasoningEffort?{reasoning_effort:config.reasoningEffort}:{})},
-    platform_toolsets:{cli:[...config.toolsets,...(config.collaboration?.enabled&&!readOnly?['ziwei_collaboration']:[])]},
+    platform_toolsets:{cli:hermesBotToolsets(config)},
     memory:{provider:'',memory_enabled:config.memory.enabled,user_profile_enabled:config.memory.userProfile,...(config.memory.charLimit?{memory_char_limit:config.memory.charLimit}:{}),...(config.memory.userCharLimit?{user_char_limit:config.memory.userCharLimit}:{})},
     skills:{disabled:config.skills.disabled,project_discovery:false,external_dirs:[],create_dir:'',auto_load:config.skills.autoLoad || []},
     plugins:{enabled:Object.entries(config.gateway?.platforms || {}).filter(([,v])=>v.enabled).map(([name])=>`${name.replaceAll('_','-')}-platform`),disabled:[]},
-    mcp_servers:readOnly?{}:Object.fromEntries(Object.entries(config.mcpServers).map(([name,{connectTimeout,...server}])=>['ziwei_external_'+name,{...server,...(connectTimeout?{connect_timeout:connectTimeout}:{})}])),
+    mcp_servers:nativeHermesMcpServers(config),
     ...(config.gateway?{gateway:{platforms:config.gateway.platforms,profile_routes:config.gateway.profileRoutes.map(route=>({...route,profile:context.employeeId}))}}:{}),
     ...Object.fromEntries(Object.entries(config.voice || {}).map(([kind,v])=>[kind,{enabled:v.enabled,provider:v.provider,[v.provider]:{...(v.model?{model:v.model}:{}),...(v.baseUrl?{base_url:v.baseUrl}:{}),...(v.keyEnv?{api_key:`\${${v.keyEnv}}`}:{}),...(v.voice?{voice:v.voice}:{}),...(v.language?{language:v.language}:{})}}])),
     approvals:{mode:readOnly?'manual':'off',single_query_mode:readOnly?'deny':'approve',unattended_mode:readOnly?'deny':'approve',cron_mode:'deny'},

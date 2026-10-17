@@ -1,5 +1,5 @@
 <script setup>
-import {computed,onBeforeUnmount,reactive,watch} from 'vue';
+import {computed,onBeforeUnmount,provide,reactive,watch} from 'vue';
 import {api,API_BASE} from '../api.js';
 import {createBotNativeOperations} from '../bot-native-operations.js';
 import {createNativeBotTransport} from '../bot-native-transport.js';
@@ -9,6 +9,7 @@ import BotChannelsPanel from './BotChannelsPanel.vue';
 import BotProactivePanel from './BotProactivePanel.vue';
 const props=defineProps({workspace:{type:String,required:true},actorId:{type:String,default:''},bot:{type:Object,required:true},draft:{type:Object,required:true},bots:{type:Array,required:true},section:{type:String,default:'knowledge'},configBusy:Boolean,refreshBot:{type:Function,required:true}});
 const emit=defineEmits(['save-config','stop-current','busy']);
+provide('bot-native-actor-id',computed(()=>props.actorId));
 const transport=createNativeBotTransport({api,getBot:()=>props.bot,onBotChanged:context=>props.workspace===context.workspace&&props.bot.id===context.botId?props.refreshBot():undefined});
 const ui=createBotNativeOperations({transport,wrap:reactive,namespace:props.actorId?API_BASE+':'+props.actorId:''});
 const enabled=computed(()=>props.bot.configuration_state==='initialized'&&(props.bot.instance?.mode!=='owned_profile'||props.bot.instance.provisioning?.status==='provisioned'));

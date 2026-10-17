@@ -1,3 +1,5 @@
+import { hermesMcpNameConflicts } from './hermes-mcp-config.mjs';
+
 // Shared wire validation: never forward unknown fields to a native runtime.
 export const BOT_SCHEMA_VERSION = 1;
 export const BOT_REASONING_EFFORTS=['minimal','low','medium','high','xhigh','max','ultra'];
@@ -39,19 +41,23 @@ export function normalizeBotConfig(input = {}) {
   const mcpServers = {};
   for (const [name, server] of Object.entries(servers)) {
     if (!/^[a-z][a-z0-9_-]{0,63}$/.test(name) || name.startsWith('ziwei')) throw botFailure('BOT_CONFIG_INVALID','MCP 名称无效或使用了紫薇保留名称',400);
-    keys(server,['transport','command','args','env','enabled','url','headers','timeout','connectTimeout','tools'],`mcpServers.${name}`);
+    keys(server,['transport','command','args','env','enabled','url','headers','timeout','connectTimeout','tools','auth','oauth','supportsParallelToolCalls'],`mcpServers.${name}`);
     const transport=server.transport || (server.url?'http':'stdio');
     if(!['stdio','http','sse'].includes(transport))throw botFailure('BOT_CONFIG_INVALID','MCP transport 无效',400);
     if(transport==='stdio'&&(typeof server.command !== 'string' || !server.command.trim() || server.command.length > 4096 || /[\r\n\0]/.test(server.command)))throw botFailure('BOT_CONFIG_INVALID','MCP command 无效',400);
     const args=server.args || [];
     if (!Array.isArray(args) || args.length > 100 || args.some(arg => typeof arg !== 'string' || arg.length > 4096 || /[\0\r\n]/.test(arg))) throw botFailure('BOT_CONFIG_INVALID','MCP args 必须为字符串数组',400);
     if(transport!=='stdio')safeEndpoint(server.url,'MCP url');
+    if(server.auth!==undefined&&(transport==='stdio'||!['oauth','header'].includes(server.auth)))throw botFailure('BOT_CONFIG_INVALID','MCP auth 仅支持 HTTP/SSE 的 oauth 或 header',400);
+    if(server.auth==='oauth'&&hermesMcpNameConflicts(name))throw botFailure('BOT_MCP_NAME_CONFLICT','OAuth MCP 名称与原生工具集冲突，请更换 MCP 逻辑名称',400);
+    if(server.oauth!==undefined&&server.auth!=='oauth')throw botFailure('BOT_CONFIG_INVALID','MCP oauth 参数需要明确 auth: oauth',400);
+    const oauth=server.oauth===undefined?undefined:normalizeMcpOAuth(server.oauth);
     const env = server.env ?? {}; if (!object(env)) throw botFailure('BOT_CONFIG_INVALID','MCP env 必须是映射',400);
     for (const [key,value] of Object.entries(env)) if (!permittedCredentialName(key) || !/^\$\{[A-Z][A-Z0-9_]*\}$/.test(value) || !permittedCredentialName(value.slice(2,-1))) throw botFailure('BOT_SECRET_REFERENCE_REQUIRED','MCP env 仅接收本机 ${ENV_NAME} 引用；不保存密钥或引用紫薇内部凭据',400);
     const headers=references(server.headers || {},'MCP headers');
-    const filters=server.tools || {};keys(filters,['include','exclude'],'MCP tools');
-    const tools=Object.fromEntries(Object.entries(filters).map(([key,list])=>[key,patterns(list,'MCP tool filter')]));
-    mcpServers[name] = {...(transport==='stdio'?{command:server.command,args:[...args]}:{transport,url:server.url,headers}),env:{...env},enabled:bool(server.enabled,true,'MCP enabled'),...(Object.keys(tools).length?{tools}:{}),...(server.timeout!==undefined?{timeout:bounded(server.timeout,1,120,'MCP timeout')}:{}),...(server.connectTimeout!==undefined?{connectTimeout:bounded(server.connectTimeout,1,60,'MCP connectTimeout')}:{})};
+    const filters=server.tools || {};keys(filters,['include','exclude','resources','prompts'],'MCP tools');
+    const tools=Object.fromEntries(Object.entries(filters).map(([key,value])=>[key,['resources','prompts'].includes(key)?bool(value,true,`MCP tools.${key}`):patterns(value,'MCP tool filter')]));
+    mcpServers[name] = {...(transport==='stdio'?{command:server.command,args:[...args]}:{transport,url:server.url,headers}),env:{...env},enabled:bool(server.enabled,true,'MCP enabled'),...(server.auth!==undefined?{auth:server.auth}:{}),...(oauth!==undefined?{oauth}:{}),...(server.supportsParallelToolCalls!==undefined?{supportsParallelToolCalls:bool(server.supportsParallelToolCalls,false,'MCP supportsParallelToolCalls')}:{}),...(Object.keys(tools).length?{tools}:{}),...(server.timeout!==undefined?{timeout:bounded(server.timeout,1,120,'MCP timeout')}:{}),...(server.connectTimeout!==undefined?{connectTimeout:bounded(server.connectTimeout,1,60,'MCP connectTimeout')}:{})};
   }
   const toolsets = names(input.toolsets ?? [], 'toolsets');
   // A requested autonomous scheduler may not compete with Ziwei's single authority.
@@ -74,6 +80,23 @@ function validateCredentialPlaceholders(value,path=[]) {
 }
 
 function bounded(value,min,max,label){if(!Number.isInteger(value)||value<min||value>max)throw botFailure('BOT_CONFIG_INVALID',`${label} 必须为${min}–${max}`,400);return value;}
+function normalizeMcpOAuth(value) {
+  keys(value,['cimd','scope','client_id','client_name','client_metadata_url','redirect_uri','redirect_host','redirect_port','flow','timeout','user_agent','application_type','token_endpoint_auth_method'],'MCP oauth');
+  const result={};
+  for(const [key,item] of Object.entries(value)) {
+    if(key==='cimd'){result[key]=bool(item,true,'MCP oauth.cimd');continue;}
+    if(key==='redirect_port'){result[key]=bounded(item,1024,65535,'MCP oauth.redirect_port');continue;}
+    if(key==='timeout'){result[key]=bounded(item,1,600,'MCP oauth.timeout');continue;}
+    if(typeof item!=='string'||!item.trim()||item.length>(key==='scope'?4000:2048)||/[\u0000-\u001f\u007f]/.test(item))throw botFailure('BOT_CONFIG_INVALID',`MCP oauth.${key} 无效`,400);
+    if(['client_metadata_url','redirect_uri'].includes(key)) {
+      safeEndpoint(item,`MCP oauth.${key}`);
+      if([...new URL(item).searchParams.keys()].some(name=>/token|secret|password|authorization|api[_-]?key|^(?:code|state)$/i.test(name)))throw botFailure('BOT_SECRET_REFERENCE_REQUIRED','MCP oauth URL 不得保存凭据或授权回执',400);
+    }
+    if(key==='redirect_host'&&!['127.0.0.1','localhost'].includes(item)||key==='flow'&&!['browser','device'].includes(item)||key==='application_type'&&!['native','web'].includes(item)||key==='token_endpoint_auth_method'&&item!=='none')throw botFailure('BOT_CONFIG_UNSUPPORTED',`MCP oauth.${key} 不受支持；仅接收公共客户端参数`,400);
+    result[key]=item;
+  }
+  return result;
+}
 function patterns(value,label){if(!Array.isArray(value)||value.length>100||value.some(v=>typeof v!=='string'||v.length>160||/[\0\r\n]/.test(v)))throw botFailure('BOT_CONFIG_INVALID',`${label} 无效`,400);return [...new Set(value)];}
 function safeEndpoint(value,label){try{const url=new URL(value);if(!['http:','https:'].includes(url.protocol)||url.username||url.password||url.hash)throw new Error();return value;}catch{throw botFailure('BOT_CONFIG_INVALID',`${label} 无效或含凭据`,400);}}
 function references(value,label){if(!object(value)||Object.keys(value).length>40)throw botFailure('BOT_CONFIG_INVALID',`${label} 无效`,400);for(const [key,v] of Object.entries(value))if(!/^[A-Za-z][A-Za-z0-9_-]{0,100}$/.test(key)||(!/^\$\{[A-Z][A-Z0-9_]*\}$/.test(v)||!permittedCredentialName(v.slice(2,-1))))throw botFailure('BOT_SECRET_REFERENCE_REQUIRED',`${label} 仅保存本机环境变量引用`,400);return {...value};}
