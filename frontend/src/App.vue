@@ -525,6 +525,8 @@ async function loadConversations({ autoSelect=true } = {}) {
     if(workspace!==workspaceSlug() || generation!==conversationListGeneration || !conversationRequests.isCurrent(request,conversationRequestScope()))return;
     conversations.value=mergeConversationLists(conversations.value,result.conversations || [],selectedConversation.value);
     const routeId = conversationIdFromPath();
+    // A manual main-chat open owns selection until its detail request settles.
+    if(botChatIntent.value?.opening && botChatIntent.value.workspace===workspace)return;
     const routedItem = routeId && conversations.value.find(item => item.id === routeId);
     if (routedItem && selectedConversation.value?.id!==routeId) await openConversation(routedItem, { push:false });
     else if (autoSelect && !selectedConversation.value && conversations.value[0]) await openConversation(conversations.value[0], { push:false });
@@ -603,6 +605,7 @@ function startConversationPolling() {
 async function openConversation(item, { push=true, workspace=workspaceSlug() } = {}) {
   const id = typeof item === 'string' ? item : item?.id;
   if (!id || workspace!==workspaceSlug()) return false;
+  if(botChatIntent.value && botChatIntent.value.conversationId!==id){botChatIntent.value=null;botBindingPending.value=false;}
   if (selectedConversation.value?.id===id) { await refreshConversationState({force:true});return true; }
   const generation=++conversationOpenGeneration;
   let request=conversationRequests.begin(conversationRequestScope(),'detail',id);
@@ -665,6 +668,7 @@ async function openEmployeeConversation(employee) {
 async function selectConversationEmployee(employeeId) {
   const value=String(employeeId || '').trim();
   if (!value || value === conversationEmployeeId.value) return;
+  botChatIntent.value=null;botBindingPending.value=false;
   clearConversationAttachment({preserve:true});
   ++conversationOpenGeneration;
   conversationEmployeeId.value=value;
@@ -1414,13 +1418,16 @@ async function openBotConversation({workspace,employee,conversation,botId}) {
   if(workspace!==workspaceSlug()||!conversation?.id)return;
   if(employee?.id&&!employees.value.some(item=>item.id===employee.id))employees.value.push(employee);
   navigate('inbox');
-  botChatIntent.value={workspace,botId,conversationId:conversation.id,pending:true};
+  conversationEmployeeId.value=employee.id;
+  conversations.value=conversations.value.filter(item=>item.employee_id===employee.id);
+  botChatIntent.value={workspace,botId,conversationId:conversation.id,pending:true,opening:true};
   const entry=botChatIntent.value;botBindingPending.value=true;
   conversationBotId.value=botId;
   history.replaceState({},'',routePath('inbox',conversation.id)+'?employee='+encodeURIComponent(employee.id)+'&bot='+encodeURIComponent(botId));
   const opened=await openConversation(conversation,{workspace,push:false});
   if(!opened&&botChatIntent.value===entry){botChatIntent.value=null;botBindingPending.value=false;}
   if(opened&&workspace===workspaceSlug()&&page.value==='inbox'&&selectedConversation.value?.id===conversation.id){
+    if(botChatIntent.value?.conversationId===conversation.id)botChatIntent.value={...botChatIntent.value,opening:false};
     conversationBotId.value=botId;
     history.replaceState({},'',routePath('inbox',conversation.id)+'?employee='+encodeURIComponent(employee.id)+'&bot='+encodeURIComponent(botId));
   }

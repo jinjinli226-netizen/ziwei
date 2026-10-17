@@ -9,6 +9,7 @@ const parse = value => { try { return JSON.parse(value); } catch { return null; 
 const now = () => new Date().toISOString();
 export const BOT_INTERNAL = Symbol('trusted bot validation');
 export const botActionMaintenance=(type,payload)=>['hermes.bot.provision','hermes.bot.validate','directory.inspect'].includes(type) || type==='hermes.bot.native' && !nativeIsExecution(normalizeNativeOperation(payload.nativeOperation));
+export const botActionReadOnlyInspection=(type,payload)=>type==='directory.inspect' && payload?.createIfMissing===false && !Object.hasOwn(payload,'create_if_missing');
 const canonical = value => JSON.stringify(value, (_key,item) => item && typeof item === 'object' && !Array.isArray(item) ? Object.fromEntries(Object.entries(item).sort(([a],[b])=>a.localeCompare(b))) : item);
 export const botUncertain = value => Boolean(value && (value.code === 'EXECUTION_UNCERTAIN' || value.executionState === 'uncertain' || botUncertain(value.result)));
 export const botSnapshot = (db, employeeId, workspaceId) => {
@@ -18,7 +19,7 @@ export const botSnapshot = (db, employeeId, workspaceId) => {
   const workspace = db.prepare('SELECT slug FROM workspaces WHERE id=?').get(workspaceId)?.slug;
   return {schemaVersion:1,employeeId,workspace,revision:row.revision,controlEpoch:row.control_epoch,config:parse(row.config_json),sourceProfile:employee.runtime_profile,instance:botProfileBinding(row),deviceId:employee.target_device_id,model:employee.model_id,persona:employee.persona,instructions:employee.instructions,description:employee.description,name:employee.name,conversationId:row.main_conversation_id};
 };
-export function assertBotExecution(db, workspaceId, payload, { validation = false, provisioning = false, requireProfile = !validation, actionId = null } = {}) {
+export function assertBotExecution(db, workspaceId, payload, { validation = false, provisioning = false, requireProfile = !validation, actionId = null, readOnlyInspection = false } = {}) {
   // Retired owned profiles cannot be addressed through a raw action without employeeId.
   const targetDeviceId=payload.deviceId || payload.targetDeviceId || payload.device_id || payload.target_device_id;
   const targetProfile=payload.profile || payload.runtimeProfile || payload.runtime_profile || payload.hermesProfile || payload.hermes_profile;
@@ -34,6 +35,8 @@ export function assertBotExecution(db, workspaceId, payload, { validation = fals
   const linkedBot=linked.find(item=>db.prepare('SELECT 1 FROM hermes_bots WHERE employee_id=?').get(item.employee_id));
   if(linkedBot && (linked.some(item=>item.workspace_id!==workspaceId || item.employee_id!==linkedBot.employee_id) || payload.employeeId && payload.employeeId!==linkedBot.employee_id))throw botFailure('BOT_BINDING_CONFLICT','会话、Routine 与员工身份不一致');
   const employeeId = linkedBot?.employee_id || payload.employeeId || null;
+  if(payload.inspectionEmployeeId!==undefined && (!readOnlyInspection || payload.inspectionEmployeeId!==employeeId || payload.employeeId || payload.employee_id || payload.assignee))throw botFailure('BOT_BINDING_CONFLICT','只读目录检查的员工绑定不一致');
+  if(readOnlyInspection && payload.hermesBot && payload.hermesBot.employeeId!==employeeId)throw botFailure('BOT_BINDING_CONFLICT','只读目录检查的 Bot 身份不一致');
   if (!employeeId) { if (payload.hermesBot) throw botFailure('BOT_IDENTITY_INVALID','Bot 配置缺少可信员工绑定'); return null; }
   const employee = db.prepare('SELECT * FROM employees WHERE id=? AND workspace_id=?').get(employeeId,workspaceId);
   if(employee?.status==='deleted')throw botFailure('EMPLOYEE_DELETED','数字员工已移除，不能接收新任务',404);
@@ -53,7 +56,7 @@ export function assertBotExecution(db, workspaceId, payload, { validation = fals
   if (payload.hermesBot && (payload.hermesBot.revision !== row.revision || payload.hermesBot.controlEpoch !== row.control_epoch)) throw botFailure('BOT_REVISION_CONFLICT','Bot 配置或控制状态已变化，请重新读取');
   if (!validation && (row.control_state !== 'active' || employee.status !== 'active')) throw botFailure('BOT_NOT_ACTIVE','Bot 未启用或已暂停');
   if (!validation && row.validated_revision !== row.revision) throw botFailure('BOT_NOT_VALIDATED','Bot 当前配置尚未通过目标电脑验证');
-  if (row.active_action_id && row.active_action_id !== actionId) {
+  if (!readOnlyInspection && row.active_action_id && row.active_action_id !== actionId) {
     const active = db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(row.active_action_id);
     if (active && (['pending','acked'].includes(active.status) || botUncertain(parse(active.result_json)) || active.status === 'expired' && active.acked_at)) throw botFailure('BOT_BUSY','Bot 仍有在途或未确认停止的执行，请查询原回执');
   }

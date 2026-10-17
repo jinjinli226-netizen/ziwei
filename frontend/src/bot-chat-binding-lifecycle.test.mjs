@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {computed,ref,watch} from 'vue';
+import {createConversationRequestSequence,mergeConversationDetail,mergeConversationLists} from './conversation-execution-state.mjs';
+import {conversationSettingsSnapshot,mergeConversationSettingsDraft} from './workdir.js';
 
 const app=await readFile(new URL('./App.vue',import.meta.url),'utf8');
 function source(name){
@@ -17,7 +19,7 @@ function deferred(){let resolve,reject;const promise=new Promise((yes,no)=>{reso
 function bot(id,workspace='bigtron'){return{id,employee_id:id,workspace,main_conversation_id:`chat-${id}`,configuration_state:'configured',revision:1,control_epoch:1};}
 function harness(){
   const workspace=ref('bigtron'),requests=[],opens=[],historyWrites=[];
-  const state={selectedConversation:ref(null),conversationBotBinding:ref(null),botBindingPending:ref(false),botBindingError:ref(''),botChatIntent:ref(null),conversationBotId:ref(''),authState:ref({user:{id:'owner'}}),employees:ref([]),page:ref('inbox'),conversationDirectoryPickerOpen:ref(false),conversationDirectoryEditorVersion:ref(0),conversationDirectoryPathDraft:ref(''),conversationDirectoryCheck:ref(null),conversationDirectoryLoading:ref(false),conversationDirectoryError:ref(''),conversationWorkingDirectory:ref('/work'),selectedConversationDevice:ref({id:'device',status:'online',workdir:'/root'})};
+  const state={conversationEmployeeId:ref(''),conversations:ref([]),selectedConversation:ref(null),conversationBotBinding:ref(null),botBindingPending:ref(false),botBindingError:ref(''),botChatIntent:ref(null),conversationBotId:ref(''),authState:ref({user:{id:'owner'}}),employees:ref([]),page:ref('inbox'),conversationDirectoryPickerOpen:ref(false),conversationDirectoryEditorVersion:ref(0),conversationDirectoryPathDraft:ref(''),conversationDirectoryCheck:ref(null),conversationDirectoryLoading:ref(false),conversationDirectoryError:ref(''),conversationWorkingDirectory:ref('/work'),selectedConversationDevice:ref({id:'device',status:'online',workdir:'/root'})};
   const context={...state,watch,workspaceSlug:()=>workspace.value,workspaceSlugValue:computed(()=>workspace.value),
     api:{bot:(employeeId,slug)=>{const request={...deferred(),employeeId,workspace:slug,actor:state.authState.value.user?.id};requests.push(request);return request.promise;}},
     navigate:key=>{state.botChatIntent.value=null;state.selectedConversation.value=null;state.page.value=key;},
@@ -183,4 +185,83 @@ test('an explicitly non-Hermes employee remains usable without confusing visibil
   ui.requests[0].reject(Object.assign(new Error('此员工没有 Hermes Bot 能力'),{code:'BOT_RUNTIME_UNSUPPORTED',status:400}));await settle();
   assert.equal(ui.botBindingError.value,'');assert.equal(ui.botBindingPending.value,false);assert.equal(ui.conversationBotBinding.value,null);
   await ui.openConversationDirectoryPicker();assert.equal(ui.requests.length,1);assert.equal(ui.conversationDirectoryLoading.value,false);assert.equal(ui.conversationDirectoryError.value,'');
+});
+
+// Use the real navigation, detail/list request sequence and Vue identity watcher
+// together. The simpler binding fixture deliberately stubs conversation opens.
+function navigationHarness() {
+  const names=['conversationRequestScope','applyConversationDetail','loadConversationExecution','loadConversations','openConversation','selectConversationEmployee','openBotConversation','botChatBindingScope','refreshBotChatBinding'];
+  const navigateLine=app.split('\n').find(line=>line.startsWith('function navigate('));
+  const sources=names.map(source).join('\n')+'\n'+navigateLine;
+  const state=Object.fromEntries([...sources.matchAll(/(\w+)\.value/g)].map(match=>[match[1],ref(null)]));
+  Object.assign(state,{authState:ref({user:{id:'owner'}}),conversationEmployeeId:ref('instrends'),conversations:ref([{id:'chat-instrends',employee_id:'instrends'}]),employees:ref([{id:'instrends'},{id:'secretary'},{id:'other'}]),devices:ref([{id:'device',status:'online',workdir:'D:/Work'}]),page:ref('bots'),selectedConversation:ref(null),conversationExecutionBusy:ref(false)});
+  const details=[],lists=[],notices=[];let location='/bigtron/bots/secretary';
+  const context={...state,watch,workspaceSlug:()=> 'bigtron',createConversationRequestSequence,mergeConversationDetail,mergeConversationLists,conversationSettingsSnapshot,mergeConversationSettingsDraft,
+    api:{conversation:id=>{const request={id,...deferred()};details.push(request);return request.promise;},conversations:employee=>{const request={employee,...deferred()};lists.push(request);return request.promise;},bot:id=>Promise.resolve(bot(id))},
+    history:{pushState:(_state,_title,url)=>{location=url;},replaceState:(_state,_title,url)=>{location=url;}},
+    routePath:(page,id='')=>`/bigtron/${page}${id?'/'+id:''}`,
+    conversationIdFromPath:()=>new URL(location,'https://fixture.test').pathname.split('/')[3]||'',
+    clearConversationAttachment:()=>{},stopConversationPolling:()=>{},startConversationPolling:()=>{},refreshConversationState:async()=>{},notify:message=>notices.push(message),load:async()=>{},loadApiKeys:()=>{},loadZiweiConnect:async()=>{},
+  };
+  const functions=new Function(...Object.keys(context),`let conversationOpenGeneration=0,conversationListGeneration=0;const conversationRequests=createConversationRequestSequence();let botChatBindingGeneration=0,botChatBindingActor='',botChatBindingResolvedScope='',botChatBindingRequest=null;${sources}\nconst stop=${bindingWatch.trim()}\nreturn {openBotConversation,openConversation,loadConversations,selectConversationEmployee,stop};`)(...Object.values(context));
+  return {...state,...functions,details,lists,notices,location:()=>location,setLocation:value=>{location=value;},enter:()=>functions.openBotConversation({workspace:'bigtron',employee:{id:'secretary'},conversation:{id:'chat-secretary'},botId:'secretary'})};
+}
+const detail=(id,employee)=>({id,employee_id:employee,employee:{id:employee,target_device_id:'device'},device_id:'device',messages:[],execution:null});
+
+test('manual main-chat entry owns target employee immediately and keeps it after detail failure',async t=>{
+  const ui=navigationHarness();t.after(ui.stop);
+  const opening=ui.enter();
+  assert.equal(ui.conversationEmployeeId.value,'secretary');assert.deepEqual(ui.conversations.value,[]);
+  assert.match(ui.location(),/chat-secretary\?employee=secretary&bot=secretary$/);
+  ui.details[0].reject(new Error('detail timed out'));await opening;
+  assert.equal(ui.conversationEmployeeId.value,'secretary');assert.equal(ui.selectedConversation.value,null);
+  assert.equal(ui.botChatIntent.value,null);assert.equal(ui.botBindingPending.value,false);assert.deepEqual(ui.notices,['detail timed out']);
+});
+
+test('late old employee list cannot change the explicit main-chat scope or selection',async t=>{
+  const ui=navigationHarness();t.after(ui.stop);
+  const oldList=ui.loadConversations();assert.equal(ui.lists[0].employee,'instrends');
+  const opening=ui.enter();
+  ui.lists[0].resolve({conversations:[detail('chat-instrends','instrends')]});await oldList;
+  assert.equal(ui.details.length,1);assert.equal(ui.conversationEmployeeId.value,'secretary');assert.deepEqual(ui.conversations.value,[]);
+  ui.details[0].resolve(detail('chat-secretary','secretary'));await opening;await settle();
+  assert.equal(ui.selectedConversation.value.id,'chat-secretary');assert.equal(ui.conversationEmployeeId.value,'secretary');assert.equal(ui.botChatIntent.value.opening,false);
+});
+
+for(const includesTarget of [true,false])test(`background list cannot supersede a manual open (${includesTarget?'route present':'another thread only'})`,async t=>{
+  const ui=navigationHarness();t.after(ui.stop);const opening=ui.enter();
+  const background=ui.loadConversations();assert.equal(ui.lists[0].employee,'secretary');
+  ui.lists[0].resolve({conversations:[detail(includesTarget?'chat-secretary':'secretary-other-thread','secretary')]});await background;
+  assert.equal(ui.details.length,1,'background routing/autoSelect must not start another detail request');
+  ui.details[0].resolve(detail('chat-secretary','secretary'));await opening;await settle();
+  assert.equal(ui.selectedConversation.value.id,'chat-secretary');assert.equal(ui.conversationEmployeeId.value,'secretary');
+});
+
+test('an explicit employee switch cancels main-chat intent and ignores its late response',async t=>{
+  const ui=navigationHarness();t.after(ui.stop);const opening=ui.enter();
+  const switchEmployee=ui.selectConversationEmployee('other');
+  assert.equal(ui.botChatIntent.value,null);assert.equal(ui.botBindingPending.value,false);assert.equal(ui.lists[0].employee,'other');
+  ui.lists[0].resolve({conversations:[detail('chat-other','other')]});await settle();
+  assert.equal(ui.details[1].id,'chat-other');
+  ui.details[1].resolve(detail('chat-other','other'));await switchEmployee;
+  ui.details[0].resolve(detail('chat-secretary','secretary'));await opening;await settle();
+  assert.equal(ui.selectedConversation.value.id,'chat-other');assert.equal(ui.conversationEmployeeId.value,'other');assert.doesNotMatch(ui.location(),/secretary/);
+});
+
+test('an explicit other conversation cancels main-chat intent and retains the latest selection',async t=>{
+  const ui=navigationHarness();t.after(ui.stop);const opening=ui.enter();
+  const other=ui.openConversation({id:'secretary-other-thread'});
+  assert.equal(ui.botChatIntent.value,null);
+  ui.details[1].resolve(detail('secretary-other-thread','secretary'));await other;
+  ui.details[0].resolve(detail('chat-secretary','secretary'));await opening;await settle();
+  assert.equal(ui.selectedConversation.value.id,'secretary-other-thread');assert.match(ui.location(),/secretary-other-thread/);
+});
+
+test('initial URL intent still opens its main conversation through the background list',async t=>{
+  const ui=navigationHarness();t.after(ui.stop);
+  ui.conversationEmployeeId.value='secretary';ui.page.value='inbox';ui.setLocation('/bigtron/inbox/chat-secretary?employee=secretary&bot=secretary');
+  ui.botChatIntent.value={workspace:'bigtron',botId:'secretary',conversationId:'chat-secretary',pending:true};
+  const loading=ui.loadConversations();ui.lists[0].resolve({conversations:[detail('chat-secretary','secretary')]});await settle();
+  assert.equal(ui.details.length,1);ui.details[0].resolve(detail('chat-secretary','secretary'));await loading;await settle();
+  assert.equal(ui.selectedConversation.value.id,'chat-secretary');assert.equal(ui.conversationEmployeeId.value,'secretary');
 });

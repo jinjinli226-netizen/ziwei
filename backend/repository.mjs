@@ -21,7 +21,7 @@ import { syncPhoneSkill } from './skills/catalog.mjs';
 import { redactSecrets } from '../src/redaction.mjs';
 import { normalizeConversationAttachments } from './conversation-attachments.mjs';
 import { resolveEmployeeDefaultWorkdir } from './employee-workdir.mjs';
-import { assertBotExecution, botUncertain, BOT_INTERNAL, botActionMaintenance } from './bots.mjs';
+import { assertBotExecution, botUncertain, BOT_INTERNAL, botActionMaintenance, botActionReadOnlyInspection } from './bots.mjs';
 import {verifyBotProvisionReceipt} from './bot-profiles.mjs';
 import {botReasoningProof} from '../src/hermes-bot-reasoning.mjs';
 import { botFailure } from '../src/hermes-bot-config.mjs';
@@ -1484,6 +1484,7 @@ export function createRepository(options = {}, io={}) {
       const targetDeviceId=input.targetDeviceId === undefined && input.target_device_id === undefined && input.deviceId === undefined && input.device_id === undefined ? row.target_device_id : String(input.targetDeviceId ?? input.target_device_id ?? input.deviceId ?? input.device_id ?? '').trim() || null;
       if (targetDeviceId && !db.prepare('SELECT 1 FROM devices WHERE id=? AND workspace_id=?').get(targetDeviceId, ws.id)) throw new Error('目标设备不属于当前工作区');
       const defaultDirectory=resolveEmployeeDefaultWorkdir(db,ws,targetDeviceId,input,row,context);
+      if(db.prepare('SELECT 1 FROM hermes_bots WHERE employee_id=?').get(employeeId) && (defaultDirectory.default_working_directory!==row.default_working_directory || defaultDirectory.default_working_directory_device_id!==row.default_working_directory_device_id))assertBotExecution(db,row.workspace_id,{employeeId},{validation:true});
       const managementMcpEnabled = true;
       const runtimeProfile=input.runtimeProfile === undefined && input.runtime_profile === undefined && input.profile === undefined && input.hermesProfile === undefined && input.hermes_profile === undefined ? row.runtime_profile : (targetDeviceId ? normalizeRuntimeProfile : validateEmployeeProfile.bind(null, runtime))(input.runtimeProfile ?? input.runtime_profile ?? input.profile ?? input.hermesProfile ?? input.hermes_profile);
       const avatar=input.avatar === undefined ? row.avatar : (input.avatar ? String(input.avatar) : null);
@@ -1819,7 +1820,21 @@ export function createRepository(options = {}, io={}) {
       const action=this.createA2AAction(ws.slug,{agentId:'ziwei_user',type:'directory.inspect',botInternal:BOT_INTERNAL,dedupeKey,payload:{workspace:ws.slug,workspaceId:ws.id,conversationId:row.id,userId:actorUserId,deviceId,path:directoryPath,createIfMissing,includeRoots:true,includeChildren:true}});
       const actionRow=db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(action.id); return {...actionView(actionRow,{includeEvents:true}),duplicate:Boolean(action.duplicate)};
     },
-    updateConversationSettings(conversationId,input={}) { const row=db.prepare('SELECT * FROM conversations WHERE id=?').get(conversationId); if(!row) throw new Error('Conversation not found'); const employee = row.employee_id ? db.prepare('SELECT * FROM employees WHERE id=? AND workspace_id=?').get(row.employee_id,row.workspace_id) : null; if (row.employee_id && !employeeVisible(employee, employeeAccessContext(input))) throw new Error('Conversation not found'); const deviceId=input.deviceId === undefined && input.device_id === undefined && input.targetDeviceId === undefined && input.target_device_id === undefined ? row.device_id || null : (String(input.deviceId ?? input.device_id ?? input.targetDeviceId ?? input.target_device_id ?? '').trim() || null); if (deviceId) { const device=db.prepare('SELECT * FROM devices WHERE id=? AND workspace_id=?').get(deviceId,row.workspace_id); if (!device) throw new Error('目标设备不属于当前工作区'); if (device.status === 'disabled') throw new Error('目标设备已停用'); } const modelId=input.modelId === undefined && input.model_id === undefined && input.model === undefined ? row.model_id || null : (String(input.modelId ?? input.model_id ?? input.model ?? '').trim() || null); const workingDirectory=input.workingDirectory === undefined && input.working_directory === undefined && input.cwd === undefined && input.workdir === undefined ? row.working_directory || null : (String(input.workingDirectory ?? input.working_directory ?? input.cwd ?? input.workdir ?? '').trim().slice(0,4096) || null); if(employee&&db.prepare('SELECT 1 FROM hermes_bots WHERE employee_id=?').get(employee.id)&&(modelId&&modelId!==employee.model_id||deviceId&&deviceId!==employee.target_device_id))throw botFailure('BOT_CONVERSATION_CONFLICT','Bot 聊天设置不能覆盖员工模型或电脑绑定'); db.prepare('UPDATE conversations SET model_id=?,working_directory=?,device_id=?,updated_at=? WHERE id=?').run(modelId,workingDirectory,deviceId,now(),conversationId); return this.getConversation(conversationId, input); },
+    updateConversationSettings(conversationId,input={}) {
+      const row=db.prepare('SELECT * FROM conversations WHERE id=?').get(conversationId);if(!row)throw new Error('Conversation not found');
+      const employee=row.employee_id?db.prepare('SELECT * FROM employees WHERE id=? AND workspace_id=?').get(row.employee_id,row.workspace_id):null;
+      if(row.employee_id&&!employeeVisible(employee,employeeAccessContext(input)))throw new Error('Conversation not found');
+      const deviceId=input.deviceId===undefined&&input.device_id===undefined&&input.targetDeviceId===undefined&&input.target_device_id===undefined?row.device_id||null:(String(input.deviceId??input.device_id??input.targetDeviceId??input.target_device_id??'').trim()||null);
+      if(deviceId){const device=db.prepare('SELECT * FROM devices WHERE id=? AND workspace_id=?').get(deviceId,row.workspace_id);if(!device)throw new Error('目标设备不属于当前工作区');if(device.status==='disabled')throw new Error('目标设备已停用');}
+      const modelId=input.modelId===undefined&&input.model_id===undefined&&input.model===undefined?row.model_id||null:(String(input.modelId??input.model_id??input.model??'').trim()||null);
+      const workingDirectory=input.workingDirectory===undefined&&input.working_directory===undefined&&input.cwd===undefined&&input.workdir===undefined?row.working_directory||null:(String(input.workingDirectory??input.working_directory??input.cwd??input.workdir??'').trim().slice(0,4096)||null);
+      if(employee&&db.prepare('SELECT 1 FROM hermes_bots WHERE employee_id=?').get(employee.id)){
+        if(modelId&&modelId!==employee.model_id||deviceId&&deviceId!==employee.target_device_id)throw botFailure('BOT_CONVERSATION_CONFLICT','Bot 聊天设置不能覆盖员工模型或电脑绑定');
+        if(workingDirectory!==(row.working_directory||null))assertBotExecution(db,row.workspace_id,{employeeId:employee.id},{validation:true});
+      }
+      db.prepare('UPDATE conversations SET model_id=?,working_directory=?,device_id=?,updated_at=? WHERE id=?').run(modelId,workingDirectory,deviceId,now(),conversationId);
+      return this.getConversation(conversationId,input);
+    },
     getConversationDirectoryAction(conversationId, actionId, input = {}) {
       const row = this.getConversationAccess(conversationId, input);
       if (!row) return null;
@@ -1906,11 +1921,12 @@ export function createRepository(options = {}, io={}) {
       let payload = trustedTemplatePayload(ws.id,input.payload && typeof input.payload === 'object' ? input.payload : {});
       const isValidation=input.type==='hermes.bot.validate';
       const isProvisioning=input.type==='hermes.bot.provision';
+      const readOnlyInspection=botActionReadOnlyInspection(input.type,payload);
       if(isProvisioning&&input.botInternal!==BOT_INTERNAL)throw botFailure('BOT_PROVISION_ROUTE_REQUIRED','请使用 Bot 专属 Profile 创建入口');
       if(input.type==='hermes.bot.native' && input.botInternal!==BOT_INTERNAL)throw botFailure('BOT_NATIVE_ROUTE_REQUIRED','请从版本化 Bot 原生操作入口提交');
       if(input.type==='directory.inspect' && input.botInternal!==BOT_INTERNAL && payload.hermesBot)throw botFailure('BOT_DIRECTORY_ROUTE_REQUIRED','请使用当前聊天目录入口');
       if (isValidation && input.botInternal!==BOT_INTERNAL) throw botFailure('BOT_VALIDATION_ROUTE_REQUIRED','请从 Bot 配置验证入口提交');
-      const bot=assertBotExecution(db,ws.id,payload,{validation:botActionMaintenance(input.type,payload),provisioning:isProvisioning,requireProfile:!isProvisioning});
+      const bot=assertBotExecution(db,ws.id,payload,{validation:botActionMaintenance(input.type,payload),provisioning:isProvisioning,requireProfile:!isProvisioning,readOnlyInspection});
       if(bot) {
         if(input.type==='directory.inspect' && input.botInternal!==BOT_INTERNAL)throw botFailure('BOT_DIRECTORY_ROUTE_REQUIRED','请使用已认证的聊天目录入口');
         if (!isValidation && !isProvisioning && !['task.execute','agent.execute','runtime.execute','conversation.execute','automation.execute','hermes.bot.native','directory.inspect'].includes(input.type || 'task.execute')) throw botFailure('BOT_ACTION_UNSUPPORTED','此 Bot 执行类型尚未接入');
@@ -1921,10 +1937,17 @@ export function createRepository(options = {}, io={}) {
           payload={...payload,conversationId:groupConversation.id};
         }
         payload={...payload,employeeId:bot.employee.id,runtime:'Hermes',model:bot.employee.model_id,profile:bot.employee.runtime_profile,deviceId:bot.employee.target_device_id,hermesBot:{...bot.snapshot,conversationId:payload.conversationId || bot.snapshot.conversationId}};
+        if(readOnlyInspection){
+          // Existing clients serialize top-level employeeId. A read-only file
+          // inspection uses its own action slot, retaining the trusted Bot and
+          // conversation binding for ACK, admission and before-execute checks.
+          const {employeeId:_employeeId,employee_id:_legacyEmployee,assignee:_assignee,...inspection}=payload;
+          payload={...inspection,inspectionEmployeeId:bot.employee.id};
+        }
       }
       const action = { id:id('action'), workspace_id:ws.id, agent_id:agentId, task_id:input.taskId || input.task_id || null, type:String(input.type || 'task.execute'), payload, dedupe_key:dedupeKey, status:'pending', expires_at:input.expiresAt || input.expires_at || new Date(Date.now()+actionExecutionLeaseMs({type:input.type || 'task.execute',payload})).toISOString(), created_at:now(), acked_at:null, completed_at:null, result_json:null, error:null };
       db.prepare('INSERT INTO a2a_actions(id,workspace_id,agent_id,task_id,type,payload_json,dedupe_key,status,expires_at,created_at,acked_at,completed_at,result_json,error) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(action.id,action.workspace_id,action.agent_id,action.task_id,action.type,JSON.stringify(action.payload),action.dedupe_key,action.status,action.expires_at,action.created_at,null,null,null,null);
-      if(bot)db.prepare('UPDATE hermes_bots SET active_action_id=? WHERE employee_id=?').run(action.id,bot.employee.id);
+      if(bot&&!readOnlyInspection)db.prepare('UPDATE hermes_bots SET active_action_id=? WHERE employee_id=?').run(action.id,bot.employee.id);
       audit(slug,'user','a2a.action.created',{actionId:action.id,type:action.type,dedupeKey}); return action;
     },
     listA2AActions(slug, input = {}) {
@@ -1944,7 +1967,7 @@ export function createRepository(options = {}, io={}) {
       const row=db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId);
       if(!row || row.status!=='acked')throw botFailure('BOT_START_INVALID','执行尚未被当前设备领取');
       assertActionDevice(row,input);
-      const bot=assertBotExecution(db,row.workspace_id,parse(row.payload_json),{validation:botActionMaintenance(row.type,parse(row.payload_json)),provisioning:row.type==='hermes.bot.provision',requireProfile:row.type!=='hermes.bot.provision',actionId});
+      const bot=assertBotExecution(db,row.workspace_id,parse(row.payload_json),{validation:botActionMaintenance(row.type,parse(row.payload_json)),provisioning:row.type==='hermes.bot.provision',requireProfile:row.type!=='hermes.bot.provision',actionId,readOnlyInspection:botActionReadOnlyInspection(row.type,parse(row.payload_json))});
       if(!bot)throw botFailure('BOT_NOT_FOUND','执行没有 Bot 绑定',404);
       return {allowed:true,actionId,revision:bot.row.revision,controlEpoch:bot.row.control_epoch};
     },
@@ -2010,7 +2033,7 @@ export function createRepository(options = {}, io={}) {
         else if (['succeeded','failed'].includes(row.status)) response = { ...a2aResponseView(row, { receiptOnly, includeResult:!receiptOnly }), duplicate:true };
         else {
           const timestamp = now();
-          if(row.status==='pending')assertBotExecution(db,row.workspace_id,{...parse(row.payload_json),...(!actionTargetDevice(row)&&(input.deviceId||input.device_id)?{deviceId:String(input.deviceId||input.device_id).trim()}:{})},{validation:botActionMaintenance(row.type,parse(row.payload_json)),provisioning:row.type==='hermes.bot.provision',requireProfile:row.type!=='hermes.bot.provision',actionId});
+          if(row.status==='pending')assertBotExecution(db,row.workspace_id,{...parse(row.payload_json),...(!actionTargetDevice(row)&&(input.deviceId||input.device_id)?{deviceId:String(input.deviceId||input.device_id).trim()}:{})},{validation:botActionMaintenance(row.type,parse(row.payload_json)),provisioning:row.type==='hermes.bot.provision',requireProfile:row.type!=='hermes.bot.provision',actionId,readOnlyInspection:botActionReadOnlyInspection(row.type,parse(row.payload_json))});
           if (row.expires_at && Date.parse(row.expires_at) <= Date.parse(timestamp)) {
             db.prepare("UPDATE a2a_actions SET status='expired',completed_at=? WHERE id=?").run(timestamp, actionId);
             expired = true;
@@ -2201,7 +2224,7 @@ export function createRepository(options = {}, io={}) {
         if(payload.hermesBot) {
           const validation=result?.botValidation || result?.result?.botValidation;
           if(row.type==='hermes.bot.validate' && status==='succeeded' && validation?.valid===true && validation.schemaVersion===1 && validation.employeeId===payload.employeeId && validation.revision===payload.hermesBot.revision) db.prepare('UPDATE hermes_bots SET validated_revision=? WHERE employee_id=? AND revision=? AND control_epoch=? AND validation_action_id=?').run(validation.revision,payload.employeeId,validation.revision,payload.hermesBot.controlEpoch,actionId);
-          if(!botUncertain(result))db.prepare('UPDATE hermes_bots SET active_action_id=NULL WHERE employee_id=? AND active_action_id=?').run(payload.employeeId,actionId);
+          if(!botUncertain(result)&&!botActionReadOnlyInspection(row.type,payload))db.prepare('UPDATE hermes_bots SET active_action_id=NULL WHERE employee_id=? AND active_action_id=?').run(payload.employeeId,actionId);
         }
         audit(ws.slug, 'ziwei_user', `a2a.action.${status}`, { actionId, type: row.type, error });
         if (row.task_id && !(reconciliation && row.status==='failed')) taskExecutionMessage(row.task_id, status, error, result);

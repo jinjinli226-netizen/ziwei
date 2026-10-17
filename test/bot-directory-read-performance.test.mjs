@@ -4,6 +4,8 @@ import { createApp } from '../backend/app.mjs';
 import { createRepository } from '../backend/repository.mjs';
 import { createManagementService } from '../backend/management.mjs';
 import { completeOwnedProfile } from '../test-support/owned-profile.mjs';
+import { createActionScheduler } from '../src/daemon-action-scheduler.mjs';
+import { FROZEN_VERSIONS } from '../backend/version-preservation.mjs';
 
 const slug='test-111';
 const owner={actorUserId:'directory-owner',actorRole:'owner',enforceEmployeeVisibility:true};
@@ -39,6 +41,117 @@ function invokeRoute(app,method,path,request) {
   route.stack.at(-1).handle(request,response,error=>{throw error;});
   return {status,body};
 }
+
+function executingBot(t) {
+  const state=fixture(t),{repo}=state,bots=createManagementService(repo).bots;
+  let bot=bots.create(slug,{name:'Busy directory Bot',targetDeviceId:'directory-pc',runtimeProfile:'default',model:'test-model',visibility:'personal',idempotencyKey:'busy-directory-bot'},member);
+  completeOwnedProfile(repo,bot);
+  const validation=bots.validate(slug,bot.id,{expectedRevision:bot.revision,idempotencyKey:'busy-directory-validation'},member).action;
+  repo.ackA2AAction(validation.id,{deviceId:'directory-pc'});
+  repo.resultA2AAction(validation.id,{deviceId:'directory-pc',status:'succeeded',result:{botValidation:{valid:true,schemaVersion:1,employeeId:bot.id,revision:bot.revision}}});
+  bot=bots.control(slug,bot.id,{expectedRevision:bot.revision,expectedControlEpoch:bot.control_epoch,operation:'activate'},member);
+  const message=repo.addConversationMessage(bot.main_conversation_id,{...member,content:'Keep this original test task in flight'});
+  const active=repo.getA2AAction(message.execution.id);
+  repo.ackA2AAction(active.id,{deviceId:'directory-pc'});
+  const input={...member,expectedRevision:bot.revision,expectedControlEpoch:bot.control_epoch,path:'C:/Work',createIfMissing:false,idempotencyKey:'busy-directory-read'};
+  const activeId=()=>repo.db.prepare('SELECT active_action_id FROM hermes_bots WHERE employee_id=?').get(bot.id).active_action_id;
+  return {...state,bots,bot,active,input,activeId};
+}
+
+test('busy Bot read-only inspection passes create, ACK, admission, before-execute and original receipt without taking its run slot',t=>{
+  const {repo,bot,active,input,activeId}=executingBot(t);
+  const conversationBefore=repo.getConversation(bot.main_conversation_id,member);
+  const action=repo.createConversationDirectoryAction(bot.main_conversation_id,input);
+  assert.equal(action.type,'directory.inspect');assert.equal(action.payload.createIfMissing,false);
+  assert.equal(action.payload.employeeId,undefined);
+  assert.equal(action.payload.inspectionEmployeeId,bot.id);
+  assert.equal(action.payload.hermesBot.employeeId,bot.id);
+  assert.equal(action.payload.conversationId,bot.main_conversation_id);
+  assert.equal(activeId(),active.id);
+  assert.equal(repo.preservation.classifyAction(repo.getA2AAction(action.id)).isV2,true);
+  assert.equal(repo.ackA2AAction(action.id,{deviceId:'directory-pc'}).status,'acked');
+  const permit=repo.authorizeActionExecution(action.id,{deviceId:'directory-pc'});
+  assert.equal(permit.allowed,true);assert.ok(permit.executionBinding);
+  assert.equal(repo.authorizeBotStart(action.id,{deviceId:'directory-pc'}).allowed,true);
+  assert.throws(()=>repo.authorizeActionExecution(action.id,{deviceId:'foreign-device'}),{code:'EXECUTION_DEVICE_MISMATCH'});
+  assert.throws(()=>repo.resultA2AAction(action.id,{deviceId:'foreign-device',status:'succeeded',result:{}}),/device/i);
+  repo.resultA2AAction(action.id,{deviceId:'directory-pc',status:'succeeded',result:{path:'C:/Work',exists:true,isDirectory:true,children:[]}});
+  assert.equal(repo.getConversationDirectoryAction(bot.main_conversation_id,action.id,member).status,'succeeded');
+  assert.equal(repo.getConversationDirectoryAction(bot.main_conversation_id,action.id,stranger),null);
+  const other=repo.createConversation(slug,{employeeId:bot.id,...member});
+  assert.equal(repo.getConversationDirectoryAction(other.id,action.id,member),null);
+  assert.equal(activeId(),active.id);assert.equal(repo.getA2AAction(active.id).status,'acked');
+  assert.equal(repo.getConversation(bot.main_conversation_id,member).working_directory,conversationBefore.working_directory);
+  assert.equal(repo.getEmployee(bot.id).default_working_directory,null);
+  assert.throws(()=>repo.createA2AAction(slug,{type:'runtime.execute',payload:{employeeId:bot.id,prompt:'must stay blocked'}}),{code:'BOT_BUSY'});
+});
+
+test('read-only directory payload can run beside the original employee on the installed client scheduler',async t=>{
+  const {repo,bot,active,input,activeId}=executingBot(t);
+  const inspection=repo.createConversationDirectoryAction(bot.main_conversation_id,input);
+  let release;const hold=new Promise(resolve=>{release=resolve;});t.after(()=>release());
+  const calls=[],scheduler=createActionScheduler({concurrency:3,execute:async action=>{calls.push(action.id);if(action.id===active.id)await hold;}});
+  assert.deepEqual(scheduler.schedule([active]),[active.id]);
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.deepEqual(scheduler.schedule([inspection]),[inspection.id]);
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.deepEqual(calls,[active.id,inspection.id]);assert.equal(activeId(),active.id);
+  release();await scheduler.whenIdle();
+});
+
+test('busy Bot still rejects actual directory changes and create requests while unchanged saves remain allowed',t=>{
+  const {repo,bot,active,input,activeId}=executingBot(t);
+  const current=repo.getConversation(bot.main_conversation_id,member).working_directory;
+  assert.doesNotThrow(()=>repo.updateConversationSettings(bot.main_conversation_id,{...member,workingDirectory:current}));
+  assert.doesNotThrow(()=>repo.updateEmployee(bot.id,{defaultWorkingDirectory:null},{...member,botConfigurationWrite:true}));
+  assert.throws(()=>repo.updateConversationSettings(bot.main_conversation_id,{...member,workingDirectory:'C:/Changed'}),{code:'BOT_BUSY'});
+  for(const value of [true,'true','yes',1])
+    assert.throws(()=>repo.createConversationDirectoryAction(bot.main_conversation_id,{...input,createIfMissing:value,idempotencyKey:'create-'+value}),{code:'BOT_BUSY'});
+  assert.throws(()=>repo.createConversationDirectoryAction(bot.main_conversation_id,{...input,createIfMissing:undefined,create_if_missing:true,idempotencyKey:'create-alias'}),{code:'BOT_BUSY'});
+  assert.throws(()=>repo.createA2AAction(slug,{type:'directory.inspect',payload:{conversationId:bot.main_conversation_id,deviceId:'directory-pc',createIfMissing:false,readOnlyInspection:true}}),{code:'BOT_DIRECTORY_ROUTE_REQUIRED'});
+  const receipt=repo.createConversationDirectoryAction(bot.main_conversation_id,input);
+  repo.ackA2AAction(receipt.id,{deviceId:'directory-pc'});
+  repo.resultA2AAction(receipt.id,{deviceId:'directory-pc',status:'succeeded',result:{path:'C:/Work',exists:true,isDirectory:true}});
+  assert.throws(()=>repo.updateEmployee(bot.id,{defaultWorkingDirectory:'C:/Work',defaultWorkingDirectoryActionId:receipt.id},{...member,botConfigurationWrite:true}),{code:'BOT_BUSY'});
+  assert.equal(repo.getEmployee(bot.id).default_working_directory,null);assert.equal(activeId(),active.id);
+});
+
+for(const column of ['revision','control_epoch'])test(`read-only inspection rejects stale ${column} at create, ACK and execution admission`,t=>{
+  const {repo,bot,input,active,activeId}=executingBot(t);
+  assert.throws(()=>repo.createConversationDirectoryAction(bot.main_conversation_id,{...input,[column==='revision'?'expectedRevision':'expectedControlEpoch']:0}),{code:'BOT_REVISION_CONFLICT'});
+  const pending=repo.createConversationDirectoryAction(bot.main_conversation_id,input);
+  const acked=repo.createConversationDirectoryAction(bot.main_conversation_id,{...input,idempotencyKey:'already-acked'});
+  repo.ackA2AAction(acked.id,{deviceId:'directory-pc'});
+  repo.db.prepare(`UPDATE hermes_bots SET ${column}=${column}+1 WHERE employee_id=?`).run(bot.id);
+  assert.throws(()=>repo.ackA2AAction(pending.id,{deviceId:'directory-pc'}),{code:'BOT_REVISION_CONFLICT'});
+  assert.throws(()=>repo.authorizeActionExecution(acked.id,{deviceId:'directory-pc'}),{code:'BOT_REVISION_CONFLICT'});
+  assert.throws(()=>repo.authorizeBotStart(acked.id,{deviceId:'directory-pc'}),{code:'BOT_REVISION_CONFLICT'});
+  assert.equal(activeId(),active.id);assert.equal(repo.getA2AAction(pending.id).status,'pending');
+});
+
+for(const [label,patch,type] of [
+  ['true-create',{createIfMissing:true}],['string-create',{createIfMissing:'true'}],
+  ['legacy-create-alias',{create_if_missing:true}],['other-inspection-employee',{inspectionEmployeeId:'another-employee'}],
+  ['serial-employee-injection',{employeeId:'another-employee'}],['foreign-bot-snapshot',{hermesBot:{employeeId:'another-employee'}}],
+  ['different-action-type',{},'runtime.execute']
+])test(`inspection marker cannot bypass busy or identity checks after ${label} tampering`,t=>{
+  const {repo,bot,input,activeId,active}=executingBot(t);
+  const action=repo.createConversationDirectoryAction(bot.main_conversation_id,input);
+  repo.ackA2AAction(action.id,{deviceId:'directory-pc'});
+  const payload={...repo.getA2AAction(action.id).payload,...patch};
+  repo.db.prepare('UPDATE a2a_actions SET type=?,payload_json=? WHERE id=?').run(type||action.type,JSON.stringify(payload),action.id);
+  assert.throws(()=>repo.authorizeActionExecution(action.id,{deviceId:'directory-pc'}),{code:'BOT_BINDING_CONFLICT'});
+  assert.equal(activeId(),active.id);
+});
+
+test('read-only directory inspection remains a sealed Bot action for preservation guards',t=>{
+  const {repo,bot,input}=executingBot(t);
+  const action=repo.createConversationDirectoryAction(bot.main_conversation_id,input);
+  repo.ackA2AAction(action.id,{deviceId:'directory-pc'});
+  repo.preservation.begin({operationId:'directory-read-sealed',versions:FROZEN_VERSIONS});
+  assert.throws(()=>repo.authorizeActionExecution(action.id,{deviceId:'directory-pc'}),{code:'V2_OBJECT_SEALED'});
+  assert.throws(()=>repo.authorizeBotStart(action.id,{deviceId:'directory-pc'}),{code:'V2_OBJECT_SEALED'});
+});
 
 test('directory authorization matches conversation visibility without loading messages or images',t=>{
   const {repo,employee,conversation,workspace}=fixture(t);

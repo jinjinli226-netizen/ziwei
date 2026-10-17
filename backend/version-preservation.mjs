@@ -340,6 +340,7 @@ export function guardRepository(repo,options={}) {
     const payload=parse(row.payload_json)||{},target=payload.deviceId||payload.device_id;
     if(!input.deviceId||target!==input.deviceId)throw preservationError('EXECUTION_DEVICE_MISMATCH','执行设备与原动作绑定不一致',403);
     if(row.status!=='acked')fail('EXECUTION_NOT_ACKED','原动作尚未领取或已终结，禁止本机执行');
+    if(payload.hermesBot)repo.authorizeBotStart(actionId,input);
     const protectedHomes=repo.db.prepare('SELECT b.employee_id,b.provision_action_id FROM hermes_bots b JOIN employees e ON e.id=b.employee_id WHERE e.target_device_id=?').all(input.deviceId).map(bot=>{const result=parse(repo.db.prepare('SELECT result_json FROM a2a_actions WHERE id=?').get(bot.provision_action_id)?.result_json),receipt=result?.botProvision||result?.result?.botProvision;return receipt?.home;}).filter(Boolean);
     return {allowed:true,actionId,executionBinding:executionBinding({...row,payload:repo.getA2AAction(actionId).payload}),productRole:preservation.role,productState:preservation.state(),protectedHomes};
   };

@@ -20,7 +20,7 @@ function harness(overrides={}, { realOpen=false,realtime=false }={}) {
   const workspace = { value:'workspace' };
   const reopened = [];
   const bindings = {
-    selectedConversation, conversations, conversationExecution:{ value:selectedConversation.value.execution }, conversationEmployeeId:{ value:'employee' }, conversationStatusLoading:{ value:false },
+    botChatIntent:{value:null},botBindingPending:{value:false},selectedConversation, conversations, conversationExecution:{ value:selectedConversation.value.execution }, conversationEmployeeId:{ value:'employee' }, conversationStatusLoading:{ value:false },
     workspaceSlug:()=>workspace.value, conversationIdFromPath:()=> 'conversation', conversationRouteId:{ value:'conversation' },
     api:{ conversation:async()=>selectedConversation.value, conversations:async()=>({conversations:conversations.value}), ...overrides },
     openConversation:async item=>reopened.push(item), stopConversationPolling:()=>{}, startConversationPolling:()=>{}, notify:()=>{},
