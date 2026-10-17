@@ -714,6 +714,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
       res.setHeader('Cache-Control','no-store');
       res.vary('Cookie');
       const context=employeeContext(req),action=management.action(req.params.slug,req.params.id,context);
+      mobileGroupAction.validate(req.params.slug,action,context);
       res.json(req.query.view==='mobile'?mobileGroupAction.project(req.params.slug,action,context):action);
     } catch(error) {next(error);}
   });

@@ -88,7 +88,7 @@ test('receipt schema/employee/revision/source workspace mismatches cannot masque
 });
 
 test('pending reads and non-group executions retain their real status, errors and receipts',async t=>{
-  const f=fixture(t),pending=f.action({resource:'groups',operation:'read',input:{groupId:f.groupId,limit:30,afterSeq:0},status:'pending',result:null}),ordinary=f.action({type:'conversation.execute'}),dm=f.action({input:{mode:'message',content:'Direct message',targets:[{id:f.target.id}]}});
+  const f=fixture(t),pending=f.action({resource:'groups',operation:'read',input:{groupId:f.groupId,limit:30,afterSeq:0},status:'pending',result:null}),ordinary=f.action({type:'conversation.execute',payload:{nativeOperation:undefined},result:{output:'Ordinary execution result',unknownProof:{keep:true}}}),dm=f.action({input:{mode:'message',content:'Direct message',targets:[{id:f.target.id}]},data:{envelopes:[],targetEmployeeIds:[f.target.id],dispatchAuthority:'ziwei'}});
   for(const a of [pending,ordinary,dm]){const original=await request(f.app,a.url,{cookie:f.cookie(f.owner)}),mobile=await request(f.app,a.url+'?view=mobile',{cookie:f.cookie(f.owner)});assert.equal(mobile.status,200);assert(mobile.bytes.equals(original.bytes));}
 });
 
@@ -236,4 +236,39 @@ test('native groups.list room/member shape remains available and rechecks the en
   const a=f.action({resource:'groups',operation:'list',input:{},data:{items:[room]}}),full=await request(f.app,a.url,{cookie:f.cookie(f.owner)}),mobile=await request(f.app,a.url+'?view=mobile',{cookie:f.cookie(f.owner)});assert.equal(mobile.status,200);assert(mobile.bytes.equals(full.bytes));assert.equal(mobile.json.result.nativeOperation.data.items[0].members.length,2);
   const bot=await request(f.app,`/api/workspaces/${f.slug}/bots/${f.source.id}?view=mobile`,{cookie:f.cookie(f.owner)});assert.equal(bot.status,200);assert.deepEqual(bot.json.nativeResources.groups.data.items,[room]);
   f.db.prepare("UPDATE employees SET visibility='personal' WHERE id=?").run(f.target.id);const hidden=await request(f.app,a.url+'?view=mobile',{cookie:f.cookie(f.member)});assert.equal(hidden.status,404);assert.equal(hidden.json.code,'GROUP_MOBILE_SCOPE_REQUIRED');assert(hidden.bytes.length<500);
+});
+
+test('new action GET enforces group roster authorization for full, mobile and unknown views before returning any bytes',async t=>{
+  const f=fixture(t),a=f.action({resource:'groups',operation:'read',count:30,text:'private full-route group history'}),saved=hash(f.dump());
+  const original=f.repo.getA2AAction(a.actionId),full=await request(f.app,a.url,{cookie:f.cookie(f.owner)});assert.equal(full.status,200);assert.deepEqual(full.json,original);assert.equal(f.view.validate(f.slug,original,f.context),original);assert(full.bytes.includes(Buffer.from('private full-route group history')));
+  f.db.prepare("UPDATE employees SET visibility='personal' WHERE id=?").run(f.target.id);
+  for(const suffix of ['', '?view=mobile','?view=desktop','?view=mobile&view=desktop']){
+    const denied=await request(f.app,a.url+suffix,{cookie:f.cookie(f.member),headers:{'if-none-match':full.headers.etag,'x-workspace-role':'owner'}});assert.equal(denied.status,404);assert.equal(denied.json.code,'GROUP_MOBILE_SCOPE_REQUIRED');assert(!denied.bytes.includes(Buffer.from('private full-route group history')));assert(denied.bytes.length<500);
+    const owner=await request(f.app,a.url+suffix,{cookie:f.cookie(f.owner)});assert.equal(owner.status,200);if(suffix!=='?view=mobile')assert(owner.bytes.equals(full.bytes));
+  }
+  f.db.prepare("UPDATE employees SET visibility='workspace' WHERE id=?").run(f.target.id);assert.equal(hash(f.dump()),saved);
+  const other=f.auth.createWorkspace(f.owner.user_id,{slug:'full-group-other-workspace',name:'Other',kind:'team'}).workspace;
+  for(const suffix of ['', '?view=mobile']){assert.equal((await request(f.app,a.url+suffix)).status,401);assert.equal((await request(f.app,a.url+suffix,{cookie:f.cookie(f.outsider)})).status,403);assert.notEqual((await request(f.app,a.url.replace(f.slug,other.slug)+suffix,{cookie:f.cookie(f.owner)})).status,200);}
+});
+
+test('all action views reject a forged logical profile or remote/mismatched member target despite visible employee IDs',async t=>{
+  const f=fixture(t),variants=[room=>{room.members[1].profile='unbound-private-native-profile';},room=>{room.members[1].target={kind:'local',profile:'unbound-private-native-profile'};},room=>{room.members[1].target={kind:'peer',profile:f.target.id};},room=>{room.members[1].target={kind:'local',profile:f.target.id,peer_id:'unbound-peer'};},room=>{room.members[1].handle='unbound-handle';},room=>{room.members[1].target=null;}];
+  // Native identities address employee IDs even when the physical runtime
+  // profiles have different names. This is the actual bridge's roster shape.
+  f.db.prepare("UPDATE employees SET runtime_profile='physical-private-profile' WHERE id=?").run(f.target.id);
+  for(const mutate of variants){
+    const a=f.action({resource:'groups',operation:'read'});for(const item of a.room.members)Object.assign(item,{handle:item.member_id,display_name:item.member_id,target:{kind:'local',profile:item.member_id}});mutate(a.room);f.db.prepare('UPDATE a2a_actions SET result_json=? WHERE id=?').run(JSON.stringify(a.result),a.actionId);const saved=hash(f.dump());
+    for(const suffix of ['', '?view=mobile']){const response=await request(f.app,a.url+suffix,{cookie:f.cookie(f.owner)});assert.equal(response.status,409);assert.equal(response.json.code,'GROUP_MOBILE_RECEIPT_INVALID');assert(response.bytes.length<500);assert(!response.bytes.includes(Buffer.from('unbound-private-native-profile')));}
+    assert.equal(hash(f.dump()),saved);
+  }
+  const valid=f.action();for(const item of valid.room.members)Object.assign(item,{handle:item.member_id,target:{kind:'local',profile:item.member_id}});f.db.prepare('UPDATE a2a_actions SET result_json=? WHERE id=?').run(JSON.stringify(valid.result),valid.actionId);assert.equal((await request(f.app,valid.url+'?view=mobile',{cookie:f.cookie(f.owner)})).status,200);
+  for(const target of [{profile:'unbound-profile'},{kind:'peer'}]){const a=f.action();Object.assign(a.payload.nativeOperation.input.targets[0],target);f.db.prepare('UPDATE a2a_actions SET payload_json=? WHERE id=?').run(JSON.stringify(a.payload),a.actionId);for(const suffix of ['', '?view=mobile'])assert.equal((await request(f.app,a.url+suffix,{cookie:f.cookie(f.owner)})).status,409);}
+});
+
+test('full validation preserves authorized old-host receipt bytes and rejects event-only unbound profiles and list roster spoofing',async t=>{
+  const f=fixture(t),old=f.action({resource:'groups',operation:'read',input:{groupId:f.groupId,limit:30,afterSeq:0},count:50}),original=f.repo.getA2AAction(old.actionId),full=await request(f.app,old.url,{cookie:f.cookie(f.owner)});assert.equal(full.status,200);assert.deepEqual(full.json,original);assert(!Object.hasOwn(full.json,'mobileReadError'));assert.equal(full.json.result.nativeOperation.data.events.events.length,50);assert.equal((await request(f.app,old.url+'?view=mobile',{cookie:f.cookie(f.owner)})).status,409);
+  const a=f.action(),event=clone(a.result);event.nativeOperation.data.room.members[1].target={kind:'local',profile:'unbound-event-profile'};f.event(a.actionId,event);
+  for(const suffix of ['', '?view=mobile']){const denied=await request(f.app,a.url+suffix,{cookie:f.cookie(f.owner)});assert.equal(denied.status,409);assert(denied.bytes.length<500);}
+  const sample=f.action(),room=clone(sample.room);room.members[1].profile='unbound-list-profile';const listing=f.action({resource:'groups',operation:'list',input:{},data:{items:[room]}});
+  for(const suffix of ['', '?view=mobile']){const denied=await request(f.app,listing.url+suffix,{cookie:f.cookie(f.owner)});assert.equal(denied.status,409);assert(denied.bytes.length<500);}
 });

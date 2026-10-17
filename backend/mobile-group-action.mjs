@@ -1,5 +1,5 @@
-// Explicit mobile read projection only. Stored/native/MCP receipts keep their
-// full logs, planner input and all execution/exit evidence.
+// Group read authorization and explicit mobile projection. Stored/native/MCP
+// receipts keep their full logs, planner input and all execution/exit evidence.
 const object=value=>Boolean(value&&typeof value==='object'&&!Array.isArray(value));
 const id=value=>typeof value==='string'&&/^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/.test(value);
 // Native hosted_rooms validates a canonical identifier up to 128 characters.
@@ -62,7 +62,10 @@ export function createMobileGroupActionView(repo){
     }
     if(input.targets!==undefined){
       if(!Array.isArray(input.targets)||input.targets.length>128)failure();
-      for(const target of input.targets)visible(target?.id);
+      for(const target of input.targets){
+        visible(target?.id);
+        if(Object.hasOwn(target,'profile')&&target.profile!==target.id||Object.hasOwn(target,'kind')&&target.kind!=='local')failure();
+      }
     }
     const listing=request.resource==='groups'&&request.operation==='list';
     if(request.resource==='groups'&&!['list','read','step'].includes(request.operation)||request.resource==='collaboration'&&!['message','publish'].includes(request.operation))failure();
@@ -72,7 +75,14 @@ export function createMobileGroupActionView(repo){
     function roomScope(room,expected=input.groupId){
       if(!object(room)||!id(room.room_id)||expected&&room.room_id!==expected||!Array.isArray(room.members)||room.members.length<1||room.members.length>128)failure();
       const ids=new Set();
-      for(const item of room.members){if(ids.has(item?.member_id))failure();visible(item?.member_id);ids.add(item.member_id);}
+      for(const item of room.members){
+        if(ids.has(item?.member_id))failure();visible(item?.member_id);
+        // Ziwei's bridge addresses logical employees inside its isolated HOME;
+        // the physical runtime_profile is never the native group identity.
+        if(item.profile!==item.member_id||item.handle!==undefined&&item.handle!==item.member_id)failure();
+        if(item.target!==undefined&&(!object(item.target)||item.target.kind!=='local'||item.target.profile!==item.member_id||Object.keys(item.target).some(key=>!['kind','profile'].includes(key))))failure();
+        ids.add(item.member_id);
+      }
       if(!ids.has(source))denied();
     }
     function logShape(log,room,{after=0,limit=50100,complete=false}={}){
@@ -105,9 +115,9 @@ export function createMobileGroupActionView(repo){
         return receipt;
       }
       const oldHost=paged&&(receipt.status==='succeeded'||data.events!==undefined)&&data.pagedRead!==true;
-      if(oldHost&&!options.auxiliary)failure(upgradeError.code,upgradeError.message);
       if(data.room)roomScope(data.room);
       else if(receipt.status==='succeeded'||data.events!==undefined)failure();
+      if(oldHost&&!options.auxiliary)failure(upgradeError.code,upgradeError.message);
       if(data.events===undefined){if(receipt.status==='succeeded')failure();return receipt;}
       if(paged&&!oldHost){
         const pagination=data.pagination,after=input.afterSeq??0;
@@ -118,9 +128,10 @@ export function createMobileGroupActionView(repo){
       }
       logShape(data.events,data.room,{complete:true});
       if(Object.hasOwn(data,'historyPointer'))failure();
-      if(oldHost){if(Object.hasOwn(receipt,'mobileReadError')||Object.hasOwn(action,'mobileReadError'))failure();upgradeRequired=true;}
       const {events:records,...metadata}=data.events;
       if(Object.hasOwn(metadata,'omitted')||Object.hasOwn(metadata,'eventCount')||metadata.room_id!==undefined&&metadata.room_id!==input.groupId)failure();
+      if(options.validateOnly)return receipt;
+      if(oldHost){if(Object.hasOwn(receipt,'mobileReadError')||Object.hasOwn(action,'mobileReadError'))failure();upgradeRequired=true;}
       const {events:_history,...rest}=data;
       // Only the known full history array moves out of the mobile response.
       // decision/plan and unknown fields are preserved, including their bounded
@@ -139,6 +150,7 @@ export function createMobileGroupActionView(repo){
       return result===event?.data?.result?event:{...event,data:{...event.data,result}};
     }):action.events;
     if(action.status==='succeeded'&&mainReceipts===0)failure();
+    if(options.validateOnly)return action;
     return result===action.result&&events===action.events&&!upgradeRequired?action:{...action,result,...(events!==action.events?{events}:{}),...(upgradeRequired?{mobileReadError:upgradeError}:{})};
   }
   const readError=error=>({code:error.code,message:error.message});
@@ -189,5 +201,8 @@ export function createMobileGroupActionView(repo){
     const execution=run(slug,value.execution,context);
     return execution===value.execution?value:{...value,execution};
   }
-  return {project,run,bot,conversation};
+  // The new first-party action route accepts a full response too, but choosing
+  // its presentation must never bypass the same group membership checks.
+  const validate=(slug,action,context)=>project(slug,action,context,{auxiliary:true,validateOnly:true});
+  return {project,validate,run,bot,conversation};
 }
