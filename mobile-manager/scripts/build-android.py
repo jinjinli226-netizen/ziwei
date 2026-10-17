@@ -124,7 +124,7 @@ def build(args):
         unsigned = work / "unsigned.apk"
         run([tool / "aapt2", "link", "-I", android, "--manifest", MODULE / "android/AndroidManifest.xml",
              "--min-sdk-version", "26", "--target-sdk-version", "35", "--version-code", args.version_code,
-             "--version-name", args.version_name, "-A", web, "-o", unsigned, compiled], env=env)
+             "--version-name", args.version_name, "--replace-version", "-A", web, "-o", unsigned, compiled], env=env)
         with zipfile.ZipFile(unsigned, "a", zipfile.ZIP_DEFLATED) as archive:
             for path in sorted(dex.glob("*.dex")):
                 archive.write(path, path.name)
