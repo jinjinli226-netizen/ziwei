@@ -18,7 +18,7 @@ test('task creation derives one current canonical entity or an explicit unresolv
     const task=f.repo.createTask(f.ws.slug,{title:'Server assignment evidence',assignee,assignmentBinding:{kind:'member',entityId:f.human.id}}),binding=f.markers(task.id)[0].assignmentBinding,stored=f.db.prepare('SELECT assignee FROM tasks WHERE id=?').get(task.id).assignee;
     assert.deepEqual(binding,{schemaVersion:1,workspaceId:f.ws.id,taskId:task.id,assigneeHash:hash(stored),kind,entityId});
     assert.equal(f.db.prepare('SELECT count(*) AS count FROM notifications').get().count,before+1,'existing task.created notification only');
-    assert.equal(f.events.at(-1).action,'task.created');assert.equal(f.events.at(-1).payload.assignmentBinding.kind,kind);
+    assert.equal(f.events.at(-1).action,'task.created');assert.deepEqual(f.events.at(-1).payload,{taskId:task.id});
   }
 });
 
@@ -60,5 +60,5 @@ test('outer template transactions retain original event deferral and roll back t
   assert.throws(()=>f.repo.withEmployeeTemplateTransaction(()=>{f.repo.createTask(f.ws.slug,{title:'Outer rollback',assignee:f.human.id});assert.deepEqual(f.events,[]);throw new Error('OUTER_ROLLBACK');}),/OUTER_ROLLBACK/);
   assert.equal(f.db.prepare("SELECT count(*) AS count FROM tasks WHERE title='Outer rollback'").get().count,0);assert.equal(f.db.prepare('SELECT count(*) AS count FROM audit_events').get().count,before);assert.deepEqual(f.events,[]);
   const task=f.repo.withEmployeeTemplateTransaction(()=>{const value=f.repo.createTask(f.ws.slug,{title:'Outer commit',assignee:f.human.id});assert.deepEqual(f.events,[]);return value;});
-  assert.equal(f.events.length,1);assert.equal(f.events[0].payload.assignmentBinding.entityId,f.human.id);assert.equal(f.markers(task.id).length,1);
+  assert.equal(f.events.length,1);assert.deepEqual(f.events[0].payload,{taskId:task.id});assert.equal(f.markers(task.id)[0].assignmentBinding.entityId,f.human.id);
 });

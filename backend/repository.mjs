@@ -137,6 +137,21 @@ const invitationHash = code => crypto.createHash('sha256').update(String(code ||
 const invitationLink = (slug, code) => `${appOrigin()}/invite?workspace=${encodeURIComponent(slug)}&code=${encodeURIComponent(code)}`;
 const normalizeEmail = value => String(value || '').trim().toLowerCase();
 const jsonObject = value => { try { const parsed = JSON.parse(value); return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}; } catch { return {}; } };
+// Assignment evidence belongs to the internal audit row, never public audit,
+// notification storage/views or realtime events. Preserve all older payloads.
+const publicAuditPayload = (action,payload) => {
+  if(!['task.created','task.updated'].includes(action)||!payload||typeof payload!=='object'||Array.isArray(payload)||!Object.hasOwn(payload,'assignmentBinding'))return payload;
+  const {assignmentBinding:_privateBinding,...visible}=payload;return visible;
+};
+const publicAuditRow = row => {
+  if(!['task.created','task.updated'].includes(row.action))return row;
+  let payload;try{payload=JSON.parse(row.payload_json);}catch{return row;}
+  const visible=publicAuditPayload(row.action,payload);
+  return visible===payload?row:{...row,payload_json:JSON.stringify(visible)};
+};
+const publicNotificationView = row => {
+  const visible=publicAuditRow(row);return {...visible,read:Boolean(visible.read_at),payload:jsonObject(visible.payload_json)};
+};
 const normalizeDescriptionFormat = value => ['plain', 'markdown', 'html'].includes(String(value || '').toLowerCase()) ? String(value).toLowerCase() : 'plain';
 const taskAttachmentView = row => row ? ({ id:row.id, task_id:row.task_id, name:row.name, mime_type:row.mime_type, size:Number(row.size || 0), content_encoding:row.content_encoding, storage_key:row.storage_key, checksum:row.checksum, created_at:row.created_at }) : null;
 const decodeDocumentBase64 = value => {
@@ -454,8 +469,9 @@ export function createRepository(options = {}, io={}) {
   const audit = (slug, actor, action, payload = {}, deferredEvents = null) => {
     const eventId = id('audit'); const timestamp = now(); const ws = workspace(slug);
     db.prepare('INSERT INTO audit_events(id,workspace_id,actor,action,payload_json,created_at) VALUES(?,?,?,?,?,?)').run(eventId, ws.id, actor, action, JSON.stringify(payload), timestamp);
-    db.prepare('INSERT INTO notifications(id,workspace_id,event_id,actor,action,payload_json,created_at,read_at,archived_at) VALUES(?,?,?,?,?,?,?,?,?)').run(id('notice'), ws.id, eventId, actor, action, JSON.stringify(payload), timestamp, null, null);
-    const event={id:eventId,workspaceId:ws.id,workspaceSlug:slug,actor,action,payload,created_at:timestamp};
+    const visible=publicAuditPayload(action,payload);
+    db.prepare('INSERT INTO notifications(id,workspace_id,event_id,actor,action,payload_json,created_at,read_at,archived_at) VALUES(?,?,?,?,?,?,?,?,?)').run(id('notice'), ws.id, eventId, actor, action, JSON.stringify(visible), timestamp, null, null);
+    const event={id:eventId,workspaceId:ws.id,workspaceSlug:slug,actor,action,payload:visible,created_at:timestamp};
     if (deferredEvents) deferredEvents.push(event);
     else if (templateAuditEvents) templateAuditEvents.push(event);
     else options.onEvent?.(event);
@@ -1665,11 +1681,11 @@ export function createRepository(options = {}, io={}) {
       const customEvents=this.listCalendarEvents(slug);
       return [{id:'calendar-default',name:'工作区日历',timezone:ws.timezone || 'Asia/Shanghai',events:[...taskEvents,...autoEvents,...customEvents]}];
     },
-    listAudit(slug, limit=50) { const ws=workspace(slug); return db.prepare('SELECT * FROM audit_events WHERE workspace_id=? ORDER BY created_at DESC LIMIT ?').all(ws.id,limit); },
-    listNotifications(slug, limit=50, options = {}) { const ws=workspace(slug); const archived=options.archived ? ' AND archived_at IS NOT NULL' : ' AND archived_at IS NULL'; const unread=options.unread ? ' AND read_at IS NULL' : ''; return db.prepare(`SELECT * FROM notifications WHERE workspace_id=?${archived}${unread} ORDER BY created_at DESC LIMIT ?`).all(ws.id,limit).map(row=>({...row,read:Boolean(row.read_at),payload:jsonObject(row.payload_json)})); },
+    listAudit(slug, limit=50) { const ws=workspace(slug); return db.prepare('SELECT * FROM audit_events WHERE workspace_id=? ORDER BY created_at DESC LIMIT ?').all(ws.id,limit).map(publicAuditRow); },
+    listNotifications(slug, limit=50, options = {}) { const ws=workspace(slug); const archived=options.archived ? ' AND archived_at IS NOT NULL' : ' AND archived_at IS NULL'; const unread=options.unread ? ' AND read_at IS NULL' : ''; return db.prepare(`SELECT * FROM notifications WHERE workspace_id=?${archived}${unread} ORDER BY created_at DESC LIMIT ?`).all(ws.id,limit).map(publicNotificationView); },
     notificationStats(slug) { const ws=workspace(slug); return { unread:db.prepare('SELECT COUNT(*) AS count FROM notifications WHERE workspace_id=? AND read_at IS NULL AND archived_at IS NULL').get(ws.id).count, total:db.prepare('SELECT COUNT(*) AS count FROM notifications WHERE workspace_id=? AND archived_at IS NULL').get(ws.id).count }; },
     markNotificationsRead(slug, ids = null) { const ws=workspace(slug); const timestamp=now(); if (Array.isArray(ids) && ids.length) { const placeholders=ids.map(()=>'?').join(','); db.prepare(`UPDATE notifications SET read_at=COALESCE(read_at,?) WHERE workspace_id=? AND id IN (${placeholders})`).run(timestamp,ws.id,...ids); } else db.prepare('UPDATE notifications SET read_at=COALESCE(read_at,?) WHERE workspace_id=? AND archived_at IS NULL').run(timestamp,ws.id); return this.notificationStats(slug); },
-    archiveNotification(notificationId, archived = true) { const row=db.prepare('SELECT * FROM notifications WHERE id=?').get(notificationId); if(!row) throw new Error('Notification not found'); db.prepare('UPDATE notifications SET archived_at=? WHERE id=?').run(archived ? now() : null,notificationId); return {...db.prepare('SELECT * FROM notifications WHERE id=?').get(notificationId),read:Boolean(row.read_at),payload:jsonObject(row.payload_json)}; },
+    archiveNotification(notificationId, archived = true) { const row=db.prepare('SELECT * FROM notifications WHERE id=?').get(notificationId); if(!row) throw new Error('Notification not found'); db.prepare('UPDATE notifications SET archived_at=? WHERE id=?').run(archived ? now() : null,notificationId); return publicNotificationView(db.prepare('SELECT * FROM notifications WHERE id=?').get(notificationId)); },
     updateWorkspace(slug, input = {}) { const ws=workspace(slug); if (!ws) throw new Error('Workspace not found'); const current=this.getWorkspaceSettings(slug); const name=String(input.name ?? ws.name).trim() || ws.name; const timezone=String(input.timezone ?? ws.timezone); const description=input.description === undefined ? current.description : String(input.description); const context=input.context === undefined ? current.context : String(input.context); const visibility=input.visibility === undefined ? current.visibility : (input.visibility === 'personal' ? 'personal' : 'workspace'); const prefix=input.prefix === undefined ? current.prefix : String(input.prefix); const quota=input.quota === undefined ? current.quota : input.quota; const preferences=input.preferences && typeof input.preferences === 'object' ? {...current.preferences,...input.preferences} : current.preferences; db.prepare('UPDATE workspaces SET name=?,timezone=? WHERE id=?').run(name,timezone,ws.id); db.prepare('INSERT INTO workspace_preferences(workspace_id,description,context,visibility,prefix,quota_json,profile_json,preferences_json) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(workspace_id) DO UPDATE SET description=excluded.description,context=excluded.context,visibility=excluded.visibility,prefix=excluded.prefix,quota_json=excluded.quota_json,preferences_json=excluded.preferences_json').run(ws.id,description,context,visibility,prefix,JSON.stringify(quota),JSON.stringify(current.profile),JSON.stringify(preferences)); audit(slug,'user','workspace.updated',{name,timezone}); return this.getWorkspaceSettings(slug); },
     getWorkspaceSettings(slug) { const ws=workspace(slug); if(!ws) throw new Error('Workspace not found'); const prefs=db.prepare('SELECT * FROM workspace_preferences WHERE workspace_id=?').get(ws.id) || {description:'',context:'',visibility:'workspace',prefix:'',quota_json:'{}',profile_json:'{}',preferences_json:'{}'}; return {...ws,description:prefs.description,context:prefs.context,visibility:prefs.visibility,prefix:prefs.prefix,quota:jsonObject(prefs.quota_json),profile:jsonObject(prefs.profile_json),preferences:jsonObject(prefs.preferences_json)}; },
     updateProfile(slug, input = {}) { const ws=workspace(slug); const current=this.getWorkspaceSettings(slug); const profile={...current.profile,...input}; db.prepare('INSERT INTO workspace_preferences(workspace_id,description,context,visibility,prefix,quota_json,profile_json,preferences_json) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(workspace_id) DO UPDATE SET profile_json=excluded.profile_json').run(ws.id,current.description,current.context,current.visibility,current.prefix,JSON.stringify(current.quota),JSON.stringify(profile),JSON.stringify(current.preferences)); audit(slug,'user','profile.updated',Object.keys(input)); return this.getWorkspaceSettings(slug); },
