@@ -272,8 +272,8 @@ test('failed initial main read clears loading and refresh retries that original 
   let attempts=0;
   const f=initializedFixture({conversation:async conversationId=>{assert.equal(conversationId,'original-main');if(!attempts++)throw new Error('聊天读取暂时失败');return {id:conversationId,employee_id:'one',messages:[{id:'recovered',role:'assistant',content:'历史已恢复'}]};}});
   t.after(()=>f.controller.dispose());
-  await f.controller.actions.chat({id:'one'});assert.equal(f.state.conversation,null);assert.equal(f.state.chatLoading,false);assert.equal(f.state.busy,false);assert.match(f.state.error,/读取暂时失败/);
-  await f.controller.refresh();assert.equal(attempts,2);assert.equal(f.state.conversation.id,'original-main');assert.equal(f.state.messages[0].id,'recovered');assert.equal(f.state.error,'');
+  await f.controller.actions.chat({id:'one'});assert.equal(f.state.conversation,null);assert.equal(f.state.chatLoading,false);assert.equal(f.state.busy,false);assert.match(f.state.employeeResources.conversation.error,/读取暂时失败/);assert.equal(f.state.error,'');assert.match(renderView(f.state),/聊天记录同步失败：聊天读取暂时失败/);
+  await f.controller.refresh();assert.equal(attempts,2);assert.equal(f.state.conversation.id,'original-main');assert.equal(f.state.messages[0].id,'recovered');assert.equal(f.state.error,'');assert.equal(f.state.employeeResources.conversation.error,'');
 });
 
 test('pending primary and auxiliary results cannot write after leaving the employee chat', async t => {
@@ -302,9 +302,119 @@ test('auxiliary failures remain visible and an auxiliary 401 still clears the lo
   const failure=deferred();
   const f=initializedFixture({botRuns:()=>failure.promise});t.after(()=>f.controller.dispose());
   await f.controller.actions.chat({id:'one'});failure.resolve(Promise.reject(new Error('真实运行记录读取失败')));await tick();
-  assert.equal(f.state.messages[0].id,'history');assert.match(f.state.error,/运行记录读取失败/);assert.equal(f.state.busy,false);
+  assert.equal(f.state.messages[0].id,'history');assert.match(f.state.employeeResources.runs.error,/运行记录读取失败/);assert.equal(f.state.error,'');assert.match(renderView(f.state),/运行记录更新失败：真实运行记录读取失败/);assert.equal(f.state.busy,false);
   const expired=initializedFixture({botRoutines:async()=>{throw Object.assign(new Error('expired'),{status:401});}});t.after(()=>expired.controller.dispose());
   await expired.controller.actions.chat({id:'one'});await tick();assert.equal(expired.state.phase,'login');assert.equal(expired.state.user,null);assert.deepEqual(expired.state.messages,[]);assert.equal(expired.state.chatLoading,false);
+});
+
+test('opening and repeated polling share one pending read for each employee auxiliary resource', async t => {
+  const pending={bot:deferred(),runs:deferred(),routines:deferred()},calls={bot:0,runs:0,routines:0};
+  const read=(name)=>{calls[name]++;return pending[name].promise;};
+  const f=initializedFixture({bot:()=>read('bot'),botRuns:()=>read('runs'),botRoutines:()=>read('routines')});
+  t.after(()=>{f.controller.dispose();pending.bot.resolve(f.bot);pending.runs.resolve({runs:[]});pending.routines.resolve({routines:[]});});
+  await f.controller.actions.chat({id:'one'});
+  await Promise.all([f.controller.refresh({silent:true}),f.controller.refresh({silent:true}),f.controller.refresh({silent:true})]);
+  assert.deepEqual(calls,{bot:1,runs:1,routines:1});assert.equal(f.state.employeeResources.conversation.phase,'ready');assert.equal(f.state.messages[0].id,'history');
+  pending.bot.resolve(f.bot);pending.runs.resolve({runs:[{id:'run'}]});pending.routines.resolve({routines:[{id:'routine'}]});await tick();
+  for(const name of ['bot','runs','routines'])assert.equal(f.state.employeeResources[name].phase,'ready');
+  await f.controller.refresh({silent:true});await tick();assert.deepEqual(calls,{bot:2,runs:2,routines:2});
+});
+
+for(const [name,method,label] of [['bot','bot','员工运行状态'],['runs','botRuns','运行记录'],['routines','botRoutines','例行工作']]) test(`${name} timeout is classified, visible and clears on recovery without changing loaded history`, async t => {
+  const pending=deferred();let attempts=0;
+  let f;const value=()=>name==='bot'?f.bot:{[name]:[{id:`fresh-${name}`} ]};
+  f=initializedFixture({[method]:()=>++attempts===1?pending.promise:Promise.resolve(value())});
+  t.after(()=>f.controller.dispose());
+  await f.controller.actions.chat({id:'one'});await f.controller.refresh({silent:true});assert.equal(attempts,1);
+  const requestPath=`/api/workspaces/workspace-one/bots/one/${name}`;
+  pending.resolve(Promise.reject(Object.assign(new Error('读取超时，请刷新重试'),{code:'READ_TIMEOUT',requestPath,method:'GET',elapsedMs:20000,body:'must not retain body'})));await tick();
+  const resource=f.state.employeeResources[name];
+  assert.equal(resource.phase,'error');assert.equal(f.state.error,'');assert.equal(f.state.messages[0].id,'history');assert.match(renderView(f.state),new RegExp(`${label}更新失败：读取超时`));
+  assert.deepEqual(resource.diagnostic,{requestPath,method:'GET',elapsedMs:20000,code:'READ_TIMEOUT'});
+  await f.controller.refresh({silent:true});await tick();assert.equal(attempts,2);assert.equal(resource.phase,'ready');assert.equal(resource.error,'');assert.equal(resource.diagnostic,null);assert.doesNotMatch(renderView(f.state),new RegExp(`${label}更新失败`));
+});
+
+test('chat read timeout and recovery preserve the actual send failure and its retry intent', async t => {
+  let readFails=false,sends=0;
+  const f=initializedFixture({conversation:async()=>{if(readFails)throw Object.assign(new Error('读取超时，请刷新重试'),{code:'READ_TIMEOUT'});return {id:'original-main',employee_id:'one',messages:[{id:'kept-history'}]};},sendMessage:async()=>{sends++;throw new Error('发送未收到回执');}});t.after(()=>f.controller.dispose());
+  await f.controller.actions.chat({id:'one'});await f.controller.submit('chat',form({draft:'保留并可按原标识重试'}));assert.equal(f.state.error,'发送未收到回执');
+  readFails=true;await f.controller.refresh({silent:true});
+  assert.equal(f.state.messages[0].id,'kept-history');assert.match(f.state.employeeResources.conversation.error,/读取超时/);assert.equal(f.state.error,'发送未收到回执');assert.match(renderView(f.state),/聊天记录同步失败：读取超时/);
+  readFails=false;await f.controller.refresh();await tick();
+  assert.equal(f.state.employeeResources.conversation.error,'');assert.equal(f.state.employeeResources.conversation.phase,'ready');assert.equal(f.state.error,'发送未收到回执');assert.equal(f.state.draft,'保留并可按原标识重试');assert.equal(sends,1);
+});
+
+test('an accepted send followed by a failed history read reports only a recoverable chat read error', async t => {
+  let reads=0,sends=0;
+  const f=initializedFixture({conversation:async()=>{if(++reads===2)throw new Error('发送后聊天回读超时');return {id:'original-main',employee_id:'one',messages:[{id:reads===1?'before':'sent'}]};},sendMessage:async()=>{sends++;return {id:'sent'};}});t.after(()=>f.controller.dispose());
+  await f.controller.actions.chat({id:'one'});await f.controller.submit('chat',form({draft:'已接收的内容'}));
+  assert.equal(sends,1);assert.equal(f.state.error,'');assert.equal(f.state.draft,'');assert.equal(f.state.employeeResources.conversation.error,'发送后聊天回读超时');assert.equal(f.state.messages[0].id,'before');
+  await f.controller.refresh({silent:true});assert.equal(f.state.employeeResources.conversation.error,'');assert.equal(f.state.messages[0].id,'sent');assert.equal(sends,1);
+});
+
+test('successful reads preserve a failed employee save and the selected unsaved avatar', async t => {
+  let writes=0;
+  const f=initializedFixture({updateBot:async()=>{writes++;throw new Error('员工资料保存未收到回执');}});t.after(()=>f.controller.dispose());
+  await f.controller.actions.chat({id:'one'});f.state.employeeAvatar='data:image/png;base64,cGVuZGluZw==';
+  await f.controller.submit('employee',form({name:'未确认的名字',description:'保留草稿'}));assert.equal(f.state.error,'员工资料保存未收到回执');
+  await f.controller.refresh({silent:true});await f.controller.refresh();await tick();
+  assert.equal(f.state.error,'员工资料保存未收到回执');assert.equal(f.state.employeeSaving,false);assert.equal(f.state.employeeAvatar,'data:image/png;base64,cGVuZGluZw==');assert.equal(writes,1);
+  for(const resource of Object.values(f.state.employeeResources))assert.equal(resource.error,'');
+});
+
+for(const change of ['employee','workspace']) test(`a late auxiliary 401 after switching ${change} observes the account and workspace boundary`, async t => {
+  const pending=deferred();let reads=0;
+  const f=initializedFixture({botRuns:()=>++reads===1?pending.promise:Promise.resolve({runs:[]}),getEmployeeConversation:async(_workspace,employee)=>({id:'second-main',employee_id:employee.id,messages:[{id:'second-history'}]})});t.after(()=>f.controller.dispose());
+  await f.controller.actions.chat({id:'one'});
+  if(change==='employee'){f.state.employees.push({id:'two',name:'员工乙',runtime:'Other'});await f.controller.actions.chat({id:'two'});}
+  else await f.controller.actions['select-workspace']({id:'workspace-two'});
+  pending.resolve(Promise.reject(Object.assign(new Error('expired'),{status:401})));await tick();
+  if(change==='employee'){assert.equal(f.state.phase,'login');assert.equal(f.state.user,null);assert.deepEqual(f.state.messages,[]);}
+  else {assert.equal(f.state.phase,'ready');assert.equal(f.state.workspace.slug,'workspace-two');assert.equal(f.state.error,'');}
+});
+
+for(const operation of ['save','stop']) for(const lateFailure of [false,true]) test(`old auxiliary ${lateFailure?'errors':'snapshots'} cannot roll back an accepted ${operation}`, async t => {
+  const pending={bot:deferred(),runs:deferred(),routines:deferred()},calls={bot:0,runs:0,routines:0};let remote, f;
+  const values=name=>name==='bot'?remote:{[name]:[{id:`current-${name}`}]};
+  const read=name=>++calls[name]===1?pending[name].promise:Promise.resolve(values(name));
+  const write=async()=>{remote={...f.bot,revision:4,control_epoch:3,employee:{...f.bot.employee,name:'写入后的名字'}};return remote;};
+  f=initializedFixture({employees:async()=>({employees:[remote.employee]}),bot:()=>read('bot'),botRuns:()=>read('runs'),botRoutines:()=>read('routines'),updateBot:write,controlBot:write});remote=f.bot;t.after(()=>f.controller.dispose());
+  await f.controller.actions.chat({id:'one'});
+  if(operation==='save')await f.controller.submit('employee',form({name:'写入后的名字',description:'新简介'}));
+  else await f.controller.actions['stop-run']({id:'one'});
+  await f.controller.refresh({silent:true});await tick();assert.equal(f.state.bot.revision,4);assert.equal(f.state.selectedEmployee.name,'写入后的名字');
+  for(const name of ['bot','runs','routines'])pending[name].resolve(lateFailure?Promise.reject(new Error('旧辅助读取超时')):name==='bot'?f.bot:{[name]:[]});
+  await tick();
+  assert.equal(f.state.bot.revision,4);assert.equal(f.state.bot.control_epoch,3);assert.equal(f.state.selectedEmployee.name,'写入后的名字');assert.equal(f.state.runs[0].id,'current-runs');assert.equal(f.state.routines[0].id,'current-routines');
+  for(const name of ['bot','runs','routines'])assert.equal(f.state.employeeResources[name].error,'');assert.equal(f.state.error,'');
+});
+
+test('pending employee save prevents polling from starting replacement auxiliary reads', async t => {
+  const save=deferred(),old=deferred();let reads=0;
+  const f=initializedFixture({bot:()=>{reads++;return old.promise;},botRuns:()=>old.promise,botRoutines:()=>old.promise,updateBot:()=>save.promise});t.after(()=>{f.controller.dispose();old.resolve(f.bot);});
+  await f.controller.actions.chat({id:'one'});const writing=f.controller.submit('employee',form({name:'已保存',description:''}));
+  await f.controller.refresh({silent:true});await f.controller.refresh({silent:true});assert.equal(reads,1);assert.equal(f.state.employeeSaving,true);
+  save.resolve({...f.bot,revision:4,employee:{...f.bot.employee,name:'已保存'}});await writing;
+  old.resolve(f.bot);await tick();assert.equal(f.state.bot.revision,4);assert.equal(f.state.selectedEmployee.name,'已保存');assert.equal(f.state.employeeSaving,false);
+});
+
+test('an earlier employee stop cannot unlock or invalidate the current employee stop', async t => {
+  const first=deferred(),second=deferred(),posts=[];let f;
+  const remote=new Map();
+  f=initializedFixture({
+    employees:async()=>({employees:[...remote.values()].map(bot=>bot.employee)}),
+    bot:async(_workspace,employeeId)=>remote.get(employeeId),
+    conversation:async conversationId=>({id:conversationId,employee_id:conversationId==='original-main'?'one':'two',messages:[]}),
+    controlBot:async(_workspace,employeeId)=>{posts.push(employeeId);const saved=await(employeeId==='one'?first.promise:second.promise);remote.set(employeeId,saved);return saved;},
+  });
+  const other={...f.bot,id:'two',employee_id:'two',employee:{id:'two',name:'员工乙',runtime:'Hermes'},main_conversation_id:'second-main'};
+  remote.set('one',f.bot);remote.set('two',other);f.state.employees.push({...other.employee,bot:other});t.after(()=>f.controller.dispose());
+  await f.controller.actions.chat({id:'one'});const oldStop=f.controller.actions['stop-run']({id:'one'});await tick();
+  await f.controller.actions.chat({id:'two'});const newStop=f.controller.actions['stop-run']({id:'two'});await tick();assert.deepEqual(posts,['one','two']);
+  first.resolve({...f.bot,revision:4,control_epoch:3});await oldStop;
+  assert.equal(f.state.selectedEmployee.id,'two');assert.equal(f.state.stopBusy,true);assert.equal(f.state.notice,'');
+  second.resolve({...other,revision:5,control_epoch:4});await newStop;
+  assert.equal(f.state.stopBusy,false);assert.equal(f.state.bot.id,'two');assert.equal(f.state.bot.revision,5);assert.equal(f.state.employeeResources.bot.phase,'ready');
 });
 
 for (const lateFailure of [false,true]) test(`a pre-send history ${lateFailure?'error':'snapshot'} cannot replace the accepted message or its running execution`, async t => {
@@ -320,7 +430,7 @@ for (const lateFailure of [false,true]) test(`a pre-send history ${lateFailure?'
   assert.deepEqual(f.state.messages.map(message=>message.id),['before','sent']);assert.equal(f.state.conversation.execution.id,'new-execution');assert.equal(f.state.conversation.execution.status,'acked');
   const acceptedDraws=drawn.length;
   old.resolve(lateFailure?Promise.reject(new Error('旧请求超时')):structuredClone(before));await pending;
-  assert.deepEqual(f.state.messages.map(message=>message.id),['before','sent']);assert.equal(f.state.conversation.execution.id,'new-execution');assert.equal(f.state.error,'');
+  assert.deepEqual(f.state.messages.map(message=>message.id),['before','sent']);assert.equal(f.state.conversation.execution.id,'new-execution');assert.equal(f.state.error,'');assert.equal(f.state.employeeResources.conversation.error,'');
   assert(drawn.slice(acceptedDraws).every(frame=>frame.ids.includes('sent')&&frame.execution==='new-execution'));
 });
 

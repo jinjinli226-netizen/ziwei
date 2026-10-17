@@ -1,5 +1,12 @@
 import {createHash} from 'node:crypto';
 
+const terminalEventTypes=new Set(['succeeded','failed','cancelled','expired']);
+export function mobileRunView(value) {
+  if(!Array.isArray(value?.events))return value;
+  const last=value.events.length-1;
+  return {...value,events:value.events.filter((event,index)=>index===last||terminalEventTypes.has(event?.type)),event_count:value.events.length};
+}
+
 // Read projections never mutate the stored employee, conversation or receipt.
 // The image source comes only from that employee's stored avatar data URL.
 function imageSource(value) {
@@ -47,5 +54,5 @@ export function createMobileReadView(repo) {
       return bytes.length?{mimeType:source.mimeType,bytes,version:source.version}:null;
     }catch{return null;}
   }
-  return {employee,employees,bot,conversation,avatar};
+  return {employee,employees,bot,conversation,avatar,run:mobileRunView};
 }

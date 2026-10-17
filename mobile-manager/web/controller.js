@@ -1,4 +1,4 @@
-import { accountId, workspaceId, scopeKey, list, id, executionUncertain, initialResources } from './model.js';
+import { accountId, workspaceId, scopeKey, list, id, executionUncertain, initialResources, initialEmployeeResources } from './model.js';
 import { createBotSettings } from './bot-settings.js';
 import { createDeviceSettings } from './device-settings.js';
 
@@ -36,10 +36,11 @@ async function readImages(files) {
 
 /** UI effects are scoped to the authenticated account, workspace and selected employee. */
 export function createController({ state, api, render = () => {}, storage = globalThis.localStorage, reporting } = {}) {
-  let epoch = 0, employeeEpoch = 0, chatReadEpoch = 0, phoneEpoch = 0, phoneRead = null, disposed = false, timer = null, attachmentEpoch = 0, nativePaused = false;
+  let epoch = 0, employeeEpoch = 0, chatReadEpoch = 0, employeeReadEpoch = 0, phoneEpoch = 0, phoneRead = null, disposed = false, timer = null, attachmentEpoch = 0, nativePaused = false;
   const composers = new Map(), pendingMutations = new Set(), routineRequests = new Map(), messageKeys = new Set(), conversationReads = new Map();
-  const resourceReads = new Map();
+  const resourceReads = new Map(), employeeReads = new Map(), employeeWrites = new Map();
   state.resources ||= initialResources();
+  state.employeeResources ||= initialEmployeeResources();
   const workspaceKey = userId => `ziwei.mobile.workspace:${userId}`;
   const messageKey = () => `ziwei.manager.message.v1:${encodeURIComponent(accountId(state))}:${encodeURIComponent(workspaceId(state))}:${encodeURIComponent(state.selectedEmployee?.id || '')}`;
   const current = () => ({ epoch, scope: scopeKey(state), employeeEpoch, employeeId: state.selectedEmployee?.id });
@@ -74,7 +75,7 @@ export function createController({ state, api, render = () => {}, storage = glob
   }
   function clearSelection() {
     employeeEpoch++; chatReadEpoch++; phoneEpoch++; attachmentEpoch++;
-    conversationReads.clear();
+    conversationReads.clear(); employeeReadEpoch++; employeeReads.clear(); state.employeeResources = initialEmployeeResources();
     state.selectedEmployee = null; state.bot = null; state.conversation = null; state.messages = [];
     state.runs = []; state.routines = []; state.phone = null; state.draft = ''; state.attachments = [];
     state.sending = false; state.attachmentReading = false; state.employeeSaving = false; state.stopBusy = false;
@@ -82,7 +83,7 @@ export function createController({ state, api, render = () => {}, storage = glob
   }
   function clearWorkspace() {
     clearSelection(); state.employees = []; state.bots = []; state.tasks = []; state.devices = []; state.phones = [];
-    resourceReads.clear(); phoneRead = null; state.resources = initialResources();
+    resourceReads.clear(); employeeWrites.clear(); phoneRead = null; state.resources = initialResources();
     state.report = null; state.reportSelection = []; state.page = 'home'; state.tab = 'employees'; state.imagePreview = null;
     state.phoneCommand = null; state.phoneError = ''; state.loading = false; state.busy = false;
     state.botSettings = null; state.deviceSettings = null; state.settingsTrail = [];
@@ -96,10 +97,61 @@ export function createController({ state, api, render = () => {}, storage = glob
     state.user = null; state.workspace = null; state.workspaces = []; state.phase = 'login'; state.error = message; state.notice = ''; draw();
   }
   function fail(error, token = current(), employee = false) {
+    if (error?.status === 401) { if (valid(token)) requireLogin('登录已过期，请重新登录'); return false; }
     if (!valid(token, employee)) return false;
-    if (error?.status === 401) requireLogin('登录已过期，请重新登录');
-    else { state.error = error?.message || '操作未完成，请稍后重试'; draw(); }
+    state.error = error?.message || '操作未完成，请稍后重试'; draw();
     return false;
+  }
+  function employeeReadFailed(name, error, token, live) {
+    // Session expiry belongs to the account even when a different employee is now open.
+    if (error?.status === 401) { if (valid(token)) requireLogin('登录已过期，请重新登录'); return; }
+    if (!live()) return;
+    const resource = state.employeeResources[name];
+    resource.phase = 'error'; resource.error = error?.message || '读取失败，请刷新重试';
+    resource.diagnostic = Object.fromEntries(['requestPath','method','elapsedMs','status','code'].filter(key => error?.[key] !== undefined).map(key => [key,error[key]]));
+    draw();
+  }
+  function employeeReadSucceeded(name) {
+    Object.assign(state.employeeResources[name], {phase:'ready',error:'',lastUpdated:new Date().toISOString(),diagnostic:null});
+  }
+  function invalidateEmployeeReads() {
+    employeeReadEpoch++; employeeReads.clear();
+    for (const name of ['bot','runs','routines']) {
+      const resource = state.employeeResources[name];
+      if (resource.phase === 'loading') resource.phase = resource.error ? 'error' : resource.lastUpdated ? 'ready' : 'idle';
+    }
+  }
+  const employeeWriteKey = (token, employeeId = token.employeeId) => `${token.epoch}:${token.scope}:${employeeId}`;
+  function beginEmployeeWrite(token, employeeId = token.employeeId) {
+    const key = employeeWriteKey(token, employeeId);
+    let released = false;
+    employeeWrites.set(key, (employeeWrites.get(key) || 0) + 1);
+    if (state.selectedEmployee?.id === employeeId) invalidateEmployeeReads();
+    return () => {
+      if (released) return;
+      released = true;
+      const count = (employeeWrites.get(key) || 0) - 1;
+      if (count > 0) employeeWrites.set(key,count); else employeeWrites.delete(key);
+      if (valid(token) && state.selectedEmployee?.id === employeeId) invalidateEmployeeReads();
+    };
+  }
+  function readEmployeeResource(name, token, fetchValue, accept) {
+    if (!valid(token,true) || employeeWrites.has(employeeWriteKey(token))) return Promise.resolve(false);
+    const existing = employeeReads.get(name);
+    if (existing && valid(existing.token,true) && existing.generation === employeeReadEpoch) return existing.promise;
+    const entry = {token,generation:employeeReadEpoch}; employeeReads.set(name,entry);
+    const live = () => valid(token,true) && entry.generation === employeeReadEpoch && employeeReads.get(name) === entry;
+    state.employeeResources[name].phase = 'loading'; draw();
+    entry.promise = Promise.resolve().then(async () => {
+      if (!live()) return false;
+      try {
+        const value = await fetchValue();
+        if (!live()) return false;
+        accept(value); employeeReadSucceeded(name); draw(); return true;
+      } catch (error) { employeeReadFailed(name,error,token,live); return false; }
+      finally { if (employeeReads.get(name) === entry) employeeReads.delete(name); }
+    });
+    return entry.promise;
   }
   const action = fn => async data => {
     const token = current();
@@ -126,6 +178,7 @@ export function createController({ state, api, render = () => {}, storage = glob
   }
   function acceptSavedBot(bot) {
     invalidateResources('employees', 'bots');
+    if (state.selectedEmployee?.id === (bot.employee_id || bot.id)) invalidateEmployeeReads();
     acceptBot(bot);
   }
   const botSettings = createBotSettings({ state, api, current, valid, fail, draw, acceptBot: acceptSavedBot });
@@ -167,7 +220,7 @@ export function createController({ state, api, render = () => {}, storage = glob
   async function refresh({ silent = false } = {}) {
     if (disposed || !state.user || !workspaceId(state) || state.phase !== 'ready') return false;
     const token = current(), primary = primaryResource();
-    if (!silent) { state.error = ''; draw(); }
+    if (!silent) draw();
     const employees = readWorkspaceResource('employees', token);
     // The initial employee response is useful on its own. Full Bot histories are supplementary.
     void employees.then(ok => {
@@ -195,7 +248,9 @@ export function createController({ state, api, render = () => {}, storage = glob
     const workspace = workspaceId(state), initial = !state.conversation?.id;
     const cachedBot = state.bot?.id === employee.id ? state.bot : employee.bot;
     const conversationId = state.conversation?.id || cachedBot?.main_conversation_id || employee.main_conversation_id;
-    if (initial) { state.chatLoading = true; draw(); }
+    state.employeeResources.conversation.phase = 'loading';
+    if (initial) state.chatLoading = true;
+    draw();
     const request = (async () => {
       try {
         // A cached authoritative main ID needs no Bot round-trip. Failed reads never create a replacement.
@@ -204,10 +259,11 @@ export function createController({ state, api, render = () => {}, storage = glob
         if (!validChat(token, readEpoch)) return;
         if (conversation.employee_id && conversation.employee_id !== employee.id) throw new Error('聊天与当前员工身份不一致，请刷新核对');
         state.conversation = conversation; state.messages = conversation.messages || [];
+        employeeReadSucceeded('conversation');
         state.chatLoading = false;
         if (initial) state.busy = false;
         draw();
-      } catch (error) { if (validChat(token, readEpoch)) fail(error, token, true); }
+      } catch (error) { employeeReadFailed('conversation',error,token,() => validChat(token,readEpoch)); }
       finally {
         if (validChat(token, readEpoch) && initial) { state.chatLoading = false; state.busy = false; draw(); }
       }
@@ -221,19 +277,16 @@ export function createController({ state, api, render = () => {}, storage = glob
     if (!employee || !valid(token, true)) return;
     const workspace = workspaceId(state), cachedBot = state.bot?.id === employee.id ? state.bot : employee.bot;
     const hasBot = cachedBot?.configuration_state === 'initialized';
-    const read = (fetchValue, accept) => Promise.resolve().then(fetchValue).then(value => {
-      if (!valid(token, true)) return;
-      accept(value); draw();
-    }).catch(error => { fail(error, token, true); });
+    const read = (name, fetchValue, accept) => readEmployeeResource(name,token,fetchValue,accept);
     const work = !skipConversation && state.page === 'chat' ? [readChat(token)] : [];
-    const readRuns = () => read(() => api.botRuns(workspace, employee.id), value => { state.runs = list(value, 'runs'); });
-    const readRoutines = () => read(() => api.botRoutines(workspace, employee.id), value => { state.routines = list(value, 'routines'); });
+    const readRuns = () => read('runs',() => api.botRuns(workspace, employee.id), value => { state.runs = list(value, 'runs'); });
+    const readRoutines = () => read('routines',() => api.botRoutines(workspace, employee.id), value => { state.routines = list(value, 'routines'); });
     if (hasBot) work.push(readRuns(), readRoutines());
-    if (employee.runtime === 'Hermes' || cachedBot) work.push(read(() => api.bot(workspace, employee.id), bot => {
+    if (employee.runtime === 'Hermes' || cachedBot) work.push(read('bot',() => api.bot(workspace, employee.id), bot => {
       if (bot) acceptBot(bot);
-    }).then(async () => {
+    }).then(async ok => {
       // The first read can discover an initialized Bot that was not in the employee cache.
-      if (valid(token, true) && !hasBot && state.bot?.configuration_state === 'initialized') await Promise.all([readRuns(), readRoutines()]);
+      if (ok && valid(token, true) && !hasBot && state.bot?.configuration_state === 'initialized') await Promise.all([readRuns(), readRoutines()]);
     }));
     await Promise.all(work);
   }
@@ -328,6 +381,9 @@ export function createController({ state, api, render = () => {}, storage = glob
     const token = current(), conversationId = state.conversation.id, revision = item.revision, requestKey = messageKey();
     const sendEpoch = ++chatReadEpoch;
     conversationReads.clear();
+    const primaryResource = state.employeeResources.conversation;
+    if (primaryResource.phase === 'loading') primaryResource.phase = primaryResource.error ? 'error' : primaryResource.lastUpdated ? 'ready' : 'idle';
+    const finishWrite = beginEmployeeWrite(token);
     state.sending = true; state.error = ''; draw();
     try {
       const fingerprintHash = await digest(fingerprint);
@@ -351,10 +407,14 @@ export function createController({ state, api, render = () => {}, storage = glob
       } catch {}
       if (!validChat(token, sendEpoch)) return;
       restoreComposer();
-      const conversation = await api.conversation(conversationId);
-      if (validChat(token, sendEpoch)) { state.conversation = conversation; state.messages = conversation.messages || []; }
-    } catch (error) { if (validChat(token, sendEpoch)) fail(error, token, true); }
-    finally { if (validChat(token, sendEpoch)) { state.sending = false; draw(); } }
+      finishWrite();
+      state.employeeResources.conversation.phase = 'loading';
+      try {
+        const conversation = await api.conversation(conversationId);
+        if (validChat(token, sendEpoch)) { state.conversation = conversation; state.messages = conversation.messages || []; employeeReadSucceeded('conversation'); }
+      } catch (error) { employeeReadFailed('conversation',error,token,() => validChat(token,sendEpoch)); }
+    } catch (error) { if (error?.status === 401 || validChat(token, sendEpoch)) fail(error, token, true); }
+    finally { finishWrite(); if (validChat(token, sendEpoch)) { state.sending = false; draw(); } }
   }
   async function saveEmployee(form) {
     const employee = state.selectedEmployee;
@@ -366,6 +426,7 @@ export function createController({ state, api, render = () => {}, storage = glob
     if (!body.name) throw new Error('请输入员工名字');
     if (state.employeeAvatar !== undefined) body.avatar = state.employeeAvatar;
     else if (typeof form.get('avatar') === 'string') body.avatar = form.get('avatar');
+    const finishWrite = beginEmployeeWrite(token);
     invalidateResources('employees', 'bots'); state.employeeSaving = true; state.error = ''; draw();
     try {
       if (state.bot?.configuration_state === 'initialized') {
@@ -377,7 +438,7 @@ export function createController({ state, api, render = () => {}, storage = glob
       }
       if (valid(token, true)) { state.employeeAvatar = undefined; state.notice = '已保存'; }
     } catch (error) { fail(error, token, true); }
-    finally { if (valid(token, true)) { invalidateResources('employees', 'bots'); state.employeeSaving = false; syncLoading(); draw(); } }
+    finally { finishWrite(); if (valid(token, true)) { invalidateResources('employees', 'bots'); state.employeeSaving = false; syncLoading(); draw(); } }
   }
   async function mutateRoutine(routineId, run = false) {
     if (!state.selectedEmployee || !routineId) throw new Error('请先选择例行工作');
@@ -385,6 +446,7 @@ export function createController({ state, api, render = () => {}, storage = glob
     if (pendingMutations.has(key)) return;
     const routine = state.routines.find(item => item.id === routineId || item.automation_id === routineId);
     if (!routine) throw new Error('例行工作已变化，请刷新');
+    const finishWrite = beginEmployeeWrite(token);
     pendingMutations.add(key); state.busy = true; state.error = ''; draw();
     try {
       if (run) {
@@ -393,9 +455,10 @@ export function createController({ state, api, render = () => {}, storage = glob
         routineRequests.delete(key);
       }
       else await api.updateRoutine(workspace, employeeId, routineId, { status: routine.status === 'active' ? 'paused' : 'active' });
+      finishWrite();
       if (valid(token, true)) { await refreshEmployee(token); state.notice = run ? '已提交运行请求，请查看实际回执' : '例行工作已更新'; }
     } catch (error) { fail(error, token, true); }
-    finally { pendingMutations.delete(key); if (valid(token, true)) { state.busy = false; draw(); } }
+    finally { finishWrite(); pendingMutations.delete(key); if (valid(token, true)) { state.busy = false; draw(); } }
   }
   async function saveTask(form) {
     const task = state.task;
@@ -426,13 +489,15 @@ export function createController({ state, api, render = () => {}, storage = glob
     const request = previous?.fingerprint === fingerprint ? previous : { fingerprint, idempotencyKey: id() };
     routineRequests.set(key, request);
     const token = current(), workspace = workspaceId(state);
+    const finishWrite = beginEmployeeWrite(token);
     state.busy = true; state.error = ''; draw();
     try {
       await api.createRoutine(workspace, employeeId, { ...input, idempotencyKey: request.idempotencyKey });
       routineRequests.delete(key);
+      finishWrite();
       if (valid(token, true)) { state.notice = '例行工作已保存'; await refreshEmployee(token); }
     } catch (error) { fail(error, token, true); }
-    finally { if (valid(token, true)) { state.busy = false; draw(); } }
+    finally { finishWrite(); if (valid(token, true)) { state.busy = false; draw(); } }
   }
   const actions = {
     navigate: action(async ({ tab }) => {
@@ -504,15 +569,18 @@ export function createController({ state, api, render = () => {}, storage = glob
     'stop-run': action(async ({ id: employeeId = state.selectedEmployee?.id }) => {
       const workspace = workspaceId(state), token = current(), key = `${scopeKey(state)}:${employeeId}:stop`;
       if (!employeeId || pendingMutations.has(key)) return;
+      const finishWrite = beginEmployeeWrite(token, employeeId);
       pendingMutations.add(key); invalidateResources('employees', 'bots'); state.stopBusy = true; state.error = ''; draw();
       try {
         const bot = await api.bot(workspace, employeeId);
         if (!valid(token)) return;
         if (bot.configuration_state !== 'initialized') throw new Error('这位员工尚未提供手机端停止入口，请在电脑版处理');
         const result = await api.controlBot(workspace, employeeId, { operation: 'stop', expectedRevision: bot.revision, expectedControlEpoch: bot.control_epoch });
-        if (valid(token)) { acceptSavedBot(result); state.notice = '停止请求已提交，以电脑回执为准'; await refresh({ silent: true }); }
+        finishWrite();
+        if (valid(token)) acceptSavedBot(result);
+        if (valid(token,true)) { state.notice = '停止请求已提交，以电脑回执为准'; await refresh({ silent: true }); }
       } catch (error) { fail(error, token); }
-      finally { pendingMutations.delete(key); if (valid(token)) { invalidateResources('employees', 'bots'); state.stopBusy = false; syncLoading(); draw(); } }
+      finally { finishWrite(); pendingMutations.delete(key); if (valid(token,true)) { invalidateResources('employees', 'bots'); state.stopBusy = false; syncLoading(); draw(); } }
     }),
     'remove-attachment': action(({ id: index }) => { state.attachments = state.attachments.filter((_, i) => i !== Number(index)); if (state.selectedEmployee && state.page === 'chat') { stashComposer(); composer().revision++; } draw(); }),
     phone: action(async ({ id: phoneId }) => {
@@ -641,7 +709,7 @@ export function createController({ state, api, render = () => {}, storage = glob
     }
   }
   function dispose() {
-    disposed = true; epoch++; clearInterval(timer); timer = null; composers.clear(); pendingMutations.clear(); routineRequests.clear(); resourceReads.clear(); phoneRead = null;
+    disposed = true; epoch++; clearInterval(timer); timer = null; composers.clear(); pendingMutations.clear(); routineRequests.clear(); resourceReads.clear(); employeeReads.clear(); employeeWrites.clear(); phoneRead = null;
     botSettings.dispose?.(); deviceSettings.dispose?.();
     globalThis.document?.removeEventListener('visibilitychange', visibility);
     globalThis.removeEventListener?.('ziwei:resume', resume);

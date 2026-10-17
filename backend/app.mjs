@@ -763,7 +763,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
     app.post(`${base}/:id/native/actions`,guard,(req,res)=>res.status(202).json(bots.native(req.params.slug,req.params.id,req.body,contextFor(req))));
     app.post(`${base}/:id/collaboration`,guard,(req,res)=>res.status(202).json(bots.collaboration(req.params.slug,req.params.id,req.body,contextFor(req))));
     app.post(`${base}/:id/control`,guard,(req,res)=>res.json(bots.control(req.params.slug,req.params.id,req.body,contextFor(req))));
-    app.get(`${base}/:id/runs`,guard,(req,res)=>res.json({runs:bots.runs(req.params.slug,req.params.id,contextFor(req))}));
+    app.get(`${base}/:id/runs`,guard,(req,res)=>{const mobile=prefix==='/api'&&req.query.view==='mobile',values=bots.runs(req.params.slug,req.params.id,contextFor(req),mobile?{limit:5}:undefined);res.json({runs:mobile?values.map(mobileReadView.run):values});});
     app.post(`${base}/:id/actions/:actionId/reconcile`,guard,(req,res)=>res.json(bots.reconcile(req.params.slug,req.params.id,req.params.actionId,req.body,contextFor(req))));
     app.get(`${base}/:id/routines`,guard,(req,res)=>res.json({routines:bots.routines(req.params.slug,req.params.id,contextFor(req))}));
     app.post(`${base}/:id/routines`,guard,(req,res)=>res.status(201).json(bots.createRoutine(req.params.slug,req.params.id,req.body,contextFor(req))));

@@ -5,7 +5,7 @@ import {Duplex} from 'node:stream';
 import {createHash} from 'node:crypto';
 import {createApp} from './app.mjs';
 import {createManagementService} from './management.mjs';
-import {createMobileReadView} from './mobile-read-view.mjs';
+import {createMobileReadView,mobileRunView} from './mobile-read-view.mjs';
 import {rasterFixtures} from '../test/fixtures/raster-images.mjs';
 
 // Exercise the real middleware and binary response without opening a listener.
@@ -24,7 +24,7 @@ async function request(app,url,{cookie='',headers={}}={}) {
 }
 
 function fixture(t) {
-  const app=createApp({memory:true,requireAuth:true}),repo=app.locals.repo,auth=app.locals.auth;
+  const app=createApp({memory:true,requireAuth:true,mcpToken:'isolated-mobile-runs-mcp',mcpWorkspace:'mobile-read-view',mcpRole:'owner'}),repo=app.locals.repo,auth=app.locals.auth;
   t.after(()=>repo.db.close());
   const owner=auth.setup({email:'mobile-owner@fixture.test',password:'isolated-fixture-password'});
   const slug='mobile-read-view';auth.createWorkspace(owner.user_id,{slug,name:'Mobile read fixture',kind:'team'});
@@ -136,4 +136,48 @@ test('projection is shallow and immutable, and an avatar endpoint cannot fetch c
   f.repo.updateEmployee(f.idle.id,{avatar:'https://caller-selected.invalid/private'});
   assert.equal((await request(f.app,`/api/workspaces/${f.slug}/employees/${f.idle.id}/avatar?url=https://caller-selected.invalid/private`,{cookie:f.ownerCookie})).status,404);
   assert.equal(view.employee(f.slug,f.repo.getEmployee(f.idle.id)).avatar,'https://caller-selected.invalid/private');
+});
+
+test('mobile run events preserve original order, the final event, and every earlier complete terminal proof without mutation',()=>{
+  const proof={processExit:{rootConfirmed:true,treeConfirmed:true,activeProcesses:0},result:{stopConfirmed:true},unknown:{keep:true}};
+  const events=Object.freeze([
+    Object.freeze({id:'early-progress',type:'progress',message:'Original progress',data:{message:'unchanged'}}),
+    Object.freeze({id:'early-proof',type:'succeeded',message:'Original terminal message',data:{result:proof}}),
+    Object.freeze({id:'failed-proof',type:'failed',data:{result:proof}}),
+    Object.freeze({id:'cancelled-proof',type:'cancelled',data:{result:proof}}),
+    Object.freeze({id:'expired-proof',type:'expired',data:{result:proof}}),
+    Object.freeze({id:'middle-progress',type:'progress',data:{result:proof}}),
+    Object.freeze({id:'last-progress',type:'progress',message:'Original final message',data:{message:'keep last'}}),
+  ]),payload=Object.freeze({context:'retain original payload'}),result=Object.freeze({summary:'Original summary',processExit:proof.processExit});
+  const original=Object.freeze({id:'original-run',status:'failed',error:'Original error',created_at:'2026-10-17T00:00:00Z',payload,result,events}),projected=mobileRunView(original);
+  assert.equal(projected.event_count,7);assert.deepEqual(projected.events.map(event=>event.id),['early-proof','failed-proof','cancelled-proof','expired-proof','last-progress']);
+  assert.equal(projected.payload,payload);assert.equal(projected.result,result);assert.equal(projected.events[0],events[1]);assert.equal(projected.events.at(-1),events.at(-1));
+  assert.deepEqual({...projected,events:original.events,event_count:undefined},{...original,event_count:undefined});
+  assert.equal(original.events.length,7);assert.deepEqual(mobileRunView({id:'empty',events:[]}),{id:'empty',events:[],event_count:0});
+  assert.deepEqual(mobileRunView({events:[events[1]]}).events,[events[1]]);
+});
+
+test('only API mobile runs select five and summarize events; default and MCP retain every original action and event byte',async t=>{
+  const f=fixture(t),db=f.repo.db;
+  const action=db.prepare('INSERT INTO a2a_actions(id,workspace_id,agent_id,type,payload_json,dedupe_key,status,created_at,completed_at,result_json) VALUES(?,?,?,?,?,?,?,?,?,?)');
+  const event=db.prepare('INSERT INTO a2a_action_events(id,action_id,type,message,data_json,created_at) VALUES(?,?,?,?,?,?)');
+  const proof={code:'EXECUTION_UNCERTAIN',processExit:{rootConfirmed:true,treeConfirmed:true,activeProcesses:0},unknown:{keep:true}},types=['progress','succeeded','failed','cancelled','expired'];
+  for(let index=0;index<8;index++) {
+    const id=`mobile-event-run-${index}`,stamp='2028-01-01T00:00:00.000Z';
+    action.run(id,f.ws.id,'ziwei_user','conversation.execute',JSON.stringify({hermesBot:{employeeId:f.bot.id},context:'original-context '.repeat(256)}),id,'failed',stamp,stamp,JSON.stringify({summary:'Original summary',outputArtifacts:[{name:'original-image',content:'retain-all-original-content'}],processExit:proof.processExit}));
+    for(let number=0;number<180;number++)event.run(`${id}-event-${String(number).padStart(3,'0')}`,id,types[number]||'progress',`Original message ${number}: `+'x'.repeat(512),JSON.stringify({message:'original event data '.repeat(32),result:proof}),stamp);
+  }
+  const base=`/api/workspaces/${f.slug}/bots/${f.bot.id}/runs`,raw=await request(f.app,base,{cookie:f.ownerCookie}),mobile=await request(f.app,base+'?view=mobile',{cookie:f.ownerCookie});
+  assert.equal(raw.status,200);assert.equal(mobile.status,200);
+  const original=raw.json().runs,actual=mobile.json().runs;
+  assert.equal(original.length,10);assert.equal(actual.length,5);assert(mobile.bytes.length<raw.bytes.length/15);
+  for(let index=0;index<actual.length;index++) {
+    assert.deepEqual(actual[index],mobileRunView(original[index]));
+    assert.equal(actual[index].event_count,180);assert.equal(actual[index].events.length,5);
+    assert.deepEqual(actual[index].result,original[index].result);assert.deepEqual(actual[index].payload,original[index].payload);
+    assert.deepEqual(actual[index].events[0].data.result,proof);assert.equal(actual[index].events.at(-1).id,original[index].events.at(-1).id);
+  }
+  const unchanged=await request(f.app,base,{cookie:f.ownerCookie}),mcp=await request(f.app,`/mcp/v1/workspaces/${f.slug}/bots/${f.bot.id}/runs?view=mobile`,{headers:{authorization:'Bearer isolated-mobile-runs-mcp'}});
+  assert.equal(mcp.status,200);assert.deepEqual(unchanged.bytes,raw.bytes);assert.deepEqual(mcp.bytes,raw.bytes);
+  t.diagnostic(`run JSON bytes: default=${raw.bytes.length}, mobile=${mobile.bytes.length}`);
 });

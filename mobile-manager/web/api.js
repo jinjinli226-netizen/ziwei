@@ -28,6 +28,7 @@ export function createApi({ fetchImpl = globalThis.fetch?.bind(globalThis), orig
     return text ? `?${text}` : '';
   };
   async function request(path, { method = 'GET', body, signal } = {}) {
+    const startedAt = Date.now();
     const epoch = cacheEpoch, cached = method === 'GET' ? readCache.get(path) : null;
     const readController = method === 'GET' && readTimeoutMs > 0 ? new AbortController() : null;
     const forwardAbort = () => readController?.abort(signal.reason);
@@ -72,6 +73,12 @@ export function createApi({ fetchImpl = globalThis.fetch?.bind(globalThis), orig
       if (method === 'GET') rememberRead(path, response.headers?.get?.('etag'), data, epoch);
       else if (epoch === cacheEpoch) clearReads();
       return data;
+    } catch (error) {
+      // Metadata only: never retain request bodies, credentials or response text
+      // in the read diagnostics shown by individual resource states.
+      error.requestPath = path; error.method = method;
+      error.elapsedMs = Math.max(0, Date.now() - startedAt);
+      throw error;
     } finally {
       if (timeout !== null) clearTimeout(timeout);
       if (readController && signal) signal.removeEventListener('abort', forwardAbort);
@@ -95,7 +102,7 @@ export function createApi({ fetchImpl = globalThis.fetch?.bind(globalThis), orig
     employeeMcpStatus: (workspace, id) => get(`${ws(workspace)}/employees/${enc(id)}/mcp/status`),
     bots: workspace => get(mobile(`${ws(workspace)}/bots`)),
     bot: (workspace, id) => get(mobile(botPath(workspace, id))),
-    botRuns: (workspace, id) => get(`${botPath(workspace, id)}/runs`),
+    botRuns: (workspace, id) => get(mobile(`${botPath(workspace, id)}/runs`)),
     botCapabilities: (workspace, deviceId) => get(`${ws(workspace)}/bots/capabilities${query({ deviceId })}`),
     validateBot: (workspace, id, body) => post(`${botPath(workspace, id)}/validate`, body),
     updateBot: (workspace, id, body) => patch(botPath(workspace, id), body),

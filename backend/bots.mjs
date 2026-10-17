@@ -106,9 +106,9 @@ export function createBotService(repo, management) {
     if(repo.serverCodeRollout)return {schemaVersion:1,workspace:slug,deviceId:input.deviceId||null,device,runtime,capabilities:BOT_CAPABILITY_CATALOG.map(([id,label])=>({id,label,status:'requires_configuration',configurable:integrated.has(id),reason:'等待客户端验证或更新；当前设备执行已关闭',evidence:['server-code-rollout-v1']}))};
     return {schemaVersion:1,workspace:slug,deviceId:input.deviceId || null,device,runtime,capabilities:BOT_CAPABILITY_CATALOG.map(([id,label])=>({id,label,status:!integrated.has(id)?'not_integrated':(!runtime?'unknown':(!runtime.available?'requires_dependency':'requires_configuration')),configurable:integrated.has(id),reason:!integrated.has(id)?'原生能力尚未接入紫薇控制与结果链；不能由此入口启用':(!runtime?'目标电脑尚未提供 Hermes 发现证据':(!runtime.available?runtime.issues.map(item=>item.message).join('；'):'需保存配置并在目标电脑验证；执行成功由实际回执确认')),evidence:[...(runtime?.version?[`device_heartbeat:${runtime.version}`]:[]),'ziwei.bot.schema:1']}))};
   };
-  const runs = (slug,id,context={}) => {
+  const runs = (slug,id,context={},options={}) => {
     const {ws}=resolve(slug,id,context);
-    return db.prepare("SELECT id FROM a2a_actions WHERE workspace_id=? AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json,'$.hermesBot.employeeId') END=? ORDER BY created_at DESC,rowid DESC LIMIT 100").all(ws.id,id).map(row=>repo.getA2AAction(row.id,{workspaceSlug:slug}));
+    return db.prepare("SELECT id FROM a2a_actions WHERE workspace_id=? AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json,'$.hermesBot.employeeId') END=? ORDER BY created_at DESC,rowid DESC LIMIT ?").all(ws.id,id,options?.limit===5?5:100).map(row=>repo.getA2AAction(row.id,{workspaceSlug:slug}));
   };
   const requestStop = (slug, action, prefix='bot-stop') => {
     const prior = db.prepare("SELECT * FROM a2a_actions WHERE workspace_id=? AND type='action.cancel' ORDER BY rowid DESC").all(action.workspace_id || workspace(slug).id).find(row=>parse(row.payload_json)?.actionId===action.id);

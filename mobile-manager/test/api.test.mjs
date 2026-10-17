@@ -45,7 +45,7 @@ test('a stalled history read times out and can retry the same conversation', asy
     if(calls.length===1) return new Promise((_resolve,reject)=>options.signal.addEventListener('abort',()=>reject(new DOMException('Aborted','AbortError')),{once:true}));
     return response({id:'original',messages:[{role:'assistant',content:'原聊天历史'}]});
   }});
-  await assert.rejects(api.conversation('original'),error=>error.code==='READ_TIMEOUT'&&error.uncertain===false);
+  await assert.rejects(api.conversation('original'),error=>error.code==='READ_TIMEOUT'&&error.uncertain===false&&error.requestPath==='/api/conversations/original?view=mobile'&&error.method==='GET'&&error.elapsedMs>=0);
   assert.equal((await api.conversation('original')).messages[0].content,'原聊天历史');
   assert.deepEqual(calls.map(call=>call.url),['/api/conversations/original?view=mobile','/api/conversations/original?view=mobile']);
   assert(calls.every(call=>call.options.method==='GET'));
@@ -129,4 +129,16 @@ test('an old ordinary conversation lookup cannot create a conversation after log
   const old=api.getEmployeeConversation('ws',{id:'ordinary',runtime:'Other'});const rejected=assert.rejects(old,/登录状态已变化/);
   await api.logout();resolveLookup(response({conversations:[]}));await rejected;
   assert.deepEqual(posts,['/api/auth/logout']);
+});
+
+
+test('read diagnostics identify the failed auxiliary route without saving request or response bodies', async () => {
+  const api=createApi({fetchImpl:async()=>response({error:'server unavailable',code:'UPSTREAM_FAILED'},502)});
+  await assert.rejects(api.botRuns('workspace','employee'),error=>{
+    assert.equal(error.requestPath,'/api/workspaces/workspace/bots/employee/runs?view=mobile');
+    assert.equal(error.method,'GET');assert.equal(error.status,502);assert.equal(error.code,'UPSTREAM_FAILED');
+    assert(Number.isFinite(error.elapsedMs)&&error.elapsedMs>=0);
+    assert.equal(error.requestBody,undefined);assert.equal(error.responseBody,undefined);
+    return true;
+  });
 });

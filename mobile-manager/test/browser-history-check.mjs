@@ -112,13 +112,22 @@ try{
   assert.equal(await image.getAttribute('src'),`data:image/png;base64,${png}`);
   const bounds=await slow.page.locator('.chat-history').evaluate(element=>({height:element.clientHeight,scrollHeight:element.scrollHeight,width:element.clientWidth}));
   assert.ok(bounds.height>100&&bounds.width>100&&bounds.scrollHeight>bounds.height,'Long history must have a usable scroll container');
+  await image.evaluate(img=>{window.__originalHistoryImage=img;});
+  const unchangedRead=slow.page.waitForResponse(response=>new URL(response.url()).pathname===`/api/conversations/${first.conversation.id}`);
+  await slow.page.evaluate(()=>{for(let i=0;i<3;i++)window.dispatchEvent(new CustomEvent('ziwei:resume'));});
+  await unchangedRead;
+  await slow.page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+  assert.equal(await image.evaluate(img=>img===window.__originalHistoryImage),true,'unchanged polls must retain the original decoded image DOM node');
+  assert.equal(requests.filter(entry=>entry.scenario==='slow-auxiliary'&&entry.path===`/api/workspaces/${slug}/bots/${first.employee.id}/runs`).length,1,'pending auxiliary reads must remain single-flight across repeated resumes');
+  checks.push('unchanged history polls retain decoded image DOM and deduplicate pending auxiliary reads');
   await capture(slow.page,'01-history-visible-with-aux-pending');
   checks.push('cached initialized Hermes main history renders before hanging Bot/runs/routines','long text scrolls and original base64 image decodes','draft editable during auxiliary requests');
 
   slow.release('botMode','fail');slow.release('auxMode','fail');
   await slow.page.getByText('辅助读取失败：',{exact:false}).first().waitFor();
   await showHistory(slow.page);assert.equal(await draft.inputValue(),'辅助接口仍在等待时，可以编辑草稿。');
-  checks.push('auxiliary failures show an error without clearing history or draft');
+  assert.equal(await image.evaluate(img=>img===window.__originalHistoryImage),true,'an auxiliary banner must not rebuild an unchanged conversation');
+  checks.push('auxiliary failures show an error without clearing history, decoded image DOM or draft');
 
   repo.addConversationMessage(first.conversation.id,{role:'assistant',content:'刷新新增历史 HERMES-HISTORY-REFRESH',dispatch:false});
   slow.control.botMode='hang';slow.control.auxMode='hang';

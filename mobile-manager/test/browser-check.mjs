@@ -106,11 +106,13 @@ try{
   await click('report-up',second.id);await click('report-start');
   // Second employee has no task/execution evidence; no fabricated report is sent.
   await page.getByText('暂无记录',{exact:true}).first().waitFor();assert.equal(requests.filter(r=>r.method==='POST'&&r.path.endsWith('/messages')).length,2);
-  await click('report-next');await page.waitForFunction(()=>document.body.innerText.includes('请汇报实际进展'));
-  const reportExecution=repo.getConversation(conversation.id).execution;repo.ackA2AAction(reportExecution.id,{deviceId});repo.resultA2AAction(reportExecution.id,{deviceId,status:'succeeded',result:{output:'实际进展：任务进行中。\n成果：尚未完成。\n卡点：无已确认卡点。\n下一步计划：继续核对记录。'}});
+  const reportAccepted=page.waitForResponse(response=>response.request().method()==='POST'&&new URL(response.url()).pathname===`/api/conversations/${conversation.id}/messages`);
+  await click('report-next');const reportReceipt=await (await reportAccepted).json();await page.waitForFunction(()=>document.body.innerText.includes('请汇报实际进展'));
+  const reportExecution=reportReceipt.execution;assert.equal(reportExecution.id,repo.getConversation(conversation.id).execution.id);repo.ackA2AAction(reportExecution.id,{deviceId});repo.resultA2AAction(reportExecution.id,{deviceId,status:'succeeded',result:{output:'实际进展：任务进行中。\n成果：尚未完成。\n卡点：无已确认卡点。\n下一步计划：继续核对记录。'}});
   await click('refresh');await page.getByText('实际进展：任务进行中。',{exact:false}).first().waitFor();await capture('04-report');
-  await page.locator('[name=draft]').fill('需要我协助什么？');await page.getByRole('button',{name:'发送消息',exact:true}).click();
-  const followup=repo.getConversation(conversation.id).execution;repo.ackA2AAction(followup.id,{deviceId});repo.resultA2AAction(followup.id,{deviceId,status:'succeeded',result:{output:'这是一条独立追问回执。'}});
+  const followupAccepted=page.waitForResponse(response=>response.request().method()==='POST'&&new URL(response.url()).pathname===`/api/conversations/${conversation.id}/messages`);
+  await page.locator('[name=draft]').fill('需要我协助什么？');await page.getByRole('button',{name:'发送消息',exact:true}).click();const followupReceipt=await (await followupAccepted).json();
+  const followup=followupReceipt.execution;assert.equal(followup.id,repo.getConversation(conversation.id).execution.id);repo.ackA2AAction(followup.id,{deviceId});repo.resultA2AAction(followup.id,{deviceId,status:'succeeded',result:{output:'这是一条独立追问回执。'}});
   await click('refresh');await page.getByText('这是一条独立追问回执。',{exact:true}).waitFor();
   const sentBeforeReload=requests.filter(r=>r.method==='POST'&&r.path.endsWith('/messages')).length;
   await page.reload();await page.getByRole('heading',{name:'我的员工',exact:true}).waitFor();await click('report-setup');await page.getByText('实际进展：任务进行中。',{exact:false}).first().waitFor();

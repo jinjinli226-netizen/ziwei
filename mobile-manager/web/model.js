@@ -30,8 +30,11 @@ export function formatTime(value) {
 export function initialResources() {
   return Object.fromEntries(['employees','bots','tasks','devices','phones'].map(name=>[name,{phase:'idle',error:'',lastUpdated:null}]));
 }
+export function initialEmployeeResources() {
+  return Object.fromEntries(['conversation','bot','runs','routines'].map(name=>[name,{phase:'idle',error:'',lastUpdated:null,diagnostic:null}]));
+}
 export function initialState() {
-  return {phase:'boot',user:null,workspaces:[],workspace:null,tab:'employees',page:'home',employees:[],bots:[],tasks:[],devices:[],phones:[],resources:initialResources(),selectedEmployee:null,bot:null,conversation:null,messages:[],runs:[],routines:[],report:null,phone:null,draft:'',attachments:[],busy:false,chatLoading:false,error:'',notice:'',filter:'all',search:'',imagePreview:null,task:null,reportSelection:[],botSettings:null,deviceSettings:null,settingsTrail:[]};
+  return {phase:'boot',user:null,workspaces:[],workspace:null,tab:'employees',page:'home',employees:[],bots:[],tasks:[],devices:[],phones:[],resources:initialResources(),employeeResources:initialEmployeeResources(),selectedEmployee:null,bot:null,conversation:null,messages:[],runs:[],routines:[],report:null,phone:null,draft:'',attachments:[],busy:false,chatLoading:false,error:'',notice:'',filter:'all',search:'',imagePreview:null,task:null,reportSelection:[],botSettings:null,deviceSettings:null,settingsTrail:[]};
 }
 export const id = () => globalThis.crypto?.randomUUID?.() || `mobile-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 export function accountId(state) { return String(state.user?.user_id || state.user?.user?.id || state.user?.id || ''); }
