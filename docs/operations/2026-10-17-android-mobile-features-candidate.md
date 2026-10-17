@@ -24,13 +24,15 @@ Android 工作树：`/Users/zhangjie/.codex/worktrees/android-manager/紫薇`，
 
 - `8e0af6f`：搜索、置顶、草稿及浏览器验证。
 - `012d5e3`：群组、计划待办、提醒中心、原生通知及版本 0.3.0/code10。
-- 后续移动 Bot 单项不可用保护和最终产物身份，见下方最终验收记录。
+- `bba9be8`：移动 Bot 单项不可用时保留旧执行状态，给局部读取错误；群历史不可核对或旧电脑有升级提示时禁止新群执行。
 
 共享候选工作树：`/Users/zhangjie/.codex/worktrees/mobile-runs-timeout/紫薇`，分支 `codex/mobile-notifications-contract`，从冻结 `a80322dc` 开始，未修改主控工作树。
 
 - `dc7e8e4`：只在显式移动 action 读取中将经过绑定校验的完整群 events 转 historyPointer，保留 processExit、botIsolation、Stop、uncertain、decision/plan 和未知证明。默认、MCP、phone-mcp action 响应不变。
 - `ed623d8`：个人只读提醒 API、实际认证路由测试和 groups.read 可选 limit/afterSeq 协议。共享 Windows 客户端必须升级，旧 host 缺 pagedRead 时返回明确升级提示，不回退全量。
-- 后续补齐 Bot latest_run、nativeResources 和 runs 恢复查询中的重复群历史，以及提醒的旧 assignee 名称和关联执行可见性。最终补充 commit 待冻结后记录。
+- `de23cf5`、`f33c36b`：提醒复用当前任务可见性，核对 assignee ID、旧姓名、重复姓名、关联执行及设备；删除或撤权后 list 与 resolve 均隐藏原待办。
+- `a1c02ed`：补齐 Bot latest_run、nativeResources、runs 恢复查询与 conversation.execution 的重复群历史；只读列表的单项不可用不伪造执行状态。原生 event ID 按实际 Hermes 存储的 128 字符规则核对，不能将更宽的 API 请求标识语法误称为合法已存事件。
+- `b8ee17f`：与主控最新启动前回执合同兼容。只有实际 runtime 密封证明满足完整未启动失败字段、且没有 fixture/uncertain/损坏或过大证明时，提醒才显示已确认的启动前失败；其余仍保留待核实。
 
 新提醒接口：`GET /api/workspaces/:slug/mobile/notifications` 与 `/:eventId`；新精确 action 接口：`GET /api/workspaces/:slug/actions/:id?view=mobile`。每次仍核对服务端登录与真实成员权限，不把 cursor 当权限凭据；新移动接口 no-store/Vary Cookie。服务尚未上线时界面显示读取失败，系统通知不会声称启用。
 
@@ -38,7 +40,7 @@ Android 工作树：`/Users/zhangjie/.codex/worktrees/android-manager/紫薇`，
 
 ## 已完成验证与证据范围
 
-- 新功能整合阶段 378 项 Node 单测通过；之后必要的列表不可用保护另增回归，最终计数见下文。
+- 最终 App **380/380** Node 单测通过，包含列表不可用时保留运行中状态、其他员工继续刷新，以及旧群记录未核对时禁止新执行。
 - 320px、390px 浏览器隔离夹具验证群分页、未知请求恢复、成员提及、发送后清正文、旧 host、跨群失败、待办筛选/精确 planned body、提醒转义/新鲜解析/已读重启/撤权。最终复跑 88 个路由请求、16 次夹具 POST，真实业务写入、外部请求、监听均为零。
 - 聊天整理浏览器复跑 48 次夹具请求、8 次合成已读水位，业务写入为零；原历史、图片节点与查找定位均保留。
 - JVM URL 策略 73 检查、通知规则 52 检查、Manifest 边界与 Android API 35 编译通过。仅 INTERNET、POST_NOTIFICATIONS、ACCESS_NETWORK_STATE；未增加无障碍、设备管理员、前台服务、启动广播或浏览器外跳。
@@ -53,4 +55,14 @@ Android 工作树：`/Users/zhangjie/.codex/worktrees/android-manager/紫薇`，
 
 ## 最终验收记录
 
-待共享余项、最终 APK 身份、模拟器最小复核与端口清理冻结后填写；在此之前维持未发布状态。
+最终 App 产品源 `bba9be85c8e55a8f3195673b16e41e330604119c`，APK `mobile-manager/dist/ziwei-manager-0.3.0-internal-code10.apk`，755846 bytes，SHA-256 `85fdb9c6caf90b8c85de1d1e07ffe1b1a1d8bebc98017a6bcb81cb9e265f8cd3`，签名证书 SHA-256 `507531ee91afe6369a2d519d653713a76d2fa54b8f5f76119672f668230ced35`。所有 23 个打包资产逐一与 manifest 和当前源码 SHA 一致。后续文档提交不改变该产品源或 APK。
+
+最终包再次覆盖安装后，原首次安装时间不变；原长聊天读回，未观察到超时、聊天同步失败或运行记录更新失败；本机草稿和置顶仍在。真实系统通知允许和拒绝均验证，拒绝状态下无本 App Job。当前线上提醒 feed 的网页读取为 404，原生验证结束于通用网络错误；不能据此声称原生收到 404，更不能声称正常通知订阅、送达或点击已通过。
+
+模拟器完整 QA 使用独立完整 COW 克隆，最终产品最小复核后正常退出 PID75037、销毁私有克隆并释放 292–296；原 AVD 六盘 SHA/size/mtime 前后完全一致。旧退出阻塞 PID59582 与 267/268/271 未触碰。根最终重新执行 Android 工作树和共享候选工作树的端口中心 check，均 ok=true、无冲突、无未登记端口。两工作树的临时依赖软链接在测试结束后移除。
+
+共享候选最终源 `b8ee17f51a56ece9239fb38ddbf1f63de43ee14b`，从 `a80322dc` 之后共有上述 6 个候选提交。独立审查发现的私有待办提醒泄露 P1、可信启动前失败被误标待核实 P2 均已修复；最终 **Node 85/85、Python 12/12** 通过，无跳过，Python 包含官方原生临时存储 4 项。私有审查证据在共享树 `.local/mobile-backend-review-final`；checked-in 测试不依赖主控未合入的 Git 对象。
+
+辅助群历史的真实认证 app.handle 合成夹具体量：bots 列表 3,833,638→19,367 bytes，Bot 详情 3,826,451→12,180，runs 2,546,822→3,980，conversation 2,826,014→4,772。只将经过原请求、成员和 authority 校验的已知完整群 events 转成历史指针；保留原始 proof，默认响应和业务表不变。此为字节数证据，不是弱网或生产时延承诺。
+
+最终 App 与共享候选都已提交，临时依赖链接均已移除，工作树无未提交变更，端口检查通过。当前仍未发布共享 API、Windows 客户端或 APK。由主控在 `4f26f450` 及 `f587cde` 之后审查合并，保持已上线知微修复和完整 MCP 产品；共享依赖部署及正常提醒/群组联调通过之前，不创建新版公开安装二维码。
