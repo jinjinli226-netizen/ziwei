@@ -38,7 +38,7 @@ export function createMobileNotificationReadService(repo){
   const scan=db.prepare(`${scanSelect} WHERE n.workspace_id=? AND n.rowid>? ORDER BY n.rowid LIMIT ?`);
   const recent=db.prepare(`${scanSelect} WHERE n.workspace_id=? AND n.rowid<=? ORDER BY n.rowid DESC LIMIT ?`);
   const byEvent=db.prepare(`${scanSelect} WHERE n.workspace_id=? AND n.event_id=? AND n.archived_at IS NULL ORDER BY n.rowid DESC LIMIT 1`);
-  const action=db.prepare(`SELECT id,workspace_id,task_id,type,status,acked_at,
+  const actionSelect=`SELECT id,workspace_id,task_id,type,status,acked_at,
     ${scalar('payload_json','$.employeeId')} AS employee_id,
     ${scalar('payload_json','$.conversationId')} AS conversation_id,
     ${scalar('payload_json','$.messageId')} AS message_id,
@@ -47,10 +47,26 @@ export function createMobileNotificationReadService(repo){
     ${scalar('payload_json','$.nativeOperation.resource')} AS resource,
     ${scalar('payload_json','$.nativeOperation.operation')} AS operation,
     ${scalar('payload_json','$.runId')} AS run_id
-    FROM a2a_actions WHERE id=? AND workspace_id=?`);
+    FROM a2a_actions`;
+  const action=db.prepare(`${actionSelect} WHERE id=? AND workspace_id=?`);
+  // Match the management task view's latest execution without loading its
+  // payload, result or event history. A task's current binding may have become
+  // private since its older notification was created.
+  const taskAction=db.prepare(`${actionSelect} WHERE task_id=? AND workspace_id=? ORDER BY created_at DESC LIMIT 1`);
   const employee=db.prepare('SELECT id,workspace_id,status,visibility,owner_user_id,target_device_id,substr(name,1,160) AS name FROM employees WHERE id=? AND workspace_id=?');
   const device=db.prepare('SELECT workspace_id,owner_user_id FROM devices WHERE id=? AND workspace_id=?');
-  const task=db.prepare('SELECT id,state,assignee,substr(title,1,160) AS title FROM tasks WHERE id=? AND workspace_id=?');
+  const task=db.prepare('SELECT id,state,substr(title,1,160) AS title FROM tasks WHERE id=? AND workspace_id=?');
+  const conversationOwner=db.prepare('SELECT employee_id FROM conversations WHERE id=? AND workspace_id=?');
+  // Legacy tasks may store an employee name instead of its ID. Check every
+  // matching employee in SQL, including duplicate names, without hydrating
+  // arbitrary assignee text or a workspace-wide task/employee list.
+  const hiddenTaskAssignee=db.prepare(`SELECT 1 AS found FROM tasks t
+    JOIN employees e ON e.workspace_id=t.workspace_id AND (e.id=t.assignee OR e.name=t.assignee)
+    LEFT JOIN devices d ON d.id=e.target_device_id AND d.workspace_id=e.workspace_id
+    WHERE t.id=? AND t.workspace_id=? AND e.status<>'deleted' AND (
+      (e.visibility='personal' AND ?=0 AND coalesce(e.owner_user_id,'')<>?) OR
+      (e.target_device_id IS NOT NULL AND (d.id IS NULL OR (? IS NOT NULL AND e.target_device_id<>?) OR
+        (?='personal' AND ?=0 AND coalesce(d.owner_user_id,'')<>?)))) LIMIT 1`);
   const automationRun=db.prepare('SELECT 1 AS found FROM automation_runs WHERE id=? AND action_id=? AND workspace_id=?');
   const message=db.prepare('SELECT id FROM conversation_messages WHERE id=? AND conversation_id=?');
   const proof=db.prepare(`SELECT json_valid(result_json) AS valid,
@@ -100,6 +116,20 @@ export function createMobileNotificationReadService(repo){
     if(row.target_device_id&&!allowedDevice(row.target_device_id,ws,actor))return null;
     return row;
   }
+  function visibleTask(id,ws,actor){
+    const row=validId(id)?task.get(id,ws.id):null;if(!row)return null;
+    if(hiddenTaskAssignee.get(id,ws.id,Number(actor.privileged),actor.actorUserId,actor.deviceScope,actor.deviceScope,ws.kind,Number(actor.privileged),actor.actorUserId))return null;
+    const latest=taskAction.get(id,ws.id);
+    if(latest){
+      if(latest.user_id&&!actor.privileged&&latest.user_id!==actor.actorUserId)return null;
+      const employeeId=latest.employee_id||(latest.conversation_id?conversationOwner.get(latest.conversation_id,ws.id)?.employee_id:null);
+      const owner=employeeId?visibleEmployee(employeeId,ws,actor):null;
+      if(employeeId&&!owner)return null;
+      const deviceId=latest.device_id||owner?.target_device_id;
+      if(deviceId&&!allowedDevice(deviceId,ws,actor))return null;
+    }
+    return row;
+  }
   function executionItem(row,ws,actor){
     if(!validId(row.action_id))return null;
     const run=action.get(row.action_id,ws.id);
@@ -119,7 +149,7 @@ export function createMobileNotificationReadService(repo){
       if(!chat||chat.workspace_id!==ws.id||chat.employee_id!==owner.id||chat.device_id&&!allowedDevice(chat.device_id,ws,actor))return null;
       target={kind:'conversation',id:chat.id,employeeId:owner.id,actionId:run.id};
       if(validId(run.message_id)&&message.get(run.message_id,chat.id))target.messageId=run.message_id;
-    }else if(validId(run.task_id)&&task.get(run.task_id,ws.id))target={kind:'task',id:run.task_id,employeeId:owner.id,actionId:run.id};
+    }else if(visibleTask(run.task_id,ws,actor))target={kind:'task',id:run.task_id,employeeId:owner.id,actionId:run.id};
     else return null;
     const receipt=proof.get(run.id,ws.id),flags=receiptFlags.get(run.id,ws.id),exit=json(receipt?.exit_json);
     let confirmed=receipt?.valid===1&&flags.count<=512&&!flags.uncertain&&!flags.fixture&&exit?.launched===true&&Number.isSafeInteger(exit.rootPid)&&exit.rootPid>0&&exit.rootConfirmed===true&&exit.treeConfirmed===true&&exit.activeProcesses===0;
@@ -136,8 +166,7 @@ export function createMobileNotificationReadService(repo){
     if(row.archived_at||!validId(row.event_id)||!row.created_at)return null;
     if(/^a2a\.action\.(succeeded|failed|expired|cancelled|reconciled)$/.test(row.action||''))return executionItem(row,ws,actor);
     if(row.action!=='task.state_changed'||!['review','blocked','todo'].includes(row.task_state)||!validId(row.task_id))return null;
-    const current=task.get(row.task_id,ws.id);if(!current||current.state!==row.task_state||actor.deviceScope)return null;
-    if(current.assignee&&employee.get(current.assignee,ws.id)&&!visibleEmployee(current.assignee,ws,actor))return null;
+    const current=visibleTask(row.task_id,ws,actor);if(!current||current.state!==row.task_state||actor.deviceScope)return null;
     return {id:row.event_id,kind:'attention.required',createdAt:row.created_at,title:boundedText(current.title,120)||'待处理工作',summary:boundedText(row.task_state==='review'?'工作已提交，等待检查。':row.task_state==='blocked'?'工作遇到阻碍，需要处理。':'有一项待处理工作。',240),target:{kind:'task',id:current.id},executionState:'not_applicable'};
   }
   function list(slug,input={},context={}){

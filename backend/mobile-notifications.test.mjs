@@ -4,6 +4,7 @@ import {randomUUID} from 'node:crypto';
 import {IncomingMessage,ServerResponse} from 'node:http';
 import {Duplex} from 'node:stream';
 import {createApp} from './app.mjs';
+import {createManagementService} from './management.mjs';
 import {createMobileNotificationReadService,MOBILE_NOTIFICATION_MAX_BYTES,MOBILE_NOTIFICATION_SCAN_LIMIT} from './mobile-notifications.mjs';
 
 const exitProof=(code=0)=>({launched:true,rootPid:123,rootConfirmed:true,treeConfirmed:true,activeProcesses:0,rootExitCode:code,hostExitCode:code});
@@ -195,6 +196,74 @@ test('task target without a chat resolves only the original task and private ass
   assert.deepEqual(f.service.resolve(f.slug,a.eventId,f.context).item.target,{kind:'task',id:work.id,employeeId:f.employee.id,actionId:a.actionId});
   f.audit('task.state_changed',{taskId:work.id,to:'blocked'});f.db.prepare("UPDATE employees SET visibility='personal' WHERE id=?").run(f.employee.id);
   assert.deepEqual(f.list({},{actorUserId:f.member.user_id}).items,[]);
+});
+
+test('legacy employee-name task assignees and duplicate private names cannot leak through list or resolve',async t=>{
+  const f=fixture(t),privateEmployee=f.repo.createEmployee(f.slug,{name:'Private legacy assignee',runtime:'Codex',visibility:'personal',ownerUserId:f.owner.user_id});
+  f.repo.createEmployee(f.slug,{name:privateEmployee.name,runtime:'Codex',visibility:'workspace',ownerUserId:f.owner.user_id});
+  const management=createManagementService(f.repo),member={actorUserId:f.member.user_id,actorRole:'member',enforceEmployeeVisibility:true};
+  const records=[privateEmployee.id,privateEmployee.name].map(assignee=>{
+    const task=f.repo.createTask(f.slug,{title:'Private task title',state:'blocked',assignee});
+    return {task,...f.audit('task.state_changed',{taskId:task.id,to:'blocked'})};
+  });
+  for(const {task,eventId} of records){
+    assert(!management.tasks(f.slug,{},member).some(row=>row.id===task.id));
+    assert.throws(()=>f.service.resolve(f.slug,eventId,member),{status:404,code:'MOBILE_NOTIFICATION_NOT_FOUND'});
+    assert.equal(f.service.resolve(f.slug,eventId,f.context).item.target.id,task.id);
+    const response=await request(f.app,`/api/workspaces/${f.slug}/mobile/notifications/${eventId}`,{cookie:f.cookie(f.member)});
+    assert.equal(response.status,404);assert(!response.bytes.includes(Buffer.from('Private task title')));
+  }
+  assert.deepEqual(f.list({},member).items,[]);
+  const route=await request(f.app,`/api/workspaces/${f.slug}/mobile/notifications`,{cookie:f.cookie(f.member)});assert.equal(route.status,200);assert.deepEqual(route.json.items,[]);
+  f.db.prepare("UPDATE employees SET visibility='workspace' WHERE id=?").run(privateEmployee.id);
+  assert.equal(f.list({},member).items.length,2);
+  f.db.prepare("UPDATE employees SET visibility='personal' WHERE id=?").run(privateEmployee.id);
+  assert.deepEqual(f.list({},member).items,[]);
+});
+
+test('task reminders recheck the latest execution user, conversation employee and personal device binding',t=>{
+  const f=fixture(t,{kind:'personal'}),task=f.repo.createTask(f.slug,{title:'Restricted linked execution',state:'review'}),member={actorUserId:f.member.user_id,actorRole:'member',enforceEmployeeVisibility:true};
+  const management=createManagementService(f.repo),notice=f.audit('task.state_changed',{taskId:task.id,to:'review'}),run=f.execution({type:'task.execute',taskId:task.id,payload:{conversationId:null,userId:f.owner.user_id}});
+  const assertHidden=()=>{
+    assert(!management.tasks(f.slug,{},member).some(row=>row.id===task.id));
+    assert(!f.list({},member).items.some(row=>row.id===notice.eventId));
+    assert.throws(()=>f.service.resolve(f.slug,notice.eventId,member),{status:404});
+  };
+  assertHidden();assert.equal(f.service.resolve(f.slug,notice.eventId,f.context).item.target.id,task.id);
+  const secret=f.repo.createEmployee(f.slug,{name:'Private linked employee',runtime:'Codex',visibility:'personal',ownerUserId:f.owner.user_id}),chat=f.repo.createConversation(f.slug,{employeeId:secret.id});
+  f.db.prepare('UPDATE a2a_actions SET payload_json=? WHERE id=?').run(JSON.stringify({conversationId:chat.id}),run.actionId);assertHidden();
+  f.db.prepare("UPDATE employees SET visibility='workspace' WHERE id=?").run(secret.id);
+  assert.equal(f.service.resolve(f.slug,notice.eventId,member).item.target.id,task.id);
+  f.repo.heartbeatDevice(f.slug,{deviceId:'private-task-pc'});f.db.prepare('UPDATE devices SET owner_user_id=? WHERE id=?').run(f.owner.user_id,'private-task-pc');
+  f.db.prepare('UPDATE employees SET target_device_id=? WHERE id=?').run('private-task-pc',secret.id);assertHidden();
+  f.db.prepare('UPDATE devices SET owner_user_id=? WHERE id=?').run(f.member.user_id,'private-task-pc');
+  assert.equal(f.service.resolve(f.slug,notice.eventId,member).item.target.id,task.id);
+});
+
+test('task-only execution targets obey current ID/name assignees and latest execution visibility',t=>{
+  const f=fixture(t),privateEmployee=f.repo.createEmployee(f.slug,{name:'Hidden task owner',runtime:'Codex',visibility:'personal',ownerUserId:f.owner.user_id}),member={actorUserId:f.member.user_id};
+  for(const assignee of [privateEmployee.id,privateEmployee.name]){
+    const task=f.repo.createTask(f.slug,{title:'Private execution target',state:'completed',assignee}),run=f.execution({type:'task.execute',taskId:task.id,payload:{conversationId:null}});
+    assert(!f.list({},member).items.some(row=>row.id===run.eventId));
+    assert.throws(()=>f.service.resolve(f.slug,run.eventId,member),{status:404});
+    assert.equal(f.service.resolve(f.slug,run.eventId,f.context).item.target.id,task.id);
+  }
+  const task=f.repo.createTask(f.slug,{title:'Task reassigned after original run',state:'completed'}),original=f.execution({type:'task.execute',taskId:task.id,payload:{conversationId:null}});
+  assert.equal(f.service.resolve(f.slug,original.eventId,member).item.target.id,task.id);
+  const latest=f.execution({type:'task.execute',taskId:task.id,payload:{employeeId:privateEmployee.id,conversationId:null}});
+  f.db.prepare('UPDATE a2a_actions SET created_at=? WHERE id=?').run('2026-10-17T12:00:00Z',latest.actionId);
+  assert.throws(()=>f.service.resolve(f.slug,original.eventId,member),{status:404});
+});
+
+test('task visibility uses thin scalar reads and keeps unrelated same-name workspace employees isolated',t=>{
+  const f=fixture(t),other=f.auth.createWorkspace(f.owner.user_id,{slug:'task-assignee-other',name:'Other',kind:'team'}).workspace;
+  f.repo.createEmployee(other.slug,{name:'Same name elsewhere',runtime:'Codex',visibility:'personal',ownerUserId:f.owner.user_id});
+  const task=f.repo.createTask(f.slug,{title:'Visible task',state:'blocked',assignee:'Same name elsewhere'}),notice=f.audit('task.state_changed',{taskId:task.id,to:'blocked'});
+  f.execution({type:'task.execute',taskId:task.id,payload:{conversationId:null,prompt:'private content '.repeat(100000)},result:{processExit:exitProof(),output:'private result '.repeat(100000)}});
+  for(const name of ['listTasks','listEmployees','getTask','getA2AAction','getConversation','listNotifications'])f.repo[name]=()=>{throw new Error('Full task/action hydration forbidden');};
+  const member={actorUserId:f.member.user_id};
+  assert.equal(f.service.resolve(f.slug,notice.eventId,member).item.target.id,task.id);
+  const feed=f.list({},member);assert(feed.items.some(row=>row.id===notice.eventId));assert(Buffer.byteLength(JSON.stringify(feed))<4000);
 });
 
 test('superseded action audit and malformed/mismatched original event do not resolve',t=>{
