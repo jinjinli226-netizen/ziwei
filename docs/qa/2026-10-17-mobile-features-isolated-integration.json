@@ -1,0 +1,148 @@
+{
+  "schemaVersion": 1,
+  "checkedAt": "2026-10-17T20:52:25.503217+08:00",
+  "verdict": "isolated_source_prepared_live_integration_pending",
+  "sources": {
+    "baseMain": "8629091c2993e32625b25cfe7835805541286f4f",
+    "sharedCandidate": "20da8856beb7f008d8c3b85f65103f53b9deef19",
+    "sharedMergeCommit": "d20bd2c533a6aa91cd698a4ebf3d236233651295",
+    "androidRuntime": "ab5045a23c814032937bf4b4143fac2fc9f6012b",
+    "androidMobileManagerTree": "fbb6cf70a26ee8cc72a9f81cedc3b0334c3074ff",
+    "selectedAndroidDocs": "6dc0e698f06b1e302103642e8724b5f83fe2498c",
+    "integratedProductCommit": "b15f2dcdfb87e37d0cccf39d6118902d5c644cfd",
+    "testedSourceCommit": "f753c534fd883725a590de2c263e616782e3bc6b"
+  },
+  "sourceBoundary": {
+    "sharedPaths": 12,
+    "androidFiles": 67,
+    "selectedDocuments": 3,
+    "unchangedBaseFiles": 698,
+    "independentChecksPassed": 20,
+    "evidenceInReleaseWorktree": ".local/mobile-features-integration-review/manifest-b15f2dc.json",
+    "evidenceSha256": "89e49b56a85980f4ccf2fea6a15e8989699f3961dc51634d72a8ba7d4fedd395",
+    "note": "Complete 20da history merged; Android exact subtree imported without its stale backend/MCP/web branch changes. Subsequent f753c53 changes only the navigation test harness, not product runtime."
+  },
+  "verification": {
+    "integratedContracts": {
+      "tests": 143,
+      "pass": 143,
+      "fail": 0,
+      "skip": 0,
+      "evidence": ".local/mobile-integrated-verification/integrated-contracts.log",
+      "sha256": "9c1319924175732e47003155e0e0cbe5dbc273ec21fa1d7e6b9f4064797650a5"
+    },
+    "nestedOfficialPython": {
+      "pass": 12,
+      "fail": 0,
+      "skip": 0,
+      "evidence": ".local/mobile-integrated-verification/integrated-contracts.log"
+    },
+    "androidWebUnit": {
+      "tests": 387,
+      "pass": 387,
+      "fail": 0,
+      "skip": 0,
+      "evidence": ".local/mobile-integrated-verification/android-web-unit.log",
+      "sha256": "0121a4c8fcda7e13eee30e19d871c43aabb66062af7c678c65fd9e75fb027342"
+    },
+    "prelaunchIsolated": {
+      "tests": 27,
+      "pass": 27,
+      "fail": 0,
+      "skip": 0,
+      "evidence": ".local/mobile-integrated-verification/prelaunch-isolated.log",
+      "sha256": "af1d166521a6ea484f57638ec188a3c5fa20aa42916372540549049f4366ab7a"
+    },
+    "chatContractsFinal": {
+      "tests": 67,
+      "pass": 67,
+      "fail": 0,
+      "skip": 0,
+      "evidence": ".local/mobile-integrated-verification/preserved-chat-contracts-fixture-recheck.log",
+      "sha256": "23bbfbcaa4d6b9308a542dccc2ffe073a2c1b467ceffd200298279dda140992a"
+    },
+    "nativeJvm": {
+      "urlChecks": 73,
+      "notificationChecks": 52,
+      "manifestPassed": true,
+      "evidence": ".local/mobile-integrated-verification/android-native-jvm.log"
+    },
+    "lint": {
+      "sourceFiles": 185,
+      "passed": true,
+      "evidence": ".local/mobile-integrated-verification/lint.log"
+    },
+    "frontendBuild": {
+      "passed": true,
+      "evidence": ".local/mobile-integrated-verification/frontend-build.log"
+    },
+    "independentNegativeCases": {
+      "pass": 3,
+      "fail": 0,
+      "scope": [
+        "all view variants private group scope",
+        "logical profile spoof rejected",
+        "public proof hidden"
+      ]
+    }
+  },
+  "preservedFailure": {
+    "initialIntegratedChatContracts": {
+      "tests": 67,
+      "pass": 66,
+      "fail": 1,
+      "skip": 0,
+      "evidence": ".local/mobile-integrated-verification/preserved-chat-contracts.log",
+      "sha256": "d9ef8993e6d8a6a6d1d30eb4037fb1dc3d214713ae014cff1f50580a87bb77aa"
+    },
+    "baselineSameFailure": {
+      "tests": 67,
+      "pass": 66,
+      "fail": 1,
+      "evidenceInReleaseWorktree": ".local/mobile-public-proof-final-review/frontend-preservation-baseline.log"
+    },
+    "cause": "The existing navigation harness used real openConversation after 4f introduced executionNeedsPolling but omitted that imported helper from the dynamic function context. The missing dependency was caught as a failed open. The test harness now supplies the real helper and asserts no concealed error. Product code was not changed.",
+    "priorReviewMacProbeFailure": "The earlier 95-test 94/1 result remains preserved in the main review record; this preparation does not rewrite it."
+  },
+  "fallback": {
+    "prepared": true,
+    "roundTripTested": true,
+    "scope": "isolated source and fixture database verification only; production switching remains untested",
+    "branch": "codex/mobile-data-safe-fallback",
+    "implementationCommit": "72a0dac428e8f16c1479258142c23dec7d67a687",
+    "headIncludingIndependentEvidence": "a942f3635517d33989b1cfb1b0f1b5dc6cc09406",
+    "runtimeBlob": "5afd5cb37d604e0b770cbdea56dbbeae98e80b60",
+    "pass": 11,
+    "fail": 0,
+    "skip": 0,
+    "compatibilityScenarios": 6,
+    "actualFixtureConnectionPhases": 13,
+    "rootEvidenceInFallbackWorktree": ".local/mobile-data-safe-fallback/root-final-verification-with-deps.json",
+    "rootEvidenceSha256": "7941d3b4aafad6e31dbc5e7ff8f046b3a5a8723b42c38a71b34b2fcbefba8373",
+    "independentEvidenceInFallbackWorktree": ".local/mobile-data-safe-fallback/independent-review-result.json",
+    "committedReport": "docs/qa/2026-10-17-mobile-data-safe-fallback.json",
+    "requirements": "Preserve trusted task assignment writer and actual-change invalidation markers, atomic events, and public projections. Do not substitute the unpatched base or restore a business database. If an unpatched writer was used after activation, this fallback cannot reconstruct missing history."
+  },
+  "liveIntegrationPending": [
+    "Actual API feature revision and target Windows installed build with native schema2 paged-read capability",
+    "Exact code10 APK normal-network chat/history/draft/group acceptance",
+    "Authorized persistent native room read and collaboration acceptance",
+    "Notification permission/baseline/OS job/natural delivery/fresh resolve acceptance"
+  ],
+  "androidApk": {
+    "sha256": "cc2d17f5f445c27e09d967c7f5993811410aa9ff6a8808457c86bf9b0523bcad",
+    "repacked": false,
+    "publiclyPublished": false,
+    "normalNetworkStatus": "partial_blocked_native_network; previous code9 shares TLS failure; no replacement of exact-package acceptance"
+  },
+  "effects": {
+    "mainReleaseBranchProductChanged": false,
+    "productionChanged": false,
+    "apiDeployed": false,
+    "windowsPublished": false,
+    "modelOrBusinessDispatched": false,
+    "listenersStarted": 0,
+    "schemaChanged": false
+  },
+  "primaryIncident": "The historical Zhiwei action still lacks its original Windows receipt; this preparation does not settle or replay it."
+}
