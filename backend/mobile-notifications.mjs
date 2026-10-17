@@ -152,15 +152,20 @@ export function createMobileNotificationReadService(repo){
     }else if(visibleTask(run.task_id,ws,actor))target={kind:'task',id:run.task_id,employeeId:owner.id,actionId:run.id};
     else return null;
     const receipt=proof.get(run.id,ws.id),flags=receiptFlags.get(run.id,ws.id),exit=json(receipt?.exit_json);
-    let confirmed=receipt?.valid===1&&flags.count<=512&&!flags.uncertain&&!flags.fixture&&exit?.launched===true&&Number.isSafeInteger(exit.rootPid)&&exit.rootPid>0&&exit.rootConfirmed===true&&exit.treeConfirmed===true&&exit.activeProcesses===0;
+    const trustedProof=receipt?.valid===1&&flags.count<=512&&!flags.uncertain&&!flags.fixture;
+    // The paired dispatcher also records a sealed runtime-prelaunch failure:
+    // no root was spawned and its owned tree is empty. Keep that definitive
+    // failed result distinct from missing or uncertain exit evidence.
+    const notLaunched=trustedProof&&run.status==='failed'&&exit?.supervisor==='runtime-prelaunch'&&exit.launched===false&&exit.rootPid===null&&exit.rootExitCode===null&&exit.rootConfirmed===false&&exit.treeConfirmed===true&&exit.activeProcesses===0&&exit.cancelled===false&&!exit.failureCode&&!exit.signal&&exit.hostExitCode==null;
+    let confirmed=trustedProof&&exit?.launched===true&&Number.isSafeInteger(exit.rootPid)&&exit.rootPid>0&&exit.rootConfirmed===true&&exit.treeConfirmed===true&&exit.activeProcesses===0;
     if(run.status==='succeeded')confirmed=confirmed&&exit.rootExitCode===0&&exit.cancelled!==true&&!exit.failureCode&&!exit.signal&&(exit.hostExitCode==null||exit.hostExitCode===0);
-    else if(run.status==='failed')confirmed=confirmed&&(Number.isSafeInteger(exit?.rootExitCode)||exit?.rootExitCode===null&&(exit.cancelled===true||typeof exit.signal==='string'&&Boolean(exit.signal)));
+    else if(run.status==='failed')confirmed=notLaunched||confirmed&&(Number.isSafeInteger(exit?.rootExitCode)||exit?.rootExitCode===null&&(exit.cancelled===true||typeof exit.signal==='string'&&Boolean(exit.signal)));
     else confirmed=false;
     if(!run.acked_at&&receipt?.code==='BOT_CANCELLED_BEFORE_START'||confirmed&&(exit.cancelled===true||receipt.stop_confirmed==='1'||receipt.nested_stop_confirmed==='1'))return null;
     const kind=confirmed?(run.status==='succeeded'?'execution.completed':'execution.failed'):'attention.required';
     const name=boundedText(owner.name,80)||'数字员工';
     return {id:row.event_id,kind,createdAt:row.created_at,title:boundedText(`${name} · ${kind==='execution.completed'?'执行完成':kind==='execution.failed'?'执行失败':'执行待核实'}`,120),
-      summary:boundedText(kind==='execution.completed'?'执行已结束，可查看原聊天中的结果。':kind==='execution.failed'?'执行已结束并返回失败，请查看原记录。':'原执行的结束状态尚未完整确认，请查看原回执；不会自动重试。',240),target,executionState:confirmed?'confirmed':'uncertain'};
+      summary:boundedText(kind==='execution.completed'?'执行已结束，可查看原聊天中的结果。':kind==='execution.failed'?(notLaunched?'执行在启动前未能开始，请查看原记录。':'执行已结束并返回失败，请查看原记录。'):'原执行的结束状态尚未完整确认，请查看原回执；不会自动重试。',240),target,executionState:confirmed?'confirmed':'uncertain'};
   }
   function itemFor(row,ws,actor){
     if(row.archived_at||!validId(row.event_id)||!row.created_at)return null;

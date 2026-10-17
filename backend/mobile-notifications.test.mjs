@@ -5,6 +5,7 @@ import {IncomingMessage,ServerResponse} from 'node:http';
 import {Duplex} from 'node:stream';
 import {createApp} from './app.mjs';
 import {createManagementService} from './management.mjs';
+import {markHermesLauncherFailure,consumeRuntimePrelaunchEvidence,completeRuntimeExit} from '../src/runtime-launch-evidence.mjs';
 import {createMobileNotificationReadService,MOBILE_NOTIFICATION_MAX_BYTES,MOBILE_NOTIFICATION_SCAN_LIMIT} from './mobile-notifications.mjs';
 
 const exitProof=(code=0)=>({launched:true,rootPid:123,rootConfirmed:true,treeConfirmed:true,activeProcesses:0,rootExitCode:code,hostExitCode:code});
@@ -118,6 +119,33 @@ test('uncertain, fixture, missing, invalid, unconfirmed or oversized proof stays
   for(const result of variants)f.execution({result});f.execution({status:'expired'});
   const malformed=f.execution();f.db.prepare('UPDATE a2a_actions SET result_json=? WHERE id=?').run('{bad json',malformed.actionId);
   const rows=f.list({limit:50}).items;assert.equal(rows.length,variants.length+2);assert(rows.every(item=>item.kind==='attention.required'&&item.executionState==='uncertain'));
+});
+
+test('an actual sealed runtime-prelaunch failed receipt stays definitive and says it could not start',t=>{
+  const f=fixture(t),error=markHermesLauncherFailure(new Error('Synthetic launcher resolution failure'));
+  const evidence=consumeRuntimePrelaunchEvidence(error);assert(evidence);assert.equal(consumeRuntimePrelaunchEvidence(error),null);assert(completeRuntimeExit(evidence.processExit));
+  // main 383d4cbbaa2bc59a0ee3d9c6fee0b561096d64d3's sealed bot-start
+  // admission proof was executed independently and has this exact same exit
+  // contract. Keep the test coupled to a real runtime-created proof, rather
+  // than inventing a launched:false-only object or changing dispatch rules.
+  assert.deepEqual(evidence.processExit,{platform:process.platform,supervisor:'runtime-prelaunch',launched:false,rootPid:null,rootConfirmed:false,rootExitCode:null,treeConfirmed:true,activeProcesses:0,cancelled:false});
+  for(const nested of [false,true]){
+    const result={code:'BOT_REVISION_CONFLICT',...evidence},run=f.execution({status:'failed',result:nested?{result}:result}),item=f.service.resolve(f.slug,run.eventId,f.context).item;
+    assert.equal(item.kind,'execution.failed');assert.equal(item.executionState,'confirmed');assert.match(item.summary,/启动前未能开始/);assert(!/待核实/.test(item.title+item.summary));
+    assert.deepEqual(f.repo.getA2AAction(run.actionId).result,nested?{result}:result);
+  }
+});
+
+test('prelaunch classification requires every definitive no-launch field and keeps uncertain/fixture/size limits',t=>{
+  const f=fixture(t),evidence=consumeRuntimePrelaunchEvidence(markHermesLauncherFailure(new Error('Synthetic launcher failure'))),base=evidence.processExit;
+  const variants=[{launched:false}];
+  for(const [key,value] of [['supervisor','windows-job'],['launched',true],['rootPid',0],['rootExitCode',0],['rootConfirmed',true],['treeConfirmed',false],['activeProcesses',1],['cancelled',true],['failureCode','UNCONFIRMED'],['signal','SIGTERM'],['hostExitCode',1]])variants.push({...base,[key]:value});
+  for(const key of ['supervisor','launched','rootPid','rootExitCode','rootConfirmed','treeConfirmed','activeProcesses','cancelled']){const value={...base};delete value[key];variants.push(value);}
+  for(const processExit of variants)f.execution({status:'failed',result:{...evidence,processExit}});
+  for(const extra of [{fixture:true},{code:'EXECUTION_UNCERTAIN'},{executionState:'uncertain'},{nested:{status:'uncertain'}},{many:Array.from({length:520},()=>0)}])f.execution({status:'failed',result:{...evidence,...extra}});
+  f.execution({status:'failed',result:{...evidence,processExit:{...base,padding:'x'.repeat(9000)}}});
+  f.execution({status:'succeeded',result:evidence});
+  const items=f.list({limit:50}).items;assert.equal(items.length,variants.length+7);assert(items.every(item=>item.kind==='attention.required'&&item.executionState==='uncertain'));
 });
 
 test('large image/output/prompt strings never hydrate through repo APIs or escape the thin projection',t=>{
