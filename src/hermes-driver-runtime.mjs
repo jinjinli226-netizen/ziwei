@@ -1,4 +1,5 @@
 import {executeHermesNative} from './hermes-native-runtime.mjs';
+import {hasBotStartAdmissionPrelaunchEvidence} from './runtime-launch-evidence.mjs';
 
 export const executionUncertain=value=>Boolean(value&&typeof value==='object'&&(value.code==='EXECUTION_UNCERTAIN'||value.executionState==='uncertain'||executionUncertain(value.result)));
 
@@ -7,7 +8,7 @@ export async function executeNativeDriver(action,options,{prepareManagement,runT
   const operation=options.operation;
   let prepared;
   try{prepared=await native({...options,operation:{...operation,operation:'_prepare'}});}
-  catch(error){return{status:'failed',...(error.definitelyNotStarted===true?{}:{code:'EXECUTION_UNCERTAIN',executionState:'uncertain'}),error:'原生 prepare 没有可验证回执',result:{code:error.definitelyNotStarted===true?'NATIVE_OPERATION_REJECTED':'EXECUTION_UNCERTAIN'}};}
+  catch(error){if(hasBotStartAdmissionPrelaunchEvidence(error))throw error;return{status:'failed',...(error.definitelyNotStarted===true?{}:{code:'EXECUTION_UNCERTAIN',executionState:'uncertain'}),error:'原生 prepare 没有可验证回执',result:{code:error.definitelyNotStarted===true?'NATIVE_OPERATION_REJECTED':'EXECUTION_UNCERTAIN'}};}
   if(prepared.status!=='succeeded'||!prepared.result.nativeOperation.data.run)return prepared;
   const data=prepared.result.nativeOperation.data;
   let turn,modelRequested=false;

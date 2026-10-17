@@ -12,6 +12,7 @@ import { createManagementBootstrap } from './management-bootstrap.mjs';
 import {normalizeRuntimeProfile} from './employee-runtime.mjs';
 import { isNativeRuntimeAction, resolveWindowsWorkdir, resolveWindowsWorkdirPath, windowsDirectoryError } from './windows-workdir.mjs';
 import { createImageArtifactSession } from './conversation-image-artifacts.mjs';
+import {markBotStartAdmissionDenied} from './runtime-launch-evidence.mjs';
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_OUTPUT_BYTES = 1024 * 1024;
@@ -382,7 +383,11 @@ export function createLocalActionExecutor({runtimeDir, admissionHandledByDispatc
       if(!action.payload?.hermesBot)return;
       if(!deviceToken || action.payload.hermesBot.workspace!==workspace)throw new Error('Bot 缺少当前工作区已配对设备凭据');
       const response=await fetch(`${String(apiBase).replace(/\/$/,'')}/a2a/v1/actions/${encodeURIComponent(action.id)}/bot-start`,{method:'POST',headers:{'content-type':'application/json','x-ziwei-device-token':deviceToken},body:JSON.stringify({workspace}),signal:context.signal?AbortSignal.any([context.signal,AbortSignal.timeout(10000)]):AbortSignal.timeout(10000),redirect:'error'});
-      const value=await response.json();if(!response.ok || value.allowed!==true)throw Object.assign(new Error(value.error || 'Bot 执行授权已过期或已暂停'),{definitelyNotStarted:true});
+      const value=await response.json();if(!response.ok || value.allowed!==true){
+        const error=Object.assign(new Error(value.error || 'Bot 执行授权已过期或已暂停'),{definitelyNotStarted:true,...(typeof value.code==='string'?{code:value.code}:{})});
+        const bot=action.payload.hermesBot;
+        throw markBotStartAdmissionDenied(error,{status:response.status,code:value.code,actionId:action.id,workspace,employeeId:bot.employeeId,deviceId,profile:bot.sourceProfile,revision:bot.revision,controlEpoch:bot.controlEpoch});
+      }
     };
     if (type === 'device.workspace.connect') {
       if (!onWorkspaceConnect) throw new Error('本机连接不允许接收共享工作区授权');

@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import {IncomingMessage,ServerResponse} from 'node:http';
+import {Duplex} from 'node:stream';
 import { createRepository } from '../../backend/repository.mjs';
 import { createApp } from '../../backend/app.mjs';
 import {conversationSettingsSnapshot,mergeConversationSettingsDraft} from './workdir.js';
@@ -14,16 +16,27 @@ const execution = (id, status, second=1) => ({ id, status, created_at:`2026-10-1
 const conversation = action => ({ id:'conversation', employee_id:'employee', title:'Fixture', messages:[], execution:action });
 const deferred = () => { let resolve; const promise = new Promise(accept => resolve=accept); return { promise, resolve }; };
 
+async function readApi(app,path,cookie) {
+  const socket=new Duplex({read(){},write(_chunk,_encoding,done){done();}}),req=new IncomingMessage(socket),res=new ServerResponse(req),chunks=[];
+  req.method='GET';req.url=path;req.headers={host:'conversation-state.fixture',cookie};
+  try{return await new Promise((resolve,reject)=>{
+    res.write=(chunk,encoding,done)=>{if(chunk)chunks.push(Buffer.isBuffer(chunk)?chunk:Buffer.from(chunk,encoding));done?.();return true;};
+    res.end=(chunk,encoding,done)=>{if(chunk)chunks.push(Buffer.isBuffer(chunk)?chunk:Buffer.from(chunk,typeof encoding==='string'?encoding:undefined));done?.();assert.equal(res.statusCode,200);resolve(JSON.parse(Buffer.concat(chunks)));res.emit('finish');return res;};
+    req.on('error',reject);res.on('error',reject);app.handle(req,res,error=>reject(error||new Error('Unhandled fixture request')));req.push(null);
+  });}finally{socket.destroy();}
+}
+
 function harness(overrides={}, { realOpen=false,realtime=false }={}) {
   const selectedConversation = { value:conversation(execution('A','succeeded')) };
   const conversations = { value:[conversation(execution('A','succeeded'))] };
   const workspace = { value:'workspace' };
   const reopened = [];
+  const polling = [];
   const bindings = {
     botChatIntent:{value:null},botBindingPending:{value:false},selectedConversation, conversations, conversationExecution:{ value:selectedConversation.value.execution }, conversationEmployeeId:{ value:'employee' }, conversationStatusLoading:{ value:false },
     workspaceSlug:()=>workspace.value, conversationIdFromPath:()=> 'conversation', conversationRouteId:{ value:'conversation' },
     api:{ conversation:async()=>selectedConversation.value, conversations:async()=>({conversations:conversations.value}), ...overrides },
-    openConversation:async item=>reopened.push(item), stopConversationPolling:()=>{}, startConversationPolling:()=>{}, notify:()=>{},
+    openConversation:async item=>reopened.push(item), stopConversationPolling:()=>polling.push('stop'), startConversationPolling:()=>polling.push('start'), notify:()=>{},
     conversationModelId:{value:'draft-model'},conversationDeviceId:{value:'draft-device'},conversationWorkingDirectory:{value:'C:/draft'},conversationDraft:{value:'unsent draft'},devices:{value:[]},page:{value:'inbox'},
     clearConversationAttachment:()=>reopened.push('clear-attachments'),history:{pushState:()=>reopened.push('route')},routePath:()=>'/workspace/inbox',
     closeRealtime:()=>{},authState:{value:{authenticated:true}},eventSource:{value:null},loadNotifications:()=>{},refreshTasks:()=>{},
@@ -41,8 +54,24 @@ function harness(overrides={}, { realOpen=false,realtime=false }={}) {
     return app.slice(start,end+2);
   }).join('\n');
   const api = new Function(...Object.keys(bindings),`let conversationOpenGeneration=0,conversationListGeneration=0,conversationPollTimer=null,conversationRefresh=null;const conversationExecutionBusy={get value(){return executionPresentation(conversationExecution.value).busy}}; const conversationRequests=typeof createConversationRequestSequence==='function'?createConversationRequestSequence():null; ${functions}; return {loadConversations,refreshSelectedConversation,refreshConversationState${realOpen?',openConversation':''}${realtime?',openRealtime':''}};`)(...Object.values(bindings));
-  return { ...bindings, ...api, workspace, reopened };
+  return { ...bindings, ...api, workspace, reopened, polling };
 }
+
+test('opening an uncertain conversation starts receipt polling even though execution is not busy',async()=>{
+  const unknown={...execution('original','failed'),result:{code:'EXECUTION_UNCERTAIN',executionState:'uncertain'}};
+  const ui=harness({conversation:async()=>conversation(unknown)},{realOpen:true});
+  ui.selectedConversation.value=null;
+  assert.equal(await ui.openConversation('conversation'),true);
+  assert.equal(state.executionPresentation(ui.conversationExecution.value).busy,false);
+  assert.deepEqual(ui.polling,['start']);
+});
+
+test('opening a confirmed failed conversation does not keep receipt polling alive',async()=>{
+  const ui=harness({conversation:async()=>conversation(execution('confirmed','failed'))},{realOpen:true});
+  ui.selectedConversation.value=null;
+  assert.equal(await ui.openConversation('conversation'),true);
+  assert.deepEqual(ui.polling,['stop']);
+});
 
 test('same-conversation detail cannot regress when an earlier request finishes last', async()=>{
   const first=deferred(),second=deferred();let calls=0;
@@ -151,11 +180,7 @@ test('real isolated conversation API keeps list/detail on the next action after 
   const first=repo.addConversationMessage(session.id,{content:'fixture A'});
   repo.ackA2AAction(first.execution.id);
   repo.resultA2AAction(first.execution.id,{result:{output:'fixture A completed'}});
-  const server=app.listen(0,'127.0.0.1');
-  await new Promise((resolve,reject)=>{server.once('listening',resolve);server.once('error',reject);});
-  t.after(()=>new Promise(resolve=>server.close(resolve)));
-  const base=`http://127.0.0.1:${server.address().port}`;
-  const read=async path=>{const response=await fetch(base+path,{headers:{cookie:`ziwei_session=${owner.session.token}`}});assert.equal(response.status,200);return response.json();};
+  const read=path=>readApi(app,path,`ziwei_session=${owner.session.token}`);
   const initial=await read(`/api/conversations/${session.id}`);
   const ui=harness({conversation:id=>read(`/api/conversations/${id}`),conversations:()=>read(`/api/workspaces/${workspace.slug}/conversations`)});
   ui.selectedConversation.value=initial;ui.conversationExecution.value=initial.execution;ui.conversations.value=[initial];
@@ -176,8 +201,8 @@ test('actual polling waits for its current slow request instead of starving acce
   let tick,requests=0;
   const response=deferred();
   const start=app.indexOf('function startConversationPolling('),end=app.indexOf('\n}',start);
-  const begin=new Function('selectedConversation','page','setInterval','clearInterval','refreshSelectedConversation','refreshConversationState','conversationExecutionBusy',`let conversationPollTimer=null,conversationOpenGeneration=0;function stopConversationPolling(){conversationPollTimer=null;}return (${app.slice(start,end+2)});`)(
-    {value:{id:'conversation'}},{value:'inbox'},callback=>{tick=callback;return 'fixture-timer';},()=>{},()=>{requests++;return response.promise;},()=>{requests++;return response.promise;},{value:true},
+  const begin=new Function('selectedConversation','page','setInterval','clearInterval','refreshSelectedConversation','refreshConversationState','conversationExecutionBusy','executionNeedsPolling','conversationExecution',`let conversationPollTimer=null,conversationOpenGeneration=0;function stopConversationPolling(){conversationPollTimer=null;}return (${app.slice(start,end+2)});`)(
+    {value:{id:'conversation'}},{value:'inbox'},callback=>{tick=callback;return 'fixture-timer';},()=>{},()=>{requests++;return response.promise;},()=>{requests++;return response.promise;},{value:true},state.executionNeedsPolling,{value:execution('running','acked')},
   );
   begin();const first=tick(),overlap=tick();
   assert.equal(requests,1);

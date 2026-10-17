@@ -16,6 +16,7 @@ import { normalizeBotConfig } from './hermes-bot-config.mjs';
 import {hermesBotToolsets} from './hermes-mcp-config.mjs';
 import {parseBotReasoningProof} from './hermes-bot-reasoning.mjs';
 import {resolveHermesLauncher} from './hermes-launcher.mjs';
+import {runBeforeSpawnAdmission} from './runtime-launch-evidence.mjs';
 export {parseBotReasoningProof} from './hermes-bot-reasoning.mjs';
 export { prepareHermesBotHome } from './hermes-bot-runtime.mjs';
 
@@ -1124,7 +1125,7 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
     state.lineBuffer = lines.pop() || '';
     for (const line of lines) parseRuntimeStreamLine(line, state, emitOutput, emitStage);
   };
-  if(beforeSpawn) {try{await beforeSpawn();}catch(error){cleanupOverlay();throw error;}}
+  if(beforeSpawn) {try{await runBeforeSpawnAdmission(beforeSpawn);}catch(error){cleanupOverlay();throw error;}}
   return new Promise((resolve, reject) => {
     let supervision;
     try { profileBinding?.verify({env:childEnv,cwd}); supervision = spawnSupervisedRuntime({ command: spec.command, args: spec.args, cwd: path.resolve(String(cwd || process.cwd())), env: childEnv }); }

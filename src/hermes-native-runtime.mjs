@@ -3,6 +3,7 @@ import path from 'node:path';
 import {createHermesExecutionOverlay,hermesMcpSpawnSpec,hermesProfileHome,discoverInstalledRuntimes} from './runtime-adapters.mjs';
 import {prepareHermesBotHome} from './hermes-bot-runtime.mjs';
 import {spawnSupervisedRuntime} from './runtime-process.mjs';
+import {runBeforeSpawnAdmission} from './runtime-launch-evidence.mjs';
 
 export function nativeSpawn({context,baseHome,privateDirectory,workspace,apiBase,binary,env={},worker=false,cwd=process.cwd()}={}) {
   const profile=context.sourceProfile || 'default';
@@ -17,7 +18,7 @@ export function nativeSpawn({context,baseHome,privateDirectory,workspace,apiBase
 
 /** A bounded native operation, under the same Windows Job supervision as turns. */
 export async function executeHermesNative(options={}) {
-  if(options.beforeSpawn)await options.beforeSpawn();
+  if(options.beforeSpawn)await runBeforeSpawnAdmission(options.beforeSpawn);
   const spec=nativeSpawn(options),signal=options.signal;
   const supervision=spawnSupervisedRuntime(spec),{child}=supervision;
   options.onSupervision?.(supervision);

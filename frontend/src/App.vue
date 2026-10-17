@@ -26,7 +26,7 @@ import {botPresence,executionUncertain,botStopPresentation,botRecoveryEvent} fro
 import {canForceRemoveEmployee,employeeRemovalPrompt,employeeRemovalNotice,forceEmployeeRemovalDetail} from './employee-removal.js';
 import {deviceRuntimes,runtimePresentation} from './device-runtimes.js';
 import { createConversationComposerStore, clipboardImageFiles, readConversationImages, CONVERSATION_IMAGE_LIMIT } from './conversation-compose.js';
-import { createConversationRequestSequence, executionPresentation, mergeConversationDetail, mergeConversationLists } from './conversation-execution-state.mjs';
+import { createConversationRequestSequence, executionPresentation, executionNeedsPolling, mergeConversationDetail, mergeConversationLists } from './conversation-execution-state.mjs';
 import { defaultWorkdirPayload, employeeConversationPayload, conversationSettingsSnapshot, mergeConversationSettingsDraft } from './workdir.js';
 import { Search, Plus, Inbox, Grip, SlidersHorizontal, ArrowDownUp, Kanban, List, MoreHorizontal, CircleDashed, Circle, CircleDot, CheckCircle2, CircleAlert, Zap, ChevronDown, RotateCcw, LayoutList, Tag, UserRound, CalendarClock, CalendarDays, ChevronLeft, ChevronRight, Maximize2, Mic, Paperclip, X, Folder, FolderOpen, FolderPlus, FileText, Upload, Download, RefreshCw, HardDrive, Network, Server, Monitor, Crown, Trash2, ClipboardList, Settings2, Bot } from 'lucide-vue-next';
 
@@ -626,7 +626,7 @@ function refreshConversationState({ force=false } = {}) {
       refresh.again=false;
       await Promise.all([loadConversations({autoSelect:false}),refreshSelectedConversation()]);
       if (conversationRefresh!==refresh || scope()!==key) return;
-      if (conversationExecutionBusy.value) { if (!conversationPollTimer) startConversationPolling(); }
+      if (executionNeedsPolling(conversationExecution.value)) { if (!conversationPollTimer) startConversationPolling(); }
       else stopConversationPolling();
     } while (refresh.again);
   })().finally(()=>{if(conversationRefresh===refresh)conversationRefresh=null;});
@@ -637,15 +637,16 @@ function startConversationPolling() {
   if (!selectedConversation.value) return;
   // Realtime is preferred, but polling keeps the status and reply visible when
   // the local daemon is busy or the browser's WebSocket/SSE is unavailable.
-  let polling=false;
+  let polling=false,lastReceiptPoll=0;
   conversationPollTimer=setInterval(async () => {
     if (!selectedConversation.value || page.value !== 'inbox') return stopConversationPolling();
     if (polling) return;
+    if (!conversationExecutionBusy.value && Date.now()-lastReceiptPoll<5000) return;
     const timer=conversationPollTimer,generation=conversationOpenGeneration;
-    polling=true;
+    polling=true;lastReceiptPoll=Date.now();
     try {
       await refreshConversationState();
-      if (timer===conversationPollTimer && generation===conversationOpenGeneration && !conversationExecutionBusy.value) stopConversationPolling();
+      if (timer===conversationPollTimer && generation===conversationOpenGeneration && !executionNeedsPolling(conversationExecution.value)) stopConversationPolling();
     } finally { polling=false; }
   }, 1500);
 }
@@ -673,7 +674,7 @@ async function openConversation(item, { push=true, workspace=workspaceSlug() } =
     if (push && page.value === 'inbox') history.pushState({},'',`${routePath('inbox', id)}?employee=${encodeURIComponent(conversationEmployeeId.value)}`);
     await loadConversationExecution({ silent:false });
     if(!current())return false;
-    if (conversationExecutionBusy.value) startConversationPolling(); else stopConversationPolling();
+    if (executionNeedsPolling(conversationExecution.value)) startConversationPolling(); else stopConversationPolling();
     return true;
   } catch(error) { if(current())notify(error.message); return false; }
 }

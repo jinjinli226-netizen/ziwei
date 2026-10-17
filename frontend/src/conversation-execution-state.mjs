@@ -1,8 +1,15 @@
 const terminal = new Set(['succeeded','failed','expired','cancelled']);
+const uncertainExecution = execution => execution?.result?.code === 'EXECUTION_UNCERTAIN' || execution?.code === 'EXECUTION_UNCERTAIN' || execution?.result?.executionState === 'uncertain' || execution?.status === 'uncertain' || (execution?.status === 'expired' && Boolean(execution?.acked_at));
+
+// A failed transport receipt can still acquire a definitive result later.
+// Waiting for that receipt does not make the original task retryable.
+export function executionNeedsPolling(execution) {
+  return Boolean(execution && (['pending','acked'].includes(execution.status) || uncertainExecution(execution)));
+}
 
 export function executionPresentation(execution) {
   const status = execution?.status;
-  const uncertain = execution?.result?.code === 'EXECUTION_UNCERTAIN' || execution?.code === 'EXECUTION_UNCERTAIN' || execution?.result?.executionState === 'uncertain' || status === 'uncertain' || (status === 'expired' && Boolean(execution?.acked_at));
+  const uncertain = uncertainExecution(execution);
   if (uncertain) return {label:'执行结果或停止状态待核实，请查看原执行回执',summary:'执行待核实',busy:false,tone:'warning',retryable:false};
   const labels = {
     pending:['已提交，等待 ziwei_user 接收','等待接收'],
