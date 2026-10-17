@@ -48,7 +48,7 @@ svg { flex-shrink: 0; }
 .workspace-line { display: flex; align-items: center; justify-content: space-between; min-height: 38px; gap: 12px; }
 .workspace-picker { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 14px; font-weight: 600; max-width: 85%; text-align: left; line-height: 1.4; overflow-wrap: anywhere; }
 .workspace-picker > .icon { width: 15px; height: 15px; color: #8b7eae; }
-.workspace-dot { font-size: 21px; line-height: 1; color: var(--purple); }
+.workspace-dot { width: 32px; height: 32px; object-fit: contain; flex: 0 0 auto; }
 .page-heading { display: flex; align-items: center; justify-content: space-between; margin-top: 15px; }
 .page-heading h1 { font-size: 29px; line-height: 1.2; letter-spacing: -.8px; font-weight: 750; }
 .page-heading p { color: var(--muted); font-size: 12px; margin-top: 7px; letter-spacing: .2px; }
@@ -384,7 +384,7 @@ details[open] > summary > .icon:last-child { transform: rotate(180deg); }
 .account-menu button > .icon { width: 14px; height: 14px; color: #d1c0da; }
 .app-about { text-align: center; padding: 40px 12px 32px; color: #cab6d5; }
 .about-brand { display: flex; align-items: center; justify-content: center; gap: 7px; font-size: 17px; color: #b195c5; font-weight: 600; }
-.about-brand > span { font-size: 23px; color: #bc9cd6; }
+.about-brand > img { width: 40px; height: 40px; object-fit: contain; }
 .app-about p { font-size: 11px; margin-top: 10px; }
 .app-about small { display: block; font-size: 9px; color: #d0bfd8; margin-top: 9px; }
 .logout-button { color: #b69ac5; border-color: #e9dfee; background: #fdfaff; font-size: 12px; font-weight: 500; }
@@ -397,8 +397,8 @@ details[open] > summary > .icon:last-child { transform: rotate(180deg); }
 .auth-screen, .workspace-screen { min-height: 100dvh; max-width: 680px; margin: 0 auto; background: linear-gradient(145deg,#fcfaff 10%,#f6f0ff 60%,#f7f4fb); padding: calc(27px + env(safe-area-inset-top,0px)) 27px calc(24px + env(safe-area-inset-bottom,0px)); position: relative; overflow: hidden; }
 .auth-screen { display: flex; flex-direction: column; }
 .auth-top { display: flex; align-items: center; gap: 10px; font-size: 24px; font-weight: 700; color: #665080; position: relative; z-index: 1; }
-.brand-mark { width: 48px; height: 48px; border-radius: 16px; background: linear-gradient(145deg,#a577f5,#7843e5); display: grid; place-items: center; color: #fff; font-size: 31px; font-weight: 400; box-shadow: 0 8px 20px #9560db20,inset 0 1px 0 #fff3; }
-.auth-top .brand-mark { height: 38px; width: 38px; border-radius: 13px; font-size: 27px; }
+.brand-mark { width: 64px; height: 64px; display: block; object-fit: contain; flex: 0 0 auto; }
+.auth-top .brand-mark { height: 64px; width: 64px; }
 .auth-content { width: 100%; max-width: 430px; position: relative; z-index: 1; margin: auto; padding: 49px 0 40px; }
 .eyebrow { font-size: 9px; letter-spacing: 2px; color: #c1a8dc; font-weight: 600; margin-bottom: 16px; }
 .auth-content h1 { font-size: 38px; line-height: 1.45; letter-spacing: 1px; color: #71508c; font-weight: 650; }
@@ -427,7 +427,7 @@ details[open] > summary > .icon:last-child { transform: rotate(180deg); }
 .workspace-card > .icon { width: 18px; height: 18px; color: #c5acd4; }
 .workspace-logout { display: flex; margin: 33px auto 0; font-size: 11px; color: #c1a6d1; font-weight: 500; }
 .boot-screen { height: 100dvh; display: flex; align-items: center; justify-content: center; flex-direction: column; background: radial-gradient(ellipse at 50% 35%,#eee2ff,#f9f7fc 65%); }
-.boot-screen .brand-mark { width: 62px; height: 62px; border-radius: 22px; font-size: 39px; }
+.boot-screen .brand-mark { width: 96px; height: 96px; }
 .boot-screen h1 { font-size: 27px; color: #916bad; margin-top: 19px; font-weight: 650; letter-spacing: 2px; }
 .boot-screen p { font-size: 11px; color: #c0a7d0; margin-top: 10px; }
 .spinner { height: 20px; width: 20px; border: 2px solid #a67bd422; border-top-color: #b899d0; border-radius: 50%; display: inline-block; animation: spin .9s linear infinite; margin-top: 28px; }

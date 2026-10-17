@@ -54,8 +54,8 @@ async function fixture(name,{botMode='ok',auxMode='ok',firstHistoryFailures=0,ho
     if(url.origin!==origin){errors.push({scenario:name,message:`Unexpected external request ${url.origin}${p}`});return route.abort();}
     if(p.startsWith('/__ziwei_manager__/')){
       const asset=p.slice('/__ziwei_manager__/'.length)||'index.html';
-      if(!/^[a-z-]+\.(html|js|css)$/.test(asset))return route.abort();
-      return route.fulfill({contentType:asset.endsWith('.js')?'application/javascript':asset.endsWith('.css')?'text/css':'text/html',body:await fs.readFile(path.join(web,asset))});
+      if(!/^[a-z-]+\.(html|js|css|png)$/.test(asset))return route.abort();
+      return route.fulfill({contentType:asset.endsWith('.js')?'application/javascript':asset.endsWith('.css')?'text/css':asset.endsWith('.png')?'image/png':'text/html',body:await fs.readFile(path.join(web,asset))});
     }
     const entry={scenario:name,method,path:p};requests.push(entry);
     try{

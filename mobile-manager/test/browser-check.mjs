@@ -34,8 +34,8 @@ await context.route('**/*',async route=>{
   if(url.origin!==origin){errors.push(`Unexpected external request ${url.origin}${p}`);return route.abort();}
   if(req.isNavigationRequest()&&!isAppDocument(url.href)){errors.push(`Unexpected document request ${url.href}`);return route.abort();}
   if(p.startsWith('/__ziwei_manager__/')){
-    const name=p.slice('/__ziwei_manager__/'.length)||'index.html';if(!/^[a-z-]+\.(html|js|css)$/.test(name))return route.abort();
-    return route.fulfill({contentType:name.endsWith('.js')?'application/javascript':name.endsWith('.css')?'text/css':'text/html',body:await fs.readFile(path.join(web,name))});
+    const name=p.slice('/__ziwei_manager__/'.length)||'index.html';if(!/^[a-z-]+\.(html|js|css|png)$/.test(name))return route.abort();
+    return route.fulfill({contentType:name.endsWith('.js')?'application/javascript':name.endsWith('.css')?'text/css':name.endsWith('.png')?'image/png':'text/html',body:await fs.readFile(path.join(web,name))});
   }
   requests.push({method,path:p,body});
   try{

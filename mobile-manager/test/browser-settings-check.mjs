@@ -90,8 +90,8 @@ async function session(role){
     if(url.origin!==origin){errors.push({role,message:`External request ${url.origin}${p}`});return route.abort();}
     try{
       if(p.startsWith('/__ziwei_manager__/')){
-        const asset=p.slice('/__ziwei_manager__/'.length)||'index.html';assert.match(asset,/^[a-z-]+\.(html|js|css)$/);
-        return route.fulfill({contentType:asset.endsWith('.js')?'text/javascript':asset.endsWith('.css')?'text/css':'text/html',body:await fs.readFile(path.join(web,asset))});
+        const asset=p.slice('/__ziwei_manager__/'.length)||'index.html';assert.match(asset,/^[a-z-]+\.(html|js|css|png)$/);
+        return route.fulfill({contentType:asset.endsWith('.js')?'text/javascript':asset.endsWith('.css')?'text/css':asset.endsWith('.png')?'image/png':'text/html',body:await fs.readFile(path.join(web,asset))});
       }
       if(method!=='GET'){
         const allowed=method==='PATCH'&&[`${base}/bots/${hermes.id}`,`${base}/employees/${ordinary.id}`].includes(p)
