@@ -313,6 +313,8 @@ def build(args):
         expected = f"package: name='com.ziwei.manager' versionCode='{args.version_code}' versionName='{args.version_name}'"
         if expected not in badging or not re.search(r"(?:minSdkVersion|sdkVersion):'26'", badging) or "targetSdkVersion:'35'" not in badging:
             raise RuntimeError("APK identity/version/SDK verification failed")
+        if "application-debuggable" in badging:
+            raise RuntimeError("An internal release must not expose Android debugging")
         permissions = re.findall(r"uses-permission: name='([^']+)'", badging)
         base = {"android.permission.INTERNET", "android.permission.POST_NOTIFICATIONS", "android.permission.ACCESS_NETWORK_STATE"}
         allowed = base | {"android.permission.ACCESS_WIFI_STATE", "android.permission.WAKE_LOCK", "android.permission.VIBRATE",

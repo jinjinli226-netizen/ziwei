@@ -17,7 +17,9 @@ if (fcmConfigured) apply plugin: 'com.google.gms.google-services'
 
 def generatedManifest = file('build/inputs/AndroidManifest.xml')
 generatedManifest.parentFile.mkdirs()
-generatedManifest.text = new File(moduleRoot, 'android/AndroidManifest.xml').getText('UTF-8').replaceFirst(/\s+package="com\.ziwei\.manager"/, '')
+generatedManifest.text = new File(moduleRoot, 'android/AndroidManifest.xml').getText('UTF-8')
+        .replaceFirst(/\s+package="com\.ziwei\.manager"/, '')
+        .replaceFirst(/\s+android:debuggable="false"/, '')
 
 android {
     namespace 'com.ziwei.manager'
