@@ -45,7 +45,7 @@ function harness(overrides={}, { realOpen=false,realtime=false }={}) {
     conversationSettingsSnapshot,mergeConversationSettingsDraft,
   };
   bindings.api.websocketUrl=()=> 'ws://fixture';bindings.api.streamUrl=()=> '/fixture';
-  const names = ['conversationRequestScope','applyConversationDetail','loadConversationExecution','loadConversations','refreshSelectedConversation','refreshConversationState',...(realOpen?['openConversation']:[]),...(realtime?['openRealtime']:[])];
+  const names = ['conversationRequestScope','applyConversationDetail','loadConversationExecution','loadConversations','refreshSelectedConversation','refreshConversationState',...(realOpen?['openConversation','refreshConversationFromRoute']:[]),...(realtime?['openRealtime']:[])];
   const functions = names.map(name => {
     const pattern = new RegExp(`(?:async )?function ${name}\\(`);
     const start = app.search(pattern);
@@ -53,7 +53,7 @@ function harness(overrides={}, { realOpen=false,realtime=false }={}) {
     const end = app.indexOf('\n}',start);
     return app.slice(start,end+2);
   }).join('\n');
-  const api = new Function(...Object.keys(bindings),`let conversationOpenGeneration=0,conversationListGeneration=0,conversationPollTimer=null,conversationRefresh=null;const conversationExecutionBusy={get value(){return executionPresentation(conversationExecution.value).busy}}; const conversationRequests=typeof createConversationRequestSequence==='function'?createConversationRequestSequence():null; ${functions}; return {loadConversations,refreshSelectedConversation,refreshConversationState${realOpen?',openConversation':''}${realtime?',openRealtime':''}};`)(...Object.values(bindings));
+  const api = new Function(...Object.keys(bindings),`let conversationOpenGeneration=0,conversationListGeneration=0,conversationPollTimer=null,conversationRefresh=null;const conversationExecutionBusy={get value(){return executionPresentation(conversationExecution.value).busy}}; const conversationRequests=typeof createConversationRequestSequence==='function'?createConversationRequestSequence():null; ${functions}; return {loadConversations,refreshSelectedConversation,refreshConversationState${realOpen?',openConversation,refreshConversationFromRoute':''}${realtime?',openRealtime':''}};`)(...Object.values(bindings));
   return { ...bindings, ...api, workspace, reopened, polling };
 }
 
@@ -71,6 +71,18 @@ test('opening a confirmed failed conversation does not keep receipt polling aliv
   ui.selectedConversation.value=null;
   assert.equal(await ui.openConversation('conversation'),true);
   assert.deepEqual(ui.polling,['stop']);
+});
+
+test('restoring the same conversation route refreshes details and restarts unresolved receipt polling',async()=>{
+  const unknown={...execution('original','failed'),result:{code:'EXECUTION_UNCERTAIN',executionState:'uncertain'}};
+  let detailReads=0;
+  const ui=harness({conversation:async()=>{detailReads++;return conversation(unknown);}},{realOpen:true});
+  await ui.refreshConversationFromRoute();
+  assert.equal(detailReads,1);
+  assert.deepEqual(ui.polling,['start']);
+  assert.equal(ui.conversationDraft.value,'unsent draft');
+  const popstate=app.slice(app.indexOf("window.addEventListener('popstate'"),app.indexOf("window.addEventListener('ziwei:auth-required'"));
+  assert.match(popstate,/page\.value==='inbox'\) void refreshConversationFromRoute\(\)/);
 });
 
 test('same-conversation detail cannot regress when an earlier request finishes last', async()=>{

@@ -678,6 +678,11 @@ async function openConversation(item, { push=true, workspace=workspaceSlug() } =
     return true;
   } catch(error) { if(current())notify(error.message); return false; }
 }
+function refreshConversationFromRoute() {
+  const id=conversationIdFromPath();
+  if (id && selectedConversation.value?.id===id) return openConversation(id,{push:false});
+  return loadConversations();
+}
 async function createConversation() {
   const workspace=workspaceSlug(),employeeId=conversationEmployeeId.value,generation=conversationOpenGeneration;
   const current=()=>workspace===workspaceSlug() && employeeId===conversationEmployeeId.value && generation===conversationOpenGeneration;
@@ -1655,7 +1660,7 @@ window.addEventListener('popstate', () => {
   botChatIntent.value=conversationBotId.value&&conversationIdFromPath()?{workspace:urlWorkspace,botId:conversationBotId.value,conversationId:conversationIdFromPath(),pending:true}:null;
   page.value=routeFromPath(location.pathname); conversationRouteId.value=conversationIdFromPath(); conversationEmployeeId.value=conversationEmployeeFromPath() || conversationEmployeeId.value; employeeRouteId.value=employeeIdFromPath(); employeeActionId.value=''; inviteCode.value=new URLSearchParams(location.search).get('code') || '';
   if (page.value==='invite-accept') loadInvite();
-  if (page.value==='inbox') loadConversations();
+  if (page.value==='inbox') void refreshConversationFromRoute();
   if (page.value==='ziwei-connect') loadZiweiConnect();
   if (urlWorkspace && authState.value.authenticated && !['invite','invite-accept'].includes(page.value)) void load();
 });
