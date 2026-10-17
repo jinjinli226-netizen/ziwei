@@ -16,6 +16,7 @@ import { createManagementService } from './management.mjs';
 import { createEmployeeTemplateService } from './employees/templates.mjs';
 import { createPhoneMcpService } from './phone-mcp.mjs';
 import {createMobileReadView} from './mobile-read-view.mjs';
+import {createConversationReadService} from './conversation-read-state.mjs';
 import { createManagementBootstrap } from './management-bootstrap.mjs';
 import { toolDefinitions as managementTools } from '../scripts/ziwei-mcp.mjs';
 
@@ -286,6 +287,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   const auth = options.auth || createAuthService(repo.db, options.authOptions);
   const management = createManagementService(repo);
   const mobileReadView = createMobileReadView(repo);
+  const conversationReads = createConversationReadService(repo);
   const employeeTemplates = createEmployeeTemplateService(repo, management);
   const managementBootstrap = createManagementBootstrap(repo, options);
   const phoneMcp = createPhoneMcpService(repo,ziweiConnect,management,options);
@@ -594,6 +596,12 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   app.post('/api/workspaces/:slug/notifications/read', (req, res) => res.json({ ok:true, stats:repo.markNotificationsRead(req.params.slug, req.body?.ids) }));
   app.post('/api/notifications/:id/archive', (req, res) => res.json(repo.archiveNotification(req.params.id, req.body?.archived !== false)));
   app.get('/api/workspaces/:slug/notifications/stream', (req, res) => { res.statusCode=200; res.setHeader('Content-Type','text/event-stream'); res.setHeader('Cache-Control','no-cache'); res.setHeader('Connection','keep-alive'); res.flushHeaders?.(); const send=event=>res.write(`event: notification\ndata: ${JSON.stringify(event)}\n\n`); const unsubscribe=realtime.subscribe(req.params.slug,send); const timer=setInterval(()=>res.write(': heartbeat\n\n'),15000); req.on('close',()=>{clearInterval(timer);unsubscribe();}); send({type:'ready',workspace:req.params.slug}); });
+  app.get('/api/workspaces/:slug/chats', (req,res)=>res.json(conversationReads.list(req.params.slug,employeeContext(req))));
+  app.post('/api/conversations/:id/read', (req,res)=>res.json(conversationReads.read(req.params.id,req.body||{},employeeContext(req))));
+  app.post('/api/conversations/:id/forwards', requireRole('owner','admin','member'), (req,res)=>{
+    const result=repo.forwardConversationMessages(req.params.id,req.body||{},employeeContext(req));
+    res.status(result.duplicate?200:201).json(result);
+  });
   app.get('/api/workspaces/:slug/conversations', (req, res) => res.json({ conversations: repo.listConversations(req.params.slug, { ...employeeContext(req), conversationEmployeeId: req.query.employeeId ?? req.query.employee_id ?? null }) }));
   app.post('/api/workspaces/:slug/conversations', (req, res) => {
     const employeeId = String(req.body?.employeeId ?? req.body?.employee_id ?? '').trim();
@@ -763,7 +771,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
     app.post(`${base}/:id/native/actions`,guard,(req,res)=>res.status(202).json(bots.native(req.params.slug,req.params.id,req.body,contextFor(req))));
     app.post(`${base}/:id/collaboration`,guard,(req,res)=>res.status(202).json(bots.collaboration(req.params.slug,req.params.id,req.body,contextFor(req))));
     app.post(`${base}/:id/control`,guard,(req,res)=>res.json(bots.control(req.params.slug,req.params.id,req.body,contextFor(req))));
-    app.get(`${base}/:id/runs`,guard,(req,res)=>res.json({runs:bots.runs(req.params.slug,req.params.id,contextFor(req))}));
+    app.get(`${base}/:id/runs`,guard,(req,res)=>{const mobile=prefix==='/api'&&req.query.view==='mobile',values=bots.runs(req.params.slug,req.params.id,contextFor(req),mobile?{limit:5}:undefined);res.json({runs:mobile?values.map(mobileReadView.run):values});});
     app.post(`${base}/:id/actions/:actionId/reconcile`,guard,(req,res)=>res.json(bots.reconcile(req.params.slug,req.params.id,req.params.actionId,req.body,contextFor(req))));
     app.get(`${base}/:id/routines`,guard,(req,res)=>res.json({routines:bots.routines(req.params.slug,req.params.id,contextFor(req))}));
     app.post(`${base}/:id/routines`,guard,(req,res)=>res.status(201).json(bots.createRoutine(req.params.slug,req.params.id,req.body,contextFor(req))));

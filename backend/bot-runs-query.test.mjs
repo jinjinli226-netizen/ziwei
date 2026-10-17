@@ -73,3 +73,17 @@ test('runs keeps workspace, membership, visibility and authorized device scope c
   assert(deviceRuns.some(row=>row.id==='visible-own-run'));
   assert(!deviceRuns.some(row=>row.id==='foreign-workspace-run'));
 });
+
+test('the explicit mobile limit hydrates only the newest five while the default still returns one hundred complete actions',t=>{
+  const {repo,bots,bot,ws,add}=fixture(t);
+  for(let index=0;index<110;index++)add(`limited-${index}`,{hermesBot:{employeeId:bot.id},retained:{context:'x'.repeat(128)}});
+  const original=repo.getA2AAction,hydrated=[];
+  repo.getA2AAction=function(id,options){hydrated.push(id);return original.call(this,id,options);};
+  const mobile=bots.runs('test-111',bot.id,{}, {limit:5});
+  assert.equal(hydrated.length,5);assert.equal(mobile.length,5);
+  assert.deepEqual(mobile.map(row=>row.id),originalRunIds(repo.db,ws.id,bot.id).slice(0,5));
+  repo.getA2AAction=original;
+  const defaultRuns=bots.runs('test-111',bot.id);
+  assert.equal(defaultRuns.length,100);assert.deepEqual(mobile,defaultRuns.slice(0,5));
+  assert.equal(bots.runs('test-111',bot.id,{}, {limit:'5'}).length,100);
+});
