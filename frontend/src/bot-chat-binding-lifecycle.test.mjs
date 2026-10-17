@@ -17,14 +17,14 @@ function deferred(){let resolve,reject;const promise=new Promise((yes,no)=>{reso
 function bot(id,workspace='bigtron'){return{id,employee_id:id,workspace,main_conversation_id:`chat-${id}`,configuration_state:'configured',revision:1,control_epoch:1};}
 function harness(){
   const workspace=ref('bigtron'),requests=[],opens=[],historyWrites=[];
-  const state={selectedConversation:ref(null),conversationBotBinding:ref(null),botBindingPending:ref(false),botChatIntent:ref(null),conversationBotId:ref(''),authState:ref({user:{id:'owner'}}),employees:ref([]),page:ref('bots')};
+  const state={selectedConversation:ref(null),conversationBotBinding:ref(null),botBindingPending:ref(false),botBindingError:ref(''),botChatIntent:ref(null),conversationBotId:ref(''),authState:ref({user:{id:'owner'}}),employees:ref([]),page:ref('inbox'),conversationDirectoryPickerOpen:ref(false),conversationDirectoryEditorVersion:ref(0),conversationDirectoryPathDraft:ref(''),conversationDirectoryCheck:ref(null),conversationDirectoryLoading:ref(false),conversationDirectoryError:ref(''),conversationWorkingDirectory:ref('/work'),selectedConversationDevice:ref({id:'device',status:'online',workdir:'/root'})};
   const context={...state,watch,workspaceSlug:()=>workspace.value,workspaceSlugValue:computed(()=>workspace.value),
     api:{bot:(employeeId,slug)=>{const request={...deferred(),employeeId,workspace:slug,actor:state.authState.value.user?.id};requests.push(request);return request.promise;}},
     navigate:key=>{state.botChatIntent.value=null;state.selectedConversation.value=null;state.page.value=key;},
     openConversation:(conversation,options)=>{const request={...deferred(),conversation,options};opens.push(request);return request.promise;},
     history:{replaceState:(_state,_title,path)=>historyWrites.push(path)},routePath:(page,id)=>`/${workspace.value}/${page}/${id}`,
   };
-  const functions=new Function(...Object.keys(context),`let botChatBindingGeneration=0,botChatBindingActor='';\n${source('refreshBotChatBinding')}\n${source('openBotConversation')}\nconst stop=${bindingWatch.trim()}\nreturn {openBotConversation,stop};`)(...Object.values(context));
+  const functions=new Function(...Object.keys(context),`let botChatBindingGeneration=0,botChatBindingActor='',botChatBindingResolvedScope='',botChatBindingRequest=null;\n${source('botChatBindingScope')}\n${source('refreshBotChatBinding')}\n${source('openConversationDirectoryPicker')}\n${source('loadConversationDirectoryBinding')}\n${source('closeConversationDirectoryPicker')}\n${source('openBotConversation')}\nconst stop=${bindingWatch.trim()}\nreturn {openBotConversation,openConversationDirectoryPicker,loadConversationDirectoryBinding,closeConversationDirectoryPicker,stop};`)(...Object.values(context));
   return{...state,...functions,workspace,requests,opens,historyWrites,
     select:id=>{state.selectedConversation.value={id:`chat-${id}`,employee_id:id,messages:[]};},
     enter:id=>functions.openBotConversation({workspace:workspace.value,employee:{id},conversation:{id:`chat-${id}`},botId:id}),
@@ -109,4 +109,70 @@ test('older failed Bot entry cannot clear the newer entry and the newer failure 
   assert.equal(ui.botChatIntent.value.botId,'secretary');assert.equal(ui.botBindingPending.value,true);
   ui.opens[1].resolve(false);await second;
   assert.equal(ui.botChatIntent.value,null);assert.equal(ui.botBindingPending.value,false);
+});
+
+
+test('directory opens immediately during initial binding and shares its request while execution updates arrive',async t=>{
+  const ui=harness();t.after(ui.stop);ui.select('tiktok');
+  const opening=ui.openConversationDirectoryPicker();
+  assert.equal(ui.conversationDirectoryPickerOpen.value,true);
+  assert.equal(ui.conversationDirectoryLoading.value,true);
+  assert.equal(ui.requests.length,1);
+  for(let i=0;i<20;i++)ui.selectedConversation.value={...ui.selectedConversation.value,execution:{status:'running',events:[{id:i}]}};
+  assert.equal(ui.requests.length,1);
+  ui.requests[0].resolve(bot('tiktok'));await opening;
+  assert.equal(ui.conversationDirectoryLoading.value,false);assert.equal(ui.conversationDirectoryError.value,'');
+  assert.equal(ui.conversationBotBinding.value.revision,1);
+});
+
+test('repeated directory clicks share a pending refresh and the latest editor settles',async t=>{
+  const ui=harness();t.after(ui.stop);ui.select('tiktok');ui.requests[0].resolve(bot('tiktok'));await settle();
+  const first=ui.openConversationDirectoryPicker(),second=ui.openConversationDirectoryPicker({useDeviceDefault:true});
+  assert.equal(ui.requests.length,2);assert.equal(ui.conversationDirectoryPickerOpen.value,true);
+  ui.requests[1].resolve({...bot('tiktok'),revision:9,control_epoch:4});await Promise.all([first,second]);
+  assert.equal(ui.conversationDirectoryLoading.value,false);assert.equal(ui.conversationDirectoryError.value,'');
+  assert.equal(ui.conversationDirectoryPathDraft.value,'/root');assert.equal(ui.conversationBotBinding.value.revision,9);
+});
+
+test('failed initial binding is retried in the directory instead of authorizing an ordinary employee',async t=>{
+  const ui=harness();t.after(ui.stop);ui.select('tiktok');ui.requests[0].reject(new Error('network unavailable'));await settle();
+  assert.equal(ui.botBindingPending.value,false);
+  const opening=ui.openConversationDirectoryPicker();
+  assert.equal(ui.requests.length,2);assert.equal(ui.conversationDirectoryLoading.value,true);
+  ui.requests[1].resolve(bot('tiktok'));await opening;
+  assert.equal(ui.conversationDirectoryError.value,'');assert.equal(ui.botBindingError.value,'');assert.equal(ui.conversationBotBinding.value.id,'tiktok');
+});
+
+test('directory timeout releases pending and exposes a retry that preserves the entered path',async t=>{
+  const ui=harness();t.after(ui.stop);ui.select('tiktok');ui.requests[0].resolve(bot('tiktok'));await settle();
+  const opening=ui.openConversationDirectoryPicker();ui.requests[1].reject(new Error('读取超时，请重试'));await opening;
+  assert.equal(ui.botBindingPending.value,false);assert.equal(ui.conversationDirectoryLoading.value,false);
+  assert.match(ui.conversationDirectoryError.value,/超时/);assert.equal(ui.conversationDirectoryPickerOpen.value,true);
+  ui.conversationDirectoryPathDraft.value='/my-draft';
+  const retry=ui.loadConversationDirectoryBinding();assert.equal(ui.requests.length,3);
+  ui.requests[2].resolve({...bot('tiktok'),revision:4});await retry;
+  assert.equal(ui.conversationDirectoryPathDraft.value,'/my-draft');assert.equal(ui.conversationDirectoryError.value,'');
+});
+
+test('confirmed ordinary employee opens the directory without another binding lookup',async t=>{
+  const ui=harness();t.after(ui.stop);ui.select('secretary');ui.requests[0].resolve({...bot('secretary'),configuration_state:'uninitialized'});await settle();
+  await ui.openConversationDirectoryPicker();assert.equal(ui.requests.length,1);assert.equal(ui.conversationDirectoryLoading.value,false);assert.equal(ui.conversationDirectoryError.value,'');
+});
+
+for(const change of ['employee','page','closed'])test(`late directory result cannot reopen or update an abandoned editor: ${change}`,async t=>{
+  const ui=harness();t.after(ui.stop);ui.select('tiktok');ui.requests[0].resolve(bot('tiktok'));await settle();
+  const opening=ui.openConversationDirectoryPicker();
+  if(change==='employee')ui.select('secretary');
+  if(change==='page')ui.page.value='bots';
+  ui.closeConversationDirectoryPicker();
+  ui.requests[1].resolve(bot('tiktok'));await opening;
+  assert.equal(ui.conversationDirectoryPickerOpen.value,false);assert.equal(ui.conversationDirectoryError.value,'');
+});
+
+
+test('both chat surfaces expose directory loading/retry rather than disable its entry',()=>{
+  assert.doesNotMatch(app,/:disabled="botBindingPending" @click="openConversationDirectoryPicker/);
+  assert.match(app,/v-if="conversationDirectoryLoading" role="status"/);
+  assert.match(app,/v-else-if="conversationDirectoryError" role="alert"/);
+  assert.match(app,/@click="loadConversationDirectoryBinding">重试读取/);
 });

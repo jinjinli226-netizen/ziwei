@@ -1,4 +1,5 @@
 import { resolveApiBase } from './api-base.js';
+import { boundedRead } from './bounded-read.js';
 
 const runtimeOrigin = typeof window === 'undefined' ? '' : window.location.origin;
 export const API_BASE = resolveApiBase({
@@ -30,7 +31,9 @@ export function setWorkspaceSlug(slug) {
 }
 async function request(path, options = {}) {
   const response = await fetch(`${API_BASE}${path}`, { credentials: 'include', headers: { 'content-type': 'application/json', ...(options.headers || {}) }, ...options });
+  if(options.signal?.aborted)throw options.signal.reason || new DOMException('读取已取消','AbortError');
   const data = await response.json().catch(() => ({}));
+  if(options.signal?.aborted)throw options.signal.reason || new DOMException('读取已取消','AbortError');
   if (response.status === 401) { window.dispatchEvent(new CustomEvent('ziwei:auth-required')); }
   if (!response.ok) {
     const error = new Error(data.error || (response.status === 413 ? '请求内容超过服务器限制，请选择更小的附件后重试' : `请求失败 ${response.status}`));
@@ -40,6 +43,7 @@ async function request(path, options = {}) {
   }
   return data;
 }
+function boundedRequest(path,options){return boundedRead(signal=>request(path,{signal}),options);}
 export const api = {
   authStatus: () => request('/api/auth/status'),
   authSetup: body => request('/api/auth/setup', { method:'POST', body:JSON.stringify(body) }),
@@ -113,7 +117,7 @@ export const api = {
   deleteDevice: id => request(`/api/workspaces/${encodeURIComponent(workspaceSlug())}/devices/${encodeURIComponent(id)}`, { method:'DELETE' }),
   employees: () => request(`/api/workspaces/${encodeURIComponent(workspaceSlug())}/employees`),
   bots: (slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/bots`),
-  bot: (id, slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/bots/${encodeURIComponent(id)}`),
+  bot: (id, slug = workspaceSlug(), options = {}) => boundedRequest(`/api/workspaces/${encodeURIComponent(slug)}/bots/${encodeURIComponent(id)}`,options),
   botCapabilities: (deviceId = '', slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/bots/capabilities${deviceId ? `?deviceId=${encodeURIComponent(deviceId)}` : ''}`),
   createBot: (body, slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/bots`, {method:'POST',body:JSON.stringify(body)}),
   provisionBot: (id, body, slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/bots/${encodeURIComponent(id)}/provision`, {method:'POST',body:JSON.stringify(body)}),
@@ -192,7 +196,7 @@ export const api = {
   },
   createConversation: body => request(`/api/workspaces/${encodeURIComponent(workspaceSlug())}/conversations`, { method:'POST', body:JSON.stringify(body) }),
   updateConversation: (id, body) => request(`/api/conversations/${encodeURIComponent(id)}`, { method:'PATCH', body:JSON.stringify(body) }),
-  conversation: id => request(`/api/conversations/${id}`),
+  conversation: (id, options = {}) => boundedRequest(`/api/conversations/${id}`,options),
   inspectConversationDirectory: (id, body = {}) => request(`/api/conversations/${encodeURIComponent(id)}/workdir/inspect`, { method:'POST', body:JSON.stringify(body) }),
   conversationDirectoryAction: (id, actionId) => request(`/api/conversations/${encodeURIComponent(id)}/workdir/actions/${encodeURIComponent(actionId)}`),
   addConversationMessage: (id, body) => request(`/api/conversations/${id}/messages`, { method:'POST', body:JSON.stringify(body) }),

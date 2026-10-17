@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises';
 test('management reads and connection retry retain an explicit workspace while navigation changes', async () => {
   const source = (await readFile(new URL('./api.js', import.meta.url), 'utf8'))
     .replace("'./api-base.js'", JSON.stringify(new URL('./api-base.js', import.meta.url).href))
+    .replace("'./bounded-read.js'", JSON.stringify(new URL('./bounded-read.js', import.meta.url).href))
     .replaceAll('import.meta.env.', '({ VITE_API_URL: "", DEV: false }).');
   const saved = { window: globalThis.window, fetch: globalThis.fetch };
   const requests = [];

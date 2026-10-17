@@ -77,6 +77,6 @@ test('a delayed employee save cannot close a newly opened employee editor',async
 });
 test('a late conversation directory save preserves a newer directory picker draft',async()=>{
   const response=deferred(),draft={value:receipt.path},check={value:null};let closed=0;
-  const use=appFunction('useConversationDirectory',{workspaceSlug:()=> 'qa',conversationDeviceId:{value:'pc-a'},conversationDirectoryPathDraft:draft,conversationDirectoryCheck:check,conversationDirectoryEditorVersion:{value:1},conversationComposeKey:()=> 'qa\0a',conversationWorkingDirectory:{value:'D:\\old'},saveConversationSettings:()=>response.promise,closeConversationDirectoryPicker:()=>closed++,notify:()=>{}});
+  const use=appFunction('useConversationDirectory',{conversationDirectoryLoading:{value:false},conversationDirectoryError:{value:''},workspaceSlug:()=> 'qa',conversationDeviceId:{value:'pc-a'},conversationDirectoryPathDraft:draft,conversationDirectoryCheck:check,conversationDirectoryEditorVersion:{value:1},conversationComposeKey:()=> 'qa\0a',conversationWorkingDirectory:{value:'D:\\old'},saveConversationSettings:()=>response.promise,closeConversationDirectoryPicker:()=>closed++,notify:()=>{}});
   const pending=use(receipt);draft.value='D:\\newer draft';check.value=null;response.resolve(true);await pending;assert.equal(closed,0);
 });
