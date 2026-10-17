@@ -11,7 +11,7 @@
 ```sh
 python3 mobile-manager/scripts/android-tools.py
 python3 mobile-manager/scripts/test-android.py
-python3 mobile-manager/scripts/build-android.py --version-code 5 --version-name 0.1.4-internal
+python3 mobile-manager/scripts/build-android.py --version-code 9 --version-name 0.2.2-internal
 ```
 
 自动工具准备支持 Apple Silicon Mac。固定使用 Temurin JDK 17.0.20.1、Android SDK platform 35 r02 和 build-tools 35.0.0；下载文件逐一比对官方校验值，缓存位于 `~/.cache/ziwei-manager-android`。

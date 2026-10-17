@@ -1,5 +1,5 @@
 /** First-party session API. All workspace identifiers are explicit to avoid stale-tab routing. */
-export function createApi({ fetchImpl = globalThis.fetch?.bind(globalThis), origin = '', onUnauthorized, readTimeoutMs = 20000 } = {}) {
+export function createApi({ fetchImpl = globalThis.fetch?.bind(globalThis), origin = '', onUnauthorized, readTimeoutMs = 60000 } = {}) {
   if (typeof fetchImpl !== 'function') throw new Error('缺少网络请求支持');
   const base = String(origin || '').replace(/\/$/, '');
   // Keep only bounded, first-party response text. Revalidate every read against

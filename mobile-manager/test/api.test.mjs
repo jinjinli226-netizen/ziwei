@@ -51,7 +51,36 @@ test('a stalled history read times out and can retry the same conversation', asy
   assert(calls.every(call=>call.options.method==='GET'));
 });
 
-for(const readTimeoutMs of [0,20000])test(`employee GET scopes propagate abort and classify cancellation with timeout ${readTimeoutMs}`, async()=>{
+test('the default read keeps waiting past twenty seconds and accepts a complete body within one minute', async t=>{
+  t.mock.timers.enable({apis:['setTimeout','Date'],now:0});
+  let finishBody,signal,calls=0;
+  const api=createApi({fetchImpl:async(_url,options)=>{
+    calls++;signal=options.signal;
+    return {status:200,ok:true,headers:{get:()=>null},json:()=>new Promise((resolve,reject)=>{
+      finishBody=resolve;signal.addEventListener('abort',()=>reject(new DOMException('Aborted','AbortError')),{once:true});
+    })};
+  }});
+  const pending=api.conversation('original');await Promise.resolve();
+  t.mock.timers.tick(20001);assert.equal(signal.aborted,false);
+  t.mock.timers.tick(24999);assert.equal(signal.aborted,false);
+  finishBody({id:'original',messages:[{role:'assistant',content:'完整原报告'}]});
+  assert.equal((await pending).messages[0].content,'完整原报告');assert.equal(calls,1);
+});
+
+test('the default read reports a real timeout after one minute without retrying or stopping a task', async t=>{
+  t.mock.timers.enable({apis:['setTimeout','Date'],now:0});
+  const calls=[];let signal;
+  const api=createApi({fetchImpl:async(url,options)=>{
+    calls.push({url,method:options.method});signal=options.signal;
+    return new Promise((_resolve,reject)=>signal.addEventListener('abort',()=>reject(new DOMException('Aborted','AbortError')),{once:true}));
+  }});
+  const rejected=assert.rejects(api.botRuns('ws','employee'),error=>error.code==='READ_TIMEOUT'&&error.elapsedMs===60000&&error.uncertain===false);
+  t.mock.timers.tick(59999);assert.equal(signal.aborted,false);
+  t.mock.timers.tick(1);await rejected;
+  assert.deepEqual(calls,[{url:'/api/workspaces/ws/bots/employee/runs?view=mobile',method:'GET'}]);
+});
+
+for(const readTimeoutMs of [0,60000])test(`employee GET scopes propagate abort and classify cancellation with timeout ${readTimeoutMs}`, async()=>{
   const calls=[];
   const api=createApi({readTimeoutMs,fetchImpl:async(url,options)=>{
     calls.push({url,options});
