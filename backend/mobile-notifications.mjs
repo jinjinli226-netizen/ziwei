@@ -63,7 +63,7 @@ export function createMobileNotificationReadService(repo){
   const hiddenTaskAssignee=db.prepare(`SELECT 1 AS found FROM tasks t
     JOIN employees e ON e.workspace_id=t.workspace_id AND (e.id=t.assignee OR e.name=t.assignee)
     LEFT JOIN devices d ON d.id=e.target_device_id AND d.workspace_id=e.workspace_id
-    WHERE t.id=? AND t.workspace_id=? AND e.status<>'deleted' AND (
+    WHERE t.id=? AND t.workspace_id=? AND (e.status='deleted' OR
       (e.visibility='personal' AND ?=0 AND coalesce(e.owner_user_id,'')<>?) OR
       (e.target_device_id IS NOT NULL AND (d.id IS NULL OR (? IS NOT NULL AND e.target_device_id<>?) OR
         (?='personal' AND ?=0 AND coalesce(d.owner_user_id,'')<>?)))) LIMIT 1`);

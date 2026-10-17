@@ -219,6 +219,9 @@ test('legacy employee-name task assignees and duplicate private names cannot lea
   assert.equal(f.list({},member).items.length,2);
   f.db.prepare("UPDATE employees SET visibility='personal' WHERE id=?").run(privateEmployee.id);
   assert.deepEqual(f.list({},member).items,[]);
+  f.db.prepare("UPDATE employees SET status='deleted' WHERE id=?").run(privateEmployee.id);
+  assert.deepEqual(f.list({},member).items,[]);assert.deepEqual(f.list().items,[]);
+  for(const {eventId} of records)assert.throws(()=>f.service.resolve(f.slug,eventId,f.context),{status:404});
 });
 
 test('task reminders recheck the latest execution user, conversation employee and personal device binding',t=>{
