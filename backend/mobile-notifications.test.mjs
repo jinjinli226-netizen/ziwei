@@ -237,14 +237,15 @@ test('legacy employee-name task assignees and duplicate private names cannot lea
   for(const {task,eventId} of records){
     assert(!management.tasks(f.slug,{},member).some(row=>row.id===task.id));
     assert.throws(()=>f.service.resolve(f.slug,eventId,member),{status:404,code:'MOBILE_NOTIFICATION_NOT_FOUND'});
-    assert.equal(f.service.resolve(f.slug,eventId,f.context).item.target.id,task.id);
+    if(task.assignee===privateEmployee.id)assert.equal(f.service.resolve(f.slug,eventId,f.context).item.target.id,task.id);
+    else assert.throws(()=>f.service.resolve(f.slug,eventId,f.context),{status:404});
     const response=await request(f.app,`/api/workspaces/${f.slug}/mobile/notifications/${eventId}`,{cookie:f.cookie(f.member)});
     assert.equal(response.status,404);assert(!response.bytes.includes(Buffer.from('Private task title')));
   }
   assert.deepEqual(f.list({},member).items,[]);
   const route=await request(f.app,`/api/workspaces/${f.slug}/mobile/notifications`,{cookie:f.cookie(f.member)});assert.equal(route.status,200);assert.deepEqual(route.json.items,[]);
   f.db.prepare("UPDATE employees SET visibility='workspace' WHERE id=?").run(privateEmployee.id);
-  assert.equal(f.list({},member).items.length,2);
+  assert.equal(f.list({},member).items.length,1);
   f.db.prepare("UPDATE employees SET visibility='personal' WHERE id=?").run(privateEmployee.id);
   assert.deepEqual(f.list({},member).items,[]);
   f.db.prepare("UPDATE employees SET status='deleted' WHERE id=?").run(privateEmployee.id);
@@ -277,7 +278,8 @@ test('task-only execution targets obey current ID/name assignees and latest exec
     const task=f.repo.createTask(f.slug,{title:'Private execution target',state:'completed',assignee}),run=f.execution({type:'task.execute',taskId:task.id,payload:{conversationId:null}});
     assert(!f.list({},member).items.some(row=>row.id===run.eventId));
     assert.throws(()=>f.service.resolve(f.slug,run.eventId,member),{status:404});
-    assert.equal(f.service.resolve(f.slug,run.eventId,f.context).item.target.id,task.id);
+    if(assignee===privateEmployee.id)assert.equal(f.service.resolve(f.slug,run.eventId,f.context).item.target.id,task.id);
+    else assert.throws(()=>f.service.resolve(f.slug,run.eventId,f.context),{status:404});
   }
   const task=f.repo.createTask(f.slug,{title:'Task reassigned after original run',state:'completed'}),original=f.execution({type:'task.execute',taskId:task.id,payload:{conversationId:null}});
   assert.equal(f.service.resolve(f.slug,original.eventId,member).item.target.id,task.id);
@@ -288,13 +290,97 @@ test('task-only execution targets obey current ID/name assignees and latest exec
 
 test('task visibility uses thin scalar reads and keeps unrelated same-name workspace employees isolated',t=>{
   const f=fixture(t),other=f.auth.createWorkspace(f.owner.user_id,{slug:'task-assignee-other',name:'Other',kind:'team'}).workspace;
-  f.repo.createEmployee(other.slug,{name:'Same name elsewhere',runtime:'Codex',visibility:'personal',ownerUserId:f.owner.user_id});
-  const task=f.repo.createTask(f.slug,{title:'Visible task',state:'blocked',assignee:'Same name elsewhere'}),notice=f.audit('task.state_changed',{taskId:task.id,to:'blocked'});
+  const human=f.repo.createMember(f.slug,{name:'Same name elsewhere',email:'same-name-human@fixture.test'});
+  f.repo.createEmployee(other.slug,{name:human.id,runtime:'Codex',visibility:'personal',ownerUserId:f.owner.user_id});
+  const task=f.repo.createTask(f.slug,{title:'Visible task',state:'blocked',assignee:human.id}),notice=f.audit('task.state_changed',{taskId:task.id,to:'blocked'});
   f.execution({type:'task.execute',taskId:task.id,payload:{conversationId:null,prompt:'private content '.repeat(100000)},result:{processExit:exitProof(),output:'private result '.repeat(100000)}});
   for(const name of ['listTasks','listEmployees','getTask','getA2AAction','getConversation','listNotifications'])f.repo[name]=()=>{throw new Error('Full task/action hydration forbidden');};
   const member={actorUserId:f.member.user_id};
   assert.equal(f.service.resolve(f.slug,notice.eventId,member).item.target.id,task.id);
   const feed=f.list({},member);assert(feed.items.some(row=>row.id===notice.eventId));assert(Buffer.byteLength(JSON.stringify(feed))<4000);
+});
+
+test('real employee hard deletion cannot reopen private unexecuted ID/name tasks, even after an alias is reused',async t=>{
+  const f=fixture(t),privateEmployee=f.repo.createEmployee(f.slug,{name:'Deleted Legacy Employee',runtime:'Codex',visibility:'personal',ownerUserId:f.owner.user_id});
+  f.repo.createMember(f.slug,{name:privateEmployee.name,email:'same-alias-human@fixture.test'});
+  const records=[privateEmployee.id,privateEmployee.name,privateEmployee.name.toLowerCase()].map(assignee=>{
+    const task=f.repo.createTask(f.slug,{title:'Private unexecuted task',state:'planned',assignee});
+    f.repo.transitionTask(task.id,'blocked');
+    const eventId=f.db.prepare("SELECT id FROM audit_events WHERE workspace_id=? AND action='task.state_changed' AND json_extract(payload_json,'$.taskId')=?").get(f.ws.id,task.id).id;
+    return {task,eventId};
+  });
+  const member={actorUserId:f.member.user_id},path=`/api/workspaces/${f.slug}/mobile/notifications`;
+  assert.deepEqual(f.list({},member).items,[]);assert.equal(f.list().items.length,1);
+  const deleted=f.repo.deleteEmployee(privateEmployee.id);assert.equal(deleted.deleted,true);assert.equal(f.db.prepare('SELECT id FROM employees WHERE id=?').get(privateEmployee.id),undefined);
+  const audit=f.db.prepare("SELECT payload_json FROM audit_events WHERE workspace_id=? AND action='employee.deleted'").get(f.ws.id);assert.deepEqual(JSON.parse(audit.payload_json),{employeeId:privateEmployee.id,name:privateEmployee.name});
+  const assertHidden=async()=>{
+    assert.deepEqual(f.list({},member).items,[]);assert.deepEqual(f.list().items,[]);
+    for(const {eventId} of records){
+      assert.throws(()=>f.service.resolve(f.slug,eventId,member),{status:404,code:'MOBILE_NOTIFICATION_NOT_FOUND'});
+      const response=await request(f.app,`${path}/${eventId}`,{cookie:f.cookie(f.member)});assert.equal(response.status,404);assert(!response.bytes.includes(Buffer.from('Private unexecuted task')));
+    }
+    const list=await request(f.app,path,{cookie:f.cookie(f.member)});assert.equal(list.status,200);assert.deepEqual(list.json.items,[]);
+  };
+  await assertHidden();
+  f.repo.createEmployee(f.slug,{name:privateEmployee.name,runtime:'Codex',visibility:'workspace',ownerUserId:f.owner.user_id});await assertHidden();
+  assert.deepEqual(records.map(({task})=>({...f.db.prepare('SELECT title,assignee,state FROM tasks WHERE id=?').get(task.id)})),records.map(({task})=>({title:task.title,assignee:task.assignee,state:'blocked'})));
+});
+
+test('real force removal followed by purge and direct purge keep retained assignment aliases unavailable',t=>{
+  const f=fixture(t),member={actorUserId:f.member.user_id};
+  for(const forceFirst of [false,true]){
+    const employee=f.repo.createEmployee(f.slug,{name:`Purged private employee ${forceFirst}`,runtime:'Codex',visibility:'personal',ownerUserId:f.owner.user_id});
+    const notices=[employee.id,employee.name].map(assignee=>{const task=f.repo.createTask(f.slug,{title:'Purged private task',state:'blocked',assignee});return f.audit('task.state_changed',{taskId:task.id,to:'blocked'});});
+    if(forceFirst){f.repo.deleteEmployee(employee.id,{force:true});assert.equal(f.db.prepare('SELECT status FROM employees WHERE id=?').get(employee.id).status,'deleted');}
+    f.repo.deleteEmployee(employee.id,{force:true,purge:true});assert.equal(f.db.prepare('SELECT id FROM employees WHERE id=?').get(employee.id),undefined);
+    const audit=f.db.prepare("SELECT payload_json FROM audit_events WHERE workspace_id=? AND action='employee.purged' AND json_extract(payload_json,'$.employeeId')=?").get(f.ws.id,employee.id);assert.equal(JSON.parse(audit.payload_json).name,employee.name);
+    for(const {eventId} of notices)assert.throws(()=>f.service.resolve(f.slug,eventId,member),{status:404});
+  }
+  assert.deepEqual(f.list({},member).items,[]);
+});
+
+test('unassigned tasks and actual workspace human members remain visible; unresolvable owner text stays private',t=>{
+  const f=fixture(t),human=f.repo.createMember(f.slug,{name:'Workspace human',email:'workspace-human@fixture.test'}),actor={actorUserId:f.member.user_id};
+  const visible=[null,'notice-member',f.member.user_id,human.id,f.employee.id];
+  const add=assignee=>{const task=f.repo.createTask(f.slug,{title:'Human or unassigned task',state:'blocked',assignee});return {task,...f.audit('task.state_changed',{taskId:task.id,to:'blocked'})};};
+  const known=visible.map(add),unknown=['employee_missing_historical','Unmapped historical owner','Member','NOTICE-MEMBER@FIXTURE.TEST',human.name,human.email].map(add);
+  assert.equal(f.list({limit:50},actor).items.length,known.length);
+  for(const {task,eventId} of known)assert.equal(f.service.resolve(f.slug,eventId,actor).item.target.id,task.id);
+  for(const {eventId} of unknown){assert.throws(()=>f.service.resolve(f.slug,eventId,actor),{status:404});assert.throws(()=>f.service.resolve(f.slug,eventId,f.context),{status:404});}
+  f.repo.updateTask(unknown[0].task.id,{assignee:human.id});assert.equal(f.service.resolve(f.slug,unknown[0].eventId,actor).item.target.id,unknown[0].task.id);
+  f.repo.updateTask(unknown[1].task.id,{assignee:null});assert.equal(f.service.resolve(f.slug,unknown[1].eventId,actor).item.target.id,unknown[1].task.id);
+  f.repo.deleteMember(human.id);assert.throws(()=>f.service.resolve(f.slug,unknown[0].eventId,actor),{status:404});
+});
+
+test('deleted employee alias veto is workspace-scoped and does not hide a real human in another workspace',t=>{
+  const f=fixture(t),other=f.auth.createWorkspace(f.owner.user_id,{slug:'deleted-assignee-other',name:'Other',kind:'team'}).workspace;
+  const human=f.repo.createMember(f.slug,{name:'Local human name',email:'local-human@fixture.test'}),employee=f.repo.createEmployee(other.slug,{name:human.id,runtime:'Codex',visibility:'personal',ownerUserId:f.owner.user_id});f.repo.deleteEmployee(employee.id);
+  const task=f.repo.createTask(f.slug,{title:'Local human work',state:'blocked',assignee:human.id}),notice=f.audit('task.state_changed',{taskId:task.id,to:'blocked'});
+  assert.equal(f.service.resolve(f.slug,notice.eventId,{actorUserId:f.member.user_id}).item.target.id,task.id);
+});
+
+test('real private employee rename and hard deletion cannot authorize legacy names through current member names, emails or new employees',async t=>{
+  const f=fixture(t),human=f.repo.createMember(f.slug,{name:'Initial private alias',email:'initial-private-alias@fixture.test'}),actor={actorUserId:f.member.user_id},path=`/api/workspaces/${f.slug}/mobile/notifications`;
+  for(const [index,alias] of [human.name,human.email,'Reused employee display name'].entries()){
+    const employee=f.repo.createEmployee(f.slug,{name:alias,runtime:'Codex',visibility:'personal',ownerUserId:f.owner.user_id}),task=f.repo.createTask(f.slug,{title:'PRIVATE_RENAMED_TITLE',state:'planned',assignee:alias});
+    f.repo.transitionTask(task.id,'blocked');
+    const eventId=f.db.prepare("SELECT id FROM audit_events WHERE workspace_id=? AND action='task.state_changed' AND json_extract(payload_json,'$.taskId')=?").get(f.ws.id,task.id).id;
+    const hidden=async()=>{
+      assert(!f.list({},actor).items.some(item=>item.id===eventId));assert.throws(()=>f.service.resolve(f.slug,eventId,actor),{status:404});
+      const response=await request(f.app,`${path}/${eventId}`,{cookie:f.cookie(f.member)});assert.equal(response.status,404);assert(!response.bytes.includes(Buffer.from(task.title)));
+    };
+    await hidden();f.repo.updateEmployee(employee.id,{name:`Renamed private employee ${index}`});await hidden();f.repo.deleteEmployee(employee.id);await hidden();
+    if(index===2){f.repo.createMember(f.slug,{name:alias,email:'reused-display-name@fixture.test'});f.repo.createEmployee(f.slug,{name:alias,runtime:'Codex',visibility:'workspace',ownerUserId:f.owner.user_id});await hidden();}
+    assert.equal(f.db.prepare('SELECT assignee FROM tasks WHERE id=?').get(task.id).assignee,alias);
+  }
+  const response=await request(f.app,path,{cookie:f.cookie(f.member)});assert.equal(response.status,200);assert.deepEqual(response.json.items,[]);
+});
+
+test('known current and deleted employee-name conflicts veto even a canonical member ID match',t=>{
+  const f=fixture(t),human=f.repo.createMember(f.slug,{name:'Human ID owner',email:'human-id-owner@fixture.test'}),employee=f.repo.createEmployee(f.slug,{name:human.id,runtime:'Codex',visibility:'personal',ownerUserId:f.owner.user_id}),task=f.repo.createTask(f.slug,{title:'Known ambiguous assignment',state:'blocked',assignee:human.id}),notice=f.audit('task.state_changed',{taskId:task.id,to:'blocked'}),actor={actorUserId:f.member.user_id};
+  assert.throws(()=>f.service.resolve(f.slug,notice.eventId,actor),{status:404});
+  f.repo.deleteEmployee(employee.id);assert.throws(()=>f.service.resolve(f.slug,notice.eventId,actor),{status:404});
+  assert(!f.list({},actor).items.some(item=>item.id===notice.eventId));
 });
 
 test('superseded action audit and malformed/mismatched original event do not resolve',t=>{

@@ -57,11 +57,28 @@ export function createMobileNotificationReadService(repo){
   const device=db.prepare('SELECT workspace_id,owner_user_id FROM devices WHERE id=? AND workspace_id=?');
   const task=db.prepare('SELECT id,state,substr(title,1,160) AS title FROM tasks WHERE id=? AND workspace_id=?');
   const conversationOwner=db.prepare('SELECT employee_id FROM conversations WHERE id=? AND workspace_id=?');
+  // A nonempty free-text assignee is not itself an employee/member binding.
+  // Ordinary DELETE and explicit purge remove the employee row, while the
+  // original task keeps its ID/name. Require a current canonical owner ID;
+  // names/emails cannot establish ownership of an ambiguous legacy task.
+  // Retained deletion aliases still veto reused names/IDs. Unassigned work
+  // and real workspace member/user IDs remain valid human tasks.
+  // This resolves current IDs; it cannot reconstruct an initial employee name
+  // absent from retained audit data. Preserving arbitrary legacy aliases would
+  // require a separate trusted assignment binding written at assignment time.
+  const taskAssigneeKnown=db.prepare(`SELECT 1 AS found FROM tasks t WHERE t.id=? AND t.workspace_id=? AND (
+    t.assignee IS NULL OR t.assignee='' OR (
+      (EXISTS (SELECT 1 FROM employees e WHERE e.workspace_id=t.workspace_id AND e.id=t.assignee) OR
+       EXISTS (SELECT 1 FROM members m WHERE m.workspace_id=t.workspace_id AND m.role IN ('owner','admin','member') AND
+         (m.id=t.assignee OR m.user_id=t.assignee))) AND
+      NOT EXISTS (SELECT 1 FROM audit_events a WHERE a.workspace_id=t.workspace_id AND a.action IN ('employee.deleted','employee.purged','employee.force_removed') AND
+        CASE WHEN json_valid(a.payload_json) THEN json_extract(a.payload_json,'$.employeeId')=t.assignee OR lower(json_extract(a.payload_json,'$.name'))=lower(t.assignee) ELSE 0 END)
+    ))`);
   // Legacy tasks may store an employee name instead of its ID. Check every
   // matching employee in SQL, including duplicate names, without hydrating
   // arbitrary assignee text or a workspace-wide task/employee list.
   const hiddenTaskAssignee=db.prepare(`SELECT 1 AS found FROM tasks t
-    JOIN employees e ON e.workspace_id=t.workspace_id AND (e.id=t.assignee OR e.name=t.assignee)
+    JOIN employees e ON e.workspace_id=t.workspace_id AND (e.id=t.assignee OR lower(e.name)=lower(t.assignee))
     LEFT JOIN devices d ON d.id=e.target_device_id AND d.workspace_id=e.workspace_id
     WHERE t.id=? AND t.workspace_id=? AND (e.status='deleted' OR
       (e.visibility='personal' AND ?=0 AND coalesce(e.owner_user_id,'')<>?) OR
@@ -118,6 +135,7 @@ export function createMobileNotificationReadService(repo){
   }
   function visibleTask(id,ws,actor){
     const row=validId(id)?task.get(id,ws.id):null;if(!row)return null;
+    if(!taskAssigneeKnown.get(id,ws.id))return null;
     if(hiddenTaskAssignee.get(id,ws.id,Number(actor.privileged),actor.actorUserId,actor.deviceScope,actor.deviceScope,ws.kind,Number(actor.privileged),actor.actorUserId))return null;
     const latest=taskAction.get(id,ws.id);
     if(latest){
