@@ -37,3 +37,25 @@ test('401 and network failures preserve response classification without an autom
   const broken=createApi({fetchImpl:async()=>{calls++;throw new TypeError('network');}});
   await assert.rejects(broken.sendMessage('original',{content:'message',clientMessageId:'same'}),error=>error.uncertain===true);assert.equal(calls,2);
 });
+
+test('a stalled history read times out and can retry the same conversation', async () => {
+  const calls=[];
+  const api=createApi({readTimeoutMs:10,fetchImpl:async(url,options)=>{
+    calls.push({url,options});
+    if(calls.length===1) return new Promise((_resolve,reject)=>options.signal.addEventListener('abort',()=>reject(new DOMException('Aborted','AbortError')),{once:true}));
+    return response({id:'original',messages:[{role:'assistant',content:'原聊天历史'}]});
+  }});
+  await assert.rejects(api.conversation('original'),error=>error.code==='READ_TIMEOUT'&&error.uncertain===false);
+  assert.equal((await api.conversation('original')).messages[0].content,'原聊天历史');
+  assert.deepEqual(calls.map(call=>call.url),['/api/conversations/original','/api/conversations/original']);
+  assert(calls.every(call=>call.options.method==='GET'));
+});
+
+test('invalid history responses never masquerade as an empty conversation', async () => {
+  for(const value of [{},{id:'original'},{id:'another',messages:[]}]) {
+    const api=createApi({fetchImpl:async()=>response(value)});
+    await assert.rejects(api.conversation('original'),/聊天记录返回异常/);
+  }
+  const api=createApi({fetchImpl:async()=>new Response('<html>unavailable</html>',{status:200})});
+  await assert.rejects(api.conversation('original'),/返回内容无法读取/);
+});

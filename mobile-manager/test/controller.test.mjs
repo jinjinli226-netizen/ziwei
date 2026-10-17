@@ -7,7 +7,7 @@ function memoryStorage() {
   const values = new Map();
   return {values, get length(){return values.size;}, key:index=>[...values.keys()][index] || null, getItem:key=>values.get(key) || null, setItem:(key,value)=>values.set(key,value), removeItem:key=>values.delete(key)};
 }
-function fixture(overrides = {}, apiOverrides = {}, storage = memoryStorage()) {
+function fixture(overrides = {}, apiOverrides = {}, storage = memoryStorage(), render = () => {}) {
   const employee = {id:'one', name:'员工甲', runtime:'Other'};
   const state = {...initialState(), phase:'ready', user:{user_id:'user-one'}, workspace:{slug:'workspace-one',role:'owner'}, workspaces:[{slug:'workspace-one',role:'owner'},{slug:'workspace-two',role:'member'}], employees:[employee], ...overrides};
   const api = {
@@ -17,11 +17,28 @@ function fixture(overrides = {}, apiOverrides = {}, storage = memoryStorage()) {
     bot:async()=>{throw new Error('普通员工不应读取 Bot');}, logout:async()=>({ok:true}),
     ...apiOverrides,
   };
-  const controller = createController({state,api,storage});
+  const controller = createController({state,api,storage,render});
   return {state,api,storage,controller};
 }
 const form = values => {const data = new FormData();for(const [key,value] of Object.entries(values))data.set(key,value);return data;};
 const deferred = () => {let resolve;const promise = new Promise(done=>resolve=done);return {promise,resolve};};
+const tick = () => new Promise(resolve=>setImmediate(resolve));
+async function promptly(promise) {
+  let timer;
+  try { return await Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('unrelated read blocked chat')),500);})]); }
+  finally { clearTimeout(timer); }
+}
+function initializedFixture(apiOverrides = {}, render = () => {}) {
+  const employee = {id:'one',name:'员工甲',runtime:'Hermes'};
+  const bot = {id:'one',employee_id:'one',employee,configuration_state:'initialized',main_conversation_id:'original-main',revision:3,control_epoch:2};
+  const f = fixture({employees:[{...employee,bot}],bots:[bot]}, {
+    employees:async()=>({employees:[employee]}),bots:async()=>({bots:[bot]}),bot:async()=>bot,botRuns:async()=>({runs:[]}),botRoutines:async()=>({routines:[]}),
+    conversation:async conversationId=>({id:conversationId,employee_id:employee.id,messages:[{id:'history',role:'assistant',content:'原主聊天历史'}]}),
+    getEmployeeConversation:async()=>{throw new Error('已有 main ID 不应再次解析或创建会话');},
+    ...apiOverrides,
+  }, memoryStorage(), render);
+  return {...f,bot};
+}
 
 test('ordinary employee chat uses its existing identity and an employee switch ignores the old response', async t => {
   const old = deferred();
@@ -108,4 +125,97 @@ test('refresh reads an existing screenshot command without sending the command a
   let writes=0;const phone={id:'phone-one',commands:[{id:'command-one',status:'queued'}],nodes:[]};
   const f=fixture({tab:'devices',page:'phone',phone,phoneCommand:{id:'command-one',status:'queued'}}, {phones:async()=>({devices:[phone]}),phone:async()=>({device:phone}),phoneSnapshot:async()=>({snapshot:null}),phoneCommand:async()=>{writes++;return {command:{id:'unexpected'}};}});t.after(()=>f.controller.dispose());
   await f.controller.actions['phone-refresh']({id:phone.id});await f.controller.refresh();assert.equal(writes,0);
+});
+
+for (const resource of ['bot','botRuns','botRoutines']) test(`cached main history renders and input unlocks while ${resource} remains pending`, async t => {
+  const slow=deferred(),drawn=[],calls=[];
+  const f=initializedFixture({[resource]:()=>slow.promise,conversation:async conversationId=>{calls.push(conversationId);return {id:conversationId,employee_id:'one',messages:[{id:'history',role:'assistant',content:'原聊天内容'}]};}},state=>drawn.push({messages:[...state.messages],busy:state.busy,chatLoading:state.chatLoading}));
+  t.after(()=>{slow.resolve(resource==='bot'?f.bot:resource==='botRuns'?{runs:[]}:{routines:[]});f.controller.dispose();});
+  await promptly(f.controller.actions.chat({id:'one'}));
+  assert.deepEqual(calls,['original-main'],'first screen must not issue a second conversation GET');
+  assert.equal(f.state.conversation.id,'original-main');assert.equal(f.state.busy,false);assert.equal(f.state.chatLoading,false);
+  assert(drawn.some(frame=>frame.messages.some(message=>message.id==='history')&&!frame.busy&&!frame.chatLoading),'visible history must not wait for auxiliary status');
+  await f.controller.change({name:'draft',value:'仍然可以输入'});assert.equal(f.state.draft,'仍然可以输入');
+});
+
+test('history refresh draws independently of workspace lists, Bot state, runs and routines', async t => {
+  const slow=deferred(),drawn=[];let calls=0,hold=false;
+  const f=initializedFixture({
+    employees:async()=>hold?slow.promise:{employees:[{id:'one',runtime:'Hermes'}]},
+    bot:async()=>hold?slow.promise:f.bot,botRuns:async()=>hold?slow.promise:{runs:[]},botRoutines:async()=>hold?slow.promise:{routines:[]},
+    conversation:async conversationId=>({id:conversationId,employee_id:'one',messages:[{id:`history-${++calls}`,role:'assistant',content:`历史第${calls}次读取`}]}),
+  },state=>drawn.push(state.messages.map(message=>message.id)));
+  t.after(()=>{f.controller.dispose();slow.resolve({});});
+  await f.controller.actions.chat({id:'one'});await tick();hold=true;
+  const pending=f.controller.refresh();await tick();
+  assert.equal(f.state.messages[0].id,'history-2');assert(drawn.some(ids=>ids.includes('history-2')));
+  assert.equal(f.state.busy,false);assert.equal(f.state.chatLoading,false);
+  await f.controller.actions.back();slow.resolve({});await pending;
+});
+
+test('failed initial main read clears loading and refresh retries that original main without creating a replacement', async t => {
+  let attempts=0;
+  const f=initializedFixture({conversation:async conversationId=>{assert.equal(conversationId,'original-main');if(!attempts++)throw new Error('聊天读取暂时失败');return {id:conversationId,employee_id:'one',messages:[{id:'recovered',role:'assistant',content:'历史已恢复'}]};}});
+  t.after(()=>f.controller.dispose());
+  await f.controller.actions.chat({id:'one'});assert.equal(f.state.conversation,null);assert.equal(f.state.chatLoading,false);assert.equal(f.state.busy,false);assert.match(f.state.error,/读取暂时失败/);
+  await f.controller.refresh();assert.equal(attempts,2);assert.equal(f.state.conversation.id,'original-main');assert.equal(f.state.messages[0].id,'recovered');assert.equal(f.state.error,'');
+});
+
+test('pending primary and auxiliary results cannot write after leaving the employee chat', async t => {
+  const primary=deferred(),aux=deferred();
+  const f=initializedFixture({conversation:()=>primary.promise,bot:()=>aux.promise,botRuns:()=>aux.promise,botRoutines:()=>aux.promise});t.after(()=>f.controller.dispose());
+  const opening=f.controller.actions.chat({id:'one'});assert.equal(f.state.chatLoading,true);
+  await f.controller.actions.back();
+  primary.resolve({id:'original-main',employee_id:'one',messages:[{id:'too-late'}]});aux.resolve({...f.bot,runs:[{id:'late-run'}],routines:[{id:'late-routine'}]});
+  await opening;await tick();
+  assert.equal(f.state.page,'home');assert.equal(f.state.selectedEmployee,null);assert.equal(f.state.bot,null);assert.equal(f.state.conversation,null);assert.deepEqual(f.state.messages,[]);assert.deepEqual(f.state.runs,[]);assert.deepEqual(f.state.routines,[]);assert.equal(f.state.chatLoading,false);
+});
+
+test('late history refresh and status errors cannot replace a newly selected employee', async t => {
+  const old=deferred(),oldRuns=deferred();let readingOld=false;
+  const f=initializedFixture({conversation:async conversationId=>readingOld&&conversationId==='original-main'?old.promise:{id:conversationId,employee_id:conversationId==='original-main'?'one':'two',messages:[{id:conversationId}]},botRuns:async()=>readingOld?oldRuns.promise:{runs:[]},getEmployeeConversation:async(_workspace,employee)=>({id:'second-chat',employee_id:employee.id,messages:[{id:'second-history'}]})});
+  f.state.employees.push({id:'two',runtime:'Other'});t.after(()=>f.controller.dispose());
+  await f.controller.actions.chat({id:'one'});await tick();readingOld=true;
+  const pending=f.controller.refresh();await tick();
+  // The workspace list was refreshed while the old read is in flight.
+  f.state.employees.push({id:'two',runtime:'Other'});await f.controller.actions.chat({id:'two'});
+  old.resolve({id:'original-main',employee_id:'one',messages:[{id:'late-old-history'}]});oldRuns.resolve({runs:[{id:'late-old-run'}]});await pending;
+  assert.equal(f.state.selectedEmployee.id,'two');assert.equal(f.state.conversation.id,'second-chat');assert.equal(f.state.messages[0].id,'second-history');assert.deepEqual(f.state.runs,[]);
+});
+
+test('auxiliary failures remain visible and an auxiliary 401 still clears the loaded chat', async t => {
+  const failure=deferred();
+  const f=initializedFixture({botRuns:()=>failure.promise});t.after(()=>f.controller.dispose());
+  await f.controller.actions.chat({id:'one'});failure.resolve(Promise.reject(new Error('真实运行记录读取失败')));await tick();
+  assert.equal(f.state.messages[0].id,'history');assert.match(f.state.error,/运行记录读取失败/);assert.equal(f.state.busy,false);
+  const expired=initializedFixture({botRoutines:async()=>{throw Object.assign(new Error('expired'),{status:401});}});t.after(()=>expired.controller.dispose());
+  await expired.controller.actions.chat({id:'one'});await tick();assert.equal(expired.state.phase,'login');assert.equal(expired.state.user,null);assert.deepEqual(expired.state.messages,[]);assert.equal(expired.state.chatLoading,false);
+});
+
+for (const lateFailure of [false,true]) test(`a pre-send history ${lateFailure?'error':'snapshot'} cannot replace the accepted message or its running execution`, async t => {
+  const old=deferred();let reads=0;
+  const before={id:'original-main',employee_id:'one',messages:[{id:'before',role:'assistant',content:'原消息'}]};
+  const after={...before,messages:[...before.messages,{id:'sent',role:'user',content:'新消息'}],execution:{id:'new-execution',status:'acked'}};
+  const drawn=[];
+  const f=initializedFixture({conversation:async()=>++reads===1?structuredClone(before):reads===2?old.promise:structuredClone(after),sendMessage:async()=>({id:'sent',execution:after.execution})},state=>drawn.push({ids:state.messages.map(message=>message.id),execution:state.conversation?.execution?.id}));
+  t.after(()=>f.controller.dispose());
+  await f.controller.actions.chat({id:'one'});await tick();
+  const pending=f.controller.refresh();await tick();assert.equal(reads,2);
+  await f.controller.submit('chat',form({draft:'新消息'}));
+  assert.deepEqual(f.state.messages.map(message=>message.id),['before','sent']);assert.equal(f.state.conversation.execution.id,'new-execution');assert.equal(f.state.conversation.execution.status,'acked');
+  const acceptedDraws=drawn.length;
+  old.resolve(lateFailure?Promise.reject(new Error('旧请求超时')):structuredClone(before));await pending;
+  assert.deepEqual(f.state.messages.map(message=>message.id),['before','sent']);assert.equal(f.state.conversation.execution.id,'new-execution');assert.equal(f.state.error,'');
+  assert(drawn.slice(acceptedDraws).every(frame=>frame.ids.includes('sent')&&frame.execution==='new-execution'));
+});
+
+test('polling skips conversation reads during a pending send and resumes after a failed send', async t => {
+  const post=deferred(),posted=deferred();let reads=0;
+  const f=initializedFixture({conversation:async()=>({id:'original-main',employee_id:'one',messages:[{id:`history-${++reads}`,role:'assistant',content:'已有历史'}]}),sendMessage:()=>{posted.resolve();return post.promise;}});t.after(()=>f.controller.dispose());
+  await f.controller.actions.chat({id:'one'});await tick();
+  const sending=f.controller.submit('chat',form({draft:'保留待发送消息'}));assert.equal(f.state.sending,true);await posted.promise;
+  await f.controller.refresh();assert.equal(reads,1,'a polling GET during send must not capture a pre-send snapshot');
+  post.resolve(Promise.reject(new Error('发送未获得确认')));await sending;
+  assert.equal(f.state.sending,false);assert.equal(f.state.messages[0].id,'history-1');assert.equal(f.state.draft,'保留待发送消息');assert.match(f.state.error,/发送未获得确认/);
+  await f.controller.refresh();assert.equal(reads,2);assert.equal(f.state.messages[0].id,'history-2');
 });

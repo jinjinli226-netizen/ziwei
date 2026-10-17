@@ -1,12 +1,16 @@
 # 紫薇 Android 管理 App
 
-首个内部测试版：`com.ziwei.manager`，Android 8.0（API 26）及以上。它是现有紫薇的手机管理入口；受控手机上的 Agent / Updater 继续使用原应用，Hermes 继续在绑定的常开电脑执行。
+当前内部测试版：`0.1.1-internal`（code 2），包名 `com.ziwei.manager`，Android 8.0（API 26）及以上。它是现有紫薇的手机管理入口；受控手机上的 Agent / Updater 继续使用原应用，Hermes 继续在绑定的常开电脑执行。
 
 ## 安装和使用
 
-下载本次交付的 `ziwei-manager-0.1.0-internal-code1.apk`，传到安卓手机，打开安装；系统询问时，仅为本次使用的下载或文件应用允许安装来源。安装后打开「紫薇」，登录原账号并选择原工作区。新应用只需要网络权限，不需要无障碍、设备管理员或常驻后台权限。
+下载本次交付的 `ziwei-manager-0.1.1-internal-code2.apk`，传到安卓手机，打开安装；已安装首版时直接覆盖更新。系统询问时，仅为本次使用的下载或文件应用允许安装来源。安装后打开「紫薇」，登录原账号并选择原工作区。新应用只需要网络权限，不需要无障碍、设备管理员或常驻后台权限。
 
 这是独立管理应用的内部签名，不覆盖或升级互联 Agent / Updater。后续更新管理应用须沿用同一签名；不要卸载应用来做常规升级，以免清除本机汇报队列。生产签名、应用商店发布不属于本次交付。
+
+## 0.1.1 聊天历史修复
+
+打开聊天时直接读取已绑定的原主会话，历史返回后立即展示。Bot 状态、执行记录和例行工作独立刷新，其中一项响应缓慢或失败不会拦住历史消息。读取期间显示加载状态；读取失败可重新加载同一原会话，GET 请求超过 20 秒会明确提示超时。不会把失败读取当成空聊天，也不会另建聊天替代已初始化 Bot 的原主会话。
 
 ## 首版功能
 
@@ -32,6 +36,7 @@
 ```sh
 node --test mobile-manager/test/*.test.mjs
 node mobile-manager/test/browser-check.mjs
+node mobile-manager/test/browser-history-check.mjs
 python3 mobile-manager/scripts/build-android.py
 ```
 

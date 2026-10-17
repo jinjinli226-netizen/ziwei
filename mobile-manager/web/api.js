@@ -1,5 +1,5 @@
 /** First-party session API. All workspace identifiers are explicit to avoid stale-tab routing. */
-export function createApi({ fetchImpl = globalThis.fetch?.bind(globalThis), origin = '', onUnauthorized } = {}) {
+export function createApi({ fetchImpl = globalThis.fetch?.bind(globalThis), origin = '', onUnauthorized, readTimeoutMs = 20000 } = {}) {
   if (typeof fetchImpl !== 'function') throw new Error('缺少网络请求支持');
   const base = String(origin || '').replace(/\/$/, '');
   const enc = value => encodeURIComponent(String(value ?? ''));
@@ -11,30 +11,46 @@ export function createApi({ fetchImpl = globalThis.fetch?.bind(globalThis), orig
     return text ? `?${text}` : '';
   };
   async function request(path, { method = 'GET', body, signal } = {}) {
-    let response;
+    const readController = method === 'GET' && readTimeoutMs > 0 ? new AbortController() : null;
+    const forwardAbort = () => readController?.abort(signal.reason);
+    if (readController && signal) {
+      if (signal.aborted) forwardAbort(); else signal.addEventListener('abort', forwardAbort, { once: true });
+    }
+    let timedOut = false;
+    const timeout = readController ? setTimeout(() => { timedOut = true; readController.abort(); }, readTimeoutMs) : null;
     try {
-      response = await fetchImpl(`${base}${path}`, {
-        method, credentials: 'include', cache: 'no-store',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-        ...(signal ? { signal } : {}),
-      });
-    } catch (cause) {
-      const error = new Error(method === 'GET' ? '连接失败，请检查网络后刷新' : '尚未收到操作回执，请先刷新核对；重试消息会沿用原请求标识');
-      error.cause = cause;
-      error.uncertain = method !== 'GET';
-      throw error;
+      let response, data;
+      try {
+        response = await fetchImpl(`${base}${path}`, {
+          method, credentials: 'include', cache: 'no-store',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+          ...((readController?.signal || signal) ? { signal: readController?.signal || signal } : {}),
+        });
+        data = response.status === 204 ? {} : await response.json().catch(cause => {
+          if (!response.ok && !readController?.signal.aborted) return {};
+          throw cause;
+        });
+      } catch (cause) {
+        const error = new Error(timedOut ? '读取超时，请刷新重试' : method === 'GET' ? '连接失败或返回内容无法读取，请刷新重试' : '尚未收到操作回执，请先刷新核对；重试消息会沿用原请求标识');
+        error.cause = cause;
+        error.uncertain = method !== 'GET';
+        if (timedOut) error.code = 'READ_TIMEOUT';
+        throw error;
+      }
+      if (!response.ok) {
+        const error = new Error(data.error || data.message || (response.status === 413 ? '图片内容超过服务器限制，请选择更小的图片' : `请求失败（${response.status}）`));
+        error.status = response.status;
+        error.code = data.code;
+        error.data = data;
+        if (response.status === 401) onUnauthorized?.(error);
+        throw error;
+      }
+      return data;
+    } finally {
+      if (timeout !== null) clearTimeout(timeout);
+      if (readController && signal) signal.removeEventListener('abort', forwardAbort);
     }
-    const data = response.status === 204 ? {} : await response.json().catch(() => ({}));
-    if (!response.ok) {
-      const error = new Error(data.error || data.message || (response.status === 413 ? '图片内容超过服务器限制，请选择更小的图片' : `请求失败（${response.status}）`));
-      error.status = response.status;
-      error.code = data.code;
-      error.data = data;
-      if (response.status === 401) onUnauthorized?.(error);
-      throw error;
-    }
-    return data;
   }
   const get = (path, options) => request(path, options);
   const post = (path, body = {}) => request(path, { method: 'POST', body });
@@ -60,7 +76,11 @@ export function createApi({ fetchImpl = globalThis.fetch?.bind(globalThis), orig
     devices: workspace => get(`${ws(workspace)}/devices`),
     conversations: (workspace, employeeId) => get(`${ws(workspace)}/conversations${query({ employeeId })}`),
     createConversation: (workspace, body) => post(`${ws(workspace)}/conversations`, body),
-    conversation: id => get(`/api/conversations/${enc(id)}`),
+    conversation: async id => {
+      const conversation = await get(`/api/conversations/${enc(id)}`);
+      if (conversation?.id !== id || !Array.isArray(conversation.messages)) throw new Error('聊天记录返回异常，请刷新重试');
+      return conversation;
+    },
     sendMessage: (id, body) => post(`/api/conversations/${enc(id)}/messages`, {
       content: body.content || '', attachments: body.attachments || [], clientMessageId: body.clientMessageId,
     }),
