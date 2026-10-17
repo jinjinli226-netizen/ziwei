@@ -1,6 +1,6 @@
 # 手机功能候选：主控负例复审后续
 
-日期：2026-10-17。状态：仍不可发布。主控产品源 `4f26f450`、API `9393` 与交接/审查文档 `f587cde`、`3d079cf`、`cb92779` 均未由本候选覆盖。所有修复仅在两条候选分支，未合入主发布树、未部署、未公开 APK 或新版二维码。
+日期：2026-10-17。状态：仍不可发布。主控产品源 `4f26f450`、API `9393` 与交接/审查文档 `f587cde`、`3d079cf`、`cb92779`、`2e0ebbf` 均未由本候选覆盖。所有修复仅在两条候选分支，未合入主发布树、未部署、未公开 APK 或新版二维码。
 
 ## 三项已闭环的群组问题
 
@@ -28,7 +28,17 @@ App 产品源 `ab5045a23c814032937bf4b4143fac2fc9f6012b`：旧电脑分页不兼
 
 固定 `113355be` 的最终联合回归为 **133/133 Node、12/12 Python**，无失败或跳过。独立审计另有 **20/20** 固定源用例及 **48/48** 通知/写入用例通过，执行前后运行时文件 SHA 一致。原主控三种旧名称恰等于 member ID、user ID、另一公开员工 ID 的负例，经过改名和删除后均不能在 list/resolve 泄露；新的人类/员工可信绑定、未分配、实时权限与设备撤权、实际重分配、最新无效 marker、伪造证明和同值保存均已覆盖。
 
-最终可信绑定证据位于共享树 `.local/mobile-backend-review-final/trusted-assignment-review.json`、`trusted-assignment-combined.log` 和 `.local/mobile-assignment-independent-audit/review-final-113355be748f.json`。本结论限定于已盘点的两个生产写入口；不宣称能检测绕过仓库及全部审计的无痕外部 SQL 复原。本项未由 `d6fbfbb` 的旧通过结论替代，最终共享产品源为 `113355be748f35fa50f3798142521a97743a48b3`，待主控复审合并。
+可信绑定原问题的证据位于共享树 `.local/mobile-backend-review-final/trusted-assignment-review.json`、`trusted-assignment-combined.log` 和 `.local/mobile-assignment-independent-audit/review-final-113355be748f.json`。本结论限定于已盘点的两个生产写入口；不宣称能检测绕过仓库及全部审计的无痕外部 SQL 复原。本项未由 `d6fbfbb` 的旧通过结论替代。主控已确认 `113355be748f35fa50f3798142521a97743a48b3` 关闭原四项问题，并在未合入的 archive 组合上通过 144 项 Node、12 项 Python；后续发现的新增公开关联问题与修复见下一节。
+
+## 内部归属证明的公开读取投影
+
+主控固定 `113355be` 用真实 member Cookie 的内存 HTTP/SSE 实证发现新增 P1：私有员工在员工列表隐藏、详情 404，任务负责人仅为名称且没有执行，但新增 `assignmentBinding` 经审计、旧通知的 raw/parsed 两份 payload 和实时推送公开了员工与任务的类型关联。原四项归属、群组问题的闭环仍有效；本项是新 writer 的内部证明进入旧公共事件载荷造成的独立问题。原负例保存在共享树 `.local/mobile-assignment-proof-read-review-113355b/113355b-result.json`，没有被修复后结果覆盖。
+
+窄修共享源 `20da8856beb7f008d8c3b85f65103f53b9deef19` 仅修改 repository 与两份测试。权威 `audit_events` 中的证明保持原值，供移动提醒内部校验。新通知存储、即时及所有延迟 `onEvent` 使用公开副本；SSE 与 WebSocket 共享该事件投影。公开 `listAudit`、`listNotifications`、通知归档与恢复对旧记录统一剥离 `task.created` / `task.updated` 顶层新增 `assignmentBinding`，同时清理 raw `payload_json` 和 parsed `payload`。原 `taskId`、通知计数、普通任务响应、其他已有字段与非 task 事件不变；原本没有该字段的 raw JSON 保持字节不变。没有重构全站审计权限、清洗权威历史数据库或改变移动提醒的归属判定。
+
+固定 `20da885` 的通知、写入和公开边界回归为 53/53；相关合同组合为 **138/138 Node、12/12 Python**，无失败或跳过。覆盖真实 member Cookie 的审计、通知双份载荷、归档/恢复、read、SSE，以及历史不同 JSON 类型的证明、旧字节与其他字段、即时和模板延迟/回滚事件。数据库证明仍保留，owner 的移动待办可见、member 列表隐藏且 resolve 404。证据为共享树 `.local/mobile-assignment-public-review/result-20da885.json` 与 `combined-20da885.log`。
+
+独立固定 Git archive 复测的 8 组检查和 53/53 现有测试通过：原主控 member Cookie 反例已反向断言关闭；HTTP/SSE 200 及真实零 TCP WebSocket upgrade 101 后解码的 5 个任务通知帧均无证明，即时/模板延迟与回滚均核对。历史双份通知、归档恢复、原 F1 三组 ID 别名在改名和硬删除前后的隐藏与 404、可信新成员待办 200、私有证明的 owner 200/member 404 均通过。权威审计证明原字节、摘要与字段不变；源码 archive 前后 SHA 稳定，工作区按 CRLF 归一后匹配固定 Git blob，tracked clean。证据为共享树 `.local/mobile-assignment-public-independent-20da8856/fixed-result.json`、`source-final-check.json` 与 `existing-tests.log`。本轮测试没有监听或真实业务操作，临时依赖链接已删除，端口中心检查通过。主控 F5 复审和后续集成仍待决定，保持不可发布；此结果不替代下节精确 APK 的原生联网验收。
 
 ## 精确 APK 与本轮原生验收限制
 
