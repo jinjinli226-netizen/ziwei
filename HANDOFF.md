@@ -6,7 +6,7 @@
 
 当前 `/opt/ziwei/current` 指向 `/opt/ziwei/releases/mobile-images-9668962e1c16-1204ed1a/v2`，发布 PID351449；独立复核源树、发布前保护摘要和内外健康200通过。网页仍 `ed499103`，Windows包仍 `5db7d83`，无需更新 Windows。63项相关回归、lint170和独立审查通过；App另验8项真实隔离浏览器图片兼容。样例普通图 JSON 约1MB降到1.3KB，重复保存图片的转发约2MB降到2.5KB；这些不是生产网络计时。
 
-安卓 code7 已支持图片URL；App分支 code8 的缓存与旧请求取消修复独立交付。真实账号连续轮询及原图的安卓验收由 App 会话继续记录，不能把本轮接口减负当成所有超时已经根治。发布曾遇到 SQLite 内部计数器误报，已只读验证并修正发布检查；未回滚或覆盖业务数据。
+安卓 code7 已支持图片URL；App分支 `f270f10` 的 `0.2.1-internal` / code8 于14:02:25公开发布，可[下载覆盖安装](https://github.com/jinjinli226-netizen/ziwei/releases/download/android-manager-v0.2.1-internal/ziwei-manager-0.2.1-internal-code8.apk)。新包修复缓存与切员工后旧请求取消；213项App单元、52组浏览器及另8组图片兼容通过。原账号模拟器中，闲鱼连续轮询、旧图缩略/放大、TikTok跨70秒同步及后台返回均通过；不是实体手机验收，不声称所有网络超时已根治。主控匿名复核Release和APK digest `fe81bd91…d97678`。发布曾遇到 SQLite 内部计数器误报，已只读验证并修正发布检查；未回滚或覆盖业务数据。
 
 接口、测试、发布证据及保留新数据的代码回退见[移动聊天同步记录](docs/operations/2026-10-17-mobile-chat-sync.md)。下方为历史快照。
 
