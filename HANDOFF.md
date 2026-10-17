@@ -1,26 +1,30 @@
 # 紫薇项目 HandOff
 
-## 2026-10-17 Agent18 已恢复，中控安装确认授权修复已发布，Updater 与中文输入待验
+## 2026-10-17 Agent18 已恢复，Updater 安装中止待覆盖安装回查，中文输入待验
 
-手机和绑定电脑已恢复在线。Agent18 / `0.4.7` 原事务 `21866c8a…` 于 **09:24:01.773** installed 并 committed，回传 `package_replaced / updateRelated=true` 和真实 WebSocket 握手。Updater 目前仍为 `0.4.5 / code16`；原 code18 事务 `device-update-5537b65e-890d-4dc5-825c-36f678ba77bf` 已一次提交，awaiting_user_action / submitted=1、无 installed_at，不重提安装。
+手机和绑定电脑已恢复在线。Agent18 / `0.4.7` 原事务 `21866c8a…` 于 **09:24:01.773** installed 并 committed，回传 `package_replaced / updateRelated=true` 和真实 WebSocket 握手。**10:25:23** 设备快照仍为 Agent18 / Updater16；原 Updater18 事务 `device-update-5537b65e-890d-4dc5-825c-36f678ba77bf` 为 **failed / submitted=1、无 installed_at**，系统回报状态 3，不能据此归因用户取消。没有重提安装或清锁，中文尚未测试。
 
-打开原安装端的旧命令 `47b03653…` 确定未执行，促成中控最窄授权衔接修复 **`67c9b29b07a4975f5c632b724d2daea2afb983c9`**：先推 GitHub、独立审查、远端 **73/73** 接口回归及正式构建通过，**09:53:32** 保护发布至 `/opt/ziwei-control/releases/phone-stability-67c9b29b07a4`。仅新增内部可空列，单条 launch 绑定原事务 / installer / session / epoch；原事务、全部原历史旧列、DB inode、主站 / 客户端 / Nginx / APK 保持，回退仅恢复代码。备份 `control-installer-resume-20261017T015331Z`。
+打开原安装端的旧命令 `47b03653…` 确定未执行，促成中控最窄授权衔接修复 **`67c9b29b07a4975f5c632b724d2daea2afb983c9`**：先推 GitHub、独立审查、远端 **73/73** 接口回归及正式构建通过，**09:53:32** 保护发布至 `/opt/ziwei-control/releases/phone-stability-67c9b29b07a4`。仅新增内部可空列，单条 launch 绑定原事务 / installer / session / epoch；该次发布保留原事务、全部原历史旧列、DB inode、主站 / 客户端 / Nginx / APK，回退仅恢复代码。备份 `control-installer-resume-20261017T015331Z`。
 
-发布后原电脑出现新的会话任务，可经管理工具派发到绑定手机；未修改的业务隔离检查在 POST 前阻止了新的打开请求，没有新手机 command ID。继续等待当前任务终态，不放宽未知业务，不重放原安装。Updater18 健康及真实中文搜索框输入仍未验收，**完整任务尚未完成**。10月16日曾应用户要求暂停定时任务；10月17日通知开机恢复工作后，10:08 恢复原 heartbeat（id 1，ACTIVE，每10分钟），在业务空闲后沿原事务继续，状态未变保持安静，验收完成后停用。
+09:54 后全局业务门禁曾在 POST 前阻止新的打开请求，当时没有新手机 command ID。随后只读核对本轮两项电脑任务均不含手机操作，以精确动作 ID 和请求摘要限定本轮 scope；原 scope 保留，未知业务仍默认阻止。**10:23:33** 一次 POST 打开原安装端，命令 `device-command-a47d6514-71d0-461a-b3a8-20d358df2e17` 已 succeeded / performed=true、executingConfirmed=true；随后成功截图见系统提醒。继续安装的点击请求被瞬态新业务门禁挡在 POST 前，未下发点击；后续 screenshot03 为 expired、未投递、无图。旧 `47b03653…` 失败和原 `5537b65e…` 的状态 3 失败均保留。
+
+用户随后主动表示愿意协助安装，已提供经过校验的原签名 Updater18 官方包覆盖安装链接，不卸载或清数据。现有代码会核对真实已安装版本与签名，并支持原事务 failed → installed → 健康后 committed；当前尚无该安装或健康成功证据。此路径包含人工安装协助，后续自动恢复须另据真实启动来源和心跳验收，不能称无人介入安装已通过，**完整任务尚未完成**。
+
+原 heartbeat（id 1）10月16日曾按用户要求暂停，17日10:08恢复 ACTIVE、每10分钟；提示已更新为安静跟踪原事务，状态未变保持安静，验收完成后停用。
 
 生产主站仍为 `eabe098a…`，官方下载客户端仍为源码 `5db7d834…` / build `208f2350…`，未回退历史包。完整证据与限制见[操作记录](docs/operations/2026-10-16-phone-input-lifecycle.md)。下方 10月16日离线与 ACTIVE 描述均为当时历史状态。
 
-## 2026-10-16 代码、构建和发布完成，真机验收未完成，已自动接续等待连接恢复
+## 2026-10-16 历史快照：代码发布完成，真机验收等待连接恢复
 
-**当前手机状态：** Agent17 / Updater16 自 **13:01:19** 后双端均无 HTTP 心跳并离线。code18 原 Agent 升级事务 `device-update-21866c8a-7d0d-4bad-ae35-76a529106451` 为 submitted=1 / awaiting_user_action、无 installed_at，不能写成已升级、已自动恢复或中文通过；保留原事务，不重复提交。尚无新退出或 TLS 失败证据，程序正在分别调查 TLS 与绑定电脑恢复通道，不归因于 WebSocket 或“被杀”。
+**10月16日当时的手机状态：** Agent17 / Updater16 自 **13:01:19** 后双端均无 HTTP 心跳并离线。code18 原 Agent 升级事务 `device-update-21866c8a-7d0d-4bad-ae35-76a529106451` 为 submitted=1 / awaiting_user_action、无 installed_at，不能写成已升级、已自动恢复或中文通过；保留原事务，不重复提交。尚无新退出或 TLS 失败证据，程序正在分别调查 TLS 与绑定电脑恢复通道，不归因于 WebSocket 或“被杀”。
 
 本轮结束时仍未恢复连接，**完整任务尚未完成**。已为本对话创建 heartbeat“闲鱼1恢复后自动接续验收”（id 1，ACTIVE，每 10 分钟），私有接续状态保留原事务和证据；恢复后继续双端 code18 与真实输入验收，通过后停用计划。该接续需要本 Mac 开机且 Codex App 运行，不代表云端可在任意时刻无条件继续。绑定电脑的只读查询也显示离线，最后心跳 12:59:40，未见活动任务；没有操作其他电脑或修改 allowlist。
 
 生产公开证书磁盘与实际服务端回读 SHA-256 一致，mtime 为 10 月 4 日、有效期为 2026-10-04 至 2027-01-02；13:01 附近没有 Nginx reload，只有下述 13:10 修复，Android 也没有叶证书固定信任逻辑。这排除该观察端所见证书过期或轮换，不能证明手机网络 / TLS 正常，更不能推断被杀原因。
 
-主站/API 与官方 Windows 客户端包于 **11:09:08（Asia/Shanghai）** 发布 `891685f70e9e4bfc2c56821ee2cc9a28a356f548`（分支 `codex/android-stability-main`）；该次目录为 `/opt/ziwei/releases/v2-hotfix-891685f70e9e/v2`。客户端 build `6b8449d9…`，包 SHA `4d993a13…`；发布包不代表电脑已安装。中控私有仓库 `ziwei-system` 生产源码 `1b26b11538916bd2dedd8685bfaa752f5736f567`（分支 `codex/android-input-lifecycle`）已先推 GitHub，于 **11:50:25** 发布，当前 `/opt/ziwei-control/releases/phone-stability-1b26b1153891`；前版 `8be4604` 保留。
+主站/API 与官方 Windows 客户端包于 **11:09:08（Asia/Shanghai）** 发布 `891685f70e9e4bfc2c56821ee2cc9a28a356f548`（分支 `codex/android-stability-main`）；该次目录为 `/opt/ziwei/releases/v2-hotfix-891685f70e9e/v2`。客户端 build `6b8449d9…`，包 SHA `4d993a13…`；发布包不代表电脑已安装。中控私有仓库 `ziwei-system` 生产源码 `1b26b11538916bd2dedd8685bfaa752f5736f567`（分支 `codex/android-input-lifecycle`）已先推 GitHub，于 **11:50:25** 发布，当时 `/opt/ziwei-control/releases/phone-stability-1b26b1153891`；前版 `8be4604` 保留。
 
-13:16:21 的最终只读快照显示，主站已由另一项后续发布推进到 `eabe098af3b6c0e7d76cf4121052e3606e022888`（`/opt/ziwei/releases/v2-hotfix-eabe098af3b6/v2`），该提交继承本轮 `891685f` 手机修复；已核对 ancestry 和 phone MCP 差异，未覆盖原回执机制。官方下载客户端元数据为源码 `5db7d834deaf3524adfada59a434bc764fda750a`、build `208f2350ff390bbf7506e6baaef60eb7c8d467f2c8630a86c670ce01aada1044`、包 SHA-256 `2aadef1b066953fb81ff247ec16cd1a5e5e91a8d34490b66b8d47f11fa13d734`。这些后续发布保持现状，不回退为 11:09 的历史包。中控仍为 `1b26b115`；双服务、公开健康与 Android index 在最终检查中正常，手机双端仍离线，活动手机命令为 0、原安装事务为 1。
+13:16:21 的最终只读快照显示，主站已由另一项后续发布推进到 `eabe098af3b6c0e7d76cf4121052e3606e022888`（`/opt/ziwei/releases/v2-hotfix-eabe098af3b6/v2`），该提交继承本轮 `891685f` 手机修复；已核对 ancestry 和 phone MCP 差异，未覆盖原回执机制。官方下载客户端元数据为源码 `5db7d834deaf3524adfada59a434bc764fda750a`、build `208f2350ff390bbf7506e6baaef60eb7c8d467f2c8630a86c670ce01aada1044`、包 SHA-256 `2aadef1b066953fb81ff247ec16cd1a5e5e91a8d34490b66b8d47f11fa13d734`。这些后续发布保持现状，不回退为 11:09 的历史包。该快照中控为 `1b26b115`；双服务、公开健康与 Android index 在最终检查中正常，该快照手机双端仍离线，活动手机命令为 0、原安装事务为 1。
 
 原签名已私下获得并验证，证书仍为 `6292cfac…`。`0.4.5 / code16`（源码 `8be4604`，76/76 JUnit）于 **11:24:57** 发布，闲鱼1的 Agent `3d497…` / Updater `468c004…` 两条原升级均已 committed。code17 APK 于 **12:20:17** 发布为 `0.4.6 / code17`（源码 `1e7977b`，86/86 JUnit），同原证书；Agent 原 code17 事务 `3060d5bb…` 已 committed，12:38 快照 Agent=17、Updater=16。原包和回执保留，发布 manifest 的 `deviceVerified=false` 未改成通过。中控 52/52 集成、72 项主站相关验证及构建通过。
 
@@ -30,9 +34,9 @@ Updater code16 的 `startTrigger=package_replaced`、退出 `updateRelated=true`
 
 **code17 真实闲鱼中文输入仍未通过。** 12:02 code16 原命令 `0ad2168c…` 为 `failed / not_started / INPUT_UNSUPPORTED`；12:45 code17 原命令 `device-command-5309ba7c-9c68-48dd-bde5-436235039298` 为 `failed / not_started / INPUT_EDITOR_FOCUS_REQUIRED`，底层错误“系统输入连接要求目标为当前非密码输入焦点，未继续输入”。executing ACK 不代表已经写入，不把升级完成当作输入成功，也不盲目重放输入。
 
-当前官方 `0.4.7 / code18` 源码 **`c54ec5332c1686d6478aca14aa23cb25166713ce` 已冻结并推送 GitHub**，归档 SHA-256 `bca0a4e87d299341ef2a56fd4dafa53fa6ef6c771efaca467612f90b2e186b08`。远端双角色各 53 项 JUnit、合计 **106/106**（0 failures / errors / skipped）、双 Debug R8 和双 Release 完整 Lint / compile / Dex / assemble 已通过，完整构建 2m31s / 159 个任务全部执行；已完成原证书签名，并于 **12:56:34** 发布 `v0.4.7-code18`，公网逐字节回读和历史文件保持通过，该次 APK 发布未改服务或数据库。该版增加原节点的系统 INPUT 焦点证据、首次升级广播精确退出标记和进程版本证据；旧 code17 没有 summary 时，首个 MY 广播前 reason 10 仍保留窄窗推断歧义，不能称绝对识别用户停止。**code18 原升级仍待系统安装确认，尚未取得安装与实机输入通过证据；中文 / 焦点 / 键盘、断网 / 熄屏 / 重启和长期存活仍待补。** 输入验收仅在搜索框使用中文+数字搜索词，不提交搜索，不公开原词或手机截图。用户要求正常故障由程序自动观察 / 恢复，不默认让用户逐次核实。11:50 中控发布备份 `/opt/ziwei-staging/backups/android-control-20261016T035025Z`，该次 schema / 历史行摘要 / inode、主站与 Nginx 保持；后续 Nginx 变更另列如下。
+10月16日发布的官方 `0.4.7 / code18` 源码 **`c54ec5332c1686d6478aca14aa23cb25166713ce` 已冻结并推送 GitHub**，归档 SHA-256 `bca0a4e87d299341ef2a56fd4dafa53fa6ef6c771efaca467612f90b2e186b08`。远端双角色各 53 项 JUnit、合计 **106/106**（0 failures / errors / skipped）、双 Debug R8 和双 Release 完整 Lint / compile / Dex / assemble 已通过，完整构建 2m31s / 159 个任务全部执行；已完成原证书签名，并于 **12:56:34** 发布 `v0.4.7-code18`，公网逐字节回读和历史文件保持通过，该次 APK 发布未改服务或数据库。该版增加原节点的系统 INPUT 焦点证据、首次升级广播精确退出标记和进程版本证据；旧 code17 没有 summary 时，首个 MY 广播前 reason 10 仍保留窄窗推断歧义，不能称绝对识别用户停止。**截至10月16日该原 Agent 升级仍待系统安装确认，当时尚未取得安装与实机输入通过证据；中文 / 焦点 / 键盘、断网 / 熄屏 / 重启和长期存活仍待补。** 输入验收仅在搜索框使用中文+数字搜索词，不提交搜索，不公开原词或手机截图。用户要求正常故障由程序自动观察 / 恢复，不默认让用户逐次核实。11:50 中控发布备份 `/opt/ziwei-staging/backups/android-control-20261016T035025Z`，该次 schema / 历史行摘要 / inode、主站与 Nginx 保持；后续 Nginx 变更另列如下。
 
-**13:10:38 Nginx WebSocket 修复已部署：** 已推源码 `98db76d4fa0e42f019e81bf446d382891ec1253f` 仅插入 10 行精确 `/api/device/v1/channel` block，nginx -t 与 graceful reload 通过；真实 Upgrade 无凭证返回 401 空 body、有 Origin 返回 403 空 body。主站 / 中控 PID、current 与 code18 下载索引保持，无数据库写入；备份 `/opt/ziwei-staging/backups/android-websocket-20261016T051038Z`。这是此前“Nginx 未改”的明确后续例外，认证手机的 101 握手仍待回执，不能用无凭证探针代替手机恢复证据。
+**13:10:38 Nginx WebSocket 修复已部署：** 已推源码 `98db76d4fa0e42f019e81bf446d382891ec1253f` 仅插入 10 行精确 `/api/device/v1/channel` block，nginx -t 与 graceful reload 通过；真实 Upgrade 无凭证返回 401 空 body、有 Origin 返回 403 空 body。主站 / 中控 PID、current 与 code18 下载索引保持，无数据库写入；备份 `/opt/ziwei-staging/backups/android-websocket-20261016T051038Z`。这是此前“Nginx 未改”的明确后续例外，当时认证手机的 101 握手仍待回执（17日证据见顶部），不能用无凭证探针代替手机恢复证据。
 
 签名材料已从公开 `main` 最新文件树移除，但历史暴露仍待后续独立处理；不得把删除最新文件或忽略规则视为清除历史暴露。设备验收占位、双 APK 摘要、完整证据、备份、回退和接续见[手机输入与生命周期记录](docs/operations/2026-10-16-phone-input-lifecycle.md)。本修复工作树 `/Users/zhangjie/Documents/ChatGPT/紫薇/.codex-worktrees/android-stability-main`；Android 树为同父目录 `ziwei-system-android-stability`。原主目录未提交修改保留。
 
