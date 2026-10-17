@@ -114,3 +114,29 @@ schema保持，内外health200。证据 `.local/zhiwei-prelaunch-repair/inspecti
 `EXECUTION_UNCERTAIN / EXECUTOR_WITHOUT_EXIT_EVIDENCE`、processExit:null，只有
 原2条事件，没有新可信终态。李金晋电脑19:19:34心跳online，但仍为旧build
 `7b4939c2…` / PID21480，不能宣称已安装6067或历史任务已恢复。
+
+
+## 用户回传的本机记录与恢复边界
+
+用户随后执行了本页原动作的只读PowerShell诊断。输出匹配原action、workspace、
+设备、员工和r3/e5绑定，含nativeRuntime:true，以及
+`quarantine.reason=EXECUTOR_WITHOUT_EXIT_EVIDENCE`、`stopConfirmed:false`；
+未打印选取的processExit/prelaunch字段。命令没有输出完整completed条目，因此
+不能将“这些字段未返回”扩大为“completed条目绝对不存在”。该文本是人工转述，
+不能作为同设备认证回执提交，也未据此修改服务器或本机记录。
+
+nativeRuntime是任务类型标记，不证明原进程当前仍在运行；stopConfirmed:false
+表示未确认停止，也不证明原进程仍存活。原任务尚未恢复。当前普通取消只控制
+内存中的controller/supervision，重启不会重建历史Job与action的映射；正常回执
+恢复只重投真实绑定的完整completed/processExit。a996 provision的窄历史恢复
+策略不适用于7b4939的conversation.execute。4f26仅预防新任务同类误分类，
+不能宣称安装后会自动修复这条旧记录。
+
+独立审查确认：若需新增历史prelaunch恢复，必须由目标端读取并校验固定源码、
+原始state及配对delivery证据，和服务端原始失败对应；现有恢复链还需明确支持
+受限的未启动证明，不能只把launched:false塞入要求真实PID/完整树退出的旧接口。
+未取得这种证明时，不能用“管理员已核实”、缺少PID、一次409、换Profile或
+停止daemon来伪造原树退出。本轮未增加该恢复实现，也未解除原占用。
+
+去敏回传与边界保存在
+`.local/zhiwei-verification-diagnostic/user-state-output-20261017.json`。
