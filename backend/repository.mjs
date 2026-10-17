@@ -461,6 +461,29 @@ export function createRepository(options = {}, io={}) {
     else options.onEvent?.(event);
     return eventId;
   };
+  // Assignment identity is a server-derived fact at the write boundary. A
+  // display token can denote several employees/members, so never prefer an ID
+  // match over a conflicting name/email match or infer an old assignment later.
+  const assignmentCandidates=db.prepare(`SELECT 'employee' AS kind,id AS entity_id,status<>'deleted' AS valid
+    FROM employees WHERE workspace_id=? AND (id=? OR lower(name)=lower(?))
+    UNION ALL SELECT 'member' AS kind,id AS entity_id,role IN ('owner','admin','member') AS valid
+    FROM members WHERE workspace_id=? AND (id=? OR user_id=? OR lower(name)=lower(?) OR lower(email)=lower(?)) LIMIT 2`);
+  const taskAssignmentBinding=(workspaceId,taskId,assignee)=>{
+    const supported=assignee===null||typeof assignee==='string';
+    const binding={schemaVersion:1,workspaceId,taskId,assigneeHash:hashSecret(JSON.stringify(supported?assignee:null)),kind:'unresolved',entityId:null};
+    if(assignee===null||assignee==='')return {...binding,kind:'unassigned'};
+    if(!supported||Buffer.byteLength(assignee)>1024)return binding;
+    const candidates=assignmentCandidates.all(workspaceId,assignee,assignee,workspaceId,assignee,assignee,assignee,assignee);
+    if(candidates.length!==1||candidates[0].valid!==1||typeof candidates[0].entity_id!=='string'||!/^[A-Za-z0-9._:-]{1,160}$/.test(candidates[0].entity_id))return binding;
+    return {...binding,kind:candidates[0].kind,entityId:candidates[0].entity_id};
+  };
+  const taskAssignmentWrite=write=>{
+    const events=[],parentEvents=templateAuditEvents;
+    db.exec('SAVEPOINT task_assignment_write');
+    try{write(events);db.exec('RELEASE task_assignment_write');}
+    catch(error){db.exec('ROLLBACK TO task_assignment_write; RELEASE task_assignment_write');throw error;}
+    if(parentEvents)parentEvents.push(...events);else for(const event of events)options.onEvent?.(event);
+  };
   const actionEvents = (actionId, eventView = 'full') => db.prepare(eventView === 'mobile'
     ? "SELECT id,action_id,type,message,data_json,created_at FROM a2a_action_events WHERE action_id=? AND (type IN ('succeeded','failed','cancelled','expired') OR id=(SELECT id FROM a2a_action_events WHERE action_id=? ORDER BY created_at DESC,id DESC LIMIT 1)) ORDER BY created_at,id"
     : 'SELECT id,action_id,type,message,data_json,created_at FROM a2a_action_events WHERE action_id=? ORDER BY created_at,id').all(...(eventView === 'mobile' ? [actionId,actionId] : [actionId])).map(event => ({
@@ -651,8 +674,11 @@ export function createRepository(options = {}, io={}) {
       const rawDescription = String(input.description || '');
       const task = { id: id('task'), workspace_id: ws.id, title: String(input.title || '未命名任务').trim(), description: descriptionFormat === 'html' ? sanitizeHtml(rawDescription) : rawDescription, description_format: descriptionFormat, state: input.state || 'planned', priority: input.priority || 'medium', created_by: String(input.createdBy ?? input.created_by ?? input.creator ?? 'user').trim() || 'user', assignee: input.assignee || null, labels: Array.isArray(input.labels) ? input.labels : [], due_date: input.dueDate ?? input.due_date ?? null, created_at: created, updated_at: created };
       if (!task.title) throw new Error('Task title is required');
-      db.prepare('INSERT INTO tasks(id,workspace_id,title,description,description_format,state,priority,created_by,assignee,labels_json,due_date,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)').run(task.id,ws.id,task.title,task.description,task.description_format,task.state,task.priority,task.created_by,task.assignee,JSON.stringify(task.labels),task.due_date,created,created);
-      audit(slug,'user','task.created',{taskId:task.id});
+      taskAssignmentWrite(events=>{
+        db.prepare('INSERT INTO tasks(id,workspace_id,title,description,description_format,state,priority,created_by,assignee,labels_json,due_date,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)').run(task.id,ws.id,task.title,task.description,task.description_format,task.state,task.priority,task.created_by,task.assignee,JSON.stringify(task.labels),task.due_date,created,created);
+        const stored=db.prepare('SELECT assignee FROM tasks WHERE id=?').get(task.id);
+        audit(slug,'user','task.created',{taskId:task.id,assignmentBinding:taskAssignmentBinding(ws.id,task.id,stored.assignee)},events);
+      });
       if (input.runtime || input.model || input.execute === true) {
         const employee = executionEmployee;
         const payload = executionPayload({
@@ -689,10 +715,14 @@ export function createRepository(options = {}, io={}) {
       if (!next.title) throw new Error('Task title is required');
       if (!['planned','todo','in_progress','review','completed','blocked'].includes(next.state)) throw new Error('Invalid task state');
       if (!['high','medium','low'].includes(next.priority)) throw new Error('Invalid task priority');
-      db.prepare('UPDATE tasks SET title=?,description=?,description_format=?,state=?,priority=?,created_by=?,assignee=?,labels_json=?,due_date=?,updated_at=? WHERE id=?')
-        .run(next.title, next.description, next.description_format, next.state, next.priority, next.created_by, next.assignee, JSON.stringify(next.labels), next.due_date, next.updated_at, taskId);
       const workspaceRow = db.prepare('SELECT slug FROM workspaces WHERE id=?').get(task.workspace_id);
-      audit(workspaceRow.slug,'user','task.updated',{taskId});
+      taskAssignmentWrite(events=>{
+        db.prepare('UPDATE tasks SET title=?,description=?,description_format=?,state=?,priority=?,created_by=?,assignee=?,labels_json=?,due_date=?,updated_at=? WHERE id=?')
+          .run(next.title, next.description, next.description_format, next.state, next.priority, next.created_by, next.assignee, JSON.stringify(next.labels), next.due_date, next.updated_at, taskId);
+        const stored=db.prepare('SELECT assignee FROM tasks WHERE id=?').get(taskId);
+        const changed=stored.assignee!==task.assignee;
+        audit(workspaceRow.slug,'user','task.updated',{taskId,...(changed?{assignmentBinding:taskAssignmentBinding(task.workspace_id,taskId,stored.assignee)}:{})},events);
+      });
       return { ...task, ...next, labels: next.labels };
     },
     transitionTask(taskId, to) {

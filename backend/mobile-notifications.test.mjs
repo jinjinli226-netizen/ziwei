@@ -278,8 +278,7 @@ test('task-only execution targets obey current ID/name assignees and latest exec
     const task=f.repo.createTask(f.slug,{title:'Private execution target',state:'completed',assignee}),run=f.execution({type:'task.execute',taskId:task.id,payload:{conversationId:null}});
     assert(!f.list({},member).items.some(row=>row.id===run.eventId));
     assert.throws(()=>f.service.resolve(f.slug,run.eventId,member),{status:404});
-    if(assignee===privateEmployee.id)assert.equal(f.service.resolve(f.slug,run.eventId,f.context).item.target.id,task.id);
-    else assert.throws(()=>f.service.resolve(f.slug,run.eventId,f.context),{status:404});
+    assert.equal(f.service.resolve(f.slug,run.eventId,f.context).item.target.id,task.id);
   }
   const task=f.repo.createTask(f.slug,{title:'Task reassigned after original run',state:'completed'}),original=f.execution({type:'task.execute',taskId:task.id,payload:{conversationId:null}});
   assert.equal(f.service.resolve(f.slug,original.eventId,member).item.target.id,task.id);
@@ -341,9 +340,9 @@ test('real force removal followed by purge and direct purge keep retained assign
 
 test('unassigned tasks and actual workspace human members remain visible; unresolvable owner text stays private',t=>{
   const f=fixture(t),human=f.repo.createMember(f.slug,{name:'Workspace human',email:'workspace-human@fixture.test'}),actor={actorUserId:f.member.user_id};
-  const visible=[null,'notice-member',f.member.user_id,human.id,f.employee.id];
+  const visible=[null,'notice-member',f.member.user_id,human.id,f.employee.id,'Member','NOTICE-MEMBER@FIXTURE.TEST',human.name,human.email];
   const add=assignee=>{const task=f.repo.createTask(f.slug,{title:'Human or unassigned task',state:'blocked',assignee});return {task,...f.audit('task.state_changed',{taskId:task.id,to:'blocked'})};};
-  const known=visible.map(add),unknown=['employee_missing_historical','Unmapped historical owner','Member','NOTICE-MEMBER@FIXTURE.TEST',human.name,human.email].map(add);
+  const known=visible.map(add),unknown=['employee_missing_historical','Unmapped historical owner'].map(add);
   assert.equal(f.list({limit:50},actor).items.length,known.length);
   for(const {task,eventId} of known)assert.equal(f.service.resolve(f.slug,eventId,actor).item.target.id,task.id);
   for(const {eventId} of unknown){assert.throws(()=>f.service.resolve(f.slug,eventId,actor),{status:404});assert.throws(()=>f.service.resolve(f.slug,eventId,f.context),{status:404});}
@@ -381,6 +380,75 @@ test('known current and deleted employee-name conflicts veto even a canonical me
   assert.throws(()=>f.service.resolve(f.slug,notice.eventId,actor),{status:404});
   f.repo.deleteEmployee(employee.id);assert.throws(()=>f.service.resolve(f.slug,notice.eventId,actor),{status:404});
   assert(!f.list({},actor).items.some(item=>item.id===notice.eventId));
+});
+
+test('write-time ambiguous employee aliases cannot become public principal bindings after rename or deletion',async t=>{
+  const f=fixture(t),human=f.repo.createMember(f.slug,{name:'Binding human',email:'binding-human@fixture.test'}),actor={actorUserId:f.member.user_id},path=`/api/workspaces/${f.slug}/mobile/notifications`;
+  for(const [index,alias] of [human.id,f.member.user_id,f.employee.id].entries()){
+    const privateEmployee=f.repo.createEmployee(f.slug,{name:alias,runtime:'Codex',visibility:'personal',ownerUserId:f.owner.user_id}),task=f.repo.createTask(f.slug,{title:'PRIVATE_ID_ALIAS_TITLE',state:'blocked',assignee:alias}),notice=f.audit('task.state_changed',{taskId:task.id,to:'blocked'});
+    const created=JSON.parse(f.db.prepare("SELECT payload_json FROM audit_events WHERE workspace_id=? AND action='task.created' AND json_extract(payload_json,'$.taskId')=?").get(f.ws.id,task.id).payload_json);
+    assert.equal(created.assignmentBinding.kind,'unresolved');assert.equal(created.assignmentBinding.entityId,null);
+    f.repo.updateEmployee(privateEmployee.id,{name:`Private renamed binding ${index}`});
+    f.repo.updateTask(task.id,{title:'PRIVATE_ID_ALIAS_TITLE',state:'blocked',assignee:alias});
+    const updated=JSON.parse(f.db.prepare("SELECT payload_json FROM audit_events WHERE workspace_id=? AND action='task.updated' AND json_extract(payload_json,'$.taskId')=? ORDER BY rowid DESC LIMIT 1").get(f.ws.id,task.id).payload_json);assert(!Object.hasOwn(updated,'assignmentBinding'));
+    for(const phase of ['renamed','deleted']){
+      if(phase==='deleted')f.repo.deleteEmployee(privateEmployee.id);
+      assert(!f.list({},actor).items.some(item=>item.id===notice.eventId));assert.throws(()=>f.service.resolve(f.slug,notice.eventId,actor),{status:404});
+      const response=await request(f.app,`${path}/${notice.eventId}`,{cookie:f.cookie(f.member)});assert.equal(response.status,404);assert(!response.bytes.includes(Buffer.from(task.title)));
+    }
+  }
+});
+
+test('legacy nonempty assignments never gain proof from reads, state/title/date writes or same-value full DTO echoes',t=>{
+  const f=fixture(t),actor={actorUserId:f.member.user_id},task=f.repo.createTask(f.slug,{title:'Old task without assignment evidence',state:'planned',assignee:f.employee.id});
+  f.db.prepare("UPDATE audit_events SET payload_json=json_remove(payload_json,'$.assignmentBinding') WHERE workspace_id=? AND action='task.created' AND json_extract(payload_json,'$.taskId')=?").run(f.ws.id,task.id);
+  f.repo.transitionTask(task.id,'blocked');const notice=f.db.prepare("SELECT id FROM audit_events WHERE workspace_id=? AND action='task.state_changed' AND json_extract(payload_json,'$.taskId')=?").get(f.ws.id,task.id).id;
+  const markers=()=>f.db.prepare("SELECT count(*) AS count FROM audit_events WHERE workspace_id=? AND json_extract(payload_json,'$.taskId')=? AND json_type(payload_json,'$.assignmentBinding') IS NOT NULL").get(f.ws.id,task.id).count;
+  const snapshot=JSON.stringify(f.db.prepare('SELECT * FROM audit_events WHERE workspace_id=? ORDER BY rowid').all(f.ws.id));
+  f.list({},actor);assert.throws(()=>f.service.resolve(f.slug,notice,actor),{status:404});assert.equal(JSON.stringify(f.db.prepare('SELECT * FROM audit_events WHERE workspace_id=? ORDER BY rowid').all(f.ws.id)),snapshot);
+  f.repo.updateTask(task.id,{title:'Title edit'});f.repo.updateTask(task.id,{dueDate:'2026-11-01'});f.repo.updateTask(task.id,{title:'Full DTO edit',state:'blocked',assignee:f.employee.id,assignmentBinding:{kind:'employee',entityId:f.employee.id}});
+  assert.equal(markers(),0);assert.throws(()=>f.service.resolve(f.slug,notice,actor),{status:404});
+  f.repo.updateTask(task.id,{assignee:null});assert.equal(f.service.resolve(f.slug,notice,actor).item.target.id,task.id);
+  f.repo.updateTask(task.id,{assignee:f.employee.id});assert.equal(markers(),2);assert.equal(f.service.resolve(f.slug,notice,actor).item.target.id,task.id);
+});
+
+test('trusted assignment identity survives later unrelated display-name collisions and tracks its own revocation',t=>{
+  const f=fixture(t),human=f.repo.createMember(f.slug,{name:'Canonical human',email:'canonical-human@fixture.test'}),other=f.repo.createEmployee(f.slug,{name:'Initially different private employee',runtime:'Codex',visibility:'personal',ownerUserId:f.owner.user_id}),task=f.repo.createTask(f.slug,{title:'Legitimate bound human work',state:'blocked',assignee:human.id}),notice=f.audit('task.state_changed',{taskId:task.id,to:'blocked'}),actor={actorUserId:f.member.user_id};
+  assert.equal(f.service.resolve(f.slug,notice.eventId,actor).item.target.id,task.id);
+  f.repo.updateEmployee(other.id,{name:human.id});assert.equal(f.service.resolve(f.slug,notice.eventId,actor).item.target.id,task.id);
+  f.repo.deleteEmployee(other.id);assert.equal(f.service.resolve(f.slug,notice.eventId,actor).item.target.id,task.id);
+  f.repo.deleteMember(human.id);assert.throws(()=>f.service.resolve(f.slug,notice.eventId,actor),{status:404});
+});
+
+test('latest null, malformed, unresolved or mismatched assignment markers cannot fall back to an older valid proof',t=>{
+  const f=fixture(t),actor={actorUserId:f.member.user_id};
+  for(const corrupt of [null,'text',[],value=>({...value,schemaVersion:'1'}),value=>({...value,workspaceId:'foreign-workspace'}),value=>({...value,taskId:'other-task'}),value=>({...value,assigneeHash:'0'.repeat(64)}),value=>({...value,kind:'unresolved',entityId:null})]){
+    const task=f.repo.createTask(f.slug,{title:'No stale binding fallback',state:'blocked',assignee:f.employee.id}),notice=f.audit('task.state_changed',{taskId:task.id,to:'blocked'}),created=JSON.parse(f.db.prepare("SELECT payload_json FROM audit_events WHERE workspace_id=? AND action='task.created' AND json_extract(payload_json,'$.taskId')=?").get(f.ws.id,task.id).payload_json);
+    assert.equal(f.service.resolve(f.slug,notice.eventId,actor).item.target.id,task.id);
+    f.audit('task.updated',{taskId:task.id,assignmentBinding:typeof corrupt==='function'?corrupt(created.assignmentBinding):corrupt});
+    assert.throws(()=>f.service.resolve(f.slug,notice.eventId,actor),{status:404});
+  }
+});
+
+test('actual reassignment writes unresolved/unassigned markers, rejects client proof and preserves exact persisted hash',t=>{
+  const f=fixture(t),actor={actorUserId:f.member.user_id},privateEmployee=f.repo.createEmployee(f.slug,{name:'Initial private binding owner',runtime:'Codex',visibility:'personal',ownerUserId:f.owner.user_id}),task=f.repo.createTask(f.slug,{title:'Reassignment evidence',state:'blocked',assignee:f.employee.id}),notice=f.audit('task.state_changed',{taskId:task.id,to:'blocked'});
+  const marker=()=>JSON.parse(f.db.prepare("SELECT payload_json FROM audit_events WHERE workspace_id=? AND action IN ('task.created','task.updated') AND json_extract(payload_json,'$.taskId')=? AND json_type(payload_json,'$.assignmentBinding') IS NOT NULL ORDER BY rowid DESC LIMIT 1").get(f.ws.id,task.id).payload_json).assignmentBinding;
+  assert.equal(marker().kind,'employee');f.repo.updateTask(task.id,{assignee:'Unresolvable owner',assignmentBinding:{kind:'employee',entityId:f.employee.id}});assert.equal(marker().kind,'unresolved');assert.throws(()=>f.service.resolve(f.slug,notice.eventId,actor),{status:404});
+  f.repo.updateTask(task.id,{assignee:null});assert.equal(marker().kind,'unassigned');assert.equal(f.service.resolve(f.slug,notice.eventId,actor).item.target.id,task.id);
+  f.repo.updateTask(task.id,{assignee:privateEmployee.name});assert.equal(marker().entityId,privateEmployee.id);assert.throws(()=>f.service.resolve(f.slug,notice.eventId,actor),{status:404});
+  f.repo.updateEmployee(privateEmployee.id,{name:f.employee.id});assert.throws(()=>f.service.resolve(f.slug,notice.eventId,actor),{status:404});
+  f.repo.updateTask(task.id,{assignee:f.employee.id});assert.equal(marker().kind,'unresolved');assert.throws(()=>f.service.resolve(f.slug,notice.eventId,actor),{status:404});
+  f.repo.updateEmployee(privateEmployee.id,{name:'Now nonconflicting'});f.repo.updateTask(task.id,{assignee:null});f.repo.updateTask(task.id,{assignee:f.employee.id});assert.equal(marker().entityId,f.employee.id);assert.equal(f.service.resolve(f.slug,notice.eventId,actor).item.target.id,task.id);
+  f.db.prepare('UPDATE tasks SET assignee=? WHERE id=?').run('Out-of-band changed raw',task.id);assert.throws(()=>f.service.resolve(f.slug,notice.eventId,actor),{status:404});
+});
+
+test('oversized assignment text and proof values stay inside the thin read budget without raw audit copies',t=>{
+  const f=fixture(t),raw='PRIVATE_ASSIGNEE_'.repeat(100000),task=f.repo.createTask(f.slug,{title:'Large assignment token',state:'blocked',assignee:raw}),notice=f.audit('task.state_changed',{taskId:task.id,to:'blocked'}),payload=f.db.prepare("SELECT payload_json FROM audit_events WHERE workspace_id=? AND action='task.created' AND json_extract(payload_json,'$.taskId')=?").get(f.ws.id,task.id).payload_json;
+  assert(payload.length<1000);assert(!payload.includes('PRIVATE_ASSIGNEE_'));assert.equal(f.db.prepare('SELECT length(assignee) AS length FROM tasks WHERE id=?').get(task.id).length,raw.length);
+  assert.throws(()=>f.service.resolve(f.slug,notice.eventId,{actorUserId:f.member.user_id}),{status:404});
+  const small=f.repo.createTask(f.slug,{title:'Huge invalid schema scalar',state:'blocked',assignee:f.employee.id}),smallNotice=f.audit('task.state_changed',{taskId:small.id,to:'blocked'});f.audit('task.updated',{taskId:small.id,assignmentBinding:{schemaVersion:{large:raw},workspaceId:f.ws.id,taskId:small.id,kind:'employee',entityId:f.employee.id,assigneeHash:'0'.repeat(64)}});
+  const audited={...f.repo,db:{prepare(sql){const stmt=f.db.prepare(sql);return new Proxy(stmt,{get(target,key){if(key==='get')return(...args)=>{const row=target.get(...args);if(sql.includes('AS binding_type')||sql.includes('AS binding_assignee'))assert(Buffer.byteLength(JSON.stringify(row))<2000);return row;};const value=target[key];return typeof value==='function'?value.bind(target):value;}});},exec:sql=>f.db.exec(sql)}};
+  const reader=createMobileNotificationReadService(audited);assert.throws(()=>reader.resolve(f.slug,smallNotice.eventId,{actorUserId:f.member.user_id}),{status:404});assert.deepEqual(reader.list(f.slug,{},f.context).items,[]);
 });
 
 test('superseded action audit and malformed/mismatched original event do not resolve',t=>{

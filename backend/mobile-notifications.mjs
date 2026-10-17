@@ -1,5 +1,6 @@
 // A read-only, bounded feed. Existing workspace-wide notification read_at is
 // deliberately neither returned as personal state nor changed by this service.
+import crypto from 'node:crypto';
 export const MOBILE_NOTIFICATION_MAX_BYTES=64*1024;
 export const MOBILE_NOTIFICATION_SCAN_LIMIT=200;
 const MAX_LIMIT=50,ID=/^[A-Za-z0-9._:-]{1,160}$/;
@@ -55,35 +56,26 @@ export function createMobileNotificationReadService(repo){
   const taskAction=db.prepare(`${actionSelect} WHERE task_id=? AND workspace_id=? ORDER BY created_at DESC LIMIT 1`);
   const employee=db.prepare('SELECT id,workspace_id,status,visibility,owner_user_id,target_device_id,substr(name,1,160) AS name FROM employees WHERE id=? AND workspace_id=?');
   const device=db.prepare('SELECT workspace_id,owner_user_id FROM devices WHERE id=? AND workspace_id=?');
-  const task=db.prepare('SELECT id,state,substr(title,1,160) AS title FROM tasks WHERE id=? AND workspace_id=?');
+  const task=db.prepare(`SELECT id,state,substr(title,1,160) AS title,assignee IS NULL OR assignee='' AS unassigned,
+    CASE WHEN typeof(assignee)='text' AND length(CAST(assignee AS BLOB))<=1024 THEN assignee END AS binding_assignee
+    FROM tasks WHERE id=? AND workspace_id=?`);
   const conversationOwner=db.prepare('SELECT employee_id FROM conversations WHERE id=? AND workspace_id=?');
-  // A nonempty free-text assignee is not itself an employee/member binding.
-  // Ordinary DELETE and explicit purge remove the employee row, while the
-  // original task keeps its ID/name. Require a current canonical owner ID;
-  // names/emails cannot establish ownership of an ambiguous legacy task.
-  // Retained deletion aliases still veto reused names/IDs. Unassigned work
-  // and real workspace member/user IDs remain valid human tasks.
-  // This resolves current IDs; it cannot reconstruct an initial employee name
-  // absent from retained audit data. Preserving arbitrary legacy aliases would
-  // require a separate trusted assignment binding written at assignment time.
-  const taskAssigneeKnown=db.prepare(`SELECT 1 AS found FROM tasks t WHERE t.id=? AND t.workspace_id=? AND (
-    t.assignee IS NULL OR t.assignee='' OR (
-      (EXISTS (SELECT 1 FROM employees e WHERE e.workspace_id=t.workspace_id AND e.id=t.assignee) OR
-       EXISTS (SELECT 1 FROM members m WHERE m.workspace_id=t.workspace_id AND m.role IN ('owner','admin','member') AND
-         (m.id=t.assignee OR m.user_id=t.assignee))) AND
-      NOT EXISTS (SELECT 1 FROM audit_events a WHERE a.workspace_id=t.workspace_id AND a.action IN ('employee.deleted','employee.purged','employee.force_removed') AND
-        CASE WHEN json_valid(a.payload_json) THEN json_extract(a.payload_json,'$.employeeId')=t.assignee OR lower(json_extract(a.payload_json,'$.name'))=lower(t.assignee) ELSE 0 END)
-    ))`);
-  // Legacy tasks may store an employee name instead of its ID. Check every
-  // matching employee in SQL, including duplicate names, without hydrating
-  // arbitrary assignee text or a workspace-wide task/employee list.
-  const hiddenTaskAssignee=db.prepare(`SELECT 1 AS found FROM tasks t
-    JOIN employees e ON e.workspace_id=t.workspace_id AND (e.id=t.assignee OR lower(e.name)=lower(t.assignee))
-    LEFT JOIN devices d ON d.id=e.target_device_id AND d.workspace_id=e.workspace_id
-    WHERE t.id=? AND t.workspace_id=? AND (e.status='deleted' OR
-      (e.visibility='personal' AND ?=0 AND coalesce(e.owner_user_id,'')<>?) OR
-      (e.target_device_id IS NOT NULL AND (d.id IS NULL OR (? IS NOT NULL AND e.target_device_id<>?) OR
-        (?='personal' AND ?=0 AND coalesce(d.owner_user_id,'')<>?)))) LIMIT 1`);
+  const assignmentMember=db.prepare('SELECT id,role FROM members WHERE id=? AND workspace_id=?');
+  // The latest explicit assignment marker wins, including unresolved/null or
+  // malformed markers. Never skip one to reuse an older successful binding.
+  // Only bounded scalar proof fields cross from SQLite; no full audit payload
+  // or workspace task/employee collection is hydrated.
+  const taskBinding=db.prepare(`SELECT json_type(payload_json,'$.assignmentBinding') AS binding_type,
+    json_type(payload_json,'$.assignmentBinding.schemaVersion') AS schema_type,
+    ${scalar('payload_json','$.assignmentBinding.schemaVersion')} AS schema_version,
+    ${scalar('payload_json','$.assignmentBinding.workspaceId')} AS workspace_id,
+    ${scalar('payload_json','$.assignmentBinding.taskId')} AS task_id,
+    ${scalar('payload_json','$.assignmentBinding.assigneeHash')} AS assignee_hash,
+    ${scalar('payload_json','$.assignmentBinding.kind')} AS kind,
+    ${scalar('payload_json','$.assignmentBinding.entityId')} AS entity_id
+    FROM audit_events WHERE workspace_id=? AND action IN ('task.created','task.updated') AND
+      CASE WHEN json_valid(payload_json) THEN json_extract(payload_json,'$.taskId')=? AND json_type(payload_json,'$.assignmentBinding') IS NOT NULL ELSE 0 END
+    ORDER BY rowid DESC LIMIT 1`);
   const automationRun=db.prepare('SELECT 1 AS found FROM automation_runs WHERE id=? AND action_id=? AND workspace_id=?');
   const message=db.prepare('SELECT id FROM conversation_messages WHERE id=? AND conversation_id=?');
   const proof=db.prepare(`SELECT json_valid(result_json) AS valid,
@@ -135,8 +127,15 @@ export function createMobileNotificationReadService(repo){
   }
   function visibleTask(id,ws,actor){
     const row=validId(id)?task.get(id,ws.id):null;if(!row)return null;
-    if(!taskAssigneeKnown.get(id,ws.id))return null;
-    if(hiddenTaskAssignee.get(id,ws.id,Number(actor.privileged),actor.actorUserId,actor.deviceScope,actor.deviceScope,ws.kind,Number(actor.privileged),actor.actorUserId))return null;
+    if(!row.unassigned){
+      if(typeof row.binding_assignee!=='string')return null;
+      const binding=taskBinding.get(ws.id,id),hash=crypto.createHash('sha256').update(JSON.stringify(row.binding_assignee)).digest('hex');
+      if(binding?.binding_type!=='object'||binding.schema_type!=='integer'||binding.schema_version!=='1'||binding.workspace_id!==ws.id||binding.task_id!==id||binding.assignee_hash!==hash||!validId(binding.entity_id))return null;
+      if(binding.kind==='employee'){if(!visibleEmployee(binding.entity_id,ws,actor))return null;}
+      else if(binding.kind==='member'){
+        const member=assignmentMember.get(binding.entity_id,ws.id);if(!member||!['owner','admin','member'].includes(member.role)||actor.deviceScope)return null;
+      }else return null;
+    }
     const latest=taskAction.get(id,ws.id);
     if(latest){
       if(latest.user_id&&!actor.privileged&&latest.user_id!==actor.actorUserId)return null;
