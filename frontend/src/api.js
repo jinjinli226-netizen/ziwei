@@ -197,6 +197,8 @@ export const api = {
   createConversation: body => request(`/api/workspaces/${encodeURIComponent(workspaceSlug())}/conversations`, { method:'POST', body:JSON.stringify(body) }),
   updateConversation: (id, body) => request(`/api/conversations/${encodeURIComponent(id)}`, { method:'PATCH', body:JSON.stringify(body) }),
   conversation: (id, options = {}) => boundedRequest(`/api/conversations/${id}`,options),
+  forwardConversation: (id, body) => request(`/api/conversations/${encodeURIComponent(id)}/forwards`, { method:'POST', body:JSON.stringify(body) }),
+  markConversationRead: (id, messageId) => request(`/api/conversations/${encodeURIComponent(id)}/read`, { method:'POST', body:JSON.stringify({messageId}) }),
   inspectConversationDirectory: (id, body = {}) => request(`/api/conversations/${encodeURIComponent(id)}/workdir/inspect`, { method:'POST', body:JSON.stringify(body) }),
   conversationDirectoryAction: (id, actionId) => request(`/api/conversations/${encodeURIComponent(id)}/workdir/actions/${encodeURIComponent(actionId)}`),
   addConversationMessage: (id, body) => request(`/api/conversations/${id}/messages`, { method:'POST', body:JSON.stringify(body) }),
