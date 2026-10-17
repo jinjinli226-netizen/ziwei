@@ -25,6 +25,7 @@ import { resolveEmployeeDefaultWorkdir } from './employee-workdir.mjs';
 import { assertBotExecution, botUncertain, BOT_INTERNAL, botActionMaintenance, botActionReadOnlyInspection } from './bots.mjs';
 import {verifyBotProvisionReceipt} from './bot-profiles.mjs';
 import {readHistoricalPrelaunchRecovery} from './bot-historical-recovery-view.mjs';
+import {readForceAbandonRecovery} from './bot-force-abandon.mjs';
 import {botReasoningProof} from '../src/hermes-bot-reasoning.mjs';
 import { botFailure } from '../src/hermes-bot-config.mjs';
 import { CREATOR_BOT_GUIDANCE } from './employees/creator-template.mjs';
@@ -477,7 +478,7 @@ export function createRepository(options = {}, io={}) {
     const { managementMcp: _oldManagement, ...rest } = trusted;
     return employeeWorkspace ? { ...rest, managementMcp: { enabled: true, workspace: employeeWorkspace } } : rest;
   };
-  const historicalActionMetadata = row => { const prelaunchRecovery=readHistoricalPrelaunchRecovery(db,row); return prelaunchRecovery ? {prelaunchRecovery} : {}; };
+  const historicalActionMetadata = row => { const prelaunchRecovery=readHistoricalPrelaunchRecovery(db,row),forceAbandonRecovery=readForceAbandonRecovery(db,row); return {...(prelaunchRecovery?{prelaunchRecovery}:{}),...(forceAbandonRecovery?{forceAbandonRecovery}:{})}; };
   const actionView = (row, { includeEvents = false, eventView = 'full' } = {}) => row ? ({
     id: row.id,
     task_id: row.task_id,

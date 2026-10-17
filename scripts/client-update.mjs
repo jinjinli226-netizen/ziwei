@@ -19,8 +19,10 @@ const SAFE_ERROR_CODES = new Set(['EBUSY', 'EPERM', 'EACCES', 'ENOENT', 'ENOTDIR
 const SAFE_SIGNALS = new Set(['SIGTERM', 'SIGKILL', 'SIGABRT', 'SIGINT', 'SIGBREAK']);
 SAFE_ERROR_CODES.add('RETAINED_STOP_RECOVERY_REFUSED');
 SAFE_ERROR_CODES.add('HISTORICAL_PRELAUNCH_RECOVERY_REFUSED');
+SAFE_ERROR_CODES.add('CLIENT_FORCE_ABANDON_REFUSED');
 for (const code of ['LEGACY_STOP_CONFIRMATION_REQUIRED', 'LEGACY_CONFIRMATION_INVALID', 'LEGACY_IDENTITY_UNVERIFIED', 'LEGACY_PROTOCOL_MISMATCH', 'LEGACY_PROOF_INVALID', 'LEGACY_PROOF_EXPIRED', 'LEGACY_IDENTITY_CHANGED', 'LEGACY_SOURCE_UNRECOGNIZED', 'LEGACY_CONFIG_MISMATCH', 'LEGACY_CONFIG_NAMESPACE_UNVERIFIED', 'LEGACY_STOP_PROOF_REQUIRED', 'LEGACY_STOP_FAILED']) SAFE_ERROR_CODES.add(code);
 const FAILURE_REASONS = {
+  CLIENT_FORCE_ABANDON_REFUSED: '已授权的旧任务放弃尚未完成；原始归档已保留，请重试官方更新入口',
   HISTORICAL_PRELAUNCH_RECOVERY_REFUSED: '旧任务自动恢复尚未完成；原始记录已保留，请重试官方更新入口，系统会继续恢复',
   CONTROL_REJECTED: '客户端拒绝停止，请查看具体阻塞记录',
   RETAINED_STOP_RECOVERY_REFUSED: '历史记录未满足自动恢复条件，客户端未被强制停止',
@@ -331,7 +333,7 @@ export async function recoverBeforeClientUpdateStop({candidate,root,env=process.
   const receipt = await module.recoverHistoricalPrelaunchForUpdate({root,env});
   if(receipt?.recovered===true) {
     if(receipt.stopped!==true||receipt.wasRunning!==true)throw failure('HISTORICAL_PRELAUNCH_RECOVERY_REFUSED','历史恢复未给出可核验的停止结果');
-    log('historical_prelaunch_recovered',{actionId:receipt.actionId});
+    log(receipt.operatorAbandoned===true?'operator_force_abandon_recovered':'historical_prelaunch_recovered',{actionId:receipt.actionId});
   }
   return receipt || {recovered:false};
 }

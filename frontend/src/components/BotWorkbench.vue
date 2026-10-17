@@ -6,6 +6,7 @@ import ZiSelect from './ZiSelect.vue';
 import {api,API_BASE} from '../api.js';
 import {createBotWorkbench,botDraftDirty,botPresence,capabilityPresentation,executionUncertain} from '../bot-workbench.js';
 import {botStopPresentation,botRecoveryEvent,botRecoveryDetail,processExitConfirmed} from '../bot-presentation.js';
+import {operatorForceAbandonRecovery} from '../operator-force-abandon-recovery.mjs';
 import {botErrorMessage,botTime} from '../bot-state.js';
 import {botCapabilityAction,botCapabilityDestination,focusCapabilityTarget} from '../bot-capability-actions.js';
 import {canForceRemoveEmployee,employeeRemovalPrompt,forceEmployeeRemovalDetail} from '../employee-removal.js';
@@ -22,6 +23,8 @@ const nativePreview=import.meta.env.VITE_ZIWEI_NATIVE_PREVIEW==='true';
 const fixtureBot=computed(()=>previewMode&&(!nativePreview||s.bot?.employee?.runtime_profile==='preview-fixture'));
 const workbench=createBotWorkbench({api,wrap:reactive});const s=workbench.state;
 const workbenchRoot=ref(null),avatarReading=ref(false);
+const forceAbandonState=ref(null),forceAbandonBusy=ref(false),forceAbandonError=ref('');
+let forceAbandonKey='';
 const tab=ref(props.initialTab),search=ref(''),discovery=ref(null),discoveryError=ref(''),discoveryLoading=ref(false);
 const showCreate=ref(false),createForm=ref({}),preparing=ref(false);
 let ownedCreate=createOwnedBotRequest({api,wrap:reactive,namespace:props.actorId,origin:API_BASE,getDiscovery:()=>discovery.value});
@@ -75,7 +78,7 @@ async function loadDiscovery(){
 function clearTransientDrafts(){routineEditor.value=null;routineScope.value=null;}
 function selectBot(id){if(id===s.selectedId)return;if(configDirty.value&&!window.confirm('当前 Bot 有未保存修改，切换会丢弃草稿。继续切换？'))return;tab.value='chat';clearTransientDrafts();emit('select',id);void workbench.select(id);}
 function chat(){if(s.bot?.main_conversation_id)emit('chat',{workspace:props.workspace,employee:s.bot.employee,conversation:{id:s.bot.main_conversation_id},botId:s.bot.id});}
-async function refresh(){await Promise.all([workbench.list(),workbench.refresh(),loadDiscovery()]);}
+async function refresh(){await Promise.all([workbench.list(),workbench.refresh(),loadDiscovery(),loadForceAbandon()]);}
 async function save(){if(avatarReading.value)return;if(nativeBlocked.value){s.error='仍有原生操作待核实，请先查看原回执。';return;}if(await workbench.save())emit('changed');}
 async function refreshNativeBot(){const reset=!configDirty.value;await workbench.refresh({resetDraft:reset});emit('changed');}
 function changeSection(value){if(tab.value===value)return;routineEditor.value=null;tab.value=value;emit('section',value);}
@@ -105,6 +108,22 @@ async function initialize(){if(await workbench.initialize())emit('changed');}
 async function removeEmployee(force=false){if(!s.bot||s.busy||s.writeUnknown||!window.confirm(employeeRemovalPrompt(s.bot.employee,force)))return;if(await workbench.removeEmployee({force})){emit('select','');emit('changed');await workbench.list();}}
 async function control(operation){if(await workbench.control(operation))emit('changed');}
 async function reconcile(run){if(await workbench.reconcile(run))emit('changed');}
+async function loadForceAbandon(){
+  const visit=generation,workspace=props.workspace,id=s.selectedId;if(!id)return;
+  try{const value=await api.botForceAbandonStatus(id,workspace);if(scopeCurrent(visit,workspace)&&s.selectedId===id)forceAbandonState.value=value;}
+  catch{if(scopeCurrent(visit,workspace)&&s.selectedId===id)forceAbandonState.value=null;}
+}
+async function forceAbandon(){
+  if(forceAbandonBusy.value||!forceAbandonState.value?.eligible||!s.bot)return;
+  if(!window.confirm('强制停止当前电脑上的紫薇客户端，并放弃这条卡住的旧任务？聊天、失败记录、Profile 和 HOME 保留。原执行结果仍标记为未知，不会自动重跑。'))return;
+  const visit=generation,workspace=props.workspace,id=s.selectedId,bot=s.bot;
+  forceAbandonBusy.value=true;forceAbandonError.value='';forceAbandonKey||=`force-abandon-${crypto.randomUUID()}`;
+  try{
+    const value=await api.forceAbandonBot(id,{expectedActionId:bot.latest_run?.id,expectedRevision:bot.revision,expectedControlEpoch:bot.control_epoch,acknowledgeUncertain:true,idempotencyKey:forceAbandonKey},workspace);
+    if(scopeCurrent(visit,workspace)&&s.selectedId===id){forceAbandonState.value=value;emit('changed');}
+  }catch(error){if(scopeCurrent(visit,workspace)&&s.selectedId===id){forceAbandonError.value=botErrorMessage(error);await loadForceAbandon();}}
+  finally{if(scopeCurrent(visit,workspace)&&s.selectedId===id)forceAbandonBusy.value=false;}
+}
 function newBot(){
   createVisit++;ownedCreate.select(props.workspace);const pending=ownedCreateState.value.pending;
   createForm.value={name:pending?.name||'',targetDeviceId:pending?.deviceId||'',sourceProfile:pending?.sourceProfile||'',model:pending?.model||'',visibility:pending?.visibility||'personal'};
@@ -119,7 +138,7 @@ async function create(){
   emit('select',result.id);await workbench.select(result.id);if(disposed||workspace!==props.workspace||s.selectedId!==result.id)return;
   ownedCreate.acknowledge(result.id);tab.value='chat';emit('changed');s.notice='Bot 和主聊天已保存。专属 Profile、HOME 与模型就绪状态见下方。';
 }
-async function refreshInstance(){await Promise.all([workbench.refresh(),loadDiscovery()]);}
+async function refreshInstance(){await Promise.all([workbench.refresh(),loadDiscovery(),loadForceAbandon()]);}
 async function recoverInstance(){if(!instanceStatus.value.canRecover)return;const revision=s.bot.revision,actionId=instanceStatus.value.actionId;await workbench.mutate((id,workspace)=>api.provisionBot(id,{expectedRevision:revision,idempotencyKey:`bot-profile-recover-${id}-${actionId}`},workspace),'已查询同一专属 Profile 的恢复请求，请等待原设备回执。',{readback:true});}
 async function prepareInstance(){
   if(preparing.value||!instanceStatus.value.canValidate||configDirty.value||s.busy||s.writeUnknown)return;
@@ -152,6 +171,7 @@ watch(()=>props.workspace,async workspace=>{
 watch(()=>[createForm.value.targetDeviceId,sourceProfiles.value],()=>{if(ownedCreateState.value.pending)return;const names=sourceProfiles.value.map(row=>typeof row==='string'?row:row.name);if(!names.includes(createForm.value.sourceProfile))createForm.value.sourceProfile=names.includes('default')?'default':names[0]||'';});
 watch(()=>props.actorId,()=>{ownedCreate.dispose();ownedCreate=createOwnedBotRequest({api,wrap:reactive,namespace:props.actorId,origin:API_BASE,getDiscovery:()=>discovery.value});ownedCreateState.value=ownedCreate.state;closeCreate();});
 watch(()=>props.botId,id=>{if(id!==s.selectedId){clearTransientDrafts();void workbench.select(id);}});
+watch(()=>[props.workspace,s.bot?.id,s.bot?.revision,s.bot?.control_epoch,s.bot?.latest_run?.id],()=>{forceAbandonState.value=null;forceAbandonBusy.value=false;forceAbandonError.value='';forceAbandonKey='';void loadForceAbandon();});
 watch(()=>props.initialTab,value=>{if(tab.value!==value){routineEditor.value=null;tab.value=value;}});
 onBeforeUnmount(()=>{disposed=true;generation++;ownedCreate.dispose();clearTimeout(pollTimer);workbench.dispose();});schedulePoll();
 </script>
@@ -173,6 +193,12 @@ onBeforeUnmount(()=>{disposed=true;generation++;ownedCreate.dispose();clearTimeo
         <template v-if="s.bot">
           <header class="bot-detail-heading"><div class="bot-identity"><span class="bot-avatar large"><img v-if="s.bot.employee.avatar" :src="s.bot.employee.avatar" alt=""/><span v-else>{{s.bot.employee.name?.slice(0,1)||'✦'}}</span><i :data-tone="present.tone"/></span><div><h2>{{s.bot.employee.name}}</h2><p>{{s.bot.employee.description||'Hermes 数字伙伴'}}</p><button class="bot-presence" :data-tone="present.tone" @click="changeSection('activity')">{{present.label}} <ChevronRight :size="13"/></button></div></div><div class="bot-actions"><button class="bot-button" @click="emit('employee',s.bot.employee)">在团队管理查看</button><button class="bot-button" :disabled="previewMode" :title="previewMode?'本地预览未连接手机':'配置同一员工的手机互联'" @click="emit('phone',{workspace,employeeId:s.bot.id})">手机互联</button><button class="bot-button danger" :disabled="s.busy||s.writeUnknown" @click="removeEmployee(false)">删除员工</button><button class="bot-button primary" :disabled="!s.bot.main_conversation_id" @click="chat"><MessageCircle :size="17"/>打开长期聊天</button></div></header>
           <div class="bot-device-line"><span>{{selectedDevice?.name||'指定电脑'}} · {{selectedDevice?(selectedDevice.status==='online'?'在线':'离线'):'连接待验证'}}</span><span>Hermes</span></div>
+          <div v-if="forceAbandonState?.eligible||forceAbandonState?.state==='requested'||forceAbandonState?.state==='completed'" class="bot-banner warning" aria-label="强制恢复旧任务">
+            <template v-if="forceAbandonState.state==='completed'"><strong>旧任务已强制放弃</strong><p>原执行结果仍未知，失败记录已保留。可以恢复 Bot 后开始新的工作。</p></template>
+            <template v-else-if="forceAbandonState.state==='requested'"><strong>已授权强制恢复</strong><p>等待运行电脑执行新版官方维护程序。系统会停止当前客户端，归档并解除这条旧任务；不会重跑旧消息。</p><button class="bot-button" :disabled="forceAbandonBusy" @click="refreshInstance">刷新恢复进度</button></template>
+            <template v-else><strong>旧任务卡住时可强制恢复</strong><p>停止当前客户端并放弃这条旧任务。聊天、失败记录、Profile 和 HOME 保留，原执行结果仍标记为未知。</p><button class="bot-button danger" :disabled="forceAbandonBusy||s.busy||s.writeUnknown" @click="forceAbandon">{{forceAbandonBusy?'正在授权…':'强制停止并放弃旧任务'}}</button></template>
+            <p v-if="forceAbandonError" role="alert">{{forceAbandonError}}</p>
+          </div>
           <div v-if="forceRemovalAvailable" class="bot-banner warning"><p>{{forceEmployeeRemovalDetail}}</p><button class="bot-button danger" :disabled="s.busy||s.writeUnknown" @click="removeEmployee(true)">强制移除员工</button></div>
           <BotInstancePanel v-if="s.bot.configuration_state!=='uninitialized'" :bot="s.bot" :discovery="discovery" :busy="s.busy||s.reading||s.writeUnknown||preparing" :dirty="configDirty" @refresh="refreshInstance" @recover="recoverInstance" @prepare="prepareInstance"/>
           <div v-if="s.bot.configuration_state==='uninitialized'" class="bot-banner"><strong>{{s.bot.kind==='creator'?'Creator 保留原管理路径':'同一员工 · Bot 能力尚未初始化'}}</strong><p>{{s.bot.effect?.pendingReason}}</p><button v-if="s.bot.kind!=='creator'" class="bot-button primary" :disabled="s.busy||s.writeUnknown" @click="initialize">初始化此员工的 Bot 能力</button><button v-else class="bot-button" @click="chat">打开 Creator 原聊天</button></div><div v-if="s.bot.effect?.executionAdmission?.deviceExecution==='blocked'" class="bot-banner">{{s.bot.effect.executionAdmission.message}}</div><nav class="bot-tabs" aria-label="Bot 详情"><button v-for="[key,label,icon] in tabs" :key="key" :aria-current="tab===key?'page':undefined" :class="{selected:tab===key}" @click="changeSection(key)"><component :is="icon" :size="15"/>{{label}}</button></nav>
@@ -211,7 +237,7 @@ onBeforeUnmount(()=>{disposed=true;generation++;ownedCreate.dispose();clearTimeo
             <div class="bot-section-heading"><div><h3>运行与控制</h3><p>{{present.detail}}</p></div><button class="bot-button" :disabled="s.reading||s.busy" @click="workbench.refresh()"><RefreshCw :size="15"/>刷新回执</button></div>
             <div class="bot-surface"><h3>{{validationLabel}}</h3><p v-if="s.bot.validation?.error" class="bot-error-text">{{s.bot.validation.error}}</p><p>检查模型、工具和运行设置是否完整。</p><p v-if="fixtureBot" class="bot-help">当前使用预览数据。</p><div class="bot-actions"><button class="bot-button" :disabled="s.busy||s.writeUnknown||s.bot.configuration_state==='uninitialized'||(instanceStatus.mode==='owned_profile'&&!instanceStatus.provisioned)||configDirty||runBusy||!instanceStatus.canValidate" @click="workbench.validate()"><ShieldCheck :size="16"/>检查已保存配置</button><button v-if="s.bot.control_state==='draft'" class="bot-button primary" :disabled="s.busy||s.writeUnknown||!checkedCurrent||configDirty||runBusy" @click="control('activate')"><Play :size="15"/>启用 Bot</button><button v-else-if="s.bot.control_state==='paused'" class="bot-button" :disabled="s.busy||s.writeUnknown||!checkedCurrent||runBusy" @click="control('resume')"><Play :size="15"/>恢复 Bot</button><button v-else class="bot-button" :disabled="s.busy||s.writeUnknown" @click="control('pause')"><Pause :size="15"/>暂停 Bot</button><button class="bot-button danger" :disabled="s.busy||s.writeUnknown||!runBusy" @click="control('stop')"><Square :size="14"/>请求停止当前执行</button></div><p v-if="configDirty" class="bot-help">有未保存草稿，请先保存，再检查和启用。</p></div>
             <article v-if="s.bot.stop_action" class="bot-surface"><h3>停止请求回执</h3><p>请求 {{s.bot.stop_action.id}} · {{s.bot.stop_action.status}}</p><p v-if="s.bot.stop_action.error" class="bot-error-text">{{s.bot.stop_action.error}}</p><p>{{stopPresentation.label}}</p></article><div v-if="!s.runs.length" class="bot-empty">尚无运行记录。状态未知时不会显示为已成功。</div>
-            <article v-for="run in s.runs" :key="run.id" class="bot-run"><div><strong>{{run.type==='hermes.bot.validate'?'配置检查':run.type||'工作执行'}}</strong><span class="bot-status" :data-tone="executionUncertain(run)?'warning':(botStopPresentation(s.bot,run).confirmed||botStopPresentation(s.bot,run).notStarted)?'muted':run.status==='succeeded'?'success':run.status==='failed'?'error':'muted'">{{executionUncertain(run)?'执行待核实':botStopPresentation(s.bot,run).notStarted?'原模型未启动 · 已恢复':botStopPresentation(s.bot,run).confirmed?'原执行已停止':({succeeded:'已完成',failed:'失败',pending:'等待接收',acked:'执行中',cancelled:'已取消',expired:'已过期'}[run.status]||run.status)}}</span></div><time>{{botTime(run.created_at)}}</time><p v-if="botStopPresentation(s.bot,run).notStarted" class="bot-help">{{botStopPresentation(s.bot,run).label}}</p><details v-if="botStopPresentation(s.bot,run).notStarted&&run.error"><summary>原始失败记录（已保留）</summary><p>{{run.error}}</p></details><p v-else-if="run.error" class="bot-error-text">{{run.error}}</p><p v-if="executionUncertain(run)" class="bot-help">{{botRecoveryDetail(run)}}</p><button v-if="botRecoveryEvent(run)" class="bot-button" :disabled="s.busy||s.reading||s.writeUnknown" @click="reconcile(run)">{{s.busy?'正在核实…':'核实并恢复回执'}}</button><details><summary>查看执行标识与回执</summary><p>执行 ID：{{run.id}}</p><p>完成时间：{{botTime(run.completed_at)}}</p><p v-if="botStopPresentation(s.bot,run).notStarted">历史恢复：模型未启动；原失败状态与回执已保留。</p><p v-else-if="run.result?.executionState">执行状态：{{run.result.executionState}}</p><p v-if="run.result?.stopConfirmed!==undefined">{{botStopPresentation(s.bot,run).label}}</p><p v-if="run.result?.processExit">进程退出证据：{{processExitConfirmed(run.result)?'根进程与进程树退出均已确认':'尚未完整确认'}}</p><p v-for="event in (run.events||[])" :key="event.id">{{event.message||event.type}}</p><button class="bot-link" @click="chat">进入主聊天查看结果与产物</button></details></article>
+            <article v-for="run in s.runs" :key="run.id" class="bot-run"><div><strong>{{run.type==='hermes.bot.validate'?'配置检查':run.type||'工作执行'}}</strong><span class="bot-status" :data-tone="executionUncertain(run)?'warning':(botStopPresentation(s.bot,run).confirmed||botStopPresentation(s.bot,run).notStarted)?'muted':run.status==='succeeded'?'success':run.status==='failed'?'error':'muted'">{{executionUncertain(run)?'执行待核实':operatorForceAbandonRecovery(run)?'旧任务已强制放弃':botStopPresentation(s.bot,run).notStarted?'原模型未启动 · 已恢复':botStopPresentation(s.bot,run).confirmed?'原执行已停止':({succeeded:'已完成',failed:'失败',pending:'等待接收',acked:'执行中',cancelled:'已取消',expired:'已过期'}[run.status]||run.status)}}</span></div><time>{{botTime(run.created_at)}}</time><p v-if="botStopPresentation(s.bot,run).notStarted||operatorForceAbandonRecovery(run)" class="bot-help">{{botStopPresentation(s.bot,run).label}}</p><details v-if="(botStopPresentation(s.bot,run).notStarted||operatorForceAbandonRecovery(run))&&run.error"><summary>原始失败记录（已保留）</summary><p>{{run.error}}</p></details><p v-else-if="run.error" class="bot-error-text">{{run.error}}</p><p v-if="executionUncertain(run)" class="bot-help">{{botRecoveryDetail(run)}}</p><button v-if="botRecoveryEvent(run)" class="bot-button" :disabled="s.busy||s.reading||s.writeUnknown" @click="reconcile(run)">{{s.busy?'正在核实…':'核实并恢复回执'}}</button><details><summary>查看执行标识与回执</summary><p>执行 ID：{{run.id}}</p><p>完成时间：{{botTime(run.completed_at)}}</p><p v-if="operatorForceAbandonRecovery(run)">旧任务已强制放弃，原执行结果仍未知；原始失败记录已保留。</p><p v-else-if="botStopPresentation(s.bot,run).notStarted">历史恢复：模型未启动；原失败状态与回执已保留。</p><p v-else-if="run.result?.executionState">执行状态：{{run.result.executionState}}</p><p v-if="run.result?.stopConfirmed!==undefined">{{botStopPresentation(s.bot,run).label}}</p><p v-if="run.result?.processExit">进程退出证据：{{processExitConfirmed(run.result)?'根进程与进程树退出均已确认':'尚未完整确认'}}</p><p v-for="event in (run.events||[])" :key="event.id">{{event.message||event.type}}</p><button class="bot-link" @click="chat">进入主聊天查看结果与产物</button></details></article>
           </section>
           <BotNativeWorkspace v-if="s.draft" :key="actorId" v-show="nativeTabs.includes(tab)" :workspace="workspace" :actor-id="actorId" :bot="s.bot" :draft="s.draft" :bots="s.bots" :section="tab" :config-busy="s.busy||s.writeUnknown||nativeBlocked" :refresh-bot="refreshNativeBot" @busy="nativeBlocked=$event" @save-config="save" @stop-current="control('stop')"/>
         </template>

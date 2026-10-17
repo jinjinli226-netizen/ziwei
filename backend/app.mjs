@@ -20,6 +20,7 @@ import {createConversationReadService} from './conversation-read-state.mjs';
 import { createManagementBootstrap } from './management-bootstrap.mjs';
 import {createBotMcpConnections} from './bot-mcp-connections.mjs';
 import {createBotHistoricalRecovery} from './bot-historical-recovery.mjs';
+import {createBotForceAbandon} from './bot-force-abandon.mjs';
 import { toolDefinitions as managementTools } from '../scripts/ziwei-mcp.mjs';
 
 const allowedOrigin = process.env.FRONTEND_ORIGIN || 'http://127.0.0.1:5178';
@@ -294,6 +295,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   const managementBootstrap = createManagementBootstrap(repo, options);
   const botMcpConnections=createBotMcpConnections(repo,management.bots,{apiBase:managementBootstrap.apiBase,now:options.mcpOAuthNow});
   const botHistoricalRecovery=createBotHistoricalRecovery(repo,{readA2AToken:()=>readA2AToken({create:true})});
+  const botForceAbandon=createBotForceAbandon(repo,{readA2AToken:()=>readA2AToken({create:true})});
   const phoneMcp = createPhoneMcpService(repo,ziweiConnect,management,options);
   app.locals.repo = repo;
   app.locals.realtime = realtime;
@@ -303,6 +305,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   app.locals.managementBootstrap = managementBootstrap;
   app.locals.botMcpConnections=botMcpConnections;
   app.locals.botHistoricalRecovery=botHistoricalRecovery;
+  app.locals.botForceAbandon=botForceAbandon;
   app.locals.employeeTemplates = employeeTemplates;
   app.use(cors);
   app.use((_req, res, next) => {
@@ -803,6 +806,8 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
     app.post(`${base}/:id/routines/:routineId/run`,guard,(req,res)=>res.status(202).json(bots.runRoutine(req.params.slug,req.params.id,req.params.routineId,req.body,contextFor(req))));
   }
   registerBotRoutes('/api',requireRole('owner','admin','member'),employeeContext);
+  app.get('/api/workspaces/:slug/bots/:id/force-abandon',requireRole('owner','admin'),(req,res)=>{res.setHeader('Cache-Control','no-store');res.json(botForceAbandon.status(req.params.slug,req.params.id,employeeContext(req)));});
+  app.post('/api/workspaces/:slug/bots/:id/force-abandon',requireRole('owner','admin'),(req,res)=>{res.setHeader('Cache-Control','no-store');res.json(botForceAbandon.authorize(req.params.slug,req.params.id,req.body,employeeContext(req)));});
   registerBotRoutes('/mcp/v1',mcpGuard,mcpContext);
   app.get('/mcp/v1/workspaces/:slug/phone-mcp/setup',mcpGuard,async(req,res,next)=>{try{res.json(await phoneMcp.setup(req.params.slug,{...mcpContext(req),userId:req.mcpCredential.actorUserId}));}catch(error){next(error);}});
   app.post('/mcp/v1/workspaces/:slug/skills/:id/install',mcpGuard,(req,res)=>{if(!repo.listSkills(req.params.slug).some(row=>row.id===req.params.id))return res.status(404).json({error:'技能不属于当前工作区'});res.json(repo.setSkillInstalled(req.params.id,req.body?.installed!==false));});
@@ -888,6 +893,8 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   }));
   app.get('/a2a/v1/agents', (_req, res) => res.json({ agents: [{ id:'ziwei_user', name:'ziwei_user', description:'紫薇工作区本机 daemon，负责心跳、轮询和 A2A 任务', url:'/a2a/v1', capabilities:['tasks','messages','heartbeat','actions','ack','result'] }] }));
   app.post('/a2a/v1/actions/:id/prelaunch-recovery/status',(req,res)=>{res.setHeader('Cache-Control','no-store');if(!assertA2AActionWorkspace(repo,req,res))return;res.json(botHistoricalRecovery.status(req.params.id,req.deviceCredential,req.body));});
+  app.post('/a2a/v1/actions/:id/force-abandon/prepare',(req,res)=>{res.setHeader('Cache-Control','no-store');if(!assertA2AActionWorkspace(repo,req,res))return;res.json(botForceAbandon.prepare(req.params.id,req.deviceCredential,req.body));});
+  app.post('/a2a/v1/actions/:id/force-abandon/commit',(req,res)=>{res.setHeader('Cache-Control','no-store');if(!assertA2AActionWorkspace(repo,req,res))return;res.json(botForceAbandon.commit(req.params.id,req.deviceCredential,req.body));});
   app.post('/a2a/v1/actions/:id/prelaunch-recovery/prepare',(req,res)=>{res.setHeader('Cache-Control','no-store');if(!assertA2AActionWorkspace(repo,req,res))return;res.json(botHistoricalRecovery.prepare(req.params.id,req.deviceCredential,req.body));});
   app.post('/a2a/v1/actions/:id/prelaunch-recovery/commit',(req,res)=>{res.setHeader('Cache-Control','no-store');if(!assertA2AActionWorkspace(repo,req,res))return;res.json(botHistoricalRecovery.commit(req.params.id,req.deviceCredential,req.body));});
   app.post('/a2a/v1/actions/:id/mcp-oauth/start',(req,res)=>{res.setHeader('Cache-Control','no-store');res.json(botMcpConnections.begin(req.params.id,req.deviceCredential));});

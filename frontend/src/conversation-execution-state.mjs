@@ -1,14 +1,16 @@
 import {historicalPrelaunchRecovery,HISTORICAL_PRELAUNCH_RECOVERY_DETAIL} from './historical-prelaunch-recovery.mjs';
+import {operatorForceAbandonRecovery,OPERATOR_FORCE_ABANDON_DETAIL} from './operator-force-abandon-recovery.mjs';
 const terminal = new Set(['succeeded','failed','expired','cancelled']);
 const uncertainExecution = execution => execution?.result?.code === 'EXECUTION_UNCERTAIN' || execution?.code === 'EXECUTION_UNCERTAIN' || execution?.result?.executionState === 'uncertain' || execution?.status === 'uncertain' || (execution?.status === 'expired' && Boolean(execution?.acked_at));
 
 // A failed transport receipt can still acquire a definitive result later.
 // Waiting for that receipt does not make the original task retryable.
 export function executionNeedsPolling(execution) {
-  return !historicalPrelaunchRecovery(execution) && Boolean(execution && (['pending','acked'].includes(execution.status) || uncertainExecution(execution)));
+  return !operatorForceAbandonRecovery(execution) && !historicalPrelaunchRecovery(execution) && Boolean(execution && (['pending','acked'].includes(execution.status) || uncertainExecution(execution)));
 }
 
 export function executionPresentation(execution) {
+  if(operatorForceAbandonRecovery(execution))return {label:OPERATOR_FORCE_ABANDON_DETAIL,summary:'已强制放弃 · 原结果未知',busy:false,tone:'muted',retryable:false};
   if(historicalPrelaunchRecovery(execution))return {label:HISTORICAL_PRELAUNCH_RECOVERY_DETAIL,summary:'原模型未启动 · 已恢复',busy:false,tone:'muted',retryable:false};
   const status = execution?.status;
   const uncertain = uncertainExecution(execution);

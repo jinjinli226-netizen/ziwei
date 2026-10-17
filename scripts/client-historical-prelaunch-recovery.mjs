@@ -5,6 +5,7 @@ import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {resolveConfigPath,defaultUserDir} from '../daemon/config.mjs';
 import {clientBuildIdentity} from '../src/management-bootstrap.mjs';
+import {recoverForceAbandonForUpdate} from './client-force-abandon-recovery.mjs';
 import {inspectNativeClientProcess,inspectNativeHealthListener,windowsCommandArguments} from './client-lifecycle.mjs';
 import {inspectLocalDaemonMaintenanceFiles} from '../backend/preservation-native-evidence.mjs';
 import {
@@ -99,7 +100,7 @@ export function createHistoricalPrelaunchRecovery({platform=process.platform,ins
  if(platform!=='win32'||POLICY.enabled!==true)return notApplicable();
  fact(typeof root==='string'&&path.isAbsolute(root)&&Number.isFinite(timeoutMs)&&timeoutMs>0&&timeoutMs<=120000);root=path.resolve(root);noLinks(root);
  configPath=configPath?path.resolve(configPath):resolveConfigPath({root,env});let configSnapshot;try{configSnapshot=read(configPath);}catch(error){if(error.code==='ENOENT')return notApplicable();throw refused();}
- const config=configSnapshot.value,configHash=configSnapshot.sha256,origin=originFor(config,env),runtimeDir=env.ZIWEI_USER_HOME?path.join(defaultUserDir({env}),'runtime'):path.join(root,'.local','runtime');
+ const config=configSnapshot.value;if(config.workspace!==POLICY.auditedSubject.workspace||config.deviceId!==POLICY.auditedSubject.deviceId)return notApplicable();const configHash=configSnapshot.sha256,origin=originFor(config,env),runtimeDir=env.ZIWEI_USER_HOME?path.join(defaultUserDir({env}),'runtime'):path.join(root,'.local','runtime');
  const directory=path.join(runtimeDir,'history-recovery',bytesDigest(JSON.stringify(ACTION))),walFile=path.join(directory,'journal.json'),exitFile=path.join(directory,'daemon-exit.json');noLinks(directory);
  const request=async(url,body,local=false)=>{let response;try{response=await fetchImpl(url,{...(body===undefined?{}:{method:'POST',headers:{'content-type':'application/json',[local?'x-ziwei-local-control':'x-ziwei-device-token']:config.deviceToken},body:JSON.stringify(body)}),redirect:'error',signal:AbortSignal.timeout(8000)});}catch(error){if(body===undefined&&(error.cause?.code==='ECONNREFUSED'||error.code==='ECONNREFUSED'))return null;throw refused('HISTORICAL_PRELAUNCH_TRANSPORT_FAILED');}if(!response.ok)throw refused('HISTORICAL_PRELAUNCH_SERVER_REFUSED');try{return await response.json();}catch{throw refused();}};
  let health=await request(origin+'/healthz');const postDirectory=path.join(runtimeDir,'history-recovery',bytesDigest(JSON.stringify(ACTION))+'-post-update-holder');if(POST_POLICY.enabled===true&&(health?.clientBuild===POST_POLICY.maintenanceHolderBuild||!health&&fs.existsSync(path.join(postDirectory,'journal.json'))))return recoverPostUpdateHolder({root,env,configPath,fetchImpl,timeoutMs},{platform,inspectProcess,inspectListener,inspectInstalledProcesses,installedBuild,terminate,now,sleep,checkpoint});let wal=fs.existsSync(walFile)?read(walFile).value:null;
@@ -140,7 +141,8 @@ export function createHistoricalPrelaunchRecovery({platform=process.platform,ins
   return{recovered:true,actionId:ACTION,...stoppedReceipt,prelaunchHistoryRetained:true,receiptId:receipt.id};
  }catch(error){const result=error?.code==='HISTORICAL_PRELAUNCH_RECOVERY_REFUSED'?error:refused();if(!stoppedReceipt&&wal&&fs.existsSync(exitFile)){try{const savedExit=read(exitFile).value;fact(exact(savedExit,['stopped','pid','creationTime','exitedAt'])&&savedExit.stopped===true&&savedExit.pid===wal.record.pid&&savedExit.creationTime===wal.record.creationTime&&Number.isFinite(Date.parse(savedExit.exitedAt))&&Date.parse(savedExit.exitedAt)<=now());stoppedReceipt={stopped:true,wasRunning:true,pid:savedExit.pid,creationTime:savedExit.creationTime};}catch{}}if(stoppedReceipt)result.stoppedClientReceipt=stoppedReceipt;else if(pauseAttempted&&!fs.existsSync(exitFile)){try{fact(read(configPath).sha256===configHash&&same(await inspectProcess(wal.record.pid,root),wal.record));await inspectListener(origin,wal.record.pid);const current=await request(origin+'/healthz');fact(current?.pid===wal.record.pid&&current.lifecycle?.nonce===wal.pinned.lifecycle.nonce&&current.lifecycle?.configSha256===configHash);await report('resuming');await request(origin+'/local/connection-control',{operation:'resume',nonce:wal.pinned.lifecycle.nonce},true);result.resumed=true;}catch{result.resumeFailed=true;}}await report('failed',result.reasonCode);throw result;}
 };return async input=>{try{return await recover(input);}catch(error){throw error?.code==='HISTORICAL_PRELAUNCH_RECOVERY_REFUSED'?error:refused();}};}
-export const recoverHistoricalPrelaunchForUpdate=createHistoricalPrelaunchRecovery();
+const recoverOriginalHistoricalPrelaunch=createHistoricalPrelaunchRecovery();
+export async function recoverHistoricalPrelaunchForUpdate(input){const force=await recoverForceAbandonForUpdate(input);return force.recovered?force:recoverOriginalHistoricalPrelaunch(input);}
 
 function postUpdateProvenance({root,env,installedBuild,now}){
  const maintenance=path.join(defaultUserDir({env}),'maintenance'),pointer=read(path.join(maintenance,'last-completed-update.json'));

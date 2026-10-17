@@ -183,3 +183,13 @@ nativeRuntime是任务类型标记，不证明原进程当前仍在运行；stop
 Windows下载build `c477b6bb9044ae181d97efaae9ee3188a985cc32805f5a8eedfe3df09660e341`，包1106183字节，SHA256 `9d2e311f4fa4560a84beffe8115a57ec40c58643a4502f0e66990bf13e3a1731`；release.json SHA256 `c44f05496dd09d2197c1f979d3077d16f36e1c484aa1f3b96d3017750e4327fa`。本地及服务器空缓存离线安装/工厂检查、公网包内容核对通过。前端生产构建成功，源码干净；独立发布前审查核对了5项原字节、归一化Git基线与候选hash，无阻断问题。发布证据在 `.local/historical-postupdate-release/`。
 
 本轮发布本身没有操作Windows、提交恢复或启用员工。用户上一版更新和启动已由在线6c9345/PID34292心跳证实，但历史恢复仍未完成；已给出一次新版官方bootstrap入口，等待设备真实prepare/commit及独立回执。不得把构建、模拟测试、心跳在线或服务器发布写成现场恢复成功。
+
+### 明确授权的强制放弃恢复
+
+用户第二次更新后，设备已实际安装c477b6/PID27868并在线，但前一次post_update_holder诊断在inspecting阶段因EVIDENCE_MISMATCH拒绝，prepare/commit均为0。不能据此猜测具体哪项本机迁移字段不同，也不能把新版在线写成恢复成功。用户随后明确提出强行停止，修复改为独立的人工强制放弃流程，不再靠扩大旧prelaunch迁移策略解决。
+
+此流程只处理知微固定的原2805任务：现有登录网页的真实owner/admin、员工可见范围及精确r3/e8暂停/active绑定生成授权。设备凭自身身份读取授权并签定当前c477维护daemon的PID、出生时间、nonce、安装根及原记录摘要；维护helper持准确进程句柄暂停、排空polling并停止当前daemon。原模型进程树是否退出仍未知，不生成假processExit、不改成not_started或成功。
+
+服务器新增独立operator_force_abandon回执，原action/result/error/failed-event字节保持；首次CAS解除该active并递增control_epoch到9，保持暂停，不派发旧消息。设备在取得有效回执后，仅将这条started/quarantine及配对delivery原字节移入持久归档，其余历史、聊天、Profile/HOME保留；中断后按WAL前向续办。网页显示“已强制放弃，原执行结果仍未知”，不再把这条已放弃记录当作当前占用或要求人工核实。
+
+当前c477没有可由服务器反向调用的维护控制通道，普通file.read等新任务也被quarantine拦住。维护helper必须在Windows实际运行一次；新候选保留旧updater已经使用的prelaunch导出入口，先检查独立放弃授权，无授权时沿用原恢复逻辑。安装/发布/授权本身都不等同于设备归档完成，须独立回执、重新上线及一条不重放的真实新模型消息分别验收。

@@ -6,6 +6,7 @@ import {chatLocalTime,conversationFiles} from '../bot-main-chat.js';
 import {ownedBotChatBlockReason} from '../bot-owned-profile.js';
 import {executionPresentation} from '../conversation-execution-state.mjs';
 import {historicalPrelaunchRecovery} from '../historical-prelaunch-recovery.mjs';
+import {operatorForceAbandonRecovery} from '../operator-force-abandon-recovery.mjs';
 import ConversationForwardCard from './ConversationForwardCard.vue';
 import {isConversationForward} from '../conversation-forward-card.mjs';
 import {createMessageReadObserver} from '../conversation-read.mjs';
@@ -14,7 +15,7 @@ const emit=defineEmits(['forward-view','forward','forward-select','forward-toggl
 function attachReadObserver(element){const scope=props.readScope;element._readScope=scope;element._messageRead=createMessageReadObserver(element,messageId=>{if(scope===props.readScope)return props.onVisibleMessage?.({messageId,scope});return false;});}
 const vConversationRead={mounted:attachReadObserver,updated(element){if(element._readScope!==props.readScope){element._messageRead?.();attachReadObserver(element);}else element._messageRead?.update();},beforeUnmount(element){element._messageRead?.();}};
 const panel=ref(typeof window!=='undefined'&&window.innerWidth>=1100),menu=ref(''),popoverStyle=ref({}),fileInput=ref(null),timeline=ref(null),followLatest=ref(true);
-const historicalRecovery=computed(()=>historicalPrelaunchRecovery(props.execution));
+const historicalRecovery=computed(()=>historicalPrelaunchRecovery(props.execution)||operatorForceAbandonRecovery(props.execution));
 const uncertain=computed(()=>executionUncertain(props.execution));
 const recoveryEvent=computed(()=>botRecoveryEvent(props.execution));
 const stopState=computed(()=>botStopPresentation(props.bot,props.execution));
