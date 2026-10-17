@@ -227,12 +227,15 @@
     "forwardDataRollbackCompatibility": {
       "trigger": "The new official task writer has persisted assignmentBinding in audit_events.",
       "risk": "A whole-code rollback to the unmodified 4f26/8834 repository restores the old raw listAudit and exposes proofs already retained in the database. Old notification list/archive projections also expose the field if a retained notification row contains it; newly created 20da notification copies are already sanitized.",
-      "required": "Prepare and independently verify a fallback source containing the old product behavior plus the narrow public task-proof projection at audit, notification raw/parsed/archive and event boundaries. Alternatively retain that compatibility layer during rollback. Do not blindly revert the full merge after the writer is enabled.",
+      "required": "Before enabling the new writer, prepare and independently verify a fallback source that preserves both trusted assignment provenance writes and public task-proof projections. Retain binding creation on task creation and actual assignee changes, including unresolved/unassigned invalidation markers and atomic write/event behavior. Keep current reminder privacy checks, or explicitly disable that feed. A projection-only fallback closes the public proof disclosure but is not a complete safe rollback/roll-forward strategy.",
       "preservation": "Retain authoritative audit proof and the live business database. Do not remove proofs, clean notifications, or restore an older database as a rollback shortcut.",
       "fallbackPrepared": false,
       "fallbackTested": false,
       "currentProductionAffected": false,
-      "currentProductionBoundary": "The candidate is not merged or deployed. This is a forward compatibility release condition, not evidence of a current production proof leak."
+      "currentProductionBoundary": "The candidate is not merged or deployed. This is a forward compatibility release condition, not evidence of a current production proof leak.",
+      "projectionOnlyLimit": "The old updateTask writer emits task.updated with taskId and no assignmentBinding. The current reminder query selects the latest audit containing that field. During fallback A-to-B-to-A writes therefore leave the earlier A proof eligible after roll-forward; equality of the current stored assignee hash does not prove that the intervening assignment still refers to the original entity. Public projections alone do not preserve assignment provenance.",
+      "requiredRoundTripVerification": "Exercise new-writer creation, fallback reads and actual reassignment including A-to-B-to-A, unresolved/unassigned states and alias identity changes, then roll forward. Verify current access and no stale proof reuse, alongside public raw/parsed/event hiding and exact authoritative proof preservation. Disabling a feed only temporarily is insufficient without a verified safe re-enable path.",
+      "verificationBoundary": "The rollback writer/query gap is statically confirmed in pinned old writer and new reminder SQL. A complete fallback has not been implemented or round-trip tested; current production has not enabled the candidate writer."
     },
     "sourceIntegration": {
       "sharedCandidate": "20da8856beb7f008d8c3b85f65103f53b9deef19",
