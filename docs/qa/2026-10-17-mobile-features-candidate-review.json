@@ -2,14 +2,16 @@
   "schemaVersion": 1,
   "date": "2026-10-17",
   "timezone": "Asia/Shanghai",
-  "verdict": "changes_required",
+  "verdict": "code_review_passed_integration_pending",
   "scope": "Independent review of the frozen Android and shared mobile feature candidates; no candidate deployment or real business dispatch",
   "sources": {
     "publishedProduct": "4f26f450e6e1bcba6326fdaedd75937364eb5189",
     "mainBeforeReview": "f587cdef4e82ebd03da7b8dcfb897a3a26801302",
     "sharedCandidate": "b8ee17f51a56ece9239fb38ddbf1f63de43ee14b",
     "androidCandidate": "bba9be85c8e55a8f3195673b16e41e330604119c",
-    "syntheticMergedTree": "c5113c64e66985db817d47a18ef763435d117465"
+    "syntheticMergedTree": "c5113c64e66985db817d47a18ef763435d117465",
+    "latestSharedCandidate": "20da8856beb7f008d8c3b85f65103f53b9deef19",
+    "latestAndroidRuntimeCandidate": "ab5045a23c814032937bf4b4143fac2fc9f6012b"
   },
   "findings": [
     {
@@ -83,7 +85,7 @@
   },
   "handoff": {
     "destinationThread": "01a14488-274a-74b1-b3f4-47116f4002f5",
-    "action": "All four findings and the rename boundary were returned to the candidate owner for fixes and new regression evidence before another release review.",
+    "action": "All five reproduced code findings are closed at the pinned candidates. Shared API/Windows integration and normal-network acceptance of the exact Android APK remain required before release.",
     "primaryIncident": "Zhiwei's historical action remains unresolved pending the original Windows host diagnostic; this mobile review does not provide its missing receipt."
   },
   "rechecks": [
@@ -161,6 +163,63 @@
       "candidatePublished": false,
       "productionModifiedByReview": false,
       "nextStep": "The candidate owner is fixing only the newly exposed private proof at public read/event boundaries, retaining the closed assignment authorization logic and the already-reviewed Android and group changes."
+    },
+    {
+      "checkedAt": "2026-10-17T20:34:15.779856+08:00",
+      "sharedCandidate": "20da8856beb7f008d8c3b85f65103f53b9deef19",
+      "androidCandidate": "ab5045a23c814032937bf4b4143fac2fc9f6012b",
+      "mainBeforeRecheck": "2e0ebbfb4e3238931fb0d8a863cf6c2c3ec89aa9",
+      "syntheticMergedTree": "c4bf6da5baf10c0f06823b7558a33d3b95e0ef0b",
+      "verdict": "code_review_passed_integration_pending",
+      "fixedFindings": [
+        "F1",
+        "F2",
+        "F3",
+        "F4",
+        "F5"
+      ],
+      "openFindings": [],
+      "publicProofRecheck": "The original member-cookie reproduction now hides assignmentBinding in audit payload_json, legacy notification raw/parsed views, archive/restore, immediate/deferred hub events and real authenticated SSE. Authoritative database proof retains its original bytes. Owner mobile list/resolve succeeds while the member list excludes the private task and resolve returns 404. Unrelated action payloads and proof-free historical raw bytes are unchanged.",
+      "independentEvidenceInSharedCandidateWorktree": ".local/mobile-assignment-proof-read-review-20da885/20da885-result.json",
+      "independentNewPublicViewTests": {
+        "pass": 5,
+        "fail": 0,
+        "skip": 0
+      },
+      "rootFocusedProofWriterFeedTests": {
+        "pass": 53,
+        "fail": 0,
+        "skip": 0,
+        "evidence": ".local/mobile-public-proof-final-review/public-proof-targeted-tests.log"
+      },
+      "rootPrelaunchIsolatedRecheck": {
+        "pass": 27,
+        "fail": 0,
+        "skip": 0,
+        "evidence": ".local/mobile-public-proof-final-review/prelaunch-isolated-recheck.log"
+      },
+      "rootInitialCombinedRun": {
+        "pass": 94,
+        "fail": 1,
+        "skip": 0,
+        "evidence": ".local/mobile-public-proof-final-review/combined-targeted-tests.log",
+        "failure": "The pre-existing Mac fixture CLI version probe exceeded its 3-second limit before bot-start. The full 27-test prelaunch file then passed in an isolated run without source changes. The failed run is retained; product timeouts and Mac behavior were not changed."
+      },
+      "candidateOwnerReportedVerification": {
+        "nodePass": 138,
+        "pythonPass": 12,
+        "fail": 0,
+        "skip": 0,
+        "evidenceInSharedCandidateWorktree": ".local/mobile-assignment-public-review/result-20da885.json"
+      },
+      "candidateOwnerIndependentReportedEvidence": ".local/mobile-assignment-public-independent-20da8856/fixed-result.json",
+      "candidateOwnerReportedAdditionalWebSocketCheck": "An independent pinned-archive replay reports an actual zero-TCP WebSocket upgrade and five decoded notification frames without the proof. Root independently verified the shared event source and real SSE; it has not re-run those raw WebSocket frames.",
+      "androidExactApkSha256": "cc2d17f5f445c27e09d967c7f5993811410aa9ff6a8808457c86bf9b0523bcad",
+      "integrationLimits": "The exact APK has install/version/assets continuity evidence, but normal-network chat/draft/group acceptance remains unproven: both old code9 and new code10 encounter the emulator TLS closure. No earlier candidate success is substituted. Shared production API/Windows feature integration is still pending. No public APK or QR release is authorized by this review record.",
+      "candidateMergedIntoMain": false,
+      "candidatePublished": false,
+      "productionModifiedByReview": false,
+      "primaryIncident": "This code review does not supply the missing original Windows receipt for the historical Zhiwei action."
     }
   ]
 }
