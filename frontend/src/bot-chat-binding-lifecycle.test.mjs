@@ -176,3 +176,11 @@ test('both chat surfaces expose directory loading/retry rather than disable its 
   assert.match(app,/v-else-if="conversationDirectoryError" role="alert"/);
   assert.match(app,/@click="loadConversationDirectoryBinding">重试读取/);
 });
+
+
+test('an explicitly non-Hermes employee remains usable without confusing visibility or transport failures',async t=>{
+  const ui=harness();t.after(ui.stop);ui.select('codex');
+  ui.requests[0].reject(Object.assign(new Error('此员工没有 Hermes Bot 能力'),{code:'BOT_RUNTIME_UNSUPPORTED',status:400}));await settle();
+  assert.equal(ui.botBindingError.value,'');assert.equal(ui.botBindingPending.value,false);assert.equal(ui.conversationBotBinding.value,null);
+  await ui.openConversationDirectoryPicker();assert.equal(ui.requests.length,1);assert.equal(ui.conversationDirectoryLoading.value,false);assert.equal(ui.conversationDirectoryError.value,'');
+});

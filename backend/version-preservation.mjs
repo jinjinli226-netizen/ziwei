@@ -70,6 +70,8 @@ export function createPreservation(db,{role=PRODUCT_ROLE,collectNativeEvidence=n
     id INTEGER PRIMARY KEY AUTOINCREMENT, operation_id TEXT NOT NULL, event TEXT NOT NULL,
     payload_json TEXT NOT NULL, created_at TEXT NOT NULL);`);
   const current=()=>exists(db,'version_preservation')?db.prepare('SELECT * FROM version_preservation WHERE singleton=1').get():null;
+  // Execution guards need only the persisted state, not the full rollback audit.
+  const state=()=>exists(db,'version_preservation')?db.prepare('SELECT state FROM version_preservation WHERE singleton=1').get()?.state||'v2':'v2';
   function validateIdentities(saved,{sealed=false}={}){
     if(!saved||!Array.isArray(saved.bots)||!Array.isArray(saved.employees)||!Array.isArray(saved.routines))fail('ROLLBACK_SNAPSHOT_INVALID','原身份快照不可读');
     const actual=snapshot();
@@ -80,7 +82,7 @@ export function createPreservation(db,{role=PRODUCT_ROLE,collectNativeEvidence=n
   let controlWrite=false;
   let operationWrite=false;
   let completion=null;
-  const frozen=()=>role==='v1-compat'||['preparing','sealed'].includes(current()?.state);
+  const frozen=()=>role==='v1-compat'||['preparing','sealed'].includes(state());
   const event=(operationId,type,payload)=>{const previous=operationWrite;operationWrite=true;try{return db.prepare('INSERT INTO version_preservation_events(operation_id,event,payload_json,created_at) VALUES(?,?,?,?)').run(operationId,type,canonical(payload),new Date().toISOString());}finally{operationWrite=previous;}};
   const transaction=fn=>{db.exec('BEGIN IMMEDIATE');operationWrite=true;try{const result=fn();db.exec('COMMIT');return result;}catch(error){db.exec('ROLLBACK');throw error;}finally{operationWrite=false;}};
   const invoke=(hook,input)=>{if(!hook)return undefined;const value=hook({db,...input});if(value&&typeof value.then==='function')fail('ROLLBACK_HOOK_INVALID','转换事务禁止异步 hook');return value;};
@@ -313,7 +315,7 @@ export function createPreservation(db,{role=PRODUCT_ROLE,collectNativeEvidence=n
   if(!readOnly&&exists(db,'a2a_actions')){db.exec('SAVEPOINT preservation_trigger_upgrade');try{db.exec(`DROP TRIGGER IF EXISTS preservation_a2a_actions_update;
     CREATE TRIGGER preservation_a2a_actions_update BEFORE UPDATE ON a2a_actions WHEN ziwei_v2_action_update_admitted(OLD.id,NEW.type,NEW.task_id,NEW.payload_json,NEW.status,NEW.expires_at)=0 OR ziwei_v2_admitted(OLD.id)=0 AND (NEW.id IS NOT OLD.id OR NEW.workspace_id IS NOT OLD.workspace_id OR NEW.agent_id IS NOT OLD.agent_id OR NEW.dedupe_key IS NOT OLD.dedupe_key OR NEW.created_at IS NOT OLD.created_at OR NEW.acked_at IS NOT OLD.acked_at) BEGIN SELECT RAISE(ABORT,'V2_OBJECT_SEALED'); END`);
     db.exec('RELEASE preservation_trigger_upgrade');}catch(error){db.exec('ROLLBACK TO preservation_trigger_upgrade; RELEASE preservation_trigger_upgrade');throw error;}}
-  return {inspect,begin,seal,restore,abort,classify,classifyAction,assert,assertAction,frozen,role,protectEmployeeTable,settle};
+  return {state,inspect,begin,seal,restore,abort,classify,classifyAction,assert,assertAction,frozen,role,protectEmployeeTable,settle};
 }
 
 export function guardRepository(repo,options={}) {
@@ -339,12 +341,12 @@ export function guardRepository(repo,options={}) {
     if(!input.deviceId||target!==input.deviceId)throw preservationError('EXECUTION_DEVICE_MISMATCH','执行设备与原动作绑定不一致',403);
     if(row.status!=='acked')fail('EXECUTION_NOT_ACKED','原动作尚未领取或已终结，禁止本机执行');
     const protectedHomes=repo.db.prepare('SELECT b.employee_id,b.provision_action_id FROM hermes_bots b JOIN employees e ON e.id=b.employee_id WHERE e.target_device_id=?').all(input.deviceId).map(bot=>{const result=parse(repo.db.prepare('SELECT result_json FROM a2a_actions WHERE id=?').get(bot.provision_action_id)?.result_json),receipt=result?.botProvision||result?.result?.botProvision;return receipt?.home;}).filter(Boolean);
-    return {allowed:true,actionId,executionBinding:executionBinding({...row,payload:repo.getA2AAction(actionId).payload}),productRole:preservation.role,productState:preservation.inspect().state,protectedHomes};
+    return {allowed:true,actionId,executionBinding:executionBinding({...row,payload:repo.getA2AAction(actionId).payload}),productRole:preservation.role,productState:preservation.state(),protectedHomes};
   };
   const wrap=(name,check)=>{if(typeof repo[name]!=='function')return;const original=repo[name];repo[name]=function(...args){check(...args);return original.apply(this,args);};};
   const ack=repo.ackA2AAction;repo.ackA2AAction=function(actionId,input={}){
     const row=repo.db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId),payload=parse(row?.payload_json)||{};
-    if(preservation.role==='v2'&&preservation.inspect().state==='preparing'&&preservation.classifyAction(row||{}).isV2&&row?.status==='acked'&&input.receiptOnly===true){
+    if(preservation.role==='v2'&&preservation.state()==='preparing'&&preservation.classifyAction(row||{}).isV2&&row?.status==='acked'&&input.receiptOnly===true){
       if(!input.deviceId||input.deviceId!==(payload.deviceId||payload.device_id))throw preservationError('EXECUTION_DEVICE_MISMATCH','原完成补传与设备身份不匹配',403);
       if(Date.parse(row.expires_at)<=Date.now())fail('ROLLBACK_DELIVERY_LEASE_EXPIRED','原 ACK 已过期，保留证据并拒绝补传许可');
       return {id:row.id,status:row.status,acked_at:row.acked_at,expires_at:row.expires_at,deviceId:input.deviceId,receiptOnly:true,deliveryOnly:true,leaseRenewed:false};
@@ -361,7 +363,7 @@ export function guardRepository(repo,options={}) {
   for(const name of ['updateTask','deleteTask','transitionTask','addTaskMessage','createTaskAttachment'])wrap(name,(taskId,input={})=>preservation.assert({...input,taskId}));
   wrap('deleteTaskAttachment',attachmentId=>{const row=repo.db.prepare('SELECT task_id FROM task_attachments WHERE id=?').get(attachmentId);if(row)preservation.assert({taskId:row.task_id});});
   for(const name of ['runAutomation','updateAutomation','deleteAutomation'])wrap(name,(automationId)=>preservation.assert({automationId}));
-  for(const name of ['completeAutomationRun','queueAutomationRetry'])wrap(name,(runId)=>{if(name==='completeAutomationRun'&&preservation.role==='v2'&&preservation.inspect().state==='preparing')return;preservation.assert({runId});});
+  for(const name of ['completeAutomationRun','queueAutomationRetry'])wrap(name,(runId)=>{if(name==='completeAutomationRun'&&preservation.role==='v2'&&preservation.state()==='preparing')return;preservation.assert({runId});});
   const queueWebhook=repo.queueWebhookDelivery;if(queueWebhook)repo.queueWebhookDelivery=function(runId,...args){if(preservation.frozen()&&preservation.classify({runId}).isV2)return null;return queueWebhook.call(this,runId,...args);};
   for(const name of ['authorizeBotStart','authorizeBotGateway','receiveBotGateway'])wrap(name,(actionId)=>preservation.assertAction(actionId));
   wrap('dispatchBotCollaboration',(_slug,manifest)=>preservation.assert({actionId:manifest?.sourceActionId,employeeId:manifest?.sourceEmployeeId}));
@@ -369,7 +371,7 @@ export function guardRepository(repo,options={}) {
   repo.listA2AActions=function(...args){const rows=list.apply(this,args);return preservation.frozen()&&String(args[1]?.status||'pending')!=='all'?rows.filter(row=>!preservation.classifyAction(row).isV2):rows;};
   for(const name of ['resultA2AAction','recordA2AEvent'])wrap(name,(actionId,input={})=>{
     if(!preservation.frozen())return;
-    const state=preservation.inspect().state;
+    const state=preservation.state();
     // While preparing, original result delivery is allowed, without granting a
     // new lease/start. In sealed V1 only an already terminal ACK/result can be
     // read idempotently. Routine completion/retry guards remain independent.
@@ -382,7 +384,7 @@ export function guardRepository(repo,options={}) {
   if(repo.authorizeBotSettlement){const original=repo.authorizeBotSettlement;repo.authorizeBotSettlement=function(...args){const value=original.apply(this,args);return preservation.frozen()?{...value,allowEvaluation:false}:value;};}
   for(const name of ['getEmployee','getConversation','getTask','getAutomationById','getA2AAction']){
     const original=repo[name];if(!original)continue;
-    repo[name]=function(...args){const value=original.apply(this,args);if(!value)return value;const input=name==='getEmployee'?{employeeId:args[0]}:name==='getConversation'?{conversationId:args[0]}:name==='getTask'?{taskId:args[0]}:name==='getAutomationById'?{automationId:args[0]}:{actionId:args[0]};return preservation.frozen()&&preservation.classify(input).isV2?{...value,availability:{available:false,code:'V2_OBJECT_SEALED',state:preservation.inspect().state}}:value;};
+    repo[name]=function(...args){const value=original.apply(this,args);if(!value)return value;const input=name==='getEmployee'?{employeeId:args[0]}:name==='getConversation'?{conversationId:args[0]}:name==='getTask'?{taskId:args[0]}:name==='getAutomationById'?{automationId:args[0]}:{actionId:args[0]};return preservation.frozen()&&preservation.classify(input).isV2?{...value,availability:{available:false,code:'V2_OBJECT_SEALED',state:preservation.state()}}:value;};
   }
   return repo;
 }

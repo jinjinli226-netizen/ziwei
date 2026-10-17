@@ -70,7 +70,16 @@ async function refreshBotChatBinding(employeeId,conversationId) {
       botChatBindingActor=actor;conversationBotId.value=conversationBotBinding.value?bot.id:'';
       botChatBindingResolvedScope=scope;
       return true;
-    }catch(error){if(current()){botBindingError.value=error.message||'无法读取员工目录设置';botChatIntent.value=null;}return false;}
+    }catch(error){
+      if(!current())return false;
+      // The Bot endpoint explicitly identifies other runtimes as ordinary
+      // employees; transport and visibility failures must remain unresolved.
+      if(error.code==='BOT_RUNTIME_UNSUPPORTED'){
+        conversationBotBinding.value=null;conversationBotId.value='';botChatIntent.value=null;
+        botChatBindingActor=actor;botChatBindingResolvedScope=scope;return true;
+      }
+      botBindingError.value=error.message||'无法读取员工目录设置';botChatIntent.value=null;return false;
+    }
     finally{if(current()){botBindingPending.value=false;if(botChatIntent.value)botChatIntent.value={...botChatIntent.value,pending:false};}if(botChatBindingRequest===request)botChatBindingRequest=null;}
   })();
   return request.promise;

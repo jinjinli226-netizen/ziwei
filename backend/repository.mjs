@@ -1727,6 +1727,12 @@ export function createRepository(options = {}, io={}) {
           };
         });
     },
+    getConversationAccess(conversationId, input = {}) {
+      const row=db.prepare('SELECT id,workspace_id,employee_id,device_id FROM conversations WHERE id=?').get(conversationId); if(!row) return null;
+      const employee=row.employee_id ? db.prepare('SELECT status,visibility,owner_user_id FROM employees WHERE id=? AND workspace_id=?').get(row.employee_id,row.workspace_id) : null;
+      if (row.employee_id && !employeeVisible(employee, employeeAccessContext(input))) return null;
+      return row;
+    },
     getConversation(conversationId, input = {}) {
       const row=db.prepare('SELECT * FROM conversations WHERE id=?').get(conversationId); if(!row) return null;
       const employee = row.employee_id ? db.prepare('SELECT * FROM employees WHERE id=? AND workspace_id=?').get(row.employee_id,row.workspace_id) : null;
@@ -1815,10 +1821,8 @@ export function createRepository(options = {}, io={}) {
     },
     updateConversationSettings(conversationId,input={}) { const row=db.prepare('SELECT * FROM conversations WHERE id=?').get(conversationId); if(!row) throw new Error('Conversation not found'); const employee = row.employee_id ? db.prepare('SELECT * FROM employees WHERE id=? AND workspace_id=?').get(row.employee_id,row.workspace_id) : null; if (row.employee_id && !employeeVisible(employee, employeeAccessContext(input))) throw new Error('Conversation not found'); const deviceId=input.deviceId === undefined && input.device_id === undefined && input.targetDeviceId === undefined && input.target_device_id === undefined ? row.device_id || null : (String(input.deviceId ?? input.device_id ?? input.targetDeviceId ?? input.target_device_id ?? '').trim() || null); if (deviceId) { const device=db.prepare('SELECT * FROM devices WHERE id=? AND workspace_id=?').get(deviceId,row.workspace_id); if (!device) throw new Error('目标设备不属于当前工作区'); if (device.status === 'disabled') throw new Error('目标设备已停用'); } const modelId=input.modelId === undefined && input.model_id === undefined && input.model === undefined ? row.model_id || null : (String(input.modelId ?? input.model_id ?? input.model ?? '').trim() || null); const workingDirectory=input.workingDirectory === undefined && input.working_directory === undefined && input.cwd === undefined && input.workdir === undefined ? row.working_directory || null : (String(input.workingDirectory ?? input.working_directory ?? input.cwd ?? input.workdir ?? '').trim().slice(0,4096) || null); if(employee&&db.prepare('SELECT 1 FROM hermes_bots WHERE employee_id=?').get(employee.id)&&(modelId&&modelId!==employee.model_id||deviceId&&deviceId!==employee.target_device_id))throw botFailure('BOT_CONVERSATION_CONFLICT','Bot 聊天设置不能覆盖员工模型或电脑绑定'); db.prepare('UPDATE conversations SET model_id=?,working_directory=?,device_id=?,updated_at=? WHERE id=?').run(modelId,workingDirectory,deviceId,now(),conversationId); return this.getConversation(conversationId, input); },
     getConversationDirectoryAction(conversationId, actionId, input = {}) {
-      const row = db.prepare('SELECT workspace_id FROM conversations WHERE id=?').get(conversationId);
+      const row = this.getConversationAccess(conversationId, input);
       if (!row) return null;
-      const conversation = this.getConversation(conversationId, input);
-      if (!conversation) return null;
       const ws = db.prepare('SELECT slug FROM workspaces WHERE id=?').get(row.workspace_id);
       if (!ws) return null;
       const action = this.getA2AAction(actionId, { workspaceSlug: ws.slug, actorUserId: input.actorUserId });
