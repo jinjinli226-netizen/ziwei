@@ -221,5 +221,31 @@
       "productionModifiedByReview": false,
       "primaryIncident": "This code review does not supply the missing original Windows receipt for the historical Zhiwei action."
     }
-  ]
+  ],
+  "releaseConditions": {
+    "status": "required_before_feature_deployment",
+    "forwardDataRollbackCompatibility": {
+      "trigger": "The new official task writer has persisted assignmentBinding in audit_events.",
+      "risk": "A whole-code rollback to the unmodified 4f26/8834 repository restores the old raw listAudit and exposes proofs already retained in the database. Old notification list/archive projections also expose the field if a retained notification row contains it; newly created 20da notification copies are already sanitized.",
+      "required": "Prepare and independently verify a fallback source containing the old product behavior plus the narrow public task-proof projection at audit, notification raw/parsed/archive and event boundaries. Alternatively retain that compatibility layer during rollback. Do not blindly revert the full merge after the writer is enabled.",
+      "preservation": "Retain authoritative audit proof and the live business database. Do not remove proofs, clean notifications, or restore an older database as a rollback shortcut.",
+      "fallbackPrepared": false,
+      "fallbackTested": false,
+      "currentProductionAffected": false,
+      "currentProductionBoundary": "The candidate is not merged or deployed. This is a forward compatibility release condition, not evidence of a current production proof leak."
+    },
+    "sourceIntegration": {
+      "sharedCandidate": "20da8856beb7f008d8c3b85f65103f53b9deef19",
+      "checkedMain": "8834e288d4afa4c2f90f638360a023a71176b377",
+      "commonBase": "a80322dc0eda1bb14ac7086178c8771cc11db2f4",
+      "mainChangedPaths": 14,
+      "sharedChangedPaths": 12,
+      "overlappingPaths": [],
+      "androidRuntime": "ab5045a23c814032937bf4b4143fac2fc9f6012b",
+      "androidMobileManagerTree": "fbb6cf70a26ee8cc72a9f81cedc3b0334c3074ff",
+      "androidImportBoundary": "Import only the pinned mobile-manager subtree and explicitly selected documentation. The Android branch also contains stale backend, MCP and web differences and must not replace the main source tree.",
+      "candidateMergedIntoMain": false,
+      "candidatePublished": false
+    }
+  }
 }
