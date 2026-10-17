@@ -6,8 +6,9 @@ import os from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
-import { acquireUpdateMaintenanceLock, releaseUpdateMaintenanceLock, maintenanceOwnerStatus, readUpdateResult, writeMaintenanceResult, describeUpdateFailure, updateFailureResult, recoverBeforeClientUpdateStop, inspectMaintenanceProcess, retireMaintenanceLock } from '../scripts/client-update.mjs';
+import { RECOVERY_SERVER_CODES, acquireUpdateMaintenanceLock, releaseUpdateMaintenanceLock, maintenanceOwnerStatus, readUpdateResult, writeMaintenanceResult, describeUpdateFailure, updateFailureResult, recoverBeforeClientUpdateStop, inspectMaintenanceProcess, retireMaintenanceLock } from '../scripts/client-update.mjs';
 import { runClientUpdateWorker } from '../scripts/client-update-worker.mjs';
+import { FORCE_ABANDON_SERVER_CODES } from '../scripts/client-force-abandon-recovery.mjs';
 
 const digest = value => createHash('sha256').update(value).digest('hex');
 const run = promisify(execFile);
@@ -168,4 +169,28 @@ test('Windows native stale retirement holds the exact file and rejects live work
   assert.equal(await retireMaintenanceLock({file:f.lockFile,archive,sha256:'0'.repeat(64),owner:{state:'exited',pid:child.pid,probe:{state:'exited'}}}),false);
   assert.equal(await retireMaintenanceLock({file:f.lockFile,archive,sha256:digest(raw),owner:{state:'exited',pid:child.pid,probe:{state:'exited'}}}),true);
   assert.equal(fs.readFileSync(archive,'utf8'),raw);assert.equal(fs.existsSync(f.lockFile),false);
+});
+
+
+test('public recovery refusal codes survive bounded cyclic causes, result projection and message formatting',()=>{
+ assert.deepEqual(RECOVERY_SERVER_CODES,FORCE_ABANDON_SERVER_CODES,'the detached reader uses the exact same explicit endpoint enum');
+ for(const serverCode of RECOVERY_SERVER_CODES){
+  const error=Object.assign(new Error('PRIVATE_RAW_ERROR'),{code:'CLIENT_FORCE_ABANDON_REFUSED',reasonCode:'SERVER_REFUSED',recoveryPhase:'offline_prepare',serverCode,httpStatus:409,stdout:'PRIVATE_STDOUT',response:{body:'PRIVATE_BODY'}});error.cause=error;
+  const diagnostic=describeUpdateFailure({cause:error},'recover_history');assert.equal(diagnostic.serverCode,serverCode);assert.equal(diagnostic.httpStatus,409);assert.equal(diagnostic.recoveryReasonCode,'SERVER_REFUSED');assert.doesNotMatch(JSON.stringify(diagnostic),/PRIVATE_|stdout|response|body/);
+  const result=updateFailureResult(error,'recover_history');assert.equal(result.serverCode,serverCode);assert.equal(result.httpStatus,409);assert.match(result.message,new RegExp(serverCode));assert.match(result.message,/HTTP 409/);assert.doesNotMatch(JSON.stringify(result),/PRIVATE_|stdout|response|body|重试官方更新入口/);
+ }
+});
+
+test('arbitrary server labels, private cyclic causes and invalid HTTP values cannot enter a result',()=>{
+ for(const serverCode of ['BOT_FORCE_ABANDON_PRIVATE_TOKEN','V2_OBJECT_SEALED PRIVATE_TOKEN','PRIVATE_TOKEN',{},null])for(const httpStatus of ['409',-1,0,600,409.1,NaN]){
+  const error={code:'CLIENT_FORCE_ABANDON_REFUSED',reasonCode:'SERVER_REFUSED',recoveryPhase:'offline_prepare',serverCode,httpStatus,message:'PRIVATE_TOKEN'};error.cause=error;
+  const result=updateFailureResult(error,'recover_history');assert.equal(Object.hasOwn(result,'serverCode'),false);assert.equal(Object.hasOwn(result,'httpStatus'),false);assert.doesNotMatch(JSON.stringify(result),/PRIVATE_|重试官方更新入口/);
+ }
+ for(const code of ['CLIENT_FORCE_ABANDON_REFUSED','HISTORICAL_PRELAUNCH_RECOVERY_REFUSED'])assert.doesNotMatch(updateFailureResult({code},'recover_history').message,/重试官方更新入口/);
+});
+
+test('safe server refusal facts survive terminal-log fallback while the recorded result is stale',async t=>{
+ const f=fixture(t);fs.writeFileSync(f.resultFile,JSON.stringify({state:'running',operation:'update'}));fs.writeFileSync(f.lockFile,JSON.stringify(f.legacy()));
+ fs.writeFileSync(path.join(f.directory,'maintenance.jsonl'),JSON.stringify({at:'2026-10-18T01:00:00Z',pid:61536,event:'maintenance_failed',failureStage:'recover_history',reasonCode:'CLIENT_FORCE_ABANDON_REFUSED',recoveryReasonCode:'SERVER_REFUSED',recoveryPhase:'offline_prepare',serverCode:'BOT_FORCE_ABANDON_HOLDER_CONFLICT',httpStatus:409,error:'PRIVATE_SERVER_BODY'})+'\n');
+ const result=await readUpdateResult({env:{ZIWEI_USER_HOME:f.home},inspectProcess:f.inspect});assert.equal(result.state,'failed');assert.equal(result.serverCode,'BOT_FORCE_ABANDON_HOLDER_CONFLICT');assert.equal(result.httpStatus,409);assert.equal(result.recoveryPhase,'offline_prepare');assert.equal(result.recoveryReasonCode,'SERVER_REFUSED');assert.match(result.message,/BOT_FORCE_ABANDON_HOLDER_CONFLICT/);assert.doesNotMatch(JSON.stringify(result),/PRIVATE_/);
 });

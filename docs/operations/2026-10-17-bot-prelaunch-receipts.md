@@ -266,3 +266,15 @@ API/前端于UTC16:54:04切换到 /opt/ziwei/releases/maintenance-recovery-874fc
 UTC17:39:48仅发布官方CLI，build `484fa58efd3b9dc569f8f9ceefd92b15ee23f00a9831142fbea7904e047793b7`；tgz1128958字节，SHA256 `67d4e5f73054a3ed4a655c8c81f816ac34811e2aafca9ac88e3c39eee7b8de3e`。独立PS仍为6390字节、原526882摘要；release.json摘要 `745fc7f8f8313bd6604e91bf24e4419e61429d04010d74d963b84f2c5c45d837`。API/前端继续874目录，PID383266；metadata如实保留pairedApiCommit/frontendCommit为874，仅CLI commit为e9ff426。UTC17:40独立postcheck核验公开包/PS/metadata、API文件/服务身份、DB inode/schema及其他CLI工件全部通过，三项只读诊断工件未变。无API重启、业务恢复提交或Windows远程调用。
 
 已请用户在李金晋电脑执行一次官方bootstrap，明确成功后再start；此电脑原先离线，更新器不能伪称恢复原在线状态。后续仍需设备独立恢复回执、原slot解除、新版上线，再从正常用户入口启用并发送一条不重放旧任务的无副作用真实模型验收消息。此发布时不宣称知微已恢复。私有证据在 `.local/operator-force-abandon-journal-release/`。
+
+### 离线准备拒绝、服务端时间基准和错误详情（2026-10-18）
+
+用户现场job `update-7cede314-c19d-4102-ad40-0ac980d315ef` 已越过本机JOURNAL_TERMINAL，失败转为recover_history / CLIENT_FORCE_ABANDON_REFUSED / offline_prepare / SERVER_REFUSED。UTC17:42:26及17:42:28两次prepare均为409，commit为0；旧客户端把HTTP状态和服务端公开code丢弃，API错误中间件也未记录响应正文，因此不能把该409直接说成某个具体code。UTC17:45只读检查16项服务器数据库谓词均通过：原raw/唯一failed字节、授权及两个marker、真实owner成员、r3/e8暂停与旧active、Profile/设备所有权、唯一有效凭据、c477心跳build和结构完整。grant1/receipt0；未重放prepare/commit或修改业务数据库。
+
+静态复核确认原离线协议把电脑wall clock的checkedAt直接与服务器now比较，快1ms即可被拒绝，慢过120秒也会被拒绝。已用真实服务端factory、设备token校验、真实本机helper和投递writer的内存协议回归重现：快5分钟的pending及慢5分钟的blocked均由旧helper得到真实ABSENCE_REQUIRED409。该实验说明一个确定的兼容缺陷，不冒充已读取现场丢失的服务端响应或证实其唯一根因。
+
+新离线证据使用受信HTTPS响应Date及单调计时建立服务端时间下界；新prepare经原完整策略校验后，以expiresAt减固定TTL重新锚定收到的服务端issuedAt。观测时间使用收件时刻下界，期限检查使用同次请求发送时刻的保守上界，不把网络往返耗时延长为可用TTL。缺/坏Date或单调计时逆跳拒绝新证据；已提交的有效receipt及已applied续办仍只做原生presence检查，不依赖新Date。原WAL/receipt/执行时间均不重写，服务端合同、策略digest、120秒窗口、旧live/v1停止规则不变。
+
+同时，正式失败回执保留22项明确枚举的公开服务端code及100..599整数HTTP状态，仍拒绝原始body/error/命令行/配置/秘密；状态日志降级恢复也保留受限详情。移除失败文案中诱导用户反复重试更新的提示。恢复决策本身未因错误展示而放宽。
+
+新helper与真实严格后端的两条协议回归均达到probe409、prepare200、commit200，独立reader验证schema2原执行未知，r3/e9暂停且active解除，四原件字节和其他历史均保持。最终203项整合测试198通过、5项Windows平台跳过、0失败；另排除未变的本机HTTP下载测试，静态检查191项通过。覆盖本机±5分钟/±24小时、HTTP Date秒精度和延迟、单调时间逆跳、严格期限边界、无Date、原WAL和receipt中断续办及错误详情脱敏。未启动Mac监听或完成Windows现场恢复；后续先推GitHub再仅发CLI，实际设备结果另记。私有证据在 `.local/operator-force-abandon-clock-release/` 及前一journal-release只读谓词报告。

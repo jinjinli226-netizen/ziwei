@@ -17,10 +17,13 @@ const failure = (code, message, details = {}) => Object.assign(new Error(message
 const UPDATE_STAGES = new Set(['validate_installation', 'resolve_npm', 'validate_paths', 'verify_archive', 'read_release_manifest', 'download_package', 'stage_install', 'validate_candidate', 'prepare_candidate', 'recover_history', 'stop_client', 'verify_original', 'backup_original', 'activate_candidate', 'verify_installation', 'restart_client', 'verify_configuration', 'stop_failed_candidate', 'restore_original', 'restart_original', 'read_restoration_configuration', 'wait_parent', 'acquire_lock', 'unknown']);
 const SAFE_ERROR_CODES = new Set(['EBUSY', 'EPERM', 'EACCES', 'ENOENT', 'ENOTDIR', 'ENOSPC', 'EIO', 'EROFS', 'EEXIST', 'ETIMEDOUT', 'ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND', 'EAI_AGAIN', 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER', 'ERR_MODULE_NOT_FOUND', 'MODULE_NOT_FOUND', 'ERR_INVALID_PACKAGE_CONFIG', 'WINDOWS_ONLY', 'USERDATA_IN_PACKAGE', 'UNSAFE_PATH', 'CONFIG_UNREADABLE', 'CONFIG_INVALID', 'PID_MISMATCH', 'PROCESS_IDENTITY_MISMATCH', 'PROCESS_CHANGED', 'NON_LOCAL_CONTROL', 'INVALID_HEALTH_PORT', 'HEALTH_UNREACHABLE', 'FOREIGN_LISTENER', 'CLIENT_IDENTITY_MISMATCH', 'LIFECYCLE_IDENTITY_MISMATCH', 'LIFECYCLE_DOWNGRADE', 'INVALID_TIMEOUT', 'BUILD_INVALID', 'HEALTH_MISSING', 'PROCESS_MISSING', 'CONTROL_AUTH_MISSING', 'CONFIG_CHANGED', 'CONTROL_REJECTED', 'CLIENT_BUSY', 'CLIENT_RESTARTED', 'STOP_TIMEOUT', 'STOP_FAILED', 'NOT_GLOBAL_INSTALL', 'PACKAGE_MISMATCH', 'BIN_MISMATCH', 'NPM_UNAVAILABLE', 'MAINTENANCE_BUSY', 'MAINTENANCE_OWNER_UNVERIFIED', 'INSTALL_CHANGED', 'INVALID_PARENT', 'PARENT_STILL_RUNNING', 'UPDATE_SOURCE_INVALID', 'UPDATE_HASH_INVALID', 'UPDATE_HTTP_FAILED', 'UPDATE_TOO_LARGE', 'UPDATE_MANIFEST_INVALID', 'UPDATE_BUILD_MISMATCH']);
 const SAFE_RECOVERY_PHASES = new Set(['configuration','grant_probe','archive_validation','current_health','source_validation','holder_validation','pause_drain','local_archive_validation','prepare','archive_backup','holder_revalidation','terminate','exit_validation','post_exit_validation','receipt_commit','local_apply','offline_observation','offline_prepare','offline_archive','offline_revalidation','offline_commit','offline_apply']);
-const SAFE_RECOVERY_REASONS = new Set(['EVIDENCE_MISMATCH','TRANSPORT_FAILED','INVALID_SERVER_RESPONSE','SERVER_REFUSED','DRAIN_TIMEOUT','CHALLENGE_EXPIRED_BEFORE_STOP']);
+const SAFE_RECOVERY_REASONS = new Set(['EVIDENCE_MISMATCH','TRANSPORT_FAILED','INVALID_SERVER_RESPONSE','SERVER_REFUSED','DRAIN_TIMEOUT','CHALLENGE_EXPIRED_BEFORE_STOP','SERVER_TIME_UNAVAILABLE']);
+// Duplicate the public endpoint enum so the detached updater needs no extra import.
+export const RECOVERY_SERVER_CODES=Object.freeze(['BOT_FORCE_ABANDON_ABSENCE_REQUIRED','BOT_FORCE_ABANDON_ALREADY_REQUESTED','BOT_FORCE_ABANDON_BINDING_CONFLICT','BOT_FORCE_ABANDON_CHALLENGE_EXPIRED','BOT_FORCE_ABANDON_CHALLENGE_INVALID','BOT_FORCE_ABANDON_CONTROL_CONFLICT','BOT_FORCE_ABANDON_DEVICE_REQUIRED','BOT_FORCE_ABANDON_EVIDENCE_INVALID','BOT_FORCE_ABANDON_GRANT_INVALID','BOT_FORCE_ABANDON_GRANT_REQUIRED','BOT_FORCE_ABANDON_HOLDER_CONFLICT','BOT_FORCE_ABANDON_HOLDER_REQUIRED','BOT_FORCE_ABANDON_IDEMPOTENCY_CONFLICT','BOT_FORCE_ABANDON_INPUT_INVALID','BOT_FORCE_ABANDON_RECEIPT_INVALID','BOT_FORCE_ABANDON_RECOVERY_CONFLICT','BOT_FORCE_ABANDON_SIGNING_UNAVAILABLE','BOT_FORCE_ABANDON_SUBJECT_CHANGED','BOT_FORCE_ABANDON_SUBJECT_INVALID','BOT_FORCE_ABANDON_USER_REQUIRED','EMPLOYEE_NOT_FOUND','V2_OBJECT_SEALED']);
+const SAFE_RECOVERY_SERVER_CODES=new Set(RECOVERY_SERVER_CODES);
 const SAFE_RECOVERY_RULES = new Set([
   'LOCAL_STATE_READ','LOCAL_JOURNAL_READ','LOCAL_ACTION_READ','LOCAL_RESULT_READ','STATE_SCHEMA','STARTED_KEY','STARTED_ACTION_ID','STARTED_IDENTITY','STARTED_TIMESTAMP','STARTED_NATIVE_FLAG','STARTED_QUARANTINE','COMPLETED_KEY','COMPLETED_RESULT','COMPLETED_IDENTITY','TARGET_STARTED_COUNT','TARGET_COMPLETED_COUNT','TARGET_NATIVE_RECORD','TARGET_WORKSPACE','TARGET_DEVICE','TARGET_BINDING','TARGET_QUARANTINE','ACTIVE_NATIVE_COUNT','LOCAL_SCOPE_URL','JOURNAL_SCHEMA','JOURNAL_ACTION','JOURNAL_IDENTITY','JOURNAL_BINDING','JOURNAL_EVENTS','JOURNAL_TERMINAL','JOURNAL_TARGET','JOURNAL_DEDUPE','ORPHAN_DELIVERY_BLOBS','ACTION_BLOB_DIGEST','ACTION_IDENTITY','ACTION_BINDING','ACTION_TARGET','ACTION_PROFILE','ACTION_HERMES_BINDING','ACTION_BINDING_DIGEST','RESULT_BLOB_DIGEST','RESULT_RECEIPT','RESULT_STATUS',
-  'RESULT_UNCERTAIN_BODY','NATIVE_COMMAND_UNAVAILABLE','NATIVE_COMMAND_FAILED','NATIVE_JSON_EMPTY','NATIVE_JSON_INVALID','NATIVE_ARRAY_REQUIRED','NATIVE_PID_INVALID','NATIVE_COMMAND_UNREADABLE','NATIVE_EXECUTABLE_UNREADABLE','NATIVE_CREATION_INVALID','NATIVE_ENTRY_ARGUMENTS','NATIVE_SOURCE_EXECUTABLE','LISTENER_COUNT_EMPTY','LISTENER_COUNT_INVALID'
+  'SERVER_DATE_MISSING','SERVER_DATE_INVALID','SERVER_PREPARED_TIME_INVALID','MONOTONIC_TIME_INVALID','RESULT_UNCERTAIN_BODY','NATIVE_COMMAND_UNAVAILABLE','NATIVE_COMMAND_FAILED','NATIVE_JSON_EMPTY','NATIVE_JSON_INVALID','NATIVE_ARRAY_REQUIRED','NATIVE_PID_INVALID','NATIVE_COMMAND_UNREADABLE','NATIVE_EXECUTABLE_UNREADABLE','NATIVE_CREATION_INVALID','NATIVE_ENTRY_ARGUMENTS','NATIVE_SOURCE_EXECUTABLE','LISTENER_COUNT_EMPTY','LISTENER_COUNT_INVALID'
 ]);
 const SAFE_SIGNALS = new Set(['SIGTERM', 'SIGKILL', 'SIGABRT', 'SIGINT', 'SIGBREAK']);
 SAFE_ERROR_CODES.add('RETAINED_STOP_RECOVERY_REFUSED');
@@ -28,8 +31,8 @@ SAFE_ERROR_CODES.add('HISTORICAL_PRELAUNCH_RECOVERY_REFUSED');
 SAFE_ERROR_CODES.add('CLIENT_FORCE_ABANDON_REFUSED');
 for (const code of ['LEGACY_STOP_CONFIRMATION_REQUIRED', 'LEGACY_CONFIRMATION_INVALID', 'LEGACY_IDENTITY_UNVERIFIED', 'LEGACY_PROTOCOL_MISMATCH', 'LEGACY_PROOF_INVALID', 'LEGACY_PROOF_EXPIRED', 'LEGACY_IDENTITY_CHANGED', 'LEGACY_SOURCE_UNRECOGNIZED', 'LEGACY_CONFIG_MISMATCH', 'LEGACY_CONFIG_NAMESPACE_UNVERIFIED', 'LEGACY_STOP_PROOF_REQUIRED', 'LEGACY_STOP_FAILED']) SAFE_ERROR_CODES.add(code);
 const FAILURE_REASONS = {
-  CLIENT_FORCE_ABANDON_REFUSED: '已授权的旧任务放弃尚未完成；原始归档已保留，请重试官方更新入口',
-  HISTORICAL_PRELAUNCH_RECOVERY_REFUSED: '旧任务自动恢复尚未完成；原始记录已保留，请重试官方更新入口，系统会继续恢复',
+  CLIENT_FORCE_ABANDON_REFUSED: '已授权的旧任务放弃尚未完成；原始归档已保留，请查看具体恢复步骤、规则或服务端原因',
+  HISTORICAL_PRELAUNCH_RECOVERY_REFUSED: '旧任务自动恢复尚未完成；原始记录已保留，请查看具体恢复步骤、规则或服务端原因',
   CONTROL_REJECTED: '客户端拒绝停止，请查看具体阻塞记录',
   RETAINED_STOP_RECOVERY_REFUSED: '历史记录未满足自动恢复条件，客户端未被强制停止',
   LEGACY_STOP_CONFIRMATION_REQUIRED: '旧版无法报告当前任务，执行状态未知；须先核验实例并明确确认停止后迁移',
@@ -52,29 +55,30 @@ const FAILURE_REASONS = {
 // The cause chain is bounded; only public codes and small numeric facts may leave it.
 export function describeUpdateFailure(error, stage = 'unknown') {
   const failureStage = UPDATE_STAGES.has(stage) ? stage : 'unknown';
-  let reasonCode = null, exitCode, signal, httpStatus,stopReasons, recoveryPhase, recoveryReasonCode, recoveryRule, maintenanceOwnerState, workerPid;
+  let reasonCode = null, exitCode, signal, httpStatus,stopReasons, recoveryPhase, recoveryReasonCode, recoveryRule, serverCode, maintenanceOwnerState, workerPid;
   const seen = new Set();
   for (let current = error, depth = 0; current && typeof current === 'object' && depth < 4 && !seen.has(current); current = current.cause, depth++) {
     seen.add(current);
     if (!recoveryPhase && SAFE_RECOVERY_PHASES.has(current.recoveryPhase)) recoveryPhase = current.recoveryPhase;
     if (!recoveryReasonCode && SAFE_RECOVERY_REASONS.has(current.reasonCode)) recoveryReasonCode = current.reasonCode;
     if (!recoveryRule && SAFE_RECOVERY_RULES.has(current.recoveryRule)) recoveryRule = current.recoveryRule;
+    if (!serverCode && current.code==='CLIENT_FORCE_ABANDON_REFUSED' && SAFE_RECOVERY_SERVER_CODES.has(current.serverCode)) serverCode=current.serverCode;
     if (!maintenanceOwnerState && MAINTENANCE_STATES.has(current.maintenanceOwnerState)) maintenanceOwnerState = current.maintenanceOwnerState;
     if (workerPid === undefined && Number.isSafeInteger(current.workerPid) && current.workerPid > 0) workerPid = current.workerPid;
     if (!reasonCode && SAFE_ERROR_CODES.has(current.code)) reasonCode = current.code;
     if (!reasonCode && ['TimeoutError', 'AbortError'].includes(current.name)) reasonCode = current.name === 'TimeoutError' ? 'OPERATION_TIMEOUT' : 'OPERATION_ABORTED';
     if (exitCode === undefined && typeof current.cmd === 'string' && Number.isInteger(current.code) && current.code !== 0 && Math.abs(current.code) <= 2147483647) exitCode = current.code;
     if (!signal && SAFE_SIGNALS.has(current.signal)) signal = current.signal;
-    if (httpStatus === undefined && ['UPDATE_HTTP_FAILED','CONTROL_REJECTED'].includes(current.code) && Number.isInteger(current.httpStatus) && current.httpStatus >= 100 && current.httpStatus <= 599) httpStatus = current.httpStatus;
+    if (httpStatus === undefined && ['UPDATE_HTTP_FAILED','CONTROL_REJECTED','CLIENT_FORCE_ABANDON_REFUSED'].includes(current.code) && Number.isInteger(current.httpStatus) && current.httpStatus >= 100 && current.httpStatus <= 599) httpStatus = current.httpStatus;
     if(!stopReasons&&current.code==='CONTROL_REJECTED'&&current.httpStatus===409){const reasons=safeLocalStopReasons(current.stopReasons);if(reasons.length)stopReasons=reasons;}
   }
   reasonCode ||= exitCode !== undefined ? 'PROCESS_EXIT_NONZERO' : signal ? 'PROCESS_TERMINATED' : failureStage.toUpperCase() + '_FAILED';
   const reason = (FAILURE_REASONS[reasonCode] || (SAFE_ERROR_CODES.has(reasonCode) ? '客户端安全核验或维护操作失败' : '此维护阶段未完成；未记录未经核验的原始输出'))+(stopReasons?'：'+localStopReasonMessage(stopReasons):'');
-  return { failureStage, reasonCode, reason, ...(exitCode !== undefined ? { exitCode } : {}), ...(signal ? { signal } : {}), ...(httpStatus !== undefined ? { httpStatus } : {}),...(stopReasons?{stopReasons}:{}), ...(recoveryPhase ? {recoveryPhase} : {}), ...(recoveryReasonCode ? {recoveryReasonCode} : {}), ...(recoveryRule ? {recoveryRule} : {}), ...(maintenanceOwnerState ? {maintenanceOwnerState} : {}), ...(workerPid !== undefined ? {workerPid} : {}) };
+  return { failureStage, reasonCode, reason, ...(exitCode !== undefined ? { exitCode } : {}), ...(signal ? { signal } : {}), ...(httpStatus !== undefined ? { httpStatus } : {}),...(stopReasons?{stopReasons}:{}), ...(recoveryPhase ? {recoveryPhase} : {}), ...(recoveryReasonCode ? {recoveryReasonCode} : {}), ...(recoveryRule ? {recoveryRule} : {}), ...(serverCode ? {serverCode} : {}), ...(maintenanceOwnerState ? {maintenanceOwnerState} : {}), ...(workerPid !== undefined ? {workerPid} : {}) };
 }
 
 function diagnosticMessage(diagnostic) {
-  const recovery = diagnostic.recoveryPhase ? `恢复步骤：${diagnostic.recoveryPhase}${diagnostic.recoveryReasonCode ? `；具体原因：${diagnostic.recoveryReasonCode}` : ''}${diagnostic.recoveryRule ? `；失败规则：${diagnostic.recoveryRule}` : ''}。` : '';
+  const recovery = diagnostic.recoveryPhase ? `恢复步骤：${diagnostic.recoveryPhase}${diagnostic.recoveryReasonCode ? `；具体原因：${diagnostic.recoveryReasonCode}` : ''}${diagnostic.recoveryRule ? `；失败规则：${diagnostic.recoveryRule}` : ''}${diagnostic.serverCode ? `；服务端原因：${diagnostic.serverCode}` : ''}。` : '';
   return `失败阶段：${diagnostic.failureStage}；原因：${diagnostic.reason}（${diagnostic.reasonCode}${diagnostic.exitCode !== undefined ? `，退出码 ${diagnostic.exitCode}` : ''}${diagnostic.httpStatus !== undefined ? `，HTTP ${diagnostic.httpStatus}` : ''}）。${recovery}`;
 }
 
@@ -532,7 +536,7 @@ function terminalMaintenanceFailure(directory) {
     for (let index = lines.length - 1; index >= 0; index--) {
       let event; try { event = JSON.parse(lines[index]); } catch { continue; }
       if (!['maintenance_failed', 'update_failed'].includes(event?.event) || !Number.isFinite(Date.parse(event.at))) continue;
-      const diagnostic = describeUpdateFailure({ code: event.reasonCode, ...(Number.isInteger(event.exitCode) ? { code: event.exitCode, cmd: 'child' } : {}) }, event.failureStage);
+      const diagnostic = describeUpdateFailure({ code: event.reasonCode, reasonCode:event.recoveryReasonCode,recoveryPhase:event.recoveryPhase,recoveryRule:event.recoveryRule,serverCode:event.serverCode,httpStatus:event.httpStatus,...(Number.isInteger(event.exitCode) ? { code: event.exitCode, cmd: 'child' } : {}) }, event.failureStage);
       return { state: 'failed', operation: 'update', code: 'UPDATE_FAILED', ...diagnostic, originalRestored: typeof event.originalRestored === 'boolean' ? event.originalRestored : null, originalInstallationRestored: typeof event.originalInstallationRestored === 'boolean' ? event.originalInstallationRestored : null, runningStateRestored: typeof event.runningStateRestored === 'boolean' ? event.runningStateRestored : null, finishedAt: event.at, recoveredFrom: 'maintenance-log', message: '更新失败；已从维护日志恢复真实结果。' + diagnosticMessage(diagnostic) };
     }
   } catch {}
