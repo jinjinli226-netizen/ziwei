@@ -233,21 +233,29 @@ def push_unsigned(args, java, sdk, work, env):
         root = ET.parse(merged[0]).getroot()
         android = "{http://schemas.android.com/apk/res/android}"
         application = root.find("application")
+        # Keep component evidence even when a newly changed SDK violates the expected boundary.
+        evidence = local / "last-merged-AndroidManifest.xml"
+        shutil.copyfile(merged[0], evidence)
+        evidence.chmod(0o600)
         expected_providers = {"com.tencent.android.tpush.XGPushProvider", "com.tencent.android.tpush.SettingsContentProvider",
                               "com.tencent.tpns.baseapi.base.SettingsContentProvider", "com.xiaomi.push.service.logupload.LogUploadFileProvider",
                               "com.huawei.hms.support.api.push.PushProvider"}
         if application is None or application.get(android + "name") != "com.ziwei.manager.ManagerApplication":
             raise RuntimeError("Missing pre-provider process initialization gate")
         providers = application.findall("provider")
-        if {p.get(android + "name") for p in providers} != expected_providers or any(p.get(android + "exported") != "false" for p in providers):
+        if {p.get(android + "name") for p in providers} != expected_providers:
             raise RuntimeError("Unexpected push provider initialization or exposure")
+        for provider in providers:
+            if provider.get(android + "name") == "com.huawei.hms.support.api.push.PushProvider":
+                # HMS retains a signature-only IPC provider; it does not initialize the SDK.
+                if (provider.get(android + "readPermission") != "com.ziwei.manager.permission.PUSH_PROVIDER"
+                        or provider.get(android + "writePermission") != "com.ziwei.manager.permission.PUSH_WRITE_PROVIDER"):
+                    raise RuntimeError("HMS push IPC is not signature isolated")
+            elif provider.get(android + "exported") != "false":
+                raise RuntimeError("Unexpected exported push provider")
         for permission in root.findall("permission"):
             if permission.get(android + "name", "").startswith("com.ziwei.manager.") and permission.get(android + "protectionLevel") != "signature":
                 raise RuntimeError("Push IPC permission is not signature protected")
-        # Keep the merged component/permission evidence private, outside public release attachments.
-        evidence = local / "last-merged-AndroidManifest.xml"
-        shutil.copyfile(merged[0], evidence)
-        evidence.chmod(0o600)
         target = work / "unsigned.apk"
         shutil.copyfile(apks[0], target)
         return target
