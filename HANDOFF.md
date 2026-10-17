@@ -1,5 +1,13 @@
 # 紫薇项目 HandOff
 
+## 2026-10-17 18:06 移动运行记录重复图片减负已发布
+
+产品 `9393dcb0aab1c7afeacf368c7205f300264fa69e` 已合入并先推 GitHub 主发布分支，再于 **18:06:21（Asia/Shanghai）** 发布 API。当前 `/opt/ziwei/current` 为 `/opt/ziwei/releases/mobile-runs-projection-9393dcb0aab1-e0f199eb/v2`，API PID `366044`。复制下节完整 MCP 正式树，仅覆盖 `backend/mobile-read-view.mjs` 并增加发布记录；网页仍 `6666a63` / `index-DI_NO0_n.js`，官方 Windows 包仍 `6666a63` / build `7b4939c2…`。
+
+移动运行记录中的明确图片槽改为元数据；同样用于 latest/Stop 和聊天 execution，保留完整报告、提示词、消息 ID、全部终态及最后事件、执行/停止证明。默认网页/MCP、原数据库图片和聊天鉴权图片通路保持。**当前0.2.1 App无需重装即可受益；这不是已经保证所有网络都不超时。** App一分钟读取等待由App分支另行交付。
+
+主发布树78项相关回归、lint178、独立27项复跑/源码审查，以及25项发布器、8项发送检查通过。18:07独立18项生产复核通过，8个MCP源、旧发布记录、全量网页/CLI、数据库逻辑schema/文件身份、中控/Nginx均保持；内外健康200。固定现场同输入投影五条运行 `419,971 → 134,273 B`（减68.0%），聊天execution `258,244 → 17,138 B`，latest/Stop与控制字段保持。这是只读重建视图统计；当时active为空，不冒充手机网络计时或进行中任务跨发布的真机证明。完整弱网边界、发布和回退见[运行记录减负记录](docs/operations/2026-10-17-mobile-runs-timeout.md)。下方为历史快照。
+
 ## 2026-10-17 17:43 Bot MCP 远程网页授权已发布
 
 产品 `6666a63b46cd783d6a6537dd3295b37619ba4afa` 已先推 GitHub，再依次于 **17:34:11 / 17:41:37 / 17:43:53（Asia/Shanghai）** 发布 API、Windows 安装包和网页。现有 Bot MCP 页面支持远程 OAuth：中央保存公开配置，精确下发到员工宿主，管理员在自己的浏览器批准，目标 Profile 使用原生凭据存储、复用与刷新；下一次执行自动加载。修复服务名、工具集清单和设备 bootstrap 范围。
