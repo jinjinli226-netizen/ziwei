@@ -6,12 +6,29 @@ import {render,captureDraft,restoreFocus} from './view.js';
 import {installMessageGestures,lastVisibleMessage} from './message-gestures.js';
 
 const state=initialState(),root=document.getElementById('app');
-let lastView='',lastMarkup='',renderScheduled=false,readScheduled=false,nativePaused=false;
+let lastView='',lastMarkup='',lastJump='',renderScheduled=false,readScheduled=false,nativePaused=false;
+function applyChatJump(){
+  const jump=state.chatJump;
+  if(!jump||jump.serial===lastJump||state.page!=='chat'||state.conversation?.id!==jump.conversationId)return;
+  const parent=[...root.querySelectorAll('[data-message-id]')].find(item=>item.dataset.messageId===jump.messageId);
+  const quote=Number.isSafeInteger(jump.quoteIndex)?[...root.querySelectorAll('[data-search-quote-index]')].find(item=>Number(item.dataset.searchQuoteIndex)===jump.quoteIndex):null;
+  const target=quote||parent;
+  if(target){
+    for(const selected of root.querySelectorAll('.message.search-match,.forward-snapshot-message.search-match'))selected.classList.remove('search-match');
+    parent?.classList.add('search-match');if(quote)quote.classList.add('search-match');
+    target.scrollIntoView({block:'center',behavior:'auto'});lastJump=jump.serial;
+  }
+}
+function sameTimelineWithoutSelection(previous,next){
+  const a=previous.cloneNode(true),b=next.cloneNode(true);
+  for(const tree of [a,b])for(const item of tree.querySelectorAll('.message.search-match,.forward-snapshot-message.search-match'))item.classList.remove('search-match');
+  return a.innerHTML===b.innerHTML;
+}
 function scheduleRead(){
   if(readScheduled)return;readScheduled=true;
   requestAnimationFrame(()=>{
     readScheduled=false;
-    if(nativePaused||document.hidden||state.phase!=='ready'||state.page!=='chat'||state.forward||state.forwardDetail||state.imagePreview)return;
+    if(nativePaused||document.hidden||state.phase!=='ready'||state.page!=='chat'||state.forward||state.forwardDetail||state.imagePreview||state.chatFind)return;
     const messageId=lastVisibleMessage(root.querySelector('.chat-timeline'),window.visualViewport?.height||window.innerHeight);
     if(messageId&&state.conversation?.id)void controller.actions['mark-thread-read']({conversationId:state.conversation.id,messageId});
   });
@@ -21,10 +38,10 @@ function draw(){
   const sameView=view===lastView,markup=render(state);
   // A revalidated poll often changes no visible content. Keep decoded images,
   // long history nodes, selection and scroll intact instead of rebuilding them.
-  if(sameView&&markup===lastMarkup){scheduleRead();return;}
+  if(sameView&&markup===lastMarkup){applyChatJump();scheduleRead();return;}
   const scroll=document.scrollingElement?.scrollTop||0,timeline=root.querySelector('.chat-timeline');
   const timelineScroll=timeline?.scrollTop,atEnd=timeline?timeline.scrollHeight-timeline.clientHeight-timeline.scrollTop<100:true;
-  const fields=sameView?[...root.querySelectorAll('input[name]:not([type=file]),select[name],textarea[name]:not([name=draft])')].filter(f=>!['search'].includes(f.name)&&!f.form?.hasAttribute('data-state-fields')).map(f=>({name:f.name,form:f.form?.dataset.form||'',record:f.form?.dataset.recordKey||'',value:f.value,checked:f.checked})):[];
+  const fields=sameView?[...root.querySelectorAll('input[name]:not([type=file]),select[name],textarea[name]:not([name=draft])')].filter(f=>!['search','chatSearch','chatFind'].includes(f.name)&&!f.form?.hasAttribute('data-state-fields')).map(f=>({name:f.name,form:f.form?.dataset.form||'',record:f.form?.dataset.recordKey||'',value:f.value,checked:f.checked})):[];
   const active=document.activeElement;
   const focus=sameView&&active?.name&&root.contains(active)?{name:active.name,form:active.form?.dataset.form||'',record:active.form?.dataset.recordKey||'',start:active.selectionStart,end:active.selectionEnd}:null;
   // Controller inputs are canonical. Keep the view's focus helper from restoring a cleared draft.
@@ -34,7 +51,7 @@ function draw(){
   const nextTimeline=template.content.querySelector('.chat-timeline');
   // Status/composer changes must not discard an unchanged long conversation.
   // A template is inert, so replacement images are never loaded or decoded.
-  if(sameView&&timeline&&nextTimeline&&timeline.innerHTML===nextTimeline.innerHTML)nextTimeline.replaceWith(timeline);
+  if(sameView&&timeline&&nextTimeline&&(timeline.innerHTML===nextTimeline.innerHTML||state.chatJump?.serial!==lastJump&&sameTimelineWithoutSelection(timeline,nextTimeline)))nextTimeline.replaceWith(timeline);
   root.replaceChildren(template.content);
   if(sameView)for(const saved of fields){const target=[...root.querySelectorAll('[name]')].find(f=>f.name===saved.name&&(f.form?.dataset.form||'')===saved.form&&(f.form?.dataset.recordKey||'')===saved.record);if(target){target.value=saved.value;if(target.type==='checkbox')target.checked=saved.checked;}}
   restoreFocus();
@@ -43,12 +60,13 @@ function draw(){
   if(currentTimeline){currentTimeline.scrollTop=atEnd||!sameView?currentTimeline.scrollHeight:timelineScroll||0;}
   if(!sameView)window.scrollTo(0,0);else window.scrollTo(0,scroll);
   lastView=view;lastMarkup=markup;
+  applyChatJump();
   scheduleRead();
 }
 const api=createApi();
 const reporting=createReporting({api,storage:localStorage,onChange:()=>draw()});
 const controller=createController({state,api,reporting,render:draw,storage:localStorage});
-installMessageGestures(root,{enabled:()=>state.phase==='ready'&&state.page==='chat'&&!state.forward&&!state.forwardDetail&&!state.imagePreview&&!nativePaused,openMenu:id=>void controller.actions['message-menu']({id})});
+installMessageGestures(root,{enabled:()=>state.phase==='ready'&&state.page==='chat'&&!state.forward&&!state.forwardDetail&&!state.imagePreview&&!state.chatFind&&!nativePaused,openMenu:id=>void controller.actions['message-menu']({id})});
 root.addEventListener('scroll',scheduleRead,true);
 document.addEventListener('visibilitychange',scheduleRead);
 window.addEventListener('ziwei:pause',()=>{nativePaused=true;});

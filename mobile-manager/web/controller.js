@@ -3,6 +3,8 @@ import { createBotSettings } from './bot-settings.js';
 import { createDeviceSettings } from './device-settings.js';
 import { createChatInbox } from './chat-inbox.js';
 import { createForwarding } from './forwarding.js';
+import { createChatPreferences } from './chat-preferences.js';
+import { searchChatMessages } from './chat-search.js';
 
 const IMAGE_LIMIT = 10 * 1024 * 1024;
 const avatarLimit = 2 * 1024 * 1024;
@@ -38,10 +40,21 @@ async function readImages(files) {
 
 /** UI effects are scoped to the authenticated account, workspace and selected employee. */
 export function createController({ state, api, render = () => {}, storage = globalThis.localStorage, reporting } = {}) {
-  let epoch = 0, employeeEpoch = 0, chatReadEpoch = 0, chatConversationId = null, employeeReadEpoch = 0, phoneEpoch = 0, phoneRead = null, disposed = false, timer = null, attachmentEpoch = 0, nativePaused = false;
+  let epoch = 0, accountGeneration = 0, employeeEpoch = 0, chatReadEpoch = 0, chatConversationId = null, employeeReadEpoch = 0, phoneEpoch = 0, phoneRead = null, disposed = false, timer = null, attachmentEpoch = 0, nativePaused = false;
   const composers = new Map(), pendingMutations = new Set(), routineRequests = new Map(), messageKeys = new Set(), conversationReads = new Map();
   const resourceReads = new Map(), employeeReads = new Map(), employeeWrites = new Map();
   let employeeGets = new AbortController(), chatWriteEpoch = 0;
+  const preferences = createChatPreferences({storage}), draftTimers = new Map();
+  let preferencesScope = '';
+  const localScope = () => ({accountId:accountId(state),workspaceId:workspaceId(state)});
+  function syncChatPreferences(force = false) {
+    const scope = localScope(), key = JSON.stringify([scope.accountId,scope.workspaceId]);
+    if (!force && key === preferencesScope) return;
+    preferencesScope = key;
+    state.pinnedChatIds = scope.accountId && scope.workspaceId ? preferences.pinnedIds(scope) : [];
+    state.chatDraftPreviews = scope.accountId && scope.workspaceId ? preferences.draftPreviews(scope) : {};
+    state.chatPreferencesError = scope.accountId && scope.workspaceId ? preferences.status(scope).error : '';
+  }
   state.resources ||= initialResources();
   state.employeeResources ||= initialEmployeeResources();
   const workspaceKey = userId => `ziwei.mobile.workspace:${userId}`;
@@ -49,7 +62,7 @@ export function createController({ state, api, render = () => {}, storage = glob
   const current = () => ({ epoch, scope: scopeKey(state), employeeEpoch, employeeId: state.selectedEmployee?.id });
   const valid = (token, employee = false) => !disposed && token.epoch === epoch && token.scope === scopeKey(state) && (!employee || (token.employeeEpoch === employeeEpoch && token.employeeId === state.selectedEmployee?.id));
   const validChat = (token, readEpoch) => valid(token, true) && readEpoch === chatReadEpoch;
-  const draw = () => { if (!disposed) { syncLoading(); render(state); } };
+  const draw = () => { if (!disposed) { syncChatPreferences(); syncLoading(); render(state); } };
   const storeGet = key => { try { return storage?.getItem(key); } catch { return null; } };
   const storeSet = (key, value) => { try { storage?.setItem(key, value); } catch {} };
   function persistMessage(key, value) {
@@ -63,15 +76,36 @@ export function createController({ state, api, render = () => {}, storage = glob
     try { for (let index = 0; index < storage.length; index++) keys.add(storage.key(index)); } catch {}
     for (const key of keys) if (key?.startsWith(prefix)) { try { storage?.removeItem(key); } catch {} messageKeys.delete(key); }
   }
-  const composerKey = () => `${scopeKey(state)}:${state.selectedEmployee?.id || ''}`;
+  const composerKey = () => JSON.stringify([accountId(state),workspaceId(state),state.selectedEmployee?.id || '']);
   function composer() {
     const key = composerKey();
-    if (!composers.has(key)) composers.set(key, { draft: '', attachments: [], request: null, revision: 0 });
+    if (!composers.has(key)) {
+      const scope = localScope(), employeeId = state.selectedEmployee?.id || '';
+      composers.set(key, { draft:preferences.getDraft(scope,employeeId),attachments:[],request:null,revision:0,scope,employeeId,accountGeneration });
+    }
     return composers.get(key);
   }
-  function stashComposer() {
+  function persistComposer(item) {
+    const pending = draftTimers.get(item); if (pending) clearTimeout(pending); draftTimers.delete(item);
+    if (disposed || item.accountGeneration !== accountGeneration || item.scope.accountId !== accountId(state)) return;
+    const result = preferences.saveDraft(item.scope,item.employeeId,item.draft);
+    if (item.scope.workspaceId === workspaceId(state)) {
+      syncChatPreferences(true);
+      if (!result.ok) state.chatPreferencesError = result.error;
+    }
+    return result;
+  }
+  function flushDrafts() {
+    for (const item of [...draftTimers.keys()]) persistComposer(item);
+  }
+  function stashComposer(defer = false) {
     if (!state.selectedEmployee || state.page !== 'chat') return;
     const item = composer(); item.draft = state.draft || ''; item.attachments = state.attachments || [];
+    if (defer) {
+      clearTimeout(draftTimers.get(item));
+      const pending = setTimeout(() => { const result=persistComposer(item); if(result&&!result.ok)draw(); },250);
+      pending.unref?.(); draftTimers.set(item,pending);
+    } else persistComposer(item);
   }
   function restoreComposer() {
     const item = composer(); state.draft = item.draft; state.attachments = item.attachments;
@@ -84,7 +118,7 @@ export function createController({ state, api, render = () => {}, storage = glob
   function clearSelection() {
     employeeEpoch++; chatReadEpoch++; chatWriteEpoch++; phoneEpoch++; attachmentEpoch++;
     renewEmployeeGets();
-    chatConversationId = null; forwarding.reset(); state.forwardDetail = null; state.chatReadError = '';
+    chatConversationId = null; forwarding.reset(); state.forwardDetail = null; state.chatReadError = ''; state.chatFind = null; state.chatJump = null;
     conversationReads.clear(); employeeReadEpoch++; employeeReads.clear(); state.employeeResources = initialEmployeeResources();
     state.selectedEmployee = null; state.bot = null; state.conversation = null; state.messages = [];
     state.runs = []; state.routines = []; state.phone = null; state.draft = ''; state.attachments = [];
@@ -101,8 +135,14 @@ export function createController({ state, api, render = () => {}, storage = glob
   }
   function requireLogin(message = '', explicitLogout = false) {
     const userId = accountId(state);
+    if (!explicitLogout) { stashComposer(); flushDrafts(); }
+    for (const pending of draftTimers.values()) clearTimeout(pending); draftTimers.clear();
+    accountGeneration++;
     reporting?.clear?.(state);
-    if (explicitLogout && userId) { clearAccountRequests(userId); forwarding.reset({ clearAccount: true }); }
+    if (explicitLogout && userId) {
+      clearAccountRequests(userId); forwarding.reset({ clearAccount: true });
+      const cleared = preferences.clearAccount(userId); if(!cleared.ok)message = cleared.error;
+    }
     if (userId) { try { storage?.removeItem(workspaceKey(userId)); } catch {} }
     epoch++; composers.clear(); pendingMutations.clear(); routineRequests.clear(); clearWorkspace();
     state.user = null; state.workspace = null; state.workspaces = []; state.phase = 'login'; state.error = message; state.notice = ''; draw();
@@ -195,7 +235,7 @@ export function createController({ state, api, render = () => {}, storage = glob
   const botSettings = createBotSettings({ state, api, current, valid, fail, draw, acceptBot: acceptSavedBot });
   const deviceSettings = createDeviceSettings({ state, api, current, valid, fail, draw });
   const inbox = createChatInbox({ state, api, current, valid, draw, fail,
-    canMarkVisible: () => !nativePaused && !globalThis.document?.hidden && !state.forward && !state.forwardDetail && !state.imagePreview,
+    canMarkVisible: () => !nativePaused && !globalThis.document?.hidden && !state.forward && !state.forwardDetail && !state.imagePreview && !state.chatFind,
   });
   const forwarding = createForwarding({ state, api, current, valid, draw, fail, storage,
     onAccepted: (_result, { token }) => { if (valid(token)) { inbox.invalidate(); void inbox.load(token); } },
@@ -429,7 +469,7 @@ export function createController({ state, api, render = () => {}, storage = glob
       if (valid(token)) { inbox.invalidate(); void inbox.load(token); }
       // A different employee may now be open. Complete only the original composer's draft.
       if (item.request === request) {
-        if (item.revision === revision) { item.draft = ''; item.attachments = []; }
+        if (item.revision === revision) { item.draft = ''; item.attachments = []; persistComposer(item); }
         item.request = null;
       }
       try {
@@ -540,6 +580,7 @@ export function createController({ state, api, render = () => {}, storage = glob
     back: action(async () => {
       if (state.imagePreview) { state.imagePreview = null; draw(); return; }
       if (state.forwardDetail) { state.forwardDetail = null; draw(); return; }
+      if (state.chatFind) { state.chatFind = null; draw(); return; }
       if (state.forward) { await forwarding.actions['forward-back'](); return; }
       if (['settings', 'bot-settings', 'device-settings'].includes(state.page)) {
         const previous = state.settingsTrail?.pop() || { page: 'home', tab: 'me' };
@@ -559,8 +600,28 @@ export function createController({ state, api, render = () => {}, storage = glob
     'switch-workspace': action(() => { stashComposer(); clearSelection(); state.phase = 'workspace'; state.page = 'workspaces'; draw(); }),
     'select-workspace': action(({ id: slug }) => chooseWorkspace(state.workspaces.find(item => item.slug === slug || item.workspace_id === slug))),
     chat: action(({ id: employeeId }) => { state.settingsTrail = []; return openEmployee(employeeId, 'chat'); }),
+    'chat-pin': action(({id:conversationId=state.conversation?.id}) => {
+      if (!state.chatThreads.some(thread=>thread.conversationId===conversationId) && state.conversation?.id!==conversationId) return false;
+      const result=preferences.togglePin(localScope(),conversationId);syncChatPreferences(true);
+      if(!result.ok)state.chatPreferencesError=result.error;
+      draw();return result.accepted;
+    }),
+    'chat-find-open': action(() => {
+      if(state.page!=='chat'||!state.conversation?.id||state.forward)return false;
+      state.chatFind={query:''};draw();return true;
+    }),
+    'chat-find-close': action(() => { state.chatFind=null;draw(); }),
+    'chat-find-result': action(({id:messageId}) => {
+      if(state.page!=='chat'||!state.chatFind)return false;
+      const found=searchChatMessages(state.messages,state.chatFind.query).results.find(item=>item.messageId===messageId);
+      if(!found)return false;
+      state.chatFind=null;
+      if(found.source==='forward')state.forwardDetail={messageId:found.messageId};
+      state.chatJump={conversationId:state.conversation.id,messageId:found.messageId,quoteIndex:found.quoteIndex,serial:id()};
+      draw();return true;
+    }),
     'mark-thread-read': action(({ conversationId, messageId }) => {
-      if (nativePaused || globalThis.document?.hidden || state.forward || state.forwardDetail || state.imagePreview) return false;
+      if (nativePaused || globalThis.document?.hidden || state.forward || state.forwardDetail || state.imagePreview || state.chatFind) return false;
       return inbox.markVisible({ conversationId, messageId });
     }),
     ...forwarding.actions,
@@ -714,7 +775,8 @@ export function createController({ state, api, render = () => {}, storage = glob
     if (state.page === 'device-settings') { await deviceSettings.change(event); return; }
     if (target.name === 'search') { state.search = target.value; draw(); return; }
     if (target.name === 'chatSearch') { state.chatSearch = String(target.value || ''); draw(); return; }
-    if (['message','content','draft'].includes(target.name)) { state.draft = target.value; if (state.selectedEmployee && state.page === 'chat') { stashComposer(); composer().revision++; } return; }
+    if (target.name === 'chatFind' && state.chatFind) { state.chatFind.query = String(target.value || ''); draw(); return; }
+    if (['message','content','draft'].includes(target.name)) { state.draft = target.value; if (state.selectedEmployee && state.page === 'chat') { stashComposer(true); composer().revision++; } return; }
     if (!['images', 'attachments', 'avatar'].includes(target.name) || !target.files?.length) return;
     const token = current(), readToken = ++attachmentEpoch, avatar = target.name === 'avatar', page = state.page, reportIndex = state.report?.index;
     state.attachmentReading = true; state.error = ''; draw();
@@ -736,6 +798,7 @@ export function createController({ state, api, render = () => {}, storage = glob
   const resume = () => { nativePaused = false; if (!disposed) void refresh({ silent: true }); };
   const pause = () => {
     if (disposed || nativePaused) return;
+    stashComposer(); flushDrafts();
     nativePaused = true;
     chatReadEpoch++; conversationReads.clear(); invalidateEmployeeReads(); renewEmployeeGets();
     const resource = state.employeeResources.conversation;
@@ -766,6 +829,8 @@ export function createController({ state, api, render = () => {}, storage = glob
     }
   }
   function dispose() {
+    stashComposer(); flushDrafts();
+    for (const pending of draftTimers.values()) clearTimeout(pending); draftTimers.clear();
     disposed = true; epoch++; clearInterval(timer); timer = null; composers.clear(); pendingMutations.clear(); routineRequests.clear(); resourceReads.clear(); employeeReads.clear(); employeeWrites.clear(); phoneRead = null;
     employeeGets.abort();
     botSettings.dispose?.(); deviceSettings.dispose?.();

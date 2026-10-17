@@ -2,6 +2,7 @@ import { escapeHtml, employeeName, avatarUrl, presence, messageText, formatTime,
 import { renderBotSettings } from './bot-settings.js';
 import { renderDeviceSettings } from './device-settings.js';
 import { isForwardableMessage, orderedForwardMessages, FORWARD_MESSAGE_LIMIT, FORWARD_NOTE_LIMIT } from './forwarding.js';
+import { searchChatMessages } from './chat-search.js';
 
 const e = value => escapeHtml(String(value ?? ''));
 const rows = value => Array.isArray(value) ? value : [];
@@ -15,6 +16,7 @@ const icons = {
   down:'<path d="m6 9 6 6 6-6"/>',
   up:'<path d="m6 15 6-6 6 6"/>',
   search:'<circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/>',
+  pin:'<path d="m16 3 5 5-4 1-4 5-1 4-6-6 4-1 5-4 1-4ZM3 21l6-6"/>',
   chat:'<path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5H4l-2 2V11.5a9.5 9.5 0 0 1 19 0Z"/><path d="M7 11h.01M12 11h.01M17 11h.01"/>',
   report:'<rect x="4" y="3" width="16" height="18" rx="3"/><path d="M8 8h8M8 12h5M8 16h3M19 15l3 2-3 2"/>',
   arrow:'<path d="M4 12h16m-6-6 6 6-6 6"/>',
@@ -118,16 +120,35 @@ function threadTime(thread) {
 function threadRow(state, thread) {
   const employee=threadEmployee(state,thread),unread=unreadCount(thread.unreadCount);
   const preview=typeof thread.preview==='string'?thread.preview.trim():'';
-  return `<button class="thread-row ${unread?'has-unread':''}" data-action="chat" data-id="${e(employee.id)}"${employee.id?'':' disabled'} aria-label="和${e(nameOf(employee))}聊天${unread?`，${unread} 条未读`:''}"><span class="thread-avatar">${avatar(employee,'chat-avatar')}${unread?`<b class="thread-unread" aria-hidden="true">${unread>99?'99+':unread}</b>`:''}</span><span class="thread-copy"><span class="thread-heading"><strong>${e(nameOf(employee))}</strong>${threadTime(thread)}</span><span class="thread-preview">${e(preview || '暂无消息')}</span></span></button>`;
+  const drafts=state.chatDraftPreviews||{},draft=Object.hasOwn(drafts,employee.id)?drafts[employee.id]:'',pinned=rows(state.pinnedChatIds).includes(thread.conversationId);
+  return `<div class="thread-item ${pinned?'is-pinned':''}"><button class="thread-row ${unread?'has-unread':''}" data-action="chat" data-id="${e(employee.id)}"${employee.id?'':' disabled'} aria-label="和${e(nameOf(employee))}聊天${unread?`，${unread} 条未读`:''}"><span class="thread-avatar">${avatar(employee,'chat-avatar')}${unread?`<b class="thread-unread" aria-hidden="true">${unread>99?'99+':unread}</b>`:''}</span><span class="thread-copy"><span class="thread-heading"><strong>${e(nameOf(employee))}</strong>${threadTime(thread)}</span><span class="thread-preview ${draft?'has-draft':''}">${draft?`<em>[草稿]</em> ${e(String(draft).slice(0,180))}`:e(preview || '暂无消息')}</span></span></button>${thread.conversationId?`<button class="thread-pin icon-button" type="button" data-action="chat-pin" data-id="${e(thread.conversationId)}" aria-label="${pinned?'取消置顶':'置顶'}${e(nameOf(employee))}" aria-pressed="${pinned}">${icon('pin')}</button>`:''}</div>`;
 }
 function chatsPage(state) {
   const resource=state.chatThreadsResource || {},search=String(state.chatSearch || '').trim().toLowerCase();
-  const all=rows(state.chatThreads).filter(thread=>thread&&typeof thread==='object').slice().sort((a,b)=>threadTimestamp(b)-threadTimestamp(a));
+  const pins=new Set(rows(state.pinnedChatIds));
+  const all=rows(state.chatThreads).filter(thread=>thread&&typeof thread==='object').slice().sort((a,b)=>Number(pins.has(b.conversationId))-Number(pins.has(a.conversationId))||threadTimestamp(b)-threadTimestamp(a));
   const threads=all.filter(thread=>`${nameOf(threadEmployee(state,thread))} ${typeof thread.preview==='string'?thread.preview:''}`.toLowerCase().includes(search));
   const start=actionButton('navigate','发起聊天','plus','soft','data-tab="employees"');
   const notice=resource.phase==='error'?`<div class="banner error" role="alert">${icon('alert')}<span>最近聊天同步失败：${e(resource.error || '请刷新重试')}</span><button class="icon-button" data-action="refresh" aria-label="重试同步最近聊天">${icon('refresh')}</button></div>`:resource.phase==='loading'&&!resource.lastUpdated?'<div class="banner notice" role="status"><span class="spinner small"></span><span>正在同步最近聊天…</span></div>':'';
   const noRows=all.length?empty('search','没有找到相关聊天','试试员工名称或最近消息中的文字'):resource.phase==='error'?empty('chat','最近聊天暂未加载','恢复连接后会继续同步原聊天记录',actionButton('refresh','刷新重试','refresh','soft')):resource.phase==='loading'||resource.phase==='idle'?empty('chat','正在同步最近聊天','原有聊天记录会在这里显示'):empty('chat','最近聊天会显示在这里','选一位员工，继续原来的聊天',start);
-  return `${appHeader(state,'聊天','接着上次的话题，继续一起工作',`<button class="icon-button new-chat-button" data-action="navigate" data-tab="employees" aria-label="发起聊天">${icon('plus')}</button>`)}<main class="page-content chats-home">${alerts(state)}${notice}<label class="search-box">${icon('search')}<input type="search" name="chatSearch" value="${e(state.chatSearch || '')}" placeholder="搜索最近聊天" aria-label="搜索最近聊天" autocomplete="off"></label><div class="thread-list" aria-label="最近聊天">${threads.length?threads.map(thread=>threadRow(state,thread)).join(''):noRows}</div></main>`;
+  return `${appHeader(state,'聊天','接着上次的话题，继续一起工作',`<button class="icon-button new-chat-button" data-action="navigate" data-tab="employees" aria-label="发起聊天">${icon('plus')}</button>`)}<main class="page-content chats-home">${alerts(state)}${notice}${chatPreferencesNotice(state)}<label class="search-box">${icon('search')}<input type="search" name="chatSearch" value="${e(state.chatSearch || '')}" placeholder="搜索最近聊天" aria-label="搜索最近聊天" autocomplete="off"></label><div class="thread-list" aria-label="最近聊天">${threads.length?threads.map(thread=>threadRow(state,thread)).join(''):noRows}</div></main>`;
+}
+function chatPreferencesNotice(state) {
+  return state.chatPreferencesError?`<div class="banner error" role="alert">${icon('alert')}<span>本机草稿与置顶：${e(state.chatPreferencesError)}</span></div>`:'';
+}
+function searchExcerpt(result) {
+  const text=String(result.excerpt||'');let end=0,html='';
+  for(const range of rows(result.ranges)) {
+    if(!Number.isSafeInteger(range.start)||!Number.isSafeInteger(range.end)||range.start<end||range.end>text.length||range.end<=range.start)continue;
+    html+=e(text.slice(end,range.start))+`<mark>${e(text.slice(range.start,range.end))}</mark>`;end=range.end;
+  }
+  return `${result.leadingEllipsis?'…':''}${html}${e(text.slice(end))}${result.trailingEllipsis?'…':''}`;
+}
+function chatFindPanel(state) {
+  if(!state.chatFind)return '';
+  const found=searchChatMessages(state.messages,state.chatFind.query);
+  const message=found.queryTooLong?'最多输入200个字':!found.query?'输入文字查找这段聊天':found.total?`${found.total} 条相关消息${found.hasMore?'，先显示前100条':''}`:'没有找到相关消息';
+  return `<section class="chat-find-panel" aria-label="聊天内查找"><div class="chat-find-input"><label>${icon('search')}<input type="search" name="chatFind" value="${e(state.chatFind.query)}" maxlength="400" placeholder="查找消息文字" aria-label="查找消息文字" autocomplete="off"></label><button type="button" class="icon-button" data-action="chat-find-close" aria-label="关闭聊天查找">${icon('close')}</button></div><p class="chat-find-summary" role="status">${e(message)} · 当前聊天已加载记录</p>${found.results.length?`<div class="chat-find-results">${found.results.map(item=>`<button type="button" data-action="chat-find-result" data-id="${e(item.messageId)}"><small>${item.source==='forward'?'转发的聊天记录':item.role==='user'?'我的消息':'员工消息'}</small><span>${searchExcerpt(item)}</span></button>`).join('')}</div>`:''}</section>`;
 }
 function employeesPage(state) {
   const all=rows(state.employees), filter=state.filter || 'all', search=String(state.search || '').toLowerCase();
@@ -203,7 +224,8 @@ function messageCard(message, employee, state=null, allowForward=false) {
   if(system) return `<div class="system-message"${message.role==='system'&&stableId?` data-message-id="${e(stableId)}"`:''}>${e(content)}</div>`;
   const forwardable=allowForward&&isForwardableMessage(message),selecting=state?.forward?.phase==='select';
   const selected=selecting&&rows(state.forward.selectedIds).includes(String(message.id || '').trim());
-  return `<article class="message ${outgoing?'outgoing':'incoming'} ${forwardable&&selecting?'forward-selectable':''} ${selected?'forward-selected':''}"${stableId?` data-message-id="${e(stableId)}"`:''}>${forwardable&&selecting?`<button type="button" class="message-select" data-action="forward-toggle" data-id="${e(stableId)}" aria-label="${selected?'取消选择':'选择'}这条消息" aria-pressed="${selected}">${selected?icon('check'):''}</button>`:''}${outgoing?'':avatar(employee,'message-avatar')}<div class="message-body"><div class="message-bubble"${forwardable?` data-forwardable-message="${e(stableId)}"`:''}>${content ? `<div class="prose">${e(content)}</div>`:''}${forwardRecordCard(message)}${attachments.length?`<div class="message-images ${attachments.length>1?'multiple':''}">${attachments.map(imageAttachment).join('')}</div>`:''}${!content&&!attachments.length&&!record?'<span class="muted">消息内容为空</span>':''}</div><div class="message-meta"><span class="message-time">${shortTime(message.created_at || message.createdAt || message.timestamp)}${message.status==='failed'?' · 未发送':message.status==='sending'?' · 发送中':''}</span>${forwardable&&!selecting?`<button type="button" class="message-menu-button" data-action="message-menu" data-id="${e(stableId)}" aria-label="消息操作">${icon('more')}<span>消息操作</span></button>`:''}</div></div></article>`;
+  const messageClasses=['message',outgoing?'outgoing':'incoming',forwardable&&selecting?'forward-selectable':'',selected?'forward-selected':'',state?.chatJump?.messageId===stableId?'search-match':''].filter(Boolean).join(' ');
+  return `<article class="${messageClasses}"${stableId?` data-message-id="${e(stableId)}"`:''}>${forwardable&&selecting?`<button type="button" class="message-select" data-action="forward-toggle" data-id="${e(stableId)}" aria-label="${selected?'取消选择':'选择'}这条消息" aria-pressed="${selected}">${selected?icon('check'):''}</button>`:''}${outgoing?'':avatar(employee,'message-avatar')}<div class="message-body"><div class="message-bubble"${forwardable?` data-forwardable-message="${e(stableId)}"`:''}>${content ? `<div class="prose">${e(content)}</div>`:''}${forwardRecordCard(message)}${attachments.length?`<div class="message-images ${attachments.length>1?'multiple':''}">${attachments.map(imageAttachment).join('')}</div>`:''}${!content&&!attachments.length&&!record?'<span class="muted">消息内容为空</span>':''}</div><div class="message-meta"><span class="message-time">${shortTime(message.created_at || message.createdAt || message.timestamp)}${message.status==='failed'?' · 未发送':message.status==='sending'?' · 发送中':''}</span>${forwardable&&!selecting?`<button type="button" class="message-menu-button" data-action="message-menu" data-id="${e(stableId)}" aria-label="消息操作">${icon('more')}<span>消息操作</span></button>`:''}</div></div></article>`;
 }
 function composer(state, report=false) {
   const entry=rows(state.report?.queue)[state.report?.index || 0];
@@ -213,9 +235,9 @@ function composer(state, report=false) {
 }
 function chatPage(state) {
   const employee=state.selectedEmployee || state.bot?.employee || state.bot || {}, status=statusOf(state.bot || {...employee,execution:state.conversation?.execution});
-  const extra=`<button class="icon-button" data-action="employee-detail" data-id="${e(employee.id || state.bot?.id)}" aria-label="员工详情">${icon('more')}</button>`;
+  const extra=`<div class="chat-header-actions"><button type="button" class="icon-button" data-action="chat-find-open" aria-label="查找聊天记录"${state.conversation?.id?'':' disabled'}>${icon('search')}</button><button class="icon-button" data-action="employee-detail" data-id="${e(employee.id || state.bot?.id)}" aria-label="员工详情">${icon('more')}</button></div>`;
   const history=rows(state.messages).length ? `<div class="conversation-start">${icon('link')}长期聊天 · 与电脑端同步</div>${state.messages.map(message=>messageCard(message,employee,state,true)).join('')}` : state.chatLoading ? '<div class="empty-state" role="status"><span class="spinner"></span><h3>正在读取原聊天记录</h3><p>稍等，正在与电脑端同步</p></div>' : !state.conversation?.id ? empty('alert','聊天记录暂未加载','请重新读取原聊天记录',actionButton('refresh','重新加载','refresh','soft')) : empty('chat',`和${nameOf(employee)}聊聊`,'交代一件事，或发送图片一起看');
-  return `${pageHeader(state,nameOf(employee),status.label,extra,employee)}<main class="chat-main">${alerts(state)}${employeeReadNotices(state,true)}<div class="chat-history chat-timeline" data-chat-scroll>${history}<div data-chat-end></div></div></main>${state.forward?.phase==='select'?forwardSelectionBar(state):composer(state)}`;
+  return `${pageHeader(state,nameOf(employee),status.label,extra,employee)}<main class="chat-main">${alerts(state)}${employeeReadNotices(state,true)}${chatPreferencesNotice(state)}${chatFindPanel(state)}<div class="chat-history chat-timeline" data-chat-scroll>${history}<div data-chat-end></div></div></main>${state.forward?.phase==='select'?forwardSelectionBar(state):composer(state)}`;
 }
 function forwardSelectionBar(state) {
   const selected=orderedForwardMessages(state.messages,state.forward?.selectedIds);
@@ -246,7 +268,7 @@ function forwardDetailOverlay(state) {
   const messageId=state.forwardDetail?.messageId;
   if(!messageId)return '';
   const message=rows(state.messages).find(item=>item.id===messageId),record=forwardRecord(message);
-  return `<div class="forward-overlay forward-detail-overlay"><button type="button" class="forward-backdrop" data-action="forward-detail-close" aria-label="关闭聊天记录"></button><section class="forward-sheet forward-record-detail" role="dialog" aria-modal="true" aria-labelledby="forward-detail-title"><header><div><h2 id="forward-detail-title">聊天记录</h2>${record?.source?.employeeName?`<p>来自${e(record.source.employeeName)}</p>`:''}</div><button type="button" class="icon-button" data-action="forward-detail-close" aria-label="关闭聊天记录">${icon('close')}</button></header><div class="forward-detail-messages">${record?record.messages.map(item=>`<article class="forward-snapshot-message"><div><strong>${e(item.senderName || '消息')}</strong><span>${shortTime(item.createdAt)}</span></div>${item.content?`<div class="prose">${e(item.content)}</div>`:''}${rows(item.attachments).length?`<div class="message-images ${item.attachments.length>1?'multiple':''}">${item.attachments.map(imageAttachment).join('')}</div>`:''}</article>`).join(''):empty('chat','这段记录暂未加载','关闭后刷新当前聊天重试')}</div></section></div>`;
+  return `<div class="forward-overlay forward-detail-overlay"><button type="button" class="forward-backdrop" data-action="forward-detail-close" aria-label="关闭聊天记录"></button><section class="forward-sheet forward-record-detail" role="dialog" aria-modal="true" aria-labelledby="forward-detail-title"><header><div><h2 id="forward-detail-title">聊天记录</h2>${record?.source?.employeeName?`<p>来自${e(record.source.employeeName)}</p>`:''}</div><button type="button" class="icon-button" data-action="forward-detail-close" aria-label="关闭聊天记录">${icon('close')}</button></header><div class="forward-detail-messages">${record?record.messages.map((item,index)=>`<article class="forward-snapshot-message${state.chatJump?.messageId===messageId&&state.chatJump?.quoteIndex===index?' search-match':''}" data-search-quote-index="${index}"><div><strong>${e(item.senderName || '消息')}</strong><span>${shortTime(item.createdAt)}</span></div>${item.content?`<div class="prose">${e(item.content)}</div>`:''}${rows(item.attachments).length?`<div class="message-images ${item.attachments.length>1?'multiple':''}">${item.attachments.map(imageAttachment).join('')}</div>`:''}</article>`).join(''):empty('chat','这段记录暂未加载','关闭后刷新当前聊天重试')}</div></section></div>`;
 }
 
 function detailPage(state) {

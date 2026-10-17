@@ -621,3 +621,25 @@ details[open] > summary > .icon:last-child { transform: rotate(180deg); }
 .forward-snapshot-message > div > span { color: #b1a0bc; font-size: 10px; flex: 0 0 auto; }
 .forward-snapshot-message .prose { font-size: 13px; line-height: 1.85; color: #6f5c7a; }
 .forward-snapshot-message .message-images { margin-top: 10px; }
+
+/* Local chat organization and find */
+.thread-item { position: relative; }
+.thread-item + .thread-item::before { content: ''; position: absolute; height: 1px; background: #f1edf7; top: 0; left: 80px; right: 0; z-index: 1; }
+.thread-item.is-pinned { background: #f7f3ff; }
+.thread-item .thread-row { padding-right: 52px; }
+.thread-pin { position: absolute; right: 7px; top: 24px; width: 36px; height: 40px; color: #b5aac4; }
+.thread-pin[aria-pressed=true] { color: #9970d5; background: #eee5ff; }
+.thread-preview.has-draft em { font-style: normal; color: #a377d4; }
+.chat-header-actions { display: flex; align-items: center; gap: 2px; }
+.chat-find-panel { flex: 0 0 auto; max-height: 45%; min-height: 90px; display: flex; flex-direction: column; padding: 10px 14px 8px; background: #fff; border-bottom: 1px solid #eee8f6; }
+.chat-find-input { display: flex; gap: 6px; align-items: center; }
+.chat-find-input label { display: flex; align-items: center; gap: 9px; flex: 1; min-width: 0; padding: 10px 12px; border-radius: 13px; background: #f6f2fb; color: #aa8dcc; }
+.chat-find-input label svg { width: 18px; height: 18px; flex-shrink: 0; }
+.chat-find-input input { border: 0; outline: 0; background: transparent; width: 100%; min-width: 0; font: inherit; font-size: 14px; color: #554462; }
+.chat-find-summary { margin: 8px 3px; font-size: 11px; color: #9c8bab; }
+.chat-find-results { overflow-y: auto; min-height: 0; }
+.chat-find-results > button { display: flex; flex-direction: column; width: 100%; gap: 5px; padding: 11px 4px; text-align: left; border-top: 1px solid #f2edf7; }
+.chat-find-results small { font-size: 11px; color: #a08cab; }
+.chat-find-results span { font-size: 13px; line-height: 1.6; color: #665574; white-space: pre-wrap; overflow-wrap: anywhere; }
+.chat-find-results mark { background: #e8dcff; color: #674c8b; border-radius: 2px; }
+.message.search-match .message-bubble, .forward-snapshot-message.search-match { box-shadow: 0 0 0 2px #cab0ee; }
