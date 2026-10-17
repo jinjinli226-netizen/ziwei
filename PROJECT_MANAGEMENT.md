@@ -1,6 +1,66 @@
 # 紫薇项目管理与 AI 接手手册
 
-## 2026-10-17 code20发布完成，手机仍双19离线，真实输入尚未通过
+## 2026-10-17 本机原手机本次升级恢复与AI视觉输入验收通过（有限范围）
+
+本机原手机本次双22升级、包替换后恢复，以及“视觉清空 → 确认空框 → 新输入 → bound_editor完整读回 → 新截图显示”的C / D两轮中文与数字输入均通过；C隐藏再重开键盘、D最终隐藏键盘后值均保留。非空直接API覆盖仍受限，未取得same_node读回；本次结论不包含长期存活、断网、熄屏、重启或用户Stop场景。
+
+新中控 `01637b2b8c2c8efcd0a1ffc05213ff2e4d8a5df7` 的远端6套 **82/82** 回归通过，fail / cancelled / skipped均0，tests / build / worker退出码均0；310个源码成员前后SHA一致、20个dist文件逐项验证。**16:24:55** 真实部署至 `/opt/ziwei-control/releases/phone-installer-scoped-01637b2b8c2c`，PID361304；备份 `/opt/ziwei-staging/backups/control-installer-scoped-20261017T082454Z`。部署中schema、四历史表全部现存列及完整rowset、DB inode、主站 / 客户端 / Nginx / APK均保持，原8f0 pending不变；controlOwner仍Agent / epoch13 / draining=false。仅切换中控代码，不创建手机动作、不恢复DB。
+
+随后通过正常API创建的原非owner Updater21 UI launch `device-command-7348912d-61bc-4beb-b000-2d24b830682e` 已succeeded / performed=true / executingConfirmed=true；主代理按新screen03确认原Agent22安装弹窗。这是原pending限定的单条scoped授权，不是部署修改owner或重提安装。Agent22原事务 `device-update-8f0c17ba-beca-4f70-9369-2ceba3d8fb99` 与Updater22原事务 `device-update-2aeb6ecd-cdd0-4728-bc48-a1ef99b1ae15` 均submitted=1 / committed，installed_at分别为 **16:28:19.638 / 16:33:12.965**，由AI按新图完成确认。**16:33:37** 双22在线健康、进程24849 / 27051、双socketConnected=true、startTrigger=package_replaced，更新相关退出与包更新时间差+4ms / -1ms。日常控制已为Agent / epoch14；epoch变化来自后续Updater22事务，不是部署擅自修改。它支持本次安装恢复和该时段健康，不扩大到重启、Stop或长期验收。
+
+非空旧值上的原B文本命令 `device-command-e2fcf519-126c-4671-aa79-fceb564d4d2d` 为 **failed / not_started / INPUT_EDITOR_TEXT_UNPROVEN**：原节点读到0字符，输入连接返回7字符，无法完整证明原文本一致。新screen14仍见旧值；保留这条安全拒绝，不把它写成非空API覆盖成功，也不放宽guards。
+
+AI按新截图定位清除X，tap `device-command-deea3160-371b-404b-8859-795c287e3ebd` succeeded，screen15原截图 `device-command-1849f1a2-13be-4611-9ff4-e25e926e1bd0`确认输入框已空。另发C文本原命令 `device-command-2277404e-779f-4d9b-a1af-bc9cf9395a95` **succeeded / performed=true / textVerified=true / executingConfirmed=true**，alreadyMatched=false，actualWriteVerified=true，inputBackend=accessibility_ime，readbackSource=`bound_editor`。这是绑定编辑器的完整读回，不是same_node读回。screen16原截图 `device-command-45490a81-b08c-47df-a905-f17c337f6008`经主代理及独审分别目视完整本轮中文与数字；隐藏键盘命令 `device-command-e556d7b8-0b68-45c4-8f09-8356978aa571` 与重开命令 `device-command-6cab65fa-7c30-4379-b820-99708185d08d` 均succeeded；screen17 / 18原截图 `device-command-5a1632c4-ca27-4e60-a073-1ca3e0eb3262` / `device-command-8d72a571-b947-491e-b66a-b979c1fdd7e4`经主代理目视，键盘实际隐藏 / 显示且C完整保留。
+
+第二轮按新截图点击可见清除X，原命令 `device-command-f7d4befd-30a9-44b8-a086-d8334afa87b3` succeeded；screen19原截图 `device-command-d70766eb-8509-40ef-8feb-a30e2a45a746`确认空框hint。另发不同D值的原文本命令 `device-command-b179fe75-32ef-4abf-8c20-9e8bef4ecc0a` **succeeded / performed=true / textVerified=true / executingConfirmed=true**，alreadyMatched=false、actualWriteVerified=true、deviceReadbackVerified=true，readbackSource仍为`bound_editor`。screen20原截图 `device-command-4c894c9d-34e0-463e-8b56-f4d276f184be`经主代理目视，完整不同D中文与数字和绑定编辑器读回在同一搜索框一致。最终隐藏命令 `device-command-ca11e52e-c2ab-42bd-8b8e-b20eec36c571` 及screen21原截图 `device-command-f943bc58-bb1c-4ea4-978b-49dcf91ee32b` 均succeeded；新图21确认D完整保留、键盘已隐藏，仍在同一输入联想页，未提交搜索。
+
+**16:45:22.503** 最终只读健康确认双22 / 0.4.11在线健康、双socketConnected=true，Agent / epoch14、draining=false，进程仍为24849 / 27051，uptime分别1023355ms / 730742ms（约17分钟 / 12分钟）；phoneIdle / mainIdle均true。这是有限观测窗口。**16:45:43** 服务复核中控仍为01637 / PID361304，主站仍为并发发布的 `/opt/ziwei/releases/mobile-images-9668962e1c16-1204ed1a/v2` / PID351449，Nginx master737，current目标均符合预期，local / public health均200；官方index `be572dbe…` / manifest `6ff858aa…`保持。原8f0 / 2aeb仍submitted=1 / committed，安装时间未改；原f30e仍uncertain、B仍failed / not_started，C / D仍succeeded / bound_editor。
+
+界面边界：主代理已目视screen11 / 12，Agent22本地主页仍显示“升级failed / 系统安装失败状态3”摘要；尚未将该本地摘要与具体当前或历史事务绑定，不能无证据归到某个旧ID或原因。原8f0 / 2aeb最新数据库事务实际installed / committed，当前双22健康且无lastError；本轮未清写未知历史，不因这条摘要重建升级事务，也不称所有历史失败提示已清除。验收范围为原安装事务、当前版本和上述截图输入流程。
+
+该搜索框后续AI视觉流程为：新截图定位X → 点击后新截图确认空 → 新text命令并取得bound_editor完整读回 → 新截图确认同一搜索框显示。直接在非空值上无法证明文本一致时继续安全拦截。原21 f30e的uncertain及B失败均不resolve、不改原回执、不重放；全程未提交搜索、发消息、购买或发布商品。公开文档不放原词或截图，发布manifest的deviceVerified=false保持。本次原手机视觉输入和升级恢复验收通过，直接非空API覆盖限制及未测试的恢复场景仍按上述边界保留；**16:45:59** 只读核实原定时id1为PAUSED，按用户要求保持暂停，不重开。
+
+以下分时历史保留当时的观察、失败及等待结果；其中“当前 / 未完成 / 待验”均仅指该节标明的历史时点。最新状态和本次通过范围以上方16:45收口为准。
+
+## 2026-10-17 16:02—16:24历史：code22发布后原安装待确认、中控测试阶段
+
+code22 / `0.4.11` 源码 `5cab3cf54ac481d74776b5b30fca7853740424ba`、归档 SHA-256 `540c3df34edda0822877bba522379af1745ea46cf895709e0c5cc1956ae15722` 已完成精确构建。**16:01:26** 核验310个源码成员逐项一致，Agent99/99 / Updater99/99，共198/198 JUnit，0 failures / errors / skipped，双 Debug R8、双 Release完整Lint / assemble通过；日志 SHA-256 `97c8e0a81acf89596df03ba7397a3fe3cce613ff0abd3f6b1198a60f197a8d12`。
+
+原证书双包于 **16:02:54** 公网发布并回读验证，index SHA-256 `be572dbe5fef248ed6dc14a02ddacbd7288ccbd44fbd7e39919af8acc6d8a661`、manifest SHA-256 `6ff858aab81a706534cdfa6bb278b2462398e7222d919cc31dad42d98d5a3318`；备份 `/opt/ziwei-staging/backups/android-apks-20261017T080254Z-f49c56bf`。发布前17个旧版本 / 51个历史文件保持，runtime前后相同，servicesChanged=false / databaseChanged=false，manifest的deviceVerified=false不改写。发布成功不等于手机22安装或输入通过。
+
+原Agent22升级 `device-update-8f0c17ba-beca-4f70-9369-2ceba3d8fb99` 仍 **awaiting_user_action / submitted=1 / installed_at=NULL**，沿原ID观察，不重提升级。screen01是旧Updater21完成页；AI按新图点Done的原命令 `device-command-9adc170e-d915-4b50-8899-38102f9e7215` succeeded / performed=true，screen02原截图 `device-command-a2c94270-d0dc-40a3-9550-012f6d5e424d` succeeded，显示闲鱼与既有测试值。这些不构成Agent22安装成功；helper中的code22上下文也不是手机版本证据。open-01为已知HTTP409拒绝，无command ID、没有手机动作，不写成已打开安装器。
+
+新中控源码 **`01637b2b8c2c8efcd0a1ffc05213ff2e4d8a5df7`** 已审查推送核对，归档 SHA-256 `61a22f75602e07683ec3ed54610e8ec2cf07ff53b8edd01ce953828948c37476`。它仅为原pending安装的单条UI打开提供受限lease，正常controlOwner仍为Agent；根代理实际完成30/30纯内存测试，没有Mac监听。远端相关6套、预期82项回归与production build已启动，尚无全套通过或部署结论；当前生产中控仍为67c9，不提前写修复已上线。原f30e的uncertain与页面实际显示证据分别保留，不resolve或重复输入；整体任务未完成，定时PAUSED。
+
+## 2026-10-17 15:55历史：双21健康、读回uncertain，当时22构建中
+
+Agent21原升级 `device-update-308e8401-03aa-4366-8a96-6ecea93f0921` 与Updater21原升级 `device-update-ee6f6919-ff26-42ea-8253-67ec61432f68` 均submitted=1 / committed，installed_at分别为 **15:39:01.670 / 15:45:21.874**，系统安装确认均由AI按新截图完成；这与此前用户协助覆盖双20分别记录。**15:55:40** 双21 / 0.4.10仍在线健康，进程17797 / 20147、双socketConnected=true、控制Agent / epoch12。两端startTrigger=package_replaced，更新相关退出记录与包更新时间相差2ms / 5ms并标updateRelated=true，支持本次包替换后的恢复，不扩大为强停、用户Stop、重启或长期稳定性验收。
+
+原文本命令 `device-command-f30e561b-751b-49f0-82ba-588a5bf51487` 保持 **uncertain / verify_read / INPUT_EDITOR_FOCUS_REQUIRED**，hostProof为 `CHANGED/COMPARE/p2/n25/ms457/q18`、txMs1472；设备读回没有通过。主代理独立目视私有新截图13 / 14 / 15，完整中文和数字测试值实际显示，隐藏再重开键盘后仍保留。截图原命令依次为 `device-command-c53f51dc-13d5-4e44-b542-c90eab19e2b7`、`device-command-efd08a49-f4c4-4060-acf2-d3ad58ea9353`、`device-command-fdc96e38-4ce8-4a74-b015-4aaf73dfd8bd`，均succeeded。页面侧可见与协议读回未通过分别记录；不改原uncertain、不resolve或重复输入，不提交搜索，不能宣告最终输入验收通过。
+
+code22 / `0.4.11` 源码 **`5cab3cf54ac481d74776b5b30fca7853740424ba`** 审查通过，冻结归档 SHA-256 `540c3df34edda0822877bba522379af1745ea46cf895709e0c5cc1956ae15722`；测试配置为每角色99项、共198项，完整构建正在运行，尚无测试通过、签发、升级或实机验收结论。修复仅为既有固定3600ms观察和10秒事务内的只读观察重试收尾，不再次写入；测试配置与源码审查不等于测试或手机通过。发布manifest的deviceVerified=false保持，原定时PAUSED，整体任务未完成。
+
+## 2026-10-17 15:36历史阶段：code21已发布，当时实机待验
+
+code21 / `0.4.10` 源码 **`26cea77ff428b2aae66a84f63fc4d4de12e890f1`** 的7个源码文件已独立审查、提交推送并核对远端；冻结归档 SHA-256 `05ed12f28103ebbb7845c5053ddb067b837f7d3e17b258ca9398159e7a39fdcf`。新增13项测试；**15:34:07** 完整构建核验308个源码成员逐项一致、Agent94/94 / Updater94/94，共188/188 JUnit且0 failures / errors / skipped，双 Debug R8、双 Release 完整 Lint / assemble通过，日志 SHA-256 `8aea76cc5cdf7e6777f20cf4cc94fe1de68122c4c64fae66faf8092aef444308`。
+
+最终原证书签名ready已核，**15:36:11** 正式发布并公网回读通过，index SHA-256 `42ac752d9b3e3745f12b5bc44c7a11427858dd874fd5e058f7354c21375a72af`、manifest SHA-256 `3b428eb561447a7395bd6e1fdd453efa7ae666dbbd1bfdebb34e5200bcd66557`。发布前16个旧版本 / 48个历史文件保持，服务 / DB未改、runtime前后相同，manifest的deviceVerified=false不改写。手机21升级刚开始，安装与输入通过仍待真实回执；原20失败 `89f7125d…` 保留，不预写成功。原定时继续PAUSED，整体任务未完成。
+
+该版减少无效父节点读取与重复焦点证明，读取 / 证明分别限1800ms；输入事务总限10秒，execute入口在排主线程前固定11秒命令期限，不由读取续期。证明后500ms内须完成新读握手、直接父节点核验与最终屏幕授权；写后仅在固定3600ms观察期限内读回，不重复写入。短票据不是原子的整树快照，不扩大为绝对无竞态或实机输入已通过。
+
+## 2026-10-17 15:09手动双20健康，15:11输入仍未写入，code21修复中
+
+用户手动覆盖安装两包 `0.4.9 / code20` 后，**15:09:00** 原手机只读快照确认 Agent20 / Updater20 双端在线健康，控制 Agent / epoch10、draining=false，双 socketConnected=true，手机无活动命令或升级。进程4060 / 7344，当时uptime约45分钟，startTrigger均为 explicit；这仅证明该时段的健康与握手，不能称本次包替换自动启动或全程无人介入安装。20从未提交升级POST，旧19的88364 / 38fd原事务仍committed；手动安装不需要新建或伪造升级事务。
+
+Agent页面显示的旧 failed 为本地 prefs journal 残留，不是20安装失败；未读取journal前不能锁定其具体旧事务ID。保持日志和旧失败回执，不清数据，也不以此否定API当前双20健康。
+
+**15:11:51** 按新图点击原搜索框的 tap `device-command-616fc846-f714-4a4b-8d29-881ac505ba64` succeeded / performed=true。随后原文本命令 `device-command-89f7125d-f15c-4850-93d7-01ebcb83b64c` 为 **failed / not_started / INPUT_EDITOR_FOCUS_REQUIRED**，诊断 hostProof=TIMEOUT，actualWriteVerified=false / deviceReadbackVerified=false。截图原命令 `device-command-37360237-fc7c-4e4b-859d-b3d310392c5a` succeeded；主代理独立目视新screen04，页面仍见键盘与灰色提示词、请求文字未出现。executing ACK不等于写入，不重试20，不提交搜索，也未执行真实业务动作。
+
+15:17之前的历史候选状态：code21 / `0.4.10` 仅为针对性能和时序的进行中源码修复与已就绪私有运维模板；截至本记录，源码 / 归档 / 测试数量仍未冻结，未推送、未构建、未签名或发布，没有手机21或输入成功证据。**15:17:52** 只读发布基线验证当前公网/shared仍为code20，16版本 / 48历史文件、runtime前后相同；这不等于21构建或发布。原定时继续PAUSED，整体任务未完成。
+
+**15:13:37** 服务复核及15:17:52基线均确认，主站已由无关发版推进至 `/opt/ziwei/releases/mobile-images-9668962e1c16-1204ed1a/v2`，PID351449、自13:43:11运行；保护该当前release，不回退到旧mobile-runs或eabe。中控仍67c9 / PID333172，Nginx master737，双公开health与官方Android index20均200。
+
+## 2026-10-17 12:23及之前历史：code20已发布，手机双19离线
 
 **12:23:58 最后只读复核：** Agent19 / Updater19 仍双端 offline，原因未知；活动手机命令、升级及主站动作均为0。code20 observe 继续 waiting_both_roles_healthy，原私有20状态无 commandId / updateId，未下发任何20手机命令或升级。既有19两条升级 committed 和输入失败均保留；code20 实机安装、中文读回及页面验收仍未完成，沿用户已提出的覆盖安装协助继续，不卸载或清数据。原定时实读 PAUSED，不承诺定时接续。私有证据 `v20-final-phone-readonly.json`、`v20-final-upgrade-observe.json`、`v20-final-upgrade-state.json`。
 
