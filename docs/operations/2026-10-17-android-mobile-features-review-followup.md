@@ -1,6 +1,6 @@
 # 手机功能候选：主控负例复审后续
 
-日期：2026-10-17。状态：仍不可发布。主控产品源 `4f26f450`、API `9393` 与交接/审查文档 `f587cde`、`3d079cf`、`cb92779`、`2e0ebbf` 均未由本候选覆盖。所有修复仅在两条候选分支，未合入主发布树、未部署、未公开 APK 或新版二维码。
+日期：2026-10-17。状态：`code_review_passed_integration_pending`，仍不可发布。主控产品源 `4f26f450`、API `9393` 与交接/审查文档均未由本候选覆盖。主控已 push `8834e28` 关闭 F1–F5，后续 `29fcaf8`、`8629091` 仅补充发布前回退条件且已推送。所有修复仍仅在两条候选分支，未合入主发布树、未部署、未公开 APK 或新版二维码。后续步骤见 [受控集成与联调方案](2026-10-17-mobile-features-controlled-integration-plan.md)。
 
 ## 三项已闭环的群组问题
 
@@ -38,7 +38,9 @@ App 产品源 `ab5045a23c814032937bf4b4143fac2fc9f6012b`：旧电脑分页不兼
 
 固定 `20da885` 的通知、写入和公开边界回归为 53/53；相关合同组合为 **138/138 Node、12/12 Python**，无失败或跳过。覆盖真实 member Cookie 的审计、通知双份载荷、归档/恢复、read、SSE，以及历史不同 JSON 类型的证明、旧字节与其他字段、即时和模板延迟/回滚事件。数据库证明仍保留，owner 的移动待办可见、member 列表隐藏且 resolve 404。证据为共享树 `.local/mobile-assignment-public-review/result-20da885.json` 与 `combined-20da885.log`。
 
-独立固定 Git archive 复测的 8 组检查和 53/53 现有测试通过：原主控 member Cookie 反例已反向断言关闭；HTTP/SSE 200 及真实零 TCP WebSocket upgrade 101 后解码的 5 个任务通知帧均无证明，即时/模板延迟与回滚均核对。历史双份通知、归档恢复、原 F1 三组 ID 别名在改名和硬删除前后的隐藏与 404、可信新成员待办 200、私有证明的 owner 200/member 404 均通过。权威审计证明原字节、摘要与字段不变；源码 archive 前后 SHA 稳定，工作区按 CRLF 归一后匹配固定 Git blob，tracked clean。证据为共享树 `.local/mobile-assignment-public-independent-20da8856/fixed-result.json`、`source-final-check.json` 与 `existing-tests.log`。本轮测试没有监听或真实业务操作，临时依赖链接已删除，端口中心检查通过。主控 F5 复审和后续集成仍待决定，保持不可发布；此结果不替代下节精确 APK 的原生联网验收。
+独立固定 Git archive 复测的 8 组检查和 53/53 现有测试通过：原主控 member Cookie 反例已反向断言关闭；HTTP/SSE 200 及真实零 TCP WebSocket upgrade 101 后解码的 5 个任务通知帧均无证明，即时/模板延迟与回滚均核对。历史双份通知、归档恢复、原 F1 三组 ID 别名在改名和硬删除前后的隐藏与 404、可信新成员待办 200、私有证明的 owner 200/member 404 均通过。权威审计证明原字节、摘要与字段不变；源码 archive 前后 SHA 稳定，工作区按 CRLF 归一后匹配固定 Git blob，tracked clean。证据为共享树 `.local/mobile-assignment-public-independent-20da8856/fixed-result.json`、`source-final-check.json` 与 `existing-tests.log`。本轮测试没有监听或真实业务操作，临时依赖链接已删除，端口中心检查通过。
+
+主控已固定 `20da885` 完成 F5 复审，全部 F1–F5 代码问题关闭，无新增 P1/P2。主控证据在共享树 `.local/mobile-assignment-proof-read-review-20da885/20da885-result.json`；合成主树的定向 53/53 与隔离 prelaunch 27/27 通过。此前 95 项组合为 94 过、1 项既有 Mac fixture 3 秒 version probe 超时，原日志保留且未改变产品超时；不改写为组合全过。主控亲测真实 SSE 与 WS 共享源，实际 WS 帧仍按候选侧独立报告注明。代码闭环不代表集成、回退、现网或准确 APK 已通过；保持不可发布，也不代替下节原生联网验收或知微历史缺失回执另案。
 
 ## 精确 APK 与本轮原生验收限制
 
