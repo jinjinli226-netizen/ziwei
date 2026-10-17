@@ -278,3 +278,11 @@ UTC17:39:48仅发布官方CLI，build `484fa58efd3b9dc569f8f9ceefd92b15ee23f00a9
 同时，正式失败回执保留22项明确枚举的公开服务端code及100..599整数HTTP状态，仍拒绝原始body/error/命令行/配置/秘密；状态日志降级恢复也保留受限详情。移除失败文案中诱导用户反复重试更新的提示。恢复决策本身未因错误展示而放宽。
 
 新helper与真实严格后端的两条协议回归均达到probe409、prepare200、commit200，独立reader验证schema2原执行未知，r3/e9暂停且active解除，四原件字节和其他历史均保持。最终203项整合测试198通过、5项Windows平台跳过、0失败；另排除未变的本机HTTP下载测试，静态检查191项通过。覆盖本机±5分钟/±24小时、HTTP Date秒精度和延迟、单调时间逆跳、严格期限边界、无Date、原WAL和receipt中断续办及错误详情脱敏。未启动Mac监听或完成Windows现场恢复；后续先推GitHub再仅发CLI，实际设备结果另记。私有证据在 `.local/operator-force-abandon-clock-release/` 及前一journal-release只读谓词报告。
+
+### 服务端时间基准恢复版已发布（北京时间 2026-10-18 02:00）
+
+产品 `776ae4c58b68e0526ab53f9cca8ff0ddb4ec94c2` 已先推GitHub两条既有分支，独立源审及115项通过/1项Windows平台跳过的复核无阻断。53项required源码、helper/updater实际字节与Git归档和tgz一致；本地及Linux服务器冷安装/运行闭包校验通过。冻结manifest摘要 `a56c67db3de428c39b4d7224d848d9aca4526769c296816187e6d47b711baed3`，payload摘要 `d9429dac2a894bf693939771500a2d2701a7a7e25347f8f90d77dafc7cb1945f`；仅四项CLI发布输入，上传计划和远端脚本由第二位审查者独立核过。包内preservation proof的publicationKind沿用前一journal修复类别，实际正式下载scope为clock-fix；候选commit、build和实际API绑定均精确记录。
+
+UTC18:00:37正式CLI切到build `623d5585b2a2e706299a79f6ae72f0d0232d3efebe5d59c51da6fcddbbf5ab14`，tgz1130649字节，SHA256 `80b44b8c3803f1aebaefc33a15070f23b83de41aad4b2124e5c32738249f0dad`；独立PS仍6390字节及原526882摘要，release.json摘要 `5b97b251f770451ebb730cf16302d56a05f8e5cc3004d9ed14f7163b1bb73b90`。API/前端维持874目录和PID383266，未重启API或改业务数据。UTC18:00:46独立postcheck核验公开包/metadata/PS、API与前端文件/服务身份、DB inode/schema、其他CLI工件均通过，原三项诊断下载保持。临时node_modules链接已移除，目标依赖目录保留，无本机新增监听。
+
+已发一次新版官方更新及成功后start的指令，等待Windows实际结果。发布不等同于原slot已解除，也未宣称现场SERVER_REFUSED的唯一原因已经拿到；若仍拒绝，新版会给出受限具体serverCode/HTTP。后续必须验证独立回执、新版设备上线及一条不重放的真实模型验收。原用户授权继续有效，不重复请求批准。
