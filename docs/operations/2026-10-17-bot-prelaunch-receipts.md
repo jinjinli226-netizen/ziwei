@@ -286,3 +286,13 @@ UTC17:39:48仅发布官方CLI，build `484fa58efd3b9dc569f8f9ceefd92b15ee23f00a9
 UTC18:00:37正式CLI切到build `623d5585b2a2e706299a79f6ae72f0d0232d3efebe5d59c51da6fcddbbf5ab14`，tgz1130649字节，SHA256 `80b44b8c3803f1aebaefc33a15070f23b83de41aad4b2124e5c32738249f0dad`；独立PS仍6390字节及原526882摘要，release.json摘要 `5b97b251f770451ebb730cf16302d56a05f8e5cc3004d9ed14f7163b1bb73b90`。API/前端维持874目录和PID383266，未重启API或改业务数据。UTC18:00:46独立postcheck核验公开包/metadata/PS、API与前端文件/服务身份、DB inode/schema、其他CLI工件均通过，原三项诊断下载保持。临时node_modules链接已移除，目标依赖目录保留，无本机新增监听。
 
 已发一次新版官方更新及成功后start的指令，等待Windows实际结果。发布不等同于原slot已解除，也未宣称现场SERVER_REFUSED的唯一原因已经拿到；若仍拒绝，新版会给出受限具体serverCode/HTTP。后续必须验证独立回执、新版设备上线及一条不重放的真实模型验收。原用户授权继续有效，不重复请求批准。
+
+### Windows 恢复和真实模型验收已完成（北京时间 2026-10-18 02:19）
+
+用户实际完成 update-3fc8514d-19c2-4b82-8ae8-a42faf2b67ed，更新器报告 Ziwei update complete、实际 build 为上述623d5585；随后正确执行 ziwei_user start，PID21776、readyz就绪。服务端只读核验确认该设备以此build重新在线，而不是仅依据本机成功文案。
+
+UTC18:02:13.492服务器保存并经严格reader核验独立恢复回执 ec66be0ff9854c3bc8b3a6c4b7dbfdade31f8fc1bf8c25dda43318100bcea373：schema2/no_current_daemon，disposition为abandoned_by_user，原executionState仍uncertain，executionConfirmedStopped仍false。原2805任务占用已经解除，Bot先保持r3/e9暂停；未伪造原进程退出、旧任务成功或重放旧消息。随后通过真实owner已登录网页的正常“恢复 Bot”入口启用，成为r3/e10。
+
+正常主聊天入口仅发送一次无副作用新消息，要求只回复“知微恢复正常”，不调用工具、操作手机、修改文件或继续旧任务。新action_9f576f71-3f6e-4da8-81fa-421a4be27895于UTC18:08:05.958创建、18:14:56.020 ACK、18:15:26.416 succeeded；真实Hermes使用gpt-6.1-sol、requested/actual均为max，返回“知微恢复正常”。新进程PID36508退出码0，root/tree均确认退出、activeProcesses为0；此退出证明仅属于本次新验收。精确用户消息计数为1，Bot最终启用且active为空，设备继续在线。私有截图及结构化证据保存在clock-release目录，未提交聊天截图或凭据。
+
+本次新消息排队约410秒，ACK后实际执行约30秒。只读队列与请求记录表明，同电脑另一个员工正在执行且poll正常；其结束后知微自动获调度，未额外重试或停止其他员工。源码确认全局managers>=1把不同员工的主对话串行，用户已明确要求多员工并行；该调度缺陷另行修复，不影响上述旧记录恢复和真实模型成功结论。
