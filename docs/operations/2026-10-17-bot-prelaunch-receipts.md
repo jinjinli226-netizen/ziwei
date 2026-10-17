@@ -218,3 +218,14 @@ UTC15:59:55只读复核仍为requested，grant1、receipt0，授权后prepare/co
 本轮整合175项回归，168通过、7项Windows平台条件跳过、0失败；未运行与本次修改无关的本机HTTP下载测试，未启动本机监听。额外4项最终诊断/原生枚举边界用例通过；静态检查191项通过。Windows原生句柄段尚未现场执行，不能宣称真机恢复完成。新发布脚本基于当前702完整生产目录，仅叠加2个API来源及新前端；保留数据库、MCP、旧metadata、旧CLI工件与其他服务。
 
 当前代码等待先推GitHub再正式发布；发布本身不会解除知微占用。后续必须收到目标设备独立回执、确认原slot解除，再通过正常用户控制恢复Bot，并只发送一条不重放旧任务的新连通性消息。私有证据位于 .local/operator-force-abandon-maintenance-release/；不在Git保存凭据或私有日志。
+
+
+### 本轮维护恢复版已正式发布（北京时间 2026-10-18 00:54）
+
+产品提交 f7c28ee5bc288aa8a9e6434043f22fe6390010e3 及包清单补充 874fcb142f35e78ca1d7d46e0ff92c01d0cee966 已先推GitHub两条既有分支。正式打包时检测出独立PS尚未列入package.files，已补上再重新生成冷包，未将失败候选发布。最终53项required客户端源码、2项API叠加及独立PS均由第二位审查者逐项比对Git归档、tgz、payload和manifest通过。
+
+API/前端于UTC16:54:04切换到 /opt/ziwei/releases/maintenance-recovery-874fcb142f35-d8d2eebc/v2，API PID383266；上一702目录保持。只叠加backend/bot-force-abandon.mjs和src/bot-force-abandon-contract.mjs，数据库inode/schema、MCP与继承源码、旧release metadata、控制服务/Nginx身份及配置保持，未恢复DB、未提交业务恢复。13项公开前端资源逐字节核验通过。
+
+官方Windows包于UTC16:54:35发布，实际build f888c61360fd9a1292a01e57526c6e8b753d14393379e950d8108a5a325310b6；tgz1126097字节，SHA256 eec3341adc85b66b36ebeecaae0b085797b192be5900abe84287543c75831033。独立update-windows.ps1共6390字节，SHA256 526882bbed69de976a546e4d1cff122d55ab838d5d3ab4bad621121dd7cdd9bd；与同包和Git归档字节一致，release.json摘要c98495eee9d9aecf0c1999126f7a36db8a1d8a6d2155207df27d1e955928e6b5。本地及服务器Linux空缓存离线检查通过；公开PS/tgz/metadata已回读确认。独立postcheck全部通过，无失败项。
+
+此刻知微仍为授权requested、恢复回执0，不宣称设备已更新或已解除占用。已请用户在CMD调用一次新版官方PowerShell外部入口；它可装入新worker回收经证实失效的旧锁。旧c477普通update无法在自己加锁前装入这一修复，不能继续循环重试。明确看到Ziwei update complete后再启动客户端；之后仍需核实独立恢复回执和一次真实新模型消息。Windows原生测试仍待该设备执行。私有发布证据完整保存在 .local/operator-force-abandon-maintenance-release/；临时node_modules链接已移除，本机端口中心check通过（无本项目冲突或未登记监听）。
