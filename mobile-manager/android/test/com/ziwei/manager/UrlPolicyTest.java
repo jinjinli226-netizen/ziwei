@@ -9,6 +9,7 @@ public final class UrlPolicyTest {
         yes(UrlPolicy.isAppDocument("https://qzelynth.top/__ziwei_manager__/"));
         same("view.js", UrlPolicy.assetPath("https://qzelynth.top/__ziwei_manager__/view.js?v=1"));
         same("images/avatar.webp", UrlPolicy.assetPath("https://qzelynth.top/__ziwei_manager__/images/avatar.webp"));
+        yes(UrlPolicy.isTrustedOrigin("https://qzelynth.top/api/images/preview.png"));
         for (String url : new String[] {
                 "http://qzelynth.top/__ziwei_manager__/index.html",
                 "https://qzelynth.top.evil.test/__ziwei_manager__/index.html",
@@ -17,6 +18,8 @@ public final class UrlPolicyTest {
                 "https://qzelynth.top:8443/__ziwei_manager__/index.html",
                 "file:///android_asset/index.html", "content://documents/index.html",
                 "javascript:alert(1)", "data:text/html,example", "https://qzelynth.top/%",
+                "https://example.com/", "mailto:team@example.com", "tel:123456",
+                "intent://example/#Intent;scheme=https;end", "market://details?id=com.example",
                 "//qzelynth.top/__ziwei_manager__/index.html", null }) {
             no(UrlPolicy.isTrustedOrigin(url));
             no(UrlPolicy.isAppDocument(url));
@@ -28,6 +31,8 @@ public final class UrlPolicyTest {
             same(null, UrlPolicy.assetPath("https://qzelynth.top/__ziwei_manager__/" + path));
         }
         no(UrlPolicy.isAppDocument("https://qzelynth.top/api/auth/status"));
+        no(UrlPolicy.isAppDocument("https://qzelynth.top/api/images/preview.png"));
+        no(UrlPolicy.isAppDocument("https://qzelynth.top/test-111/members"));
         no(UrlPolicy.isAppDocument("https://qzelynth.top/__ziwei_manager__/app.js"));
         same(null, UrlPolicy.assetPath("https://qzelynth.top/__ziwei_manager__/../api"));
         System.out.println("URL policy passed: " + checks + " checks");

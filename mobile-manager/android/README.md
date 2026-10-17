@@ -11,7 +11,7 @@
 ```sh
 python3 mobile-manager/scripts/android-tools.py
 python3 mobile-manager/scripts/test-android.py
-python3 mobile-manager/scripts/build-android.py --version-code 1 --version-name 0.1.0-internal
+python3 mobile-manager/scripts/build-android.py --version-code 3 --version-name 0.1.2-internal
 ```
 
 自动工具准备支持 Apple Silicon Mac。固定使用 Temurin JDK 17.0.20.1、Android SDK platform 35 r02 和 build-tools 35.0.0；下载文件逐一比对官方校验值，缓存位于 `~/.cache/ziwei-manager-android`。
@@ -31,7 +31,7 @@ python3 mobile-manager/scripts/build-android.py --version-code 1 --version-name 
 系统允许同签名、更大 `versionCode` 的管理 App 覆盖升级。升级不需要卸载员工受控 Agent，也不需要重新创建员工、Profile 或电脑身份。
 
 内部签名可供直接安装测试；没有声称已完成商店上架或正式分发签名配置。
-`manifest.json` 的 `deviceVerified: false` 表示尚无此构建的实机验收，只有编译/签名检查通过。
+`manifest.json` 的 `deviceVerified: false` 表示尚无此构建的物理手机验收；模拟器和隔离测试证据按版本另行记录。
 
 ## 资源、登录与安全边界
 
@@ -39,7 +39,7 @@ python3 mobile-manager/scripts/build-android.py --version-code 1 --version-name 
 - `/api/`、同源头像/截图仍经正常 HTTPS 请求到现有后端，`CookieManager` 接受一方 Cookie 并在退出前台时持久化，继续遵守服务器会话有效期。
 - 只允许正式 HTTPS 源在 WebView 中发出资源请求；没有 `file://` / `content://` 页面访问、混合内容、第三方 Cookie、JS native bridge、TLS 错误放行或网页设备权限。
 - 本地资源响应有 CSP。JS 只能来自同源模块，禁止 inline JS；图片支持同源、`data:`、`blob:`；样式允许内联样式，跨域 frame/object/form 被拒绝。
-- 用户点击的外链交给系统应用，WebView 主文档始终是打包页面。应用没有可从外部导入任意 URL 的 deep link。
+- WebView 主文档只允许打包页面。其他文档导航、弹窗及下载均在 App 内阻止，不发出浏览器 `ACTION_VIEW` Intent；没有可从外部导入任意 URL 的 deep link。相册的系统文档选择器不受此限制。
 - 相册使用系统文档选择器，支持页面声明的多选，最多接收 20 张；只接收经用户选中的 `content://` 且 MIME 为 `image/*` 的 URI，不申请存储、摄像头或相册全量权限。
 
 ## 界面事件约定

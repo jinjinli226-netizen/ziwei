@@ -1,4 +1,6 @@
 import { accountId, workspaceId, scopeKey, list, id, executionUncertain } from './model.js';
+import { createBotSettings } from './bot-settings.js';
+import { createDeviceSettings } from './device-settings.js';
 
 const IMAGE_LIMIT = 10 * 1024 * 1024;
 const avatarLimit = 2 * 1024 * 1024;
@@ -80,6 +82,7 @@ export function createController({ state, api, render = () => {}, storage = glob
     clearSelection(); state.employees = []; state.bots = []; state.tasks = []; state.devices = []; state.phones = [];
     state.report = null; state.reportSelection = []; state.page = 'home'; state.tab = 'employees'; state.imagePreview = null;
     state.phoneCommand = null; state.phoneError = ''; state.loading = false; state.busy = false;
+    state.botSettings = null; state.deviceSettings = null; state.settingsTrail = [];
   }
   function requireLogin(message = '', explicitLogout = false) {
     const userId = accountId(state);
@@ -111,6 +114,8 @@ export function createController({ state, api, render = () => {}, storage = glob
     state.employees = state.employees.map(employee => employee.id === bot.id ? { ...employee, ...(bot.employee || {}), bot } : employee);
     if (state.selectedEmployee?.id === bot.id) { state.bot = bot; state.selectedEmployee = state.employees.find(employee => employee.id === bot.id) || { ...state.selectedEmployee, ...bot.employee, bot }; }
   }
+  const botSettings = createBotSettings({ state, api, current, valid, fail, draw, acceptBot });
+  const deviceSettings = createDeviceSettings({ state, api, current, valid, fail, draw });
   async function refresh({ silent = false } = {}) {
     if (disposed || !state.user || !workspaceId(state) || refreshing) return false;
     const token = current(), workspace = workspaceId(state), requestId = ++refreshToken;
@@ -118,6 +123,7 @@ export function createController({ state, api, render = () => {}, storage = glob
     if (!silent) { state.loading = true; state.error = ''; draw(); }
     // Chat history must progress even if a workspace list or another employee resource is slow.
     const employeeWork = ['chat', 'detail', 'employee-detail'].includes(state.page) ? refreshEmployee(token) : Promise.resolve();
+    const settingsWork = state.page === 'bot-settings' ? botSettings.load() : state.page === 'device-settings' ? deviceSettings.load() : Promise.resolve();
     try {
       const results = await Promise.allSettled([api.employees(workspace), api.bots(workspace), api.tasks(workspace), api.devices(workspace)]);
       if (!valid(token)) return false;
@@ -133,7 +139,7 @@ export function createController({ state, api, render = () => {}, storage = glob
       const failures = results.filter(result => result.status === 'rejected');
       if (failures.length) state.error = failures.map(result => result.reason.message).join('；');
       state.lastRefreshed = new Date().toISOString();
-      await employeeWork;
+      await Promise.all([employeeWork, settingsWork]);
       if (!valid(token)) return false;
       if (['phones', 'devices'].includes(state.tab) || state.page === 'phone') await refreshPhones(token);
       if (!valid(token)) return false;
@@ -231,13 +237,16 @@ export function createController({ state, api, render = () => {}, storage = glob
     if (workspace) await chooseWorkspace(workspace);
     else { state.phase = 'workspace'; state.page = 'workspaces'; state.workspace = null; draw(); }
   }
-  async function openEmployee(employeeId, page) {
+  function enterEmployeePage(employeeId, page, busy = true) {
     const employee = state.employees.find(item => item.id === employeeId);
     if (!employee) throw new Error('这位员工不在当前工作区中，请刷新');
     stashComposer(); clearSelection(); state.selectedEmployee = employee;
     state.bot = employee.bot || state.bots.find(bot => (bot.employee_id || bot.id) === employeeId) || null;
-    state.page = page; state.error = ''; state.busy = true; state.chatLoading = page === 'chat'; restoreComposer(); draw();
-    const token = current();
+    state.page = page; state.error = ''; state.busy = busy; state.chatLoading = page === 'chat'; restoreComposer(); draw();
+    return current();
+  }
+  async function openEmployee(employeeId, page) {
+    const token = enterEmployeePage(employeeId, page);
     try {
       if (page === 'chat') {
         const primary = readChat(token);
@@ -380,18 +389,41 @@ export function createController({ state, api, render = () => {}, storage = glob
   const actions = {
     navigate: action(async ({ tab }) => {
       if (!['employees', 'work', 'tasks', 'phones', 'devices', 'me'].includes(tab)) return;
-      stashComposer(); clearSelection(); state.tab = tab; state.page = 'home'; state.error = ''; draw();
+      stashComposer(); clearSelection(); state.settingsTrail = []; state.tab = tab; state.page = 'home'; state.error = ''; draw();
       if (['phones', 'devices'].includes(tab)) { await refreshPhones(current()); draw(); } else await refresh({ silent: true });
     }),
     back: action(async () => {
       if (state.imagePreview) { state.imagePreview = null; draw(); return; }
-      stashComposer(); clearSelection(); state.page = 'home'; state.phase = workspaceId(state) ? 'ready' : 'workspace'; state.error = ''; draw();
+      if (['settings', 'bot-settings', 'device-settings'].includes(state.page)) {
+        const previous = state.settingsTrail?.pop() || { page: 'home', tab: 'me' };
+        stashComposer(); clearSelection(); state.error = ''; state.tab = previous.tab || state.tab;
+        if (['detail', 'bot-settings'].includes(previous.page) && previous.employeeId) {
+          if (previous.page === 'detail') await openEmployee(previous.employeeId, 'detail');
+          else { enterEmployeePage(previous.employeeId, 'bot-settings', false); await botSettings.load(); }
+        } else {
+          state.page = previous.page || 'home'; draw();
+          if (state.page === 'device-settings') await deviceSettings.load();
+        }
+        return;
+      }
+      stashComposer(); clearSelection(); state.settingsTrail = []; state.page = 'home'; state.phase = workspaceId(state) ? 'ready' : 'workspace'; state.error = ''; draw();
     }),
-    refresh: action(() => refresh()),
+    refresh: action(() => state.page === 'bot-settings' ? botSettings.load() : state.page === 'device-settings' ? deviceSettings.load() : refresh()),
     'switch-workspace': action(() => { stashComposer(); clearSelection(); state.phase = 'workspace'; state.page = 'workspaces'; draw(); }),
     'select-workspace': action(({ id: slug }) => chooseWorkspace(state.workspaces.find(item => item.slug === slug || item.workspace_id === slug))),
-    chat: action(({ id: employeeId }) => openEmployee(employeeId, 'chat')),
-    'employee-detail': action(({ id: employeeId }) => openEmployee(employeeId, 'detail')),
+    chat: action(({ id: employeeId }) => { state.settingsTrail = []; return openEmployee(employeeId, 'chat'); }),
+    'employee-detail': action(({ id: employeeId }) => { state.settingsTrail = []; return openEmployee(employeeId, 'detail'); }),
+    settings: action(() => {
+      rememberSettingsPage(); stashComposer(); clearSelection(); state.page = 'settings'; state.error = ''; draw();
+    }),
+    'bot-settings': action(async ({ id: employeeId }) => {
+      rememberSettingsPage(); enterEmployeePage(employeeId, 'bot-settings', false); await botSettings.load();
+    }),
+    'device-settings': action(async () => {
+      rememberSettingsPage(); stashComposer(); clearSelection(); state.page = 'device-settings'; state.error = ''; draw(); await deviceSettings.load();
+    }),
+    ...Object.fromEntries(Object.entries(botSettings.actions || {}).map(([name, fn]) => [name, action(fn)])),
+    ...Object.fromEntries(Object.entries(deviceSettings.actions || {}).map(([name, fn]) => [name, action(fn)])),
     task: action(async ({ id: taskId }) => {
       const task = state.tasks.find(item => item.id === taskId);
       if (!task) throw new Error('任务不存在，请刷新');
@@ -463,10 +495,13 @@ export function createController({ state, api, render = () => {}, storage = glob
     image: action(({ src }) => { state.imagePreview = src; draw(); }),
     'close-image': action(() => { state.imagePreview = null; draw(); }),
     logout: action(async () => { await api.logout(); requireLogin('', true); }),
-    'open-desktop': action(() => { globalThis.ZiweiManager?.openDesktop?.(); }),
     'routine-toggle': action(({ id: routineId }) => mutateRoutine(routineId)),
     'routine-run': action(({ id: routineId }) => mutateRoutine(routineId, true)),
   };
+  function rememberSettingsPage() {
+    state.settingsTrail ||= [];
+    state.settingsTrail.push({ page: state.page, tab: state.tab, employeeId: state.selectedEmployee?.id });
+  }
   function newReport() {
     if (state.busy || state.sending) return;
     stashComposer(); clearSelection(); state.page = 'report-setup'; state.draft = ''; state.attachments = [];
@@ -502,12 +537,17 @@ export function createController({ state, api, render = () => {}, storage = glob
         if (routineId) await mutateRoutine(routineId, true); else await createRoutine(data);
       }
       else if (name === 'task') await saveTask(data);
+      else if (name === 'bot-settings') await botSettings.submit(data);
+      else if (name === 'bot-phone-mcp') await botSettings.submitPhone(data);
+      else if (['device-pairing', 'device-binding', 'device-phone-control'].includes(name)) await deviceSettings.submit(name, data);
     } catch (error) { fail(error, token); }
     finally { if (!disposed && name === 'login') { state.busy = false; draw(); } }
   }
   async function change(event) {
     const target = event?.target || event;
     if (!target) return;
+    if (state.page === 'bot-settings') { await botSettings.change(event); return; }
+    if (state.page === 'device-settings') { await deviceSettings.change(event); return; }
     if (target.name === 'search') { state.search = target.value; draw(); return; }
     if (['message','content','draft'].includes(target.name)) { state.draft = target.value; if (state.selectedEmployee && state.page === 'chat') { stashComposer(); composer().revision++; } return; }
     if (!['images', 'attachments', 'avatar'].includes(target.name) || !target.files?.length) return;
@@ -554,6 +594,7 @@ export function createController({ state, api, render = () => {}, storage = glob
   }
   function dispose() {
     disposed = true; epoch++; clearInterval(timer); timer = null; composers.clear(); pendingMutations.clear(); routineRequests.clear();
+    botSettings.dispose?.(); deviceSettings.dispose?.();
     globalThis.document?.removeEventListener('visibilitychange', visibility);
     globalThis.removeEventListener?.('ziwei:resume', resume);
     globalThis.removeEventListener?.('ziwei:pause', pause);

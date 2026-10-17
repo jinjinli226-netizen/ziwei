@@ -16,17 +16,23 @@ const first=repo.createEmployee(slug,{name:'闲鱼运营大神 · 验收',descri
 const second=repo.createEmployee(slug,{name:'TikTokTrendS · 验收',description:'无限爆款探索员',runtime:'Codex',runtimeProfile:'default',targetDeviceId:deviceId,model:'gpt-6.1-sol'});
 const employeeIds=new Set([first.id,second.id]);
 const task=repo.createTask(slug,{title:'待核对的真实验收记录',description:'这条记录只存在于内存验收数据库。',assignee:first.id,state:'in_progress'});
-const requests=[],errors=[],screenshots=[];
-let authenticated=true,phoneCommands=0;
+const requests=[],errors=[],screenshots=[],popups=[],newPages=[],documentNavigations=[],closedSurfaces=[];
+let authenticated=true,phoneCommands=0,emptyEmployees=false;
 const phone={id:'qa-phone',alias:'隔离验收手机',nodes:[{role:'agent',status:'offline',lastSeen:'2026-10-16T12:00:00Z',health:{accessibility:false}}],control:{role:'agent',epoch:1},commands:[],snapshot:null};
 const browser=await chromium.launch({executablePath:process.env.ZIWEI_BROWSER_EXECUTABLE||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
 const context=await browser.newContext({viewport:{width:393,height:851},deviceScaleFactor:1,isMobile:true,hasTouch:true,serviceWorkers:'block'}),page=await context.newPage();
 page.setDefaultTimeout(12000);
 page.on('pageerror',error=>errors.push(error.message));
+const isAppDocument=value=>{try{const url=new URL(value);return url.origin===origin&&url.pathname==='/__ziwei_manager__/index.html';}catch{return false;}};
+context.on('page',opened=>{if(opened!==page){newPages.push(opened.url());opened.on('pageerror',error=>errors.push(error.message));}});
+page.on('popup',opened=>popups.push(opened.url()));
+page.on('framenavigated',frame=>{if(frame===page.mainFrame()){documentNavigations.push(frame.url());if(!isAppDocument(frame.url()))errors.push(`Unexpected document navigation ${frame.url()}`);}});
 const json=(route,data,status=200)=>route.fulfill({status,contentType:'application/json',body:JSON.stringify(data)});
-await page.route('**/*',async route=>{
+// Context routing also catches the initial navigation of target=_blank pages.
+await context.route('**/*',async route=>{
   const req=route.request(),url=new URL(req.url()),p=url.pathname,method=req.method(),body=req.postData()?req.postDataJSON():{};
   if(url.origin!==origin){errors.push(`Unexpected external request ${url.origin}${p}`);return route.abort();}
+  if(req.isNavigationRequest()&&!isAppDocument(url.href)){errors.push(`Unexpected document request ${url.href}`);return route.abort();}
   if(p.startsWith('/__ziwei_manager__/')){
     const name=p.slice('/__ziwei_manager__/'.length)||'index.html';if(!/^[a-z-]+\.(html|js|css)$/.test(name))return route.abort();
     return route.fulfill({contentType:name.endsWith('.js')?'application/javascript':name.endsWith('.css')?'text/css':'text/html',body:await fs.readFile(path.join(web,name))});
@@ -39,11 +45,11 @@ await page.route('**/*',async route=>{
     if(!authenticated)return json(route,{error:'请登录'},401);
     if(p==='/api/workspaces')return json(route,{workspaces:[{slug,name:'隔离验收',role:'owner'}]});
     const base=`/api/workspaces/${slug}`;
-    if(p===base+'/employees')return json(route,{employees:repo.listEmployees(slug).filter(e=>employeeIds.has(e.id))});
+    if(p===base+'/employees')return json(route,{employees:emptyEmployees?[]:repo.listEmployees(slug).filter(e=>employeeIds.has(e.id))});
     if(p===base+'/bots')return json(route,{bots:[]});
     if(p===base+'/tasks'){if(method==='POST')return json(route,repo.createTask(slug,body),201);return json(route,{tasks:repo.listTasks(slug)});}
     const employeeMatch=p.match(new RegExp(`^${base}/employees/([^/]+)$`));
-    if(employeeMatch&&method==='PATCH')return json(route,repo.updateEmployee(slug,employeeMatch[1],body));
+    if(employeeMatch&&method==='PATCH')return json(route,repo.updateEmployee(employeeMatch[1],body));
     if(p===base+'/devices')return json(route,{devices:repo.listDevices(slug)});
     if(p===base+'/conversations'){
       if(method==='POST')return json(route,repo.createConversation(slug,body),201);
@@ -60,7 +66,15 @@ await page.route('**/*',async route=>{
     errors.push(`Unhandled ${method} ${p}`);return json(route,{error:'Unimplemented fixture'},404);
   }catch(error){return json(route,{error:error.message,code:error.code},error.status||400);}
 });
-const capture=async name=>{await page.screenshot({path:path.join(out,`${name}.png`),fullPage:true});screenshots.push(name);};
+const staysInApp=async()=>{assert.equal(isAppDocument(page.url()),true);assert.equal(context.pages().length,1);assert.deepEqual(popups,[]);assert.deepEqual(newPages,[]);};
+const noBrowserShortcut=async surface=>{
+  await staysInApp();
+  assert.equal(await page.locator('[data-action="open-desktop"]').count(),0);
+  assert.deepEqual(await page.locator('a[href]').evaluateAll(links=>links.map(link=>link.href).filter(href=>!href.startsWith(location.origin+'/__ziwei_manager__/index.html'))),[]);
+  assert.equal(await page.evaluate(()=>typeof window.ZiweiManager?.openDesktop),'undefined');
+  closedSurfaces.push(surface);
+};
+const capture=async name=>{await staysInApp();await page.screenshot({path:path.join(out,`${name}.png`),fullPage:true});screenshots.push(name);};
 const click=async(action,id)=>{const locator=page.locator(`[data-action="${action}"]${id?`[data-id="${id}"]`:''}`).first();if(action==='refresh'&&!await locator.count())return page.evaluate(()=>window.dispatchEvent(new Event('ziwei:resume')));return locator.click();};
 try{
   await page.goto(`${origin}/__ziwei_manager__/index.html`);await page.getByRole('heading',{name:'我的员工',exact:true}).waitFor();await capture('01-employees');
@@ -77,6 +91,17 @@ try{
   await page.waitForFunction(()=>document.querySelector('[name=draft]')?.value==='');
   const photoRequest=requests.filter(r=>r.method==='POST'&&r.path.endsWith('/messages')).at(-1);assert.equal(photoRequest.body.attachments[0].content,png.toString('base64'));
   const photoExecution=repo.getConversation(conversation.id).execution;repo.ackA2AAction(photoExecution.id,{deviceId});repo.resultA2AAction(photoExecution.id,{deviceId,status:'succeeded',result:{output:'图片已到达隔离执行器。'}});
+  await page.locator('.message-image').first().click();await page.locator('.image-overlay').waitFor();
+  const preview=page.locator('.image-overlay img');await preview.evaluate(image=>image.decode());assert.equal(await preview.evaluate(image=>image.naturalWidth),1);
+  assert.equal(await page.evaluate(()=>window.dispatchEvent(new CustomEvent('ziwei:back',{cancelable:true}))),false);
+  await page.locator('.image-overlay').waitFor({state:'detached'});assert.equal(await page.locator('.app-shell').getAttribute('data-page'),'chat');await staysInApp();
+  await click('back');await click('employee-detail',first.id);await page.getByRole('heading',{name:'员工详情',exact:true}).waitFor();await noBrowserShortcut('employee detail');
+  await page.locator('.edit-panel > summary').click();
+  assert.equal(await page.locator('[data-form=employee] input[name=name]').inputValue(),first.name,'Opening employee details must preserve the employee name despite a separate routine name field');
+  const description='在 App 内更新的岗位简介，仍使用同一员工。';await page.locator('[data-form=employee] textarea[name=description]').fill(description);
+  const employeeSaved=page.waitForResponse(response=>response.request().method()==='PATCH'&&new URL(response.url()).pathname===`/api/workspaces/${slug}/employees/${first.id}`);
+  await page.getByRole('button',{name:'保存资料',exact:true}).click();assert.equal((await employeeSaved).status(),200);
+  await page.getByText(description,{exact:true}).first().waitFor();assert.equal(repo.getEmployee(first.id).description,description);await capture('09-employee-edit-in-app');
   await click('back');await click('report-setup');await click('report-toggle',first.id);await click('report-toggle',second.id);await capture('03-report-queue');
   await click('report-up',second.id);await click('report-start');
   // Second employee has no task/execution evidence; no fabricated report is sent.
@@ -94,10 +119,15 @@ try{
   await click('report-todo','0');await page.getByText('已加入',{exact:true}).waitFor();assert.equal(requests.filter(r=>r.method==='POST'&&r.path===`/api/workspaces/${slug}/tasks`).length,1);
   await click('report-home');await page.locator('[data-action=navigate][data-tab=work]').click();await page.getByText(task.title,{exact:true}).waitFor();await capture('06-work');
   await click('task',task.id);await page.locator('[name=title]').fill('修改后的隔离任务');await page.getByRole('button',{name:'保存修改',exact:true}).click();await page.getByText('已保存',{exact:false}).first().waitFor();assert.equal(repo.getTask(task.id).title,'修改后的隔离任务');
-  await click('back');await page.locator('[data-action=navigate][data-tab=devices]').click();await page.getByText(phone.alias,{exact:true}).waitFor();await click('phone',phone.id);await capture('07-phone');assert.equal(phoneCommands,0);
+  await click('back');await page.locator('[data-action=navigate][data-tab=devices]').click();await page.getByText(phone.alias,{exact:true}).waitFor();await noBrowserShortcut('devices');await click('phone',phone.id);await capture('07-phone');assert.equal(phoneCommands,0);
   await page.setViewportSize({width:360,height:740});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
-  await click('back');await page.locator('[data-action=navigate][data-tab=me]').click();await click('logout');await page.locator('[data-form=login]').waitFor();await capture('08-login');
+  await click('back');await page.locator('[data-action=navigate][data-tab=me]').click();await noBrowserShortcut('account');
+  await page.locator('.account-menu [data-action=switch-workspace]').click();await page.getByRole('heading',{name:'进入你的工作区',exact:true}).waitFor();await staysInApp();
+  await click('select-workspace',slug);await page.getByRole('heading',{name:'我的员工',exact:true}).waitFor();await page.locator(`[data-action=chat][data-id="${first.id}"]`).first().waitFor();await staysInApp();
+  emptyEmployees=true;await click('refresh');await page.getByRole('heading',{name:'还没有数字员工',exact:true}).waitFor();await noBrowserShortcut('empty employees');await capture('10-empty-employees-in-app');
+  await page.locator('[data-action=navigate][data-tab=me]').click();await click('logout');await page.locator('[data-form=login]').waitFor();await capture('08-login');
+  await staysInApp();assert.deepEqual(closedSurfaces,['employee detail','devices','account','empty employees']);
   assert.deepEqual(errors,[]);
-  const result={passed:true,checks:['mobile navigation','existing employee conversation','message idempotency key','photo byte transport','ordered report selection','no-record honesty','exact execution reporting','report followup','resume without redispatch','summary','confirmed planned todo creation','task editing','offline phone state','360px no overflow','logout'],screenshots,requests:requests.length,realDeviceActions:0,externalModelCalls:0,evidence:'real in-memory repository; synthetic receipts; no listeners'};
+  const result={passed:true,checks:['mobile navigation','existing employee conversation','message idempotency key','photo byte transport','ordered report selection','no-record honesty','exact execution reporting','report followup','resume without redispatch','summary','confirmed planned todo creation','task editing','offline phone state','360px no overflow','logout','in-app photo preview and native-back DOM contract','employee profile editing persisted in the same employee','four former browser shortcut surfaces remain in app','workspace selection stays in app','all workflows use one app document without popups'],closedSurfaces,screenshots,requests:requests.length,popups,newPages,documentNavigations,realDeviceActions:0,externalModelCalls:0,evidence:'real in-memory repository; synthetic receipts; no listeners; native-back DOM contract is not a physical device test'};
   await fs.writeFile(path.join(out,'result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result,null,2));
-}catch(error){await capture('failure');await fs.writeFile(path.join(out,'failure.json'),JSON.stringify({error:error.message,errors,requests,body:await page.locator('body').innerText(),forms:await page.locator('form').evaluateAll(forms=>forms.map(f=>({valid:f.checkValidity(),html:f.outerHTML})))},null,2));throw error;}finally{await browser.close();repo.db.close();}
+}catch(error){await page.screenshot({path:path.join(out,'failure.png'),fullPage:true}).catch(()=>{});await fs.writeFile(path.join(out,'failure.json'),JSON.stringify({error:error.message,errors,requests,popups,newPages,documentNavigations,closedSurfaces,body:await page.locator('body').innerText(),forms:await page.locator('form').evaluateAll(forms=>forms.map(f=>({valid:f.checkValidity(),html:f.outerHTML,fields:[...f.elements].filter(element=>element.type!=='file').map(element=>({name:element.name,value:element.value,valid:element.checkValidity()}))})))},null,2));throw error;}finally{await browser.close();repo.db.close();}

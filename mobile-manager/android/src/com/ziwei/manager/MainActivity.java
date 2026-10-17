@@ -9,6 +9,7 @@ import android.net.Uri;
 import android.net.http.SslError;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Message;
 import android.view.Gravity;
 import android.view.View;
 import android.view.WindowInsets;
@@ -114,7 +115,7 @@ public final class MainActivity extends Activity {
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, false);
         webView.setWebViewClient(new AppWebViewClient());
         webView.setWebChromeClient(new AppChromeClient());
-        webView.setDownloadListener((url, userAgent, disposition, type, length) -> openExternal(url));
+        webView.setDownloadListener((url, userAgent, disposition, type, length) -> showBlockedLink());
         root.addView(webView, new FrameLayout.LayoutParams(-1, -1));
         if (state == null || webView.restoreState(state) == null
                 || !UrlPolicy.isAppDocument(webView.getUrl())) webView.loadUrl(UrlPolicy.START_URL);
@@ -123,6 +124,10 @@ public final class MainActivity extends Activity {
     private final class AppWebViewClient extends WebViewClient {
         @Override public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
             String url = request.getUrl().toString();
+            if (request.isForMainFrame() && !UrlPolicy.isAppDocument(url)) {
+                showBlockedLink();
+                return textResponse(403, "Forbidden", "Blocked document");
+            }
             if (!UrlPolicy.isTrustedOrigin(url)) return textResponse(403, "Forbidden", "Blocked origin");
             if (UrlPolicy.isAssetNamespace(url)) {
                 if (!"GET".equals(request.getMethod())) return textResponse(405, "Method Not Allowed", "GET only");
@@ -135,17 +140,21 @@ public final class MainActivity extends Activity {
                     return textResponse(404, "Not Found", "Unknown resource");
                 }
             }
-            // Only packaged UI may be a document. Existing API/images continue over validated TLS.
-            if (request.isForMainFrame()) return textResponse(403, "Forbidden", "Blocked document");
+            // Existing API/images continue as subresources over validated TLS.
             return null;
         }
 
         @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
             if (!request.isForMainFrame()) return true;
-            String url = request.getUrl().toString();
+            if (UrlPolicy.isAppDocument(request.getUrl().toString())) return false;
+            showBlockedLink();
+            return true;
+        }
+
+        @SuppressWarnings("deprecation")
+        @Override public boolean shouldOverrideUrlLoading(WebView view, String url) {
             if (UrlPolicy.isAppDocument(url)) return false;
-            // The trusted UI also creates links synchronously from its button handlers.
-            if (UrlPolicy.isAppDocument(view.getUrl())) openExternal(url);
+            showBlockedLink();
             return true;
         }
 
@@ -173,6 +182,12 @@ public final class MainActivity extends Activity {
 
     private final class AppChromeClient extends WebChromeClient {
         @Override public void onPermissionRequest(PermissionRequest request) { request.deny(); }
+
+        @Override public boolean onCreateWindow(WebView view, boolean isDialog, boolean isUserGesture,
+                Message resultMsg) {
+            showBlockedLink();
+            return false;
+        }
 
         @Override public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback,
                 FileChooserParams params) {
@@ -234,16 +249,12 @@ public final class MainActivity extends Activity {
         catch (android.content.pm.PackageManager.NameNotFoundException exception) { return "unknown"; }
     }
 
-    private void openExternal(String value) {
-        if (value == null) return;
-        Uri uri = Uri.parse(value);
-        String scheme = uri.getScheme();
-        if (!("https".equals(scheme) || "http".equals(scheme)
-                || "mailto".equals(scheme) || "tel".equals(scheme))) return;
-        try { startActivity(new Intent(Intent.ACTION_VIEW, uri).addCategory(Intent.CATEGORY_BROWSABLE)); }
-        catch (ActivityNotFoundException exception) {
-            Toast.makeText(this, "没有可打开此链接的应用", Toast.LENGTH_SHORT).show();
-        }
+    private void showBlockedLink() {
+        runOnUiThread(() -> {
+            if (!isFinishing() && !isDestroyed()) {
+                Toast.makeText(this, "请在紫薇内继续操作", Toast.LENGTH_SHORT).show();
+            }
+        });
     }
 
     private void showPageError(String message) {
