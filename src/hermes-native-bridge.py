@@ -575,12 +575,57 @@ def room_log(db, group_id):
         cursor = page['cursor']
 
 
+def group_page(rooms, db, room, args):
+    limit, after_seq = args['limit'], args.get('afterSeq', 0)
+    safe_integer = lambda value: isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 9007199254740991
+    if not safe_integer(limit) or not 1 <= limit <= 100 or not safe_integer(after_seq):
+        raise NativeOperationError('GROUP_PAGE_INPUT_INVALID')
+    if not isinstance(room, dict) or room.get('room_id') != args['groupId']:
+        raise NativeOperationError('GROUP_PAGE_INVALID')
+    if not safe_integer(room.get('authority_epoch')) or room['authority_epoch'] < 1:
+        raise NativeOperationError('GROUP_PAGE_INVALID')
+    # This is a display-only delta, exactly one native read. It must never
+    # become a planner input or silently fall back to the complete room log.
+    page = rooms.read_events(db, room_id=args['groupId'], since_seq=after_seq, limit=limit)
+    if not isinstance(page, dict) or not isinstance(page.get('events'), list) or len(page['events']) > limit:
+        raise NativeOperationError('GROUP_PAGE_INVALID')
+    cursor, latest, has_more = page.get('cursor'), page.get('latest_seq'), page.get('has_more')
+    if not safe_integer(cursor) or not safe_integer(latest) or cursor < after_seq or latest < cursor or not isinstance(has_more, bool):
+        raise NativeOperationError('GROUP_PAGE_INVALID')
+    if 'latest_seq' in room and (not safe_integer(room['latest_seq']) or latest < room['latest_seq']):
+        raise NativeOperationError('GROUP_PAGE_INVALID')
+    previous, event_ids = after_seq, set()
+    for event in page['events']:
+        if not isinstance(event, dict) or event.get('room_id') != args['groupId'] or not safe_integer(event.get('seq')) or event['seq'] != previous + 1:
+            raise NativeOperationError('GROUP_PAGE_INVALID')
+        event_id = event.get('event_id')
+        if not isinstance(event_id, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._:-]{0,127}', event_id) or event_id in event_ids:
+            raise NativeOperationError('GROUP_PAGE_INVALID')
+        event_ids.add(event_id)
+        previous = event['seq']
+    authority = page.get('authority')
+    if cursor != previous or has_more != (cursor < latest) or has_more and cursor == after_seq:
+        raise NativeOperationError('GROUP_PAGE_INVALID')
+    if not isinstance(authority, dict) or not isinstance(authority.get('gateway_id'), str) or not authority['gateway_id'] or not safe_integer(authority.get('epoch')) or authority.get('gateway_id') != room.get('authority_gateway_id') or authority.get('epoch') != room.get('authority_epoch'):
+        raise NativeOperationError('GROUP_PAGE_INVALID')
+    return {'room': room, 'events': page, 'pagedRead': True,
+            'pagination': {'limit': limit, 'afterSeq': after_seq, 'nextAfterSeq': cursor, 'hasMore': has_more},
+            'decision': None, 'plan': None}
+
+
 def groups(op, args):
-    from gateway import hosted_rooms as rooms, hosted_room_discussion as discussion
+    from gateway import hosted_rooms as rooms
     db = home_path('hosted_rooms.db')
     if op == 'list':
         return {'items': rooms.list_rooms(db) if db.exists() else []}
+    if op != 'read' and ('afterSeq' in args or 'limit' in args):
+        raise NativeOperationError('GROUP_PAGE_INPUT_INVALID')
+    if op == 'read' and 'afterSeq' in args and 'limit' not in args:
+        raise NativeOperationError('GROUP_PAGE_INPUT_INVALID')
     room = rooms.room_state(db, room_id=args['groupId'])
+    if op == 'read' and 'limit' in args:
+        return group_page(rooms, db, room, args)
+    from gateway import hosted_room_discussion as discussion
     events = room_log(db, args['groupId'])
     profiles = [item['profile'] for item in room['members']]
     decision = discussion.plan_next_task(room, events['events'], local_profiles=profiles)
