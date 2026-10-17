@@ -336,6 +336,23 @@ export async function recoverBeforeClientUpdateStop({candidate,root,env=process.
   return receipt || {recovered:false};
 }
 
+/** Preserve the last completed update before latest-update becomes this job. */
+export function retainLastCompletedUpdatePointer({home}={}) {
+  const maintenance=path.join(path.resolve(home),'maintenance'),latest=path.join(maintenance,'latest-update.json'),retained=path.join(maintenance,'last-completed-update.json');
+  try {
+    const read=file=>{noLinks(file);const stat=fs.lstatSync(file);if(!stat.isFile()||stat.nlink!==1||stat.size>65536)throw failure('UNSAFE_PATH','维护记录路径无效');return JSON.parse(fs.readFileSync(file,'utf8'));};
+    const pointer=read(latest);
+    if(!pointer||Object.keys(pointer).some(key=>!['resultFile','directory'].includes(key))||typeof pointer.resultFile!=='string'||typeof pointer.directory!=='string')return {retained:false};
+    const directory=path.resolve(pointer.directory),resultFile=path.resolve(pointer.resultFile);
+    if(path.dirname(directory)!==maintenance||!/^update-[a-f0-9-]{36}$/.test(path.basename(directory))||path.dirname(resultFile)!==directory||path.basename(resultFile)!=='result.json')return {retained:false};
+    const result=read(resultFile);if(result?.state!=='complete'||result.operation!=='update')return {retained:false};
+    noLinks(retained);const temporary=retained+'.'+randomUUID()+'.tmp';let fd;
+    try {fd=fs.openSync(temporary,'wx',0o600);fs.writeFileSync(fd,JSON.stringify({resultFile,directory}));fs.fsyncSync(fd);fs.closeSync(fd);fd=undefined;fs.renameSync(temporary,retained);}
+    finally {if(fd!==undefined)fs.closeSync(fd);try{fs.unlinkSync(temporary);}catch{}}
+    return {retained:true};
+  } catch {return {retained:false};}
+}
+
 export async function launchClientUpdate({ codeRoot, root = codeRoot, args = {}, env = process.env } = {}) {
   if (process.platform !== 'win32') throw new Error('本轮 update 仅支持 Windows；未修改此平台客户端');
   const legacyConsent = await readLegacyUpdateConsent(args);
@@ -359,6 +376,7 @@ export async function launchClientUpdate({ codeRoot, root = codeRoot, args = {},
   const jobFile = path.join(directory, 'job.json'); fs.writeFileSync(jobFile, JSON.stringify(job), { mode: 0o600 });
   const resultFile = path.join(directory, 'result.json');
   fs.writeFileSync(resultFile, JSON.stringify({ state: 'queued', operation: 'update', queuedAt: new Date().toISOString() }), { mode: 0o600 });
+  retainLastCompletedUpdatePointer({home});
   fs.writeFileSync(path.join(home, 'maintenance', 'latest-update.json'), JSON.stringify({ resultFile, directory }), { mode: 0o600 });
   const child = spawn(process.execPath, [path.join(helperRoot, 'scripts/client-update-worker.mjs'), jobFile], { env: { ...env, ZIWEI_USER_HOME: home, ZIWEI_CONFIG: resolveConfigPath({ root, env }) }, cwd: directory, detached: true, windowsHide: true, stdio: 'ignore' });
   await new Promise((resolve, reject) => { child.once('spawn', resolve); child.once('error', reject); }); child.unref();

@@ -4,6 +4,7 @@ import {readHistoricalPrelaunchRecovery} from './bot-historical-recovery-view.mj
 import {botFailure} from '../src/hermes-bot-config.mjs';
 import {
   HISTORICAL_PRELAUNCH_POLICY as POLICY,HISTORICAL_PRELAUNCH_POLICY_DIGEST as POLICY_DIGEST,
+  HISTORICAL_POST_UPDATE_HOLDER_POLICY as POST_POLICY,HISTORICAL_POST_UPDATE_HOLDER_POLICY_DIGEST as POST_DIGEST,validateHistoricalPostUpdateHolderEvidence,
   HISTORICAL_PRELAUNCH_RECOVERY_KIND as KIND,HISTORICAL_PRELAUNCH_CHALLENGE_TTL_MS as TTL,
   canonicalHistoricalPrelaunchValue as canonical,historicalPrelaunchDigest as digest,
   historicalPrelaunchBytesDigest as bytesDigest,historicalPrelaunchExactKeys as exact,
@@ -45,7 +46,7 @@ export function createBotHistoricalRecovery(repo,{readA2AToken,now=Date.now}={})
     const {raw,snapshot,employee,bot}=checked;
     if(bot.control_state!=='paused'||employee.status!=='paused'||bot.revision!==snapshot.revision||bot.control_epoch<snapshot.controlEpoch||(!completed&&bot.active_action_id!==raw.id)||(completed&&bot.active_action_id!==null&&bot.active_action_id!==raw.id))fail('BOT_PRELAUNCH_CONTROL_CONFLICT','恢复只允许原 active action 与当前已暂停的同一 Bot 配置');
   }
-  function subjectFor(checked,{requirePolicy=true}={}){
+  function subjectFor(checked,{requirePolicy=true,postUpdate=false}={}){
     const {raw,payload,snapshot,employee,bot,grant}=checked;
     paused(checked);
     if(db.prepare("SELECT 1 FROM employee_template_instances WHERE employee_id=? AND workspace_id=? AND template_id='ziwei-employee-creator'").get(employee.id,raw.workspace_id))fail('BOT_PRELAUNCH_POLICY_UNAVAILABLE','此历史恢复策略不允许 Creator 模板实例');
@@ -57,24 +58,27 @@ export function createBotHistoricalRecovery(repo,{readA2AToken,now=Date.now}={})
     if(!finiteDate(event.created_at)||Date.parse(event.created_at)<Date.parse(raw.acked_at)||!exact(data,['error','result'])||data.error!==raw.error||!same(data.result,result))fail('BOT_PRELAUNCH_ORIGINAL_FAILURE_REQUIRED','服务器原 failed 事件与原动作结果不一致');
     const originalWire={status:'failed',result,error:raw.error,receiptOnly:true};
     const subject={schemaVersion:1,actionId:raw.id,actionType:raw.type,workspace:grant.slug,workspaceId:raw.workspace_id,deviceId:grant.device_id,employeeId:employee.id,credentialId:grant.id,profile:employee.runtime_profile,profileBinding:botProfileBinding(bot),profileBindingDigest:digest(botProfileBinding(bot)),dedupeKey:raw.dedupe_key,createdAt:raw.created_at,ackedAt:raw.acked_at,completedAt:raw.completed_at,originalRevision:snapshot.revision,originalControlEpoch:snapshot.controlEpoch,currentRevision:bot.revision,currentControlEpoch:bot.control_epoch,currentControlState:bot.control_state,currentEmployeeStatus:employee.status,originalActionSha256:bytesDigest(canonical(raw)),originalPayloadSha256:bytesDigest(raw.payload_json),originalDeliveredPayloadDigest:digest(historicalPrelaunchDeliveredPayload(payload)),originalResultSha256:bytesDigest(raw.result_json),originalResultDigest:digest(result),originalWireBodyDigest:digest(originalWire),originalError:raw.error,failedEvent:{id:event.id,type:event.type,createdAt:event.created_at,error:data.error,dataSha256:bytesDigest(event.data_json),resultDigest:digest(data.result)}};
+    if(postUpdate){const holder=db.prepare('SELECT client_build,pid FROM devices WHERE id=? AND workspace_id=?').get(grant.device_id,grant.workspace_id);if(holder?.client_build!==POST_POLICY.maintenanceHolderBuild||!Number.isSafeInteger(holder.pid)||holder.pid<=0)fail('BOT_PRELAUNCH_HOLDER_BINDING_CONFLICT','当前电脑尚未上报固定官方更新版本及维护进程身份');subject.maintenanceHolderBuild=holder.client_build;subject.maintenanceHolderPid=holder.pid;}
     if(requirePolicy&&!policyAllows(subject))fail('BOT_PRELAUNCH_POLICY_UNAVAILABLE','此历史版本尚未取得可证明模型未启动的独立源代码审计策略');
     return{subject,originalResult:result};
   }
   function signed(payload){
     const key=readA2AToken();if(typeof key!=='string'||key.length<16)fail('BOT_PRELAUNCH_SIGNING_UNAVAILABLE','服务器恢复挑战签名暂不可用',503);
     const data=Buffer.from(canonical(payload)).toString('base64url');
-    return`${data}.${crypto.createHmac('sha256',key).update('ziwei-historical-prelaunch-v1\0'+data).digest('base64url')}`;
+    return`${data}.${crypto.createHmac('sha256',key).update(`ziwei-historical-prelaunch-v${payload.schemaVersion}\0`+data).digest('base64url')}`;
   }
   function verified(challenge,{expired=false}={}){
     if(typeof challenge!=='string'||challenge.length>20000||!/^[-_A-Za-z0-9]+\.[-_A-Za-z0-9]{43}$/.test(challenge))fail('BOT_PRELAUNCH_CHALLENGE_INVALID','历史恢复挑战无效',400);
     const [data]=challenge.split('.'),payload=parse(Buffer.from(data,'base64url').toString('utf8'));
-    if(!exact(payload,['schemaVersion','kind','policy','sourcePolicyDigest','issuedAt','expiresAt','nonce','subject','subjectDigest'])||payload.schemaVersion!==1||payload.kind!==KIND||payload.policy!==POLICY.id||payload.sourcePolicyDigest!==POLICY_DIGEST||!hex(payload.nonce)||!hex(payload.subjectDigest)||digest(payload.subject)!==payload.subjectDigest||!Number.isSafeInteger(payload.issuedAt)||!Number.isSafeInteger(payload.expiresAt)||payload.expiresAt-payload.issuedAt!==TTL||payload.issuedAt>now()||!policyAllows(payload.subject))fail('BOT_PRELAUNCH_CHALLENGE_INVALID','历史恢复挑战内容无效',400);
+    const postUpdate=payload?.schemaVersion===2,policy=postUpdate?POST_POLICY:POLICY,policyDigest=postUpdate?POST_DIGEST:POLICY_DIGEST;
+    if(!exact(payload,['schemaVersion','kind',...(postUpdate?['mode']:[]),'policy','sourcePolicyDigest','issuedAt','expiresAt','nonce','subject','subjectDigest'])||![1,2].includes(payload.schemaVersion)||postUpdate&&payload.mode!==POST_POLICY.mode||payload.kind!==KIND||payload.policy!==policy.id||payload.sourcePolicyDigest!==policyDigest||!hex(payload.nonce)||!hex(payload.subjectDigest)||digest(payload.subject)!==payload.subjectDigest||!Number.isSafeInteger(payload.issuedAt)||!Number.isSafeInteger(payload.expiresAt)||payload.expiresAt-payload.issuedAt!==TTL||payload.issuedAt>now()||!policyAllows(payload.subject))fail('BOT_PRELAUNCH_CHALLENGE_INVALID','历史恢复挑战内容无效',400);
     const expected=signed(payload),left=Buffer.from(challenge),right=Buffer.from(expected);
     if(left.length!==right.length||!crypto.timingSafeEqual(left,right))fail('BOT_PRELAUNCH_CHALLENGE_INVALID','历史恢复挑战签名不匹配',403);
     if(!expired&&payload.expiresAt<=now())fail('BOT_PRELAUNCH_CHALLENGE_EXPIRED','历史恢复挑战已到期，请重新准备');
     return payload;
   }
-  function evidenceFor(evidence,subject){
+  function evidenceFor(evidence,subject,{postUpdate=false}={}){
+    if(postUpdate){if(!validateHistoricalPostUpdateHolderEvidence(evidence,subject,{recordedAt:now()}))fail('BOT_PRELAUNCH_MIGRATION_EVIDENCE_INVALID','官方迁移记录、旧安装来源或当前维护进程退出证明不匹配');return evidence;}
     if(!exact(evidence,['schemaVersion','policy','sourceBuild','sourcePolicyDigest','subjectDigest','daemonExit','localEvidence'])||evidence.schemaVersion!==1||evidence.policy!==POLICY.id||evidence.sourceBuild!==POLICY.sourceBuild||evidence.sourcePolicyDigest!==POLICY_DIGEST||evidence.subjectDigest!==digest(subject))fail('BOT_PRELAUNCH_EVIDENCE_INVALID','恢复证据的策略或原动作绑定无效',400);
     const stopped=evidence.daemonExit;
     if(!exact(stopped,['stopped','pid','creationTime','exitedAt'])||stopped.stopped!==true||!Number.isSafeInteger(stopped.pid)||stopped.pid<=0||!finiteDate(stopped.creationTime)||!finiteDate(stopped.exitedAt)||Date.parse(stopped.creationTime)>evidence.localEvidence?.quarantine?.startedAt||Date.parse(stopped.exitedAt)<Date.parse(subject.failedEvent.createdAt)||Date.parse(stopped.exitedAt)>now())fail('BOT_PRELAUNCH_DAEMON_EXIT_REQUIRED','需要停止持有原执行的准确 daemon 进程并取得退出证明');
@@ -95,26 +99,29 @@ export function createBotHistoricalRecovery(repo,{readA2AToken,now=Date.now}={})
     return{prior,receipt};
   }
   function prepare(actionId,credential,input={}){return atomic(()=>{
-    if(!exact(input,[])&&!exact(input,['workspace']))fail('BOT_PRELAUNCH_INPUT_INVALID','恢复准备请求包含未知字段',400);
+    if(!exact(input,[])&&!exact(input,['workspace'])&&!exact(input,['mode'])&&!exact(input,['workspace','mode']))fail('BOT_PRELAUNCH_INPUT_INVALID','恢复准备请求包含未知字段',400);
+    const postUpdate=input.mode===POST_POLICY.mode;if(input.mode!==undefined&&!postUpdate)fail('BOT_PRELAUNCH_INPUT_INVALID','历史恢复模式无效',400);
+    const policy=postUpdate?POST_POLICY:POLICY,policyDigest=postUpdate?POST_DIGEST:POLICY_DIGEST;
     const checked=identity(actionId,credential);
     if(input.workspace!==undefined&&input.workspace!==checked.grant.slug)fail('BOT_PRELAUNCH_BINDING_CONFLICT','恢复工作区不一致',403);
     const previous=priorFor(actionId,checked);if(previous)return{recovered:true,receipt:previous.receipt};
     admission(actionId);
-    const {subject,originalResult}=subjectFor(checked),issuedAt=now();
-    const payload={schemaVersion:1,kind:KIND,policy:POLICY.id,sourcePolicyDigest:POLICY_DIGEST,issuedAt,expiresAt:issuedAt+TTL,nonce:crypto.randomBytes(32).toString('hex'),subject,subjectDigest:digest(subject)};
-    return{recovered:false,challenge:signed(payload),subject,subjectDigest:payload.subjectDigest,expiresAt:new Date(payload.expiresAt).toISOString(),policy:POLICY,sourcePolicyDigest:POLICY_DIGEST,originalResult,originalWireBodyDigest:subject.originalWireBodyDigest,originalDeliveredPayloadDigest:subject.originalDeliveredPayloadDigest};
+    const {subject,originalResult}=subjectFor(checked,{postUpdate}),issuedAt=now();
+    const payload={schemaVersion:postUpdate?2:1,kind:KIND,...(postUpdate?{mode:POST_POLICY.mode}:{}),policy:policy.id,sourcePolicyDigest:policyDigest,issuedAt,expiresAt:issuedAt+TTL,nonce:crypto.randomBytes(32).toString('hex'),subject,subjectDigest:digest(subject)};
+    return{recovered:false,challenge:signed(payload),subject,subjectDigest:payload.subjectDigest,expiresAt:new Date(payload.expiresAt).toISOString(),policy,sourcePolicyDigest:policyDigest,...(postUpdate?{mode:POST_POLICY.mode}:{}),originalResult,originalWireBodyDigest:subject.originalWireBodyDigest,originalDeliveredPayloadDigest:subject.originalDeliveredPayloadDigest};
   });}
   function commit(actionId,credential,input={}){return atomic(()=>{
     if(!exact(input,['challenge','evidence']))fail('BOT_PRELAUNCH_INPUT_INVALID','恢复提交必须包含挑战与完整证据',400);
     const checked=identity(actionId,credential);
     const previous=priorFor(actionId,checked),claim=verified(input.challenge,{expired:Boolean(previous)});
     if(claim.subject.actionId!==actionId||claim.subject.credentialId!==checked.grant.id||claim.subject.deviceId!==checked.grant.device_id||claim.subject.workspaceId!==checked.grant.workspace_id)fail('BOT_PRELAUNCH_BINDING_CONFLICT','恢复挑战不属于当前原设备动作',403);
-    const evidence=evidenceFor(input.evidence,claim.subject),evidenceDigest=digest(evidence);
+    const postUpdate=claim.schemaVersion===2,evidence=evidenceFor(input.evidence,claim.subject,{postUpdate}),evidenceDigest=digest(evidence);
+    const policy=postUpdate?POST_POLICY:POLICY,policyDigest=postUpdate?POST_DIGEST:POLICY_DIGEST;
     if(previous){if(previous.prior.fingerprint!==evidenceDigest||previous.receipt.subjectDigest!==claim.subjectDigest)fail('BOT_PRELAUNCH_IDEMPOTENCY_CONFLICT','此原动作已使用不同证据恢复');return{receipt:previous.receipt};}
     admission(actionId);
-    const {subject,originalResult}=subjectFor(checked,{requirePolicy:false});
+    const {subject,originalResult}=subjectFor(checked,{requirePolicy:false,postUpdate});
     if(!same(subject,claim.subject))fail('BOT_PRELAUNCH_SUBJECT_CHANGED','挑战准备后原失败证据、Profile 或控制状态已变化');
-    const recordedAt=new Date(now()).toISOString(),receipt={schemaVersion:1,kind:KIND,id:digest({actionId,subjectDigest:claim.subjectDigest,evidenceDigest}),policy:POLICY.id,sourceBuild:POLICY.sourceBuild,sourcePolicyDigest:POLICY_DIGEST,subject,subjectDigest:claim.subjectDigest,evidenceDigest,localEvidenceDigest:digest(evidence.localEvidence),daemonExit:evidence.daemonExit,localStartedAt:evidence.localEvidence.quarantine.startedAt,admissionProof:admissionProof(),status:'failed',executionState:'not_started',recordedAt};
+    const recordedAt=new Date(now()).toISOString(),receipt={schemaVersion:postUpdate?2:1,kind:KIND,...(postUpdate?{mode:POST_POLICY.mode}:{}),id:digest({actionId,subjectDigest:claim.subjectDigest,evidenceDigest}),policy:policy.id,sourceBuild:policy.sourceBuild,sourcePolicyDigest:policyDigest,subject,subjectDigest:claim.subjectDigest,evidenceDigest,localEvidenceDigest:digest(evidence.localEvidence),...(postUpdate?{maintenanceHolderExit:evidence.maintenanceHolderExit,migrationEvidenceDigest:digest(evidence.migrationEvidence),verifiedUpdateFinishedAt:evidence.migrationEvidence.finishedAt}:{daemonExit:evidence.daemonExit}),localStartedAt:evidence.localEvidence.quarantine.startedAt,admissionProof:admissionProof(),status:'failed',executionState:'not_started',recordedAt};
     if(!receiptValid(receipt,{actionId,subject,evidenceDigest}))fail('BOT_PRELAUNCH_RECEIPT_INVALID','服务器恢复回执未通过校验');
     // The original uncertain action/result/error and its failed event remain intact.
     const unchanged=db.prepare("SELECT 1 FROM a2a_actions WHERE id=? AND workspace_id=? AND status='failed' AND payload_json=? AND result_json=? AND ziwei_v2_admitted(id)=1").get(actionId,checked.raw.workspace_id,checked.raw.payload_json,checked.raw.result_json);
@@ -125,5 +132,14 @@ export function createBotHistoricalRecovery(repo,{readA2AToken,now=Date.now}={})
     db.prepare('INSERT INTO management_requests(workspace_id,kind,request_key,fingerprint,resource_id,created_at) VALUES(?,?,?,?,?,?)').run(subject.workspaceId,REQUEST_KIND,actionId,evidenceDigest,eventId,recordedAt);
     return{receipt};
   });}
-  return{prepare,commit};
+  function status(actionId,credential,input={}){return atomic(()=>{
+    const modes=['original_holder',POST_POLICY.mode],phases=['inspecting','prepared','stopping','daemon_exited','before_commit','receipt_saved','applied','resuming','not_applicable','failed'];
+    if(!exact(input,['mode','phase','reasonCode','holderBuild','attemptId'])||!modes.includes(input.mode)||!phases.includes(input.phase)||input.reasonCode!==null&&(typeof input.reasonCode!=='string'||!/^[A-Z][A-Z0-9_]{0,95}$/.test(input.reasonCode))||![POLICY.sourceBuild,POST_POLICY.maintenanceHolderBuild].includes(input.holderBuild)||typeof input.attemptId!=='string'||!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(input.attemptId))fail('BOT_PRELAUNCH_DIAGNOSTIC_INVALID','历史恢复诊断只接受固定模式、阶段和安全错误代码',400);
+    const checked=identity(actionId,credential),pin=POLICY.auditedSubject;
+    if(actionId!==pin.actionId||checked.raw.workspace_id!==pin.workspaceId||checked.grant.device_id!==pin.deviceId||checked.employee.id!==pin.employeeId||bytesDigest(checked.raw.payload_json)!==pin.originalPayloadSha256||bytesDigest(checked.raw.result_json)!==pin.originalResultSha256)fail('BOT_PRELAUNCH_BINDING_CONFLICT','诊断不属于固定历史动作或原电脑',403);
+    const eventId=`action-event_diagnostic_${digest({actionId,credentialId:checked.grant.id,...input})}`,previous=db.prepare('SELECT id FROM a2a_action_events WHERE id=? AND action_id=?').get(eventId,actionId);
+    if(!previous)db.prepare('INSERT INTO a2a_action_events(id,action_id,type,message,data_json,created_at) VALUES(?,?,?,?,?,?)').run(eventId,actionId,'bot.historical_prelaunch_diagnostic','历史恢复设备诊断；不构成恢复证明',JSON.stringify(input),new Date(now()).toISOString());
+    return{recorded:true,eventId};
+  });}
+  return{prepare,commit,status};
 }

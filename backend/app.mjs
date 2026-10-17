@@ -887,6 +887,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
     deviceVerifier: req => verifyDeviceRequest(repo, req)
   }));
   app.get('/a2a/v1/agents', (_req, res) => res.json({ agents: [{ id:'ziwei_user', name:'ziwei_user', description:'紫薇工作区本机 daemon，负责心跳、轮询和 A2A 任务', url:'/a2a/v1', capabilities:['tasks','messages','heartbeat','actions','ack','result'] }] }));
+  app.post('/a2a/v1/actions/:id/prelaunch-recovery/status',(req,res)=>{res.setHeader('Cache-Control','no-store');if(!assertA2AActionWorkspace(repo,req,res))return;res.json(botHistoricalRecovery.status(req.params.id,req.deviceCredential,req.body));});
   app.post('/a2a/v1/actions/:id/prelaunch-recovery/prepare',(req,res)=>{res.setHeader('Cache-Control','no-store');if(!assertA2AActionWorkspace(repo,req,res))return;res.json(botHistoricalRecovery.prepare(req.params.id,req.deviceCredential,req.body));});
   app.post('/a2a/v1/actions/:id/prelaunch-recovery/commit',(req,res)=>{res.setHeader('Cache-Control','no-store');if(!assertA2AActionWorkspace(repo,req,res))return;res.json(botHistoricalRecovery.commit(req.params.id,req.deviceCredential,req.body));});
   app.post('/a2a/v1/actions/:id/mcp-oauth/start',(req,res)=>{res.setHeader('Cache-Control','no-store');res.json(botMcpConnections.begin(req.params.id,req.deviceCredential));});

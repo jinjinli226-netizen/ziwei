@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {isHistoricalPrelaunchCompletion} from '../src/bot-historical-prelaunch-completion.mjs';
-import {HISTORICAL_PRELAUNCH_POLICY as policy,HISTORICAL_PRELAUNCH_POLICY_DIGEST as policyDigest,HISTORICAL_PRELAUNCH_RECOVERY_KIND as kind,historicalPrelaunchDigest as digest,historicalPrelaunchAdmissionProof} from '../src/bot-historical-prelaunch-policy.mjs';
+import {HISTORICAL_POST_UPDATE_HOLDER_POLICY as postPolicy,HISTORICAL_POST_UPDATE_HOLDER_POLICY_DIGEST as postDigest,HISTORICAL_PRELAUNCH_POLICY as policy,HISTORICAL_PRELAUNCH_POLICY_DIGEST as policyDigest,HISTORICAL_PRELAUNCH_RECOVERY_KIND as kind,historicalPrelaunchDigest as digest,historicalPrelaunchAdmissionProof} from '../src/bot-historical-prelaunch-policy.mjs';
 import {inspectLocalDaemonMaintenanceFiles,scanNativeFiles} from '../backend/preservation-native-evidence.mjs';
 import {exitedTree} from '../backend/version-preservation.mjs';
 import {ActionDispatcher} from '../src/daemon.mjs';
@@ -48,4 +48,21 @@ test('a restarted dispatcher accepts the repaired history and runs new work with
   assert.equal(duplicate.status,'duplicate');assert.deepEqual(executed,[]);
   const fresh=await dispatcher.dispatch({id:'new-safe-verification',type:'agent.execute',payload:{prompt:'isolated harmless fixture'}});
   assert.equal(fresh.status,'succeeded');assert.deepEqual(executed,['new-safe-verification']);
+});
+
+
+function postUpdateFixture(){
+  const f=fixture(),body=f.completed.result.result,receipt=body.prelaunchRecovery;
+  const migration={schemaVersion:1,operation:'update',state:'complete',oldBuild:policy.sourceBuild,clientBuild:postPolicy.maintenanceHolderBuild,archiveSha256:postPolicy.archiveSha256,configurationPreserved:true,restoredRunning:false,finishedAt:'2026-10-17T13:00:00Z',updateResultSha256:digest('real-update-result-bytes'),backupRoot:'C:\\Users\\fixture\\node_modules\\.ziwei-backup-12345678-1234-1234-1234-123456789abc',backupSourceFiles:Object.entries(policy.sourceFiles).map(([path,sha256])=>({path,sha256})),currentSourceFiles:Object.entries(postPolicy.currentSourceFiles).map(([path,sha256])=>({path,sha256}))};
+  delete receipt.daemonExit;Object.assign(receipt,{schemaVersion:2,mode:postPolicy.mode,policy:postPolicy.id,sourcePolicyDigest:postDigest,migrationEvidenceDigest:digest(migration),verifiedUpdateFinishedAt:migration.finishedAt,maintenanceHolderExit:{stopped:true,pid:34292,creationTime:'2026-10-17T13:01:00Z',exitedAt:'2026-10-17T13:02:00Z'},recordedAt:'2026-10-17T13:03:00Z'});
+  receipt.subject.maintenanceHolderBuild=postPolicy.maintenanceHolderBuild;receipt.subject.maintenanceHolderPid=receipt.maintenanceHolderExit.pid;receipt.subjectDigest=digest(receipt.subject);receipt.id=digest({actionId:receipt.subject.actionId,subjectDigest:receipt.subjectDigest,evidenceDigest:receipt.evidenceDigest});
+  body.prelaunchMigrationEvidence=migration;f.completed.result.completedAt=Date.parse(receipt.recordedAt);return f;
+}
+
+test('post-update admission completion binds both migration sources and the new holder without inventing the original exit',()=>{
+  const f=postUpdateFixture();assert.equal(isHistoricalPrelaunchCompletion(f),true);
+  assert.equal('daemonExit' in f.completed.result.result.prelaunchRecovery,false);
+  for(const mutate of [f=>f.completed.result.result.prelaunchMigrationEvidence.restoredRunning=true,f=>f.completed.result.result.prelaunchMigrationEvidence.backupRoot='C:\\Users\\fixture\\other',f=>f.completed.result.result.prelaunchRecovery.daemonExit={stopped:true},f=>f.completed.result.result.prelaunchRecovery.maintenanceHolderExit.creationTime='2026-10-17T10:00:00Z']){
+    const copy=structuredClone(f);mutate(copy);assert.equal(isHistoricalPrelaunchCompletion(copy),false);
+  }
 });

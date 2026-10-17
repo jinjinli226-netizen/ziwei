@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import path from 'node:path';
 
 const freeze=value=>{if(value&&typeof value==='object'){Object.freeze(value);for(const item of Object.values(value))freeze(item);}return value;};
 export const canonicalHistoricalPrelaunchValue=value=>JSON.stringify(value,(_key,item)=>item&&typeof item==='object'&&!Array.isArray(item)?Object.fromEntries(Object.entries(item).sort(([a],[b])=>a.localeCompare(b))):item);
@@ -42,6 +43,34 @@ export const HISTORICAL_PRELAUNCH_POLICY=freeze({
   originalResult:{processExit:null,partialEffectsPossible:true,code:'EXECUTION_UNCERTAIN',executionState:'uncertain',reason:'EXECUTOR_WITHOUT_EXIT_EVIDENCE'},
 });
 export const HISTORICAL_PRELAUNCH_POLICY_DIGEST=historicalPrelaunchDigest(HISTORICAL_PRELAUNCH_POLICY);
+// A second, separately pinned policy covers the completed official migration
+// whose previous holder was already stopped. It does not reinterpret V1 exit.
+export const HISTORICAL_POST_UPDATE_HOLDER_POLICY=freeze({
+  schemaVersion:2,id:'6666a63-post-update-holder-prelaunch-v2',enabled:true,mode:'post_update_holder',
+  historicalPolicyDigest:HISTORICAL_PRELAUNCH_POLICY_DIGEST,
+  sourceBuild:HISTORICAL_PRELAUNCH_POLICY.sourceBuild,
+  maintenanceHolderBuild:'6c9345a699c977dcc69f396f2aee96e7ca96e38fc7c9f686b9b49217ae09c8d9',
+  archiveSha256:'408fbf7f501025b0c290393b96902d70ad4bbc0ed82b305955995c494ba15703',
+  currentSourceFiles:{
+    "daemon/ziwei_user.mjs": "e2292c09d4d7bc531750b4d3e6054eed32593a1bb10355bc781b11a01a3a49e5",
+    "src/daemon.mjs": "3dfa9902bf340907a4371005a50b8f34ae78489b16ab1561017133c0d1ecbaa2",
+    "src/local-action.mjs": "90bd9123b077b2d66a67ac34638ed3eabba5fbf8f0e12c4520d987ee3fc4f892",
+    "src/runtime-adapters.mjs": "123ca5d137f3478d8daa3ad7df06f158f895af332a0ae5ad0575e720d9dd1d8e",
+    "src/runtime-process.mjs": "a48eb40faf66b34108f49bbc216ce700642636c3fa94d8b9875c9c3b29ee3db1",
+    "src/daemon-action-delivery.mjs": "5779762e6740f9cfd4f050a4541e7c0a339ab3d845b4ccdb668c9b48bbb3c579",
+    "src/daemon-action-scheduler.mjs": "c9a3fd21f2744ce8b49527095ddc668838885c3dac49de0625d8a3a85055240d",
+    "src/windows-workdir.mjs": "f85b455c206d608058d7758b7c6ba901b67fdec15b5aa9423603877eed2a4912",
+    "src/runtime-launch-evidence.mjs": "24539644b405187ac4623a504a467b509c878682df3dab58c1145caf19ab171f",
+    "src/execution-admission.mjs": "1c664e5e8b016fde92e1cd95128ea2ee0938281897ff91e566c434a7f1a241be",
+    "src/management-bootstrap.mjs": "a747c0618377eedf2c5b4ddda69191bcb373719b4302051855ecd83e92e8b285",
+    "src/runtime-cli-discovery.mjs": "6fff628addaf8fa06896019bc0f2bedfa4a8ea38cdcb0881de48f2a5801398f9",
+    "src/hermes-launcher.mjs": "56f9837d112b46cb8a99534ad4b13b435180e3a31ebd81cfc84254aec7d5564b",
+    "src/hermes-mcp-bootstrap.py": "e5fcc41dccc918797178157b68df9b8a3421cf9d820e58794d75213df698e9eb",
+    "src/hermes-bot-runtime.mjs": "d5625d6fff43da1cd804e2e0f68d6b1e5d695d418780a73d3936957d404c03c3",
+    "src/hermes-bot-config.mjs": "ae1a4726f7205d187fee669bb6b79334f68bb07d409459c963e7adabcd5d8f80"
+},
+});
+export const HISTORICAL_POST_UPDATE_HOLDER_POLICY_DIGEST=historicalPrelaunchDigest(HISTORICAL_POST_UPDATE_HOLDER_POLICY);
 export const historicalPrelaunchHex=value=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
 export const historicalPrelaunchExactKeys=(value,keys)=>Boolean(value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).length===keys.length&&keys.every(key=>Object.hasOwn(value,key)));
 export function historicalPrelaunchPolicyAllows(subject){
@@ -59,7 +88,7 @@ export function historicalPrelaunchDeliveredPayload(payload){
   return{...rest,managementMcp:{enabled:true,workspace:payload.hermesBot.workspace}};
 }
 export function historicalPrelaunchAdmissionProof(){return{scope:'conversation-runtime-root',phase:'bot-start-admission',launched:false,partialEffectsPossible:true};}
-export function validateHistoricalPrelaunchReceipt(receipt,{actionId,subject,evidenceDigest}={}){
+function validateOriginalHistoricalPrelaunchReceipt(receipt,{actionId,subject,evidenceDigest}={}){
   if(!historicalPrelaunchExactKeys(receipt,['schemaVersion','kind','id','policy','sourceBuild','sourcePolicyDigest','subject','subjectDigest','evidenceDigest','localEvidenceDigest','daemonExit','localStartedAt','admissionProof','status','executionState','recordedAt']))return false;
   if(receipt.schemaVersion!==1||receipt.kind!==HISTORICAL_PRELAUNCH_RECOVERY_KIND||receipt.policy!==HISTORICAL_PRELAUNCH_POLICY.id||receipt.sourceBuild!==HISTORICAL_PRELAUNCH_POLICY.sourceBuild||receipt.sourcePolicyDigest!==HISTORICAL_PRELAUNCH_POLICY_DIGEST||!historicalPrelaunchPolicyAllows(receipt.subject)||!historicalPrelaunchHex(receipt.subject.originalDeliveredPayloadDigest)||receipt.subjectDigest!==historicalPrelaunchDigest(receipt.subject)||!historicalPrelaunchHex(receipt.evidenceDigest)||!historicalPrelaunchHex(receipt.localEvidenceDigest)||!historicalPrelaunchHex(receipt.id)||receipt.status!=='failed'||receipt.executionState!=='not_started'||!Number.isFinite(Date.parse(receipt.recordedAt)))return false;
   if(receipt.id!==historicalPrelaunchDigest({actionId:receipt.subject.actionId,subjectDigest:receipt.subjectDigest,evidenceDigest:receipt.evidenceDigest}))return false;
@@ -67,4 +96,42 @@ export function validateHistoricalPrelaunchReceipt(receipt,{actionId,subject,evi
   if(actionId!==undefined&&receipt.subject.actionId!==actionId||subject!==undefined&&receipt.subjectDigest!==historicalPrelaunchDigest(subject)||evidenceDigest!==undefined&&receipt.evidenceDigest!==evidenceDigest)return false;
   const exit=receipt.daemonExit;
   return historicalPrelaunchExactKeys(exit,['stopped','pid','creationTime','exitedAt'])&&exit.stopped===true&&Number.isSafeInteger(exit.pid)&&exit.pid>0&&Number.isFinite(Date.parse(exit.creationTime))&&Number.isFinite(Date.parse(exit.exitedAt))&&Number.isSafeInteger(receipt.localStartedAt)&&receipt.localStartedAt>=Date.parse(receipt.subject.ackedAt)&&receipt.localStartedAt<=Date.parse(receipt.subject.failedEvent.createdAt)&&Date.parse(exit.creationTime)<=receipt.localStartedAt&&Date.parse(exit.exitedAt)>=Date.parse(receipt.subject.failedEvent.createdAt)&&Date.parse(exit.exitedAt)<=Date.parse(receipt.recordedAt);
+}
+
+const finiteDate=value=>typeof value==='string'&&Number.isFinite(Date.parse(value));
+const same=(left,right)=>canonicalHistoricalPrelaunchValue(left)===canonicalHistoricalPrelaunchValue(right);
+const timeOf=value=>typeof value==='number'?value:Date.parse(value);
+const stoppedExit=value=>historicalPrelaunchExactKeys(value,['stopped','pid','creationTime','exitedAt'])&&value.stopped===true&&Number.isSafeInteger(value.pid)&&value.pid>0&&finiteDate(value.creationTime)&&finiteDate(value.exitedAt)&&Date.parse(value.exitedAt)>=Date.parse(value.creationTime);
+function sourceRecordsMatch(records,pins){
+  if(!Array.isArray(records)||records.length!==Object.keys(pins).length||records.some(item=>!historicalPrelaunchExactKeys(item,['path','sha256'])||typeof item.path!=='string'||!historicalPrelaunchHex(item.sha256)))return false;
+  const source=Object.fromEntries(records.map(item=>[item.path,item.sha256]));
+  return Object.keys(source).length===records.length&&same(source,pins);
+}
+export function validateHistoricalPrelaunchLocalEvidence(local,subject){
+  const q=local?.quarantine;
+  return historicalPrelaunchExactKeys(local,['sourceFiles','quarantine','noSupervision','quarantineCount'])&&local.noSupervision===true&&local.quarantineCount===1&&sourceRecordsMatch(local.sourceFiles,HISTORICAL_PRELAUNCH_POLICY.sourceFiles)
+    &&historicalPrelaunchExactKeys(q,['actionId','dedupeKey','startedAt','startedSha256','stateSha256','deliverySha256','actionSha256','resultSha256','serverResultDigest'])&&q.actionId===subject?.actionId&&q.dedupeKey===subject?.dedupeKey&&Number.isSafeInteger(q.startedAt)&&q.startedAt>=Date.parse(subject.ackedAt)&&q.startedAt<=Date.parse(subject.failedEvent?.createdAt)&&['startedSha256','stateSha256','deliverySha256','actionSha256','resultSha256','serverResultDigest'].every(key=>historicalPrelaunchHex(q[key]))&&q.serverResultDigest===subject.originalWireBodyDigest;
+}
+export function validateHistoricalPostUpdateHolderMigrationEvidence(migration,{subject,recordedAt=Date.now()}={}){
+  const policy=HISTORICAL_POST_UPDATE_HOLDER_POLICY,backup=migration?.backupRoot;
+  if(!policy.enabled||policy.historicalPolicyDigest!==HISTORICAL_PRELAUNCH_POLICY_DIGEST||!historicalPrelaunchPolicyAllows(subject)||!historicalPrelaunchExactKeys(migration,['schemaVersion','operation','state','oldBuild','clientBuild','archiveSha256','configurationPreserved','restoredRunning','finishedAt','updateResultSha256','backupRoot','backupSourceFiles','currentSourceFiles']))return false;
+  return migration.schemaVersion===1&&migration.operation==='update'&&migration.state==='complete'&&migration.oldBuild===policy.sourceBuild&&migration.clientBuild===policy.maintenanceHolderBuild&&migration.archiveSha256===policy.archiveSha256&&migration.configurationPreserved===true&&migration.restoredRunning===false&&finiteDate(migration.finishedAt)&&Date.parse(migration.finishedAt)>=Date.parse(subject.failedEvent.createdAt)&&Date.parse(migration.finishedAt)<=timeOf(recordedAt)&&historicalPrelaunchHex(migration.updateResultSha256)
+    &&typeof backup==='string'&&/^[A-Za-z]:\\/.test(backup)&&!/[\0\r\n]/.test(backup)&&path.win32.resolve(backup)===backup&&path.win32.basename(path.win32.dirname(backup)).toLowerCase()==='node_modules'&&/^\.ziwei-backup-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(path.win32.basename(backup))
+    &&sourceRecordsMatch(migration.backupSourceFiles,HISTORICAL_PRELAUNCH_POLICY.sourceFiles)&&sourceRecordsMatch(migration.currentSourceFiles,policy.currentSourceFiles);
+}
+export function validateHistoricalPostUpdateHolderEvidence(evidence,subject,{recordedAt=Date.now()}={}){
+  const policy=HISTORICAL_POST_UPDATE_HOLDER_POLICY,exit=evidence?.maintenanceHolderExit;
+  return historicalPrelaunchExactKeys(evidence,['schemaVersion','mode','policy','sourceBuild','sourcePolicyDigest','subjectDigest','maintenanceHolderExit','migrationEvidence','localEvidence'])&&evidence.schemaVersion===2&&evidence.mode===policy.mode&&evidence.policy===policy.id&&evidence.sourceBuild===policy.sourceBuild&&evidence.sourcePolicyDigest===HISTORICAL_POST_UPDATE_HOLDER_POLICY_DIGEST&&evidence.subjectDigest===historicalPrelaunchDigest(subject)
+    &&subject?.maintenanceHolderBuild===policy.maintenanceHolderBuild&&Number.isSafeInteger(subject.maintenanceHolderPid)&&subject.maintenanceHolderPid>0&&exit?.pid===subject.maintenanceHolderPid&&validateHistoricalPrelaunchLocalEvidence(evidence.localEvidence,subject)&&validateHistoricalPostUpdateHolderMigrationEvidence(evidence.migrationEvidence,{subject,recordedAt})&&stoppedExit(exit)&&Date.parse(exit.creationTime)>=Date.parse(evidence.migrationEvidence.finishedAt)&&Date.parse(exit.exitedAt)<=timeOf(recordedAt);
+}
+function validatePostUpdateHolderReceipt(receipt,{actionId,subject,evidenceDigest}={}){
+  const policy=HISTORICAL_POST_UPDATE_HOLDER_POLICY,exit=receipt?.maintenanceHolderExit;
+  if(!historicalPrelaunchExactKeys(receipt,['schemaVersion','kind','id','mode','policy','sourceBuild','sourcePolicyDigest','subject','subjectDigest','evidenceDigest','localEvidenceDigest','maintenanceHolderExit','migrationEvidenceDigest','verifiedUpdateFinishedAt','localStartedAt','admissionProof','status','executionState','recordedAt']))return false;
+  if(receipt.schemaVersion!==2||receipt.kind!==HISTORICAL_PRELAUNCH_RECOVERY_KIND||receipt.mode!==policy.mode||receipt.policy!==policy.id||receipt.sourceBuild!==policy.sourceBuild||receipt.sourcePolicyDigest!==HISTORICAL_POST_UPDATE_HOLDER_POLICY_DIGEST||!policy.enabled||policy.historicalPolicyDigest!==HISTORICAL_PRELAUNCH_POLICY_DIGEST||!historicalPrelaunchPolicyAllows(receipt.subject)||!historicalPrelaunchHex(receipt.subject.originalDeliveredPayloadDigest)||receipt.subjectDigest!==historicalPrelaunchDigest(receipt.subject)||!['id','evidenceDigest','localEvidenceDigest','migrationEvidenceDigest'].every(key=>historicalPrelaunchHex(receipt[key]))||receipt.status!=='failed'||receipt.executionState!=='not_started'||!finiteDate(receipt.recordedAt)||!finiteDate(receipt.verifiedUpdateFinishedAt))return false;
+  if(receipt.id!==historicalPrelaunchDigest({actionId:receipt.subject.actionId,subjectDigest:receipt.subjectDigest,evidenceDigest:receipt.evidenceDigest})||!same(receipt.admissionProof,historicalPrelaunchAdmissionProof()))return false;
+  if(actionId!==undefined&&receipt.subject.actionId!==actionId||subject!==undefined&&receipt.subjectDigest!==historicalPrelaunchDigest(subject)||evidenceDigest!==undefined&&receipt.evidenceDigest!==evidenceDigest)return false;
+  return receipt.subject.maintenanceHolderBuild===policy.maintenanceHolderBuild&&Number.isSafeInteger(receipt.subject.maintenanceHolderPid)&&receipt.subject.maintenanceHolderPid>0&&exit?.pid===receipt.subject.maintenanceHolderPid&&Number.isSafeInteger(receipt.localStartedAt)&&receipt.localStartedAt>=Date.parse(receipt.subject.ackedAt)&&receipt.localStartedAt<=Date.parse(receipt.subject.failedEvent.createdAt)&&Date.parse(receipt.verifiedUpdateFinishedAt)>=Date.parse(receipt.subject.failedEvent.createdAt)&&stoppedExit(exit)&&Date.parse(exit.creationTime)>=Date.parse(receipt.verifiedUpdateFinishedAt)&&Date.parse(exit.exitedAt)<=Date.parse(receipt.recordedAt);
+}
+export function validateHistoricalPrelaunchReceipt(receipt,options={}){
+  return receipt?.schemaVersion===2?validatePostUpdateHolderReceipt(receipt,options):validateOriginalHistoricalPrelaunchReceipt(receipt,options);
 }

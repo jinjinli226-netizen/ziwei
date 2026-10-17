@@ -8,6 +8,7 @@ import {
   historicalPrelaunchExactKeys as exact,
   historicalPrelaunchHex as hex,
   validateHistoricalPrelaunchReceipt,
+  validateHistoricalPostUpdateHolderEvidence,
 } from '../src/bot-historical-prelaunch-policy.mjs';
 
 const REQUEST_KIND='bot-historical-prelaunch-recovery-v1';
@@ -30,7 +31,10 @@ export function readHistoricalPrelaunchRecovery(db,row) {
     const failures=db.prepare("SELECT * FROM a2a_action_events WHERE action_id=? AND type IN ('failed','succeeded') ORDER BY created_at,id").all(row.id),original=failures[0],originalData=parse(original?.data_json);
     if(failures.length!==1||original.type!=='failed'||original.id!==subject.failedEvent.id||original.created_at!==subject.failedEvent.createdAt||bytesDigest(original.data_json)!==subject.failedEvent.dataSha256||!exact(originalData,['error','result'])||originalData.error!==row.error||!same(originalData.result,result)||digest(originalData.result)!==subject.failedEvent.resultDigest)return null;
     const evidence=data.evidence,local=evidence?.localEvidence,q=local?.quarantine;
-    if(!exact(evidence,['schemaVersion','policy','sourceBuild','sourcePolicyDigest','subjectDigest','daemonExit','localEvidence'])||evidence.schemaVersion!==1||evidence.policy!==receipt.policy||evidence.sourceBuild!==receipt.sourceBuild||evidence.sourcePolicyDigest!==receipt.sourcePolicyDigest||evidence.subjectDigest!==receipt.subjectDigest||!same(evidence.daemonExit,receipt.daemonExit)||digest(evidence)!==receipt.evidenceDigest||digest(local)!==receipt.localEvidenceDigest)return null;
+    if(evidence?.policy!==receipt.policy||evidence.sourceBuild!==receipt.sourceBuild||evidence.sourcePolicyDigest!==receipt.sourcePolicyDigest||evidence.subjectDigest!==receipt.subjectDigest||digest(evidence)!==receipt.evidenceDigest||digest(local)!==receipt.localEvidenceDigest)return null;
+    if(receipt.schemaVersion===2){
+      if(!validateHistoricalPostUpdateHolderEvidence(evidence,subject,{recordedAt:receipt.recordedAt})||evidence.schemaVersion!==2||evidence.mode!==receipt.mode||!same(evidence.maintenanceHolderExit,receipt.maintenanceHolderExit)||digest(evidence.migrationEvidence)!==receipt.migrationEvidenceDigest||evidence.migrationEvidence.finishedAt!==receipt.verifiedUpdateFinishedAt)return null;
+    }else if(!exact(evidence,['schemaVersion','policy','sourceBuild','sourcePolicyDigest','subjectDigest','daemonExit','localEvidence'])||evidence.schemaVersion!==1||!same(evidence.daemonExit,receipt.daemonExit))return null;
     if(!exact(local,['sourceFiles','quarantine','noSupervision','quarantineCount'])||local.noSupervision!==true||local.quarantineCount!==1||!Array.isArray(local.sourceFiles)||local.sourceFiles.length!==Object.keys(POLICY.sourceFiles).length||local.sourceFiles.some(item=>!exact(item,['path','sha256'])))return null;
     const sources=Object.fromEntries(local.sourceFiles.map(item=>[item.path,item.sha256]));
     if(Object.keys(sources).length!==local.sourceFiles.length||!same(sources,POLICY.sourceFiles)||!exact(q,['actionId','dedupeKey','startedAt','startedSha256','stateSha256','deliverySha256','actionSha256','resultSha256','serverResultDigest'])||!['startedSha256','stateSha256','deliverySha256','actionSha256','resultSha256','serverResultDigest'].every(key=>hex(q[key]))||q.actionId!==row.id||q.dedupeKey!==row.dedupe_key||q.startedAt!==receipt.localStartedAt||q.serverResultDigest!==subject.originalWireBodyDigest||subject.originalWireBodyDigest!==digest({status:'failed',result,error:row.error,receiptOnly:true}))return null;
