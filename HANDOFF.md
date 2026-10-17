@@ -1,5 +1,12 @@
 # 紫薇项目 HandOff
 
+## 2026-10-17 Android 管理 App 0.1.3 官网图标已发布
+
+用户要求采用官网图标。启动、加载、登录、工作区及关于标识已统一为官网现用 Z 原图，原图 SHA-256 `68452b1f4299b0af353ee35d3315302061fa64c72cc77ba66763ebb8ec81ca2c`；Android 自适应图标只加浅底与安全边距。6 组定向视觉与圆/圆角检查通过，Android 模拟器 code 3 → 4 覆盖升级及实际 Launcher/登录标识已验证。
+
+产品 `09616161620138fc40186993dc8b8ecc5066560d` 已先推 GitHub，再构建并发布 [0.1.3 / code 4 更新](https://github.com/jinjinli226-netizen/ziwei/releases/tag/android-manager-v0.1.3-internal)，公开回读 SHA-256 `a4c211ab3ecca60181ae5f9c56e32d82ad2a414ecffd5dbae30021d6f44caf7c` 一致。同原内部证书，直接覆盖安装。含前版聊天历史和 App 内高级设置；核心 JS 与原生 dex 未改，功能验收沿用明确标注的 0.1.2 基线。临时服务已停、登记已释放、最终端口检查通过。正式账号及用户真机未作已验收结论，主站/API、电脑和受控端不变。详见[图标统一记录](docs/operations/2026-10-17-android-manager-official-icon.md)。
+
+
 ## 2026-10-17 Android 管理 App 0.1.2 高级设置已发布
 
 用户要求将模型、能力和设备绑定放进 App。四处旧电脑版入口已改为内部页面，原生浏览器 Intent 已删除。可保存原员工模型、工具权限、记忆、技能、工具集与 MCP，显式检查/启用/暂停新任务；设备页支持电脑配对、手机审批、员工手机/账号关联和控制端选择。已初始化 Hermes 的电脑与 Profile 按原规则固定，暂不支持迁移。配置冲突保留草稿；原手机配置未读取成功时禁止保存，旧读取不能覆盖新配置。
