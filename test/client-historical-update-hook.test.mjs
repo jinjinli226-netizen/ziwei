@@ -3,12 +3,12 @@ import assert from 'node:assert/strict';
 import {recoverBeforeClientUpdateStop,describeUpdateFailure} from '../scripts/client-update.mjs';
 
 test('update invokes recovery only from its verified candidate and retains restart intent',async()=>{
-  let observed;const events=[];
-  const result=await recoverBeforeClientUpdateStop({candidate:'/verified candidate',root:'/old-install',env:{TEST:'yes'},log:(...args)=>events.push(args),load:async url=>{
+  let observed;const events=[],log=(...args)=>events.push(args);
+  const result=await recoverBeforeClientUpdateStop({candidate:'/verified candidate',root:'/old-install',env:{TEST:'yes'},log,load:async url=>{
     assert.equal(url,'file:///verified%20candidate/scripts/client-historical-prelaunch-recovery.mjs');
     return{recoverHistoricalPrelaunchForUpdate:async options=>{observed=options;return{recovered:true,wasRunning:true,stopped:true,actionId:'original'};}};
   }});
-  assert.deepEqual(observed,{root:'/old-install',env:{TEST:'yes'}});
+  assert.deepEqual(observed,{root:'/old-install',env:{TEST:'yes'},log});
   assert.equal(result.wasRunning,true);assert.equal(result.stopped,true);
   assert.deepEqual(events,[['historical_prelaunch_recovered',{actionId:'original'}]]);
 });

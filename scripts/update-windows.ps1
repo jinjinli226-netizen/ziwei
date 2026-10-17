@@ -33,6 +33,7 @@ try {
   $ziweiCheckExit = $LASTEXITCODE
   $ziweiCheck = $ziweiCheckText | ConvertFrom-Json
   if ($ziweiCheckExit -ne 0) { throw ('Client preflight failed [' + $ziweiCheck.reasonCode + ']: ' + $ziweiCheck.reason + '. No process was stopped and no installation was replaced.') }
+  Write-Host 'The official updater automatically archives a maintenance lock only after proving its previous worker has exited or the PID belongs to another instance.'
   $ziweiUpdateArguments = @('update', '--target', $ziweiInstalledRoot, '--package', $ziweiArchive, '--sha256', $ziweiRelease.sha256, '--json')
   if ($ziweiCheck.state -eq 'legacy_confirmation_required') {
     Write-Host ('Verified early client PID: ' + $ziweiCheck.legacyProof.pid)
@@ -57,13 +58,16 @@ try {
   Write-Host ('The update runs outside the package. Result: ' + $ziweiQueued.resultFile)
   $ziweiWaitUntil = [DateTime]::UtcNow.AddMinutes(5)
   while ([DateTime]::UtcNow -lt $ziweiWaitUntil) {
-    $ziweiResult = Get-Content -Raw -Encoding UTF8 -LiteralPath $ziweiQueued.resultFile | ConvertFrom-Json
+    # Query this exact job through the new updater, including worker liveness
+    # and the independent terminal ledger; never trust a stale running record.
+    $ziweiStatusText = & $ziweiNode $ziweiUpdaterEntry update-status --result $ziweiQueued.resultFile --json
+    $ziweiResult = $ziweiStatusText | ConvertFrom-Json
     if ($ziweiResult.state -eq 'complete') {
       Write-Host ('Ziwei update complete. Actual build: ' + $ziweiResult.clientBuild)
       Write-Host 'The original npm prefix, main/shared connections, device identity and user data were preserved.'
       break
     }
-    if ($ziweiResult.state -eq 'failed') { throw ($ziweiResult.message + ' Result file: ' + $ziweiQueued.resultFile) }
+    if ($ziweiResult.state -in @('failed', 'interrupted')) { throw ($ziweiResult.message + ' Result file: ' + $ziweiQueued.resultFile) }
     Start-Sleep -Milliseconds 500
   }
   if ($ziweiResult.state -ne 'complete') { throw ('Update has not completed. Check the result file; do not pair again: ' + $ziweiQueued.resultFile) }

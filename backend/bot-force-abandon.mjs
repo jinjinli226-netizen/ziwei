@@ -3,10 +3,11 @@ import {botProfileBinding} from './bot-profiles.mjs';
 import {botFailure} from '../src/hermes-bot-config.mjs';
 import {
   BOT_FORCE_ABANDON_POLICY as POLICY,BOT_FORCE_ABANDON_POLICY_DIGEST as POLICY_DIGEST,
+  BOT_FORCE_ABANDON_ABSENT_POLICY as ABSENT_POLICY,BOT_FORCE_ABANDON_ABSENT_POLICY_DIGEST as ABSENT_DIGEST,
   BOT_FORCE_ABANDON_KIND as KIND,BOT_FORCE_ABANDON_TTL_MS as TTL,
   canonicalForceAbandonValue as canonical,forceAbandonDigest as digest,forceAbandonBytesDigest as bytesDigest,
   forceAbandonExactKeys as exact,forceAbandonHex as hex,forceAbandonSubjectAllowed,
-  validateForceAbandonHolder,validateForceAbandonEvidence,validateForceAbandonReceipt,
+  validateForceAbandonHolder,validateForceAbandonEvidence,validateForceAbandonReceipt,validateForceAbandonAbsence,validateForceAbandonInstallation,
 } from '../src/bot-force-abandon-contract.mjs';
 
 const GRANT_KIND='bot-force-abandon-grant-v1',REQUEST_KIND='bot-force-abandon-recovery-v1',IDEMPOTENCY_KIND='bot-force-abandon-request-v1',GRANT_EVENT='bot.operator_force_abandon_requested';
@@ -42,7 +43,7 @@ export function readForceAbandonRecovery(db,row){
     const checked=original(db,row);if(!checked)return null;
     const marker=db.prepare('SELECT * FROM management_requests WHERE workspace_id=? AND kind=? AND request_key=?').get(row.workspace_id,REQUEST_KIND,row.id);if(!marker)return null;
     const event=db.prepare('SELECT * FROM a2a_action_events WHERE id=? AND action_id=? AND type=?').get(marker.resource_id,row.id,KIND),data=parse(event?.data_json),r=data?.receipt,g=readGrant(db,row);
-    if(!exact(data,['receipt','evidence'])||!validateForceAbandonReceipt(r,{actionId:row.id})||!g||r.grantId!==g.id||r.grantDigest!==digest(g)||event.id!==`action-event_${r.id}`||event.created_at!==r.recordedAt||marker.created_at!==r.recordedAt||marker.fingerprint!==r.evidenceDigest||!validateForceAbandonEvidence(data.evidence,r.subject,{recordedAt:r.recordedAt})||digest(data.evidence)!==r.evidenceDigest||digest(data.evidence.localArchive)!==r.localArchiveDigest||!same(data.evidence.currentDaemonExit,r.currentDaemonExit))return null;
+    if(!exact(data,['receipt','evidence'])||!validateForceAbandonReceipt(r,{actionId:row.id})||!g||r.grantId!==g.id||r.grantDigest!==digest(g)||event.id!==`action-event_${r.id}`||event.created_at!==r.recordedAt||marker.created_at!==r.recordedAt||marker.fingerprint!==r.evidenceDigest||data.evidence?.schemaVersion!==r.schemaVersion||!validateForceAbandonEvidence(data.evidence,r.subject,{recordedAt:r.recordedAt})||digest(data.evidence)!==r.evidenceDigest||digest(data.evidence.localArchive)!==r.localArchiveDigest||!same(r.schemaVersion===2?data.evidence.currentDaemonAbsence:data.evidence.currentDaemonExit,r.schemaVersion===2?r.currentDaemonAbsence:r.currentDaemonExit))return null;
     const s=r.subject,{snapshot,event:failed}=checked;
     if(s.originalActionSha256!==bytesDigest(canonical(row))||s.originalPayloadSha256!==bytesDigest(row.payload_json)||s.originalResultSha256!==bytesDigest(row.result_json)||s.originalDeliveredPayloadDigest!==digest(deliveredPayload(checked.payload))||s.actionType!==row.type||s.dedupeKey!==row.dedupe_key||s.createdAt!==row.created_at||s.ackedAt!==row.acked_at||s.completedAt!==row.completed_at||!same(s.profileBinding,snapshot.instance)||s.failedEvent.id!==failed.id||s.failedEvent.createdAt!==failed.created_at||s.failedEvent.dataSha256!==bytesDigest(failed.data_json))return null;
     return r;
@@ -106,42 +107,51 @@ export function createBotForceAbandon(repo,{readA2AToken,now=Date.now}={}){
     for(const [kind,requestKey,fp]of [[GRANT_KIND,p.actionId,digest(grant)],[IDEMPOTENCY_KIND,key,fingerprint]])db.prepare('INSERT INTO management_requests(workspace_id,kind,request_key,fingerprint,resource_id,created_at) VALUES(?,?,?,?,?,?)').run(p.workspaceId,kind,requestKey,fp,grant.id,requestedAt);
     return{eligible:true,state:'requested',grantId:grant.id};
   });}
-  function subjectFor(checked,grant,holder,{freshHeartbeat=true}={}){
+  function subjectFor(checked,grant,holder,{freshHeartbeat=true,absence,installation}={}){
     controlled(checked);const {row,payload,snapshot,event,credential}=checked;
-    if(!validateForceAbandonHolder(holder))fail('BOT_FORCE_ABANDON_HOLDER_REQUIRED','必须提交本机实测当前维护进程身份');
-    if(credential.client_build!==POLICY.holderBuild||credential.pid!==holder.pid||Date.parse(holder.creationTime)>now()||freshHeartbeat&&(!Number.isFinite(Date.parse(credential.heartbeat_at||credential.last_seen))||now()-Date.parse(credential.heartbeat_at||credential.last_seen)>180_000))fail('BOT_FORCE_ABANDON_HOLDER_CONFLICT','当前维护进程与原电脑实际心跳版本或 PID 不一致');
-    const s={schemaVersion:1,actionId:row.id,actionType:row.type,workspace:POLICY.subject.workspace,workspaceId:row.workspace_id,deviceId:credential.device_id,employeeId:payload.employeeId,credentialId:credential.id,profile:payload.profile,profileBinding:snapshot.instance,profileBindingDigest:digest(snapshot.instance),dedupeKey:row.dedupe_key,createdAt:row.created_at,ackedAt:row.acked_at,completedAt:row.completed_at,originalRevision:snapshot.revision,originalControlEpoch:snapshot.controlEpoch,currentRevision:POLICY.subject.currentRevision,currentControlEpoch:POLICY.subject.currentControlEpoch,currentControlState:'paused',currentEmployeeStatus:'paused',originalActionSha256:bytesDigest(canonical(row)),originalPayloadSha256:bytesDigest(row.payload_json),originalDeliveredPayloadDigest:digest(deliveredPayload(payload)),originalResultSha256:bytesDigest(row.result_json),originalResultDigest:digest(checked.result),originalError:row.error,failedEvent:{id:event.id,type:event.type,createdAt:event.created_at,dataSha256:bytesDigest(event.data_json)},grantId:grant.id,grantDigest:digest(grant),holderBuild:credential.client_build,holder};
+    const absent=installation!==undefined;
+    if(absent){
+      if(!validateForceAbandonInstallation(installation)||!validateForceAbandonAbsence(absence)||freshHeartbeat&&(Date.parse(absence.checkedAt)>now()||now()-Date.parse(absence.checkedAt)>TTL))fail('BOT_FORCE_ABANDON_ABSENCE_REQUIRED','需要本机当前无守护进程、无监听及连接拒绝的独立观察');
+      if(credential.client_build!==ABSENT_POLICY.installationBuild)fail('BOT_FORCE_ABANDON_HOLDER_CONFLICT','原电脑最后上报版本与固定当前安装不一致');
+    }else{
+      if(!validateForceAbandonHolder(holder))fail('BOT_FORCE_ABANDON_HOLDER_REQUIRED','必须提交本机实测当前维护进程身份');
+      if(credential.client_build!==POLICY.holderBuild||credential.pid!==holder.pid||Date.parse(holder.creationTime)>now()||freshHeartbeat&&(!Number.isFinite(Date.parse(credential.heartbeat_at||credential.last_seen))||now()-Date.parse(credential.heartbeat_at||credential.last_seen)>180_000))fail('BOT_FORCE_ABANDON_HOLDER_CONFLICT','当前维护进程与原电脑实际心跳版本或 PID 不一致');
+    }
+    const s={schemaVersion:absent?2:1,...(absent?{mode:ABSENT_POLICY.mode}:{}),actionId:row.id,actionType:row.type,workspace:POLICY.subject.workspace,workspaceId:row.workspace_id,deviceId:credential.device_id,employeeId:payload.employeeId,credentialId:credential.id,profile:payload.profile,profileBinding:snapshot.instance,profileBindingDigest:digest(snapshot.instance),dedupeKey:row.dedupe_key,createdAt:row.created_at,ackedAt:row.acked_at,completedAt:row.completed_at,originalRevision:snapshot.revision,originalControlEpoch:snapshot.controlEpoch,currentRevision:POLICY.subject.currentRevision,currentControlEpoch:POLICY.subject.currentControlEpoch,currentControlState:'paused',currentEmployeeStatus:'paused',originalActionSha256:bytesDigest(canonical(row)),originalPayloadSha256:bytesDigest(row.payload_json),originalDeliveredPayloadDigest:digest(deliveredPayload(payload)),originalResultSha256:bytesDigest(row.result_json),originalResultDigest:digest(checked.result),originalError:row.error,failedEvent:{id:event.id,type:event.type,createdAt:event.created_at,dataSha256:bytesDigest(event.data_json)},grantId:grant.id,grantDigest:digest(grant),...(absent?{installation,initialAbsence:absence,serverHeartbeat:{clientBuild:credential.client_build,pid:credential.pid??null,lastSeen:credential.last_seen??null,heartbeatAt:credential.heartbeat_at??null}}:{holderBuild:credential.client_build,holder})};
     if(!forceAbandonSubjectAllowed(s))fail('BOT_FORCE_ABANDON_SUBJECT_INVALID','人工放弃绑定未通过固定策略');return s;
   }
-  function signed(payload){const key=readA2AToken();if(typeof key!=='string'||key.length<16)fail('BOT_FORCE_ABANDON_SIGNING_UNAVAILABLE','维护挑战签名不可用',503);const data=Buffer.from(canonical(payload)).toString('base64url');return`${data}.${crypto.createHmac('sha256',key).update('ziwei-operator-force-abandon-v1\0'+data).digest('base64url')}`;}
+  function signed(payload){const key=readA2AToken();if(typeof key!=='string'||key.length<16)fail('BOT_FORCE_ABANDON_SIGNING_UNAVAILABLE','维护挑战签名不可用',503);const data=Buffer.from(canonical(payload)).toString('base64url');return`${data}.${crypto.createHmac('sha256',key).update(`ziwei-operator-force-abandon-v${payload.schemaVersion}\0`+data).digest('base64url')}`;}
   function verified(challenge,expired=false){
     if(typeof challenge!=='string'||challenge.length>25000||!/^[-_A-Za-z0-9]+\.[-_A-Za-z0-9]{43}$/.test(challenge))fail('BOT_FORCE_ABANDON_CHALLENGE_INVALID','维护挑战无效',400);
     const data=challenge.split('.')[0],c=parse(Buffer.from(data,'base64url').toString('utf8'));
-    if(!exact(c,['schemaVersion','kind','policyDigest','issuedAt','expiresAt','nonce','subject','subjectDigest'])||c.schemaVersion!==1||c.kind!==KIND||c.policyDigest!==POLICY_DIGEST||!hex(c.nonce)||!forceAbandonSubjectAllowed(c.subject)||c.subjectDigest!==digest(c.subject)||!Number.isSafeInteger(c.issuedAt)||!Number.isSafeInteger(c.expiresAt)||c.expiresAt-c.issuedAt!==TTL||c.issuedAt>now())fail('BOT_FORCE_ABANDON_CHALLENGE_INVALID','维护挑战内容无效',400);
+    const absent=c?.schemaVersion===2;
+    if(!exact(c,['schemaVersion',...(absent?['mode']:[]),'kind','policyDigest','issuedAt','expiresAt','nonce','subject','subjectDigest'])||![1,2].includes(c.schemaVersion)||absent&&c.mode!==ABSENT_POLICY.mode||c.kind!==KIND||c.policyDigest!==(absent?ABSENT_DIGEST:POLICY_DIGEST)||!hex(c.nonce)||c.subject?.schemaVersion!==c.schemaVersion||!forceAbandonSubjectAllowed(c.subject)||c.subjectDigest!==digest(c.subject)||!Number.isSafeInteger(c.issuedAt)||!Number.isSafeInteger(c.expiresAt)||c.expiresAt-c.issuedAt!==TTL||c.issuedAt>now())fail('BOT_FORCE_ABANDON_CHALLENGE_INVALID','维护挑战内容无效',400);
     const expected=signed(c),left=Buffer.from(challenge),right=Buffer.from(expected);if(left.length!==right.length||!crypto.timingSafeEqual(left,right))fail('BOT_FORCE_ABANDON_CHALLENGE_INVALID','维护挑战签名不一致',403);
     if(!expired&&c.expiresAt<=now())fail('BOT_FORCE_ABANDON_CHALLENGE_EXPIRED','维护挑战已到期');return c;
   }
   function prepare(actionId,credential,input={}){return atomic(()=>{
-    if(!exact(input,['holder']))fail('BOT_FORCE_ABANDON_INPUT_INVALID','维护准备仅接受实测进程身份',400);
+    const absent=input?.mode===ABSENT_POLICY.mode;
+    if(!exact(input,absent?['mode','installation','absence']:['holder']))fail('BOT_FORCE_ABANDON_INPUT_INVALID','维护准备仅接受独立当前持有者或无持有者观察',400);
     const checked=device(actionId,credential),receipt=prior(checked);if(receipt)return{applicable:true,completed:true,receipt};
     const grant=grantFor(checked);if(!grant)return{applicable:false};admission(actionId);
-    const subject=subjectFor(checked,grant,input.holder),issuedAt=now(),claim={schemaVersion:1,kind:KIND,policyDigest:POLICY_DIGEST,issuedAt,expiresAt:issuedAt+TTL,nonce:crypto.randomBytes(32).toString('hex'),subject,subjectDigest:digest(subject)};
-    return{applicable:true,completed:false,challenge:signed(claim),subject,subjectDigest:claim.subjectDigest,policy:POLICY,policyDigest:POLICY_DIGEST,expiresAt:new Date(claim.expiresAt).toISOString()};
+    const subject=subjectFor(checked,grant,input.holder,absent?{installation:input.installation,absence:input.absence}:{}),issuedAt=now(),claim={schemaVersion:absent?2:1,...(absent?{mode:ABSENT_POLICY.mode}:{}),kind:KIND,policyDigest:absent?ABSENT_DIGEST:POLICY_DIGEST,issuedAt,expiresAt:issuedAt+TTL,nonce:crypto.randomBytes(32).toString('hex'),subject,subjectDigest:digest(subject)};
+    return{applicable:true,completed:false,challenge:signed(claim),subject,subjectDigest:claim.subjectDigest,policy:absent?ABSENT_POLICY:POLICY,policyDigest:claim.policyDigest,expiresAt:new Date(claim.expiresAt).toISOString()};
   });}
   function commit(actionId,credential,input={}){return atomic(()=>{
     if(!exact(input,['challenge','evidence']))fail('BOT_FORCE_ABANDON_INPUT_INVALID','维护提交只接受挑战和独立证据',400);
     const checked=device(actionId,credential),previous=prior(checked),claim=verified(input.challenge,true);
     if(claim.subject.actionId!==actionId||claim.subject.credentialId!==checked.credential.id||claim.subject.deviceId!==checked.credential.device_id)fail('BOT_FORCE_ABANDON_BINDING_CONFLICT','挑战与实际设备身份不一致',403);
-    if(!validateForceAbandonEvidence(input.evidence,claim.subject,{recordedAt:now()}))fail('BOT_FORCE_ABANDON_EVIDENCE_INVALID','当前维护进程退出或本地归档证据不匹配');
+    const absent=claim.schemaVersion===2;
+    if(input.evidence?.schemaVersion!==claim.schemaVersion||!validateForceAbandonEvidence(input.evidence,claim.subject,{recordedAt:now()}))fail('BOT_FORCE_ABANDON_EVIDENCE_INVALID','当前维护进程退出、无持有者观察或本地归档证据不匹配');
     // A persisted stop receipt may arrive after a network outage. It can only
     // finish the original signed window, never authorize a later stop or holder.
-    const exitedAt=Date.parse(input.evidence.currentDaemonExit.exitedAt);
-    if(exitedAt<claim.issuedAt||exitedAt>claim.expiresAt)fail('BOT_FORCE_ABANDON_CHALLENGE_EXPIRED','当前维护进程必须在原挑战有效期内完成停止');
+    const observedAt=Date.parse(absent?input.evidence.currentDaemonAbsence.checkedAt:input.evidence.currentDaemonExit.exitedAt);
+    if(observedAt<claim.issuedAt||observedAt>claim.expiresAt||absent&&!previous&&claim.expiresAt<=now())fail('BOT_FORCE_ABANDON_CHALLENGE_EXPIRED','当前停止或无持有者观察必须在原挑战有效期内完成');
     const evidenceDigest=digest(input.evidence);
     if(previous){if(previous.evidenceDigest!==evidenceDigest||previous.subjectDigest!==claim.subjectDigest)fail('BOT_FORCE_ABANDON_IDEMPOTENCY_CONFLICT','原人工放弃已使用不同证据完成');return{receipt:previous};}
     admission(actionId);const grant=grantFor(checked);if(!grant)fail('BOT_FORCE_ABANDON_GRANT_REQUIRED','缺少真实用户人工授权');
-    const subject=subjectFor(checked,grant,claim.subject.holder,{freshHeartbeat:false});if(!same(subject,claim.subject))fail('BOT_FORCE_ABANDON_SUBJECT_CHANGED','准备后原证据、授权、设备或控制状态已变化');
-    const recordedAt=new Date(now()).toISOString(),receipt={schemaVersion:1,kind:KIND,id:digest({actionId,subjectDigest:claim.subjectDigest,evidenceDigest}),policy:POLICY.id,policyDigest:POLICY_DIGEST,subject,subjectDigest:claim.subjectDigest,grantId:grant.id,grantDigest:digest(grant),evidenceDigest,localArchiveDigest:digest(input.evidence.localArchive),currentDaemonExit:input.evidence.currentDaemonExit,resultingControlEpoch:subject.currentControlEpoch+1,executionState:'uncertain',disposition:'abandoned_by_user',executionConfirmedStopped:false,partialEffectsPossible:true,recordedAt};
+    const subject=subjectFor(checked,grant,claim.subject.holder,{freshHeartbeat:false,...(absent?{installation:claim.subject.installation,absence:claim.subject.initialAbsence}:{})});if(!same(subject,claim.subject))fail('BOT_FORCE_ABANDON_SUBJECT_CHANGED','准备后原证据、授权、设备或控制状态已变化');
+    const recordedAt=new Date(now()).toISOString(),receipt={schemaVersion:absent?2:1,...(absent?{mode:ABSENT_POLICY.mode}:{}),kind:KIND,id:digest({actionId,subjectDigest:claim.subjectDigest,evidenceDigest}),policy:absent?ABSENT_POLICY.id:POLICY.id,policyDigest:absent?ABSENT_DIGEST:POLICY_DIGEST,subject,subjectDigest:claim.subjectDigest,grantId:grant.id,grantDigest:digest(grant),evidenceDigest,localArchiveDigest:digest(input.evidence.localArchive),...(absent?{currentDaemonAbsence:input.evidence.currentDaemonAbsence}:{currentDaemonExit:input.evidence.currentDaemonExit}),resultingControlEpoch:subject.currentControlEpoch+1,executionState:'uncertain',disposition:'abandoned_by_user',executionConfirmedStopped:false,partialEffectsPossible:true,recordedAt};
     if(!validateForceAbandonReceipt(receipt,{actionId}))fail('BOT_FORCE_ABANDON_RECEIPT_INVALID','独立人工放弃回执无效');
     const changed=db.prepare("UPDATE hermes_bots SET active_action_id=NULL,control_epoch=control_epoch+1,updated_at=? WHERE employee_id=? AND workspace_id=? AND active_action_id=? AND revision=? AND control_epoch=? AND control_state='paused' AND ziwei_v2_admitted(?)=1").run(recordedAt,subject.employeeId,subject.workspaceId,actionId,subject.currentRevision,subject.currentControlEpoch,actionId);
     if(changed.changes!==1)fail('BOT_FORCE_ABANDON_CONTROL_CONFLICT','占用或控制版本发生并发变化');

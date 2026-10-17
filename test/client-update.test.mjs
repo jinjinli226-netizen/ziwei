@@ -13,6 +13,16 @@ import { validateUpdateSource, downloadVerifiedPackage, resolveInstalledPackage,
 
 const run = promisify(execFile);
 
+// Match the package-outside detached worker layout produced by launchClientUpdate.
+function detachedUpdateWorker(directory) {
+  const source=path.resolve(import.meta.dirname,'..'),helper=path.join(directory,'helper');
+  for(const relative of ['package.json','daemon/config.mjs','src/management-bootstrap.mjs','scripts/client-update.mjs','scripts/client-update-worker.mjs','scripts/client-lifecycle.mjs','scripts/client-retained-stop-recovery.mjs','scripts/client-legacy-identity.mjs','scripts/client-legacy-identity.ps1']) {
+    const target=path.join(helper,relative);fs.mkdirSync(path.dirname(target),{recursive:true});fs.copyFileSync(path.join(source,relative),target);
+  }
+  return path.join(helper,'scripts/client-update-worker.mjs');
+}
+
+
 function fileInventory(directory) {
   const files = {}, directories = [];
   const visit = (folder, relative = '') => {
@@ -112,7 +122,7 @@ test('download verification rejects corrupt bytes and keeps previous package and
 });
 
 test('update only accepts the canonical Ziwei global install and exact supported bin map', t => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ziwei-update-layout-'));
+  const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ziwei-update-layout-')));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const root = path.join(directory, 'node_modules', 'ziwei');
   fs.mkdirSync(path.join(root, 'scripts'), { recursive: true });
@@ -222,11 +232,11 @@ test('a corrupt candidate fails before stopping the client or touching its insta
   assert.equal(events.at(-1).failureStage, 'stage_install');
   assert.equal(events.at(-1).reasonCode, 'PROCESS_EXIT_NONZERO');
   fs.mkdirSync(path.join(home, 'maintenance'), { recursive: true });
-  const workerDirectory = path.join(directory, 'worker-maintenance'); fs.mkdirSync(workerDirectory);
+  const workerDirectory = path.join(home, 'maintenance', 'update-12345678-1234-1234-1234-123456789abc'); fs.mkdirSync(workerDirectory);
   const parent = await run(process.execPath, ['-e', 'process.stdout.write(String(process.pid))'], { windowsHide: true });
   const jobFile = path.join(workerDirectory, 'job.json');
   fs.writeFileSync(jobFile, JSON.stringify({ root, directory: workerDirectory, parentPid: Number(parent.stdout), artifactFile: artifact, sha256: createHash('sha256').update(fs.readFileSync(artifact)).digest('hex') }));
-  await assert.rejects(run(process.execPath, [fileURLToPath(new URL('../scripts/client-update-worker.mjs', import.meta.url)), jobFile], { env: { ...process.env, ZIWEI_USER_HOME: home, ZIWEI_CONFIG: file }, windowsHide: true, timeout: 10_000 }), error => error.code === 1);
+  await assert.rejects(run(process.execPath, [detachedUpdateWorker(workerDirectory), jobFile], { env: { ...process.env, ZIWEI_USER_HOME: home, ZIWEI_CONFIG: file }, windowsHide: true, timeout: 10_000 }), error => error.code === 1);
   const result = JSON.parse(fs.readFileSync(path.join(workerDirectory, 'result.json')));
   assert.equal(result.code, 'UPDATE_FAILED');
   assert.equal(result.failureStage, 'stage_install');
@@ -353,8 +363,8 @@ test('failed startup after package swap restores the original program and connec
   assert.ok(bins.every(file => fs.readFileSync(file, 'utf8') === 'node_modules/ziwei/scripts/ziwei-user.mjs'));
 });
 
-test('update worker reports a structured lock failure without changing an existing maintenance lock', async t => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ziwei-update-worker-lock-'));
+test('update worker reports an unverified lock without changing another maintenance operation', async t => {
+  const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ziwei-update-worker-lock-')));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const home = path.join(directory, 'home');
   const maintenance = path.join(home, 'maintenance');
@@ -363,16 +373,17 @@ test('update worker reports a structured lock failure without changing an existi
   const originalLock = '{"operation":"uninstall","private":"PRIVATE_EXISTING_LOCK"}';
   fs.writeFileSync(lockFile, originalLock);
   const parent = await run(process.execPath, ['-e', 'process.stdout.write(String(process.pid))'], { windowsHide: true });
-  const jobFile = path.join(directory, 'job.json');
-  fs.writeFileSync(jobFile, JSON.stringify({ directory, parentPid: Number(parent.stdout), root: path.join(directory, 'untouched-installation') }));
-  await assert.rejects(run(process.execPath, [fileURLToPath(new URL('../scripts/client-update-worker.mjs', import.meta.url)), jobFile], { env: { ...process.env, ZIWEI_USER_HOME: home }, windowsHide: true, timeout: 10_000 }), error => error.code === 1);
-  const result = JSON.parse(fs.readFileSync(path.join(directory, 'result.json')));
+  const workerDirectory=path.join(maintenance,'update-12345678-1234-1234-1234-123456789abc');fs.mkdirSync(workerDirectory);
+  const jobFile = path.join(workerDirectory, 'job.json');
+  fs.writeFileSync(jobFile, JSON.stringify({ directory:workerDirectory, parentPid: Number(parent.stdout), root: path.join(directory, 'untouched-installation') }));
+  await assert.rejects(run(process.execPath, [detachedUpdateWorker(workerDirectory), jobFile], { env: { ...process.env, ZIWEI_USER_HOME: home }, windowsHide: true, timeout: 10_000 }), error => error.code === 1);
+  const result = JSON.parse(fs.readFileSync(path.join(workerDirectory, 'result.json')));
   assert.equal(result.state, 'failed');
-  assert.equal(result.code, 'MAINTENANCE_BUSY');
+  assert.equal(result.code, 'MAINTENANCE_OWNER_UNVERIFIED');
   assert.equal(result.failureStage, 'acquire_lock');
-  assert.equal(result.reasonCode, 'MAINTENANCE_BUSY');
+  assert.equal(result.reasonCode, 'MAINTENANCE_OWNER_UNVERIFIED');
   assert.equal(result.originalRestored, true);
-  const failed = fs.readFileSync(path.join(directory, 'maintenance.jsonl'), 'utf8').trim().split('\n').map(JSON.parse).find(item => item.event === 'maintenance_failed');
+  const failed = fs.readFileSync(path.join(workerDirectory, 'maintenance.jsonl'), 'utf8').trim().split('\n').map(JSON.parse).find(item => item.event === 'maintenance_failed');
   assert.equal(failed.failureStage, result.failureStage);
   assert.equal(failed.reasonCode, result.reasonCode);
   assert.equal(failed.originalRestored, true);

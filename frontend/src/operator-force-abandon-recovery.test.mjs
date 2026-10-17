@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {operatorForceAbandonRecovery,OPERATOR_FORCE_ABANDON_DETAIL} from './operator-force-abandon-recovery.mjs';
 import {botPresence,botStopPresentation,botRecoveryEvent,botRecoveryDetail,executionUncertain,processExitConfirmed} from './bot-presentation.js';
 import {executionNeedsPolling,executionPresentation,mergeConversationDetail} from './conversation-execution-state.mjs';
-import {BOT_FORCE_ABANDON_POLICY_DIGEST,forceAbandonDigest,validateForceAbandonReceipt} from '../../src/bot-force-abandon-contract.mjs';
+import {BOT_FORCE_ABANDON_POLICY_DIGEST,BOT_FORCE_ABANDON_ABSENT_POLICY,BOT_FORCE_ABANDON_ABSENT_POLICY_DIGEST,forceAbandonDigest,validateForceAbandonReceipt} from '../../src/bot-force-abandon-contract.mjs';
 
 function fixture() {
   const binding={mode:'owned_profile',profile:'bot-e1bf33c85b1543b18ecd3d6a',templateProfile:'default',ownershipId:'187b5fff-7df9-4ca8-87d3-980c0855e3c1',provisionActionId:'action_4f59d06e-207d-4f17-aff8-d739ba138a3b'};
@@ -15,6 +15,51 @@ function fixture() {
   const receipt=run.forceAbandonRecovery;receipt.policyDigest=BOT_FORCE_ABANDON_POLICY_DIGEST;receipt.subjectDigest=forceAbandonDigest(subject);receipt.id=forceAbandonDigest({actionId:run.id,subjectDigest:receipt.subjectDigest,evidenceDigest:receipt.evidenceDigest});
   return run;
 }
+
+function absentFixture({nullHeartbeat=false}={}) {
+  const run=fixture(),receipt=run.forceAbandonRecovery,{holder,holderBuild,...originalSubject}=receipt.subject;
+  const initialAbsence={scope:'current-daemon-holder',state:'absent',health:'connection_refused',nativeDaemonCount:0,healthListenerCount:0,checkedAt:'2026-10-17T15:04:00.000Z'};
+  receipt.schemaVersion=2;receipt.mode=BOT_FORCE_ABANDON_ABSENT_POLICY.mode;receipt.policy=BOT_FORCE_ABANDON_ABSENT_POLICY.id;receipt.policyDigest=BOT_FORCE_ABANDON_ABSENT_POLICY_DIGEST;
+  receipt.subject={...originalSubject,schemaVersion:2,mode:receipt.mode,installation:{build:holderBuild,root:holder.root,configSha256:holder.configSha256,stateSha256:holder.stateSha256},initialAbsence,serverHeartbeat:{clientBuild:holderBuild,pid:nullHeartbeat?null:holder.pid,lastSeen:nullHeartbeat?null:'2026-10-17T15:00:00.000Z',heartbeatAt:nullHeartbeat?null:'2026-10-17T15:00:00.000Z'}};
+  delete receipt.currentDaemonExit;
+  receipt.currentDaemonAbsence={...initialAbsence,checkedAt:'2026-10-17T15:05:00.000Z'};
+  receipt.subjectDigest=forceAbandonDigest(receipt.subject);receipt.id=forceAbandonDigest({actionId:run.id,subjectDigest:receipt.subjectDigest,evidenceDigest:receipt.evidenceDigest});
+  return run;
+}
+
+test('an independently verified absent current daemon permits the same operator disposition without an exit claim',()=>{
+  for(const nullHeartbeat of [false,true]){
+    const run=absentFixture({nullHeartbeat}),receipt=run.forceAbandonRecovery,original=JSON.stringify({payload:run.payload,result:run.result,error:run.error});
+    assert.equal(validateForceAbandonReceipt(receipt,{actionId:run.id}),true,'the actual shared contract accepts the offline receipt');
+    assert.equal(operatorForceAbandonRecovery(run),receipt);assert.equal(executionUncertain(run),false);assert.equal(executionNeedsPolling(run),false);
+    assert.deepEqual(executionPresentation(run),{label:OPERATOR_FORCE_ABANDON_DETAIL,summary:'已强制放弃 · 原结果未知',busy:false,tone:'muted',retryable:false});
+    assert.deepEqual(botStopPresentation({latest_run:run}),{confirmed:false,abandoned:true,label:OPERATOR_FORCE_ABANDON_DETAIL,tone:'muted'});
+    assert.equal(botPresence({control_state:'paused',latest_run:run}).label,'已暂停 · 旧记录已放弃');assert.equal(botRecoveryEvent(run),null);
+    assert.equal(processExitConfirmed(run.result),false);assert.equal(Object.hasOwn(receipt,'currentDaemonExit'),false);assert.equal(Object.hasOwn(receipt.subject,'holder'),false);
+    assert.equal(run.result.executionState,'uncertain');assert.equal(JSON.stringify({payload:run.payload,result:run.result,error:run.error}),original);
+  }
+});
+
+test('offline disposition requires exact absence observations and cannot borrow a holder exit or a generic offline flag',()=>{
+  const mutations=[
+    r=>{r.forceAbandonRecovery.mode='offline';},r=>{r.forceAbandonRecovery.subject.mode='offline';},r=>{r.forceAbandonRecovery.policyDigest='8'.repeat(64);},
+    r=>{r.forceAbandonRecovery.currentDaemonExit=fixture().forceAbandonRecovery.currentDaemonExit;},r=>{r.forceAbandonRecovery.subject.holder=fixture().forceAbandonRecovery.subject.holder;},r=>{r.forceAbandonRecovery.subject.holderBuild=fixture().forceAbandonRecovery.subject.holderBuild;},
+    r=>{r.forceAbandonRecovery.currentDaemonAbsence.scope='original-execution-tree';},r=>{r.forceAbandonRecovery.currentDaemonAbsence.state='stopped';},r=>{r.forceAbandonRecovery.currentDaemonAbsence.health='offline';},r=>{r.forceAbandonRecovery.currentDaemonAbsence.nativeDaemonCount=1;},r=>{r.forceAbandonRecovery.currentDaemonAbsence.healthListenerCount=1;},r=>{r.forceAbandonRecovery.currentDaemonAbsence.stopped=true;},
+    r=>{r.forceAbandonRecovery.subject.initialAbsence.health='timeout';},r=>{r.forceAbandonRecovery.subject.initialAbsence.checkedAt='2026-10-17T10:37:20.000Z';},r=>{r.forceAbandonRecovery.currentDaemonAbsence.checkedAt='2026-10-17T15:03:00.000Z';},r=>{r.forceAbandonRecovery.currentDaemonAbsence.checkedAt='2026-10-17T15:06:00.000Z';},
+    r=>{r.forceAbandonRecovery.subject.installation.build='8'.repeat(64);},r=>{r.forceAbandonRecovery.subject.installation.configSha256='bad';},r=>{r.forceAbandonRecovery.subject.serverHeartbeat.clientBuild='8'.repeat(64);},r=>{r.forceAbandonRecovery.subject.serverHeartbeat.pid=0;},r=>{r.forceAbandonRecovery.subject.serverHeartbeat.lastSeen='bad';},
+    r=>{r.forceAbandonRecovery.subject.schemaVersion=1;},r=>{r.forceAbandonRecovery.executionState='not_started';},r=>{r.forceAbandonRecovery.executionConfirmedStopped=true;},r=>{r.forceAbandonRecovery.partialEffectsPossible=false;},r=>{r.forceAbandonRecovery.subject.originalPayloadSha256='8'.repeat(64);},r=>{r.forceAbandonRecovery.subject.originalError='another';},
+  ];
+  for(const mutate of mutations){const run=absentFixture();mutate(run);assert.equal(operatorForceAbandonRecovery(run),null,mutate.toString());assert.equal(executionUncertain(run),true);assert.equal(executionNeedsPolling(run),true);assert.equal(executionPresentation(run).retryable,false);}
+  const run=absentFixture(),receipt=run.forceAbandonRecovery;delete run.forceAbandonRecovery;
+  for(const forged of [{...run,currentDaemonAbsent:true},{...run,result:{...run.result,forceAbandonRecovery:receipt}},{...run,events:[{type:'bot.operator_force_abandon',data:{receipt}}]}])assert.equal(operatorForceAbandonRecovery(forged),null);
+});
+
+test('the offline extension preserves the original live-holder version and its mandatory exit evidence',()=>{
+  const live=fixture();assert.equal(validateForceAbandonReceipt(live.forceAbandonRecovery),true);assert.equal(operatorForceAbandonRecovery(live),live.forceAbandonRecovery);
+  const missing=fixture();delete missing.forceAbandonRecovery.currentDaemonExit;assert.equal(operatorForceAbandonRecovery(missing),null);
+  const reclassified=fixture();reclassified.forceAbandonRecovery.schemaVersion=2;assert.equal(operatorForceAbandonRecovery(reclassified),null);
+  const offline=absentFixture();offline.forceAbandonRecovery.schemaVersion=1;assert.equal(operatorForceAbandonRecovery(offline),null);
+});
 
 test('a committed owner abandonment removes the admission prompt while retaining the original unknown failure',()=>{
   const run=fixture(),original=JSON.stringify({result:run.result,error:run.error}),receipt=run.forceAbandonRecovery;

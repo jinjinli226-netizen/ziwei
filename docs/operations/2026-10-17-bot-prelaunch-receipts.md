@@ -203,3 +203,18 @@ API/前端于UTC `2026-10-17T15:50:00Z`切换到 `/opt/ziwei/releases/operator-f
 网页原生确认弹窗使自动浏览器目标挂起，未重复点击或伪造actor。随后使用用户已授权账号正常登录API，核实其确为原员工所属工作区owner，正常POST精确强制放弃意图，退出本次临时登录；没有提取浏览器cookie或修改认证上下文。授权 `action-event_force-grant_25b9b7ae-3f2d-45e6-a261-c46fb46ea138` 已保存，另一个正常网页目标已显示“已授权强制恢复”。密码/会话凭据不保存到发布记录。
 
 UTC15:59:55只读复核仍为requested，grant1、receipt0，授权后prepare/commit均0；Windows仍为c477/PID27868在线，知微仍r3/e8暂停、active为原2805，原三项hash保持。已要求用户在该电脑运行一次普通 `ziwei_user update`（c477旧worker可通过新candidate薄包装进入独立force helper），无需用户查记录。此刻没有声称强停、归档、解除占用、启用或真实新模型消息验收已经完成。私有证据 `.local/operator-force-abandon-release/`；后续必须继续核实实际设备回执并用正常用户入口恢复Bot，再只发送一条不重放的无副作用验证消息。
+
+
+### 维护锁遗留、假 running 与已停客户端恢复（2026-10-18 北京时间）
+
+用户实际回传：旧 c477 updater 的 update-aa35b60a-8731-4ea9-bead-a406286fb986 在 UTC16:08:15 的 recover_history 步骤写入 update_failed / maintenance_failed，原安装未替换，结果文件却一直显示 running。后一次 update-7ba45935-3c50-4014-afd8-9e21101b5e26 在 UTC16:30:43 因遗留 operation.lock 报 MAINTENANCE_BUSY；用户同时报告 readyz 离线。以上是用户日志证据，不能等同于已原生核验该 worker 或 daemon 退出。
+
+已复现旧更新器的诊断降级：旧501/c477错误白名单不认识新 helper 的 CLIENT_FORCE_ABANDON_REFUSED，会变成 RECOVER_HISTORY_FAILED；正式702冷包及旧更新器加载新 wrapper 的原生 ESM 导入在当前 Mac 成功，未据日志臆断漏包。新版传递有限恢复 phase/reason，并写 ASCII JSON，避免终端乱码掩盖 JSON。日志失败不再阻断终态落盘和自身维护锁释放，另有独立 terminal.json；状态查询结合 worker 实例及旧失败日志，不把已退出 worker 永久展示成 running。
+
+新版官方 bootstrap 使用候选更新器核验并归档失效维护锁。核验仅指维护 worker：Windows 原生 PID、创建时间、命令行及原锁字节一致后，通过独占文件句柄归档；活 worker 或无法核验时不移锁、不杀进程。此操作不是原业务任务退出证明。更新状态查询绑定精确 job，不能被后来的 latest-update 指针覆盖。必须同时发布 scripts/update-windows.ps1 独立下载文件，不能只换 tgz。
+
+另补独立 schema2 no_current_daemon 放弃路径：原 owner/admin 授权、设备凭据、原动作/失败字节、员工/Profile/r3e8 与 CAS 全保留。设备原生检查当前安装无 daemon、健康端口无任何监听且实际拒连，在 prepare 前、commit 前及本机归档前复核，并绑定配置/安装/state/source。该路径只观察当前客户端已不存在，不生成 currentDaemonExit，不把原执行未知变为已停止。旧 v1 策略摘要与真实退出规则不变。取得严格独立回执后才归档指定旧条目，其余记录、聊天、Profile/HOME保留；离线分支不伪造 wasRunning，也不借此自动重启原客户端。
+
+本轮整合175项回归，168通过、7项Windows平台条件跳过、0失败；未运行与本次修改无关的本机HTTP下载测试，未启动本机监听。额外4项最终诊断/原生枚举边界用例通过；静态检查191项通过。Windows原生句柄段尚未现场执行，不能宣称真机恢复完成。新发布脚本基于当前702完整生产目录，仅叠加2个API来源及新前端；保留数据库、MCP、旧metadata、旧CLI工件与其他服务。
+
+当前代码等待先推GitHub再正式发布；发布本身不会解除知微占用。后续必须收到目标设备独立回执、确认原slot解除，再通过正常用户控制恢复Bot，并只发送一条不重放旧任务的新连通性消息。私有证据位于 .local/operator-force-abandon-maintenance-release/；不在Git保存凭据或私有日志。

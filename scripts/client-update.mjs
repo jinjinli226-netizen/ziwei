@@ -15,7 +15,9 @@ const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const pause = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
 const failure = (code, message, details = {}) => Object.assign(new Error(message), { code, ...details });
 const UPDATE_STAGES = new Set(['validate_installation', 'resolve_npm', 'validate_paths', 'verify_archive', 'read_release_manifest', 'download_package', 'stage_install', 'validate_candidate', 'prepare_candidate', 'recover_history', 'stop_client', 'verify_original', 'backup_original', 'activate_candidate', 'verify_installation', 'restart_client', 'verify_configuration', 'stop_failed_candidate', 'restore_original', 'restart_original', 'read_restoration_configuration', 'wait_parent', 'acquire_lock', 'unknown']);
-const SAFE_ERROR_CODES = new Set(['EBUSY', 'EPERM', 'EACCES', 'ENOENT', 'ENOTDIR', 'ENOSPC', 'EIO', 'EROFS', 'EEXIST', 'ETIMEDOUT', 'ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND', 'EAI_AGAIN', 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER', 'ERR_MODULE_NOT_FOUND', 'MODULE_NOT_FOUND', 'ERR_INVALID_PACKAGE_CONFIG', 'WINDOWS_ONLY', 'USERDATA_IN_PACKAGE', 'UNSAFE_PATH', 'CONFIG_UNREADABLE', 'CONFIG_INVALID', 'PID_MISMATCH', 'PROCESS_IDENTITY_MISMATCH', 'PROCESS_CHANGED', 'NON_LOCAL_CONTROL', 'INVALID_HEALTH_PORT', 'HEALTH_UNREACHABLE', 'FOREIGN_LISTENER', 'CLIENT_IDENTITY_MISMATCH', 'LIFECYCLE_IDENTITY_MISMATCH', 'LIFECYCLE_DOWNGRADE', 'INVALID_TIMEOUT', 'BUILD_INVALID', 'HEALTH_MISSING', 'PROCESS_MISSING', 'CONTROL_AUTH_MISSING', 'CONFIG_CHANGED', 'CONTROL_REJECTED', 'CLIENT_BUSY', 'CLIENT_RESTARTED', 'STOP_TIMEOUT', 'STOP_FAILED', 'NOT_GLOBAL_INSTALL', 'PACKAGE_MISMATCH', 'BIN_MISMATCH', 'NPM_UNAVAILABLE', 'MAINTENANCE_BUSY', 'INSTALL_CHANGED', 'INVALID_PARENT', 'PARENT_STILL_RUNNING', 'UPDATE_SOURCE_INVALID', 'UPDATE_HASH_INVALID', 'UPDATE_HTTP_FAILED', 'UPDATE_TOO_LARGE', 'UPDATE_MANIFEST_INVALID', 'UPDATE_BUILD_MISMATCH']);
+const SAFE_ERROR_CODES = new Set(['EBUSY', 'EPERM', 'EACCES', 'ENOENT', 'ENOTDIR', 'ENOSPC', 'EIO', 'EROFS', 'EEXIST', 'ETIMEDOUT', 'ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND', 'EAI_AGAIN', 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER', 'ERR_MODULE_NOT_FOUND', 'MODULE_NOT_FOUND', 'ERR_INVALID_PACKAGE_CONFIG', 'WINDOWS_ONLY', 'USERDATA_IN_PACKAGE', 'UNSAFE_PATH', 'CONFIG_UNREADABLE', 'CONFIG_INVALID', 'PID_MISMATCH', 'PROCESS_IDENTITY_MISMATCH', 'PROCESS_CHANGED', 'NON_LOCAL_CONTROL', 'INVALID_HEALTH_PORT', 'HEALTH_UNREACHABLE', 'FOREIGN_LISTENER', 'CLIENT_IDENTITY_MISMATCH', 'LIFECYCLE_IDENTITY_MISMATCH', 'LIFECYCLE_DOWNGRADE', 'INVALID_TIMEOUT', 'BUILD_INVALID', 'HEALTH_MISSING', 'PROCESS_MISSING', 'CONTROL_AUTH_MISSING', 'CONFIG_CHANGED', 'CONTROL_REJECTED', 'CLIENT_BUSY', 'CLIENT_RESTARTED', 'STOP_TIMEOUT', 'STOP_FAILED', 'NOT_GLOBAL_INSTALL', 'PACKAGE_MISMATCH', 'BIN_MISMATCH', 'NPM_UNAVAILABLE', 'MAINTENANCE_BUSY', 'MAINTENANCE_OWNER_UNVERIFIED', 'INSTALL_CHANGED', 'INVALID_PARENT', 'PARENT_STILL_RUNNING', 'UPDATE_SOURCE_INVALID', 'UPDATE_HASH_INVALID', 'UPDATE_HTTP_FAILED', 'UPDATE_TOO_LARGE', 'UPDATE_MANIFEST_INVALID', 'UPDATE_BUILD_MISMATCH']);
+const SAFE_RECOVERY_PHASES = new Set(['configuration','grant_probe','archive_validation','current_health','source_validation','holder_validation','pause_drain','local_archive_validation','prepare','archive_backup','holder_revalidation','terminate','exit_validation','post_exit_validation','receipt_commit','local_apply','offline_observation','offline_prepare','offline_archive','offline_revalidation','offline_commit','offline_apply']);
+const SAFE_RECOVERY_REASONS = new Set(['EVIDENCE_MISMATCH','TRANSPORT_FAILED','INVALID_SERVER_RESPONSE','SERVER_REFUSED','DRAIN_TIMEOUT','CHALLENGE_EXPIRED_BEFORE_STOP']);
 const SAFE_SIGNALS = new Set(['SIGTERM', 'SIGKILL', 'SIGABRT', 'SIGINT', 'SIGBREAK']);
 SAFE_ERROR_CODES.add('RETAINED_STOP_RECOVERY_REFUSED');
 SAFE_ERROR_CODES.add('HISTORICAL_PRELAUNCH_RECOVERY_REFUSED');
@@ -39,17 +41,21 @@ const FAILURE_REASONS = {
   LEGACY_STOP_PROOF_REQUIRED: '旧版停止缺少本次确认所绑定的实例检查凭据',
   LEGACY_STOP_FAILED: '未能确认旧版实例已按本次授权停止，请查看停止与恢复结果',
   EBUSY: '文件或安装目录被占用', EPERM: '操作权限不足或文件受保护', EACCES: '访问权限不足', ENOENT: '所需文件或路径不存在', ENOTDIR: '所需路径不是目录', ENOSPC: '磁盘空间不足', EIO: '文件读写失败', EROFS: '文件系统只读', EEXIST: '目标文件已存在', ETIMEDOUT: '操作超时', ECONNREFUSED: '连接被拒绝', ECONNRESET: '连接被重置', ENOTFOUND: '服务器地址解析失败', EAI_AGAIN: '服务器地址解析暂时失败', ERR_CHILD_PROCESS_STDIO_MAXBUFFER: '子进程输出超过维护限制',
-  PROCESS_EXIT_NONZERO: '子进程以非零退出码退出', PROCESS_TERMINATED: '子进程被终止', OPERATION_TIMEOUT: '维护请求超时', OPERATION_ABORTED: '维护请求被取消', MAINTENANCE_BUSY: '已有维护任务或待核实的维护锁', CLIENT_BUSY: '客户端仍有执行或请求未完成', CONFIG_CHANGED: '连接配置在维护期间发生变化', UPDATE_HASH_INVALID: '更新包 SHA-256 校验失败', UPDATE_HTTP_FAILED: '官方更新请求失败', UPDATE_TOO_LARGE: '更新包超过大小限制', UPDATE_SOURCE_INVALID: '更新地址未通过安全校验', UPDATE_MANIFEST_INVALID: '官方发布清单与更新地址不匹配', UPDATE_BUILD_MISMATCH: '实际安装与已验证候选的 build 不一致', NPM_UNAVAILABLE: '当前 Node 对应的 npm CLI 无法核验', INVALID_PARENT: '发起更新的父进程身份无效', PARENT_STILL_RUNNING: '发起更新的 CLI 未在时限内退出'
+  PROCESS_EXIT_NONZERO: '子进程以非零退出码退出', PROCESS_TERMINATED: '子进程被终止', OPERATION_TIMEOUT: '维护请求超时', OPERATION_ABORTED: '维护请求被取消', MAINTENANCE_BUSY: '已有维护worker正在运行；未并发更换安装', MAINTENANCE_OWNER_UNVERIFIED: '维护worker身份暂时无法确认；未更换安装', CLIENT_BUSY: '客户端仍有执行或请求未完成', CONFIG_CHANGED: '连接配置在维护期间发生变化', UPDATE_HASH_INVALID: '更新包 SHA-256 校验失败', UPDATE_HTTP_FAILED: '官方更新请求失败', UPDATE_TOO_LARGE: '更新包超过大小限制', UPDATE_SOURCE_INVALID: '更新地址未通过安全校验', UPDATE_MANIFEST_INVALID: '官方发布清单与更新地址不匹配', UPDATE_BUILD_MISMATCH: '实际安装与已验证候选的 build 不一致', NPM_UNAVAILABLE: '当前 Node 对应的 npm CLI 无法核验', INVALID_PARENT: '发起更新的父进程身份无效', PARENT_STILL_RUNNING: '发起更新的 CLI 未在时限内退出'
 };
 
 // Never serialize arbitrary Error.message, command, stdout, stderr, stack or config.
 // The cause chain is bounded; only public codes and small numeric facts may leave it.
 export function describeUpdateFailure(error, stage = 'unknown') {
   const failureStage = UPDATE_STAGES.has(stage) ? stage : 'unknown';
-  let reasonCode = null, exitCode, signal, httpStatus,stopReasons;
+  let reasonCode = null, exitCode, signal, httpStatus,stopReasons, recoveryPhase, recoveryReasonCode, maintenanceOwnerState, workerPid;
   const seen = new Set();
   for (let current = error, depth = 0; current && typeof current === 'object' && depth < 4 && !seen.has(current); current = current.cause, depth++) {
     seen.add(current);
+    if (!recoveryPhase && SAFE_RECOVERY_PHASES.has(current.recoveryPhase)) recoveryPhase = current.recoveryPhase;
+    if (!recoveryReasonCode && SAFE_RECOVERY_REASONS.has(current.reasonCode)) recoveryReasonCode = current.reasonCode;
+    if (!maintenanceOwnerState && MAINTENANCE_STATES.has(current.maintenanceOwnerState)) maintenanceOwnerState = current.maintenanceOwnerState;
+    if (workerPid === undefined && Number.isSafeInteger(current.workerPid) && current.workerPid > 0) workerPid = current.workerPid;
     if (!reasonCode && SAFE_ERROR_CODES.has(current.code)) reasonCode = current.code;
     if (!reasonCode && ['TimeoutError', 'AbortError'].includes(current.name)) reasonCode = current.name === 'TimeoutError' ? 'OPERATION_TIMEOUT' : 'OPERATION_ABORTED';
     if (exitCode === undefined && typeof current.cmd === 'string' && Number.isInteger(current.code) && current.code !== 0 && Math.abs(current.code) <= 2147483647) exitCode = current.code;
@@ -59,11 +65,12 @@ export function describeUpdateFailure(error, stage = 'unknown') {
   }
   reasonCode ||= exitCode !== undefined ? 'PROCESS_EXIT_NONZERO' : signal ? 'PROCESS_TERMINATED' : failureStage.toUpperCase() + '_FAILED';
   const reason = (FAILURE_REASONS[reasonCode] || (SAFE_ERROR_CODES.has(reasonCode) ? '客户端安全核验或维护操作失败' : '此维护阶段未完成；未记录未经核验的原始输出'))+(stopReasons?'：'+localStopReasonMessage(stopReasons):'');
-  return { failureStage, reasonCode, reason, ...(exitCode !== undefined ? { exitCode } : {}), ...(signal ? { signal } : {}), ...(httpStatus !== undefined ? { httpStatus } : {}),...(stopReasons?{stopReasons}:{}) };
+  return { failureStage, reasonCode, reason, ...(exitCode !== undefined ? { exitCode } : {}), ...(signal ? { signal } : {}), ...(httpStatus !== undefined ? { httpStatus } : {}),...(stopReasons?{stopReasons}:{}), ...(recoveryPhase ? {recoveryPhase} : {}), ...(recoveryReasonCode ? {recoveryReasonCode} : {}), ...(maintenanceOwnerState ? {maintenanceOwnerState} : {}), ...(workerPid !== undefined ? {workerPid} : {}) };
 }
 
 function diagnosticMessage(diagnostic) {
-  return `失败阶段：${diagnostic.failureStage}；原因：${diagnostic.reason}（${diagnostic.reasonCode}${diagnostic.exitCode !== undefined ? `，退出码 ${diagnostic.exitCode}` : ''}${diagnostic.httpStatus !== undefined ? `，HTTP ${diagnostic.httpStatus}` : ''}）。`;
+  const recovery = diagnostic.recoveryPhase ? `恢复步骤：${diagnostic.recoveryPhase}${diagnostic.recoveryReasonCode ? `；具体原因：${diagnostic.recoveryReasonCode}` : ''}。` : '';
+  return `失败阶段：${diagnostic.failureStage}；原因：${diagnostic.reason}（${diagnostic.reasonCode}${diagnostic.exitCode !== undefined ? `，退出码 ${diagnostic.exitCode}` : ''}${diagnostic.httpStatus !== undefined ? `，HTTP ${diagnostic.httpStatus}` : ''}）。${recovery}`;
 }
 
 class ClientUpdateFailure extends Error {
@@ -257,7 +264,7 @@ async function performClientUpdateInternal({ root, env = process.env, directory,
     const recovery = await recoverBeforeClientUpdateStop({ candidate, root, env, log });
     // Historical quarantine is included in the old daemon's active count. Its
     // audited recovery must run before the ordinary zero-active drain loop.
-    if (recovery.recovered) stopped = { ...recovery, stopped: true, wasRunning: true };
+    if (recovery.recovered) stopped = { ...recovery };
     else {
       progress.stage = 'stop_client';
       stopped = await stop({ root, env, retainedRecoveryRoot: candidate, ...(allowLegacyStop ? { allowLegacyStop: true, legacyProof } : {}) });
@@ -330,9 +337,10 @@ async function performClientUpdateInternal({ root, env = process.env, directory,
 
 export async function recoverBeforeClientUpdateStop({candidate,root,env=process.env,log=()=>{},load=specifier=>import(specifier)}={}) {
   const module = await load(pathToFileURL(path.join(candidate,'scripts/client-historical-prelaunch-recovery.mjs')).href);
-  const receipt = await module.recoverHistoricalPrelaunchForUpdate({root,env});
+  const receipt = await module.recoverHistoricalPrelaunchForUpdate({root,env,log});
   if(receipt?.recovered===true) {
-    if(receipt.stopped!==true||receipt.wasRunning!==true)throw failure('HISTORICAL_PRELAUNCH_RECOVERY_REFUSED','历史恢复未给出可核验的停止结果');
+    const observedAbsent = receipt.operatorAbandoned===true && receipt.currentDaemonAbsent===true && receipt.stopped===false && receipt.wasRunning===false && receipt.originalExecutionExitConfirmed===false && receipt.executionConfirmedStopped===false;
+    if(receipt.currentDaemonAbsent===true ? !observedAbsent : receipt.stopped!==true||receipt.wasRunning!==true)throw failure('HISTORICAL_PRELAUNCH_RECOVERY_REFUSED','历史恢复未给出可核验的停止结果');
     log(receipt.operatorAbandoned===true?'operator_force_abandon_recovered':'historical_prelaunch_recovered',{actionId:receipt.actionId});
   }
   return receipt || {recovered:false};
@@ -385,8 +393,167 @@ export async function launchClientUpdate({ codeRoot, root = codeRoot, args = {},
   return { state: 'queued', operation: 'update', workerPid: child.pid, resultFile, logFile: path.join(directory, 'maintenance.jsonl') };
 }
 
-export function readUpdateResult({ env = process.env } = {}) {
-  try { const pointer = JSON.parse(fs.readFileSync(path.join(defaultUserDir({ env }), 'maintenance', 'latest-update.json'))); return { ...JSON.parse(fs.readFileSync(pointer.resultFile)), resultFile: pointer.resultFile, logFile: path.join(pointer.directory, 'maintenance.jsonl') }; } catch (error) { if (error.code === 'ENOENT') return { state: 'none', operation: 'update' }; throw error; }
+// Only maintenance-worker identity is described here. It is never evidence that
+// an employee task, Hermes process or its descendants exited.
+const MAINTENANCE_STATES = new Set(['alive', 'exited', 'pid_reused', 'unknown']);
+const sameMaintenancePath = (a, b) => typeof a === 'string' && typeof b === 'string' && path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
+const psLiteral = value => "'" + String(value).replaceAll("'", "''") + "'";
+const asciiJson = value => JSON.stringify(value, null, 2).replace(/[\u007f-\uffff]/g, character => '\\u' + character.charCodeAt(0).toString(16).padStart(4, '0')) + '\n';
+
+function readMaintenanceBytes(file) {
+  noLinks(file);
+  const stat = fs.lstatSync(file);
+  if (!stat.isFile() || stat.nlink !== 1 || stat.size > 65536) throw failure('UNSAFE_PATH', '维护记录不是受限的普通文件');
+  return fs.readFileSync(file);
+}
+
+function readMaintenanceJson(file) { return JSON.parse(readMaintenanceBytes(file).toString('utf8').replace(/^\uFEFF/, '')); }
+
+export function writeMaintenanceResult(file, value, { io = fs } = {}) {
+  const temporary = file + '.next-' + randomUUID(); let fd;
+  try {
+    fd = io.openSync(temporary, 'wx', 0o600);
+    io.writeFileSync(fd, asciiJson(value)); io.fsyncSync(fd); io.closeSync(fd); fd = undefined;
+    io.renameSync(temporary, file);
+  } finally {
+    if (fd !== undefined) try { io.closeSync(fd); } catch {}
+    try { io.unlinkSync(temporary); } catch {}
+  }
+}
+
+export async function inspectMaintenanceProcess(pid) {
+  if (process.platform !== 'win32' || !Number.isSafeInteger(pid) || pid < 1) return { state: 'unknown' };
+  try {
+    const code = `[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); $ErrorActionPreference='Stop'; $p=Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}'; if($p){[pscustomobject]@{pid=[int]$p.ProcessId;creationTime=$p.CreationDate.ToUniversalTime().ToString('o');executable=$p.ExecutablePath;command=$p.CommandLine}|ConvertTo-Json -Compress}else{'null'}`;
+    const { stdout } = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', code], { encoding: 'utf8', timeout: 8000, windowsHide: true, maxBuffer: 65536 });
+    const record = JSON.parse(stdout.replace(/^\uFEFF/, '').trim());
+    if (record === null) return { state: 'exited' };
+    if (record?.pid !== pid || typeof record.command !== 'string' || !record.command || typeof record.executable !== 'string' || !record.executable || !Number.isFinite(Date.parse(record.creationTime))) return { state: 'unknown' };
+    return { state: 'present', record };
+  } catch { return { state: 'unknown' }; }
+}
+
+export async function maintenanceOwnerStatus(lock, { inspectProcess = inspectMaintenanceProcess } = {}) {
+  if (!lock || lock.operation !== 'update' || !Number.isSafeInteger(lock.pid) || lock.pid < 1 || typeof lock.jobFile !== 'string' || !path.isAbsolute(lock.jobFile) || path.basename(lock.jobFile) !== 'job.json') return { state: 'unknown' };
+  const probe = await inspectProcess(lock.pid);
+  if (probe?.state === 'exited') return { state: 'exited', pid: lock.pid, probe };
+  if (probe?.state !== 'present' || !probe.record) return { state: 'unknown', pid: lock.pid };
+  const current = probe.record, args = (await import('./client-lifecycle.mjs')).windowsCommandArguments(current.command || '');
+  const expectedEntry = path.join(path.dirname(lock.jobFile), 'helper', 'scripts', 'client-update-worker.mjs');
+  const matchesLegacyCommand = args.length === 3 && sameMaintenancePath(args[0], current.executable) && sameMaintenancePath(args[1], expectedEntry) && sameMaintenancePath(args[2], lock.jobFile);
+  const matchesGeneration = lock.version === 2 ? Number.isFinite(Date.parse(lock.creationTime)) && lock.creationTime === current.creationTime && sameMaintenancePath(lock.executable, current.executable) && lock.commandHash === hash(current.command) : matchesLegacyCommand;
+  return { state: matchesLegacyCommand && matchesGeneration ? 'alive' : 'pid_reused', pid: lock.pid, probe };
+}
+
+// Rename the exact stale lock through its exclusively held Windows file handle.
+// A path-based check followed by rename can otherwise retire a new contender's
+// lock. The native operation rechecks both bytes and the observed PID generation.
+export async function retireMaintenanceLock({ file, archive, sha256, owner }) {
+  if (process.platform !== 'win32' || !['exited', 'pid_reused'].includes(owner?.state)) return false;
+  const expected = Buffer.from(JSON.stringify({ sha256, pid: owner.pid, probe: owner.probe })).toString('base64');
+  const source = `using System; using System.IO; using System.Text; using System.Runtime.InteropServices; using Microsoft.Win32.SafeHandles;
+public sealed class ZiweiMaintenanceLock : IDisposable {
+  [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern SafeFileHandle CreateFile(string name,uint access,uint share,IntPtr sa,uint disposition,uint flags,IntPtr template);
+  [DllImport("kernel32.dll", SetLastError=true)] static extern bool GetFileSizeEx(SafeFileHandle h,out long size);
+  [DllImport("kernel32.dll", SetLastError=true)] static extern bool ReadFile(SafeFileHandle h,byte[] bytes,uint size,out uint read,IntPtr overlapped);
+  [DllImport("kernel32.dll", SetLastError=true)] static extern bool SetFileInformationByHandle(SafeFileHandle h,int kind,IntPtr info,uint size);
+  readonly SafeFileHandle handle;
+  public ZiweiMaintenanceLock(string file) { handle=CreateFile(file,0x80010000,0,IntPtr.Zero,3,0,IntPtr.Zero); if(handle.IsInvalid)throw new IOException("LOCK_UNAVAILABLE"); }
+  public byte[] Read() {long size;uint read;if(!GetFileSizeEx(handle,out size)||size<1||size>65536)throw new IOException("LOCK_INVALID");byte[] b=new byte[(int)size];if(!ReadFile(handle,b,(uint)size,out read,IntPtr.Zero)||read!=size)throw new IOException("LOCK_READ_FAILED");return b;}
+  public void Rename(string file) {byte[] name=Encoding.Unicode.GetBytes(file);int root=IntPtr.Size==8?8:4;int length=root+IntPtr.Size;int start=length+4;IntPtr p=Marshal.AllocHGlobal(start+name.Length);try{for(int i=0;i<start;i++)Marshal.WriteByte(p,i,0);Marshal.WriteIntPtr(p,root,IntPtr.Zero);Marshal.WriteInt32(p,length,name.Length);Marshal.Copy(name,0,IntPtr.Add(p,start),name.Length);if(!SetFileInformationByHandle(handle,3,p,(uint)(start+name.Length)))throw new IOException("LOCK_RENAME_FAILED");}finally{Marshal.FreeHGlobal(p);}}
+  public void Dispose(){handle.Dispose();}
+}`;
+  const code = `$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); Add-Type -TypeDefinition ${psLiteral(source)}; $expected=([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(${psLiteral(expected)}))|ConvertFrom-Json); $h=$null; try{$h=[ZiweiMaintenanceLock]::new(${psLiteral(file)});$hasher=[Security.Cryptography.SHA256]::Create();try{$actual=[BitConverter]::ToString($hasher.ComputeHash($h.Read())).Replace('-','').ToLowerInvariant()}finally{$hasher.Dispose()};if($actual -cne $expected.sha256){throw 'LOCK_CHANGED'};$p=Get-CimInstance Win32_Process -Filter ('ProcessId = '+[int]$expected.pid);if($expected.probe.state -eq 'exited'){if($p){throw 'OWNER_CHANGED'}}else{if(!$p -or [int]$p.ProcessId -ne [int]$expected.probe.record.pid -or $p.CreationDate.ToUniversalTime().ToString('o') -cne $expected.probe.record.creationTime -or $p.ExecutablePath -cne $expected.probe.record.executable -or $p.CommandLine -cne $expected.probe.record.command){throw 'OWNER_CHANGED'}};$h.Rename(${psLiteral(archive)});'{"retired":true}'}catch{'{"retired":false}'}finally{if($h){$h.Dispose()}}`;
+  try {
+    const { stdout } = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(code, 'utf16le').toString('base64')], { encoding: 'utf8', timeout: 15000, windowsHide: true, maxBuffer: 65536 });
+    return JSON.parse(stdout.replace(/^\uFEFF/, '').trim())?.retired === true;
+  } catch { return false; }
+}
+
+function validateMaintenanceJobFile(jobFile, maintenance) {
+  const directory = path.dirname(path.resolve(jobFile));
+  return sameMaintenancePath(path.dirname(directory), maintenance) && /^update-[a-f0-9-]{36}$/.test(path.basename(directory)) && path.basename(jobFile) === 'job.json';
+}
+
+export async function acquireUpdateMaintenanceLock({ home, jobFile, inspectProcess = inspectMaintenanceProcess, retireLock = retireMaintenanceLock, log = () => {} }) {
+  const maintenance = path.join(path.resolve(home), 'maintenance'), file = path.join(maintenance, 'operation.lock');
+  noLinks(file);
+  if (!validateMaintenanceJobFile(jobFile, maintenance)) throw failure('UNSAFE_PATH', '维护任务路径无效');
+  const self = await inspectProcess(process.pid);
+  if (self?.state !== 'present') throw failure('MAINTENANCE_OWNER_UNVERIFIED', '无法核验当前维护worker实例');
+  const lock = { version: 2, pid: process.pid, operation: 'update', jobFile: path.resolve(jobFile), creationTime: self.record.creationTime, executable: self.record.executable, commandHash: hash(self.record.command), nonce: randomUUID() };
+  if ((await maintenanceOwnerStatus(lock, { inspectProcess })).state !== 'alive') throw failure('MAINTENANCE_OWNER_UNVERIFIED', '当前维护worker身份不匹配');
+  const bytes = asciiJson(lock);
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try { fs.writeFileSync(file, bytes, { flag: 'wx', mode: 0o600 }); return { file, bytes, lock }; }
+    catch (error) { if (error.code !== 'EEXIST') throw error; }
+    let existing, original;
+    try { original = readMaintenanceBytes(file); existing = JSON.parse(original.toString('utf8')); }
+    catch (error) { if (error.code === 'ENOENT') continue; throw failure('MAINTENANCE_OWNER_UNVERIFIED', '维护锁身份无法确认，未覆盖已有维护'); }
+    if (!validateMaintenanceJobFile(existing.jobFile || '', maintenance)) throw failure('MAINTENANCE_OWNER_UNVERIFIED', '维护锁路径无法确认');
+    const owner = await maintenanceOwnerStatus(existing, { inspectProcess });
+    if (!['exited', 'pid_reused'].includes(owner.state)) throw failure(owner.state === 'alive' ? 'MAINTENANCE_BUSY' : 'MAINTENANCE_OWNER_UNVERIFIED', '维护worker仍在运行或身份无法确认', { maintenanceOwnerState: owner.state, workerPid: existing.pid });
+    const archive = path.join(maintenance, `retired-operation-${randomUUID()}.json`);
+    if (!await retireLock({ file, archive, sha256: hash(original), owner })) continue;
+    log('stale_maintenance_lock_retired', { previousWorkerPid: existing.pid, ownerState: owner.state });
+  }
+  throw failure('MAINTENANCE_OWNER_UNVERIFIED', '维护锁状态持续变化或暂时无法归档；未更换安装');
+}
+
+export function releaseUpdateMaintenanceLock(lease) {
+  if (!lease) return false;
+  try { noLinks(lease.file); if (fs.readFileSync(lease.file, 'utf8') !== lease.bytes) return false; fs.unlinkSync(lease.file); return true; }
+  catch { return false; }
+}
+
+function lastMaintenanceEvent(directory) {
+  try {
+    const file = path.join(directory, 'maintenance.jsonl'); noLinks(file);
+    const stat = fs.statSync(file); if (!stat.isFile() || stat.size > 4 * 1024 * 1024) return null;
+    const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/);
+    for (let index = lines.length - 1; index >= 0; index--) {
+      let event; try { event = JSON.parse(lines[index]); } catch { continue; }
+      if (event && typeof event.event === 'string' && /^[a-z_]{1,64}$/.test(event.event) && Number.isFinite(Date.parse(event.at))) return event;
+    }
+  } catch {}
+  return null;
+}
+
+function terminalMaintenanceFailure(directory) {
+  try {
+    const file = path.join(directory, 'maintenance.jsonl'); noLinks(file);
+    const stat = fs.statSync(file); if (!stat.isFile() || stat.size > 4 * 1024 * 1024) return null;
+    const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/);
+    for (let index = lines.length - 1; index >= 0; index--) {
+      let event; try { event = JSON.parse(lines[index]); } catch { continue; }
+      if (!['maintenance_failed', 'update_failed'].includes(event?.event) || !Number.isFinite(Date.parse(event.at))) continue;
+      const diagnostic = describeUpdateFailure({ code: event.reasonCode, ...(Number.isInteger(event.exitCode) ? { code: event.exitCode, cmd: 'child' } : {}) }, event.failureStage);
+      return { state: 'failed', operation: 'update', code: 'UPDATE_FAILED', ...diagnostic, originalRestored: typeof event.originalRestored === 'boolean' ? event.originalRestored : null, originalInstallationRestored: typeof event.originalInstallationRestored === 'boolean' ? event.originalInstallationRestored : null, runningStateRestored: typeof event.runningStateRestored === 'boolean' ? event.runningStateRestored : null, finishedAt: event.at, recoveredFrom: 'maintenance-log', message: '更新失败；已从维护日志恢复真实结果。' + diagnosticMessage(diagnostic) };
+    }
+  } catch {}
+  return null;
+}
+
+export async function readUpdateResult({ env = process.env, resultFile, inspectProcess = inspectMaintenanceProcess } = {}) {
+  try {
+    const maintenance = path.join(defaultUserDir({ env }), 'maintenance');
+    const pointer = resultFile ? {resultFile:path.resolve(String(resultFile)),directory:path.dirname(path.resolve(String(resultFile)))} : readMaintenanceJson(path.join(maintenance, 'latest-update.json'));
+    if (!validateMaintenanceJobFile(path.join(pointer.directory || '', 'job.json'), maintenance) || !sameMaintenancePath(pointer.resultFile, path.join(pointer.directory, 'result.json'))) throw failure('UNSAFE_PATH', '更新状态入口无效');
+    let result = readMaintenanceJson(pointer.resultFile);
+    const details = { resultFile: pointer.resultFile, logFile: path.join(pointer.directory, 'maintenance.jsonl') };
+    if (!['queued', 'running'].includes(result.state)) return { ...result, ...details };
+    try { const terminal = readMaintenanceJson(path.join(pointer.directory, 'terminal.json')); if (['complete', 'failed'].includes(terminal.state)) result = terminal; } catch {}
+    if (['queued', 'running'].includes(result.state)) result = terminalMaintenanceFailure(pointer.directory) || result;
+    const event = lastMaintenanceEvent(pointer.directory);
+    let identity;
+    try { identity = readMaintenanceJson(path.join(pointer.directory, 'worker.json')); } catch {}
+    if (!identity) try { const candidate = readMaintenanceJson(path.join(maintenance, 'operation.lock')); if (sameMaintenancePath(candidate.jobFile, path.join(pointer.directory, 'job.json'))) identity = candidate; } catch {}
+    if (!identity && Number.isSafeInteger(result.workerPid || event?.pid) && (result.workerPid || event?.pid) > 0) identity = {operation:'update',pid:result.workerPid || event.pid,jobFile:path.join(pointer.directory,'job.json')};
+    const owner = identity ? await maintenanceOwnerStatus(identity, { inspectProcess }) : { state: 'unknown' };
+    if (['queued', 'running'].includes(result.state)) { const {finishedAt:_staleFinishedAt,...nonterminal}=result; result=nonterminal; }
+    if (['queued', 'running'].includes(result.state) && ['exited', 'pid_reused'].includes(owner.state)) result = { ...result, state: 'interrupted', code: 'MAINTENANCE_WORKER_EXITED', reason: '维护worker已退出，更新未完成；下次官方更新会自动归档失效维护锁', message: '维护worker已退出，更新未完成；下次官方更新会自动归档失效维护锁', finishedAt: event?.at || null };
+    return { ...result, ...details, workerStatus: owner.state, ...(identity ? { workerPid: identity.pid } : {}), ...(event ? { lastEvent: event.event, lastProgressAt: event.at } : {}) };
+  } catch (error) { if (error.code === 'ENOENT') return { state: 'none', operation: 'update' }; throw error; }
 }
 
 export async function waitForParentExit(pid, timeoutMs = 30_000) {

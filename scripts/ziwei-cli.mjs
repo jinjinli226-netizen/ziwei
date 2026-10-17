@@ -476,9 +476,9 @@ async function main() {
   }
   if (command === 'update-status') {
     const { readUpdateResult } = await import('./client-update.mjs');
-    const result = readUpdateResult({ env: process.env });
-    console.log(args.json ? JSON.stringify(result) : JSON.stringify(result, null, 2));
-    if (result.state === 'failed') process.exitCode = 1;
+    const result = await readUpdateResult({ env: process.env, ...(args.result ? {resultFile:args.result} : {}) });
+    console.log((args.json ? JSON.stringify(result) : JSON.stringify(result, null, 2)).replace(/[\u007f-\uffff]/g, character => '\\u' + character.charCodeAt(0).toString(16).padStart(4, '0')));
+    if (['failed', 'interrupted'].includes(result.state)) process.exitCode = 1;
     return;
   }
   if (command === 'uninstall' || command === 'remove') {
