@@ -17,6 +17,7 @@ import tempfile
 import threading
 import time
 import zipfile
+import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 
 MODULE = Path(__file__).resolve().parent.parent
@@ -229,6 +230,20 @@ def push_unsigned(args, java, sdk, work, env):
         merged = list((project / "build/intermediates/merged_manifests").rglob("AndroidManifest.xml"))
         if len(merged) != 1:
             raise RuntimeError("Expected the real merged push manifest")
+        root = ET.parse(merged[0]).getroot()
+        android = "{http://schemas.android.com/apk/res/android}"
+        application = root.find("application")
+        expected_providers = {"com.tencent.android.tpush.XGPushProvider", "com.tencent.android.tpush.SettingsContentProvider",
+                              "com.tencent.tpns.baseapi.base.SettingsContentProvider", "com.xiaomi.push.service.logupload.LogUploadFileProvider",
+                              "com.huawei.hms.support.api.push.PushProvider"}
+        if application is None or application.get(android + "name") != "com.ziwei.manager.ManagerApplication":
+            raise RuntimeError("Missing pre-provider process initialization gate")
+        providers = application.findall("provider")
+        if {p.get(android + "name") for p in providers} != expected_providers or any(p.get(android + "exported") != "false" for p in providers):
+            raise RuntimeError("Unexpected push provider initialization or exposure")
+        for permission in root.findall("permission"):
+            if permission.get(android + "name", "").startswith("com.ziwei.manager.") and permission.get(android + "protectionLevel") != "signature":
+                raise RuntimeError("Push IPC permission is not signature protected")
         # Keep the merged component/permission evidence private, outside public release attachments.
         evidence = local / "last-merged-AndroidManifest.xml"
         shutil.copyfile(merged[0], evidence)
@@ -306,6 +321,7 @@ def build(args):
                           "com.meizu.flyme.permission.PUSH", "com.meizu.flyme.push.permission.RECEIVE", "com.meizu.c2dm.permission.RECEIVE",
                           "com.ziwei.manager.permission.XGPUSH_RECEIVE", "com.ziwei.manager.permission.MIPUSH_RECEIVE",
                           "com.ziwei.manager.push.permission.MESSAGE", "com.ziwei.manager.permission.C2D_MESSAGE",
+                          "com.ziwei.manager.permission.PROCESS_PUSH_MSG", "com.ziwei.manager.permission.PUSH_PROVIDER",
                           "com.ziwei.manager.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"}
         if not base.issubset(permissions) or set(permissions) - (allowed if args.profile == "tpns" else base):
             raise RuntimeError("Unexpected APK permission boundary: " + repr(permissions))
