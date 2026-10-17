@@ -1,5 +1,31 @@
 # 2026-10-17 Android 聊天记录同步超时修复
 
+## 0.2.2/code9 最终交付：一分钟读取等待
+
+用户新截图为“运行记录更新失败”，主控确认请求已是0.2.1。服务端减去mobile runs、Bot latest_run/stop_action、conversation.execution明确附件槽位内已识别图片的重复内联字节，完整prompt/messageId、报告、最后/终态事件、退出/停止证明及未知字段保留。默认API、MCP、DB原件和认证聊天图片不变；继续保留聊天runs fallback，不以parallel directory.inspect覆盖的latest替代原activeAction或Stop目标。
+
+正式API `9393dcb0aab1c7afeacf368c7205f300264fa69e`先推主发布分支，18:06:21（Asia/Shanghai）上线至`/opt/ziwei/releases/mobile-runs-projection-9393dcb0aab1-e0f199eb/v2`，PID366044。主控固定同ID现场只读重建快照runs419971→134273B、execution258244→17138B，完整非图及控制证明保持；这是字节统计，不是手机HTTP耗时。主控相关78回归/lint178、独立27与最终18保护检查通过，完整MCP/网页/CLI/DB身份/schema保持；最终文档e01d409已推。根修复分支73项与独立27项通过。
+
+用户随后明确要求一分钟等待。App GET默认20000→60000ms，慢body继续收取，真实网络/权限/内容错误仍显示，60秒仍未完成才READ_TIMEOUT；页面读取失败不停止员工任务，不给POST增加取消或重发，离页/后台仍取消旧读取。此项需要升级App；以下0.2.1历史记录中的20秒不能冒充当前交付阈值。
+
+一分钟逻辑提交`3f8e266b05b38f87dcf6bf1177637ac9e8d4cdc4`先推，215单元及73 Java URL检查通过，mock timers覆盖45秒完整body和60000ms真超时且不重试/停止。配9393 API的真实HTTP runs专用3800B/s规则验收：176796B于47055ms完整返回；20/30/45秒仍收包、无早超时、只有1个在途runs、报告/prompt/proof与两条真实历史逐字保持；948次50ms采样Stop保持可见、发送保持禁用。此为桌面Chromium单资源合成限速，非共享蜂窝。原20秒阶段19.447秒仅约0.55秒余量，旧证据不覆盖新需求。
+
+最终产品`47db0bcf55b7769c883a2b3dd3afeaf9fbc48deb`只修“我的”版本文字为0.2.2，view10项复核通过。独立比较确认14资产逐字相同、view.js仅该字面，API SHA仍`4ea47ded84fdf187009f87b5d40359b70f55a67a7b63060e344513cdfcc1172e`；原47秒证据仍归3f8，未冒称最终commit重跑。根将最终APK15资产与47db Git blob逐字核对。
+
+最终APK `ziwei-manager-0.2.2-internal-code9.apk`，706114B，SHA-256 `85dd797f002b1c796ed6355bf08cc0c6288d86f0d8fd97202b8896cfb9ead9f5`，沿用签名`507531ee91afe6369a2d519d653713a76d2fa54b8f5f76119672f668230ced35`。3f8/d8de包仅为未公开候选，旧草稿核身份后已删；最终tag/Release均指47db，manifest实体设备验证仍false。
+
+全盘私有AVD clone实测code8→code9覆盖，原登录/firstInstallTime保持。3f8候选在9393上线后两位正确原员工分别跨26.735s/22.153s轮询，原正文/已有图片可见且无读取错误；未把它们计成最终85dd截图。最终47db/85dd真实再覆盖、guest APK SHA相同、“我的”0.2.2正确，10:16:04Z恢复帧/XML及10:16:26Z目视确认正确TikTok原历史仍在、无读错或浏览器外跳。真实状态分别为原执行已停止/上次已完成，不冒称真实在途跨发布；Stop/阻发长等待由隔离夹具覆盖。未发真实消息/转发/配置/Stop/设备命令，允许App已读水位；无真实cookie或CDP提取。
+
+[0.2.2 Release](https://github.com/jinjinli226-netizen/ziwei/releases/tag/android-manager-v0.2.2-internal)于18:17:11公开，三附件均匿名完整回读与本地/digest相同，远端tag核47db。[APK直接下载](https://github.com/jinjinli226-netizen/ziwei/releases/download/android-manager-v0.2.2-internal/ziwei-manager-0.2.2-internal-code9.apk)。590px二维码经Vision实际解码到该URL；交付在主目录`output/android-manager/v0.2.2-internal/`。
+
+临时HTTP283/284/285和新AVD286–290均已停止、确认无监听后release；clone销毁，六原盘SHA/size/mtime复制前后及QA后相同。ADB首次mDNS发现后只停自身ADB、关闭mDNS再启动并复核green；退出console短暂释放延迟，待实际无监听才release。根第一次独立扫描非零导致记录脚本提前退出、未改文档；随后独立复查成功，最终ok/0冲突/0未登记，原失败未冒称成功。旧kernel UEs的267/268/271有归属保留，其他项目260未动。
+
+私有证据：Android worktree `.local/mobile-manager-code9-native-qa/`、`.local/mobile-manager-release-0.2.2/`；修复worktree `.local/mobile-manager-runs-final-http-qa/`、`.local/mobile-manager-minute-read-qa/`及final-source-compat.json。真实截图仅本机0600，不随Git/Release上传。
+
+---
+
+以下保留0.2.1/code8的历史记录。
+
 用户在0.2.0/code7交付后明确反馈：进入员工聊天，持续提示“聊天记录同步失败：读取超时”。原先原AVD通过属于上版当时观察，不能替代本次故障复现或保证实体手机网络表现。继续按已授权的总控协作分工：总控维护线上API，Android分支负责App及隔离、模拟器验证；不发送真实员工消息、转发、执行或配置命令，仅允许App自身已读水位。
 
 ## 已确认的读取行为
