@@ -256,3 +256,13 @@ API/前端于UTC16:54:04切换到 /opt/ziwei/releases/maintenance-recovery-874fc
 新增的窄支路仅接受这条已授权原任务的result_pending或blocked：双blob必须存在，身份、绑定、SHA均有效，retainEvidence与dispatcherStatus正确，serverStatus不得为成功、过期或未知值；blockedStatus必须是永久4xx并排除408/429。结果的error和完整uncertain正文必须精确匹配固定原失败。仍归档原始四文件字节、不伪造confirmed/serverStatus/原进程退出，不重放消息；其余started/completed、聊天及Profile/HOME保留。既有confirmed/failed路径和服务端合同不变，不需切换API。正式更新失败回执同步增加有限白名单recoveryRule，避免再次只留下笼统EVIDENCE_MISMATCH；不输出原配置、命令行或错误原文。
 
 最终整合136项测试，131通过、5项Windows平台条件跳过、0失败；另排除未变的本机HTTP下载测试以免启动临时监听。包含真实writer产生的pending/blocked离线归档端到端、拒绝矛盾状态/错误结果/损坏blob、原字节与其他历史保留、只读诊断不写入、更新状态及安全错误投影。静态检查191项通过，未启动本机监听。Windows现场恢复仍待新版官方更新实际回执，不将这些测试写成知微已经恢复。源码先推GitHub，之后仅更新官方CLI下载；发布及真实设备结果另记。
+
+### 投递日志恢复版已正式发布（北京时间 2026-10-18 01:40）
+
+产品提交 `e9ff426be18dfb72ea0f9fd5ef34701e290aab40` 已先推GitHub两条既有分支。第二位审查者独立运行89项回归，88通过、1项Windows平台跳过、0失败，并检查全部56个静态失败规则均可进入受限更新诊断；原合同/API不需修改。首次私有打包因发布器多要求两个未列入package.files的诊断源而被阻止；移除多余要求，未改产品包清单，另建final目录重新完成完整冷包校验，失败候选未发布。
+
+最终53项required源码与Git归档、tgz逐字节一致；本地及服务器Linux空缓存离线安装/运行闭包核验通过，未启动监听或运行设备维护。冻结manifest SHA256 `40f1d9d68f67ad59f9448622025f9684de5d52074fffbc70480bfc2f7bc18520`，payload SHA256 `22df3c61a47784547942cc6dd557855e48b1b7f05b6eb73c95476c45c42b27db`，仅含CLI包、离线检查包/程序与独立更新PS。独立核验源、包、上传计划及远端执行脚本均通过。
+
+UTC17:39:48仅发布官方CLI，build `484fa58efd3b9dc569f8f9ceefd92b15ee23f00a9831142fbea7904e047793b7`；tgz1128958字节，SHA256 `67d4e5f73054a3ed4a655c8c81f816ac34811e2aafca9ac88e3c39eee7b8de3e`。独立PS仍为6390字节、原526882摘要；release.json摘要 `745fc7f8f8313bd6604e91bf24e4419e61429d04010d74d963b84f2c5c45d837`。API/前端继续874目录，PID383266；metadata如实保留pairedApiCommit/frontendCommit为874，仅CLI commit为e9ff426。UTC17:40独立postcheck核验公开包/PS/metadata、API文件/服务身份、DB inode/schema及其他CLI工件全部通过，三项只读诊断工件未变。无API重启、业务恢复提交或Windows远程调用。
+
+已请用户在李金晋电脑执行一次官方bootstrap，明确成功后再start；此电脑原先离线，更新器不能伪称恢复原在线状态。后续仍需设备独立恢复回执、原slot解除、新版上线，再从正常用户入口启用并发送一条不重放旧任务的无副作用真实模型验收消息。此发布时不宣称知微已恢复。私有证据在 `.local/operator-force-abandon-journal-release/`。
