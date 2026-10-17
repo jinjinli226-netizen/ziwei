@@ -1,5 +1,12 @@
 # 紫薇项目管理与 AI 接手手册
 
+## 2026-10-17 Android 管理 App 0.1.1 聊天修复
+
+[0.1.1 / code 2 内部测试更新](https://github.com/jinjinli226-netizen/ziwei/releases/tag/android-manager-v0.1.1-internal)修复原聊天历史被附加读取阻塞、首次失败后无法重试，以及旧刷新覆盖刚发送消息的问题。最终 APK 源码 `9fcb83c84652b09927e73172880bc32f1196e921` 已先推 GitHub，发布文件公网回读 SHA-256 `1deac0c3b087171dfa910bab560c4115ea508238dd4fea8f6e468b4b5abb91e1` 一致。沿用 code 1 内部证书，直接覆盖安装，不卸载。
+
+40 项单元、原浏览器 15 条与 Hermes 历史 7 组、55 项原生 URL 门禁及 Android 模拟器覆盖升级和隔离真实新版 WebView 模块检查通过。临时服务已停，登记 240–244 已释放，最终端口 check 通过。真实账号聊天与物理手机不作已验收结论；正式站/API、数据库、电脑客户端和互联 Agent/Updater 不变。构建/边界见 [mobile-manager](mobile-manager/README.md)，完整证据与接续见[本轮记录](docs/operations/2026-10-17-android-manager-chat-history.md)。
+
+
 ## 2026-10-16 Android 管理 App 首版内部测试已发布
 
 独立 Android 管理应用的产品源码为 `3edb4df5c9de2eba90e51fab42688ea742ba0f6b`，已先推 GitHub `codex/android-manager`，再分发 [0.1.0 内部测试包](https://github.com/jinjinli226-netizen/ziwei/releases/tag/android-manager-v0.1.0-internal)。代码、原生壳、构建和维护说明集中在 [mobile-manager](mobile-manager/README.md)，不替换正式站/API，不改变电脑客户端或受控手机 Agent/Updater。

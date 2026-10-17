@@ -1,5 +1,12 @@
 # 紫薇项目 HandOff
 
+## 2026-10-17 Android 管理 App 聊天历史修复已发布
+
+用户报告两位员工进聊天后看不到历史。已复现并修复主会话历史被重复 Bot 查询及运行记录/例行工作阻塞的问题；原历史先显示，辅助请求独立更新，失败可重试原会话。独立审查发现的旧刷新覆盖刚发送消息及执行状态的竞态也已修复。
+
+产品源码先推 GitHub；聊天修复 `c372d0d`，最终构建源码 `9fcb83c84652b09927e73172880bc32f1196e921`。[0.1.1 / code 2 更新 APK](https://github.com/jinjinli226-netizen/ziwei/releases/tag/android-manager-v0.1.1-internal)已发布并公网回读校验，可同签名覆盖 code 1，不必卸载。40 项单元、15 条原浏览器流程、7 组 Hermes 历史回归、55 项 URL 检查，以及 Android 模拟器覆盖升级/真实新版 JS 隔离历史检查通过。用户真机、Android 正式账号历史及 Cookie 未实测；主站/API 和受控端未替换。详见[修复与验收记录](docs/operations/2026-10-17-android-manager-chat-history.md)。
+
+
 ## 2026-10-16 Android 管理 App 首版内部测试
 
 用户已确认先做 Android，并认可浅色紫色视觉。独立分支 `codex/android-manager` 新增 `mobile-manager/`：员工原聊天、多图、工作与状态、既有 Bot 停止、员工常用编辑、例行工作、互联状态与截图，以及「选员工排序 → 逐个汇报/追问 → 汇总和计划待办」。复用原账号、工作区和员工数据；不创建第二套员工/Profile/HOME。Hermes 仍在绑定电脑执行。
