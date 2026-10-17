@@ -1,5 +1,14 @@
 # 紫薇项目管理与 AI 接手手册
 
+## 2026-10-17 Android管理App 0.1.5真实账号读取验收已发布
+
+用户要求模拟器修好再给安装。code4真实员工页超时已复现，code5首轮虽显示历史仍发现辅助读取超时，未公开交付。最终code6修复独立读取、辅助single-flight与错误恢复，手机最近执行只取5条并保留完整终态证据，未变化的长聊天/图片DOM复用。
+
+产品源码`1757bd8190991cd2213ca5a55622d9efe63e717c`已先推GitHub，115项单元与40组浏览器流程通过；Android模拟器用原账号验证5位员工、两原聊天跨轮询/旧记录和模型能力、设备设置必要读取，通过后发布[0.1.5/code6](https://github.com/jinjinli226-netizen/ziwei/releases/tag/android-manager-v0.1.5-internal)。公开APK回读SHA `5039110efa7f73404ab4ac92be0868b06895ca7937164f2856331dd18d48a777`一致，同签名覆盖安装、原登录保留。实际图片只验证部分缩略图可见，原图完整预览、全部辅助catalog、逐条员工手机关联、真实保存/业务及用户实体手机未冒称通过；一次模拟器System UI启动ANR经Wait恢复，后续未复发。
+
+配套API以生产`51e2a255…`raw基底叠加1757bd8窄补丁，保留并发目录读取修复及原preservation字节，非整分支替换。active为`/opt/ziwei/releases/mobile-runs-1757bd819099-51e2a255-bf145367/v2`；清单`9d1547fc…`。主API重启一次，227非选定项及持久路径/其它服务保留，无schema迁移；真实闲鱼runs从4.91MB降至333KB。临时服务已停、255–259释放、root复核端口检查绿色。完整范围/混合来源/核验修正/回退见[员工读取超时记录](docs/operations/2026-10-17-android-manager-employee-timeout.md)。
+
+
 ## 2026-10-17 Android 管理 App 0.1.3 官网图标已发布
 
 用户要求采用官网图标。启动、加载、登录、工作区及关于标识已统一为官网现用 Z 原图，原图 SHA-256 `68452b1f4299b0af353ee35d3315302061fa64c72cc77ba66763ebb8ec81ca2c`；Android 自适应图标只加浅底与安全边距。6 组定向视觉与圆/圆角检查通过，Android 模拟器 code 3 → 4 覆盖升级及实际 Launcher/登录标识已验证。
