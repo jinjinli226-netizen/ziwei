@@ -90,6 +90,45 @@ test('back flushes typing immediately before its debounce expires', async t => {
   assert.equal(f.state.chatDraftPreviews.one, '返回前未停顿的文字');
 });
 
+test('chat detail and model settings return to the exact original conversation and draft', async t => {
+  const original = 'historical-conversation-one';
+  const f = fixture(t, {
+    stateOverrides: { chatThreads: [{ ...threads()[0], conversationId: original }] },
+    overrides: { conversation: async id => ({ id, employee_id: 'one', messages: [] }) },
+  });
+  await f.controller.actions.chat({ id: 'one' });
+  await f.controller.change({ name: 'draft', value: '查看设置后继续写' });
+  await f.controller.actions['employee-detail']({ id: 'one' });
+  assert.equal(f.state.page, 'detail');
+  await f.controller.actions['bot-settings']({ id: 'one' });
+  await f.controller.actions.back(); assert.equal(f.state.page, 'detail');
+  await f.controller.actions.back();
+  assert.equal(f.state.page, 'chat'); assert.equal(f.state.selectedEmployee.id, 'one');
+  assert.equal(f.state.conversation.id, original); assert.equal(f.state.draft, '查看设置后继续写');
+  await f.controller.actions.back(); assert.equal(f.state.page, 'home');
+  assert.equal(f.posts.length, 0);
+});
+
+test('repeated detail and settings taps cannot add duplicate return pages', async t => {
+  const f = fixture(t); await f.controller.actions.chat({ id: 'one' });
+  await f.controller.actions['employee-detail']({ id: 'one' });
+  await f.controller.actions['employee-detail']({ id: 'one' });
+  assert.equal(f.state.settingsTrail.length, 1);
+  await f.controller.actions.settings(); await f.controller.actions.settings();
+  assert.equal(f.state.settingsTrail.length, 2);
+  await f.controller.actions.back(); assert.equal(f.state.page, 'detail');
+  await f.controller.actions.back(); assert.equal(f.state.page, 'chat');
+});
+
+test('a detached old composer input cannot replace another employee draft', async t => {
+  const f = fixture(t); await f.controller.actions.chat({ id: 'one' });
+  await f.controller.actions.chat({ id: 'two' });
+  await f.controller.change({ name: 'draft', value: '乙的草稿' });
+  await f.controller.change({ target: { name: 'draft', value: '甲的迟到输入', isConnected: false } });
+  assert.equal(f.state.draft, '乙的草稿');
+  await f.controller.actions.back(); assert.equal(readDraft(f.storage, 'two'), '乙的草稿');
+});
+
 test('native pause flushes typing immediately and resume keeps the original chat and draft', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const events = nativeEvents(t), f = fixture(t);
@@ -168,6 +207,39 @@ test('a send receipt for a previous employee clears only its original draft', as
   receipt.resolve({ id: 'accepted' }); await sending.promise;
   assert.equal(readDraft(f.storage, 'one'), ''); assert.equal(readDraft(f.storage, 'two'), '乙的独立草稿');
   assert.equal(f.posts.length, 1);
+});
+
+test('a late accepted send clears the visible original composer after leaving and returning', async t => {
+  const f = fixture(t), receipt = deferred(); await f.controller.actions.chat({ id: 'one' });
+  const sending = await pendingSend(f, '已经明确发送的原文', receipt);
+  await f.controller.actions.back(); await f.controller.actions.chat({ id: 'one' });
+  await f.controller.change({ name: 'draft', value: '已经明确发送的原文' });
+  receipt.resolve({ id: 'accepted' }); await sending.promise;
+  assert.equal(f.state.draft, '');
+  await f.controller.actions.back();
+  assert.equal(readDraft(f.storage), ''); assert.equal(f.posts.length, 1);
+});
+
+test('returning to the original employee and editing before its receipt keeps the new draft', async t => {
+  const f = fixture(t), receipt = deferred(); await f.controller.actions.chat({ id: 'one' });
+  const sending = await pendingSend(f, '明确发送的原文', receipt);
+  await f.controller.actions.chat({ id: 'two' }); await f.controller.actions.chat({ id: 'one' });
+  await f.controller.change({ name: 'draft', value: '返回后写的下一条' });
+  receipt.resolve({ id: 'accepted' }); await sending.promise;
+  assert.equal(f.state.draft, '返回后写的下一条');
+  await f.controller.actions.back();
+  assert.equal(readDraft(f.storage), '返回后写的下一条'); assert.equal(f.posts.length, 1);
+});
+
+test('composition start protects a new IME edit even before its first changed input value', async t => {
+  const f = fixture(t), receipt = deferred(); await f.controller.actions.chat({ id: 'one' });
+  const sending = await pendingSend(f, '正在发送的文字', receipt);
+  await f.controller.change({ type: 'compositionstart', target: { name: 'draft', value: '正在发送的文字', isConnected: true } });
+  receipt.resolve({ id: 'accepted' }); await sending.promise;
+  assert.equal(f.state.draft, '正在发送的文字');
+  await f.controller.change({ type: 'compositionend', target: { name: 'draft', value: '输入法刚提交的新文字', isConnected: true } });
+  await f.controller.actions.back();
+  assert.equal(readDraft(f.storage), '输入法刚提交的新文字'); assert.equal(f.posts.length, 1);
 });
 
 test('a previous workspace send receipt never deletes the current workspace draft', async t => {

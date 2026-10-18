@@ -1,13 +1,13 @@
 # Android 自建持续接收
 
-`com.ziwei.manager`，最低 Android 8 / API26，target35。0.5.0 起移除全部TPNS、OEM、FCM适配器与Gradle依赖；0.5.1-internal / code13 补齐已核验历史恢复记录的显示和发送判断。只通过现有正常HTTPS会话连接自建紫薇服务器，没有安装秘密、设备token或第三方注册请求。
+`com.ziwei.manager`，最低 Android 8 / API26，target35。0.5.0 起移除全部TPNS、OEM、FCM适配器与Gradle依赖；0.5.1 补齐已核验历史恢复记录的显示和发送判断；0.5.2-internal / code14 修复输入法、草稿与导航稳定性。只通过现有正常HTTPS会话连接自建紫薇服务器，没有安装秘密、设备token或第三方注册请求。
 
 ## 构建
 
 ```sh
 python3 mobile-manager/scripts/android-tools.py
 python3 mobile-manager/scripts/test-android.py
-python3 mobile-manager/scripts/build-android.py --profile selfhost --version-code 13 --version-name 0.5.1-internal
+python3 mobile-manager/scripts/build-android.py --profile selfhost --version-code 14 --version-name 0.5.2-internal
 ```
 
 默认及唯一profile为selfhost。手工javac→D8→AAPT2→zipalign→apksigner，不启动Gradle、adb或模拟器。固定工具沿用原缓存；内部签名沿用原独立管理App身份，私钥/密码不入库。脚本核包名、版本、SDK、五项准确权限、签名、对齐、web逐字节绑定，并拒绝任何厂商/TPNS/FCM DEX类或原生库。产物默认dist，也可用--output写私有候选目录。

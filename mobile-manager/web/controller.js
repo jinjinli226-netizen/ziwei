@@ -46,7 +46,7 @@ async function readImages(files) {
 
 /** UI effects are scoped to the authenticated account, workspace and selected employee. */
 export function createController({ state, api, render = () => {}, storage = globalThis.localStorage, reporting, nativeNotifications = globalThis.ZiweiNotifications } = {}) {
-  let epoch = 0, accountGeneration = 0, employeeEpoch = 0, chatReadEpoch = 0, chatConversationId = null, employeeReadEpoch = 0, phoneEpoch = 0, phoneRead = null, disposed = false, timer = null, attachmentEpoch = 0, nativePaused = false;
+  let epoch = 0, navigationEpoch = 0, accountGeneration = 0, employeeEpoch = 0, chatReadEpoch = 0, chatConversationId = null, employeeReadEpoch = 0, phoneEpoch = 0, phoneRead = null, disposed = false, timer = null, attachmentEpoch = 0, nativePaused = false;
   const composers = new Map(), pendingMutations = new Set(), routineRequests = new Map(), messageKeys = new Set(), conversationReads = new Map();
   const resourceReads = new Map(), employeeReads = new Map(), employeeWrites = new Map();
   let employeeGets = new AbortController(), chatWriteEpoch = 0;
@@ -66,8 +66,9 @@ export function createController({ state, api, render = () => {}, storage = glob
   state.employeeResources ||= initialEmployeeResources();
   const workspaceKey = userId => `ziwei.mobile.workspace:${userId}`;
   const messageKey = () => `ziwei.manager.message.v1:${encodeURIComponent(accountId(state))}:${encodeURIComponent(workspaceId(state))}:${encodeURIComponent(state.selectedEmployee?.id || '')}`;
-  const current = () => ({ epoch, scope: scopeKey(state), employeeEpoch, employeeId: state.selectedEmployee?.id });
+  const current = () => ({ epoch, navigationEpoch, scope: scopeKey(state), employeeEpoch, employeeId: state.selectedEmployee?.id });
   const valid = (token, employee = false) => !disposed && token.epoch === epoch && token.scope === scopeKey(state) && (!employee || (token.employeeEpoch === employeeEpoch && token.employeeId === state.selectedEmployee?.id));
+  const validNavigation = token => valid(token) && token.navigationEpoch === navigationEpoch;
   const validChat = (token, readEpoch) => valid(token, true) && readEpoch === chatReadEpoch;
   const draw = () => { if (!disposed) { syncChatPreferences(); syncLoading(); notificationPresence.sync(); render(state); } };
   const storeGet = key => { try { return storage?.getItem(key); } catch { return null; } };
@@ -123,7 +124,7 @@ export function createController({ state, api, render = () => {}, storage = glob
     previous.abort();
   }
   function clearSelection() {
-    employeeEpoch++; chatReadEpoch++; chatWriteEpoch++; phoneEpoch++; attachmentEpoch++;
+    navigationEpoch++; employeeEpoch++; chatReadEpoch++; chatWriteEpoch++; phoneEpoch++; attachmentEpoch++;
     renewEmployeeGets();
     chatConversationId = null; forwarding.reset(); state.forwardDetail = null; state.chatReadError = ''; state.chatFind = null; state.chatJump = null;
     conversationReads.clear(); employeeReadEpoch++; employeeReads.clear(); state.employeeResources = initialEmployeeResources();
@@ -258,35 +259,37 @@ export function createController({ state, api, render = () => {}, storage = glob
   const mobileTasks = createMobileTasks({state,api,current,valid,draw,fail,
     onSaved: (_task, token) => { if(valid(token))invalidateResources('tasks'); },
   });
-  const notifications = createMobileNotifications({state,api,current,valid,draw,fail,storage,native:nativeNotifications,
+  const notifications = createMobileNotifications({state,api,current,valid,canNavigate:validNavigation,draw,fail,storage,native:nativeNotifications,
     onPendingNotification: token => {
       if (!valid(token)) return;
       stashComposer(); clearSelection(); state.page = 'notifications'; state.tab = 'me'; draw();
     },
     onTarget: async (item,token) => {
-      if(!valid(token))return false;
+      if(!validNavigation(token))return false;
       const target=item.target;
       if(target.kind==='conversation') {
         if(!state.employees.some(row=>row.id===target.employeeId))await readWorkspaceResource('employees',token);
-        if(!valid(token))return false;
-        await openEmployee(target.employeeId,'chat',{conversationId:target.id});
-        if(!valid(token)||state.conversation?.id!==target.id||state.page!=='chat')return false;
+        if(!validNavigation(token))return false;
+        state.settingsTrail = [];
+        const opened = await openEmployee(target.employeeId,'chat',{conversationId:target.id});
+        if(!opened||!validNavigation(opened)||state.conversation?.id!==target.id||state.page!=='chat')return false;
         if(target.messageId&&state.messages.some(row=>row.id===target.messageId)) {
           state.chatJump={conversationId:target.id,messageId:target.messageId,quoteIndex:null,serial:id()};draw();
         }
         return true;
       }
       const detail=await api.task(target.id);
-      if(!valid(token))return false;
+      if(!validNavigation(token))return false;
       if(detail?.id!==target.id||detail.workspace_id&&detail.workspace_id!==workspaceDatabaseId(state.workspace))throw new Error('工作详情与提醒归属不一致，请重新读取');
       stashComposer();clearSelection();state.task=detail;state.tab='work';state.page='task';state.error='';draw();return true;
     },
     onWorkspaceTarget: async (pending,token) => {
-      if(!valid(token)||accountId(state)!==pending.accountId)return false;
+      if(!validNavigation(token)||accountId(state)!==pending.accountId)return false;
       const workspace=state.workspaces.find(row=>row.slug===pending.workspaceSlug&&workspaceDatabaseId(row)===pending.workspaceId);
       if(!workspace)throw new Error('提醒所属工作区当前不可查看');
-      await chooseWorkspace(workspace);
-      if(accountId(state)!==pending.accountId||workspaceId(state)!==pending.workspaceSlug)return false;
+      const changing = chooseWorkspace(workspace), visit = current();
+      await changing;
+      if(!validNavigation(visit)||accountId(state)!==pending.accountId||workspaceId(state)!==pending.workspaceSlug)return false;
       return notifications.resolvePending(pending);
     },
   });
@@ -483,6 +486,7 @@ export function createController({ state, api, render = () => {}, storage = glob
       } else await refreshEmployee(token, { skipConversation: true });
     } catch (error) { fail(error, token, true); }
     finally { if (valid(token, true)) { state.busy = false; state.chatLoading = false; draw(); } }
+    return validNavigation(token) ? token : null;
   }
   async function sendChat(form) {
     if (state.sending || state.attachmentReading) return;
@@ -527,14 +531,23 @@ export function createController({ state, api, render = () => {}, storage = glob
       await api.sendMessage(conversationId, { content, attachments, clientMessageId: request.clientMessageId });
       if (valid(token)) { inbox.invalidate(); void inbox.load(token); }
       // A different employee may now be open. Complete only the original composer's draft.
+      let clearedVisibleComposer = false;
       if (item.request === request) {
-        if (item.revision === revision) { item.draft = ''; item.attachments = []; persistComposer(item); }
+        if (item.revision === revision) {
+          item.draft = ''; item.attachments = []; persistComposer(item);
+          // Returning to this employee creates a new visit, but still uses the
+          // original composer. Do not let its stale visible text repopulate a
+          // draft that this accepted request has just cleared.
+          if (valid(token) && state.page === 'chat' && composer() === item) {
+            state.draft = ''; state.attachments = []; clearedVisibleComposer = true;
+          }
+        }
         item.request = null;
       }
       try {
         if (JSON.parse(storeGet(requestKey) || 'null')?.clientMessageId === request.clientMessageId) storage?.removeItem(requestKey);
       } catch {}
-      if (!validSend()) return;
+      if (!validSend()) { if (clearedVisibleComposer) draw(); return; }
       restoreComposer();
       finishWrite();
       if (nativePaused || globalThis.document?.hidden) return;
@@ -642,11 +655,12 @@ export function createController({ state, api, render = () => {}, storage = glob
       if (state.chatFind) { state.chatFind = null; draw(); return; }
       if (state.forward) { await forwarding.actions['forward-back'](); return; }
       if (state.page === 'group') { state.page='groups';draw();return; }
-      if (['settings', 'bot-settings', 'device-settings'].includes(state.page)) {
+      if (['detail', 'employee-detail', 'settings', 'bot-settings', 'device-settings'].includes(state.page)) {
         const previous = state.settingsTrail?.pop() || { page: 'home', tab: 'me' };
         stashComposer(); clearSelection(); state.error = ''; state.tab = previous.tab || state.tab;
-        if (['detail', 'bot-settings'].includes(previous.page) && previous.employeeId) {
-          if (previous.page === 'detail') await openEmployee(previous.employeeId, 'detail');
+        if (['chat', 'detail', 'bot-settings'].includes(previous.page) && previous.employeeId) {
+          if (previous.page === 'chat') await openEmployee(previous.employeeId, 'chat', { conversationId: previous.conversationId });
+          else if (previous.page === 'detail') await openEmployee(previous.employeeId, 'detail');
           else { enterEmployeePage(previous.employeeId, 'bot-settings', false); await botSettings.load(); }
         } else {
           state.page = previous.page || 'home'; draw();
@@ -659,7 +673,7 @@ export function createController({ state, api, render = () => {}, storage = glob
     refresh: action(() => state.page === 'bot-settings' ? botSettings.load() : state.page === 'device-settings' ? deviceSettings.load() : refresh()),
     'switch-workspace': action(() => { stashComposer(); clearSelection(); state.phase = 'workspace'; state.page = 'workspaces'; draw(); }),
     'select-workspace': action(({ id: slug }) => chooseWorkspace(state.workspaces.find(item => item.slug === slug || item.workspace_id === slug))),
-    chat: action(({ id: employeeId }) => { state.settingsTrail = []; return openEmployee(employeeId, 'chat'); }),
+    chat: action(({ id: employeeId }) => { if (state.page === 'chat' && state.selectedEmployee?.id === employeeId) return; state.settingsTrail = []; return openEmployee(employeeId, 'chat'); }),
     'chat-pin': action(({id:conversationId=state.conversation?.id}) => {
       if (!state.chatThreads.some(thread=>thread.conversationId===conversationId) && state.conversation?.id!==conversationId) return false;
       const result=preferences.togglePin(localScope(),conversationId);syncChatPreferences(true);
@@ -702,14 +716,17 @@ export function createController({ state, api, render = () => {}, storage = glob
       state.forwardDetail = { messageId }; draw(); return true;
     }),
     'forward-detail-close': action(() => { state.forwardDetail = null; draw(); }),
-    'employee-detail': action(({ id: employeeId }) => { state.settingsTrail = []; return openEmployee(employeeId, 'detail'); }),
+    'employee-detail': action(({ id: employeeId }) => { if (state.page === 'detail' && state.selectedEmployee?.id === employeeId) return; rememberSettingsPage(); return openEmployee(employeeId, 'detail'); }),
     settings: action(() => {
+      if (state.page === 'settings') return;
       rememberSettingsPage(); stashComposer(); clearSelection(); state.page = 'settings'; state.error = ''; draw();
     }),
     'bot-settings': action(async ({ id: employeeId }) => {
+      if (state.page === 'bot-settings' && state.selectedEmployee?.id === employeeId) return;
       rememberSettingsPage(); enterEmployeePage(employeeId, 'bot-settings', false); await botSettings.load();
     }),
     'device-settings': action(async () => {
+      if (state.page === 'device-settings') return;
       rememberSettingsPage(); stashComposer(); clearSelection(); state.page = 'device-settings'; state.error = ''; draw(); await deviceSettings.load();
     }),
     ...Object.fromEntries(Object.entries(botSettings.actions || {}).map(([name, fn]) => [name, action(fn)])),
@@ -791,9 +808,28 @@ export function createController({ state, api, render = () => {}, storage = glob
     'routine-toggle': action(({ id: routineId }) => mutateRoutine(routineId)),
     'routine-run': action(({ id: routineId }) => mutateRoutine(routineId, true)),
   };
+  // Navigation belongs to the user's intent, including delegated same-page
+  // room/form replacements and overlays. Employee selection alone cannot
+  // revoke an older notification lookup when those routes keep that selection.
+  // Read refreshes, polling and automatic visible-message receipts stay outside
+  // this list so they do not revoke an otherwise current notification click.
+  for (const name of [
+    'navigate', 'back', 'switch-workspace', 'select-workspace', 'chat', 'employee-detail',
+    'settings', 'bot-settings', 'device-settings', 'groups-open', 'groups-settings',
+    'groups-source', 'group-new', 'group-open', 'mobile-task-new', 'mobile-task-another',
+    'mobile-task-save', 'mobile-task-review', 'task', 'notifications-open',
+    'notifications-target', 'notifications-pending', 'phone', 'logout',
+    'report-setup', 'report-new', 'report-start', 'report-next', 'report-skip', 'report-finish', 'report-home',
+    'image', 'close-image', 'chat-find-open', 'chat-find-close', 'chat-find-result',
+    'forward-detail', 'forward-detail-close', 'message-menu', 'forward-single',
+    'forward-select', 'forward-next', 'forward-target', 'forward-back', 'forward-cancel', 'forward-open-target',
+  ]) {
+    const perform = actions[name];
+    actions[name] = values => { navigationEpoch++; return perform(values); };
+  }
   function rememberSettingsPage() {
     state.settingsTrail ||= [];
-    state.settingsTrail.push({ page: state.page, tab: state.tab, employeeId: state.selectedEmployee?.id });
+    state.settingsTrail.push({ page: state.page, tab: state.tab, employeeId: state.selectedEmployee?.id, conversationId: state.conversation?.id || chatConversationId });
   }
   function newReport() {
     if (state.busy || state.sending) return;
@@ -831,7 +867,7 @@ export function createController({ state, api, render = () => {}, storage = glob
         if (routineId) await mutateRoutine(routineId, true); else await createRoutine(data);
       }
       else if (name === 'task') await saveTask(data);
-      else if (name === 'mobile-task') await mobileTasks.submit(data);
+      else if (name === 'mobile-task') { navigationEpoch++; await mobileTasks.submit(data); }
       else if (name === 'bot-settings') await botSettings.submit(data);
       else if (name === 'bot-phone-mcp') await botSettings.submitPhone(data);
       else if (['device-pairing', 'device-binding', 'device-phone-control'].includes(name)) await deviceSettings.submit(name, data);
@@ -841,15 +877,24 @@ export function createController({ state, api, render = () => {}, storage = glob
   async function change(event) {
     const target = event?.target || event;
     if (!target) return;
+    if (target.isConnected === false) return;
     if (forwarding.change(event)) return;
     if (mobileTasks.change(event)) return;
-    if (['groups','group'].includes(state.page)) { await groups.change(event);return; }
+    if (['groups','group'].includes(state.page)) {
+      if (target.name === 'groupSource') navigationEpoch++;
+      await groups.change(event);return;
+    }
     if (state.page === 'bot-settings') { await botSettings.change(event); return; }
     if (state.page === 'device-settings') { await deviceSettings.change(event); return; }
     if (target.name === 'search') { state.search = target.value; draw(); return; }
     if (target.name === 'chatSearch') { state.chatSearch = String(target.value || ''); draw(); return; }
     if (target.name === 'chatFind' && state.chatFind) { state.chatFind.query = String(target.value || ''); draw(); return; }
-    if (['message','content','draft'].includes(target.name)) { state.draft = target.value; if (state.selectedEmployee && state.page === 'chat') { stashComposer(true); composer().revision++; } return; }
+    if (['message','content','draft'].includes(target.name)) {
+      const changed = state.draft !== target.value || event?.type === 'compositionstart';
+      state.draft = target.value;
+      if (state.selectedEmployee && state.page === 'chat') { stashComposer(true); if (changed) composer().revision++; }
+      return;
+    }
     if (!['images', 'attachments', 'avatar'].includes(target.name) || !target.files?.length) return;
     const token = current(), readToken = ++attachmentEpoch, avatar = target.name === 'avatar', page = state.page, reportIndex = state.report?.index;
     state.attachmentReading = true; state.error = ''; draw();

@@ -53,7 +53,7 @@ function checkedEnvelope(response, state, { eventId, incremental = false } = {})
 }
 
 /** The read marker is a bounded, personal local preference, never the shared server read_at. */
-export function createMobileNotifications({ state, api, current = () => ({}), valid = () => true, draw = () => {}, fail = () => {},
+export function createMobileNotifications({ state, api, current = () => ({}), valid = () => true, canNavigate = valid, draw = () => {}, fail = () => {},
   storage = globalThis.localStorage, native = null, onTarget = () => false, onWorkspaceTarget = null, onPendingNotification = () => {} } = {}) {
   let generation = 0, disposed = false, pendingRead = null, pendingResolve = null, pendingEnable = null, handlingNative = false;
   let knownAccount = accountId(state), lastScope = null;
@@ -222,9 +222,9 @@ export function createMobileNotifications({ state, api, current = () => ({}), va
       }
       draw();
       // Consume only after an authenticated principal and authorized workspace list exist.
-      if (status.pendingTarget && typeof native.consumePendingTarget === 'function') {
+      if (status.pendingTarget && canNavigate(visit.token) && typeof native.consumePendingTarget === 'function') {
         const pending = checkedPending(await callNative('consumePendingTarget'));
-        if (!live(visit) || state.notifications !== data || !pending) return false;
+        if (!live(visit) || !canNavigate(visit.token) || state.notifications !== data || !pending) return false;
         data.pendingTarget = pending;
         if (pending.workspaceSlug === visit.scope.workspace) return await resolvePending(pending);
         if (typeof onWorkspaceTarget === 'function') return await onWorkspaceTarget(pending, visit.token);
