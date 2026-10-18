@@ -21,8 +21,7 @@ public final class NotificationConnectionService extends Service {
     private static final Object STATE_LOCK=new Object();
     private static volatile NotificationConnectionService instance;
     private static volatile String state="stopped";
-    private final Object wake=new Object();
-    private volatile long networkEpoch;
+    private final ReceiveWake wake=new ReceiveWake();
     private final ReceiveLease<NotificationFeed.Work> lease=new ReceiveLease<>();
     private ConnectivityManager connectivity;
     private ConnectivityManager.NetworkCallback callback;
@@ -63,18 +62,19 @@ public final class NotificationConnectionService extends Service {
         int failures=0;boolean catchup=true;
         while(lease.current(token)&&NativeNotifications.shouldReceive(this)){
             if(!NativeNotifications.enabled(this)){pause(500,token);continue;}
-            long networkBefore=networkEpoch;NotificationFeed.Work next=new NotificationFeed.Work();if(!lease.attach(token,next))break;
+            long networkBefore=wake.epoch();NotificationFeed.Work next=new NotificationFeed.Work();if(!lease.attach(token,next))break;
             boolean success;try{success=NativeNotifications.receive(this,next,!catchup);}finally{lease.finish(token,next);}
             if(!lease.current(token))break;
             if(success){failures=0;catchup=false;state(token,"connected");NativeNotifications.changed();pause(250,token);}
-            else {catchup=true;state(token,"backoff");NativeNotifications.changed();if(networkBefore!=networkEpoch){failures=0;continue;}pause(SelfhostRules.backoff(failures),token);failures=Math.min(6,failures+1);}
+            else {catchup=true;state(token,"backoff");NativeNotifications.changed();if(networkBefore!=wake.epoch()){failures=0;continue;}pause(SelfhostRules.backoff(failures),token,networkBefore);failures=Math.min(6,failures+1);}
         }
         if(lease.current(token))stopSelf();
     }
-    private void pause(long millis,long token){synchronized(wake){if(!lease.current(token))return;try{wake.wait(millis);}catch(InterruptedException stopped){Thread.currentThread().interrupt();}}}
-    private void networkChanged(){networkEpoch++;NotificationFeed.Work current=lease.active();if(current!=null)current.cancel();synchronized(wake){wake.notifyAll();}}
+    private void pause(long millis,long token){pause(millis,token,-1);}
+    private void pause(long millis,long token,long expectedNetworkEpoch){try{wake.pause(millis,expectedNetworkEpoch,()->lease.current(token));}catch(InterruptedException stopped){Thread.currentThread().interrupt();}}
+    private void networkChanged(){NotificationFeed.Work current=lease.active();wake.networkChanged();if(current!=null)current.cancel();}
     private void state(long token,String value){synchronized(STATE_LOCK){if(instance==this&&lease.current(token))state=value;}}
-    private void cancel(){ReceiveLease.Start<NotificationFeed.Work> stopped=lease.restart();if(stopped.previous!=null)stopped.previous.cancel();synchronized(STATE_LOCK){if(instance==this)state="stopped";}synchronized(wake){wake.notifyAll();}}
+    private void cancel(){ReceiveLease.Start<NotificationFeed.Work> stopped=lease.restart();if(stopped.previous!=null)stopped.previous.cancel();synchronized(STATE_LOCK){if(instance==this)state="stopped";}wake.signal();}
     @Override public void onDestroy(){cancel();if(callback!=null)try{connectivity.unregisterNetworkCallback(callback);}catch(RuntimeException ignored){}synchronized(STATE_LOCK){if(instance==this){instance=null;state="stopped";}}stopForeground(STOP_FOREGROUND_REMOVE);NativeNotifications.changed();super.onDestroy();}
     @Override public IBinder onBind(Intent intent){return null;}
 }

@@ -43,6 +43,7 @@ with tempfile.TemporaryDirectory(prefix="ziwei-manager-url-test-") as temporary:
                     str(MODULE / "android/test/com/ziwei/manager/NotificationRulesTest.java"),
                     str(MODULE / "android/src/com/ziwei/manager/SelfhostRules.java"),
                     str(MODULE / "android/src/com/ziwei/manager/ReceiveLease.java"),
+                    str(MODULE / "android/src/com/ziwei/manager/ReceiveWake.java"),
                     str(MODULE / "android/test/com/ziwei/manager/SelfhostRulesTest.java")], check=True)
     subprocess.run([str(java / "bin/java"), "-ea", "-cp", temporary,
                     "com.ziwei.manager.UrlPolicyTest"], check=True)

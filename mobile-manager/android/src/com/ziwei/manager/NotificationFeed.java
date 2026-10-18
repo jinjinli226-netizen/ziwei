@@ -37,8 +37,9 @@ final class NotificationFeed {
         int timeout() throws IOException { check(); return (int)Math.max(1, Math.min(waiting ? 35_000 : 10_000, deadline - SystemClock.elapsedRealtime())); }
     }
     static final class Failure extends IOException {
-        final int status;
-        Failure(int status) { super("Notification feed unavailable"); this.status = status; }
+        final int status;final String code;
+        Failure(int status) { this(status,null); }
+        Failure(int status,String code) { super("Notification feed unavailable"); this.status=status;this.code=code; }
     }
     static final class Item {
         final String id, title, summary;
@@ -107,7 +108,7 @@ final class NotificationFeed {
             connection.setRequestProperty("User-Agent", "ZiweiManager/" + version + " Android Notifications");
             int status = connection.getResponseCode();
             work.check();
-            if (status != 200) throw new Failure(status);
+            if (status != 200) throw new Failure(status,status==404?errorCode(connection,work):null);
             String type = connection.getContentType();
             if (type == null || !"application/json".equalsIgnoreCase(type.split(";", 2)[0].trim())
                     || connection.getContentLengthLong() > NotificationRules.MAX_BODY_BYTES) throw new JSONException("Invalid feed body");
@@ -130,6 +131,19 @@ final class NotificationFeed {
             } catch (CharacterCodingException invalid) { throw new JSONException("Invalid feed encoding"); }
             return body;
         } finally { work.connection = null; connection.disconnect(); }
+    }
+
+    private static String errorCode(HttpsURLConnection connection,Work work) throws IOException {
+        String type=connection.getContentType();
+        if(type==null||!"application/json".equalsIgnoreCase(type.split(";",2)[0].trim())||connection.getContentLengthLong()>4096)return null;
+        InputStream input=connection.getErrorStream();if(input==null)return null;
+        ByteArrayOutputStream bytes=new ByteArrayOutputStream();
+        try(InputStream source=input){byte[] buffer=new byte[1024];int count;while((count=source.read(buffer))!=-1){work.check();if(bytes.size()+count>4096)return null;bytes.write(buffer,0,count);connection.setReadTimeout(work.timeout());}}
+        try{
+            String body=StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(bytes.toByteArray())).toString();
+            JSONTokener parser=new JSONTokener(body);Object parsed=parser.nextValue();if(!(parsed instanceof JSONObject)||parser.nextClean()!=0)return null;
+            Object code=((JSONObject)parsed).opt("code");return code instanceof String&&((String)code).matches("[A-Z0-9_]{1,80}")?(String)code:null;
+        }catch(JSONException|CharacterCodingException malformed){return null;}
     }
 
     static Page parse(String body, boolean baseline) throws JSONException {

@@ -80,17 +80,21 @@ final class NativeNotifications {
         synchronized (LOCK) {
             SharedPreferences store = prefs(context);
             String permission = permission(context);
+            boolean enabled=store.getBoolean("enabled",false),service=NotificationConnectionService.running();
+            boolean supplement=scheduler(context)!=null&&scheduler(context).getPendingJob(JOB_ID)!=null;
+            String message=store.getString("message","关闭");
+            if(enabled&&!service)message=supplement?"持续接收当前未运行；仍保留系统补充检查，可关闭后重新开启连接":"持续接收当前未运行，请关闭后重新开启连接";
             try {
                 return new JSONObject().put("available", true).put("enabled", store.getBoolean("enabled", false))
                         .put("subscriptionState", store.getString("state", "disabled")).put("permission", permission)
                         .put("workspaceSlug", store.getString("slug", "")).put("workspaceId", store.getString("workspace", ""))
                         .put("accountId", store.getString("account", "")).put("intervalMinutes", 15)
-                        .put("pendingTarget", store.contains("pending")).put("message", store.getString("message", "关闭"))
+                        .put("pendingTarget", store.contains("pending")).put("message", message)
                         .put("lastCheckedAt", store.getLong("lastCheckedAt", 0))
-                        .put("deliveryMode", store.getBoolean("enabled",false) ? (NotificationConnectionService.running()?"selfhost":"supplement") : "unavailable")
-                        .put("foregroundServiceRunning",NotificationConnectionService.running()).put("connectionState",NotificationConnectionService.connectionState())
+                        .put("deliveryMode", enabled ? (service?"selfhost":supplement?"supplement":"unavailable") : "unavailable")
+                        .put("foregroundServiceRunning",service).put("connectionState",NotificationConnectionService.connectionState())
                         .put("batteryOptimizationExempt",context.getSystemService(android.os.PowerManager.class).isIgnoringBatteryOptimizations(context.getPackageName()))
-                        .put("batterySettingsAvailable",true).put("supplementScheduled",scheduler(context)!=null&&scheduler(context).getPendingJob(JOB_ID)!=null).toString();
+                        .put("batterySettingsAvailable",true).put("supplementScheduled",supplement).toString();
             } catch (JSONException impossible) { return "{\"available\":false,\"enabled\":false}"; }
         }
     }
@@ -230,9 +234,16 @@ final class NativeNotifications {
                 }
                 for(NotificationFeed.Item item:page.items){
                     work.check();
+                    synchronized(LOCK){
+                        if(!receiptCurrent(context,generation,snapshot)||work.cancelled.get())return false;
+                        if(SelfhostRules.processed(prefs(context).getString("seen",""),item.id))continue;
+                    }
                     NotificationFeed.Item fresh;
                     try{fresh=NotificationFeed.resolve(context,slug,item.id,account,workspace,snapshot,work);}
-                    catch(NotificationFeed.Failure missing){if(missing.status==404)continue;throw missing;}
+                    catch(NotificationFeed.Failure missing){
+                        if(!SelfhostRules.itemGone(missing.status,missing.code))throw missing;
+                        synchronized(LOCK){if(!receiptCurrent(context,generation,snapshot)||work.cancelled.get())return false;rememberLocked(prefs(context),item.id);}continue;
+                    }
                     synchronized(LOCK){
                         if(!receiptCurrent(context,generation,snapshot)||work.cancelled.get())return false;
                         deliverLocked(context,generation,slug,account,workspace,fresh);
@@ -311,6 +322,11 @@ final class NativeNotifications {
         }
         WORKER.execute(()->baseline(context,slug,generation));
         // Keep the existing foreground connection service; no forbidden background restart is needed.
+    }
+    private static void rememberLocked(SharedPreferences store,String id) throws JSONException {
+        LinkedHashSet<String> processed=new LinkedHashSet<>();for(String digest:store.getString("seen","").split(","))if(!digest.isEmpty())processed.add(digest);
+        processed.add(NotificationRules.digest(id));while(processed.size()>128)processed.remove(processed.iterator().next());
+        if(!store.edit().putString("seen",join(processed)).commit())throw new JSONException("Processed item receipt unavailable");
     }
     private static String join(Set<String> values) { StringBuilder result = new StringBuilder(); for (String value : values) { if (result.length() > 0) result.append(','); result.append(value); } return result.toString(); }
     private static JSONObject privateTargets(SharedPreferences store) { try { return new JSONObject(store.getString("targets", "{}")); } catch (JSONException invalid) { return new JSONObject(); } }

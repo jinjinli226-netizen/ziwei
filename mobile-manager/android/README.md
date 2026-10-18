@@ -29,7 +29,7 @@ FGS和普通权限仅INTERNET、POST_NOTIFICATIONS、ACCESS_NETWORK_STATE、FORE
 - /wait?cursor=...&limit=30&timeout=25
 - /items/:eventId 当前会话逐项fresh授权
 
-只接受schemaVersion2，nextCursor为正式游标；旧v1订阅在升级时清除并要求重新开启。接收先等待/补拉页，再逐项fresh GET、显示/去重落盘，最后提交页cursor。重试仍保留cursor，重复回包不双发；网络切换取消旧request并补拉，退避1秒至60秒封顶。401/403清停，409提升generation、清旧点击能力并新baseline跳过旧历史。Service和Job在同一原子门禁下读取，迟到回执必须匹配generation和当前Cookie。
+只接受schemaVersion2，nextCursor为正式游标；旧v1订阅在升级时清除并要求重新开启。接收先等待/补拉页，尚未处理的项才fresh GET、显示/去重落盘，最后提交页cursor。已处理和明确404项的当前scope摘要会持久跳过，慢页重试能越过前缀继续处理尾项。重试仍保留cursor，重复回包不双发；网络切换取消旧request并补拉，退避1秒至60秒封顶；网络epoch核对与wait共用监视器，恢复通知不会丢在进入退避等待之前。401/403清停，409提升generation、清旧点击能力并新baseline跳过旧历史。Service和Job在同一原子门禁下读取，迟到回执必须匹配generation和当前Cookie。
 
 消息通知使用真实员工名(title≤160 UTF8字节)与纯文本内容(summary≤1024字节，保URL/换行)，可展开，锁屏PRIVATE。只在内存和系统通知中显示正文，私有偏好不保存正文/title/summary。setForeground(chatId|'')仅标记真正可见的原会话；该会话事件同cursor/seen原子抑制，后台/离页清除标记。
 
