@@ -1,0 +1,74 @@
+# CREATE-only current-user one-shot. All prior files remain read-only.
+$ErrorActionPreference='Stop'
+$Stage='initializing'
+$Encoding=[Text.UTF8Encoding]::new($false)
+function Need($condition,[string]$code){if(!$condition){throw $code}}
+function HashBytes([byte[]]$b){$h=[Security.Cryptography.SHA256]::Create();try{return [BitConverter]::ToString($h.ComputeHash($b)).Replace('-','').ToLowerInvariant()}finally{$h.Dispose()}}
+function NoLink([string]$p){$at=[IO.Path]::GetFullPath($p);while($at){if(Test-Path -LiteralPath $at){$i=Get-Item -LiteralPath $at -Force;Need (($i.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) 'PATH_UNSAFE'};$parent=[IO.Directory]::GetParent($at);if(!$parent){break};$at=$parent.FullName}}
+function ReadPlain([string]$p){NoLink $p;$i=Get-Item -LiteralPath $p -Force;Need (!$i.PSIsContainer) 'PATH_UNSAFE';return [IO.File]::ReadAllBytes($p)}
+function WriteNew([string]$p,[byte[]]$b){NoLink $p;$s=[IO.File]::Open($p,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None);try{$s.Write($b,0,$b.Length);$s.Flush($true)}finally{$s.Dispose()}}
+function TaskOrNull([string]$name){$found=@($Folder.GetTasks(1)|Where-Object {$_.Name -ceq $name});Need ($found.Count -le 1) 'TASK_NAME_IN_USE';if($found.Count -eq 0){return $null};return $found[0]}
+function Runner([string]$p,[string]$hash){return '$p='''+$p.Replace("'","''")+''';$b=[IO.File]::ReadAllBytes($p);$h=[Security.Cryptography.SHA256]::Create();try{$s=[BitConverter]::ToString($h.ComputeHash($b)).Replace(''-'','''').ToLowerInvariant()}finally{$h.Dispose()};if($s -cne '''+$hash+'''){throw ''SCRIPT_SHA_MISMATCH''};& ([scriptblock]::Create([Text.Encoding]::UTF8.GetString($b))) -Mode Worker -SourceFile $p'}
+function Health{
+ $q=[Net.HttpWebRequest]::Create('http://127.0.0.1:20242/healthz');$q.Proxy=$null;$q.AllowAutoRedirect=$false;$q.Timeout=3000;$q.ReadWriteTimeout=3000;$r=$q.GetResponse()
+ try{Need ([int]$r.StatusCode -eq 200) 'CLIENT_UNAVAILABLE';$reader=[IO.StreamReader]::new($r.GetResponseStream());try{$s=$reader.ReadToEnd();Need ($s.Length -le 1048576) 'CLIENT_UNAVAILABLE';return ($s|ConvertFrom-Json)}finally{$reader.Dispose()}}finally{$r.Dispose()}
+}
+function Matches($task){
+ try{$u=[string]$task.Definition.Principal.UserId;$s=if($u -match '^S-[0-9]+-'){([Security.Principal.SecurityIdentifier]::new($u)).Value}else{([Security.Principal.NTAccount]::new($u)).Translate([Security.Principal.SecurityIdentifier]).Value}}catch{return $false}
+ return ($task.Definition.RegistrationInfo.Description -ceq ('Ziwei one-shot '+$WorkerSha) -and $s -ceq $Sid -and $task.Definition.Principal.LogonType -eq 3 -and $task.Definition.Principal.RunLevel -eq 0 -and $task.Definition.Actions.Count -eq 1 -and $task.Definition.Actions.Item(1).Path -ieq $PowerShell -and $task.Definition.Actions.Item(1).Arguments -ceq $Arguments -and $task.Definition.Actions.Item(1).WorkingDirectory -ieq $JobDirectory -and $task.Definition.Triggers.Count -eq 1 -and $task.Definition.Settings.MultipleInstances -eq 2 -and $task.Definition.Settings.RestartCount -eq 0)
+}
+try{
+ $ExpectedCommit='__TARGET_COMMIT__';$ExpectedBuild='__TARGET_BUILD__';$ExpectedArchive='__TARGET_ARCHIVE_SHA__';$ExpectedBootstrap='__TARGET_BOOTSTRAP_SHA__'
+ $SourceBuild='88b2ea9f41c10c53498ecb524ad1dc5d836813440f804a61050f0e98da9cc14e'
+ Need ($ExpectedCommit -cmatch '^[a-f0-9]{40}$' -and $ExpectedBuild -cmatch '^[a-f0-9]{64}$' -and $ExpectedArchive -cmatch '^[a-f0-9]{64}$' -and $ExpectedBootstrap -cmatch '^[a-f0-9]{64}$' -and $ExpectedBuild -cne $SourceBuild) 'TARGET_NOT_FROZEN'
+ Need ($env:OS -ceq 'Windows_NT' -and $env:USERPROFILE -ieq 'C:\Users\PC') 'WRONG_WINDOWS_USER'
+ $TaskName='Ziwei.TK.Scope.Update.20261018';$PriorTask='Ziwei.TK.Update.fbb52e2';$PriorSha='74e1a307bb2902a3a7243b39735e86bb43fa4e4d50b345b27b52bf66f4e25953'
+ $Sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+ $UserDirectory=Join-Path $env:LOCALAPPDATA 'Ziwei\ziwei_user';$ConfigPath=Join-Path $UserDirectory 'ziwei_user.json';$Root='C:\Users\PC\AppData\Roaming\npm\node_modules\ziwei'
+ $PriorDirectory=Join-Path $UserDirectory 'maintenance\tk-update-fbb52e2';$JobDirectory=Join-Path $UserDirectory 'maintenance\tk-scope-update-20261018'
+ $Stage='prior_read_only'
+ Need ((HashBytes (ReadPlain (Join-Path $PriorDirectory 'task.ps1'))) -ceq $PriorSha) 'PRIOR_BINDING_MISMATCH'
+ $PriorPlanBytes=ReadPlain (Join-Path $PriorDirectory 'plan.json');$Prior=$Encoding.GetString($PriorPlanBytes)|ConvertFrom-Json
+ Need ($Prior.task -ceq $PriorTask -and $Prior.scriptSha256 -ceq $PriorSha -and $Prior.expectedBuild -ceq $SourceBuild -and $Prior.ownerSid -ceq $Sid -and $Prior.workspace -ceq 'bigtron' -and $Prior.deviceId -ceq 'device_11af6d85-6c5c-4cbe-9a25-31599a474e5d' -and $Prior.root -ieq $Root -and $Prior.userDirectory -ieq $UserDirectory -and $Prior.configPath -ieq $ConfigPath -and $Prior.origin -ceq 'http://127.0.0.1:20242') 'PRIOR_BINDING_MISMATCH'
+ $PriorAttempt=$Encoding.GetString((ReadPlain (Join-Path $PriorDirectory 'attempt.json')))|ConvertFrom-Json
+ Need ($PriorAttempt.task -ceq $PriorTask -and $PriorAttempt.expectedClientBuild -ceq $SourceBuild -and $PriorAttempt.archiveSha256 -ceq '7f6941d7e5d6de9fa5c71eae4a79b739359705c5b1e59fd2368c9f523a015e69') 'PRIOR_BINDING_MISMATCH'
+ $PriorStatus=$Encoding.GetString((ReadPlain (Join-Path $PriorDirectory 'status.json')))|ConvertFrom-Json
+ Need ($PriorStatus.task -ceq $PriorTask -and $PriorStatus.state -ceq 'complete' -and $PriorStatus.code -ceq 'TARGET_BUILD_READY' -and $PriorStatus.expectedClientBuild -ceq $SourceBuild) 'PRIOR_BINDING_MISMATCH'
+ $PriorArchive=Join-Path $PriorDirectory 'owned-idle-archive';$PriorManifestBytes=ReadPlain (Join-Path $PriorArchive 'manifest.json');$Manifest=$Encoding.GetString($PriorManifestBytes)|ConvertFrom-Json
+ $PriorExit=$Encoding.GetString((ReadPlain (Join-Path $PriorArchive 'service-exit.json')))|ConvertFrom-Json
+ Need ($Manifest.scope -ceq 'owned-daemon-root-only' -and $Manifest.files -is [Array] -and $PriorExit.scope -ceq 'owned-daemon-root-only' -and $PriorExit.stopped -eq $true -and $PriorExit.pid -eq $Manifest.record.pid -and $PriorExit.creationTime -ceq $Manifest.record.creationTime) 'PRIOR_ARCHIVE_MISMATCH'
+ for($i=0;$i -lt $Manifest.files.Count;$i++){$row=$Manifest.files[$i];if($row.exists){Need ((HashBytes (ReadPlain (Join-Path $PriorArchive ('file-'+$i+'.original')))) -ceq $row.sha256) 'PRIOR_ARCHIVE_MISMATCH'}}
+ $NodeExe=Join-Path $Prior.nodeDirectory 'node.exe';NoLink $NodeExe;NoLink $Root;NoLink $UserDirectory
+ $ConfigBytes=ReadPlain $ConfigPath;$Config=$Encoding.GetString($ConfigBytes)|ConvertFrom-Json
+ Need ($Config.workspace -ceq 'bigtron' -and $Config.deviceId -ceq 'device_11af6d85-6c5c-4cbe-9a25-31599a474e5d' -and $Config.healthHost -ceq '127.0.0.1' -and $Config.healthPort -eq 20242) 'CURRENT_BINDING_MISMATCH'
+ $Probe="import path from 'node:path';import{pathToFileURL}from'node:url';const root=process.argv[1];const{clientBuildIdentity}=await import(pathToFileURL(path.join(root,'src/management-bootstrap.mjs')));console.log(JSON.stringify({build:clientBuildIdentity(root)}));"
+ $ProbeText=(& $NodeExe --input-type=module -e $Probe $Root 2>$null|Out-String);Need ($LASTEXITCODE -eq 0 -and $ProbeText.Length -le 256) 'CURRENT_SOURCE_MISMATCH';$Actual=$ProbeText|ConvertFrom-Json;Need ($Actual.build -ceq $SourceBuild) 'CURRENT_SOURCE_MISMATCH'
+ $h=Health
+ Need ($h.service -ceq 'ziwei_user' -and $h.agentId -ceq 'ziwei_user' -and $h.workspace -ceq 'bigtron' -and $h.deviceId -ceq $Config.deviceId -and $h.clientBuild -ceq $SourceBuild -and $h.lifecycle.root -ieq $Root -and $h.lifecycle.configPath -ieq $ConfigPath -and $h.lifecycle.configSha256 -ceq (HashBytes $ConfigBytes) -and $h.lifecycle.runtimeDir -ieq (Join-Path $UserDirectory 'runtime') -and [DateTime]::Parse($h.lifecycle.startedAt) -gt [DateTime]::Parse($PriorExit.exitedAt)) 'CURRENT_BINDING_MISMATCH'
+ $native=Get-CimInstance Win32_Process -Filter ('ProcessId = '+[int]$h.pid);$owner=Invoke-CimMethod -InputObject $native -MethodName GetOwnerSid
+ Need ($owner.ReturnValue -eq 0 -and $owner.Sid -ceq $Sid -and $native.ExecutablePath -ieq $NodeExe) 'CURRENT_OWNER_MISMATCH'
+ $PowerShell=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+ $Scheduler=New-Object -ComObject 'Schedule.Service';$Scheduler.Connect();$Folder=$Scheduler.GetFolder('\')
+ Need ($null -eq (TaskOrNull $PriorTask) -and $null -eq (TaskOrNull $TaskName)) 'TASK_NAME_IN_USE'
+ Need (!(Test-Path -LiteralPath $JobDirectory)) 'JOB_DIRECTORY_EXISTS';NoLink $JobDirectory
+ __EMBEDDED_SOURCES__
+ Need ((HashBytes $WorkerBytes) -ceq $WorkerSha -and (HashBytes $StopBytes) -ceq $StopSha -and (HashBytes $HandleBytes) -ceq $HandleSha) 'SOURCE_SHA_MISMATCH'
+ $null=[scriptblock]::Create($Encoding.GetString($WorkerBytes));$null=[scriptblock]::Create($Encoding.GetString($HandleBytes))
+ $WorkerFile=Join-Path $JobDirectory 'task.ps1';$PlanFile=Join-Path $JobDirectory 'plan.json';$Arguments='-NoLogo -NoProfile -NonInteractive -Command "& { '+(Runner $WorkerFile $WorkerSha)+' }"'
+ $Plan=[ordered]@{schemaVersion=1;task=$TaskName;ownerSid=$Sid;scriptSha256=$WorkerSha;sourceBuild=$SourceBuild;expectedBuild=$ExpectedBuild;root=$Root;origin='http://127.0.0.1:20242';workspace='bigtron';deviceId=$Config.deviceId;userDirectory=$UserDirectory;configPath=$ConfigPath;configSha256=(HashBytes $ConfigBytes);nodeDirectory=$Prior.nodeDirectory;npmDirectory=$Prior.npmDirectory;priorTaskSha256=$PriorSha;priorPlanSha256=(HashBytes $PriorPlanBytes);priorArchiveManifestSha256=(HashBytes $PriorManifestBytes)}
+ $Stage='writing_new_owned_job';$null=[IO.Directory]::CreateDirectory($JobDirectory);NoLink $JobDirectory
+ WriteNew $WorkerFile $WorkerBytes;WriteNew (Join-Path $JobDirectory 'owned-idle-stop.mjs') $StopBytes;WriteNew (Join-Path $JobDirectory 'owned-idle-handle.ps1') $HandleBytes;WriteNew $PlanFile ($Encoding.GetBytes(($Plan|ConvertTo-Json -Compress)))
+ Need ($null -eq (TaskOrNull $TaskName) -and $null -eq (TaskOrNull $PriorTask)) 'TASK_NAME_IN_USE'
+ $d=$Scheduler.NewTask(0);$d.RegistrationInfo.Description='Ziwei one-shot '+$WorkerSha;$d.Principal.UserId=$Sid;$d.Principal.LogonType=3;$d.Principal.RunLevel=0
+ $d.Settings.Enabled=$true;$d.Settings.MultipleInstances=2;$d.Settings.RestartCount=0;$d.Settings.StartWhenAvailable=$true;$d.Settings.DisallowStartIfOnBatteries=$false;$d.Settings.StopIfGoingOnBatteries=$false;$d.Settings.ExecutionTimeLimit='PT45M'
+ $trigger=$d.Triggers.Create(1);$trigger.StartBoundary=(Get-Date).AddMinutes(2).ToString('yyyy-MM-ddTHH:mm:ss');$trigger.Enabled=$true
+ $action=$d.Actions.Create(0);$action.Path=$PowerShell;$action.Arguments=$Arguments;$action.WorkingDirectory=$JobDirectory
+ $Stage='create_named_task';$null=$Folder.RegisterTaskDefinition($TaskName,$d,2,$Sid,$null,3,$null)
+ $task=TaskOrNull $TaskName;Need ($task -and (Matches $task) -and (HashBytes (ReadPlain $WorkerFile)) -ceq $WorkerSha -and !(Test-Path -LiteralPath (Join-Path $JobDirectory 'attempt.json'))) 'POSTCHECK_UNKNOWN'
+ [ordered]@{state='scheduled';code='SCOPE_UPDATE_SCHEDULED';task=$TaskName;sourceBuild=$SourceBuild;expectedBuild=$ExpectedBuild;scriptSha256=$WorkerSha;delaySeconds=120;attemptExists=$false;priorFilesUnchanged=$true}|ConvertTo-Json -Compress
+}catch{
+ $allowed=@('TARGET_NOT_FROZEN','WRONG_WINDOWS_USER','PATH_UNSAFE','PRIOR_BINDING_MISMATCH','PRIOR_ARCHIVE_MISMATCH','CURRENT_BINDING_MISMATCH','CURRENT_SOURCE_MISMATCH','CURRENT_OWNER_MISMATCH','CLIENT_UNAVAILABLE','TASK_NAME_IN_USE','JOB_DIRECTORY_EXISTS','SOURCE_SHA_MISMATCH','POSTCHECK_UNKNOWN')
+ $code=if($_.Exception.Message -cin $allowed){$_.Exception.Message}else{'SCOPE_UPDATE_REGISTRATION_FAILED'}
+ [ordered]@{state='failed';stage=$Stage;code=$code;line=$_.InvocationInfo.ScriptLineNumber;hresult=$_.Exception.HResult}|ConvertTo-Json -Compress
+ exit 1
+}

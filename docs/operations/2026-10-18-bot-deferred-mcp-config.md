@@ -93,3 +93,7 @@ Windows 包只覆盖 OAuth helper 和管理工具说明，继承其余 930 个�
 中央配置原本请求library:read与library:collect，而真实授权URL仅请求read；公开401 challenge也仅给read，受保护资源元数据则支持两者。真实Hermes 0.22归档与官方913d源码、MCP SDK两套无监听集成复现SDK覆盖显式scope。窄修仅在当前目标OAuth进程、当前dashboard flow中保留配置scope并合并SDK原生附加项，finally还原选择器；保持DCR、PKCE、目标Profile令牌存储和原回调链。实际token scope不足则明确拒绝，未知scope不声称确认；服务端仅投影有限原生scope证据，不从工具名推断权限。已有read-only缓存不会被删除或强制登出，单纯重连不能承诺自动升级旧grant；本次TK没有完成旧授权。
 
 追加39项服务端定向回归、两套各26项helper及实际SDK后台线程授权/刷新/缓存集成全部通过。发布及公司台式新包生效、实际完整授权和查询仍须另行记录。
+
+16:51:35，权限修复产品 `acee34d32f04167038cb1b55eab2377c142df614` 先推两条GitHub分支，再发布API `/opt/ziwei/releases/windows-mcp-scope-acee34d32f04-bdc0ae98/v2`、PID429489，仅覆盖管理scope投影和MCP连接模块；39项候选实际内存测试通过。16:52:18发布官方Windows包，实际build `5a642107fa32d8e8f09ea139a9f964e7f50c77d9648788ae5aba6e96ac509fec`、包SHA `e386b28ab38fddfa53c88091418f372a2c91ebd8c1402b19d3db22b1d60e157c`、1134321B，公开元数据SHA789eae1c；仅覆盖remote OAuth helper、native bridge和descriptor，930个继承文件及原bundled依赖保持。原bootstrap526882bb/6390B逐字保留。DB身份/schema、前端、中控/Nginx保持。发布包不代表公司电脑已安装。
+
+已准备公司台式88到5a6421的限定一次性官方更新入口，源码位于 `company-mcp-scope-update-20261018/`，27项无监听回归、freezer正反校验及独立逐字审查通过。新任务CREATE-only、当前用户Limited、仅一个延后触发；重新取证当前空闲daemon根，不复用旧exit，不改旧历史。入口bcf8e1ee/76251B及实际包/构建/脚本固定，后续先推源码，再仅新增不可变下载入口；现场注册和真实新build尚待验收。
