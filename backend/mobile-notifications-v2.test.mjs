@@ -44,6 +44,16 @@ test('actual employee name and plain message content preserve URLs/newlines/emoj
   assert.deepEqual((await f.call(`?cursor=${page.json.nextCursor}`)).json.items,[]);
 });
 
+test('legal employee line controls cannot poison Native/Web titles while message body line breaks and URLs stay exact',async t=>{
+  const f=fixture(t),content='正文保留换行\nhttps://example.test/result?q=🐳';
+  for(const separator of ['\r','\n','\t','\u2028','\u2029']){
+    f.repo.updateEmployee(f.employee.id,{name:`运营${separator}员工🐳`});const cursor=await f.baseline(),message=f.message(content),page=await f.call(`?cursor=${cursor}`);
+    assert.equal(page.status,200);assert.equal(page.json.items.length,1);const item=page.json.items[0];assert.equal(item.title,'运营 员工🐳');assert.equal(item.summary,content);assert(!/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/.test(item.title));
+    const fresh=await f.call(`/items/${message.eventId}`);assert.equal(fresh.status,200);assert.equal(fresh.json.item.title,item.title);assert.equal(fresh.json.item.summary,content);
+  }
+  f.repo.updateEmployee(f.employee.id,{name:'🐳'.repeat(100)+'\n尾'});const cursor=await f.baseline();f.message(content);const item=(await f.call(`?cursor=${cursor}`)).json.items[0];assert(Buffer.byteLength(item.title)<=160);assert(!item.title.includes('�'));
+});
+
 test('JSON byte budget and Unicode truncation bound real text without HTML or inline image bodies',async t=>{
   const f=fixture(t),cursor=await f.baseline();f.db.prepare('UPDATE employees SET name=? WHERE id=?').run('🐳'.repeat(100),f.employee.id);
   for(let i=0;i<50;i++)f.message('<b>正文</b> 1 < 2 https://example.test/x\n'+('🐳\\\n'.repeat(2000))+' data:image/png;base64,PRIVATE_IMAGE_BYTES');

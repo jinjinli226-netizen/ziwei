@@ -14,6 +14,9 @@ const text=(value,max)=>{
   const clean=String(value||'').replace(/data:image\/[^\s)"'<>]+/gi,'[图片]').replace(/<\/?[A-Za-z][^>]*>/g,'').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g,'').trim();
   let output='',bytes=0;for(const character of clean){const size=Buffer.byteLength(character);if(bytes+size>max)break;output+=character;bytes+=size;}return output;
 };
+// Native/Web notification titles reject line controls; message bodies retain
+// their intentional line breaks and URLs through the separate text path.
+const title=value=>text(String(value||'').replace(/[\r\n\t\u2028\u2029]+/g,' '),160);
 
 export function createMobileNotificationV2Service(repo,auth,realtime,{now=Date.now}={}){
   const db=repo.db,v1=createMobileNotificationReadService(repo),groups=createMobileGroupActionView(repo);
@@ -97,7 +100,7 @@ export function createMobileNotificationV2Service(repo,auth,realtime,{now=Date.n
     const target=chat(row.conversation_id,ws,who);if(!target)return null;
     if(row.action_id){const terminal=latestTerminal.get(ws.id,row.action_id),run=terminal?original(terminal.id,ws,who):null;if(!run||run.target.kind!=='conversation'||run.target.id!==target.id||!groupAllowed(row.action_id,ws,who))return null;}
     const read=unread?watermark.get(who.userId,target.id):null;if(read&&read.last_message_rowid>=value.sequence)return null;
-    return {id:row.event_id,kind:'message.received',title:text(target.name,160)||'数字员工',summary:text(value.content,1024)||'[消息]',createdAt:row.event_at,executionState:'not_applicable',target:{kind:'conversation',id:target.id,employeeId:target.employee_id,messageId:value.id,...(row.action_id?{actionId:row.action_id}:{})}};
+    return {id:row.event_id,kind:'message.received',title:title(target.name)||'数字员工',summary:text(value.content,1024)||'[消息]',createdAt:row.event_at,executionState:'not_applicable',target:{kind:'conversation',id:target.id,employeeId:target.employee_id,messageId:value.id,...(row.action_id?{actionId:row.action_id}:{})}};
   }
   function position(cursor,ws,who){
     if(typeof cursor!=='string'||cursor.length>2048||!/^[A-Za-z0-9_-]+$/.test(cursor))fail(400,'MOBILE_NOTIFICATION_CURSOR_INVALID','提醒游标无效，请重新同步');const value=parse(Buffer.from(cursor,'base64url').toString('utf8'));
