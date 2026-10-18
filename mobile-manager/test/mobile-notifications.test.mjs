@@ -339,6 +339,8 @@ test('connection state is accurate and the battery settings action remains expli
   await f.mobile.actions['notifications-battery'](); assert(native.calls.some(row => row[0] === 'battery'));
   native.status.connectionState = 'backoff'; await f.mobile.handleNative(); assert.match(renderMobileNotifications(f.state), /正在连接消息通知/);
   native.status.foregroundServiceRunning = false; await f.mobile.handleNative(); assert.doesNotMatch(renderMobileNotifications(f.state), /消息通知已连接/);
+  native.status.deliveryMode='unavailable'; await f.mobile.handleNative();
+  assert.match(renderMobileNotifications(f.state), /消息接收当前未运行/); assert.doesNotMatch(renderMobileNotifications(f.state), /补充提醒已开启/);
   delete native.status.deliveryMode; await f.mobile.handleNative(); assert.match(renderMobileNotifications(f.state), /补充提醒已开启/);
 });
 
