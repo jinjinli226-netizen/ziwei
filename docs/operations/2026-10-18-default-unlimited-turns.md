@@ -14,8 +14,18 @@ Profile YAML、实际 CLI argv 统一调用同一 helper。所有 Bot 的启动�
 
 ## 验证与发布范围
 
-107项定向回归全通过，0失败、0跳过；覆盖旧配置、原生形状子进程的argv/YAML、config-only有效轮数回读、退出证据、24小时预算、真实独立子进程并行、UI编译和创建幂等。lint192项通过。最初单独CLI fixture遇到既有3秒版本探测超时；串行综合测试通过，生产探测超时没有改变。
+112项定向回归全通过，0失败、0跳过；覆盖旧配置、原生形状子进程的argv/YAML、config-only有效轮数回读、退出证据、24小时预算、真实独立子进程并行、UI编译和创建幂等。lint192项通过。最初单独CLI fixture遇到既有3秒版本探测超时；串行综合测试通过，生产探测超时没有改变。
 
 API仍仅覆盖 `src/hermes-bot-config.mjs`，保留 d453 线上混合来源的 runtime/adapters/启动证据及数据库。完整执行代码由新Windows客户端包提供。必须更新目标电脑后下一次执行才使用新默认；已启动任务不追溯改写。未把本机fixture当作Windows模型连续100轮或24小时现场证明，不重放闲鱼原业务。
 
 发布准备以 d453 实际线上目录为基线，新建独立 stage、完整 Git 归档构建网页及冷包，保留原发布目录、下载包和标记。先推 GitHub 再发布，正式结果见下方续记。
+
+## 已发布（2026-10-18 11:13，Asia/Shanghai）
+
+产品 `12d5aa9f6d62a1b3173ff787efcf5a1e225ca38b` 已先推GitHub两条既有分支。UTC03:10:05 API/网页切至 `/opt/ziwei/releases/default-unlimited-12d5aa9f6d62-3f149f60/v2`，PID409294；UTC03:11:17官方包发布，build `161cc99010d6cdee4e3d8834135ac2ed4e8fb2031b746755b7d53de0b76dfb0b`，包1132117字节，SHA256 `593294a3961ca4004309932276d3f2f81ad3fef1f84c0cf03888efe49bfc134c`。旧目录、下载包及发布标记保留。
+
+UTC03:13:45独立postcheck全部14项通过，含GitHub、API/网页及官方下载哈希、配套版本、数据库身份/schema、其他服务及旧下载保全。53项CLI源码与Git归档一致，网页冷构建通过，本机未启动监听，端口中心check通过。冻结manifest为 `c18ca97a38e0daa051b82160b7b34cf4ea59fd081e8427b12f3f1a0e0a68ebfd`，payload为 `54e8ff3ee425b19040dc6708161d3b3203ae8fb01d88f699c1f1359054012eda`。
+
+正式owner页面只读DOM确认：高级运行设置保留主动工作累计预算、截止时间、工具权限和“单次最多24小时，可手动停止”，没有普通聊天轮数开关/输入。没有保存或改写员工配置。浏览器输入命令曾超时，后续DOM实际已展开；截图因native pipe关闭未取得，未声称截图验证。
+
+UTC03:13:42李金晋电脑仍在线、PID21776、旧623d5585 build；闲鱼r7/e17 active且没有在途动作。安装本次新包后下一次执行默认不限轮数，同时取得并行修复，不需要逐个Bot重新保存/启用。尚未取得新build或真实provider长跑、并行现场回执。
