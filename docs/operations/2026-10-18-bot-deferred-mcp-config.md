@@ -50,3 +50,22 @@ Windows 包只覆盖 OAuth helper 和管理工具说明，继承其余 930 个�
 针对用户已授权的公司台式强停及更新，准备公司电脑限定的一次性维护入口，源码位于 `company-mcp-update-20261018/`。仅在当前真实执行、投递、轮询、辅助进程及原 daemon 子进程归零后，核验原安装、配置、设备、用户 SID、PID 创建时间、nonce、监听归属和状态快照，持有准确进程句柄停止空闲 daemon 根进程。独立记录仅证明该根进程退出；不补造历史业务退出证据。随后运行已发布的原官方更新并显式正常启动，须由实际 build88 就绪验收。若停止或更新失败，严格核验后才可正常启动原161安装；不自动重复强停。
 
 24 项无监听回归全部通过，包含真实无害子进程的完整 JSON stdin 与 EOF；独立审查通过。Windows PowerShell 源在本 Mac 未实际运行，入口运行时先解析两份嵌入脚本再写入。后续先推 GitHub，再发布不可变、绑定源码哈希的单次入口；不替换官方包、更新脚本、API 或历史记录。当前尚未声称目标电脑更新完成、爆款库已连接，现场结果继续追加。
+
+
+15:35 一次性入口 `company-mcp-update-20261018-33a4bece1524.ps1` 在源码5778b69先推两条GitHub分支后，仅新增到官方下载目录；公开SHA256 `33a4bece1524d910682151cab222e9ce7b8cbab5a8a97bc98034ce215300fab1`，71826字节与Git源码逐字一致。官方原包、release.json和update-windows.ps1均核验未变化，未重启API。
+
+15:37 从TK原主聊天发送唯一 `tk-owned-idle-update-20261018-7d82`，对应 `action_d901e533-2fac-4f2a-835c-d1396d8a26d3`。只下载此官方不可变入口并验证SHA/长度后执行一次，收到结果即结束本轮，不重试、不进行业务操作。此处仅记录请求已送达，现场运行和新build仍须另行确认。
+
+
+15:42:32，单次入口原动作 `action_d901e533-2fac-4f2a-835c-d1396d8a26d3` 成功、根及Windows Job树退出0（activeProcesses=0），实际返回 `OWNED_IDLE_UPDATE_SCHEDULED`。同名任务的新worker SHA `74e1a307bb2902a3a7243b39735e86bb43fa4e4d50b345b27b52bf66f4e25953`，nextRunTime=15:43:20，attempt尚不存在。本结果仅证明准确同名任务替换和排定，不能代替宿主停止、安装或就绪证据。
+
+
+15:44:45 的独立只读生产快照确认：公司台式已经上报目标 `88b2ea9f41c10c53498ecb524ad1dc5d836813440f804a61050f0e98da9cc14e`，新PID9784、心跳15:44:34，距快照10.8秒，设备online。TK仍为原r4/e7 active，validatedRevision4、原设备及专属Profile固定，activeActionId为空。这证明目标客户端已实际更新并重启；旧失败连接意图仍保留，新一轮延期接入另行提交，不把客户端更新代替MCP连接。
+
+
+15:48:10 从TK自己原聊天提交唯一重验 `tk-viral-repair-fbb52e2-20261018-417c`，原动作 `action_93ef6da9-9e6d-4b5d-8525-df9208aa3810` 于15:50:21失败、根及树退出0，原工具错误为 `ziwei_bot get` 30秒超时。未调用update，未创建417c意图；不复用请求未知的说法或改写失败回执。
+
+只读Nginx元数据确认原管理GET实际返回200、gzip正文499989字节；本地/公网health检查200分别0.087/0.033秒，不能据此断言服务器宕机或代理故障。15:57:39单事务分量统计明确：employee JSON798680字节，其中内联data URI头像794807字节；config557字节，全部相关compact动作8057字节，单reader0.7–4.61毫秒。因此追加最小管理头像省略修复，不扩大超时、不改头像存储或网页显示；修复后重新用真实TK请求验证。原统计不读取或输出头像正文/凭据。
+
+
+追加修复只在管理响应省略内联头像本体，返回avatarPresent、avatarBytes与avatarRepresented:false，省略不合成为avatar:null。统一getter覆盖已初始化/未初始化和create/replay/update/control/list回执；普通网页、移动端、URL头像、数据库原图、完整配置和版本/身份/原执行证据保持。795KB真实factory回归验证get和延期ack低于40KB、同幂等重放及实际apply后头像字节未改。42项联合回归、lint203及独立审查通过；主控另重跑39项全部通过。没有扩大30秒超时、改变查询/schema或授权。

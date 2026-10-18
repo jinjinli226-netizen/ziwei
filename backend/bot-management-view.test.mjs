@@ -9,6 +9,7 @@ import {completeOwnedProfile} from '../test-support/owned-profile.mjs';
 const slug='test-111',deviceId='compact-pc',actorUserId='compact-user';
 const tree={launched:true,rootPid:987,rootConfirmed:true,rootExitCode:0,treeConfirmed:true,activeProcesses:0,cancelled:false,hostExitCode:0};
 const privateHistory='HISTORY_MUST_STAY_ON_ORIGINAL_ACTION_'.repeat(3000);
+const largeAvatar='data:image/png;base64,'+'A'.repeat(794785);
 function fixture(t){
   const repo=createRepository({memory:true}),db=repo.db,ws=repo.getWorkspace(slug),bots=createManagementService(repo).bots;
   db.prepare('INSERT INTO members(id,workspace_id,user_id,name,email,role,joined_at) VALUES(?,?,?,?,?,?,?)').run('compact-member',ws.id,actorUserId,'Owner','compact@fixture.invalid','owner',new Date().toISOString());
@@ -111,4 +112,53 @@ test('an expanded legacy reason is bounded while the original error and unknown 
   const f=fixture(t),reader=createBotManagementActionReader(f.repo),result={code:'EXECUTION_UNCERTAIN',reason:'large legacy reason '.repeat(10000),processExit:null};
   f.db.prepare("UPDATE a2a_actions SET status='failed',result_json=?,error=? WHERE id=?").run(JSON.stringify(result),'original failure',f.source.id);
   const view=reader(f.source.id,f.ws.id);assert.equal(view.result.reason.length,2000);assert.equal(view.result.executionState,'uncertain');assert.equal(view.error,'original failure');assert.equal(f.repo.getA2AAction(f.source.id).result.reason,result.reason);assert(JSON.stringify(view).length<10000);
+});
+
+test('an inline 795KB avatar stays out of management get and deferred acknowledgements without becoming an editable null',t=>{
+  const f=fixture(t);
+  f.db.prepare('UPDATE employees SET avatar=? WHERE id=?').run(largeAvatar,f.bot.id);
+  const before=f.current(),compact=f.compact();
+  const assertCompact=reply=>{
+    assert.equal(Object.hasOwn(reply.employee,'avatar'),false);
+    assert.equal(reply.employee.avatarPresent,true);assert.equal(reply.employee.avatarRepresented,false);
+    assert.equal(reply.employee.avatarBytes,Buffer.byteLength(largeAvatar));
+    const text=JSON.stringify(reply);assert(Buffer.byteLength(text)<40000);assert(!text.includes('data:image/'));
+    assert.deepEqual(reply.config,before.config);assert.equal(reply.employee.runtime_profile,before.employee.runtime_profile);
+    assert.equal(reply.employee.target_device_id,deviceId);
+  };
+  assertCompact(compact);
+  assert.equal(f.current().employee.avatar,largeAvatar);
+  assert.equal(f.bots.get(slug,f.bot.id,f.context,{view:'mobile'}).employee.avatar,largeAvatar);
+  const body={deferUntilIdle:true,expectedRevision:compact.revision,expectedControlEpoch:compact.control_epoch,idempotencyKey:'inline-avatar-config-roundtrip',config:structuredClone(compact.config)};
+  const ack=f.bots.update(slug,f.bot.id,body,f.mcp),retry=f.bots.update(slug,f.bot.id,body,f.mcp);
+  assertCompact(ack);assertCompact(retry);assert.equal(retry.duplicate,true);assert.equal(retry.deferredConfig.id,ack.deferredConfig.id);
+  assert.equal(ack.active_run.id,f.source.id);assert.equal(ack.validation.receipt.valid,true);
+  // The queue and its real apply path receive config only, never a synthesized
+  // employee.avatar:null or a copy of the management omission metadata.
+  f.repo.resultA2AAction(f.source.id,{deviceId,status:'succeeded',result:{processExit:tree}});
+  f.bots.deferredConfig.drain();
+  const after=f.current();assert.deepEqual(after.config,before.config);
+  assert.equal(after.employee.avatar,largeAvatar);
+  assert.equal(f.db.prepare('SELECT avatar FROM employees WHERE id=?').get(f.bot.id).avatar,largeAvatar);
+  assertCompact(f.compact());
+});
+
+test('the same inline-avatar projection covers create/replay, control, uninitialized employees and management list',t=>{
+  const f=fixture(t),input={name:'Avatar Bot',sourceProfile:'default',targetDeviceId:deviceId,model:'gpt-6.1-sol',avatar:largeAvatar,idempotencyKey:'inline-avatar-create'};
+  const created=f.bots.create(slug,input,f.mcp),replayed=f.bots.create(slug,input,f.mcp);
+  assert.equal(replayed.id,created.id);assert.equal(replayed.duplicate,true);
+  const paused=f.bots.control(slug,created.id,{expectedRevision:created.revision,expectedControlEpoch:created.control_epoch,operation:'pause'},f.mcp);
+  const uninitialized=f.repo.createEmployee(slug,{name:'Avatar uninitialized',runtime:'Hermes',runtimeProfile:'default',targetDeviceId:deviceId,avatar:largeAvatar},f.context);
+  const draft=f.bots.get(slug,uninitialized.id,f.mcp);
+  assert.equal(draft.configuration_state,'uninitialized');
+  for(const reply of [created,replayed,paused,draft]){
+    assert.equal(Object.hasOwn(reply.employee,'avatar'),false);assert.equal(reply.employee.avatarPresent,true);assert.equal(reply.employee.avatarRepresented,false);
+    assert.equal(reply.employee.avatarBytes,Buffer.byteLength(largeAvatar));assert(Buffer.byteLength(JSON.stringify(reply))<40000);
+    assert.equal(f.bots.get(slug,reply.id,f.context).employee.avatar,largeAvatar);
+  }
+  const listed=f.bots.list(slug,f.mcp);assert(Buffer.byteLength(JSON.stringify(listed))<100000);assert(!JSON.stringify(listed).includes('data:image/'));
+  assert.equal(f.bots.get(slug,uninitialized.id,f.context,{view:'mobile'}).employee.avatar,largeAvatar);
+  // Existing small URL avatars retain their current management representation.
+  f.db.prepare('UPDATE employees SET avatar=? WHERE id=?').run('https://avatar.fixture.invalid/profile.png',f.bot.id);
+  assert.equal(f.compact().employee.avatar,'https://avatar.fixture.invalid/profile.png');
 });

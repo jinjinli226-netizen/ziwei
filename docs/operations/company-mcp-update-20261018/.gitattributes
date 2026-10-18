@@ -1,0 +1,4 @@
+# Preserve the audited bytes and embedded SHA256 values on Windows checkouts.
+*.ps1 text eol=lf
+*.mjs text eol=lf
+*.json text eol=lf
