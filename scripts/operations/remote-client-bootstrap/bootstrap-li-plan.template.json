@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "acceptanceStage": "bootstrap-validation",
+  "workspace": "bigtron",
+  "deviceId": "device_bfd9a3d2-c2cc-4a36-8bd8-465bea492493",
+  "nonce": "FILL_WITH_FROZEN_UUID",
+  "candidateCommit": "a8b5b8cb4947829c10af22e39c0dd44d97307ca2",
+  "userProfile": "C:\\Users\\25941",
+  "userDirectory": "C:\\Users\\25941\\AppData\\Local\\Ziwei\\ziwei_user",
+  "configPath": "C:\\Users\\25941\\AppData\\Local\\Ziwei\\ziwei_user\\ziwei_user.json",
+  "root": "D:\\work\\nodejs\\node_global\\node_modules\\ziwei",
+  "ownerSid": "S-1-5-21-4019069998-341204304-2024549848-1001",
+  "sourcePid": null,
+  "sourceNonce": "FILL_FROM_READ_ONLY_DEVICE_PROOF",
+  "sourceBuild": "FILL_FROM_READ_ONLY_DEVICE_PROOF",
+  "configSha256": "FILL_FROM_READ_ONLY_DEVICE_PROOF",
+  "nodeExe": "C:\\Program Files\\nodejs\\node.exe",
+  "jobDirectory": "FILL_USER_DIRECTORY_MAINTENANCE_REMOTE_BOOTSTRAP_UUID",
+  "targetBuild": "8c55a30dfb40ed31777dbfc7491e5dcdbd42f308bef7dc3420b6a599e97177a5",
+  "archiveSha256": "6de9275c78e605623199612e51e4b6e84e62ae76efdf0b1df5e5907ffd3534aa",
+  "archiveUrl": "https://qzelynth.top/downloads/cli/remote-client-bootstrap-a8b5b8cb4947829c10af22e39c0dd44d97307ca2-6de9275c78e6.tgz",
+  "workerSha256": "21939efa2d02126d8ea6912b253f65ae937cfcb0b29658858c9d0725a2573c01"
+}
