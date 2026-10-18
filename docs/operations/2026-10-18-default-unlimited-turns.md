@@ -29,3 +29,13 @@ UTC03:13:45独立postcheck全部14项通过，含GitHub、API/网页及官方下
 正式owner页面只读DOM确认：高级运行设置保留主动工作累计预算、截止时间、工具权限和“单次最多24小时，可手动停止”，没有普通聊天轮数开关/输入。没有保存或改写员工配置。浏览器输入命令曾超时，后续DOM实际已展开；截图因native pipe关闭未取得，未声称截图验证。
 
 UTC03:13:42李金晋电脑仍在线、PID21776、旧623d5585 build；闲鱼r7/e17 active且没有在途动作。安装本次新包后下一次执行默认不限轮数，同时取得并行修复，不需要逐个Bot重新保存/启用。尚未取得新build或真实provider长跑、并行现场回执。
+
+## 用户升级后的真机验收通过
+
+UTC03:25新build161cc990和PID34836心跳已确认。闲鱼配置检查 `action_edc94400-5d3d-4bd5-87a0-a582a4d035d6` succeeded，原生有效轮数9007199254740991，turnLimit.mode=unlimited、runBudgetSeconds=86400、status=validated。没有修改员工原r7配置，旧maxTurns100留在兼容数据中，不再决定普通聊天的有效轮数。
+
+通过正常owner登录和正式聊天API创建两个专用验收对话，各派发一次只读终端+CIM祖先PID观察、45秒等待任务。闲鱼动作f0113dd0和知微7fbf1d39都真实运行成功，原生Codex订阅请求边界匹配gpt-6.1-sol/max；实际rootPid分别2632/31616，Windows根和树均退出0、activeProcesses=0。两次真实执行回执均为默认unlimited/86400。
+
+另通过现有sessions.read原生只读入口读取各自本次Session，而非采信助手转述。terminal工具原始消息中的UTC区间重叠45.3943362秒，同机10MHz QPC重叠45.3947017秒；工具call_id匹配各自assistant工具请求，nonce/session/employee/profile/revision/device及祖先链绑定都核对。只测试终端等待，无手机、店铺、外部消息或旧任务重放。短测试不构成连续24小时或超过100轮的长跑证明。
+
+已保存[脱敏验收摘录](../qa/2026-10-18-bot-unlimited-parallel-live.json)，原始回执与独立校验器保留在私有.local/live-unlimited-parallel。一次只读快照查询失败后重读成功，没有重发测试。独立本地proof校验及13个篡改负例通过。当前无需用户再升级、重建Bot或另开轮数开关。

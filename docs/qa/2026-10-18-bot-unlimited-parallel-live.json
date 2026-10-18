@@ -1,0 +1,164 @@
+{
+  "schemaVersion": 1,
+  "status": "passed",
+  "verifiedAt": "2026-10-18T03:35:37.556609+00:00",
+  "executionClientBuild": "161cc99010d6cdee4e3d8834135ac2ed4e8fb2031b746755b7d53de0b76dfb0b",
+  "testedProductCommit": "12d5aa9f6d62a1b3173ff787efcf5a1e225ca38b",
+  "deviceName": "李金晋电脑",
+  "defaultUnlimitedValidationActionId": "action_edc94400-5d3d-4bd5-87a0-a582a4d035d6",
+  "defaultUnlimitedEffective": {
+    "mode": "unlimited",
+    "effectiveMaxTurns": 9007199254740991,
+    "runBudgetSeconds": 86400,
+    "status": "validated"
+  },
+  "parallelToolOverlapSeconds": 45.3947017,
+  "utcOverlapSeconds": 45.394336,
+  "rawToolRoleVerified": true,
+  "toolCallLinkageVerified": true,
+  "independentRootsVerified": true,
+  "bothTreesExited": true,
+  "businessOperationsExecuted": false,
+  "claims24HourEndurance": false,
+  "claimsMoreThan100Turns": false,
+  "runs": [
+    {
+      "employeeId": "employee_78932a02-be5c-42f5-b14d-f4bcb21d3529",
+      "actionId": "action_f0113dd0-02ab-491c-a02d-d2e74f302104",
+      "conversationId": "conv_5c1ca0f5-8bb2-4af3-a06b-f23458c9b635",
+      "nativeSessionId": "20261018_112904_4ded58",
+      "rootPid": 2632,
+      "toolCallId": "call_2c0b95cd6eb84b9ba51775c37537cb78",
+      "toolProof": {
+        "nonce": "parallel-9a0bf4b3528c-1",
+        "startUtc": "2026-10-18T03:29:32.0372193Z",
+        "endUtc": "2026-10-18T03:30:19.1233598Z",
+        "startTick": 397608326431,
+        "endTick": 398079192344,
+        "frequency": 10000000,
+        "pid": 36872,
+        "ancestors": [
+          36872,
+          39748,
+          38072,
+          5512,
+          18832,
+          2632,
+          37776,
+          34836
+        ]
+      },
+      "resultStatus": "succeeded",
+      "code": 0,
+      "processExit": {
+        "launched": true,
+        "rootConfirmed": true,
+        "treeConfirmed": true,
+        "cancelled": false,
+        "backgroundProcessesRetained": false,
+        "rootPid": 2632,
+        "rootExitCode": 0,
+        "activeProcesses": 0,
+        "hostExitCode": 0,
+        "platform": "win32",
+        "supervisor": "windows-job"
+      },
+      "turnLimit": {
+        "mode": "unlimited",
+        "effectiveMaxTurns": 9007199254740991,
+        "runBudgetSeconds": 86400,
+        "status": "configured"
+      },
+      "reasoning": {
+        "schemaVersion": 1,
+        "employeeId": "employee_78932a02-be5c-42f5-b14d-f4bcb21d3529",
+        "revision": 7,
+        "provider": "openai-codex",
+        "model": "gpt-6.1-sol",
+        "requested": "max",
+        "effective": "max",
+        "actual": "max",
+        "status": "matched",
+        "phase": "request",
+        "evidence": "native_codex_transport",
+        "actualModel": "gpt-6.1-sol",
+        "nativeActual": "xhigh",
+        "mode": "verified_gpt61_sol_max",
+        "requests": 4
+      }
+    },
+    {
+      "employeeId": "employee_5f157a51-a8fa-483c-90df-53d44292b5d2",
+      "actionId": "action_7fbf1d39-bf45-4f15-a808-665945dfd36b",
+      "conversationId": "conv_695974fd-4821-426e-95a1-44eb1126ff4a",
+      "nativeSessionId": "20261018_112904_36501c",
+      "rootPid": 31616,
+      "toolCallId": "call_a2eea22706e3472d80cf639ef82c3497",
+      "toolProof": {
+        "nonce": "parallel-9a0bf4b3528c-2",
+        "startUtc": "2026-10-18T03:29:30.4341155Z",
+        "endUtc": "2026-10-18T03:30:17.4315555Z",
+        "startTick": 397592298760,
+        "endTick": 398062273448,
+        "frequency": 10000000,
+        "pid": 35528,
+        "ancestors": [
+          35528,
+          39368,
+          38404,
+          31500,
+          32608,
+          31616,
+          31260,
+          34836
+        ]
+      },
+      "resultStatus": "succeeded",
+      "code": 0,
+      "processExit": {
+        "launched": true,
+        "rootConfirmed": true,
+        "treeConfirmed": true,
+        "cancelled": false,
+        "backgroundProcessesRetained": false,
+        "rootPid": 31616,
+        "rootExitCode": 0,
+        "activeProcesses": 0,
+        "hostExitCode": 0,
+        "platform": "win32",
+        "supervisor": "windows-job"
+      },
+      "turnLimit": {
+        "mode": "unlimited",
+        "effectiveMaxTurns": 9007199254740991,
+        "runBudgetSeconds": 86400,
+        "status": "configured"
+      },
+      "reasoning": {
+        "schemaVersion": 1,
+        "employeeId": "employee_5f157a51-a8fa-483c-90df-53d44292b5d2",
+        "revision": 3,
+        "provider": "openai-codex",
+        "model": "gpt-6.1-sol",
+        "requested": "max",
+        "effective": "max",
+        "actual": "max",
+        "status": "matched",
+        "phase": "request",
+        "evidence": "native_codex_transport",
+        "actualModel": "gpt-6.1-sol",
+        "nativeActual": "xhigh",
+        "mode": "verified_gpt61_sol_max",
+        "requests": 4
+      }
+    }
+  ],
+  "sourceEvidenceSha256": {
+    "latest-poll.json": "73a3bbc468b9586e3e55bc16b19f115a7207bba790da0a5610a716bd444e77dc",
+    "sessions-poll.json": "3e8595644c4cce35220e64757d57fbe02aae8603f5a982fc3e2f15224cf2cc24",
+    "read-validation.json": "f3adfb343daab52676763fe8d8b8ba9a91f405d1622578d607331bbc8fb21490"
+  },
+  "utcOverlapSecondsExact": "45.3943362",
+  "independentProofSha256": "75846d17305b71fad7fb46b35add2b0cf0f31ee51e45776f1e8cdea948e5c94c",
+  "independentVerifierSha256": "96e30dcfe832583d66ab6b88615153bf654f8e8b4687fe8295eb961d777da1c7"
+}

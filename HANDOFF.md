@@ -1,5 +1,13 @@
 # 紫薇项目 HandOff
 
+## 2026-10-18 Windows默认不限轮数与真实并行验收通过
+
+李金晋电脑已安装12d5aa9新包，build `161cc99010d6cdee4e3d8834135ac2ed4e8fb2031b746755b7d53de0b76dfb0b`、PID34836。闲鱼运营大神r7默认不限轮数的本机配置验证通过，实际有效轮数9007199254740991、预算86400秒，无需重建或逐个开启。
+
+11:29–11:32（北京时间）在同一电脑给闲鱼运营大神与知微发独立无业务操作测试，均通过真实openai-codex/gpt-6.1-sol请求执行终端等待。只读取两份本次原生Session的terminal工具消息，工具运行区间交叠45.3943362秒，QPC独立印证；根PID2632/31616各在对应工具祖先链，两棵Windows Job树均退出0、无残留。两Bot保持原r7/e17及r3/e10和独立Profile/HOME。未操作手机、店铺、外部消息或旧任务，也不将本次短测试声称为连续24小时或超过100轮验收。
+
+证据摘录见[真机验收记录](docs/qa/2026-10-18-bot-unlimited-parallel-live.json)。本轮未发布服务端新代码；通知App会话已获串行发布窗口，其API后续变化以该会话记录为准。下方“Windows待升级”是此前发布时快照。
+
 ## 2026-10-18 Bot默认不限轮数，移除开关已发布
 
 产品12d5aa9已先推GitHub两条发布分支，再上线API/网页和官方Windows包。旧Bot及新Bot普通聊天默认不限轮数，已删除开关和单次轮数输入，保留24小时、手动停止、并行、Goals/Kanban独立预算和Profile/HOME，不需逐个员工重新保存。112项回归、lint192项及14项上线校验通过。API目录 `/opt/ziwei/releases/default-unlimited-12d5aa9f6d62-3f149f60/v2`、PID409294；CLI build `161cc99010d6cdee4e3d8834135ac2ed4e8fb2031b746755b7d53de0b76dfb0b`。李金晋电脑仍为旧623d5585，安装新包后下一次执行生效；尚未宣称真机已更新或完成真实长跑。详见[默认不限轮数记录](docs/operations/2026-10-18-default-unlimited-turns.md)。下方可选模式为历史版本。
