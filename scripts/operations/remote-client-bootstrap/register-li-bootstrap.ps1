@@ -20,6 +20,46 @@ function OwnTask($task){
   return ($taskSid -ceq $Sid -and $principal.LogonType -eq 3 -and $principal.RunLevel -eq 0 -and $task.Definition.RegistrationInfo.Description -ceq ('Ziwei Li bootstrap '+$RegistrationHash) -and $task.Definition.Actions.Count -eq 1 -and $task.Definition.Actions.Item(1).Path -ieq $PowerShell -and $task.Definition.Actions.Item(1).Arguments -ceq $Arguments -and $task.Definition.Actions.Item(1).WorkingDirectory -ieq $Plan.jobDirectory -and $task.Definition.Triggers.Count -eq 1 -and $task.Definition.Settings.RestartCount -eq 0 -and $task.Definition.Settings.MultipleInstances -eq 2)
 }
 function TaskOrNull{$found=@($Folder.GetTasks(1)|Where-Object {$_.Name -ceq $TaskName});Need ($found.Count -le 1) 'BOOTSTRAP_TASK_CONFLICT';if($found.Count -eq 1){return $found[0]};return $null}
+function ParentImage($record){
+  $image=[string]$record.ExecutablePath
+  if([string]::IsNullOrWhiteSpace($image)){
+    try{
+      if(!('Ziwei.RemoteBootstrapParentImage' -as [type])){
+        $nativeSource=@'
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+namespace Ziwei {
+  public static class RemoteBootstrapParentImage {
+    [DllImport("kernel32.dll", SetLastError=true)]
+    private static extern IntPtr OpenProcess(uint access, bool inherit, int pid);
+    [DllImport("kernel32.dll", EntryPoint="QueryFullProcessImageNameW", CharSet=CharSet.Unicode, ExactSpelling=true, SetLastError=true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool QueryFullProcessImageName(IntPtr process, uint flags, StringBuilder value, ref uint size);
+    [DllImport("kernel32.dll", SetLastError=true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CloseHandle(IntPtr process);
+    public static string Read(int pid) {
+      IntPtr handle = OpenProcess(0x1000, false, pid);
+      if (handle == IntPtr.Zero) return null;
+      try {
+        uint size = 32768;
+        StringBuilder value = new StringBuilder((int)size);
+        if (!QueryFullProcessImageName(handle, 0, value, ref size) || size < 3 || size >= 32768) return null;
+        return value.ToString();
+      } finally { CloseHandle(handle); }
+    }
+  }
+}
+'@
+        Add-Type -TypeDefinition $nativeSource -ErrorAction Stop|Out-Null
+      }
+      $image=[Ziwei.RemoteBootstrapParentImage]::Read([int]$record.ProcessId)
+    }catch{throw 'BOOTSTRAP_PARENT_IMAGE_UNAVAILABLE'}
+  }
+  Need (![string]::IsNullOrWhiteSpace($image) -and $image -cmatch '^[A-Za-z]:\\') 'BOOTSTRAP_PARENT_IMAGE_UNAVAILABLE'
+  return $image
+}
 function Status([string]$state,[string]$code,$detail){
   $row=[ordered]@{schemaVersion=1;state=$state;code=$code;stage=$Stage;task=$TaskName;workspace=$Plan.workspace;deviceId=$Plan.deviceId;targetBuild=$Plan.targetBuild;at=[DateTime]::UtcNow.ToString('o');bootstrapOnly=$true;dedicatedRemoteProtocolVerified=$false}
   if($detail){$row.detail=$detail}
@@ -84,7 +124,9 @@ try{
   $Stage='verify_task_boundary'
   Need ($PSCommandPath -ieq $OwnScript -and $PlanPath -ieq $OwnPlan -and $WorkerSourcePath -ieq $OwnWorker -and (OwnTask (TaskOrNull))) 'BOOTSTRAP_TASK_BINDING_INVALID'
   $self=Get-CimInstance Win32_Process -Filter ('ProcessId = '+$PID);$parent=Get-CimInstance Win32_Process -Filter ('ProcessId = '+[int]$self.ParentProcessId)
-  Need ($parent -and $parent.Name -cin @('svchost.exe','taskeng.exe','taskhostw.exe') -and [IO.Path]::GetDirectoryName($parent.ExecutablePath) -ieq (Join-Path $env:SystemRoot 'System32')) 'BOOTSTRAP_OUTSIDE_TASK_UNCONFIRMED'
+  Need ($parent -and $parent.Name -iin @('svchost.exe','taskeng.exe','taskhostw.exe')) 'BOOTSTRAP_OUTSIDE_TASK_UNCONFIRMED'
+  $parentImage=ParentImage $parent
+  Need ([IO.Path]::GetFileName($parentImage) -ieq $parent.Name -and [IO.Path]::GetDirectoryName($parentImage) -ieq (Join-Path $env:SystemRoot 'System32')) 'BOOTSTRAP_OUTSIDE_TASK_UNCONFIRMED'
   $Stage='wait_all_employees_idle'
   Status 'waiting_idle' 'BOOTSTRAP_WAITING_ALL_EMPLOYEES' @{forceStopped=$false}
   $env:ZIWEI_USER_HOME=$Plan.userDirectory;$env:ZIWEI_CONFIG=$Plan.configPath

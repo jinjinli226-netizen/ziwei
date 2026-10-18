@@ -119,3 +119,23 @@ test('the actual bootstrap start path reaches only the official queue for inacti
     else { assert.equal((await run()).state, 'queued'); assert.equal(pauses, 1); assert.equal(queues, 1); assert.equal(downloads, 1); assert(observations.some(value => value.stopSafe === false)); }
   }
 });
+test('missing CIM parent image uses a read-only limited native handle and always releases it', () => {
+  const helper = script.slice(script.indexOf('function ParentImage('), script.indexOf('function Status('));
+  assert(helper.includes('$image=[string]$record.ExecutablePath'));
+  assert(helper.includes('if([string]::IsNullOrWhiteSpace($image))'));
+  assert(helper.includes('OpenProcess(0x1000, false, pid)'));
+  assert(helper.includes('EntryPoint="QueryFullProcessImageNameW"'));
+  assert(helper.includes('QueryFullProcessImageName(handle, 0, value, ref size)'));
+  assert(helper.includes('finally { CloseHandle(handle); }'));
+  assert(helper.includes("throw 'BOOTSTRAP_PARENT_IMAGE_UNAVAILABLE'"));
+  assert(!/SeDebug|AdjustTokenPrivileges|PROCESS_ALL_ACCESS|TerminateProcess|\.Kill\(|taskkill/.test(helper));
+});
+test('native parent fallback does not weaken exact task registration or the System32 name boundary', () => {
+  const boundary = script.slice(script.indexOf("$Stage='verify_task_boundary'"), script.indexOf("$Stage='wait_all_employees_idle'"));
+  assert(boundary.includes('(OwnTask (TaskOrNull))'));
+  assert(boundary.includes("$parent.Name -iin @('svchost.exe','taskeng.exe','taskhostw.exe')"));
+  assert(boundary.includes('$parentImage=ParentImage $parent'));
+  assert(boundary.includes('[IO.Path]::GetFileName($parentImage) -ieq $parent.Name'));
+  assert(boundary.includes("[IO.Path]::GetDirectoryName($parentImage) -ieq (Join-Path $env:SystemRoot 'System32')"));
+  assert(!boundary.includes('[IO.Path]::GetDirectoryName($parent.ExecutablePath)'));
+});
