@@ -11,8 +11,6 @@ import urllib.request
 import zipfile
 
 CACHE = Path.home() / ".cache/ziwei-manager-android"
-GRADLE = ("gradle-8.10.2-bin.zip", "https://services.gradle.org/distributions/gradle-8.10.2-bin.zip",
-          "sha256", "31c55713e40233a8303827ceb42ca48a47267a0ad4bab9177123121e71524c26")
 ARTIFACTS = (
     ("jdk.tar.gz", "https://github.com/adoptium/temurin17-binaries/releases/download/"
      "jdk-17.0.20.1%2B1/OpenJDK17U-jdk_aarch64_mac_hotspot_17.0.20.1_1.tar.gz",
@@ -105,23 +103,11 @@ def bootstrap(cache):
     return java, sdk
 
 
-def bootstrap_gradle(cache):
-    """Official distribution, independently fixed to its published SHA-256. Does not start Gradle."""
-    archive = checked_download(cache, GRADLE)
-    root = cache / "gradle-8.10.2"
-    if not (root / "lib/gradle-gradle-cli-main-8.10.2.jar").is_file():
-        safe_zip_extract(archive, cache)
-    return root
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cache", type=Path, default=CACHE)
-    parser.add_argument("--push", action="store_true", help="also prepare the pinned Gradle distribution for real SDK builds")
     args = parser.parse_args()
     java, sdk = bootstrap(args.cache.expanduser().resolve())
-    if args.push:
-        print("GRADLE_HOME=" + str(bootstrap_gradle(args.cache.expanduser().resolve())))
     print("JAVA_HOME=" + str(java))
     print("ANDROID_SDK_ROOT=" + str(sdk))
 

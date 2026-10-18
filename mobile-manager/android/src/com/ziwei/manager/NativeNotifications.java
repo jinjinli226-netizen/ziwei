@@ -26,7 +26,7 @@ import java.util.concurrent.TimeUnit;
 import org.json.JSONException;
 import org.json.JSONObject;
 
-/** Opt-in system push with a bounded supplementary feed; no employee actions or foreground service. */
+/** Opt-in self-hosted receiver; one cursor/capability owner for service and supplementary Job. */
 final class NativeNotifications {
     static final String CHANNEL = "ziwei_updates_v1";
     static final String CLICK_ACTION = "com.ziwei.manager.NOTIFICATION";
@@ -38,6 +38,8 @@ final class NativeNotifications {
     private static WeakReference<NotificationBridge> listener = new WeakReference<>(null);
     private static NotificationFeed.Work activeWork;
     private static long enablingGeneration = -1;
+    private static boolean foreground;
+    private static String visibleConversation="";
     static { WORKER.allowCoreThreadTimeOut(true); }
     private NativeNotifications() { }
 
@@ -61,7 +63,7 @@ final class NativeNotifications {
         NotificationManager manager = manager(context);
         if (manager != null) {
             NotificationChannel channel = new NotificationChannel(CHANNEL, "员工消息和任务提醒", NotificationManager.IMPORTANCE_DEFAULT);
-            channel.setDescription("员工消息和任务结果；补充检查由系统调度，可能延后");
+            channel.setDescription("员工消息原文和任务结果");
             channel.setLockscreenVisibility(Notification.VISIBILITY_PRIVATE);
             manager.createNotificationChannel(channel);
         }
@@ -79,12 +81,16 @@ final class NativeNotifications {
             SharedPreferences store = prefs(context);
             String permission = permission(context);
             try {
-                return NativePush.augment(context, new JSONObject().put("available", true).put("enabled", store.getBoolean("enabled", false))
+                return new JSONObject().put("available", true).put("enabled", store.getBoolean("enabled", false))
                         .put("subscriptionState", store.getString("state", "disabled")).put("permission", permission)
                         .put("workspaceSlug", store.getString("slug", "")).put("workspaceId", store.getString("workspace", ""))
                         .put("accountId", store.getString("account", "")).put("intervalMinutes", 15)
                         .put("pendingTarget", store.contains("pending")).put("message", store.getString("message", "关闭"))
-                        .put("lastCheckedAt", store.getLong("lastCheckedAt", 0))).toString();
+                        .put("lastCheckedAt", store.getLong("lastCheckedAt", 0))
+                        .put("deliveryMode", store.getBoolean("enabled",false) ? (NotificationConnectionService.running()?"selfhost":"supplement") : "unavailable")
+                        .put("foregroundServiceRunning",NotificationConnectionService.running()).put("connectionState",NotificationConnectionService.connectionState())
+                        .put("batteryOptimizationExempt",context.getSystemService(android.os.PowerManager.class).isIgnoringBatteryOptimizations(context.getPackageName()))
+                        .put("batterySettingsAvailable",true).put("supplementScheduled",scheduler(context)!=null&&scheduler(context).getPendingJob(JOB_ID)!=null).toString();
             } catch (JSONException impossible) { return "{\"available\":false,\"enabled\":false}"; }
         }
     }
@@ -93,15 +99,16 @@ final class NativeNotifications {
         synchronized (LOCK) {
             SharedPreferences store = prefs(context);
             if (store.getBoolean("enabled", false)) {
-                if (!"granted".equals(permission(context))) disableLocked(context, "disabled", "系统通知权限或频道已关闭");
-                else if (!schedule(context)) disableLocked(context, "error", "系统未接受后台检查，请重新开启");
+                if(store.getInt("schemaVersion",0)!=2) disableLocked(context,"disabled","通知版本已更新，请重新开启持续接收");
+                else if (!"granted".equals(permission(context))) disableLocked(context, "disabled", "系统通知权限或频道已关闭");
+                else if (!schedule(context)) store.edit().putString("message","持续接收已开启，系统未接受补充检查").commit();
             } else if ("enabling".equals(store.getString("state", ""))
                     && enablingGeneration != store.getLong("generation", 0)) {
                 // An interrupted baseline is never promoted to an active subscription after process death.
                 disableLocked(context, "disabled", "开启未完成，请重试");
             }
         }
-        NativePush.recover(context);
+        if(enabled(context))NotificationConnectionService.start(context);
         changed();
     }
     static void configure(Context context, String slug, boolean enabled) {
@@ -119,6 +126,7 @@ final class NativeNotifications {
             store.edit().putString("slug", slug).putString("state", "enabling").putString("message", "正在验证登录和提醒服务").commit();
         }
         changed();
+        NotificationConnectionService.start(app);
         WORKER.execute(() -> baseline(app, slug, generation));
     }
     static void clear(Context context) { synchronized (LOCK) { disableLocked(context, "disabled", "已关闭系统通知"); } changed(); }
@@ -130,7 +138,8 @@ final class NativeNotifications {
         // First invalidate every late receipt and stored click capability; cancel only this app's job/notifications.
         store.edit().clear().putLong("generation", generation).putBoolean("enabled", false)
                 .putString("state", state).putString("message", message).commit();
-        NativePush.disable(context);
+        visibleConversation="";
+        NotificationConnectionService.stop(context);
         JobScheduler scheduler = scheduler(context);
         if (scheduler != null) scheduler.cancel(JOB_ID);
         NotificationManager manager = manager(context);
@@ -152,12 +161,12 @@ final class NativeNotifications {
                 if (!current(context, generation, snapshot)) { invalidateChangedCookie(context, generation); return; }
                 if (!"granted".equals(permission(context))) { disableLocked(context, "disabled", "系统通知权限或频道已关闭"); return; }
                 prefs(context).edit().putString("account", page.accountId).putString("workspace", page.workspaceId)
-                        .putString("cursor", page.cursor).putBoolean("enabled", true).putString("state", "enabled")
-                        .putString("message", "已开启，约每 15 分钟由系统安排检查，可能延后")
+                        .putInt("schemaVersion",2).putString("cursor", page.cursor).putBoolean("enabled", true).putString("state", "enabled")
+                        .putString("message", "持续接收已开启；断线后自动重连，系统限制可能使接收延后")
                         .putLong("lastCheckedAt", System.currentTimeMillis()).commit();
-                if (!schedule(context)) disableLocked(context, "error", "系统未接受后台检查，请重新开启");
+                if (!schedule(context)) prefs(context).edit().putString("message","持续接收已开启，系统未接受补充检查").commit();
             }
-            if (receiptCurrent(context, generation, snapshot)) NativePush.enable(context, slug, page.accountId, page.workspaceId, generation, snapshot);
+
         } catch (Exception failure) { failed(context, generation, failure, true); }
         finally { synchronized (LOCK) { if (activeWork == work) activeWork = null; if (enablingGeneration == generation) enablingGeneration = -1; } changed(); }
     }
@@ -190,18 +199,19 @@ final class NativeNotifications {
 
     static void check(Context context, NotificationFeed.Work work, Runnable complete) {
         WORKER.execute(() -> {
-            try { poll(context.getApplicationContext(), work); }
+            try { if(!NotificationConnectionService.running())receive(context.getApplicationContext(), work, false); }
             finally { complete.run(); changed(); }
         });
     }
-    private static void poll(Context context, NotificationFeed.Work work) {
+    static boolean receive(Context context, NotificationFeed.Work work, boolean waiting) {
         final long generation;
         final String slug, account, workspace;
         String cursor;
         synchronized (LOCK) {
             SharedPreferences store = prefs(context);
-            if (!store.getBoolean("enabled", false)) return;
-            if (!"granted".equals(permission(context))) { disableLocked(context, "disabled", "系统通知权限或频道已关闭"); return; }
+            if (!store.getBoolean("enabled", false) || activeWork!=null) return false;
+            if(store.getInt("schemaVersion",0)!=2){disableLocked(context,"disabled","请重新开启持续接收");return false;}
+            if (!"granted".equals(permission(context))) { disableLocked(context, "disabled", "系统通知权限或频道已关闭"); return false; }
             generation = store.getLong("generation", 0);
             activeWork = work;
             slug = store.getString("slug", ""); account = store.getString("account", ""); workspace = store.getString("workspace", ""); cursor = store.getString("cursor", "");
@@ -210,27 +220,41 @@ final class NativeNotifications {
         try {
             for (int index = 0; index < 2; index++) {
                 work.check();
-                NotificationFeed.Page page = NotificationFeed.get(context, slug, false, cursor, snapshot, work);
+                NotificationFeed.Page page = waiting && index==0 ? NotificationFeed.waitFor(context,slug,cursor,snapshot,work) : NotificationFeed.get(context, slug, false, cursor, snapshot, work);
                 synchronized (LOCK) {
-                    if (!current(context, generation, snapshot)) { invalidateChangedCookie(context, generation); return; }
-                    if (work.cancelled.get()) return;
-                    if (!account.equals(page.accountId) || !workspace.equals(page.workspaceId)) { disableLocked(context, "disabled", "账号或工作区已变化，请重新开启系统通知"); return; }
-                    if (!"granted".equals(permission(context))) { disableLocked(context, "disabled", "系统通知权限或频道已关闭"); return; }
+                    if (!current(context, generation, snapshot)) { invalidateChangedCookie(context, generation); return false; }
+                    if (work.cancelled.get()) return false;
+                    if (!account.equals(page.accountId) || !workspace.equals(page.workspaceId)) { disableLocked(context, "disabled", "账号或工作区已变化，请重新开启系统通知"); return false; }
+                    if (!"granted".equals(permission(context))) { disableLocked(context, "disabled", "系统通知权限或频道已关闭"); return false; }
                     if (page.hasMore && page.cursor.equals(cursor)) throw new JSONException("Feed did not advance");
-                    for (NotificationFeed.Item item : page.items) {
-                        work.check();
-                        if (!current(context, generation, snapshot)) { invalidateChangedCookie(context, generation); return; }
-                        // A configured provider already delivers these events; the feed still advances its bounded cursor.
-                        if (!NativePush.ready(context)) deliverLocked(context, generation, slug, account, workspace, item);
+                }
+                for(NotificationFeed.Item item:page.items){
+                    work.check();
+                    NotificationFeed.Item fresh;
+                    try{fresh=NotificationFeed.resolve(context,slug,item.id,account,workspace,snapshot,work);}
+                    catch(NotificationFeed.Failure missing){if(missing.status==404)continue;throw missing;}
+                    synchronized(LOCK){
+                        if(!receiptCurrent(context,generation,snapshot)||work.cancelled.get())return false;
+                        deliverLocked(context,generation,slug,account,workspace,fresh);
                     }
-                    prefs(context).edit().putString("cursor", page.cursor).putString("state", "enabled")
-                            .putString("message", "已开启，约每 15 分钟由系统安排检查，可能延后")
-                            .putLong("lastCheckedAt", System.currentTimeMillis()).commit();
+                }
+                synchronized(LOCK){
+                    if(!receiptCurrent(context,generation,snapshot)||work.cancelled.get())return false;
+                    if(!prefs(context).edit().putString("cursor", page.cursor).putString("state", "enabled")
+                            .putString("message", "持续接收已开启；断线后自动重连，系统限制可能使接收延后")
+                            .putLong("lastCheckedAt", System.currentTimeMillis()).commit())throw new java.io.IOException("Cursor receipt unavailable");
                 }
                 cursor = page.cursor;
                 if (!page.hasMore) break;
             }
-        } catch (Exception failure) { if (!work.cancelled.get()) failed(context, generation, failure, false); }
+            return true;
+        } catch (Exception failure) {
+            if (!work.cancelled.get()) {
+                if(failure instanceof NotificationFeed.Failure && ((NotificationFeed.Failure)failure).status==409) resetBaseline(context,generation,slug);
+                else failed(context, generation, failure, false);
+            }
+            return false;
+        }
         finally { synchronized (LOCK) { if (activeWork == work) activeWork = null; } }
     }
     private static void deliverLocked(Context context, long generation, String slug, String account, String workspace, NotificationFeed.Item item) throws JSONException {
@@ -240,6 +264,10 @@ final class NativeNotifications {
         for (String value : encodedSeen.split(",")) if (!value.isEmpty()) seen.add(value);
         String digest = NotificationRules.digest(item.id);
         if (seen.contains(digest)) return;
+        if(SelfhostRules.suppress(foreground,visibleConversation,item.target.optString("kind"),item.target.optString("id"))){
+            seen.add(digest);while(seen.size()>128)seen.remove(seen.iterator().next());
+            if(!store.edit().putString("seen",join(seen)).commit())throw new JSONException("Suppression receipt unavailable");return;
+        }
         byte[] random = new byte[24]; new SecureRandom().nextBytes(random);
         StringBuilder keyBuilder = new StringBuilder();
         for (byte value : random) keyBuilder.append(String.format(java.util.Locale.ROOT, "%02x", value & 255));
@@ -252,18 +280,37 @@ final class NativeNotifications {
                 .put("accountId", account).put("workspaceId", workspace).put("workspaceSlug", slug).put("eventId", item.id).put("target", item.target);
         targets.put(key, envelope);
         if (!store.edit().putString("targets", targets.toString()).commit()) throw new JSONException("Private target storage unavailable");
-        int notificationId = (int)Long.parseLong(digest.substring(0, 8), 16);
-        Intent intent = new Intent(context, MainActivity.class).setAction(CLICK_ACTION).putExtra(CLICK_KEY, key)
+        int notificationId = 0x60000000 | ((int)Long.parseLong(digest.substring(0, 8), 16) & 0x0fffffff);
+        Intent intent = new Intent(context, MainActivity.class).setAction(CLICK_ACTION).setData(android.net.Uri.parse("ziwei-internal://notification/"+key)).putExtra(CLICK_KEY, key)
                 .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
         PendingIntent pending = PendingIntent.getActivity(context, notificationId, intent, PendingIntent.FLAG_CANCEL_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         Notification notification = new Notification.Builder(context, CHANNEL).setSmallIcon(android.R.drawable.ic_dialog_info)
-                .setContentTitle("紫薇").setContentText("有新的员工消息或任务提醒，打开查看")
+                .setContentTitle(item.title).setContentText(item.summary)
+                .setStyle(new Notification.BigTextStyle().bigText(item.summary))
                 .setVisibility(Notification.VISIBILITY_PRIVATE).setContentIntent(pending).setAutoCancel(true)
                 .setCategory(Notification.CATEGORY_MESSAGE).setOnlyAlertOnce(true).build();
-        manager(context).notify(notificationId, notification);
+        manager(context).notify("ziwei-event-"+digest,notificationId, notification);
         seen.add(digest);
         while (seen.size() > 128) seen.remove(seen.iterator().next());
-        store.edit().putString("seen", join(seen)).commit();
+        if(!store.edit().putString("seen", join(seen)).commit())throw new JSONException("Notification receipt unavailable");
+    }
+    static void lifecycle(Context context,boolean active){synchronized(LOCK){foreground=active;if(!active)visibleConversation="";}}
+    static void setForeground(Context context,String chat){if(chat==null||!chat.isEmpty()&&!NotificationRules.identifier(chat))return;synchronized(LOCK){visibleConversation=foreground?chat:"";}}
+    static boolean shouldReceive(Context context){SharedPreferences p=prefs(context);return p.getBoolean("enabled",false)&&p.getInt("schemaVersion",0)==2||"enabling".equals(p.getString("state",""))&&enablingGeneration==p.getLong("generation",0);}
+    private static void resetBaseline(Context context,long previous,String slug){
+        final long generation;
+        synchronized(LOCK){
+            if(prefs(context).getLong("generation",0)!=previous)return;
+            generation=previous+1;enablingGeneration=generation;
+            prefs(context).edit().clear().putLong("generation",generation).putBoolean("enabled",false).putString("slug",slug)
+                    .putString("state","enabling").putString("message","记录窗口已更新，正在重新建立接收起点").commit();
+            visibleConversation="";
+            NotificationManager manager=manager(context);
+            if(manager!=null)for(android.service.notification.StatusBarNotification notification:manager.getActiveNotifications())
+                if(notification.getTag()!=null&&notification.getTag().startsWith("ziwei-event-"))manager.cancel(notification.getTag(),notification.getId());
+        }
+        WORKER.execute(()->baseline(context,slug,generation));
+        // Keep the existing foreground connection service; no forbidden background restart is needed.
     }
     private static String join(Set<String> values) { StringBuilder result = new StringBuilder(); for (String value : values) { if (result.length() > 0) result.append(','); result.append(value); } return result.toString(); }
     private static JSONObject privateTargets(SharedPreferences store) { try { return new JSONObject(store.getString("targets", "{}")); } catch (JSONException invalid) { return new JSONObject(); } }
@@ -274,7 +321,7 @@ final class NativeNotifications {
     }
 
     static void click(Context context, Intent intent) {
-        NativePush.click(context, intent);
+
         if (intent == null || !CLICK_ACTION.equals(intent.getAction())) return;
         String key = intent.getStringExtra(CLICK_KEY);
         intent.removeExtra(CLICK_KEY);
@@ -297,7 +344,7 @@ final class NativeNotifications {
             NotificationFeed.Work work = new NotificationFeed.Work();
             synchronized (LOCK) {
                 if (prefs(app).getLong("generation", 0) != generation) return;
-                activeWork = work;
+                if(activeWork!=null)activeWork.cancel();activeWork = work;
             }
             try {
                 NotificationFeed.Page page = NotificationFeed.get(app, envelope.getString("workspaceSlug"), true, null, snapshot, work);
@@ -314,8 +361,7 @@ final class NativeNotifications {
         });
     }
     static String consume(Context context) {
-        String pushTarget = NativePush.consume(context);
-        if (!"null".equals(pushTarget)) return pushTarget;
+
         synchronized (LOCK) {
             SharedPreferences store = prefs(context);
             String raw = store.getString("pending", null);

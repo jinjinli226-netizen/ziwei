@@ -50,6 +50,11 @@ public final class NotificationBridge {
         });
         return getStatus();
     }
+    @JavascriptInterface public String openBatterySettings(){
+        MainActivity current=trusted(true);
+        if(current!=null)current.runOnUiThread(()->{if(trusted(true)!=current)return;try{current.startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,android.net.Uri.parse("package:"+current.getPackageName())));}catch(ActivityNotFoundException unavailable){emit();}});
+        return getStatus();
+    }
     @JavascriptInterface public String clear() {
         MainActivity current = trusted(false);
         if (current != null) NativeNotifications.clear(current);
@@ -61,7 +66,7 @@ public final class NotificationBridge {
     }
     @JavascriptInterface public String setForeground(String conversationId) {
         MainActivity current = trusted(true);
-        if (current != null) NativePush.setForeground(current, conversationId);
+        if (current != null) NativeNotifications.setForeground(current, conversationId);
         return getStatus();
     }
     void emit() {

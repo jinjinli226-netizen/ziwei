@@ -327,14 +327,14 @@ public final class MainActivity extends Activity {
     @Override protected void onResume() {
         super.onResume();
         foreground = true;
-        NativePush.lifecycle(this, true);
+        NativeNotifications.lifecycle(this, true);
         NativeNotifications.recover(this);
         if (webView != null) { webView.onResume(); dispatchLifecycle("resume"); }
     }
 
     @Override protected void onPause() {
         foreground = false;
-        NativePush.lifecycle(this, false);
+        NativeNotifications.lifecycle(this, false);
         dispatchLifecycle("pause");
         CookieManager.getInstance().flush();
         if (webView != null) webView.onPause();
