@@ -1,5 +1,15 @@
 # 紫薇项目 HandOff
 
+## 2026-10-18 18:43 TK 爆款库长期授权与真实查询完成
+
+爆款库产品082390c4已先推GitHub后发布。当前候选b330843b，主PID439374/应用439384，OAuth schema2，原三库inode保持、没有restore。初次克隆丢失属组导致启动失败，已恢复原服务后以独立reconcile修复；原失败73be保留。真实996服务账号候选/回退两组HTTP通过，兼容fallback8834090a保留永久授权，不能直接回65b代码或恢复旧库。
+
+TK独立principal ece070fd-02bd-4a4a-b20f-a27ac91c1c17 / grant6a50984b已按用户要求在管理员网页授权read+collect、直到手动撤销。原native5417934d成功/tree0，两scope实际确认，页面9工具已连接。只读证明grant和refresh均无日历到期；不读取token/hash，其它旧授权未延长。
+
+真实聊天源6943a761用openai-codex/gpt-6.1-sol/max完成，3项原生爆款库工具执行/完成有CLI证据，原回复返回7平台/12赛道，root3468/tree退出0。数量来源为本轮最终回复；未伪造服务器缺失的原工具结果体，也未等待15分钟后现场刷新。授权与实际模型读取验收已完成。私仓最终文档1603dde3已推main和codex分支。
+
+紫薇API仍acee34d/PID429489，前端/中控/Nginx/官方client均保持。公司台式诊断build5a9c550c/PID21596、原r4/e7及专属Profile/HOME保持，无需用户终端。此前未批准前较早退出的底层cause未复现，不声称已经定位那个未知根因；本次真实授权成功。详见本轮operations与QA；下方均为历史快照。
+
 ## 2026-10-18 17:25 当前现场与后续工作
 
 当前API为acee34d目录 `/opt/ziwei/releases/windows-mcp-scope-acee34d32f04-bdc0ae98/v2`、PID429489；官方客户端5a642107，包e386b28a，bootstrap526882bb逐字保留。公司台式已通过单次官方任务自动更新，实际PID23428、09:00:06Z新build心跳。TK仍原r4/e7及专属Profile绑定。

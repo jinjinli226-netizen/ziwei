@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "checkedAt": "2026-10-18T09:19:00.326983+00:00",
-  "state": "awaiting_grant_lifetime_and_failure_diagnosis",
+  "checkedAt": "2026-10-18T10:42:27.573549+00:00",
+  "state": "live_connected_until_revoked_and_native_model_queries_passed",
   "workspace": "bigtron",
   "employeeId": "employee_1743b9a2-dd8c-4a51-9b7d-0d25414aa234",
   "originalDeferred": {
@@ -42,8 +42,8 @@
   },
   "newDeferredKey": "tk-viral-repair-fbb52e2-20261018-417c",
   "newUiMarker": "tk-viral-after-avatar-20261018-47d1",
-  "connectedVerified": false,
-  "currentBusinessSessionLoadedProven": false,
+  "connectedVerified": true,
+  "currentBusinessSessionLoadedProven": true,
   "companyScopeUpdate": {
     "clientBuild": "5a642107fa32d8e8f09ea139a9f964e7f50c77d9648788ae5aba6e96ac509fec",
     "pid": 23428,
@@ -98,5 +98,142 @@
     "grantedScopes": null
   },
   "userRequestedGrantLifetime": "until_revoked",
-  "grantLifetimeChangeDeployed": false
+  "grantLifetimeChangeDeployed": true,
+  "companyDiagnosticUpdate": {
+    "clientBuild": "5a9c550c26ec02ffe16f68d11e732e35aa5695f756b9b464e6ae80ab4af8a45b",
+    "pid": 21596,
+    "freshHeartbeatObserved": true,
+    "heartbeatAt": "2026-10-18T09:53:18.598Z",
+    "sourceActionId": "action_359def0b-32a4-4ed6-ab54-5e865e478b73",
+    "sourceTreeExitConfirmed": true,
+    "task": "Ziwei.TK.OAuthWait.Update.20261018",
+    "entrySha256": "a8b414279c9a95bd09c0149c455c19e589e6b8ebf536f0ca2da91fbacfd3fc1e",
+    "manualTerminalRequired": false,
+    "historyPreserved": true
+  },
+  "grantLifetimeCandidate": {
+    "repository": "jinjinli226-netizen/ai-viral-library",
+    "commit": "082390c4767db1f0caa4261e60e5fe33831a7476",
+    "githubPushed": true,
+    "localPureTestsPassed": 64,
+    "linuxHttpAndOtherTestsPassed": 70,
+    "productionDeployed": true,
+    "grantCreated": false,
+    "firstDeployment": {
+      "state": "failed_then_original_restored",
+      "errorCode": "SERVICE_PROCESS_MISMATCH",
+      "actualCause": "CLONE_DROPPED_SERVICE_GROUP",
+      "candidate": "/opt/viral-library/releases/until-revoked-candidate-082390c4767d-b330843b",
+      "originalRestored": true,
+      "originalPid": 438574,
+      "originalChildPid": 438581,
+      "oauthSchemaVersion": 1,
+      "databaseRestored": false,
+      "originalDatabaseIdentityRetained": true,
+      "publicHealthVerified": true
+    },
+    "successfulDeployment": {
+      "current": "/opt/viral-library/releases/until-revoked-candidate-082390c4767d-b330843b",
+      "mainPid": 439374,
+      "applicationPid": 439384,
+      "oauthSchemaVersion": 2,
+      "actualServiceUid": 996,
+      "lowPrivilegeCandidateAndFallbackHttpPassed": true,
+      "databaseRestored": false,
+      "originalDatabaseIdentitiesRetained": true
+    }
+  },
+  "viralIdentity": {
+    "principalId": "ece070fd-02bd-4a4a-b20f-a27ac91c1c17",
+    "name": "TikTokTrendS",
+    "created": true,
+    "grantCreated": true,
+    "grantId": "6a50984b-a803-49ba-bdc7-99df98e27156",
+    "lifetime": "until_revoked",
+    "expiresAt": null,
+    "revokedAt": null,
+    "scopes": [
+      "library:read",
+      "library:collect"
+    ],
+    "refreshCalendarExpiry": null
+  },
+  "finalNativeConnection": {
+    "actionId": "action_5417934d-31ee-458d-89da-c09a1345faa5",
+    "requestId": "f8afca15-99ad-417f-b3a7-e684f9a97abb",
+    "status": "succeeded",
+    "treeExitConfirmed": true,
+    "scopeConfirmed": true,
+    "requestedScopes": [
+      "library:read",
+      "library:collect"
+    ],
+    "grantedScopes": [
+      "library:read",
+      "library:collect"
+    ],
+    "toolsCountFromLiveUi": 9,
+    "sameDeferredSourceRelationProven": false
+  },
+  "businessSessionToolTest": {
+    "sourceActionId": "action_6943a761-34b2-484b-9610-ca23d25f7cf0",
+    "marker": "tk-viral-native-query-20261018-7f6b",
+    "status": "succeeded",
+    "requestedDirectNativeReadOnlyTools": 3,
+    "writesRequested": false,
+    "completedAt": "2026-10-18T10:33:13.389Z",
+    "rootPid": 3468,
+    "rootExitCode": 0,
+    "treeExitConfirmed": true,
+    "activeProcesses": 0,
+    "provider": "openai-codex",
+    "model": "gpt-6.1-sol",
+    "reasoningEffort": "max",
+    "nativeRequestReceiptInternallyConsistentAndSourceBound": true,
+    "directMcpToolCallsCompleted": [
+      "mcp__viral_library__library_get_capabilities",
+      "mcp__viral_library__library_list_platforms",
+      "mcp__viral_library__library_list_tracks"
+    ],
+    "additionalInternalToolsObserved": [
+      "tool_describe",
+      "execute_code"
+    ],
+    "platformCountFromCurrentReply": 7,
+    "trackCountFromCurrentReply": 12,
+    "firstTracksFromCurrentReply": [
+      "AI工具",
+      "AI绘画",
+      "AI视频"
+    ],
+    "rawStructuredToolResultAvailableInServerEvents": false,
+    "mcpWriteToolCallsObserved": 0
+  },
+  "evidenceFiles": {
+    "tk-native-query-direct-audit-1.json": {
+      "sha256": "4027975b018320f1b1b49eaa59cbc7c33c7a998ebf5af18ab597eb55cd326830",
+      "bytes": 6664
+    },
+    "tk-native-query-final-audit.json": {
+      "sha256": "ca6a518cf86bc673e31a31c54c8f8d73418187ef8de8243987fce601a4110279",
+      "bytes": 2858
+    },
+    "tk-native-query-observation-2.json": {
+      "sha256": "adce976dc7ee6ff17ef54f22af263cd59dfb67ed7f3e3333604ff707a11a0bb7",
+      "bytes": 2177
+    },
+    "tk-until-revoked-scope-proof.json": {
+      "sha256": "de11be8e357dc7d722eae25429efa63373b5fc50ea37c398a164e7942cda25c7",
+      "bytes": 2137
+    },
+    "reconcile-result.json": {
+      "sha256": "8a96ab8de2b14883d91e737bc65b45df3296596f0d61a58bc6cf593f26ec1a51",
+      "bytes": 4107
+    },
+    "tiktok-principal-until-revoked-scoped-proof.json": {
+      "sha256": "c400c6e6fafc5303387b60b1fb889ad903ee11eef38eb5fa3d2dd5a18f5852d5",
+      "bytes": 2127
+    }
+  },
+  "viralLibraryFinalDocumentationCommit": "1603dde3eb72e9249d1adfe987583561d56cfc3e"
 }

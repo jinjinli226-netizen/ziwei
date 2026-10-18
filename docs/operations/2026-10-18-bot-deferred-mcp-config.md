@@ -109,3 +109,23 @@ Windows 包只覆盖 OAuth helper 和管理工具说明，继承其余 930 个�
 17:36:49诊断产品 `e2a360c13765c6f4fce3aa1c34966388a327dd1c` 已先推双GitHub分支后，仅发布官方Windows包：build `5a9c550c26ec02ffe16f68d11e732e35aa5695f756b9b464e6ae80ab4af8a45b`、包SHA `b721f079c9a39f40d4d699904160b1a09ca3570eb5fcb512c071f355eff4e851`、1136585B，metadata03b800d2，bootstrap526882bb/6390B不变。有限失败诊断只含phase/cause/异常类型/HTTP状态/SDK版本等10字段，不含URL、消息、headers或凭据。两套各30项helper及实际SDK集成、独审、客户端933项闭包和Linux冷验通过；930继承文件保持。API、前端、中控/Nginx、DB身份/schema均不改。新5a9机器实际更新另行取证。
 
 后续公司台式5a到诊断包的限定一次性入口源保存在 `company-mcp-oauth-diagnostic-update-20261018/`，27项无监听测试及冻结器通过；只为取得真实失败原因，不声称已修复未知根因。新任务OAuthWait CREATE-only、fresh持有句柄只停空闲原daemon根、旧Scope任务/Plan/archive只读，保留全部历史。源码先推后新增不可变官方入口，实际执行继续记录。
+
+
+17:53:24，新一次性官方更新已自动完成。源359def0b成功且root/tree退出0，实际Company心跳确认build5a9c550c、PID21596、17:53:18.598，全部旧历史保留，无需用户终端。此前注册入口a8b414279c9a/76404B已先推GitHub、单次发布并公网原字节核验。
+
+长期授权源码在私库`jinjinli226-netizen/ai-viral-library`，082390c4767db1f0caa4261e60e5fe33831a7476已推main与codex/long-lived-mcp-grants并精确回读。该库以实际65b源文件c1b62导入基线，不伪称找回原Git历史；不含生产数据库或凭据。显式新授权可选until_revoked，旧有限期保持、access仍15分钟，refresh无日历到期且保留旋转/撤销检查。64项本地纯测试、类型和构建、独立源码审查通过；Linux隔离真实OAuth接口联合70/70，未打开生产数据库或更改服务。发布器和schema v2兼容回退还在独立验收，生产未变、TK grant尚未创建，不能称已接通。
+
+
+18:12长期授权首发布attempt lifetime-publish-082390c4767d-73beee48在完成三库SQLite一致性备份后切候选，进程校验SERVICE_PROCESS_MISMATCH失败；不能当部署成功。真实原因是copytree只保mode不保属组，原root:996/0640入口成为root:0/0640，服务用户无法读取。原记录和候选/回退树、全部失败回执保留。原数据库inode/schema保持，OAuth尚未迁移。随后以confirmed-empty状态及schema1执行限定恢复：先切精确65b，因自动重启限流一次start被拒；只读明确rate-limit后，仅reset-failed本unit并正常start一次，原服务PID438574/应用438581实际恢复，三库原inode及schema1、本地/公网健康、issuer/PRM/MCP401和其它项目保护全部通过。未restore/更换DB，未改sidecars（实际均996/0600）。
+
+当前补做精确代码metadata继承以及实际viral-library服务用户的低权compiled HTTP验收，准备新独立reconcile attempt；不会重跑或覆盖73be原失败。TK外部身份ece070fd-02bd-4a4a-b20f-a27ac91c1c17已在管理员网页创建一次，当前0连接、grant仍未提交。
+
+
+18:24:48，新独立reconcile-25902d48成功上线同一Git082候选b330843b，主PID439374/应用439384。元数据逐文件继承原root:996与权限，新增JS沿原资产；原BASE和node_modules未改。停服前真实996账户完成入口/npm读取与候选/兼容回退两组synthetic compiled HTTP，通过后才新取三库SQLite一致性备份并切换。schema2迁移成功，三库原inode由新应用FD实际持有；本地/公网/前端hash/issuer/PRM/MCP401、其它项目和官方Windows均通过保护核对。原失败73be回执保留，未restore任何数据库。
+
+18:26新UI连接只提交一次，原native5417934d、keyf8afca15；管理员已按用户本轮要求选择TK独立身份、阅读与采集、直到手动撤销。18:27:13原native成功、根16092与tree退出0，requested/granted两scope均确认；真实紫薇卡片显示已连接9工具。独立RO确认grant6a50984b principal/client精确对应，expires/revoked均NULL，refresh聚合1条未消费且expiry NULL，不读token/hash。当前永久授权已真实持久生效，但尚不据此声称业务聊天工具已加载。新真实模型只读三工具验收源6943a761于18:30在原聊天派一次，结果继续记录。
+
+
+18:33:13，真实TK查询源6943a761成功，root3468与tree退出0/active0。原生请求回执openai-codex / gpt-6.1-sol / max匹配，8次native_codex_transport request；模型沿本机Profile选择。原CLI阶段直接记录三项mcp__viral_library工具执行及完成，另有tool_describe与execute_code内部工具。当前原回复明确三项读取成功、7平台/12赛道，前三为AI工具/AI绘画/AI视频；read/collect均true，未继续业务。服务器未保留原tool-role结果体，数字标为本轮原回复，不伪造独立结构化结果。真实网页主聊天已显示完成回复；连接9工具，授权直到撤销。本次接入及真实模型读取验收完成。未等待15分钟后真实刷新，不把合成长闲置回归说成现场已刷新。
+
+爆款库最终实测文档已推私仓main与codex/long-lived-mcp-grants，两ref均1603dde3eb72e9249d1adfe987583561d56cfc3e；相对部署源082只变文档。
