@@ -30,11 +30,38 @@
 - 回退须保持可信任务绑定 writer / 无效标记和公开字段剥离连续性；可以停 v2 路由，不能裸退旧 writer 再前滚，造成证明缺口。
 - 新版服务尚未上线时明确提示服务未更新或接收未运行，不能以编译、夹具或旧包截图称正式包已经测通。
 
+2026-10-18 11:01（Asia/Shanghai）只读现场核对：正式 API / frontend 为 `d45317011235f38c0f1b5b2f2e60eff322338135`，current 为 `/opt/ziwei/releases/unlimited-parallel-d45317011235-55597409/v2`，CLI 为同一提交 / build `203fe63c886b4a98ef510a6302c84c6291f9eb66f095ed42549c4f0d9e903116`。现场尚无 v2 路由或三个通知模块。`df2f1943` 到 `d4531701` 没有 backend 差异；现场 auth 与 Git 的差异仅 CRLF / LF，规范化后内容相同。必须在该现场全树上叠加六文件增量，沿原四锁、snapshot / CAS 进行受控发布，保留 frontend / CLI，不能套用旧正式路径。
+
+**11:25 再次只读核对发现正式 current 已变为 `/opt/ziwei/releases/default-unlimited-12d5aa9f6d62-3f149f60/v2`。** 旧 d453 snapshot / CAS 已正确拒绝，变化包含 API 树、current、frontend / CLI 元数据与服务身份。上述六文件材料及本地 publisher 不得直接激活；恢复发布前必须重新核对新正式版本并生成新的受审基线。本次未执行远程 stage、切换、重启或数据库写入。
+
+## 固定安装包
+
+| 项目 | 值 |
+| --- | --- |
+| 固定源码 | `5a28be1dac5aad6f6e8ddeec90863cea8dd0a973` |
+| 包名 / 版本 | `com.ziwei.manager` / `0.5.0-internal` / code 12 |
+| APK SHA-256 | `96811f586c10f06901b29cb57246f05c96f320411821d89b245886ea0c371809` |
+| 文件大小 | 764,115 bytes |
+| 原有签名 SHA-256 | `507531ee91afe6369a2d519d653713a76d2fa54b8f5f76119672f668230ced35` |
+| 后台候选 | `0c8dc4a955ef7b65bc496ce7f43246b88201a088` |
+
+安装包及 `manifest-code12.json` 位于 `mobile-manager/dist/`。独立二进制复核确认 24 份网页资源与固定源码 / manifest 逐字节一致，包内没有第三方通知 SDK、native `.so`、测试 CA、localhost 源或可调试开关。两个服务均私有，权限只有网络、通知、网络状态和前台服务所需两项。此记录是构建与二进制证据，模拟器 / 正式接口验收须另附实际结果；`deviceVerified:false` 保留，不能据此声称真机已验证。
+
 ## 代码与测试记录
 
 网页 400 项检查通过，定向通知 / API / 页面联动 112 项通过；后续接收未运行状态小修另有 71 项通过。合成浏览器检查覆盖 390 / 320 宽度，无本地监听和真实业务写入。
 
 后台固定 `ca905ecc` 的独立扩大反例 14 项、通知 v1 / v2 / F1 / F5 回归 67 项通过；`a4e0e1fc` 服务入口 2 项通过。原生弱网、代次、去重、标题及线程策略持续在最终冻结点复核。后续实际 APK 和模拟器结论只按准确哈希记录。
+
+最终固定点的网页及后台组合测试 417 / 417 通过；原生 JVM 检查 266 项通过，其中包含真实接收 lease 的代次互斥、同锁网络唤醒，以及逐项重新鉴权超过处理预算后仍能推进分页尾部的回归。独立复核重复通过。员工名包含换行的跨端契约已修复：后台标题改为单行、正文保留多行，真实 Cookie → HTTP → 网页解析 6 项及原生标题验证 7 项通过。
+
+### 模拟器当前结果：尚未通过
+
+同源码隔离 smoke 包 SHA-256 为 `3115fb51c71435f606845582e2c2973d366c2db4bbebeb66d1170c47520ab4d4`，使用独立 applicationId、localhost HTTPS 专用测试 CA 和完整 TLS 校验；其 native / web 来源仍为固定 5a28。fixture 的真实内存 repository / v2 baseline / item / 严格 TLS 读取通过，无业务派发。这些结果不能代替 Android 通知送达。
+
+私有原数据 clone 在 guest 启动阶段出现系统命令停滞；改为官方软件渲染后曾达到 boot completed，但随后 guest shell 仍停滞，App 尚未安装。之后使用同 API 35 镜像的全新临时 userdata，guest shell 恢复，系统首次启动持续推进；尝试安装时系统仍未建立 settings provider。采样时宿主为 8 GB 内存、已用 swap 约 15.7 GB，出现很高磁盘活动；这是环境压力证据，不能据此认定 App 崩溃或通知成功。
+
+测试中断时未取得实际系统通知、点击原聊天或准确 canonical 包安装成功的证据。没有发布 APK、二维码或把 `deviceVerified` 改为 true。11:25 清理核对确认本次监听均已停止，347–360 临时登记已释放，项目端口检查无冲突或未登记监听；原六个 AVD 磁盘 SHA / 大小 / mtime 完全未变。两份私有测试磁盘保留供恢复，原 59582 及旧保留登记未操作。记录位于 `.local/mobile-manager-selfhosted-notification-v2-native-qa/interrupted-qa-cleanup.json`。
 
 广回归初轮出现两个旧进程探针超时；端口中心恢复后 prelaunch 真实探针已串行通过。旧官方 Python 群存储探针仍触发 30 秒 wrapper 超时；有界采样停在测试造数阶段的官方配置模块导入 / 编译，未进入群读取本体。缺配置 YAML 依赖导致重复 import 是静态推断，不是已经捕获的 ImportError。未修改产品超时或伪称全套通过；诊断在后端工作树 `.local/mobile-selfhost-probe-diagnostic/`。
 
