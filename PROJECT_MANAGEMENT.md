@@ -1,5 +1,9 @@
 # 紫薇项目管理与 AI 接手手册
 
+## 2026-10-18 默认不限轮数调整
+
+按用户最新要求去掉轮数开关，旧Bot及新建Bot普通聊天一律默认不限轮数；保留24小时、手动停止和跨员工并行。执行变更需新Windows客户端；正式发布与现场状态以[最新HANDOFF](HANDOFF.md)及[专项记录](docs/operations/2026-10-18-default-unlimited-turns.md)为准。
+
 ## 2026-10-18 不限轮数与多员工并行已发布
 
 最新正式产品为 `d453170`，API/网页已发布，Windows下载build为 `203fe63c…3116`，包含不限轮数与昨日并行修复。不限轮数仍保留24小时及手动停止；旧电脑必须更新后才能验证启用。API仅更新配置校验，保留线上混合基线，不恢复数据库。以[HANDOFF.md最新节](HANDOFF.md)及[专项发布记录](docs/operations/2026-10-18-unlimited-turns-and-parallel.md)为准，现场Windows新build与真实并行验收仍待用户升级后核对。下方为历史记录。

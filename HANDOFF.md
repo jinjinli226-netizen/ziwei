@@ -1,5 +1,9 @@
 # 紫薇项目 HandOff
 
+## 2026-10-18 Bot默认不限轮数，移除开关（发布准备）
+
+用户要求所有旧Bot及新Bot普通聊天默认不限轮数，不再逐个开启。设置开关和单次轮数输入已删除，保留24小时与手动停止；原有并行执行、Goals/Kanban独立预算和Profile/HOME不变。107项回归、lint192项通过。新包必须安装到Windows后下一次执行生效，尚未宣称真机已更新。详见[默认不限轮数记录](docs/operations/2026-10-18-default-unlimited-turns.md)。下方可选模式为历史版本。
+
 ## 2026-10-18 不限轮数与并行执行已发布
 
 产品 `d45317011235f38c0f1b5b2f2e60eff322338135` 已先推GitHub，再发布网页、API配置校验和Windows客户端。当前API目录 `/opt/ziwei/releases/unlimited-parallel-d45317011235-55597409/v2`，PID407909；CLI build `203fe63c886b4a98ef510a6302c84c6291f9eb66f095ed42549c4f0d9e903116` 同时包含不限轮数及df2跨员工并行修复。网页高级运行设置可选“不限轮数（最多24小时）”，保留单次24小时和停止。旧Bot配置不自动变化。

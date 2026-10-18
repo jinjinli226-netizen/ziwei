@@ -699,11 +699,11 @@ export async function runBotValidationProcess(spec,{signal,onSupervision,timeout
 }
 
 function botTurnLimitConfig(context,prepared) {
-  return {mode:context.config.turnLimitMode,maxTurns:context.config.maxTurns ?? 20,effectiveMaxTurns:effectiveBotMaxTurns(context.config),runBudgetSeconds:prepared.config.agent.run_budget_seconds,status:'configured'};
+  return {mode:'unlimited',effectiveMaxTurns:effectiveBotMaxTurns(context.config),runBudgetSeconds:prepared.config.agent.run_budget_seconds,status:'configured'};
 }
 
 export function withBotTurnLimitValidation(result,context,prepared) {
-  if(context.config?.turnLimitMode===undefined)return result;
+  if(context.config===undefined)return result;
   const validation=result.botValidation,turnLimit=botTurnLimitConfig(context,prepared);
   if(validation.employeeId!==context.employeeId||validation.revision!==context.revision||validation.effective?.maxTurns!==turnLimit.effectiveMaxTurns)throw Object.assign(new Error('Hermes 原生轮数限制与保存的策略不一致；未启动模型'),{processExit:result.processExit});
   return {...result,botValidation:{...validation,effective:{...validation.effective,turnLimit:{...turnLimit,status:'validated'}}}};
@@ -1059,7 +1059,7 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
       botPrepared=prepareHermesBotHome({context:hermesBot,sourceHome:hermesProfileHome(profile || 'default',{baseHome:profileBaseHome}),privateDirectory:botInstanceDirectory,workspace:managementMcp?.workspace,apiBase:managementMcp?.apiBase});
       reasoningProvider=botPrepared.provider;
       invocation={args:['chat','--query-file','-','-c','Ziwei '+String(hermesBot.conversationId || 'Bot Chat'),'--create-if-missing','--format','stream-json','--model',botPrepared.effectiveModel,'--provider',botPrepared.provider,'--max-turns',String(effectiveBotMaxTurns(hermesBot.config)),'--run-budget',String(botPrepared.config.agent.run_budget_seconds),...(imageInputs.length===1?['--image',imageInputs[0].path]:[])],stdin:content,format:'json-lines'};
-      if(hermesBot.config.turnLimitMode!==undefined)botTurnLimit=botTurnLimitConfig(hermesBot,botPrepared);
+      botTurnLimit=botTurnLimitConfig(hermesBot,botPrepared);
     }
     const launch = hermesBot && (hermesBot.config.permissions.mode==='read_only'||hermesBot.config.permissions.management===false) ? {invocation,env:childEnv,receipt:null} : prepareManagementMcpLaunch({ runtime: resolvedRuntime, profile, model, invocation, env: childEnv, ...(managementMcp || {}), creatorInstance, creatorInstanceDirectory, selectedProfileHome });
     invocation = launch.invocation; childEnv = launch.env; receipt = launch.receipt;

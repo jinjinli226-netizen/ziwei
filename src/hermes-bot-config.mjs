@@ -25,7 +25,9 @@ export function effectiveBotMaxTurns(config={}) {
   if(config.turnLimitMode!==undefined&&!BOT_TURN_LIMIT_MODES.includes(config.turnLimitMode))throw botFailure('BOT_CONFIG_INVALID','turnLimitMode 必须为 bounded 或 unlimited',400);
   const maxTurns=config.maxTurns ?? 20;
   if(!Number.isInteger(maxTurns)||maxTurns<1||maxTurns>100)throw botFailure('BOT_CONFIG_INVALID','maxTurns 必须为 1–100',400);
-  return config.turnLimitMode==='unlimited'?BOT_UNLIMITED_NATIVE_MAX_TURNS:maxTurns;
+  // Retain legacy fields on the wire for retries and autonomous aggregate
+  // budgets; every Bot chat now runs without an iteration-count limit.
+  return BOT_UNLIMITED_NATIVE_MAX_TURNS;
 }
 export const permittedCredentialName=name=>typeof name==='string'&&/^[A-Z][A-Z0-9_]*$/.test(name)&&! /^(ZIWEI_|CONTROL_MCP_|HERMES_|PYTHON|NODE_OPTIONS$|HOME$|USERPROFILE$)/.test(name);
 // Creation policy is separate from the legacy wire/runtime interpretation below.

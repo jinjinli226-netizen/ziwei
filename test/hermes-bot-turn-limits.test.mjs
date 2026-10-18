@@ -8,14 +8,16 @@ import {parse as yaml} from 'yaml';
 import {BOT_UNLIMITED_NATIVE_MAX_TURNS,effectiveBotMaxTurns,normalizeBotConfig,createDefaultBotConfig} from '../src/hermes-bot-config.mjs';
 import {prepareHermesBotHome,executeRuntime,resetRuntimeDiscovery,validateHermesBotRuntime,withBotTurnLimitValidation} from '../src/runtime-adapters.mjs';
 
-test('the explicit turn policy preserves legacy wire defaults and accepts only exact modes',()=>{
+test('every Bot defaults to unlimited execution while preserving legacy wire and aggregate budgets',()=>{
  const legacy=normalizeBotConfig();assert.equal(legacy.maxTurns,20);assert.equal(Object.hasOwn(legacy,'turnLimitMode'),false);assert.equal(Object.hasOwn(createDefaultBotConfig(),'turnLimitMode'),false);
  for(const maxTurns of [1,20,100]){
-  assert.equal(effectiveBotMaxTurns({maxTurns}),maxTurns);
-  for(const turnLimitMode of ['bounded','unlimited']){const config=normalizeBotConfig({maxTurns,turnLimitMode});assert.equal(config.maxTurns,maxTurns);assert.equal(config.turnLimitMode,turnLimitMode);assert.deepEqual(normalizeBotConfig(config),config);assert.equal(effectiveBotMaxTurns(config),turnLimitMode==='unlimited'?Number.MAX_SAFE_INTEGER:maxTurns);}
+  assert.equal(effectiveBotMaxTurns({maxTurns}),Number.MAX_SAFE_INTEGER);
+  for(const turnLimitMode of ['bounded','unlimited']){const config=normalizeBotConfig({maxTurns,turnLimitMode});assert.equal(config.maxTurns,maxTurns);assert.equal(config.turnLimitMode,turnLimitMode);assert.deepEqual(normalizeBotConfig(config),config);assert.equal(effectiveBotMaxTurns(config),Number.MAX_SAFE_INTEGER);}
  }
  for(const turnLimitMode of [null,true,false,0,1,'','Unlimited','none',' bounded',{},[]])assert.throws(()=>normalizeBotConfig({turnLimitMode}),{code:'BOT_CONFIG_INVALID'});
  for(const maxTurns of [0,-1,101,1.5,'20',Infinity,NaN,Number.MAX_SAFE_INTEGER])for(const turnLimitMode of ['bounded','unlimited'])assert.throws(()=>normalizeBotConfig({maxTurns,turnLimitMode}),{code:'BOT_CONFIG_INVALID'});
+ assert.equal(effectiveBotMaxTurns(),Number.MAX_SAFE_INTEGER);
+ assert.equal(effectiveBotMaxTurns(createDefaultBotConfig()),Number.MAX_SAFE_INTEGER);
  assert.equal(BOT_UNLIMITED_NATIVE_MAX_TURNS,Number.MAX_SAFE_INTEGER);assert.equal(JSON.parse(JSON.stringify(BOT_UNLIMITED_NATIVE_MAX_TURNS)),BOT_UNLIMITED_NATIVE_MAX_TURNS);assert.equal(Number.isSafeInteger(BOT_UNLIMITED_NATIVE_MAX_TURNS),true);
  const unlimited=normalizeBotConfig({turnLimitMode:'unlimited',maxTurns:7,drivers:{maxTotalTurns:9}});assert.equal(unlimited.maxTurns,7);assert.equal(unlimited.drivers.maxTotalTurns,9,'autonomous aggregate budgets are separate from one chat run');
 });
@@ -27,9 +29,9 @@ function homeFixture(t){
  return {root,home,source,context,options};
 }
 
-test('saved native YAML can switch unlimited to bounded while retaining the finite budget and source profile',t=>{
+test('default and legacy Bot settings all produce unlimited native YAML without changing aggregate budgets or source profile',t=>{
  const f=homeFixture(t);
- for(const [turnLimitMode,maxTurns,native]of [['unlimited',7,Number.MAX_SAFE_INTEGER],['bounded',7,7],[undefined,100,100]]){
+ for(const [turnLimitMode,maxTurns,native]of [['unlimited',7,Number.MAX_SAFE_INTEGER],['bounded',7,Number.MAX_SAFE_INTEGER],[undefined,100,Number.MAX_SAFE_INTEGER]]){
   const config={...f.context.config,maxTurns,...(turnLimitMode?{turnLimitMode}:{})},prepared=prepareHermesBotHome({...f.options,context:{...f.context,config}}),saved=yaml(fs.readFileSync(path.join(prepared.home,'config.yaml'),'utf8'));
   assert.equal(saved.agent.max_turns,native);assert.equal(saved.agent.max_turns,prepared.config.agent.max_turns);assert.equal(saved.agent.run_budget_seconds,86400);assert.equal(config.maxTurns,maxTurns);
  }
@@ -51,18 +53,18 @@ const posix={skip:process.platform==='win32'?'The isolated CLI capture uses POSI
 
 test('real adapter spawning sends the same exact positive ceiling as native YAML and retains the 24-hour budget',posix,async t=>{
  const f=cliFixture(t);
- for(const [turnLimitMode,maxTurns,effective]of [['unlimited',7,Number.MAX_SAFE_INTEGER],['bounded',7,7],[undefined,100,100]]){
+ for(const [turnLimitMode,maxTurns,effective]of [['unlimited',7,Number.MAX_SAFE_INTEGER],['bounded',7,Number.MAX_SAFE_INTEGER],[undefined,100,Number.MAX_SAFE_INTEGER]]){
   const config={...f.context.config,maxTurns,...(turnLimitMode?{turnLimitMode}:{})},context={...f.context,config},outcome=await executeRuntime({runtime:'Hermes',prompt:'isolated no-model argv fixture',cwd:f.root,env:f.env,hermesBot:context,botInstanceDirectory:f.options.privateDirectory,managementMcp:{workspace:context.workspace,apiBase:f.options.apiBase}});
   assert.equal(outcome.status,'succeeded',outcome.error);const {args,config:native}=f.read();assert.equal(args[args.indexOf('--max-turns')+1],String(effective));assert.equal(native.agent.max_turns,effective);assert.equal(args[args.indexOf('--run-budget')+1],'86400');assert.equal(native.agent.run_budget_seconds,86400);assert.equal(outcome.result.processExit.rootConfirmed,true);
-  if(turnLimitMode)assert.deepEqual(outcome.result.turnLimit,{mode:turnLimitMode,maxTurns,effectiveMaxTurns:effective,runBudgetSeconds:86400,status:'configured'});else assert.equal(Object.hasOwn(outcome.result,'turnLimit'),false);
+  assert.deepEqual(outcome.result.turnLimit,{mode:'unlimited',effectiveMaxTurns:effective,runBudgetSeconds:86400,status:'configured'});
  }
 });
 
-test('native config-only validation binds explicit policy to the reported effective value',posix,t=>{
+test('native config-only validation checks unlimited execution for both default and legacy settings',posix,t=>{
  const f=cliFixture(t),context={...f.context,config:{...f.context.config,turnLimitMode:'unlimited',maxTurns:7}},options={...f.validation,context};
- for(const [turnLimitMode,maxTurns,effective]of [['unlimited',7,Number.MAX_SAFE_INTEGER],['bounded',7,7],[undefined,20,20]]){
+ for(const [turnLimitMode,maxTurns,effective]of [['unlimited',7,Number.MAX_SAFE_INTEGER],['bounded',7,Number.MAX_SAFE_INTEGER],[undefined,20,Number.MAX_SAFE_INTEGER]]){
   const config={...f.context.config,maxTurns,...(turnLimitMode?{turnLimitMode}:{})},result=validateHermesBotRuntime({...options,context:{...context,config}});assert.equal(result.status,'succeeded',JSON.stringify(result));assert.equal(result.result.botValidation.effective.maxTurns,effective);assert.equal(result.result.externalModelCalls,0);
-  if(turnLimitMode)assert.deepEqual(result.result.botValidation.effective.turnLimit,{mode:turnLimitMode,maxTurns,effectiveMaxTurns:effective,runBudgetSeconds:86400,status:'validated'});else assert.equal(Object.hasOwn(result.result.botValidation.effective,'turnLimit'),false);
+  assert.deepEqual(result.result.botValidation.effective.turnLimit,{mode:'unlimited',effectiveMaxTurns:effective,runBudgetSeconds:86400,status:'validated'});
  }
  for(const patch of [{effective:{maxTurns:100}},{effective:{maxTurns:0}},{effective:{maxTurns:String(Number.MAX_SAFE_INTEGER)}},{employeeId:'employee_other'},{revision:0}]){
   fs.writeFileSync(f.capture+'.patch',JSON.stringify(patch));assert.throws(()=>validateHermesBotRuntime(options),/轮数限制/);
@@ -70,12 +72,12 @@ test('native config-only validation binds explicit policy to the reported effect
 });
 
 test('shared sync/supervised receipt matching retains existing confirmed process evidence on rejection',t=>{
- const f=homeFixture(t),context={...f.context,config:{...f.context.config,turnLimitMode:'unlimited',maxTurns:7}},prepared=prepareHermesBotHome({...f.options,context});
+ const f=homeFixture(t),context={...f.context,config:{...f.context.config,maxTurns:7}},prepared=prepareHermesBotHome({...f.options,context});
  // This is an input proof fixture for the receipt matcher, not an assertion
  // that a Windows Job was run on this machine. The Mac direct supervisor does
  // not attest an empty process tree and its strict validation stays unchanged.
  const processExit={platform:'win32',supervisor:'windows-job',launched:true,rootConfirmed:true,rootExitCode:0,treeConfirmed:true,activeProcesses:0,cancelled:false},receipt={processExit,botValidation:{valid:true,employeeId:context.employeeId,revision:context.revision,effective:{maxTurns:Number.MAX_SAFE_INTEGER}}};
- assert.equal(withBotTurnLimitValidation(receipt,{...context,config:undefined},prepared),receipt,'legacy requests without an explicit policy keep their existing receipt');
+ assert.equal(withBotTurnLimitValidation(receipt,{...context,config:undefined},prepared),receipt,'non-Bot validation contexts keep their existing receipt');
  assert.equal(withBotTurnLimitValidation(receipt,context,prepared).processExit,processExit);
  for(const patch of [{effective:{maxTurns:100}},{effective:{}},{employeeId:'other'},{revision:0}])assert.throws(()=>withBotTurnLimitValidation({...receipt,botValidation:{...receipt.botValidation,...patch}},context,prepared),error=>{assert.match(error.message,/轮数限制/);assert.equal(error.processExit,processExit);return true;});
 });
