@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import {actionExecutionLeaseMs} from '../src/action-execution-budget.mjs';
+import {observeDeviceUpdateHeartbeat} from './device-updates.mjs';
 import { guardRepository } from './version-preservation.mjs';
 import {serverCodeRolloutFor,guardServerCodeRolloutRepository} from './server-code-rollout.mjs';
 import fs from 'node:fs';
@@ -1348,6 +1349,7 @@ export function createRepository(options = {}, io={}) {
       for(const key of ['platform','arch'])if(typeof rawDiscovery[key]==='string'&&/^[A-Za-z0-9_.-]{1,32}$/.test(rawDiscovery[key]))runtimeDiscovery[key]=rawDiscovery[key];
       if(typeof rawDiscovery.checkedAt==='string'&&Number.isFinite(Date.parse(rawDiscovery.checkedAt)))runtimeDiscovery.checkedAt=rawDiscovery.checkedAt;
       if(clientBuild)runtimeDiscovery.clientBuild=clientBuild;
+      if(typeof rawDiscovery.maintenanceHostId==='string'&&/^[a-f0-9]{64}$/.test(rawDiscovery.maintenanceHostId))runtimeDiscovery.maintenanceHostId=rawDiscovery.maintenanceHostId;
       if(Array.isArray(rawDiscovery.features))runtimeDiscovery.features=[...new Set(rawDiscovery.features.filter(value=>typeof value==='string'&&/^[a-z][a-z0-9_]{0,63}$/.test(value)))].slice(0,32);
       db.prepare('UPDATE devices SET client_build=COALESCE(?,client_build),arch=COALESCE(?,arch),runtime_discovery_json=COALESCE(?,runtime_discovery_json) WHERE id=? AND workspace_id=?').run(clientBuild,arch,Object.keys(runtimeDiscovery).length?JSON.stringify(runtimeDiscovery):null,deviceId,ws.id);
       ensureRuntimeCatalog(ws.id, timestamp);
@@ -1363,6 +1365,7 @@ export function createRepository(options = {}, io={}) {
         db.prepare('UPDATE devices SET management_mcp_json=? WHERE id=? AND workspace_id=?').run(JSON.stringify(safe), deviceId, ws.id);
       }
       if(input.terminalMcp && typeof input.terminalMcp==='object') {const metadata=input.terminalMcp;const safe={configured:metadata.configured===true,workspace:String(metadata.workspace || slug),transport:'stdio',serverName:'ziwei-terminal',supportedRuntimes:Array.isArray(metadata.supportedRuntimes)?metadata.supportedRuntimes.map(String).slice(0,20):[],...(metadata.reason?{reason:String(metadata.reason).slice(0,400)}:{})};db.prepare('UPDATE devices SET terminal_mcp_json=? WHERE id=? AND workspace_id=?').run(JSON.stringify(safe),deviceId,ws.id);}
+      observeDeviceUpdateHeartbeat(db,deviceId);
       return this.listDevices(slug).find(device => device.id === row.id) || null;
     },
     requestManagementMcpRetry(slug, deviceId, context = {}) {

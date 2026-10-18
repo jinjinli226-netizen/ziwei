@@ -25,11 +25,12 @@ test('presentation separates available, not installed, failed, missing, stale an
   const rows=helpers.deviceRuntimes({id:'off',status:'offline',runtimes:[{name:'Codex',cli_status:'available',cli_version:'LAST'}]},[]);
   assert.equal(helpers.runtimePresentation(rows[0]).label,'设备离线');
 });
-test('Windows client maintenance is a separate local dialog and never generates pairing',async()=>{
+test('Windows client maintenance stays separate from device pairing',async()=>{
   const source=await readFile(new URL('./App.vue',import.meta.url),'utf8');
   assert.ok(source.includes('showClientMaintenance=true'),'A separate maintenance entry is required');
   assert.ok(source.includes('<ClientMaintenancePanel'),'Maintenance instructions must be mounted independently of connection pairing');
   const panel=await readFile(new URL('./components/ClientMaintenancePanel.vue',import.meta.url),'utf8');
   for(const command of ['ziwei_user stop','ziwei_user update','ziwei_user update-status --json','ziwei_user uninstall','https://qzelynth.top/downloads/cli/update-windows.ps1'])assert.ok(panel.includes(command),command);
-  assert.ok(!panel.includes('createDevicePairing')&&!panel.includes('api.'),'Instructions cannot invoke pairing or business APIs');
+  assert.ok(!panel.includes('createDevicePairing'),'Maintenance cannot create another pairing');
+  assert.ok(panel.includes('api.clientUpdates')&&panel.includes('api.updateClient'),'Remote upgrades use the existing authenticated management API');
 });

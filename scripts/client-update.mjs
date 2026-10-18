@@ -203,7 +203,7 @@ export async function performClientUpdate(options = {}) {
   }
 }
 
-async function performClientUpdateInternal({ root, env = process.env, directory, artifactFile, sha256, source = OFFICIAL_UPDATE_SOURCE, npmCli, stopClient, allowLegacyStop = false, legacyProof, log = () => {} }, progress) {
+async function performClientUpdateInternal({ root, env = process.env, directory, artifactFile, sha256, expectedBuild, source = OFFICIAL_UPDATE_SOURCE, npmCli, stopClient, allowLegacyStop = false, legacyProof, log = () => {} }, progress) {
   if (process.platform !== 'win32') throw failure('WINDOWS_ONLY', '本轮 update 仅支持 Windows；未修改此平台客户端');
   const installation = resolveInstalledPackage(root);
   const lifecycle = await import('./client-lifecycle.mjs');
@@ -246,6 +246,7 @@ async function performClientUpdateInternal({ root, env = process.env, directory,
   validateCandidatePackage(stagedRoot);
   await run(process.execPath, [path.join(stagedRoot, 'scripts/ziwei-user.mjs'), 'version'], { env, cwd: directory, timeout: 15_000, windowsHide: true });
   const newBuild = clientBuildIdentity(stagedRoot), oldBuild = clientBuildIdentity(root);
+  if (expectedBuild !== undefined && (!/^[a-f0-9]{64}$/.test(expectedBuild) || newBuild !== expectedBuild)) throw failure('UPDATE_BUILD_MISMATCH', '候选 build 与本次远程升级目标不一致；原客户端未停止');
   progress.stage = 'prepare_candidate';
   const operationId = randomUUID();
   const candidate = path.join(installation.modules, `.ziwei-ready-${operationId}`);
@@ -391,7 +392,8 @@ export async function launchClientUpdate({ codeRoot, root = codeRoot, args = {},
   for (const relative of ['package.json', 'daemon/config.mjs', 'src/management-bootstrap.mjs', 'scripts/client-update.mjs', 'scripts/client-update-worker.mjs', 'scripts/client-lifecycle.mjs', 'scripts/client-retained-stop-recovery.mjs', 'scripts/client-legacy-identity.mjs', 'scripts/client-legacy-identity.ps1']) {
     const target = path.join(helperRoot, relative); fs.mkdirSync(path.dirname(target), { recursive: true }); fs.copyFileSync(path.join(codeRoot, relative), target);
   }
-  const job = { root: path.resolve(root), parentPid: process.pid, directory, npmCli, ...legacyConsent, ...(args.package ? { artifactFile: path.resolve(String(args.package)), sha256: args.sha256 } : {}) };
+  if (args.expectedBuild !== undefined && !/^[a-f0-9]{64}$/.test(args.expectedBuild)) throw failure('BUILD_INVALID', '远程升级目标 build 无效');
+  const job = { root: path.resolve(root), parentPid: process.pid, directory, npmCli, ...legacyConsent, ...(args.expectedBuild ? { expectedBuild: args.expectedBuild } : {}), ...(args.package ? { artifactFile: path.resolve(String(args.package)), sha256: args.sha256 } : {}) };
   const jobFile = path.join(directory, 'job.json'); fs.writeFileSync(jobFile, JSON.stringify(job), { mode: 0o600 });
   const resultFile = path.join(directory, 'result.json');
   fs.writeFileSync(resultFile, JSON.stringify({ state: 'queued', operation: 'update', queuedAt: new Date().toISOString() }), { mode: 0o600 });

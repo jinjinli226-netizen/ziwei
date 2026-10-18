@@ -15,6 +15,8 @@ import { defaultUserDir, resolveConfigPath, resolveDaemonDataDirectory, resolveW
 import {inspectLocalDaemonMaintenanceFiles} from '../backend/preservation-native-evidence.mjs';
 import {createProductionClientIdentityHandler} from '../backend/preservation-source-namespace.mjs';
 import {loadPrivateClientIdentityConfiguration,privateClientConnections,createPrivateClientStateReader,createPrivateIdentityHttpRoute} from './private-preservation-identity.mjs';
+import { createRemoteClientUpdates, remoteMaintenanceHostId, REMOTE_CLIENT_UPDATE_FEATURE } from '../src/client-remote-update.mjs';
+import { launchRemoteClientUpdate, inspectRemoteClientUpdateWorker, recoverRemoteClientUpdateWorker } from '../scripts/client-remote-update-worker.mjs';
 
 const ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const packageMeta = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
@@ -51,6 +53,9 @@ function log(event, extra = {}) {
 }
 function rotate() { try { if (fs.statSync(logPath).size > 5 * 1024 * 1024) fs.renameSync(logPath, `${logPath}.${Date.now()}`); } catch {} }
 const connections = new Map();
+let remoteClientUpdates;
+const remoteUpdateEnabled = process.platform === 'win32' && path.basename(ROOT) === 'ziwei' && path.basename(path.dirname(ROOT)) === 'node_modules' && Boolean(standaloneHome);
+const maintenanceHostId = remoteUpdateEnabled ? remoteMaintenanceHostId(dataDir) : null;
 const executionAllowed = () => ![...connections.values()].some(connection => connection.dispatcher?.quarantined);
 let connectionErrors = [];
 function installConnections() {
@@ -111,7 +116,7 @@ function installConnections() {
     });
     state.actionScheduler = createActionScheduler({
       execute: action => state.actionDelivery.execute(action),
-      canStart: action => isCancellationAction(action) || executionAllowed() || state.actionDelivery.canDeliverWithoutExecution(action),
+      canStart: (action, admission) => isCancellationAction(action) || state.actionDelivery.canDeliverWithoutExecution(action) || ((!remoteClientUpdates?.blocksNewActions || admission.collaborationChild) && executionAllowed()),
       quarantinedActionIds: () => state.dispatcher.quarantinedActionIds,
       onError: (error, action) => log('a2a_action_failed', { workspace: config.workspace, actionId: action.id, error: error.message }),
     });
@@ -133,6 +138,30 @@ let pollTimer;
 let draining = false;
 const shutdownAbort = new AbortController();
 const activeHeartbeats = new Set();
+const remoteUpdateIdle = () => [...connections.values()].every(connection => !connection.polling && connection.actionScheduler.activeCount === 0 && connection.localExecutor.maintenanceStatus().workers.every(worker => worker.pendingCommands === 0 && worker.inFlight === 0 && worker.pendingInbound === 0));
+remoteClientUpdates = createRemoteClientUpdates({
+  home: dataDir, hostId: maintenanceHostId, clientBuild: CLIENT_BUILD, enabled: remoteUpdateEnabled,
+  connections: () => [...connections.values()].map(connection => connection.config).filter(config => config.deviceToken),
+  idle: remoteUpdateIdle,
+  prepareIdle: async () => {
+    if (!remoteUpdateIdle()) throw Object.assign(new Error('CLIENT_UPDATE_BUSY_AT_DRAIN'), { code: 'CLIENT_UPDATE_BUSY_AT_DRAIN' });
+    await Promise.all([...connections.values()].map(connection => connection.localExecutor.close()));
+    if ([...connections.values()].some(connection => !connection.localExecutor.maintenanceStatus().safe)) throw Object.assign(new Error('CLIENT_UPDATE_GATEWAY_EXIT_UNCONFIRMED'), { code: 'CLIENT_UPDATE_GATEWAY_EXIT_UNCONFIRMED' });
+  },
+  request: async (config, pathname, body) => {
+    const response = await fetch(config.apiBase + pathname, { method: body ? 'POST' : 'GET', redirect: 'error', headers: { 'x-ziwei-device-token': config.deviceToken, ...(body ? { 'content-type': 'application/json' } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.any([AbortSignal.timeout(8000), shutdownAbort.signal]) });
+    if (!response.ok) throw Object.assign(new Error('CLIENT_UPDATE_TRANSPORT_FAILED'), { code: [401, 403].includes(response.status) ? 'CLIENT_UPDATE_AUTHORIZATION_FAILED' : response.status === 404 ? 'CLIENT_UPDATE_SERVER_UNSUPPORTED' : 'CLIENT_UPDATE_TRANSPORT_FAILED', status: response.status });
+    const payload = await response.json(); if (payload.ok !== true) throw Object.assign(new Error('CLIENT_UPDATE_RESPONSE_INVALID'), { code: 'CLIENT_UPDATE_RESPONSE_INVALID' });
+    return payload;
+  },
+  launch: ({ request, claimToken }) => launchRemoteClientUpdate({ root: ROOT, home: dataDir, configPath, request, claimToken }),
+  inspectWorker: worker => inspectRemoteClientUpdateWorker(worker, { home: dataDir }),
+  recoverWorker: (request, claimToken) => recoverRemoteClientUpdateWorker({ home: dataDir, request, claimToken }),
+  log,
+});
+function clientRuntimeDiscovery() {
+  return { checkedAt: runtimeDiscovery.discoveredAt, platform: runtimeDiscovery.bridge.platform, arch: runtimeDiscovery.bridge.arch, clientBuild: CLIENT_BUILD, features: ['bot_mcp_oauth_relay_v1', ...(remoteUpdateEnabled ? [REMOTE_CLIENT_UPDATE_FEATURE] : [])], ...(maintenanceHostId ? { maintenanceHostId } : {}) };
+}
 process.on('uncaughtException', error => log('uncaught_exception', { error: error.stack || error.message }));
 process.on('unhandledRejection', error => log('unhandled_rejection', { error: error?.stack || String(error) }));
 async function heartbeat() {
@@ -179,7 +208,7 @@ async function performHeartbeatConnection(connection) {
     status: 'online',
     runtimes: runtimeDiscovery.runtimes,
     runtimeMetadata: runtimeDiscovery.runtimes,
-    runtimeDiscovery: { checkedAt: runtimeDiscovery.discoveredAt, platform: runtimeDiscovery.bridge.platform, arch: runtimeDiscovery.bridge.arch, clientBuild: CLIENT_BUILD, features:['bot_mcp_oauth_relay_v1'] },
+    runtimeDiscovery: clientRuntimeDiscovery(),
     managementMcp: connection.managementStatus,
     terminalMcp: connection.terminalStatus,
     agentVersions: Object.fromEntries(Object.entries(runtimeDiscovery.runtimes).map(([name, item]) => [name, item.status === 'available' ? item.version || null : null]))
@@ -236,12 +265,14 @@ async function refreshRuntimeDiscovery(connection) {
   try {
     await fetch(`${config.apiBase}/api/workspaces/${encodeURIComponent(config.workspace)}/runtimes/register`, {
       method: 'POST', headers: daemonHeaders(connection, { json: true }),
-      body: JSON.stringify({ agentId: 'ziwei_user', deviceId: config.deviceId || 'device-ziwei-user', clientBuild: CLIENT_BUILD, runtimeDiscovery: { checkedAt: runtimeDiscovery.discoveredAt, platform: runtimeDiscovery.bridge.platform, arch: runtimeDiscovery.bridge.arch, clientBuild: CLIENT_BUILD, features:['bot_mcp_oauth_relay_v1'] }, runtimes: runtimeDiscovery.runtimes }),
+      body: JSON.stringify({ agentId: 'ziwei_user', deviceId: config.deviceId || 'device-ziwei-user', clientBuild: CLIENT_BUILD, runtimeDiscovery: clientRuntimeDiscovery(), runtimes: runtimeDiscovery.runtimes }),
       signal: AbortSignal.timeout(3000)
     });
   } catch (error) { log('runtime_discovery_refresh_failed', { error: error.message }); }
 }
 async function poll() {
+  await remoteClientUpdates.tick();
+  if (draining || shutdownAbort.signal.aborted) return;
   await Promise.allSettled([...connections.values()].map(pollConnection));
 }
 async function pollConnection(connection) {
@@ -284,7 +315,7 @@ function healthPayload() {
   const gatewaySafe=gateway.every(row=>row.safe===true);
   const maintenance={safe:fileEvidence.safe&&gatewaySafe&&quarantinedActionCount===0,stopSafe:fileEvidence.stopSafe&&gatewaySafe&&quarantinedActionCount===0,retainedDeliveryCount:fileEvidence.retainedDeliveryCount,retainedBackgroundCount:fileEvidence.retainedBackgroundCount,pendingDeliveryCount:[...connections.values()].reduce((n,c)=>n+c.actionDelivery.pendingCount,0),blockedDeliveryCount:[...connections.values()].reduce((n,c)=>n+c.actionDelivery.blockedCount,0),gatewaySafe,gatewayWorkers:gateway.flatMap(row=>row.workers),fileIssues:fileEvidence.issues,stopIssues:fileEvidence.stopIssues.map(({code})=>({code}))};
   return { service: 'ziwei_user', version: VERSION, clientBuild: CLIENT_BUILD, bridge: 'ziwei_user', agentId: 'ziwei_user', workspace: config.workspace, deviceId: config.deviceId, runtimes: runtimeDiscovery.runtimes, managementMcp: primaryConnection?.managementBootstrap.status(), terminalMcp: primaryConnection?.terminalStatus, lastHeartbeat, lastHeartbeatAgeMs: lastHeartbeatAt ? Math.max(0, Date.now() - lastHeartbeatAt) : null, lastPoll, pid: process.pid,
-    lifecycle: { nonce: lifecycleNonce, root: ROOT, configPath, configSha256: lifecycleConfigurationHash(), runtimeDir, startedAt: lifecycleStartedAt, managedAuxiliaryCount: maintenance.gatewayWorkers.filter(row=>row.processAlive!==false).length }, maintenance,
+    lifecycle: { nonce: lifecycleNonce, root: ROOT, configPath, configSha256: lifecycleConfigurationHash(), runtimeDir, startedAt: lifecycleStartedAt, managedAuxiliaryCount: maintenance.gatewayWorkers.filter(row=>row.processAlive!==false).length }, maintenance, remoteClientUpdate: remoteClientUpdates.status(),
     connectionState: draining ? 'draining' : executionQuarantined ? 'quarantined' : 'connected', executionQuarantined, quarantinedActionCount, activeActionCount: [...connections.values()].reduce((total, connection) => total + connection.actionScheduler.activeCount, 0), pollingCount: [...connections.values()].filter(connection => connection.polling).length,
     connections: [...connections.values()].map(connection => ({ workspace: connection.config.workspace, deviceId: connection.config.deviceId, primary: connection.config.primary, configured: true, ready: !draining && !executionQuarantined && connection.lastHeartbeatAt > 0 && Date.now() - connection.lastHeartbeatAt <= Math.max(45_000, (Number(config.heartbeatMs) || 15_000) * 3), lastHeartbeat: connection.lastHeartbeat, managementMcp: connection.managementBootstrap.status(), terminalMcp: connection.terminalStatus })), connectionErrors,
   };

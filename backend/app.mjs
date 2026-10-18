@@ -25,6 +25,7 @@ import { createManagementBootstrap } from './management-bootstrap.mjs';
 import {createBotMcpConnections} from './bot-mcp-connections.mjs';
 import {createBotHistoricalRecovery} from './bot-historical-recovery.mjs';
 import {createBotForceAbandon} from './bot-force-abandon.mjs';
+import {createDeviceUpdateService} from './device-updates.mjs';
 import { toolDefinitions as managementTools } from '../scripts/ziwei-mcp.mjs';
 
 const allowedOrigin = process.env.FRONTEND_ORIGIN || 'http://127.0.0.1:5178';
@@ -305,6 +306,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   if(options.enableDeferredConfig!==false&&options.enableScheduler!==false)botDeferredConfig.start(botMcpConnections.deferredHandlers);
   const botHistoricalRecovery=createBotHistoricalRecovery(repo,{readA2AToken:()=>readA2AToken({create:true})});
   const botForceAbandon=createBotForceAbandon(repo,{readA2AToken:()=>readA2AToken({create:true})});
+  const deviceUpdates=createDeviceUpdateService(repo,options.deviceUpdates);
   const phoneMcp = createPhoneMcpService(repo,ziweiConnect,management,options);
   app.locals.repo = repo;
   app.locals.realtime = realtime;
@@ -317,6 +319,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   app.locals.botDeferredConfig=botDeferredConfig;
   app.locals.botHistoricalRecovery=botHistoricalRecovery;
   app.locals.botForceAbandon=botForceAbandon;
+  app.locals.deviceUpdates=deviceUpdates;
   app.locals.employeeTemplates = employeeTemplates;
   app.use(cors);
   app.use((_req, res, next) => {
@@ -528,6 +531,12 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   app.post('/api/invitations/:id/revoke', requireRole('owner','admin'), (req, res) => res.json(repo.revokeInvitation(req.params.id)));
   app.get('/api/invitations/lookup/:code', (req, res) => { const invitation = repo.getInvitationByCode(req.params.code); if (!invitation) return res.status(404).json({ error: 'Invitation not found' }); res.json(invitation); });
   app.post('/api/invitations/:code/accept', (req, res) => res.json(repo.acceptInvitation(req.params.code, req.body || {}, req.auth ? { userId: req.auth.user_id, email: req.auth.user.email, name: req.auth.user.name } : null)));
+  const updateActor = req => ({actorUserId:req.auth?.user_id});
+  app.get('/api/workspaces/:slug/client-updates', async(req,res)=>{res.setHeader('Cache-Control','no-store');res.json(await deviceUpdates.list(req.params.slug,updateActor(req)));});
+  app.get('/api/workspaces/:slug/devices/:id/client-updates',async(req,res)=>{res.setHeader('Cache-Control','no-store');res.json(await deviceUpdates.get(req.params.slug,req.params.id,null,updateActor(req)));});
+  app.get('/api/workspaces/:slug/devices/:id/client-updates/:requestId',async(req,res)=>{res.setHeader('Cache-Control','no-store');res.json(await deviceUpdates.get(req.params.slug,req.params.id,req.params.requestId,updateActor(req)));});
+  app.post('/api/workspaces/:slug/devices/:id/client-updates',requireRole('owner','admin'),async(req,res)=>{res.setHeader('Cache-Control','no-store');const result=await deviceUpdates.create(req.params.slug,req.params.id,req.body,updateActor(req));res.status(result.duplicate||result.alreadyCurrent?200:202).json(result);});
+  app.post('/api/workspaces/:slug/devices/:id/client-updates/:requestId/cancel',requireRole('owner','admin'),(req,res)=>{res.setHeader('Cache-Control','no-store');res.json(deviceUpdates.cancel(req.params.slug,req.params.id,req.params.requestId,updateActor(req)));});
   app.get('/api/workspaces/:slug/devices', (req, res) => res.json({ devices: repo.listDevices(req.params.slug, { userId: req.auth?.user_id }) }));
   // Any workspace member may pair the computer they control. The short-lived
   // code is scoped to this workspace and can only create one credential; it
@@ -945,6 +954,10 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
     requireDevice: app.locals.requireDeviceAuth,
     deviceVerifier: req => verifyDeviceRequest(repo, req)
   }));
+  const updateDevice = req => ({slug:String(req.query.workspace||''),id:String(req.query.deviceId||'')});
+  app.get('/a2a/v1/device-updates',(req,res)=>{res.setHeader('Cache-Control','no-store');const{slug,id}=updateDevice(req);res.json({ok:true,...deviceUpdates.pending(slug,id,req.deviceCredential)});});
+  app.post('/a2a/v1/device-updates/:requestId/claim',(req,res)=>{res.setHeader('Cache-Control','no-store');const{slug,id}=updateDevice(req);res.json({ok:true,...deviceUpdates.claim(slug,id,req.params.requestId,req.body,req.deviceCredential)});});
+  app.post('/a2a/v1/device-updates/:requestId/progress',(req,res)=>{res.setHeader('Cache-Control','no-store');const{slug,id}=updateDevice(req);res.json({ok:true,...deviceUpdates.progress(slug,id,req.params.requestId,req.body,req.deviceCredential)});});
   app.get('/a2a/v1/agents', (_req, res) => res.json({ agents: [{ id:'ziwei_user', name:'ziwei_user', description:'紫薇工作区本机 daemon，负责心跳、轮询和 A2A 任务', url:'/a2a/v1', capabilities:['tasks','messages','heartbeat','actions','ack','result'] }] }));
   app.post('/a2a/v1/actions/:id/prelaunch-recovery/status',(req,res)=>{res.setHeader('Cache-Control','no-store');if(!assertA2AActionWorkspace(repo,req,res))return;res.json(botHistoricalRecovery.status(req.params.id,req.deviceCredential,req.body));});
   app.post('/a2a/v1/actions/:id/force-abandon/prepare',(req,res)=>{res.setHeader('Cache-Control','no-store');if(!assertA2AActionWorkspace(repo,req,res))return;res.json(botForceAbandon.prepare(req.params.id,req.deviceCredential,req.body));});

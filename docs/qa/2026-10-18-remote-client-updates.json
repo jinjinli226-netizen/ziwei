@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "phase": "source-acceptance",
+  "userAuthorizedLiveTarget": {
+    "workspace": "bigtron",
+    "deviceId": "device_bfd9a3d2-c2cc-4a36-8bd8-465bea492493",
+    "name": "李金晋电脑"
+  },
+  "tests": {
+    "total": 134,
+    "passed": 133,
+    "failed": 0,
+    "skipped": 1,
+    "skipReason": "Windows native maintenance retirement requires Windows"
+  },
+  "lint": {
+    "passed": true,
+    "files": 209
+  },
+  "frontendBuild": {
+    "passed": true,
+    "entry": "assets/index-B9L_did_.js"
+  },
+  "independentReview": {
+    "passed": true,
+    "originalBoundaryFailures": 3,
+    "sameReproAfterFixPassed": 3
+  },
+  "testListenersStartedByNewTests": 0,
+  "realDeviceUpdateTriggeredAtSourceAcceptance": false,
+  "deploymentConfirmedAtSourceAcceptance": false,
+  "sourceHashes": {
+    "backend/device-updates.mjs": "228dee634b677fd957ffa991f1acb47cd3609b6eb8a342e25f9714cda4486eed",
+    "backend/app.mjs": "023f6fb969582053b8110ada417d7adbb947e9eb21115fa7c94012cc33e81d74",
+    "backend/repository.mjs": "e63b98d4242d4e844341836ddb9726d3e735d5a4e495665c356af8036f4f8db4",
+    "daemon/ziwei_user.mjs": "b80baa9c499b64aab1ffa83ebf0f2667b2fa442952c0ac449ccdb0667f34c3c2",
+    "src/client-remote-update.mjs": "9d9f6e50ad20753cd253a31c5a8d35b34059c5b1b648c0684436aa9bde8888dd",
+    "scripts/client-remote-update-worker.mjs": "5a62103a95bb3babbe4972c163f513b4502d18fbff9387f1e04c55d6389fb836",
+    "scripts/client-update.mjs": "4ad505d7468aab9f567306ac0ae436effa3bd371519ee7f4fb52dba5c5d628e8",
+    "src/daemon-action-scheduler.mjs": "59d76d4dbd4fcc184f03fe296065cee904f45ff5e836daf7f25cbcdcf1fb92b7",
+    "src/management-bootstrap.mjs": "75e9c74b4163a0d4d339203880ca7b1d13b40353f6ba24b2c91005777b370a25",
+    "frontend/src/client-updates.js": "5335589bf9b29a76baf9c9ecc0b702d4af02c7fffd2e96a331ae9c0ac754f161",
+    "frontend/src/components/ClientMaintenancePanel.vue": "1dacc3c127e0a576c3c6dcdd1b73b5862a0d67c5b877ce01d58ae588caa81882"
+  }
+}

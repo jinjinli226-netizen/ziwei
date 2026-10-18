@@ -17,7 +17,7 @@ export function createActionScheduler({execute,concurrency=3,onError=()=>{},canS
  const deviceKey=a=>a.payload?.deviceId||a.payload?.device_id||a.payload?.targetDeviceId||a.payload?.target_device_id||null;
  const potentialParent=a=>{const native=a.payload?.nativeOperation;return a.type==='conversation.execute'||a.payload?.employeeTemplateId==='ziwei-employee-creator'||a.type==='hermes.bot.native'&&(native?.resource==='groups'&&native.operation==='step'||native?.resource==='collaboration'&&native.input?.mode==='group');};
  const report=(error,a)=>{try{onError(error,a);}catch{}};
- const allowed=a=>{try{return canStart(a);}catch(error){report(error,a);return false;}};
+ const allowed=a=>{try{return canStart(a,{collaborationChild:collaborationChild(a)});}catch(error){report(error,a);return false;}};
  const collaborationChild=a=>{
   const c=a?.payload?.collaboration;if(a?.type!=='conversation.execute'||a.payload?.employeeTemplateId==='ziwei-employee-creator'||!c||typeof c.sourceActionId!=='string'||typeof c.sourceEmployeeId!=='string'||!['message','delegate','group'].includes(c.mode)||typeof c.messageId!=='string'||!c.messageId||typeof c.fingerprint!=='string'||!/^[a-f0-9]{64}$/.test(c.fingerprint))return false;
   const parent=activeActions.get(c.sourceActionId),workspace=workspaceKey(a),device=deviceKey(a);
