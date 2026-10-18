@@ -18,11 +18,12 @@ public final class NotificationConnectionService extends Service {
     static final String CHANNEL="ziwei_connection_v1";
     static final int NOTIFICATION_ID=0x5a5701;
     private static final String STOP="com.ziwei.manager.STOP_RECEIVING";
+    private static final Object STATE_LOCK=new Object();
     private static volatile NotificationConnectionService instance;
     private static volatile String state="stopped";
     private final Object wake=new Object();
-    private volatile long runToken,networkEpoch;
-    private volatile NotificationFeed.Work work;
+    private volatile long networkEpoch;
+    private final ReceiveLease<NotificationFeed.Work> lease=new ReceiveLease<>();
     private ConnectivityManager connectivity;
     private ConnectivityManager.NetworkCallback callback;
     static boolean running(){return instance!=null&&!"stopped".equals(state);}
@@ -30,11 +31,11 @@ public final class NotificationConnectionService extends Service {
     static void start(Context c){
         if(!NativeNotifications.shouldReceive(c)||running())return;
         try{c.startForegroundService(new Intent(c,NotificationConnectionService.class));}
-        catch(RuntimeException unavailable){state="stopped";NativeNotifications.changed();}
+        catch(RuntimeException unavailable){synchronized(STATE_LOCK){if(instance==null)state="stopped";}NativeNotifications.changed();}
     }
     static void stop(Context c){NotificationConnectionService current=instance;if(current!=null)current.cancel();c.stopService(new Intent(c,NotificationConnectionService.class));}
     @Override public void onCreate(){
-        super.onCreate();instance=this;state="connecting";
+        super.onCreate();synchronized(STATE_LOCK){instance=this;state="connecting";}
         NotificationManager manager=getSystemService(NotificationManager.class);
         NotificationChannel channel=new NotificationChannel(CHANNEL,"持续接收连接",NotificationManager.IMPORTANCE_LOW);
         channel.setDescription("直接连接自建紫薇服务器接收员工消息；可随时停止");channel.setSound(null,null);channel.enableVibration(false);channel.setShowBadge(false);manager.createNotificationChannel(channel);
@@ -53,26 +54,27 @@ public final class NotificationConnectionService extends Service {
     @Override public int onStartCommand(Intent intent,int flags,int startId){
         if(intent!=null&&STOP.equals(intent.getAction())){NativeNotifications.clear(this);stopSelf();return START_NOT_STICKY;}
         if(!NativeNotifications.shouldReceive(this)){stopSelf();return START_NOT_STICKY;}
-        NotificationFeed.Work previous=work;if(previous!=null)previous.cancel();
-        final long token=++runToken;state="connecting";
+        ReceiveLease.Start<NotificationFeed.Work> start=lease.restart();if(start.previous!=null)start.previous.cancel();
+        final long token=start.generation;state(token,"connecting");
         Thread receiver=new Thread(()->receive(token),"ziwei-selfhost-receiver");receiver.setDaemon(true);receiver.start();
         NativeNotifications.changed();return START_STICKY;
     }
     private void receive(long token){
         int failures=0;boolean catchup=true;
-        while(runToken==token&&NativeNotifications.shouldReceive(this)){
+        while(lease.current(token)&&NativeNotifications.shouldReceive(this)){
             if(!NativeNotifications.enabled(this)){pause(500,token);continue;}
-            long networkBefore=networkEpoch;NotificationFeed.Work next=new NotificationFeed.Work();work=next;
-            boolean success=NativeNotifications.receive(this,next,!catchup);work=null;
-            if(runToken!=token)break;
-            if(success){failures=0;catchup=false;state="connected";NativeNotifications.changed();pause(250,token);}
-            else {catchup=true;state="backoff";NativeNotifications.changed();if(networkBefore!=networkEpoch){failures=0;continue;}pause(SelfhostRules.backoff(failures),token);failures=Math.min(6,failures+1);}
+            long networkBefore=networkEpoch;NotificationFeed.Work next=new NotificationFeed.Work();if(!lease.attach(token,next))break;
+            boolean success;try{success=NativeNotifications.receive(this,next,!catchup);}finally{lease.finish(token,next);}
+            if(!lease.current(token))break;
+            if(success){failures=0;catchup=false;state(token,"connected");NativeNotifications.changed();pause(250,token);}
+            else {catchup=true;state(token,"backoff");NativeNotifications.changed();if(networkBefore!=networkEpoch){failures=0;continue;}pause(SelfhostRules.backoff(failures),token);failures=Math.min(6,failures+1);}
         }
-        if(runToken==token)stopSelf();
+        if(lease.current(token))stopSelf();
     }
-    private void pause(long millis,long token){synchronized(wake){if(runToken!=token)return;try{wake.wait(millis);}catch(InterruptedException stopped){Thread.currentThread().interrupt();}}}
-    private void networkChanged(){networkEpoch++;NotificationFeed.Work current=work;if(current!=null)current.cancel();synchronized(wake){wake.notifyAll();}}
-    private void cancel(){runToken++;NotificationFeed.Work current=work;if(current!=null)current.cancel();state="stopped";synchronized(wake){wake.notifyAll();}}
-    @Override public void onDestroy(){cancel();if(callback!=null)try{connectivity.unregisterNetworkCallback(callback);}catch(RuntimeException ignored){}if(instance==this)instance=null;stopForeground(STOP_FOREGROUND_REMOVE);NativeNotifications.changed();super.onDestroy();}
+    private void pause(long millis,long token){synchronized(wake){if(!lease.current(token))return;try{wake.wait(millis);}catch(InterruptedException stopped){Thread.currentThread().interrupt();}}}
+    private void networkChanged(){networkEpoch++;NotificationFeed.Work current=lease.active();if(current!=null)current.cancel();synchronized(wake){wake.notifyAll();}}
+    private void state(long token,String value){synchronized(STATE_LOCK){if(instance==this&&lease.current(token))state=value;}}
+    private void cancel(){ReceiveLease.Start<NotificationFeed.Work> stopped=lease.restart();if(stopped.previous!=null)stopped.previous.cancel();synchronized(STATE_LOCK){if(instance==this)state="stopped";}synchronized(wake){wake.notifyAll();}}
+    @Override public void onDestroy(){cancel();if(callback!=null)try{connectivity.unregisterNetworkCallback(callback);}catch(RuntimeException ignored){}synchronized(STATE_LOCK){if(instance==this){instance=null;state="stopped";}}stopForeground(STOP_FOREGROUND_REMOVE);NativeNotifications.changed();super.onDestroy();}
     @Override public IBinder onBind(Intent intent){return null;}
 }
