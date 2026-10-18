@@ -6,6 +6,7 @@ import {promisify} from 'node:util';
 import {resolveConfigPath,defaultUserDir} from '../daemon/config.mjs';
 import {clientBuildIdentity} from '../src/management-bootstrap.mjs';
 import {recoverForceAbandonForUpdate} from './client-force-abandon-recovery.mjs';
+import {recoverLocalHistoryStopForUpdate} from './client-local-history-stop-recovery.mjs';
 import {inspectNativeClientProcess,inspectNativeHealthListener,windowsCommandArguments} from './client-lifecycle.mjs';
 import {inspectLocalDaemonMaintenanceFiles} from '../backend/preservation-native-evidence.mjs';
 import {
@@ -142,7 +143,7 @@ export function createHistoricalPrelaunchRecovery({platform=process.platform,ins
  }catch(error){const result=error?.code==='HISTORICAL_PRELAUNCH_RECOVERY_REFUSED'?error:refused();if(!stoppedReceipt&&wal&&fs.existsSync(exitFile)){try{const savedExit=read(exitFile).value;fact(exact(savedExit,['stopped','pid','creationTime','exitedAt'])&&savedExit.stopped===true&&savedExit.pid===wal.record.pid&&savedExit.creationTime===wal.record.creationTime&&Number.isFinite(Date.parse(savedExit.exitedAt))&&Date.parse(savedExit.exitedAt)<=now());stoppedReceipt={stopped:true,wasRunning:true,pid:savedExit.pid,creationTime:savedExit.creationTime};}catch{}}if(stoppedReceipt)result.stoppedClientReceipt=stoppedReceipt;else if(pauseAttempted&&!fs.existsSync(exitFile)){try{fact(read(configPath).sha256===configHash&&same(await inspectProcess(wal.record.pid,root),wal.record));await inspectListener(origin,wal.record.pid);const current=await request(origin+'/healthz');fact(current?.pid===wal.record.pid&&current.lifecycle?.nonce===wal.pinned.lifecycle.nonce&&current.lifecycle?.configSha256===configHash);await report('resuming');await request(origin+'/local/connection-control',{operation:'resume',nonce:wal.pinned.lifecycle.nonce},true);result.resumed=true;}catch{result.resumeFailed=true;}}await report('failed',result.reasonCode);throw result;}
 };return async input=>{try{return await recover(input);}catch(error){throw error?.code==='HISTORICAL_PRELAUNCH_RECOVERY_REFUSED'?error:refused();}};}
 const recoverOriginalHistoricalPrelaunch=createHistoricalPrelaunchRecovery();
-export async function recoverHistoricalPrelaunchForUpdate(input){const force=await recoverForceAbandonForUpdate(input);return force.recovered?force:recoverOriginalHistoricalPrelaunch(input);}
+export async function recoverHistoricalPrelaunchForUpdate(input){const retained=await recoverLocalHistoryStopForUpdate(input);if(retained.recovered)return retained;const force=await recoverForceAbandonForUpdate(input);return force.recovered?force:recoverOriginalHistoricalPrelaunch(input);}
 
 function postUpdateProvenance({root,env,installedBuild,now}){
  const maintenance=path.join(defaultUserDir({env}),'maintenance'),pointer=read(path.join(maintenance,'last-completed-update.json'));

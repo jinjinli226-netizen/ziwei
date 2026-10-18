@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {actionExecutionTimeoutMs,ACTION_EXECUTION_LEASE_BUFFER_MS} from './action-execution-budget.mjs';
 import {consumeRuntimePrelaunchEvidence,completeRuntimeExit} from './runtime-launch-evidence.mjs';
+import {markDispatcherAdmissionRejected,consumeDispatcherAdmissionRejected,isDispatcherAdmissionRejected} from './dispatcher-admission-evidence.mjs';
 import { isNativeRuntimeAction, resolveWindowsWorkdir, resolveWindowsWorkdirPath } from './windows-workdir.mjs';
 
 function needsNativeCwd(action) {
@@ -34,6 +35,7 @@ function safeProcessExit(value,depth=0) {
 export class ActionDispatcher {
   #completed = new Map();
   #completedIdentity = new Map();
+  #admissionRejected = new Map();
   #residentExits = new Map();
   #legacyCompleted = new Set();
   #started = new Map();
@@ -66,9 +68,13 @@ export class ActionDispatcher {
       const parsed = JSON.parse(fs.readFileSync(this.#stateFile, 'utf8'));
       if (![1, 2].includes(parsed?.version) || !Array.isArray(parsed.completed) || (parsed.version === 2 && !Array.isArray(parsed.started))) throw new Error('Invalid action state structure');
       const validIdentity = value => value === undefined || (value && typeof value === 'object' && !Array.isArray(value) && Object.values(value).every(item => typeof item === 'string'));
-      const completed = new Map(); const identities = new Map(); const legacy = new Set(); const started = new Map();
+      const completed = new Map(); const identities = new Map(); const admissions = new Map(); const legacy = new Set(); const started = new Map();
       for (const item of parsed.completed) {
         if (!item || typeof item.key !== 'string' || !item.key || !item.result || !['succeeded', 'failed'].includes(item.result.status) || !validIdentity(item.identity) || (parsed.version === 2 && !item.identity && item.legacy !== true) || completed.has(item.key)) throw new Error('Invalid completed action state');
+        if (Object.hasOwn(item,'admissionRejected')) {
+          if (parsed.version !== 2 || !isDispatcherAdmissionRejected({completed:item,identity:{workspace:this.#workspace,deviceId:this.#deviceId},started:parsed.started})) throw new Error('Invalid admission rejection state');
+          admissions.set(item.key,item.admissionRejected);
+        }
         completed.set(item.key, item.result); if (item.identity) identities.set(item.key, item.identity);
         else legacy.add(item.key);
       }
@@ -78,7 +84,7 @@ export class ActionDispatcher {
         if (item.quarantine !== undefined && (!item.quarantine || typeof item.quarantine.stopConfirmed !== 'boolean')) throw new Error('Invalid execution quarantine state');
         started.set(item.key, item);
       }
-      this.#completed = completed; this.#completedIdentity = identities; this.#legacyCompleted = legacy; this.#started = started;
+      this.#completed = completed; this.#completedIdentity = identities; this.#admissionRejected = admissions; this.#legacyCompleted = legacy; this.#started = started;
       for (const [key, item] of started) {
         if (!completed.has(key) && (item.nativeRuntime || item.quarantine) && item.quarantine?.stopConfirmed !== true) this.#quarantines.add(key);
       }
@@ -93,7 +99,7 @@ export class ActionDispatcher {
     let descriptor; const temporary = `${this.#stateFile}.${process.pid}.${Date.now()}.tmp`;
     try {
       fs.mkdirSync(path.dirname(this.#stateFile), {recursive: true});
-      const payload = JSON.stringify({version: 2, updatedAt: new Date(this.#now()).toISOString(), completed: [...this.#completed.entries()].map(([key, result]) => ({key, result, ...(this.#completedIdentity.has(key) ? {identity: this.#completedIdentity.get(key)} : {}), ...(this.#legacyCompleted.has(key) ? {legacy: true} : {})})), started: [...this.#started.values()]});
+      const payload = JSON.stringify({version: 2, updatedAt: new Date(this.#now()).toISOString(), completed: [...this.#completed.entries()].map(([key, result]) => ({key, result, ...(this.#completedIdentity.has(key) ? {identity: this.#completedIdentity.get(key)} : {}), ...(this.#admissionRejected.has(key) ? {admissionRejected:this.#admissionRejected.get(key)} : {}), ...(this.#legacyCompleted.has(key) ? {legacy: true} : {})})), started: [...this.#started.values()]});
       descriptor = fs.openSync(temporary, 'w', 0o600);
       fs.writeFileSync(descriptor, payload, 'utf8'); fs.fsyncSync(descriptor);
       fs.closeSync(descriptor); descriptor = undefined;
@@ -201,8 +207,12 @@ export class ActionDispatcher {
     const message = error instanceof Error ? error.message : String(error);
     return {status: 'failed', actionId: action?.id, error: message, completedAt: this.#now(), ...extra};
   }
+  #rejectAdmission(action,key,identity,phase,error,code='ACTION_ADMISSION_REJECTED') {
+    return markDispatcherAdmissionRejected(this.#failure(action,error,{code,executionState:'not_dispatched',admissionRejected:true,result:{admissionRejected:true,executionState:'not_dispatched'}}),{key,identity,phase});
+  }
   async #run(action, key, identity) {
     const actionId = action?.id; const controller = new AbortController(); let hardTimeoutHandle = null; let idleWatchdogHandle = null; this.#controllers.set(String(actionId), controller);
+    let admissionPhase='authorization';
     try {
       if (!action || typeof action !== 'object') throw new Error('A2A action must be an object');
       // Verify the original wire payload before this trusted dispatcher adds
@@ -210,27 +220,31 @@ export class ActionDispatcher {
       await this.#authorizeExecute(action);
       const actionType = String(action.type || '').toLowerCase();
       if (actionType === 'agent.cancel' || actionType === 'action.cancel') {
+        admissionPhase=null;
         this.#markStarted(action, key, identity);
         const target = String(action.payload?.actionId || action.payload?.action_id || ''); const cancellationRequested = target !== String(actionId) && this.cancel(target);
         const completed = this.status(target).completed, exit = completed?.result?.processExit;
         const targetResultAvailable = Boolean(completed && exit?.rootConfirmed === true && exit.treeConfirmed === true && exit.activeProcesses === 0);
         return {status: cancellationRequested || targetResultAvailable ? 'succeeded' : 'failed', actionId, result: {targetActionId: target, cancellationRequested, targetResultAvailable, stopConfirmed: false, message: cancellationRequested ? '取消请求已接受；目标是否停止须以目标动作的停止回执为准' : targetResultAvailable ? '已有目标动作退出终态，正在核实原动作回执' : '没有可用的目标动作控制器或可信退出终态，无法确认目标是否停止'}, completedAt: this.#now(), ...(cancellationRequested || targetResultAvailable ? {} : {code: 'CANCEL_TARGET_UNCONFIRMED', error: 'target execution stop is unconfirmed'})};
       }
+      admissionPhase='expiry';
       const expiresAt = action.expiresAt ?? action.expires_at;
       if (expiresAt && Number.isFinite(Date.parse(String(expiresAt))) && Date.parse(String(expiresAt)) <= Date.now()) throw new Error('A2A action expired');
+      admissionPhase='workdir';
       const workdir = this.#validateWorkdir(action);
       const executableAction = process.platform === 'win32' || (action.payload && typeof action.payload === 'object') ? {...action, payload: {
         ...(action.payload && typeof action.payload === 'object' ? action.payload : {}),
         workdir, ...(needsNativeCwd(action) ? { cwd: workdir } : {})
       }} : action;
       if (this.quarantined || !this.#canExecute(action)) return this.#uncertain(action, 'EXECUTION_QUARANTINED', '本机仍有未确认停止的执行；未启动新动作');
+      admissionPhase='budget';
       const nativeRuntime = isNativeRuntimeAction(action);
       const requestedTimeout = action.payload?.timeoutMs ?? action.payload?.timeout_ms;
       const hasHardTimeout = requestedTimeout !== undefined && requestedTimeout !== null && String(requestedTimeout).trim() !== '' && Number.isFinite(Number(requestedTimeout));
       let hardTimeoutMs = hasHardTimeout || nativeRuntime ? actionExecutionTimeoutMs(action) : null;
       if (nativeRuntime && expiresAt) {
         const remaining = Date.parse(String(expiresAt)) - this.#now() - ACTION_EXECUTION_LEASE_BUFFER_MS;
-        if (!Number.isFinite(remaining) || remaining < 100) return this.#failure(action, 'A2A action lease leaves insufficient time for execution and confirmed shutdown', {code: 'ACTION_LEASE_INSUFFICIENT'});
+        if (!Number.isFinite(remaining) || remaining < 100) return this.#rejectAdmission(action,key,identity,'lease','A2A action lease leaves insufficient time for execution and confirmed shutdown','ACTION_LEASE_INSUFFICIENT');
         hardTimeoutMs = Math.min(hardTimeoutMs, remaining);
       }
       const hardDeadline = hardTimeoutMs === null ? null : this.#now() + hardTimeoutMs;
@@ -238,6 +252,7 @@ export class ActionDispatcher {
       const hasIdleTimeout = requestedIdleTimeout !== undefined && requestedIdleTimeout !== null && String(requestedIdleTimeout).trim() !== '' && Number.isFinite(Number(requestedIdleTimeout));
       const idleTimeoutMs = hasIdleTimeout ? Math.max(100, Number(requestedIdleTimeout)) : 2 * 60 * 1000;
       const enforceIdle = !nativeRuntime || hasIdleTimeout;
+      admissionPhase=null;
       this.#markStarted(action, key, identity);
       this.#onEvent('action.started', {actionId, type: action.type});
       let stopReason = null; let resolveStop; let supervision = null; let stopInvoked = false; let stopInFlight = false;
@@ -405,7 +420,7 @@ export class ActionDispatcher {
       }
       const output = executorStatus === 'succeeded' && Object.prototype.hasOwnProperty.call(result, 'result') ? result.result : result;
       return {status: 'succeeded', actionId, result: supervision ? {...(output && typeof output === 'object' && !Array.isArray(output) ? output : {output}), processExit: safeProcessExit(latestEvidence), ...(residentExit ? {residentExit} : {})} : residentExit?{...output,residentExit}:output, completedAt: this.#now()};
-    } catch (error) { const failed = error?.code === 'ACTION_STATE_WRITE_FAILED' ? this.#uncertain(action, error.code, error) : this.#failure(action, error); this.#onEvent('action.failed', {actionId, type: action?.type, error: failed.error}); return failed; }
+    } catch (error) { const failed = admissionPhase ? this.#rejectAdmission(action,key,identity,admissionPhase,error) : error?.code === 'ACTION_STATE_WRITE_FAILED' ? this.#uncertain(action, error.code, error) : this.#failure(action, error); this.#onEvent('action.failed', {actionId, type: action?.type, error: failed.error}); return failed; }
     finally { if (hardTimeoutHandle) clearTimeout(hardTimeoutHandle); if (idleWatchdogHandle) clearInterval(idleWatchdogHandle); this.#controllers.delete(String(actionId)); if (!this.quarantinedActionIds.includes(String(actionId))) this.#stopHandlers.delete(String(actionId)); }
   }
   async dispatch(action) {
@@ -434,9 +449,10 @@ export class ActionDispatcher {
       if (result.code === 'EXECUTION_UNCERTAIN') return result;
       if(this.#residentExits.has(key))result.result={...result.result,residentExit:this.#residentExits.get(key)};
       this.#completed.set(key, result); this.#completedIdentity.set(key, identity);
+      const admission=consumeDispatcherAdmissionRejected(result);if(admission)this.#admissionRejected.set(key,admission);
       try { this.#saveState(); }
       catch (error) {
-        this.#completed.delete(key); this.#completedIdentity.delete(key);
+        this.#completed.delete(key); this.#completedIdentity.delete(key); this.#admissionRejected.delete(key);
         return this.#uncertain(action, 'ACTION_STATE_WRITE_FAILED', error);
       }
       if (result.status === 'succeeded') this.#onEvent('action.succeeded', {actionId: action?.id, type: action?.type});

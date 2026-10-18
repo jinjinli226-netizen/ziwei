@@ -69,10 +69,6 @@ const invalid={
   'incomplete tree evidence':f=>f.change('result',value=>{value.result.processExit.treeConfirmed=false;}),
   'live owned process':f=>f.change('result',value=>{value.result.processExit.activeProcesses=1;}),
   'missing exit evidence':f=>f.change('result',value=>{delete value.result.processExit;}),
-  'nested unknown exit':f=>f.change('result',value=>{value.result.additional={processExit:{}};}),
-  'explicit uncertain result':f=>f.change('result',value=>{value.result.code='EXECUTION_UNCERTAIN';}),
-  'explicit pending execution':f=>f.change('result',value=>{value.result.execution_state='pending';}),
-  'retained uncertain marker':f=>f.change('record',value=>{value.retainEvidence=true;}),
   'fixture evidence':f=>f.change('result',value=>{value.result.executionSource='fixture';}),
   'malformed progress event':f=>f.change('record',value=>{value.events=[{type:'unknown'}];}),
   'nonterminal delivery state':f=>f.change('record',value=>{value.state='acked';}),
@@ -82,6 +78,18 @@ const invalid={
 };
 for(const[name,mutate]of Object.entries(invalid))test(`local stop refuses ${name} without changing any original bytes`,async t=>{
   const f=await fixture(t);mutate(f);const result=f.inspect();assert.equal(result.safe,false);assert.equal(result.stopSafe,false,JSON.stringify(result));assert(result.stopIssues.length>0);assert.equal(f.executions,1);
+});
+
+const historicalOutcome={
+  'nested business exit uncertainty':f=>f.change('result',value=>{value.result.additional={processExit:{}};}),
+  'uncertain outcome with an exited CLI':f=>f.change('result',value=>{value.result.code='EXECUTION_UNCERTAIN';}),
+  'pending outcome with an exited CLI':f=>f.change('result',value=>{value.result.execution_state='pending';}),
+  'retained uncertain receipt with an exited CLI':f=>f.change('record',value=>{value.retainEvidence=true;}),
+};
+for(const[name,mutate]of Object.entries(historicalOutcome))test(`local stop retains ${name} without confirming delivery or changing original history`,async t=>{
+  const f=await fixture(t);mutate(f);const before=snapshot(f.root),result=f.inspect();
+  assert.equal(result.safe,false);assert.equal(result.stopSafe,true);assert.equal(result.retainedDeliveryCount,1);assert.deepEqual(result.stopIssues,[]);assert.equal(f.executions,1);
+  assert.equal(JSON.parse(fs.readFileSync(f.recordFile)).state,'blocked');assert.equal(scanNativeFiles({connections:[f.connection]}).safe,false);assert.deepEqual(snapshot(f.root),before);
 });
 
 test('linked result evidence is not regular private original evidence',async t=>{

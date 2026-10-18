@@ -26,11 +26,13 @@ const SAFE_RECOVERY_RULES = new Set([
   'SERVER_DATE_MISSING','SERVER_DATE_INVALID','SERVER_PREPARED_TIME_INVALID','MONOTONIC_TIME_INVALID','RESULT_UNCERTAIN_BODY','NATIVE_COMMAND_UNAVAILABLE','NATIVE_COMMAND_FAILED','NATIVE_JSON_EMPTY','NATIVE_JSON_INVALID','NATIVE_ARRAY_REQUIRED','NATIVE_PID_INVALID','NATIVE_COMMAND_UNREADABLE','NATIVE_EXECUTABLE_UNREADABLE','NATIVE_CREATION_INVALID','NATIVE_ENTRY_ARGUMENTS','NATIVE_SOURCE_EXECUTABLE','LISTENER_COUNT_EMPTY','LISTENER_COUNT_INVALID'
 ]);
 const SAFE_SIGNALS = new Set(['SIGTERM', 'SIGKILL', 'SIGABRT', 'SIGINT', 'SIGBREAK']);
+SAFE_ERROR_CODES.add('LOCAL_HISTORY_STOP_RECOVERY_REFUSED');
 SAFE_ERROR_CODES.add('RETAINED_STOP_RECOVERY_REFUSED');
 SAFE_ERROR_CODES.add('HISTORICAL_PRELAUNCH_RECOVERY_REFUSED');
 SAFE_ERROR_CODES.add('CLIENT_FORCE_ABANDON_REFUSED');
 for (const code of ['LEGACY_STOP_CONFIRMATION_REQUIRED', 'LEGACY_CONFIRMATION_INVALID', 'LEGACY_IDENTITY_UNVERIFIED', 'LEGACY_PROTOCOL_MISMATCH', 'LEGACY_PROOF_INVALID', 'LEGACY_PROOF_EXPIRED', 'LEGACY_IDENTITY_CHANGED', 'LEGACY_SOURCE_UNRECOGNIZED', 'LEGACY_CONFIG_MISMATCH', 'LEGACY_CONFIG_NAMESPACE_UNVERIFIED', 'LEGACY_STOP_PROOF_REQUIRED', 'LEGACY_STOP_FAILED']) SAFE_ERROR_CODES.add(code);
 const FAILURE_REASONS = {
+  LOCAL_HISTORY_STOP_RECOVERY_REFUSED: '历史原始记录已保留；当前客户端实例、空闲状态或文件证据已变化，停止尚未完成',
   CLIENT_FORCE_ABANDON_REFUSED: '已授权的旧任务放弃尚未完成；原始归档已保留，请查看具体恢复步骤、规则或服务端原因',
   HISTORICAL_PRELAUNCH_RECOVERY_REFUSED: '旧任务自动恢复尚未完成；原始记录已保留，请查看具体恢复步骤、规则或服务端原因',
   CONTROL_REJECTED: '客户端拒绝停止，请查看具体阻塞记录',
@@ -326,7 +328,9 @@ async function performClientUpdateInternal({ root, env = process.env, directory,
     // Once the audited holder has exited, a failed remote commit must keep
     // that generation stopped. Restarting it would strand the durable recovery
     // journal behind a new daemon that cannot own the original execution.
-    const historicalRecoveryPending = stopped?.prelaunchHistoryRetained === true || progress.stage === 'recover_history' && stopped?.stopped === true;
+    // Pure local-history retention changes no business journal, so a verified
+    // daemon-only stop may restore its original running state after failure.
+    const historicalRecoveryPending = stopped?.prelaunchHistoryRetained === true || progress.stage === 'recover_history' && stopped?.stopped === true && stopped?.localHistoryRetained !== true;
     if (historicalRecoveryPending) recovered = false;
     if (recovered && stopped?.wasRunning) {
       let recoveryStage = 'read_restoration_configuration';

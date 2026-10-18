@@ -390,3 +390,30 @@ test('update worker reports an unverified lock without changing another maintena
   assert.doesNotMatch(JSON.stringify({ result, failed }), /PRIVATE_|private|stdout|stderr/);
   assert.equal(fs.readFileSync(lockFile, 'utf8'), originalLock);
 });
+
+
+test('pure local history stop failure can restore the original client while audited business recovery stays stopped', { skip: process.platform !== 'win32', timeout: 60000 }, async t => {
+  const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ziwei-local-history-rollback-')));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  for (const localHistoryRetained of [true, false]) {
+    const scope = path.join(directory, localHistoryRetained ? 'local-history' : 'audited-business');
+    const prefix = path.join(scope, 'prefix'), root = path.join(prefix, 'node_modules', 'ziwei'), source = path.join(scope, 'candidate'), home = path.join(scope, 'home');
+    for (const [target, version] of [[root, '0.1.0'], [source, '0.1.1']]) {
+      fs.mkdirSync(path.join(target, 'scripts'), { recursive: true });
+      fs.writeFileSync(path.join(target, 'package.json'), JSON.stringify({ name: 'ziwei', version, type: 'module', bin: { ziwei_user: 'scripts/ziwei-user.mjs' } }));
+      fs.writeFileSync(path.join(target, 'scripts/ziwei-user.mjs'), `console.log('ziwei_user ${version}');\n`);
+    }
+    fs.mkdirSync(home); const configPath = path.join(home, 'ziwei_user.json'), marker = path.join(home, 'original-restarted');
+    const originalConfig = JSON.stringify({ workspace: 'fixture', deviceId: 'fixture-device', deviceToken: 'private-fixture', connectionState: 'connected' }); fs.writeFileSync(configPath, originalConfig);
+    fs.writeFileSync(path.join(root, 'scripts/start-ziwei-user.mjs'), "import fs from 'node:fs';import path from 'node:path';fs.writeFileSync(path.join(process.env.ZIWEI_USER_HOME,'original-restarted'),'yes');\n");
+    const receipt = { stopped: true, wasRunning: true, pid: 12345, originalExecutionExitConfirmed: false, executionConfirmedStopped: false, ...(localHistoryRetained ? { localHistoryRetained: true } : { prelaunchHistoryRetained: true }) };
+    fs.writeFileSync(path.join(source, 'scripts/client-historical-prelaunch-recovery.mjs'), `export async function recoverHistoricalPrelaunchForUpdate(){throw Object.assign(Error('fixture recovery failed'),{code:'LOCAL_HISTORY_STOP_RECOVERY_REFUSED',stoppedClientReceipt:${JSON.stringify(receipt)}});}`);
+    for (const suffix of ['', '.cmd', '.ps1']) fs.writeFileSync(path.join(prefix, 'ziwei_user' + suffix), 'node_modules/ziwei/scripts/ziwei-user.mjs');
+    const npmCli = resolveNpmCli(); const packed = JSON.parse((await run(process.execPath, [npmCli, 'pack', '--json', '--pack-destination', scope], { cwd: source, windowsHide: true })).stdout)[0];
+    const archive = path.join(scope, packed.filename);
+    await assert.rejects(performClientUpdate({ root, directory: path.join(scope, 'maintenance'), artifactFile: archive, sha256: createHash('sha256').update(fs.readFileSync(archive)).digest('hex'), npmCli, env: { ...process.env, ZIWEI_USER_HOME: home, ZIWEI_CONFIG: configPath }, stopClient: async () => { throw Error('normal stop must not run after candidate recovery fails'); } }), error => {
+      assert.equal(error.failureStage, 'recover_history'); assert.equal(error.reasonCode, 'LOCAL_HISTORY_STOP_RECOVERY_REFUSED'); assert.equal(error.originalInstallationRestored, true); assert.equal(error.runningStateRestored, localHistoryRetained); return true;
+    });
+    assert.equal(fs.existsSync(marker), localHistoryRetained); assert.equal(fs.readFileSync(configPath, 'utf8'), originalConfig); assert.equal(JSON.parse(fs.readFileSync(path.join(root, 'package.json'))).version, '0.1.0');
+  }
+});

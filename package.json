@@ -37,7 +37,8 @@
     "scripts/update-windows.ps1",
     "scripts/ziwei-mcp.mjs",
     "scripts/ziwei-terminal-mcp.mjs",
-    "src"
+    "src",
+    "scripts/client-local-history-stop-recovery.mjs"
   ],
   "type": "module",
   "scripts": {
