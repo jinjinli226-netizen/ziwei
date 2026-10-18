@@ -4,6 +4,7 @@ import base64
 from dataclasses import asdict, is_dataclass
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -13,6 +14,40 @@ import uuid
 
 class NativeOperationError(Exception):
     pass
+
+
+def oauth_failure_diagnostic(value):
+    # Only this finite, credential-free diagnostic shape may cross the native
+    # failure boundary. Unknown keys/types fail closed; no exception text.
+    phases = {'native_probe', 'authorization_url', 'relay_start', 'authorization_publish',
+              'relay_authorization', 'callback_wait', 'relay_callback', 'token_exchange',
+              'grant_verification', 'tools_verification'}
+    names = {'TimeoutError', 'CancelledError', 'HTTPError', 'URLError', 'ConnectError',
+             'ConnectTimeout', 'ReadTimeout', 'WriteTimeout', 'PoolTimeout', 'HTTPStatusError',
+             'RemoteProtocolError', 'ProtocolError', 'NetworkError', 'OSError', 'ConnectionError',
+             'ConnectionResetError', 'ConnectionRefusedError', 'BrokenPipeError', 'SSLError',
+             'MCPError', 'McpError', 'OAuthFlowError', 'OAuthTokenError', 'OAuthNonInteractiveError',
+             'RuntimeError', 'ValueError', 'ImportError', 'ModuleNotFoundError', 'ExceptionGroup',
+             'NativeOperationError', 'Other'}
+    keys = {'schemaVersion', 'sdkVersion', 'phase', 'cause', 'exceptionType', 'httpStatus',
+            'authorizationPublished', 'callbackPollCount', 'callbackWindowSeconds', 'elapsedSeconds'}
+    if not isinstance(value, dict) or set(value) != keys or type(value['schemaVersion']) is not int or value['schemaVersion'] != 1:
+        return None
+    if any(not isinstance(value[key], str) for key in ('phase', 'cause', 'exceptionType')):
+        return None
+    if value['phase'] not in phases or value['cause'] not in {'http', 'timeout', 'cancelled', 'network', 'dependency', 'sdk', 'other'} or value['exceptionType'] not in names:
+        return None
+    sdk = value['sdkVersion']
+    if sdk is not None and (not isinstance(sdk, str) or not re.fullmatch(r'[0-9][A-Za-z0-9.+-]{0,63}', sdk)):
+        return None
+    status, elapsed, polls = value['httpStatus'], value['elapsedSeconds'], value['callbackPollCount']
+    if status is not None and (type(status) is not int or not 100 <= status <= 599):
+        return None
+    if elapsed is not None and (type(elapsed) not in (int, float) or not math.isfinite(elapsed) or not 0 <= elapsed <= 86400):
+        return None
+    if type(value['authorizationPublished']) is not bool or type(polls) is not int or not 0 <= polls <= 100000 or type(value['callbackWindowSeconds']) is not int or value['callbackWindowSeconds'] != 300:
+        return None
+    return dict(value)
 
 
 def decode(value):
@@ -296,7 +331,11 @@ def mcp(op, args):
             raise NativeOperationError('MCP_OAUTH_REQUIRES_DEPENDENCY') from None
         except Exception as error:
             code = getattr(error, 'code', None)
-            raise NativeOperationError(code if isinstance(code, str) and code in public_codes else 'MCP_OAUTH_FAILED') from None
+            failure = NativeOperationError(code if isinstance(code, str) and code in public_codes else 'MCP_OAUTH_FAILED')
+            diagnostic = oauth_failure_diagnostic(getattr(error, 'oauth_diagnostic', None))
+            if diagnostic is not None:
+                failure.oauth_diagnostic = diagnostic
+            raise failure from None
     try:
         names = register_mcp_servers({server: env_refs(config)})
         statuses = [{'name': item.get('name'), 'connected': item.get('connected') is True, 'status': item.get('status')} for item in get_mcp_status() or [] if item.get('name') == server]
@@ -613,7 +652,18 @@ def run_operation(request, context):
         if resource == 'memory': data = memory(op, args)
         elif resource == 'sessions': data = sessions(op, args)
         elif resource == 'skills': data = skills(op, args, request_id)
-        elif resource == 'mcp': data = mcp(op, args)
+        elif resource == 'mcp':
+            try:
+                data = mcp(op, args)
+            except NativeOperationError as error:
+                diagnostic = oauth_failure_diagnostic(getattr(error, 'oauth_diagnostic', None)) if op == 'authorize' else None
+                if diagnostic is None:
+                    raise
+                import hermes_cli
+                return {'schemaVersion': 2, 'resource': resource, 'operation': op,
+                        'employeeId': context['employeeId'], 'revision': context['revision'],
+                        'nativeVersion': hermes_cli.__version__, 'status': 'failed', 'code': str(error),
+                        'data': {'oauthDiagnostic': diagnostic}}
         elif resource in {'goals', 'heartbeat'}: data = control(resource, op, args, context, request_id)
         elif resource == 'kanban': data = kanban(op, args, context, request_id)
         elif resource == 'voice': data = voice(op, args, context)

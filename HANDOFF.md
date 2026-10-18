@@ -1,5 +1,13 @@
 # 紫薇项目 HandOff
 
+## 2026-10-18 17:25 当前现场与后续工作
+
+当前API为acee34d目录 `/opt/ziwei/releases/windows-mcp-scope-acee34d32f04-bdc0ae98/v2`、PID429489；官方客户端5a642107，包e386b28a，bootstrap526882bb逐字保留。公司台式已通过单次官方任务自动更新，实际PID23428、09:00:06Z新build心跳。TK仍原r4/e7及专属Profile绑定。
+
+新d06c自助延期已真实成功提交并验证，但原连接267450b8在relay/start499后失败/tree退出。随后等待普通详情完整加载后，在既有MCP卡片只点一次连接：2ea28006实际发布read+collect授权页，9项工具可见，原生callback曾连续19次200；但09:11:56Z在未获用户批准前返回MCP_OAUTH_CONNECTION_FAILED/tree退出。未创建爆款库员工身份或grant、未做实际工具查询，不声称接通。旧页面已关闭。
+
+用户现明确要求本次TK授权长期有效直到主动撤销，替代90天；正在爆款库actual65b源码隔离实现，保15分钟access自动续期及撤销/停用/轮换重放保护，不延长其它旧grant。现有本机两套Hermes原生315/300链已通过虚拟120秒等待，未复现现场较早失败；追加有限安全诊断候选区分实际phase/cause/SDK，不能把未明根因称已修复。详见本轮操作记录和更新的现场QA。
+
 ## 2026-10-18 16:50 MCP 显式权限范围兼容候选
 
 TK 的90be验收已通过自己提交、自动验证及网页授权handoff。管理员登录期间旧flow到期并明确失败/tree退出；用户现已登录爆款库，但尚未选择员工身份或批准授权，未完成实际查询。配置请求read+collect，实际SDK却按challenge仅申请read；两套真实Hermes源/SDK已复现并验证窄修。候选保留显式scope、目标Profile令牌及原生PKCE，并在服务端显示实际授权范围证据；已有只读grant不删除、不假称已升级。39项服务端回归、两套各26项helper及真实SDK集成通过。后续先推GitHub、再发布API/Windows，确认公司台式实际更新后重做完整授权及只读查询，下节为此前发布快照。

@@ -12,6 +12,8 @@ from pathlib import Path
 import sys
 import tempfile
 import threading
+import time
+import types
 from urllib.parse import parse_qs, urlsplit
 from unittest.mock import patch
 
@@ -59,6 +61,9 @@ with tempfile.TemporaryDirectory(prefix='ziwei-oauth-sdk-') as temp:
     server_name = ['reports']
     configured = {'url': resource, 'auth': 'oauth', 'oauth': {'scope': 'reports:read reports:collect reports:read'}}
     original_selector = oauth2.get_client_metadata_scopes
+    clock_offset = [0.0]
+    clock_loops = []
+    callback_delay = [0.0]
 
     def transport_for(module):
         def respond(request):
@@ -139,6 +144,20 @@ with tempfile.TemporaryDirectory(prefix='ziwei-oauth-sdk-') as temp:
                 result = {'ok': True}
             else:
                 assert operation == 'callback'
+                if callback_delay[0]:
+                    # Advance both the helper and the ACTUAL background loop.
+                    # Yield through its timer queue before granting, so an inner
+                    # 30/60s handshake deadline would really fire in this test.
+                    from tools.mcp_tool_loop import _running_loop
+                    loop = _running_loop()
+                    assert loop is not None and loop in clock_loops
+                    clock_offset[0] += callback_delay[0]
+                    async def timers_ran():
+                        await asyncio.sleep(0)
+                        await asyncio.sleep(0)
+                    asyncio.run_coroutine_threadsafe(timers_ran(), loop).result(timeout=5)
+                if mode[0] == 'callback-cancelled':
+                    return RelayResponse(json.dumps({'status': 'cancelled'}).encode())
                 result = {'status': 'callback', 'callback': {'code': 'SYNTHETIC_CODE', 'state': state['state'][0], 'iss': origin}}
             return RelayResponse(json.dumps(result).encode())
 
@@ -275,4 +294,42 @@ with tempfile.TemporaryDirectory(prefix='ziwei-oauth-sdk-') as temp:
         assert asyncio.run(narrowed.get_tokens()).scope == 'reports:read'
         assert all((home / 'mcp-tokens' / name).read_bytes() == value for name, value in existing.items())
 
-    print('Native SDK integration passed: explicit/native scope union + genuine DCR/PKCE/callback + cached grant checks + no-scope compatibility + AS rejection + refresh/failure retention; no sockets or subprocesses')
+        # A browser wait crosses 30/60/90 seconds on the genuine native loop,
+        # without sleeping or replacing a probe/session/provider. Only time and
+        # HTTP responses are injected. The fixed 300-second deadline and cancel
+        # still refuse a token grant and preserve all previous token files.
+        from tools import mcp_tool_loop
+        original_ensure = mcp_tool_loop._ensure_mcp_loop
+        def virtual_loop():
+            original_ensure()
+            loop = mcp_tool_loop._running_loop()
+            assert loop is not None
+            if loop not in clock_loops:
+                original_time = loop.time
+                loop.time = lambda: original_time() + clock_offset[0]
+                clock_loops.append(loop)
+        with patch.object(mcp_tool_loop, '_ensure_mcp_loop', virtual_loop), patch.object(helper, 'time', types.SimpleNamespace(monotonic=lambda: time.monotonic() + clock_offset[0])):
+            for name, delay, expected_error in [('reports-browser-delay', 120.0, None), ('reports-browser-expired', 301.0, 'MCP_OAUTH_EXPIRED'), ('reports-browser-cancelled', 120.0, 'MCP_OAUTH_CANCELLED')]:
+                preserved = {p.name: p.read_bytes() for p in (home / 'mcp-tokens').glob('*') if p.is_file()}
+                server_name[0] = name
+                granted_scope[0] = expected_scope[0]
+                mode[0] = 'callback-cancelled' if expected_error == 'MCP_OAUTH_CANCELLED' else 'new'
+                callback_delay[0] = delay
+                clock_offset[0] = 0.0
+                state.clear(); relay_calls.clear(); requests.clear()
+                try:
+                    delayed = run()
+                except helper.NativeOperationError as error:
+                    assert error.code == expected_error, error.code
+                else:
+                    assert expected_error is None, 'Browser expiry/cancel unexpectedly succeeded'
+                    assert delayed['connected'] and delayed['scopeConfirmed']
+                assert relay_calls == ['start', 'authorization', 'callback']
+                assert all((home / 'mcp-tokens' / name).read_bytes() == value for name, value in preserved.items())
+                if expected_error:
+                    failed_storage = HermesTokenStorage(server_name[0], hermes_home=str(home))
+                    assert not failed_storage.has_cached_tokens()
+                assert clock_offset[0] == delay
+        callback_delay[0] = 0.0
+
+    print('Native SDK integration passed: explicit/native scope union + genuine DCR/PKCE/callback + cached grant checks + no-scope compatibility + AS rejection + refresh/failure retention + 120s virtual native browser wait/300s expiry/cancel; no sockets or subprocesses')

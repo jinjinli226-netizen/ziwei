@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "checkedAt": "2026-10-18T08:03:38Z",
-  "state": "acceptance_in_progress",
+  "checkedAt": "2026-10-18T09:19:00.326983+00:00",
+  "state": "awaiting_grant_lifetime_and_failure_diagnosis",
   "workspace": "bigtron",
   "employeeId": "employee_1743b9a2-dd8c-4a51-9b7d-0d25414aa234",
   "originalDeferred": {
@@ -43,5 +43,60 @@
   "newDeferredKey": "tk-viral-repair-fbb52e2-20261018-417c",
   "newUiMarker": "tk-viral-after-avatar-20261018-47d1",
   "connectedVerified": false,
-  "currentBusinessSessionLoadedProven": false
+  "currentBusinessSessionLoadedProven": false,
+  "companyScopeUpdate": {
+    "clientBuild": "5a642107fa32d8e8f09ea139a9f964e7f50c77d9648788ae5aba6e96ac509fec",
+    "pid": 23428,
+    "freshHeartbeatObserved": true,
+    "heartbeatAt": "2026-10-18T09:00:06.216Z",
+    "sourceActionId": "action_bec46d82-ae12-4975-b99d-d637fd3bb48b",
+    "sourceTreeExitConfirmed": true,
+    "scopeUpdateScheduledVerified": true,
+    "historyPreserved": true
+  },
+  "scopeFix": {
+    "commit": "acee34d32f04167038cb1b55eab2377c142df614",
+    "apiPid": 429489,
+    "apiOverlays": [
+      "backend/bot-management-view.mjs",
+      "backend/bot-mcp-connections.mjs"
+    ],
+    "clientOverlays": [
+      "src/hermes-native-bridge.py",
+      "src/hermes-remote-mcp-oauth.py"
+    ],
+    "actualAuthorizationPageRequestedScopes": [
+      "library:read",
+      "library:collect"
+    ],
+    "actualConsentToolsCount": 9,
+    "grantNotApproved": true
+  },
+  "latestSelfSubmitted": {
+    "sourceActionId": "action_5a532e68-de6c-4f74-b6e8-48fcafd875de",
+    "sourceTreeExitConfirmed": true,
+    "intentId": "bot-config_460772a1-46f3-439c-a4ae-c3997a9ca919",
+    "validationActionId": "action_dbb722a5-0089-4e4f-8255-eeb1e9caa5e5",
+    "validationSucceededWithTreeExit": true,
+    "connectionActionId": "action_267450b8-05fc-4227-b040-13db8eaefc61",
+    "connectionFailure": "MCP_OAUTH_RELAY_FAILED",
+    "connectionTreeExitConfirmed": true
+  },
+  "latestDirectUiConnection": {
+    "actionId": "action_2ea28006-6d65-4a66-ba1c-c58730a62879",
+    "requestId": "95997bfa-1fa3-409f-926a-abfefd2aaac7",
+    "authorizationPageReached": true,
+    "status": "failed",
+    "code": "MCP_OAUTH_CONNECTION_FAILED",
+    "treeExitConfirmed": true,
+    "nativeCompletedAt": "2026-10-18T09:11:56.462Z",
+    "grantApproved": false,
+    "requestedScopes": [
+      "library:read",
+      "library:collect"
+    ],
+    "grantedScopes": null
+  },
+  "userRequestedGrantLifetime": "until_revoked",
+  "grantLifetimeChangeDeployed": false
 }

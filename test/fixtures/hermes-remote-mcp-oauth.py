@@ -360,5 +360,76 @@ class Tests(unittest.TestCase):
         self.assertEqual(self.calls, [])
 
 
+    def test_relay_http_failure_has_only_phase_type_and_numeric_status(self):
+        private = 'SECRET_URL_TOKEN_PROVIDER_BODY'
+        def rejected(*args, **kwargs):
+            raise HTTPError('https://relay.example/' + private, 503, private, {'Authorization': private}, None)
+        with patch.object(helper, 'build_opener', return_value=types.SimpleNamespace(open=rejected)):
+            with self.assertRaises(helper.NativeOperationError) as error:
+                self.run_helper()
+        self.assertEqual(error.exception.code, 'MCP_OAUTH_RELAY_FAILED')
+        diagnostic = error.exception.oauth_diagnostic
+        self.assertEqual(diagnostic['phase'], 'relay_start')
+        self.assertEqual(diagnostic['cause'], 'http')
+        self.assertEqual(diagnostic['exceptionType'], 'HTTPError')
+        self.assertEqual(diagnostic['httpStatus'], 503)
+        self.assertFalse(diagnostic['authorizationPublished'])
+        self.assertEqual(diagnostic['callbackPollCount'], 0)
+        self.assertNotIn(private, json.dumps(diagnostic))
+        self.assertFalse(self.tokens.exists())
+
+    def test_native_timeout_during_published_flow_keeps_bounded_wait_diagnostic(self):
+        def timed_out(*args, **kwargs):
+            flow = native.get_dashboard_oauth_flow()
+            asyncio.run(flow.publish_authorization_url(self.authorization_url))
+            flow.callback_polls = 19
+            raise TimeoutError('SECRET_NATIVE_PROVIDER_DIAGNOSTIC')
+        with patch.object(sys.modules['hermes_cli.mcp_config'], '_probe_single_server', timed_out):
+            with self.assertRaises(helper.NativeOperationError) as error:
+                self.run_helper()
+        self.assertEqual(error.exception.code, 'MCP_OAUTH_CONNECTION_FAILED')
+        d = error.exception.oauth_diagnostic
+        self.assertEqual(d['phase'], 'callback_wait')
+        self.assertEqual(d['cause'], 'timeout')
+        self.assertEqual(d['exceptionType'], 'TimeoutError')
+        self.assertEqual(d['callbackWindowSeconds'], 300)
+        self.assertEqual(d['callbackPollCount'], 19)
+        self.assertTrue(d['authorizationPublished'])
+        self.assertNotIn('SECRET', json.dumps(d))
+        self.assertFalse(self.tokens.exists())
+
+    def test_diagnostic_unwraps_types_without_copying_messages_or_arbitrary_class_names(self):
+        private = 'SECRET_CLASS_MESSAGE_URL_TOKEN'
+        inner = HTTPError('https://issuer.example/' + private, 429, private, {}, None)
+        outer = RuntimeError(private); outer.__cause__ = inner
+        d = helper.failure_diagnostic(outer, 'native_probe')
+        self.assertEqual((d['cause'], d['exceptionType'], d['httpStatus']), ('http', 'HTTPError', 429))
+        unknown = type(private, (RuntimeError,), {})(private)
+        d = helper.failure_diagnostic(unknown, private)
+        self.assertEqual(d['exceptionType'], 'Other')
+        self.assertEqual(d['phase'], 'native_probe')
+        self.assertNotIn(private, json.dumps(d))
+
+    def test_bridge_failure_receipt_is_strict_failed_and_rejects_unknown_diagnostic_fields(self):
+        bridge = load('isolated_bridge_diagnostic', ROOT / 'src/hermes-native-bridge.py')
+        diagnostic = helper.failure_diagnostic(TimeoutError('SECRET'), 'callback_wait', types.SimpleNamespace(published=True, callback_polls=19))
+        failure = bridge.NativeOperationError('MCP_OAUTH_CONNECTION_FAILED')
+        failure.oauth_diagnostic = diagnostic
+        def rejected(*args): raise failure
+        cli = types.ModuleType('hermes_cli'); cli.__version__ = 'fixture'
+        with patch.object(bridge, 'mcp', rejected), patch.dict(sys.modules, {'hermes_cli': cli}):
+            result = bridge.run_operation({'resource': 'mcp', 'operation': 'authorize'}, {'config': {}, 'employeeId': 'employee-fixture', 'revision': 4})
+            self.assertEqual(result['status'], 'failed')
+            self.assertEqual(result['code'], 'MCP_OAUTH_CONNECTION_FAILED')
+            self.assertEqual(result['data'], {'oauthDiagnostic': diagnostic})
+            self.assertNotIn('SECRET', json.dumps(result))
+            with self.assertRaises(bridge.NativeOperationError):
+                bridge.run_operation({'resource': 'mcp', 'operation': 'inspect'}, {'config': {}, 'employeeId': 'employee-fixture', 'revision': 4})
+        for patch_value in [{'url': 'SECRET'}, {'phase': ['callback_wait']}, {'httpStatus': 'SECRET'}, {'callbackPollCount': True}, {'elapsedSeconds': float('nan')}, {'exceptionType': 'SECRET'}, {'callbackWindowSeconds': 999999}, {'sdkVersion': 'SECRET token'}]:
+            with self.subTest(patch_value=patch_value):
+                self.assertIsNone(bridge.oauth_failure_diagnostic({**diagnostic, **patch_value}))
+        self.assertEqual(bridge.oauth_failure_diagnostic(diagnostic), diagnostic)
+
+
 if __name__ == '__main__':
     unittest.main()

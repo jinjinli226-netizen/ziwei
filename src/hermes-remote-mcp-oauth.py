@@ -6,6 +6,7 @@ from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from datetime import datetime, timezone
 import json
 import inspect
+from importlib.metadata import PackageNotFoundError, version
 import logging
 import os
 from pathlib import Path
@@ -15,6 +16,7 @@ import sys
 import time
 from urllib.parse import parse_qs, quote, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.error import HTTPError, URLError
 
 
 PUBLIC_CODES = frozenset({
@@ -73,8 +75,63 @@ class NativeOperationError(RuntimeError):
         super().__init__(self.code)
 
 
-def fail(code):
-    raise NativeOperationError(code) from None
+OAUTH_PHASES = frozenset({'native_probe', 'authorization_url', 'relay_start', 'authorization_publish',
+                          'relay_authorization', 'callback_wait', 'relay_callback', 'token_exchange',
+                          'grant_verification', 'tools_verification'})
+OAUTH_EXCEPTION_TYPES = frozenset({'TimeoutError', 'CancelledError', 'HTTPError', 'URLError',
+    'ConnectError', 'ConnectTimeout', 'ReadTimeout', 'WriteTimeout', 'PoolTimeout', 'HTTPStatusError',
+    'RemoteProtocolError', 'ProtocolError', 'NetworkError', 'OSError', 'ConnectionError',
+    'ConnectionResetError', 'ConnectionRefusedError', 'BrokenPipeError', 'SSLError',
+    'MCPError', 'McpError', 'OAuthFlowError', 'OAuthTokenError', 'OAuthNonInteractiveError',
+    'RuntimeError', 'ValueError', 'ImportError', 'ModuleNotFoundError', 'ExceptionGroup',
+    'NativeOperationError', 'Other'})
+
+
+def failure_diagnostic(error, phase, flow=None):
+    # Read only types and numeric HTTP status. Exception messages, args, request
+    # URLs, headers, body, and native provider diagnostics never enter a receipt.
+    pending, seen, candidates = [error], set(), []
+    while pending and len(seen) < 16:
+        item = pending.pop(0)
+        if not isinstance(item, BaseException) or id(item) in seen:
+            continue
+        seen.add(id(item))
+        name = type(item).__name__
+        name = name if name in OAUTH_EXCEPTION_TYPES else 'Other'
+        status = getattr(item, 'code', None) if isinstance(item, HTTPError) else None
+        if name == 'HTTPStatusError':
+            status = getattr(getattr(item, 'response', None), 'status_code', None)
+        status = status if type(status) is int and 100 <= status <= 599 else None
+        cause = ('http' if status is not None else 'timeout' if isinstance(item, TimeoutError) or name in {'ConnectTimeout', 'ReadTimeout', 'WriteTimeout', 'PoolTimeout'}
+                 else 'cancelled' if isinstance(item, asyncio.CancelledError) else 'network' if isinstance(item, (OSError, URLError)) or name in {'ConnectError', 'RemoteProtocolError', 'ProtocolError', 'NetworkError'}
+                 else 'dependency' if isinstance(item, ImportError) else 'sdk' if name in {'MCPError', 'McpError', 'OAuthFlowError', 'OAuthTokenError', 'OAuthNonInteractiveError'} else 'other')
+        candidates.append((cause, name, status))
+        children = getattr(item, 'exceptions', ())
+        if isinstance(children, (tuple, list)):
+            pending.extend(children[:16])
+        pending.extend([item.__cause__, item.__context__])
+    cause, name, status = next((x for x in candidates if x[0] != 'other'), candidates[0] if candidates else ('other', 'Other', None))
+    started = getattr(flow, 'started_at', None)
+    elapsed = max(0.0, min(86400.0, time.monotonic() - started)) if isinstance(started, (int, float)) else None
+    try:
+        sdk_version = version('mcp')
+    except PackageNotFoundError:
+        sdk_version = None
+    if not isinstance(sdk_version, str) or not re.fullmatch(r'[0-9][A-Za-z0-9.+-]{0,63}', sdk_version):
+        sdk_version = None
+    return {'schemaVersion': 1, 'sdkVersion': sdk_version, 'phase': phase if phase in OAUTH_PHASES else 'native_probe',
+            'cause': cause, 'exceptionType': name, 'httpStatus': status,
+            'authorizationPublished': getattr(flow, 'published', False) is True,
+            'callbackPollCount': min(100000, max(0, getattr(flow, 'callback_polls', 0))),
+            'callbackWindowSeconds': int(CALLBACK_SECONDS),
+            'elapsedSeconds': round(elapsed, 3) if elapsed is not None else None}
+
+
+def fail(code, *, error=None, phase=None, flow=None):
+    failure = NativeOperationError(code)
+    if error is not None or phase is not None:
+        failure.oauth_diagnostic = failure_diagnostic(error or failure, phase, flow)
+    raise failure from None
 
 
 def scope_tokens(value, *, allow_empty=False):
@@ -189,7 +246,8 @@ class Relay:
         try:
             with self.opener.open(request, timeout=timeout) as response:
                 if response.status != 200:
-                    fail('MCP_OAUTH_RELAY_FAILED')
+                    failure = HTTPError(request.full_url, response.status, '', None, None)
+                    fail('MCP_OAUTH_RELAY_FAILED', error=failure, phase='relay_' + operation, flow=getattr(self, 'flow', None))
                 raw = response.read(65537)
             if len(raw) > 65536:
                 fail('MCP_OAUTH_RELAY_INVALID_RESPONSE')
@@ -199,10 +257,10 @@ class Relay:
             return result
         except NativeOperationError:
             raise
-        except (ValueError, UnicodeError):
-            fail('MCP_OAUTH_RELAY_INVALID_RESPONSE')
-        except Exception:
-            fail('MCP_OAUTH_RELAY_FAILED')
+        except (ValueError, UnicodeError) as error:
+            fail('MCP_OAUTH_RELAY_INVALID_RESPONSE', error=error, phase='relay_' + operation, flow=getattr(self, 'flow', None))
+        except Exception as error:
+            fail('MCP_OAUTH_RELAY_FAILED', error=error, phase='relay_' + operation, flow=getattr(self, 'flow', None))
 
 
 def remote_flow_type(native_flow):
@@ -210,13 +268,19 @@ def remote_flow_type(native_flow):
         failure_code = None
         callback_deadline = None
         published = False
+        phase = 'native_probe'
+        started_at = None
+        callback_polls = 0
 
-        def reject(self, code):
+        def reject(self, code, error=None):
             self.failure_code = self.failure_code or code
             self.mark_error(self.failure_code)
-            fail(self.failure_code)
+            failure = NativeOperationError(self.failure_code)
+            failure.oauth_diagnostic = getattr(error, 'oauth_diagnostic', None) or failure_diagnostic(error or failure, getattr(self, 'phase', 'native_probe'), self)
+            raise failure from None
 
         async def publish_authorization_url(self, url):
+            self.phase = 'authorization_url'
             if self.failure_code or self.published:
                 self.reject(self.failure_code or 'MCP_OAUTH_CONNECTION_FAILED')
             try:
@@ -224,6 +288,7 @@ def remote_flow_type(native_flow):
                 query = parse_qs(parsed.query)
                 if query.get('redirect_uri') != [self.redirect_uri] or len(query.get('state', [])) != 1 or not query['state'][0]:
                     self.reject('MCP_OAUTH_REQUIRES_DEPENDENCY')
+                self.phase = 'relay_start'
                 started = await asyncio.to_thread(self.relay.request, 'start', {})
                 if started.get('redirectUri') != self.redirect_uri:
                     self.reject('MCP_OAUTH_RELAY_INVALID_RESPONSE')
@@ -237,15 +302,18 @@ def remote_flow_type(native_flow):
                 if remaining <= 0:
                     self.reject('MCP_OAUTH_EXPIRED')
                 self.callback_deadline = time.monotonic() + min(CALLBACK_SECONDS, remaining)
+                self.phase = 'authorization_publish'
                 await super().publish_authorization_url(url)
+                self.phase = 'relay_authorization'
                 result = await asyncio.to_thread(self.relay.request, 'authorization', {'authorizationUrl': url})
                 if result.get('ok') is not True:
                     self.reject('MCP_OAUTH_RELAY_INVALID_RESPONSE')
                 self.published = True
+                self.phase = 'callback_wait'
             except NativeOperationError as error:
-                self.reject(error.code)
-            except Exception:
-                self.reject('MCP_OAUTH_RELAY_FAILED')
+                self.reject(error.code, error)
+            except Exception as error:
+                self.reject('MCP_OAUTH_RELAY_FAILED', error)
 
         async def wait_for_callback(self, timeout=CALLBACK_SECONDS):
             if self.failure_code:
@@ -255,9 +323,11 @@ def remote_flow_type(native_flow):
             deadline = min(self.callback_deadline, time.monotonic() + min(float(timeout), CALLBACK_SECONDS))
             while time.monotonic() < deadline:
                 try:
+                    self.phase = 'callback_wait'
+                    self.callback_polls += 1
                     value = await asyncio.to_thread(self.relay.request, 'callback', None, min(10, max(0.01, deadline - time.monotonic())))
                 except NativeOperationError as error:
-                    self.reject(error.code)
+                    self.reject(error.code, error)
                 if time.monotonic() >= deadline:
                     self.reject('MCP_OAUTH_EXPIRED')
                 if value.get('status') == 'waiting':
@@ -278,7 +348,9 @@ def remote_flow_type(native_flow):
                 if callback.get('error'):
                     self.reject('MCP_OAUTH_DENIED')
                 try:
-                    return await super().wait_for_callback(timeout=0)
+                    result = await super().wait_for_callback(timeout=0)
+                    self.phase = 'token_exchange'
+                    return result
                 except Exception:
                     self.reject('MCP_OAUTH_RELAY_INVALID_RESPONSE')
             self.reject('MCP_OAUTH_EXPIRED')
@@ -319,6 +391,8 @@ def _authorize_mcp(logical_server, server, config):
     flow = remote_flow_type(DashboardOAuthFlow)(flow_id=relay.action, server_name=server,
         profile=None, hermes_home=str(home.resolve()), redirect_uri=relay.redirect_uri, reconnect_live=False)
     flow.relay = relay
+    flow.started_at, flow.phase, flow.callback_polls = time.monotonic(), 'native_probe', 0
+    relay.flow = flow
     home_token = set_hermes_home_override(flow.hermes_home)
     secret_token = None
     try:
@@ -339,11 +413,13 @@ def _authorize_mcp(logical_server, server, config):
             tools = _probe_single_server(server, selected, connect_timeout=315)
             if flow.failure_code:
                 fail(flow.failure_code)
+            flow.phase = 'grant_verification'
             storage = HermesTokenStorage(server, hermes_home=flow.hermes_home)
             tokens = asyncio.run(storage.get_tokens()) if storage.has_cached_tokens() else None
             if not tokens or not getattr(tokens, 'access_token', None):
                 fail('MCP_OAUTH_TOKEN_NOT_CONFIRMED')
             scope_receipt = granted_scope_receipt(config.get('oauth', {}).get('scope'), tokens)
+            flow.phase = 'tools_verification'
             if not isinstance(tools, list) or not tools or len(tools) > 2000:
                 fail('MCP_OAUTH_NO_TOOLS')
             output = []
@@ -354,10 +430,12 @@ def _authorize_mcp(logical_server, server, config):
             flow.mark_approved()
             return {'server': logical_server, 'connected': True, 'tools': output, 'toolsCount': len(output),
                     'credentialLocation': 'target_profile', 'loadedForNextRun': True, **scope_receipt}
-    except NativeOperationError:
+    except NativeOperationError as error:
+        if not getattr(error, 'oauth_diagnostic', None):
+            error.oauth_diagnostic = failure_diagnostic(error, flow.phase, flow)
         raise
-    except Exception:
-        fail(flow.failure_code or 'MCP_OAUTH_CONNECTION_FAILED')
+    except Exception as error:
+        fail(flow.failure_code or 'MCP_OAUTH_CONNECTION_FAILED', error=error, phase=flow.phase, flow=flow)
     finally:
         flow.mark_worker_done()
         if secret_token is not None:
