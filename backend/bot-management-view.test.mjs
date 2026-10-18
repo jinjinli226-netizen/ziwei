@@ -162,3 +162,24 @@ test('the same inline-avatar projection covers create/replay, control, uninitial
   f.db.prepare('UPDATE employees SET avatar=? WHERE id=?').run('https://avatar.fixture.invalid/profile.png',f.bot.id);
   assert.equal(f.compact().employee.avatar,'https://avatar.fixture.invalid/profile.png');
 });
+
+test('management MCP scope summaries preserve exact native scope sets and drop malformed or unbound confirmation',t=>{
+  const f=fixture(t),reader=createBotManagementActionReader(f.repo),original=f.repo.getA2AAction(f.source.id);
+  const payload={...original.payload,nativeOperation:{resource:'mcp',operation:'authorize',input:{server:'viral_library'}}};
+  const write=(data,receiptPatch={})=>{
+    const nativeOperation={schemaVersion:2,employeeId:f.bot.id,revision:1,resource:'mcp',operation:'authorize',status:'succeeded',data:{connected:true,tools:[{name:'collect_records'}],token:privateHistory,...data},...receiptPatch};
+    f.db.prepare("UPDATE a2a_actions SET type='hermes.bot.native',status='succeeded',payload_json=?,result_json=? WHERE id=?").run(JSON.stringify(payload),JSON.stringify({processExit:tree,nativeOperation}),f.source.id);
+    return reader(f.source.id,f.ws.id).result.nativeOperation.data;
+  };
+  const complete=write({requestedScopes:['read','collect','read'],grantedScopes:['read','collect'],scopeConfirmed:true});
+  assert.deepEqual(complete.requestedScopes,['read','collect']);assert.deepEqual(complete.grantedScopes,['read','collect']);assert.equal(complete.scopeConfirmed,true);assert.equal(complete.token,undefined);
+  const cached=write({requestedScopes:['read','collect'],grantedScopes:['read'],scopeConfirmed:true});assert.equal(cached.scopeConfirmed,false);assert.deepEqual(cached.grantedScopes,['read']);
+  const unknown=write({requestedScopes:['read','collect'],grantedScopes:null,scopeConfirmed:false});assert.equal(unknown.scopeConfirmed,false);assert.equal(unknown.grantedScopes,null);
+  for(const bad of [Array(129).fill('read'),['x'.repeat(4001)],['read collect'],['read\\collect'],['read"collect'],['非ASCII'],[1],{read:true}]){
+    const data=write({requestedScopes:bad,grantedScopes:['read'],scopeConfirmed:true});assert.equal(data.requestedScopes,null);assert.equal(data.scopeConfirmed,false);assert(Buffer.byteLength(JSON.stringify(data))<1000);
+  }
+  const wrongRevision=write({requestedScopes:['read'],grantedScopes:['read'],scopeConfirmed:true},{revision:2});assert.equal(wrongRevision.scopeConfirmed,false);assert.equal(wrongRevision.requestedScopes,null);
+  const failedReceipt=write({requestedScopes:['read'],grantedScopes:['read'],scopeConfirmed:true},{status:'failed'});assert.equal(failedReceipt.scopeConfirmed,false);
+  const unrecorded=write({});assert.equal(unrecorded.scopeConfirmed,undefined);assert.equal(unrecorded.requestedScopes,undefined);
+  assert.equal(JSON.stringify(complete).includes('HISTORY_MUST_STAY_ON_ORIGINAL_ACTION'),false);
+});

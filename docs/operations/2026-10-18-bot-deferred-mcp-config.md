@@ -84,3 +84,12 @@ Windows 包只覆盖 OAuth helper 和管理工具说明，继承其余 930 个�
 
 
 四处MCP读取窄修经57项联合回归、lint203及独立审查通过；主控另18项、独审15项均全部通过。新增120份大旧历史的full-action读取陷阱，覆盖start/幂等重放/list/read/cancel/deferred快照；真实工厂完成延期应用、验证、恢复、同一OAuth动作五次等待、浏览器handoff和原native树退出后完成，期间不读取旧完整历史、不重复派发。只覆盖连接服务模块，客户端88保持。
+
+
+16:20:22，产品 `950f4df2a23f6c7a279acd4ea6121208a01015c0` 在两条GitHub分支先推后发布API。目录 `/opt/ziwei/releases/mcp-relay-followup-950f4df2a23f-8304d4c7/v2`，PID426944，回退目录为da35。唯一覆盖 `backend/bot-mcp-connections.mjs`；实际候选两组18项测试通过，无监听，完整混合源码其余路径、前端、中控/Nginx、官方88安装包及DB身份/schema保留。新验收标识 `tk-viral-relay-followup-20261018-90be` 在原26adb明确失败/tree退出后提交，从TK自己的本轮再次走延期链，不改写或自动重放旧失败意图。
+
+16:21:29—16:22:53，新90be源动作 `action_4fc473bc-e2c6-40d2-a304-4bd010a83a79` 成功且根/树退出；意图 `bot-config_0871d161-38a0-452f-94aa-5c4429c3c7e9` 自动验证通过，原生授权 `action_5531e20f-c102-4ea6-9ee6-d69cc600c92b` 实际达到网页授权handoff。管理员登录期间旧flow到期，原动作16:28:22明确失败/tree退出，原码MCP_OAUTH_RELAY_FAILED，失败记录保留。用户随后已登录爆款库，但尚未选择/创建员工身份或批准，不能称已连接或已查询。
+
+中央配置原本请求library:read与library:collect，而真实授权URL仅请求read；公开401 challenge也仅给read，受保护资源元数据则支持两者。真实Hermes 0.22归档与官方913d源码、MCP SDK两套无监听集成复现SDK覆盖显式scope。窄修仅在当前目标OAuth进程、当前dashboard flow中保留配置scope并合并SDK原生附加项，finally还原选择器；保持DCR、PKCE、目标Profile令牌存储和原回调链。实际token scope不足则明确拒绝，未知scope不声称确认；服务端仅投影有限原生scope证据，不从工具名推断权限。已有read-only缓存不会被删除或强制登出，单纯重连不能承诺自动升级旧grant；本次TK没有完成旧授权。
+
+追加39项服务端定向回归、两套各26项helper及实际SDK后台线程授权/刷新/缓存集成全部通过。发布及公司台式新包生效、实际完整授权和查询仍须另行记录。

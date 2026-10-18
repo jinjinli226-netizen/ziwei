@@ -106,15 +106,15 @@ class Tests(unittest.TestCase):
         self.wire.start(); self.addCleanup(self.wire.stop)
         self.config = {'url': 'https://mcp.example/mcp', 'auth': 'oauth', 'enabled': True, 'oauth': {'scope': 'reports:read'}}
 
-    def save_token(self, value='SYNTHETIC_ACCESS_TOKEN'):
+    def save_token(self, value='SYNTHETIC_ACCESS_TOKEN', scope=None):
         self.tokens.parent.mkdir(exist_ok=True)
-        self.tokens.write_text(json.dumps({'access_token': value}))
+        self.tokens.write_text(json.dumps({'access_token': value, **({'scope': scope} if scope is not None else {})}))
 
     def probe(self, name, config, connect_timeout):
         self.assertEqual(name, 'reports')
         self.assertEqual(self.current_home.get(), str(self.home))
         self.assertEqual(self.secret_scope.get(), {'scope': str(self.home)})
-        self.assertEqual(config['oauth']['scope'], 'reports:read')
+        self.assertEqual(config['oauth'].get('scope'), self.config['oauth'].get('scope'))
         self.assertEqual(config['oauth']['redirect_uri'], 'https://relay.example/api/mcp-oauth/callback')
         self.assertEqual(config['oauth']['timeout'], helper.CALLBACK_SECONDS)
         self.assertFalse(any(key in os.environ for key in ('ZIWEI_MCP_OAUTH_API_BASE', 'ZIWEI_MCP_OAUTH_DEVICE_TOKEN', 'ZIWEI_MCP_OAUTH_ACTION_ID')))
@@ -182,7 +182,8 @@ class Tests(unittest.TestCase):
         value = self.run_helper()
         self.assertEqual(value, {'server': 'reports', 'connected': True,
             'tools': [{'name': 'read_report', 'description': 'Read the selected report'}], 'toolsCount': 1,
-            'credentialLocation': 'target_profile', 'loadedForNextRun': True})
+            'credentialLocation': 'target_profile', 'loadedForNextRun': True,
+            'requestedScopes': ['reports:read'], 'grantedScopes': None, 'scopeConfirmed': False})
         self.assertEqual([row[0] for row in self.calls], ['start', 'authorization', 'callback'])
         self.assertEqual(self.config, original)
         self.assertEqual(self.evictions, [('reports', str(self.home))])
@@ -293,6 +294,70 @@ class Tests(unittest.TestCase):
             response = io.BytesIO(raw); response.status = 200
             with patch.object(helper, 'build_opener', return_value=types.SimpleNamespace(open=lambda *a, **k: response)):
                 self.expect_code('MCP_OAUTH_RELAY_INVALID_RESPONSE')
+
+    def test_explicit_scope_is_flow_local_and_preserves_native_requirements_without_duplicates(self):
+        from mcp.client.auth import oauth2
+        from mcp.shared.auth import OAuthMetadata, ProtectedResourceMetadata
+        original = oauth2.get_client_metadata_scopes
+        prm = ProtectedResourceMetadata(resource='https://mcp.example/mcp', authorization_servers=['https://issuer.example'],
+                                        scopes_supported=['reports:read', 'reports:collect'])
+        asm = OAuthMetadata(issuer='https://issuer.example', authorization_endpoint='https://issuer.example/authorize',
+                            token_endpoint='https://issuer.example/token', response_types_supported=['code'],
+                            scopes_supported=['reports:read', 'reports:collect', 'offline_access'])
+        flow = native.DashboardOAuthFlow(flow_id='scope-test', server_name='reports', profile=None,
+                                        hermes_home=str(self.home), redirect_uri='https://relay.example/api/mcp-oauth/callback')
+        args = ('reports:read', prm, asm, ['authorization_code', 'refresh_token'])
+        with helper.preserve_configured_scope('reports:read reports:collect reports:read', flow):
+            self.assertEqual(oauth2.get_client_metadata_scopes(*args), 'reports:read offline_access')
+            with native.dashboard_oauth_flow(flow):
+                self.assertEqual(oauth2.get_client_metadata_scopes(*args), 'reports:read reports:collect offline_access')
+            self.assertEqual(oauth2.get_client_metadata_scopes(*args), 'reports:read offline_access')
+        self.assertIs(oauth2.get_client_metadata_scopes, original)
+        with self.assertRaisesRegex(RuntimeError, 'synthetic'):
+            with native.dashboard_oauth_flow(flow), helper.preserve_configured_scope('reports:collect', flow):
+                raise RuntimeError('synthetic')
+        self.assertIs(oauth2.get_client_metadata_scopes, original)
+
+    def test_absent_scope_does_not_patch_sdk_and_unknown_selector_is_refused(self):
+        from mcp.client.auth import oauth2
+        original = oauth2.get_client_metadata_scopes
+        with helper.preserve_configured_scope(None, object()):
+            self.assertIs(oauth2.get_client_metadata_scopes, original)
+        with patch.object(oauth2, 'get_client_metadata_scopes', lambda *args: 'reports:read') as unknown:
+            with self.assertRaises(helper.NativeOperationError) as error:
+                with helper.preserve_configured_scope('reports:collect', object()):
+                    self.fail('Unknown SDK selector accepted')
+            self.assertEqual(error.exception.code, 'MCP_OAUTH_REQUIRES_DEPENDENCY')
+            self.assertIs(oauth2.get_client_metadata_scopes, unknown)
+        self.assertIs(oauth2.get_client_metadata_scopes, original)
+
+    def test_read_only_cached_grant_cannot_claim_configured_collect_and_is_not_removed(self):
+        self.config['oauth']['scope'] = 'reports:read reports:collect'
+        self.save_token(scope='reports:read')
+        before = self.tokens.read_bytes(); self.mode = 'cached'
+        self.expect_code('MCP_OAUTH_SCOPE_NOT_GRANTED')
+        self.assertEqual(self.tokens.read_bytes(), before)
+        self.assertEqual(self.calls, [])
+
+    def test_unknown_grant_scope_is_not_collect_confirmation_and_no_scope_keeps_original_shape(self):
+        self.config['oauth']['scope'] = 'reports:read reports:collect'
+        self.save_token(); self.mode = 'cached'
+        value = self.run_helper()
+        self.assertTrue(value['connected']); self.assertFalse(value['scopeConfirmed'])
+        self.assertIsNone(value['grantedScopes'])
+        self.assertEqual(value['requestedScopes'], ['reports:read', 'reports:collect'])
+        del self.config['oauth']['scope']
+        value = self.run_helper()
+        self.assertTrue(value['connected'])
+        self.assertNotIn('scopeConfirmed', value)
+        self.assertNotIn('requestedScopes', value)
+
+    def test_invalid_scope_tokens_do_not_reach_native_authorization(self):
+        for scope in ['reports:read\nSECRET', 'reports:read\\SECRET', 'reports:read "SECRET', '', ' '.join('s'+str(n) for n in range(129))]:
+            with self.subTest(scope=scope):
+                self.config['oauth']['scope'] = scope
+                self.expect_code('MCP_OAUTH_INVALID_CONFIGURATION')
+        self.assertEqual(self.calls, [])
 
 
 if __name__ == '__main__':

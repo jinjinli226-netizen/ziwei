@@ -11,7 +11,21 @@ const result=['runtime','model','profile','code','status','executionState','reas
 const validation=['schemaVersion','valid','employeeId','revision','externalModelCalls','code'];
 const effective=['provider','model','maxTurns','turnLimit','reasoning','runtimeProfile','profile','home','sourceProfile','deviceId','workspace','permissions','memory','toolsets','mcpServers','mcpServerNames'];
 const native=['schemaVersion','resource','operation','employeeId','revision','nativeVersion','status','code'];
-const data=['connected','authorized','persisted','success','requires_authorization','session_id','message_count','truncated','executionSource','fixture'];
+const data=['connected','authorized','persisted','success','requires_authorization','session_id','message_count','truncated','executionSource','fixture','requestedScopes','grantedScopes','scopeConfirmed'];
+const scopeTokens=value=>{
+  if(!Array.isArray(value)||value.length>128)return null;
+  let length=Math.max(0,value.length-1);
+  for(const token of value){
+    if(typeof token!=='string'||!/^[\x21\x23-\x5B\x5D-\x7E]+$/.test(token))return null;
+    length+=token.length;if(length>4000)return null;
+  }
+  return [...new Set(value)];
+};
+export function projectMcpScopeEvidence(data){
+  const requestedScopes=scopeTokens(data?.requestedScopes),grantedScopes=scopeTokens(data?.grantedScopes);
+  const scopeConfirmed=data?.scopeConfirmed===true&&requestedScopes!==null&&requestedScopes.length>0&&grantedScopes!==null&&requestedScopes.every(scope=>grantedScopes.includes(scope));
+  return {requestedScopes,grantedScopes,scopeConfirmed};
+}
 const paths=[
   ...payload.map(key=>['p',key,['payload',key]]),
   ...binding.map(key=>['p',`hermesBot.${key}`,['payload','hermesBot',key]]),
@@ -27,6 +41,8 @@ const valueSql=(column,path)=>{
   const value=column==='r'?`CASE WHEN json_type(r,'$.${path}') IS NOT NULL THEN r -> '$.${path}' ELSE r -> '$.result.${path}' END`:`p -> '$.${path}'`;
   // A legacy error can put arbitrary content in reason. It is a short display
   // detail here, never a place to embed another complete management response.
+  if(column==='r'&&['nativeOperation.data.requestedScopes','nativeOperation.data.grantedScopes'].includes(path))return `CASE WHEN json_type(${value})='array' AND json_array_length(${value})<=128 AND length(${value})<=25000 THEN ${value} END`;
+  if(column==='r'&&path==='nativeOperation.data.scopeConfirmed')return `CASE WHEN json_type(${value}) IN ('true','false') THEN ${value} END`;
   return column==='r'&&path==='reason'?`CASE WHEN json_type(${value})='text' THEN json_quote(substr(json_extract(${value},'$'),1,2000)) END`:value;
 };
 const put=(target,path,value)=>{for(const key of path.slice(0,-1))target=target[key]??=(Object.create(null));target[path.at(-1)]=value;};
@@ -56,6 +72,11 @@ export function createBotManagementActionReader(repo){
     if(view.result.nativeOperation){
       const names=(parse(row.tool_names)||[]).filter(value=>typeof value==='string');
       if(names.length){view.result.nativeOperation.data??={};view.result.nativeOperation.data.tools=names.map(name=>({name}));}
+      const receipt=view.result.nativeOperation,scopeData=receipt.data;
+      if(scopeData&&['requestedScopes','grantedScopes','scopeConfirmed'].some(key=>Object.hasOwn(scopeData,key))){
+        const bound=view.status==='succeeded'&&receipt.status==='succeeded'&&receipt.schemaVersion===2&&receipt.resource==='mcp'&&view.payload.nativeOperation?.resource==='mcp'&&receipt.employeeId===view.payload.employeeId&&receipt.revision===view.payload.hermesBot?.revision&&receipt.operation===view.payload.nativeOperation?.operation;
+        Object.assign(scopeData,projectMcpScopeEvidence(bound?scopeData:null));
+      }
     }
     // These rare historical dispositions must retain their verified, complete
     // original binding. A marker alone is never projected as recovery authority.

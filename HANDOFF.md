@@ -1,12 +1,16 @@
 # 紫薇项目 HandOff
 
+## 2026-10-18 16:50 MCP 显式权限范围兼容候选
+
+TK 的90be验收已通过自己提交、自动验证及网页授权handoff。管理员登录期间旧flow到期并明确失败/tree退出；用户现已登录爆款库，但尚未选择员工身份或批准授权，未完成实际查询。配置请求read+collect，实际SDK却按challenge仅申请read；两套真实Hermes源/SDK已复现并验证窄修。候选保留显式scope、目标Profile令牌及原生PKCE，并在服务端显示实际授权范围证据；已有只读grant不删除、不假称已升级。39项服务端回归、两套各26项helper及真实SDK集成通过。后续先推GitHub、再发布API/Windows，确认公司台式实际更新后重做完整授权及只读查询，下节为此前发布快照。
+
 ## 2026-10-18 Bot 本轮结束后自动应用 MCP 配置已发布
 
-主发布分支和 `codex/bot-deferred-mcp-config` 已包含 `0d26bbe` 的持久延期机制及 `fbb52e2` 的 Windows OAuth/管理回执修复，均先推 GitHub 再发布。当前 API 为 `/opt/ziwei/releases/compact-management-followup-da35d3a6d652-01ec30ce/v2`、PID 424996（追加da35d3a仅省略管理回执内联头像）；官方 Windows 包 build `88b2ea9f41c10c53498ecb524ad1dc5d836813440f804a61050f0e98da9cc14e`。首轮 200 项回归、追加 55 项联合回归及 lint 203 项通过，生产混合树、前端、中控、数据库身份和数据保留。
+主发布分支和 `codex/bot-deferred-mcp-config` 已包含 `0d26bbe` 的持久延期机制及 `fbb52e2` 的 Windows OAuth/管理回执修复，均先推 GitHub 再发布。当前 API 为 `/opt/ziwei/releases/mcp-relay-followup-950f4df2a23f-8304d4c7/v2`、PID 426944（da35省略管理头像，950f4df仅将MCP状态内部读改管理摘要）；官方 Windows 包 build `88b2ea9f41c10c53498ecb524ad1dc5d836813440f804a61050f0e98da9cc14e`。首轮 200 项回归、追加 55 项联合回归及 lint 203 项通过，生产混合树、前端、中控、数据库身份和数据保留。
 
 TK 已用真实模型在自己的本轮提交延期意图，本轮退出后自动保存 `viral_library` 配置、原生验证成功并恢复启用，r3/e5 → r4/e7；无需用户或其他员工手工保存。首次连接真实返回 Windows 事件循环被 OAuth 监听守卫误拦，已修复并发布客户端包。配置成功和实际连接分开记录，尚不能仅凭发布包称 TK 已连通。
 
-公司台式正做无用户终端操作的单次更新验收。Node/npm prefix、Windows 状态备份和 Task Scheduler 账号名/SID 等价校验已逐项修复并由现场回执证实；同名任务随后进入等待空闲，但普通停止仍被维护扫描器 ACTION_STATE_CORRUPT 汇总代码阻塞。该代码不一定表示 JSON 语法损坏。公司台式限定的一次性空闲根进程停止/官方更新入口已通过24项无监听测试和独审，源码5778b69先推GitHub后发布不可变官方入口（SHA33a4bece）；保留历史记录、不补造业务退出。公司台式已实际完成更新：15:44:34开始上报目标88b2ea9f客户端、新PID9784和新鲜心跳，TK原r4/e7 active及专属绑定保持。首次417c重验get超时且未提交update；定位管理回复夹带794807字节内联头像后，da35d3a经42项回归/独审先推后发布，仅省略管理头像，保持网页/数据库原图。正在以同一幂等键417c从TK自己聊天复验，尚不能以客户端或API更新代替爆款库已接通。详细原动作、发布与后续验收见 [本轮操作记录](docs/operations/2026-10-18-bot-deferred-mcp-config.md)。
+公司台式正做无用户终端操作的单次更新验收。Node/npm prefix、Windows 状态备份和 Task Scheduler 账号名/SID 等价校验已逐项修复并由现场回执证实；同名任务随后进入等待空闲，但普通停止仍被维护扫描器 ACTION_STATE_CORRUPT 汇总代码阻塞。该代码不一定表示 JSON 语法损坏。公司台式限定的一次性空闲根进程停止/官方更新入口已通过24项无监听测试和独审，源码5778b69先推GitHub后发布不可变官方入口（SHA33a4bece）；保留历史记录、不补造业务退出。公司台式已实际完成更新：15:44:34开始上报目标88b2ea9f客户端、新PID9784和新鲜心跳，TK原r4/e7 active及专属绑定保持。首次417c重验get超时且未提交update；定位管理回复夹带794807字节内联头像后，da35d3a经42项回归/独审先推后发布，仅省略管理头像，保持网页/数据库原图。417c复验真实成功排队并自动原生验证；新原生授权26adb在relay/start访问中明确失败/tree退出，Nginx记499。发现状态轮询仍每tick取100份mobile完整历史，950f4df经57项回归和独审先推后发布四处读取窄修。正在以新标识90be复验实际授权连接，未声称爆款库已接通。详细原动作、发布与后续验收见 [本轮操作记录](docs/operations/2026-10-18-bot-deferred-mcp-config.md)。
 
 ## 2026-10-18 Windows默认不限轮数与真实并行验收通过
 

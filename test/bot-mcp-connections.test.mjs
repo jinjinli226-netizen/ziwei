@@ -228,3 +228,45 @@ test('the real deferred runner polls one OAuth action through browser handoff an
     assert.deepEqual(history.reads,[]);assert.equal(db.prepare('SELECT count(*) n FROM a2a_actions').get().n,count);
   } finally {f.bots.deferredConfig.stop();}
 });
+
+test('scope-not-granted is a public actionable failure without exposing native diagnostics',t=>{
+  const f=fixture(t),a=f.begin();
+  f.repo.resultA2AAction(a.id,{deviceId:f.device.deviceId,status:'failed',error:'PRIVATE PROVIDER BODY',result:{nativeOperation:{schemaVersion:2,employeeId:f.bot.id,revision:f.bot.revision,resource:'mcp',operation:'authorize',status:'failed',code:'MCP_OAUTH_SCOPE_NOT_GRANTED'}}});
+  const item=f.service.read('test-111',f.bot.id,a.id).connection;
+  assert.equal(item.status,'failed');assert.match(item.error,/权限/);assert.match(item.error,/重新授权/);
+  assert.equal(item.scopeConfirmed,false);assert.equal(item.requestedScopes,null);assert.equal(item.grantedScopes,null);
+  assert.equal(JSON.stringify(item).includes('PRIVATE PROVIDER BODY'),false);
+});
+
+test('scope confirmation comes from bounded original native scope evidence rather than tool names',t=>{
+  const f=fixture(t),a=f.begin();
+  const data={connected:true,tools:[{name:'read_records'}],requestedScopes:['library:read','library:collect','library:read'],grantedScopes:['library:read','library:collect','offline_access'],scopeConfirmed:true,token:'PRIVATE_TOKEN',authorizationUrl:'https://private.invalid/secret'};
+  f.repo.resultA2AAction(a.id,{deviceId:f.device.deviceId,status:'succeeded',result:{nativeOperation:{schemaVersion:2,employeeId:f.bot.id,revision:f.bot.revision,resource:'mcp',operation:'authorize',status:'succeeded',data}}});
+  const item=f.service.read('test-111',f.bot.id,a.id).connection;
+  assert.equal(item.status,'connected');assert.equal(item.scopeConfirmed,true);
+  assert.deepEqual(item.requestedScopes,['library:read','library:collect']);assert.deepEqual(item.grantedScopes,['library:read','library:collect','offline_access']);
+  assert.equal(JSON.stringify(item).includes('PRIVATE_TOKEN'),false);assert.equal(JSON.stringify(item).includes('private.invalid'),false);
+  f.repo.db.prepare("UPDATE a2a_actions SET status='failed' WHERE id=?").run(a.id);
+  assert.equal(f.service.read('test-111',f.bot.id,a.id).connection.scopeConfirmed,false);
+  f.repo.db.prepare("UPDATE a2a_actions SET status='succeeded' WHERE id=?").run(a.id);
+  f.repo.db.prepare('UPDATE hermes_bots SET control_epoch=control_epoch+1 WHERE employee_id=?').run(f.bot.id);
+  const stale=f.service.read('test-111',f.bot.id,a.id).connection;assert.equal(stale.status,'failed');assert.equal(stale.scopeConfirmed,false);assert.equal(stale.requestedScopes,null);
+});
+
+for(const [name,evidence,requested,granted]of [
+  ['old receipt',{},null,null],
+  ['unknown native token scope',{requestedScopes:['library:read','library:collect'],grantedScopes:null,scopeConfirmed:false},['library:read','library:collect'],null],
+  ['read-only cached grant',{requestedScopes:['library:read','library:collect'],grantedScopes:['library:read'],scopeConfirmed:true},['library:read','library:collect'],['library:read']],
+  ['missing native confirmation',{requestedScopes:['library:read'],grantedScopes:['library:read']},['library:read'],['library:read']],
+  ['non-boolean confirmation',{requestedScopes:['library:read'],grantedScopes:['library:read'],scopeConfirmed:'true'},['library:read'],['library:read']],
+  ['invalid requested token',{requestedScopes:['library:read collect'],grantedScopes:['library:read'],scopeConfirmed:true},null,['library:read']],
+  ['too many tokens',{requestedScopes:Array.from({length:129},(_,i)=>'scope:'+i),grantedScopes:['library:read'],scopeConfirmed:true},null,['library:read']],
+  ['oversize token',{requestedScopes:['x'.repeat(4001)],grantedScopes:['library:read'],scopeConfirmed:true},null,['library:read']],
+])test(`${name} cannot claim the configured scope is confirmed, even with a collect tool`,t=>{
+  const f=fixture(t),a=f.begin();
+  f.repo.resultA2AAction(a.id,{deviceId:f.device.deviceId,status:'succeeded',result:{nativeOperation:{schemaVersion:2,employeeId:f.bot.id,revision:f.bot.revision,resource:'mcp',operation:'authorize',status:'succeeded',data:{connected:true,tools:[{name:'collect_records'}],...evidence}}}});
+  const item=f.service.read('test-111',f.bot.id,a.id).connection;
+  assert.equal(item.status,'connected','scope display does not rewrite the existing connection status contract');
+  assert.equal(item.scopeConfirmed,false);assert.deepEqual(item.requestedScopes,requested);assert.deepEqual(item.grantedScopes,granted);
+  assert(Buffer.byteLength(JSON.stringify(item))<12000);
+});

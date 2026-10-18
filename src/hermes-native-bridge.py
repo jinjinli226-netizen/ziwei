@@ -285,7 +285,7 @@ def mcp(op, args):
         public_codes = {'MCP_OAUTH_REQUIRES_DEPENDENCY', 'MCP_OAUTH_INVALID_CONFIGURATION', 'MCP_OAUTH_RELAY_FAILED',
                         'MCP_OAUTH_RELAY_INVALID_RESPONSE', 'MCP_OAUTH_CANCELLED', 'MCP_OAUTH_EXPIRED',
                         'MCP_OAUTH_STATE_MISMATCH', 'MCP_OAUTH_DENIED', 'MCP_OAUTH_CONNECTION_FAILED',
-                        'MCP_OAUTH_TOKEN_NOT_CONFIRMED', 'MCP_OAUTH_NO_TOOLS', 'MCP_OAUTH_FAILED'}
+                        'MCP_OAUTH_TOKEN_NOT_CONFIRMED', 'MCP_OAUTH_NO_TOOLS', 'MCP_OAUTH_FAILED', 'MCP_OAUTH_SCOPE_NOT_GRANTED'}
         try:
             spec = importlib.util.spec_from_file_location('ziwei_remote_mcp_oauth', Path(__file__).with_name('hermes-remote-mcp-oauth.py'))
             module = importlib.util.module_from_spec(spec)

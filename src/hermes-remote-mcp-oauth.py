@@ -2,9 +2,10 @@
 import asyncio
 from asyncio.proactor_events import BaseProactorEventLoop
 from asyncio.selector_events import BaseSelectorEventLoop
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from datetime import datetime, timezone
 import json
+import inspect
 import logging
 import os
 from pathlib import Path
@@ -22,6 +23,7 @@ PUBLIC_CODES = frozenset({
     'MCP_OAUTH_CANCELLED', 'MCP_OAUTH_EXPIRED', 'MCP_OAUTH_STATE_MISMATCH',
     'MCP_OAUTH_DENIED', 'MCP_OAUTH_CONNECTION_FAILED',
     'MCP_OAUTH_TOKEN_NOT_CONFIRMED', 'MCP_OAUTH_NO_TOOLS', 'MCP_OAUTH_FAILED',
+    'MCP_OAUTH_SCOPE_NOT_GRANTED',
 })
 CALLBACK_SECONDS = 300.0
 POLL_SECONDS = 1.0
@@ -73,6 +75,72 @@ class NativeOperationError(RuntimeError):
 
 def fail(code):
     raise NativeOperationError(code) from None
+
+
+def scope_tokens(value, *, allow_empty=False):
+    # OAuth scope-token grammar (RFC 6749), never URLs or arbitrary diagnostics.
+    if not isinstance(value, str) or len(value) > 4000:
+        fail('MCP_OAUTH_INVALID_CONFIGURATION')
+    tokens = value.split(' ')
+    if any(not re.fullmatch(r'[\x21\x23-\x5b\x5d-\x7e]+', token) for token in tokens if token):
+        fail('MCP_OAUTH_INVALID_CONFIGURATION')
+    tokens = list(dict.fromkeys(token for token in tokens if token))
+    if len(tokens) > 128 or not tokens and not allow_empty:
+        fail('MCP_OAUTH_INVALID_CONFIGURATION')
+    return tokens
+
+
+@contextmanager
+def preserve_configured_scope(scope, flow):
+    if scope is None:
+        yield
+        return
+    requested = scope_tokens(scope)
+    try:
+        from mcp.client.auth import oauth2
+        from tools.mcp_dashboard_oauth import get_dashboard_oauth_flow
+        original = oauth2.get_client_metadata_scopes
+        method = oauth2.OAuthClientProvider.async_auth_flow
+        parameters = list(inspect.signature(original).parameters)
+        known = (original.__module__ == 'mcp.client.auth.utils'
+                 and original.__name__ == 'get_client_metadata_scopes'
+                 and parameters == ['www_authenticate_scope', 'protected_resource_metadata',
+                                    'authorization_server_metadata', 'client_grant_types']
+                 and method.__module__ == 'mcp.client.auth.oauth2'
+                 and method.__globals__ is vars(oauth2)
+                 and method.__globals__.get('get_client_metadata_scopes') is original
+                 and 'get_client_metadata_scopes' in method.__code__.co_names)
+    except (ImportError, AttributeError, TypeError, ValueError):
+        fail('MCP_OAUTH_REQUIRES_DEPENDENCY')
+    if not known:
+        fail('MCP_OAUTH_REQUIRES_DEPENDENCY')
+
+    def select(*args, **kwargs):
+        native = original(*args, **kwargs)
+        if get_dashboard_oauth_flow() is not flow:
+            return native
+        # Preserve native additions such as offline_access; only the configured
+        # request is added. The unchanged SDK still performs DCR, PKCE and grant.
+        selected = [] if native is None else scope_tokens(native, allow_empty=True)
+        return ' '.join(scope_tokens(' '.join(dict.fromkeys([*requested, *selected]))))
+
+    oauth2.get_client_metadata_scopes = select
+    try:
+        yield
+    finally:
+        oauth2.get_client_metadata_scopes = original
+
+
+def granted_scope_receipt(scope, tokens):
+    if scope is None:
+        return {}
+    requested = scope_tokens(scope)
+    granted_value = getattr(tokens, 'scope', None)
+    granted = None if granted_value is None else scope_tokens(granted_value, allow_empty=True)
+    if granted is not None and not set(requested).issubset(granted):
+        fail('MCP_OAUTH_SCOPE_NOT_GRANTED')
+    return {'requestedScopes': requested, 'grantedScopes': granted,
+            'scopeConfirmed': granted is not None}
 
 
 def https_url(value):
@@ -255,7 +323,14 @@ def _authorize_mcp(logical_server, server, config):
     secret_token = None
     try:
         secret_token = set_secret_scope(build_profile_secret_scope(home))
-        with force_interactive_oauth(), dashboard_oauth_flow(flow):
+        with force_interactive_oauth(), dashboard_oauth_flow(flow), preserve_configured_scope(config.get('oauth', {}).get('scope'), flow):
+            if config.get('oauth', {}).get('scope') is not None:
+                existing = HermesTokenStorage(server, hermes_home=flow.hermes_home)
+                cached = asyncio.run(existing.get_tokens()) if existing.has_cached_tokens() else None
+                if cached and getattr(cached, 'access_token', None):
+                    # Reject an explicitly narrower cached grant before even a
+                    # native probe can refresh metadata or silently reuse it.
+                    granted_scope_receipt(config['oauth']['scope'], cached)
             manager = get_manager()
             if not callable(getattr(manager, 'evict', None)):
                 fail('MCP_OAUTH_REQUIRES_DEPENDENCY')
@@ -268,6 +343,7 @@ def _authorize_mcp(logical_server, server, config):
             tokens = asyncio.run(storage.get_tokens()) if storage.has_cached_tokens() else None
             if not tokens or not getattr(tokens, 'access_token', None):
                 fail('MCP_OAUTH_TOKEN_NOT_CONFIRMED')
+            scope_receipt = granted_scope_receipt(config.get('oauth', {}).get('scope'), tokens)
             if not isinstance(tools, list) or not tools or len(tools) > 2000:
                 fail('MCP_OAUTH_NO_TOOLS')
             output = []
@@ -277,7 +353,7 @@ def _authorize_mcp(logical_server, server, config):
                 output.append({'name': item[0], 'description': item[1]})
             flow.mark_approved()
             return {'server': logical_server, 'connected': True, 'tools': output, 'toolsCount': len(output),
-                    'credentialLocation': 'target_profile', 'loadedForNextRun': True}
+                    'credentialLocation': 'target_profile', 'loadedForNextRun': True, **scope_receipt}
     except NativeOperationError:
         raise
     except Exception:

@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import {botFailure} from '../src/hermes-bot-config.mjs';
+import {projectMcpScopeEvidence} from './bot-management-view.mjs';
 
 export const MCP_OAUTH_RELAY_FEATURE = 'bot_mcp_oauth_relay_v1';
 const TTL = 10 * 60_000;
@@ -25,6 +26,7 @@ const errors = {
   MCP_OAUTH_STATE_MISMATCH:'授权回调与本次连接不一致，请重新连接。',
   MCP_OAUTH_DENIED:'授权未获批准，请重新连接并确认服务权限。',
   MCP_OAUTH_NO_TOOLS:'授权后没有发现可用工具，请检查服务权限和工具筛选。',
+  MCP_OAUTH_SCOPE_NOT_GRANTED:'授权未包含所需权限，请重新授权。',
   MCP_OAUTH_FAILED:'员工未能完成 MCP 授权，请查看本次运行记录。',
   MCP_OAUTH_NAME_CONFLICT:'MCP 名称与 Hermes 内建工具集重名，请换一个连接名称后保存。',
   MCP_OAUTH_REQUIRED:'请先为该连接选择 OAuth 认证并保存。',
@@ -77,7 +79,8 @@ export function createBotMcpConnections(repo,bots,{apiBase,now=Date.now,maxFlows
       const code=receipt?.code||action.result?.code||action.error;
       error=errors[code]||'连接验证未通过，请查看本次运行记录。';
     } else if(flow&&['authorization_required','cancelled','expired'].includes(flow.status))status=flow.status;
-    return {id:action.id,idempotencyKey:op.requestId,workspace:binding.workspace,employeeId:binding.employeeId,server:op.input.server,deviceId:binding.deviceId,profile:binding.instance?.profile||binding.sourceProfile,revision:binding.revision,controlEpoch:binding.controlEpoch,status,authorizationUrl:status==='authorization_required'?flow.authorizationUrl:null,toolsCount:tools.length,...(tools.length?{tools}:{}),error,expiresAt:flow?new Date(flow.expiresAt).toISOString():action.expires_at,loadedForNextRun:status==='connected'};
+    const scopeReceipt=action.status==='succeeded'&&receipt?.status==='succeeded'&&binding.revision===bot.revision&&binding.controlEpoch===bot.control_epoch&&receipt.schemaVersion===2&&receipt.employeeId===bot.id&&receipt.revision===binding.revision&&receipt.resource==='mcp'&&receipt.operation===op.operation?receipt.data:null;
+    return {id:action.id,idempotencyKey:op.requestId,workspace:binding.workspace,employeeId:binding.employeeId,server:op.input.server,deviceId:binding.deviceId,profile:binding.instance?.profile||binding.sourceProfile,revision:binding.revision,controlEpoch:binding.controlEpoch,status,authorizationUrl:status==='authorization_required'?flow.authorizationUrl:null,toolsCount:tools.length,...(tools.length?{tools}:{}),...projectMcpScopeEvidence(scopeReceipt),error,expiresAt:flow?new Date(flow.expiresAt).toISOString():action.expires_at,loadedForNextRun:status==='connected'};
   }
   function start(slug,id,input={},context={}) {
     if(Object.keys(input).some(key=>!['server','expectedRevision','expectedControlEpoch','idempotencyKey','workspace'].includes(key)))fail('BOT_NATIVE_INPUT_INVALID','连接请求包含未知字段。',400);
