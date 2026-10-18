@@ -19,7 +19,7 @@ import {createMobileReadView} from './mobile-read-view.mjs';
 import {createConversationReadService} from './conversation-read-state.mjs';
 import {createMobileNotificationReadService} from './mobile-notifications.mjs';
 import {createMobileGroupActionView} from './mobile-group-action.mjs';
-import {createMobilePushService} from './mobile-push.mjs';
+import {createMobileNotificationV2Service} from './mobile-notifications-v2.mjs';
 import { createManagementBootstrap } from './management-bootstrap.mjs';
 import {createBotMcpConnections} from './bot-mcp-connections.mjs';
 import {createBotHistoricalRecovery} from './bot-historical-recovery.mjs';
@@ -90,7 +90,7 @@ function resourceRoleGuard(req, res, next) {
 }
 
 function authExempt(pathname) {
-  return pathname === '/mobile/push/logout' || pathname === '/auth' || pathname.startsWith('/auth/') || pathname.startsWith('/external/')
+  return pathname === '/auth' || pathname.startsWith('/auth/') || pathname.startsWith('/external/')
     || pathname.startsWith('/daemon/') || pathname === '/devices/heartbeat' || pathname.endsWith('/heartbeat') || pathname.endsWith('/runtimes/register');
 }
 
@@ -278,9 +278,8 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   const privateIdentity=privatePreservationIdentityConfiguration(options);
   const app = express();
   const realtime = new RealtimeHub();
-  let mobilePush;
   const supplied=options.repository;if(supplied)assertServerCodeRolloutRepository(supplied,options);
-  const repo = guardServerCodeRolloutRepository(guardRepository(supplied || createRepository({ ...options, onEvent: event => {realtime.publish(event);mobilePush?.wake();} }),options.preservation));
+  const repo = guardServerCodeRolloutRepository(guardRepository(supplied || createRepository({ ...options, onEvent: event => realtime.publish(event) }),options.preservation));
   const ziweiConnect = createZiweiConnect(repo, {
     apiBase: options.ziweiConnectApiBase,
     auth: options.ziweiConnectAuth,
@@ -297,7 +296,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   const conversationReads = createConversationReadService(repo);
   const mobileNotifications = createMobileNotificationReadService(repo);
   const mobileGroupAction = createMobileGroupActionView(repo);
-  mobilePush=createMobilePushService(repo,auth,{...(options.mobilePush||{}),disabled:Boolean(repo.serverCodeRollout||options.preservation||typeof auth.sessionReference!=='function')});
+  const mobileNotificationsV2=createMobileNotificationV2Service(repo,auth,realtime,options.mobileNotificationsV2);
   const employeeTemplates = createEmployeeTemplateService(repo, management);
   const managementBootstrap = createManagementBootstrap(repo, options);
   const botMcpConnections=createBotMcpConnections(repo,management.bots,{apiBase:managementBootstrap.apiBase,now:options.mcpOAuthNow});
@@ -307,7 +306,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   app.locals.repo = repo;
   app.locals.realtime = realtime;
   app.locals.auth = auth;
-  app.locals.mobilePush=mobilePush;
+  app.locals.mobileNotificationsV2=mobileNotificationsV2;
   app.locals.ziweiConnect = ziweiConnect;
   app.locals.phoneMcp = phoneMcp;
   app.locals.managementBootstrap = managementBootstrap;
@@ -325,9 +324,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   // Task attachments are sent as Base64 JSON; allow the 10 MiB attachment
   // limit plus encoding and envelope overhead without accepting unbounded
   // request bodies.
-  app.use('/api/mobile/push',express.json({limit:'8kb'}));
-  const ordinaryJson=express.json({limit:'16mb'});
-  app.use((req,res,next)=>/^\/api\/mobile\/push(?:\/|$)/i.test(req.path)?next():ordinaryJson(req,res,next));
+  app.use(express.json({limit:'16mb'}));
   app.get('/api/mcp-oauth/callback',(req,res)=>{
     res.setHeader('Cache-Control','no-store');res.setHeader('Referrer-Policy','no-referrer');res.setHeader('Content-Security-Policy',"default-src 'none'; frame-ancestors 'none'; base-uri 'none'");
     try {botMcpConnections.deliver(req.query);res.type('html').send('<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>紫薇 · MCP 授权</title><h2>已收到授权</h2><p>员工正在验证连接。请返回紫薇员工页面，结果会自动更新。</p></html>');}
@@ -441,14 +438,6 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   const scheduler = repo.serverCodeRollout || options.memory || options.enableScheduler === false ? null : setInterval(() => { try { repo.tickAutomations(); } catch {} }, Number(process.env.ZIWEI_SCHEDULER_MS || 15000));
   scheduler?.unref?.();
   app.locals.scheduler=scheduler;
-  if(!options.memory&&options.enableMobilePushWorker!==false)mobilePush.start();
-  app.use('/api/mobile/push',(_req,res,next)=>{res.setHeader('Cache-Control','no-store');res.vary('Cookie');next();});
-  app.get('/api/mobile/push/config',(_req,res)=>res.json(mobilePush.config()));
-  app.post('/api/mobile/push/installations',(req,res)=>res.json(mobilePush.register(req,req.body)));
-  app.put('/api/mobile/push/subscription',(req,res)=>res.json(mobilePush.subscription(req,req.body)));
-  app.post('/api/mobile/push/foreground',(req,res)=>res.json(mobilePush.foreground(req,req.body)));
-  app.post('/api/mobile/push/logout',(req,res)=>res.json(mobilePush.logout(req,req.body)));
-  app.get('/api/mobile/push/deliveries/:id',(req,res)=>res.json(mobilePush.resolve(req,req.params.id)));
 
   app.get('/api/workspaces/:slug/summary', (req, res) => res.json(repo.getSummary(req.params.slug, { userId: req.auth?.user_id })));
   app.get('/api/workspaces/:slug/tasks', (req, res) => res.json({ tasks: repo.listTasks(req.params.slug, req.query) }));
@@ -643,6 +632,14 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
     res.json(mobileNotifications.list(req.params.slug,input,employeeContext(req)));
   });
   app.get('/api/workspaces/:slug/mobile/notifications/:id', (req,res)=>{res.setHeader('Cache-Control','no-store');res.vary('Cookie');res.json(mobileNotifications.resolve(req.params.slug,req.params.id,employeeContext(req)));});
+  function notificationV2Input(req,wait=false){const input={};for(const [key,value] of Object.entries(req.query)){
+    if(!['cursor','limit','baseline',...(wait?['timeout']:[])].includes(key)||typeof value!=='string')throw Object.assign(new Error('提醒读取参数无效'),{status:400,code:'MOBILE_NOTIFICATION_INPUT_INVALID'});
+    if(key==='baseline'){if(!['1','0','true','false'].includes(value))throw Object.assign(new Error('提醒基线参数无效'),{status:400,code:'MOBILE_NOTIFICATION_INPUT_INVALID'});input.baseline=value==='1'||value==='true';}else input[key]=value;
+  }return input;}
+  app.use('/api/workspaces/:slug/mobile/notifications-v2',(_req,res,next)=>{res.setHeader('Cache-Control','no-store');res.vary('Cookie');next();});
+  app.get('/api/workspaces/:slug/mobile/notifications-v2',(req,res)=>res.json(mobileNotificationsV2.list(req,req.params.slug,notificationV2Input(req))));
+  app.get('/api/workspaces/:slug/mobile/notifications-v2/wait',async(req,res,next)=>{try{const page=await mobileNotificationsV2.wait(req,res,req.params.slug,notificationV2Input(req,true));if(page&&!res.destroyed)res.json(page);}catch(error){if(!res.destroyed)next(error);}});
+  app.get('/api/workspaces/:slug/mobile/notifications-v2/items/:id',(req,res)=>res.json(mobileNotificationsV2.resolve(req,req.params.slug,req.params.id)));
   app.post('/api/conversations/:id/read', (req,res)=>res.json(conversationReads.read(req.params.id,req.body||{},employeeContext(req))));
   app.post('/api/conversations/:id/forwards', requireRole('owner','admin','member'), (req,res)=>{
     const result=repo.forwardConversationMessages(req.params.id,req.body||{},employeeContext(req));
@@ -971,7 +968,6 @@ export function startServer({ port = Number(process.env.API_PORT || 4178), host 
   const app = createApp({ ...options, objectStoreDir });
   const server = app.listen(port, host, () => console.log(JSON.stringify({ event:'started', service:'ziwei-api', cli:'ziwei_user', host, port, pid:process.pid, at:new Date().toISOString() })));
   attachRealtimeWebSocket(server, app);
-  server.once('close',()=>app.locals.mobilePush.stop());
   return server;
 }
 

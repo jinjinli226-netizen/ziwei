@@ -117,6 +117,10 @@ export function createMobileGroupActionView(repo){
       const oldHost=paged&&(receipt.status==='succeeded'||data.events!==undefined)&&data.pagedRead!==true;
       if(data.room)roomScope(data.room);
       else if(receipt.status==='succeeded'||data.events!==undefined)failure();
+      // Notification previews carry a bounded room/receipt projection, never
+      // full native history. Authorize its original roster without treating
+      // that projection as a validated log, execution proof or mobile page.
+      if(options.notificationScope)return receipt;
       if(oldHost&&!options.auxiliary)failure(upgradeError.code,upgradeError.message);
       if(data.events===undefined){if(receipt.status==='succeeded')failure();return receipt;}
       if(paged&&!oldHost){
