@@ -97,3 +97,15 @@ Windows 包只覆盖 OAuth helper 和管理工具说明，继承其余 930 个�
 16:51:35，权限修复产品 `acee34d32f04167038cb1b55eab2377c142df614` 先推两条GitHub分支，再发布API `/opt/ziwei/releases/windows-mcp-scope-acee34d32f04-bdc0ae98/v2`、PID429489，仅覆盖管理scope投影和MCP连接模块；39项候选实际内存测试通过。16:52:18发布官方Windows包，实际build `5a642107fa32d8e8f09ea139a9f964e7f50c77d9648788ae5aba6e96ac509fec`、包SHA `e386b28ab38fddfa53c88091418f372a2c91ebd8c1402b19d3db22b1d60e157c`、1134321B，公开元数据SHA789eae1c；仅覆盖remote OAuth helper、native bridge和descriptor，930个继承文件及原bundled依赖保持。原bootstrap526882bb/6390B逐字保留。DB身份/schema、前端、中控/Nginx保持。发布包不代表公司电脑已安装。
 
 已准备公司台式88到5a6421的限定一次性官方更新入口，源码位于 `company-mcp-scope-update-20261018/`，27项无监听回归、freezer正反校验及独立逐字审查通过。新任务CREATE-only、当前用户Limited、仅一个延后触发；重新取证当前空闲daemon根，不复用旧exit，不改旧历史。入口bcf8e1ee/76251B及实际包/构建/脚本固定，后续先推源码，再仅新增不可变下载入口；现场注册和真实新build尚待验收。
+
+17:00:11只读快照确认公司台式已经是5a642107、新PID23428、17:00:06新鲜心跳；原调度source `action_bec46d82-ae12-4975-b99d-d637fd3bb48b` 成功且root/tree退出，SCOPE_UPDATE_SCHEDULED原JSON保留。本次未要求用户到电脑运行命令。
+
+17:02新d06c source `action_5a532e68-de6c-4f74-b6e8-48fcafd875de` 成功/tree0，自己提交意图 `bot-config_460772a1-46f3-439c-a4ae-c3997a9ca919`，原生验证dbb722a5成功/tree0；原授权267450b8仍在relay/start返回499后明确失败/tree0。普通Bot页当时也出现详情读取超时；源码仍有完整历史重复读取，不能只凭时间重叠认定本次499原因。
+
+17:10:30在已完整加载的既有工具页，仅点一次连接，精确原native `action_2ea28006-6d65-4a66-ba1c-c58730a62879`、requestId95997bfa，实际发布包含read+collect的新URL，授权页显示9项阅读与采集工具。start、authorization和19次callback均返回200，未见429或本轮poll网络错误；但未批准前17:11:56原动作返回MCP_OAUTH_CONNECTION_FAILED/root与tree退出。没有创建员工身份或grant，页面已关闭，不把等待授权当连接通过。
+
+用户随后明确要求本次TK长期授权直到撤销；爆款库actual65b实现仍有grant90天及refresh30天限制，正在独立源码修复，不批量延长其它旧grant。现有两套原生315秒连接/300秒callback实现已通过虚拟120秒等待、301秒过期与取消真实SDK回归；未复现现场较早退出，不能再声称是已找到30/60秒硬限。
+
+17:36:49诊断产品 `e2a360c13765c6f4fce3aa1c34966388a327dd1c` 已先推双GitHub分支后，仅发布官方Windows包：build `5a9c550c26ec02ffe16f68d11e732e35aa5695f756b9b464e6ae80ab4af8a45b`、包SHA `b721f079c9a39f40d4d699904160b1a09ca3570eb5fcb512c071f355eff4e851`、1136585B，metadata03b800d2，bootstrap526882bb/6390B不变。有限失败诊断只含phase/cause/异常类型/HTTP状态/SDK版本等10字段，不含URL、消息、headers或凭据。两套各30项helper及实际SDK集成、独审、客户端933项闭包和Linux冷验通过；930继承文件保持。API、前端、中控/Nginx、DB身份/schema均不改。新5a9机器实际更新另行取证。
+
+后续公司台式5a到诊断包的限定一次性入口源保存在 `company-mcp-oauth-diagnostic-update-20261018/`，27项无监听测试及冻结器通过；只为取得真实失败原因，不声称已修复未知根因。新任务OAuthWait CREATE-only、fresh持有句柄只停空闲原daemon根、旧Scope任务/Plan/archive只读，保留全部历史。源码先推后新增不可变官方入口，实际执行继续记录。

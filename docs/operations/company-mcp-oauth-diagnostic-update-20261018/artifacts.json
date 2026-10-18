@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "preparationOnly": true,
+  "task": "Ziwei.TK.OAuthWait.Update.20261018",
+  "sourceBuild": "5a642107fa32d8e8f09ea139a9f964e7f50c77d9648788ae5aba6e96ac509fec",
+  "targetFrozen": true,
+  "target": {
+    "TARGET_COMMIT": "e2a360c13765c6f4fce3aa1c34966388a327dd1c",
+    "TARGET_BUILD": "5a9c550c26ec02ffe16f68d11e732e35aa5695f756b9b464e6ae80ab4af8a45b",
+    "TARGET_ARCHIVE_SHA": "b721f079c9a39f40d4d699904160b1a09ca3570eb5fcb512c071f355eff4e851",
+    "TARGET_BOOTSTRAP_SHA": "526882bbed69de976a546e4d1cff122d55ab838d5d3ab4bad621121dd7cdd9bd",
+    "TARGET_BOOTSTRAP_BYTES": 6390
+  },
+  "sourceFiles": {
+    "owned-idle-stop.mjs": {
+      "sha256": "052296508e5fe78202b44755ff4bd7a6d860b5d4dde7db4005c42bc71d7aadc3",
+      "bytes": 20582
+    },
+    "owned-idle-handle.ps1": {
+      "sha256": "2cb11036e513175f61c1c08e8a62eb7e6cd18b94365e688be7fe7291e669e9a1",
+      "bytes": 10745
+    },
+    "owned-idle-stop.test.mjs": {
+      "sha256": "35dbb8718063ebfe2c3cf40cbaea96824069d0b3c4d3ae046e38e84059cfcd99",
+      "bytes": 9488
+    },
+    "tk-self-update-owned-idle.ps1": {
+      "sha256": "553d702fe32997a1634be8dd7ce22bb697fb48d364d08d37388b3d934727c4dd",
+      "bytes": 16658
+    },
+    "register-company-oauth-wait-update.ps1": {
+      "sha256": "a8b414279c9a95bd09c0149c455c19e589e6b8ebf536f0ca2da91fbacfd3fc1e",
+      "bytes": 76404
+    }
+  },
+  "priorWorkerSha256": "7fd4dc4ed078c92909215022b262899604f5f751c94be3eb192173e37f3c8e0f",
+  "historyDeleted": false,
+  "windowsExecuted": false,
+  "taskRegistered": false,
+  "productionModified": false
+}
