@@ -625,3 +625,9 @@ npm run lint
 - 真实动作验收通过：Hermes profile `ziwei-aigc` 返回 `HERMES_PROD_PROFILE_OK` 与 `HERMES_PROD_PROFILE_RECHECK_OK`，服务器动作终态为 `succeeded`。
 - 本轮质量门槛：`npm test` 90/90、`npm run lint`、`npm run build` 通过。工作树中的 `tmp_gzgov.html` 继续保留，未改动。
 
+# 2026-10-18 不限轮数与并行执行已发布
+
+产品 `d45317011235f38c0f1b5b2f2e60eff322338135` 已先推GitHub，再发布网页、API配置校验和Windows客户端。当前API目录 `/opt/ziwei/releases/unlimited-parallel-d45317011235-55597409/v2`，PID407909；CLI build `203fe63c886b4a98ef510a6302c84c6291f9eb66f095ed42549c4f0d9e903116` 同时包含不限轮数及df2跨员工并行修复。网页高级运行设置可选“不限轮数（最多24小时）”，保留单次24小时和停止。旧Bot配置不自动变化。
+
+服务端只更新 `src/hermes-bot-config.mjs`，原API混合基线的runtime/adapters/启动证据模块保留，不可用整份Git旧树盲盖。14项正式postcheck通过，数据库、MCP、恢复回执、其他服务和下载保持。Windows旧客户端尚需实际更新，新build心跳及模式启用/真实模型并行验收仍待现场完成，不将下载发布称为电脑已生效。完整证据见[发布记录](docs/operations/2026-10-18-unlimited-turns-and-parallel.md)。下方为历史状态。
+

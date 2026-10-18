@@ -1,5 +1,9 @@
 # 紫薇项目管理与 AI 接手手册
 
+## 2026-10-18 不限轮数与多员工并行已发布
+
+最新正式产品为 `d453170`，API/网页已发布，Windows下载build为 `203fe63c…3116`，包含不限轮数与昨日并行修复。不限轮数仍保留24小时及手动停止；旧电脑必须更新后才能验证启用。API仅更新配置校验，保留线上混合基线，不恢复数据库。以[HANDOFF.md最新节](HANDOFF.md)及[专项发布记录](docs/operations/2026-10-18-unlimited-turns-and-parallel.md)为准，现场Windows新build与真实并行验收仍待用户升级后核对。下方为历史记录。
+
 ## 2026-10-16 12:57 公司台式更新阻塞修复已发布
 
 公司台式仍运行 `993639eb…`，升级 24 小时客户端时被 `ACTION_STATE_CORRUPT` / HTTP 409 阻塞。根因是旧版允许正常 CLI 完成后留下后台进程，而维护扫描又将该合法历史当成文件损坏：原动作 `action_5b4dc026-2a9e-45db-8169-a08086e6e525` 的 root/host exit 均 0，treeConfirmed=false、activeProcesses=1。不能宣称这个后台进程已退出。
