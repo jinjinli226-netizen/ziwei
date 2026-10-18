@@ -18,3 +18,10 @@
 针对知暖的后续客户端补丁：普通无图 Hermes 改用已有 Bot/多图使用的显式 `chat --query-file - --format stream-json`，完整提示词走 stdin，单图及 Bot 路线不变。退出码 0 但无结构化答复且只有独立 TTY 诊断时返回 `HERMES_NONINTERACTIVE_FAILED`，保留原退出证据，不自动重跑。新测试通过隔离 Python/bootstrap 检查真实 stdin、profile、model、管理 overlay 与 cwd；TTY 在 stdout/stderr 均不能假成功，合法答复引用该文本不误判。新5项、多图8项、图片19项通过；主控联合 native 测试18/18。此测试模拟原生协议，不代替 Windows 真实 provider 验收。
 
 J 远程升级请求 `client-update_c760583a-cc18-4d0e-8508-b719e4206737` 在等待空闲期间取消，准备累计包含上述 Hermes 修复的新包。李金晋电脑上的用户闲鱼业务 `action_49bd64e6-0105-4fd6-aff5-53f50b520d52` 仍运行，不强停该业务、不把排队升级显示为成功。后续包发布、升级与真实验收追加记录。
+
+
+后续 K `0f7e8940feaf70d9cd0ecd912eeff752a6ca8220` 已先推 GitHub 两分支再发布正式客户端，完成时间 `2026-10-18T15:56:05Z`。新 build `5ed84509b57a6ad3e3b40cfc223703f50c799af8c34edddef161d3fd3e4ddb00`，包 SHA256 `cb79d6f7d4debcb1d1a1be3869b4371b5419f5e1d1fb9e59f2f45b3d67e6985f` / 1,153,612B。主站/API仍J/PID466819，K发布不重启服务、不改库，全部既有下载和通用PS入口保留。主控离线冷装、API工厂、实际helper导入及独审19/19通过。
+
+另一次显式原生命令验收 `action_1b766694-d774-4647-a9bb-b29c3d16267a` 已由李金晋电脑的 Creator 执行一次：直接启动现有 `zhi-nuan-life` 的新 chat/query-file 路线，真实模型 `gpt-6.1-sol`；Hermes session `20261018_235424_847d2a` 返回1次 terminal tool_use/tool_result（命令没有自定cwd、exit_code0），cwd为 `D:\AIUSE\life-assistant`，原生总耗时20,053ms。证据来源是原Creator动作转述/透传的原生stdout，未提供独立文件读取链；这是显式启动路线的provider smoke，不等同于K安装后普通task.execute全链验收。
+
+已为精确李金晋电脑提交累计K正式远程升级 `client-update_b9f94525-1577-48d3-a957-3f04ea6baeeb`，使用固定官方包与 `waitForIdle:true`；源H build尚在运行用户的闲鱼任务。升级请求提交不算安装完成，必须看到新build认证心跳才能记成功。目前不触碰运行中的用户业务，其他电脑未更新。本次服务器目录继承已上线、显式Hermes路线实测通过；K安装与安装后普通任务仍待空闲后的回执，不宣称已经全链验收。

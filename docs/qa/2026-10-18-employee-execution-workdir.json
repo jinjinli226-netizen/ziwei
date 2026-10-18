@@ -1,5 +1,5 @@
 {
-  "phase": "server-published-client-followup-testing",
+  "phase": "server-and-client-published-awaiting-idle-device-install",
   "productionBefore": {
     "employeeDefaultsAndConversationsAlreadyCorrect": true,
     "employees": [
@@ -33,7 +33,8 @@
       "unchangedBaselineFailures": 4
     },
     "hermesNoninteractiveNewPassed": 5,
-    "rootNativeAndHermesPassed": 18
+    "rootNativeAndHermesPassed": 18,
+    "independentHermesPassed": 19
   },
   "release": {
     "pushed": true,
@@ -41,7 +42,12 @@
     "serverCommit": "241f0cc59bbd2cb7800ac3072470b1a85a77dfd1",
     "serverPid": 466819,
     "clientJBuild": "b036e91d6fd6800ca71364dbff6bb5a34e19583415c3eca486ce53a7ba7ca0d3",
-    "clientJArchiveSha256": "cf5b96140985f56dff700969a92c938470f47fb83412bd41a17b3fde1deec545"
+    "clientJArchiveSha256": "cf5b96140985f56dff700969a92c938470f47fb83412bd41a17b3fde1deec545",
+    "clientCommit": "0f7e8940feaf70d9cd0ecd912eeff752a6ca8220",
+    "clientBuild": "5ed84509b57a6ad3e3b40cfc223703f50c799af8c34edddef161d3fd3e4ddb00",
+    "clientArchiveSha256": "cb79d6f7d4debcb1d1a1be3869b4371b5419f5e1d1fb9e59f2f45b3d67e6985f",
+    "clientArchiveBytes": 1153612,
+    "clientPublishedAt": "2026-10-18T15:56:05Z"
   },
   "liveVerification": {
     "passed": false,
@@ -53,13 +59,28 @@
     "hermesActionId": "action_f85ed19e-946f-446e-a97c-8e29d5fca072",
     "hermesPayloadCwd": "D:\\AIUSE\\life-assistant",
     "hermesActualOutput": "stdin is not a tty",
-    "hermesModelTestPassed": false
+    "hermesModelTestPassed": false,
+    "explicitHermesRouteSmoke": {
+      "actionId": "action_1b766694-d774-4647-a9bb-b29c3d16267a",
+      "nativeSessionId": "20261018_235424_847d2a",
+      "model": "gpt-6.1-sol",
+      "code": 0,
+      "toolResultExitCode": 0,
+      "toolResultCwd": "D:\\AIUSE\\life-assistant",
+      "durationMs": 20053,
+      "source": "Creator action relays direct native stdout; not independently read from disk",
+      "postInstallTaskExecuteTest": false
+    }
   },
   "employeeConfigurationChanged": false,
   "profilesOrHomesMigrated": false,
   "remoteUpdate": {
     "cancelledJRequestId": "client-update_c760583a-cc18-4d0e-8508-b719e4206737",
     "userWorkloadInterrupted": false,
-    "reason": "cumulative Hermes follow-up; wait for existing user action to finish"
+    "reason": "cumulative Hermes follow-up; wait for existing user action to finish",
+    "requestId": "client-update_b9f94525-1577-48d3-a957-3f04ea6baeeb",
+    "waitForIdle": true,
+    "installed": false,
+    "authenticatedTargetHeartbeat": false
   }
 }

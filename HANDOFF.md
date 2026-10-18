@@ -1,5 +1,14 @@
 # 紫薇项目 HandOff
 
+## 2026-10-18 D盘员工目录继承修复已发布，客户端等空闲安装
+
+主站J `241f0cc59bbd2cb7800ac3072470b1a85a77dfd1`（API PID466819）已先推GitHub再发布。知微创建的擎天/知暖默认目录本来已正确，旧task.execute漏继承cwd而落入电脑C盘默认；现在显式目录→精确绑定会话→绑定该电脑的员工默认目录统一解析。native/group/Gateway及网页继承显示一并修复，不改Profile/HOME或业务文件。
+
+真实新任务的payload分别为 `D:\AIUSE`、`D:\AIUSE\life-assistant`；擎天Codex正常退出并返回D，适配器未持久化独立tool stdout。知暖暴露普通Hermes纯文本入口TTYcode0假成功，K `0f7e8940feaf70d9cd0ecd912eeff752a6ca8220` 改明确query-file JSON路线并拒绝该假成功，纯测试和独审通过，官方包已发布：build `5ed84509b57a6ad3e3b40cfc223703f50c799af8c34edddef161d3fd3e4ddb00`、SHA `cb79d6f7d4debcb1d1a1be3869b4371b5419f5e1d1fb9e59f2f45b3d67e6985f`。主站仍J、库与旧下载保留。
+
+显式Hermes真实provider smoke `action_1b766694-d774-4647-a9bb-b29c3d16267a` 由Creator透传原生stdout，session `20261018_235424_847d2a`、一次terminal原结果D盘、exit0、20.053秒；不当作安装后task.execute全链证据。李金晋电脑正式升级请求 `client-update_b9f94525-1577-48d3-a957-3f04ea6baeeb` 已提交等待空闲；用户闲鱼任务 `action_49bd64e6-0105-4fd6-aff5-53f50b520d52` 仍运行，不能强停或称安装完成。旧J排队请求c760583a已取消，避免先装中间版。后续需GET原请求，看K新build认证心跳后再验普通任务；不要重发或重复升级。其他电脑未更新。详见[目录运维记录](docs/operations/2026-10-18-employee-execution-workdir.md)和[QA](docs/qa/2026-10-18-employee-execution-workdir.json)。下方是历史快照。
+
+
 
 ## 2026-10-18 统一远程升级与本机安装回执均已真机通过
 
