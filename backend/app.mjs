@@ -1,6 +1,7 @@
 import express from 'express';
 import fs from 'node:fs';
 import path from 'node:path';
+import {fileURLToPath} from 'node:url';
 import { WebSocketServer } from 'ws';
 import { createRepository } from './repository.mjs';
 import {guardRepository} from './version-preservation.mjs';
@@ -1034,5 +1035,8 @@ export function attachRealtimeWebSocket(server, app, { pathPrefix = '/api/worksp
   return sockets;
 }
 
-if (process.argv[1] && process.argv[1].endsWith('server.mjs')) startServer();
+export function isBackendServerEntry(entry,appUrl=import.meta.url){
+  return typeof entry==='string'&&Boolean(entry)&&path.resolve(entry)===fileURLToPath(new URL('./server.mjs',appUrl));
+}
+if (isBackendServerEntry(process.argv[1])) startServer();
 
