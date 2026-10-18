@@ -20,45 +20,28 @@ function OwnTask($task){
   return ($taskSid -ceq $Sid -and $principal.LogonType -eq 3 -and $principal.RunLevel -eq 0 -and $task.Definition.RegistrationInfo.Description -ceq ('Ziwei Li bootstrap '+$RegistrationHash) -and $task.Definition.Actions.Count -eq 1 -and $task.Definition.Actions.Item(1).Path -ieq $PowerShell -and $task.Definition.Actions.Item(1).Arguments -ceq $Arguments -and $task.Definition.Actions.Item(1).WorkingDirectory -ieq $Plan.jobDirectory -and $task.Definition.Triggers.Count -eq 1 -and $task.Definition.Settings.RestartCount -eq 0 -and $task.Definition.Settings.MultipleInstances -eq 2)
 }
 function TaskOrNull{$found=@($Folder.GetTasks(1)|Where-Object {$_.Name -ceq $TaskName});Need ($found.Count -le 1) 'BOOTSTRAP_TASK_CONFLICT';if($found.Count -eq 1){return $found[0]};return $null}
-function ParentImage($record){
-  $image=[string]$record.ExecutablePath
-  if([string]::IsNullOrWhiteSpace($image)){
-    try{
-      if(!('Ziwei.RemoteBootstrapParentImage' -as [type])){
-        $nativeSource=@'
-using System;
-using System.Runtime.InteropServices;
-using System.Text;
-namespace Ziwei {
-  public static class RemoteBootstrapParentImage {
-    [DllImport("kernel32.dll", SetLastError=true)]
-    private static extern IntPtr OpenProcess(uint access, bool inherit, int pid);
-    [DllImport("kernel32.dll", EntryPoint="QueryFullProcessImageNameW", CharSet=CharSet.Unicode, ExactSpelling=true, SetLastError=true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool QueryFullProcessImageName(IntPtr process, uint flags, StringBuilder value, ref uint size);
-    [DllImport("kernel32.dll", SetLastError=true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool CloseHandle(IntPtr process);
-    public static string Read(int pid) {
-      IntPtr handle = OpenProcess(0x1000, false, pid);
-      if (handle == IntPtr.Zero) return null;
-      try {
-        uint size = 32768;
-        StringBuilder value = new StringBuilder((int)size);
-        if (!QueryFullProcessImageName(handle, 0, value, ref size) || size < 3 || size >= 32768) return null;
-        return value.ToString();
-      } finally { CloseHandle(handle); }
-    }
+function TaskInstance($expected){
+  try{
+    $task=TaskOrNull;Need (OwnTask $task) 'BOOTSTRAP_TASK_BINDING_INVALID'
+    $instances=$task.GetInstances(0)
+    Need ($instances -and $instances.Count -eq 1) 'BOOTSTRAP_TASK_INSTANCE_NOT_UNIQUE'
+    $instance=$instances.Item(1);$null=$instance.Refresh()
+    Need ([int]$instance.State -eq 4 -and [string]$instance.Path -ceq ('\'+$TaskName)) 'BOOTSTRAP_TASK_INSTANCE_NOT_RUNNING'
+    $instanceGuid=[guid]::Empty
+    Need ([guid]::TryParse([string]$instance.InstanceGuid,[ref]$instanceGuid) -and $instanceGuid -ne [guid]::Empty) 'BOOTSTRAP_TASK_INSTANCE_INVALID'
+    $self=Get-CimInstance Win32_Process -Filter ('ProcessId = '+$PID)
+    Need ($self -and $self.ProcessId -eq $PID -and [int]$self.ParentProcessId -gt 0) 'BOOTSTRAP_OUTSIDE_TASK_UNCONFIRMED'
+    $parent=Get-CimInstance Win32_Process -Filter ('ProcessId = '+[int]$self.ParentProcessId)
+    Need ($parent -and $parent.Name -iin @('svchost.exe','taskeng.exe','taskhostw.exe')) 'BOOTSTRAP_OUTSIDE_TASK_UNCONFIRMED'
+    $enginePid=[int]$instance.EnginePID
+    Need ($enginePid -gt 0 -and ($enginePid -eq $PID -or $enginePid -eq [int]$self.ParentProcessId)) 'BOOTSTRAP_TASK_ENGINE_MISMATCH'
+    $binding=[pscustomobject]@{instanceGuid=$instanceGuid.ToString('D');enginePid=$enginePid;selfPid=[int]$PID;parentPid=[int]$self.ParentProcessId}
+    if($expected){Need ($binding.instanceGuid -ceq $expected.instanceGuid -and $binding.enginePid -eq $expected.enginePid -and $binding.selfPid -eq $expected.selfPid -and $binding.parentPid -eq $expected.parentPid) 'BOOTSTRAP_TASK_INSTANCE_CHANGED'}
+    return $binding
+  }catch{
+    if($_.Exception.Message -cmatch '^BOOTSTRAP_[A-Z0-9_]{1,64}$'){throw}
+    throw 'BOOTSTRAP_TASK_INSTANCE_UNAVAILABLE'
   }
-}
-'@
-        Add-Type -TypeDefinition $nativeSource -ErrorAction Stop|Out-Null
-      }
-      $image=[Ziwei.RemoteBootstrapParentImage]::Read([int]$record.ProcessId)
-    }catch{throw 'BOOTSTRAP_PARENT_IMAGE_UNAVAILABLE'}
-  }
-  Need (![string]::IsNullOrWhiteSpace($image) -and $image -cmatch '^[A-Za-z]:\\') 'BOOTSTRAP_PARENT_IMAGE_UNAVAILABLE'
-  return $image
 }
 function Status([string]$state,[string]$code,$detail){
   $row=[ordered]@{schemaVersion=1;state=$state;code=$code;stage=$Stage;task=$TaskName;workspace=$Plan.workspace;deviceId=$Plan.deviceId;targetBuild=$Plan.targetBuild;at=[DateTime]::UtcNow.ToString('o');bootstrapOnly=$true;dedicatedRemoteProtocolVerified=$false}
@@ -123,15 +106,14 @@ try{
   }
   $Stage='verify_task_boundary'
   Need ($PSCommandPath -ieq $OwnScript -and $PlanPath -ieq $OwnPlan -and $WorkerSourcePath -ieq $OwnWorker -and (OwnTask (TaskOrNull))) 'BOOTSTRAP_TASK_BINDING_INVALID'
-  $self=Get-CimInstance Win32_Process -Filter ('ProcessId = '+$PID);$parent=Get-CimInstance Win32_Process -Filter ('ProcessId = '+[int]$self.ParentProcessId)
-  Need ($parent -and $parent.Name -iin @('svchost.exe','taskeng.exe','taskhostw.exe')) 'BOOTSTRAP_OUTSIDE_TASK_UNCONFIRMED'
-  $parentImage=ParentImage $parent
-  Need ([IO.Path]::GetFileName($parentImage) -ieq $parent.Name -and [IO.Path]::GetDirectoryName($parentImage) -ieq (Join-Path $env:SystemRoot 'System32')) 'BOOTSTRAP_OUTSIDE_TASK_UNCONFIRMED'
+  $TaskBoundary=TaskInstance $null
   $Stage='wait_all_employees_idle'
   Status 'waiting_idle' 'BOOTSTRAP_WAITING_ALL_EMPLOYEES' @{forceStopped=$false}
   $env:ZIWEI_USER_HOME=$Plan.userDirectory;$env:ZIWEI_CONFIG=$Plan.configPath
   @(Get-ChildItem Env:|Where-Object {$_.Name.ToLowerInvariant() -ceq 'npm_config_prefix'})|ForEach-Object {[Environment]::SetEnvironmentVariable($_.Name,$null,'Process')}
   [Environment]::SetEnvironmentVariable('npm_config_prefix','D:\work\nodejs\node_global','Process')
+  $Stage='verify_task_boundary_before_start';$null=TaskInstance $TaskBoundary
+  $Stage='wait_all_employees_idle'
   $text=(& $Plan.nodeExe $OwnWorker $OwnPlan --start 2>$null|Out-String);Need ($text.Length -lt 65536) 'BOOTSTRAP_OUTPUT_INVALID';$result=$text|ConvertFrom-Json
   Need ($LASTEXITCODE -eq 0 -and $result.state -ceq 'queued') 'BOOTSTRAP_START_FAILED'
   $Stage='observe_own_official_update';Status 'updating' 'BOOTSTRAP_OFFICIAL_WORKER_QUEUED' @{workerPid=$result.workerPid}

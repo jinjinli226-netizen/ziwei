@@ -119,23 +119,29 @@ test('the actual bootstrap start path reaches only the official queue for inacti
     else { assert.equal((await run()).state, 'queued'); assert.equal(pauses, 1); assert.equal(queues, 1); assert.equal(downloads, 1); assert(observations.some(value => value.stopSafe === false)); }
   }
 });
-test('missing CIM parent image uses a read-only limited native handle and always releases it', () => {
-  const helper = script.slice(script.indexOf('function ParentImage('), script.indexOf('function Status('));
-  assert(helper.includes('$image=[string]$record.ExecutablePath'));
-  assert(helper.includes('if([string]::IsNullOrWhiteSpace($image))'));
-  assert(helper.includes('OpenProcess(0x1000, false, pid)'));
-  assert(helper.includes('EntryPoint="QueryFullProcessImageNameW"'));
-  assert(helper.includes('QueryFullProcessImageName(handle, 0, value, ref size)'));
-  assert(helper.includes('finally { CloseHandle(handle); }'));
-  assert(helper.includes("throw 'BOOTSTRAP_PARENT_IMAGE_UNAVAILABLE'"));
-  assert(!/SeDebug|AdjustTokenPrivileges|PROCESS_ALL_ACCESS|TerminateProcess|\.Kill\(|taskkill/.test(helper));
+test('task boundary uses the unique real scheduler instance without querying protected parent images', () => {
+  const helper = script.slice(script.indexOf('function TaskInstance('), script.indexOf('function Status('));
+  assert(helper.includes('$task=TaskOrNull;Need (OwnTask $task)'));
+  assert(helper.includes('$instances=$task.GetInstances(0)'));
+  assert(helper.includes('$instances.Count -eq 1'));
+  assert(helper.includes('$instance=$instances.Item(1);$null=$instance.Refresh()'));
+  assert(helper.includes("[int]$instance.State -eq 4 -and [string]$instance.Path -ceq ('\\'+$TaskName)"));
+  assert(helper.includes('[guid]::TryParse([string]$instance.InstanceGuid,[ref]$instanceGuid) -and $instanceGuid -ne [guid]::Empty'));
+  assert(helper.includes("$parent.Name -iin @('svchost.exe','taskeng.exe','taskhostw.exe')"));
+  assert(helper.includes('$enginePid -gt 0 -and ($enginePid -eq $PID -or $enginePid -eq [int]$self.ParentProcessId)'));
+  assert(helper.includes("throw 'BOOTSTRAP_TASK_INSTANCE_UNAVAILABLE'"));
+  assert(!/ParentImage|OpenProcess|QueryFullProcessImageName|Add-Type|SeDebug|AdjustTokenPrivileges|TerminateProcess/.test(script));
 });
-test('native parent fallback does not weaken exact task registration or the System32 name boundary', () => {
-  const boundary = script.slice(script.indexOf("$Stage='verify_task_boundary'"), script.indexOf("$Stage='wait_all_employees_idle'"));
+test('scheduler binding is checked twice, retaining the same instance before starting the worker', () => {
+  const helper = script.slice(script.indexOf('function TaskInstance('), script.indexOf('function Status('));
+  for (const key of ['instanceGuid', 'enginePid', 'selfPid', 'parentPid']) assert(helper.includes(`$binding.${key} ${key === 'instanceGuid' ? '-ceq' : '-eq'} $expected.${key}`));
+  assert(helper.includes("'BOOTSTRAP_TASK_INSTANCE_CHANGED'"));
+  const boundary = script.slice(script.indexOf("$Stage='verify_task_boundary'"), script.indexOf("$Stage='observe_own_official_update'"));
   assert(boundary.includes('(OwnTask (TaskOrNull))'));
-  assert(boundary.includes("$parent.Name -iin @('svchost.exe','taskeng.exe','taskhostw.exe')"));
-  assert(boundary.includes('$parentImage=ParentImage $parent'));
-  assert(boundary.includes('[IO.Path]::GetFileName($parentImage) -ieq $parent.Name'));
-  assert(boundary.includes("[IO.Path]::GetDirectoryName($parentImage) -ieq (Join-Path $env:SystemRoot 'System32')"));
-  assert(!boundary.includes('[IO.Path]::GetDirectoryName($parent.ExecutablePath)'));
+  assert(boundary.includes('$TaskBoundary=TaskInstance $null'));
+  assert(boundary.includes("$Stage='verify_task_boundary_before_start';$null=TaskInstance $TaskBoundary"));
+  assert(boundary.indexOf('$TaskBoundary=TaskInstance $null') < boundary.indexOf("Status 'waiting_idle'"));
+  assert(boundary.indexOf('$null=TaskInstance $TaskBoundary') > boundary.indexOf("Status 'waiting_idle'"));
+  assert(boundary.indexOf('$null=TaskInstance $TaskBoundary') < boundary.indexOf('& $Plan.nodeExe $OwnWorker $OwnPlan --start'));
+  for (const evidence of ['$taskSid -ceq $Sid', '$principal.LogonType -eq 3', '$principal.RunLevel -eq 0', "('Ziwei Li bootstrap '+$RegistrationHash)", '$task.Definition.Actions.Count -eq 1', '$task.Definition.Actions.Item(1).Arguments -ceq $Arguments', '$task.Definition.Settings.MultipleInstances -eq 2']) assert(script.includes(evidence));
 });
