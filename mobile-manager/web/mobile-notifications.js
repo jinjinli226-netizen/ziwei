@@ -1,4 +1,4 @@
-import { accountId, workspaceId } from './model.js';
+import { accountId, workspaceId, workspaceDatabaseId } from './model.js';
 
 export const MOBILE_NOTIFICATION_LIMITS = Object.freeze({ page: 20, items: 200, readIds: 200, workspaces: 16, storageBytes: 128 * 1024, responseBytes: 64 * 1024 });
 const PREFIX = 'ziwei.manager.notification-read.v1:';
@@ -7,7 +7,7 @@ const SLUG = /^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/;
 const identifier = value => typeof value === 'string' && ID.test(value);
 const plainObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const bytes = value => new TextEncoder().encode(value).length;
-const scopeOf = state => ({ account: accountId(state), workspace: workspaceId(state), workspaceDbId: workspaceRecord(state, workspaceId(state))?.id || '' });
+const scopeOf = state => ({ account: accountId(state), workspace: workspaceId(state), workspaceDbId: workspaceDatabaseId(workspaceRecord(state, workspaceId(state))) });
 const keyOf = scope => JSON.stringify([scope.account, scope.workspace]);
 const storageKey = account => PREFIX + JSON.stringify(account);
 const preferenceWorkspace = scope => JSON.stringify([scope.workspace, scope.workspaceDbId]);
@@ -33,11 +33,11 @@ function checkedItem(value) {
 }
 
 function checkedEnvelope(response, state, { eventId, incremental = false } = {}) {
-  const scope = scopeOf(state), workspace = workspaceRecord(state, scope.workspace);
+  const scope = scopeOf(state);
   let size; try { size = bytes(JSON.stringify(response)); } catch { throw invalid(); }
   if (!plainObject(response) || size > MOBILE_NOTIFICATION_LIMITS.responseBytes || response.schemaVersion !== 2
       || response.accountId !== scope.account || response.workspaceSlug !== scope.workspace || !identifier(response.workspaceId)
-      || !identifier(workspace?.id) || response.workspaceId !== workspace.id) throw invalid('提醒账号或工作区归属无法核对，请重新读取');
+      || !identifier(scope.workspaceDbId) || response.workspaceId !== scope.workspaceDbId) throw invalid('提醒账号或工作区归属无法核对，请重新读取');
   if (eventId) {
     const item = checkedItem(response.item);
     if (item.id !== eventId) throw invalid('提醒与原事件不一致，请重新读取');
@@ -191,7 +191,7 @@ export function createMobileNotifications({ state, api, current = () => ({}), va
     if (!plainObject(value)) throw invalid('这条系统提醒的账号或工作区已不可用');
     const workspace = workspaceRecord(state, value.workspaceSlug);
     if (value.accountId !== accountId(state) || Object.hasOwn(value, 'deliveryId') || !identifier(value.eventId) || !SLUG.test(value.workspaceSlug)
-        || !identifier(value.workspaceId) || !workspace || workspace.id !== value.workspaceId) throw invalid('这条系统提醒的账号或工作区已不可用');
+        || !identifier(value.workspaceId) || !workspace || workspaceDatabaseId(workspace) !== value.workspaceId) throw invalid('这条系统提醒的账号或工作区已不可用');
     return { accountId: value.accountId, workspaceId: value.workspaceId, workspaceSlug: value.workspaceSlug, eventId: value.eventId };
   }
   async function resolvePending(value) {

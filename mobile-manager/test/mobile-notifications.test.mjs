@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { initialState } from '../web/model.js';
+import { initialState, workspaceDatabaseId } from '../web/model.js';
 import { createMobileNotifications, MOBILE_NOTIFICATION_LIMITS } from '../web/mobile-notifications.js';
 import { renderMobileNotifications } from '../web/mobile-notifications-view.js';
 
@@ -13,10 +13,10 @@ function deferred() { let resolve, reject; const promise = new Promise((yes, no)
 function memoryStorage() { const rows = new Map(); return { rows, getItem: key => rows.get(key) ?? null, setItem: (key, value) => rows.set(key, value), removeItem: key => rows.delete(key) }; }
 function fixture(t, overrides = {}) {
   let epoch = 0;
-  const state = { ...initialState(), phase: 'ready', user: { user_id: 'user-one' }, workspace: { id: 'workspace-db-one', slug: 'one', role: 'owner' },
-    workspaces: [{ id: 'workspace-db-one', slug: 'one' }, { id: 'workspace-db-two', slug: 'two' }] };
+  const state = { ...initialState(), phase: 'ready', user: { user_id: 'user-one' }, workspace: { id: 'member-one', workspace_id: 'workspace-db-one', slug: 'one', role: 'owner' },
+    workspaces: [{ id: 'member-one', workspace_id: 'workspace-db-one', slug: 'one' }, { id: 'member-two', workspace_id: 'workspace-db-two', slug: 'two' }] };
   const calls = [], failures = [], opened = [], frames = [], storage = overrides.storage || memoryStorage();
-  const envelope = (values = {}, scope = {}) => ({ schemaVersion: 2, accountId: scope.account || state.user.user_id, workspaceId: scope.db || state.workspace.id, workspaceSlug: scope.slug || state.workspace.slug,
+  const envelope = (values = {}, scope = {}) => ({ schemaVersion: 2, accountId: scope.account || state.user.user_id, workspaceId: scope.db || state.workspace.workspace_id || state.workspace.id, workspaceSlug: scope.slug || state.workspace.slug,
     nextCursor: 'cursor1', hasMore: false, historyWindow: true, items: [item()], ...values });
   const api = { mobileNotifications: async (workspace, query, options) => { calls.push({ kind: 'list', workspace, query, options }); return envelope(query.cursor ? { historyWindow: undefined, nextCursor: query.cursor, items: [] } : {}); },
     mobileNotification: async (workspace, id, options) => { calls.push({ kind: 'resolve', workspace, id, options }); const result = envelope({ item: item(id) }); delete result.items; return result; }, ...overrides.api };
@@ -81,8 +81,19 @@ test('scope changes are guarded even when the root forgot reset; account change 
 
 test('workspace DB identity is required and a recreated slug cannot inherit old local read markers', async t => {
   const f = fixture(t); await f.mobile.poll(); f.mobile.actions['notifications-read-all'](); assert.equal(f.state.notifications.unreadCount, 0);
-  f.state.workspace.id = 'replacement-db'; await f.mobile.poll(); assert.equal(f.state.notifications.unreadCount, 1);
-  f.state.workspace.id = ''; f.mobile.reset(); assert.equal(await f.mobile.poll(), false); assert.equal(f.state.notifications, null);
+  f.state.workspace.workspace_id = 'replacement-db'; await f.mobile.poll(); assert.equal(f.state.notifications.unreadCount, 1);
+  f.state.workspace.workspace_id = ''; f.mobile.reset(); assert.equal(await f.mobile.poll(), false); assert.equal(f.state.notifications, null);
+});
+
+test('membership identity cannot be mistaken for its workspace or mask an invalid binding', async t => {
+  assert.equal(workspaceDatabaseId({id:'member-one',workspace_id:'workspace-db-one'}),'workspace-db-one');
+  assert.equal(workspaceDatabaseId({id:'workspace-db-one'}),'workspace-db-one');
+  for (const workspace_id of ['',null,17,'../foreign','a'.repeat(161)]) {
+    assert.equal(workspaceDatabaseId({id:'workspace-db-one',workspace_id}),'');
+  }
+  const f=fixture(t);await f.mobile.poll();assert.equal(f.state.notifications.workspaceId,'workspace-db-one');
+  f.api.mobileNotifications=async()=>f.envelope({}, {db:'member-one'});
+  assert.equal(await f.mobile.actions['notifications-refresh'](),false);assert.equal(f.state.notifications.blocked,true);
 });
 
 for (const [label, mutate] of [

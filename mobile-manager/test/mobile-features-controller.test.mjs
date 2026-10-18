@@ -5,11 +5,11 @@ import {createApi} from '../web/api.js';
 import {initialState} from '../web/model.js';
 import {createChatPreferences} from '../web/chat-preferences.js';
 
-const workspaces=[{id:'workspace_1',slug:'work-one',role:'owner'},{id:'workspace_2',slug:'work-two',role:'owner'}];
+const workspaces=[{id:'member_1',workspace_id:'workspace_1',slug:'work-one',role:'owner'},{id:'member_2',workspace_id:'workspace_2',slug:'work-two',role:'owner'}];
 const employees=[{id:'employee_one',name:'员工甲',runtime:'Other'}];
 const eventId='event_original';
 const item=(target={kind:'conversation',id:'original_chat',employeeId:'employee_one',messageId:'original_message'})=>({id:eventId,kind:'execution.completed',title:'工作已完成',summary:'查看结果',createdAt:'2026-10-17T11:00:00.000Z',executionState:'confirmed',target});
-const envelope=(slug='work-one',extra={})=>({schemaVersion:2,accountId:'user_one',workspaceId:workspaces.find(row=>row.slug===slug).id,workspaceSlug:slug,...extra});
+const envelope=(slug='work-one',extra={})=>({schemaVersion:2,accountId:'user_one',workspaceId:workspaces.find(row=>row.slug===slug).workspace_id,workspaceSlug:slug,...extra});
 function storageFixture(){const values=new Map();return {get length(){return values.size;},key:i=>[...values.keys()][i],getItem:k=>values.get(k)??null,setItem:(k,v)=>values.set(k,String(v)),removeItem:k=>values.delete(k),values};}
 function deferred(){let resolve;const promise=new Promise(yes=>{resolve=yes;});return {promise,resolve};}
 function fixture(t,overrides={},nativeOverrides={}){
@@ -71,6 +71,28 @@ test('old workspace resolve cannot open a conversation after choosing another wo
 test('a task detail with mismatched identity cannot be opened from a notification',async t=>{
   const f=fixture(t,{mobileNotification:async()=>envelope('work-one',{item:item({kind:'task',id:'original_task'})}),task:async()=>({id:'another_task',workspace_id:'workspace_1'})});
   await f.controller.actions['notifications-open']();await f.controller.actions['notifications-target']({id:eventId});assert.equal(f.state.page,'notifications');assert.deepEqual(f.state.notifications.readIds,[]);
+});
+
+test('a native click selects the authorized membership by workspace_id before resolving the original chat',async t=>{
+  let pending=true,consumed=0;
+  const f=fixture(t,{},{
+    getStatus:()=>JSON.stringify({available:true,enabled:true,subscriptionState:'enabled',permission:'granted',accountId:'user_one',workspaceSlug:'work-one',pendingTarget:pending}),
+    consumePendingTarget:()=>{pending=false;consumed++;return JSON.stringify({accountId:'user_one',workspaceId:'workspace_2',workspaceSlug:'work-two',eventId});},
+  });
+  await f.controller.actions['notifications-open']();
+  assert.equal(consumed,1);assert.equal(f.state.workspace.id,'member_2');assert.equal(f.state.workspace.workspace_id,'workspace_2');
+  assert.equal(f.state.page,'chat');assert.equal(f.state.conversation.id,'original_chat');
+  assert.deepEqual(f.calls,[['resolve','work-two',eventId],['conversation','original_chat']]);
+});
+
+test('a native click carrying the membership row id cannot impersonate the workspace id',async t=>{
+  const f=fixture(t,{},{
+    getStatus:()=>JSON.stringify({available:true,enabled:true,subscriptionState:'enabled',permission:'granted',accountId:'user_one',workspaceSlug:'work-one',pendingTarget:true}),
+    consumePendingTarget:()=>JSON.stringify({accountId:'user_one',workspaceId:'member_2',workspaceSlug:'work-two',eventId}),
+  });
+  await f.controller.actions['notifications-open']();
+  assert.equal(f.state.workspace.slug,'work-one');assert.equal(f.state.page,'notifications');
+  assert.deepEqual(f.calls,[]);assert.match(f.state.notifications.nativeError,/不可用/);
 });
 
 test('mobile APIs encode identifiers and request only explicit mobile action projection',async()=>{

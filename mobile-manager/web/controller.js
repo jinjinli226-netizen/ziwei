@@ -1,4 +1,4 @@
-import { accountId, workspaceId, scopeKey, list, id, executionUncertain, initialResources, initialEmployeeResources } from './model.js';
+import { accountId, workspaceId, workspaceDatabaseId, scopeKey, list, id, executionUncertain, initialResources, initialEmployeeResources } from './model.js';
 import { createBotSettings } from './bot-settings.js';
 import { createDeviceSettings } from './device-settings.js';
 import { createChatInbox } from './chat-inbox.js';
@@ -279,12 +279,12 @@ export function createController({ state, api, render = () => {}, storage = glob
       }
       const detail=await api.task(target.id);
       if(!valid(token))return false;
-      if(detail?.id!==target.id||detail.workspace_id&&detail.workspace_id!==state.workspace?.id)throw new Error('工作详情与提醒归属不一致，请重新读取');
+      if(detail?.id!==target.id||detail.workspace_id&&detail.workspace_id!==workspaceDatabaseId(state.workspace))throw new Error('工作详情与提醒归属不一致，请重新读取');
       stashComposer();clearSelection();state.task=detail;state.tab='work';state.page='task';state.error='';draw();return true;
     },
     onWorkspaceTarget: async (pending,token) => {
       if(!valid(token)||accountId(state)!==pending.accountId)return false;
-      const workspace=state.workspaces.find(row=>row.slug===pending.workspaceSlug&&row.id===pending.workspaceId);
+      const workspace=state.workspaces.find(row=>row.slug===pending.workspaceSlug&&workspaceDatabaseId(row)===pending.workspaceId);
       if(!workspace)throw new Error('提醒所属工作区当前不可查看');
       await chooseWorkspace(workspace);
       if(accountId(state)!==pending.accountId||workspaceId(state)!==pending.workspaceSlug)return false;

@@ -39,6 +39,13 @@ export function initialState() {
 export const id = () => globalThis.crypto?.randomUUID?.() || `mobile-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 export function accountId(state) { return String(state.user?.user_id || state.user?.user?.id || state.user?.id || ''); }
 export function workspaceId(state) { return String(typeof state.workspace === 'string' ? state.workspace : state.workspace?.slug || ''); }
+// Membership rows have their own id; workspace_id identifies the workspace.
+// An invalid explicit binding must never fall back to the membership id.
+export function workspaceDatabaseId(record) {
+  if (!record || typeof record !== 'object' || Array.isArray(record)) return '';
+  const value = Object.hasOwn(record, 'workspace_id') ? record.workspace_id : record.id;
+  return typeof value === 'string' && /^[A-Za-z0-9._:-]{1,160}$/.test(value) ? value : '';
+}
 export function scopeKey(state) { return `${accountId(state)}:${workspaceId(state)}`; }
 export function resultText(run) {
   const result=run?.result;
