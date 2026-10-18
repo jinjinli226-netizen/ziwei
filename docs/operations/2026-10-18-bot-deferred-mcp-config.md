@@ -25,3 +25,16 @@
 13:39 的 TK 只读现场诊断确认 Windows Python 3.14.7 创建事件循环时经过 `socket._fallback_socketpair → asyncio.proactor_events._make_self_pipe`，原全局禁止 bind 的规则在任何实际监听前拦截了事件循环。原诊断布尔值漏匹配 `_fallback_socketpair` 别名而为 false；原始调用链保留，未修改原回执。修复仅允许 Windows 标准库代码对象、对应内部 socket、loopback TCP 端口 0 的这一自唤醒路径，仍拒绝 OAuth 本地回调监听及直接 bind。两套原生 Hermes SDK 的目标 HOME、授权、缓存及刷新回归和精确 CPython 3.14.7 无监听模拟通过。
 
 员工管理读和延期申请回执改为当前完整配置及有界执行摘要，保留版本、绑定、验证和退出证明；不再嵌入完整历史事件或 Session 内容。普通网页详情保持原行为，完整原动作仍可用 `ziwei_get_action` 读取。新增大历史、未知状态和恢复凭据边界回归。该修复后续发布与真实连接结果继续追加，不将安装包发布等同于员工电脑已更新。
+
+修复产品 `fbb52e22f27e32de681f2f0300779e6f3945d71f` 经最后 55 项相关联合回归、lint 203 项及独立审查后先推两条 GitHub 发布分支，再于北京时间 13:50:36 发布 API、13:51:38 发布官方 Windows 包。API 目录 `/opt/ziwei/releases/windows-oauth-management-fbb52e22f27e-259be463/v2`，PID 417549；只覆盖 `backend/bots.mjs` 和新增管理摘要模块，其余实际混合树保持。数据库逻辑 schema 和文件身份、前端、中控、Nginx 均未变化。
+
+Windows 包只覆盖 OAuth helper 和管理工具说明，继承其余 930 个文件及原依赖；冷缓存离线安装、真实 API factory 和 CLI 检查通过，无监听或外部网络。实际安装 build `88b2ea9f41c10c53498ecb524ad1dc5d836813440f804a61050f0e98da9cc14e`，包 SHA `7f6941d7e5d6de9fa5c71eae4a79b739359705c5b1e59fd2368c9f523a015e69`，1,133,248 B；官方下载、元数据和官方更新脚本经独立公网核验一致。API 的旧 OAuth helper 保持继承字节，实际修复在 Windows 客户端执行，不能声称 API 整树均来自同一 Git 提交。
+
+为避免要求用户到电脑运行命令，13:59 从 TK 原聊天发送唯一登记请求 `tk-update-fbb52e2-20261018-7ca6`，对应 `action_5c4a172a-eb1f-43fe-a409-ec0eb27f527d`。本次运输脚本仅登记当前用户、Limited 的单次计划任务 `Ziwei.TK.Update.fbb52e2`，在 Hermes Job 外等待客户端空闲，再调用正常官方更新器；不强停、不改执行策略、不重跑业务、不添加维护锁。脚本传输 SHA、任务身份、一次 attempt、官方包和目标 build 固定；真实 ready 后仅清理自己的任务。任务登记或源码检查不等于实际更新完成，后续结果单独记录。
+
+
+现场更新尚未完成：首次登记因 Hermes 终端的 npm prefix 与真实安装不同而返回 `CLIENT_UNAVAILABLE`，未创建计划；真实安装根为 `C:\Users\PC\AppData\Roaming\npm\node_modules\ziwei`。后续运输只修改进程内 prefix 和真实运行 Node 路径，不改系统环境。又修复 Windows PowerShell 将 `File.Replace` 的 null 备份参数转成非法路径的问题，使用唯一真实备份路径保留原状态。
+
+14:38 的只读请求 `tk-update-state-20261018-6a7c` 对应 `action_02d4f11e-66a4-4019-8e79-32e7472d0dd0`，14:40 根进程及 Windows Job 树退出 0。它确认同名更新任务和 Plan 已存在、attempt 不存在；06:36 UTC 的更新 worker 在 `initializing` 阶段返回 `TASK_NAME_IN_USE`，任务已退出，LastTaskResult=1。因此任务登记实际成功，但自身份校验失败，不能因为先前通用 `TASK_FAILED` 就重发登记，也不能把聊天框架执行成功称为更新完成。原脚本、Plan、失败状态和原始回执均保留；继续只读比较任务定义及实际 SID，不放宽身份检查。
+
+截至这次交接记录，公司台式最后已观察 build 仍为 `161cc990…`，目标 `88b2ea9f…` 尚未由目标电脑心跳证实；TK 原意图的连接状态仍为失败。后续必须记录真实更新、下一次明确延期请求、实际 OAuth 连接和工具查询结果，不得用官方下载核验代替现场验收。

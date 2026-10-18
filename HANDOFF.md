@@ -1,5 +1,13 @@
 # 紫薇项目 HandOff
 
+## 2026-10-18 Bot 本轮结束后自动应用 MCP 配置已发布
+
+主发布分支和 `codex/bot-deferred-mcp-config` 已包含 `0d26bbe` 的持久延期机制及 `fbb52e2` 的 Windows OAuth/管理回执修复，均先推 GitHub 再发布。当前 API 为 `/opt/ziwei/releases/windows-oauth-management-fbb52e22f27e-259be463/v2`、PID 417549；官方 Windows 包 build `88b2ea9f41c10c53498ecb524ad1dc5d836813440f804a61050f0e98da9cc14e`。首轮 200 项回归、追加 55 项联合回归及 lint 203 项通过，生产混合树、前端、中控、数据库身份和数据保留。
+
+TK 已用真实模型在自己的本轮提交延期意图，本轮退出后自动保存 `viral_library` 配置、原生验证成功并恢复启用，r3/e5 → r4/e7；无需用户或其他员工手工保存。首次连接真实返回 Windows 事件循环被 OAuth 监听守卫误拦，已修复并发布客户端包。配置成功和实际连接分开记录，尚不能仅凭发布包称 TK 已连通。
+
+公司台式正做无用户终端操作的单次更新验收。已查明 Hermes 终端的 Node/npm prefix 与实际 Roaming npm 安装不同，并修复运输脚本的 Windows 状态备份参数。最新只读现场回执确认同名计划任务和 Plan 已存在，但 worker 自身份校验返回 TASK_NAME_IN_USE，尚无 attempt；禁止重发登记。目标电脑最后仍为161cc990旧build，不能宣称88b2客户端或爆款库已经接通。继续比较实际任务定义/SID，保留官方更新器检查，不改全局 PATH/npm、配置或业务。详细原动作、发布与后续验收见 [本轮操作记录](docs/operations/2026-10-18-bot-deferred-mcp-config.md)。
+
 ## 2026-10-18 Windows默认不限轮数与真实并行验收通过
 
 李金晋电脑已安装12d5aa9新包，build `161cc99010d6cdee4e3d8834135ac2ed4e8fb2031b746755b7d53de0b76dfb0b`、PID34836。闲鱼运营大神r7默认不限轮数的本机配置验证通过，实际有效轮数9007199254740991、预算86400秒，无需重建或逐个开启。
