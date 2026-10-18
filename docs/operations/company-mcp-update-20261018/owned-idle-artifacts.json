@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "scope": "one_company_owned_idle_daemon_root_only",
+  "sourceFiles": {
+    "owned-idle-stop.mjs": {
+      "sha256": "3928e8490bf751aead4db35f556e79c5e66931e70003575126f6c246b391ebf8",
+      "bytes": 20260
+    },
+    "owned-idle-handle.ps1": {
+      "sha256": "de27f9e0fe8eec94ab113141b3db1e46c1cb6bf48f92a45248a7b074d78110b2",
+      "bytes": 10745
+    },
+    "owned-idle-stop.test.mjs": {
+      "sha256": "35dbb8718063ebfe2c3cf40cbaea96824069d0b3c4d3ae046e38e84059cfcd99",
+      "bytes": 9488
+    },
+    "tk-self-update-owned-idle.ps1": {
+      "sha256": "74e1a307bb2902a3a7243b39735e86bb43fa4e4d50b345b27b52bf66f4e25953",
+      "bytes": 15988
+    },
+    "repair-company-owned-idle.ps1": {
+      "sha256": "33a4bece1524d910682151cab222e9ce7b8cbab5a8a97bc98034ce215300fab1",
+      "bytes": 71826
+    }
+  },
+  "oldTaskSha256": "25e89206261eb8cb573d15cb3f9fb6e84d0ef5269013d7b185710ba972bd6928",
+  "oldBuild": "161cc99010d6cdee4e3d8834135ac2ed4e8fb2031b746755b7d53de0b76dfb0b",
+  "expectedBuild": "88b2ea9f41c10c53498ecb524ad1dc5d836813440f804a61050f0e98da9cc14e",
+  "noWindowsNativeExecutionClaim": true,
+  "deployed": false
+}
