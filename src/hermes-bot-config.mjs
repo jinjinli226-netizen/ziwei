@@ -3,6 +3,10 @@ import { hermesMcpNameConflicts } from './hermes-mcp-config.mjs';
 // Shared wire validation: never forward unknown fields to a native runtime.
 export const BOT_SCHEMA_VERSION = 1;
 export const BOT_REASONING_EFFORTS=['minimal','low','medium','high','xhigh','max','ultra'];
+export const BOT_TURN_LIMIT_MODES=Object.freeze(['bounded','unlimited']);
+// Hermes accepts a positive integer ceiling. Avoid zero's version-dependent
+// meaning and retain exact JSON/YAML/Python integer transport on every host.
+export const BOT_UNLIMITED_NATIVE_MAX_TURNS=Number.MAX_SAFE_INTEGER;
 export const BOT_DEFAULT_TOOLSETS=Object.freeze(['web','browser','file','terminal','vision','skills','todo','memory','session_search','code_execution']);
 export function botFailure(code, message, status = 409) { return Object.assign(new Error(message), { code, status }); }
 const object = value => value && typeof value === 'object' && !Array.isArray(value);
@@ -16,6 +20,13 @@ const names = (value, label) => {
   return [...new Set(value)];
 };
 const bool = (value, fallback, label) => { if (value === undefined) return fallback; if (typeof value !== 'boolean') throw botFailure('BOT_CONFIG_INVALID', `${label} 必须是布尔值`, 400); return value; };
+export function effectiveBotMaxTurns(config={}) {
+  if(!object(config))throw botFailure('BOT_CONFIG_INVALID','Bot config 必须是对象',400);
+  if(config.turnLimitMode!==undefined&&!BOT_TURN_LIMIT_MODES.includes(config.turnLimitMode))throw botFailure('BOT_CONFIG_INVALID','turnLimitMode 必须为 bounded 或 unlimited',400);
+  const maxTurns=config.maxTurns ?? 20;
+  if(!Number.isInteger(maxTurns)||maxTurns<1||maxTurns>100)throw botFailure('BOT_CONFIG_INVALID','maxTurns 必须为 1–100',400);
+  return config.turnLimitMode==='unlimited'?BOT_UNLIMITED_NATIVE_MAX_TURNS:maxTurns;
+}
 export const permittedCredentialName=name=>typeof name==='string'&&/^[A-Z][A-Z0-9_]*$/.test(name)&&! /^(ZIWEI_|CONTROL_MCP_|HERMES_|PYTHON|NODE_OPTIONS$|HOME$|USERPROFILE$)/.test(name);
 // Creation policy is separate from the legacy wire/runtime interpretation below.
 export function createDefaultBotConfig(input = {}) {
@@ -26,12 +37,12 @@ export function createDefaultBotConfig(input = {}) {
 }
 export function normalizeBotConfig(input = {}) {
   validateCredentialPlaceholders(input);
-  keys(input, ['provider','reasoningEffort','toolsets','maxTurns','memory','skills','mcpServers','permissions','gateway','voice','collaboration','drivers'], 'Bot config');
+  keys(input, ['provider','reasoningEffort','toolsets','maxTurns','turnLimitMode','memory','skills','mcpServers','permissions','gateway','voice','collaboration','drivers'], 'Bot config');
   if(Object.hasOwn(input,'reasoningEffort')&&!BOT_REASONING_EFFORTS.includes(input.reasoningEffort))throw botFailure('BOT_CONFIG_INVALID','reasoningEffort 必须为明确的原生等级：'+BOT_REASONING_EFFORTS.join(', '),400);
   const provider = input.provider ?? null;
   if (provider !== null && (typeof provider !== 'string' || !/^[A-Za-z0-9_.:-]{1,100}$/.test(provider))) throw botFailure('BOT_CONFIG_INVALID', 'provider 必须是原生服务商名称', 400);
   const maxTurns = input.maxTurns ?? 20;
-  if (!Number.isInteger(maxTurns) || maxTurns < 1 || maxTurns > 100) throw botFailure('BOT_CONFIG_INVALID', 'maxTurns 必须为 1–100', 400);
+  effectiveBotMaxTurns(input);
   const memory = input.memory ?? {}; keys(memory, ['enabled','userProfile','charLimit','userCharLimit'], 'memory');
   const skills = input.skills ?? {}; keys(skills, ['disabled','autoLoad'], 'skills');
   const permissions = input.permissions ?? {}; keys(permissions, ['mode','management'], 'permissions');
@@ -65,6 +76,7 @@ export function normalizeBotConfig(input = {}) {
   if (mode === 'read_only' && (toolsets.length || Object.values(mcpServers).some(server => server.enabled))) throw botFailure('BOT_PERMISSION_CONFLICT','read_only 只允许无工具对话；使用工具或 MCP 请明确选择 execute',400);
   const result={provider,toolsets,maxTurns,memory:{enabled:bool(memory.enabled,true,'memory.enabled'),userProfile:bool(memory.userProfile,true,'memory.userProfile'),...(memory.charLimit!==undefined?{charLimit:bounded(memory.charLimit,100,50000,'memory.charLimit')}:{}),...(memory.userCharLimit!==undefined?{userCharLimit:bounded(memory.userCharLimit,100,50000,'memory.userCharLimit')}:{})},skills:{disabled:names(skills.disabled ?? [],'skills.disabled'),...(skills.autoLoad!==undefined?{autoLoad:names(skills.autoLoad,'skills.autoLoad')}:{})},mcpServers,permissions:{mode,...(permissions.management!==undefined?{management:bool(permissions.management,true,'permissions.management')}:{})}};
   if(input.reasoningEffort!==undefined)result.reasoningEffort=input.reasoningEffort;
+  if(input.turnLimitMode!==undefined)result.turnLimitMode=input.turnLimitMode;
   if(input.gateway!==undefined)result.gateway=normalizeGateway(input.gateway);
   if(input.voice!==undefined)result.voice=normalizeVoice(input.voice);
   if(input.collaboration!==undefined){keys(input.collaboration,['enabled','targetEmployeeIds'],'collaboration');result.collaboration={enabled:bool(input.collaboration.enabled,false,'collaboration.enabled'),targetEmployeeIds:names(input.collaboration.targetEmployeeIds || [],'collaboration.targetEmployeeIds')};}

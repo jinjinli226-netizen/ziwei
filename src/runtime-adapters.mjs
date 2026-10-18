@@ -12,7 +12,7 @@ import { createCliDiscoveryContext, discoverRuntimeCli, carryRuntimeDiscoveryEnv
 import { imageArtifactInstructions, readImageArtifacts, validateImageBytes, imageArtifactDeliveryBody, MAX_CONVERSATION_IMAGE_BYTES, MAX_ACTION_RESULT_JSON_BYTES } from './conversation-image-artifacts.mjs';
 import { spawnSupervisedRuntime } from './runtime-process.mjs';
 import { prepareHermesBotHome, BOT_RUNTIME_ENV_KEYS } from './hermes-bot-runtime.mjs';
-import { normalizeBotConfig } from './hermes-bot-config.mjs';
+import { normalizeBotConfig, effectiveBotMaxTurns } from './hermes-bot-config.mjs';
 import {hermesBotToolsets} from './hermes-mcp-config.mjs';
 import {parseBotReasoningProof} from './hermes-bot-reasoning.mjs';
 import {resolveHermesLauncher} from './hermes-launcher.mjs';
@@ -698,6 +698,17 @@ export async function runBotValidationProcess(spec,{signal,onSupervision,timeout
   return {output,stderr,processExit};
 }
 
+function botTurnLimitConfig(context,prepared) {
+  return {mode:context.config.turnLimitMode,maxTurns:context.config.maxTurns ?? 20,effectiveMaxTurns:effectiveBotMaxTurns(context.config),runBudgetSeconds:prepared.config.agent.run_budget_seconds,status:'configured'};
+}
+
+export function withBotTurnLimitValidation(result,context,prepared) {
+  if(context.config?.turnLimitMode===undefined)return result;
+  const validation=result.botValidation,turnLimit=botTurnLimitConfig(context,prepared);
+  if(validation.employeeId!==context.employeeId||validation.revision!==context.revision||validation.effective?.maxTurns!==turnLimit.effectiveMaxTurns)throw Object.assign(new Error('Hermes 原生轮数限制与保存的策略不一致；未启动模型'),{processExit:result.processExit});
+  return {...result,botValidation:{...validation,effective:{...validation.effective,turnLimit:{...turnLimit,status:'validated'}}}};
+}
+
 export async function validateHermesBotRuntimeSupervised({context,baseHome,privateDirectory,workspace,apiBase,binary,signal,onSupervision}={}) {
   const profile=context.sourceProfile || 'default',prepared=prepareHermesBotHome({context,sourceHome:hermesProfileHome(profile,{baseHome}),privateDirectory,workspace,apiBase}),overlay=createHermesExecutionOverlay({profile,baseHome,privateDirectory:path.join(privateDirectory,'overlays')});
   const env={...process.env,HERMES_HOME:overlay.sourceHome,HERMES_MANAGED_DIR:overlay.home,...prepared.env};
@@ -707,7 +718,7 @@ export async function validateHermesBotRuntimeSupervised({context,baseHome,priva
     const execution=await runBotValidationProcess({...spec,cwd:process.cwd(),env},{signal,onSupervision});
     const result=execution.output.trim().split(/\r?\n/).map(line=>{try{return JSON.parse(line);}catch{return null;}}).find(item=>item?.botValidation);
     if(!result?.botValidation?.valid)throw Object.assign(new Error('缺少 Hermes 原生配置验证回执'),{processExit:execution.processExit,stderr:execution.stderr});
-    return {status:'succeeded',result:{...result,processExit:execution.processExit}};
+    return {status:'succeeded',result:withBotTurnLimitValidation({...result,processExit:execution.processExit},context,prepared)};
   } catch(error) {
     const reasoning=String(error.stderr||'').split(/\r?\n/).map(line=>parseBotReasoningProof(line,context,{provider:prepared.provider,model:prepared.effectiveModel})).filter(Boolean).at(-1);
     if(reasoning&&reasoning.status!=='matched')return {status:'failed',code:'BOT_REASONING_UNSATISFIED',error:'原生实际推理等级与明确请求不一致；未启动模型',result:{botValidation:{valid:false,schemaVersion:1,employeeId:context.employeeId,revision:context.revision,effective:{reasoning}},externalModelCalls:0,processExit:error.processExit}};
@@ -730,7 +741,7 @@ export function validateHermesBotRuntime({context,baseHome,privateDirectory,work
     const output=execFileSync(spec.command,spec.args,{env,encoding:'utf8',timeout:30_000,windowsHide:true,stdio:['ignore','pipe','pipe']});
     const result=output.trim().split(/\r?\n/).map(line=>{try{return JSON.parse(line);}catch{return null;}}).find(item=>item?.botValidation);
     if(!result?.botValidation?.valid)throw new Error('缺少 Hermes 原生配置验证回执');
-    return {status:'succeeded',result};
+    return {status:'succeeded',result:withBotTurnLimitValidation(result,context,prepared)};
   } catch(error) {
     if(error.code==='ETIMEDOUT')throw new Error('Hermes 配置检查超时；未启动模型');
     const reasoning=String(error.stderr || '').split(/\r?\n/).map(line=>parseBotReasoningProof(line,context,{provider:prepared.provider,model:prepared.effectiveModel})).filter(Boolean).at(-1);
@@ -1023,6 +1034,7 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
   let cleanupOverlay = () => {};
   let creatorPrepared = null;
   let creatorIsolation = null;
+  let botTurnLimit=null;
   let botReasoning=null;
   let reasoningRequests=0;
   let reasoningProvider=null;
@@ -1046,7 +1058,8 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
       if(resolvedRuntime!=='Hermes')throw new Error('Bot 必须使用 Hermes');
       botPrepared=prepareHermesBotHome({context:hermesBot,sourceHome:hermesProfileHome(profile || 'default',{baseHome:profileBaseHome}),privateDirectory:botInstanceDirectory,workspace:managementMcp?.workspace,apiBase:managementMcp?.apiBase});
       reasoningProvider=botPrepared.provider;
-      invocation={args:['chat','--query-file','-','-c','Ziwei '+String(hermesBot.conversationId || 'Bot Chat'),'--create-if-missing','--format','stream-json','--model',botPrepared.effectiveModel,'--provider',botPrepared.provider,'--max-turns',String(hermesBot.config.maxTurns),'--run-budget',String(botPrepared.config.agent.run_budget_seconds),...(imageInputs.length===1?['--image',imageInputs[0].path]:[])],stdin:content,format:'json-lines'};
+      invocation={args:['chat','--query-file','-','-c','Ziwei '+String(hermesBot.conversationId || 'Bot Chat'),'--create-if-missing','--format','stream-json','--model',botPrepared.effectiveModel,'--provider',botPrepared.provider,'--max-turns',String(effectiveBotMaxTurns(hermesBot.config)),'--run-budget',String(botPrepared.config.agent.run_budget_seconds),...(imageInputs.length===1?['--image',imageInputs[0].path]:[])],stdin:content,format:'json-lines'};
+      if(hermesBot.config.turnLimitMode!==undefined)botTurnLimit=botTurnLimitConfig(hermesBot,botPrepared);
     }
     const launch = hermesBot && (hermesBot.config.permissions.mode==='read_only'||hermesBot.config.permissions.management===false) ? {invocation,env:childEnv,receipt:null} : prepareManagementMcpLaunch({ runtime: resolvedRuntime, profile, model, invocation, env: childEnv, ...(managementMcp || {}), creatorInstance, creatorInstanceDirectory, selectedProfileHome });
     invocation = launch.invocation; childEnv = launch.env; receipt = launch.receipt;
@@ -1178,7 +1191,7 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
         // this healthy workstation as an unconfirmed local process.
         if (phoneFailure.phoneExecutionState === 'uncertain') result.executionState = 'uncertain';
       }
-      if(hermesBot)Object.assign(result,{botIsolation:creatorIsolation,configurationRevision:hermesBot.revision,nativeSessionId:state.sessionId || null});
+      if(hermesBot)Object.assign(result,{botIsolation:creatorIsolation,configurationRevision:hermesBot.revision,nativeSessionId:state.sessionId || null,...(botTurnLimit?{turnLimit:botTurnLimit}:{})});
       if(hermesBot?.config.reasoningEffort){
         result.reasoning=botReasoning?{...botReasoning,requests:reasoningRequests}:{requested:hermesBot.config.reasoningEffort,actual:null,status:'unconfirmed',requests:0};
         if(botReasoning&&botReasoning.status!=='matched'){
