@@ -6,6 +6,7 @@ import { normalizeBotConfig, createDefaultBotConfig, botFailure, BOT_CAPABILITY_
 import {deriveBotCapabilities} from './bot-capabilities.mjs';
 import {readHistoricalPrelaunchRecovery} from './bot-historical-recovery-view.mjs';
 import {createBotDeferredConfig} from './bot-deferred-config.mjs';
+import {createBotManagementActionReader} from './bot-management-view.mjs';
 
 const parse = value => { try { return JSON.parse(value); } catch { return null; } };
 const now = () => new Date().toISOString();
@@ -71,6 +72,7 @@ export function assertBotExecution(db, workspaceId, payload, { validation = fals
 
 export function createBotService(repo, management) {
   const db = repo.db;
+  const managementAction=createBotManagementActionReader(repo);
   const workspace = slug => { const ws = db.prepare('SELECT * FROM workspaces WHERE slug=?').get(slug); if (!ws) throw botFailure('WORKSPACE_NOT_FOUND','工作区不存在',404); return ws; };
   const scope = (slug,context={}) => {
     const ws=workspace(slug);
@@ -147,23 +149,33 @@ export function createBotService(repo, management) {
       const environment=capabilities(slug,{deviceId:existingEmployee.target_device_id},actor),view={id,employee_id:id,workspace:slug,employee:existingEmployee,configuration_state:'uninitialized',kind:isCreator?'creator':'employee',config:createDefaultBotConfig(),revision:0,control_epoch:0,control_state:existingEmployee.status==='paused'?'paused':'draft',main_conversation_id:conversation?.id || null,scheduler_authority:'ziwei',validation:{status:'not_checked',action_id:null,revision:null,error:null},latest_run:null,effect:{savedRevision:0,validatedRevision:null,scope:'not_initialized',pendingReason:isCreator?'Creator 保持原管理身份；普通岗位 Bot 初始化不适用':'从同一员工记录初始化 Bot 能力；不会新建员工或复制旧记忆'}};
       return{...view,...deriveBotCapabilities({bot:view,capabilities:environment.capabilities,device:environment.device,runtime:environment.runtime})};
     }
-    // Capability and native-resource evidence needs the same 100 complete
-    // payloads/results, but historical progress is not part of that evidence.
-    // Only the explicitly requested mobile read skips those event SQL rows.
-    const mobile=options?.view==='mobile',readAction=(actionId,eventView='none')=>repo.getA2AAction(actionId,{workspaceSlug:slug,...(mobile?{eventView}:{})});
+    // A management configuration read never re-embeds execution history into
+    // the current model turn. The ordinary web/mobile detail path is unchanged.
+    const compact=options?.view==='management'||context.authenticatedMcp===true||context.botManagementRead===true;
+    const mobile=options?.view==='mobile',workspaceId=existingEmployee.workspace_id;
+    const readAction=(actionId,eventView='none')=>compact?managementAction(actionId,workspaceId):repo.getA2AAction(actionId,{workspaceSlug:slug,...(mobile?{eventView}:{})});
     const {row,employee}=resolve(slug,id,context), validationAction=row.validation_action_id?readAction(row.validation_action_id):null;
     const validationStatus=!validationAction?'not_checked':validationAction.payload.hermesBot.revision!==row.revision?'stale':validationAction.status==='succeeded'&&row.validated_revision===row.revision?'succeeded':validationAction.status==='succeeded'&&validationAction.payload.hermesBot.controlEpoch!==row.control_epoch?'stale':['failed','expired','succeeded'].includes(validationAction.status)?'failed':'pending';
-    const configured=validationStatus==='succeeded', botRuns=runs(slug,id,context,mobile?{eventView:'none'}:undefined),nativeResources={};
-    for(const action of botRuns){const receipt=action.result?.nativeOperation || action.result?.result?.nativeOperation;if(receipt?.revision===row.revision&&!nativeResources[receipt.resource])nativeResources[receipt.resource]={...receipt,actionId:action.id,actionStatus:action.status,completedAt:action.completed_at};}
+    const latest=compact?db.prepare("SELECT id FROM a2a_actions WHERE workspace_id=? AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json,'$.hermesBot.employeeId') END=? ORDER BY created_at DESC,rowid DESC LIMIT 1").get(workspaceId,id):null;
+    const configured=validationStatus==='succeeded', botRuns=compact?(latest?[readAction(latest.id)]:[]):runs(slug,id,context,mobile?{eventView:'none'}:undefined),nativeResources={};
+    const resourceRuns=compact?db.prepare(`SELECT id FROM a2a_actions WHERE rowid IN (
+      SELECT max(rowid) FROM a2a_actions WHERE workspace_id=? AND type='hermes.bot.native' AND json_valid(payload_json)
+      AND status IN ('succeeded','failed','expired') AND result_json IS NOT NULL
+      AND json_extract(payload_json,'$.employeeId')=?
+      AND json_extract(payload_json,'$.hermesBot.revision')=?
+      GROUP BY json_extract(payload_json,'$.nativeOperation.resource')
+    ) ORDER BY created_at DESC,rowid DESC LIMIT 20`).all(workspaceId,id,row.revision).map(action=>readAction(action.id)):botRuns;
+    for(const action of resourceRuns){const receipt=action.result?.nativeOperation || action.result?.result?.nativeOperation;if(receipt?.revision===row.revision&&(!compact||receipt.employeeId===id&&receipt.resource===action.payload?.nativeOperation?.resource)&&!nativeResources[receipt.resource])nativeResources[receipt.resource]={...receipt,actionId:action.id,actionStatus:action.status,completedAt:action.completed_at,...(compact?{managementSummary:action.managementSummary}:{})};}
     const environment=capabilities(slug,{deviceId:employee.target_device_id},context),botCapabilities=environment.capabilities.map(item=>({...item,...(!repo.serverCodeRollout && configured && item.status==='requires_configuration' && ['bot_identity','persistent_chat','profile_memory','model_provider','routines','observability'].includes(item.id)?{status:'available',evidence:[...item.evidence,`validation:${row.validation_action_id}:revision:${row.revision}`]}:{})}));
     const view={id,employee_id:id,workspace:slug,employee,instance:botProfileView(db,row,employee),configuration_state:'initialized',kind:'employee',config:parse(row.config_json),revision:row.revision,control_state:row.control_state,control_epoch:row.control_epoch,main_conversation_id:row.main_conversation_id,nativeResources,scheduler_authority:'ziwei',validation:{status:validationStatus,action_id:row.validation_action_id,revision:validationAction?.payload?.hermesBot?.revision ?? null,error:validationAction?.error || null},latest_run:mobile&&botRuns[0]?readAction(botRuns[0].id,'mobile'):botRuns[0] || null,stop_action:row.stop_action_id?readAction(row.stop_action_id,'mobile'):null,effect:{savedRevision:row.revision,validatedRevision:row.validated_revision,scope:repo.serverCodeRollout?'draft_waiting_client':'next_execution',executionAdmission:repo.serverCodeRollout?.status()||null,pendingReason:repo.serverCodeRollout?'等待客户端验证或更新；专属 Profile/HOME 仅保存规划，尚未在电脑创建':row.validated_revision!==row.revision?'目标电脑尚未验证本版本':row.control_state!=='active'?'Bot 尚未启用':null}};
-    const savedRoutines=db.prepare('SELECT automation_id FROM bot_routines WHERE employee_id=?').all(id).map(item=>routine(slug,id,item.automation_id,context));
+    const savedRoutines=compact?db.prepare('SELECT a.id,a.status,a.next_run FROM automations a JOIN bot_routines r ON r.automation_id=a.id WHERE r.employee_id=?').all(id):db.prepare('SELECT automation_id FROM bot_routines WHERE employee_id=?').all(id).map(item=>routine(slug,id,item.automation_id,context));
     const activeAction=row.active_action_id?botRuns.find(action=>action.id===row.active_action_id)||readAction(row.active_action_id):null;
-    return{...view,deferredConfig:deferredConfig.latest(row.workspace_id,id),...deriveBotCapabilities({bot:view,capabilities:botCapabilities,device:environment.device,runtime:environment.runtime,actions:botRuns,activeAction,routines:savedRoutines,phoneMcp:phoneMcpConfiguration(slug,employee)})};
+    const evidenceActions=compact?[...new Map([...botRuns,...resourceRuns,validationAction,activeAction].filter(Boolean).map(action=>[action.id,action])).values()]:botRuns;
+    return{...view,...(compact?{managementView:{schemaVersion:1,historyIncluded:false,nativeContentIncluded:false,capabilityEvidence:'bounded_summary',nativeResourceLimit:20,fullActionOperation:'ziwei_get_action'},active_run:activeAction,validation:{...view.validation,receipt:validationAction?.result?.botValidation||null}}:{}),deferredConfig:deferredConfig.latest(row.workspace_id,id),...deriveBotCapabilities({bot:view,capabilities:botCapabilities,device:environment.device,runtime:environment.runtime,actions:evidenceActions,activeAction,routines:savedRoutines,phoneMcp:phoneMcpConfiguration(slug,employee)})};
   };
   const routine = (slug,id,autoId,context={}) => {const {ws}=resolve(slug,id,context);const binding=db.prepare('SELECT * FROM bot_routines WHERE automation_id=? AND employee_id=? AND workspace_id=?').get(autoId,id,ws.id);if(!binding)throw botFailure('ROUTINE_NOT_FOUND','Routine 不属于当前 Bot',404);return {...repo.getAutomation(slug,autoId),...binding,last_result:repo.listAutomationRuns(autoId)[0] || null};};
   let service;
-  const deferredConfig=createBotDeferredConfig(repo,{resolve,get,update:(...args)=>service.update(...args),validate:(...args)=>service.validate(...args),control:(...args)=>service.control(...args)});
+  const deferredConfig=createBotDeferredConfig(repo,{resolve,get:(slug,id,context)=>get(slug,id,context,{view:'management'}),update:(slug,id,input,context)=>service.update(slug,id,input,{...context,botManagementRead:true}),validate:(...args)=>service.validate(...args),control:(slug,id,input,context)=>service.control(slug,id,input,{...context,botManagementRead:true})});
   service=guardBotService(repo,{
     deferredConfig,
     capabilities,get,runs,

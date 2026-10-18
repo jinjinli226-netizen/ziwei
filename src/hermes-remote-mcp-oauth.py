@@ -1,5 +1,7 @@
 """Browser callbacks via the authenticated relay; OAuth stays in the target Hermes HOME."""
 import asyncio
+from asyncio.proactor_events import BaseProactorEventLoop
+from asyncio.selector_events import BaseSelectorEventLoop
 from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime, timezone
 import json
@@ -7,6 +9,7 @@ import logging
 import os
 from pathlib import Path
 import re
+import socket
 import sys
 import time
 from urllib.parse import parse_qs, quote, urlsplit
@@ -23,6 +26,43 @@ PUBLIC_CODES = frozenset({
 CALLBACK_SECONDS = 300.0
 POLL_SECONDS = 1.0
 _no_listener_installed = False
+_IS_WINDOWS = sys.platform == 'win32'
+_SOCKETPAIR_CODES = frozenset(code for function in
+    (socket.socketpair, getattr(socket, '_fallback_socketpair', None))
+    if (code := getattr(function, '__code__', None)) is not None)
+_SELF_PIPE_CODES = frozenset(function.__code__ for function in
+    (BaseProactorEventLoop._make_self_pipe, BaseSelectorEventLoop._make_self_pipe))
+
+
+def _windows_asyncio_self_pipe_bind(args):
+    # Windows implements socketpair with a short-lived loopback TCP listener.
+    # Permit only the stdlib event-loop wakeup pipe, never an OAuth callback.
+    if not _IS_WINDOWS or not isinstance(args, tuple) or len(args) != 2:
+        return False
+    target, address = args
+    if (not isinstance(address, tuple) or len(address) != 2
+            or type(address[1]) is not int or address[1] != 0):
+        return False
+    try:
+        if (target.type != socket.SOCK_STREAM or target.proto != 0
+                or (target.family, address[0]) not in
+                ((socket.AF_INET, '127.0.0.1'), (socket.AF_INET6, '::1'))):
+            return False
+    except AttributeError:
+        return False
+    frame = sys._getframe(1)
+    try:
+        for _ in range(4):
+            if frame is None:
+                return False
+            if frame.f_code in _SOCKETPAIR_CODES:
+                return (frame.f_locals.get('lsock') is target
+                        and frame.f_back is not None
+                        and frame.f_back.f_code in _SELF_PIPE_CODES)
+            frame = frame.f_back
+        return False
+    finally:
+        del frame
 
 
 class NativeOperationError(RuntimeError):
@@ -264,10 +304,10 @@ def authorize_mcp(logical_server, server, config):
     # SDK diagnostics may include provider URLs; only our public result/error escapes.
     global _no_listener_installed
     if not _no_listener_installed:
-        # A dedicated authorize process may make outbound connections only. Even
-        # an older SDK fallback must fail before reserving/binding a local port.
+        # OAuth callbacks must use the relay. An older SDK's callback listener
+        # is rejected; only Windows asyncio's internal wakeup pipe may bind.
         def no_listener(event, _args):
-            if event == 'socket.bind':
+            if event == 'socket.bind' and not _windows_asyncio_self_pipe_bind(_args):
                 fail('MCP_OAUTH_REQUIRES_DEPENDENCY')
         sys.addaudithook(no_listener)
         _no_listener_installed = True

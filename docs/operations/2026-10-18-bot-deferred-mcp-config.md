@@ -1,6 +1,6 @@
 # Bot 本轮结束后应用配置
 
-候选实现：2026-10-18。正式发布与现场验收结果将在本文件追加；源码通过不等于目标员工已连接。
+实现日期：2026-10-18。以下分别记录自动应用、原生连接和现场查询，不能以保存成功代替已接通。
 
 员工可用已有 `ziwei_bot update` 提交完整合并后的配置，增加 `deferUntilIdle:true`、`expectedRevision`、`expectedControlEpoch`、稳定 `idempotencyKey`；需要自动连接的 MCP 名称放入 `connectMcpServers`。无需新增客户端工具或终端操作。旧客户端即时修改遭遇 `BOT_BUSY` 时，API 返回这条可执行路径，员工不必让用户保存，也不能在当前轮内等待自己结束。
 
@@ -11,3 +11,17 @@
 数据库仅增 `bot_deferred_configs` 及其两个显式索引和 SQLite 自动索引。正式发布必须克隆实际混合服务树，仅覆盖审核过的必要模块，保留手机通知、前端、官方 Windows 包、中控和 Nginx。回退只切回上一代码目录，不恢复数据库、不删除新状态表；再次升级须按当前版本和授权重新核对未完成意图。
 
 回归使用无监听的内存数据库和 Express 请求；包含真实完成后推进、幂等及重启、未知或不完整退出、撤权和暂停、当前员工隔离、真实 MCP service action 复用，以及已有手机通知和停止流程。真实 TK 接入将使用固定唯一请求，结果未知时只读取原回执，不换标识重发。
+
+## 首次发布和 TK 现场结果
+
+产品 `0d26bbe583a78829bf3d59703c4129f33692d170` 经 200 项回归、lint 和独立审查后先推 GitHub，再于北京时间 13:21:53 发布。API 目录 `/opt/ziwei/releases/deferred-mcp-0d26bbe583a7-b8a5f442/v2`，PID 416013。克隆实际混合树，只覆盖八个必要源文件；前端、官方 Windows 包、中控、Nginx 和数据库文件身份保留。仅增前述队列表及索引，未恢复数据库。
+
+随后从 TK 原主聊天提交唯一请求 `tk-viral-deferred-20261018-bc399600`。真实模型运行的原动作 `action_85e1751d-dedc-43e8-83d4-8735faf4d525` 在 r3/e5 中提交意图 `bot-config_cd619a3a-bce1-47d7-b8cb-0f6c8e03ce22`；原动作退出后，自动应用 r4/e6，验证动作 `action_74cd2880-0d34-4deb-986a-081454a16912` 在公司台式原生验证成功、进程树退出 0，然后恢复原已启用状态 r4/e7。原配置、电脑和专属 Profile 绑定保持，只增加 `viral_library`。没有用户或其他员工手工保存。
+
+自动连接动作 `action_146d15de-d5c1-46b2-9b71-7b351c5cbb7e` 返回 `MCP_OAUTH_REQUIRES_DEPENDENCY`，不是已连接。失败原回执和意图保留，不自动换标识重试。TK 的提交和回读还暴露了管理响应包含完整历史而超时的问题。
+
+## Windows OAuth 和管理回执修复
+
+13:39 的 TK 只读现场诊断确认 Windows Python 3.14.7 创建事件循环时经过 `socket._fallback_socketpair → asyncio.proactor_events._make_self_pipe`，原全局禁止 bind 的规则在任何实际监听前拦截了事件循环。原诊断布尔值漏匹配 `_fallback_socketpair` 别名而为 false；原始调用链保留，未修改原回执。修复仅允许 Windows 标准库代码对象、对应内部 socket、loopback TCP 端口 0 的这一自唤醒路径，仍拒绝 OAuth 本地回调监听及直接 bind。两套原生 Hermes SDK 的目标 HOME、授权、缓存及刷新回归和精确 CPython 3.14.7 无监听模拟通过。
+
+员工管理读和延期申请回执改为当前完整配置及有界执行摘要，保留版本、绑定、验证和退出证明；不再嵌入完整历史事件或 Session 内容。普通网页详情保持原行为，完整原动作仍可用 `ziwei_get_action` 读取。新增大历史、未知状态和恢复凭据边界回归。该修复后续发布与真实连接结果继续追加，不将安装包发布等同于员工电脑已更新。
