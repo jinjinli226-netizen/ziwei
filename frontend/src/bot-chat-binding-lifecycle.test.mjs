@@ -203,7 +203,7 @@ function navigationHarness() {
     conversationIdFromPath:()=>new URL(location,'https://fixture.test').pathname.split('/')[3]||'',
     clearConversationAttachment:()=>{},stopConversationPolling:()=>{},startConversationPolling:()=>{},refreshConversationState:async()=>{},notify:message=>notices.push(message),load:async()=>{},loadApiKeys:()=>{},loadZiweiConnect:async()=>{},
   };
-  const functions=new Function(...Object.keys(context),`let conversationOpenGeneration=0,conversationListGeneration=0;const conversationRequests=createConversationRequestSequence();let botChatBindingGeneration=0,botChatBindingActor='',botChatBindingResolvedScope='',botChatBindingRequest=null;${sources}\nconst stop=${bindingWatch.trim()}\nreturn {openBotConversation,openConversation,loadConversations,selectConversationEmployee,stop};`)(...Object.values(context));
+  const functions=new Function(...Object.keys(context),`let conversationSettingsBaseline=null;let conversationOpenGeneration=0,conversationListGeneration=0;const conversationRequests=createConversationRequestSequence();let botChatBindingGeneration=0,botChatBindingActor='',botChatBindingResolvedScope='',botChatBindingRequest=null;${sources}\nconst stop=${bindingWatch.trim()}\nreturn {openBotConversation,openConversation,loadConversations,selectConversationEmployee,stop};`)(...Object.values(context));
   return {...state,...functions,details,lists,notices,location:()=>location,setLocation:value=>{location=value;},enter:()=>functions.openBotConversation({workspace:'bigtron',employee:{id:'secretary'},conversation:{id:'chat-secretary'},botId:'secretary'})};
 }
 const detail=(id,employee)=>({id,employee_id:employee,employee:{id:employee,target_device_id:'device'},device_id:'device',messages:[],execution:null});

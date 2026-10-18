@@ -1,0 +1,46 @@
+{
+  "phase": "candidate-tested-release-pending",
+  "productionBefore": {
+    "employeeDefaultsAndConversationsAlreadyCorrect": true,
+    "employees": [
+      {
+        "name": "擎天",
+        "id": "employee_dd92eaf3-3b47-4cff-8771-319673a06b7a",
+        "directory": "D:\\AIUSE",
+        "runtime": "Codex",
+        "actionId": "action_109d9d20-dd48-4001-8e3b-c8140641e77b"
+      },
+      {
+        "name": "知暖",
+        "id": "employee_485327e2-16ae-4c17-97af-53d4e9d50ddf",
+        "directory": "D:\\AIUSE\\life-assistant",
+        "runtime": "Hermes",
+        "actionId": "action_ee7a600b-369e-4768-adcc-9f24f5b1e5c9"
+      }
+    ],
+    "actionType": "task.execute",
+    "cwdAbsent": true,
+    "conversationIdAbsent": true
+  },
+  "validation": {
+    "backendRelatedPassed": 33,
+    "nativePassed": 5,
+    "uiNewPassed": 16,
+    "uiRelatedPassed": 54,
+    "frontendFull": {
+      "total": 379,
+      "passed": 375,
+      "unchangedBaselineFailures": 4
+    }
+  },
+  "release": {
+    "pushed": false,
+    "published": false
+  },
+  "liveVerification": {
+    "passed": false,
+    "pending": true
+  },
+  "employeeConfigurationChanged": false,
+  "profilesOrHomesMigrated": false
+}

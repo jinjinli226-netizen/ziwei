@@ -5,7 +5,7 @@ import {createConversationComposerStore} from './conversation-compose.js';
 import {conversationSettingsSnapshot} from './workdir.js';
 const app=await readFile(new URL('./App.vue',import.meta.url),'utf8');
 function source(name){const start=app.search(new RegExp(`(?:async )?function ${name}\\(`));assert.ok(start>=0);return app.slice(start,app.indexOf('\n}',start)+2);}
-function actual(name,bindings){return new Function(...Object.keys(bindings),`let conversationOpenGeneration=0;return (${source(name)});`)(...Object.values(bindings));}
+function actual(name,bindings){return new Function(...Object.keys(bindings),`let conversationSettingsBaseline=null;let conversationOpenGeneration=0;return (${source(name)});`)(...Object.values(bindings));}
 test('actual Bot message relies on server model and device binding even when generic composer fields are stale',async()=>{
   const composer=createConversationComposerStore(),writes=[],conversation={id:'chat',employee_id:'bot',device_id:'fixed-device',messages:[]};composer.updateDraft('qa\0chat','hello');
   const send=actual('sendConversationMessage',{selectedConversation:{value:conversation},employees:{value:[{id:'bot',runtime:'Hermes',model_id:'fixed-model'}]},conversationDeviceId:{value:'fixed-device'},devices:{value:[]},conversationSettingsSnapshot,botBindingPending:{value:false},botBindingError:{value:''},conversationBotBinding:{value:{id:'bot'}},conversationModelId:{value:'wrong-override'},conversationWorkingDirectory:{value:''},conversationComposeKey:()=> 'qa\0chat',conversationComposer:composer,api:{addConversationMessage:async(_id,body)=>{writes.push(body);return {id:'msg'};}},refreshSelectedConversation:async()=>{},startConversationPolling:()=>{},notify:()=>{}});

@@ -53,7 +53,7 @@ function harness(overrides={}, { realOpen=false,realtime=false }={}) {
     const end = app.indexOf('\n}',start);
     return app.slice(start,end+2);
   }).join('\n');
-  const api = new Function(...Object.keys(bindings),`let conversationOpenGeneration=0,conversationListGeneration=0,conversationPollTimer=null,conversationRefresh=null;const conversationExecutionBusy={get value(){return executionPresentation(conversationExecution.value).busy}}; const conversationRequests=typeof createConversationRequestSequence==='function'?createConversationRequestSequence():null; ${functions}; return {loadConversations,refreshSelectedConversation,refreshConversationState${realOpen?',openConversation,refreshConversationFromRoute':''}${realtime?',openRealtime':''}};`)(...Object.values(bindings));
+  const api = new Function(...Object.keys(bindings),`let conversationSettingsBaseline=null;let conversationOpenGeneration=0,conversationListGeneration=0,conversationPollTimer=null,conversationRefresh=null;const conversationExecutionBusy={get value(){return executionPresentation(conversationExecution.value).busy}}; const conversationRequests=typeof createConversationRequestSequence==='function'?createConversationRequestSequence():null; ${functions}; return {loadConversations,refreshSelectedConversation,refreshConversationState${realOpen?',openConversation,refreshConversationFromRoute':''}${realtime?',openRealtime':''}};`)(...Object.values(bindings));
   return { ...bindings, ...api, workspace, reopened, polling };
 }
 

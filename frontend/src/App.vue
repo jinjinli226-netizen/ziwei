@@ -261,7 +261,7 @@ const conversationSendPending=computed(()=>Boolean(conversationComposeState.valu
 const conversationAttachmentReading=computed(()=>Boolean(conversationComposeState.value?.reading));
 const conversationSendError=computed(()=>conversationComposeState.value?.error || '');
 const conversationImagePreview=ref(null);
-const conversationDeviceId = ref(''); const conversationModelId = ref(''); const conversationWorkingDirectory = ref(''); const conversationAttachmentInput = ref(null); const conversationExecution = ref(null); const conversationStatusLoading = ref(false); const conversationExecutionList = ref(null); const taskExecutionList = ref(null); const conversationDirectoryPickerOpen = ref(false); const conversationDirectoryPathDraft = ref(''); const conversationDirectoryCheck=ref(null),conversationDirectoryEditorVersion=ref(0),conversationDirectoryLoading=ref(false),conversationDirectoryError=ref(''); let conversationPollTimer = null; let taskDetailPollTimer = null; const eventSource = ref(null);
+const conversationDeviceId = ref(''); const conversationModelId = ref(''); const conversationWorkingDirectory = ref(''); const conversationAttachmentInput = ref(null); const conversationExecution = ref(null); const conversationStatusLoading = ref(false); const conversationExecutionList = ref(null); const taskExecutionList = ref(null); const conversationDirectoryPickerOpen = ref(false); const conversationDirectoryPathDraft = ref(''); const conversationDirectoryCheck=ref(null),conversationDirectoryEditorVersion=ref(0),conversationDirectoryLoading=ref(false),conversationDirectoryError=ref(''); let conversationSettingsBaseline = null; let conversationPollTimer = null; let taskDetailPollTimer = null; const eventSource = ref(null);
 watch([()=>selectedConversation.value?.id,()=>selectedConversation.value?.employee_id,()=>page.value,()=>authState.value.user?.id],()=>{if(conversationDirectoryPickerOpen.value)closeConversationDirectoryPicker();},{flush:'sync'});
 const calendarEventForm = ref({id:'',name:'',description:'',startAt:'',endAt:'',status:'planned',assignee:'',allDay:true}); const showCalendarEvent = ref(false);
 const automationRuns = ref({}); const selectedAutomation = ref(null); const showAutomationDetails = ref(false); const automationEditId = ref('');
@@ -559,7 +559,9 @@ function applyConversationDetail(conversation) {
   const previous=selectedConversation.value;
   selectedConversation.value=mergeConversationDetail(selectedConversation.value,conversation);
   const next=conversationSettingsSnapshot(selectedConversation.value,devices.value);
-  const settings=mergeConversationSettingsDraft(previous?.id===selectedConversation.value?.id?conversationSettingsSnapshot(previous,devices.value):null,{deviceId:conversationDeviceId.value,modelId:conversationModelId.value,workingDirectory:conversationWorkingDirectory.value},next);
+  const prior=previous?.id===selectedConversation.value?.id?(conversationSettingsBaseline?.id===previous.id&&conversationSettingsBaseline.workspace===workspaceSlug()?conversationSettingsBaseline.settings:conversationSettingsSnapshot(previous,devices.value)):null;
+  const settings=mergeConversationSettingsDraft(prior,{deviceId:conversationDeviceId.value,modelId:conversationModelId.value,workingDirectory:conversationWorkingDirectory.value},next);
+  conversationSettingsBaseline={id:selectedConversation.value?.id,workspace:workspaceSlug(),settings:next};
   conversationDeviceId.value=settings.deviceId;conversationModelId.value=settings.modelId;conversationWorkingDirectory.value=settings.workingDirectory;
   conversationExecution.value=selectedConversation.value?.execution || null;
   conversations.value=mergeConversationLists(conversations.value,conversations.value,selectedConversation.value);
@@ -663,10 +665,6 @@ async function openConversation(item, { push=true, workspace=workspaceSlug() } =
     const conversation=await api.conversation(id);
     if(!current())return false;
     applyConversationDetail(conversation);
-    conversationModelId.value=selectedConversation.value.model_id || '';
-    conversationWorkingDirectory.value=selectedConversation.value.working_directory || '';
-    conversationDeviceId.value=selectedConversation.value.device_id || selectedConversation.value.employee?.target_device_id || devices.value.find(device => device.status === 'online')?.id || devices.value[0]?.id || '';
-    if (!conversationWorkingDirectory.value && conversationDeviceId.value) conversationWorkingDirectory.value=devices.value.find(device => device.id === conversationDeviceId.value)?.workdir || '';
     if (selectedConversation.value.employee_id) conversationEmployeeId.value=selectedConversation.value.employee_id;
     else if (selectedConversation.value.employee_binding === 'unassigned_legacy') conversationEmployeeId.value='unassigned';
     request=conversationRequests.begin(conversationRequestScope(),'detail',id);
@@ -752,10 +750,13 @@ async function sendConversationMessage() {
   if(!conversation) return;
   const employee=employees.value.find(item=>item.id===conversation.employee_id) || null;
   if(!employee) return notify('该历史会话没有明确数字员工归属，不能发送消息','error');
-  if(conversationDeviceId.value!==conversationSettingsSnapshot(conversation,devices.value).deviceId)return notify('换电脑后请先检查并保存会话工作目录','error');
+  const persistedSettings=conversationSettingsBaseline?.id===conversation.id&&conversationSettingsBaseline.workspace===workspaceSlug()?conversationSettingsBaseline.settings:conversationSettingsSnapshot(conversation,devices.value);
+  if(conversationDeviceId.value!==persistedSettings.deviceId)return notify('换电脑后请先检查并保存会话工作目录','error');
   const key=conversationComposeKey(),generation=conversationOpenGeneration;
   if(botBindingPending.value===true||botBindingError.value)return notify(botBindingError.value||'正在读取员工运行设置，请稍候','error');
-  const settings=conversationBotBinding.value?.id===conversation.employee_id?{cwd:conversationWorkingDirectory.value || null}:{runtime:employee.runtime || null,model:conversationModelId.value || employee.model_id || employee.modelId || null,cwd:conversationWorkingDirectory.value || null,targetDeviceId:conversationDeviceId.value || null};
+  const directory=conversationWorkingDirectory.value || '';
+  const directoryOverride=directory===persistedSettings.workingDirectory?{}:{cwd:directory || null};
+  const settings=conversationBotBinding.value?.id===conversation.employee_id?directoryOverride:{runtime:employee.runtime || null,model:conversationModelId.value || employee.model_id || employee.modelId || null,...directoryOverride,targetDeviceId:conversationDeviceId.value || null};
   const submission=conversationComposer.beginSubmission(key,settings);
   if(!submission)return;
   const current=()=>key===conversationComposeKey() && generation===conversationOpenGeneration;
@@ -775,14 +776,18 @@ async function sendConversationMessage() {
     if(current())notify(detail,'error');
   }
 }
-async function saveConversationSettings({ notifyUser = true } = {}) {
+async function saveConversationSettings({ notifyUser = true, directorySelected = false } = {}) {
   if (!selectedConversation.value?.id) return false;
   if(conversationDeviceId.value!==conversationSettingsSnapshot(selectedConversation.value,devices.value).deviceId&&!(conversationDirectoryCheck.value?.deviceId===conversationDeviceId.value&&conversationDirectoryCheck.value?.workspace===workspaceSlug()&&conversationDirectoryCheck.value?.path===conversationWorkingDirectory.value.trim())){notify('换电脑后请重新检查当前工作目录，再选择此目录保存','error');return false;}
   const id=selectedConversation.value.id,key=conversationComposeKey(),generation=conversationOpenGeneration;
   const request=conversationRequests.begin(conversationRequestScope(),'detail',id);
   try {
     if(botBindingPending.value===true||botBindingError.value)return false;
-    const body=conversationBotBinding.value?.id===selectedConversation.value.employee_id?{workingDirectory:conversationWorkingDirectory.value || null}:{modelId:conversationModelId.value || null,deviceId:conversationDeviceId.value || null,workingDirectory:conversationWorkingDirectory.value || null};
+    const persistedSettings=conversationSettingsBaseline?.id===id&&conversationSettingsBaseline.workspace===workspaceSlug()?conversationSettingsBaseline.settings:conversationSettingsSnapshot(selectedConversation.value,devices.value);
+    const directory=conversationWorkingDirectory.value || '';
+    const directoryOverride=directorySelected||directory!==persistedSettings.workingDirectory||conversationDeviceId.value!==persistedSettings.deviceId?{workingDirectory:directory || null}:{};
+    const body=conversationBotBinding.value?.id===selectedConversation.value.employee_id?directoryOverride:{modelId:conversationModelId.value || null,deviceId:conversationDeviceId.value || null,...directoryOverride};
+    if(!Object.keys(body).length)return true;
     const updated=await api.updateConversation(id,body);
     if(key!==conversationComposeKey() || generation!==conversationOpenGeneration || !conversationRequests.isCurrent(request,conversationRequestScope()))return true;
     applyConversationDetail(updated);
@@ -834,7 +839,7 @@ async function useConversationDirectory(check) {
   const key=conversationComposeKey(),version=conversationDirectoryEditorVersion.value;
   conversationDirectoryCheck.value=check;
   conversationWorkingDirectory.value=check.path;
-  const saved=await saveConversationSettings({ notifyUser:false });
+  const saved=await saveConversationSettings({ notifyUser:false, directorySelected:true });
   if (!saved||key!==conversationComposeKey()||version!==conversationDirectoryEditorVersion.value||conversationDirectoryPathDraft.value.trim()!==check.path||conversationDirectoryCheck.value?.actionId!==check.actionId) return;
   closeConversationDirectoryPicker();
   notify(`工作目录已切换为 ${check.path}`);

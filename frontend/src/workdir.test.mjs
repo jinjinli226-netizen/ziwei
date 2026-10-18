@@ -57,7 +57,7 @@ test('same conversation refresh updates clean settings from its snapshot and pre
 
 const app=await readFile(new URL('./App.vue',import.meta.url),'utf8');
 function source(name){const start=app.search(new RegExp(`(?:async )?function ${name}\\(`));assert.ok(start>=0);return app.slice(start,app.indexOf('\n}',start)+2);}
-function appFunction(name,bindings){const context={botBindingPending:{value:false},conversationBotBinding:{value:null},selectedConversation:{value:null},...bindings};return new Function(...Object.keys(context),`let conversationOpenGeneration=0,employeeEditorGeneration=0;return (${source(name)});`)(...Object.values(context));}
+function appFunction(name,bindings){const context={botBindingPending:{value:false},conversationBotBinding:{value:null},selectedConversation:{value:null},...bindings};return new Function(...Object.keys(context),`let conversationSettingsBaseline=null;let conversationOpenGeneration=0,employeeEditorGeneration=0;return (${source(name)});`)(...Object.values(context));}
 test('actual new conversation handler does not overwrite employee inheritance with a leftover device cwd',async()=>{
   const employee={id:'a',name:'A',target_device_id:'pc-b'},writes=[];
   const create=appFunction('createConversation',{workspaceSlug:()=> 'qa',conversationEmployeeId:{value:'a'},activeConversationEmployee:{value:employee},conversationDeviceId:{value:'pc-a'},devices:{value:[{id:'pc-a',status:'online',workdir:'C:\\legacy'},{id:'pc-b',status:'online',workdir:'D:\\device'}]},api:{createConversation:async body=>{writes.push(body);return {id:'new'};}},employeeConversationPayload:workdir?.employeeConversationPayload,conversations:{value:[]},openConversation:async()=>{},notify:message=>assert.fail(message)});

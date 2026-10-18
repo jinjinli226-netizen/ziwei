@@ -44,10 +44,18 @@ export function employeeConversationPayload(employee,devices=[]){
   const deviceId=employee.target_device_id||employee.targetDeviceId||devices.find(item=>item.status==='online')?.id||devices[0]?.id||null;
   return {title:`${employee.name||'数字伙伴'} 对话`,employeeId:employee.id,modelId:employee.model_id||employee.modelId||null,deviceId};
 }
-export function conversationSettingsSnapshot(conversation,devices=[]){
-  const deviceId=conversation?.device_id||devices.find(item=>item.status==='online')?.id||devices[0]?.id||'';
-  return {deviceId,modelId:conversation?.model_id||'',workingDirectory:conversation?.working_directory||devices.find(item=>item.id===deviceId)?.workdir||''};
+export function conversationSettingsSnapshot(conversation,devices=[],candidate=conversation?.employee){
+  const conversationWorkspace=conversation?.workspace_id||conversation?.workspaceId,employeeWorkspace=candidate?.workspace_id||candidate?.workspaceId;
+  const employee=candidate?.id&&candidate.id===conversation?.employee_id&&(!conversationWorkspace||!employeeWorkspace||employeeWorkspace===conversationWorkspace)?candidate:null;
+  const employeeDevice=employee?.target_device_id||employee?.targetDeviceId||'';
+  const deviceId=conversation?.device_id||employeeDevice||devices.find(item=>item.status==='online')?.id||devices[0]?.id||'';
+  const defaultDevice=employee?.default_working_directory_device_id||employee?.defaultWorkingDirectoryDeviceId;
+  const employeeDirectory=defaultDevice===deviceId&&(!employeeDevice||employeeDevice===deviceId)?employee?.default_working_directory||employee?.defaultWorkingDirectory||'':'';
+  return {deviceId,modelId:conversation?.model_id||'',workingDirectory:conversation?.working_directory||employeeDirectory||devices.find(item=>item.id===deviceId)?.workdir||''};
 }
 export function mergeConversationSettingsDraft(prior,draft,next){
-  return Object.fromEntries(Object.keys(next).map(key=>[key,!prior||draft[key]===prior[key]?next[key]:draft[key]]));
+  const merged=Object.fromEntries(Object.keys(next).map(key=>[key,!prior||draft[key]===prior[key]?next[key]:draft[key]]));
+  // A server binding change cannot carry a temporary path from the old computer.
+  if(prior&&next.deviceId!==prior.deviceId&&draft.deviceId===prior.deviceId)merged.workingDirectory=next.workingDirectory;
+  return merged;
 }
