@@ -1,5 +1,16 @@
 # 紫薇项目 HandOff
 
+
+## 2026-10-18 统一远程升级与本机安装回执均已真机通过
+
+H `c418e20dc92469d077f22e53fd0ae3ed64ba4ce2` 已先推 GitHub 再发布官方客户端 B3；主站/网页保持 C `a8b5b8cb4947829c10af22e39c0dd44d97307ca2`、API PID `447589`，没有重启其他服务或改数据库。通用 Windows 更新脚本保持原 6390 字节；旧不可变包、PS、JS 保留。B3 build `bfc96edf59be31f1be50d3878a12d6c37d154fa108ef37c7a0d7d41ee7511927`、包 SHA `6ac4ac3718a3b93dd1ea3ea9066a44feffbd1e20213c3884be4f2aced2f356aa`。
+
+仅用户授权的李金晋电脑已完成两段真实验收：先由首次安装任务 `a1d14f4a…` / 原动作 `8efe1069…` 经官方更新 `777b6281…` 装入 A3，真实健康接口与新版指纹函数确认 build `93bca14d4aea8b63e15c038d38486cf773e0cba7ab63e1d3dc2a587cf8d69684`、PID `32644`，配置保留且恢复运行；旧更新器回执中的 `419b371f…` 是旧指纹算法结果，不当作真实安装 build。再由统一维护请求 `client-update_7b78753f-5163-490e-b18d-c8d2ad92b1e0` 从 A3 升到 B3：`14:02:39.819Z` 创建，`14:03:42.028Z` 目标认证心跳确认 `succeeded`，`heartbeatVerified:true`、`completionSource:heartbeat`；设备在线、`supported:true`。其他两台设备仍为原 `208…`、`5a9…` build，未更新。
+
+此前 F/G 首次安装因历史记录阻挡停止而失败，原失败回执保留。G 处理原孤立终态及具真实 CLI 退出的业务不确定回执；H 再按两条现场记录补限定 `conversation.execute` 的严格终态失败历史分类。原记录、去重和正式保全规则保持，不补造旧任务退出。H 132 项通过/1 条件跳过、主控 56/56、独审 103/103；不同范围不合计。
+
+**最后只读核对也已通过：**真实 Codex 原动作 `action_d1aade15-00fb-4de3-9a3b-fa86cf456f7d` 成功；B3 本机健康与新版指纹函数一致，PID 已由 `32644` 变为 `40628`，配置保留且摘要一致（不提交实际摘要）。精确匹配统一请求的唯一官方安装回执为 complete、新 B3 包 SHA 正确、configurationPreserved/restoredRunning 均 true。诊断运行时 stopSafe:false 是该诊断自身执行的预期保护，不记新故障或清理。无需再次升级已成功设备。 主控于 `14:09:08Z` 最后 GET 复核请求仍 succeeded、李金晋电脑 B3 在线且受支持，另外两台原 build 设备在线且未变。详见 [统一升级运维记录](docs/operations/2026-10-18-remote-client-updates.md) 与 [QA 记录](docs/qa/2026-10-18-remote-client-updates.json)。下方“候选/待验收”均为此前历史快照。
+
 ## 2026-10-18 统一远程升级候选与李金晋电脑验收授权
 
 统一远程升级已实现：团队管理新增客户端升级面板，管理员按设备提交固定官方目标，客户端独立领取并等待全机员工空闲，经包外 supervisor 运行原官方更新器；目标 build 的新进程认证心跳才算完成。含稳定幂等、排队取消、授权撤销、崩溃恢复、已运行父任务的真实协作子任务和 Gateway 空闲关闭。旧客户端明确提示首次装入能力，不伪称所有已连接电脑都支持。无 Mac 远程升级适配。

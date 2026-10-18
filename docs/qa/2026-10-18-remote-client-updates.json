@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "phase": "client-published-live-validation-pending",
+  "phase": "live-acceptance-passed",
   "userAuthorizedLiveTarget": {
     "workspace": "bigtron",
     "deviceId": "device_bfd9a3d2-c2cc-4a36-8bd8-465bea492493",
@@ -126,7 +126,45 @@
         "reason": "expected root ownership did not match actual download-directory uid/gid",
         "resolvedBy": "freeze and validate actual 998:998 ownership; preserve existing files"
       }
-    ]
+    ],
+    "terminalHistoryClientPublication": {
+      "commit": "c418e20dc92469d077f22e53fd0ae3ed64ba4ce2",
+      "mainSiteCommit": "a8b5b8cb4947829c10af22e39c0dd44d97307ca2",
+      "frontendCommit": "a8b5b8cb4947829c10af22e39c0dd44d97307ca2",
+      "completedAt": "2026-10-18T13:53:32.503915+00:00",
+      "auditId": "client-terminal-publication-c418e20dc924-c0a1d4c8d890",
+      "B3": {
+        "clientBuild": "bfc96edf59be31f1be50d3878a12d6c37d154fa108ef37c7a0d7d41ee7511927",
+        "sha256": "6ac4ac3718a3b93dd1ea3ea9066a44feffbd1e20213c3884be4f2aced2f356aa",
+        "bytes": 1153364,
+        "url": "https://qzelynth.top/downloads/cli/ziwei-latest.tgz"
+      },
+      "A3": {
+        "clientBuild": "93bca14d4aea8b63e15c038d38486cf773e0cba7ab63e1d3dc2a587cf8d69684",
+        "sha256": "988f7697029fe0b3794be95f76fc5c9656fabb9c7c4ca7df31aca08bc96bb97d",
+        "bytes": 1153385,
+        "filename": "remote-client-bootstrap-c418e20dc92469d077f22e53fd0ae3ed64ba4ce2-988f7697029f.tgz",
+        "latestTarget": false
+      },
+      "linuxColdInstallVerified": true,
+      "packagedHelperImportRoles": [
+        "A",
+        "B"
+      ],
+      "packagedHistoryHookImportRoles": [
+        "A",
+        "B"
+      ],
+      "metadataOnlyDifferenceBetweenA3AndB3": [
+        "package/package.json"
+      ],
+      "servicesRestarted": false,
+      "apiPid": 447589,
+      "databaseDataOrSchemaModified": false,
+      "deviceMaintenanceIntentsSubmittedByPublisher": 0,
+      "employeeActionsSubmittedByPublisher": 0,
+      "priorImmutableAssetsPreserved": true
+    }
   },
   "localHistoryRepairValidation": {
     "commit": "ce3c158556a32fe906e382b1cf816cb6d5a64eea",
@@ -180,8 +218,8 @@
     }
   },
   "liveDeviceAcceptance": {
-    "status": "pending",
-    "passed": false,
+    "status": "passed",
+    "passed": true,
     "onlyAuthorizedDevice": {
       "workspace": "bigtron",
       "deviceId": "device_bfd9a3d2-c2cc-4a36-8bd8-465bea492493",
@@ -205,19 +243,33 @@
       "scheduled": true,
       "targetBuild": "48b8c664f34c6378994b73cb6de71d2baef333db8c4a31fd547e36397fae21d0",
       "targetAuthenticatedHeartbeatConfirmed": false,
-      "scheduledIsNotUpgradeSuccess": true
+      "scheduledIsNotUpgradeSuccess": true,
+      "officialUpdateId": "291636d0-830e-4517-8e72-be721964b0b0",
+      "officialUpdateState": "failed",
+      "failureStage": "stop_client",
+      "reasonCode": "CONTROL_REJECTED",
+      "supersededByTerminalHistoryRepair": true
     },
     "unifiedProtocolLiveUpgrade": {
-      "started": false,
-      "targetBuild": "802c6e50745f4217ffe67b8b9b25f7c5b68013d1f8cf97b78eb245aab7e45eb2",
-      "targetAuthenticatedHeartbeatConfirmed": false,
-      "passed": false
+      "requestId": "client-update_7b78753f-5163-490e-b18d-c8d2ad92b1e0",
+      "started": true,
+      "createdAt": "2026-10-18T14:02:39.819Z",
+      "succeededAt": "2026-10-18T14:03:42.028Z",
+      "fromBuild": "93bca14d4aea8b63e15c038d38486cf773e0cba7ab63e1d3dc2a587cf8d69684",
+      "targetBuild": "bfc96edf59be31f1be50d3878a12d6c37d154fa108ef37c7a0d7d41ee7511927",
+      "state": "succeeded",
+      "heartbeatVerified": true,
+      "completionSource": "heartbeat",
+      "targetAuthenticatedHeartbeatConfirmed": true,
+      "currentDeviceBuild": "bfc96edf59be31f1be50d3878a12d6c37d154fa108ef37c7a0d7d41ee7511927",
+      "currentDeviceStatus": "online",
+      "currentDeviceSupported": true,
+      "lastObservedAt": "2026-10-18T14:04:44.961Z",
+      "auditId": "li-a3-b3-protocol-observations-c418e20dc924",
+      "fullPrivatePayloadCommitted": false,
+      "passed": true
     },
-    "remaining": [
-      "Verify A2 authenticated heartbeat on the authorized device",
-      "Run one unified-protocol update to B2 on that same device",
-      "Verify a new target-build authenticated heartbeat and final maintenance state"
-    ],
+    "remaining": [],
     "otherDevicesUpdated": false,
     "GFollowup": {
       "state": "failed",
@@ -230,6 +282,108 @@
       "remainingHistoricalBlockerCount": 2,
       "sourceClientReplaced": false,
       "dedicatedProtocolVerified": false
+    },
+    "overallAuditComplete": true,
+    "thirdBootstrap": {
+      "auditId": "a1d14f4a-0fe9-4491-bbed-aab53459fdef",
+      "registrationActionId": "action_8efe1069-23aa-4913-a2cf-9d18a04c094f",
+      "registrationActionStatus": "succeeded",
+      "officialUpdateId": "777b6281-d29f-432a-92c3-952bdee26cba",
+      "officialUpdateState": "complete",
+      "configurationPreserved": true,
+      "restoredRunning": true,
+      "preservedPrefix": "D:\\work\\nodejs\\node_global",
+      "realHealthAndNewFingerprintBuild": "93bca14d4aea8b63e15c038d38486cf773e0cba7ab63e1d3dc2a587cf8d69684",
+      "realHealthPid": 32644,
+      "legacyOfficialUpdaterBuild": "419b371f7a47aceffeba1bb7fbead307450d96c2f6339597308401b4ea2ff578",
+      "legacyBuildNotUsedAsInstalledIdentity": true,
+      "legacyFingerprintExplanation": "Old 161 updater fingerprint omits newly added script; live health and current fingerprint agree on A3",
+      "passed": true
+    },
+    "finalReadOnlyInstallationAudit": {
+      "status": "passed",
+      "passed": true,
+      "actionId": "action_d1aade15-00fb-4de3-9a3b-fa86cf456f7d",
+      "actionStatus": "succeeded",
+      "runtime": "Codex",
+      "completedAt": "2026-10-18T14:06:50.715Z",
+      "auditId": "li-final-receipt-action-latest",
+      "officialLocalB3InstallReceiptConfirmed": true,
+      "matchingOfficialResultCount": 1,
+      "newB3Pid": 40628,
+      "sourcePid": 32644,
+      "sourcePidChanged": true,
+      "healthConnectionState": "connected",
+      "healthBuild": "bfc96edf59be31f1be50d3878a12d6c37d154fa108ef37c7a0d7d41ee7511927",
+      "newClientBuildIdentity": "bfc96edf59be31f1be50d3878a12d6c37d154fa108ef37c7a0d7d41ee7511927",
+      "configPreserved": true,
+      "configSha256Matched": true,
+      "actualConfigurationDigestCommitted": false,
+      "officialResult": {
+        "state": "complete",
+        "oldBuild": "93bca14d4aea8b63e15c038d38486cf773e0cba7ab63e1d3dc2a587cf8d69684",
+        "clientBuild": "bfc96edf59be31f1be50d3878a12d6c37d154fa108ef37c7a0d7d41ee7511927",
+        "sha256": "6ac4ac3718a3b93dd1ea3ea9066a44feffbd1e20213c3884be4f2aced2f356aa",
+        "configurationPreserved": true,
+        "restoredRunning": true,
+        "originalPrefixPreserved": true,
+        "finishedAt": "2026-10-18T14:03:43.340Z"
+      },
+      "stopSafeFalseDuringObservation": {
+        "observed": true,
+        "reason": "this read-only diagnostic itself was executing",
+        "maintenanceFault": false,
+        "cleanupPerformed": false
+      },
+      "fullPrivatePayloadCommitted": false
+    },
+    "otherDevicesPreservedBuildPrefixes": [
+      "208",
+      "5a9"
+    ],
+    "finalServerReadOnlyRecheck": {
+      "at": "2026-10-18T14:09:08Z",
+      "requestState": "succeeded",
+      "authorizedDeviceCurrentBuild": "bfc96edf59be31f1be50d3878a12d6c37d154fa108ef37c7a0d7d41ee7511927",
+      "authorizedDeviceOnline": true,
+      "authorizedDeviceSupported": true,
+      "otherDevicesOnline": true,
+      "otherDeviceBuildPrefixesUnchanged": [
+        "208",
+        "5a9"
+      ],
+      "newUpgradeOrEmployeeActionSubmitted": false
     }
+  },
+  "terminalHistoryRepairValidation": {
+    "commit": "c418e20dc92469d077f22e53fd0ae3ed64ba4ce2",
+    "scopedPolicy": "strict terminal-failure history for conversation.execute; local-maintenance only",
+    "matchedHistoricalActionIds": [
+      "action_3986a96b-3bb9-4875-a58e-88ccc638098a",
+      "action_98154e52-cfc2-47f2-a4d3-b2012b2e7525"
+    ],
+    "originalHistoryBytesPreserved": true,
+    "originalExecutionExitInvented": false,
+    "formalPreservationRulesRelaxed": false,
+    "targetedTests": {
+      "total": 133,
+      "passed": 132,
+      "failed": 0,
+      "skipped": 1,
+      "skipReason": "Official a996 fixture unavailable; ZIWEI_A996_FIXTURE is not configured"
+    },
+    "rootTargetedTests": {
+      "total": 56,
+      "passed": 56,
+      "failed": 0,
+      "skipped": 0
+    },
+    "independentReviewTests": {
+      "total": 103,
+      "passed": 103,
+      "failed": 0,
+      "skipped": 0
+    },
+    "countsMayOverlap": true
   }
 }

@@ -2,7 +2,7 @@
 
 这是旧版 `ziwei_user` 首次装入专用远程升级能力的运维桥接。它只允许工作区 `bigtron` 的李金晋电脑，安装目录固定为 `D:\work\nodejs\node_global\node_modules\ziwei`，配置与用户数据仍在原来的 `C:\Users\25941\AppData\Local\Ziwei\ziwei_user`。不得用于其他电脑、迁移目录或批量发布。
 
-`register-li-bootstrap.ps1` 默认 `Validate`，不注册任务。显式 `Register` 才创建当前用户、有限权限、一次触发、零自动重试的计划任务，使维护程序在员工执行 Job 之外运行。脚本不调用强停，不改用户或系统环境变量；npm prefix 只在维护进程及其子进程内规范为现有 D 盘 prefix。
+`register-li-bootstrap.ps1` 默认 `Validate`，不注册任务。显式 `Register` 才创建当前用户、有限权限、一次触发、零自动重试的计划任务，使维护程序在员工执行 Job 之外运行。运行时绑定唯一的 Task Scheduler 任务实例、GUID、EnginePID 与当前 PowerShell 进程，不要求普通用户读取受保护的 SYSTEM 进程路径。脚本不调用强停，不改用户或系统环境变量；npm prefix 只在维护进程及其子进程内规范为现有 D 盘 prefix。
 
 桥接严格核对旧实例的设备、SID、安装路径、PID、build、boot nonce 和配置摘要。它等待全机活动执行、轮询、隔离执行归零及 Gateway 空闲。历史 `stopSafe` 与问题代码保留到工作目录的观察 JSON，由已安装的受信官方更新器执行 `recover_history → stop` 并决定能否停止。桥接不伪造退出证据，不清除历史记录，不绕过官方停止校验。暂停回执丢失或更新失败时，只允许恢复同一个旧实例的接单状态。
 
@@ -11,7 +11,7 @@
 发布桥接文件时，从已提交且已推送的运维提交读取精确 Git blob，使用不变的官方地址，例如：
 
 ```text
-https://qzelynth.top/downloads/cli/register-li-bootstrap-be6ebd4851c3.ps1
+https://qzelynth.top/downloads/cli/register-li-bootstrap-9c6ae3218e52.ps1
 https://qzelynth.top/downloads/cli/bootstrap-li-worker-21939efa2d02.mjs
 ```
 

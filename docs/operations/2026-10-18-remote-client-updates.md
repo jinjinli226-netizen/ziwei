@@ -82,3 +82,42 @@ A2 文件名为 `remote-client-bootstrap-ce3c158556a32fe906e382b1cf816cb6d5a64ee
 G 的373ba228维护任务实际进入官方更新器，update-291636d0 在 stop_client/CONTROL_REJECTED 失败，旧161cc客户端未替换。只读检查已确认G候选保留原4项历史和3项配送，另两条3986a96b、98154e52的普通聊天失败终态缺少原CLI退出字段，仍触发UNMAPPED_NATIVE_EXECUTION。两条本机原记录均唯一配对、conversation.execute、相同完整身份、r7/e13，且结果仅四字段失败信封；错误分别为手机MCP授权服务无法连接及请求超时。
 
 补充策略仅用于本机停止维护：精确上述通用结构的失败历史保留为LOCAL_HISTORY_RETAINED；不按action ID或错误文案特殊放行，不补造启动/退出，不改结果或去重，不放宽正式保存证明。新版本仍需真实员工全机空闲、无隔离/网关执行和精确daemon句柄无子进程，且不宣称历史业务进程已退出。此处为候选策略，后续追加实际设备升级与统一协议结果。
+
+
+## H 发布与李金晋电脑统一协议真机成功
+
+本节更新此前“设备待验收”状态。产品 H `c418e20dc92469d077f22e53fd0ae3ed64ba4ce2` 已先推 GitHub 双发布分支，再完成客户端专属发布；主站、网页仍为 C `a8b5b8cb4947829c10af22e39c0dd44d97307ca2`，主 API PID 保持 `447589`。H 只更新官方下载的 latest/发布元数据并追加不可变包，保留原 A1/A2、PS、JS，未重启服务器服务或改写数据库。通用 Windows 更新脚本仍是原 6390 字节及原 SHA-256。
+
+此前 G 的 `373ba228…` 首次安装尝试实际失败：官方更新 `291636d0-830e-4517-8e72-be721964b0b0` 同样停在 `stop_client` / `CONTROL_REJECTED`。现场的新 G 检查器已修复原损坏误判及三条 delivery，剩余阻塞是两条 `UNMAPPED_NATIVE_EXECUTION`：`action_3986a96b-3bb9-4875-a58e-88ccc638098a` 与 `action_98154e52-cfc2-47f2-a4d3-b2012b2e7525`。H 根据其实际封套补了仅供本地停止检查使用、限定 `conversation.execute` 的严格终态失败历史分类；保留原始字节和不确定性，不补造原任务退出，不将该例外扩展为任意成功或异常结构的放行。正式保全扫描保持原规则。
+
+H 定向检查 132 通过、1 项官方 a996 夹具条件跳过（未配置 `ZIWEI_A996_FIXTURE`）；主控另跑 56/56，独立审查重跑 103/103。各范围可能重叠，不相加计数。新 B3/A3 还完成真实 Linux 离线冷安装、包外 helper 和历史恢复入口导入、公网包字节校验。
+
+| 包 | 实际 build | SHA-256 | 大小 |
+| --- | --- | --- | --- |
+| B3：官方 latest | `bfc96edf59be31f1be50d3878a12d6c37d154fa108ef37c7a0d7d41ee7511927` | `6ac4ac3718a3b93dd1ea3ea9066a44feffbd1e20213c3884be4f2aced2f356aa` | 1153364 字节 |
+| A3：不可变首次安装包 | `93bca14d4aea8b63e15c038d38486cf773e0cba7ab63e1d3dc2a587cf8d69684` | `988f7697029fe0b3794be95f76fc5c9656fabb9c7c4ca7df31aca08bc96bb97d` | 1153385 字节 |
+
+A3 文件为 `remote-client-bootstrap-c418e20dc92469d077f22e53fd0ae3ed64ba4ce2-988f7697029f.tgz`，没有成为 latest。客户端发布审计标识为 `client-terminal-publication-c418e20dc924-c0a1d4c8d890`。
+
+### 首次装入维护能力：已成功
+
+仅对已授权的李金晋电脑安排 `a1d14f4a-0fe9-4491-bbed-aab53459fdef` 首次安装任务，登记原动作 `action_8efe1069-23aa-4913-a2cf-9d18a04c094f` 返回 `succeeded`。官方更新 `777b6281-d29f-432a-92c3-952bdee26cba` 实际返回 `complete`，`configurationPreserved:true`、`restoredRunning:true`，保留原 `D:\work\nodejs\node_global` 安装位置。真实健康接口和新版身份计算函数一致确认 A3 build `93bca14d4aea8b63e15c038d38486cf773e0cba7ab63e1d3dc2a587cf8d69684`、PID `32644`。
+
+旧 161 更新器自己的 `official.clientBuild` 为 `419b371f7a47aceffeba1bb7fbead307450d96c2f6339597308401b4ea2ff578`。其旧指纹算法没有纳入新增脚本，因此该字段不能作为实际新安装身份；本轮以真实健康接口及新版函数计算的 A3 身份为准，保留原回执差异，不把它改写成另一个安装结果。
+
+### 统一协议 A3 → B3：已成功
+
+真实维护请求 `client-update_7b78753f-5163-490e-b18d-c8d2ad92b1e0` 于 `2026-10-18T14:02:39.819Z` 创建，`2026-10-18T14:03:42.028Z` 由目标新进程认证心跳确认为 `succeeded`，`heartbeatVerified:true`、`completionSource:heartbeat`。随后设备列表显示 B3 build `bfc96edf59be31f1be50d3878a12d6c37d154fa108ef37c7a0d7d41ee7511927`、在线且 `supported:true`。这次从支持维护协议的 A3 领取并升级到 B3，独立于此前首次安装任务，属于统一远程升级的真实验收。
+
+原观察审计标识为 `li-a3-b3-protocol-observations-c418e20dc924`；完整私有 payload 不提交。另两台设备仍是原 `208…` 和 `5a9…` build，没有执行升级。
+
+### 最后只读安装与配置核对：已通过
+
+Creator 发出的真实 Codex 原动作 `action_d1aade15-00fb-4de3-9a3b-fa86cf456f7d` 于 `2026-10-18T14:06:50.715Z` 返回 `succeeded`。实际健康接口为 connected、PID `40628`、B3 build `bfc96edf59be31f1be50d3878a12d6c37d154fa108ef37c7a0d7d41ee7511927`；新版 `clientBuildIdentity` 对本机安装的计算结果完全相同，源 PID `32644` 已变化。配置摘要与升级前完全一致，仅记录 `configPreserved:true` / `configSha256Matched:true`，实际摘要不写入 Git。
+
+精确匹配该统一请求的本机官方结果只有一份：`state:complete`，旧 build 为 A3 `93bca14d4aea8b63e15c038d38486cf773e0cba7ab63e1d3dc2a587cf8d69684`，新 build 为上述 B3，包 SHA 与已发布 B3 的 `6ac4ac3718a3b93dd1ea3ea9066a44feffbd1e20213c3884be4f2aced2f356aa` 一致，`configurationPreserved:true`、`restoredRunning:true`，原安装 prefix 保持，完成时间为 `2026-10-18T14:03:43.340Z`。该官方结果与服务器的目标心跳成功相互印证。
+
+这条只读诊断进行期间健康中的 `stopSafe:false` 来自诊断自身正在执行，属于预期的活动保护，不是新的维护故障，不据此清理任务或再做升级。本机安装、配置保留及统一协议真机验收均已通过；完整私有回执不提交，审计标识为 `li-final-receipt-action-latest`。
+
+
+主控于 `2026-10-18T14:09:08Z` 最后再次只读查询统一请求与设备列表：请求仍为 succeeded，李金晋电脑仍为 B3、在线且 supported:true；另外两台 `208…` / `5a9…` 设备仍在线、build 未变。该复查没有触发新的升级或员工任务。
