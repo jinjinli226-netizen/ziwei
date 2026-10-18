@@ -69,3 +69,18 @@ Windows 包只覆盖 OAuth helper 和管理工具说明，继承其余 930 个�
 
 
 追加修复只在管理响应省略内联头像本体，返回avatarPresent、avatarBytes与avatarRepresented:false，省略不合成为avatar:null。统一getter覆盖已初始化/未初始化和create/replay/update/control/list回执；普通网页、移动端、URL头像、数据库原图、完整配置和版本/身份/原执行证据保持。795KB真实factory回归验证get和延期ack低于40KB、同幂等重放及实际apply后头像字节未改。42项联合回归、lint203及独立审查通过；主控另重跑39项全部通过。没有扩大30秒超时、改变查询/schema或授权。
+
+
+16:03:37，产品 `da35d3a6d652f26906f1dc5dfc44eb09df71e139` 已先推两条GitHub分支后发布API。实际目录 `/opt/ziwei/releases/compact-management-followup-da35d3a6d652-01ec30ce/v2`，PID424996，回退目录为原fbb。仅覆盖 `backend/bots.mjs`；实际混合树其余源、前端、官方Windows三文件、中控/Nginx以及数据库文件身份/schema保持。停机前在实际候选树执行两组真实内存测试通过，无监听、无员工调用。未重打Windows包，当前公司台式88继续可用。
+
+随后从TK原聊天提交唯一复验消息 `tk-viral-after-avatar-20261018-47d1`，管理操作仍复用原幂等键 `tk-viral-repair-fbb52e2-20261018-417c`。前一轮get明确失败且无update，不创建第二套连接；本轮真实结果继续记录。
+
+
+16:04:46复验原动作 `action_da74c660-638d-4a7f-93d8-7c56bb0ed48e` 真实完成，16:05:47根及树退出0，取得自己的延期意图 `bot-config_ecfc5a83-da74-46b0-b155-8055a7103810`。同配置无变化，因此仍r4/e7；16:05:48自动发起原生验证 `action_3ea83e17-8fd9-48f3-908e-feee27cf9be4`，16:05:52成功且树退出0，随后自动原生授权 `action_26adb3d7-b75f-4611-a8fc-e5e4322e461f`。管理GET在Nginx实际返回200，gzip正文从499989字节降到17177字节；本轮get/update均成功，自动应用及校验链真实通过。
+
+新授权动作16:06:32真实失败，根和树退出证据完整，公开原始码 `MCP_OAUTH_RELAY_FAILED`。原回执未保存底层cause/status/phase；此码合并网络及非200，不能凭此声称viral服务或代理不可用。Nginx进一步只读证实对当前action的relay/start POST已抵达，于16:06:14记为499/零字节，后续publish/callback不存在。
+
+源码确认MCP连接模块四处仅需id/config/version/binding的状态读，仍使用mobile完整历史视图；持久延期轮询每tick会重复该路径。追加窄修将这四处改管理投影，保留context/作用域和begin/deviceAction/authorizeBotStart，不改原10秒网络截止、不改schema。当前未知此开销是否解释全部现场等待，最终仍以新连接实际回执为准。未发送原计划的员工网络诊断，避免不必要的终端执行。
+
+
+四处MCP读取窄修经57项联合回归、lint203及独立审查通过；主控另18项、独审15项均全部通过。新增120份大旧历史的full-action读取陷阱，覆盖start/幂等重放/list/read/cancel/deferred快照；真实工厂完成延期应用、验证、恢复、同一OAuth动作五次等待、浏览器handoff和原native树退出后完成，期间不读取旧完整历史、不重复派发。只覆盖连接服务模块，客户端88保持。

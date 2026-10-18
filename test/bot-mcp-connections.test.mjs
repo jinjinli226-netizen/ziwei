@@ -146,3 +146,85 @@ test('deferred first admission retains ordinary client capability and device-sco
   assert.throws(()=>f.service.deferredHandlers.connectMcp({...request,context:{deviceScope:'another-device',deviceCredentialDeviceId:'another-device'}}),{code:'BOT_NOT_FOUND'});
   assert.equal(f.repo.db.prepare('SELECT count(*) n FROM a2a_actions').get().n,count);
 });
+
+function forbidFullHistoryReads(f) {
+  const db=f.repo.db,workspaceId=f.repo.getWorkspace('test-111').id;
+  const payload=f.repo.getA2AAction(f.bot.instance.provisioning.actionId).payload;
+  const privateHistory='OLD_SESSION_CONTENT_MUST_NOT_BE_RELOADED_'.repeat(3000);
+  const insert=db.prepare('INSERT INTO a2a_actions(id,workspace_id,agent_id,type,payload_json,dedupe_key,status,created_at,result_json) VALUES(?,?,?,?,?,?,?,?,?)');
+  const event=db.prepare('INSERT INTO a2a_action_events(id,action_id,type,data_json,created_at) VALUES(?,?,?,?,?)');
+  const historyPayload=JSON.stringify({...payload,prompt:privateHistory,nativeOperation:{resource:'sessions',operation:'read',input:{sessionId:'old'}}});
+  const historyResult=JSON.stringify({output:privateHistory,nativeOperation:{schemaVersion:2,employeeId:f.bot.id,revision:1,resource:'sessions',operation:'read',status:'succeeded',data:{message_count:500,messages:[{content:privateHistory}]}}});
+  for(let n=0;n<120;n++){
+    const id=`forbidden-full-history-${n}`,stamp=new Date(Date.parse('2020-01-01T00:00:00Z')+n*1000).toISOString();
+    insert.run(id,workspaceId,'ziwei_user','hermes.bot.native',historyPayload,id,'succeeded',stamp,historyResult);
+    event.run('event-'+id,id,'succeeded',JSON.stringify({output:privateHistory}),stamp);
+  }
+  const original=f.repo.getA2AAction,reads=[];
+  f.repo.getA2AAction=function(id,...args){
+    if(String(id).startsWith('forbidden-full-history-')){reads.push(id);throw new Error('Connection state attempted a complete historical action read');}
+    return original.call(this,id,...args);
+  };
+  return {reads,assertBounded:value=>assert.equal(JSON.stringify(value).includes('OLD_SESSION_CONTENT_MUST_NOT_BE_RELOADED'),false)};
+}
+
+test('connection start, stable replay, list/read/cancel and deferred snapshots never materialize old action history',t=>{
+  const f=fixture(t),history=forbidFullHistoryReads(f),request=deferredRequest(f);
+  const first=f.start().connection;
+  const duplicate=f.start().connection;assert.equal(duplicate.id,first.id);
+  f.repo.ackA2AAction(first.id,{deviceId:f.device.deviceId});f.service.begin(first.id,f.credential);
+  f.service.publish(first.id,f.credential,{authorizationUrl:f.authorization()});
+  const stable={...request,idempotencyKey:f.input.idempotencyKey};
+  for(const reply of [
+    f.service.list('test-111',f.bot.id),
+    f.service.read('test-111',f.bot.id,first.id),
+    f.service.deferredHandlers.connectMcp(stable),
+    f.service.deferredHandlers.readMcp({...stable,actionId:first.id}),
+    f.service.cancel('test-111',f.bot.id,first.id),
+  ])history.assertBounded(reply);
+  assert.equal(f.service.read('test-111',f.bot.id,first.id).connection.status,'cancelled');
+  assert.deepEqual(history.reads,[]);
+});
+
+test('the real deferred runner polls one OAuth action through browser handoff and native completion without full-history reads',t=>{
+  const f=fixture(t),db=f.repo.db,ws=f.repo.getWorkspace('test-111'),owner='relay-tick-owner';
+  db.prepare('INSERT INTO members(id,workspace_id,user_id,name,email,role,joined_at) VALUES(?,?,?,?,?,?,?)').run('relay-tick-member',ws.id,owner,'Owner','relay-tick@fixture.invalid','owner',new Date().toISOString());
+  const context={actorUserId:owner,enforceEmployeeVisibility:true};
+  const tree={launched:true,rootPid:918,rootConfirmed:true,rootExitCode:0,treeConfirmed:true,activeProcesses:0,cancelled:false};
+  const completeValidation=action=>{
+    f.repo.ackA2AAction(action.id,{deviceId:f.device.deviceId});
+    f.repo.resultA2AAction(action.id,{deviceId:f.device.deviceId,status:'succeeded',result:{processExit:tree,botValidation:{schemaVersion:1,valid:true,employeeId:f.bot.id,revision:action.payload.hermesBot.revision}}});
+  };
+  completeValidation(f.bots.validate('test-111',f.bot.id,{expectedRevision:1,idempotencyKey:'tick-initial-validation'},context).action);
+  f.bots.control('test-111',f.bot.id,{expectedRevision:1,expectedControlEpoch:1,operation:'activate'},context);
+  const history=forbidFullHistoryReads(f);
+  const current=f.bots.get('test-111',f.bot.id,context,{view:'management'});
+  const source=f.repo.addConversationMessage(f.bot.main_conversation_id,{content:'isolated deferred original turn'}).execution;
+  f.repo.ackA2AAction(source.id,{deviceId:f.device.deviceId});
+  const queued=f.bots.update('test-111',f.bot.id,{deferUntilIdle:true,expectedRevision:current.revision,expectedControlEpoch:current.control_epoch,idempotencyKey:'bounded-relay-deferred',config:{...current.config,memory:{...current.config.memory,enabled:false}},connectMcpServers:['example']},context);
+  f.bots.deferredConfig.start({...f.service.deferredHandlers,pollIntervalMs:0});
+  try {
+    f.repo.resultA2AAction(source.id,{deviceId:f.device.deviceId,status:'succeeded',result:{processExit:tree}});
+    f.bots.deferredConfig.drain();
+    const latest=()=>f.bots.deferredConfig.latest(ws.id,f.bot.id);
+    completeValidation(f.repo.getA2AAction(latest().validationActionId));f.bots.deferredConfig.drain();
+    const connection=latest().connections[0];assert.equal(latest().state,'connecting');assert.equal(connection.status,'queued');
+    const native=f.repo.getA2AAction(connection.actionId),count=db.prepare('SELECT count(*) n FROM a2a_actions').get().n;
+    f.repo.ackA2AAction(native.id,{deviceId:f.device.deviceId});f.service.begin(native.id,f.credential);
+    f.service.publish(native.id,f.credential,{authorizationUrl:f.authorization()});
+    for(let tick=0;tick<5;tick++){
+      f.bots.deferredConfig.drain();assert.equal(latest().phase,'authorization_required');
+      assert.equal(latest().connections[0].actionId,native.id);
+      assert.equal(f.service.read('test-111',f.bot.id,native.id,context).connection.status,'authorization_required');
+      assert.deepEqual(f.service.callback(native.id,f.credential),{status:'waiting'});
+    }
+    assert.equal(db.prepare('SELECT count(*) n FROM a2a_actions').get().n,count);
+    f.service.deliver({state:'isolated-state',code:'isolated-browser-code'});
+    f.bots.deferredConfig.drain();assert.equal(latest().state,'connecting');
+    assert.equal(f.service.read('test-111',f.bot.id,native.id,context).connection.status,'connecting');
+    f.repo.resultA2AAction(native.id,{deviceId:f.device.deviceId,status:'succeeded',result:{processExit:tree,nativeOperation:{schemaVersion:2,employeeId:f.bot.id,revision:native.payload.hermesBot.revision,resource:'mcp',operation:'authorize',status:'succeeded',data:{connected:true,tools:[{name:'lookup'}]}}}});
+    f.bots.deferredConfig.drain();const done=latest();assert.equal(done.id,queued.deferredConfig.id);assert.equal(done.state,'completed');assert.equal(done.connections[0].actionId,native.id);
+    const ready=f.service.read('test-111',f.bot.id,native.id,context).connection;assert.equal(ready.status,'connected');assert.equal(ready.toolsCount,1);history.assertBounded(ready);
+    assert.deepEqual(history.reads,[]);assert.equal(db.prepare('SELECT count(*) n FROM a2a_actions').get().n,count);
+  } finally {f.bots.deferredConfig.stop();}
+});

@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "checkedAt": "2026-10-18T08:03:38Z",
+  "state": "acceptance_in_progress",
+  "workspace": "bigtron",
+  "employeeId": "employee_1743b9a2-dd8c-4a51-9b7d-0d25414aa234",
+  "originalDeferred": {
+    "intentId": "bot-config_cd619a3a-bce1-47d7-b8cb-0f6c8e03ce22",
+    "selfSubmitted": true,
+    "appliedRevision": 4,
+    "activatedEpoch": 7,
+    "validationSucceededWithTreeExit": true,
+    "connectionSucceeded": false,
+    "connectionFailure": "MCP_OAUTH_REQUIRES_DEPENDENCY"
+  },
+  "companyUpdate": {
+    "clientBuild": "88b2ea9f41c10c53498ecb524ad1dc5d836813440f804a61050f0e98da9cc14e",
+    "pid": 9784,
+    "freshHeartbeatObserved": true,
+    "sourceActionId": "action_d901e533-2fac-4f2a-835c-d1396d8a26d3",
+    "sourceTreeExitConfirmed": true,
+    "unknownHistoricalBusinessProofNotRewritten": true
+  },
+  "managementReadFailure": {
+    "sourceActionId": "action_93ef6da9-9e6d-4b5d-8525-df9208aa3810",
+    "getFailedBeforeUpdate": true,
+    "sourceTreeExitConfirmed": true,
+    "inlineAvatarBytes": 794807,
+    "actualConfigBytes": 557,
+    "originalHttpStatus": 200,
+    "originalCompressedResponseBytes": 499989
+  },
+  "apiFollowup": {
+    "commit": "da35d3a6d652f26906f1dc5dfc44eb09df71e139",
+    "pid": 424996,
+    "deployed": true,
+    "onlyOverlay": "backend/bots.mjs",
+    "databaseIdentityAndSchemaUnchanged": true,
+    "officialClientAndFrontendPreserved": true,
+    "regressionTests": 42,
+    "independentReviewPassed": true
+  },
+  "newDeferredKey": "tk-viral-repair-fbb52e2-20261018-417c",
+  "newUiMarker": "tk-viral-after-avatar-20261018-47d1",
+  "connectedVerified": false,
+  "currentBusinessSessionLoadedProven": false
+}

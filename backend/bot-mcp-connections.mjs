@@ -60,7 +60,9 @@ export function createBotMcpConnections(repo,bots,{apiBase,now=Date.now,maxFlows
   function actionFor(id) {return repo.getA2AAction(id,{eventView:'none'});}
   function isConnection(action) {const op=action?.payload?.nativeOperation;return action?.type==='hermes.bot.native'&&op?.resource==='mcp'&&['authorize','inspect'].includes(op.operation);}
   function browserAction(slug,id,actionId,context) {
-    const bot=bots.get(slug,id,context,{view:'mobile'}),action=actionFor(actionId);
+    // Connection snapshots need current scoped configuration and identity, not
+    // the mobile workbench's complete execution history on every relay tick.
+    const bot=bots.get(slug,id,context,{view:'management'}),action=actionFor(actionId);
     if(!isConnection(action)||action.payload.hermesBot?.workspace!==slug||action.payload.hermesBot.employeeId!==id)fail('MCP_CONNECTION_NOT_FOUND','未找到此员工的连接。',404);
     return {bot,action};
   }
@@ -80,7 +82,7 @@ export function createBotMcpConnections(repo,bots,{apiBase,now=Date.now,maxFlows
   function start(slug,id,input={},context={}) {
     if(Object.keys(input).some(key=>!['server','expectedRevision','expectedControlEpoch','idempotencyKey','workspace'].includes(key)))fail('BOT_NATIVE_INPUT_INVALID','连接请求包含未知字段。',400);
     if(input.workspace!==undefined&&input.workspace!==slug)fail('BOT_WORKSPACE_CONFLICT','连接请求与当前工作区不一致。',403);
-    const bot=bots.get(slug,id,context,{view:'mobile'});
+    const bot=bots.get(slug,id,context,{view:'management'});
     const server=typeof input.server==='string'&&Object.hasOwn(bot.config.mcpServers||{},input.server)?bot.config.mcpServers[input.server]:null;
     if(!server||server.enabled===false)fail('MCP_SERVER_NOT_CONFIGURED','请先保存并启用此员工的 MCP 配置。',400);
     const device=repo.listDevices(slug).find(item=>item.id===bot.employee.target_device_id);
@@ -92,7 +94,7 @@ export function createBotMcpConnections(repo,bots,{apiBase,now=Date.now,maxFlows
     return {connection:snapshot(action,bot)};
   }
   function list(slug,id,context={}) {
-    const bot=bots.get(slug,id,context,{view:'mobile'}),seen=new Set(),connections=[];
+    const bot=bots.get(slug,id,context,{view:'management'}),seen=new Set(),connections=[];
     const rows=repo.db.prepare("SELECT id FROM a2a_actions WHERE rowid IN (SELECT max(rowid) FROM a2a_actions WHERE workspace_id=(SELECT id FROM workspaces WHERE slug=?) AND type='hermes.bot.native' AND json_extract(payload_json,'$.employeeId')=? AND json_extract(payload_json,'$.nativeOperation.resource')='mcp' AND json_extract(payload_json,'$.nativeOperation.operation') IN ('inspect','authorize') GROUP BY json_extract(payload_json,'$.nativeOperation.input.server')) ORDER BY rowid DESC").all(slug,id);
     for(const row of rows) {const action=actionFor(row.id),name=action.payload.nativeOperation.input.server;if(seen.has(name)||!Object.hasOwn(bot.config.mcpServers,name))continue;seen.add(name);connections.push(snapshot(action,bot));}
     return {connections};
@@ -107,7 +109,7 @@ export function createBotMcpConnections(repo,bots,{apiBase,now=Date.now,maxFlows
   const deferredHandlers=Object.freeze({
     connectMcp({workspace,employeeId,server,idempotencyKey,context={}}) {
       if(typeof idempotencyKey!=='string'||!/^[A-Za-z0-9._:-]{1,160}$/.test(idempotencyKey))fail('IDEMPOTENCY_KEY_REQUIRED','必须提供稳定 idempotencyKey',400);
-      const bot=bots.get(workspace,employeeId,context,{view:'mobile'});
+      const bot=bots.get(workspace,employeeId,context,{view:'management'});
       const owner=context.actorUserId||context.deviceCredentialDeviceId||'authorized-mcp';
       const saved=repo.db.prepare('SELECT resource_id FROM management_requests WHERE workspace_id=(SELECT id FROM workspaces WHERE slug=?) AND kind=? AND request_key=?')
         .get(workspace,`bot:native:${employeeId}:${owner}`,idempotencyKey);
