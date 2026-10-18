@@ -96,14 +96,14 @@ async function fixture(width) {
     if (native && method === 'POST') { const target = native[2] === 'collaboration' ? control.sends : control.nativePosts; target.push(body); return json(route, { action: nativeAction(native[1], body) }, 202); }
     const action = p.match(new RegExp(`^${base}/actions/([^/]+)$`));
     if (action && method === 'GET') { const value = actions.get(action[1]); if (value?.status === 'pending') value.finish(); return value ? json(route, value) : json(route, { error: 'No original action' }, 404); }
-    if (p === `${base}/mobile/notifications`) return json(route, { schemaVersion: 1, accountId, workspaceId, workspaceSlug: slug, items: url.searchParams.has('cursor') ? [] : notices, nextCursor: 'fixturecursor', hasMore: false, ...(url.searchParams.has('history') || url.searchParams.has('limit') && !url.searchParams.has('cursor') ? { historyWindow: true } : {}) });
-    const notice = p.match(new RegExp(`^${base}/mobile/notifications/([^/]+)$`));
+    if (p === `${base}/mobile/notifications-v2`) return json(route, { schemaVersion: 2, accountId, workspaceId, workspaceSlug: slug, items: url.searchParams.has('cursor') ? [] : notices, nextCursor: 'fixturecursor', hasMore: false, ...(url.searchParams.has('history') || url.searchParams.has('limit') && !url.searchParams.has('cursor') ? { historyWindow: true } : {}) });
+    const notice = p.match(new RegExp(`^${base}/mobile/notifications-v2/items/([^/]+)$`));
     if (notice && method === 'GET') {
       if (control.denyResolve) return json(route, { error: '当前已无权查看这条提醒' }, 403);
       const original = notices.find(item => item.id === notice[1]);
       // Intentionally update the target: navigation must follow the fresh
       // authorized resolver, never the originally cached notification row.
-      return json(route, { schemaVersion: 1, accountId, workspaceId, workspaceSlug: slug, item: { ...original, target: { kind: 'task', id: 'done-task' } } });
+      return json(route, { schemaVersion: 2, accountId, workspaceId, workspaceSlug: slug, item: { ...original, target: { kind: 'task', id: 'done-task' } } });
     }
     if (method !== 'GET') errors.push({ width, message: `Unexpected fixture business mutation ${method} ${p}` });
     else errors.push({ width, message: `Unhandled GET ${p}` });
@@ -193,7 +193,7 @@ try {
     await noOverflow(page, `notifications-${width}`); await capture(page, `notifications-${width}-in-app`);
     await click(page, 'notifications-target', 'notice-task');
     await page.getByRole('heading', { name: '已经完成的工作', exact: true }).waitFor();
-    assert.ok(requests.some(request => request.width === width && request.method === 'GET' && request.path.endsWith('/mobile/notifications/notice-task')));
+    assert.ok(requests.some(request => request.width === width && request.method === 'GET' && request.path.endsWith('/mobile/notifications-v2/items/notice-task')));
     assert.ok(requests.some(request => request.width === width && request.method === 'GET' && request.path === '/api/tasks/done-task'));
     await click(page, 'back'); await page.locator('.bottom-nav [data-action=navigate][data-tab=chat]').click(); await click(page, 'notifications-open');
     const writes = requests.filter(request => request.width === width && request.method !== 'GET').length;

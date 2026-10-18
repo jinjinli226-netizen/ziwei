@@ -372,10 +372,10 @@ test('forward receipt accepts server chat ordering, legacy null source and an om
   assert.equal(value.execution.id,'run');
 });
 
-test('push clicks resolve only an encoded opaque delivery over a cancellable authenticated GET', async () => {
+test('first-party clicks use the encoded workspace and event with a cancellable authenticated GET', async () => {
   const calls = [], api = createApi({ fetchImpl: async (url, options) => { calls.push({ url, options }); return response({ schemaVersion: 1 }); } });
   const controller = new AbortController();
-  await api.mobilePushDelivery('opaque/identifier', { signal: controller.signal, method: 'POST', body: { target: 'forged-chat' } });
-  assert.equal(calls.length, 1); assert.equal(calls[0].url, '/api/mobile/push/deliveries/opaque%2Fidentifier');
+  await api.mobileNotification('work/one', 'event/identifier', { signal: controller.signal, method: 'POST', body: { target: 'forged-chat' } });
+  assert.equal(calls.length, 1); assert.equal(calls[0].url, '/api/workspaces/work%2Fone/mobile/notifications-v2/items/event%2Fidentifier');
   assert.equal(calls[0].options.method, 'GET'); assert.equal(calls[0].options.credentials, 'include'); assert.equal(calls[0].options.body, undefined);
 });

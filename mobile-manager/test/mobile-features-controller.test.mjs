@@ -9,7 +9,7 @@ const workspaces=[{id:'workspace_1',slug:'work-one',role:'owner'},{id:'workspace
 const employees=[{id:'employee_one',name:'员工甲',runtime:'Other'}];
 const eventId='event_original';
 const item=(target={kind:'conversation',id:'original_chat',employeeId:'employee_one',messageId:'original_message'})=>({id:eventId,kind:'execution.completed',title:'工作已完成',summary:'查看结果',createdAt:'2026-10-17T11:00:00.000Z',executionState:'confirmed',target});
-const envelope=(slug='work-one',extra={})=>({schemaVersion:1,accountId:'user_one',workspaceId:workspaces.find(row=>row.slug===slug).id,workspaceSlug:slug,...extra});
+const envelope=(slug='work-one',extra={})=>({schemaVersion:2,accountId:'user_one',workspaceId:workspaces.find(row=>row.slug===slug).id,workspaceSlug:slug,...extra});
 function storageFixture(){const values=new Map();return {get length(){return values.size;},key:i=>[...values.keys()][i],getItem:k=>values.get(k)??null,setItem:(k,v)=>values.set(k,String(v)),removeItem:k=>values.delete(k),values};}
 function deferred(){let resolve;const promise=new Promise(yes=>{resolve=yes;});return {promise,resolve};}
 function fixture(t,overrides={},nativeOverrides={}){
@@ -79,8 +79,8 @@ test('mobile APIs encode identifiers and request only explicit mobile action pro
   await api.botNativeAction('work/one','employee/one',{resource:'groups'});await api.collaborateBot('work/one','employee/one',{mode:'group'});
   assert.deepEqual(calls.map(row=>[row.path,row.method]),[
     ['/api/workspaces/work%2Fone/actions/action%3Fone?view=mobile','GET'],
-    ['/api/workspaces/work%2Fone/mobile/notifications?cursor=a_b&limit=20','GET'],
-    ['/api/workspaces/work%2Fone/mobile/notifications/event%3Fone','GET'],
+    ['/api/workspaces/work%2Fone/mobile/notifications-v2?cursor=a_b&limit=20','GET'],
+    ['/api/workspaces/work%2Fone/mobile/notifications-v2/items/event%3Fone','GET'],
     ['/api/workspaces/work%2Fone/bots/employee%2Fone/native/actions','POST'],
     ['/api/workspaces/work%2Fone/bots/employee%2Fone/collaboration','POST'],
   ]);
@@ -95,31 +95,31 @@ test('an unavailable Bot list item preserves its prior execution and other emplo
   assert.equal(f.state.bots.find(row=>row.id==='employee_two').latest_run.id,'second_action');assert.equal(f.state.resources.bots.phase,'error');
 });
 
-test('a system push opens its freshly authorized original employee message and keeps the current draft',async t=>{
-  const deliveryId='e'.repeat(32),presence=[];
-  const f=fixture(t,{mobilePushDelivery:async id=>{
-    f.calls.push(['push-resolve',id]);return envelope('work-one',{item:{...item(),id:'new-reply',kind:'message.received',executionState:'not_applicable'}});
+test('a self-hosted notification opens its freshly authorized original employee message and keeps the current draft',async t=>{
+  const eventId='new-reply',presence=[];
+  const f=fixture(t,{mobileNotification:async (_slug,id)=>{
+    f.calls.push(['message-resolve',id]);return envelope('work-one',{item:{...item(),id:'new-reply',kind:'message.received',executionState:'not_applicable'}});
   }},{
-    getStatus:()=>JSON.stringify({available:true,enabled:true,subscriptionState:'enabled',permission:'granted',accountId:'user_one',workspaceSlug:'work-one',pendingTarget:true,deliveryMode:'push',pushConfigured:true,pushAvailable:true}),
-    consumePendingTarget:()=>JSON.stringify({accountId:'user_one',workspaceId:'workspace_1',workspaceSlug:'work-one',deliveryId}),
+    getStatus:()=>JSON.stringify({available:true,enabled:true,subscriptionState:'enabled',permission:'granted',accountId:'user_one',workspaceSlug:'work-one',pendingTarget:true,deliveryMode:'selfhost',foregroundServiceRunning:true,connectionState:'connected'}),
+    consumePendingTarget:()=>JSON.stringify({accountId:'user_one',workspaceId:'workspace_1',workspaceSlug:'work-one',eventId}),
     setForeground:id=>presence.push(id),
   });
   await f.controller.actions.chat({id:'employee_one'});await f.controller.change({name:'draft',value:'尚未发送的草稿'});
   await f.controller.actions['notifications-open']();
   assert.equal(f.state.page,'chat');assert.equal(f.state.selectedEmployee.id,'employee_one');assert.equal(f.state.conversation.id,'original_chat');
   assert.equal(f.state.chatJump.messageId,'original_message');assert.equal(f.state.draft,'尚未发送的草稿');
-  assert(f.calls.some(row=>row[0]==='push-resolve'&&row[1]===deliveryId));assert.equal(presence.at(-1),'original_chat');
+  assert(f.calls.some(row=>row[0]==='message-resolve'&&row[1]===eventId));assert.equal(presence.at(-1),'original_chat');
   assert(f.state.notifications.readIds.includes('new-reply'));
 });
 
-test('a denied system push keeps the saved composer and shows the permission error in reminders',async t=>{
-  const deliveryId='f'.repeat(32),f=fixture(t,{mobilePushDelivery:async()=>{throw Object.assign(new Error('这条通知当前不可查看'),{status:404});}},{
+test('a denied self-hosted notification keeps the saved composer and shows the permission error in reminders',async t=>{
+  const eventId='denied-reply',f=fixture(t,{mobileNotification:async()=>{throw Object.assign(new Error('这条通知当前不可查看'),{status:404});}},{
     getStatus:()=>JSON.stringify({available:true,enabled:true,subscriptionState:'enabled',permission:'granted',accountId:'user_one',workspaceSlug:'work-one',pendingTarget:true}),
-    consumePendingTarget:()=>JSON.stringify({accountId:'user_one',workspaceId:'workspace_1',workspaceSlug:'work-one',deliveryId}),
+    consumePendingTarget:()=>JSON.stringify({accountId:'user_one',workspaceId:'workspace_1',workspaceSlug:'work-one',eventId}),
   });
   await f.controller.actions.chat({id:'employee_one'});await f.controller.change({name:'draft',value:'拒绝通知后也保留'});
   await f.controller.actions['notifications-open']();
-  assert.equal(f.state.page,'notifications');assert.match(f.state.notifications.pushError,/当前不可查看/);
+  assert.equal(f.state.page,'notifications');assert.match(f.state.notifications.targetError,/当前不可查看/);
   assert.equal(createChatPreferences({storage:f.storage}).getDraft({accountId:'user_one',workspaceId:'work-one'},'employee_one'),'拒绝通知后也保留');
   assert.equal(f.calls.some(row=>row[0]==='conversation'),false);assert.deepEqual(f.state.notifications.readIds,[]);
 });

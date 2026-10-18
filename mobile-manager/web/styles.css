@@ -688,3 +688,5 @@ details[open] > summary > .icon:last-child { transform: rotate(180deg); }
 .notification-item-meta { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: 11px; color: #af9cbc; }
 .notification-open-label { display: block; margin-top: 13px; font-size: 12px; color: #a27bcb; }.notification-item.is-read .notification-item-heading { color: #9a8ba7; }
 @media(max-width:350px) { .notification-controls > .button { width: 100%; }.group-room > .button { width: 100%; }.task-filters button { padding-left: 5px; padding-right: 5px; } }
+
+.notification-item .notification-target > p { white-space: pre-wrap; overflow-wrap: anywhere; }

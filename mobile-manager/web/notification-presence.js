@@ -3,8 +3,8 @@ import { accountId, workspaceId } from './model.js';
 const ID = /^[A-Za-z0-9._:-]{1,160}$/;
 
 // Presence is a short-lived hint for one currently visible chat, never a read
-// receipt or authority to subscribe to another user's messages. Native owns
-// the installation proof; the server checks the current session and chat.
+// receipt or authority to read another user's messages. Native suppresses
+// only the current visible chat; every server read still checks its session.
 export function createNotificationPresence({ state, native, visible = () => !globalThis.document?.hidden, now = Date.now } = {}) {
   let previous = '', lastSent = 0, active = false, disposed = false;
   function send(conversationId) {

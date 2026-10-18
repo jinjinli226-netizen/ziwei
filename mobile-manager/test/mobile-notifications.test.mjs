@@ -16,7 +16,7 @@ function fixture(t, overrides = {}) {
   const state = { ...initialState(), phase: 'ready', user: { user_id: 'user-one' }, workspace: { id: 'workspace-db-one', slug: 'one', role: 'owner' },
     workspaces: [{ id: 'workspace-db-one', slug: 'one' }, { id: 'workspace-db-two', slug: 'two' }] };
   const calls = [], failures = [], opened = [], frames = [], storage = overrides.storage || memoryStorage();
-  const envelope = (values = {}, scope = {}) => ({ schemaVersion: 1, accountId: scope.account || state.user.user_id, workspaceId: scope.db || state.workspace.id, workspaceSlug: scope.slug || state.workspace.slug,
+  const envelope = (values = {}, scope = {}) => ({ schemaVersion: 2, accountId: scope.account || state.user.user_id, workspaceId: scope.db || state.workspace.id, workspaceSlug: scope.slug || state.workspace.slug,
     nextCursor: 'cursor1', hasMore: false, historyWindow: true, items: [item()], ...values });
   const api = { mobileNotifications: async (workspace, query, options) => { calls.push({ kind: 'list', workspace, query, options }); return envelope(query.cursor ? { historyWindow: undefined, nextCursor: query.cursor, items: [] } : {}); },
     mobileNotification: async (workspace, id, options) => { calls.push({ kind: 'resolve', workspace, id, options }); const result = envelope({ item: item(id) }); delete result.items; return result; }, ...overrides.api };
@@ -87,12 +87,12 @@ test('workspace DB identity is required and a recreated slug cannot inherit old 
 
 for (const [label, mutate] of [
   ['account', value => { value.accountId = 'other-user'; }], ['workspace slug', value => { value.workspaceSlug = 'two'; }],
-  ['workspace DB id', value => { value.workspaceId = 'other-db'; }], ['schema', value => { value.schemaVersion = 2; }],
+  ['workspace DB id', value => { value.workspaceId = 'other-db'; }], ['schema', value => { value.schemaVersion = 1; }],
   ['cursor', value => { value.nextCursor = 'https://evil.invalid'; }], ['cursor size', value => { value.nextCursor = 'a'.repeat(2049); }],
   ['recent hasMore', value => { value.hasMore = true; }], ['recent history claim', value => { delete value.historyWindow; }],
   ['item bounds', value => { value.items = Array.from({ length: 51 }, (_, index) => item(`event-${index}`)); }],
-  ['duplicate events', value => { value.items = [item(), item()]; }], ['byte title', value => { value.items[0].title = '中'.repeat(41); }],
-  ['byte summary', value => { value.items[0].summary = '中'.repeat(81); }], ['unknown kind', value => { value.items[0].kind = 'group.mention'; }],
+  ['duplicate events', value => { value.items = [item(), item()]; }], ['byte title', value => { value.items[0].title = '中'.repeat(54); }],
+  ['byte summary', value => { value.items[0].summary = '中'.repeat(342); }], ['unknown kind', value => { value.items[0].kind = 'group.mention'; }],
   ['completion proof label', value => { value.items[0].executionState = 'uncertain'; }], ['invalid event id', value => { value.items[0].id = '../event'; }],
   ['date', value => { value.items[0].createdAt = 'not-date'; }], ['target URL', value => { value.items[0].target.url = 'https://evil.invalid'; }],
   ['target kind', value => { value.items[0].target.kind = 'group'; }], ['conversation owner', value => { delete value.items[0].target.employeeId; }],
@@ -259,7 +259,7 @@ test('late native permission or click reads cannot configure/navigate after disp
 
 test('view includes accessible actions, unread labels and fixed delay guidance without exposing IDs as URLs', async t => {
   const native = nativeStub(), f = fixture(t, { native }); await f.mobile.open(); const html = renderMobileNotifications(f.state);
-  for (const label of ['最近提醒', '全部标为已读', '开启系统提醒', '系统通知设置', '未读：员工', '查看原聊天', '15 分钟', '重启后需再打开']) assert(html.includes(label));
+  for (const label of ['最近提醒', '全部标为已读', '开启消息通知', '系统通知设置', '未读：员工', '查看原聊天', '15 分钟', '重启手机后需重新打开']) assert(html.includes(label));
   assert.doesNotMatch(html, /href=/); assert.match(html, /data-action="notifications-target"/); assert.match(html, /aria-label="最近提醒"/);
 });
 
@@ -295,23 +295,22 @@ test('a permission intent expires after two minutes even when the Activity pause
   assert.equal(native.calls.some(call=>call[0]==='configure'||call[0]==='clear'),false);
 });
 
-test('an opaque push delivery resolves a fresh original message before navigation and never trusts cached Intent targets', async t => {
-  const deliveryId = 'a'.repeat(32), native = nativeStub({ pendingTarget: true, accountId: 'user-one' });
-  native.pending.push({ accountId: 'user-one', workspaceId: 'workspace-db-one', workspaceSlug: 'one', deliveryId, target: { id: 'forged-chat' } });
-  let f; f = fixture(t, { native, api: { mobilePushDelivery: async (id, options) => {
-    f.calls.push({ kind: 'delivery', id, options });
-    return f.envelope({ item: item('message-event', { kind: 'message.received', executionState: 'not_applicable', target: { kind: 'conversation', id: 'original-chat', employeeId: 'original-employee', messageId: 'original-message' } }) });
+test('a self-hosted message click resolves its exact event and ignores cached targets', async t => {
+  const native = nativeStub({ pendingTarget: true, accountId: 'user-one' });
+  native.pending.push({ accountId: 'user-one', workspaceId: 'workspace-db-one', workspaceSlug: 'one', eventId: 'message-event', target: { id: 'forged-chat' } });
+  let f; f = fixture(t, { native, api: { mobileNotification: async (_slug, id, options) => {
+    f.calls.push({ kind: 'resolve', id, options });
+    return f.envelope({ item: item(id, { kind: 'message.received', title: '闲鱼运营大神', summary: '检查完成😊\n请确认：https://example.invalid/work', executionState: 'not_applicable', target: { kind: 'conversation', id: 'original-chat', employeeId: 'original-employee', messageId: 'original-message' } }) });
   } } });
   assert.equal(await f.mobile.handleNative(), true);
-  assert.equal(f.calls.length, 1); assert.equal(f.calls[0].kind, 'delivery'); assert.equal(f.calls[0].id, deliveryId);
-  assert.equal(f.opened.length, 1); assert.equal(f.opened[0].value.target.id, 'original-chat');
-  assert(f.state.notifications.readIds.includes('message-event'));
+  assert.equal(f.calls.length, 1); assert.equal(f.calls[0].kind, 'resolve'); assert.equal(f.calls[0].id, 'message-event');
+  assert.equal(f.opened[0].value.target.id, 'original-chat'); assert(f.state.notifications.readIds.includes('message-event'));
 });
 
-test('a push delivery cannot navigate after account/workspace change, pause or an unauthorized response', async t => {
+test('a first-party message click cannot navigate after account switch, pause or permission loss', async t => {
   for (const change of ['account', 'pause', 'denied', 'wrong-scope']) {
-    const delayed = deferred(), deliveryId = 'b'.repeat(32), f = fixture(t, { api: { mobilePushDelivery: () => delayed.promise } });
-    const pending = { accountId: 'user-one', workspaceId: 'workspace-db-one', workspaceSlug: 'one', deliveryId };
+    const delayed = deferred(), f = fixture(t, { api: { mobileNotification: () => delayed.promise } });
+    const pending = { accountId: 'user-one', workspaceId: 'workspace-db-one', workspaceSlug: 'one', eventId: 'event-one' };
     const opening = f.mobile.resolvePending(pending);
     if (change === 'account') f.switchScope('user-two');
     if (change === 'pause') f.mobile.pause();
@@ -321,19 +320,38 @@ test('a push delivery cannot navigate after account/workspace change, pause or a
   }
 });
 
-test('invalid or mixed push identifiers are rejected and message pushes cannot redirect to an unrelated task', async t => {
-  for (const extra of [{ deliveryId: 'invalid' }, { deliveryId: 'c'.repeat(32), eventId: 'event-one' }, { deliveryId: 'invalid', eventId: 'event-one' }]) {
+test('old third-party delivery tickets and malformed message targets never grant navigation', async t => {
+  for (const extra of [{ deliveryId: 'a'.repeat(32) }, { deliveryId: 'c'.repeat(32), eventId: 'event-one' }, { eventId: '' }]) {
     const f = fixture(t); assert.equal(await f.mobile.resolvePending({ accountId: 'user-one', workspaceId: 'workspace-db-one', workspaceSlug: 'one', ...extra }), false);
     assert.deepEqual(f.calls, []); assert.deepEqual(f.opened, []);
   }
-  let f; f = fixture(t, { api: { mobilePushDelivery: async () => f.envelope({ item: item('new-message', { kind: 'message.received', executionState: 'not_applicable', target: { kind: 'task', id: 'unrelated' } }) }) } });
-  assert.equal(await f.mobile.resolvePending({ accountId: 'user-one', workspaceId: 'workspace-db-one', workspaceSlug: 'one', deliveryId: 'd'.repeat(32) }), false); assert.deepEqual(f.opened, []);
+  let f; f = fixture(t, { api: { mobileNotification: async () => f.envelope({ item: item('new-message', { kind: 'message.received', executionState: 'not_applicable', target: { kind: 'task', id: 'unrelated' } }) }) } });
+  assert.equal(await f.mobile.resolvePending({ accountId: 'user-one', workspaceId: 'workspace-db-one', workspaceSlug: 'one', eventId: 'new-message' }), false); assert.deepEqual(f.opened, []);
 });
 
-test('only verified native push support shows enabled message notifications; a timer-only bridge stays supplementary', async t => {
-  const native = nativeStub({ enabled: true, subscriptionState: 'enabled', deliveryMode: 'push', pushConfigured: true, pushAvailable: true }), f = fixture(t, { native });
-  await f.mobile.handleNative(); const html = renderMobileNotifications(f.state);
-  assert.match(html, /消息通知已开启/); assert.match(html, /定时检查仅作补充/); assert.doesNotMatch(html, /系统提醒约每 15 分钟/);
-  native.status.pushConfigured = false; await f.mobile.handleNative(); assert.doesNotMatch(renderMobileNotifications(f.state), /消息通知已开启/);
+test('connection state is accurate and the battery settings action remains explicit', async t => {
+  const native = nativeStub({ enabled: true, subscriptionState: 'enabled', deliveryMode: 'selfhost', foregroundServiceRunning: true, connectionState: 'connected', batterySettingsAvailable: true });
+  native.openBatterySettings = () => { native.calls.push(['battery']); return JSON.stringify(native.status); };
+  const f = fixture(t, { native }); await f.mobile.handleNative();
+  let html = renderMobileNotifications(f.state);
+  assert.match(html, /消息通知已连接/); assert.match(html, /员工名字和消息内容/); assert.match(html, /后台与电池设置/);
+  assert.equal(native.calls.some(row => row[0] === 'battery'), false);
+  await f.mobile.actions['notifications-battery'](); assert(native.calls.some(row => row[0] === 'battery'));
+  native.status.connectionState = 'backoff'; await f.mobile.handleNative(); assert.match(renderMobileNotifications(f.state), /正在连接消息通知/);
+  native.status.foregroundServiceRunning = false; await f.mobile.handleNative(); assert.doesNotMatch(renderMobileNotifications(f.state), /消息通知已连接/);
   delete native.status.deliveryMode; await f.mobile.handleNative(); assert.match(renderMobileNotifications(f.state), /补充提醒已开启/);
+});
+
+test('v2 permits bounded real multiline message previews but rejects legacy schema and bad cursor aliases', async t => {
+  let f; f = fixture(t, { api: { mobileNotifications: async () => f.envelope({ items: [item('reply', { kind: 'message.received', executionState: 'not_applicable', title: '员'.repeat(50), summary: '消息正文😊\n'.repeat(45) })] }) } });
+  assert.equal(await f.mobile.poll(), true); assert.match(renderMobileNotifications(f.state), /新消息/);
+  for (const extra of [{schemaVersion: 1}, {cursor: 'different'}, {items:[item('reply',{summary:'x'.repeat(1025)})]}]) {
+    f.api.mobileNotifications=async()=>f.envelope(extra); assert.equal(await f.mobile.actions['notifications-refresh'](), false);
+  }
+});
+
+test('an outdated server stops automatic notification polling with an actionable message', async t => {
+  const f=fixture(t, {api:{mobileNotifications:async()=>{throw Object.assign(new Error('请求失败（404）'),{status:404});}}});
+  assert.equal(await f.mobile.poll(),false); assert.match(f.state.notifications.error,/服务尚未更新/);
+  assert.equal(f.state.notifications.blocked,true); assert.equal(await f.mobile.poll(),false);
 });
