@@ -68,9 +68,9 @@ await context.route('**/*',async route=>{
   if(url.origin!==origin){errors.push(`External browser request ${url.origin}${p}`);return route.abort();}
   try{
     if(p.startsWith('/__ziwei_manager__/')){
-      const asset=p.slice('/__ziwei_manager__/'.length)||'index.html';assert.match(asset,/^[a-z-]+\.(html|js|css|png)$/);
+      const asset=p.slice('/__ziwei_manager__/'.length)||'index.html';assert.match(asset,/^[a-z-]+\.(html|m?js|css|png)$/);
       const bytes=await fs.readFile(path.join(web,asset));servedAssets[asset]=createHash('sha256').update(bytes).digest('hex');
-      return route.fulfill({contentType:asset.endsWith('.js')?'text/javascript':asset.endsWith('.css')?'text/css':asset.endsWith('.png')?'image/png':'text/html',body:bytes});
+      return route.fulfill({contentType:/\.m?js$/.test(asset)?'text/javascript':asset.endsWith('.css')?'text/css':asset.endsWith('.png')?'image/png':'text/html',body:bytes});
     }
     assert.ok(method==='GET'||method==='POST'&&/^\/api\/conversations\/[^/]+\/(read|forwards)$/.test(p),`Blocked unrelated write ${method} ${p}`);
     const body=request.postData()?request.postDataJSON():undefined,entry={method,path:p,...(body===undefined?{}:{body})};requests.push(entry);

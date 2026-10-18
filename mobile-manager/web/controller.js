@@ -1,4 +1,4 @@
-import { accountId, workspaceId, workspaceDatabaseId, scopeKey, list, id, executionUncertain, initialResources, initialEmployeeResources } from './model.js';
+import { accountId, workspaceId, workspaceDatabaseId, scopeKey, list, id, blockingChatExecution, initialResources, initialEmployeeResources } from './model.js';
 import { createBotSettings } from './bot-settings.js';
 import { createDeviceSettings } from './device-settings.js';
 import { createChatInbox } from './chat-inbox.js';
@@ -20,7 +20,6 @@ async function digest(value) {
   const bytes = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
   return [...new Uint8Array(bytes)].map(value => value.toString(16).padStart(2, '0')).join('');
 }
-const activeExecution = execution => ['pending', 'queued', 'acked', 'running', 'executing'].includes(execution?.status) || executionUncertain(execution);
 const imageMime = bytes => {
   if (bytes.length >= 8 && [137,80,78,71,13,10,26,10].every((v, i) => bytes[i] === v)) return 'image/png';
   if (bytes.length >= 3 && bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255) return 'image/jpeg';
@@ -500,7 +499,7 @@ export function createController({ state, api, render = () => {}, storage = glob
       return;
     }
     if (!state.conversation?.id || !state.selectedEmployee) throw new Error('请先打开员工聊天');
-    if (activeExecution(state.conversation.execution)) throw new Error('当前工作尚未结束，请等待回执或使用停止入口');
+    if (blockingChatExecution(state)) throw new Error('当前工作尚未结束，请等待回执或使用停止入口');
     stashComposer();
     const item = composer(), content = item.draft.trim(), attachments = [...item.attachments];
     if (!content && !attachments.length) return;

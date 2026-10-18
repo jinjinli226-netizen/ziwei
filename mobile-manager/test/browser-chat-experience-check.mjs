@@ -48,8 +48,8 @@ async function fixture(name, width) {
     if (url.origin !== origin) { errors.push({ scenario: name, message: `External request ${url.origin}${p}` }); return route.abort(); }
     if (p.startsWith('/__ziwei_manager__/')) {
       const asset = p.slice('/__ziwei_manager__/'.length) || 'index.html';
-      if (!/^[a-z-]+\.(html|js|css|png)$/.test(asset)) return route.abort();
-      return route.fulfill({ contentType: asset.endsWith('.js') ? 'application/javascript' : asset.endsWith('.css') ? 'text/css' : asset.endsWith('.png') ? 'image/png' : 'text/html', body: await fs.readFile(path.join(web, asset)) });
+      if (!/^[a-z-]+\.(html|m?js|css|png)$/.test(asset)) return route.abort();
+      return route.fulfill({ contentType: /\.m?js$/.test(asset) ? 'application/javascript' : asset.endsWith('.css') ? 'text/css' : asset.endsWith('.png') ? 'image/png' : 'text/html', body: await fs.readFile(path.join(web, asset)) });
     }
     requests.push({ scenario: name, method, path: p });
     if (/^\/api\/conversations\/[^/]+\/read$/.test(p) && method === 'POST') {

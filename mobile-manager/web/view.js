@@ -1,4 +1,4 @@
-import { escapeHtml, employeeName, avatarUrl, presence, messageText, formatTime, executionUncertain, botStopPresentation } from './model.js';
+import { escapeHtml, employeeName, avatarUrl, presence, messageText, formatTime, executionUncertain, botStopPresentation, blockingChatExecution } from './model.js';
 import { renderBotSettings } from './bot-settings.js';
 import { renderDeviceSettings } from './device-settings.js';
 import { isForwardableMessage, orderedForwardMessages, FORWARD_MESSAGE_LIMIT, FORWARD_NOTE_LIMIT } from './forwarding.js';
@@ -187,12 +187,8 @@ function taskPage(state) {
   return `${pageHeader(state,'工作详情')}<main class="page-content">${alerts(state)}<div class="task-detail-heading">${badge(workStatus(task.state || task.status))}<h2>${e(task.title || task.name || '工作任务')}</h2><p>${shortTime(task.updated_at || task.updatedAt || task.created_at)}</p></div><form class="panel form-panel" data-form="task"><label class="field-label">工作名称<input name="title" value="${e(task.title || task.name || '')}" maxlength="200" required></label><label class="field-label">工作说明<textarea name="description" rows="6">${e(task.description || '')}</textarea></label><label class="field-label">当前状态<select name="status">${statuses.map(status=>`<option value="${e(status)}" ${status===(task.state || task.status)?'selected':''}>${e(statusLabels[status] || status)}</option>`).join('')}</select></label><button class="button primary full" type="submit"${disabled(state)}>${icon('check')}保存修改</button></form>${task.result ? `<section class="panel result-panel"><h3>最近结果</h3><div class="prose">${e(typeof task.result==='string'?task.result:task.result.summary || task.result.message || '')}</div></section>`:''}</main>`;
 }
 
-function activeRun(state) {
-  const running=run=>run && (['pending','queued','acked','running','executing'].includes(run.status) || executionUncertain(run));
-  return (running(state.conversation?.execution) ? state.conversation.execution : null) || rows(state.runs).find(running) || (running(state.bot?.latest_run) ? state.bot.latest_run : null);
-}
 function runPanel(state) {
-  const run=activeRun(state);
+  const run=blockingChatExecution(state);
   if (!run) return '';
   const employee=state.selectedEmployee, bot=state.bot || employee?.bot || rows(state.bots).find(item=>item.id===employee?.id);
   const events=rows(run.events), event=events[events.length-1], uncertain=executionUncertain(run);
@@ -233,7 +229,7 @@ function messageCard(message, employee, state=null, allowForward=false) {
 }
 function composer(state, report=false) {
   const entry=rows(state.report?.queue)[state.report?.index || 0];
-  const waiting=report ? !['completed','no_records','skipped','failed'].includes(entry?.status) : Boolean(activeRun(state));
+  const waiting=report ? !['completed','no_records','skipped','failed'].includes(entry?.status) : Boolean(blockingChatExecution(state));
   const sendUnavailable=waiting || !report && !state.conversation?.id;
   return `<div class="composer-area">${runPanel(state)}${rows(state.attachments).length?`<div class="draft-attachments">${state.attachments.map((attachment,index)=>`<div class="draft-attachment">${imageAttachment(attachment)}<button data-action="remove-attachment" data-id="${index}" class="remove-image" aria-label="移除第${index+1}张图片">${icon('close')}</button></div>`).join('')}</div>`:''}<form class="composer" data-form="chat"><label class="attach-button" aria-label="添加图片">${icon('attach')}<input type="file" name="images" accept="image/png,image/jpeg,image/webp,image/gif" multiple${disabled(state)}></label><textarea name="draft" rows="1" placeholder="${waiting?(report?'等待汇报结束，可先写下追问…':'工作进行中，可先写下下一条…'):report?'追问这位员工…':'继续交给他…'}" aria-label="聊天消息" maxlength="50000">${e(state.draft || '')}</textarea><button class="send-button" type="submit" aria-label="发送消息"${sendUnavailable?' disabled':disabled(state)}>${state.sending?'<span class="spinner small"></span>':icon('send')}</button></form></div>`;
 }
@@ -329,7 +325,7 @@ function phonePage(state) {
 }
 function mePage(state) {
   const user=state.user?.user || state.user || {}, username=user.name || user.display_name || user.username || user.email || '我的账号';
-  return `${appHeader(state,'我的')}<main class="page-content">${alerts(state)}<section class="account-card"><span class="account-avatar">${e(Array.from(username)[0])}</span><h2>${e(username)}</h2><p>${e(user.email || user.username || '')}</p></section><div class="panel account-menu"><button data-action="switch-workspace"><span class="menu-icon">${icon('employees')}</span><span><strong>当前工作区</strong><small>${e(state.workspace?.name || state.workspace?.slug || '未选择')}</small></span>${icon('chevron')}</button><button data-action="navigate" data-tab="devices"><span class="menu-icon">${icon('devices')}</span><span><strong>设备互联</strong><small>查看手机画面与运行电脑</small></span>${icon('chevron')}</button><button data-action="settings"><span class="menu-icon">${icon('settings')}</span><span><strong>管理与设置</strong><small>模型、能力与设备绑定</small></span>${icon('chevron')}</button></div><div class="app-about"><div class="about-brand"><img src="./ziwei-logo.png" alt="" width="40" height="40">紫薇</div><p>和数字员工，一起把事情做好。</p><small>Android 0.5.0 · 内部测试版</small></div><button class="button logout-button full" data-action="logout"${disabled(state)}>${icon('logout')}退出登录</button></main>`;
+  return `${appHeader(state,'我的')}<main class="page-content">${alerts(state)}<section class="account-card"><span class="account-avatar">${e(Array.from(username)[0])}</span><h2>${e(username)}</h2><p>${e(user.email || user.username || '')}</p></section><div class="panel account-menu"><button data-action="switch-workspace"><span class="menu-icon">${icon('employees')}</span><span><strong>当前工作区</strong><small>${e(state.workspace?.name || state.workspace?.slug || '未选择')}</small></span>${icon('chevron')}</button><button data-action="navigate" data-tab="devices"><span class="menu-icon">${icon('devices')}</span><span><strong>设备互联</strong><small>查看手机画面与运行电脑</small></span>${icon('chevron')}</button><button data-action="settings"><span class="menu-icon">${icon('settings')}</span><span><strong>管理与设置</strong><small>模型、能力与设备绑定</small></span>${icon('chevron')}</button></div><div class="app-about"><div class="about-brand"><img src="./ziwei-logo.png" alt="" width="40" height="40">紫薇</div><p>和数字员工，一起把事情做好。</p><small>Android 0.5.1 · 内部测试版</small></div><button class="button logout-button full" data-action="logout"${disabled(state)}>${icon('logout')}退出登录</button></main>`;
 }
 function settingsPage(state) {
   const employees=rows(state.employees);

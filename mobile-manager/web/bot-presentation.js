@@ -1,4 +1,8 @@
+import {historicalPrelaunchRecovery,HISTORICAL_PRELAUNCH_RECOVERY_DETAIL} from './historical-prelaunch-recovery.mjs';
+import {operatorForceAbandonRecovery,OPERATOR_FORCE_ABANDON_DETAIL} from './operator-force-abandon-recovery.mjs';
 export function executionUncertain(run) {
+  if(operatorForceAbandonRecovery(run))return false;
+  if(historicalPrelaunchRecovery(run))return false;
   return run?.result?.code==='EXECUTION_UNCERTAIN' || run?.code==='EXECUTION_UNCERTAIN' || run?.result?.executionState==='uncertain' || run?.executionState==='uncertain' || run?.status==='uncertain' || (run?.status==='expired'&&Boolean(run?.acked_at));
 }
 export function processExitConfirmed(result) {
@@ -10,9 +14,13 @@ export function botRecoveryEvent(run) {
   return [...(run.events || [])].reverse().find(event=>event.id && ['succeeded','failed'].includes(event.type) && !event.data?.result?.fixture && processExitConfirmed(event.data?.result)) || null;
 }
 export function botRecoveryDetail(run) {
+  if(operatorForceAbandonRecovery(run))return OPERATOR_FORCE_ABANDON_DETAIL;
+  if(historicalPrelaunchRecovery(run))return HISTORICAL_PRELAUNCH_RECOVERY_DETAIL;
   return botRecoveryEvent(run)?'服务器已保存终态与进程退出证据，可核实并恢复原回执。':'服务器尚未收到可恢复的终态与进程退出证据。请检查原电脑上的客户端及执行进程；保留原执行，勿重复派发。';
 }
 export function botStopPresentation(bot,run=bot?.latest_run) {
+  if(operatorForceAbandonRecovery(run))return {confirmed:false,abandoned:true,label:OPERATOR_FORCE_ABANDON_DETAIL,tone:'muted'};
+  if(historicalPrelaunchRecovery(run))return {confirmed:false,ended:true,notStarted:true,label:HISTORICAL_PRELAUNCH_RECOVERY_DETAIL,tone:'muted'};
   if(['failed','cancelled'].includes(run?.status) && (run.result?.stopConfirmed===true || run.result?.result?.stopConfirmed===true) && !executionUncertain(run) && processExitConfirmed(run.result))return {confirmed:true,label:'原执行已停止，根进程与进程树退出均已确认。',tone:'success'};
   if(['succeeded','failed','cancelled'].includes(run?.status) && !executionUncertain(run) && processExitConfirmed(run.result))return {confirmed:false,ended:true,label:'原执行已结束，根进程与进程树退出均已确认。',tone:'muted'};
   if(run?.result?.code==='BOT_CANCELLED_BEFORE_START' && !run.acked_at)return {confirmed:false,label:'本次执行尚未启动，已取消派发。',tone:'muted'};
@@ -27,6 +35,8 @@ export function botStopPresentation(bot,run=bot?.latest_run) {
 export function botPresence(bot) {
   const run=bot?.latest_run;
   if(bot?.configuration_state==='uninitialized')return {label:bot.kind==='creator'?'Creator · 管理伙伴':'Bot 能力待初始化',tone:'muted',detail:bot.kind==='creator'?'Creator 沿用原管理身份与记忆。':'这是团队管理中的同一位员工；初始化只增加 Bot 配置，不创建第二位员工。'};
+  if(operatorForceAbandonRecovery(run))return {label:bot?.control_state==='paused'?'已暂停 · 旧记录已放弃':'旧记录已放弃',tone:'muted',detail:OPERATOR_FORCE_ABANDON_DETAIL};
+  if(historicalPrelaunchRecovery(run))return {label:bot?.control_state==='paused'?'已暂停 · 原模型未启动':'原模型未启动',tone:'muted',detail:HISTORICAL_PRELAUNCH_RECOVERY_DETAIL};
   if (executionUncertain(run)) return {label:'执行待核实',tone:'warning',detail:botRecoveryDetail(run)};
   if (botStopPresentation(bot,run).confirmed)return {label:'原执行已停止',tone:'muted',detail:botStopPresentation(bot,run).label};
   if (run?.type==='hermes.bot.validate') {

@@ -2,6 +2,30 @@
 import {botPresence, botStopPresentation, executionUncertain} from './bot-presentation.js';
 
 export {executionUncertain, botStopPresentation};
+function executionScopeMatches(run, state, {requireEmployee = false} = {}) {
+  if (!run || typeof run !== 'object') return false;
+  const employeeId=state.selectedEmployee?.id, workspace=workspaceId(state), databaseId=workspaceDatabaseId(state.workspace);
+  if (!employeeId || !workspace) return false;
+  const payload=run.payload, hermes=payload?.hermesBot;
+  const employees=[run.employee_id,run.employeeId,payload?.employeeId,hermes?.employeeId].filter(value=>value!==undefined);
+  if (employees.some(value=>value!==employeeId) || requireEmployee && !employees.length) return false;
+  const workspaces=[run.workspace,payload?.workspace,hermes?.workspace].filter(value=>value!==undefined);
+  if (workspaces.some(value=>value!==workspace)) return false;
+  return !databaseId || run.workspace_id===undefined || run.workspace_id===databaseId;
+}
+// History remains visible, but verified historical dispositions do not block a new turn.
+// A newer successful reply alone never clears a different unresolved execution.
+export function blockingChatExecution(state) {
+  const employeeId=state.selectedEmployee?.id, conversation=state.conversation, bot=state.bot;
+  const conversationMatches=conversation?.employee_id===employeeId && executionScopeMatches(conversation,state);
+  const botMatches=bot?.id===employeeId && executionScopeMatches(bot,state);
+  const candidates = [
+    conversationMatches && executionScopeMatches(conversation.execution,state) ? conversation.execution : null,
+    ...list(state.runs,'runs').filter(run=>executionScopeMatches(run,state,{requireEmployee:true})),
+    botMatches && executionScopeMatches(bot.latest_run,state) ? bot.latest_run : null,
+  ];
+  return candidates.find(run => run && (['pending','queued','acked','running','executing'].includes(run.status) || executionUncertain(run))) || null;
+}
 export const list = (value, key) => Array.isArray(value) ? value : Array.isArray(value?.[key]) ? value[key] : [];
 export const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 export const employeeName = value => value?.employee?.name || value?.name || '数字员工';
