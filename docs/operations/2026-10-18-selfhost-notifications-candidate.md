@@ -94,3 +94,35 @@ canonical 741a 已在原数据私有 clone 覆盖安装，code 7 → 12，appId 
 离线 fixture 初次文件名 `fixture-server.mjs` 触发旧 app 的后缀自动启动判断，误起自有 4178 监听后已立即停止、未事后 adopt、未访问正式业务；失败记录保留。随后夹具换名并在产品中精确限定正式 `backend/server.mjs` 启动入口，防止任意同后缀导入产生监听。所有后续测试服务先登记，再启动和核对。
 
 参考：[Android 前台服务类型](https://developer.android.com/develop/background-work/services/fgs/service-types)、[Doze 网络限制](https://developer.android.com/training/monitoring-device-state/doze-standby)。
+
+## 0.5.1：历史恢复后仍无法发送的修复
+
+用户安装 code 12 后，原聊天已有恢复后的成功回复，顶部也显示“上次已完成”，底部却仍显示旧停止请求的“执行待核实”，非空草稿无法发送。准确旧包在模拟器实际复现。根因是手机缺少桌面已有的严格历史恢复规则，同时从全部运行历史取任意 uncertain 作为当前阻断，显示与发送还使用了不同判定。
+
+新版同步 `prelaunchRecovery` / `forceAbandonRecovery` 的严格顶层投影校验；只有服务端已核验的原历史 disposition 解除自身阻断。原 result、error、停止回执和聊天记录均保留，不宣称旧执行已经停止或成功。新回复或新时间本身不会解除另一个真实未知任务。
+
+显示和发送共同使用同一个阻断选择器，明确核对当前员工与工作区。异员工、异工作区的快照不再误锁本聊天；同员工在另一个聊天中的真实 pending / acked / uncertain 仍阻止再次派发。没有修改服务端、原生通知实现、权限或后台连接机制。
+
+| 项目 | 值 |
+| --- | --- |
+| 准确源码 | `a741ace054ce38817504fc977a6c5c77dbb685fd` |
+| 版本 | `0.5.1-internal` / code 13 |
+| APK SHA-256 | `f15996be722cc0338f51b8c8d212eb5928e46b8ad8ef30f870dc0394f9ade227` |
+| 大小 | 772,481 bytes |
+| 包名及签名 | 沿用 `com.ziwei.manager` 及上表原签名 |
+
+全网页 444 / 444、独立定向 41 / 41 和真实 Chromium 历史聊天检查通过。两份恢复模块及 presentation 与桌面源按 LF / 单末尾换行规范一致；六个浏览器夹具已补 `.mjs` 的允许范围和 MIME。首轮浏览器夹具因未允许新扩展而未加载，修正夹具后通过；没有为此改变产品网络或超时。
+
+独立二进制检查确认 26 份网页资源与准确 Git / manifest / APK 字节一致；`classes.dex` 与已验 code 12 完全一致。生产 owner API 的完整脱敏形状直接输入新版选择器后，原历史恢复收据有效、当前无阻断；去掉该收据则原未知执行立即重新阻断，原数据保持。
+
+同一私有 API 35 AVD 已从准确 code 12 覆盖升级到准确 code 13，安装内 APK 实读 SHA 一致。UID、首次安装时间、原账号登录、旧版非空草稿及原聊天历史均保留；旧错误底栏消失，发送按钮可用。随后通过正常 App 界面在该原聊天只发送一次无业务测试；服务端确认一个用户消息、一个请求和一个执行，真实模型成功并具备 Windows 根进程与进程树退出证明。后台收到员工名与完整唯一回复，实际点击系统通知后回到原聊天并以紫框定位新回复，聊天增为 28 条消息，旧误锁不再出现。未通过 API、DOM 或夹具代发。完整证据在 `.local/mobile-manager-known-uncertain-recovery-code13-native-qa/`；最终独立审查已通过，公开下载校验见下文。
+
+TikTok 仅作只读对照：旧包较早看到运行中，新包检查时其真实执行已经成功结束，因此可发送是正常状态；本轮没有额外发任务制造在途，也没有把该对照计为真实在途保护通过。真实 pending / acked / uncertain 的保护由匹配归属的九种组合及独立范围复审验证。
+
+本轮验收结束已在 App 关闭持续接收，停止自有 QEMU / ADB，释放 375–387 临时登记并销毁本轮私有新 userdata；未登出原账号，原六盘 SHA / 大小 / mtime 未变，旧 59582 / 保留登记及其他项目进程未操作。没有创建本地 HTTPS 夹具、测试 CA 或诊断 APK。最后项目端口检查无冲突和未登记监听，真实测试记录及脱敏证据保留。收据为新 QA 目录 `cleanup-final-owned.json`。
+
+已发布[内部测试版 0.5.1](https://github.com/jinjinli226-netizen/ziwei/releases/tag/android-manager-v0.5.1-internal)，[直接下载 code13 APK](https://github.com/jinjinli226-netizen/ziwei/releases/download/android-manager-v0.5.1-internal/ziwei-manager-0.5.1-internal-code13.apk)。真实 tag 固定 a741ace，匿名完整下载 SHA-256 为 f15996be…ade227，与准确模拟器安装包一致；不更换已验包的任何运行资源。
+
+追加只读访问关联：真实 assistant 消息对应通知事件 `audit_3b02507a-ad62-498b-944e-ba3644a5b24e`；12:49:22 同事件 fresh item 200，随后系统显示通知。12:50:40.962 实际点卡后，12:50:42 原聊天 200 及 feed 200，12:50:43 baseline 200 / 同事件 fresh item 200，12:50:44 原聊天为正常条件读取 304。不能把最后一次 304 写作 200，前台恢复读取与通知定位各自存在。补强记录为主控工作树 `.local/mobile-stale-recovery/notification-verification.json`，只含脱敏元数据。
+
+新版安装二维码保存后已重新解码，内容准确等于上述 code13 直接下载 URL。稳定交付目录为 `output/android-manager/v0.5.1-internal/`，包含 APK、SHA、manifest、二维码与 `release-verification.json`。保持内部测试性质及 `deviceVerified:false`；实际真机效果待安装确认。
