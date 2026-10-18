@@ -108,3 +108,41 @@ test('native failure and missing evidence never turn saved configuration into co
   f.repo.resultA2AAction(a.id,{deviceId:f.device.deviceId,status:'failed',error:'PRIVATE EXCEPTION WITH TOKEN',result:{nativeOperation:{status:'failed',code:'MCP_OAUTH_CONNECTION_FAILED'}}});
   const item=f.service.list('test-111',f.bot.id).connections[0];assert.equal(item.status,'failed');assert.match(item.error,/连接 MCP 失败/);assert.equal(JSON.stringify(item).includes('PRIVATE EXCEPTION'),false);
 });
+
+const deferredRequest=f=>({workspace:'test-111',employeeId:f.bot.id,server:'example',idempotencyKey:'deferred-mcp:intent-one:example',context:{}});
+test('deferred connection acceptance recovers its exact native action across ticks, restart and offline readback',t=>{
+  const f=fixture(t),request=deferredRequest(f),first=f.service.deferredHandlers.connectMcp(request);
+  assert.equal(first.status,'queued');assert.equal(first.idempotencyKey,request.idempotencyKey);
+  const count=f.repo.db.prepare('SELECT count(*) n FROM a2a_actions').get().n;
+  const restarted=createBotMcpConnections(f.repo,f.bots,{apiBase:'https://ziwei.example.invalid'});
+  f.repo.db.prepare("UPDATE devices SET status='offline' WHERE id=?").run(f.device.deviceId);
+  for(const service of [f.service,restarted]){
+    assert.equal(service.deferredHandlers.connectMcp(request).id,first.id);
+    assert.equal(service.deferredHandlers.readMcp({...request,actionId:first.id}).id,first.id);
+  }
+  assert.equal(f.repo.db.prepare('SELECT count(*) n FROM a2a_actions').get().n,count);
+  assert.throws(()=>restarted.deferredHandlers.connectMcp({...request,server:'different'}),{code:'IDEMPOTENCY_CONFLICT'});
+  assert.throws(()=>restarted.deferredHandlers.readMcp({...request,actionId:first.id,server:'different'}),{code:'MCP_CONNECTION_NOT_FOUND'});
+});
+
+test('deferred exact-action reads do not substitute a later connection or browser approval for native success',t=>{
+  const f=fixture(t),request=deferredRequest(f),first=f.service.deferredHandlers.connectMcp(request);
+  f.repo.ackA2AAction(first.id,{deviceId:f.device.deviceId});f.service.begin(first.id,f.credential);
+  f.service.publish(first.id,f.credential,{authorizationUrl:f.authorization()});
+  const pending=f.service.deferredHandlers.readMcp({...request,actionId:first.id});
+  assert.equal(pending.status,'authorization_required');assert.equal(pending.authorizationUrl,f.authorization());assert.equal(pending.loadedForNextRun,false);
+  f.service.deliver({state:'isolated-state',code:'private-fixture-code'});
+  const approving=f.service.deferredHandlers.readMcp({...request,actionId:first.id});assert.equal(approving.status,'connecting');assert.equal(approving.authorizationUrl,null);
+  assert.equal(JSON.stringify(approving).includes('private-fixture-code'),false);
+  f.repo.resultA2AAction(first.id,{deviceId:f.device.deviceId,status:'succeeded',result:{nativeOperation:{schemaVersion:2,employeeId:f.bot.id,revision:f.bot.revision,resource:'mcp',operation:'authorize',status:'succeeded',data:{connected:true,tools:[{name:'lookup'}]}}}});
+  const next=f.service.deferredHandlers.connectMcp({...request,idempotencyKey:'deferred-mcp:intent-two:example'});assert.notEqual(next.id,first.id);
+  assert.equal(f.service.list('test-111',f.bot.id).connections[0].id,next.id);
+  const original=f.service.deferredHandlers.readMcp({...request,actionId:first.id});assert.equal(original.id,first.id);assert.equal(original.status,'connected');assert.equal(original.toolsCount,1);
+});
+
+test('deferred first admission retains ordinary client capability and device-scope checks',t=>{
+  const f=fixture(t,{feature:false}),request=deferredRequest(f),count=f.repo.db.prepare('SELECT count(*) n FROM a2a_actions').get().n;
+  assert.throws(()=>f.service.deferredHandlers.connectMcp(request),{code:'BOT_MCP_CLIENT_REQUIRED'});
+  assert.throws(()=>f.service.deferredHandlers.connectMcp({...request,context:{deviceScope:'another-device',deviceCredentialDeviceId:'another-device'}}),{code:'BOT_NOT_FOUND'});
+  assert.equal(f.repo.db.prepare('SELECT count(*) n FROM a2a_actions').get().n,count);
+});

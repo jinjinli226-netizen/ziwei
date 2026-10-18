@@ -1,9 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { listEmployeeTemplates, getEmployeeTemplate, createTemplateEmployeeConfig } from '../backend/employees/creator-template.mjs';
+import { listEmployeeTemplates, getEmployeeTemplate, createTemplateEmployeeConfig, CREATOR_BOT_GUIDANCE } from '../backend/employees/creator-template.mjs';
 import { toolDefinitions } from '../scripts/ziwei-mcp.mjs';
 
 const templateId = 'ziwei-employee-creator';
+
+test('Creator defers busy configuration and MCP setup through the existing update without self-wait or consent bypass',()=>{
+  for(const term of ['ziwei_bot update','deferUntilIdle:true','expectedControlEpoch','idempotencyKey','connectMcpServers','get.deferredConfig','authorization_required','authorizationUrl','connected'])assert.ok(CREATOR_BOT_GUIDANCE.includes(term),`missing deferred workflow: ${term}`);
+  assert.match(CREATOR_BOT_GUIDANCE,/不在当前action内循环等待自己结束/);
+  assert.match(CREATOR_BOT_GUIDANCE,/不代替用户同意、不让用户去运行电脑敲命令/);
+  assert.match(CREATOR_BOT_GUIDANCE,/不冒充当前任务已加载或工具业务调用已验证/);
+});
 
 test('Creator catalog separates responsibilities, persona, real skills and executable workflow', () => {
   const templates = listEmployeeTemplates();

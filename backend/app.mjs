@@ -1,6 +1,7 @@
 import express from 'express';
 import fs from 'node:fs';
 import path from 'node:path';
+import {fileURLToPath} from 'node:url';
 import { WebSocketServer } from 'ws';
 import { createRepository } from './repository.mjs';
 import {guardRepository} from './version-preservation.mjs';
@@ -17,6 +18,9 @@ import { createEmployeeTemplateService } from './employees/templates.mjs';
 import { createPhoneMcpService } from './phone-mcp.mjs';
 import {createMobileReadView} from './mobile-read-view.mjs';
 import {createConversationReadService} from './conversation-read-state.mjs';
+import {createMobileNotificationReadService} from './mobile-notifications.mjs';
+import {createMobileGroupActionView} from './mobile-group-action.mjs';
+import {createMobileNotificationV2Service} from './mobile-notifications-v2.mjs';
 import { createManagementBootstrap } from './management-bootstrap.mjs';
 import {createBotMcpConnections} from './bot-mcp-connections.mjs';
 import {createBotHistoricalRecovery} from './bot-historical-recovery.mjs';
@@ -291,19 +295,26 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   const management = createManagementService(repo);
   const mobileReadView = createMobileReadView(repo);
   const conversationReads = createConversationReadService(repo);
+  const mobileNotifications = createMobileNotificationReadService(repo);
+  const mobileGroupAction = createMobileGroupActionView(repo);
+  const mobileNotificationsV2=createMobileNotificationV2Service(repo,auth,realtime,options.mobileNotificationsV2);
   const employeeTemplates = createEmployeeTemplateService(repo, management);
   const managementBootstrap = createManagementBootstrap(repo, options);
   const botMcpConnections=createBotMcpConnections(repo,management.bots,{apiBase:managementBootstrap.apiBase,now:options.mcpOAuthNow});
+  const botDeferredConfig=management.bots.deferredConfig;
+  if(options.enableDeferredConfig!==false&&options.enableScheduler!==false)botDeferredConfig.start(botMcpConnections.deferredHandlers);
   const botHistoricalRecovery=createBotHistoricalRecovery(repo,{readA2AToken:()=>readA2AToken({create:true})});
   const botForceAbandon=createBotForceAbandon(repo,{readA2AToken:()=>readA2AToken({create:true})});
   const phoneMcp = createPhoneMcpService(repo,ziweiConnect,management,options);
   app.locals.repo = repo;
   app.locals.realtime = realtime;
   app.locals.auth = auth;
+  app.locals.mobileNotificationsV2=mobileNotificationsV2;
   app.locals.ziweiConnect = ziweiConnect;
   app.locals.phoneMcp = phoneMcp;
   app.locals.managementBootstrap = managementBootstrap;
   app.locals.botMcpConnections=botMcpConnections;
+  app.locals.botDeferredConfig=botDeferredConfig;
   app.locals.botHistoricalRecovery=botHistoricalRecovery;
   app.locals.botForceAbandon=botForceAbandon;
   app.locals.employeeTemplates = employeeTemplates;
@@ -317,7 +328,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   // Task attachments are sent as Base64 JSON; allow the 10 MiB attachment
   // limit plus encoding and envelope overhead without accepting unbounded
   // request bodies.
-  app.use(express.json({ limit: '16mb' }));
+  app.use(express.json({limit:'16mb'}));
   app.get('/api/mcp-oauth/callback',(req,res)=>{
     res.setHeader('Cache-Control','no-store');res.setHeader('Referrer-Policy','no-referrer');res.setHeader('Content-Security-Policy',"default-src 'none'; frame-ancestors 'none'; base-uri 'none'");
     try {botMcpConnections.deliver(req.query);res.type('html').send('<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>紫薇 · MCP 授权</title><h2>已收到授权</h2><p>员工正在验证连接。请返回紫薇员工页面，结果会自动更新。</p></html>');}
@@ -611,6 +622,28 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   app.post('/api/notifications/:id/archive', (req, res) => res.json(repo.archiveNotification(req.params.id, req.body?.archived !== false)));
   app.get('/api/workspaces/:slug/notifications/stream', (req, res) => { res.statusCode=200; res.setHeader('Content-Type','text/event-stream'); res.setHeader('Cache-Control','no-cache'); res.setHeader('Connection','keep-alive'); res.flushHeaders?.(); const send=event=>res.write(`event: notification\ndata: ${JSON.stringify(event)}\n\n`); const unsubscribe=realtime.subscribe(req.params.slug,send); const timer=setInterval(()=>res.write(': heartbeat\n\n'),15000); req.on('close',()=>{clearInterval(timer);unsubscribe();}); send({type:'ready',workspace:req.params.slug}); });
   app.get('/api/workspaces/:slug/chats', (req,res)=>res.json(conversationReads.list(req.params.slug,employeeContext(req))));
+  app.get('/api/workspaces/:slug/mobile/notifications', (req,res)=>{
+    res.setHeader('Cache-Control','no-store');res.vary('Cookie');
+    const input={};
+    for(const key of Object.keys(req.query)) {
+      const value=req.query[key];
+      if(!['cursor','limit','baseline'].includes(key)||typeof value!=='string')throw Object.assign(new Error('提醒读取参数无效'),{status:400,code:'MOBILE_NOTIFICATION_INPUT_INVALID'});
+      if(key==='baseline') {
+        if(!['1','true','0','false'].includes(value))throw Object.assign(new Error('提醒基线参数无效'),{status:400,code:'MOBILE_NOTIFICATION_INPUT_INVALID'});
+        input.baseline=value==='1'||value==='true';
+      } else input[key]=value;
+    }
+    res.json(mobileNotifications.list(req.params.slug,input,employeeContext(req)));
+  });
+  app.get('/api/workspaces/:slug/mobile/notifications/:id', (req,res)=>{res.setHeader('Cache-Control','no-store');res.vary('Cookie');res.json(mobileNotifications.resolve(req.params.slug,req.params.id,employeeContext(req)));});
+  function notificationV2Input(req,wait=false){const input={};for(const [key,value] of Object.entries(req.query)){
+    if(!['cursor','limit','baseline',...(wait?['timeout']:[])].includes(key)||typeof value!=='string')throw Object.assign(new Error('提醒读取参数无效'),{status:400,code:'MOBILE_NOTIFICATION_INPUT_INVALID'});
+    if(key==='baseline'){if(!['1','0','true','false'].includes(value))throw Object.assign(new Error('提醒基线参数无效'),{status:400,code:'MOBILE_NOTIFICATION_INPUT_INVALID'});input.baseline=value==='1'||value==='true';}else input[key]=value;
+  }return input;}
+  app.use('/api/workspaces/:slug/mobile/notifications-v2',(_req,res,next)=>{res.setHeader('Cache-Control','no-store');res.vary('Cookie');next();});
+  app.get('/api/workspaces/:slug/mobile/notifications-v2',(req,res)=>res.json(mobileNotificationsV2.list(req,req.params.slug,notificationV2Input(req))));
+  app.get('/api/workspaces/:slug/mobile/notifications-v2/wait',async(req,res,next)=>{try{const page=await mobileNotificationsV2.wait(req,res,req.params.slug,notificationV2Input(req,true));if(page&&!res.destroyed)res.json(page);}catch(error){if(!res.destroyed)next(error);}});
+  app.get('/api/workspaces/:slug/mobile/notifications-v2/items/:id',(req,res)=>res.json(mobileNotificationsV2.resolve(req,req.params.slug,req.params.id)));
   app.post('/api/conversations/:id/read', (req,res)=>res.json(conversationReads.read(req.params.id,req.body||{},employeeContext(req))));
   app.post('/api/conversations/:id/forwards', requireRole('owner','admin','member'), (req,res)=>{
     const result=repo.forwardConversationMessages(req.params.id,req.body||{},employeeContext(req));
@@ -622,7 +655,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
     if (!employeeId) return res.status(400).json({ error: '新建会话必须绑定数字员工' });
     return res.status(201).json(repo.createConversation(req.params.slug, { ...(req.body || {}), employeeId, ...employeeContext(req), enforceDeviceOwnership: true }));
   });
-  app.get('/api/conversations/:id', (req, res) => { const conversation=repo.getConversation(req.params.id, employeeContext(req)); if(!conversation) return res.status(404).json({error:'Conversation not found'}); res.json(req.query.view==='mobile'?mobileReadView.conversation(conversation):conversation); });
+  app.get('/api/conversations/:id', (req, res) => { const context=employeeContext(req),conversation=repo.getConversation(req.params.id, context); if(!conversation) return res.status(404).json({error:'Conversation not found'}); if(req.query.view==='mobile'){res.setHeader('Cache-Control','no-store');res.vary('Cookie');return res.json(mobileReadView.conversation(mobileGroupAction.conversation(conversation,context)));} res.json(conversation); });
   const conversationImage=(req,res)=>{
     const image=mobileReadView.conversationImage(req.params.id,req.params.messageId,req.params.index,employeeContext(req),req.params.forwardIndex);
     if(!image||req.query.v!==undefined&&req.query.v!==image.version)return res.status(404).json({error:'Conversation image not found'});
@@ -697,6 +730,15 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   app.get('/api/workspaces/:slug/employees/:id/phone-mcp/status',requireRole('owner','admin','member'),async(req,res,next)=>{try{ensureEmployeeInWorkspace(req.params.slug,req.params.id,req);res.json(await phoneMcp.status(req.params.slug,req.params.id,employeeContext(req)));}catch(error){next(error);}});
   for(const kind of ['check','trial']) app.post(`/api/workspaces/:slug/employees/:id/phone-mcp/${kind}`,requireRole('owner','admin','member'),(req,res,next)=>{try{ensureEmployeeInWorkspace(req.params.slug,req.params.id,req);res.status(202).json(phoneMcp.trial(req.params.slug,req.params.id,req.body || {},kind==='check',employeeContext(req)));}catch(error){next(error);}});
   app.get('/api/workspaces/:slug/phone-mcp/actions/:actionId',requireRole('owner','admin','member'),(req,res,next)=>{try{const action=management.action(req.params.slug,req.params.actionId,employeeContext(req));ensureEmployeeInWorkspace(req.params.slug,action.payload.employeeId,req);res.json({action});}catch(error){next(error);}});
+  app.get('/api/workspaces/:slug/actions/:id',requireRole('owner','admin','member'),(req,res,next)=>{
+    try {
+      res.setHeader('Cache-Control','no-store');
+      res.vary('Cookie');
+      const context=employeeContext(req),action=management.action(req.params.slug,req.params.id,context);
+      mobileGroupAction.validate(req.params.slug,action,context);
+      res.json(req.query.view==='mobile'?mobileGroupAction.project(req.params.slug,action,context):action);
+    } catch(error) {next(error);}
+  });
   app.get('/api/workspaces/:slug/device-workspace-grants',requireRole('owner','admin'),(req,res)=>res.json({grants:phoneMcp.grants(req.params.slug)}));
   app.post('/api/workspaces/:slug/device-workspace-grants',requireRole('owner'),(req,res,next)=>{
     try {
@@ -784,11 +826,23 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   function registerBotRoutes(prefix,guard,contextFor) {
     const base=`${prefix}/workspaces/:slug/bots`, bots=management.bots;
     app.get(`${base}/capabilities`,guard,(req,res)=>res.json(bots.capabilities(req.params.slug,req.query,contextFor(req))));
-    app.get(base,guard,(req,res)=>{const mobile=prefix==='/api'&&req.query.view==='mobile',values=bots.list(req.params.slug,contextFor(req),mobile?{view:'mobile'}:undefined);res.json({bots:mobile?values.map(value=>mobileReadView.bot(req.params.slug,value)):values});});
+    app.get(base,guard,(req,res)=>{const mobile=prefix==='/api'&&req.query.view==='mobile',context=contextFor(req),values=bots.list(req.params.slug,context,mobile?{view:'mobile'}:undefined);if(mobile){res.setHeader('Cache-Control','no-store');res.vary('Cookie');}res.json({bots:mobile?values.map(value=>mobileReadView.bot(req.params.slug,mobileGroupAction.bot(req.params.slug,value,context,{partial:true}))):values});});
     app.post(base,guard,(req,res)=>{const result=bots.create(req.params.slug,req.body,contextFor(req));res.status(result.duplicate?200:202).json(result);});
     app.post(`${prefix}/workspaces/:slug/employees/:id/bot`,guard,(req,res)=>res.json(bots.initialize(req.params.slug,req.params.id,req.body,contextFor(req))));
-    app.get(`${base}/:id`,guard,(req,res)=>{const mobile=prefix==='/api'&&req.query.view==='mobile',value=bots.get(req.params.slug,req.params.id,contextFor(req),mobile?{view:'mobile'}:undefined);res.json(mobile?mobileReadView.bot(req.params.slug,value):value);});
-    app.patch(`${base}/:id`,guard,(req,res)=>res.json(bots.update(req.params.slug,req.params.id,req.body,contextFor(req))));
+    app.get(`${base}/:id`,guard,(req,res)=>{const mobile=prefix==='/api'&&req.query.view==='mobile',context=contextFor(req),value=bots.get(req.params.slug,req.params.id,context,mobile?{view:'mobile'}:undefined);if(mobile){res.setHeader('Cache-Control','no-store');res.vary('Cookie');}res.json(mobile?mobileReadView.bot(req.params.slug,mobileGroupAction.bot(req.params.slug,value,context)):value);});
+    app.patch(`${base}/:id`,guard,(req,res)=>{
+      const context=contextFor(req);
+      try {
+        const value=bots.update(req.params.slug,req.params.id,req.body,context);
+        res.status(value.deferred?202:200).json(value);
+      } catch(error) {
+        if(prefix==='/mcp/v1'&&error.code==='BOT_BUSY') {
+          const current=bots.get(req.params.slug,req.params.id,context);
+          error.message=`此员工正在执行。请用同一 ziwei_bot update 提交延后配置：data 增加 deferUntilIdle:true、expectedControlEpoch:${current.control_epoch}、稳定 idempotencyKey；保留 expectedRevision 与完整合并后的 config，需自动连接的 MCP 名称放在 connectMcpServers。系统会在本轮可信结束后自动应用、验证并连接；提交后结束本轮，不要等待自己结束，也不要交给用户或其他员工手工保存。用 get 的 deferredConfig 查看原意图；首次 OAuth 只需管理员网页批准。`;
+        }
+        throw error;
+      }
+    });
     app.post(`${base}/:id/provision`,guard,(req,res)=>res.status(202).json(bots.provision(req.params.slug,req.params.id,req.body,contextFor(req))));
     app.post(`${base}/:id/validate`,guard,(req,res)=>res.status(202).json(bots.validate(req.params.slug,req.params.id,req.body,contextFor(req))));
     app.post(`${base}/:id/native/actions`,guard,(req,res)=>res.status(202).json(bots.native(req.params.slug,req.params.id,req.body,contextFor(req))));
@@ -797,7 +851,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
     app.delete(`${base}/:id/mcp/connections/:actionId`,guard,(req,res)=>{res.setHeader('Cache-Control','no-store');res.json(botMcpConnections.cancel(req.params.slug,req.params.id,req.params.actionId,contextFor(req)));});
     app.post(`${base}/:id/collaboration`,guard,(req,res)=>res.status(202).json(bots.collaboration(req.params.slug,req.params.id,req.body,contextFor(req))));
     app.post(`${base}/:id/control`,guard,(req,res)=>res.json(bots.control(req.params.slug,req.params.id,req.body,contextFor(req))));
-    app.get(`${base}/:id/runs`,guard,(req,res)=>{const mobile=prefix==='/api'&&req.query.view==='mobile',values=bots.runs(req.params.slug,req.params.id,contextFor(req),mobile?{limit:5,eventView:'mobile'}:undefined);res.json({runs:mobile?values.map(mobileReadView.run):values});});
+    app.get(`${base}/:id/runs`,guard,(req,res)=>{const mobile=prefix==='/api'&&req.query.view==='mobile',context=contextFor(req),values=bots.runs(req.params.slug,req.params.id,context,mobile?{limit:5,eventView:'mobile'}:undefined);if(mobile){res.setHeader('Cache-Control','no-store');res.vary('Cookie');}res.json({runs:mobile?values.map(value=>mobileReadView.run(mobileGroupAction.run(req.params.slug,value,context))):values});});
     app.post(`${base}/:id/actions/:actionId/reconcile`,guard,(req,res)=>res.json(bots.reconcile(req.params.slug,req.params.id,req.params.actionId,req.body,contextFor(req))));
     app.get(`${base}/:id/routines`,guard,(req,res)=>res.json({routines:bots.routines(req.params.slug,req.params.id,contextFor(req))}));
     app.post(`${base}/:id/routines`,guard,(req,res)=>res.status(201).json(bots.createRoutine(req.params.slug,req.params.id,req.body,contextFor(req))));
@@ -930,6 +984,7 @@ export function startServer({ port = Number(process.env.API_PORT || 4178), host 
   const app = createApp({ ...options, objectStoreDir });
   const server = app.listen(port, host, () => console.log(JSON.stringify({ event:'started', service:'ziwei-api', cli:'ziwei_user', host, port, pid:process.pid, at:new Date().toISOString() })));
   attachRealtimeWebSocket(server, app);
+  server.on('close',()=>app.locals.botDeferredConfig.stop());
   return server;
 }
 
@@ -996,5 +1051,8 @@ export function attachRealtimeWebSocket(server, app, { pathPrefix = '/api/worksp
   return sockets;
 }
 
-if (process.argv[1] && process.argv[1].endsWith('server.mjs')) startServer();
+export function isBackendServerEntry(entry,appUrl=import.meta.url){
+  return typeof entry==='string'&&Boolean(entry)&&path.resolve(entry)===fileURLToPath(new URL('./server.mjs',appUrl));
+}
+if (isBackendServerEntry(process.argv[1])) startServer();
 

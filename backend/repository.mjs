@@ -139,6 +139,21 @@ const invitationHash = code => crypto.createHash('sha256').update(String(code ||
 const invitationLink = (slug, code) => `${appOrigin()}/invite?workspace=${encodeURIComponent(slug)}&code=${encodeURIComponent(code)}`;
 const normalizeEmail = value => String(value || '').trim().toLowerCase();
 const jsonObject = value => { try { const parsed = JSON.parse(value); return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}; } catch { return {}; } };
+// Assignment evidence belongs to the internal audit row, never public audit,
+// notification storage/views or realtime events. Preserve all older payloads.
+const publicAuditPayload = (action,payload) => {
+  if(!['task.created','task.updated'].includes(action)||!payload||typeof payload!=='object'||Array.isArray(payload)||!Object.hasOwn(payload,'assignmentBinding'))return payload;
+  const {assignmentBinding:_privateBinding,...visible}=payload;return visible;
+};
+const publicAuditRow = row => {
+  if(!['task.created','task.updated'].includes(row.action))return row;
+  let payload;try{payload=JSON.parse(row.payload_json);}catch{return row;}
+  const visible=publicAuditPayload(row.action,payload);
+  return visible===payload?row:{...row,payload_json:JSON.stringify(visible)};
+};
+const publicNotificationView = row => {
+  const visible=publicAuditRow(row);return {...visible,read:Boolean(visible.read_at),payload:jsonObject(visible.payload_json)};
+};
 const normalizeDescriptionFormat = value => ['plain', 'markdown', 'html'].includes(String(value || '').toLowerCase()) ? String(value).toLowerCase() : 'plain';
 const taskAttachmentView = row => row ? ({ id:row.id, task_id:row.task_id, name:row.name, mime_type:row.mime_type, size:Number(row.size || 0), content_encoding:row.content_encoding, storage_key:row.storage_key, checksum:row.checksum, created_at:row.created_at }) : null;
 const decodeDocumentBase64 = value => {
@@ -348,6 +363,7 @@ const ownDevice = devices => {
 
 export function createRepository(options = {}, io={}) {
   const db = openDatabase(options,io);
+  const botActionCompletionListeners=new Set();
   const allowLocalNetwork = options.memory === true;
   const rollout=serverCodeRolloutFor(db);if(rollout)options={...options,objectStoreDir:rollout.objectStoreDir};
   const employeeEnvKey = rollout?rollout.environmentKey():encryptionKey(options);
@@ -456,12 +472,36 @@ export function createRepository(options = {}, io={}) {
   const audit = (slug, actor, action, payload = {}, deferredEvents = null) => {
     const eventId = id('audit'); const timestamp = now(); const ws = workspace(slug);
     db.prepare('INSERT INTO audit_events(id,workspace_id,actor,action,payload_json,created_at) VALUES(?,?,?,?,?,?)').run(eventId, ws.id, actor, action, JSON.stringify(payload), timestamp);
-    db.prepare('INSERT INTO notifications(id,workspace_id,event_id,actor,action,payload_json,created_at,read_at,archived_at) VALUES(?,?,?,?,?,?,?,?,?)').run(id('notice'), ws.id, eventId, actor, action, JSON.stringify(payload), timestamp, null, null);
-    const event={id:eventId,workspaceId:ws.id,workspaceSlug:slug,actor,action,payload,created_at:timestamp};
+    const visible=publicAuditPayload(action,payload);
+    db.prepare('INSERT INTO notifications(id,workspace_id,event_id,actor,action,payload_json,created_at,read_at,archived_at) VALUES(?,?,?,?,?,?,?,?,?)').run(id('notice'), ws.id, eventId, actor, action, JSON.stringify(visible), timestamp, null, null);
+    const event={id:eventId,workspaceId:ws.id,workspaceSlug:slug,actor,action,payload:visible,created_at:timestamp};
     if (deferredEvents) deferredEvents.push(event);
     else if (templateAuditEvents) templateAuditEvents.push(event);
     else options.onEvent?.(event);
     return eventId;
+  };
+  // Assignment identity is a server-derived fact at the write boundary. A
+  // display token can denote several employees/members, so never prefer an ID
+  // match over a conflicting name/email match or infer an old assignment later.
+  const assignmentCandidates=db.prepare(`SELECT 'employee' AS kind,id AS entity_id,status<>'deleted' AS valid
+    FROM employees WHERE workspace_id=? AND (id=? OR lower(name)=lower(?))
+    UNION ALL SELECT 'member' AS kind,id AS entity_id,role IN ('owner','admin','member') AS valid
+    FROM members WHERE workspace_id=? AND (id=? OR user_id=? OR lower(name)=lower(?) OR lower(email)=lower(?)) LIMIT 2`);
+  const taskAssignmentBinding=(workspaceId,taskId,assignee)=>{
+    const supported=assignee===null||typeof assignee==='string';
+    const binding={schemaVersion:1,workspaceId,taskId,assigneeHash:hashSecret(JSON.stringify(supported?assignee:null)),kind:'unresolved',entityId:null};
+    if(assignee===null||assignee==='')return {...binding,kind:'unassigned'};
+    if(!supported||Buffer.byteLength(assignee)>1024)return binding;
+    const candidates=assignmentCandidates.all(workspaceId,assignee,assignee,workspaceId,assignee,assignee,assignee,assignee);
+    if(candidates.length!==1||candidates[0].valid!==1||typeof candidates[0].entity_id!=='string'||!/^[A-Za-z0-9._:-]{1,160}$/.test(candidates[0].entity_id))return binding;
+    return {...binding,kind:candidates[0].kind,entityId:candidates[0].entity_id};
+  };
+  const taskAssignmentWrite=write=>{
+    const events=[],parentEvents=templateAuditEvents;
+    db.exec('SAVEPOINT task_assignment_write');
+    try{write(events);db.exec('RELEASE task_assignment_write');}
+    catch(error){db.exec('ROLLBACK TO task_assignment_write; RELEASE task_assignment_write');throw error;}
+    if(parentEvents)parentEvents.push(...events);else for(const event of events)options.onEvent?.(event);
   };
   const actionEvents = (actionId, eventView = 'full') => db.prepare(eventView === 'mobile'
     ? "SELECT id,action_id,type,message,data_json,created_at FROM a2a_action_events WHERE action_id=? AND (type IN ('succeeded','failed','cancelled','expired') OR id=(SELECT id FROM a2a_action_events WHERE action_id=? ORDER BY created_at DESC,id DESC LIMIT 1)) ORDER BY created_at,id"
@@ -586,6 +626,11 @@ export function createRepository(options = {}, io={}) {
   };
   return finishRepository(guardRepository({
     db,
+    onBotActionCompleted(listener) {
+      if(typeof listener!=='function')throw new TypeError('Completion listener must be a function');
+      botActionCompletionListeners.add(listener);
+      return()=>botActionCompletionListeners.delete(listener);
+    },
     withEmployeeTemplateTransaction(create) {
       // This service owns its commit so notifications cannot escape a rollback.
       // Management's inner savepoint remains inside the same transaction.
@@ -655,8 +700,11 @@ export function createRepository(options = {}, io={}) {
       const rawDescription = String(input.description || '');
       const task = { id: id('task'), workspace_id: ws.id, title: String(input.title || '未命名任务').trim(), description: descriptionFormat === 'html' ? sanitizeHtml(rawDescription) : rawDescription, description_format: descriptionFormat, state: input.state || 'planned', priority: input.priority || 'medium', created_by: String(input.createdBy ?? input.created_by ?? input.creator ?? 'user').trim() || 'user', assignee: input.assignee || null, labels: Array.isArray(input.labels) ? input.labels : [], due_date: input.dueDate ?? input.due_date ?? null, created_at: created, updated_at: created };
       if (!task.title) throw new Error('Task title is required');
-      db.prepare('INSERT INTO tasks(id,workspace_id,title,description,description_format,state,priority,created_by,assignee,labels_json,due_date,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)').run(task.id,ws.id,task.title,task.description,task.description_format,task.state,task.priority,task.created_by,task.assignee,JSON.stringify(task.labels),task.due_date,created,created);
-      audit(slug,'user','task.created',{taskId:task.id});
+      taskAssignmentWrite(events=>{
+        db.prepare('INSERT INTO tasks(id,workspace_id,title,description,description_format,state,priority,created_by,assignee,labels_json,due_date,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)').run(task.id,ws.id,task.title,task.description,task.description_format,task.state,task.priority,task.created_by,task.assignee,JSON.stringify(task.labels),task.due_date,created,created);
+        const stored=db.prepare('SELECT assignee FROM tasks WHERE id=?').get(task.id);
+        audit(slug,'user','task.created',{taskId:task.id,assignmentBinding:taskAssignmentBinding(ws.id,task.id,stored.assignee)},events);
+      });
       if (input.runtime || input.model || input.execute === true) {
         const employee = executionEmployee;
         const payload = executionPayload({
@@ -693,10 +741,14 @@ export function createRepository(options = {}, io={}) {
       if (!next.title) throw new Error('Task title is required');
       if (!['planned','todo','in_progress','review','completed','blocked'].includes(next.state)) throw new Error('Invalid task state');
       if (!['high','medium','low'].includes(next.priority)) throw new Error('Invalid task priority');
-      db.prepare('UPDATE tasks SET title=?,description=?,description_format=?,state=?,priority=?,created_by=?,assignee=?,labels_json=?,due_date=?,updated_at=? WHERE id=?')
-        .run(next.title, next.description, next.description_format, next.state, next.priority, next.created_by, next.assignee, JSON.stringify(next.labels), next.due_date, next.updated_at, taskId);
       const workspaceRow = db.prepare('SELECT slug FROM workspaces WHERE id=?').get(task.workspace_id);
-      audit(workspaceRow.slug,'user','task.updated',{taskId});
+      taskAssignmentWrite(events=>{
+        db.prepare('UPDATE tasks SET title=?,description=?,description_format=?,state=?,priority=?,created_by=?,assignee=?,labels_json=?,due_date=?,updated_at=? WHERE id=?')
+          .run(next.title, next.description, next.description_format, next.state, next.priority, next.created_by, next.assignee, JSON.stringify(next.labels), next.due_date, next.updated_at, taskId);
+        const stored=db.prepare('SELECT assignee FROM tasks WHERE id=?').get(taskId);
+        const changed=stored.assignee!==task.assignee;
+        audit(workspaceRow.slug,'user','task.updated',{taskId,...(changed?{assignmentBinding:taskAssignmentBinding(task.workspace_id,taskId,stored.assignee)}:{})},events);
+      });
       return { ...task, ...next, labels: next.labels };
     },
     transitionTask(taskId, to) {
@@ -1639,11 +1691,11 @@ export function createRepository(options = {}, io={}) {
       const customEvents=this.listCalendarEvents(slug);
       return [{id:'calendar-default',name:'工作区日历',timezone:ws.timezone || 'Asia/Shanghai',events:[...taskEvents,...autoEvents,...customEvents]}];
     },
-    listAudit(slug, limit=50) { const ws=workspace(slug); return db.prepare('SELECT * FROM audit_events WHERE workspace_id=? ORDER BY created_at DESC LIMIT ?').all(ws.id,limit); },
-    listNotifications(slug, limit=50, options = {}) { const ws=workspace(slug); const archived=options.archived ? ' AND archived_at IS NOT NULL' : ' AND archived_at IS NULL'; const unread=options.unread ? ' AND read_at IS NULL' : ''; return db.prepare(`SELECT * FROM notifications WHERE workspace_id=?${archived}${unread} ORDER BY created_at DESC LIMIT ?`).all(ws.id,limit).map(row=>({...row,read:Boolean(row.read_at),payload:jsonObject(row.payload_json)})); },
+    listAudit(slug, limit=50) { const ws=workspace(slug); return db.prepare('SELECT * FROM audit_events WHERE workspace_id=? ORDER BY created_at DESC LIMIT ?').all(ws.id,limit).map(publicAuditRow); },
+    listNotifications(slug, limit=50, options = {}) { const ws=workspace(slug); const archived=options.archived ? ' AND archived_at IS NOT NULL' : ' AND archived_at IS NULL'; const unread=options.unread ? ' AND read_at IS NULL' : ''; return db.prepare(`SELECT * FROM notifications WHERE workspace_id=?${archived}${unread} ORDER BY created_at DESC LIMIT ?`).all(ws.id,limit).map(publicNotificationView); },
     notificationStats(slug) { const ws=workspace(slug); return { unread:db.prepare('SELECT COUNT(*) AS count FROM notifications WHERE workspace_id=? AND read_at IS NULL AND archived_at IS NULL').get(ws.id).count, total:db.prepare('SELECT COUNT(*) AS count FROM notifications WHERE workspace_id=? AND archived_at IS NULL').get(ws.id).count }; },
     markNotificationsRead(slug, ids = null) { const ws=workspace(slug); const timestamp=now(); if (Array.isArray(ids) && ids.length) { const placeholders=ids.map(()=>'?').join(','); db.prepare(`UPDATE notifications SET read_at=COALESCE(read_at,?) WHERE workspace_id=? AND id IN (${placeholders})`).run(timestamp,ws.id,...ids); } else db.prepare('UPDATE notifications SET read_at=COALESCE(read_at,?) WHERE workspace_id=? AND archived_at IS NULL').run(timestamp,ws.id); return this.notificationStats(slug); },
-    archiveNotification(notificationId, archived = true) { const row=db.prepare('SELECT * FROM notifications WHERE id=?').get(notificationId); if(!row) throw new Error('Notification not found'); db.prepare('UPDATE notifications SET archived_at=? WHERE id=?').run(archived ? now() : null,notificationId); return {...db.prepare('SELECT * FROM notifications WHERE id=?').get(notificationId),read:Boolean(row.read_at),payload:jsonObject(row.payload_json)}; },
+    archiveNotification(notificationId, archived = true) { const row=db.prepare('SELECT * FROM notifications WHERE id=?').get(notificationId); if(!row) throw new Error('Notification not found'); db.prepare('UPDATE notifications SET archived_at=? WHERE id=?').run(archived ? now() : null,notificationId); return publicNotificationView(db.prepare('SELECT * FROM notifications WHERE id=?').get(notificationId)); },
     updateWorkspace(slug, input = {}) { const ws=workspace(slug); if (!ws) throw new Error('Workspace not found'); const current=this.getWorkspaceSettings(slug); const name=String(input.name ?? ws.name).trim() || ws.name; const timezone=String(input.timezone ?? ws.timezone); const description=input.description === undefined ? current.description : String(input.description); const context=input.context === undefined ? current.context : String(input.context); const visibility=input.visibility === undefined ? current.visibility : (input.visibility === 'personal' ? 'personal' : 'workspace'); const prefix=input.prefix === undefined ? current.prefix : String(input.prefix); const quota=input.quota === undefined ? current.quota : input.quota; const preferences=input.preferences && typeof input.preferences === 'object' ? {...current.preferences,...input.preferences} : current.preferences; db.prepare('UPDATE workspaces SET name=?,timezone=? WHERE id=?').run(name,timezone,ws.id); db.prepare('INSERT INTO workspace_preferences(workspace_id,description,context,visibility,prefix,quota_json,profile_json,preferences_json) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(workspace_id) DO UPDATE SET description=excluded.description,context=excluded.context,visibility=excluded.visibility,prefix=excluded.prefix,quota_json=excluded.quota_json,preferences_json=excluded.preferences_json').run(ws.id,description,context,visibility,prefix,JSON.stringify(quota),JSON.stringify(current.profile),JSON.stringify(preferences)); audit(slug,'user','workspace.updated',{name,timezone}); return this.getWorkspaceSettings(slug); },
     getWorkspaceSettings(slug) { const ws=workspace(slug); if(!ws) throw new Error('Workspace not found'); const prefs=db.prepare('SELECT * FROM workspace_preferences WHERE workspace_id=?').get(ws.id) || {description:'',context:'',visibility:'workspace',prefix:'',quota_json:'{}',profile_json:'{}',preferences_json:'{}'}; return {...ws,description:prefs.description,context:prefs.context,visibility:prefs.visibility,prefix:prefs.prefix,quota:jsonObject(prefs.quota_json),profile:jsonObject(prefs.profile_json),preferences:jsonObject(prefs.preferences_json)}; },
     updateProfile(slug, input = {}) { const ws=workspace(slug); const current=this.getWorkspaceSettings(slug); const profile={...current.profile,...input}; db.prepare('INSERT INTO workspace_preferences(workspace_id,description,context,visibility,prefix,quota_json,profile_json,preferences_json) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(workspace_id) DO UPDATE SET profile_json=excluded.profile_json').run(ws.id,current.description,current.context,current.visibility,current.prefix,JSON.stringify(current.quota),JSON.stringify(profile),JSON.stringify(current.preferences)); audit(slug,'user','profile.updated',Object.keys(input)); return this.getWorkspaceSettings(slug); },
@@ -2265,6 +2317,9 @@ export function createRepository(options = {}, io={}) {
         throw writeError;
       }
       const updated = db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId);
+      // Notify only after the result savepoint was released. Recovery workers
+      // schedule their own work and cannot change this committed reply.
+      if(payload.hermesBot)for(const listener of botActionCompletionListeners)try{listener({actionId,employeeId:payload.employeeId,workspace:ws.slug});}catch{}
       return a2aResponseView(updated, { payload, receiptOnly });
     },
     getA2AAction(actionId, { workspaceSlug = null, actorUserId = null, eventView = 'full' } = {}) {

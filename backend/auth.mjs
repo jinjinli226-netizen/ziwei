@@ -128,6 +128,14 @@ export function createAuthService(db, { sessionTtlMs = SESSION_TTL_MS, cookieNam
 
   return {
     cookieName,
+    // Private server reference for push subscriptions. Never return the session
+    // token/hash or extend a session from the background notification worker.
+    sessionReference(req) {
+      const token=parseCookies(req.headers.cookie)[cookieName] || req.headers['x-ziwei-session'];
+      if(!token)return null;
+      const row=db.prepare('SELECT id,user_id FROM local_sessions WHERE token_hash=? AND expires_at>?').get(hashToken(token),now());
+      return row?{id:row.id,userId:row.user_id}:null;
+    },
     status(req) {
       const token = parseCookies(req.headers.cookie)[cookieName] || req.headers['x-ziwei-session'];
       const auth = findSession(token);

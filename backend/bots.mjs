@@ -5,6 +5,7 @@ import {normalizeNativeOperation,nativeIsExecution,nativeNeedsTools} from '../sr
 import { normalizeBotConfig, createDefaultBotConfig, botFailure, BOT_CAPABILITY_CATALOG } from '../src/hermes-bot-config.mjs';
 import {deriveBotCapabilities} from './bot-capabilities.mjs';
 import {readHistoricalPrelaunchRecovery} from './bot-historical-recovery-view.mjs';
+import {createBotDeferredConfig} from './bot-deferred-config.mjs';
 
 const parse = value => { try { return JSON.parse(value); } catch { return null; } };
 const now = () => new Date().toISOString();
@@ -57,6 +58,10 @@ export function assertBotExecution(db, workspaceId, payload, { validation = fals
   if (payload.hermesBot && (payload.hermesBot.revision !== row.revision || payload.hermesBot.controlEpoch !== row.control_epoch)) throw botFailure('BOT_REVISION_CONFLICT','Bot 配置或控制状态已变化，请重新读取');
   if (!validation && (row.control_state !== 'active' || employee.status !== 'active')) throw botFailure('BOT_NOT_ACTIVE','Bot 未启用或已暂停');
   if (!validation && row.validated_revision !== row.revision) throw botFailure('BOT_NOT_VALIDATED','Bot 当前配置尚未通过目标电脑验证');
+  if(!validation&&!readOnlyInspection){
+    const deferred=db.prepare("SELECT state,intent_json FROM bot_deferred_configs WHERE employee_id=? AND state IN ('pending','validating','connecting')").get(employeeId);
+    if(deferred&&(!actionId||deferred.state!=='pending'||parse(deferred.intent_json)?.blocking?.id!==actionId))throw botFailure('BOT_DEFERRED_CONFIG_BUSY','已接受此员工的延后配置，等待原执行结束及配置、连接流程完成后再派新工作');
+  }
   if (!readOnlyInspection && row.active_action_id && row.active_action_id !== actionId) {
     const active = db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(row.active_action_id);
     if (active && (['pending','acked'].includes(active.status) || botUncertain(parse(active.result_json)) || active.status === 'expired' && active.acked_at) && !readHistoricalPrelaunchRecovery(db,active)) throw botFailure('BOT_BUSY','Bot 仍有在途或未确认停止的执行，请查询原回执');
@@ -104,11 +109,12 @@ export function createBotService(repo, management) {
   });
   const capabilities = (slug,input={},context={}) => {
     scope(slug,context);
+    const deferredConfiguration={schemaVersion:1,supported:true,operation:'update',required:['deferUntilIdle','expectedRevision','expectedControlEpoch','idempotencyKey'],optional:['employee','config','connectMcpServers'],projection:'deferredConfig',selfExecution:'submit_then_finish_current_turn',effectiveScope:'after_confirmed_idle',requiresClientUpdate:false};
     const device=management.discovery(slug,{deviceId:input.deviceId,userId:context.actorUserId,deviceScope:context.deviceScope}).devices.find(item=>item.id===input.deviceId) || null;
     const runtime=device?.runtimes.find(item=>item.name==='Hermes') || null;
     const integrated=new Set(['groups_mentions','delegation','gateway','voice','goals','heartbeat','kanban','bot_identity','persistent_chat','profile_memory','model_provider','skills','tools_mcp','routines','multimodal','session_search','observability']);
-    if(repo.serverCodeRollout)return {schemaVersion:1,workspace:slug,deviceId:input.deviceId||null,device,runtime,capabilities:BOT_CAPABILITY_CATALOG.map(([id,label])=>({id,label,status:'requires_configuration',configurable:integrated.has(id),reason:'等待客户端验证或更新；当前设备执行已关闭',evidence:['server-code-rollout-v1']}))};
-    return {schemaVersion:1,workspace:slug,deviceId:input.deviceId || null,device,runtime,capabilities:BOT_CAPABILITY_CATALOG.map(([id,label])=>({id,label,status:!integrated.has(id)?'not_integrated':(!runtime?'unknown':(!runtime.available?'requires_dependency':'requires_configuration')),configurable:integrated.has(id),reason:!integrated.has(id)?'原生能力尚未接入紫薇控制与结果链；不能由此入口启用':(!runtime?'目标电脑尚未提供 Hermes 发现证据':(!runtime.available?runtime.issues.map(item=>item.message).join('；'):'需保存配置并在目标电脑验证；执行成功由实际回执确认')),evidence:[...(runtime?.version?[`device_heartbeat:${runtime.version}`]:[]),'ziwei.bot.schema:1']}))};
+    if(repo.serverCodeRollout)return {schemaVersion:1,workspace:slug,deviceId:input.deviceId||null,device,runtime,deferredConfiguration:{...deferredConfiguration,supported:false},capabilities:BOT_CAPABILITY_CATALOG.map(([id,label])=>({id,label,status:'requires_configuration',configurable:integrated.has(id),reason:'等待客户端验证或更新；当前设备执行已关闭',evidence:['server-code-rollout-v1']}))};
+    return {schemaVersion:1,workspace:slug,deviceId:input.deviceId || null,device,runtime,deferredConfiguration,capabilities:BOT_CAPABILITY_CATALOG.map(([id,label])=>({id,label,status:!integrated.has(id)?'not_integrated':(!runtime?'unknown':(!runtime.available?'requires_dependency':'requires_configuration')),configurable:integrated.has(id),reason:!integrated.has(id)?'原生能力尚未接入紫薇控制与结果链；不能由此入口启用':(!runtime?'目标电脑尚未提供 Hermes 发现证据':(!runtime.available?runtime.issues.map(item=>item.message).join('；'):'需保存配置并在目标电脑验证；执行成功由实际回执确认')),evidence:[...(runtime?.version?[`device_heartbeat:${runtime.version}`]:[]),'ziwei.bot.schema:1']}))};
   };
   const runs = (slug,id,context={},options={}) => {
     const {ws}=resolve(slug,id,context);
@@ -153,10 +159,13 @@ export function createBotService(repo, management) {
     const view={id,employee_id:id,workspace:slug,employee,instance:botProfileView(db,row,employee),configuration_state:'initialized',kind:'employee',config:parse(row.config_json),revision:row.revision,control_state:row.control_state,control_epoch:row.control_epoch,main_conversation_id:row.main_conversation_id,nativeResources,scheduler_authority:'ziwei',validation:{status:validationStatus,action_id:row.validation_action_id,revision:validationAction?.payload?.hermesBot?.revision ?? null,error:validationAction?.error || null},latest_run:mobile&&botRuns[0]?readAction(botRuns[0].id,'mobile'):botRuns[0] || null,stop_action:row.stop_action_id?readAction(row.stop_action_id,'mobile'):null,effect:{savedRevision:row.revision,validatedRevision:row.validated_revision,scope:repo.serverCodeRollout?'draft_waiting_client':'next_execution',executionAdmission:repo.serverCodeRollout?.status()||null,pendingReason:repo.serverCodeRollout?'等待客户端验证或更新；专属 Profile/HOME 仅保存规划，尚未在电脑创建':row.validated_revision!==row.revision?'目标电脑尚未验证本版本':row.control_state!=='active'?'Bot 尚未启用':null}};
     const savedRoutines=db.prepare('SELECT automation_id FROM bot_routines WHERE employee_id=?').all(id).map(item=>routine(slug,id,item.automation_id,context));
     const activeAction=row.active_action_id?botRuns.find(action=>action.id===row.active_action_id)||readAction(row.active_action_id):null;
-    return{...view,...deriveBotCapabilities({bot:view,capabilities:botCapabilities,device:environment.device,runtime:environment.runtime,actions:botRuns,activeAction,routines:savedRoutines,phoneMcp:phoneMcpConfiguration(slug,employee)})};
+    return{...view,deferredConfig:deferredConfig.latest(row.workspace_id,id),...deriveBotCapabilities({bot:view,capabilities:botCapabilities,device:environment.device,runtime:environment.runtime,actions:botRuns,activeAction,routines:savedRoutines,phoneMcp:phoneMcpConfiguration(slug,employee)})};
   };
   const routine = (slug,id,autoId,context={}) => {const {ws}=resolve(slug,id,context);const binding=db.prepare('SELECT * FROM bot_routines WHERE automation_id=? AND employee_id=? AND workspace_id=?').get(autoId,id,ws.id);if(!binding)throw botFailure('ROUTINE_NOT_FOUND','Routine 不属于当前 Bot',404);return {...repo.getAutomation(slug,autoId),...binding,last_result:repo.listAutomationRuns(autoId)[0] || null};};
-  return guardBotService(repo,{
+  let service;
+  const deferredConfig=createBotDeferredConfig(repo,{resolve,get,update:(...args)=>service.update(...args),validate:(...args)=>service.validate(...args),control:(...args)=>service.control(...args)});
+  service=guardBotService(repo,{
+    deferredConfig,
     capabilities,get,runs,
     reconcile(slug,id,actionId,input={},context={}) { return atomic(()=>{
       if (Object.keys(input).some(key=>!['eventId','expectedRevision','expectedControlEpoch'].includes(key))) throw botFailure('BOT_RECOVERY_INPUT_INVALID','核实只接受原服务器事件标识与当前配置版本，不接受自填结果或退出证明',400);
@@ -264,6 +273,8 @@ export function createBotService(repo, management) {
       },actionId=>management.action(slug,actionId,context))};
     },
     update(slug,id,input={},context={}) {return atomic(()=>{
+      if(input.deferUntilIdle===true)return deferredConfig.enqueue(slug,id,input,context);
+      if(input.deferUntilIdle!==undefined&&input.deferUntilIdle!==false||input.connectMcpServers!==undefined)throw botFailure('BOT_DEFERRED_INPUT_INVALID','自动连接 MCP 需要明确 deferUntilIdle:true');
       const {row,employee}=resolve(slug,id,context);revision(row,input);
       const patch=input.employee || {};
       const allowed=['name','avatar','description','persona','instructions','skills','model','visibility'];
@@ -321,4 +332,5 @@ export function createBotService(repo, management) {
     deleteRoutine(slug,id,autoId,context={}) {routine(slug,id,autoId,context);return repo.deleteAutomation(autoId);},
     runRoutine(slug,id,autoId,input={},context={}) {routine(slug,id,autoId,context);return idempotent(slug,`routine-run:${autoId}`,input,context,()=>repo.runAutomation(autoId,'manual'),runId=>repo.listAutomationRuns(autoId).find(item=>item.id===runId));},
   });
+  return service;
 }

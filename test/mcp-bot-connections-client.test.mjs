@@ -22,7 +22,7 @@ test('ziwei_bot advertises all three MCP connection operations and the authoriza
   for(const operation of ['mcpConnections','connectMcp','cancelMcpConnection'])assert.ok(bot.inputSchema.properties.operation.enum.includes(operation));
   assert.equal(bot.inputSchema.properties.connectionId.type,'string');
   const description=bot.description+' '+bot.inputSchema.properties.data.description;
-  for(const term of ['mcpConnections','connectMcp','cancelMcpConnection','authorizationUrl','connected','idempotencyKey'])assert.ok(description.includes(term),`missing connection workflow keyword: ${term}`);
+  for(const term of ['mcpConnections','connectMcp','cancelMcpConnection','authorizationUrl','connected','idempotencyKey','deferUntilIdle','connectMcpServers','expectedControlEpoch','deferredConfig'])assert.ok(description.includes(term),`missing connection workflow keyword: ${term}`);
   assert.equal(f.requests.length,0);
 });
 
@@ -43,6 +43,15 @@ test('connection POST sends only data fields and explicit retries retain the exa
     assert.deepEqual(Object.keys(JSON.parse(init.body)).sort(),['expectedControlEpoch','expectedRevision','idempotencyKey','server']);
   }
   assert.equal(f.requests[0].init.body,f.requests[1].init.body);assert.equal(data.idempotencyKey,'stable-connect-key');
+});
+
+test('deferred configuration uses the existing update operation and preserves the exact queued request body',async()=>{
+  const queued={id:'bot-1',deferredConfig:{id:'deferred-one',phase:'queued',connections:[]}},f=fixture(queued,202);
+  const input={operation:'update',id:'bot-1',data:{expectedRevision:7,expectedControlEpoch:3,idempotencyKey:'same-config-intent',deferUntilIdle:true,connectMcpServers:['viral_library'],config:{mcpServers:{viral_library:{transport:'http',url:'https://library.example.test/mcp',auth:'oauth',oauth:{cimd:false,scope:'read'},enabled:true}}}}};
+  assert.deepEqual(await f.client.bot(input),queued);assert.deepEqual(await f.client.bot(input),queued);
+  assert.equal(f.requests.length,2);
+  for(const {url,init}of f.requests){assert.equal(url,'https://example.test/mcp/v1/workspaces/test-111/bots/bot-1');assert.equal(init.method,'PATCH');assert.deepEqual(JSON.parse(init.body),input.data);}
+  assert.equal(f.requests[0].init.body,f.requests[1].init.body);
 });
 
 test('connection cancellation encodes the exact original ID without changing workspace or device routing',async()=>{

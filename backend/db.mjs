@@ -101,6 +101,19 @@ export function openDatabase(options = {}, {serverCodeRolloutIo={}}={}) {
       FOREIGN KEY(employee_id) REFERENCES employees(id) ON DELETE CASCADE,
       FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS bot_deferred_configs (
+      id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, employee_id TEXT NOT NULL,
+      actor_key TEXT NOT NULL, request_key TEXT NOT NULL, fingerprint TEXT NOT NULL,
+      intent_json TEXT NOT NULL, intent_digest TEXT NOT NULL,
+      state TEXT NOT NULL DEFAULT 'pending', phase TEXT NOT NULL DEFAULT 'waiting_for_idle',
+      applied_json TEXT, validation_action_id TEXT, connections_json TEXT NOT NULL DEFAULT '[]',
+      error_code TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+      UNIQUE(workspace_id,employee_id,actor_key,request_key),
+      FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_bot_deferred_configs_state ON bot_deferred_configs(state,created_at);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_deferred_configs_pending ON bot_deferred_configs(employee_id)
+      WHERE state IN ('pending','validating','connecting');
     CREATE TABLE IF NOT EXISTS bot_routines (
       automation_id TEXT PRIMARY KEY, employee_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
       conversation_id TEXT NOT NULL, authority TEXT NOT NULL DEFAULT 'ziwei', native_driver_json TEXT,

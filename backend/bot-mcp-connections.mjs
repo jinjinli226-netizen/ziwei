@@ -97,6 +97,36 @@ export function createBotMcpConnections(repo,bots,{apiBase,now=Date.now,maxFlows
     for(const row of rows) {const action=actionFor(row.id),name=action.payload.nativeOperation.input.server;if(seen.has(name)||!Object.hasOwn(bot.config.mcpServers,name))continue;seen.add(name);connections.push(snapshot(action,bot));}
     return {connections};
   }
+  function read(slug,id,actionId,context={}) {
+    const {bot,action}=browserAction(slug,id,actionId,context);
+    return {connection:snapshot(action,bot)};
+  }
+  // The durable configuration runner owns when a connection may start. These
+  // synchronous callbacks only reuse the normal scoped connection admission and
+  // read its exact native action; they never wait inside the Bot's active slot.
+  const deferredHandlers=Object.freeze({
+    connectMcp({workspace,employeeId,server,idempotencyKey,context={}}) {
+      if(typeof idempotencyKey!=='string'||!/^[A-Za-z0-9._:-]{1,160}$/.test(idempotencyKey))fail('IDEMPOTENCY_KEY_REQUIRED','必须提供稳定 idempotencyKey',400);
+      const bot=bots.get(workspace,employeeId,context,{view:'mobile'});
+      const owner=context.actorUserId||context.deviceCredentialDeviceId||'authorized-mcp';
+      const saved=repo.db.prepare('SELECT resource_id FROM management_requests WHERE workspace_id=(SELECT id FROM workspaces WHERE slug=?) AND kind=? AND request_key=?')
+        .get(workspace,`bot:native:${employeeId}:${owner}`,idempotencyKey);
+      if(saved) {
+        // A response can be lost between native admission and the runner's own
+        // checkpoint. Recover before online checks or new revision defaults.
+        const action=actionFor(saved.resource_id),operation=action?.payload?.nativeOperation;
+        if(!isConnection(action)||action.payload.hermesBot?.workspace!==workspace||action.payload.hermesBot.employeeId!==employeeId||operation.requestId!==idempotencyKey||operation.input.server!==server)
+          fail('IDEMPOTENCY_CONFLICT','原请求不是此员工和服务的 MCP 连接。');
+        return snapshot(action,bot);
+      }
+      return start(workspace,employeeId,{server,idempotencyKey,expectedRevision:bot.revision,expectedControlEpoch:bot.control_epoch},context).connection;
+    },
+    readMcp({workspace,employeeId,actionId,server,context={}}) {
+      const {connection}=read(workspace,employeeId,actionId,context);
+      if(connection.server!==server)fail('MCP_CONNECTION_NOT_FOUND','原连接不属于指定 MCP 服务。',404);
+      return connection;
+    },
+  });
   function cancel(slug,id,actionId,context={}) {
     const {action,bot}=browserAction(slug,id,actionId,context);
     if(action.payload.nativeOperation.operation!=='authorize'||!['pending','acked'].includes(action.status))return {connection:snapshot(action,bot)};
@@ -153,5 +183,5 @@ export function createBotMcpConnections(repo,bots,{apiBase,now=Date.now,maxFlows
     if(flow.credentialId!==credential.credentialId)fail('MCP_OAUTH_DEVICE_SCOPE','请使用原电脑授权连接。',403);
     return {status:flow.status==='callback'?'callback':['cancelled','expired'].includes(flow.status)?flow.status:'waiting',...(flow.status==='callback'?{callback:flow.callback}:{})};
   }
-  return {start,list,cancel,begin,publish,deliver,callback};
+  return {start,list,read,deferredHandlers,cancel,begin,publish,deliver,callback};
 }
