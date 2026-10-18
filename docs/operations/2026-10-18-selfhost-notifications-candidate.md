@@ -126,3 +126,30 @@ TikTok 仅作只读对照：旧包较早看到运行中，新包检查时其真�
 追加只读访问关联：真实 assistant 消息对应通知事件 `audit_3b02507a-ad62-498b-944e-ba3644a5b24e`；12:49:22 同事件 fresh item 200，随后系统显示通知。12:50:40.962 实际点卡后，12:50:42 原聊天 200 及 feed 200，12:50:43 baseline 200 / 同事件 fresh item 200，12:50:44 原聊天为正常条件读取 304。不能把最后一次 304 写作 200，前台恢复读取与通知定位各自存在。补强记录为主控工作树 `.local/mobile-stale-recovery/notification-verification.json`，只含脱敏元数据。
 
 新版安装二维码保存后已重新解码，内容准确等于上述 code13 直接下载 URL。稳定交付目录为 `output/android-manager/v0.5.1-internal/`，包含 APK、SHA、manifest、二维码与 `release-verification.json`。保持内部测试性质及 `deviceVerified:false`；实际真机效果待安装确认。
+
+
+## 0.5.2：输入法、草稿和导航
+
+本轮独立处理手机端输入与导航问题，没有联系主控或其他 Codex 聊天，也没有发布服务端改动。准确旧 code13 在模拟器真实 InputConnection 组合输入遇到自然 8 秒轮询时重启输入法连接，最终把“中文组合”写成“中中文组合”。普通同聊天刷新原先会替换整个输入框及祖先；仅保留历史节点不能避免输入法被断开。
+
+code14 对同一聊天做原位 DOM 更新，保留输入框、祖先、选区与历史图片节点；组合输入期间不写旧模型值，不在组合结束后补写旧值。切页先同步当前草稿，跨员工或工作区不恢复前一输入框的焦点。发送回执根据原草稿修订号清理，返回原员工后也不能把已接受消息重新存回；新输入继续保留。
+
+详情与设置返回栈保存原 conversationId。独立审核补充发现群组委托导航绕过旧通知的导航代次，已统一覆盖实际导航动作，包括同页群来源、房间和表单替换、设备、汇报与弹层。旧通知查询及原生 consume 迟到不再抢走新页面；普通轮询、刷新和自动已读不会撤销当前导航。业务写入、幂等、权限和真实执行保护不因撤销导航而取消或重发。
+
+| 项目 | 值 |
+| --- | --- |
+| 准确源码 | `65eb8b036f6d579065f3942f8dbc79a250b4400a` |
+| 版本 | `0.5.2-internal` / code 14 |
+| APK SHA-256 | `9959c7f7ade4cc708081aec40549b2609b82e9d72c093a781fd90ccbab22024d` |
+| 大小 | 772,549 bytes |
+| 签名 | 沿用原 `507531ee91afe6369a2d519d653713a76d2fa54b8f5f76119672f668230ced35` |
+
+全网页 465/465、独立输入与导航 51/51、Chromium 真实组合输入与跨工作区草稿回归通过。27 份网页资源经独立检查与准确 Git / manifest / APK 字节一致；Java、资源和 `classes.dex` 与 code13 完全一致，无第三方 SDK、测试 CA、测试输入法或调试桥入包。
+
+同一私有 API35 模拟器从准确旧13覆盖升级到准确14，安装内 APK SHA 与上表相同，appId 10148、首次安装时间、原账号免重登与旧非空草稿均保留。真实 Android InputMethodService / InputConnection 跨三次自然轮询，starts / restarts / finishes 增量均为0；中文组合恰好一次且光标4。选区1–3跨轮询保留，一次替换后文字与光标2正确；24次连续原生输入未重复或丢失。实际详情刷新、模型设置只读进入与两次返回、A/B/A独立未发草稿均通过。
+
+原聊天身份通过官方界面查找并定位前轮唯一 C13 assistant 标记，关联前轮已核验原会话收据；本轮 UI 不直接暴露原始 ID，没有虚称从 UI 读取 ID 或新发服务端探针。全程新增消息0、配置写入0，未重复真实后台通知或模型执行验收。真机仍未验证，`deviceVerified:false` 保持。
+
+独立测试输入法无网络权限、不提供发送动作，正式登录完成后才用于非密码多行输入；验收后已恢复 LatinIME、卸载输入法并删除临时二进制与签名。只停止自己的 QEMU / ADB、释放388–400并销毁本轮新 userdata，原六个磁盘 SHA / 大小 / mtime 不变，旧59582、保留登记及其他项目260未改。原生验收与清理见 `.local/mobile-manager-composer-code14-native-qa/{actual-android-canonical-result,cleanup-final-owned}.json`，源码和最终独立审查见 `.local/mobile-manager-composer-code14-independent-review/`。
+
+已在原仓库发布[内部测试版 0.5.2](https://github.com/jinjinli226-netizen/ziwei/releases/tag/android-manager-v0.5.2-internal)：[直接下载 APK](https://github.com/jinjinli226-netizen/ziwei/releases/download/android-manager-v0.5.2-internal/ziwei-manager-0.5.2-internal-code14.apk)。tag 解析到准确 65eb8b0 源码，匿名完整下载 SHA 与模拟器准确包一致；同包附 SHA256 与 manifest-code14.json。安装二维码为590×590，保存后重新解码确认同一直接下载 URL；交付文件位于 `output/android-manager/v0.5.2-internal/`。发布记录见 `.local/mobile-manager-release-0.5.2/result.json`，root gate 固定30份验收和清理证据。原临时依赖链接已移除，真实依赖目录未改，端口检查无冲突或未登记监听。
