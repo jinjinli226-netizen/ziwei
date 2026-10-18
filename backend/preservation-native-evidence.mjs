@@ -213,6 +213,17 @@ function retainableOrphanLocalHistory(completed,started,scope){
   return exactKeys(completed,['key','identity','result'])&&typeof completed.key==='string'&&completed.key&&localHistoryIdentity(completed.identity,scope)&&result&&['succeeded','failed'].includes(result.status)&&typeof result.actionId==='string'&&result.actionId&&Number.isFinite(result.completedAt)&&result.completedAt>=0&&!backgroundControlUnknown(result)&&!syntheticEvidence(result)&&!started.some(row=>row.key===completed.key||row.actionId===result.actionId);
 }
 
+// Old ordinary chat failures sometimes persisted only a terminal envelope.
+// Retain that history without inferring whether any original runtime launched
+// or exited. This never applies to a live/quarantined/control/native worker.
+function retainableConversationFailureHistory(started,completed,state,scope){
+  if(!exactKeys(started,['key','actionId','identity','startedAt','nativeRuntime','resourceBinding'])||!exactKeys(completed,['key','identity','result'])||started.nativeRuntime!==true||typeof started.key!=='string'||!started.key||typeof started.actionId!=='string'||!started.actionId||started.key!==completed.key||started.actionId!==completed.result?.actionId||!localHistoryIdentity(started.identity,scope)||!equal(started.identity,completed.identity))return false;
+  const binding=started.resourceBinding,result=completed.result;
+  if(!exactKeys(binding,['type','employeeId','revision','controlEpoch','resource','operation','platform'])||binding.type!=='conversation.execute'||typeof binding.employeeId!=='string'||!binding.employeeId||!Number.isSafeInteger(binding.revision)||binding.revision<=0||!Number.isSafeInteger(binding.controlEpoch)||binding.controlEpoch<=0||binding.resource!==null||binding.operation!==null||binding.platform!==null)return false;
+  if(!exactKeys(result,['status','actionId','error','completedAt'])||result.status!=='failed'||typeof result.error!=='string'||!result.error||!Number.isFinite(started.startedAt)||started.startedAt<0||!Number.isFinite(result.completedAt)||result.completedAt<started.startedAt)return false;
+  return state.started.filter(row=>row.key===started.key).length===1&&state.started.filter(row=>row.actionId===started.actionId).length===1&&state.completed.filter(row=>row.key===completed.key).length===1&&state.completed.filter(row=>row.result?.actionId===result.actionId).length===1;
+}
+
 /** Read-only evidence. Zero in-memory counters cannot replace these files.
  * localMaintenance is lexical code state, never selected by input JSON. */
 function scanFileEvidence({connections=[],actions=[],homes=[],productionRequest}={},localMaintenance,legacyInterpreter=null) {
@@ -292,6 +303,7 @@ function scanFileEvidence({connections=[],actions=[],homes=[],productionRequest}
         // local maintenance. Formal preservation still requires its own evidence.
         if(localMaintenance&&isHistoricalPrelaunchCompletion({started,completed,identity:scope}))continue;
         if(localMaintenance&&started.quarantine&&started.quarantine.stopConfirmed!==true)issue('ACTION_QUARANTINE_UNCONFIRMED',{actionId:started.actionId,path:stateFile});
+        if(localMaintenance&&retainableConversationFailureHistory(started,completed,state,scope)){issue('LOCAL_HISTORY_RETAINED',{actionId:started.actionId,path:stateFile,reason:'conversation_failure_envelope'});retainedHistory.add(stateFile+'\0'+started.actionId);continue;}
         if(backgroundCompletions.has(started.key)){issue('BACKGROUND_PROCESS_RETAINED',{actionId:started.actionId,path:stateFile});retainedBackground.add(stateFile+'\0'+started.actionId);continue;}
         if(!originals.has(started.actionId)){const exit=executionExit(completed.result);if((started.nativeRuntime||exit)&&!exitedTree(exit)){
           issue('UNMAPPED_NATIVE_EXECUTION',{actionId:started.actionId,path:stateFile});

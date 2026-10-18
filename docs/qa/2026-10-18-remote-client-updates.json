@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "phase": "source-acceptance",
+  "phase": "client-published-live-validation-pending",
   "userAuthorizedLiveTarget": {
     "workspace": "bigtron",
     "deviceId": "device_bfd9a3d2-c2cc-4a36-8bd8-465bea492493",
@@ -41,5 +41,195 @@
     "src/management-bootstrap.mjs": "75e9c74b4163a0d4d339203880ca7b1d13b40353f6ba24b2c91005777b370a25",
     "frontend/src/client-updates.js": "5335589bf9b29a76baf9c9ecc0b702d4af02c7fffd2e96a331ae9c0ac754f161",
     "frontend/src/components/ClientMaintenancePanel.vue": "1dacc3c127e0a576c3c6dcdd1b73b5862a0d67c5b877ce01d58ae588caa81882"
+  },
+  "publicationHistory": {
+    "mainSite": {
+      "commit": "a8b5b8cb4947829c10af22e39c0dd44d97307ca2",
+      "deployed": true,
+      "apiPid": 447589,
+      "publishedAt": "2026-10-18T11:59:23.830899+00:00",
+      "auditId": "server-a8b5b8cb4947-507776dde0ca",
+      "businessDatabaseRestored": false,
+      "newSchemaScope": "device_updates and its explicit indexes only"
+    },
+    "firstClientPublication": {
+      "commit": "a8b5b8cb4947829c10af22e39c0dd44d97307ca2",
+      "completedAt": "2026-10-18T12:10:38.144703+00:00",
+      "auditId": "client-publication-a8b5b8cb4947-3440f475010b",
+      "B1": {
+        "clientBuild": "38969152d3d232d50ea5988d0605b7bd64ce46a2856ddc5858f7cbe83ec56438",
+        "sha256": "712db98194ba8bc4a86b24623088c94ea8f7c401ff07a8b59d14b0c36630075e",
+        "bytes": 1143810,
+        "url": "https://qzelynth.top/downloads/cli/ziwei-latest.tgz"
+      },
+      "A1": {
+        "clientBuild": "8c55a30dfb40ed31777dbfc7491e5dcdbd42f308bef7dc3420b6a599e97177a5",
+        "sha256": "6de9275c78e605623199612e51e4b6e84e62ae76efdf0b1df5e5907ffd3534aa",
+        "bytes": 1143832,
+        "filename": "remote-client-bootstrap-a8b5b8cb4947829c10af22e39c0dd44d97307ca2-6de9275c78e6.tgz",
+        "latestTarget": false
+      },
+      "linuxColdInstallVerified": true,
+      "deviceUpgradeAcceptance": false
+    },
+    "localHistoryClientPublication": {
+      "commit": "ce3c158556a32fe906e382b1cf816cb6d5a64eea",
+      "mainSiteCommit": "a8b5b8cb4947829c10af22e39c0dd44d97307ca2",
+      "frontendCommit": "a8b5b8cb4947829c10af22e39c0dd44d97307ca2",
+      "completedAt": "2026-10-18T13:30:04.487719+00:00",
+      "auditId": "client-history-publication-ce3c158556a3-14e6e05a4ad6",
+      "B2": {
+        "clientBuild": "802c6e50745f4217ffe67b8b9b25f7c5b68013d1f8cf97b78eb245aab7e45eb2",
+        "sha256": "d3464a9e6cb34cc028416911dedea11771bae940c2aff9607cfc28c8d5ec68b7",
+        "bytes": 1153027,
+        "url": "https://qzelynth.top/downloads/cli/ziwei-latest.tgz"
+      },
+      "A2": {
+        "clientBuild": "48b8c664f34c6378994b73cb6de71d2baef333db8c4a31fd547e36397fae21d0",
+        "sha256": "ec14d0d264a817d72f7532c2b9f799305a50cca6915e1054ee8fc9c2dd99dfc7",
+        "bytes": 1153048,
+        "filename": "remote-client-bootstrap-ce3c158556a32fe906e382b1cf816cb6d5a64eea-ec14d0d264a8.tgz",
+        "latestTarget": false
+      },
+      "linuxColdInstallVerified": true,
+      "packagedHelperImportRoles": [
+        "A",
+        "B"
+      ],
+      "packagedHistoryHookImportRoles": [
+        "A",
+        "B"
+      ],
+      "metadataOnlyDifferenceBetweenA2AndB2": [
+        "package/package.json"
+      ],
+      "servicesRestarted": false,
+      "apiPid": 447589,
+      "databaseDataOrSchemaModified": false,
+      "deviceMaintenanceIntentsSubmittedByPublisher": 0,
+      "employeeActionsSubmittedByPublisher": 0,
+      "priorImmutableAssetsPreserved": true
+    },
+    "genericWindowsBootstrap": {
+      "preserved": true,
+      "bytes": 6390,
+      "sha256": "526882bbed69de976a546e4d1cff122d55ab838d5d3ab4bad621121dd7cdd9bd"
+    },
+    "publisherFailuresPreserved": [
+      {
+        "scope": "upload_preflight",
+        "reason": "incoming parent directory absent",
+        "businessModified": false
+      },
+      {
+        "scope": "immutable_asset_metadata",
+        "reason": "expected root ownership did not match actual download-directory uid/gid",
+        "resolvedBy": "freeze and validate actual 998:998 ownership; preserve existing files"
+      }
+    ]
+  },
+  "localHistoryRepairValidation": {
+    "commit": "ce3c158556a32fe906e382b1cf816cb6d5a64eea",
+    "combinedRecoveryTests": {
+      "total": 233,
+      "passed": 233,
+      "failed": 0,
+      "skipped": 0
+    },
+    "rootTargetedTests": {
+      "total": 68,
+      "passed": 63,
+      "failed": 0,
+      "skipped": 5
+    },
+    "countsMayOverlap": true,
+    "lint": {
+      "passed": true,
+      "files": 210
+    },
+    "windowsOriginalRunningRestorationFixture": {
+      "added": true,
+      "executedOnMac": false,
+      "skipReason": "Windows native update fixture requires Windows"
+    },
+    "runtimeStateObservation": {
+      "validJson": true,
+      "approximatelyBytes": 2860000,
+      "startedCount": 144,
+      "completedCount": 177,
+      "duplicateDedupeKeys": false,
+      "nonLegacyOrphanActionId": "action_b37893ca-7615-43a5-8996-f93bdacfdf19",
+      "serverOriginalError": "The operation was aborted due to timeout",
+      "originalExecutionExitEvidencePresent": false,
+      "blockedDeliveriesWithConfirmedPhysicalExit": 3,
+      "businessResultMayRemainUncertain": true
+    },
+    "originalHistoryBytesAndDedupePreserved": true,
+    "localStopClassification": {
+      "warning": "LOCAL_HISTORY_RETAINED",
+      "safe": false,
+      "stopSafe": true,
+      "formalPreservationAcceptance": false
+    },
+    "daemonOnlyRecovery": {
+      "heldProcessHandle": true,
+      "durableIntentBeforeStop": true,
+      "missingExitLedgerRequiresExactNativeAbsenceAndStableFiles": true,
+      "recoveryContinuesOnlyAfterDurableObservation": true,
+      "originalExecutionExitConfirmed": false
+    }
+  },
+  "liveDeviceAcceptance": {
+    "status": "pending",
+    "passed": false,
+    "onlyAuthorizedDevice": {
+      "workspace": "bigtron",
+      "deviceId": "device_bfd9a3d2-c2cc-4a36-8bd8-465bea492493",
+      "name": "李金晋电脑"
+    },
+    "firstNativeBootstrap": {
+      "auditId": "861bcd0e-0d85-42fe-a055-85d7533140ad",
+      "scheduled": true,
+      "nativeRunningInstanceBoundaryPassed": true,
+      "officialUpdateId": "21fc2834-699f-4bc7-865d-1d131d6fd2da",
+      "officialUpdateState": "failed",
+      "failureStage": "stop_client",
+      "reasonCode": "CONTROL_REJECTED",
+      "lastVerifiedBuildAfterFailure": "161cc99010d6cdee4e3d8834135ac2ed4e8fb2031b746755b7d53de0b76dfb0b",
+      "lastVerifiedPidAfterFailure": 34836
+    },
+    "secondBootstrapRegistration": {
+      "auditId": "373ba228-53f8-4745-a897-cf809facf3be",
+      "actionId": "action_07163913-6c58-4ce1-b804-1d0a2612f0cc",
+      "actionStatus": "succeeded",
+      "scheduled": true,
+      "targetBuild": "48b8c664f34c6378994b73cb6de71d2baef333db8c4a31fd547e36397fae21d0",
+      "targetAuthenticatedHeartbeatConfirmed": false,
+      "scheduledIsNotUpgradeSuccess": true
+    },
+    "unifiedProtocolLiveUpgrade": {
+      "started": false,
+      "targetBuild": "802c6e50745f4217ffe67b8b9b25f7c5b68013d1f8cf97b78eb245aab7e45eb2",
+      "targetAuthenticatedHeartbeatConfirmed": false,
+      "passed": false
+    },
+    "remaining": [
+      "Verify A2 authenticated heartbeat on the authorized device",
+      "Run one unified-protocol update to B2 on that same device",
+      "Verify a new target-build authenticated heartbeat and final maintenance state"
+    ],
+    "otherDevicesUpdated": false,
+    "GFollowup": {
+      "state": "failed",
+      "actionId": "action_07163913-6c58-4ce1-b804-1d0a2612f0cc",
+      "officialOperation": "update-291636d0-830e-4517-8e72-be721964b0b0",
+      "failureStage": "stop_client",
+      "reasonCode": "CONTROL_REJECTED",
+      "retainedHistoryCount": 4,
+      "retainedDeliveryCount": 3,
+      "remainingHistoricalBlockerCount": 2,
+      "sourceClientReplaced": false,
+      "dedicatedProtocolVerified": false
+    }
   }
 }
