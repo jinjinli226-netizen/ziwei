@@ -1,5 +1,5 @@
 {
-  "phase": "candidate-tested-release-pending",
+  "phase": "server-published-client-followup-testing",
   "productionBefore": {
     "employeeDefaultsAndConversationsAlreadyCorrect": true,
     "employees": [
@@ -31,16 +31,35 @@
       "total": 379,
       "passed": 375,
       "unchangedBaselineFailures": 4
-    }
+    },
+    "hermesNoninteractiveNewPassed": 5,
+    "rootNativeAndHermesPassed": 18
   },
   "release": {
-    "pushed": false,
-    "published": false
+    "pushed": true,
+    "published": true,
+    "serverCommit": "241f0cc59bbd2cb7800ac3072470b1a85a77dfd1",
+    "serverPid": 466819,
+    "clientJBuild": "b036e91d6fd6800ca71364dbff6bb5a34e19583415c3eca486ce53a7ba7ca0d3",
+    "clientJArchiveSha256": "cf5b96140985f56dff700969a92c938470f47fb83412bd41a17b3fde1deec545"
   },
   "liveVerification": {
     "passed": false,
-    "pending": true
+    "pending": true,
+    "codexActionId": "action_789473ad-1578-4f4b-a8d4-4a1ff586c945",
+    "codexPayloadCwd": "D:\\AIUSE",
+    "codexModelReportedCwd": "D:\\AIUSE",
+    "codexToolStdoutRetained": false,
+    "hermesActionId": "action_f85ed19e-946f-446e-a97c-8e29d5fca072",
+    "hermesPayloadCwd": "D:\\AIUSE\\life-assistant",
+    "hermesActualOutput": "stdin is not a tty",
+    "hermesModelTestPassed": false
   },
   "employeeConfigurationChanged": false,
-  "profilesOrHomesMigrated": false
+  "profilesOrHomesMigrated": false,
+  "remoteUpdate": {
+    "cancelledJRequestId": "client-update_c760583a-cc18-4d0e-8508-b719e4206737",
+    "userWorkloadInterrupted": false,
+    "reason": "cumulative Hermes follow-up; wait for existing user action to finish"
+  }
 }

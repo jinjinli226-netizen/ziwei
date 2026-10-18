@@ -65,7 +65,7 @@ test('multi-image source shape and fingerprints are required only for the new ro
   f.write('cli.py','def main(**kwargs):\n return 0\n');
   assert.throws(()=>f.spec(),/Hermes.*兼容|Hermes.*更新/);
   assert.doesNotThrow(()=>hermesMcpSpawnSpec(f.launcher,f.args,{env:f.env}));
-  const one=runtimeInvocation('Hermes',{prompt:'one image',attachments:[{path:f.images[0].path,mimeType:'image/png'}]});assert.equal(one.args.filter(arg=>arg==='--image').length,1);assert.equal(one.stdin,null);assert.equal(runtimeInvocation('Hermes',{prompt:'no image'}).args[0],'-z');
+  const one=runtimeInvocation('Hermes',{prompt:'one image',attachments:[{path:f.images[0].path,mimeType:'image/png'}]});assert.equal(one.args.filter(arg=>arg==='--image').length,1);assert.equal(one.stdin,null);const plain=runtimeInvocation('Hermes',{prompt:'no image'});assert.deepEqual(plain.args,['--yolo','chat','--query-file','-','--format','stream-json']);assert.equal(plain.stdin,'no image');assert.equal(plain.format,'json-lines');
 });
 
 test('multi-image transport rejects unsafe counts and duplicate native image flags',t=>{

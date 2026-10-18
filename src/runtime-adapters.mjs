@@ -420,9 +420,9 @@ const DEFINITIONS = {
     invoke: ({ prompt, model, images = [] }) => images.length>1?{
       args:['--yolo','chat','--query-file','-','--format','stream-json',...(model?['--model',model]:[])],stdin:prompt,format:'json-lines',inputImages:[...images],
     }:{
-      args: images.length ? ['--yolo','chat','-q',prompt,'-Q','--image',images[0],...(model ? ['--model',model] : [])] : ['-z', prompt, '--yolo', ...(model ? ['--model', model] : [])],
-      stdin: null,
-      format: 'text',
+      args: images.length ? ['--yolo','chat','-q',prompt,'-Q','--image',images[0],...(model ? ['--model',model] : [])] : ['--yolo','chat','--query-file','-','--format','stream-json',...(model ? ['--model',model] : [])],
+      stdin: images.length ? null : prompt,
+      format: images.length ? 'text' : 'json-lines',
     },
   },
 };
@@ -1206,6 +1206,7 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
       const mcpFailure = code === 0 ? phoneFailure || managementFailure : null;
       if (mcpFailure) return finish({ status: 'failed', ...mcpFailure, ...(phoneFailure && managementFailure ? { error: `${phoneFailure.error}\n${managementFailure.error}` } : {}), result });
       if (code !== 0) return finish({ status: 'failed', code: 'runtime_failed', error: `${formatRuntimeFailure(resolvedRuntime, code, state.output, state.runtimeError)}${phoneFailure ? `\n${phoneFailure.error}` : ''}`, result });
+      if (resolvedRuntime === 'Hermes' && !state.response.trim() && /(?:^|[\r\n])\s*stdin is not a tty\s*(?:[\r\n]|$)/i.test(state.output)) return finish({ status: 'failed', code: 'HERMES_NONINTERACTIVE_FAILED', error: 'Hermes 未进入非交互任务模式（stdin is not a tty），未收到模型答复', result });
       if (imageArtifacts) {
         try { result.outputArtifacts = readImageArtifacts(imageArtifacts); }
         catch (error) { return finish({status:'failed',code:error.code || 'image_artifact_invalid',error:error.message,result}); }
