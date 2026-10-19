@@ -39,7 +39,7 @@ test('the real candidate reader permits scoped orphan plus physically exited blo
 });
 
 for(const[name,mutate]of Object.entries({
- 'active action':f=>{f.health.activeActionCount=1;},'quarantine':f=>{f.health.quarantinedActionCount=1;},'execution quarantine':f=>{f.health.executionQuarantined=true;},'gateway worker':f=>{f.health.maintenance.gatewayWorkers=[{processAlive:false}];},'pending delivery':f=>{f.health.maintenance.pendingDeliveryCount=1;},'new client already supports normal stop':f=>{f.health.maintenance.stopSafe=true;},
+ 'quarantine':f=>{f.health.quarantinedActionCount=1;},'execution quarantine':f=>{f.health.executionQuarantined=true;},'gateway worker':f=>{f.health.maintenance.gatewayWorkers=[{processAlive:false}];},'pending delivery':f=>{f.health.maintenance.pendingDeliveryCount=1;},'new client already supports normal stop':f=>{f.health.maintenance.stopSafe=true;},
  'true unsafe history':f=>{f.scanMutator=e=>{e.stopSafe=false;e.stopIssues=[{code:'STARTED_WITHOUT_RESULT'}];};},'unknown warning':f=>{f.scanMutator=e=>e.issues.push({code:'ACTION_STATE_CORRUPT'});},'unproven retained delivery':f=>{f.scanMutator=e=>{e.retainedDeliveryCount=0;};},'zero retained history':f=>{f.scanMutator=e=>{e.retainedHistoryCount=0;};},
 }))test(`candidate history fallback is not applicable to ${name}`,async t=>{const f=fixture(t);mutate(f);assert.deepEqual(await f.make()(f.input),{recovered:false,reason:'not_applicable'});assert.equal(f.kills,0);assert.deepEqual(fs.readFileSync(f.stateFile),f.raw);});
 
@@ -83,7 +83,25 @@ test('a poll which does not drain by the bounded deadline never permits a stop a
  const f=fixture(t);f.health.pollingCount=1;const before=fs.readFileSync(f.stateFile);await assert.rejects(f.make()({...f.input,timeoutMs:1}),{code:'LOCAL_HISTORY_STOP_RECOVERY_REFUSED'});assert.equal(f.kills,0);assert.equal(f.paused,false);assert.deepEqual(fs.readFileSync(f.stateFile),before);
 });
 test('a new employee action during poll drain refuses stopping and preserves the original task bytes',async t=>{
- const f=fixture(t);f.healthMutator=h=>{if(h.connectionState==='draining'){h.pollingCount=1;h.activeActionCount=1;}};const before=fs.readFileSync(f.stateFile);await assert.rejects(f.make()(f.input),{code:'LOCAL_HISTORY_STOP_RECOVERY_REFUSED'});assert.equal(f.kills,0);assert.deepEqual(fs.readFileSync(f.stateFile),before);
+ const f=fixture(t);f.healthMutator=h=>{if(h.connectionState==='draining'){h.pollingCount=1;h.activeActionCount=1;}};const before=fs.readFileSync(f.stateFile);await assert.rejects(f.make()({...f.input,timeoutMs:1}),{code:'LOCAL_HISTORY_STOP_RECOVERY_REFUSED'});assert.equal(f.kills,0);assert.deepEqual(fs.readFileSync(f.stateFile),before);
 });
 for(const pollingCount of [-1,2,Infinity,'1'])test(`poll allowance refuses invalid or impossible count ${pollingCount}`,async t=>{const f=fixture(t);f.health.pollingCount=pollingCount;assert.deepEqual(await f.make()(f.input),{recovered:false,reason:'not_applicable'});assert.equal(f.kills,0);});
-for(const [name,change]of Object.entries({'quarantine':h=>{h.quarantinedActionCount=1;h.executionQuarantined=true;},'another pending result':h=>h.maintenance.pendingDeliveryCount++}))test(`poll drain never ignores ${name}`,async t=>{const f=fixture(t);f.healthMutator=h=>{if(h.connectionState==='draining'){h.pollingCount=1;change(h);}};await assert.rejects(f.make()(f.input),{code:'LOCAL_HISTORY_STOP_RECOVERY_REFUSED'});assert.equal(f.kills,0);assert.deepEqual(fs.readFileSync(f.stateFile),f.raw);});
+for(const [name,change]of Object.entries({'quarantine':h=>{h.quarantinedActionCount=1;h.executionQuarantined=true;},'another pending result':h=>h.maintenance.pendingDeliveryCount++}))test(`poll drain never ignores ${name}`,async t=>{const f=fixture(t);f.healthMutator=h=>{if(h.connectionState==='draining'){h.pollingCount=1;change(h);}};await assert.rejects(f.make()({...f.input,timeoutMs:1}),{code:'LOCAL_HISTORY_STOP_RECOVERY_REFUSED'});assert.equal(f.kills,0);assert.deepEqual(fs.readFileSync(f.stateFile),f.raw);});
+
+test('a receipt retry already active at preflight drains before candidate history is read',async t=>{
+ const f=fixture(t);let drains=0,active=1,scans=0;f.healthMutator=h=>{if(h.connectionState==='draining'){drains++;active=drains<3?1:0;}h.activeActionCount=active;h.maintenance.pendingDeliveryCount=active?1:0;};f.scanMutator=()=>{scans++;assert.equal(active,0);assert.equal(f.paused,true);};
+ const before=fs.readFileSync(f.stateFile),result=await f.make()(f.input);assert.equal(result.recovered,true);assert.equal(f.kills,1);assert(scans>=2);assert(drains>=3);assert.deepEqual(fs.readFileSync(f.stateFile),before);
+});
+test('a real task still active at the drain deadline is never stopped and resumes the previous connection',async t=>{
+ const f=fixture(t);f.health.activeActionCount=1;let scans=0;f.scanMutator=()=>scans++;await assert.rejects(f.make()({...f.input,timeoutMs:1}),{code:'LOCAL_HISTORY_STOP_RECOVERY_REFUSED'});assert.equal(scans,0);assert.equal(f.kills,0);assert.equal(f.paused,false);assert.deepEqual(fs.readFileSync(f.stateFile),f.raw);
+});
+test('history that remains inapplicable after drain restores the prior connected state',async t=>{
+ const f=fixture(t);let drains=0;f.healthMutator=h=>{h.activeActionCount=h.connectionState==='draining'?(++drains<2?1:0):1;};f.scanMutator=e=>{assert.equal(f.paused,true);e.stopSafe=false;e.stopIssues=[{code:'STARTED_WITHOUT_RESULT'}];};assert.deepEqual(await f.make()(f.input),{recovered:false,reason:'not_applicable'});assert.equal(f.kills,0);assert.equal(f.paused,false);assert.deepEqual(fs.readFileSync(f.stateFile),f.raw);
+});
+test('a pending count mismatch after drain restores the prior connection without terminating',async t=>{
+ const f=fixture(t);f.health.activeActionCount=1;f.healthMutator=h=>{if(h.connectionState==='draining')h.activeActionCount=0;h.maintenance.pendingDeliveryCount=1;};assert.deepEqual(await f.make()(f.input),{recovered:false,reason:'not_applicable'});assert.equal(f.kills,0);assert.equal(f.paused,false);assert.deepEqual(fs.readFileSync(f.stateFile),f.raw);
+});
+
+for(const activeActionCount of [-1,10,Infinity,'1'])test(`active drain allowance refuses invalid or impossible count ${activeActionCount}`,async t=>{const f=fixture(t);f.health.activeActionCount=activeActionCount;assert.deepEqual(await f.make()(f.input),{recovered:false,reason:'not_applicable'});assert.equal(f.kills,0);});
+test('maintenance becoming ordinary safe during drain restores the connection and leaves stopping to the standard path',async t=>{const f=fixture(t);f.healthMutator=h=>{if(h.connectionState==='draining'){h.maintenance.safe=true;h.maintenance.stopSafe=true;h.maintenance.fileIssues=[];}};f.scanMutator=e=>{e.safe=true;e.stopSafe=true;e.issues=[];e.retainedHistoryCount=0;};assert.deepEqual(await f.make()(f.input),{recovered:false,reason:'not_applicable'});assert.equal(f.kills,0);assert.equal(f.paused,false);});
+test('drain failure preserves an already paused connection instead of implicitly resuming it',async t=>{const f=fixture(t);f.health.connectionState='draining';f.health.activeActionCount=1;await assert.rejects(f.make()({...f.input,timeoutMs:1}),{code:'LOCAL_HISTORY_STOP_RECOVERY_REFUSED'});assert.equal(f.kills,0);assert.equal(f.paused,true);});

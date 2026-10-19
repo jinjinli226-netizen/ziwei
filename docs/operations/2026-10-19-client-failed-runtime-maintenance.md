@@ -22,3 +22,8 @@ M `e0fa8e2a4e265e678e82d948b289dc69c62bd2d9` 只准备了包和发布stage，未
 N `c897b68593655624a839c115158ce2ccbcaf83fc` 已先推GitHub后发布；build `a39048706e304e6292a9e7efa41abd5e571c3a2c0bdd1ab1e2b0b65ea9364d64`，只换客户端下载，API/UI仍J。真实升级 `client-update_38de2d53-476c-4537-a67e-e90a9ab80f6d` 在holder_revalidation拒绝；设备仍H/PID40628，没有安装成功。真实Windows扫描已接受原失败回执：retainedFailedBackgroundCount=1、retainedPendingCount=1；formal与原业务状态不改写。
 
 精确只读诊断 `action_eafcad29-bc45-47d4-999e-e1eba64e7d26` 成功：唯一本安装daemon、四项原生身份、config/build/listener全匹配；正常polling前1后0。旧逻辑在暂停接单前长时间查询原生身份，期间新轮询启动会被误拒。后续候选在pause前仅容许0..已绑定连接数的整数polling，active/quarantine/Gateway及精确pending条件不放宽；先pause，再最多15秒等被中止的polling退出，最终与原生停止仍要求polling=0。超时不kill；原实例与业务状态仍匹配时恢复连接。3个竞态夹具在N先红，修复后连同历史回归94/94通过，独立复核同样94/94。候选包发布不等于设备升级或D盘验收通过，结果待追加。
+
+
+O `621985b86cdeb3a58bcd409568644f8196084a5e` 已推送及发布，真实请求 `client-update_27ff3d92-8681-43aa-9fa4-f27ba59b99ae` 仍旧CONTROL_REJECTED。只读现场动作 `action_5c839c7b-cc37-459c-bae5-9346766017d9` 确认只到current_health即返回notApplicable；候选对原回执匹配正确，activeActionCount包含已结束任务的result_pending重传。之后普通旧stop虽等到排空，却仍被旧维护分类拒绝；并非模型任务一定还在运行。
+
+后续候选把稳定扫描移到已核对精确进程与配置身份的pause/drain之后：初始active仅容许等待，15秒内active/poll都归零后才按候选扫描并严格匹配pending，随后归档、二次文件/进程核验和原生停止仍强制active/poll=0。真实任务不退出则超时恢复连接并拒停；扫描不适用也恢复，原先已draining则不擅自resume。4个现场顺序夹具先红后绿，定向108/108和独审108/108通过。后台成功服务与手机业务不被重跑，原记录仍不改写。

@@ -1,5 +1,5 @@
 {
-  "phase": "polling-race-tested-N-published-device-still-H",
+  "phase": "quiesce-first-tested-O-published-device-still-H",
   "deviceId": "device_bfd9a3d2-c2cc-4a36-8bd8-465bea492493",
   "oldPid": 40628,
   "oldBuild": "bfc96edf59be31f1be50d3878a12d6c37d154fa108ef37c7a0d7d41ee7511927",
@@ -45,5 +45,13 @@
   "nativeIdentityAllMatched": true,
   "pollingRaceObserved": true,
   "pollingFocusPassed": 94,
-  "pollingIndependentPassed": 94
+  "pollingIndependentPassed": 94,
+  "OCommit": "621985b86cdeb3a58bcd409568644f8196084a5e",
+  "OPublished": true,
+  "ORequestId": "client-update_27ff3d92-8681-43aa-9fa4-f27ba59b99ae",
+  "OState": "failed",
+  "OFailurePhase": "current_health",
+  "activeCounterIncludesResultRetries": true,
+  "quiesceFirstFocusPassed": 108,
+  "quiesceIndependentPassed": 108
 }
