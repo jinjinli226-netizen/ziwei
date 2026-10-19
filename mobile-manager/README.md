@@ -1,6 +1,6 @@
 # 紫薇 Android 管理 App
 
-最近已交付的内部测试版：`0.5.2-internal`（code 14），包名 `com.ziwei.manager`，Android 8.0（API 26）及以上。[下载安装包](https://github.com/jinjinli226-netizen/ziwei/releases/download/android-manager-v0.5.2-internal/ziwei-manager-0.5.2-internal-code14.apk)。它是现有紫薇的手机管理入口；受控手机上的 Agent / Updater 继续使用原应用，Hermes 继续在绑定的常开电脑执行。
+最近已交付的内部测试版：`0.5.3-internal`（code 15），包名 `com.ziwei.manager`，Android 8.0（API 26）及以上。[下载安装包](https://github.com/jinjinli226-netizen/ziwei/releases/download/android-manager-v0.5.3-internal/ziwei-manager-0.5.3-internal-code15.apk)。它是现有紫薇的手机管理入口；受控手机上的 Agent / Updater 继续使用原应用，Hermes 继续在绑定的常开电脑执行。
 
 0.3 起加入的手机功能随本版保留。群组分页依赖电脑客户端协议，旧电脑缺少分页回执时仍要求升级；通知验收不代表所有群组和电脑组合已测通。最近提醒及自建通知服务已与主控同步上线。
 
@@ -11,6 +11,12 @@
 原 `0.4.0-internal`（code 11）第三方 SDK 候选已按用户要求停止，本分支移除相关 SDK、构建和注册调用。其交付文档仅是历史记录，不作为本版接入或安装指南。
 
 主控复审后的候选记录见 [后续验收说明](../docs/operations/2026-10-17-android-mobile-features-review-followup.md)。旧待办若无法证明负责人身份，暂不进入手机提醒，原任务仍保留，也不会被标为已读；需要实际重新分配负责人，普通保存标题或状态不会恢复提醒。
+
+## 0.5.3 历史异常与当前执行占位
+
+修复原聊天已经完成，手机仍从历史运行记录中取旧“待核实”来禁用发送的问题。只按已上线服务端同一完整规则豁免精确的只读观察异常：CLI 根进程已退出、所有实际手机写操作有可核对终态，剩余仅只读观察未知。原 error、uncertain 与进程树未退出证据保留；这条历史记录不再占位，不等于原手机观察已成功或进程树已退出。
+
+同员工其它聊天的真实在途或未知写入继续阻断，较新的成功回复、不完整摘要、通用 released 标记均不能替代证据。迟到轮询、离开再进入和同名工作区换代均通过回归。只调整 App 的判定，未停止、暂停或升级任何员工，也未发布生产后端或 Windows 改动。全网页476/476和中文组合输入回归通过；准确包的原账号模拟器及交付记录见[本轮验收](../docs/operations/2026-10-19-android-historical-observation-occupancy.md)。
 
 ## 0.5.2 输入与导航稳定性
 
@@ -39,7 +45,7 @@
 
 ## 安装和使用
 
-使用 `ziwei-manager-0.5.2-internal-code14.apk` 同签名覆盖更新，不要先卸载。具体构建和验收见[自建通知交付记录](../docs/operations/2026-10-18-selfhost-notifications-candidate.md)。系统询问时，仅为本次使用的下载或文件应用允许安装来源；打开「紫薇」，按需登录原账号并选择原工作区。在「最近提醒」开启消息通知、允许系统通知权限，开启后会保留持续接收状态通知；不需要无障碍或设备管理员权限。准确 code13 → code14 已在同一模拟器验证原登录、UID、首次安装时间和旧草稿保留；其他旧版的登录是否仍有效以实际会话为准。
+使用 `ziwei-manager-0.5.3-internal-code15.apk` 同签名覆盖更新，不要先卸载。具体构建和验收见[本轮交付记录](../docs/operations/2026-10-19-android-historical-observation-occupancy.md)。系统询问时，仅为本次使用的下载或文件应用允许安装来源；打开「紫薇」，按需登录原账号并选择原工作区。在「最近提醒」开启消息通知、允许系统通知权限，开启后会保留持续接收状态通知；不需要无障碍或设备管理员权限。准确 code14 → code15 已在同一模拟器验证原登录、UID、首次安装时间和旧草稿保留；其他旧版的登录是否仍有效以实际会话为准。
 
 这是独立管理应用的内部签名，不覆盖或升级互联 Agent / Updater。后续更新管理应用须沿用同一签名；不要卸载应用来做常规升级，以免清除本机汇报队列。生产签名、应用商店发布不属于本次交付。
 
