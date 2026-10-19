@@ -30,6 +30,7 @@ import {readForceAbandonRecovery} from './bot-force-abandon.mjs';
 import {botReasoningProof} from '../src/hermes-bot-reasoning.mjs';
 import { botFailure } from '../src/hermes-bot-config.mjs';
 import { CREATOR_BOT_GUIDANCE } from './employees/creator-template.mjs';
+import { assertMaintenanceAttempt, maintenancePublicEventData, maintenanceActionDeadline, guardMaintenanceExecutionAdmission, isMaintenanceTerminalInput, settleExpiredMaintenanceAction } from './action-maintenance.mjs';
 
 // Constructor provenance is private; exported queries cannot register callers.
 const repositoryOrigins=new WeakMap();
@@ -43,6 +44,7 @@ export function isRepositoryConstructedForRollout(repo,state){
 function finishRepository(repo,rollout){
  const origin={db:repo.db,rollout,methods:null};repositoryOrigins.set(repo,origin);
  guardServerCodeRolloutRepository(repo);
+  guardMaintenanceExecutionAdmission(repo);
  origin.methods=new Map(Object.entries(Object.getOwnPropertyDescriptors(repo)).filter(([,row])=>typeof row.value==='function').map(([name,row])=>[name,row.value]));
  return repo;
 }
@@ -522,7 +524,7 @@ export function createRepository(options = {}, io={}) {
     ? "SELECT id,action_id,type,message,data_json,created_at FROM a2a_action_events WHERE action_id=? AND (type IN ('succeeded','failed','cancelled','expired') OR id=(SELECT id FROM a2a_action_events WHERE action_id=? ORDER BY created_at DESC,id DESC LIMIT 1)) ORDER BY created_at,id"
     : 'SELECT id,action_id,type,message,data_json,created_at FROM a2a_action_events WHERE action_id=? ORDER BY created_at,id').all(...(eventView === 'mobile' ? [actionId,actionId] : [actionId])).map(event => ({
     id:event.id, action_id:event.action_id, type:event.type, message:event.message,
-    data:parse(event.data_json), created_at:event.created_at
+    data:maintenancePublicEventData(event.type,parse(event.data_json)), created_at:event.created_at
   }));
   const executionActionPayload = row => {
     const payload = parse(row.payload_json);
@@ -2119,7 +2121,8 @@ export function createRepository(options = {}, io={}) {
         if (!row) throw new Error('A2A action not found');
         if (input.agentId && String(input.agentId) !== row.agent_id) throw new Error('A2A agent mismatch');
         assertActionDevice(row, input);
-        if (row.status === 'expired') {
+        if(settleExpiredMaintenanceAction(this,row,input)){const updated=db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId);response={...a2aResponseView(updated,{receiptOnly,includeResult:!receiptOnly}),duplicate:true};}
+        else if (row.status === 'expired') {
           if (!receiptOnly || !recoverableBotCompletion(row) || !input.deviceId || input.deviceId !== actionTargetDevice(row)) throw new Error('A2A action expired');
           response = { ...a2aResponseView(row, { receiptOnly, includeResult:false }), duplicate:true, deliveryOnly:true, leaseRenewed:false };
         }
@@ -2131,7 +2134,7 @@ export function createRepository(options = {}, io={}) {
             db.prepare("UPDATE a2a_actions SET status='expired',completed_at=? WHERE id=?").run(timestamp, actionId);
             expired = true;
           } else if (row.status === 'acked') {
-            if (input.renewLease === true) {
+            if (input.renewLease === true && !maintenanceActionDeadline(db,actionId)) {
               const deviceId = String(input.deviceId || input.device_id || '').trim();
               if (!deviceId || !actionTargetDevice(row)) throw new Error('A2A lease renewal requires the assigned device credential');
               const leaseExpiry = new Date(Date.parse(timestamp) + actionExecutionLeaseMs({type:row.type,payload:parse(row.payload_json)})).toISOString();
@@ -2174,7 +2177,10 @@ export function createRepository(options = {}, io={}) {
         if (suppliedId !== undefined && suppliedId !== null && (typeof suppliedId !== 'string' || !suppliedId.trim() || suppliedId.length > 200)) throw new Error('A2A eventId must be a nonempty string of at most 200 characters');
         const eventId = suppliedId === undefined || suppliedId === null ? id('action-event') : `action-event_${hashSecret(JSON.stringify([actionId, suppliedId.trim()]))}`;
         const type = String(input.type || 'progress').slice(0,80), message = String(input.message || '').slice(0,4000);
-        const dataJson = JSON.stringify(input.data ?? null);
+        if (type.startsWith('maintenance.')) throw Object.assign(new Error('Maintenance events require the dedicated checkpoint endpoint'), {code:'MAINTENANCE_EVENT_RESERVED',status:403});
+        const maintenance = assertMaintenanceAttempt(db,row,input);
+        const eventData = maintenance ? { ...(input.data && typeof input.data==='object' && !Array.isArray(input.data) ? input.data : {value:input.data ?? null}), maintenanceGeneration:maintenance.generation } : input.data ?? null;
+        const dataJson = JSON.stringify(eventData);
         if (dataJson === undefined) throw new Error('A2A event data must be JSON');
         const data = JSON.parse(dataJson);
         const existing = db.prepare('SELECT * FROM a2a_action_events WHERE id=? AND action_id=?').get(eventId, actionId);
@@ -2193,7 +2199,7 @@ export function createRepository(options = {}, io={}) {
             event = { id:eventId, action_id:actionId, type, message, data, created_at:timestamp };
             db.prepare('INSERT INTO a2a_action_events(id,action_id,type,message,data_json,created_at) VALUES(?,?,?,?,?,?)').run(event.id,event.action_id,type,message,dataJson,event.created_at);
             const leaseExpiry = new Date(Date.parse(timestamp) + actionExecutionLeaseMs({type:row.type,payload:parse(row.payload_json)})).toISOString();
-            if(!rollout)db.prepare("UPDATE a2a_actions SET expires_at=? WHERE id=? AND ziwei_v2_admitted(id)=1 AND status IN ('pending','acked')").run(leaseExpiry,actionId);
+            if(!rollout&&!maintenance)db.prepare("UPDATE a2a_actions SET expires_at=? WHERE id=? AND ziwei_v2_admitted(id)=1 AND status IN ('pending','acked')").run(leaseExpiry,actionId);
             const ws = db.prepare('SELECT slug FROM workspaces WHERE id=?').get(row.workspace_id);
             if (ws) audit(ws.slug,'ziwei_user','a2a.action.event',{actionId,type,message},deferredEvents);
           }
@@ -2207,7 +2213,7 @@ export function createRepository(options = {}, io={}) {
       for (const auditEvent of deferredEvents) options.onEvent?.(auditEvent);
       return event;
     },
-    listA2AEvents(actionId) { const row=db.prepare('SELECT id FROM a2a_actions WHERE id=?').get(actionId); if (!row) throw new Error('A2A action not found'); return db.prepare('SELECT id,action_id,type,message,data_json,created_at FROM a2a_action_events WHERE action_id=? ORDER BY created_at,id').all(actionId).map(item => ({...item,data:parse(item.data_json)})); },
+    listA2AEvents(actionId) { const row=db.prepare('SELECT id FROM a2a_actions WHERE id=?').get(actionId); if (!row) throw new Error('A2A action not found'); return db.prepare('SELECT id,action_id,type,message,data_json,created_at FROM a2a_action_events WHERE action_id=? ORDER BY created_at,id').all(actionId).map(({data_json,...item}) => ({...item,data:maintenancePublicEventData(item.type,parse(data_json))})); },
     dispatchBotCollaboration(slug,manifest,key) {
       if(typeof key!=='string'||!key||key.length>160)throw botFailure('IDEMPOTENCY_KEY_REQUIRED','协作需要稳定请求标识',400);
       const ws=workspace(slug);db.exec('SAVEPOINT bot_collaboration');
@@ -2248,9 +2254,11 @@ export function createRepository(options = {}, io={}) {
       if (!row) throw new Error('A2A action not found');
       if (input.agentId && String(input.agentId) !== row.agent_id) throw new Error('A2A agent mismatch');
       assertActionDevice(row, input);
+      assertMaintenanceAttempt(db,row,input);
       const receiptOnly = explicitBoolean(input.receiptOnly);
-      const recovering = recoverableBotCompletion(row);
-      const reconciliation = recovering || Boolean(input[botReplayEvent]);
+      const maintenanceTerminal = isMaintenanceTerminalInput(db,row,input);
+      const recovering = recoverableBotCompletion(row) || maintenanceTerminal;
+      const reconciliation = !maintenanceTerminal && (recovering || Boolean(input[botReplayEvent]));
       if (['succeeded', 'failed', 'expired'].includes(row.status) && !recovering) return { ...a2aResponseView(row, { receiptOnly }), duplicate: true };
       let status = String(input.status || (input.error ? 'failed' : 'succeeded'));
       if (!['succeeded', 'failed'].includes(status)) throw new Error('A2A result status must be succeeded or failed');
@@ -2295,6 +2303,7 @@ export function createRepository(options = {}, io={}) {
       const timestamp = now();
       db.exec('SAVEPOINT conversation_result');
       try {
+        assertMaintenanceAttempt(db,db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId),input);
         if(row.type==='hermes.bot.provision'&&status==='succeeded')verifyBotProvisionReceipt(payload,result);
         if(row.type==='hermes.bot.validate'&&status==='succeeded'&&payload.hermesBot?.config.reasoningEffort){
           const validation=result?.botValidation || result?.result?.botValidation;
@@ -2329,7 +2338,7 @@ export function createRepository(options = {}, io={}) {
           audit(ws.slug, 'assistant', 'conversation.message.created', { conversationId: conversation.id, messageId, actionId, dispatch: false });
         }
         if (['automation.execute','hermes.bot.native'].includes(row.type) && payload.runId) {
-          if (reconciliation) db.prepare("UPDATE automation_runs SET status=?,result_json=?,error=?,finished_at=?,message=? WHERE id=? AND action_id=? AND status NOT IN ('completed','failed')").run(status==='succeeded'?'completed':'failed',JSON.stringify(result),error,timestamp,'已核实原执行终态；未重新派发或重试',payload.runId,actionId);
+          if (reconciliation || maintenanceTerminal) db.prepare("UPDATE automation_runs SET status=?,result_json=?,error=?,finished_at=?,message=? WHERE id=? AND action_id=? AND status NOT IN ('completed','failed')").run(status==='succeeded'?'completed':'failed',JSON.stringify(result),error,timestamp,maintenanceTerminal?'维护暂停后原任务已终结；没有重新派发或重试':'已核实原执行终态；未重新派发或重试',payload.runId,actionId);
           else this.completeAutomationRun(payload.runId, { status: status === 'succeeded' ? 'completed' : 'failed', result, error, botInternal:BOT_INTERNAL,sourceActionId:actionId });
         }
         db.exec('RELEASE conversation_result');

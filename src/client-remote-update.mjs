@@ -57,10 +57,10 @@ const permanentFailure = error => [401, 403, 404, 410].includes(error?.status ||
 
 /** No business executor participates in maintenance. A single daemon gate covers
  * every paired workspace. Disk state is a retry ledger, never a process lock. */
-export function createRemoteClientUpdates({ home, hostId, clientBuild, enabled = false, connections, idle, prepareIdle = async () => {}, request, launch, inspectWorker, recoverWorker = async () => null, clock = Date.now, pid = process.pid, log = () => {} } = {}) {
+export function createRemoteClientUpdates({ home, hostId, clientBuild, enabled = false, connections, idle, prepareActions = async () => {}, hasPendingResumes = () => false, prepareIdle = async () => {}, request, launch, inspectWorker, recoverWorker = async () => null, clock = Date.now, pid = process.pid, log = () => {} } = {}) {
   const file = path.join(path.resolve(home), 'maintenance', 'remote-client-update.json');
   const outboxFile = path.join(path.resolve(home), 'maintenance', 'remote-client-update-reports.json');
-  let current = null, ticking = false, outbox = [];
+  let current = null, ticking = false, outbox = [], installationSettled = false;
   if (enabled) {
     try { current = readRemoteUpdateJson(file); }
     catch (error) { if (error.code !== 'ENOENT') log('remote_update_state_unreadable', { code: 'CLIENT_UPDATE_STATE_INVALID' }); }
@@ -106,12 +106,48 @@ export function createRemoteClientUpdates({ home, hostId, clientBuild, enabled =
     if (state === 'failed') { try { await report('failed'); } catch { queueFailedReport(); } }
   };
   return {
-    get blocksNewActions() { return enabled && ['accepted', 'waiting_idle', 'updating'].includes(current?.state); },
+    get blocksNewActions() { return enabled && (['accepted', 'waiting_idle', 'updating','awaiting_heartbeat'].includes(current?.state)||current?.state==='succeeded'&&current.stage==='worker_launch'&&!installationSettled); },
     status() { return current ? { id: current.request.id, state: current.state, targetBuild: current.request.targetBuild, ...(current.code ? { code: current.code } : {}) } : null; },
+    checkpointAuthority(receipt) {
+      if (!enabled || !current || current.request.id !== receipt?.updateId || current.request.targetBuild !== receipt?.targetBuild) return null;
+      return { updateId: current.request.id, claimToken: current.claimToken };
+    },
+    async maintenanceResumeReadiness(receipt) {
+      if (!enabled || !current || current.request.id !== receipt?.updateId || current.request.targetBuild !== receipt?.targetBuild) return { ready: false };
+      // A verified new daemon can heartbeat before the package worker releases
+      // its installation lease. Neither a heartbeat nor a result file alone
+      // permits business execution in that window.
+      const lock = path.join(path.resolve(home), 'maintenance', 'operation.lock');
+      try { noLinks(lock); if (fs.existsSync(lock)) return { ready: false }; } catch { return { ready: false }; }
+      if (current.state === 'succeeded' && current.request.targetBuild === clientBuild) {
+        if (!current.worker) current.worker = await recoverWorker(current.request, current.claimToken);
+        if (!current.worker || (await inspectWorker(current.worker)).state !== 'complete') return { ready: false };
+        return { ready: true };
+      }
+      // A cancelled queued upgrade did not replace this still-running daemon.
+      // An ambiguous spawn window or a failed rollback is not this case.
+      if (['cancelled', 'canceled', 'failed'].includes(current.state) && !current.worker && !['worker_launch'].includes(current.stage)) {
+        return { ready: true, sourceIdle: { workerAbsent: true, maintenanceLockAbsent: true, installedBuild: clientBuild, pid } };
+      }
+      if(current.state==='failed'&&current.worker){
+        const result=await inspectWorker(current.worker);
+        if(result.state==='failed'&&result.originalInstallationRestored===true)return {
+          ready:true,sourceIdle:{workerTerminal:true,originalInstallationRestored:true,maintenanceLockAbsent:true,installedBuild:clientBuild,pid},
+        };
+        if(result.state==='failed')return{ready:true,maintenanceFailure:{workerTerminal:true,maintenanceLockAbsent:true,installedBuild:clientBuild,pid}};
+      }
+      return { ready: false };
+    },
     async tick() {
       if (!enabled || ticking) return; ticking = true;
       try {
         await flushFailedReports();
+        if(current?.state==='succeeded'&&current.stage==='worker_launch'&&!installationSettled){
+          installationSettled=(await this.maintenanceResumeReadiness({updateId:current.request.id,targetBuild:current.request.targetBuild})).ready===true;
+        }
+        // The accepted update is also the immutable authority for its paused
+        // actions. Do not overwrite it with a newer request before they resume.
+        if(current&&terminal(current.state)&&hasPendingResumes(current.request))return;
         if (current && current.request.targetBuild === clientBuild && ['accepted', 'waiting_idle', 'updating', 'awaiting_heartbeat'].includes(current.state)) {
           // Actual success is decided by the server's fresh target-build heartbeat.
           current.state = 'awaiting_heartbeat'; save();
@@ -164,6 +200,9 @@ export function createRemoteClientUpdates({ home, hostId, clientBuild, enabled =
         }
         current.state = 'waiting_idle'; current.updatedAt = clock(); save();
         if (current.reported !== current.state && !await report(current.state)) return;
+        // Cooperative maintenance is separate from cancellation: a runtime
+        // acknowledges only after its whole current tool batch is persisted.
+        await prepareActions(current.request);
         if (!idle()) return;
         current.state = 'updating'; current.stage = 'before_worker'; current.updatedAt = clock(); save();
         if (!await report('updating')) return;

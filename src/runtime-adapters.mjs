@@ -17,6 +17,7 @@ import {hermesBotToolsets} from './hermes-mcp-config.mjs';
 import {parseBotReasoningProof} from './hermes-bot-reasoning.mjs';
 import {resolveHermesLauncher} from './hermes-launcher.mjs';
 import {runBeforeSpawnAdmission} from './runtime-launch-evidence.mjs';
+import {markMaintenancePaused, validateMaintenancePause} from './maintenance-checkpoint.mjs';
 export {parseBotReasoningProof} from './hermes-bot-reasoning.mjs';
 export { prepareHermesBotHome } from './hermes-bot-runtime.mjs';
 
@@ -678,7 +679,7 @@ export function runtimeDiscoverySpawnSpec(binary,args) {
   return runtimeSpawnSpec(binary,args);
 }
 
-export function hermesMcpSpawnSpec(binary, args, { env = process.env, boundProfile, inputImages = [] } = {}) {
+export function hermesMcpSpawnSpec(binary, args, { env = process.env, boundProfile, inputImages = [], maintenanceControl } = {}) {
   if(!Array.isArray(inputImages)||inputImages.length>20||inputImages.length===1)throw new Error('Hermes 多图清单必须包含 2–20 张受控图片');
   const multiImages=inputImages.length>1;
   const selected=resolveHermesLauncher(binary),interpreter=selected.interpreter;
@@ -688,7 +689,34 @@ export function hermesMcpSpawnSpec(binary, args, { env = process.env, boundProfi
     binding = JSON.parse(output);
     if (!binding.paths?.main || !binding.paths?.mcp_startup || !binding.paths?.managed_scope || !binding.fingerprint) throw new Error();
   } catch { throw new Error('Hermes 原生入口不兼容 managed MCP discovery 或安装已变化；请更新 Hermes/ziwei_user，不会替代运行时'); }
-  return { command: interpreter, modeInsertIndex:5+(selected.pythonArgs?.length||0), args: [...(selected.pythonArgs||[]),HERMES_MCP_BOOTSTRAP, '--launcher', selected.launcher, '--binding', JSON.stringify(binding), ...(boundProfile ? ['--bound-profile', JSON.stringify({home:boundProfile.home,profile:boundProfile.profile,baseHome:boundProfile.baseHome,identity:boundProfile.identity,requestedHome:boundProfile.requestedHome,protectedHomes:boundProfile.protectedHomes})] : []), ...(multiImages?['--input-images',JSON.stringify(inputImages)]:[]), '--', ...args.map(String)], nativeBinding: { binary, interpreter, entrypoint: binding.paths.main, launcherKind:selected.kind, bootstrapBound:Boolean(binding.paths.bootstrap), mode: multiImages?'effective-mcp-gate-native-images':'effective-mcp-gate' } };
+  return { command: interpreter, modeInsertIndex:5+(selected.pythonArgs?.length||0), args: [...(selected.pythonArgs||[]),HERMES_MCP_BOOTSTRAP, '--launcher', selected.launcher, '--binding', JSON.stringify(binding), ...(boundProfile ? ['--bound-profile', JSON.stringify({home:boundProfile.home,profile:boundProfile.profile,baseHome:boundProfile.baseHome,identity:boundProfile.identity,requestedHome:boundProfile.requestedHome,protectedHomes:boundProfile.protectedHomes})] : []), ...(maintenanceControl ? ['--maintenance-control', maintenanceControl] : []), ...(multiImages?['--input-images',JSON.stringify(inputImages)]:[]), '--', ...args.map(String)], nativeBinding: { binary, interpreter, entrypoint: binding.paths.main, launcherKind:selected.kind, bootstrapBound:Boolean(binding.paths.bootstrap), mode: multiImages?'effective-mcp-gate-native-images':'effective-mcp-gate' } };
+}
+
+function prepareMaintenanceCheckpoint(maintenance, {runtime, profile, home, cwd, audits={}}) {
+  if (!maintenance || runtime !== 'Hermes') return null;
+  const invalid = () => Object.assign(new Error('维护检查点身份或路径无效；未启动模型'), {code:'MAINTENANCE_CHECKPOINT_INVALID'});
+  const identifier = value => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/.test(value);
+  const hex = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
+  if (!identifier(maintenance.actionId) || !hex(maintenance.executionBinding) || !path.isAbsolute(maintenance.directory || '') || typeof maintenance.onControl !== 'function') throw invalid();
+  const noLinks = file => {for(let p=path.resolve(file);;p=path.dirname(p)){try{if(fs.lstatSync(p).isSymbolicLink())throw invalid();}catch(error){if(error.code!=='ENOENT')throw error;}if(p===path.dirname(p))break;}};
+  noLinks(maintenance.directory);fs.mkdirSync(maintenance.directory,{recursive:true,mode:0o700});
+  const directory=fs.mkdtempSync(path.join(maintenance.directory,'execution-'));noLinks(directory);
+  const settings={schemaVersion:1,actionId:maintenance.actionId,executionBinding:maintenance.executionBinding,profile:profile||'default',home:fs.realpathSync.native(home),cwd:fs.realpathSync.native(path.resolve(cwd)),directory,audits,nonce:createHash('sha256').update(randomUUID()).digest('hex'),resume:maintenance.resume||null};
+  const expected=Object.fromEntries(['actionId','executionBinding','profile','home','cwd'].map(key=>[key,settings[key]]));
+  if(settings.resume&&!validateMaintenancePause(settings.resume,{...expected,runtime:'Hermes'}))throw invalid();
+  const write=(name,value)=>{const file=path.join(directory,name);noLinks(file);const temporary=file+'.'+randomUUID()+'.tmp';let fd;try{fd=fs.openSync(temporary,'wx',0o600);fs.writeFileSync(fd,JSON.stringify(value));fs.fsyncSync(fd);fs.closeSync(fd);fd=undefined;fs.renameSync(temporary,file);}finally{if(fd!==undefined)fs.closeSync(fd);try{fs.unlinkSync(temporary);}catch{}}};
+  const read=name=>{const file=path.join(directory,name);noLinks(file);try{const stat=fs.lstatSync(file);if(!stat.isFile()||stat.size>64000)throw invalid();return JSON.parse(fs.readFileSync(file,'utf8'));}catch(error){if(error.code==='ENOENT')return null;throw error;}};
+  write('settings.json',settings);let intent=null,closed=false;
+  const cleanup=maintenance.onControl(request=>{
+    if(closed)return {accepted:false,reasonCode:'MAINTENANCE_CHECKPOINT_CLOSED'};
+    if(!identifier(request?.id)||!hex(request?.targetBuild))throw invalid();
+    const ready=read('ready.json');
+    if(!ready||ready.nonce!==settings.nonce)return {accepted:false,reasonCode:'MAINTENANCE_CHECKPOINT_NOT_READY'};
+    if(ready.supported!==true)return {accepted:false,reasonCode:'MAINTENANCE_CHECKPOINT_UNSUPPORTED'};
+    if(intent)return intent.id===request.id&&intent.targetBuild===request.targetBuild?{accepted:true}:{accepted:false,reasonCode:'MAINTENANCE_CHECKPOINT_BUSY'};
+    const next={id:request.id,targetBuild:request.targetBuild};write('request.json',{schemaVersion:1,nonce:settings.nonce,...next});intent=next;return {accepted:true};
+  });
+  return {settings,controlFile:path.join(directory,'settings.json'),close(){if(closed)return;closed=true;if(typeof cleanup==='function'){try{cleanup();}catch{}}},checkpoint(processExit){const candidate=read('checkpoint.json');if(!candidate)return null;if(!intent||candidate.schemaVersion!==1||candidate.nonce!==settings.nonce||Object.keys(candidate).length!==3)throw invalid();const receipt={...candidate.receipt,processExit};if(!validateMaintenancePause(receipt,{...expected,runtime:'Hermes',updateId:intent.id,targetBuild:intent.targetBuild}))throw invalid();return receipt;}};
 }
 
 function readPrivateJson(file) {
@@ -979,13 +1007,15 @@ export function parseRuntimeStreamLine(line, state, onOutput = () => {}, onStage
 }
 
 /** Execute an installed CLI using an explicit argv, with full local approval. */
-export async function executeRuntime({ runtime, prompt, model = null, profile = null, cwd = process.cwd(), env = {}, attachments = [], imageArtifacts = null, codexMcpDisabledServers = [], managementMcp = null, terminalMcp = null, creatorInstance, creatorInstanceDirectory, hermesBot, botInstanceDirectory, botAuthority, beforeSpawn, executionGuard, signal, onOutput, onProgress, onStage, onActivity, onSupervision } = {}) {
+export async function executeRuntime({ runtime, prompt, model = null, profile = null, cwd = process.cwd(), env = {}, attachments = [], imageArtifacts = null, codexMcpDisabledServers = [], managementMcp = null, terminalMcp = null, creatorInstance, creatorInstanceDirectory, hermesBot, botInstanceDirectory, botAuthority, beforeSpawn, executionGuard, maintenance, signal, onOutput, onProgress, onStage, onActivity, onSupervision } = {}) {
   if (signal?.aborted) return Promise.resolve({ status: 'failed', code: 'cancelled', error: 'runtime execution cancelled before launch' });
   if(hermesBot)hermesBot={...hermesBot,config:normalizeBotConfig(hermesBot.config)};
   const resolvedRuntime = normalizeRuntime(runtime);
   if (!resolvedRuntime) return Promise.reject(new Error(`未知本机运行时: ${runtime || '(empty)'}`));
+  if(maintenance?.resume&&resolvedRuntime!=='Hermes')return Promise.reject(Object.assign(new Error('此运行时不支持维护会话恢复；未重放原任务'),{code:'MAINTENANCE_RESUME_UNSUPPORTED'}));
+  if(maintenance?.resume)attachments=[];
   const imageInputs = attachments.filter(item=>/^image\//i.test(item?.mimeType || '') || /\.(?:png|jpe?g|gif|webp)$/i.test(item?.path || ''));
-  let content = String(prompt ?? '').trim();
+  let content = maintenance?.resume ? 'Continue the remaining task from this saved session after Ziwei maintenance. Keep completed work and tool receipts. Do not repeat completed external operations; inspect the original receipt or current state before any operation whose result is uncertain.' : String(prompt ?? '').trim();
   if (!content && imageInputs.length) content = '请查看输入图片，并根据图片内容作答。';
   if (!content) return Promise.reject(new Error('agent.execute 需要非空 prompt'));
   if (imageArtifacts) content += imageArtifactInstructions(imageArtifacts);
@@ -1048,6 +1078,7 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
   let reasoningRequests=0;
   let reasoningProvider=null;
   let reasoningRejection=null;
+  let maintenancePrepared=null;
   let selectedModel = model || null;
   try {
     // Internal executor policy, never an A2A payload field. Apply the complete
@@ -1099,15 +1130,24 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
       childEnv.HERMES_HOME=overlay.sourceHome;childEnv.HERMES_MANAGED_DIR=overlay.home;launch.overlayHome=overlay.home;cleanupOverlay=overlay.cleanup;
       invocation.args.unshift('--profile',profile || 'default');
     }
+    if(resolvedRuntime==='Hermes'&&maintenance&&!launch.overlayHome){
+      const overlay=createHermesExecutionOverlay({profile,baseHome:profileBaseHome,selectedProfileHome,managedDirectory:childEnv.HERMES_MANAGED_DIR,privateDirectory:path.join(maintenance.directory,'overlays')});
+      childEnv.HERMES_HOME=overlay.sourceHome;childEnv.HERMES_MANAGED_DIR=overlay.home;launch.overlayHome=overlay.home;cleanupOverlay=overlay.cleanup;invocation.args.unshift('--profile',profile||'default');
+    }
     const phoneLaunch = prepareTerminalMcpLaunch({ runtime: resolvedRuntime, profile, invocation, env: childEnv, profileBaseHome, hermesOverlayHome: launch.overlayHome, ...(terminalMcp || {}), selectedProfileHome });
     invocation = phoneLaunch.invocation; childEnv = phoneLaunch.env; phoneReceipt = phoneLaunch.receipt;
     if(hermesBot&&phoneReceipt){const index=invocation.args.indexOf('--toolsets');if(index<0)invocation.args.push('--toolsets','ziwei-terminal');else invocation.args[index+1]+=',ziwei-terminal';}
     if (resolvedRuntime === 'Hermes' && !receipt && !phoneReceipt && !hermesBot) childEnv.HERMES_HOME = selectedProfileHome || hermesProfileHome(profile || 'default', { baseHome: profileBaseHome });
-  } catch (error) { cleanupOverlay(); return Promise.reject(error); }
+    if(maintenance&&resolvedRuntime==='Hermes')maintenancePrepared=prepareMaintenanceCheckpoint(maintenance,{runtime:resolvedRuntime,profile,home:botPrepared?.home||childEnv.ZIWEI_CREATOR_HOME||selectedProfileHome||hermesProfileHome(profile||'default',{baseHome:profileBaseHome}),cwd,audits:{phone:phoneReceipt?.auditFile||null,management:receipt?.auditFile||null}});
+    if(maintenancePrepared?.settings.resume){
+      const args=[...invocation.args];for(let i=args.length-1;i>=0;i--){if(args[i]==='--create-if-missing')args.splice(i,1);else if(args[i]==='-c'||args[i]==='--continue')args.splice(i,2);}
+      args.push('--resume',maintenancePrepared.settings.resume.sessionId,'--no-restore-cwd');invocation={...invocation,args};
+    }
+  } catch (error) { maintenancePrepared?.close();cleanupOverlay(); return Promise.reject(error); }
   childEnv = runtimeTerminalEnvironment({ runtime: resolvedRuntime, invocation, env: childEnv });
   let spec;
-  try { spec = resolvedRuntime === 'Hermes' && childEnv.HERMES_MANAGED_DIR && (receipt || hermesBot || profileBinding || controlledImages.length>1) ? hermesMcpSpawnSpec(discovered.binary, invocation.args, { env: childEnv, boundProfile:profileBinding, inputImages:controlledImages.length>1?controlledImages:[] }) : runtimeSpawnSpec(discovered.binary, invocation.args); }
-  catch (error) { cleanupOverlay(); return Promise.reject(error); }
+  try { spec = resolvedRuntime === 'Hermes' && childEnv.HERMES_MANAGED_DIR && (receipt || hermesBot || profileBinding || controlledImages.length>1 || maintenancePrepared) ? hermesMcpSpawnSpec(discovered.binary, invocation.args, { env: childEnv, boundProfile:profileBinding, inputImages:controlledImages.length>1?controlledImages:[],maintenanceControl:maintenancePrepared?.controlFile }) : runtimeSpawnSpec(discovered.binary, invocation.args); }
+  catch (error) { maintenancePrepared?.close();cleanupOverlay(); return Promise.reject(error); }
   // The desktop user session may have a proxy configured in Windows Internet
   // Settings while the daemon process has no proxy variables in its service
   // environment. Propagate that proxy to each local CLI child, preserving any
@@ -1148,17 +1188,18 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
     state.lineBuffer = lines.pop() || '';
     for (const line of lines) parseRuntimeStreamLine(line, state, emitOutput, emitStage);
   };
-  if(beforeSpawn) {try{await runBeforeSpawnAdmission(beforeSpawn);}catch(error){cleanupOverlay();throw error;}}
+  if(beforeSpawn) {try{await runBeforeSpawnAdmission(beforeSpawn);}catch(error){maintenancePrepared?.close();cleanupOverlay();throw error;}}
   return new Promise((resolve, reject) => {
     let supervision;
     try { profileBinding?.verify({env:childEnv,cwd}); supervision = spawnSupervisedRuntime({ command: spec.command, args: spec.args, cwd: path.resolve(String(cwd || process.cwd())), env: childEnv, cleanupOnFailure: true }); }
-    catch (error) { cleanupOverlay(); reject(error); return; }
+    catch (error) { maintenancePrepared?.close();cleanupOverlay(); reject(error); return; }
     const { child } = supervision;
     let settled = false;
     let launchError = null;
     const finish = (result, error = null) => {
       if (settled) return;
       settled = true;
+      maintenancePrepared?.close();
       cleanupOverlay();
       signal?.removeEventListener('abort', abort);
       if (error) reject(error); else resolve(result);
@@ -1201,7 +1242,8 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
         // this healthy workstation as an unconfirmed local process.
         if (phoneFailure.phoneExecutionState === 'uncertain') result.executionState = 'uncertain';
       }
-      if(hermesBot)Object.assign(result,{botIsolation:creatorIsolation,configurationRevision:hermesBot.revision,nativeSessionId:state.sessionId || null,...(botTurnLimit?{turnLimit:botTurnLimit}:{})});
+      if(resolvedRuntime==='Hermes')result.nativeSessionId=state.sessionId || null;
+      if(hermesBot)Object.assign(result,{botIsolation:creatorIsolation,configurationRevision:hermesBot.revision,...(botTurnLimit?{turnLimit:botTurnLimit}:{})});
       if(hermesBot?.config.reasoningEffort){
         result.reasoning=botReasoning?{...botReasoning,requests:reasoningRequests}:{requested:hermesBot.config.reasoningEffort,actual:null,status:'unconfirmed',requests:0};
         if(botReasoning&&botReasoning.status!=='matched'){
@@ -1213,9 +1255,13 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
       }
       if (code === 0 && creatorPrepared && !creatorIsolation) return finish({ status: 'failed', code: 'creator_isolation_unconfirmed', error: 'Hermes 未确认实例状态隔离；不能报告执行成功', result });
       const managementFailure = code === 0 ? managementMcpExecutionFailure(result.managementMcp) : null;
+      if (code !== 0) return finish({ status: 'failed', code: 'runtime_failed', error: `${formatRuntimeFailure(resolvedRuntime, code, state.output, state.runtimeError)}${phoneFailure ? `\n${phoneFailure.error}` : ''}`, result });
+      // The native boundary has already required terminal external receipts.
+      // A maintenance pause preserves known tool failures for the resumed task;
+      // it does not promote those business operations to success.
+      if(maintenancePrepared){try{const checkpoint=maintenancePrepared.checkpoint(processExit);if(checkpoint){result.nativeSessionId=checkpoint.sessionId;result.maintenanceCheckpoint=checkpoint;return finish(markMaintenancePaused({status:'maintenance_paused',result},checkpoint));}}catch{return finish({status:'failed',code:'MAINTENANCE_CHECKPOINT_INVALID',error:'维护检查点无法验证；未重放原任务',result});}}
       const mcpFailure = code === 0 ? phoneFailure || managementFailure : null;
       if (mcpFailure) return finish({ status: 'failed', ...mcpFailure, ...(phoneFailure && managementFailure ? { error: `${phoneFailure.error}\n${managementFailure.error}` } : {}), result });
-      if (code !== 0) return finish({ status: 'failed', code: 'runtime_failed', error: `${formatRuntimeFailure(resolvedRuntime, code, state.output, state.runtimeError)}${phoneFailure ? `\n${phoneFailure.error}` : ''}`, result });
       if (resolvedRuntime === 'Hermes' && !state.response.trim() && /(?:^|[\r\n])\s*stdin is not a tty\s*(?:[\r\n]|$)/i.test(state.output)) return finish({ status: 'failed', code: 'HERMES_NONINTERACTIVE_FAILED', error: 'Hermes 未进入非交互任务模式（stdin is not a tty），未收到模型答复', result });
       if (imageArtifacts) {
         try { result.outputArtifacts = readImageArtifacts(imageArtifacts); }

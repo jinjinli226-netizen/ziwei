@@ -74,7 +74,11 @@ test('real protocol waits for every workspace, launches once, and succeeds only 
   await replacement.tick();
   assert.equal((await f.read()).state, 'succeeded');
   assert.equal((await f.read()).heartbeatVerified, true);
-  assert.equal(replacement.blocksNewActions, false);
+  // A fresh daemon can heartbeat while the installer still owns its lease.
+  assert.equal(replacement.blocksNewActions, true);
+  const settled = f.makeClient(targetBuild, {inspectWorker: async () => ({state:'complete'})});
+  await settled.tick();
+  assert.equal(settled.blocksNewActions, false);
   assert.equal(replacement.status().state, 'succeeded');
   assert.equal(f.launches(), 1);
 });

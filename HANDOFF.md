@@ -1,5 +1,11 @@
 # 紫薇项目 HandOff
 
+## 2026-10-19 Hermes 升级暂停与续做候选已通过联合回归
+
+用户已授权直接实现、测试后先推 GitHub 再发布。当前候选保留同一 ACKed action/逻辑任务/Bot 锁，整批工具结果落入原生 SQLite、确认 root/tree 退出后暂停；目标版本心跳、安装完成及锁释放后，按精确 Profile/HOME/cwd/session 摘要和持久代次许可续做，不重放原 prompt、不重置原预算。支持取消升级、明确还原后的继续和永久拒绝/到期收尾；手机待回执、后台进程或未知管理写不强停。Codex/其它未接入路径仍等空闲，不声称通用进程栈或损坏上下文迁移。
+
+274 项联合 Node 回归通过、0 失败/跳过；Python 原生夹具18项通过。已只读核对实际李金晋电脑 Hermes 0.22 ABI，但候选测试和 ABI 检查不等于已发布或跨升级真机验收。后续仅该电脑装入基础支持，再用独立无外部业务任务验证跨升级、工具步骤不重复。原闲鱼业务不重跑。API仅叠加实际 J 的4个源文件，客户端从真实官方包保留其它混合字节。详见 [本轮运维](docs/operations/2026-10-19-maintenance-checkpoint-resume.md) 和 [QA](docs/qa/2026-10-19-maintenance-checkpoint-resume.json)。下方为此前已发布快照。
+
 ## 2026-10-19 知暖裸 node TTY 已修复、发布并真机通过
 
 产品 Q `d249c5786df867346d9b0f97451daf75e1d4bf76` 已先推 GitHub 再发布官方 Windows 包，build `11cf2eb7f739698a34f0590020629c1b99dd6fed4abfdecc69154850e7ed4fa6`、SHA `c960b9962ee4f88368d3f12498653e95f59e8a57fc3156a601a0d5afe3b9310a`。仅李金晋电脑统一升级 `client-update_a514c779-278b-4cc9-a5a1-51a55a0b9962` 已 succeeded、新build认证心跳及本机PID2808确认；不要重复升级。API/UI仍J，未重启主站。

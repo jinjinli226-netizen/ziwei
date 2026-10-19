@@ -1,3 +1,5 @@
+import {executionBinding} from './execution-admission.mjs';
+import {markMaintenancePaused,consumeMaintenancePaused,validateMaintenancePause} from './maintenance-checkpoint.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import {actionExecutionTimeoutMs,ACTION_EXECUTION_LEASE_BUFFER_MS} from './action-execution-budget.mjs';
@@ -42,6 +44,12 @@ export class ActionDispatcher {
   #inFlight = new Map();
   #controllers = new Map();
   #stopHandlers = new Map();
+  #maintenanceControls=new Map();
+  #maintenanceRequests=new Map();
+  #maintenanceActions=new Map();
+  #maintenanceCommitted=new Set();
+  #authorizeResume;
+  #onMaintenancePaused;
   #execute;
   #authorizeExecute;
   #now;
@@ -54,10 +62,12 @@ export class ActionDispatcher {
   #stopGraceMs;
   #canExecute;
   #quarantines = new Set();
-  constructor({execute, authorizeExecute = async()=>{}, now = () => Date.now(), workdir = process.cwd(), onEvent = () => {}, stateFile = null, workspace = '', deviceId = '', stopGraceMs = 10000, canExecute = () => true} = {}) {
+  constructor({execute, authorizeExecute = async()=>{}, now = () => Date.now(), workdir = process.cwd(), onEvent = () => {}, stateFile = null, workspace = '', deviceId = '', stopGraceMs = 10000, canExecute = () => true,authorizeResume=async()=>false,onMaintenancePaused=async()=>false} = {}) {
     if (typeof execute !== 'function') throw new TypeError('ActionDispatcher requires an execute function');
     this.#execute = execute; this.#now = now; this.#workdir = process.platform === 'win32' ? resolveWindowsWorkdirPath(process.cwd(), workdir) : path.resolve(workdir); this.#onEvent = onEvent;
     this.#authorizeExecute=authorizeExecute;
+    if(typeof authorizeResume!=='function'||typeof onMaintenancePaused!=='function')throw new TypeError('Invalid maintenance callbacks');
+    this.#authorizeResume=authorizeResume;this.#onMaintenancePaused=onMaintenancePaused;
     this.#workspace = String(workspace || ''); this.#deviceId = String(deviceId || '');
     this.#stopGraceMs = Math.max(1, Number(stopGraceMs) || 10000); this.#canExecute = canExecute;
     this.#stateFile = stateFile ? path.resolve(stateFile) : null; this.#loadState();
@@ -86,6 +96,7 @@ export class ActionDispatcher {
       }
       this.#completed = completed; this.#completedIdentity = identities; this.#admissionRejected = admissions; this.#legacyCompleted = legacy; this.#started = started;
       for (const [key, item] of started) {
+        if(item.maintenancePause!==undefined&&this.#validPaused(item))continue;
         if (!completed.has(key) && (item.nativeRuntime || item.quarantine) && item.quarantine?.stopConfirmed !== true) this.#quarantines.add(key);
       }
     } catch (error) {
@@ -146,8 +157,8 @@ export class ActionDispatcher {
   #duplicate(action, result) {
     return {status: 'duplicate', actionId: action?.id, originalStatus: result.status, result: result.result, error: result.error, completedAt: result.completedAt, ...(result.code ? {code: result.code} : {}), ...(result.reason ? {reason: result.reason} : {}), ...(result.executionState ? {executionState: result.executionState} : {})};
   }
-  #markStarted(action, key, identity) {
-    this.#started.set(key, {key, actionId: action?.id ?? null, identity, startedAt: this.#now(), ...(isNativeRuntimeAction(action) ? {nativeRuntime: true,resourceBinding:{type:action.type,employeeId:action.payload?.employeeId||null,revision:action.payload?.hermesBot?.revision||null,controlEpoch:action.payload?.hermesBot?.controlEpoch||null,resource:action.payload?.nativeOperation?.resource||null,operation:action.payload?.nativeOperation?.operation||null,platform:action.payload?.nativeOperation?.input?.platform||null}} : {})});
+  #markStarted(action, key, identity,timing={}) {
+    this.#started.set(key, {key, actionId: action?.id ?? null, identity, startedAt: timing.startedAt??this.#now(),...(timing.hardDeadline!==undefined?{hardDeadline:timing.hardDeadline}:{}), ...(isNativeRuntimeAction(action) ? {nativeRuntime: true,resourceBinding:{type:action.type,employeeId:action.payload?.employeeId||null,revision:action.payload?.hermesBot?.revision||null,controlEpoch:action.payload?.hermesBot?.controlEpoch||null,resource:action.payload?.nativeOperation?.resource||null,operation:action.payload?.nativeOperation?.operation||null,platform:action.payload?.nativeOperation?.input?.platform||null}} : {})});
     try { this.#saveState(); }
     catch (error) { throw Object.assign(new Error(error?.message || String(error)), {code: 'ACTION_STATE_WRITE_FAILED'}); }
   }
@@ -174,6 +185,34 @@ export class ActionDispatcher {
   }
   get quarantined() { return this.#stateError !== null || this.#quarantines.size > 0; }
   get quarantinedActionIds() { return [...this.#quarantines].map(key => String(this.#started.get(key)?.actionId ?? key)).concat(this.#stateError ? ['state-corrupt'] : []); }
+  #validPaused(item,action=null){
+    const receipt=item?.maintenancePause;
+    if(!item||item.nativeRuntime!==true||item.quarantine||item.maintenanceResumeStarted===true||!Number.isFinite(item.hardDeadline)||item.hardDeadline<item.startedAt||!item.identity||item.identity.workspace!==this.#workspace||item.identity.deviceId!==this.#deviceId||!validateMaintenancePause(receipt,{actionId:String(item.actionId)}))return false;
+    const b=item.resourceBinding;
+    if(!b||!['conversation.execute','task.execute','agent.execute','runtime.execute','automation.execute'].includes(b.type)||b.resource!==null||b.operation!==null||b.platform!==null)return false;
+    return !action||(item.key===String(action.dedupeKey??action.dedupe_key??action.id)&&b.type===action.type&&b.employeeId===(action.payload?.employeeId||null)&&b.revision===(action.payload?.hermesBot?.revision||null)&&b.controlEpoch===(action.payload?.hermesBot?.controlEpoch||null)&&item.hardDeadline<=item.startedAt+actionExecutionTimeoutMs(action)&&this.#sameIdentity(item.identity,this.#identity(action),item.actionId,action)&&validateMaintenancePause(receipt,{actionId:action.id,executionBinding:executionBinding(action),profile:action.payload?.profile||action.payload?.hermesBot?.sourceProfile||'default'}));
+  }
+  #pausedResult(action,receipt){return markMaintenancePaused({status:'maintenance_paused',actionId:action.id,result:{maintenanceCheckpoint:receipt,processExit:receipt.processExit}},receipt);}
+  async #commitPause(action,key,receipt){
+    if(this.#maintenanceCommitted.has(key))return true;
+    try{const value=await this.#onMaintenancePaused(action,receipt);if(value===true||value?.committed===true){if(!this.#completed.has(key))this.#maintenanceCommitted.add(key);return true;}}catch{}
+    this.#onEvent('action.maintenance_commit_pending',{actionId:action.id});return false;
+  }
+  get maintenancePausedActions(){return [...this.#started.values()].filter(item=>!this.#completed.has(item.key)&&this.#validPaused(item)).map(item=>({actionId:item.actionId,employeeId:item.resourceBinding?.employeeId||null,receipt:JSON.parse(JSON.stringify(item.maintenancePause))}));}
+  get maintenancePendingCommits(){return this.maintenancePausedActions.filter(row=>!this.#maintenanceCommitted.has(this.#findByActionId(this.#started,row.actionId,item=>item.actionId)?.[0]));}
+  getMaintenancePause(actionId){return this.maintenancePausedActions.find(row=>String(row.actionId)===String(actionId))?.receipt||null;}
+  hasPausedEmployee(employeeId){return this.maintenancePausedActions.some(row=>row.employeeId===employeeId);}
+  async retryMaintenanceCommits(actions=[]){
+    for(const action of actions){const entry=this.#findByActionId(this.#started,action?.id,item=>item.actionId);if(entry&&this.#validPaused(entry[1],action))this.#maintenanceActions.set(entry[0],action);}
+    for(const row of this.maintenancePendingCommits){const entry=this.#findByActionId(this.#started,row.actionId,item=>item.actionId),action=entry&&this.#maintenanceActions.get(entry[0]);if(action&&this.#validPaused(entry[1],action))await this.#commitPause(action,entry[0],entry[1].maintenancePause);}
+    return {pending:this.maintenancePendingCommits.length};
+  }
+  async requestMaintenancePause(update){
+    if(!update||typeof update.id!=='string'||!update.id||!/^[a-f0-9]{64}$/.test(update.targetBuild||''))throw new TypeError('Invalid maintenance update');
+    const results=[];
+    for(const [actionId,controller]of this.#controllers){if(controller.signal.aborted)continue;const request={id:update.id,targetBuild:update.targetBuild};this.#maintenanceRequests.set(actionId,request);const handler=this.#maintenanceControls.get(actionId);let value={accepted:false,reasonCode:'MAINTENANCE_NOT_READY'};if(handler)try{value=await handler(request);}catch{}results.push({actionId,...(value&&typeof value==='object'?value:{accepted:false})});}
+    return results;
+  }
   #inside(root, candidate) {
     const relative = path.relative(root, candidate);
     return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
@@ -210,7 +249,7 @@ export class ActionDispatcher {
   #rejectAdmission(action,key,identity,phase,error,code='ACTION_ADMISSION_REJECTED') {
     return markDispatcherAdmissionRejected(this.#failure(action,error,{code,executionState:'not_dispatched',admissionRejected:true,result:{admissionRejected:true,executionState:'not_dispatched'}}),{key,identity,phase});
   }
-  async #run(action, key, identity) {
+  async #run(action, key, identity,maintenanceResume=null,resumeTiming=null) {
     const actionId = action?.id; const controller = new AbortController(); let hardTimeoutHandle = null; let idleWatchdogHandle = null; this.#controllers.set(String(actionId), controller);
     let admissionPhase='authorization';
     try {
@@ -218,6 +257,7 @@ export class ActionDispatcher {
       // Verify the original wire payload before this trusted dispatcher adds
       // local working-directory defaults or handles an action.cancel itself.
       await this.#authorizeExecute(action);
+      if(maintenanceResume&&controller.signal.aborted)return this.#failure(action,'A2A action cancelled before maintenance resume launch',{code:'cancelled',result:{maintenanceCancelled:true,maintenanceCheckpoint:maintenanceResume,processExit:maintenanceResume.processExit,partialEffectsPossible:true}});
       const actionType = String(action.type || '').toLowerCase();
       if (actionType === 'agent.cancel' || actionType === 'action.cancel') {
         admissionPhase=null;
@@ -247,13 +287,15 @@ export class ActionDispatcher {
         if (!Number.isFinite(remaining) || remaining < 100) return this.#rejectAdmission(action,key,identity,'lease','A2A action lease leaves insufficient time for execution and confirmed shutdown','ACTION_LEASE_INSUFFICIENT');
         hardTimeoutMs = Math.min(hardTimeoutMs, remaining);
       }
-      const hardDeadline = hardTimeoutMs === null ? null : this.#now() + hardTimeoutMs;
+      const hardDeadline = resumeTiming ? Math.min(resumeTiming.hardDeadline,this.#now()+hardTimeoutMs) : (hardTimeoutMs === null ? null : this.#now()+hardTimeoutMs);
+      if(resumeTiming){hardTimeoutMs=hardDeadline-this.#now();if(hardTimeoutMs<=0)return this.#failure(action,'A2A action original execution budget expired during maintenance',{code:'action_timeout',result:{processExit:maintenanceResume.processExit,maintenanceCheckpoint:maintenanceResume}});}
       const requestedIdleTimeout = action.payload?.idleTimeoutMs ?? action.payload?.idle_timeout_ms;
       const hasIdleTimeout = requestedIdleTimeout !== undefined && requestedIdleTimeout !== null && String(requestedIdleTimeout).trim() !== '' && Number.isFinite(Number(requestedIdleTimeout));
       const idleTimeoutMs = hasIdleTimeout ? Math.max(100, Number(requestedIdleTimeout)) : 2 * 60 * 1000;
       const enforceIdle = !nativeRuntime || hasIdleTimeout;
       admissionPhase=null;
-      this.#markStarted(action, key, identity);
+      this.#markStarted(action, key, identity,{startedAt:resumeTiming?.startedAt,hardDeadline});
+      if(maintenanceResume)this.#onEvent('action.maintenance_resumed',{actionId,updateId:maintenanceResume.updateId,targetBuild:maintenanceResume.targetBuild});
       this.#onEvent('action.started', {actionId, type: action.type});
       let stopReason = null; let resolveStop; let supervision = null; let stopInvoked = false; let stopInFlight = false;
       let residentExit=null;
@@ -324,6 +366,9 @@ export class ActionDispatcher {
       }, intervalMs);
       const execution = Promise.resolve().then(() => controller.signal.aborted ? {status: 'failed', code: 'cancelled'} : this.#execute(executableAction, {
         signal: controller.signal,
+        maintenanceResume:maintenanceResume?JSON.parse(JSON.stringify(maintenanceResume)):null,
+        maintenanceExecutionBinding:executionBinding(action),
+        onMaintenancePauseControl:handler=>{if(typeof handler!=='function'||this.#maintenanceControls.has(String(actionId)))throw new Error('Invalid maintenance pause control');this.#maintenanceControls.set(String(actionId),handler);const update=this.#maintenanceRequests.get(String(actionId));if(update&&!controller.signal.aborted)void Promise.resolve().then(()=>handler(update)).catch(()=>{});},
         onResidentExit,
         onActivity: refreshIdleTimeout,
         onSupervision: value => {
@@ -408,6 +453,12 @@ export class ActionDispatcher {
         }
       }
       const result = outcome.value;
+      const pause=consumeMaintenancePaused(result);
+      if(pause){
+        const requested=this.#maintenanceRequests.get(String(actionId));
+        if(!['conversation.execute','task.execute','agent.execute','runtime.execute','automation.execute'].includes(action.type)||!requested||!supervision||!latestEvidence||!validateMaintenancePause(pause,{actionId,executionBinding:executionBinding(action),updateId:requested.id,targetBuild:requested.targetBuild,profile:action.payload?.profile||action.payload?.hermesBot?.sourceProfile||'default',cwd:workdir,processExit:latestEvidence})){this.#quarantine(key,'MAINTENANCE_CHECKPOINT_UNCONFIRMED');return this.#uncertain(action,'MAINTENANCE_CHECKPOINT_UNCONFIRMED','维护暂停缺少匹配的原生退出证据');}
+        return this.#pausedResult(action,pause);
+      }
       const executorStatus = result && typeof result === 'object' ? String(result.status || '') : '';
       if (executorStatus && executorStatus !== 'succeeded') {
         if (result.code === 'EXECUTION_UNCERTAIN' || result.executionState === 'uncertain') {
@@ -421,7 +472,7 @@ export class ActionDispatcher {
       const output = executorStatus === 'succeeded' && Object.prototype.hasOwnProperty.call(result, 'result') ? result.result : result;
       return {status: 'succeeded', actionId, result: supervision ? {...(output && typeof output === 'object' && !Array.isArray(output) ? output : {output}), processExit: safeProcessExit(latestEvidence), ...(residentExit ? {residentExit} : {})} : residentExit?{...output,residentExit}:output, completedAt: this.#now()};
     } catch (error) { const failed = admissionPhase ? this.#rejectAdmission(action,key,identity,admissionPhase,error) : error?.code === 'ACTION_STATE_WRITE_FAILED' ? this.#uncertain(action, error.code, error) : this.#failure(action, error); this.#onEvent('action.failed', {actionId, type: action?.type, error: failed.error}); return failed; }
-    finally { if (hardTimeoutHandle) clearTimeout(hardTimeoutHandle); if (idleWatchdogHandle) clearInterval(idleWatchdogHandle); this.#controllers.delete(String(actionId)); if (!this.quarantinedActionIds.includes(String(actionId))) this.#stopHandlers.delete(String(actionId)); }
+    finally { if (hardTimeoutHandle) clearTimeout(hardTimeoutHandle); if (idleWatchdogHandle) clearInterval(idleWatchdogHandle); this.#controllers.delete(String(actionId)); this.#maintenanceControls.delete(String(actionId));this.#maintenanceRequests.delete(String(actionId)); if (!this.quarantinedActionIds.includes(String(actionId))) this.#stopHandlers.delete(String(actionId)); }
   }
   async dispatch(action) {
     const key = String(action?.dedupeKey ?? action?.dedupe_key ?? action?.id ?? ''); if (!key) return this.#failure(action, 'A2A action requires id or dedupeKey');
@@ -436,16 +487,35 @@ export class ActionDispatcher {
     const inFlight = this.#inFlight.get(key) || this.#findByActionId(this.#inFlight, action?.id, item => item.actionId)?.[1];
     if (inFlight) {
       if (!this.#sameIdentity(inFlight.identity, identity, inFlight.actionId, action)) return this.#uncertain(action, 'ACTION_IDENTITY_MISMATCH', '正在执行的动作属于不同的工作区、设备或动作标识');
-      return this.#duplicate(action, await inFlight.promise);
+      const value=await inFlight.promise;const pause=this.getMaintenancePause(action.id);return value.status==='maintenance_paused'&&pause?this.#pausedResult(action,pause):this.#duplicate(action,value);
     }
     const started = this.#started.get(key) || this.#findByActionId(this.#started, action?.id, item => item.actionId)?.[1];
     if (started) {
       if (!this.#sameIdentity(started.identity, identity, started.actionId, action)) return this.#uncertain(action, 'ACTION_IDENTITY_MISMATCH', '未确认完成的动作属于不同的工作区、设备或动作标识');
-      return this.#uncertain(action, 'STARTED_WITHOUT_RESULT', '已有执行开始记录，但没有持久化终态；不会重新执行');
+      if(!this.#validPaused(started,action))return this.#uncertain(action, 'STARTED_WITHOUT_RESULT', '已有执行开始记录，但没有持久化终态；不会重新执行');
     }
     const entry = {actionId: action?.id, identity, promise: null};
     entry.promise = Promise.resolve().then(async () => {
-      const result = await this.#run(action, key, identity);
+      let resume=null;
+      if(started){
+        this.#maintenanceActions.set(key,action);resume=started.maintenancePause;
+        const committed=await this.#commitPause(action,key,resume),settled=this.#completed.get(key);
+        if(settled)return this.#duplicate(action,settled);
+        if(!committed)return this.#pausedResult(action,resume);
+        let allowed=false;try{const value=await this.#authorizeResume(action,resume);allowed=value===true||value?.allowed===true;}catch{}
+        const completed=this.#completed.get(key);if(completed)return this.#duplicate(action,completed);
+        if(!allowed)return this.#pausedResult(action,resume);
+        if(this.#started.get(key)!==started||!this.#validPaused(started,action))return this.#uncertain(action,'MAINTENANCE_RESUME_CHANGED','维护暂停状态已变化');
+        started.maintenanceResumeStarted=true;try{this.#saveState();}catch(error){this.#quarantine(key,'MAINTENANCE_RESUME_WRITE_FAILED');return this.#uncertain(action,'ACTION_STATE_WRITE_FAILED',error);}
+      }
+      const result = await this.#run(action, key, identity,resume,started?{startedAt:started.startedAt,hardDeadline:started.hardDeadline}:null);
+      const pause=consumeMaintenancePaused(result);
+      if(pause){
+        const item=this.#started.get(key);if(!item)return this.#uncertain(action,'MAINTENANCE_STATE_MISSING','维护暂停原始执行记录缺失');
+        item.maintenancePause=pause;delete item.maintenanceResumeStarted;this.#maintenanceCommitted.delete(key);this.#maintenanceActions.set(key,action);
+        try{this.#saveState();}catch(error){this.#quarantine(key,'MAINTENANCE_PAUSE_WRITE_FAILED');return this.#uncertain(action,'ACTION_STATE_WRITE_FAILED',error);}
+        await this.#commitPause(action,key,pause);const completed=this.#completed.get(key);if(completed)return this.#duplicate(action,completed);this.#onEvent('action.maintenance_paused',{actionId:action.id,updateId:pause.updateId,targetBuild:pause.targetBuild});return this.#pausedResult(action,pause);
+      }
       if (result.code === 'EXECUTION_UNCERTAIN') return result;
       if(this.#residentExits.has(key))result.result={...result.result,residentExit:this.#residentExits.get(key)};
       this.#completed.set(key, result); this.#completedIdentity.set(key, identity);
@@ -462,12 +532,28 @@ export class ActionDispatcher {
     try { return await entry.promise; }
     finally { if (this.#inFlight.get(key) === entry) this.#inFlight.delete(key); }
   }
+  settleMaintenanceFromServer(action,status,reason='MAINTENANCE_SERVER_TERMINAL') {
+    if(this.#stateError||!['succeeded','failed','expired'].includes(status)||typeof reason!=='string'||!/^[A-Z0-9_]{1,100}$/.test(reason))return false;
+    const entry=this.#findByActionId(this.#started,action?.id,item=>item.actionId);
+    if(!entry||this.#completed.has(entry[0])||this.#controllers.has(String(action.id))||this.#stopHandlers.has(String(action.id))||!this.#validPaused(entry[1],action))return false;
+    const [key,item]=entry,receipt=item.maintenancePause;
+    // The server owns this terminal decision. Retain the invocation's actual
+    // checkpoint exit; it is not evidence of a cancelled or completed business task.
+    const result=this.#failure(action,'服务器已确认原动作终止；未恢复执行',{
+      code:reason==='MAINTENANCE_BUDGET_EXPIRED'||status==='expired'?'action_timeout':'maintenance_server_terminal',
+      result:{maintenanceServerTerminal:{status,reasonCode:reason},maintenanceCheckpoint:receipt,processExit:receipt.processExit,partialEffectsPossible:true},
+    });
+    this.#completed.set(key,result);this.#completedIdentity.set(key,item.identity);
+    try{this.#saveState();}catch(error){this.#completed.delete(key);this.#completedIdentity.delete(key);throw error;}
+    this.#maintenanceCommitted.delete(key);this.#maintenanceActions.delete(key);
+    this.#onEvent('action.maintenance_server_terminal',{actionId:action.id,status,reasonCode:reason});return true;
+  }
   completedResult(action) {
     if (this.#stateError) return null;
     const entry = this.#findByActionId(this.#completed, action?.id, item => item.actionId);
     if (!entry || this.#legacyCompleted.has(entry[0]) || !this.#sameIdentity(this.#completedIdentity.get(entry[0]), this.#identity(action), entry[1].actionId, action)) return null;
     return this.#duplicate(action, entry[1]);
   }
-  cancel(actionId) { const id = String(actionId), controller = this.#controllers.get(id), stop = this.#stopHandlers.get(id); if (!controller && !stop) return false; if (controller && !controller.signal.aborted) controller.abort(); else if (stop) stop(); this.#onEvent('action.cancel_requested', {actionId, stopConfirmed: false}); return true; }
-  status(actionId) { const id = String(actionId); return {actionId: id, running: this.#controllers.has(id) || this.quarantinedActionIds.includes(id), quarantined: this.quarantinedActionIds.includes(id), completed: [...this.#completed.values()].find(item => String(item.actionId) === id) || null}; }
+  cancel(actionId) { const id = String(actionId), controller = this.#controllers.get(id), stop = this.#stopHandlers.get(id);if(!controller&&!stop){const entry=this.#findByActionId(this.#started,id,item=>item.actionId);if(!entry||this.#completed.has(entry[0])||!this.#validPaused(entry[1]))return false;const result=this.#failure({id},'A2A action cancelled after maintenance pause; completed tool effects remain',{code:'cancelled',result:{maintenanceCancelled:true,processExit:entry[1].maintenancePause.processExit,maintenanceCheckpoint:entry[1].maintenancePause,partialEffectsPossible:true}});this.#completed.set(entry[0],result);this.#completedIdentity.set(entry[0],entry[1].identity);try{this.#saveState();}catch{this.#completed.delete(entry[0]);this.#completedIdentity.delete(entry[0]);return false;}this.#onEvent('action.result_recovered',{actionId:id,status:'failed'});return true;} if (controller && !controller.signal.aborted) controller.abort(); else if (stop) stop(); this.#onEvent('action.cancel_requested', {actionId, stopConfirmed: false}); return true; }
+  status(actionId) { const id = String(actionId); return {actionId: id, running: this.#controllers.has(id) || this.quarantinedActionIds.includes(id), quarantined: this.quarantinedActionIds.includes(id),paused:Boolean(this.getMaintenancePause(id)), completed: [...this.#completed.values()].find(item => String(item.actionId) === id) || null}; }
 }

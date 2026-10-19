@@ -1,0 +1,30 @@
+{
+  "phase": "candidate-tested-awaiting-publication-and-live-upgrade",
+  "targetDeviceId": "device_bfd9a3d2-c2cc-4a36-8bd8-465bea492493",
+  "employeeId": "employee_485327e2-16ae-4c17-97af-53d4e9d50ddf",
+  "runtime": "Hermes",
+  "sameActionRetained": true,
+  "originalDeadlinePreserved": true,
+  "originalPromptReplayed": false,
+  "previousPhoneBusinessReplayed": false,
+  "nativeInstalledMethodsReadOnlyVerified": true,
+  "published": false,
+  "installed": false,
+  "liveCrossUpgradeVerified": false,
+  "nativeProcessStackRestoration": false,
+  "otherRuntimeContinuationImplemented": false,
+  "contextCorruptionMigrationImplemented": false,
+  "nodeCombinedPassed": 274,
+  "nodeCombinedFailed": 0,
+  "nodeCombinedSkipped": 0,
+  "pythonNativeFixturePassed": 18,
+  "actualInstalledNativeAbi": "Hermes 0.22 synchronous batch/flush/interrupt/run/persist and background registry verified read-only",
+  "nativeCapabilityActionId": "action_d8a7820f-7877-4601-8499-4af85537d8c1",
+  "nativeBackgroundCapabilityActionId": "action_dc540c59-d961-43fb-a5b5-2a69f8156a55",
+  "apiMixedTreeOverlayFiles": [
+    "backend/app.mjs",
+    "backend/repository.mjs",
+    "backend/action-maintenance.mjs",
+    "src/maintenance-checkpoint.mjs"
+  ]
+}

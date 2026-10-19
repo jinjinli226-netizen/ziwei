@@ -371,18 +371,19 @@ export function createLocalActionExecutor({runtimeDir, admissionHandledByDispatc
   fs.mkdirSync(runtimeDir, {recursive: true});
   const automaticManagement = managementBootstrap || (workspace && deviceToken ? createManagementBootstrap({ workspace, apiBase, deviceId, deviceToken, cacheDirectory: path.join(runtimeDir, 'management-mcp-credentials') }) : null);
   const gateways=createBotGatewayManager({apiBase,workspace,deviceToken});
-  const admissions=new Map();
+  const admissions=new Map(),maintenanceAttempts=new Map();
   const execute = async (action, context = {}) => {
     const permit=admissionHandledByDispatcher?admissions.get(action.id):await authorizeNativeExecution(action,{apiBase,workspace,deviceId,deviceToken,signal:context.signal,hermesHome:hermesHomePath||hermesHome(),runtimeDir,defaultWorkdir});
     if(PRODUCT_ROLE==='v1-compat'||['preparing','sealed'].includes(permit?.productState))assertNoOwnedBotResource(action,{hermesHome:hermesHomePath||hermesHome(),protectedHomes:permit?.protectedHomes||[],runtimeDir,defaultWorkdir});
     admissions.delete(action.id);
+    const maintenanceAttempt=maintenanceAttempts.get(action.id);maintenanceAttempts.delete(action.id);
     const type = String(action?.type || '');
     if (action?.payload?.deviceId && deviceId && action.payload.deviceId !== deviceId) throw new Error('执行目标设备与本机已配对设备不一致；不会回退其他设备');
     if (action?.workspace && workspace && action.workspace !== workspace) throw new Error('执行工作区与本机已配对工作区不一致');
     const authorizeBot=async()=>{
       if(!action.payload?.hermesBot)return;
       if(!deviceToken || action.payload.hermesBot.workspace!==workspace)throw new Error('Bot 缺少当前工作区已配对设备凭据');
-      const response=await fetch(`${String(apiBase).replace(/\/$/,'')}/a2a/v1/actions/${encodeURIComponent(action.id)}/bot-start`,{method:'POST',headers:{'content-type':'application/json','x-ziwei-device-token':deviceToken},body:JSON.stringify({workspace}),signal:context.signal?AbortSignal.any([context.signal,AbortSignal.timeout(10000)]):AbortSignal.timeout(10000),redirect:'error'});
+      const response=await fetch(`${String(apiBase).replace(/\/$/,'')}/a2a/v1/actions/${encodeURIComponent(action.id)}/bot-start`,{method:'POST',headers:{'content-type':'application/json','x-ziwei-device-token':deviceToken},body:JSON.stringify({workspace,...(maintenanceAttempt?{maintenanceAttempt}:{})}),signal:context.signal?AbortSignal.any([context.signal,AbortSignal.timeout(10000)]):AbortSignal.timeout(10000),redirect:'error'});
       const value=await response.json();if(!response.ok || value.allowed!==true){
         const error=Object.assign(new Error(value.error || 'Bot 执行授权已过期或已暂停'),{definitelyNotStarted:true,...(typeof value.code==='string'?{code:value.code}:{})});
         const bot=action.payload.hermesBot;
@@ -484,6 +485,11 @@ export function createLocalActionExecutor({runtimeDir, admissionHandledByDispatc
         managementMcp: { request: workspace ? { ...(payload.managementMcp || {}), enabled: true } : payload.managementMcp, config: preparedManagement, workspace, apiBase, auditDirectory: path.join(runtimeDir, 'management-mcp-audit'), actionId: action.id },
         terminalMcp: { request: payload.terminalMcp, config: phoneSession.config, workspace, auditDirectory: path.join(runtimeDir, 'terminal-mcp-audit'), actionId: action.id },
         signal: context.signal,
+        ...(process.platform==='win32'&&String(runtime).toLowerCase()==='hermes'&&typeof context.onMaintenancePauseControl==='function'?{
+          maintenance:{actionId:action.id,executionBinding:context.maintenanceExecutionBinding,
+            directory:path.join(runtimeDir,'maintenance-checkpoints'),resume:context.maintenanceResume||null,
+            onControl:context.onMaintenancePauseControl},
+        }:{}),
         onOutput: context.onOutput,
         onProgress: context.onProgress,
         onStage: context.onStage,
@@ -508,7 +514,7 @@ export function createLocalActionExecutor({runtimeDir, admissionHandledByDispatc
     throw new Error(`unsupported A2A action type: ${type || '(empty)'}`);
   };
   execute.maintenanceStatus=()=>gateways.maintenanceStatus();
-  execute.authorizeExecution=async action=>{const permit=await authorizeNativeExecution(action,{apiBase,workspace,deviceId,deviceToken,hermesHome:hermesHomePath||hermesHome(),runtimeDir,defaultWorkdir});admissions.set(action.id,permit);return permit;};
+  execute.authorizeExecution=async (action,{maintenanceAttempt}={})=>{const permit=await authorizeNativeExecution(action,{apiBase,workspace,deviceId,deviceToken,hermesHome:hermesHomePath||hermesHome(),runtimeDir,defaultWorkdir,maintenanceAttempt});admissions.set(action.id,permit);if(maintenanceAttempt)maintenanceAttempts.set(action.id,maintenanceAttempt);return permit;};
   execute.close=()=>gateways.close();
   return execute;
 }

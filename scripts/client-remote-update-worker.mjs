@@ -39,6 +39,7 @@ export async function launchRemoteClientUpdate({ root, home, configPath, request
  * for this short-lived supervisor to exit, then owns drain/stop/install/restart. */
 export async function runRemoteClientUpdateWorker({ jobFile, download = downloadVerifiedPackage, launch = launchClientUpdate, fetchImpl = fetch, clock = Date.now, env = process.env } = {}) {
   const job = readRemoteUpdateJson(jobFile), statusFile = path.join(path.dirname(jobFile), 'supervisor-result.json');
+  let officialLaunchStarted=false;
   try {
     if (job.schemaVersion !== 1 || path.resolve(job.directory) !== path.dirname(path.resolve(jobFile)) || !outside(job.directory, job.root) || !outside(job.configPath, job.root) || !outside(job.home, job.root)) throw failure('CLIENT_UPDATE_JOB_INVALID');
     const request = validateRemoteUpdateRequest(job.request, job.request);
@@ -61,13 +62,17 @@ export async function runRemoteClientUpdateWorker({ jobFile, download = download
     if (['succeeded', 'complete', 'failed', 'canceled', 'cancelled'].includes(afterDownload.state)) throw failure('CLIENT_UPDATE_CANCELED');
     if (['id', 'targetBuild', 'sha256', 'source'].some(key => afterDownload[key] !== request[key])) throw failure('CLIENT_UPDATE_TARGET_CHANGED');
     const helperRoot = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
+    // Persist the boundary before invoking the official worker: it may spawn
+    // successfully and then throw or lose its launch receipt.
+    writeRemoteUpdateJson(statusFile,{state:'launching',workerPid:process.pid,officialLaunchStarted:true,startedAt:clock()});
+    officialLaunchStarted=true;
     const queued = await launch({ codeRoot: helperRoot, root: job.root, env: { ...env, ZIWEI_USER_HOME: job.home, ZIWEI_CONFIG: job.configPath }, args: { package: artifactFile, sha256: request.sha256, expectedBuild: request.targetBuild } });
     writeRemoteUpdateJson(statusFile, { state: 'queued', workerPid: queued.workerPid, resultFile: queued.resultFile, queuedAt: clock() });
     return { state: 'queued' };
   } catch (error) {
     const code = remoteUpdateErrorCode(error);
-    writeRemoteUpdateJson(statusFile, { state: 'failed', code, finishedAt: clock() });
-    return { state: 'failed', code };
+    writeRemoteUpdateJson(statusFile, { state: 'failed', code, installationUnchanged:!officialLaunchStarted,officialLaunchStarted,finishedAt: clock() });
+    return { state: 'failed', code,installationUnchanged:!officialLaunchStarted };
   }
 }
 
@@ -78,13 +83,13 @@ export async function inspectRemoteClientUpdateWorker(worker, { home, env = proc
   let status;
   try { status = readRemoteUpdateJson(path.join(worker.directory, 'supervisor-result.json')); }
   catch (error) { if (error.code !== 'ENOENT') return { state: 'failed', code: 'CLIENT_UPDATE_STATE_INVALID' }; }
-  if (status?.state === 'failed') return { state: 'failed', code: remoteUpdateErrorCode(status) };
+  if (status?.state === 'failed') return { state: 'failed', code: remoteUpdateErrorCode(status),originalInstallationRestored:status.installationUnchanged===true&&status.officialLaunchStarted!==true };
   if (status?.state === 'queued') {
     const resultPath = path.resolve(status.resultFile || '');
     if (path.dirname(path.dirname(resultPath)) !== parent || !/^update-[a-f0-9-]{36}$/.test(path.basename(path.dirname(resultPath))) || path.basename(resultPath) !== 'result.json') return { state: 'failed', code: 'CLIENT_UPDATE_STATE_INVALID' };
     const result = await readStatus({ env: { ...env, ZIWEI_USER_HOME: home }, resultFile: resultPath });
     if (result.state === 'complete') return { state: 'complete' };
-    if (['failed', 'interrupted'].includes(result.state)) return { state: 'failed', code: remoteUpdateErrorCode({ code: result.reasonCode || result.code }) };
+    if (['failed', 'interrupted'].includes(result.state)) return { state: 'failed', code: remoteUpdateErrorCode({ code: result.reasonCode || result.code }),originalInstallationRestored:result.state==='failed'&&result.operation==='update'&&result.originalInstallationRestored===true };
     return { state: 'updating' };
   }
   if (!Number.isSafeInteger(worker.workerPid) || worker.workerPid < 1) return now - worker.startedAt < 10_000 ? { state: 'updating' } : { state: 'interrupted', code: 'CLIENT_UPDATE_INTERRUPTED' };

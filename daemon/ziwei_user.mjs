@@ -16,6 +16,7 @@ import {inspectLocalDaemonMaintenanceFiles} from '../backend/preservation-native
 import {createProductionClientIdentityHandler} from '../backend/preservation-source-namespace.mjs';
 import {loadPrivateClientIdentityConfiguration,privateClientConnections,createPrivateClientStateReader,createPrivateIdentityHttpRoute} from './private-preservation-identity.mjs';
 import { createRemoteClientUpdates, remoteMaintenanceHostId, REMOTE_CLIENT_UPDATE_FEATURE } from '../src/client-remote-update.mjs';
+import { createClientMaintenanceResume } from '../src/client-maintenance-resume.mjs';
 import { launchRemoteClientUpdate, inspectRemoteClientUpdateWorker, recoverRemoteClientUpdateWorker } from '../scripts/client-remote-update-worker.mjs';
 
 const ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -92,12 +93,17 @@ function installConnections() {
       } : null,
     });
     state.localExecutor=localExecutor;
+    state.maintenanceReady=new Set();
+    state.maintenanceResume=createClientMaintenanceResume({clientBuild:CLIENT_BUILD,updates:()=>remoteClientUpdates,
+      delivery:()=>state.actionDelivery,onTerminal:(action,status,reason)=>state.dispatcher.settleMaintenanceFromServer(action,status,reason),post:(pathname,body)=>postAction(state,pathname,{workspace:config.workspace,...body})});
     state.dispatcher = new ActionDispatcher({
       // Keep primary state in place and isolate every explicitly shared workspace.
       workdir: config.workdir || process.cwd() || ROOT,
       workspace: config.workspace, deviceId: config.deviceId,
       stateFile: path.join(connectionRuntimeDir, 'action-state.json'), execute: localExecutor,
-      authorizeExecute:action=>localExecutor.authorizeExecution(action),
+      authorizeExecute:action=>localExecutor.authorizeExecution(action,{maintenanceAttempt:state.actionDelivery?.maintenanceAttempt(action.id)}),
+      onMaintenancePaused:(action,receipt)=>state.maintenanceResume.commit(action,receipt),
+      authorizeResume:(action,receipt)=>state.maintenanceResume.authorize(action,receipt),
       canExecute: executionAllowed,
       onEvent: (event, extra) => {
         log(event, { workspace: config.workspace, ...extra });
@@ -111,12 +117,19 @@ function installConnections() {
       post: (pathname, body, options) => postAction(state, pathname, body, options),
       dispatch: action => state.dispatcher.dispatch(action),
       recoverResult: action => state.dispatcher.completedResult(action),
+      onConfirmed:(action,status)=>state.dispatcher.settleMaintenanceFromServer(action,status,'SERVER_TERMINAL_CONFIRMED'),
       onSuccess: async action => { if (action.type === 'hermes.profile.create') await refreshRuntimeDiscovery(state); },
       onEvent: (event, extra) => log(event, { workspace: config.workspace, ...extra }),
     });
     state.actionScheduler = createActionScheduler({
       execute: action => state.actionDelivery.execute(action),
-      canStart: (action, admission) => isCancellationAction(action) || state.actionDelivery.canDeliverWithoutExecution(action) || ((!remoteClientUpdates?.blocksNewActions || admission.collaborationChild) && executionAllowed()),
+      canStart: (action, admission) => {
+        if(isCancellationAction(action)||state.actionDelivery.canDeliverWithoutExecution(action))return true;
+        const pause=state.dispatcher.getMaintenancePause(action.id);
+        const employee=action.payload?.employeeId||action.payload?.employee_id||action.payload?.assignee;
+        if(pause&&!state.maintenanceReady.has(action.id)||!pause&&employee&&state.dispatcher.hasPausedEmployee(employee))return false;
+        return (!remoteClientUpdates?.blocksNewActions||admission.collaborationChild)&&executionAllowed();
+      },
       quarantinedActionIds: () => state.dispatcher.quarantinedActionIds,
       onError: (error, action) => log('a2a_action_failed', { workspace: config.workspace, actionId: action.id, error: error.message }),
     });
@@ -138,14 +151,22 @@ let pollTimer;
 let draining = false;
 const shutdownAbort = new AbortController();
 const activeHeartbeats = new Set();
-const remoteUpdateIdle = () => [...connections.values()].every(connection => !connection.polling && connection.actionScheduler.activeCount === 0 && connection.localExecutor.maintenanceStatus().workers.every(worker => worker.pendingCommands === 0 && worker.inFlight === 0 && worker.pendingInbound === 0));
+const remoteUpdateIdle = () => [...connections.values()].every(connection => !connection.polling && connection.actionScheduler.activeCount === 0 && connection.dispatcher.maintenancePendingCommits.length===0 && connection.actionDelivery.maintenanceEventsPending===0 && connection.localExecutor.maintenanceStatus().workers.every(worker => worker.pendingCommands === 0 && worker.inFlight === 0 && worker.pendingInbound === 0));
 remoteClientUpdates = createRemoteClientUpdates({
   home: dataDir, hostId: maintenanceHostId, clientBuild: CLIENT_BUILD, enabled: remoteUpdateEnabled,
   connections: () => [...connections.values()].map(connection => connection.config).filter(config => config.deviceToken),
   idle: remoteUpdateIdle,
+  hasPendingResumes:update=>[...connections.values()].some(connection=>connection.dispatcher.maintenancePausedActions.some(row=>row.receipt.updateId===update.id)),
+  prepareActions:async update=>{
+    for(const connection of connections.values()){
+      await connection.dispatcher.retryMaintenanceCommits(connection.actionDelivery.recoverActions({full:true}));
+      await connection.actionDelivery.flushMaintenanceEvents();
+      await connection.dispatcher.requestMaintenancePause(update);
+    }
+  },
   prepareIdle: async () => {
     if (!remoteUpdateIdle()) throw Object.assign(new Error('CLIENT_UPDATE_BUSY_AT_DRAIN'), { code: 'CLIENT_UPDATE_BUSY_AT_DRAIN' });
-    await Promise.all([...connections.values()].map(connection => connection.localExecutor.close()));
+    await Promise.all([...connections.values()].map(async connection => {await connection.actionDelivery.whenIdle();await connection.localExecutor.close();}));
     if ([...connections.values()].some(connection => !connection.localExecutor.maintenanceStatus().safe)) throw Object.assign(new Error('CLIENT_UPDATE_GATEWAY_EXIT_UNCONFIRMED'), { code: 'CLIENT_UPDATE_GATEWAY_EXIT_UNCONFIRMED' });
   },
   request: async (config, pathname, body) => {
@@ -160,7 +181,7 @@ remoteClientUpdates = createRemoteClientUpdates({
   log,
 });
 function clientRuntimeDiscovery() {
-  return { checkedAt: runtimeDiscovery.discoveredAt, platform: runtimeDiscovery.bridge.platform, arch: runtimeDiscovery.bridge.arch, clientBuild: CLIENT_BUILD, features: ['bot_mcp_oauth_relay_v1', ...(remoteUpdateEnabled ? [REMOTE_CLIENT_UPDATE_FEATURE] : [])], ...(maintenanceHostId ? { maintenanceHostId } : {}) };
+  return { checkedAt: runtimeDiscovery.discoveredAt, platform: runtimeDiscovery.bridge.platform, arch: runtimeDiscovery.bridge.arch, clientBuild: CLIENT_BUILD, features: ['bot_mcp_oauth_relay_v1', ...(remoteUpdateEnabled ? [REMOTE_CLIENT_UPDATE_FEATURE,'maintenance_checkpoint_resume_v1'] : [])], ...(maintenanceHostId ? { maintenanceHostId } : {}) };
 }
 process.on('uncaughtException', error => log('uncaught_exception', { error: error.stack || error.message }));
 process.on('unhandledRejection', error => log('unhandled_rejection', { error: error?.stack || String(error) }));
@@ -273,6 +294,13 @@ async function refreshRuntimeDiscovery(connection) {
 async function poll() {
   await remoteClientUpdates.tick();
   if (draining || shutdownAbort.signal.aborted) return;
+  for(const connection of connections.values()){
+    await connection.dispatcher.retryMaintenanceCommits(connection.actionDelivery.recoverActions({full:true}));
+    connection.maintenanceReady.clear();
+    for(const paused of connection.dispatcher.maintenancePausedActions){
+      if((await remoteClientUpdates.maintenanceResumeReadiness(paused.receipt)).ready)connection.maintenanceReady.add(paused.actionId);
+    }
+  }
   await Promise.allSettled([...connections.values()].map(pollConnection));
 }
 async function pollConnection(connection) {

@@ -4,6 +4,8 @@ import crypto from 'node:crypto';
 import {clientBuildIdentity} from '../src/management-bootstrap.mjs';
 import {isHistoricalPrelaunchCompletion} from '../src/bot-historical-prelaunch-completion.mjs';
 import {isDispatcherAdmissionRejected} from '../src/dispatcher-admission-evidence.mjs';
+import {validateMaintenancePause} from '../src/maintenance-checkpoint.mjs';
+import {executionBinding} from '../src/execution-admission.mjs';
 import {inspectClientMaintenance,inspectNativeClientProcess,inspectNativeHealthListener} from '../scripts/client-lifecycle.mjs';
 import {digest,uncertain,exitedTree,executionExit,gatewayResultMatches} from './version-preservation.mjs';
 import {scanOwnedNativeDatabases,nativeActionDigest,attestNativeVersion} from './preservation-native-databases.mjs';
@@ -63,8 +65,14 @@ export function scanNativeFiles(options={}, {legacySource=null}={}) {
 
 /** Current daemon admission only; this cannot attest a production namespace. */
 export function inspectLocalDaemonMaintenanceFiles({connections=[]}={}) {
-  const {safe,stopSafe,issues,stopIssues,retainedDeliveryCount,retainedPrelaunchCount,retainedBackgroundCount,retainedHistoryCount,retainedFailedBackgroundCount,retainedPendingCount,files,directories}=scanFileEvidence({connections},true);
-  return {safe,stopSafe,issues,stopIssues,retainedDeliveryCount,retainedPrelaunchCount,retainedBackgroundCount,retainedHistoryCount,retainedFailedBackgroundCount,retainedPendingCount,files,directories};
+  const {safe,stopSafe,issues,stopIssues,retainedDeliveryCount,retainedPrelaunchCount,retainedBackgroundCount,retainedHistoryCount,retainedFailedBackgroundCount,retainedPendingCount,maintenancePausedCount,files,directories}=scanFileEvidence({connections},true);
+  return {safe,stopSafe,issues,stopIssues,retainedDeliveryCount,retainedPrelaunchCount,retainedBackgroundCount,retainedHistoryCount,retainedFailedBackgroundCount,retainedPendingCount,maintenancePausedCount,files,directories};
+}
+
+function pausedMaintenancePair(started,record,original,receipt,identity){
+  if(!started||started.nativeRuntime!==true||started.quarantine||started.maintenanceResumeStarted===true||!Number.isFinite(started.hardDeadline)||started.hardDeadline<started.startedAt||!original||started.key!==String(original.dedupe_key??original.dedupeKey??original.id)||!validateMaintenancePause(receipt,{actionId:original.id,executionBinding:executionBinding(original)})||!equal(started.maintenancePause,receipt))return false;
+  const b=started.resourceBinding,p=original.payload||{},expected=Object.fromEntries(Object.entries({workspace:identity.workspace,deviceId:identity.deviceId,workspaceId:original.workspace_id??original.workspaceId,actionWorkspace:original.workspace??original.workspace_slug,targetDeviceId:p.deviceId??p.device_id??p.targetDeviceId??p.target_device_id}).filter(([,v])=>v!==undefined&&v!==null&&String(v)!=='').map(([k,v])=>[k,String(v)]));
+  return equal(started.identity,expected)&&b&&['conversation.execute','task.execute','runtime.execute','agent.execute','automation.execute'].includes(original.type)&&b.type===original.type&&b.employeeId===(p.employeeId||null)&&b.revision===(p.hermesBot?.revision||null)&&b.controlEpoch===(p.hermesBot?.controlEpoch||null)&&b.resource===null&&b.operation===null&&b.platform===null&&receipt.profile===(p.profile||p.hermesBot?.sourceProfile||'default')&&record.version===2&&record.state==='maintenance_paused'&&!record.resultDigest&&!record.retainEvidence&&Array.isArray(record.events)&&record.events.length===0&&equal(record.identity,identity)&&record.binding===deliveryBinding(original,identity);
 }
 
 // One audited historical defect, not a general interpretation of failed work.
@@ -256,7 +264,7 @@ function retainableConversationFailureHistory(started,completed,state,scope){
 /** Read-only evidence. Zero in-memory counters cannot replace these files.
  * localMaintenance is lexical code state, never selected by input JSON. */
 function scanFileEvidence({connections=[],actions=[],homes=[],productionRequest}={},localMaintenance,legacyInterpreter=null) {
-  const issues=[],files=[],directories=[],gatewayExits=[],legacyHistoryProofs=[],legacyNeverDispatchedProofs=[],retainedDeliveries=new Set(),retainedPrelaunch=new Set(),retainedBackground=new Set(),retainedHistory=new Set(),retainedFailedBackground=new Set(),retainedPending=new Set(),originals=new Map(actions.map(row=>[row.id,normalizedAction(row)]));
+  const issues=[],files=[],directories=[],gatewayExits=[],legacyHistoryProofs=[],legacyNeverDispatchedProofs=[],retainedDeliveries=new Set(),retainedPrelaunch=new Set(),retainedBackground=new Set(),retainedHistory=new Set(),retainedFailedBackground=new Set(),retainedPending=new Set(),maintenancePauses=new Set(),originals=new Map(actions.map(row=>[row.id,normalizedAction(row)]));
   const issue=(code,detail={})=>issues.push({code,...detail});
   const read=file=>{try{const stat=fs.lstatSync(file,{bigint:true});if(!stat.isFile()||stat.isSymbolicLink()||stat.nlink!==1n)throw new Error('not regular file');const bytes=fs.readFileSync(file);files.push({path:path.resolve(file),exists:true,sha256:hash(bytes),bytes:bytes.length,identity:{dev:String(stat.dev),ino:String(stat.ino)}});return bytes.toString('utf8');}catch(error){if(error.code==='ENOENT')files.push({path:path.resolve(file),exists:false});throw error;}};
   const directoryProof=directory=>{try{const stat=fs.lstatSync(directory,{bigint:true});if(!stat.isDirectory()||stat.isSymbolicLink())throw Error('identity');const names=fs.readdirSync(directory).sort();directories.push({path:path.resolve(directory),exists:true,names,identity:{dev:String(stat.dev),ino:String(stat.ino)}});}catch(error){if(error.code==='ENOENT')directories.push({path:path.resolve(directory),exists:false,names:[]});else issue('DIRECTORY_UNREADABLE',{path:directory});}};
@@ -321,7 +329,14 @@ function scanFileEvidence({connections=[],actions=[],homes=[],productionRequest}
       for(const started of state.started||[]){
         if(!started?.key||keys.has(started.key)||!started.identity||!Number.isFinite(started.startedAt)){issue('ACTION_STATE_CORRUPT',{path:stateFile});continue;}keys.add(started.key);
         const completed=state.completed.find(row=>row.key===started.key);
-        if(!completed){issue('STARTED_WITHOUT_RESULT',{actionId:started.actionId,path:stateFile});continue;}
+        if(!completed){
+          if(localMaintenance&&started.maintenancePause)try{
+            const directory=path.join(runtimeDir,'action-delivery'),stem=hash(JSON.stringify(String(started.actionId))),record=json(read(path.join(directory,stem+'.json'))),bytes=read(path.join(directory,stem+'.action.json')),blob=json(bytes),pauseBytes=read(path.join(directory,stem+'.pause.json')),receipt=json(pauseBytes),identity={apiBase:connection.apiBase.replace(/\/$/,''),workspace,deviceId};
+            if(hash(bytes)!==record?.actionDigest||hash(pauseBytes)!==record?.pauseDigest||!equal(blob?.identity,identity)||blob?.binding!==record?.binding||!pausedMaintenancePair(started,record,blob?.action,receipt,identity))throw Error('invalid maintenance checkpoint');
+            maintenancePauses.add(stateFile+'\0'+started.actionId);continue;
+          }catch{issue('MAINTENANCE_CHECKPOINT_INVALID',{actionId:started.actionId,path:stateFile});}
+          issue('STARTED_WITHOUT_RESULT',{actionId:started.actionId,path:stateFile});continue;
+        }
         if(!equal(started.identity,completed.identity)||completed.result?.actionId!==started.actionId||!['succeeded','failed'].includes(completed.result?.status)||uncertain(completed.result)&&!(localMaintenance&&(exitedTree(executionExit(completed.result))||failedBackgroundCompletions.has(started.key))))issue('ACTION_RESULT_UNCERTAIN',{actionId:started.actionId,path:stateFile});
         if(started.identity.workspace!==workspace||started.identity.deviceId!==deviceId)issue('ACTION_IDENTITY_MISMATCH',{actionId:started.actionId,path:stateFile});
         const gateway=completed.result?.result?.nativeOperation,worker=gateway?.data?.residentWorker;
@@ -369,7 +384,7 @@ function scanFileEvidence({connections=[],actions=[],homes=[],productionRequest}
     const consumed=new Set();
     for(const name of names.filter(name=>/^[a-f0-9]{64}\.json$/.test(name))){
       const file=path.join(directory,name);let record,originalAction,deliveryResult;
-      try{record=json(read(file));if(record?.version!==2||!record.action?.id||!Array.isArray(record.events)||!['awaiting_ack','acked','result_pending','confirmed','blocked'].includes(record.state)||name!==`${hash(JSON.stringify(String(record.action.id)))}.json`)throw new Error('invalid record');consumed.add(name);
+      try{record=json(read(file));if(record?.version!==2||!record.action?.id||!Array.isArray(record.events)||!['awaiting_ack','acked','maintenance_paused','result_pending','confirmed','blocked'].includes(record.state)||name!==`${hash(JSON.stringify(String(record.action.id)))}.json`)throw new Error('invalid record');consumed.add(name);
         const identity={apiBase:connection.apiBase.replace(/\/$/,''),workspace,deviceId};
         if(!equal(record.identity,identity)||record.binding!==deliveryBinding(record.action,identity))throw new Error('identity mismatch');
         if(record.state!=='confirmed'||record.retainEvidence){
@@ -378,6 +393,11 @@ function scanFileEvidence({connections=[],actions=[],homes=[],productionRequest}
             if(kind==='result'&&(!['succeeded','failed'].includes(blob?.status)||!Object.hasOwn(blob,'result')||blob.receiptOnly!==true))throw new Error('result shape mismatch');
             if(kind==='action')originalAction=blob.action;else deliveryResult=blob;
           }
+        }
+        if(record.pauseDigest){
+          const pauseName=name.replace(/\.json$/,'.pause.json'),bytes=read(path.join(directory,pauseName)),receipt=json(bytes);consumed.add(pauseName);
+          if(hash(bytes)!==record.pauseDigest||!validateMaintenancePause(receipt,{actionId:record.action.id,executionBinding:executionBinding(originalAction||{})}))throw Error('invalid pause digest');
+          if(localMaintenance&&record.state==='maintenance_paused'&&maintenancePauses.has(stateFile+'\0'+record.action.id)&&pausedMaintenancePair(state.started.find(row=>row.actionId===record.action.id),record,originalAction,receipt,identity))continue;
         }
         // Unmapped/removed connections and queues are not guessed to be legacy.
         if(record.state!=='confirmed'||record.retainEvidence||record.events.length)issue('DELIVERY_NOT_DRAINED',{actionId:record.action.id,state:record.state,path:file});
@@ -409,7 +429,7 @@ function scanFileEvidence({connections=[],actions=[],homes=[],productionRequest}
     for(const action of [...originals.values()].filter(row=>row.type==='hermes.bot.native'&&row.payload.employeeId===item.employeeId&&row.payload.nativeOperation?.resource==='gateway'&&row.payload.nativeOperation.operation==='connect'&&row.acked_at))if(!starts.some(entry=>entry.sourceActionId===action.id))issue('GATEWAY_LIFECYCLE_MISSING',{actionId:action.id,path:file});
   }
   const stopIssues=localMaintenance?issues.filter(item=>!(item.code==='DELIVERY_NOT_DRAINED'&&retainedDeliveries.has(item.path))&&!(item.code==='UNMAPPED_NATIVE_EXECUTION'&&retainedPrelaunch.has(item.path+'\0'+item.actionId))&&!(item.code==='BACKGROUND_PROCESS_RETAINED'&&retainedBackground.has(item.path+'\0'+item.actionId))&&!(item.code==='LOCAL_HISTORY_RETAINED'&&retainedHistory.has(item.path+'\0'+item.actionId))&&!(item.code==='FAILED_BACKGROUND_HISTORY_RETAINED'&&retainedFailedBackground.has(item.path+'\0'+item.actionId))):null;
-  return {safe:issues.length===0,issues,files,directories,gatewayExits,legacyHistoryProofs,originalActionProofs:[...legacyHistoryProofs,...legacyNeverDispatchedProofs],...(localMaintenance?{stopSafe:stopIssues.length===0,stopIssues,retainedDeliveryCount:retainedDeliveries.size,retainedPrelaunchCount:retainedPrelaunch.size,retainedBackgroundCount:retainedBackground.size,retainedHistoryCount:retainedHistory.size,retainedFailedBackgroundCount:retainedFailedBackground.size,retainedPendingCount:retainedPending.size}:{})};
+  return {safe:issues.length===0,issues,files,directories,gatewayExits,legacyHistoryProofs,originalActionProofs:[...legacyHistoryProofs,...legacyNeverDispatchedProofs],...(localMaintenance?{stopSafe:stopIssues.length===0,stopIssues,retainedDeliveryCount:retainedDeliveries.size,retainedPrelaunchCount:retainedPrelaunch.size,retainedBackgroundCount:retainedBackground.size,retainedHistoryCount:retainedHistory.size,retainedFailedBackgroundCount:retainedFailedBackground.size,retainedPendingCount:retainedPending.size,maintenancePausedCount:maintenancePauses.size}:{})};
 }
 
 /** Only actual native maintenance inspection + loopback health is accepted. */

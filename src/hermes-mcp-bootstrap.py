@@ -541,6 +541,10 @@ def run():
     if native_args and native_args[0] == '--bound-profile':
         bound_profile = json.loads(native_args[1])
         native_args = native_args[2:]
+    maintenance_control = None
+    if native_args and native_args[0] == '--maintenance-control':
+        maintenance_control = native_args[1]
+        native_args = native_args[2:]
     input_images = None
     if native_args and native_args[0] == '--input-images':
         input_images = json.loads(native_args[1])
@@ -740,17 +744,43 @@ def run():
                                        'status': item.get('status')} for item in statuses],
                           'externalModelCalls': 0}))
         return 0
-    if isolation and isolation.get('kind') == 'hermes-bot' and isolation.get('mode') == 'owned_profile':
-        def owned_main():
+    finish_maintenance = lambda: None
+    if maintenance_control is not None:
+        if config_only or native_operation or gateway_worker:
+            raise UnsupportedNativeHermes('maintenance execution route')
+        spec = importlib.util.spec_from_file_location('ziwei_maintenance_checkpoint', Path(__file__).with_name('hermes-maintenance-checkpoint.py'))
+        checkpoint = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(checkpoint)
+        finish_maintenance = checkpoint.install(maintenance_control, str(Path(current['paths']['main']).parent.parent))
+    owned = isolation and isolation.get('kind') == 'hermes-bot' and isolation.get('mode') == 'owned_profile'
+    if not owned and maintenance_control is None:
+        return native.main
+    def managed_main():
+        native_exit = None
+        paused = False
+        try:
+            result = native.main()
+        except SystemExit as error:
+            if type(error.code) is not int or error.code != 130:
+                raise
+            native_exit = error.code
+        finally:
             try:
-                return native.main()
+                if owned:
+                    finalize_owned_storage(current, isolation)
             finally:
-                # The Bot chat/query-file route raises SystemExit after native
-                # single-query cleanup. Its SDK storage cache still needs the
-                # owned child's explicit close before the process exits.
-                finalize_owned_storage(current, isolation)
-        return owned_main
-    return native.main
+                paused = finish_maintenance() is True
+        # Native oneshot correctly reports an interrupted business turn as 130.
+        # Only a durable, verified maintenance yield gives this wrapper a normal
+        # exit. Physical process evidence still records its actual exit code 0;
+        # stdout/native diagnostics retain the native business outcome 130.
+        if paused and (native_exit == 130 or native_exit is None and type(result) is int and result == 130):
+            print('ZIWEI_MAINTENANCE_YIELD:' + json.dumps({'nativeExitCode': 130, 'maintenanceExitCode': 0}), file=sys.stderr, flush=True)
+            return 0
+        if native_exit is not None:
+            raise SystemExit(native_exit)
+        return result
+    return managed_main
 
 
 if __name__ == '__main__':

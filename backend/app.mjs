@@ -26,6 +26,7 @@ import {createBotMcpConnections} from './bot-mcp-connections.mjs';
 import {createBotHistoricalRecovery} from './bot-historical-recovery.mjs';
 import {createBotForceAbandon} from './bot-force-abandon.mjs';
 import {createDeviceUpdateService} from './device-updates.mjs';
+import {createActionMaintenanceService} from './action-maintenance.mjs';
 import { toolDefinitions as managementTools } from '../scripts/ziwei-mcp.mjs';
 
 const allowedOrigin = process.env.FRONTEND_ORIGIN || 'http://127.0.0.1:5178';
@@ -307,6 +308,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   const botHistoricalRecovery=createBotHistoricalRecovery(repo,{readA2AToken:()=>readA2AToken({create:true})});
   const botForceAbandon=createBotForceAbandon(repo,{readA2AToken:()=>readA2AToken({create:true})});
   const deviceUpdates=createDeviceUpdateService(repo,options.deviceUpdates);
+  const actionMaintenance=createActionMaintenanceService(repo,options.actionMaintenance);
   const phoneMcp = createPhoneMcpService(repo,ziweiConnect,management,options);
   app.locals.repo = repo;
   app.locals.realtime = realtime;
@@ -320,6 +322,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   app.locals.botHistoricalRecovery=botHistoricalRecovery;
   app.locals.botForceAbandon=botForceAbandon;
   app.locals.deviceUpdates=deviceUpdates;
+  app.locals.actionMaintenance=actionMaintenance;
   app.locals.employeeTemplates = employeeTemplates;
   app.use(cors);
   app.use((_req, res, next) => {
@@ -971,8 +974,11 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   app.post('/a2a/v1/actions', (req, res, next) => { const workspace = String(req.body.workspace || req.body.workspace_slug || '').trim(); if (!workspace) return res.status(400).json({ error: 'A2A action 必须明确 workspace' }); try { const action=repo.createA2AAction(workspace, req.body); return res.status(action.duplicate ? 200 : 201).json(action); } catch (error) { return next(error); } });
   app.get('/a2a/v1/actions', (req, res, next) => { const workspace=String(req.query.workspace || '').trim(); if (!workspace) return res.status(400).json({ error: 'A2A poll 必须明确 workspace' }); try { return res.json({ actions:repo.listA2AActions(workspace,{executionDelivery:true,agentId:req.query.agent || req.query.agent_id,status:req.query.status || 'pending',includeAcked:req.query.includeAcked ?? req.query.include_acked,includeResult:String(req.query.includeResult || '').toLowerCase() !== 'false',deviceId:req.deviceCredential?.deviceId}) }); } catch (error) { return next(error); } });
   app.post('/a2a/v1/actions/:id/ack', (req, res) => { if (!assertA2AActionWorkspace(repo, req, res)) return; return res.json(repo.ackA2AAction(req.params.id, { ...(req.body || {}), deviceId:req.deviceCredential?.deviceId })); });
-  app.post('/a2a/v1/actions/:id/execution-admission',(req,res)=>{if(!assertA2AActionWorkspace(repo,req,res))return;res.json(repo.authorizeActionExecution(req.params.id,{deviceId:req.deviceCredential?.deviceId}));});
-  app.post('/a2a/v1/actions/:id/bot-start',(req,res)=>{if(!assertA2AActionWorkspace(repo,req,res))return;res.json(repo.authorizeBotStart(req.params.id,{deviceId:req.deviceCredential?.deviceId}));});
+  app.get('/a2a/v1/actions/:id/maintenance-checkpoint',(req,res)=>{res.setHeader('Cache-Control','no-store');if(!assertA2AActionWorkspace(repo,req,res))return;res.json(actionMaintenance.status(req.params.id,req.deviceCredential));});
+  app.post('/a2a/v1/actions/:id/maintenance-checkpoint',(req,res)=>{res.setHeader('Cache-Control','no-store');if(!assertA2AActionWorkspace(repo,req,res))return;res.json(actionMaintenance.checkpoint(req.params.id,req.body,req.deviceCredential));});
+  app.post('/a2a/v1/actions/:id/authorize-maintenance-resume',(req,res)=>{res.setHeader('Cache-Control','no-store');if(!assertA2AActionWorkspace(repo,req,res))return;res.json(actionMaintenance.resume(req.params.id,req.body,req.deviceCredential));});
+  app.post('/a2a/v1/actions/:id/execution-admission',(req,res)=>{if(!assertA2AActionWorkspace(repo,req,res))return;actionMaintenance.assertAttempt(req.params.id,req.body);res.json(repo.authorizeActionExecution(req.params.id,{deviceId:req.deviceCredential?.deviceId,...(req.body?.maintenanceAttempt?{maintenanceAttempt:req.body.maintenanceAttempt}:{})}));});
+  app.post('/a2a/v1/actions/:id/bot-start',(req,res)=>{if(!assertA2AActionWorkspace(repo,req,res))return;actionMaintenance.assertAttempt(req.params.id,req.body);res.json(repo.authorizeBotStart(req.params.id,{deviceId:req.deviceCredential?.deviceId}));});
   app.post('/a2a/v1/actions/:id/bot-gateway-lease',(req,res)=>{if(!assertA2AActionWorkspace(repo,req,res))return;res.json(repo.authorizeBotGateway(req.params.id,{deviceId:req.deviceCredential?.deviceId}));});
   app.post('/a2a/v1/actions/:id/bot-gateway-ingress',(req,res)=>{if(!assertA2AActionWorkspace(repo,req,res))return;res.status(202).json(repo.receiveBotGateway(req.params.id,{...req.body,deviceId:req.deviceCredential?.deviceId}));});
   app.get('/a2a/v1/actions/:id/bot-gateway-deliveries/:deliveryId',(req,res)=>{if(!assertA2AActionWorkspace(repo,req,res))return;res.json(repo.botGatewayDelivery(req.params.id,req.params.deliveryId,{deviceId:req.deviceCredential?.deviceId}));});
@@ -980,9 +986,9 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   app.get('/a2a/v1/actions/:id',(req,res)=>{if(!assertA2AActionWorkspace(repo,req,res))return;res.json(repo.deviceAction(req.params.id,{deviceId:req.deviceCredential?.deviceId}));});
   app.post('/a2a/v1/actions/:id/bot-settle',(req,res)=>{if(!assertA2AActionWorkspace(repo,req,res))return;res.json(repo.authorizeBotSettlement(req.params.id,{deviceId:req.deviceCredential?.deviceId}));});
   app.post('/a2a/v1/actions/:id/bot-collaboration',(req,res)=>{if(!assertA2AActionWorkspace(repo,req,res))return;const deviceId=req.deviceCredential?.deviceId,action=repo.deviceAction(req.params.id,{deviceId}),bot=action.payload.hermesBot;if(!bot)return res.status(404).json({error:'Bot action 不存在'});res.status(202).json(management.bots.collaboration(bot.workspace,bot.employeeId,{...req.body,sourceActionId:action.id,expectedRevision:bot.revision,expectedControlEpoch:bot.controlEpoch},{authenticatedMcp:true,deviceCredentialDeviceId:deviceId,deviceScope:deviceId}));});
-  app.post('/a2a/v1/actions/:id/events', (req, res) => { if (!assertA2AActionWorkspace(repo, req, res)) return; return res.status(202).json(repo.recordA2AEvent(req.params.id, { ...(req.body || {}), deviceId:req.deviceCredential?.deviceId })); });
+  app.post('/a2a/v1/actions/:id/events', (req, res) => { if (!assertA2AActionWorkspace(repo, req, res)) return; actionMaintenance.assertAttempt(req.params.id,req.body);return res.status(202).json(repo.recordA2AEvent(req.params.id, { ...(req.body || {}), deviceId:req.deviceCredential?.deviceId })); });
   app.get('/a2a/v1/actions/:id/events', (req, res) => { if (!assertA2AActionWorkspace(repo, req, res)) return; return res.json({ events: repo.listA2AEvents(req.params.id) }); });
-  app.post('/a2a/v1/actions/:id/result', (req, res) => { if (!assertA2AActionWorkspace(repo, req, res)) return; return res.json(repo.resultA2AAction(req.params.id, { ...(req.body || {}), deviceId:req.deviceCredential?.deviceId })); });
+  app.post('/a2a/v1/actions/:id/result', (req, res) => { if (!assertA2AActionWorkspace(repo, req, res)) return; actionMaintenance.assertAttempt(req.params.id,req.body);return res.json(repo.resultA2AAction(req.params.id, { ...(req.body || {}), deviceId:req.deviceCredential?.deviceId })); });
   app.post('/a2a/v1/tasks', (req, res, next) => { const workspace = String(req.body.workspace || req.body.workspace_slug || '').trim(); if (!workspace) return res.status(400).json({ error: 'A2A task 必须明确 workspace' }); try { const task = repo.createA2ATask(workspace, req.body); return res.status(201).json({ id:task.id, status:{state:'submitted', timestamp:task.created_at}, task }); } catch (error) { return next(error); } });
   app.get('/a2a/v1/tasks', (req, res, next) => { const workspace = String(req.query.workspace || '').trim(); if (!workspace) return res.status(400).json({ error: 'A2A tasks 必须明确 workspace' }); try { const tasks = repo.listTasks(workspace, { state: req.query.state, q: req.query.q }); return res.json({ tasks: tasks.map(task => ({ id: task.id, status: { state: task.state, timestamp: task.updated_at }, task })) }); } catch (error) { return next(error); } });
   app.get('/a2a/v1/tasks/:id', (req, res) => { if (!assertA2ATaskWorkspace(repo, req, res)) return; const task=repo.getTask(req.params.id); if(!task) return res.status(404).json({error:'Task not found'}); res.json({id:task.id,status:{state:task.state,timestamp:task.updated_at},task,messages:repo.getTaskMessages(task.id)}); });
