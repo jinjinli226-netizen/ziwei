@@ -1,5 +1,5 @@
 {
-  "phase": "P-installed-zhinuan-terminal-proof-pending",
+  "phase": "P-installed-both-default-workdirs-live-verified",
   "deviceId": "device_bfd9a3d2-c2cc-4a36-8bd8-465bea492493",
   "oldPid": 40628,
   "oldBuild": "bfc96edf59be31f1be50d3878a12d6c37d154fa108ef37c7a0d7d41ee7511927",
@@ -23,7 +23,7 @@
   },
   "published": true,
   "installed": true,
-  "postInstallEmployeeTestsPassed": false,
+  "postInstallEmployeeTestsPassed": true,
   "rootTargetedPassed": 85,
   "followupTargetedPassed": 80,
   "LCommit": "2a801ef702bd3deb16ba76f37b52d07db9782e09",
@@ -65,6 +65,18 @@
   "qingtianTask": "action_7f1cbadf-ad26-4e65-87a2-5c6ab988b585",
   "qingtianDirectoryPassed": true,
   "zhinuanTask": "action_7fcec325-ea8f-44e9-b194-cf070c200548",
-  "zhinuanDirectoryPassed": false,
-  "zhinuanObservedToolFailure": "stdin is not a tty"
+  "zhinuanDirectoryPassed": true,
+  "zhinuanObservedToolFailure": "stdin is not a tty",
+  "zhinuanFinalTask": "action_8338eae8-a237-48ac-afcc-d8b47a649ba2",
+  "zhinuanFinalSession": "20261019_095042_e636a4",
+  "zhinuanFinalCommandUsedNativeNodeAbsolutePath": true,
+  "bareNodeTtyIssueResolved": false,
+  "postInstallExplicitCwdProvided": false,
+  "zhinuanFinalIndependentSqliteToolRowsRetrieved": false,
+  "zhinuanFinalSqliteProbeFailure": "diagnostic dict.itims typo",
+  "onlyLiDeviceUpdateRequestedThisTurn": true,
+  "otherDevicesObserved": {
+    "companyDesktop": "bfc96edf59be31f1be50d3878a12d6c37d154fa108ef37c7a0d7d41ee7511927",
+    "strongestDesktop": "208f2350ff390bbf7506e6baaef60eb7c8d467f2c8630a86c670ce01aada1044"
+  }
 }

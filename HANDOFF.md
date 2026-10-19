@@ -1,12 +1,12 @@
 # 紫薇项目 HandOff
 
-## 2026-10-19 李金晋电脑已远程升级，擎天通过，知暖终端待验
+## 2026-10-19 李金晋电脑已远程升级，两名员工D盘目录已实测
 
 客户端P `b02683b28cb12ecdcc2b93c6a847ccdb45bbcfee` 已先推GitHub再发布，统一请求 `client-update_3b976a49-9b7c-4711-8a57-02edacc4f4a4` 于09:35:47北京时间收到新版认证心跳并成功。设备build为 `b40ce7117c3b43b8ff05bbc9adb541b59555125934a670a5ab43069c0ef7b405`、PID17316，实际安装回执complete、配置保留并恢复运行。其它电脑未更新，主站API/UI仍J。不要重复升级已成功设备。
 
 本次旧闲鱼动作在05:40因模型上下文过长、自动压缩失败自然退出；不是升级杀掉。其原结果存在手机业务不确定与旧tree:false，未篡改、未重跑。维护曾被旧回执重传计入active及暂停前普通poll竞态阻断；现已改为精确核验本安装后pause/drain，再读稳定历史、原样归档与严格停止。108项及独审通过；真实Windows合成失败Job根exit23、tree0、子进程已退，未来非零退出清理已验。
 
-升级后普通任务未传cwd/workdir/conversationId：擎天 `action_7f1cbadf-ad26-4e65-87a2-5c6ab988b585` 成功返回 `D:\AIUSE`。知暖 `action_7fcec325-ea8f-44e9-b194-cf070c200548` 已继承 `D:\AIUSE\life-assistant`，原独立profile保持，但terminal真实返回 `stdin is not a tty`/exit1；不能拿CLI code0或平台succeeded称目录验收通过。正在比较两条精确Session的工具和启动环境；不要重复原手机业务。详见[当前运维记录](docs/operations/2026-10-19-client-failed-runtime-maintenance.md)和[QA](docs/qa/2026-10-19-client-failed-runtime-maintenance.json)。下方为历史快照。
+升级后普通任务未传cwd/workdir/conversationId：擎天 `action_7f1cbadf-ad26-4e65-87a2-5c6ab988b585` 成功返回 `D:\AIUSE`。知暖第一条 `action_7fcec325-ea8f-44e9-b194-cf070c200548` 的裸node工具真实返回TTY错误，未当作通过；后续独立验收 `action_8338eae8-a237-48ac-afcc-d8b47a649ba2` 使用原生Node完整路径且不cd/不设置工具cwd，实际返回 `D:\AIUSE\life-assistant`、exit0/tree0，原独立profile保持。目录继承与真实执行通过；裸node命令解析/TTY兼容原因尚未定位，不声称终端所有调用已修复。不要重复原手机业务。详见[当前运维记录](docs/operations/2026-10-19-client-failed-runtime-maintenance.md)和[QA](docs/qa/2026-10-19-client-failed-runtime-maintenance.json)。下方为历史快照。
 
 ## 2026-10-18 D盘员工目录继承修复已发布，客户端等空闲安装
 
