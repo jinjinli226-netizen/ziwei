@@ -404,7 +404,7 @@ export function createRepository(options = {}, io={}) {
   };
   const creatorConversationBinding = (employee, conversationId, messageId = null) => {
     if (!employee) return null;
-    if (employee.runtime!=='Hermes' && trustedTemplatePayload(employee.workspace_id,{employeeId:employee.id}).employeeTemplateId!=='ziwei-employee-creator') return null;
+    if (employee.runtime!=='Hermes' && !(employee.runtime==='Codex' && messageId) && trustedTemplatePayload(employee.workspace_id,{employeeId:employee.id}).employeeTemplateId!=='ziwei-employee-creator') return null;
     if (!conversationId) { if (messageId) throw new Error('Creator 当前消息缺少绑定会话'); return null; }
     const conversation=db.prepare('SELECT id FROM conversations WHERE id=? AND workspace_id=? AND employee_id=?').get(String(conversationId),employee.workspace_id,employee.id);
     if (!conversation) throw new Error('Creator 会话与当前员工或工作区不一致');
@@ -414,7 +414,27 @@ export function createRepository(options = {}, io={}) {
   const creatorConversationPrompt = ({prompt,employee,conversationId,messageId}) => {
     const conversation=creatorConversationBinding(employee,conversationId,messageId);
     if (!conversation || !messageId) return prompt;
-    const rows=db.prepare("SELECT role,substr(content,-12000) AS content FROM conversation_messages WHERE conversation_id=? AND id<>? AND role IN ('user','assistant') AND trim(content)<>'' ORDER BY created_at DESC,rowid DESC LIMIT 16").all(conversation.id,String(messageId));
+    const current=db.prepare("SELECT rowid FROM conversation_messages WHERE id=? AND conversation_id=? AND role='user'").get(String(messageId),conversation.id);
+    const before=db.prepare("SELECT rowid,role,substr(content,-12000) AS content FROM conversation_messages WHERE conversation_id=? AND rowid<? AND role IN ('user','assistant') AND trim(content)<>'' ORDER BY rowid DESC LIMIT 16").all(conversation.id,current.rowid);
+    // A queued next turn can precede the previous turn's assistant reply in
+    // storage order. Include that late reply only through the server's exact
+    // result audit -> action -> earlier user message binding. Later queued
+    // requests (and their replies) must never become this turn's history.
+    const late=db.prepare(`WITH result_events AS (
+        SELECT CASE WHEN json_valid(payload_json) THEN payload_json ELSE '{}' END AS data FROM audit_events
+        WHERE workspace_id=? AND action='conversation.message.created' AND actor='assistant'
+      ), original_actions AS (
+        SELECT id,CASE WHEN json_valid(payload_json) THEN payload_json ELSE '{}' END AS data FROM a2a_actions
+        WHERE workspace_id=? AND type='conversation.execute' AND status IN ('succeeded','failed')
+      )
+      SELECT DISTINCT reply.rowid,reply.role,substr(reply.content,-12000) AS content FROM result_events event
+      JOIN original_actions action ON action.id=json_extract(event.data,'$.actionId')
+      JOIN conversation_messages source ON source.id=json_extract(action.data,'$.messageId') AND source.conversation_id=? AND source.role='user' AND source.rowid<?
+      JOIN conversation_messages reply ON reply.id=json_extract(event.data,'$.messageId') AND reply.conversation_id=source.conversation_id AND reply.role='assistant' AND reply.rowid>=?
+      WHERE json_extract(event.data,'$.conversationId')=? AND json_extract(action.data,'$.conversationId')=?
+        AND json_extract(action.data,'$.employeeId')=? AND trim(reply.content)<>''
+      ORDER BY reply.rowid DESC LIMIT 16`).all(employee.workspace_id,employee.workspace_id,conversation.id,current.rowid,current.rowid,conversation.id,conversation.id,employee.id);
+    const rows=[...before,...late].sort((a,b)=>b.rowid-a.rowid).slice(0,16);
     const history=[];
     for (const row of rows) {
       const content=String(row.content || '');
@@ -466,6 +486,22 @@ export function createRepository(options = {}, io={}) {
       ...(employee && employeeWorkspace ? { managementMcp: { enabled: true, workspace: employeeWorkspace } } : {}),
       ...(phoneConfig?.enabled && skillIds.includes(phoneConfig.skill_id) ? { terminalMcp: { enabled:true, workspace:employeeWorkspace, employeeId:employee.id, deviceId:phoneConfig.device_id,configurationRevision:phoneRevision } } : {}),
     };
+  };
+  const pendingConversationPayload = (row,payload) => {
+    if(row.status!=='pending' || row.type!=='conversation.execute' || payload.runtime!=='Codex' || payload.hermesBot || !payload.employeeId || !payload.conversationId || !payload.messageId)return payload;
+    const employee=db.prepare("SELECT * FROM employees WHERE id=? AND workspace_id=? AND status<>'deleted'").get(String(payload.employeeId),row.workspace_id);
+    const message=db.prepare("SELECT * FROM conversation_messages WHERE id=? AND conversation_id=? AND role='user'").get(String(payload.messageId),String(payload.conversationId));
+    const mismatch=()=>Object.assign(new Error('待执行聊天与当前员工、工作区、目标电脑或用户消息不一致'),{code:'EXECUTION_HISTORY_BINDING_MISMATCH',status:409});
+    if(!employee || !message)throw mismatch();
+    const attachments=parse(message.attachment_json);
+    const prompt=message.content || (attachments.some(item=>item.mimeType?.startsWith('image/')) ? '请分析所附图片，说明其中的内容并回复用户。' : '请阅读所附文件并回复用户。');
+    let refreshed;
+    try{refreshed=executionPayload({prompt,employee,runtime:payload.runtime,model:payload.model,profile:payload.profile,conversationId:payload.conversationId,messageId:payload.messageId,cwd:payload.cwd,targetDeviceId:payload.deviceId,workspaceId:row.workspace_id});}
+    catch(error){if(error.code==='EXECUTION_CONVERSATION_MISMATCH'||/^Creator .*不一致$/.test(error.message))throw mismatch();throw error;}
+    // Rebuild from the canonical user message and server-held employee role,
+    // never from a prompt which may already contain a history wrapper. Keep
+    // all execution settings/credentials bound to the original queued action.
+    return {...payload,prompt:refreshed.prompt};
   };
   // A workspace can be created after the database seed has run.  Keep the
   // four built-in runtime rows available as soon as our own bridge reports a
@@ -529,7 +565,7 @@ export function createRepository(options = {}, io={}) {
   const executionActionPayload = row => {
     const payload = parse(row.payload_json);
     if (!['pending', 'acked'].includes(row.status)) return payload;
-    const trusted=trustedTemplatePayload(row.workspace_id,payload);
+    const trusted=pendingConversationPayload(row,trustedTemplatePayload(row.workspace_id,payload));
     if (!['task.execute', 'conversation.execute', 'automation.execute'].includes(row.type) || !payload.employeeId) return trusted;
     const employeeWorkspace = db.prepare('SELECT w.slug FROM employees e JOIN workspaces w ON w.id=e.workspace_id WHERE e.id=? AND e.workspace_id=?').get(String(payload.employeeId), row.workspace_id)?.slug;
     const { managementMcp: _oldManagement, ...rest } = trusted;
@@ -2056,7 +2092,16 @@ export function createRepository(options = {}, io={}) {
       const deviceId = String(input.deviceId || input.device_id || '').trim();
       const rows=db.prepare(`SELECT * FROM a2a_actions WHERE workspace_id=? AND agent_id=? AND status IN (${placeholders}) ORDER BY created_at`).all(ws.id,agentId,...statuses);
       return rows.filter(row => !deviceId || !actionTargetDevice(row) || actionTargetDevice(row) === deviceId)
-        .map(row => ({...a2aResponseView(row, { payload:executionActionPayload(row), includeResult:input.includeResult !== false }),...historicalActionMetadata(row)}));
+        .flatMap(row => {
+          try{return [{...a2aResponseView(row, { payload:executionActionPayload(row), includeResult:input.includeResult !== false }),...historicalActionMetadata(row)}];}
+          catch(error){
+            if(error.code!=='EXECUTION_HISTORY_BINDING_MISMATCH')throw error;
+            // A deleted/rebound employee's queued input must not stop delivery
+            // to every other employee on the computer. Keep the original row
+            // inspectable, but never deliver its invalid binding for execution.
+            return input.executionDelivery===true?[]:[{...a2aResponseView(row,{includeResult:input.includeResult!==false}),...historicalActionMetadata(row),historyBindingError:{code:error.code,message:error.message}}];
+          }
+        });
     },
     authorizeBotStart(actionId,input={}) {
       const row=db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId);
@@ -2144,7 +2189,7 @@ export function createRepository(options = {}, io={}) {
             } else response = { ...a2aResponseView(row, { receiptOnly, includeResult:!receiptOnly }), duplicate:true };
           }
           else {
-            const payload = parse(row.payload_json);
+            const payload = pendingConversationPayload(row,parse(row.payload_json));
             const deviceId = String(input.deviceId || input.device_id || '').trim();
             if (!actionTargetDevice(row) && deviceId) payload.deviceId = deviceId;
             const executionLeaseMs = actionExecutionLeaseMs({type:row.type,payload});
