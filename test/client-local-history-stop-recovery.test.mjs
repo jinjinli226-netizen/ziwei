@@ -1,3 +1,4 @@
+import {runClientUpdateWorker} from '../scripts/client-update-worker.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -8,8 +9,8 @@ import {EventEmitter} from 'node:events';
 import {ActionDispatcher} from '../src/daemon.mjs';
 import {createActionDelivery} from '../src/daemon-action-delivery.mjs';
 import {inspectLocalDaemonMaintenanceFiles,scanNativeFiles} from '../backend/preservation-native-evidence.mjs';
-import {describeUpdateFailure} from '../scripts/client-update.mjs';
-import {createLocalHistoryStopRecovery,createLocalHistoryHandleTerminator,recoverLocalHistoryStopForUpdate} from '../scripts/client-local-history-stop-recovery.mjs';
+import {describeUpdateFailure,updateFailureResult} from '../scripts/client-update.mjs';
+import {createLocalHistoryStopRecovery,createLocalHistoryHandleTerminator,recoverLocalHistoryStopForUpdate,LOCAL_HISTORY_STOP_HANDLE_PROGRAM,LOCAL_HISTORY_NATIVE_RULES} from '../scripts/client-local-history-stop-recovery.mjs';
 
 const sha=value=>createHash('sha256').update(value).digest('hex');
 function fixture(t){
@@ -51,7 +52,7 @@ test('new files or changed native identity during private snapshot prevent stopp
  const f=fixture(t);f.checkpoint=()=>fs.writeFileSync(path.join(f.runtime,'new-inflight.json'),'must-survive');await assert.rejects(f.make()(f.input),{code:'LOCAL_HISTORY_STOP_RECOVERY_REFUSED'});assert.equal(f.kills,0);assert.equal(f.paused,false);assert.deepEqual(fs.readFileSync(f.stateFile),f.raw);assert.equal(fs.readFileSync(path.join(f.runtime,'new-inflight.json'),'utf8'),'must-survive');
 });
 test('native failure cannot expose raw credentials, output or private command',async t=>{const f=fixture(t);await assert.rejects(f.make({terminate:async()=>{throw Error('PRIVATE_SYNTHETIC_TOKEN raw-command');}})(f.input),error=>error.code==='LOCAL_HISTORY_STOP_RECOVERY_REFUSED'&&!/PRIVATE|raw-command/.test(error.message));assert.equal(f.paused,false);assert.deepEqual(fs.readFileSync(f.stateFile),f.raw);});
-test('candidate failure phases and updater diagnostics are bounded and contain no raw native output',async t=>{const f=fixture(t),events=[];let caught;try{await f.make({terminate:async()=>{throw Error('PRIVATE_SYNTHETIC_TOKEN C:/private/raw-command');}})({...f.input,log:(event,value)=>events.push({event,...value})});}catch(error){caught=error;}assert.equal(caught.code,'LOCAL_HISTORY_STOP_RECOVERY_REFUSED');assert.equal(caught.recoveryPhase,'post_exit_validation');assert.equal(caught.reasonCode,'EVIDENCE_MISMATCH');assert.deepEqual(events.at(-1),{event:'local_history_recovery_failed',phase:'post_exit_validation',reasonCode:'EVIDENCE_MISMATCH'});const diagnostic=describeUpdateFailure(caught,'recover_history');assert.equal(diagnostic.reasonCode,'LOCAL_HISTORY_STOP_RECOVERY_REFUSED');assert.equal(diagnostic.recoveryPhase,'post_exit_validation');assert.equal(diagnostic.recoveryReasonCode,'EVIDENCE_MISMATCH');assert.doesNotMatch(JSON.stringify({events,diagnostic}),/PRIVATE_SYNTHETIC_TOKEN|raw-command|C:\/private/);assert.equal(f.kills,0);});
+test('candidate failure phases and updater diagnostics are bounded and contain no raw native output',async t=>{const f=fixture(t),events=[];let caught;try{await f.make({terminate:async()=>{throw Error('PRIVATE_SYNTHETIC_TOKEN C:/private/raw-command');}})({...f.input,log:(event,value)=>events.push({event,...value})});}catch(error){caught=error;}assert.equal(caught.code,'LOCAL_HISTORY_STOP_RECOVERY_REFUSED');assert.equal(caught.recoveryPhase,'terminate');assert.equal(caught.reasonCode,'EVIDENCE_MISMATCH');assert.deepEqual(events.at(-1),{event:'local_history_recovery_failed',phase:'terminate',reasonCode:'EVIDENCE_MISMATCH'});const diagnostic=describeUpdateFailure(caught,'recover_history');assert.equal(diagnostic.reasonCode,'LOCAL_HISTORY_STOP_RECOVERY_REFUSED');assert.equal(diagnostic.recoveryPhase,'terminate');assert.equal(diagnostic.recoveryReasonCode,'EVIDENCE_MISMATCH');assert.doesNotMatch(JSON.stringify({events,diagnostic}),/PRIVATE_SYNTHETIC_TOKEN|raw-command|C:\/private/);assert.equal(f.kills,0);});
 test('durable exact daemon-exit evidence survives a lost native response',async t=>{const f=fixture(t);await assert.rejects(f.make({terminate:async data=>{fs.writeFileSync(data.exitFile,JSON.stringify({stopped:true,pid:data.pid,creationTime:data.creationTime,exitedAt:'2026-10-18T13:00:00Z'}));throw Error('lost response');}})(f.input),error=>error.code==='LOCAL_HISTORY_STOP_RECOVERY_REFUSED'&&error.stoppedClientReceipt?.stopped===true&&error.stoppedClientReceipt.originalExecutionExitConfirmed===false);assert.deepEqual(fs.readFileSync(f.stateFile),f.raw);});
 for(const failureCode of ['PS_WORKER_EXITED','EACCES'])test(`a stopped daemon with ${failureCode} before its exit ledger is independently observed and update may continue`,async t=>{
  const f=fixture(t);let intent;const r=await f.make({terminate:async data=>{intent=JSON.parse(fs.readFileSync(path.join(path.dirname(data.exitFile),'termination-intent.json')));assert.equal(intent.process.pid,data.pid);assert.equal(intent.process.creationTime,data.creationTime);assert.equal(intent.nonce,data.nonce);f.markStopped();throw Object.assign(Error('raw native output'),{code:failureCode});}})(f.input);assert.equal(r.recovered,true);assert.equal(r.stopped,true);assert.equal(r.wasRunning,true);assert.equal(r.daemonAbsenceObserved,true);assert.equal(r.stopObservationPersisted,true);assert.equal(r.originalExecutionExitConfirmed,false);assert.equal(r.executionConfirmedStopped,false);assert.equal(fs.existsSync(path.join(r.archiveDirectory,'daemon-exit.json')),false);const observation=JSON.parse(fs.readFileSync(path.join(r.archiveDirectory,'daemon-absence-observation.json')));assert.equal(observation.kind,'exact-daemon-absence-after-stop-attempt');assert.equal(observation.process.commandHash,f.record.commandHash);assert.equal(observation.originalExecutionExitConfirmed,false);assert.deepEqual(fs.readFileSync(f.stateFile),f.raw);
@@ -105,3 +106,39 @@ test('a pending count mismatch after drain restores the prior connection without
 for(const activeActionCount of [-1,10,Infinity,'1'])test(`active drain allowance refuses invalid or impossible count ${activeActionCount}`,async t=>{const f=fixture(t);f.health.activeActionCount=activeActionCount;assert.deepEqual(await f.make()(f.input),{recovered:false,reason:'not_applicable'});assert.equal(f.kills,0);});
 test('maintenance becoming ordinary safe during drain restores the connection and leaves stopping to the standard path',async t=>{const f=fixture(t);f.healthMutator=h=>{if(h.connectionState==='draining'){h.maintenance.safe=true;h.maintenance.stopSafe=true;h.maintenance.fileIssues=[];}};f.scanMutator=e=>{e.safe=true;e.stopSafe=true;e.issues=[];e.retainedHistoryCount=0;};assert.deepEqual(await f.make()(f.input),{recovered:false,reason:'not_applicable'});assert.equal(f.kills,0);assert.equal(f.paused,false);});
 test('drain failure preserves an already paused connection instead of implicitly resuming it',async t=>{const f=fixture(t);f.health.connectionState='draining';f.health.activeActionCount=1;await assert.rejects(f.make()({...f.input,timeoutMs:1}),{code:'LOCAL_HISTORY_STOP_RECOVERY_REFUSED'});assert.equal(f.kills,0);assert.equal(f.paused,true);});
+
+
+function rejectedNative(rule,{stdout,stderr='PRIVATE_NATIVE_STDERR C:/private/command',message='PRIVATE_NATIVE_COMMAND'}={}){
+ return createLocalHistoryHandleTerminator({runCommand:()=>{let reject;const promise=new Promise((_,fail)=>{reject=fail;}),stdin=new EventEmitter();stdin.end=()=>reject(Object.assign(Error(message),{stdout:stdout??('ZIWEI_LOCAL_HISTORY_RULE:'+rule+'\r\n'),stderr,cmd:'PRIVATE_NATIVE_COMMAND'}));promise.child={stdin};return promise;}});
+}
+for(const rule of LOCAL_HISTORY_NATIVE_RULES)test(`native ${rule} is retained as diagnostic only through official terminal serialization`,async t=>{
+ const f=fixture(t),before=fs.readFileSync(f.stateFile);let caught;try{await f.make({terminate:rejectedNative(rule)})(f.input);}catch(error){caught=error;}
+ assert.equal(caught?.code,'LOCAL_HISTORY_STOP_RECOVERY_REFUSED');assert.equal(caught.recoveryPhase,'terminate');assert.equal(caught.recoveryRule,rule);assert.equal(caught.reasonCode,rule==='LH00_NATIVE_ERROR'?'NATIVE_OBSERVATION_FAILED':'NATIVE_ASSERTION_FAILED');assert.equal(f.kills,0);assert.equal(f.paused,false);assert.deepEqual(fs.readFileSync(f.stateFile),before);
+ const terminal=updateFailureResult(caught,'recover_history');assert.equal(terminal.recoveryPhase,'terminate');assert.equal(terminal.recoveryRule,rule);assert.equal(terminal.recoveryReasonCode,caught.reasonCode);assert.doesNotMatch(JSON.stringify(terminal),/PRIVATE_NATIVE|C:\/private|stderr|CommandLine/);assert.equal(Object.hasOwn(terminal,'stopped'),false);assert.equal(Object.hasOwn(terminal,'stoppedClientReceipt'),false);
+});
+
+test('the native observability wrapper preserves every original guard expression and its order',()=>{
+ const expressions=[],calls=[...LOCAL_HISTORY_STOP_HANDLE_PROGRAM.matchAll(/\bAssert-Fact '(LH[0-9]{2}_[A-Z_]+)' (?=\()/g)];
+ for(const match of calls){const begin=match.index+match[0].length;let depth=0;for(let at=begin;at<LOCAL_HISTORY_STOP_HANDLE_PROGRAM.length;at++){const char=LOCAL_HISTORY_STOP_HANDLE_PROGRAM[at];if(char==='(')depth++;else if(char===')'&&--depth===0){expressions.push(LOCAL_HISTORY_STOP_HANDLE_PROGRAM.slice(begin,at+1));break;}}}
+ assert.equal(expressions.length,23);assert.deepEqual(calls.map(row=>row[1]),LOCAL_HISTORY_NATIVE_RULES.slice(1));assert.equal(createHash('sha256').update(JSON.stringify(expressions)).digest('hex'),'d6a90e0d1eca48de0d5fea22f6e7b751528def8d5e4b4204b4b127dbb24ada1e');
+ assert.match(LOCAL_HISTORY_STOP_HANDLE_PROGRAM,/if\(!\$v\)\{\$script:ziweiLocalHistoryRule=\$rule/);assert(LOCAL_HISTORY_STOP_HANDLE_PROGRAM.indexOf("Assert-Fact 'LH20_DAEMON_CHILDREN'")<LOCAL_HISTORY_STOP_HANDLE_PROGRAM.indexOf('$p.Kill()'));
+});
+
+for(const [label,options]of Object.entries({
+ 'multiple markers':{stdout:'ZIWEI_LOCAL_HISTORY_RULE:LH20_DAEMON_CHILDREN\nZIWEI_LOCAL_HISTORY_RULE:LH08_HEALTH_IDLE\n'},
+ 'mixed output':{stdout:'{"private":"PRIVATE_NATIVE"}\nZIWEI_LOCAL_HISTORY_RULE:LH20_DAEMON_CHILDREN\n'},
+ 'unknown marker':{stdout:'ZIWEI_LOCAL_HISTORY_RULE:LH99_UNREVIEWED\n'},
+ 'stderr only':{stdout:'',stderr:'ZIWEI_LOCAL_HISTORY_RULE:LH20_DAEMON_CHILDREN\n'},
+ 'message only':{stdout:'',message:'ZIWEI_LOCAL_HISTORY_RULE:LH20_DAEMON_CHILDREN\n'},
+ 'leading log':{stdout:'PRIVATE_NATIVE_LOG\nZIWEI_LOCAL_HISTORY_RULE:LH20_DAEMON_CHILDREN\n'},
+}))test(`native rule parsing rejects ${label}`,async()=>{
+ await assert.rejects(rejectedNative('LH20_DAEMON_CHILDREN',options)({waitMs:1}),error=>error.code==='LOCAL_HISTORY_STOP_RECOVERY_REFUSED'&&error.recoveryRule==='LH00_NATIVE_ERROR'&&error.reasonCode==='NATIVE_OBSERVATION_FAILED'&&!/PRIVATE_NATIVE|stderr|CommandLine/.test(error.message));
+});
+
+test('the detached official worker persists the native failure rule in real terminal JSON without any stop proof',async t=>{
+ const f=fixture(t);let caught;try{await f.make({terminate:rejectedNative('LH20_DAEMON_CHILDREN')})(f.input);}catch(error){caught=error;}
+ const directory=path.join(f.root,'isolated-maintenance-result');fs.mkdirSync(directory);const jobFile=path.join(directory,'job.json');fs.writeFileSync(jobFile,JSON.stringify({directory,parentPid:1234}));
+ const result=await runClientUpdateWorker({jobFile,env:{},waitParent:async()=>{},acquireLock:async()=>({lock:{fixture:true}}),releaseLock:()=>true,performUpdate:async()=>{throw caught;}});assert.equal(result.exitCode,1);
+ for(const name of ['terminal.json','result.json']){const terminal=JSON.parse(fs.readFileSync(path.join(directory,name)));assert.equal(terminal.state,'failed');assert.equal(terminal.recoveryPhase,'terminate');assert.equal(terminal.recoveryReasonCode,'NATIVE_ASSERTION_FAILED');assert.equal(terminal.recoveryRule,'LH20_DAEMON_CHILDREN');assert.equal(Object.hasOwn(terminal,'stopped'),false);assert.equal(Object.hasOwn(terminal,'stoppedClientReceipt'),false);assert.doesNotMatch(JSON.stringify(terminal),/PRIVATE_NATIVE|CommandLine|C:\/private/);}
+ assert.equal(f.kills,0);
+});

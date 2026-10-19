@@ -45,49 +45,68 @@ function inspectEvidence(inspect,connections,runtimeDir){
 }
 const fingerprint=e=>sha(JSON.stringify({files:e.files,directories:e.directories,issues:e.issues,retainedHistoryCount:e.retainedHistoryCount,retainedDeliveryCount:e.retainedDeliveryCount,retainedBackgroundCount:e.retainedBackgroundCount,retainedFailedBackgroundCount:e.retainedFailedBackgroundCount??0,retainedPendingCount:e.retainedPendingCount??0}));
 
+export const LOCAL_HISTORY_NATIVE_RULES=Object.freeze(["LH00_NATIVE_ERROR", "LH01_PATH_NO_REPARSE", "LH02_PROCESS_CREATION", "LH03_PROCESS_TIME", "LH04_PROCESS_COMMAND", "LH05_LISTENER", "LH06_CONFIG_HASH", "LH07_HEALTH_IDENTITY", "LH08_HEALTH_IDLE", "LH09_HEALTH_LIFECYCLE", "LH10_HEALTH_MAINTENANCE", "LH11_HEALTH_CONNECTIONS", "LH12_CONNECTION_SCOPE", "LH13_DIRECTORY_ABSENCE", "LH14_DIRECTORY_COUNT", "LH15_DIRECTORY_NAMES", "LH16_SOURCE_ABSENCE", "LH17_SOURCE_HASH", "LH18_SNAPSHOT_HASH", "LH19_EXIT_ABSENCE_PRESTOP", "LH20_DAEMON_CHILDREN", "LH21_LAST_IDENTITY", "LH22_DAEMON_EXIT", "LH23_EXIT_ABSENCE_POSTSTOP"]);
+const nativeRules=new Set(LOCAL_HISTORY_NATIVE_RULES);
+const nativeFailure=rule=>Object.assign(fail(),{reasonCode:rule==='LH00_NATIVE_ERROR'?'NATIVE_OBSERVATION_FAILED':'NATIVE_ASSERTION_FAILED',recoveryRule:rule});
+function closedNativeRule(stdout){const text=typeof stdout==='string'?stdout.replace(/^\uFEFF/,'').replace(/\r\n/g,'\n').replace(/\n$/,''):'';const match=/^ZIWEI_LOCAL_HISTORY_RULE:(LH[0-9]{2}_[A-Z_]+)$/.exec(text);return match&&nativeRules.has(match[1])?match[1]:null;}
+
 // Native identity, listener, local idle health and every original file are
 // rechecked while one exact Windows Process handle is held across Kill/Wait.
 export const LOCAL_HISTORY_STOP_HANDLE_PROGRAM=String.raw`
 $ErrorActionPreference='Stop'
 [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)
 [Console]::InputEncoding=[Text.UTF8Encoding]::new($false)
+$script:ziweiLocalHistoryRule=$null
+try{
 $d=([Console]::In.ReadToEnd()|ConvertFrom-Json)
-function Assert-Fact($v){if(!$v){throw 'Local history stop identity or evidence changed'}}
+function Assert-Fact([string]$rule,$v){if(!$v){$script:ziweiLocalHistoryRule=$rule;throw 'ZIWEI_LOCAL_HISTORY_ASSERTION_FAILED'}}
 function File-Hash($f){$h=[Security.Cryptography.SHA256]::Create();try{return [BitConverter]::ToString($h.ComputeHash([IO.File]::ReadAllBytes($f))).Replace('-','').ToLowerInvariant()}finally{$h.Dispose()}}
 function Text-Hash($v){$h=[Security.Cryptography.SHA256]::Create();try{return [BitConverter]::ToString($h.ComputeHash([Text.Encoding]::UTF8.GetBytes($v))).Replace('-','').ToLowerInvariant()}finally{$h.Dispose()}}
-function No-Link($f){$i=Get-Item -LiteralPath $f -Force;while($i){Assert-Fact (($i.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0);$parent=Split-Path -Parent $i.FullName;if(!$parent -or $parent -eq $i.FullName){break};$i=Get-Item -LiteralPath $parent -Force}}
+function No-Link($f){$i=Get-Item -LiteralPath $f -Force;while($i){Assert-Fact 'LH01_PATH_NO_REPARSE' (($i.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0);$parent=Split-Path -Parent $i.FullName;if(!$parent -or $parent -eq $i.FullName){break};$i=Get-Item -LiteralPath $parent -Force}}
 $p=Get-Process -Id $d.pid -ErrorAction Stop
 try{
  $heldHandle=$p.Handle
  $native=Get-CimInstance Win32_Process -Filter ('ProcessId = '+$d.pid)
- Assert-Fact ($native -and $native.CreationDate.ToUniversalTime().ToString('o') -ceq $d.creationTime)
- Assert-Fact ([Math]::Abs(($p.StartTime.ToUniversalTime()-$native.CreationDate.ToUniversalTime()).TotalMilliseconds) -le 2)
- Assert-Fact ($native.ExecutablePath -ieq $d.executable -and (Text-Hash $native.CommandLine) -ceq $d.commandHash)
+ Assert-Fact 'LH02_PROCESS_CREATION' ($native -and $native.CreationDate.ToUniversalTime().ToString('o') -ceq $d.creationTime)
+ Assert-Fact 'LH03_PROCESS_TIME' ([Math]::Abs(($p.StartTime.ToUniversalTime()-$native.CreationDate.ToUniversalTime()).TotalMilliseconds) -le 2)
+ Assert-Fact 'LH04_PROCESS_COMMAND' ($native.ExecutablePath -ieq $d.executable -and (Text-Hash $native.CommandLine) -ceq $d.commandHash)
  $listeners=@(Get-NetTCPConnection -State Listen -LocalPort $d.port -ErrorAction Stop|Where-Object {$_.LocalAddress -eq $d.host})
- Assert-Fact ($listeners.Count -eq 1 -and $listeners[0].OwningProcess -eq $d.pid)
- No-Link $d.configPath;Assert-Fact ((File-Hash $d.configPath) -ceq $d.configSha256)
+ Assert-Fact 'LH05_LISTENER' ($listeners.Count -eq 1 -and $listeners[0].OwningProcess -eq $d.pid)
+ No-Link $d.configPath;Assert-Fact 'LH06_CONFIG_HASH' ((File-Hash $d.configPath) -ceq $d.configSha256)
  $request=[Net.HttpWebRequest]::Create($d.origin+'/healthz');$request.Proxy=$null;$request.Timeout=3000;$response=$request.GetResponse()
  try{$reader=[IO.StreamReader]::new($response.GetResponseStream());try{$h=$reader.ReadToEnd()|ConvertFrom-Json}finally{$reader.Dispose()}}finally{$response.Dispose()}
- Assert-Fact ($h.service -ceq 'ziwei_user' -and $h.agentId -ceq 'ziwei_user' -and $h.pid -eq $d.pid -and $h.clientBuild -ceq $d.build -and $h.workspace -ceq $d.workspace -and $h.deviceId -ceq $d.deviceId)
- Assert-Fact ($h.connectionState -ceq 'draining' -and $h.activeActionCount -eq 0 -and $h.pollingCount -eq 0 -and $h.quarantinedActionCount -eq 0 -and $h.executionQuarantined -eq $false)
- Assert-Fact ($h.lifecycle.nonce -ceq $d.nonce -and $h.lifecycle.root -ieq $d.root -and $h.lifecycle.configPath -ieq $d.configPath -and $h.lifecycle.configSha256 -ceq $d.configSha256 -and $h.lifecycle.runtimeDir -ieq $d.runtimeDir -and $h.lifecycle.startedAt -ceq $d.startedAt -and $h.lifecycle.managedAuxiliaryCount -eq 0)
- Assert-Fact ($h.maintenance.safe -eq $false -and $h.maintenance.gatewaySafe -eq $true -and $h.maintenance.gatewayWorkers -is [Array] -and @($h.maintenance.gatewayWorkers).Count -eq 0 -and $h.maintenance.pendingDeliveryCount -eq $d.retainedPendingCount)
- Assert-Fact ($h.connectionErrors -is [Array] -and @($h.connectionErrors).Count -eq 0 -and $h.connections -is [Array] -and @($h.connections).Count -eq @($d.connections).Count)
- foreach($c in $d.connections){Assert-Fact (@($h.connections|Where-Object {$_.workspace -ceq $c.workspace -and $_.deviceId -ceq $c.deviceId -and $_.primary -eq $c.primary}).Count -eq 1)}
- foreach($item in $d.directories){if(!$item.exists){Assert-Fact (!(Test-Path -LiteralPath $item.path));continue};No-Link $item.path;$actual=@(Get-ChildItem -LiteralPath $item.path -Force|ForEach-Object {$_.Name}|Sort-Object);$expected=@($item.names|Sort-Object);Assert-Fact ($actual.Count -eq $expected.Count);for($i=0;$i -lt $actual.Count;$i++){Assert-Fact ($actual[$i] -ceq $expected[$i])}}
- foreach($item in $d.files){if(!$item.exists){Assert-Fact (!(Test-Path -LiteralPath $item.path));continue};No-Link $item.path;Assert-Fact ((File-Hash $item.path) -ceq $item.sha256)}
- foreach($item in $d.snapshotFiles){No-Link $item.path;Assert-Fact ((File-Hash $item.path) -ceq $item.sha256)}
- No-Link ([IO.Path]::GetDirectoryName($d.exitFile));Assert-Fact (!(Test-Path -LiteralPath $d.exitFile))
- Assert-Fact (@(Get-CimInstance Win32_Process -Filter ('ParentProcessId = '+$d.pid)).Count -eq 0)
- Assert-Fact ((File-Hash $d.configPath) -ceq $d.configSha256 -and !$p.HasExited)
- $p.Kill();Assert-Fact ($p.WaitForExit($d.waitMs) -and $p.HasExited)
+ Assert-Fact 'LH07_HEALTH_IDENTITY' ($h.service -ceq 'ziwei_user' -and $h.agentId -ceq 'ziwei_user' -and $h.pid -eq $d.pid -and $h.clientBuild -ceq $d.build -and $h.workspace -ceq $d.workspace -and $h.deviceId -ceq $d.deviceId)
+ Assert-Fact 'LH08_HEALTH_IDLE' ($h.connectionState -ceq 'draining' -and $h.activeActionCount -eq 0 -and $h.pollingCount -eq 0 -and $h.quarantinedActionCount -eq 0 -and $h.executionQuarantined -eq $false)
+ Assert-Fact 'LH09_HEALTH_LIFECYCLE' ($h.lifecycle.nonce -ceq $d.nonce -and $h.lifecycle.root -ieq $d.root -and $h.lifecycle.configPath -ieq $d.configPath -and $h.lifecycle.configSha256 -ceq $d.configSha256 -and $h.lifecycle.runtimeDir -ieq $d.runtimeDir -and $h.lifecycle.startedAt -ceq $d.startedAt -and $h.lifecycle.managedAuxiliaryCount -eq 0)
+ Assert-Fact 'LH10_HEALTH_MAINTENANCE' ($h.maintenance.safe -eq $false -and $h.maintenance.gatewaySafe -eq $true -and $h.maintenance.gatewayWorkers -is [Array] -and @($h.maintenance.gatewayWorkers).Count -eq 0 -and $h.maintenance.pendingDeliveryCount -eq $d.retainedPendingCount)
+ Assert-Fact 'LH11_HEALTH_CONNECTIONS' ($h.connectionErrors -is [Array] -and @($h.connectionErrors).Count -eq 0 -and $h.connections -is [Array] -and @($h.connections).Count -eq @($d.connections).Count)
+ foreach($c in $d.connections){Assert-Fact 'LH12_CONNECTION_SCOPE' (@($h.connections|Where-Object {$_.workspace -ceq $c.workspace -and $_.deviceId -ceq $c.deviceId -and $_.primary -eq $c.primary}).Count -eq 1)}
+ foreach($item in $d.directories){if(!$item.exists){Assert-Fact 'LH13_DIRECTORY_ABSENCE' (!(Test-Path -LiteralPath $item.path));continue};No-Link $item.path;$actual=@(Get-ChildItem -LiteralPath $item.path -Force|ForEach-Object {$_.Name}|Sort-Object);$expected=@($item.names|Sort-Object);Assert-Fact 'LH14_DIRECTORY_COUNT' ($actual.Count -eq $expected.Count);for($i=0;$i -lt $actual.Count;$i++){Assert-Fact 'LH15_DIRECTORY_NAMES' ($actual[$i] -ceq $expected[$i])}}
+ foreach($item in $d.files){if(!$item.exists){Assert-Fact 'LH16_SOURCE_ABSENCE' (!(Test-Path -LiteralPath $item.path));continue};No-Link $item.path;Assert-Fact 'LH17_SOURCE_HASH' ((File-Hash $item.path) -ceq $item.sha256)}
+ foreach($item in $d.snapshotFiles){No-Link $item.path;Assert-Fact 'LH18_SNAPSHOT_HASH' ((File-Hash $item.path) -ceq $item.sha256)}
+ No-Link ([IO.Path]::GetDirectoryName($d.exitFile));Assert-Fact 'LH19_EXIT_ABSENCE_PRESTOP' (!(Test-Path -LiteralPath $d.exitFile))
+ Assert-Fact 'LH20_DAEMON_CHILDREN' (@(Get-CimInstance Win32_Process -Filter ('ParentProcessId = '+$d.pid)).Count -eq 0)
+ Assert-Fact 'LH21_LAST_IDENTITY' ((File-Hash $d.configPath) -ceq $d.configSha256 -and !$p.HasExited)
+ $p.Kill();Assert-Fact 'LH22_DAEMON_EXIT' ($p.WaitForExit($d.waitMs) -and $p.HasExited)
  $exit=[ordered]@{stopped=$true;pid=[int]$d.pid;creationTime=$d.creationTime;exitedAt=[DateTime]::UtcNow.ToString('o')}
- No-Link ([IO.Path]::GetDirectoryName($d.exitFile));Assert-Fact (!(Test-Path -LiteralPath $d.exitFile))
+ No-Link ([IO.Path]::GetDirectoryName($d.exitFile));Assert-Fact 'LH23_EXIT_ABSENCE_POSTSTOP' (!(Test-Path -LiteralPath $d.exitFile))
  $bytes=[Text.UTF8Encoding]::new($false).GetBytes(($exit|ConvertTo-Json -Compress));$stream=[IO.File]::Open($d.exitFile,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None);try{$stream.Write($bytes,0,$bytes.Length);$stream.Flush($true)}finally{$stream.Dispose()}
  $exit|ConvertTo-Json -Compress
 }finally{$p.Dispose()}
+}catch{
+ $rule=if($script:ziweiLocalHistoryRule){$script:ziweiLocalHistoryRule}else{'LH00_NATIVE_ERROR'}
+ [Console]::Out.WriteLine('ZIWEI_LOCAL_HISTORY_RULE:'+$rule)
+ exit 1
+}
 `;
-export function createLocalHistoryHandleTerminator({runCommand=run}={}){return async data=>{const pending=runCommand('powershell.exe',['-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(LOCAL_HISTORY_STOP_HANDLE_PROGRAM,'utf16le').toString('base64')],{encoding:'utf8',windowsHide:true,timeout:data.waitMs+15000,maxBuffer:64*1024});if(!pending.child?.stdin){await pending;throw fail();}pending.child.stdin.on('error',()=>{});pending.child.stdin.end(JSON.stringify(data));const{stdout}=await pending;return JSON.parse(stdout.replace(/^\uFEFF/,'').trim());};}
+export function createLocalHistoryHandleTerminator({runCommand=run}={}){return async data=>{
+ let output;
+ try{const pending=runCommand('powershell.exe',['-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(LOCAL_HISTORY_STOP_HANDLE_PROGRAM,'utf16le').toString('base64')],{encoding:'utf8',windowsHide:true,timeout:data.waitMs+15000,maxBuffer:64*1024});if(!pending.child?.stdin){await pending;throw nativeFailure('LH00_NATIVE_ERROR');}pending.child.stdin.on('error',()=>{});pending.child.stdin.end(JSON.stringify(data));output=await pending;}
+ catch(error){throw nativeFailure(closedNativeRule(error?.stdout)||'LH00_NATIVE_ERROR');}
+ const rule=closedNativeRule(output?.stdout);if(rule)throw nativeFailure(rule);
+ try{return JSON.parse(output.stdout.replace(/^\uFEFF/,'').trim());}catch{throw nativeFailure('LH00_NATIVE_ERROR');}
+};}
+
 const nativeTerminate=createLocalHistoryHandleTerminator(),nativeInventory=createForceAbandonInventory(),nativeListenerCount=createForceAbandonListenerCount();
 
 /** Candidate-only update hook. History/dedupe/result bytes are never rewritten. */
@@ -120,13 +139,13 @@ export function createLocalHistoryStopRecovery({platform=process.platform,inspec
    phase('terminate');nativeAttempted=true;const url=new URL(origin),output=await terminate({pid:record.pid,creationTime:record.creationTime,commandHash:record.commandHash,executable:record.executable,origin,host:url.hostname.replace(/^\[|\]$/g,''),port:Number(url.port),root,configPath,configSha256:configHash,build,workspace:config.workspace,deviceId:config.deviceId,nonce:pinned.lifecycle.nonce,runtimeDir,startedAt:pinned.lifecycle.startedAt,connections:[{workspace:config.workspace,deviceId:config.deviceId,primary:true},...(config.sharedWorkspaces||[]).filter(v=>v.enabled!==false).map(v=>({workspace:v.workspace,deviceId:v.deviceId,primary:false}))],files:initialEvidence.files,directories:initialEvidence.directories,snapshotFiles:nativeSnapshotFiles,retainedPendingCount:c.retainedPendingCount,exitFile,waitMs:Math.min(8000,timeoutMs)});
    phase('exit_validation');fact(output?.stopped===true&&output.pid===record.pid&&output.creationTime===record.creationTime&&Number.isFinite(Date.parse(output.exitedAt))&&same(JSON.parse(original(exitFile).bytes),output));stoppedReceipt={stopped:true,wasRunning:true,pid:record.pid,creationTime:record.creationTime,originalExecutionExitConfirmed:false,executionConfirmedStopped:false,localHistoryRetained:true,retainedHistoryCount:initialEvidence.retainedHistoryCount,...retainedBackground,archiveDirectory};checkpoint('daemon_exited',stoppedReceipt);
    phase('post_exit_validation');fact((await inspectInstalledProcesses(root)).length===0&&await inspectListenerCount(origin)===0&&!(await request())&&!(await inspectProcess(record.pid,root))&&original(configPath).sha256===configHash&&fingerprint(inspectEvidence(inspect,connections,runtimeDir))===initialFingerprint);for(const item of copies)fact(original(path.join(archiveDirectory,item.snapshot)).sha256===item.sha256&&original(item.path).sha256===item.sha256);phase('receipt_commit');durable(path.join(archiveDirectory,'receipt.json'),stoppedReceipt);return{recovered:true,...stoppedReceipt};
-  }catch(error){const refused=fail();if(!stoppedReceipt&&exitFile&&fs.existsSync(exitFile)){try{const saved=JSON.parse(original(exitFile).bytes);fact(saved.stopped===true&&saved.pid===record.pid&&saved.creationTime===record.creationTime&&Number.isFinite(Date.parse(saved.exitedAt)));stoppedReceipt={stopped:true,wasRunning:true,pid:record.pid,creationTime:record.creationTime,originalExecutionExitConfirmed:false,executionConfirmedStopped:false,localHistoryRetained:true,retainedHistoryCount:initialEvidence.retainedHistoryCount,...retainedBackground,archiveDirectory};}catch{}}if(nativeAttempted&&terminationIntent&&archiveDirectory){try{
+  }catch(error){const refused=fail();refused.recoveryPhase=currentPhase;if(['NATIVE_ASSERTION_FAILED','NATIVE_OBSERVATION_FAILED'].includes(error?.reasonCode)&&nativeRules.has(error?.recoveryRule)){refused.reasonCode=error.reasonCode;refused.recoveryRule=error.recoveryRule;}if(!stoppedReceipt&&exitFile&&fs.existsSync(exitFile)){try{const saved=JSON.parse(original(exitFile).bytes);fact(saved.stopped===true&&saved.pid===record.pid&&saved.creationTime===record.creationTime&&Number.isFinite(Date.parse(saved.exitedAt)));stoppedReceipt={stopped:true,wasRunning:true,pid:record.pid,creationTime:record.creationTime,originalExecutionExitConfirmed:false,executionConfirmedStopped:false,localHistoryRetained:true,retainedHistoryCount:initialEvidence.retainedHistoryCount,...retainedBackground,archiveDirectory};}catch{}}if(nativeAttempted&&terminationIntent&&archiveDirectory){try{
     phase('post_exit_validation');fact(same(JSON.parse(original(path.join(archiveDirectory,'termination-intent.json')).bytes),terminationIntent));fact(original(configPath).sha256===configHash&&installedBuild(root)===build&&fingerprint(inspectEvidence(inspect,connections,runtimeDir))===initialFingerprint);for(const item of terminationIntent.snapshotFiles)fact(original(item.path).sha256===item.sha256);
     fact(!(await inspectProcess(record.pid,root))&&(await inspectInstalledProcesses(root)).length===0&&await inspectListenerCount(origin)===0&&!(await request()));fact(original(configPath).sha256===configHash&&installedBuild(root)===build&&fingerprint(inspectEvidence(inspect,connections,runtimeDir))===initialFingerprint);fact((await inspectInstalledProcesses(root)).length===0&&await inspectListenerCount(origin)===0);
     stoppedReceipt={stopped:true,wasRunning:true,pid:record.pid,creationTime:record.creationTime,originalExecutionExitConfirmed:false,executionConfirmedStopped:false,localHistoryRetained:true,retainedHistoryCount:initialEvidence.retainedHistoryCount,...retainedBackground,archiveDirectory,daemonAbsenceObserved:true,stopObservationPersisted:false};
     try{durable(path.join(archiveDirectory,'daemon-absence-observation.json'),{schemaVersion:1,kind:'exact-daemon-absence-after-stop-attempt',process:record,nonce:pinned.lifecycle.nonce,configSha256:configHash,evidenceFingerprint:initialFingerprint,originalExecutionExitConfirmed:false});stoppedReceipt.stopObservationPersisted=true;}catch{}
    }catch{}}if(stoppedReceipt?.daemonAbsenceObserved===true&&stoppedReceipt.stopObservationPersisted===true){phase('receipt_commit');return{recovered:true,...stoppedReceipt};}if(stoppedReceipt)refused.stoppedClientReceipt=stoppedReceipt;else if(paused&&pinned.connectionState==='connected'){try{await restoreConnection();refused.resumed=true;}catch{refused.resumeFailed=true;}}throw refused;}
-  }catch(error){const refused=error?.code==='LOCAL_HISTORY_STOP_RECOVERY_REFUSED'?error:fail();refused.recoveryPhase=currentPhase;refused.reasonCode='EVIDENCE_MISMATCH';try{log('local_history_recovery_failed',{phase:currentPhase,reasonCode:'EVIDENCE_MISMATCH'});}catch{}throw refused;}
+  }catch(error){const refused=error?.code==='LOCAL_HISTORY_STOP_RECOVERY_REFUSED'?error:fail();refused.recoveryPhase=refused.recoveryPhase||currentPhase;refused.reasonCode=['NATIVE_ASSERTION_FAILED','NATIVE_OBSERVATION_FAILED'].includes(refused.reasonCode)&&nativeRules.has(refused.recoveryRule)?refused.reasonCode:'EVIDENCE_MISMATCH';try{log('local_history_recovery_failed',{phase:refused.recoveryPhase,reasonCode:refused.reasonCode,...(nativeRules.has(refused.recoveryRule)?{recoveryRule:refused.recoveryRule}:{})});}catch{}throw refused;}
  };
 }
 export const recoverLocalHistoryStopForUpdate=createLocalHistoryStopRecovery();
