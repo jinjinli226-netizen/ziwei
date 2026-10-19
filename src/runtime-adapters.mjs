@@ -472,6 +472,15 @@ export function proxyUrlForChild(env = {}) {
   return configured || windowsInternetProxyUrl();
 }
 
+/** Pipe-based Windows Hermes must not inherit Git Bash's xterm winpty aliases. */
+export function runtimeTerminalEnvironment({ runtime, invocation, env, platform = process.platform } = {}) {
+  if (platform !== 'win32' || runtime !== 'Hermes' || !invocation?.args?.some(arg => ['--query-file', '-q', '--query'].includes(arg))) return env;
+  const childEnv = { ...env };
+  for (const key of Object.keys(childEnv)) if (/^term$/i.test(key)) delete childEnv[key];
+  childEnv.TERM = 'dumb';
+  return childEnv;
+}
+
 export function windowsRuntimeCandidates(name, { home = os.homedir() } = {}) {
   if (process.platform !== 'win32' || String(name || '').toLowerCase() !== 'codex') return [];
   const root = path.join(home, 'AppData', 'Local', 'OpenAI', 'Codex', 'bin');
@@ -1095,6 +1104,7 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
     if(hermesBot&&phoneReceipt){const index=invocation.args.indexOf('--toolsets');if(index<0)invocation.args.push('--toolsets','ziwei-terminal');else invocation.args[index+1]+=',ziwei-terminal';}
     if (resolvedRuntime === 'Hermes' && !receipt && !phoneReceipt && !hermesBot) childEnv.HERMES_HOME = selectedProfileHome || hermesProfileHome(profile || 'default', { baseHome: profileBaseHome });
   } catch (error) { cleanupOverlay(); return Promise.reject(error); }
+  childEnv = runtimeTerminalEnvironment({ runtime: resolvedRuntime, invocation, env: childEnv });
   let spec;
   try { spec = resolvedRuntime === 'Hermes' && childEnv.HERMES_MANAGED_DIR && (receipt || hermesBot || profileBinding || controlledImages.length>1) ? hermesMcpSpawnSpec(discovered.binary, invocation.args, { env: childEnv, boundProfile:profileBinding, inputImages:controlledImages.length>1?controlledImages:[] }) : runtimeSpawnSpec(discovered.binary, invocation.args); }
   catch (error) { cleanupOverlay(); return Promise.reject(error); }

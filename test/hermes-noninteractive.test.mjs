@@ -29,6 +29,12 @@ def main():
  audit=os.environ.get('ZIWEI_MCP_AUDIT_FILE')
  if audit:Path(audit).write_text(json.dumps({'method':'initialize','ok':True})+'\\n')
  mode=os.environ.get('FIXTURE_QUERY_MODE')
+ if mode=='native_bash_alias':
+  import subprocess
+  script='shopt -s expand_aliases; case "$TERM" in xterm*) alias node="printf \\\'stdin is not a tty\\\\n\\\'; false";; esac; eval "$1"'
+  tool=subprocess.run(['/bin/bash','-c',script,'fixture',"node -e 'console.log(JSON.stringify({cwd:process.cwd(),term:process.env.TERM}))'"],capture_output=True,text=True)
+  print(json.dumps({'type':'tool_result','name':'terminal','output':json.dumps({'output':tool.stdout.strip(),'exit_code':tool.returncode})}))
+  print(json.dumps({'type':'result','text':tool.stdout.strip()}));return 0
  if mode in ('tty_stdout','tty_stderr'):
   print('stdin is not a tty',file=sys.stderr if mode=='tty_stderr' else sys.stdout);return 0
  selected=Path(os.environ['HERMES_HOME']);managed=Path(os.environ['HERMES_MANAGED_DIR'])
@@ -79,6 +85,22 @@ test('structured assistant content may quote the TTY diagnostic without being re
   const f=fixture(t);if(!f)return;
   const result=await executeRuntime({...f.options,env:{...f.env,FIXTURE_QUERY_MODE:'quoted'}});
   assert.equal(result.status,'succeeded',result.error);assert.match(result.result.output,/only quoted here/);
+});
+
+test('Windows piped Hermes avoids the native non-PTY winpty alias while preserving profile, proxy and cwd',{skip:process.platform==='win32'||!fs.existsSync('/bin/bash')},async t=>{
+  const f=fixture(t);if(!f)return;
+  fs.symlinkSync(process.execPath,path.join(f.root,'node'));
+  const env={...f.env,TERM:'xterm-256color',HTTPS_PROXY:'http://127.0.0.1:10808',FIXTURE_QUERY_MODE:'native_bash_alias'};
+  const sourceUrl=new URL('../src/runtime-adapters.mjs',import.meta.url);
+  const original=fs.readFileSync(sourceUrl,'utf8');
+  const source=original.replace('runtimeTerminalEnvironment({ runtime, invocation, env, platform = process.platform }','runtimeTerminalEnvironment({ runtime, invocation, env, platform = "win32" }').replaceAll('import.meta.url',JSON.stringify(sourceUrl.href)).replace(/from (['"])([^'"\r\n]+)\1/g,(_all,_quote,specifier)=>'from '+JSON.stringify(specifier.startsWith('.')?new URL(specifier,sourceUrl).href:specifier.startsWith('node:')?specifier:import.meta.resolve(specifier)));
+  assert.notEqual(source,original);
+  const isolated=await import('data:text/javascript,'+encodeURIComponent(source));
+  const old=await executeRuntime({...f.options,env});
+  assert.equal(old.status,'succeeded',old.error);assert.equal(old.result.output,'stdin is not a tty');
+  const result=await isolated.executeRuntime({...f.options,env});
+  assert.equal(result.status,'succeeded',result.error);assert.deepEqual(JSON.parse(result.result.output),{cwd:f.cwd,term:'dumb'});
+  assert.equal(result.result.profile,'selected');assert.equal(result.result.managementMcp.loaded,true);assert.equal(env.TERM,'xterm-256color');assert.equal(env.HTTPS_PROXY,'http://127.0.0.1:10808');
 });
 
 test('model execution explicitly requests owned-Job cleanup on a failed root',{skip:process.platform==='win32'},async t=>{

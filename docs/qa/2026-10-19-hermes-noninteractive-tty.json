@@ -1,0 +1,21 @@
+{
+  "phase": "tested-not-yet-published",
+  "targetDeviceId": "device_bfd9a3d2-c2cc-4a36-8bd8-465bea492493",
+  "employeeId": "employee_485327e2-16ae-4c17-97af-53d4e9d50ddf",
+  "profile": "zhi-nuan-life",
+  "expectedCwd": "D:\\AIUSE\\life-assistant",
+  "beforeActionId": "action_7fcec325-ea8f-44e9-b194-cf070c200548",
+  "realResolutionActionId": "action_41d174c7-e1d4-47ea-8930-f7e4d77fcf08",
+  "observedBeforeTerm": "xterm-256color",
+  "observedBeforeNodeAlias": "winpty node.exe",
+  "targetedPassed": 22,
+  "independentPassed": 22,
+  "clientRuntimeOverlayFiles": ["src/runtime-adapters.mjs"],
+  "providerProxyPreserved": true,
+  "profileConfigurationChanged": false,
+  "hermesInstallationChanged": false,
+  "nativeWindowsPtyVerified": false,
+  "published": false,
+  "installed": false,
+  "postInstallBareNodePassed": false
+}
