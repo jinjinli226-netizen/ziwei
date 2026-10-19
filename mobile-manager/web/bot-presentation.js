@@ -1,9 +1,19 @@
 import {historicalPrelaunchRecovery,HISTORICAL_PRELAUNCH_RECOVERY_DETAIL} from './historical-prelaunch-recovery.mjs';
 import {operatorForceAbandonRecovery,OPERATOR_FORCE_ABANDON_DETAIL} from './operator-force-abandon-recovery.mjs';
+import {exitedReadOnlyPhoneObservation} from './bot-execution-occupancy.mjs';
+const READ_ONLY_OBSERVATION_DETAIL='原 CLI 根进程已退出；本条历史记录不再占位，手机只读观察结果仍待核实。';
 export function executionUncertain(run) {
   if(operatorForceAbandonRecovery(run))return false;
   if(historicalPrelaunchRecovery(run))return false;
   return run?.result?.code==='EXECUTION_UNCERTAIN' || run?.code==='EXECUTION_UNCERTAIN' || run?.result?.executionState==='uncertain' || run?.executionState==='uncertain' || run?.status==='uncertain' || (run?.status==='expired'&&Boolean(run?.acked_at));
+}
+// Business uncertainty remains part of the original history. Only the same
+// complete read-only observation receipt that the server accepts releases its
+// execution slot; a newer reply or a generic released flag is not evidence.
+export function executionOccupiesSlot(run,expected={}) {
+  if(!run)return false;
+  if(exitedReadOnlyPhoneObservation(run,expected))return false;
+  return ['pending','queued','acked','running','executing'].includes(run.status) || executionUncertain(run);
 }
 export function processExitConfirmed(result) {
   const proof=result?.processExit || result?.result?.processExit;
@@ -16,11 +26,13 @@ export function botRecoveryEvent(run) {
 export function botRecoveryDetail(run) {
   if(operatorForceAbandonRecovery(run))return OPERATOR_FORCE_ABANDON_DETAIL;
   if(historicalPrelaunchRecovery(run))return HISTORICAL_PRELAUNCH_RECOVERY_DETAIL;
+  if(exitedReadOnlyPhoneObservation(run))return READ_ONLY_OBSERVATION_DETAIL;
   return botRecoveryEvent(run)?'服务器已保存终态与进程退出证据，可核实并恢复原回执。':'服务器尚未收到可恢复的终态与进程退出证据。请检查原电脑上的客户端及执行进程；保留原执行，勿重复派发。';
 }
 export function botStopPresentation(bot,run=bot?.latest_run) {
   if(operatorForceAbandonRecovery(run))return {confirmed:false,abandoned:true,label:OPERATOR_FORCE_ABANDON_DETAIL,tone:'muted'};
   if(historicalPrelaunchRecovery(run))return {confirmed:false,ended:true,notStarted:true,label:HISTORICAL_PRELAUNCH_RECOVERY_DETAIL,tone:'muted'};
+  if(exitedReadOnlyPhoneObservation(run))return {confirmed:false,released:true,label:READ_ONLY_OBSERVATION_DETAIL,tone:'warning'};
   if(['failed','cancelled'].includes(run?.status) && (run.result?.stopConfirmed===true || run.result?.result?.stopConfirmed===true) && !executionUncertain(run) && processExitConfirmed(run.result))return {confirmed:true,label:'原执行已停止，根进程与进程树退出均已确认。',tone:'success'};
   if(['succeeded','failed','cancelled'].includes(run?.status) && !executionUncertain(run) && processExitConfirmed(run.result))return {confirmed:false,ended:true,label:'原执行已结束，根进程与进程树退出均已确认。',tone:'muted'};
   if(run?.result?.code==='BOT_CANCELLED_BEFORE_START' && !run.acked_at)return {confirmed:false,label:'本次执行尚未启动，已取消派发。',tone:'muted'};
@@ -37,6 +49,7 @@ export function botPresence(bot) {
   if(bot?.configuration_state==='uninitialized')return {label:bot.kind==='creator'?'Creator · 管理伙伴':'Bot 能力待初始化',tone:'muted',detail:bot.kind==='creator'?'Creator 沿用原管理身份与记忆。':'这是团队管理中的同一位员工；初始化只增加 Bot 配置，不创建第二位员工。'};
   if(operatorForceAbandonRecovery(run))return {label:bot?.control_state==='paused'?'已暂停 · 旧记录已放弃':'旧记录已放弃',tone:'muted',detail:OPERATOR_FORCE_ABANDON_DETAIL};
   if(historicalPrelaunchRecovery(run))return {label:bot?.control_state==='paused'?'已暂停 · 原模型未启动':'原模型未启动',tone:'muted',detail:HISTORICAL_PRELAUNCH_RECOVERY_DETAIL};
+  if(exitedReadOnlyPhoneObservation(run))return {label:bot?.control_state==='paused'?'已暂停 · 上次结果待核实':'上次结果待核实',tone:'warning',detail:READ_ONLY_OBSERVATION_DETAIL};
   if (executionUncertain(run)) return {label:'执行待核实',tone:'warning',detail:botRecoveryDetail(run)};
   if (botStopPresentation(bot,run).confirmed)return {label:'原执行已停止',tone:'muted',detail:botStopPresentation(bot,run).label};
   if (run?.type==='hermes.bot.validate') {

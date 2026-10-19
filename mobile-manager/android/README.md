@@ -1,6 +1,6 @@
 # Android 自建持续接收
 
-`com.ziwei.manager`，最低 Android 8 / API26，target35。0.5.0 起移除全部TPNS、OEM、FCM适配器与Gradle依赖；0.5.1 补齐已核验历史恢复记录的显示和发送判断；0.5.2-internal / code14 修复输入法、草稿与导航稳定性。只通过现有正常HTTPS会话连接自建紫薇服务器，没有安装秘密、设备token或第三方注册请求。
+`com.ziwei.manager`，最低 Android 8 / API26，target35。0.5.0 起移除全部TPNS、OEM、FCM适配器与Gradle依赖；0.5.1 补齐已核验历史恢复记录的显示和发送判断；0.5.2-internal / code14 修复输入法、草稿与导航稳定性。0.5.3-internal / code15 严格区分历史只读观察异常与当前执行占位，保留真实未知和原始失败。只通过现有正常HTTPS会话连接自建紫薇服务器，没有安装秘密、设备token或第三方注册请求。
 
 ## 构建
 

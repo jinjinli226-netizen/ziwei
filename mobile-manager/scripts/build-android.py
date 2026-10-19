@@ -187,8 +187,8 @@ def main():
     parser.add_argument("--cache", type=Path, default=CACHE)
     parser.add_argument("--output", type=Path, default=MODULE / "dist")
     parser.add_argument("--profile", choices=("selfhost",), default="selfhost")
-    parser.add_argument("--version-code", type=int, default=14)
-    parser.add_argument("--version-name", default="0.5.2-internal")
+    parser.add_argument("--version-code", type=int, default=15)
+    parser.add_argument("--version-name", default="0.5.3-internal")
     args = parser.parse_args()
     if args.version_code < 1 or not re.fullmatch(r"[A-Za-z0-9._-]+", args.version_name):
         parser.error("Invalid Android version")

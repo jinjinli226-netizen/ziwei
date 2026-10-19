@@ -1,5 +1,5 @@
 // Shared presentation uses the same receipt rules as the desktop product.
-import {botPresence, botStopPresentation, executionUncertain} from './bot-presentation.js';
+import {botPresence, botStopPresentation, executionUncertain, executionOccupiesSlot} from './bot-presentation.js';
 
 export {executionUncertain, botStopPresentation};
 function executionScopeMatches(run, state, {requireEmployee = false} = {}) {
@@ -24,7 +24,14 @@ export function blockingChatExecution(state) {
     ...list(state.runs,'runs').filter(run=>executionScopeMatches(run,state,{requireEmployee:true})),
     botMatches && executionScopeMatches(bot.latest_run,state) ? bot.latest_run : null,
   ];
-  return candidates.find(run => run && (['pending','queued','acked','running','executing'].includes(run.status) || executionUncertain(run))) || null;
+  const employee=state.selectedEmployee || {}, boundEmployee=botMatches ? bot.employee || {} : {};
+  const expected={workspace:workspaceId(state),employeeId};
+  const deviceId=employee.target_device_id ?? boundEmployee.target_device_id;
+  const profile=employee.runtime_profile ?? boundEmployee.runtime_profile;
+  if(deviceId!==undefined)expected.deviceId=deviceId;
+  if(profile!==undefined)expected.profile=profile;
+  const databaseId=workspaceDatabaseId(state.workspace);
+  return candidates.find(run => executionOccupiesSlot(run,databaseId&&run?.workspace_id!==undefined?{...expected,workspaceId:databaseId}:expected)) || null;
 }
 export const list = (value, key) => Array.isArray(value) ? value : Array.isArray(value?.[key]) ? value[key] : [];
 export const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));

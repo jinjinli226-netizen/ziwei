@@ -1,20 +1,28 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { prelaunchFixture, forceAbandonFixture } from './fixtures/historical-recovery.mjs';
+import { createHash } from 'node:crypto';
+import { prelaunchFixture, forceAbandonFixture, readOnlyObservationFixture } from './fixtures/historical-recovery.mjs';
 import { historicalPrelaunchRecovery, HISTORICAL_PRELAUNCH_RECOVERY_DETAIL } from '../web/historical-prelaunch-recovery.mjs';
 import { operatorForceAbandonRecovery, OPERATOR_FORCE_ABANDON_DETAIL } from '../web/operator-force-abandon-recovery.mjs';
-import { botPresence, botStopPresentation, botRecoveryEvent, botRecoveryDetail, executionUncertain, processExitConfirmed } from '../web/bot-presentation.js';
+import { botPresence, botStopPresentation, botRecoveryEvent, botRecoveryDetail, executionUncertain, executionOccupiesSlot, processExitConfirmed } from '../web/bot-presentation.js';
+import { exitedReadOnlyPhoneObservation } from '../web/bot-execution-occupancy.mjs';
+import { blockingChatExecution, initialState } from '../web/model.js';
 
 const canonical = value => JSON.stringify(value, (_key, item) => item && typeof item === 'object' && !Array.isArray(item) ? Object.fromEntries(Object.entries(item).sort(([left], [right]) => left.localeCompare(right))) : item);
 
-test('mobile recovery validation and presentation match the desktop contract with repository LF line endings', async () => {
-  for (const name of ['bot-presentation.js', 'historical-prelaunch-recovery.mjs', 'operator-force-abandon-recovery.mjs']) {
+test('mobile historical recovery validators match the desktop contract with repository LF line endings', async () => {
+  for (const name of ['historical-prelaunch-recovery.mjs', 'operator-force-abandon-recovery.mjs']) {
     const mobile = await readFile(new URL(`../web/${name}`, import.meta.url), 'utf8');
     const desktop = await readFile(new URL(`../../frontend/src/${name}`, import.meta.url), 'utf8');
     assert.equal(mobile, desktop.replace(/\r\n/g, '\n').replace(/\n+$/, '\n'), name);
     assert.doesNotMatch(mobile, /\r/, 'packaged web resources use the Git LF bytes');
   }
+});
+
+test('the mobile occupancy exception uses the exact server contract from authority commit 794211e', async () => {
+  const bytes = await readFile(new URL('../web/bot-execution-occupancy.mjs', import.meta.url));
+  assert.equal(createHash('sha256').update(bytes).digest('hex'), '4a3cd7a5c5a4460e639f794238057d4058a71bf0f91904902f20737fa8649d1f');
 });
 
 test('both committed prelaunch versions release the admission block without changing the original failure or claiming process exit', () => {
@@ -123,5 +131,90 @@ test('new true in-flight or uncertain executions do not borrow the abandoned act
     const withOldReceipt = { ...run, forceAbandonRecovery: forceAbandonFixture().forceAbandonRecovery };
     assert.equal(operatorForceAbandonRecovery(withOldReceipt), null);
     assert.equal(executionUncertain(withOldReceipt), run.status !== 'acked');
+  }
+});
+
+const observationState = (run, overrides = {}) => ({ ...initialState(), phase: 'ready', workspace: { id: 'observation-workspace-id', slug: 'observation-workspace' }, selectedEmployee: { id: 'observation-employee', target_device_id: 'observation-pc', runtime_profile: 'observation-profile' }, conversation: { id: 'original-chat', employee_id: 'observation-employee', execution: { id: 'new-success', status: 'succeeded' } }, runs: [run], bot: { id: 'observation-employee', workspace: 'observation-workspace', latest_run: { id: 'new-success', status: 'succeeded' } }, ...overrides });
+
+test('567 original receipts release only the matching historical slot while preserving every unknown result and retained process', () => {
+  const run = readOnlyObservationFixture(), before = canonical(run);
+  assert.equal(run.result.terminalMcp.toolCalls.length, 567); assert.equal(exitedReadOnlyPhoneObservation(run), true);
+  assert.equal(executionOccupiesSlot(run), false); assert.equal(executionUncertain(run), true);
+  assert.equal(processExitConfirmed(run.result), false); assert.equal(run.result.processExit.treeConfirmed, false); assert.equal(run.result.processExit.activeProcesses, 3);
+  assert.equal(blockingChatExecution(observationState(run)), null); assert.equal(canonical(run), before);
+  assert.match(run.error, /phone observation remains unknown/); assert.equal(run.result.executionState, 'uncertain');
+  assert.equal(botPresence({configuration_state:'initialized',control_state:'active',latest_run:run}).label,'上次结果待核实');
+  assert.match(botRecoveryDetail(run),/只读观察.*待核实/);
+  const stop=botStopPresentation({latest_run:run});
+  assert.equal(stop.confirmed,false);assert.equal(stop.released,true);assert.equal(stop.ended,undefined);
+  assert.doesNotMatch(stop.label,/进程树退出|已停止|已完成|成功/);
+  const sameConversation = observationState(run); sameConversation.conversation.execution = run;
+  assert.equal(blockingChatExecution(sameConversation), null);
+  const withoutDatabaseId = structuredClone(run); delete withoutDatabaseId.workspace_id;
+  assert.equal(blockingChatExecution(observationState(withoutDatabaseId)), null, 'ordinary API action views retain full binding without workspace_id');
+});
+
+test('new successful replies cannot release unknown writes, missing native evidence or unrelated uncertainty', () => {
+  const variants = [
+    a => { const c = a.result.terminalMcp.toolCalls.find(c => c.toolName === 'ziwei_phone_action'); delete c.commandId; delete c.ids.commandId; c.ok = false; c.commandExecutionState = 'uncertain'; },
+    a => { for (const c of a.result.terminalMcp.toolCalls) if (c.commandId === 'write-0') { c.status = c.commandStatus = 'queued'; c.commandExecutionState = 'pending'; } },
+    a => { a.result.terminalMcp.toolCalls.findLast(c => c.commandId === 'write-0').commandExecutionState = 'uncertain'; },
+    a => { a.result.terminalMcp.toolCalls.push({ toolName: 'ziwei_phone_upgrade', ok: false, error: 'Original response lost' }); },
+    a => { a.result.terminalMcp.toolCalls.push({ toolName: 'ziwei_phone_upgrade', ok: true, updateId: 'pending-upgrade', updateStatus: 'awaiting_health' }); },
+    a => { a.result.terminalMcp.toolCalls.push({ toolName: 'ziwei_phone_control', ok: true }); },
+    a => { a.result.code = 'EXECUTION_UNCERTAIN'; }, a => { a.result.processExit.rootConfirmed = false; },
+    a => { a.result.processExit.rootExitCode = null; a.result.code = null; }, a => { a.result.processExit.streamsComplete = false; },
+    a => { a.result.processExit.cancelled = true; }, a => { a.result.processExit.failureCode = 'WINDOWS_JOB_UNKNOWN'; },
+    a => { delete a.result.processExit.backgroundProcessesRetained; }, a => { a.result.processExit.activeProcesses = 0; },
+    a => { a.result.nativeOperation = { status: 'uncertain' }; }, a => { a.result.supervision = { rootConfirmed: false }; },
+    a => { a.result.residentExit = { treeConfirmed: false }; }, a => { a.result.quarantined = true; },
+    a => { a.result.other = { executionState: 'uncertain' }; }, a => { a.result.futureEvidence = { safe: true }; },
+    a => { a.result.managementMcp.toolCalls.push({ toolName: 'ziwei_update_employee', ok: true }); },
+    a => { a.result.managementMcp.toolCalls.push({ toolName: 'ziwei_get_employee', ok: false }); },
+    a => { delete a.result.managementMcp; }, a => { delete a.result.terminalMcp; },
+    a => { a.result.terminalMcp.tool_calls = []; }, a => { a.result.terminalMcp.actionId = 'another-action'; },
+    a => { a.result.terminalMcp.employeeId = 'another-employee'; }, a => { a.result.terminalMcp.workspace = 'another-workspace'; },
+    a => { a.result.terminalMcp.profile = 'another-profile'; }, a => { a.result.terminalMcp.toolCalls[0].deviceId = 'another-phone'; },
+    a => { a.payload.terminalMcp.deviceId = 'another-phone'; }, a => { a.payload.deviceId = 'another-pc'; },
+    a => { a.result.botIsolation.key = 'another-owner'; }, a => { a.result.terminalMcp.loaded = false; },
+    a => { a.result.fixture = true; }, a => { a.status = 'cancelled'; },
+  ];
+  for (const mutate of variants) {
+    const run = readOnlyObservationFixture(); mutate(run); const before = canonical(run), state = observationState(run);
+    assert.equal(exitedReadOnlyPhoneObservation(run), false, mutate.toString());
+    assert.equal(executionUncertain(run), true); assert.equal(executionOccupiesSlot(run), true);
+    assert.equal(blockingChatExecution(state), run, 'new success cannot erase another original blocker'); assert.equal(canonical(run), before);
+  }
+});
+
+test('generic released markers, an incomplete management summary and receipts nested in events are never release authority', () => {
+  const complete = readOnlyObservationFixture();
+  for (const run of [
+    { id: complete.id, status: 'failed', payload: complete.payload, result: { executionState: 'uncertain' }, released: true },
+    { id: complete.id, status: 'failed', payload: complete.payload, result: { executionState: 'uncertain' }, executionOccupancy: { state: 'released' } },
+    { ...complete, result: { executionState: 'uncertain' }, managementSummary: { detailsOmitted: true } },
+    { ...complete, result: { executionState: 'uncertain' }, events: [{ type: 'failed', data: { result: complete.result } }] },
+  ]) {
+    assert.equal(executionOccupiesSlot(run), true); assert.equal(blockingChatExecution(observationState(run)), run);
+  }
+});
+
+test('a historical observation does not release a real pending or unknown execution in another chat of the same employee', () => {
+  const history = readOnlyObservationFixture();
+  for (const status of ['pending', 'queued', 'acked', 'running', 'executing', 'uncertain', 'expired']) {
+    const run = { id: 'another-chat-action', status, acked_at: '2026-10-19T10:00:00Z', payload: { employeeId: 'observation-employee', conversationId: 'another-chat', hermesBot: { workspace: 'observation-workspace' } } };
+    const state = observationState(history, { runs: [history, run] });
+    assert.equal(blockingChatExecution(state), run, status);
+  }
+  const otherUnknown = { id: 'different-unknown', status: 'failed', payload: { employeeId: 'observation-employee', conversationId: 'another-chat' }, result: { code: 'EXECUTION_UNCERTAIN' } };
+  assert.equal(blockingChatExecution(observationState(history, { runs: [history, otherUnknown] })), otherUnknown);
+});
+
+test('observation release must match current employee, computer, profile and workspace scope', () => {
+  const run = readOnlyObservationFixture();
+  for (const expected of [{ workspace: 'foreign' }, { workspaceId: 'foreign' }, { employeeId: 'foreign' }, { deviceId: 'foreign' }, { profile: 'foreign' }]) assert.equal(executionOccupiesSlot(run, expected), true);
+  for (const field of ['target_device_id', 'runtime_profile']) {
+    const state = observationState(run); state.selectedEmployee[field] = 'changed-binding';
+    assert.equal(blockingChatExecution(state), run, field);
   }
 });
