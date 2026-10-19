@@ -83,7 +83,6 @@ for(const[name,change]of Object.entries({
  'another pending delivery':h=>h.maintenance.pendingDeliveryCount++,
  'pending count no longer matches':h=>h.maintenance.pendingDeliveryCount=0,
  'new live action':h=>h.activeActionCount++,
- 'new live poll':h=>h.pollingCount++,
  'new quarantine':h=>h.quarantinedActionCount++,
  'new Gateway':h=>h.maintenance.gatewayWorkers=[{processAlive:true}],
 }))test(`recovery never ignores ${name}`,async t=>{const f=await fixture(t);f.healthMutator=change;const before=snapshots(f.runtime);const result=await f.make()(f.recoveryInput).catch(e=>e);assert(result.recovered===false||result.code==='LOCAL_HISTORY_STOP_RECOVERY_REFUSED');assert.equal(f.kills,0);assert.deepEqual(snapshots(f.runtime),before);});
@@ -95,3 +94,8 @@ test('a pending count that changes only after pause prevents any stop',async t=>
 test('a pending result that changes during backup prevents any stop',async t=>{const f=await fixture(t),file=f.deliveryFile.replace(/\.json$/,'.result.json');await assert.rejects(f.make({checkpoint:phase=>{if(phase==='snapshot')fs.appendFileSync(file,' ');}})(f.recoveryInput),{code:'LOCAL_HISTORY_STOP_RECOVERY_REFUSED'});assert.equal(f.kills,0);assert.equal(f.paused,false);});
 
 test('the real dispatcher fallback remains supported when an executor omits a failure code',async t=>{const f=await fixture(t,{runtimeFailureCode:null});assert.equal(f.state.completed[0].result.code,'executor_failed');assert.equal(isRetainedFailedBackgroundCompletion(f.input()),true);assert.equal(f.inspect().stopSafe,true);});
+
+
+test('failed-background recovery still requires exact pending count while a periodic poll drains',async t=>{
+ const f=await fixture(t);let drains=0;f.healthMutator=h=>{if(h.connectionState==='connected')h.pollingCount=1;else{drains++;h.pollingCount=drains<3?1:0;}};const before=snapshots(f.runtime),result=await f.make()(f.recoveryInput);assert.equal(result.recovered,true);assert.equal(result.retainedPendingCount,1);assert.equal(f.kills,1);assert.deepEqual(snapshots(f.runtime),before);
+});

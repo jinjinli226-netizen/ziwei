@@ -39,7 +39,7 @@ test('the real candidate reader permits scoped orphan plus physically exited blo
 });
 
 for(const[name,mutate]of Object.entries({
- 'active action':f=>{f.health.activeActionCount=1;},'active poll':f=>{f.health.pollingCount=1;},'quarantine':f=>{f.health.quarantinedActionCount=1;},'execution quarantine':f=>{f.health.executionQuarantined=true;},'gateway worker':f=>{f.health.maintenance.gatewayWorkers=[{processAlive:false}];},'pending delivery':f=>{f.health.maintenance.pendingDeliveryCount=1;},'new client already supports normal stop':f=>{f.health.maintenance.stopSafe=true;},
+ 'active action':f=>{f.health.activeActionCount=1;},'quarantine':f=>{f.health.quarantinedActionCount=1;},'execution quarantine':f=>{f.health.executionQuarantined=true;},'gateway worker':f=>{f.health.maintenance.gatewayWorkers=[{processAlive:false}];},'pending delivery':f=>{f.health.maintenance.pendingDeliveryCount=1;},'new client already supports normal stop':f=>{f.health.maintenance.stopSafe=true;},
  'true unsafe history':f=>{f.scanMutator=e=>{e.stopSafe=false;e.stopIssues=[{code:'STARTED_WITHOUT_RESULT'}];};},'unknown warning':f=>{f.scanMutator=e=>e.issues.push({code:'ACTION_STATE_CORRUPT'});},'unproven retained delivery':f=>{f.scanMutator=e=>{e.retainedDeliveryCount=0;};},'zero retained history':f=>{f.scanMutator=e=>{e.retainedHistoryCount=0;};},
 }))test(`candidate history fallback is not applicable to ${name}`,async t=>{const f=fixture(t);mutate(f);assert.deepEqual(await f.make()(f.input),{recovered:false,reason:'not_applicable'});assert.equal(f.kills,0);assert.deepEqual(fs.readFileSync(f.stateFile),f.raw);});
 
@@ -67,3 +67,23 @@ test('the native terminator transports large snapshots via stdin and holds one P
  const calls=[];const terminate=createLocalHistoryHandleTerminator({runCommand:(command,args)=>{let finish;const promise=new Promise(resolve=>{finish=resolve;}),stdin=new EventEmitter();stdin.end=value=>{calls.push({command,args,data:JSON.parse(value)});finish({stdout:'{}'});};promise.child={stdin};return promise;}});await terminate({waitMs:8000,files:Array.from({length:600},(_,i)=>({path:'C:/private/'+i,sha256:'a'.repeat(64)}))});const program=Buffer.from(calls[0].args.at(-1),'base64').toString('utf16le');assert(calls[0].args.join(' ').length<32000);assert.equal(calls[0].data.files.length,600);assert.match(program,/\$heldHandle=\$p.Handle/);assert.match(program,/\$p\.Kill\(\)/);assert.match(program,/\$p\.WaitForExit/);assert.match(program,/ParentProcessId/);assert.match(program,/FileMode\]::CreateNew/);assert.doesNotMatch(program,/taskkill|Stop-Process|PRIVATE_SYNTHETIC_TOKEN/);
 });
 test('the official history fallback never operates on a non-Windows host',async()=>{if(process.platform!=='win32')assert.deepEqual(await recoverLocalHistoryStopForUpdate({}),{recovered:false,reason:'not_applicable'});});
+
+
+test('a periodic poll that starts during native holder revalidation drains after pause before stopping',async t=>{
+ const f=fixture(t);let reads=0,drainingReads=0,observedBusyPoll=false;
+ f.healthMutator=h=>{reads++;if(h.connectionState==='connected'&&reads>=2){h.pollingCount=1;observedBusyPoll=true;}if(h.connectionState==='draining'){drainingReads++;h.pollingCount=drainingReads<=2?1:0;}};
+ const before=fs.readFileSync(f.stateFile),result=await f.make()(f.input);
+ assert.equal(result.recovered,true);assert.equal(observedBusyPoll,true);assert(drainingReads>=3);assert.equal(f.kills,1);assert.deepEqual(fs.readFileSync(f.stateFile),before);
+});
+test('an already running periodic poll is paused and drained without treating it as a live employee action',async t=>{
+ const f=fixture(t);f.health.pollingCount=1;let drainingReads=0;f.healthMutator=h=>{if(h.connectionState==='draining'){drainingReads++;h.pollingCount=drainingReads===1?1:0;}};
+ const result=await f.make()(f.input);assert.equal(result.recovered,true);assert.equal(f.kills,1);assert(drainingReads>=2);
+});
+test('a poll which does not drain by the bounded deadline never permits a stop and restores the prior connection state',async t=>{
+ const f=fixture(t);f.health.pollingCount=1;const before=fs.readFileSync(f.stateFile);await assert.rejects(f.make()({...f.input,timeoutMs:1}),{code:'LOCAL_HISTORY_STOP_RECOVERY_REFUSED'});assert.equal(f.kills,0);assert.equal(f.paused,false);assert.deepEqual(fs.readFileSync(f.stateFile),before);
+});
+test('a new employee action during poll drain refuses stopping and preserves the original task bytes',async t=>{
+ const f=fixture(t);f.healthMutator=h=>{if(h.connectionState==='draining'){h.pollingCount=1;h.activeActionCount=1;}};const before=fs.readFileSync(f.stateFile);await assert.rejects(f.make()(f.input),{code:'LOCAL_HISTORY_STOP_RECOVERY_REFUSED'});assert.equal(f.kills,0);assert.deepEqual(fs.readFileSync(f.stateFile),before);
+});
+for(const pollingCount of [-1,2,Infinity,'1'])test(`poll allowance refuses invalid or impossible count ${pollingCount}`,async t=>{const f=fixture(t);f.health.pollingCount=pollingCount;assert.deepEqual(await f.make()(f.input),{recovered:false,reason:'not_applicable'});assert.equal(f.kills,0);});
+for(const [name,change]of Object.entries({'quarantine':h=>{h.quarantinedActionCount=1;h.executionQuarantined=true;},'another pending result':h=>h.maintenance.pendingDeliveryCount++}))test(`poll drain never ignores ${name}`,async t=>{const f=fixture(t);f.healthMutator=h=>{if(h.connectionState==='draining'){h.pollingCount=1;change(h);}};await assert.rejects(f.make()(f.input),{code:'LOCAL_HISTORY_STOP_RECOVERY_REFUSED'});assert.equal(f.kills,0);assert.deepEqual(fs.readFileSync(f.stateFile),f.raw);});

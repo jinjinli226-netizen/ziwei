@@ -1,5 +1,5 @@
 {
-  "phase": "deep-phone-followup-tested-M-not-published",
+  "phase": "polling-race-tested-N-published-device-still-H",
   "deviceId": "device_bfd9a3d2-c2cc-4a36-8bd8-465bea492493",
   "oldPid": 40628,
   "oldBuild": "bfc96edf59be31f1be50d3878a12d6c37d154fa108ef37c7a0d7d41ee7511927",
@@ -36,5 +36,14 @@
   "deepPhoneTargetedPassed": 91,
   "fullRealResultPureShapeAccepted": true,
   "realBusinessStateUnchanged": true,
-  "originalTreeConfirmedStillFalse": true
+  "originalTreeConfirmedStillFalse": true,
+  "NCommit": "c897b68593655624a839c115158ce2ccbcaf83fc",
+  "NPublished": true,
+  "NRequestId": "client-update_38de2d53-476c-4537-a67e-e90a9ab80f6d",
+  "NState": "failed",
+  "NFailurePhase": "holder_revalidation",
+  "nativeIdentityAllMatched": true,
+  "pollingRaceObserved": true,
+  "pollingFocusPassed": 94,
+  "pollingIndependentPassed": 94
 }

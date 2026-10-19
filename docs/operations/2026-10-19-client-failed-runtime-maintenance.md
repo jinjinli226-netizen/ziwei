@@ -17,3 +17,8 @@ L `2a801ef702bd3deb16ba76f37b52d07db9782e09` 已推GitHub并发布客户端：bu
 
 
 M `e0fa8e2a4e265e678e82d948b289dc69c62bd2d9` 只准备了包和发布stage，未执行发布。现场只读诊断进一步确认：旧回执包含手机工具深层 executing/uncertain 状态，原纯判定即使归一code仍拒绝。补齐严格同workspace/employee/action/runtime/profile的已加载ziwei-terminal业务子树局部判定：仅本地legacy业务状态检查省略该手机子树，完整原视图仍检查任意嵌套本机exit/native/control/quarantine。使用完整真实原结果形状的本地纯探针通过，原数据不变；含深层状态、scope错绑、子树未知进程/控制状态的91项回归全通过。不会先把未通过真实形状的M发到设备。
+
+
+N `c897b68593655624a839c115158ce2ccbcaf83fc` 已先推GitHub后发布；build `a39048706e304e6292a9e7efa41abd5e571c3a2c0bdd1ab1e2b0b65ea9364d64`，只换客户端下载，API/UI仍J。真实升级 `client-update_38de2d53-476c-4537-a67e-e90a9ab80f6d` 在holder_revalidation拒绝；设备仍H/PID40628，没有安装成功。真实Windows扫描已接受原失败回执：retainedFailedBackgroundCount=1、retainedPendingCount=1；formal与原业务状态不改写。
+
+精确只读诊断 `action_eafcad29-bc45-47d4-999e-e1eba64e7d26` 成功：唯一本安装daemon、四项原生身份、config/build/listener全匹配；正常polling前1后0。旧逻辑在暂停接单前长时间查询原生身份，期间新轮询启动会被误拒。后续候选在pause前仅容许0..已绑定连接数的整数polling，active/quarantine/Gateway及精确pending条件不放宽；先pause，再最多15秒等被中止的polling退出，最终与原生停止仍要求polling=0。超时不kill；原实例与业务状态仍匹配时恢复连接。3个竞态夹具在N先红，修复后连同历史回归94/94通过，独立复核同样94/94。候选包发布不等于设备升级或D盘验收通过，结果待追加。
