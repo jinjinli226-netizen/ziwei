@@ -9,3 +9,8 @@
 候选恢复沿原官方更新器：两次健康和文件快照/hash、暂停接单后精确pending数相等、原生清单只有精确daemon、持有真实Process句柄验证无直接子进程后停止；停止后核对进程/监听均空。仅证明本次daemon停止，回执仍originalExecutionExitConfirmed:false，不补造历史业务退出。
 
 定向新旧本地恢复78/78、未来清理相关15/15通过；独审93项82通过/9 Windows条件跳过/2项原HEAD同样失败（Mac路径与ENOENT差异）。Windows条件测试不是Mac真机通过。发布及真实升级和D盘新任务结果另行追加，不把候选测试或包发布当作设备安装完成。
+
+
+L `2a801ef702bd3deb16ba76f37b52d07db9782e09` 已推GitHub并发布客户端：build `27b255fb7b48777bcdedaf3c81eafe8518ac607ebd1b5eb3fbafa677d0e8b6bc`、SHA `577d1e4557014737a11620f83fe597382d3d13e4628afcd1fbf9090ace70fedf`。主控85项通过；Linux离线冷装与helper导入通过。真实请求 `client-update_f1fc8b9f-14cd-49fc-9f2d-50b023a86ebd` 又在stop_client/CONTROL_REJECTED失败，原H/PID40628保持，未停电脑或换安装。
+
+后续发现分类夹具用了executor_failed，而真实Hermes adapter返回runtime_failed，dispatcher会原样保留（而非统一改executor_failed）。补丁仅允许这两个已知码，不接受任意code；新夹具通过真实dispatcher接收runtime_failed先红后绿，另测无code默认executor_failed与未知码拒绝，定向80/80通过。后续候选发布与设备结果另记；原L失败保留，不用测试总数代替现场验收。

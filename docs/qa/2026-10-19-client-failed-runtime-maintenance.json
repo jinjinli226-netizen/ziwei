@@ -1,5 +1,5 @@
 {
-  "phase": "candidate-tested",
+  "phase": "L-published-device-attempt-failed-followup-tested",
   "deviceId": "device_bfd9a3d2-c2cc-4a36-8bd8-465bea492493",
   "oldPid": 40628,
   "oldBuild": "bfc96edf59be31f1be50d3878a12d6c37d154fa108ef37c7a0d7d41ee7511927",
@@ -14,8 +14,21 @@
   "originalBusinessReplayed": false,
   "originalJournalsRewritten": false,
   "formalPreservationRelaxed": false,
-  "validation": {"localHistoryFocusPassed": 78, "futureCleanupFocusPassed": 15, "independentPassed": 82, "independentWindowsSkipped": 9, "independentUnchangedBaselineFailures": 2},
-  "published": false,
+  "validation": {
+    "localHistoryFocusPassed": 78,
+    "futureCleanupFocusPassed": 15,
+    "independentPassed": 82,
+    "independentWindowsSkipped": 9,
+    "independentUnchangedBaselineFailures": 2
+  },
+  "published": true,
   "installed": false,
-  "postInstallEmployeeTestsPassed": false
+  "postInstallEmployeeTestsPassed": false,
+  "rootTargetedPassed": 85,
+  "followupTargetedPassed": 80,
+  "LCommit": "2a801ef702bd3deb16ba76f37b52d07db9782e09",
+  "LRequestId": "client-update_f1fc8b9f-14cd-49fc-9f2d-50b023a86ebd",
+  "LState": "failed",
+  "LReason": "CLIENT_UPDATE_CONTROL_REJECTED",
+  "followupReason": "actual dispatcher retains runtime_failed"
 }
