@@ -3,6 +3,7 @@ import asyncio
 import base64
 from dataclasses import asdict, is_dataclass
 import hashlib
+import importlib.util
 import json
 import math
 import os
@@ -164,7 +165,18 @@ def memory(op, args):
             'saved': op == 'write', 'mutation': result}
 
 
-def sessions(op, args):
+def sessions(op, args, context=None):
+    if op == 'compress':
+        # Reuse the installed CLI's exact Profile, credential resolution and
+        # canonical /compress core. No business turn or custom transcript edit.
+        import hermes_cli
+        module = importlib.util.spec_from_file_location('ziwei_official_compression', Path(__file__).with_name('hermes-official-compression.py'))
+        compression = importlib.util.module_from_spec(module)
+        module.loader.exec_module(compression)
+        try:
+            return compression.compress_session(args, context or {}, native_root=Path(hermes_cli.__file__).resolve().parent.parent)
+        except compression.OfficialCompressionError as error:
+            raise NativeOperationError(str(error)) from None
     from hermes_state import SessionDB
     from tools.session_search_tool import session_search
     path = home_path('state.db')
@@ -650,7 +662,7 @@ def run_operation(request, context):
                 sid = native_session(context, create=False)
                 prior_heartbeat = plain(load_heartbeat(sid)) if sid else None
         if resource == 'memory': data = memory(op, args)
-        elif resource == 'sessions': data = sessions(op, args)
+        elif resource == 'sessions': data = sessions(op, args, context)
         elif resource == 'skills': data = skills(op, args, request_id)
         elif resource == 'mcp':
             try:
@@ -676,6 +688,8 @@ def run_operation(request, context):
             if not pending_db.get_meta(pending_key): raise NativeOperationError('DRIVER_CLAIM_NOT_SAVED')
         import hermes_cli
         status = 'requires_authorization' if isinstance(data, dict) and (data.get('requiresReview') or (data.get('mutation') or {}).get('staged')) else 'succeeded'
+        if resource == 'sessions' and op == 'compress' and not (data.get('preview') or data.get('safeToContinue')):
+            return {'schemaVersion': 2, 'resource': resource, 'operation': op, 'employeeId': context['employeeId'], 'revision': context['revision'], 'nativeVersion': hermes_cli.__version__, 'status': 'failed', 'code': 'HERMES_COMPRESSION_NOT_RECOVERED', 'data': data}
         return {'schemaVersion': 2, 'resource': resource, 'operation': op, 'employeeId': context['employeeId'], 'revision': context['revision'], 'nativeVersion': hermes_cli.__version__, 'status': status, 'data': data}
     finally:
         if pending_db is not None:

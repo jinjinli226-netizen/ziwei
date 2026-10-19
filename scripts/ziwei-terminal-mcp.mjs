@@ -101,7 +101,20 @@ function privateConfig(options) {
   const expected = `/terminal-mcp/v1/workspaces/${encodeURIComponent(workspace)}/employees/${encodeURIComponent(employeeId)}`;
   if (base.pathname.replace(/\/$/, '') !== expected) throw new Error('手机 MCP API 与员工/工作区 scope 不匹配');
   if (new URL(saved.baseUrl).origin !== base.origin) throw new Error('手机 MCP capability 与 API 必须同源');
-  return { token, workspace, employeeId, deviceId, expiresAt, baseUrl: base.toString().replace(/\/$/, '') };
+  const actionId = typeof saved.actionId === 'string' && /^[A-Za-z0-9_-][A-Za-z0-9._:-]{0,199}$/.test(saved.actionId) ? saved.actionId : null;
+  return { token, workspace, employeeId, deviceId, actionId, expiresAt, baseUrl: base.toString().replace(/\/$/, '') };
+}
+
+// Only the capability endpoint can attest that it rejected this exact tool
+// before dispatch. HTTP status or error text alone cannot establish that fact.
+function preDispatchRejection(value, config, toolName) {
+  const proof = value?.phoneDispatch;
+  const keys = ['schemaVersion', 'kind', 'state', 'phase', 'dispatchAttempted', 'workspace', 'employeeId', 'deviceId', 'actionId', 'toolName', 'code'];
+  return Boolean(proof && typeof proof === 'object' && !Array.isArray(proof) && Object.keys(proof).length === keys.length && keys.every(key => Object.hasOwn(proof, key))
+    && proof.schemaVersion === 1 && proof.kind === 'phone.pre_dispatch_rejected' && proof.state === 'not_started' && proof.phase === 'pre_dispatch' && proof.dispatchAttempted === false
+    && config.actionId && proof.workspace === config.workspace && proof.employeeId === config.employeeId && proof.deviceId === config.deviceId && proof.actionId === config.actionId && proof.toolName === toolName
+    && typeof proof.code === 'string' && /^[A-Z][A-Z0-9_]{0,99}$/.test(proof.code) && value.code === proof.code
+    && !['command', 'commandId', 'command_id', 'update', 'updateId', 'update_id', 'run'].some(key => Object.hasOwn(value, key)));
 }
 
 export function createTerminalMcpClient(options = {}) {
@@ -128,7 +141,10 @@ export function createTerminalMcpClient(options = {}) {
           let value;
           try { value = await response.json(); }
           catch { throw Object.assign(new Error('手机 MCP 响应无法解析；系统仅继续读取原回执和当前页面，不重放动作'), { phoneExecutionState: 'uncertain', retryableRead: true }); }
-          if (!response.ok) throw Object.assign(new Error(scrub(value?.error || value?.message || `手机 MCP HTTP ${response.status}`)), { phoneExecutionState: 'uncertain', retryableRead: response.status >= 500 });
+          if (!response.ok) {
+            const rejected = preDispatchRejection(value, config, name);
+            throw Object.assign(new Error(scrub(value?.error || value?.message || `手机 MCP HTTP ${response.status}`)), { phoneExecutionState: rejected ? 'not_started' : 'uncertain', ...(rejected ? { phoneErrorCode: value.code } : {}), retryableRead: !rejected && response.status >= 500 });
+          }
           return value;
         } catch (error) {
           // Only repeat observations. A POST /call can itself submit an action,
@@ -176,7 +192,7 @@ export async function handleTerminalJsonRpc(message, client) {
       }
     }
     return { jsonrpc: '2.0', id, result: { content, structuredContent: value, isError: false } };
-  } catch (error) { return { jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: error?.message || '手机 MCP 工具失败' }], structuredContent: { phoneExecution: { state: executionStates.has(error?.phoneExecutionState) ? error.phoneExecutionState : 'uncertain', retryAllowed: false, nextAction: 'observe', statusTool: 'ziwei_phone_status', observationTool: 'ziwei_phone_screenshot', ...(typeof message.params?.arguments?.commandId === 'string' ? { commandId: message.params.arguments.commandId, receiptTool: 'ziwei_phone_receipt' } : {}) } }, isError: true } }; }
+  } catch (error) { return { jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: error?.message || '手机 MCP 工具失败' }], structuredContent: { phoneExecution: { state: executionStates.has(error?.phoneExecutionState) ? error.phoneExecutionState : 'uncertain', ...(typeof error?.phoneErrorCode === 'string' && /^[A-Z][A-Z0-9_]{0,99}$/.test(error.phoneErrorCode) ? { errorCode: error.phoneErrorCode } : {}), retryAllowed: false, nextAction: 'observe', statusTool: 'ziwei_phone_status', observationTool: 'ziwei_phone_screenshot', ...(typeof message.params?.arguments?.commandId === 'string' ? { commandId: message.params.arguments.commandId, receiptTool: 'ziwei_phone_receipt' } : {}) } }, isError: true } }; }
 }
 
 export async function runTerminalStdio(options = {}) {

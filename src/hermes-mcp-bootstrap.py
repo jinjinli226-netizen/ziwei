@@ -744,6 +744,19 @@ def run():
                                        'status': item.get('status')} for item in statuses],
                           'externalModelCalls': 0}))
         return 0
+    # The installed Hermes owns summarization, transcript commits and any
+    # native session rotation. This bridge only invokes its canonical /compress
+    # core once after an actual typed context-overflow result, in this process.
+    if isolation and isolation.get('kind') == 'hermes-bot' and config.load_config().get('compression', {}).get('enabled', True) is not False:
+        spec = importlib.util.spec_from_file_location('ziwei_official_compression', Path(__file__).with_name('hermes-official-compression.py'))
+        compression = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(compression)
+        try:
+            compression.install(str(Path(current['paths']['main']).parent.parent), maintenance_control=maintenance_control)
+        except (compression.OfficialCompressionError, ImportError, AttributeError):
+            # Unsupported ABIs keep the native failure path; they cannot be
+            # mistaken for successful recovery or break an ordinary valid turn.
+            print('ZIWEI_CONTEXT_RECOVERY:' + json.dumps({'schemaVersion': 1, 'phase': 'unsupported', 'code': 'HERMES_OFFICIAL_COMPRESSION_UNSUPPORTED'}), file=sys.stderr, flush=True)
     finish_maintenance = lambda: None
     if maintenance_control is not None:
         if config_only or native_operation or gateway_worker:

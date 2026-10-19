@@ -21,6 +21,15 @@ const terminalActions = new Set(['health', 'screenshot', 'tap', 'swipe', 'text',
 const commandStatuses = new Set(['queued', 'delivered', 'executing', 'succeeded', 'failed', 'cancelled', 'expired', 'uncertain', 'acknowledged']);
 const settledCommandStatuses = new Set(['succeeded', 'failed', 'cancelled', 'expired', 'acknowledged']);
 const commandStatus = command => commandStatuses.has(command?.status) ? command.status : 'queued';
+const commandPreDispatchRejections = new WeakMap();
+// A private transport provenance marker. A downstream Error with similarly
+// named public properties is not evidence that its command was never created.
+export const phoneCommandPreDispatchRejection = error => commandPreDispatchRejections.get(error) || null;
+const commandPreconditionProof = (error,deviceId,action) => {
+  const body=error?.details,proof=body?.submission;
+  if(error?.status!==409 || !body || typeof body!=='object' || Array.isArray(body) || Object.keys(body).length!==3 || !['message','code','submission'].every(key=>Object.hasOwn(body,key)) || typeof body.message!=='string' || body.code!=='ANDROID_COMMAND_PRECONDITION_FAILED' || !proof || typeof proof!=='object' || Array.isArray(proof) || Object.keys(proof).length!==4 || !['state','commandCreated','action','deviceId'].every(key=>Object.hasOwn(proof,key)) || proof.state!=='not_dispatched' || proof.commandCreated!==false || proof.action!==action || proof.deviceId!==deviceId)return null;
+  return {code:body.code,submission:{state:'not_dispatched',commandCreated:false,action,deviceId}};
+};
 const terminalId = value => {
   let decoded;
   try { decoded = decodeURIComponent(value); } catch { throw externalError('终端标识无效', 400); }
@@ -376,7 +385,16 @@ export function createZiweiConnect(repo, options = {}) {
         return outputRun(row);
       }
       try {
-        const commandPayload = await request(`/android-devices/${encodeURIComponent(deviceId)}/commands`, { method: 'POST', body: JSON.stringify({ action, args: input.args && typeof input.args === 'object' ? input.args : {} }) });
+        let commandPayload;
+        try {
+          commandPayload = await request(`/android-devices/${encodeURIComponent(deviceId)}/commands`, { method: 'POST', body: JSON.stringify({ action, args: input.args && typeof input.args === 'object' ? input.args : {} }) });
+        } catch(error) {
+          // Only the exact command-submission response can carry this proof.
+          // The same status/code from a later receipt read must remain unknown.
+          const rejected=commandPreconditionProof(error,deviceId,action);
+          if(rejected)commandPreDispatchRejections.set(error,rejected);
+          throw error;
+        }
         const commandId = commandPayload.command?.id || commandPayload.id || null;
         if (!commandId) throw externalError('紫薇·互联未返回 command_id', 502, commandPayload);
         db.prepare('UPDATE ziwei_connect_runs SET command_id=?,updated_at=? WHERE id=?').run(commandId, now(), runId);
@@ -396,7 +414,8 @@ export function createZiweiConnect(repo, options = {}) {
         row=db.prepare('SELECT * FROM ziwei_connect_runs WHERE id=?').get(runId);
         const uncertain=Boolean(row.command_id) || !error.status || error.status>=500;
         if(uncertain && !row.command_id) error.message=`手机命令提交结果不确定，勿重复提交；运行记录 ${runId}，请读取手机状态核对：${error.message}`;
-        row = updateRun(row, { status: uncertain?'uncertain':'failed', error: error.message });
+        const rejected=phoneCommandPreDispatchRejection(error);
+        row = updateRun(row, { status: uncertain?'uncertain':'failed', ...(rejected?{result:rejected}:{}), error: error.message });
         notify(slug, `ziwei_connect.run.${row.status}`, { runId, employeeId, deviceId, accountId: binding.account_id, commandId: row.command_id, status: row.status, error: error.message });
         error.run = outputRun(row);
         throw error;

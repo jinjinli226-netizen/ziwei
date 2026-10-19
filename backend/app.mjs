@@ -394,7 +394,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
     try {const credential=repo.authenticateDeviceToken(deviceTokenFromRequest(req),{workspaceSlug:req.params.slug});res.setHeader('Cache-Control','no-store');res.json(phoneMcp.bootstrap(req.params.slug,req.body || {},credential));}catch(error){next(error);}
   });
   app.post('/terminal-mcp/v1/workspaces/:slug/employees/:id/call', async(req,res,next)=>{
-    try{res.setHeader('Cache-Control','no-store');res.json(await phoneMcp.call(req.params.slug,req.params.id,tokenFromRequest(req),req.body || {}));}catch(error){next(error);}
+    try{res.setHeader('Cache-Control','no-store');res.json(await phoneMcp.call(req.params.slug,req.params.id,tokenFromRequest(req),req.body || {}));}catch(error){const rejected=phoneMcp.callFailure(error);if(rejected)return res.status(Number(error.status)>=400&&Number(error.status)<=599?Number(error.status):400).json(rejected);next(error);}
   });
   app.use('/api', sessionMiddleware(auth, { bypass: authBypass }));
   app.use('/api/workspaces/:slug', workspaceMembershipGuard(auth, { bypass: authBypass }));

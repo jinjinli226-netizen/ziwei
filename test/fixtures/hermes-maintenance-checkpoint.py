@@ -336,6 +336,23 @@ class Checkpoints(unittest.TestCase):
         before = audit.read_bytes()
         self.assertTrue(bridge.external_receipts_ready({'phone': str(audit)}))
         self.assertEqual(audit.read_bytes(), before)
+    def test_phone_control_enrollment_and_unknown_tools_cannot_claim_completed_work(self):
+        audit = self.control / 'phone.jsonl'
+        handshake = {'method': 'initialize', 'ok': True}
+        for name in ('ziwei_phone_control', 'ziwei_enrollment_approve', 'unknown_tool', None):
+            for ok in (False, True):
+                with self.subTest(tool=name, ok=ok):
+                    row = {'method': 'tools/call', 'toolName': name, 'ok': ok,
+                           'commandStatus': 'succeeded', 'commandExecutionState': 'not_started'}
+                    audit.write_text(''.join(json.dumps(item) + '\n' for item in (handshake, row)))
+                    before = audit.read_bytes()
+                    self.assertFalse(bridge.external_receipts_ready({'phone': str(audit)}))
+                    self.assertEqual(audit.read_bytes(), before)
+        for name in ('ziwei_phone_list', 'ziwei_phone_status', 'ziwei_phone_receipt',
+                     'ziwei_phone_wait', 'ziwei_enrollment_pending'):
+            audit.write_text(''.join(json.dumps(item) + '\n' for item in
+                                    (handshake, {'method': 'tools/call', 'toolName': name, 'ok': False})))
+            self.assertTrue(bridge.external_receipts_ready({'phone': str(audit)}))
     def test_missing_session_and_pending_tool_result_are_not_checkpoints(self):
         with self.assertRaises(bridge.CheckpointError):
             bridge.session_snapshot(self.home, 'missing-session')

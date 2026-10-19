@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { readA2AToken, safeTokenEqual } from './a2a-auth.mjs';
 import { actionExecutionTimeoutMs } from '../src/action-execution-budget.mjs';
+import {phoneCommandPreDispatchRejection} from './ziwei-connect.mjs';
 
 const at = () => new Date().toISOString();
 const parse = (value, fallback = {}) => { try { return JSON.parse(value) ?? fallback; } catch { return fallback; } };
@@ -11,6 +12,10 @@ const keyFor = options => crypto.createHash('sha256').update(options.phoneMcpSec
 
 export function createPhoneMcpService(repo, connect, management, options = {}) {
   const db=repo.db; const key=keyFor(options);
+  // These proofs are minted only by this call boundary, never copied from
+  // arbitrary error properties or an upstream response.
+  const callRejections = new WeakMap();
+  const callFailure = error => callRejections.get(error) || null;
   const publicBase=String(options.publicApiBase || process.env.ZIWEI_APP_URL || 'https://qzelynth.top').replace(/\/$/,'');
   const ws = slug => { const item=repo.getWorkspace(slug); if(!item) fail('工作区不存在','WORKSPACE_NOT_FOUND',404); return item; };
   const employee = (slug,id,context={}) => {
@@ -96,25 +101,40 @@ export function createPhoneMcpService(repo, connect, management, options = {}) {
     const capability={workspace:slug,employeeId:id,deviceId:cfg.phone_device_id,actionId:action.id,computerDeviceId:credential.deviceId,credentialId:credential.credentialId,revision:cfg.revision,checkOnly:action.payload.terminalMcp.checkOnly===true,expiresAt};
     return {...capability,token:sign(capability),baseUrl:`${publicBase}/terminal-mcp/v1/workspaces/${encodeURIComponent(slug)}/employees/${encodeURIComponent(id)}`};
   };
-  const authorize = (slug,id,token) => {
+  const authorize = (slug,id,token,onVerified = () => {}) => {
     repo.preservation?.assert({employeeId:id});
     const [body,signature,...extra]=String(token || '').split('.');if(extra.length || !body || !signature || !safeTokenEqual(signature,crypto.createHmac('sha256',key).update(body).digest('base64url'))) fail('需要有效的员工手机执行凭据','PHONE_CAPABILITY_INVALID',401);
-    const cap=parse(Buffer.from(body,'base64url').toString());if(cap.workspace!==slug || cap.employeeId!==id || Date.parse(cap.expiresAt)<=Date.now()) fail('手机执行凭据已过期或超出员工/工作区scope','PHONE_CAPABILITY_SCOPE',403);
+    const cap=parse(Buffer.from(body,'base64url').toString());if(cap.workspace!==slug || cap.employeeId!==id) fail('手机执行凭据已过期或超出员工/工作区scope','PHONE_CAPABILITY_SCOPE',403);
+    onVerified(cap);
+    if(Date.parse(cap.expiresAt)<=Date.now()) fail('手机执行凭据已过期或超出员工/工作区scope','PHONE_CAPABILITY_SCOPE',403);
     const cfg=configuration(slug,id);const action=repo.getA2AAction(cap.actionId,{workspaceSlug:slug});const credential=db.prepare('SELECT revoked_at FROM device_credentials WHERE id=? AND device_id=?').get(cap.credentialId,cap.computerDeviceId);
     const executionExpiresAt=action ? actionExpiry(slug,action.id) : NaN;
     if(!credential || credential.revoked_at || !cfg.enabled || cfg.revision!==cap.revision || cfg.phone_device_id!==cap.deviceId || cfg.target_device_id!==cap.computerDeviceId || !action || !['pending','acked'].includes(action.status) || !Number.isFinite(executionExpiresAt) || executionExpiresAt<=Date.now()) fail('手机配置已改变、卸载或执行已结束，请重新发起员工执行','PHONE_CAPABILITY_REVOKED',403);
     return cap;
   };
   const call = async (slug,id,token,input) => {
-    const cap=authorize(slug,id,token);const {toolDefinitions}=await import('../scripts/ziwei-terminal-mcp.mjs');const definition=toolDefinitions.find(row=>row.name===input?.name);
-    if(!definition) fail('未知手机工具','PHONE_TOOL_UNKNOWN');const args=input.arguments ?? {};
-    if(!args || typeof args!=='object'||Array.isArray(args)) fail('工具参数必须是对象','PHONE_TOOL_ARGUMENTS');
-    for(const name of Object.keys(args)) if(!Object.hasOwn(definition.inputSchema.properties,name)) fail('工具包含未授权参数','PHONE_TOOL_ARGUMENTS');
-    for(const name of definition.inputSchema.required || []) if(!Object.hasOwn(args,name)) fail(`缺少工具参数 ${name}`,'PHONE_TOOL_ARGUMENTS');
-    for(const [name,value] of Object.entries(args)) {const s=definition.inputSchema.properties[name];if(s.enum && !s.enum.includes(value)) fail(`${name} 无效`,'PHONE_TOOL_ARGUMENTS');if(s.type==='string' && (typeof value!=='string'||!value.trim()||value.length>200)) fail(`${name} 无效`,'PHONE_TOOL_ARGUMENTS');if(s.type==='integer' && (!Number.isSafeInteger(value)||value<(s.minimum??0)||value>(s.maximum??Number.MAX_SAFE_INTEGER))) fail(`${name} 无效`,'PHONE_TOOL_ARGUMENTS');if(s.type==='object' && (!value || typeof value!=='object'||Array.isArray(value))) fail(`${name} 必须是对象`,'PHONE_TOOL_ARGUMENTS');}
-    if(args.deviceId && args.deviceId!==cap.deviceId) fail('手机工具只能访问明确绑定的手机','PHONE_DEVICE_SCOPE',403);
-    if(cap.checkOnly && !['ziwei_phone_list','ziwei_phone_status'].includes(input.name)) fail('本次检测仅授权工具发现和读取状态','PHONE_CHECK_SCOPE',403);
-    return connect.toolCall(slug,{employeeId:id,phoneDeviceId:cap.deviceId,actionId:cap.actionId,configurationRevision:cap.revision},input.name,args);
+    let cap, dispatchEntered=false;
+    try {
+      authorize(slug,id,token,value=>{cap=value;});const {toolDefinitions}=await import('../scripts/ziwei-terminal-mcp.mjs');const definition=toolDefinitions.find(row=>row.name===input?.name);
+      if(!definition) fail('未知手机工具','PHONE_TOOL_UNKNOWN');const args=input.arguments ?? {};
+      if(!args || typeof args!=='object'||Array.isArray(args)) fail('工具参数必须是对象','PHONE_TOOL_ARGUMENTS');
+      for(const name of Object.keys(args)) if(!Object.hasOwn(definition.inputSchema.properties,name)) fail('工具包含未授权参数','PHONE_TOOL_ARGUMENTS');
+      for(const name of definition.inputSchema.required || []) if(!Object.hasOwn(args,name)) fail(`缺少工具参数 ${name}`,'PHONE_TOOL_ARGUMENTS');
+      for(const [name,value] of Object.entries(args)) {const s=definition.inputSchema.properties[name];if(s.enum && !s.enum.includes(value)) fail(`${name} 无效`,'PHONE_TOOL_ARGUMENTS');if(s.type==='string' && (typeof value!=='string'||!value.trim()||value.length>200)) fail(`${name} 无效`,'PHONE_TOOL_ARGUMENTS');if(s.type==='integer' && (!Number.isSafeInteger(value)||value<(s.minimum??0)||value>(s.maximum??Number.MAX_SAFE_INTEGER))) fail(`${name} 无效`,'PHONE_TOOL_ARGUMENTS');if(s.type==='object' && (!value || typeof value!=='object'||Array.isArray(value))) fail(`${name} 必须是对象`,'PHONE_TOOL_ARGUMENTS');}
+      if(args.deviceId && args.deviceId!==cap.deviceId) fail('手机工具只能访问明确绑定的手机','PHONE_DEVICE_SCOPE',403);
+      if(cap.checkOnly && !['ziwei_phone_list','ziwei_phone_status'].includes(input.name)) fail('本次检测仅授权工具发现和读取状态','PHONE_CHECK_SCOPE',403);
+      dispatchEntered=true;
+      return await connect.toolCall(slug,{employeeId:id,phoneDeviceId:cap.deviceId,actionId:cap.actionId,configurationRevision:cap.revision},input.name,args);
+    } catch(error) {
+      callRejections.delete(error);
+      const upstream=phoneCommandPreDispatchRejection(error);
+      const rejectedCommand=upstream && cap && upstream.submission.deviceId===cap.deviceId && (input?.name==='ziwei_phone_screenshot' && upstream.submission.action==='screenshot' || input?.name==='ziwei_phone_action' && upstream.submission.action===input.arguments?.action);
+      if(error && typeof error==='object' && (!dispatchEntered || rejectedCommand) && cap && typeof input?.name==='string' && /^[a-z_]{1,100}$/.test(input.name) && ['workspace','employeeId','deviceId','actionId'].every(field=>typeof cap[field]==='string' && cap[field])) {
+        const code=rejectedCommand?upstream.code:typeof error.code==='string' && /^[A-Z][A-Z0-9_]{0,99}$/.test(error.code)?error.code:'PHONE_PRE_DISPATCH_REJECTED';
+        callRejections.set(error,{error:error.message,code,phoneDispatch:{schemaVersion:1,kind:'phone.pre_dispatch_rejected',state:'not_started',phase:'pre_dispatch',dispatchAttempted:false,workspace:cap.workspace,employeeId:cap.employeeId,deviceId:cap.deviceId,actionId:cap.actionId,toolName:input.name,code}});
+      }
+      throw error;
+    }
   };
   const encrypt = value => {const iv=crypto.randomBytes(12);const cipher=crypto.createCipheriv('aes-256-gcm',key,iv);const data=Buffer.concat([cipher.update(JSON.stringify(value)),cipher.final()]);return JSON.stringify({iv:iv.toString('base64'),tag:cipher.getAuthTag().toString('base64'),data:data.toString('base64')});};
   const decrypt = value => {const c=parse(value);const decipher=crypto.createDecipheriv('aes-256-gcm',key,Buffer.from(c.iv,'base64'));decipher.setAuthTag(Buffer.from(c.tag,'base64'));return JSON.parse(Buffer.concat([decipher.update(Buffer.from(c.data,'base64')),decipher.final()]).toString());};
@@ -134,5 +154,5 @@ export function createPhoneMcpService(repo, connect, management, options = {}) {
     const token=`zwd_${crypto.randomBytes(32).toString('base64url')}`;const result={workspace:g.workspace,deviceId:g.target_device_id,deviceToken:token,apiBase:publicBase};
     db.exec('SAVEPOINT workspace_claim');try{db.prepare('INSERT INTO device_credentials(id,device_id,workspace_id,token_hash,token_prefix,created_at) VALUES(?,?,?,?,?,?)').run(`device-credential_${crypto.randomUUID()}`,g.target_device_id,g.target_workspace_id,crypto.createHash('sha256').update(token).digest('hex'),token.slice(0,12),at());db.prepare('UPDATE device_workspace_grants SET secret_json=?,claimed_at=? WHERE id=?').run(encrypt(result),at(),id);db.exec('RELEASE workspace_claim');return result;}catch(error){db.exec('ROLLBACK TO workspace_claim');db.exec('RELEASE workspace_claim');throw error;}
   };
-  return {configuration,save,status,trial,bootstrap,call,grants,grant,claim,async setup(slug,context={}){let phones=[],api={status:'healthy',error:null};try{phones=await connect.listDevices();}catch(error){api={status:'unavailable',error:error.message};}return{workspace:slug,skill:skill(slug),computers:management.discovery(slug,{...context,userId:context.actorUserId ?? context.userId}).devices,phones,employees:repo.listEmployees(slug,context).filter(row=>!context.deviceScope || row.target_device_id===context.deviceScope).map(row=>({...row,phone_mcp:configuration(slug,row.id,context)})),api};}};
+  return {configuration,save,status,trial,bootstrap,call,callFailure,grants,grant,claim,async setup(slug,context={}){let phones=[],api={status:'healthy',error:null};try{phones=await connect.listDevices();}catch(error){api={status:'unavailable',error:error.message};}return{workspace:slug,skill:skill(slug),computers:management.discovery(slug,{...context,userId:context.actorUserId ?? context.userId}).devices,phones,employees:repo.listEmployees(slug,context).filter(row=>!context.deviceScope || row.target_device_id===context.deviceScope).map(row=>({...row,phone_mcp:configuration(slug,row.id,context)})),api};}};
 }

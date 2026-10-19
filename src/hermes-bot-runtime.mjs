@@ -12,6 +12,30 @@ function noLink(file) {try{if(fs.lstatSync(file).isSymbolicLink())throw botFailu
 function write(file,text) {noLink(file);const tmp=`${file}.${randomUUID()}.tmp`;try{fs.writeFileSync(tmp,text,{flag:'wx',mode:0o600});fs.renameSync(tmp,file);}finally{try{fs.unlinkSync(tmp);}catch{}}}
 function readConfig(file) {const document=parseDocument(fs.readFileSync(file,'utf8'));const value=document.toJSON();if(document.errors.length||!value||typeof value!=='object'||Array.isArray(value))throw botFailure('BOT_SOURCE_INVALID','来源 profile config.yaml 无效');return value;}
 
+// Public native compression policy only. Source provider secrets remain in
+// their existing authentication store and never enter a derived Bot config.
+function nativeCompressionPolicy(source,model) {
+  const raw=source.compression;
+  if(raw!==undefined&&(!raw||typeof raw!=='object'||Array.isArray(raw)))throw botFailure('BOT_SOURCE_INVALID','来源 Profile 的 compression 必须为配置对象');
+  const publicScalar=value=>{if(value===null||typeof value==='boolean'||typeof value==='string'||typeof value==='number'&&Number.isFinite(value))return value;throw botFailure('BOT_SOURCE_INVALID','来源 Profile 的公开压缩设置须为标量，不能含嵌套凭据');};
+  const keys=['enabled','threshold','threshold_tokens','target_ratio','tail_mode','protect_last_n','protect_first_n','min_tail_user_messages','in_place','idle_compact_after_seconds','hygiene_hard_message_limit','hygiene_timeout_seconds','hygiene_total_ceiling_seconds','hygiene_max_turn_hold_seconds','hygiene_failure_cooldown_seconds','context_timeout_seconds','context_total_ceiling_seconds','codex_gpt55_autoraise','codex_gpt55_autoraise_notice','codex_app_server_auto','codex_responses_native','codex_responses_compact_threshold','abort_on_summary_failure','proactive_prune_tokens','proactive_prune_min_result_chars','proactive_prune_min_reclaim_tokens','progress_notices'];
+  const compression={enabled:true,in_place:true,tail_mode:'lean',threshold_tokens:128000,...Object.fromEntries(keys.filter(key=>Object.hasOwn(raw||{},key)).map(key=>[key,publicScalar(raw[key])]))};
+  if(raw?.model_thresholds!==undefined){
+    const thresholds=raw.model_thresholds;
+    if(!thresholds||typeof thresholds!=='object'||Array.isArray(thresholds)||Object.entries(thresholds).some(([key,value])=>!key||key.length>200||typeof value!=='number'||!Number.isFinite(value)))throw botFailure('BOT_SOURCE_INVALID','来源 Profile 的 model_thresholds 必须为模型到阈值的映射');
+    compression.model_thresholds={...thresholds};
+  }
+  const original=source.auxiliary?.compression;
+  if(original!==undefined&&(!original||typeof original!=='object'||Array.isArray(original)))throw botFailure('BOT_SOURCE_INVALID','来源 Profile 的 auxiliary.compression 必须为配置对象');
+  const route=value=>Object.fromEntries(['provider','model','api_mode','timeout','no_progress_timeout'].filter(key=>Object.hasOwn(value||{},key)).map(key=>[key,publicScalar(value[key])]));
+  const auxiliary={provider:'main',model,...route(original)};
+  if(original?.fallback_chain!==undefined){
+    if(!Array.isArray(original.fallback_chain)||original.fallback_chain.some(value=>!value||typeof value!=='object'||Array.isArray(value)))throw botFailure('BOT_SOURCE_INVALID','来源 Profile 的压缩 fallback_chain 必须为配置对象数组');
+    auxiliary.fallback_chain=original.fallback_chain.map(route);
+  }
+  return{compression,auxiliary:{compression:auxiliary}};
+}
+
 export function ownedProfileMetadata({context,sourceHome,apiBase}) {
   const instance=context.instance;
   if(instance?.mode!=='owned_profile'||!/^bot-[a-z0-9_-]{1,58}$/.test(instance.profile || '')||! /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(instance.templateProfile || '')||! /^[A-Za-z0-9_-]{1,100}$/.test(instance.ownershipId || '')||context.sourceProfile!==instance.profile||!context.deviceId)throw botFailure('BOT_HOME_BINDING_CONFLICT','Bot 专属 Profile 身份无效');
@@ -59,6 +83,7 @@ export function prepareHermesBotHome({context,sourceHome,privateDirectory,worksp
   const native={
     model:{provider,default:model,...(endpoint?{base_url:endpoint}:{}),...(apiMode?{api_mode:apiMode}:{})},
     ...(custom?{providers:{[providerName]:Object.fromEntries(['base_url','api_mode','default_model','key_env','context_length'].filter(key=>custom[key]!==undefined).map(key=>[key,custom[key]]).concat([['discover_models',false]]))}}:{}),
+    ...nativeCompressionPolicy(sourceConfig,model),
     fallback_providers:[],updates:{check:false},...(sourceConfig.models_dev?.url?{models_dev:{url:sourceConfig.models_dev.url}}:{}),
     agent:{max_turns:effectiveBotMaxTurns(config),run_budget_seconds:NATIVE_LONG_TASK_TIMEOUT_MS / 1000,bot_mode_protocol:false,coding_context:'off',disabled_toolsets:readOnly?['all']:['cronjob','delegation','kanban'],...(config.reasoningEffort?{reasoning_effort:config.reasoningEffort}:{})},
     platform_toolsets:{cli:hermesBotToolsets(config)},

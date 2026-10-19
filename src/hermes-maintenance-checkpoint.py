@@ -110,10 +110,19 @@ def external_receipts_ready(audits):
         management = _audit_events(audits.get('management'))
         issued = {}
         submit_tools = {'ziwei_phone_action', 'ziwei_phone_screenshot', 'ziwei_phone_upgrade'}
+        read_tools = {'ziwei_phone_list', 'ziwei_phone_status', 'ziwei_phone_receipt',
+                      'ziwei_phone_wait', 'ziwei_enrollment_pending'}
         for row in phone or []:
             if row.get('method') != 'tools/call':
                 continue
-            submit = row.get('toolName') in submit_tools
+            name = row.get('toolName')
+            # Control changes, enrollment approval and future/unknown tools do
+            # not have a terminal command receipt in this audit format. Even
+            # ok=True only proves the RPC returned, not that no external work
+            # remains. Neither maintenance nor compression may infer otherwise.
+            if name not in read_tools | submit_tools:
+                return False
+            submit = name in submit_tools
             if submit and not any(row.get(key) for key in ('commandId', 'updateId')):
                 if row.get('commandExecutionState') != 'not_started':
                     return False
