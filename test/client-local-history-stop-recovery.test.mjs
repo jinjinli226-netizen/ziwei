@@ -12,6 +12,7 @@ import {inspectLocalDaemonMaintenanceFiles,scanNativeFiles} from '../backend/pre
 import {describeUpdateFailure,updateFailureResult} from '../scripts/client-update.mjs';
 import {createLocalHistoryStopRecovery,createLocalHistoryHandleTerminator,recoverLocalHistoryStopForUpdate,LOCAL_HISTORY_STOP_HANDLE_PROGRAM,LOCAL_HISTORY_NATIVE_RULES} from '../scripts/client-local-history-stop-recovery.mjs';
 
+function nativeStop(data,processes=[]){return{stopped:true,pid:data.pid,creationTime:data.creationTime,exitedAt:'2026-10-18T13:00:00.000Z',maintenanceCleanup:{schemaVersion:1,scope:'held-daemon-descendant-closure',rootPid:data.pid,rootCreationTime:data.creationTime,rootExitedAt:'2026-10-18T12:30:00.000Z',nonce:data.nonce,complete:true,descendantCount:processes.length,terminatedCount:processes.filter(row=>row.terminationRequested).length,processes}};}
 const sha=value=>createHash('sha256').update(value).digest('hex');
 function fixture(t){
  const root=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'ziwei-local-history-stop-'))),home=path.join(root,'home'),runtime=path.join(home,'runtime');fs.mkdirSync(runtime,{recursive:true});t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
@@ -21,7 +22,7 @@ function fixture(t){
  const health={service:'ziwei_user',agentId:'ziwei_user',pid:record.pid,clientBuild:build,workspace:config.workspace,deviceId:config.deviceId,connectionState:'connected',activeActionCount:0,pollingCount:0,quarantinedActionCount:0,executionQuarantined:false,connectionErrors:[],connections:[{workspace:config.workspace,deviceId:config.deviceId,primary:true}],lifecycle:{nonce:'test-nonce-for-exact-instance',root,configPath:file,configSha256:sha(fs.readFileSync(file)),runtimeDir:runtime,startedAt:record.creationTime,managedAuxiliaryCount:0},maintenance:{safe:false,stopSafe:false,pendingDeliveryCount:0,blockedDeliveryCount:3,gatewaySafe:true,gatewayWorkers:[],fileIssues:[{code:'ACTION_STATE_CORRUPT',path:stateFile}]}};
  const inspect=()=>{const names=fs.readdirSync(runtime).sort();const result={safe:false,stopSafe:true,stopIssues:[],retainedHistoryCount:1,retainedDeliveryCount:3,retainedBackgroundCount:0,issues:[{code:'LOCAL_HISTORY_RETAINED',path:stateFile,actionId:'original-orphan'},{code:'DELIVERY_NOT_DRAINED',path:stateFile}],files:names.map(name=>{const p=path.join(runtime,name),bytes=fs.readFileSync(p);return{path:p,exists:true,sha256:sha(bytes),bytes:bytes.length};}),directories:[{path:runtime,exists:true,names}]};scanMutator?.(result);return result;};
  const fetchImpl=async(url,options={})=>{assert.equal(new URL(url).origin,'http://127.0.0.1:20242');if(!running)throw Object.assign(Error('offline'),{code:'ECONNREFUSED'});if(options.method==='POST'){assert.equal(options.headers['x-ziwei-local-control'],config.deviceToken);const body=JSON.parse(options.body);assert.equal(body.nonce,health.lifecycle.nonce);assert(['pause','resume'].includes(body.operation));paused=body.operation==='pause';}const result=structuredClone(health);result.connectionState=paused?'draining':health.connectionState;healthMutator?.(result);return{ok:true,json:async()=>result};};
- const make=(overrides={})=>createLocalHistoryStopRecovery({platform:'win32',inspect,inspectProcess:async()=>running?structuredClone(record):null,inspectListener:async()=>({listenerPid:record.pid}),inspectInstalledProcesses:async()=>running?[structuredClone(record)]:[],inspectListenerCount:async()=>running?1:0,installedBuild:()=>build,terminate:async data=>{kills++;terminateData=data;running=false;const result={stopped:true,pid:record.pid,creationTime:record.creationTime,exitedAt:'2026-10-18T13:00:00.000Z'};fs.writeFileSync(data.exitFile,JSON.stringify(result));return result;},checkpoint:(...args)=>checkpoint(...args),...overrides});
+ const make=(overrides={})=>createLocalHistoryStopRecovery({platform:'win32',inspect,inspectProcess:async()=>running?structuredClone(record):null,inspectListener:async()=>({listenerPid:record.pid}),inspectInstalledProcesses:async()=>running?[structuredClone(record)]:[],inspectListenerCount:async()=>running?1:0,installedBuild:()=>build,terminate:async data=>{kills++;terminateData=data;running=false;const result=nativeStop(data);fs.writeFileSync(data.exitFile,JSON.stringify(result));return result;},checkpoint:(...args)=>checkpoint(...args),...overrides});
  return{root,home,runtime,file,stateFile,state,raw,health,record,build,inspect,input:{root,env:{ZIWEI_USER_HOME:home},configPath:file,fetchImpl},make,set scanMutator(value){scanMutator=value;},set healthMutator(value){healthMutator=value;},set checkpoint(value){checkpoint=value;},get paused(){return paused;},get kills(){return kills;},get terminateData(){return terminateData;},markStopped(){running=false;}};
 }
 
@@ -40,7 +41,7 @@ test('the real candidate reader permits scoped orphan plus physically exited blo
 });
 
 for(const[name,mutate]of Object.entries({
- 'quarantine':f=>{f.health.quarantinedActionCount=1;},'execution quarantine':f=>{f.health.executionQuarantined=true;},'gateway worker':f=>{f.health.maintenance.gatewayWorkers=[{processAlive:false}];},'pending delivery':f=>{f.health.maintenance.pendingDeliveryCount=1;},'new client already supports normal stop':f=>{f.health.maintenance.stopSafe=true;},
+ 'quarantine':f=>{f.health.quarantinedActionCount=1;},'execution quarantine':f=>{f.health.executionQuarantined=true;},'gateway worker':f=>{f.health.maintenance.gatewayWorkers=[{processAlive:false}];},'pending delivery':f=>{f.health.maintenance.pendingDeliveryCount=1;},
  'true unsafe history':f=>{f.scanMutator=e=>{e.stopSafe=false;e.stopIssues=[{code:'STARTED_WITHOUT_RESULT'}];};},'unknown warning':f=>{f.scanMutator=e=>e.issues.push({code:'ACTION_STATE_CORRUPT'});},'unproven retained delivery':f=>{f.scanMutator=e=>{e.retainedDeliveryCount=0;};},'zero retained history':f=>{f.scanMutator=e=>{e.retainedHistoryCount=0;};},
 }))test(`candidate history fallback is not applicable to ${name}`,async t=>{const f=fixture(t);mutate(f);assert.deepEqual(await f.make()(f.input),{recovered:false,reason:'not_applicable'});assert.equal(f.kills,0);assert.deepEqual(fs.readFileSync(f.stateFile),f.raw);});
 
@@ -53,10 +54,11 @@ test('new files or changed native identity during private snapshot prevent stopp
 });
 test('native failure cannot expose raw credentials, output or private command',async t=>{const f=fixture(t);await assert.rejects(f.make({terminate:async()=>{throw Error('PRIVATE_SYNTHETIC_TOKEN raw-command');}})(f.input),error=>error.code==='LOCAL_HISTORY_STOP_RECOVERY_REFUSED'&&!/PRIVATE|raw-command/.test(error.message));assert.equal(f.paused,false);assert.deepEqual(fs.readFileSync(f.stateFile),f.raw);});
 test('candidate failure phases and updater diagnostics are bounded and contain no raw native output',async t=>{const f=fixture(t),events=[];let caught;try{await f.make({terminate:async()=>{throw Error('PRIVATE_SYNTHETIC_TOKEN C:/private/raw-command');}})({...f.input,log:(event,value)=>events.push({event,...value})});}catch(error){caught=error;}assert.equal(caught.code,'LOCAL_HISTORY_STOP_RECOVERY_REFUSED');assert.equal(caught.recoveryPhase,'terminate');assert.equal(caught.reasonCode,'EVIDENCE_MISMATCH');assert.deepEqual(events.at(-1),{event:'local_history_recovery_failed',phase:'terminate',reasonCode:'EVIDENCE_MISMATCH'});const diagnostic=describeUpdateFailure(caught,'recover_history');assert.equal(diagnostic.reasonCode,'LOCAL_HISTORY_STOP_RECOVERY_REFUSED');assert.equal(diagnostic.recoveryPhase,'terminate');assert.equal(diagnostic.recoveryReasonCode,'EVIDENCE_MISMATCH');assert.doesNotMatch(JSON.stringify({events,diagnostic}),/PRIVATE_SYNTHETIC_TOKEN|raw-command|C:\/private/);assert.equal(f.kills,0);});
-test('durable exact daemon-exit evidence survives a lost native response',async t=>{const f=fixture(t);await assert.rejects(f.make({terminate:async data=>{fs.writeFileSync(data.exitFile,JSON.stringify({stopped:true,pid:data.pid,creationTime:data.creationTime,exitedAt:'2026-10-18T13:00:00Z'}));throw Error('lost response');}})(f.input),error=>error.code==='LOCAL_HISTORY_STOP_RECOVERY_REFUSED'&&error.stoppedClientReceipt?.stopped===true&&error.stoppedClientReceipt.originalExecutionExitConfirmed===false);assert.deepEqual(fs.readFileSync(f.stateFile),f.raw);});
-for(const failureCode of ['PS_WORKER_EXITED','EACCES'])test(`a stopped daemon with ${failureCode} before its exit ledger is independently observed and update may continue`,async t=>{
- const f=fixture(t);let intent;const r=await f.make({terminate:async data=>{intent=JSON.parse(fs.readFileSync(path.join(path.dirname(data.exitFile),'termination-intent.json')));assert.equal(intent.process.pid,data.pid);assert.equal(intent.process.creationTime,data.creationTime);assert.equal(intent.nonce,data.nonce);f.markStopped();throw Object.assign(Error('raw native output'),{code:failureCode});}})(f.input);assert.equal(r.recovered,true);assert.equal(r.stopped,true);assert.equal(r.wasRunning,true);assert.equal(r.daemonAbsenceObserved,true);assert.equal(r.stopObservationPersisted,true);assert.equal(r.originalExecutionExitConfirmed,false);assert.equal(r.executionConfirmedStopped,false);assert.equal(fs.existsSync(path.join(r.archiveDirectory,'daemon-exit.json')),false);const observation=JSON.parse(fs.readFileSync(path.join(r.archiveDirectory,'daemon-absence-observation.json')));assert.equal(observation.kind,'exact-daemon-absence-after-stop-attempt');assert.equal(observation.process.commandHash,f.record.commandHash);assert.equal(observation.originalExecutionExitConfirmed,false);assert.deepEqual(fs.readFileSync(f.stateFile),f.raw);
+test('durable exact daemon-exit evidence survives a lost native response',async t=>{const f=fixture(t);await assert.rejects(f.make({terminate:async data=>{fs.writeFileSync(data.exitFile,JSON.stringify(nativeStop(data)));throw Error('lost response');}})(f.input),error=>error.code==='LOCAL_HISTORY_STOP_RECOVERY_REFUSED'&&error.stoppedClientReceipt?.stopped===true&&error.stoppedClientReceipt.originalExecutionExitConfirmed===false);assert.deepEqual(fs.readFileSync(f.stateFile),f.raw);});
+for(const failureCode of ['PS_WORKER_EXITED','EACCES'])test(`root absence after ${failureCode} never substitutes for missing descendant cleanup evidence`,async t=>{
+ const f=fixture(t);await assert.rejects(f.make({terminate:async()=>{f.markStopped();throw Object.assign(Error('raw native output'),{code:failureCode});}})(f.input),error=>error.code==='LOCAL_HISTORY_STOP_RECOVERY_REFUSED'&&!error.stoppedClientReceipt);assert.deepEqual(fs.readFileSync(f.stateFile),f.raw);
 });
+
 for(const [name,override]of Object.entries({
  'original daemon remains alive':f=>({terminate:async()=>{throw Error('no stop');}}),
  'a replacement daemon exists':f=>({terminate:async()=>{f.markStopped();throw Error('lost native output');},inspectInstalledProcesses:async()=>[{pid:9999}]}),
@@ -117,10 +119,10 @@ for(const rule of LOCAL_HISTORY_NATIVE_RULES)test(`native ${rule} is retained as
  const terminal=updateFailureResult(caught,'recover_history');assert.equal(terminal.recoveryPhase,'terminate');assert.equal(terminal.recoveryRule,rule);assert.equal(terminal.recoveryReasonCode,caught.reasonCode);assert.doesNotMatch(JSON.stringify(terminal),/PRIVATE_NATIVE|C:\/private|stderr|CommandLine/);assert.equal(Object.hasOwn(terminal,'stopped'),false);assert.equal(Object.hasOwn(terminal,'stoppedClientReceipt'),false);
 });
 
-test('the native observability wrapper preserves every original guard expression and its order',()=>{
+test('the native guard order is preserved with LH20 selecting exact tree capture instead of refusing every child',()=>{
  const expressions=[],calls=[...LOCAL_HISTORY_STOP_HANDLE_PROGRAM.matchAll(/\bAssert-Fact '(LH[0-9]{2}_[A-Z_]+)' (?=\()/g)];
  for(const match of calls){const begin=match.index+match[0].length;let depth=0;for(let at=begin;at<LOCAL_HISTORY_STOP_HANDLE_PROGRAM.length;at++){const char=LOCAL_HISTORY_STOP_HANDLE_PROGRAM[at];if(char==='(')depth++;else if(char===')'&&--depth===0){expressions.push(LOCAL_HISTORY_STOP_HANDLE_PROGRAM.slice(begin,at+1));break;}}}
- assert.equal(expressions.length,23);assert.deepEqual(calls.map(row=>row[1]),LOCAL_HISTORY_NATIVE_RULES.slice(1));assert.equal(createHash('sha256').update(JSON.stringify(expressions)).digest('hex'),'d6a90e0d1eca48de0d5fea22f6e7b751528def8d5e4b4204b4b127dbb24ada1e');
+ assert.equal(expressions.length,23);assert.deepEqual(calls.map(row=>row[1]),LOCAL_HISTORY_NATIVE_RULES.slice(1));assert.equal(createHash('sha256').update(JSON.stringify(expressions)).digest('hex'),'c932039f68da7228a1be2eaf392e19416a51a9ca66b257e5decd3badffbf8b0d');
  assert.match(LOCAL_HISTORY_STOP_HANDLE_PROGRAM,/if\(!\$v\)\{\$script:ziweiLocalHistoryRule=\$rule/);assert(LOCAL_HISTORY_STOP_HANDLE_PROGRAM.indexOf("Assert-Fact 'LH20_DAEMON_CHILDREN'")<LOCAL_HISTORY_STOP_HANDLE_PROGRAM.indexOf('$p.Kill()'));
 });
 
@@ -141,4 +143,48 @@ test('the detached official worker persists the native failure rule in real term
  const result=await runClientUpdateWorker({jobFile,env:{},waitParent:async()=>{},acquireLock:async()=>({lock:{fixture:true}}),releaseLock:()=>true,performUpdate:async()=>{throw caught;}});assert.equal(result.exitCode,1);
  for(const name of ['terminal.json','result.json']){const terminal=JSON.parse(fs.readFileSync(path.join(directory,name)));assert.equal(terminal.state,'failed');assert.equal(terminal.recoveryPhase,'terminate');assert.equal(terminal.recoveryReasonCode,'NATIVE_ASSERTION_FAILED');assert.equal(terminal.recoveryRule,'LH20_DAEMON_CHILDREN');assert.equal(Object.hasOwn(terminal,'stopped'),false);assert.equal(Object.hasOwn(terminal,'stoppedClientReceipt'),false);assert.doesNotMatch(JSON.stringify(terminal),/PRIVATE_NATIVE|CommandLine|C:\/private/);}
  assert.equal(f.kills,0);
+});
+
+test('a new stopSafe scanner still enters the same exact-instance maintenance cleanup path',async t=>{
+ const f=fixture(t);f.health.maintenance.stopSafe=true;const result=await f.make()(f.input);assert.equal(result.recovered,true);assert.equal(result.maintenanceCleanup.complete,true);assert.equal(f.kills,1);assert.deepEqual(fs.readFileSync(f.stateFile),f.raw);
+});
+
+function descendants(root){return[
+ {pid:12001,parentPid:root,creationTime:'2026-10-18T12:10:00.000Z',exitedAt:'2026-10-18T12:40:00.000Z',exitConfirmed:true,exitCode:1,terminationRequested:true},
+ {pid:12002,parentPid:12001,creationTime:'2026-10-18T12:35:00.000Z',exitedAt:'2026-10-18T12:41:00.000Z',exitConfirmed:true,exitCode:0,terminationRequested:false},
+];}
+
+test('actual maintenance cleanup keeps its own held-tree receipt and never rewrites an old action result',async t=>{
+ const f=fixture(t),result=await f.make({terminate:async data=>{const value=nativeStop(data,descendants(data.pid));f.markStopped();fs.writeFileSync(data.exitFile,JSON.stringify(value));return value;}})(f.input);
+ assert.equal(result.recovered,true);assert.equal(result.maintenanceCleanup.descendantCount,2);assert.equal(result.maintenanceCleanup.terminatedCount,1);assert.equal(result.retainedHistoryPreserved,true);assert.equal(Object.hasOwn(result,'backgroundProcessesPreserved'),false);assert.equal(result.originalExecutionExitConfirmed,false);assert.equal(result.executionConfirmedStopped,false);assert.deepEqual(fs.readFileSync(f.stateFile),f.raw);
+ const saved=JSON.parse(fs.readFileSync(path.join(result.archiveDirectory,'daemon-exit.json')));assert.deepEqual(saved.maintenanceCleanup,result.maintenanceCleanup);assert.equal(saved.maintenanceCleanup.processes[1].parentPid,12001);
+});
+
+for(const[name,mutate]of Object.entries({
+ 'missing cleanup':v=>{delete v.maintenanceCleanup;},
+ 'unfinished cleanup':v=>{v.maintenanceCleanup.complete=false;},
+ 'different root generation':v=>{v.maintenanceCleanup.rootCreationTime='2026-10-18T11:00:00Z';},
+ 'different daemon nonce':v=>{v.maintenanceCleanup.nonce='another-generation';},
+ 'incorrect process count':v=>{v.maintenanceCleanup.descendantCount=9;},
+ 'incorrect termination count':v=>{v.maintenanceCleanup.terminatedCount=2;},
+ 'foreign parent outside held closure':v=>{v.maintenanceCleanup.processes[0].parentPid=99999;},
+ 'child older than actual root':v=>{v.maintenanceCleanup.processes[0].creationTime='2026-10-18T11:59:59Z';},
+ 'root PID reused after root exit':v=>{v.maintenanceCleanup.processes[0].creationTime='2026-10-18T12:31:00Z';},
+ 'child PID reused after parent exit':v=>{v.maintenanceCleanup.processes[1].creationTime='2026-10-18T12:40:01Z';},
+ 'duplicate process identity':v=>{v.maintenanceCleanup.processes[1].pid=12001;},
+ 'uncertain child exit':v=>{v.maintenanceCleanup.processes[1].exitConfirmed=false;},
+ 'future child exit':v=>{v.maintenanceCleanup.processes[1].exitedAt='2026-10-18T14:00:00Z';},
+ 'cycle in parent closure':v=>{v.maintenanceCleanup.processes[0].parentPid=12002;},
+ 'serialized child string':v=>{v.maintenanceCleanup.processes[1]='System.Collections.Specialized.OrderedDictionary';},
+}))test(`root disappearance cannot hide ${name}`,async t=>{
+ const f=fixture(t);await assert.rejects(f.make({terminate:async data=>{const value=nativeStop(data,descendants(data.pid));mutate(value);f.markStopped();fs.writeFileSync(data.exitFile,JSON.stringify(value));return value;}})(f.input),error=>error.code==='LOCAL_HISTORY_STOP_RECOVERY_REFUSED'&&!error.stoppedClientReceipt);assert.deepEqual(fs.readFileSync(f.stateFile),f.raw);
+});
+
+test('native cleanup binds generation windows and excludes its own updater ancestry before any kill',()=>{
+ const p=LOCAL_HISTORY_STOP_HANDLE_PROGRAM;
+ assert.match(p,/\$parent\.process\.HasExited/);assert.match(p,/\$created -gt \$parent\.process\.ExitTime\.ToUniversalTime\(\)/);assert.match(p,/\$owner\.CreationDate\.ToUniversalTime\(\)\.ToString\('o'\) -ceq \$parent\.created\.ToString\('o'\)/);
+ assert.match(p,/!\$protected\.ContainsKey\(\$id\)/);assert.match(p,/!\$protected\.ContainsKey\(\[int\]\$d.pid\)/);assert.match(p,/\$null=\$child.Handle/);assert.match(p,/\$item.process.Kill\(\)/);assert.doesNotMatch(p,/taskkill|Stop-Process|Kill\(true\)/);
+ assert.equal((p.match(/\$exit\|ConvertTo-Json -Depth 8 -Compress/g)||[]).length,2);assert.equal((p.match(/^ Assert-IdleSnapshot$/gm)||[]).length,2);
+ assert(p.indexOf('Assert-Fact \'LH21_LAST_IDENTITY\'')<p.indexOf('$p.Kill()'));assert(p.indexOf('$cleanup=Finish-Tree')<p.indexOf('$bytes=[Text.UTF8Encoding]::new($false).GetBytes(($exit|'));
+ assert.match(p,/\$tree.Count -lt 257/);assert.match(p,/\$pass -lt 8/);assert.match(p,/\$watch.ElapsedMilliseconds -lt \$d.waitMs/);
 });
