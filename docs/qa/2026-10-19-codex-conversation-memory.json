@@ -6,7 +6,7 @@
     "61f58289d19d0518842d7d20adc43db5df6a7ba4",
     "d185cb9e6a8f5ec49b06c953706d6d136b9b502b"
   ],
-  "clientCommit": "ed0224c94ced9e4e7322193ecc15413b18b3d257",
+  "clientCommit": "223b7efcabf7f50e6182713b53da8c53871b51e3",
   "rootCause": {
     "employeeRuntime": "Codex",
     "ordinaryEmployeeExcludedFromHistory": true,
@@ -115,6 +115,164 @@
     }
   },
   "publication": {
+    "commit": "223b7efcabf7f50e6182713b53da8c53871b51e3",
+    "build": "15687444502be073f3dc432d8c6817ec27b2f6635019da28f97dde1b3635d0f7",
+    "archiveSha256": "e3e323ac0ed9be5e9c1f1b905fbb9e42cb04afd86a641d609550620606a1e46f",
+    "archiveBytes": 1186841,
+    "metadataSha256": "697631bf49b1bde7480421543faa2bee1a39c9c92fe0b5678b0a01bdee02cd89",
+    "bootstrapSha256": "526882bbed69de976a546e4d1cff122d55ab838d5d3ab4bad621121dd7cdd9bd",
+    "checks": {
+      "publicArchiveMatches": true,
+      "onDiskArchiveMatches": true,
+      "metadataBytesMatch": true,
+      "metadataCommitMatches": true,
+      "metadataApiMatches": true,
+      "metadataBuildMatches": true,
+      "metadataArchiveMatches": true,
+      "publicBootstrapMatches": true,
+      "onDiskBootstrapMatches": true,
+      "metadataBootstrapMatches": true
+    },
+    "apiCommit": "d185cb9e6a8f5ec49b06c953706d6d136b9b502b",
+    "independentlyAttested": true,
+    "newInstalledClientVerified": true,
+    "publicationReceiptSha256": "7453757bc8552ceb14446b934f259e8689552cbd76d88d6f29e84d160d1513c9",
+    "attestationSha256": "67bc3141d4a79b4271367367c5bc634723afef8450fd598a7ee7468d37417867"
+  },
+  "nativeRealProviderAfterUpdate": {
+    "state": "passed",
+    "passed": true,
+    "employeeId": "employee_daebe01c-6652-40a7-8136-49fa6a82a41f",
+    "conversationId": "conv_cad7b915-6342-47d7-9785-3b442b66d0b3",
+    "rounds": [
+      {
+        "round": "first",
+        "verified": true,
+        "actionId": "action_506f48c3-8e43-4543-a7d5-cc1111e72308",
+        "status": "succeeded",
+        "ackedAt": "2026-10-19T12:16:00.525Z",
+        "completedAt": "2026-10-19T12:16:31.457Z",
+        "threadId": "01a15417-1b46-78f2-8294-b65d38981924",
+        "scopeKey": "57778feb8526a59508229d450265ea4e30f8f4eb241eac887e37e06cd89ba00d",
+        "method": "codex.exec",
+        "durable": true,
+        "nativeSessionId": "01a15417-1b46-78f2-8294-b65d38981924",
+        "code": 0,
+        "processExit": {
+          "launched": true,
+          "rootConfirmed": true,
+          "treeConfirmed": true,
+          "cancelled": false,
+          "backgroundProcessesRetained": false,
+          "rootPid": 48484,
+          "rootExitCode": 0,
+          "activeProcesses": 0,
+          "hostExitCode": 0,
+          "platform": "win32",
+          "supervisor": "windows-job"
+        },
+        "expectedOutputMatched": true,
+        "managedToolCalls": 0,
+        "currentOnlyStructuredInput": false
+      },
+      {
+        "round": "second",
+        "verified": true,
+        "actionId": "action_13391254-64af-478b-98b6-7416a51b58b8",
+        "status": "succeeded",
+        "ackedAt": "2026-10-19T12:17:31.157Z",
+        "completedAt": "2026-10-19T12:18:00.267Z",
+        "threadId": "01a15417-1b46-78f2-8294-b65d38981924",
+        "scopeKey": "57778feb8526a59508229d450265ea4e30f8f4eb241eac887e37e06cd89ba00d",
+        "method": "codex.exec.resume",
+        "durable": true,
+        "nativeSessionId": "01a15417-1b46-78f2-8294-b65d38981924",
+        "code": 0,
+        "processExit": {
+          "launched": true,
+          "rootConfirmed": true,
+          "treeConfirmed": true,
+          "cancelled": false,
+          "backgroundProcessesRetained": false,
+          "rootPid": 46160,
+          "rootExitCode": 0,
+          "activeProcesses": 0,
+          "hostExitCode": 0,
+          "platform": "win32",
+          "supervisor": "windows-job"
+        },
+        "expectedOutputMatched": true,
+        "managedToolCalls": 0,
+        "currentOnlyStructuredInput": true
+      }
+    ],
+    "secondActionId": "action_13391254-64af-478b-98b6-7416a51b58b8",
+    "secondRoundVerified": true,
+    "noManagedBusinessToolCallsObserved": true,
+    "observationFile": "native-session-real-acceptance-15687444/observation-1792412287521.json",
+    "qaCleanup": {
+      "conversationArchived": true,
+      "employeeDeleted": true,
+      "forced": false,
+      "archivedAt": "2026-10-19T12:18:45.326Z",
+      "deletedAt": "2026-10-19T12:18:45.871Z"
+    },
+    "model": "gpt-6.1-sol",
+    "updateRequestId": "client-update_d9cc7216-5f24-4f8f-a045-76cbd683d87e",
+    "targetHeartbeatVerified": true,
+    "secondCurrentMessageContainsNonce": false,
+    "sameExactNativeSession": true,
+    "qaReadProjection": "existing employees?view=mobile avoids downloading inline avatars; no production source change",
+    "rawActionFetchAfterQaDeletion": "404; no employee restored or action authorization bypassed; sanitized proofs were captured before deletion"
+  },
+  "androidStaleBanner": {
+    "versionName": "0.5.3-internal",
+    "versionCode": 15,
+    "sourceCommit": "94379947947b2304895ee144c55acf073174e97a",
+    "apkSha256": "6938df37c25f529c522ed92e06e32b0264ec9b76fa4780a9f284563b3d0d1d6f",
+    "publicDownloadVerified": true,
+    "emulatorVerified": true,
+    "physicalPhoneVerified": false,
+    "operationsEmployeeStopped": false
+  },
+  "limitations": [
+    "No original native rollout was saved by the former ephemeral chat path; this repair seeds central chat history and does not reconstruct old tool execution stacks.",
+    "One-shot tasks without a bound conversation keep ephemeral execution.",
+    "Native profile/HOME/cwd changes require an explicit migration; no implicit selection of a different session.",
+    "Other computers are not declared upgraded by this deployment.",
+    "Existing platform-specific Hermes path fixture failure on Mac and three model/profile environment fixtures were reproduced on baseline; they were not changed.",
+    "One earlier legacy management test briefly opened an unregistered listen(0) fixture, then closed it; no residual listeners. Final focused tests deny listeners and outbound network.",
+    "Overlapping regression scopes are reported separately, not summed.",
+    "The final real maintenance stop had no remaining descendants (count 0); the nonempty descendant termination branches are covered by guarded tests, not claimed as an actual 31-process kill.",
+    "A transient supervisor EPERM occurred before stopping the daemon. One explicit retry of the identical final package succeeded; no perpetual retries were added."
+  ],
+  "separateMaintenanceCheckpointObservation": {
+    "actionId": "action_46cc58d6-25d7-4706-8ea5-a015d40e2978",
+    "employeeId": "employee_5f157a51-a8fa-483c-90df-53d44292b5d2",
+    "status": "failed",
+    "error": "维护检查点无法验证；未重放原任务",
+    "processExit": {
+      "launched": true,
+      "rootConfirmed": true,
+      "treeConfirmed": false,
+      "cancelled": false,
+      "backgroundProcessesRetained": true,
+      "rootPid": 37996,
+      "rootExitCode": 0,
+      "activeProcesses": 3,
+      "hostExitCode": 0,
+      "platform": "win32",
+      "supervisor": "windows-job"
+    },
+    "originalTaskReplayed": false,
+    "notAssumedToBeStopClientRefusalRootCause": true
+  },
+  "temporaryQaCleanup": {
+    "conversationArchived": true,
+    "employeeSoftDeleted": true,
+    "noForceOrProfilePurge": true
+  },
+  "previousPublicationSnapshot": {
     "apiCommit": "d185cb9e6a8f5ec49b06c953706d6d136b9b502b",
     "clientBuild": "6838000c3860753937ca39e323158964cb46c8e3851d5a8da9108d177d23aa8e",
     "archiveSha256": "e6950fcdc1237efffd9d6eea9047a19fd5ce06964f00b386a7622a2b11799e68",
@@ -124,7 +282,7 @@
     "independentlyAttested": true,
     "newInstalledClientVerified": false
   },
-  "nativeRealProviderAfterUpdate": {
+  "previousNativeUpdateRefusalSnapshot": {
     "state": "not_run_client_update_refused",
     "updateRequestId": "client-update_62047773-9954-4556-814b-376828989cdf",
     "updateState": "failed",
@@ -176,49 +334,203 @@
     },
     "nextStep": "Resolve the exact local maintenance record and delivery blockers while preserving business evidence before another installation attempt; native real-provider resume validation remains unrun."
   },
-  "androidStaleBanner": {
-    "versionName": "0.5.3-internal",
-    "versionCode": 15,
-    "sourceCommit": "94379947947b2304895ee144c55acf073174e97a",
-    "apkSha256": "6938df37c25f529c522ed92e06e32b0264ec9b76fa4780a9f284563b3d0d1d6f",
-    "publicDownloadVerified": true,
-    "emulatorVerified": true,
-    "physicalPhoneVerified": false,
-    "operationsEmployeeStopped": false
-  },
-  "limitations": [
-    "No original native rollout was saved by the former ephemeral chat path; this repair seeds central chat history and does not reconstruct old tool execution stacks.",
-    "One-shot tasks without a bound conversation keep ephemeral execution.",
-    "Native profile/HOME/cwd changes require an explicit migration; no implicit selection of a different session.",
-    "Other computers are not declared upgraded by this deployment.",
-    "Existing platform-specific Hermes path fixture failure on Mac and three model/profile environment fixtures were reproduced on baseline; they were not changed.",
-    "One earlier legacy management test briefly opened an unregistered listen(0) fixture, then closed it; no residual listeners. Final focused tests deny listeners and outbound network.",
-    "Overlapping regression scopes are reported separately, not summed."
+  "clientCommits": [
+    "ed0224c94ced9e4e7322193ecc15413b18b3d257",
+    "d62d0d36dab1e03d92b55d8198e9fe6bc7c8f1d4",
+    "e542ca2feb19a3002e776cd7a195bf34e0c79cda",
+    "223b7efcabf7f50e6182713b53da8c53871b51e3"
   ],
-  "separateMaintenanceCheckpointObservation": {
-    "actionId": "action_46cc58d6-25d7-4706-8ea5-a015d40e2978",
-    "employeeId": "employee_5f157a51-a8fa-483c-90df-53d44292b5d2",
-    "status": "failed",
-    "error": "维护检查点无法验证；未重放原任务",
-    "processExit": {
-      "launched": true,
-      "rootConfirmed": true,
-      "treeConfirmed": false,
-      "cancelled": false,
-      "backgroundProcessesRetained": true,
-      "rootPid": 37996,
-      "rootExitCode": 0,
-      "activeProcesses": 3,
-      "hostExitCode": 0,
-      "platform": "win32",
-      "supervisor": "windows-job"
+  "maintenanceOwnedTreeCleanup": {
+    "candidateCommit": "223b7efcabf7f50e6182713b53da8c53871b51e3",
+    "officialClient": {
+      "commit": "223b7efcabf7f50e6182713b53da8c53871b51e3",
+      "build": "15687444502be073f3dc432d8c6817ec27b2f6635019da28f97dde1b3635d0f7",
+      "archiveSha256": "e3e323ac0ed9be5e9c1f1b905fbb9e42cb04afd86a641d609550620606a1e46f",
+      "archiveBytes": 1186841,
+      "metadataSha256": "697631bf49b1bde7480421543faa2bee1a39c9c92fe0b5678b0a01bdee02cd89",
+      "bootstrapSha256": "526882bbed69de976a546e4d1cff122d55ab838d5d3ab4bad621121dd7cdd9bd",
+      "checks": {
+        "publicArchiveMatches": true,
+        "onDiskArchiveMatches": true,
+        "metadataBytesMatch": true,
+        "metadataCommitMatches": true,
+        "metadataApiMatches": true,
+        "metadataBuildMatches": true,
+        "metadataArchiveMatches": true,
+        "publicBootstrapMatches": true,
+        "onDiskBootstrapMatches": true,
+        "metadataBootstrapMatches": true
+      }
     },
-    "originalTaskReplayed": false,
-    "notAssumedToBeStopClientRefusalRootCause": true
-  },
-  "temporaryQaCleanup": {
-    "conversationArchived": true,
-    "employeeSoftDeleted": true,
-    "noForceOrProfilePurge": true
+    "serverPreservation": {
+      "apiCommit": "d185cb9e6a8f5ec49b06c953706d6d136b9b502b",
+      "apiPid": "530005",
+      "controlCommit": "9d25509cf4a2f947465582d9442a2d1845a8af1b",
+      "controlPid": "521384",
+      "apkFileCount": 55,
+      "publicationServicesRestarted": false,
+      "allMatched": true,
+      "scopeChecks": {
+        "currentPreserved": true,
+        "treePreserved": true,
+        "linksPreserved": true,
+        "databaseIdentityPreserved": true,
+        "schemaPreserved": true,
+        "unitHashesPreserved": true,
+        "nginxHashPreserved": true,
+        "clientTreePreserved": true,
+        "protectedServicesPreserved": true,
+        "apiTreeUnchangedByClientPublication": true,
+        "onlyArchiveAndReleaseMetadataChanged": true,
+        "all197RuntimeFactorySourcesPreserved": true
+      }
+    },
+    "tests": {
+      "total": 187,
+      "passed": 187,
+      "skipped": 0,
+      "testSha256": {
+        "test/client-local-history-stop-recovery.test.mjs": "81ad98f85c1afd321661df356813d05b395556e1848facdb978ab10bd640e21a",
+        "test/failed-background-history-maintenance.test.mjs": "0d24fba1f2960b4c8fee0277a2673c75064c4c70b14b80bae636adc4d64d30ac"
+      },
+      "noListeners": true,
+      "noNetwork": true,
+      "noNetworkOrHelpers": true,
+      "guardGroups": {
+        "strict": {
+          "files": [
+            "test/client-local-history-stop-recovery.test.mjs",
+            "test/failed-background-history-maintenance.test.mjs"
+          ],
+          "tests": 187,
+          "pass": 187,
+          "fail": 0,
+          "skipped": 0,
+          "noListeners": true,
+          "noNetwork": true,
+          "noNetworkOrHelpers": true
+        }
+      }
+    },
+    "packagePreservation": {
+      "members": 942,
+      "sourceReplacements": [
+        "scripts/client-local-history-stop-recovery.mjs"
+      ],
+      "sourceAdditions": [],
+      "metadataChanges": [
+        "preservation-package.json"
+      ],
+      "inheritedUnchangedMembers": 940,
+      "provenanceEntries": 29,
+      "baseArchiveSha256": "abf426ae3d7e27416497d5dac53ffe98b5780553fdd0cc708868d0c68846819c",
+      "archiveSha256": "e3e323ac0ed9be5e9c1f1b905fbb9e42cb04afd86a641d609550620606a1e46f",
+      "archiveBytes": 1186841,
+      "allOtherBytesAndPermissionsPreserved": true,
+      "nativeSessionFourSourcesPreserved": true,
+      "scanner8ebPreserved": true,
+      "changes": [
+        {
+          "path": "scripts/client-local-history-stop-recovery.mjs",
+          "before": {
+            "sha256": "99d1d7aef2d188f4173bc0d725a8006e3f2254588b48a25416a457554f697c7f",
+            "bytes": 34643,
+            "mode": 420
+          },
+          "after": {
+            "sha256": "a7e5e92bda4d9f4cb2b7db78bfd5e24771fefa2d4ab55f549be4e2146d01699b",
+            "bytes": 34839,
+            "mode": 420
+          }
+        }
+      ]
+    },
+    "unifiedUpgrade": {
+      "firstAttempt": {
+        "id": "client-update_9001eac9-7d77-457e-ab7b-b88f8487d739",
+        "state": "failed",
+        "code": "CLIENT_UPDATE_EPERM",
+        "heartbeatVerified": false,
+        "evidenceRetained": true
+      },
+      "singleExplicitRetry": {
+        "id": "client-update_d9cc7216-5f24-4f8f-a045-76cbd683d87e",
+        "state": "succeeded",
+        "sourceBuild": "e0cfb63ee43c3d837a049b9c4f0c6d1362cab64918f8987b35597b9e549c4c18",
+        "targetBuild": "15687444502be073f3dc432d8c6817ec27b2f6635019da28f97dde1b3635d0f7",
+        "heartbeatVerified": true,
+        "completionSource": "heartbeat",
+        "verifiedAt": "2026-10-19T12:12:17.585Z",
+        "deviceBuild": "15687444502be073f3dc432d8c6817ec27b2f6635019da28f97dde1b3635d0f7"
+      },
+      "attemptCountForFinalBudgetBuild": 2
+    },
+    "installedCleanup": {
+      "readOnly": true,
+      "state": "verified",
+      "newBuild": "15687444502be073f3dc432d8c6817ec27b2f6635019da28f97dde1b3635d0f7",
+      "newPid": 53608,
+      "rootPid": 55824,
+      "rootCreationTime": "2026-10-19T09:09:20.3445030Z",
+      "rootExitedAt": "2026-10-19T12:12:08.8301141Z",
+      "cleanupReceiptAt": "2026-10-19T12:12:09.9823187Z",
+      "complete": true,
+      "descendantCount": 0,
+      "terminatedCount": 0,
+      "allDescendantExitsConfirmed": true,
+      "archiveSnapshotCount": 233,
+      "archiveSnapshotHashesMatched": true,
+      "originalExecutionExitConfirmed": false
+    },
+    "standaloneOneOff": {
+      "taskId": "task_6b2035fe-318e-4224-bca5-52ec9cb5cd23",
+      "operationResult": {
+        "state": "failed",
+        "stage": "live_identity",
+        "code": "ONCE_EXECUTION_FAILED",
+        "detail": null
+      },
+      "schedulerRegistered": false,
+      "forcedStopExecuted": false,
+      "notAcceptanceEvidence": true,
+      "explanation": "Creator action completed, but the operation returned failure before register stage."
+    },
+    "evidenceSha256": {
+      "client-local-history-tree-cleanup-budget-publication-223b7efcabf7-4ef2dcfe9290/result.json": "7453757bc8552ceb14446b934f259e8689552cbd76d88d6f29e84d160d1513c9",
+      "maintenance-budget-client-publication-attestation.json": "67bc3141d4a79b4271367367c5bc634723afef8450fd598a7ee7468d37417867",
+      "223b7efcabf7-local-history-tree-cleanup-budget-client-B/manifest.json": "da937eecdf6201752c6168b9f06065756f0c8c6c27bd471a3ee768edffc4be56",
+      "li-maintenance-budget-observations-223b7efcabf7.jsonl": "1ce470ff3d18630e121aa0395291cc8725c5eff2cb3b5c4fd1e16f568dd12165",
+      "li-maintenance-budget-observations-223b7efcabf7-eperm-retry1.jsonl": "ba7fd8d13aa4b6dda1ab3152eb4af0e6a601181246d49fb298dd718185259c62",
+      "installed-cleanup-receipt-diagnostic-latest.json": "9141463c6edf94049d6beff5bbefe2be3800b8f330e6d9954df711ecdebbb567",
+      "li-force-recovery-task-latest.json": "b9f8173c2a91e4ace12a4cc2a7feb38af69d2b5dd2a94f910b3b9fd211d118fa",
+      "native-session-real-acceptance-15687444/observation-1792412287521.json": "ac33e8f17991eff06edc7acdf47770fcf7a9580d50b3248eb07266a3c49b3435",
+      "native-session-real-acceptance-15687444/second-response.json": "bb7df95f6a304ac8e85c099c548ece482b6c929a239438f0bbb516831074d278",
+      "native-session-real-acceptance-15687444/archive-response.json": "f731a84da6d25810d3a1790d5e4ce35f94b94a5cba18848bd4c590acfd380965",
+      "native-session-real-acceptance-15687444/delete-response.json": "e3ba308304927b7f78dac7992901f5add8e3991f855b5474dd9f17f44dcfd4e7"
+    },
+    "state": "verified_installed",
+    "authorization": "User explicitly requested exact Ziwei daemon tree termination during maintenance, including descendants, without another permission prompt.",
+    "observationBudget": {
+      "previousHostMs": 23000,
+      "realReadOnlyPrepareMs": 32075,
+      "readOnlyInventoryDescendants": 31,
+      "diagnosticIncludesOwnCreatorAncestors": true,
+      "newHostMs": 128000,
+      "cleanupWaitMs": 8000,
+      "parentCimSnapshotReused": true
+    },
+    "priorScannerFix": {
+      "commit": "d62d0d36dab1e03d92b55d8198e9fe6bc7c8f1d4",
+      "failedAction": "action_46cc58d6-25d7-4706-8ea5-a015d40e2978",
+      "acceptsExactRetainedHermesCheckpointFailure": true,
+      "originalBusinessExitUncertaintyPreserved": true
+    },
+    "treeObservationFailure": {
+      "requestId": "client-update_2ca2da6b-5b97-4db7-9d9b-d89c283787a7",
+      "code": "CLIENT_UPDATE_LOCAL_HISTORY_STOP_RECOVERY_REFUSED",
+      "rule": "LH00_NATIVE_ERROR",
+      "actualRootKilled": false,
+      "diagnosticTaskId": "task_115c8e9c-6715-47c5-8d8d-392b43f4b844"
+    }
   }
 }
