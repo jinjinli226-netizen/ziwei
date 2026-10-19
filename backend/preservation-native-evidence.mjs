@@ -6,6 +6,7 @@ import {isHistoricalPrelaunchCompletion} from '../src/bot-historical-prelaunch-c
 import {isDispatcherAdmissionRejected} from '../src/dispatcher-admission-evidence.mjs';
 import {validateMaintenancePause} from '../src/maintenance-checkpoint.mjs';
 import {executionBinding} from '../src/execution-admission.mjs';
+import {actionExecutionTimeoutMs} from '../src/action-execution-budget.mjs';
 import {inspectClientMaintenance,inspectNativeClientProcess,inspectNativeHealthListener} from '../scripts/client-lifecycle.mjs';
 import {digest,uncertain,exitedTree,executionExit,gatewayResultMatches} from './version-preservation.mjs';
 import {scanOwnedNativeDatabases,nativeActionDigest,attestNativeVersion} from './preservation-native-databases.mjs';
@@ -176,10 +177,26 @@ function failedBackgroundHistoryUnknown(view){
   return legacyHistoryUncertain({...view,result:{...view.result,result:cleanResult}});
 }
 
+// Native dispatch now persists hardDeadline. It is timing metadata, never an
+// exit proof. Confirmed delivery may retain only a compact action without its
+// original timeout, so validate the shared timer bound and enforce the actual
+// payload budget whenever that full payload remains available.
+function retainedBackgroundStart(started,action){
+  const timed=Object.hasOwn(started||{},'hardDeadline');
+  if(!exactKeys(started,['key','actionId','identity','startedAt','nativeRuntime','resourceBinding',...(timed?['hardDeadline']:[])]))return false;
+  if(!timed)return true; // reviewed six-field histories remain unchanged
+  if(!Number.isFinite(started.startedAt)||started.startedAt<0||!Number.isFinite(started.hardDeadline))return false;
+  const p=action?.payload,fullPayload=p&&typeof p==='object'&&['runtime','agent','modelId','prompt','hermesBot','timeoutMs','timeout_ms'].some(key=>Object.hasOwn(p,key));
+  const budget=actionExecutionTimeoutMs(fullPayload?action:{payload:{timeoutMs:Number.MAX_SAFE_INTEGER}}),duration=started.hardDeadline-started.startedAt;
+  // These retained completions require nativeRuntime=true below. Native actions
+  // always have a finite timer; null is emitted only for non-native no-timeout work.
+  return Number.isFinite(duration)&&duration>=0&&duration<=budget;
+}
+
 /** Local daemon shutdown only. This never proves the retained child exited. */
 function retainedBackgroundCompletion({started,completed,identity,action}={},failed=false){
   if(!identity||typeof identity.workspace!=='string'||!identity.workspace||typeof identity.deviceId!=='string'||!identity.deviceId)return false;
-  if(!exactKeys(started,['key','actionId','identity','startedAt','nativeRuntime','resourceBinding'])||!exactKeys(completed,['key','identity','result'])||started.nativeRuntime!==true||typeof started.key!=='string'||!started.key||started.key!==completed.key||typeof started.actionId!=='string'||!started.actionId||completed.result?.actionId!==started.actionId||completed.result.status!==(failed?'failed':'succeeded')||(failed?typeof completed.result.error!=='string'||!completed.result.error||!['executor_failed','runtime_failed'].includes(completed.result.code):completed.result.error!=null)||!Number.isFinite(started.startedAt)||!Number.isFinite(completed.result.completedAt)||completed.result.completedAt<started.startedAt)return false;
+  if(!retainedBackgroundStart(started,action)||!exactKeys(completed,['key','identity','result'])||started.nativeRuntime!==true||typeof started.key!=='string'||!started.key||started.key!==completed.key||typeof started.actionId!=='string'||!started.actionId||completed.result?.actionId!==started.actionId||completed.result.status!==(failed?'failed':'succeeded')||(failed?typeof completed.result.error!=='string'||!completed.result.error||!['executor_failed','runtime_failed'].includes(completed.result.code):completed.result.error!=null)||!Number.isFinite(started.startedAt)||!Number.isFinite(completed.result.completedAt)||completed.result.completedAt<started.startedAt)return false;
   const stored=started.identity,binding=started.resourceBinding,result=completed.result.result,exit=result?.processExit;
   if(!stored||typeof stored!=='object'||Array.isArray(stored)||!equal(stored,completed.identity)||Object.keys(stored).some(key=>!['workspace','deviceId','workspaceId','actionWorkspace','targetDeviceId'].includes(key))||Object.values(stored).some(value=>typeof value!=='string'||!value)||stored.workspace!==identity.workspace||stored.deviceId!==identity.deviceId||stored.targetDeviceId!==undefined&&stored.targetDeviceId!==identity.deviceId||stored.actionWorkspace!==undefined&&stored.actionWorkspace!==identity.workspace)return false;
   if(!exactKeys(binding,['type','employeeId','revision','controlEpoch','resource','operation','platform'])||!['conversation.execute','agent.execute','runtime.execute','automation.execute','task.execute'].includes(binding.type)||binding.resource!==null||binding.operation!==null||binding.platform!==null||binding.employeeId!==null&&(typeof binding.employeeId!=='string'||!binding.employeeId)||![binding.revision,binding.controlEpoch].every(value=>value===null||Number.isSafeInteger(value)&&value>0)||(binding.revision===null)!==(binding.controlEpoch===null)||binding.revision!==null&&binding.employeeId===null)return false;

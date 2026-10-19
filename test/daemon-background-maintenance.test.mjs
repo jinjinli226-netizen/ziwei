@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {ActionDispatcher} from '../src/daemon.mjs';
+import {actionExecutionTimeoutMs} from '../src/action-execution-budget.mjs';
 import {createActionDelivery} from '../src/daemon-action-delivery.mjs';
 import {isRetainedBackgroundCompletion,inspectLocalDaemonMaintenanceFiles,scanNativeFiles} from '../backend/preservation-native-evidence.mjs';
 
@@ -13,10 +14,11 @@ const exit={platform:'win32',supervisor:'windows-job',launched:true,rootPid:2899
 const sha=value=>createHash('sha256').update(value).digest('hex');
 const snapshot=root=>Object.fromEntries(fs.readdirSync(root,{recursive:true}).filter(name=>fs.statSync(path.join(root,name)).isFile()).sort().map(name=>[name,sha(fs.readFileSync(path.join(root,name)))]));
 
-async function fixture(t,{backgroundMarker}={}){
+async function fixture(t,{backgroundMarker,timeoutMs}={}){
   const root=fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()),'ziwei-background-maintenance-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
   const stateFile=path.join(root,'action-state.json'),directory=path.join(root,'action-delivery'),connection={...identity,runtimeDir:root};let executions=0,stops=0;
   const action={id:'original-background-action',type:'conversation.execute',workspace_id:'workspace-background',dedupe_key:'background-original',payload:{runtime:'Hermes',employeeId:'employee-background',deviceId:identity.deviceId,hermesBot:{employeeId:'employee-background',workspace:identity.workspace,deviceId:identity.deviceId,revision:4,controlEpoch:7}}};
+  if(timeoutMs!==undefined)action.payload.timeoutMs=timeoutMs;
   const dispatcher=new ActionDispatcher({workdir:root,workspace:identity.workspace,deviceId:identity.deviceId,stateFile,execute:async(_action,context)=>{
     const proof={...exit,...(backgroundMarker===undefined?{}:{backgroundProcessesRetained:backgroundMarker})};
     executions++;context.onSupervision({completionEvidence:Promise.resolve(proof),stop:async()=>{stops++;return proof;}});
@@ -37,6 +39,8 @@ async function fixture(t,{backgroundMarker}={}){
 
 test('the real dispatcher background-success history is retained unchanged for local stop only',async t=>{
   const f=await fixture(t),before=snapshot(f.root),local=f.inspect();
+  assert.equal(typeof f.state.started[0].hardDeadline,'number','the real dispatcher persists its native budget');
+  assert(f.state.started[0].hardDeadline>=f.state.started[0].startedAt);assert(f.state.started[0].hardDeadline-f.state.started[0].startedAt<=actionExecutionTimeoutMs(f.action));
   assert.equal(isRetainedBackgroundCompletion(f.input()),true);
   assert.equal(isRetainedBackgroundCompletion({...f.input(),action:JSON.parse(fs.readFileSync(f.recordFile)).action}),true,'the original confirmed delivery uses its compact action');
   assert.equal(local.safe,false);assert.equal(local.stopSafe,true);assert.equal(local.retainedBackgroundCount,1);assert.equal(local.retainedDeliveryCount,0);assert.deepEqual(local.stopIssues,[]);
@@ -48,6 +52,24 @@ test('the real dispatcher background-success history is retained unchanged for l
   assert.equal(f.executions,1);assert.equal(f.stops,0);assert.deepEqual(snapshot(f.root),before);
 });
 
+test('reviewed legacy six-key started records remain valid without adding timing or exit evidence',async t=>{
+  const f=await fixture(t);delete f.state.started[0].hardDeadline;f.save();const before=snapshot(f.root);
+  assert.equal(Object.keys(f.state.started[0]).length,6);assert.equal(isRetainedBackgroundCompletion(f.input()),true);assert.equal(f.inspect().stopSafe,true);assert.deepEqual(snapshot(f.root),before);
+});
+
+test('an available full action payload preserves its actual execution budget while compact history keeps the shared timer bound',async t=>{
+  const f=await fixture(t,{timeoutMs:5000}),start=f.state.started[0];assert(start.hardDeadline-start.startedAt<=5000);assert.equal(isRetainedBackgroundCompletion(f.input()),true);
+  const narrower=structuredClone(f.action);narrower.payload.timeoutMs=100;assert.equal(isRetainedBackgroundCompletion({...f.input(),action:narrower}),false);
+  const compact=JSON.parse(fs.readFileSync(f.recordFile)).action;assert.equal(Object.hasOwn(compact.payload,'timeoutMs'),false);assert.equal(isRetainedBackgroundCompletion({...f.input(),action:compact}),true);
+  start.hardDeadline=start.startedAt+actionExecutionTimeoutMs({payload:{timeoutMs:Number.MAX_SAFE_INTEGER}})+1;assert.equal(isRetainedBackgroundCompletion(f.input()),false);
+});
+
+test('unpaired terminal cache remains distinct from background proof and uses the existing scoped orphan retention',async t=>{
+  const f=await fixture(t);f.state.started=[];f.save();const before=snapshot(f.root);
+  assert.equal(isRetainedBackgroundCompletion(f.input()),false);const local=f.inspect();assert.equal(local.retainedBackgroundCount,0);assert.equal(local.retainedHistoryCount,1);assert.equal(local.stopSafe,true);assert(local.issues.some(row=>row.code==='LOCAL_HISTORY_RETAINED'&&row.reason==='orphan_terminal'));
+  assert.equal(f.state.completed[0].result.result.processExit.treeConfirmed,false);assert.equal(f.stops,0);assert.deepEqual(snapshot(f.root),before);
+});
+
 test('new explicit background retention survives the real dispatcher cache and remains honest about the live child',async t=>{
   const f=await fixture(t,{backgroundMarker:true});
   assert.equal(f.state.completed[0].result.result.processExit.backgroundProcessesRetained,true);
@@ -55,9 +77,17 @@ test('new explicit background retention survives the real dispatcher cache and r
 });
 
 const invalid={
+  'null native deadline':f=>{f.state.started[0].hardDeadline=null;},
+  'string deadline':f=>{f.state.started[0].hardDeadline=String(f.state.started[0].hardDeadline);},
+  'object deadline':f=>{f.state.started[0].hardDeadline={value:Date.now()};},
+  'negative deadline':f=>{f.state.started[0].hardDeadline=-1;},
+  'deadline before start':f=>{f.state.started[0].hardDeadline=f.state.started[0].startedAt-1;},
+  'deadline beyond timer ceiling':f=>{f.state.started[0].hardDeadline=f.state.started[0].startedAt+actionExecutionTimeoutMs({payload:{timeoutMs:Number.MAX_SAFE_INTEGER}})+1;},
+  'unknown started field':f=>{f.state.started[0].unrecognizedTiming=true;},
+  'maintenance pause field':f=>{f.state.started[0].maintenancePause={};},
+  'maintenance resume field':f=>{f.state.started[0].maintenanceResumeStarted=true;},
   'failed outer result':f=>{f.state.completed[0].result.status='failed';},
   'a success with a failure message':f=>{f.state.completed[0].result.error='contradictory failure';},
-  'unpaired completion':f=>{f.state.started=[];},
   'different completed action':f=>{f.state.completed[0].result.actionId='different-action';},
   'different completed identity':f=>{f.state.completed[0].identity={...f.state.completed[0].identity,deviceId:'other-pc'};},
   'different workspace identity':f=>{for(const row of [f.state.started[0],f.state.completed[0]])row.identity.workspace='other-workspace';},
