@@ -18,6 +18,7 @@ import {parseBotReasoningProof} from './hermes-bot-reasoning.mjs';
 import {resolveHermesLauncher} from './hermes-launcher.mjs';
 import {runBeforeSpawnAdmission} from './runtime-launch-evidence.mjs';
 import {markMaintenancePaused, validateMaintenancePause} from './maintenance-checkpoint.mjs';
+import {prepareCodexConversationSession} from './codex-conversation-session.mjs';
 export {parseBotReasoningProof} from './hermes-bot-reasoning.mjs';
 export { prepareHermesBotHome } from './hermes-bot-runtime.mjs';
 
@@ -1007,7 +1008,7 @@ export function parseRuntimeStreamLine(line, state, onOutput = () => {}, onStage
 }
 
 /** Execute an installed CLI using an explicit argv, with full local approval. */
-export async function executeRuntime({ runtime, prompt, model = null, profile = null, cwd = process.cwd(), env = {}, attachments = [], imageArtifacts = null, codexMcpDisabledServers = [], managementMcp = null, terminalMcp = null, creatorInstance, creatorInstanceDirectory, hermesBot, botInstanceDirectory, botAuthority, beforeSpawn, executionGuard, maintenance, signal, onOutput, onProgress, onStage, onActivity, onSupervision } = {}) {
+export async function executeRuntime({ runtime, prompt, model = null, profile = null, cwd = process.cwd(), env = {}, attachments = [], imageArtifacts = null, codexMcpDisabledServers = [], codexConversation = null, managementMcp = null, terminalMcp = null, creatorInstance, creatorInstanceDirectory, hermesBot, botInstanceDirectory, botAuthority, beforeSpawn, executionGuard, maintenance, signal, onOutput, onProgress, onStage, onActivity, onSupervision } = {}) {
   if (signal?.aborted) return Promise.resolve({ status: 'failed', code: 'cancelled', error: 'runtime execution cancelled before launch' });
   if(hermesBot)hermesBot={...hermesBot,config:normalizeBotConfig(hermesBot.config)};
   const resolvedRuntime = normalizeRuntime(runtime);
@@ -1079,6 +1080,7 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
   let reasoningProvider=null;
   let reasoningRejection=null;
   let maintenancePrepared=null;
+  let codexSession=null;
   let selectedModel = model || null;
   try {
     // Internal executor policy, never an A2A payload field. Apply the complete
@@ -1143,11 +1145,15 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
       const args=[...invocation.args];for(let i=args.length-1;i>=0;i--){if(args[i]==='--create-if-missing')args.splice(i,1);else if(args[i]==='-c'||args[i]==='--continue')args.splice(i,2);}
       args.push('--resume',maintenancePrepared.settings.resume.sessionId,'--no-restore-cwd');invocation={...invocation,args};
     }
-  } catch (error) { maintenancePrepared?.close();cleanupOverlay(); return Promise.reject(error); }
+    if(resolvedRuntime==='Codex'&&codexConversation){
+      codexSession=prepareCodexConversationSession({binding:codexConversation,invocation,codexHome:childEnv.CODEX_HOME||path.join(os.homedir(),'.codex'),profile:normalizeRuntimeProfile(profile)||'default',cwd,resumePromptSuffix:imageArtifacts?imageArtifactInstructions(imageArtifacts):''});
+      invocation=codexSession.invocation;
+    }
+  } catch (error) { codexSession?.close();maintenancePrepared?.close();cleanupOverlay(); return Promise.reject(error); }
   childEnv = runtimeTerminalEnvironment({ runtime: resolvedRuntime, invocation, env: childEnv });
   let spec;
   try { spec = resolvedRuntime === 'Hermes' && childEnv.HERMES_MANAGED_DIR && (receipt || hermesBot || profileBinding || controlledImages.length>1 || maintenancePrepared) ? hermesMcpSpawnSpec(discovered.binary, invocation.args, { env: childEnv, boundProfile:profileBinding, inputImages:controlledImages.length>1?controlledImages:[],maintenanceControl:maintenancePrepared?.controlFile }) : runtimeSpawnSpec(discovered.binary, invocation.args); }
-  catch (error) { maintenancePrepared?.close();cleanupOverlay(); return Promise.reject(error); }
+  catch (error) { codexSession?.close();maintenancePrepared?.close();cleanupOverlay(); return Promise.reject(error); }
   // The desktop user session may have a proxy configured in Windows Internet
   // Settings while the daemon process has no proxy variables in its service
   // environment. Propagate that proxy to each local CLI child, preserving any
@@ -1188,17 +1194,19 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
     state.lineBuffer = lines.pop() || '';
     for (const line of lines) parseRuntimeStreamLine(line, state, emitOutput, emitStage);
   };
-  if(beforeSpawn) {try{await runBeforeSpawnAdmission(beforeSpawn);}catch(error){maintenancePrepared?.close();cleanupOverlay();throw error;}}
+  if(beforeSpawn) {try{await runBeforeSpawnAdmission(beforeSpawn);}catch(error){codexSession?.close();maintenancePrepared?.close();cleanupOverlay();throw error;}}
   return new Promise((resolve, reject) => {
     let supervision;
     try { profileBinding?.verify({env:childEnv,cwd}); supervision = spawnSupervisedRuntime({ command: spec.command, args: spec.args, cwd: path.resolve(String(cwd || process.cwd())), env: childEnv, cleanupOnFailure: true }); }
-    catch (error) { maintenancePrepared?.close();cleanupOverlay(); reject(error); return; }
+    catch (error) { codexSession?.close();maintenancePrepared?.close();cleanupOverlay(); reject(error); return; }
+    codexSession?.markSpawned();
     const { child } = supervision;
     let settled = false;
     let launchError = null;
     const finish = (result, error = null) => {
       if (settled) return;
       settled = true;
+      try{codexSession?.close();}catch(cleanupError){if(!error){if(result)result={...result,status:'failed',code:'CODEX_CONVERSATION_WRITE_FAILED',error:'Codex 会话映射未能持久保存；未重跑原任务'};else error=cleanupError;}}
       maintenancePrepared?.close();
       cleanupOverlay();
       signal?.removeEventListener('abort', abort);
@@ -1210,6 +1218,7 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
       else signal.addEventListener('abort', abort, { once: true });
     }
     child.stdout?.on('data', chunk => {
+      codexSession?.observeStdout(chunk);
       if (!signal?.aborted) onActivity?.({ runtime: resolvedRuntime, stream: 'stdout', bytes: Buffer.byteLength(chunk) });
       consume(chunk);
       if (!signal?.aborted) onProgress?.({ runtime: resolvedRuntime, bytes: state.bytes, truncated: state.truncated });
@@ -1226,6 +1235,10 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
       if (diagnosticBuffer) consumeDiagnostics('\n');
       if (state.lineBuffer) parseRuntimeStreamLine(state.lineBuffer, state, emitOutput, emitStage);
       const exitResult = { runtime: resolvedRuntime, code, signal: childSignal, processExit, output: state.output, truncated: state.truncated };
+      let codexSessionReceipt=null,codexSessionError=null;
+      if(codexSession)try{if(launchError&&processExit.launched===false&&processExit.rootPid===null)codexSession.notLaunched();else codexSessionReceipt=codexSession.complete({processExit,code,signal:childSignal});}catch(error){codexSessionError=error;}
+      if(codexSessionReceipt)exitResult.codexConversation=codexSessionReceipt;
+      if(codexSessionError)exitResult.codexConversation={status:'unconfirmed',durable:false,reasonCode:codexSessionError.code};
       // A normally completed CLI may intentionally leave a user-requested
       // background service running. Cancellation requires a verified empty
       // owned tree; ordinary completion requires a verified root exit.
@@ -1233,7 +1246,8 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
       if (process.platform === 'win32' && !neverLaunched && (!processExit.rootConfirmed || ((signal?.aborted || processExit.cancelled) && !processExit.treeConfirmed))) return finish({ status: 'failed', code: 'EXECUTION_UNCERTAIN', executionState: 'uncertain', error: '无法确认本次 CLI 及其子进程的停止状态；工具可能已产生写入，请核实后处理，不要直接重发原消息。', result: exitResult });
       if (launchError) return finish(null, launchError);
       if (signal?.aborted) return finish({ status: 'failed', code: 'cancelled', error: 'runtime execution cancelled; completed tool writes may already exist', result: exitResult });
-    const result = { runtime: resolvedRuntime, model: selectedModel, profile: profile || null, binary: discovered.binary, code, signal: childSignal, processExit, output: state.response.trim() || state.output, diagnostics: state.response.trim() ? state.output : null, truncated: state.truncated, ...(spec.nativeBinding ? { hermesBootstrap: spec.nativeBinding } : {}), ...(creatorPrepared ? { creatorIsolation: creatorIsolation || { ...creatorPrepared, enabled: false, reasonCode: 'native_isolation_unconfirmed' } } : {}), ...(receipt ? { managementMcp: managementMcpReceipt(receipt) } : {}), ...(phoneReceipt ? { terminalMcp: terminalMcpReceipt(phoneReceipt) } : {}), ...(attachments.length ? {inputAttachments:attachments} : {}) };
+    const result = { runtime: resolvedRuntime, model: selectedModel, profile: profile || null, binary: discovered.binary, code, signal: childSignal, processExit, output: state.response.trim() || state.output, diagnostics: state.response.trim() ? state.output : null, truncated: state.truncated, ...(exitResult.codexConversation?{codexConversation:exitResult.codexConversation}:{}), ...(spec.nativeBinding ? { hermesBootstrap: spec.nativeBinding } : {}), ...(creatorPrepared ? { creatorIsolation: creatorIsolation || { ...creatorPrepared, enabled: false, reasonCode: 'native_isolation_unconfirmed' } } : {}), ...(receipt ? { managementMcp: managementMcpReceipt(receipt) } : {}), ...(phoneReceipt ? { terminalMcp: terminalMcpReceipt(phoneReceipt) } : {}), ...(attachments.length ? {inputAttachments:attachments} : {}) };
+      if(codexSessionReceipt?.durable)result.nativeSessionId=codexSessionReceipt.threadId;
       const phoneFailure = terminalMcpExecutionFailure(result.terminalMcp);
       if (phoneFailure?.phoneExecutionState) {
         result.terminalMcp = { ...result.terminalMcp, executionState: phoneFailure.phoneExecutionState, failure: phoneFailure };
@@ -1242,6 +1256,7 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
         // this healthy workstation as an unconfirmed local process.
         if (phoneFailure.phoneExecutionState === 'uncertain') result.executionState = 'uncertain';
       }
+      if(codexSessionError)return finish({status:'failed',code:codexSessionError.code||'CODEX_CONVERSATION_UNCONFIRMED',error:codexSessionError.message+(phoneFailure?'\n'+phoneFailure.error:''),result});
       if(resolvedRuntime==='Hermes')result.nativeSessionId=state.sessionId || null;
       if(hermesBot)Object.assign(result,{botIsolation:creatorIsolation,configurationRevision:hermesBot.revision,...(botTurnLimit?{turnLimit:botTurnLimit}:{})});
       if(hermesBot?.config.reasoningEffort){

@@ -13,6 +13,7 @@ import {normalizeRuntimeProfile} from './employee-runtime.mjs';
 import { isNativeRuntimeAction, resolveWindowsWorkdir, resolveWindowsWorkdirPath, windowsDirectoryError } from './windows-workdir.mjs';
 import { createImageArtifactSession } from './conversation-image-artifacts.mjs';
 import {markBotStartAdmissionDenied} from './runtime-launch-evidence.mjs';
+import {bindCodexConversationToHost} from './codex-conversation-session.mjs';
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_OUTPUT_BYTES = 1024 * 1024;
@@ -453,9 +454,8 @@ export function createLocalActionExecutor({runtimeDir, admissionHandledByDispatc
         || Object.values(discoverInstalledRuntimes().runtimes).find(item => item.status === 'available')?.runtime;
       const prompt = payload.prompt ?? payload.message ?? payload.content ?? payload.instructions;
       const attachmentPaths = materializeRuntimeAttachments({attachments: payload.attachments, cwd: safeCwd, actionId: action.id});
-      const promptWithAttachments = attachmentPaths.length
-        ? `${String(prompt || '').trim()}\n\n[本机附件]\n${attachmentPaths.map(item => `- ${item.name}: ${item.path}`).join('\n')}`
-        : prompt;
+      const attachmentPromptSuffix=attachmentPaths.length?`\n\n[本机附件]\n${attachmentPaths.map(item => `- ${item.name}: ${item.path}`).join('\n')}`:'';
+      const promptWithAttachments = attachmentPromptSuffix ? String(prompt || '').trim()+attachmentPromptSuffix : prompt;
       // Refuse unsupported vision combinations before preparing any MCP session.
       runtimeInvocation(runtime,{prompt:promptWithAttachments,attachments:attachmentPaths});
       const imageArtifacts = createImageArtifactSession({runtimeDir,actionId:action.id,conversationId:payload.conversationId || null});
@@ -473,6 +473,7 @@ export function createLocalActionExecutor({runtimeDir, admissionHandledByDispatc
         attachments: attachmentPaths,
         imageArtifacts,
         codexMcpDisabledServers,
+        codexConversation:String(runtime).toLowerCase()==='codex'&&!payload.hermesBot?bindCodexConversationToHost({action,workspace,deviceId,apiBase,runtimeDir,daemonBound:admissionHandledByDispatcher,currentPromptSuffix:attachmentPromptSuffix}):null,
         executionGuard,
         ...(payload.hermesBot?{hermesBot:payload.hermesBot,botInstanceDirectory:path.join(runtimeDir,'bot-instances'),botAuthority:{actionId:action.id,deviceToken},beforeSpawn:authorizeBot}:{}),
         cwd: safeCwd,

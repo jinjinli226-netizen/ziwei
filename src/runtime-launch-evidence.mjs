@@ -34,6 +34,14 @@ export function markHermesLauncherFailure(error) {
   }));
   return failure;
 }
+// Called only by the owned Codex bind/prepare entry before native spawn.
+// Scope data from wire errors cannot create this in-process capability.
+export function markCodexConversationPrelaunchFailure(error, scope) {
+  const valid=(key,prefix)=>typeof scope?.[key]==='string'&&new RegExp('^'+prefix+'[A-Za-z0-9_-]{1,120}$').test(scope[key]);
+  if(!(error instanceof Error)||typeof scope?.workspace!=='string'||!/^[a-z0-9][a-z0-9_-]{0,99}$/i.test(scope.workspace)||!valid('actionId','action_')||!valid('deviceId','device_')||!valid('employeeId','employee_')||!valid('conversationId','conv_'))return error;
+  prelaunchFailures.set(error,Object.freeze({prelaunch:Object.freeze({schemaVersion:1,source:'codex-conversation-preflight',phase:'before-runtime-spawn',spawnAttempted:false,actionId:scope.actionId,workspace:scope.workspace,deviceId:scope.deviceId,employeeId:scope.employeeId,conversationId:scope.conversationId}),processExit:notLaunched()}));
+  return error;
+}
 export function consumeRuntimePrelaunchEvidence(error) {
   const evidence=prelaunchFailures.get(error);if(evidence)prelaunchFailures.delete(error);return evidence || null;
 }
