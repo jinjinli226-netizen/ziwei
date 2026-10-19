@@ -15,13 +15,13 @@ import {createLocalHistoryStopRecovery,LOCAL_HISTORY_STOP_HANDLE_PROGRAM} from '
 
 const sha=v=>createHash('sha256').update(v).digest('hex');
 const snapshots=root=>Object.fromEntries(fs.readdirSync(root,{recursive:true}).filter(n=>fs.statSync(path.join(root,n)).isFile()).sort().map(n=>[n,sha(fs.readFileSync(path.join(root,n)))]));
-async function fixture(t,{deliveryState='result_pending',runtimeFailureCode='runtime_failed'}={}){
+async function fixture(t,{deliveryState='result_pending',runtimeFailureCode='runtime_failed',nativeCode=1,failureError='Provider context too long; prior phone result remains uncertain'}={}){
  const root=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'ziwei-failed-background-history-'))),home=path.join(root,'home'),runtime=path.join(home,'runtime');fs.mkdirSync(runtime,{recursive:true});t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
  const configPath=path.join(home,'ziwei_user.json'),config={workspace:'history-test',deviceId:'computer-test',apiBase:'https://history.invalid',deviceToken:'PRIVATE_TOKEN'};fs.writeFileSync(configPath,JSON.stringify(config));
  const identity={apiBase:config.apiBase,workspace:config.workspace,deviceId:config.deviceId},connection={...identity,runtimeDir:runtime},stateFile=path.join(runtime,'action-state.json'),action={id:'failed-root-with-background',type:'conversation.execute',workspace_id:'ws-history-test',workspace:config.workspace,dedupe_key:'original-key',payload:{runtime:'Hermes',employeeId:'employee-test',deviceId:config.deviceId,cwd:root,hermesBot:{employeeId:'employee-test',workspace:config.workspace,deviceId:config.deviceId,revision:7,controlEpoch:17}}};
- const exit={platform:'win32',supervisor:'windows-job',launched:true,rootPid:46856,rootConfirmed:true,rootExitCode:1,treeConfirmed:false,activeProcesses:3,cancelled:false,backgroundProcessesRetained:true,hostExitCode:0};
+ const exit={platform:'win32',supervisor:'windows-job',launched:true,rootPid:46856,rootConfirmed:true,rootExitCode:nativeCode,treeConfirmed:false,activeProcesses:3,cancelled:false,backgroundProcessesRetained:true,hostExitCode:0};
  const phoneCalls=[{toolName:'ziwei_phone_action',ok:true,deviceId:'phone-test',commandId:'phone-command-test',ids:{deviceId:'phone-test',commandId:'phone-command-test'},status:'executing',commandStatus:'executing',commandExecutionState:'pending',commandExecutingConfirmed:true,receipts:[{commandId:'phone-command-test',status:'executing',executingConfirmed:true}]},{toolName:'ziwei_phone_action',ok:true,deviceId:'phone-test',commandId:'phone-command-test',ids:{deviceId:'phone-test',commandId:'phone-command-test'},status:'uncertain',commandStatus:'uncertain',commandError:'business receipt was not confirmed',commandExecutionState:'uncertain',commandExecutingConfirmed:false}];
- const dispatcher=new ActionDispatcher({workdir:root,workspace:config.workspace,deviceId:config.deviceId,stateFile,execute:async(_action,context)=>{context.onSupervision({completionEvidence:Promise.resolve(exit),stop:async()=>exit});return{status:'failed',...(runtimeFailureCode?{code:runtimeFailureCode}:{}),error:'Provider context too long; prior phone result remains uncertain',result:{runtime:'Hermes',profile:'bot-test-profile',code:1,signal:null,executionState:'uncertain',terminalMcp:{configured:true,injected:true,loaded:true,transport:'stdio',serverName:'ziwei-terminal',workspace:config.workspace,runtime:'Hermes',profile:'bot-test-profile',runtimeProfile:'bot-test-profile',employeeId:action.payload.employeeId,targetDeviceId:'phone-test',actionId:action.id,status:'loaded',toolCalls:phoneCalls,tool_calls:phoneCalls,executionState:'uncertain',failure:{code:'terminal_mcp_receipt_incomplete',phoneExecutionState:'uncertain',retryAllowed:false}},configurationRevision:7,botIsolation:{kind:'hermes-bot',employeeId:action.payload.employeeId,workspace:config.workspace,revision:7,profile:'bot-test-profile'}}};}});
+ const dispatcher=new ActionDispatcher({workdir:root,workspace:config.workspace,deviceId:config.deviceId,stateFile,execute:async(_action,context)=>{context.onSupervision({completionEvidence:Promise.resolve(exit),stop:async()=>exit});return{status:'failed',...(runtimeFailureCode?{code:runtimeFailureCode}:{}),error:failureError,result:{runtime:'Hermes',profile:'bot-test-profile',code:nativeCode,signal:null,executionState:'uncertain',terminalMcp:{configured:true,injected:true,loaded:true,transport:'stdio',serverName:'ziwei-terminal',workspace:config.workspace,runtime:'Hermes',profile:'bot-test-profile',runtimeProfile:'bot-test-profile',employeeId:action.payload.employeeId,targetDeviceId:'phone-test',actionId:action.id,status:'loaded',toolCalls:phoneCalls,tool_calls:phoneCalls,executionState:'uncertain',failure:{code:'terminal_mcp_receipt_incomplete',phoneExecutionState:'uncertain',retryAllowed:false}},configurationRevision:7,botIsolation:{kind:'hermes-bot',employeeId:action.payload.employeeId,workspace:config.workspace,revision:7,profile:'bot-test-profile'}}};}});
  const delivery=createActionDelivery({directory:path.join(runtime,'action-delivery'),identity,retryDelays:[],dispatch:a=>dispatcher.dispatch(a),post:async(url,body)=>{if(url.endsWith('/ack'))return{id:action.id,status:'acked',deviceId:config.deviceId,acked_at:new Date().toISOString(),expires_at:new Date(Date.now()+1_000_000).toISOString()};if(url.endsWith('/events'))return{id:body.eventId};if(deliveryState==='confirmed')return{id:action.id,status:'failed'};throw Object.assign(Error('result transport unavailable'),{status:deliveryState==='blocked'?400:503});}});
  if(deliveryState==='confirmed')await delivery.execute(action);else await assert.rejects(delivery.execute(action),/unavailable/);await delivery.whenIdle();
  const state=JSON.parse(fs.readFileSync(stateFile)),deliveryFile=path.join(runtime,'action-delivery',sha(JSON.stringify(action.id))+'.json'),record=JSON.parse(fs.readFileSync(deliveryFile));assert.equal(record.state,deliveryState);
@@ -121,4 +121,53 @@ test('the real dispatcher fallback remains supported when an executor omits a fa
 
 test('failed-background recovery still requires exact pending count while a periodic poll drains',async t=>{
  const f=await fixture(t);let drains=0;f.healthMutator=h=>{if(h.connectionState==='connected')h.pollingCount=1;else{drains++;h.pollingCount=drains<3?1:0;}};const before=snapshots(f.runtime),result=await f.make()(f.recoveryInput);assert.equal(result.recovered,true);assert.equal(result.retainedPendingCount,1);assert.equal(f.kills,1);assert.deepEqual(snapshots(f.runtime),before);
+});
+
+const checkpointFixture={runtimeFailureCode:'MAINTENANCE_CHECKPOINT_INVALID',nativeCode:0,failureError:'维护检查点无法验证；未重放原任务'};
+for(const deliveryState of ['result_pending','blocked','confirmed'])test(`a successful root with rejected checkpoint and ${deliveryState} receipt retains history without granting resume or child exit`,async t=>{
+ const f=await fixture(t,{...checkpointFixture,deliveryState}),before=snapshots(f.runtime),e=f.inspect();
+ assert.equal(f.state.completed[0].result.code,'MAINTENANCE_CHECKPOINT_INVALID');
+ assert.equal(f.state.completed[0].result.result.code,0);
+ assert.equal(isRetainedFailedBackgroundCompletion(f.input()),true);
+ assert.equal(e.safe,false);assert.equal(e.stopSafe,true);assert.deepEqual(e.stopIssues,[]);
+ assert.equal(e.retainedFailedBackgroundCount,1);assert.equal(e.retainedDeliveryCount,1);
+ assert.equal(e.retainedPendingCount,deliveryState==='result_pending'?1:0);
+ assert.equal(scanNativeFiles({connections:[f.connection]}).safe,false);
+ assert.deepEqual(snapshots(f.runtime),before,'classification never rewrites state, phone receipts or queue blobs');
+ const recovered=await f.make()(f.recoveryInput);
+ assert.equal(recovered.recovered,true);assert.equal(recovered.originalExecutionExitConfirmed,false);assert.equal(recovered.executionConfirmedStopped,false);assert.equal(recovered.backgroundProcessesPreserved,true);assert.equal(f.kills,1,'fixture stops only its exact idle daemon');
+ assert.deepEqual(snapshots(f.runtime),before);
+ const result=f.state.completed[0].result.result;
+ assert.equal(result.processExit.rootExitCode,0);assert.equal(result.processExit.treeConfirmed,false);assert.equal(result.processExit.activeProcesses,3);
+ assert.equal(result.terminalMcp.failure.phoneExecutionState,'uncertain');assert.equal(result.terminalMcp.failure.retryAllowed,false);
+ assert.equal(Object.hasOwn(result,'maintenanceCheckpoint'),false);
+ let replayed=0;const next=new ActionDispatcher({workdir:f.root,stateFile:f.stateFile,workspace:f.connection.workspace,deviceId:f.connection.deviceId,execute:async()=>{replayed++;}});
+ const duplicate=await next.dispatch(f.action);assert.equal(duplicate.status,'duplicate');assert.equal(duplicate.originalStatus,'failed');assert.equal(duplicate.code,'MAINTENANCE_CHECKPOINT_INVALID');assert.equal(replayed,0);
+ assert.equal(scanNativeFiles({connections:[f.connection]}).safe,false);assert.deepEqual(snapshots(f.runtime),before);
+});
+
+const checkpointInvalid={
+ 'an unrelated failed code with native zero':f=>{f.state.completed[0].result.code='runtime_failed';},
+ 'a different checkpoint error message':f=>{f.state.completed[0].result.error='Other checkpoint failure';},
+ 'another runtime':f=>{f.state.completed[0].result.result.runtime='Codex';},
+ 'a nonzero root under the checkpoint-zero exception':f=>{f.state.completed[0].result.result.code=1;f.state.completed[0].result.result.processExit.rootExitCode=1;},
+ 'a mismatched native code':f=>{f.state.completed[0].result.result.code=1;},
+ 'an unknown root exit':f=>{f.state.completed[0].result.result.processExit.rootConfirmed=false;},
+ 'cancelled background work':f=>{f.state.completed[0].result.result.processExit.cancelled=true;},
+ 'backgrounds without their native retention marker':f=>{delete f.state.completed[0].result.result.processExit.backgroundProcessesRetained;},
+ 'a real quarantine':f=>{f.state.started[0].quarantine={reason:'ROOT_EXIT_UNCONFIRMED',stopConfirmed:false};},
+ 'a non-chat native action':f=>{f.state.started[0].resourceBinding.type='runtime.execute';},
+ 'a maintenance checkpoint':f=>{f.state.completed[0].result.result.maintenanceCheckpoint={schemaVersion:1,state:'ready'};},
+ 'a maintenance pause':f=>{f.state.completed[0].result.result.maintenancePause={state:'paused'};},
+ 'a nested resume object':f=>{f.state.completed[0].result.result.managementMcp={maintenanceResume:{allowed:true}};},
+ 'a nested grant':f=>{f.state.completed[0].result.result.managementMcp={grant:{allowed:true}};},
+ 'an unknown runtime result field':f=>{f.state.completed[0].result.result.newRuntimeControl={allowed:true};},
+ 'unrelated nested local exit uncertainty':f=>{f.state.completed[0].result.result.managementMcp={processExit:{treeConfirmed:false,activeProcesses:1}};},
+};
+for(const[name,mutate]of Object.entries(checkpointInvalid))test(`checkpoint background retention refuses ${name}`,async t=>{
+ const f=await fixture(t,checkpointFixture);mutate(f);f.save();const before=snapshots(f.runtime);
+ assert.equal(isRetainedFailedBackgroundCompletion(f.input()),false);
+ assert.equal(f.inspect().stopSafe,false);
+ assert.deepEqual(await f.make()(f.recoveryInput),{recovered:false,reason:'not_applicable'});
+ assert.equal(f.kills,0);assert.deepEqual(snapshots(f.runtime),before);
 });
