@@ -1,5 +1,15 @@
 # 紫薇项目 HandOff
 
+## 2026-10-19 闲鱼官方压缩恢复与客户端远程升级
+
+优先采用 Hermes 官方 `compress_now`，不自建摘要、不换会话、不重跑手机/店铺旧任务。闲鱼原 session `20261015_120149_45e77a` 已真实压缩 579723 → 331744 token，未用 fallback；原配置及旧失败/手机不确定/树未知证据保留。通过原生 API 独立回读后，主聊天 `action_5cd837b4-c153-4e9e-a0d0-43177fb0d5b8` 于08:54:40 UTC 用真实 `gpt-6.1-sol` 回复“闲鱼恢复验收通过”，同一 session、root50528 exit0/tree0、无后台保留。Bot 已恢复 active r7/e23；该轮手机投影回读也为该 succeeded，不再是旧未知动作。不要再次重放原业务。
+
+源码已先推 GitHub 双分支，API e7ecaf6 与 Control 9d255 已发布且独立校验，前端J和旧数据保持。最终官方包 ed9165e/build e0cfb63e 包含自动官方压缩、手机未下发证明及原执行预算/并行能力；李金晋电脑远程升级请求 `client-update_3ec158a0-3756-4697-b3aa-8eb23e18cd54` 已在09:09:24.281 UTC 收到目标版本认证心跳，`heartbeatVerified:true`，实际安装成功。新客户端常规原生 `sessions.compress preview` 也已 succeeded，同一 profile/session、root35440 exit0/tree0，无写入；不能把预览当成再次真实压缩。此前两次失败回执仍保留，精确实例拒绝的原始 LH 规则未捕获，不反推历史原因。详情及验收边界见 [本轮运维](docs/operations/2026-10-19-hermes-official-context-recovery.md) 和 [QA](docs/qa/2026-10-19-hermes-official-context-recovery.json)。
+
+新客户端最终主聊天验收 `action_feb8f4ae-0fce-47e3-a45c-4fbcbf039708` 于09:20:33.025 UTC 用同一模型/session 精确回复“新版恢复验收通过”，root51780 exit0/tree0，无工具调用；ACK到完成346.506秒。手机投影的最新执行也为该 succeeded，Bot继续 active r7/e23。自动 typed-overflow 补偿本轮未故障注入，仅按回归证明，不能声称已现场触发。
+
+下方为此前发布快照。
+
 ## 2026-10-19 Hermes 升级暂停、安装 V 与原会话续做已真机通过
 
 用户已授权直接实现、测试后先推 GitHub 再发布。实现保留同一 ACKed action/逻辑任务/Bot 锁，整批工具结果落入原生 SQLite、确认 root/tree 退出后暂停；目标版本心跳、安装完成及锁释放后，按精确 Profile/HOME/cwd/session 摘要和持久代次许可续做，不重放原 prompt、不重置原预算。支持取消升级、明确还原后的继续和永久拒绝/到期收尾；手机待回执、后台进程或未知管理写不强停。Codex/其它未接入路径仍等空闲，不声称通用进程栈或损坏上下文迁移。

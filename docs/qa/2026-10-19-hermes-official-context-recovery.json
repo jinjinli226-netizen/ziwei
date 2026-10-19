@@ -1,0 +1,233 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-19",
+  "scope": "official Hermes compression and precise maintenance evidence",
+  "overall": "original-session-recovery-passed; latest-client-installation-passed; installed-client-main-smoke-passed",
+  "officialCore": {
+    "method": "official_compress_now",
+    "sessionId": "20261015_120149_45e77a",
+    "actionId": "action_a3f41e92-0c7c-46bd-be99-4e19fa9a8c99",
+    "beforeTokens": 579723,
+    "afterTokens": 331744,
+    "fallbackUsed": false,
+    "persisted": true,
+    "safeToContinue": true,
+    "originalPromptResent": false,
+    "phoneCommands": 0,
+    "clientInstalledByThisTest": false
+  },
+  "nativeReadback": {
+    "actionId": "action_5f0911a3-5386-4983-8f5f-dcd1a8a860fd",
+    "status": "succeeded",
+    "nativeVersion": "0.21.3",
+    "sessionId": "20261015_120149_45e77a",
+    "activeMessageCount": 1599,
+    "processExit": {
+      "launched": true,
+      "rootConfirmed": true,
+      "treeConfirmed": true,
+      "cancelled": false,
+      "backgroundProcessesRetained": false,
+      "rootPid": 42340,
+      "rootExitCode": 0,
+      "activeProcesses": 0,
+      "hostExitCode": 0,
+      "platform": "win32",
+      "supervisor": "windows-job"
+    }
+  },
+  "actualMainConversationSmoke": {
+    "actionId": "action_5cd837b4-c153-4e9e-a0d0-43177fb0d5b8",
+    "status": "succeeded",
+    "completedAt": "2026-10-19T08:54:40.847Z",
+    "model": "gpt-6.1-sol",
+    "nativeSessionId": "20261015_120149_45e77a",
+    "output": "闲鱼恢复验收通过",
+    "processExit": {
+      "launched": true,
+      "rootConfirmed": true,
+      "treeConfirmed": true,
+      "cancelled": false,
+      "backgroundProcessesRetained": false,
+      "rootPid": 50528,
+      "rootExitCode": 0,
+      "activeProcesses": 0,
+      "hostExitCode": 0,
+      "platform": "win32",
+      "supervisor": "windows-job"
+    },
+    "botRevision": 7,
+    "restoredControlEpoch": 23
+  },
+  "originalFailurePreserved": {
+    "actionId": "action_49bd64e6-0105-4fd6-aff5-53f50b520d52",
+    "originalFieldsUnchanged": true,
+    "baselineSha256": "41ced0f73c2ebd8a79d32defb9104439664ccf48cfef831f1eb07f1f20bca5b8",
+    "currentSha256": "41ced0f73c2ebd8a79d32defb9104439664ccf48cfef831f1eb07f1f20bca5b8",
+    "originalExecutionState": "uncertain",
+    "originalProcessExit": {
+      "launched": true,
+      "rootConfirmed": true,
+      "treeConfirmed": false,
+      "cancelled": false,
+      "backgroundProcessesRetained": true,
+      "rootPid": 46856,
+      "rootExitCode": 1,
+      "activeProcesses": 3,
+      "hostExitCode": 0,
+      "platform": "win32",
+      "supervisor": "windows-job"
+    }
+  },
+  "regressionScopes": {
+    "contextAndPhone": {
+      "passed": 130,
+      "failed": 0,
+      "skipped": 0
+    },
+    "updateRequestedGate": {
+      "passed": 66,
+      "failed": 0
+    },
+    "deadlineCompatibility": {
+      "passed": 190,
+      "failed": 0,
+      "rootIndependentSubset": 132
+    },
+    "nativeDiagnostics": {
+      "passed": 256,
+      "failed": 0,
+      "windowsConditionalSkipped": 6,
+      "rootIndependentSubset": 83
+    },
+    "packagedClient": {
+      "passed": 222,
+      "failed": 0,
+      "skipped": 0,
+      "releaseBoundaryFixturesPassed": 8
+    }
+  },
+  "publication": {
+    "apiCommit": "e7ecaf6a52ed2b1229008b881be4d5084ca717e0",
+    "controlCommit": "9d25509cf4a2f947465582d9442a2d1845a8af1b",
+    "lastAttestedClientBuild": "e0cfb63ee43c3d837a049b9c4f0c6d1362cab64918f8987b35597b9e549c4c18",
+    "clientArchiveSha256": "e947bb79cda87009070351bf4b572c3546d61d8c4c556e8c6c0967c4425271b9",
+    "independentAttestationSha256": "41f05dd1b35f2cd5c3932605053f912c13f94877e7d178eb480dc11f297c32bf",
+    "attestedAllMatched": true,
+    "clientCommit": "ed9165e7bd018dfba1ea59043044eb8cf9a26c36"
+  },
+  "liWindowsInstallation": {
+    "actualBuild": "e0cfb63ee43c3d837a049b9c4f0c6d1362cab64918f8987b35597b9e549c4c18",
+    "lastRequestId": "client-update_3ec158a0-3756-4697-b3aa-8eb23e18cd54",
+    "lastRequestState": "succeeded",
+    "reason": null,
+    "latestClientInstalled": true,
+    "heartbeatVerified": true,
+    "completionSource": "heartbeat",
+    "verifiedAt": "2026-10-19T09:09:24.281Z",
+    "dedicatedRemoteProtocolVerified": true,
+    "priorRefusedRequest": "client-update_cf30cf8a-51a3-4681-8855-660564547db3",
+    "priorRefusalExactNativeRuleKnown": false
+  },
+  "limits": [
+    "Actual official compression, new-client native preview and real-provider original-session reply passed. Automatic typed context-overflow recovery hook is regression-tested but not fault-injected onsite.",
+    "Original uncertain phone result and incomplete historical process tree remain unchanged.",
+    "No original phone/store task replay, user-database restore, Android APK release, unrelated computer update or Mac listener.",
+    "Synthetic nested test scopes overlap; counts above are not summed."
+  ],
+  "installedClientNativePreview": {
+    "actionId": "action_cb5542cb-f0cd-4161-98a1-c16b896821ef",
+    "status": "succeeded",
+    "completedAt": "2026-10-19T09:11:45.784Z",
+    "nativeVersion": "0.21.3",
+    "data": {
+      "method": "official_compress_now",
+      "status": "preview",
+      "previousSessionId": "20261015_120149_45e77a",
+      "sessionId": "20261015_120149_45e77a",
+      "beforeMessages": 1601,
+      "afterMessages": 1601,
+      "beforeTokens": 337349,
+      "afterTokens": 337349,
+      "aborted": false,
+      "fallbackUsed": false,
+      "refusedWouldGrow": false,
+      "noop": false,
+      "persisted": false,
+      "safeToContinue": false,
+      "preview": true
+    },
+    "processExit": {
+      "launched": true,
+      "rootConfirmed": true,
+      "treeConfirmed": true,
+      "cancelled": false,
+      "backgroundProcessesRetained": false,
+      "rootPid": 35440,
+      "rootExitCode": 0,
+      "activeProcesses": 0,
+      "hostExitCode": 0,
+      "platform": "win32",
+      "supervisor": "windows-job"
+    }
+  },
+  "installedClientMainConversationSmoke": {
+    "actionId": "action_feb8f4ae-0fce-47e3-a45c-4fbcbf039708",
+    "status": "succeeded",
+    "completedAt": "2026-10-19T09:20:33.025Z",
+    "ackToCompletionSeconds": 346.506,
+    "model": "gpt-6.1-sol",
+    "nativeSessionId": "20261015_120149_45e77a",
+    "output": "新版恢复验收通过",
+    "processExit": {
+      "launched": true,
+      "rootConfirmed": true,
+      "treeConfirmed": true,
+      "cancelled": false,
+      "backgroundProcessesRetained": false,
+      "rootPid": 51780,
+      "rootExitCode": 0,
+      "activeProcesses": 0,
+      "hostExitCode": 0,
+      "platform": "win32",
+      "supervisor": "windows-job"
+    },
+    "reasoning": {
+      "schemaVersion": 1,
+      "employeeId": "employee_78932a02-be5c-42f5-b14d-f4bcb21d3529",
+      "revision": 7,
+      "provider": "openai-codex",
+      "model": "gpt-6.1-sol",
+      "requested": "max",
+      "effective": "max",
+      "actual": "max",
+      "status": "matched",
+      "phase": "request",
+      "evidence": "native_codex_transport",
+      "actualModel": "gpt-6.1-sol",
+      "nativeActual": "xhigh",
+      "mode": "verified_gpt61_sol_max",
+      "requests": 2
+    },
+    "configurationRevision": 7,
+    "contextRecoveryMarkerPresent": false,
+    "automaticOverflowFaultInjected": false
+  },
+  "mobileProjectionAfterInstallation": {
+    "readOnly": true,
+    "bot": {
+      "revision": 7,
+      "control_state": "active",
+      "control_epoch": 23
+    },
+    "latestBotAction": {
+      "id": "action_feb8f4ae-0fce-47e3-a45c-4fbcbf039708",
+      "status": "succeeded"
+    },
+    "execution": {
+      "id": "action_feb8f4ae-0fce-47e3-a45c-4fbcbf039708",
+      "status": "succeeded",
+      "error": null
+    }
+  }
+}
