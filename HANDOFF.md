@@ -1,5 +1,13 @@
 # 紫薇项目 HandOff
 
+## 2026-10-19 知暖裸 node TTY 已修复、发布并真机通过
+
+产品 Q `d249c5786df867346d9b0f97451daf75e1d4bf76` 已先推 GitHub 再发布官方 Windows 包，build `11cf2eb7f739698a34f0590020629c1b99dd6fed4abfdecc69154850e7ed4fa6`、SHA `c960b9962ee4f88368d3f12498653e95f59e8a57fc3156a601a0d5afe3b9310a`。仅李金晋电脑统一升级 `client-update_a514c779-278b-4cc9-a5a1-51a55a0b9962` 已 succeeded、新build认证心跳及本机PID2808确认；不要重复升级。API/UI仍J，未重启主站。
+
+真实普通任务的 Bash 原将 node 别名成 winpty node.exe；后台无TTY，故失败。现在仅 Windows Hermes 显式 query 子进程规范化 TERM=dumb，保留代理、PATH、Profile/HOME；其它运行时和真正交互入口不变。22项定向测试及独立复跑通过。
+
+知暖新普通任务 `action_b468da01-3fe7-4a97-8668-01427d02a93f` 未指定 cwd，直接裸 node 返回 `D:\AIUSE\life-assistant`、工具exit0，根16152/root0/tree0，无后台残留。独立只读回读精确原生 Session `20261019_102500_bd2308` 确认一次terminal原命令及结果，不依赖模型口述；原 `zhi-nuan-life` Profile保持。只改验收脚本的 process.execPath 属性笔误后重验，没有隐藏首次脚本exit1。未重跑闲鱼手机业务；没有声称原生Windows显式PTY、所有设备或更新后自动续干已验收。详见 [运维记录](docs/operations/2026-10-19-hermes-noninteractive-tty.md) 和 [QA](docs/qa/2026-10-19-hermes-noninteractive-tty.json)。下方均为历史快照。
+
 ## 2026-10-19 李金晋电脑已远程升级，两名员工D盘目录已实测
 
 客户端P `b02683b28cb12ecdcc2b93c6a847ccdb45bbcfee` 已先推GitHub再发布，统一请求 `client-update_3b976a49-9b7c-4711-8a57-02edacc4f4a4` 于09:35:47北京时间收到新版认证心跳并成功。设备build为 `b40ce7117c3b43b8ff05bbc9adb541b59555125934a670a5ab43069c0ef7b405`、PID17316，实际安装回执complete、配置保留并恢复运行。其它电脑未更新，主站API/UI仍J。不要重复升级已成功设备。

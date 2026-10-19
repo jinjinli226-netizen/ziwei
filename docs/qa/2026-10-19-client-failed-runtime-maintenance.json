@@ -78,5 +78,12 @@
   "otherDevicesObserved": {
     "companyDesktop": "bfc96edf59be31f1be50d3878a12d6c37d154fa108ef37c7a0d7d41ee7511927",
     "strongestDesktop": "208f2350ff390bbf7506e6baaef60eb7c8d467f2c8630a86c670ce01aada1044"
+  },
+  "ttyFollowup": {
+    "resolvedInProductCommit": "d249c5786df867346d9b0f97451daf75e1d4bf76",
+    "installedBuild": "11cf2eb7f739698a34f0590020629c1b99dd6fed4abfdecc69154850e7ed4fa6",
+    "liveBareNodeVerified": true,
+    "record": "docs/qa/2026-10-19-hermes-noninteractive-tty.json",
+    "historicalSnapshotPreserved": true
   }
 }

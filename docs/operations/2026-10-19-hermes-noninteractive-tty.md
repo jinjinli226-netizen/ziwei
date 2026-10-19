@@ -16,4 +16,16 @@ Creator环境下的本机原生探针使用完整代码SHA校验，dumb、unset�
 
 22项定向测试与独立复跑均通过，含真实Bash别名失败/修复回归、Windows字段大小写、调用者环境不可变、代理/PATH/Profile保持及其它运行时/平台边界。没有新增依赖。没有修改Hermes安装或用户Shell文件，也没有把工具错误误判成模型启动错误。本轮未声称原生Windows显式PTY工具已真机验收。
 
-发布顺序为先推GitHub，再更新官方Windows包。仅请求李金晋电脑远程升级；必须以实际目标build心跳及修复后知暖普通任务确认安装和效果，候选测试不代表已安装。后续现场结果另行追加。
+## 发布与真机验收完成
+
+产品 Q `d249c5786df867346d9b0f97451daf75e1d4bf76` 已先推 GitHub 两条发布分支，再发布官方 Windows 包。build `11cf2eb7f739698a34f0590020629c1b99dd6fed4abfdecc69154850e7ed4fa6`，包 SHA256 `c960b9962ee4f88368d3f12498653e95f59e8a57fc3156a601a0d5afe3b9310a`，1156114 字节。只覆盖已审查的客户端累积文件；API/UI仍为 J `241f0cc59bbd2cb7800ac3072470b1a85a77dfd1`，没有重启主站服务。
+
+仅对李金晋电脑提交统一远程升级 `client-update_a514c779-278b-4cc9-a5a1-51a55a0b9962`，2026-10-19 10:19:07 北京时间目标认证心跳确认 succeeded、heartbeatVerified:true、completionSource:heartbeat。后续本机健康只读回执确认同一 Q build、PID2808；其余设备未请求升级。无需用户终端或重复更新。
+
+安装后知暖普通任务 `task_6417162a-438d-4711-b902-452e130091b7` / `action_b468da01-3fe7-4a97-8668-01427d02a93f` 使用真实 `gpt-6.1-sol` provider。提交未传 cwd/workdir/conversationId，沿用原 `zhi-nuan-life` Profile，实际 payload 为 `D:\AIUSE\life-assistant`。一次 terminal 调用包含 `printf`、`type -a node` 和裸 `node -e 'console.log(JSON.stringify({cwd:process.cwd()}))'`，没有完整 Node 路径、winpty、PTY、unalias、export TERM、cd 或工具 cwd 覆写。返回 TERM=dumb、node 原生路径、D 盘目录，工具 exit_code0；根PID16152/root0/tree0/active0，cancelled:false，无后台残留。
+
+独立只读动作 `action_8c442fac-4ccd-49c2-985b-be033468dde4` 使用 Node 内置 SQLite 只读打开该 Profile 的 state.db，仅提取精确 Session `20261019_102500_bd2308` 的 assistant tool_calls 与 tool 结果，确认实际只有一次 terminal、上述裸 node 命令及 exit_code0。原生持久记录中的反斜杠有二次转义，QA保留原文，并另存规范化目录；没有把模型口述或仅平台 succeeded 当作工具原始回执。
+
+此前安装后诊断 `action_0ddef406-0911-4960-988d-539c2e395e1b` 已确认别名消失、Node能启动，但本轮验收提示误把 `process.execPath` 属性写成函数，工具 exit1。它是验收脚本笔误；修正提示后重验通过，没有为此改产品。另一次长编码只读探针因 SHA 不匹配安全拒绝，未执行变形代码；最终使用短探针取得原生记录。
+
+本次验收只覆盖李金晋电脑上的真实普通知暖任务。单图路径有定向回归覆盖，没有宣称单图真机或原生 Windows 显式 PTY 完整验收。没有重跑闲鱼手机业务，也没有新增升级后自动续干功能。

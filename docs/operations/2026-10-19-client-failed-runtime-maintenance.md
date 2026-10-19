@@ -35,3 +35,6 @@ P `b02683b28cb12ecdcc2b93c6a847ccdb45bbcfee` 已先推GitHub再发布。包SHA `
 两条精确原生SQLite session只读比对：上述新会话裸node工具exit1；此前显式原生smoke `20261018_235424_847d2a` 同一命令工具exit0、返回D目录。真实源码使用Git Bash，环境与shell选择仍需继续定位，不以推测覆盖用户shell配置或修改Hermes安装。后续独立普通任务 `task_e0b40f40-20ea-43a1-a8e2-3f861cb3130c` / `action_8338eae8-a237-48ac-afcc-d8b47a649ba2` 使用 `C:/Program Files/nodejs/node.exe` 原生完整路径，一次terminal命令，无cd、无工具cwd覆写、无文件修改，返回 `D:\AIUSE\life-assistant`、exit_code0；CLI根39956/tree0，原profile仍 `zhi-nuan-life`，session `20261019_095042_e636a4`。这证明升级后普通任务按员工默认目录执行；不把裸node的TTY兼容问题称为已修复，也不声称连续24小时业务验收。
 
 最终API回读李金晋电脑仍P在线。本轮只对该设备提交升级请求；公司台式最终观察为H build `bfc96edf...`，全公司最强电脑仍 `208f2350...`，不沿用更早公司台式5a9的过期快照。追加读取最终知暖Session的独立诊断在执行时因 `dict.itims` 拼写异常失败，未改数据库；不把这条诊断平台succeeded当作独立工具原文已取得。最终目录结论依据该普通任务的正确payload、真实terminal阶段、模型返回与CLI完整退出；原始SQLite工具行尚未由追加诊断取回。这项证据范围与裸node未解决限制均保留。
+
+
+后续 Q 已定位并修复真实 Bash 的 winpty 别名问题，李金晋电脑完成远程升级，知暖裸 node 的精确原生工具记录已验证 D 目录与 exit0。上述 P 阶段“未解决”保留为历史结论；当前结果见 [TTY修复与真机验收](2026-10-19-hermes-noninteractive-tty.md)。

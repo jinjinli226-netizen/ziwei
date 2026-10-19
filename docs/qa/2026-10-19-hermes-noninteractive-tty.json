@@ -1,5 +1,5 @@
 {
-  "phase": "tested-not-yet-published",
+  "phase": "published-installed-bare-node-native-receipt-verified",
   "targetDeviceId": "device_bfd9a3d2-c2cc-4a36-8bd8-465bea492493",
   "employeeId": "employee_485327e2-16ae-4c17-97af-53d4e9d50ddf",
   "profile": "zhi-nuan-life",
@@ -10,12 +10,71 @@
   "observedBeforeNodeAlias": "winpty node.exe",
   "targetedPassed": 22,
   "independentPassed": 22,
-  "clientRuntimeOverlayFiles": ["src/runtime-adapters.mjs"],
+  "clientRuntimeOverlayFiles": [
+    "src/runtime-adapters.mjs"
+  ],
   "providerProxyPreserved": true,
   "profileConfigurationChanged": false,
   "hermesInstallationChanged": false,
   "nativeWindowsPtyVerified": false,
-  "published": false,
-  "installed": false,
-  "postInstallBareNodePassed": false
+  "published": true,
+  "installed": true,
+  "postInstallBareNodePassed": true,
+  "productCommit": "d249c5786df867346d9b0f97451daf75e1d4bf76",
+  "clientBuild": "11cf2eb7f739698a34f0590020629c1b99dd6fed4abfdecc69154850e7ed4fa6",
+  "archiveSha256": "c960b9962ee4f88368d3f12498653e95f59e8a57fc3156a601a0d5afe3b9310a",
+  "archiveBytes": 1156114,
+  "upgrade": {
+    "requestId": "client-update_a514c779-278b-4cc9-a5a1-51a55a0b9962",
+    "state": "succeeded",
+    "heartbeatVerified": true,
+    "completionSource": "heartbeat",
+    "verifiedAt": "2026-10-19T02:19:07.131Z",
+    "daemonPid": 2808
+  },
+  "postInstall": {
+    "taskId": "task_6417162a-438d-4711-b902-452e130091b7",
+    "actionId": "action_b468da01-3fe7-4a97-8668-01427d02a93f",
+    "sessionId": "20261019_102500_bd2308",
+    "status": "succeeded",
+    "runtime": "Hermes",
+    "model": "gpt-6.1-sol",
+    "profile": "zhi-nuan-life",
+    "payloadCwd": "D:\\AIUSE\\life-assistant",
+    "explicitTaskCwdSubmitted": false,
+    "toolCallCount": 1,
+    "toolFunction": "terminal",
+    "toolArgumentsAsPersisted": {
+      "command": "printf 'TERM=%s\\n' \"$TERM\"; type -a node; node -e 'console.log(JSON.stringify({cwd:process.cwd()}))'"
+    },
+    "toolExitCode": 0,
+    "toolOutputAsPersisted": "TERM=dumb\nnode is /c/Program Files/nodejs/node\n{\"cwd\":\"D:\\\\AIUSE\\\\life-assistant\"}",
+    "observedCwd": "D:\\AIUSE\\life-assistant",
+    "observedTerm": "dumb",
+    "observedNodeAlias": null,
+    "originalNativeSqliteReceiptVerified": true,
+    "receiptProbeActionId": "action_8c442fac-4ccd-49c2-985b-be033468dde4",
+    "processExit": {
+      "launched": true,
+      "rootConfirmed": true,
+      "treeConfirmed": true,
+      "cancelled": false,
+      "backgroundProcessesRetained": false,
+      "rootPid": 16152,
+      "rootExitCode": 0,
+      "activeProcesses": 0,
+      "hostExitCode": 0,
+      "platform": "win32",
+      "supervisor": "windows-job"
+    }
+  },
+  "intermediateAcceptanceFailure": {
+    "actionId": "action_0ddef406-0911-4960-988d-539c2e395e1b",
+    "toolExitCode": 1,
+    "cause": "Acceptance prompt used process.execPath() instead of process.execPath property; Node already launched and winpty alias was absent. Corrected test only; no product change."
+  },
+  "onlyTargetDeviceUpgraded": true,
+  "apiUiCommitUnchanged": "241f0cc59bbd2cb7800ac3072470b1a85a77dfd1",
+  "apiUiRestarted": false,
+  "previousPhoneBusinessReplayed": false
 }
