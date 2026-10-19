@@ -75,7 +75,11 @@ function snapshot(file,files,read){
     if(!fs.existsSync(target)){const proof={path:target,exists:false};source.push({proof});files.push(proof);continue;}
     const stat=fs.lstatSync(target,{bigint:true});if(!stat.isFile()||stat.isSymbolicLink()||stat.nlink!==1n)throw Error('NATIVE_DATABASE_IDENTITY_UNKNOWN');
     const bytes=fs.readFileSync(target),proof={path:target,exists:true,bytes:bytes.length,sha256:hash(bytes),identity:{dev:String(stat.dev),ino:String(stat.ino)}};
-    files.push(proof);source.push({proof,bytes});if(suffix==='-journal'&&bytes.length)throw Error('NATIVE_DATABASE_RECOVERY_REQUIRED');
+    files.push(proof);source.push({proof,bytes});
+    // SQLite may retain a rollback journal after invalidating its header. Only
+    // a complete header with all eight magic bytes zero is proven non-hot;
+    // partial headers and every nonzero magic still require native recovery.
+    if(suffix==='-journal'&&bytes.length&&(bytes.length<28||!bytes.subarray(0,8).equals(Buffer.alloc(8))))throw Error('NATIVE_DATABASE_RECOVERY_REQUIRED');
   }
   if(!source[0].proof.exists){if(source[1].proof.exists||source[3].proof.exists)throw Error('NATIVE_DATABASE_ORPHAN_WAL');return null;}
   if(source[1].proof.exists||source[3].proof.exists)validateWal(source[1].bytes||Buffer.alloc(0),source[0].bytes,source[3].bytes);
