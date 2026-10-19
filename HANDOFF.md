@@ -1,10 +1,14 @@
 # 紫薇项目 HandOff
 
-## 2026-10-19 Hermes 升级暂停与续做候选已通过联合回归
+## 2026-10-19 Hermes 升级暂停、安装 V 与原会话续做已真机通过
 
-用户已授权直接实现、测试后先推 GitHub 再发布。当前候选保留同一 ACKed action/逻辑任务/Bot 锁，整批工具结果落入原生 SQLite、确认 root/tree 退出后暂停；目标版本心跳、安装完成及锁释放后，按精确 Profile/HOME/cwd/session 摘要和持久代次许可续做，不重放原 prompt、不重置原预算。支持取消升级、明确还原后的继续和永久拒绝/到期收尾；手机待回执、后台进程或未知管理写不强停。Codex/其它未接入路径仍等空闲，不声称通用进程栈或损坏上下文迁移。
+用户已授权直接实现、测试后先推 GitHub 再发布。实现保留同一 ACKed action/逻辑任务/Bot 锁，整批工具结果落入原生 SQLite、确认 root/tree 退出后暂停；目标版本心跳、安装完成及锁释放后，按精确 Profile/HOME/cwd/session 摘要和持久代次许可续做，不重放原 prompt、不重置原预算。支持取消升级、明确还原后的继续和永久拒绝/到期收尾；手机待回执、后台进程或未知管理写不强停。Codex/其它未接入路径仍等空闲，不声称通用进程栈或损坏上下文迁移。
 
-274 项联合 Node 回归通过、0 失败/跳过；Python 原生夹具18项通过。已只读核对实际李金晋电脑 Hermes 0.22 ABI，但候选测试和 ABI 检查不等于已发布或跨升级真机验收。后续仅该电脑装入基础支持，再用独立无外部业务任务验证跨升级、工具步骤不重复。原闲鱼业务不重跑。API仅叠加实际 J 的4个源文件，客户端从真实官方包保留其它混合字节。详见 [本轮运维](docs/operations/2026-10-19-maintenance-checkpoint-resume.md) 和 [QA](docs/qa/2026-10-19-maintenance-checkpoint-resume.json)。下方为此前已发布快照。
+API R `a6411aad5586073691b727dcea6d0f824dfd9f10` 已部署，PID510535；主站/前端仍J、数据库schema与旧数据保持。仅李金晋电脑已由统一维护装入 R，再更新至 U `75c35204ca708f2ae85b512c074ff854ea84ed29`，目标 build `b2cbdeb72250ef5b1a08060947e2a430619373b8635717e045730e183b5f04e5` 的认证心跳已确认。首轮两个任务因 null 被误判非法许可而 admissionRejected/not_dispatched，未启动原生或写业务，失败记录保留；U 空许可修复55/55通过。安装后普通知暖任务 `action_890da648-5f3b-4ca5-8ec2-0f70b86bcc99` succeeded，返回 `D:\AIUSE\life-assistant`、exit0/root0/tree0。
+
+V `e3ddc12f132a1cd770ba6d1486be72ee25a0bf7b` 已推双分支并仅发布官方客户端，build `daf73ba86f7fb883cb022edd0807820cfddacfe6bcb3ab5b971060699240ec35`；没有第二次API部署。真实 U→V 请求 `client-update_cf3c86e0-8f00-4520-9c9e-d26796ce7a46` 已由V认证心跳确认 succeeded，李金晋电脑daemon PID44384、paused/pending均0。UV2原任务 `action_53440ccf-7295-4a03-8310-4b3612897082` 按generation1暂停并恢复原session `20261019_121912_0ff447`，始终同一action；原根57340及恢复新根44476均exit0/tree0，最终succeeded。只读SQLite证明 `action_aec7ae7e-f096-4e89-8aa1-1e11062cb60b` 确认两条terminal命令hash分别匹配计划、各一次且原工具exit0，测试文件阶段1/2各一条，阶段1原时间不变。D盘cwd、原独立Profile/HOME保持；该普通Hermes任务的跨升级续做已实测，不声称其它运行时或全部业务都已验。
+
+首UV实验 `action_af6754dd-7a2f-440c-957a-b4dae381fbfc` 的工具虽与plan一致，原生shell传递后eval反斜杠减少，工具TEST_CWD_MISMATCH/exit1、无阶段产物；外层action succeeded未当作工具通过。原SQLite证据 `action_b05f5ad6-b048-40e2-94b6-8541ccf85da3` 和最初null许可失败记录均保留，UV2使用独立测试文件。此前联合Node274项、Python18项通过是源码/夹具证据；本次另有真实检查点、认证心跳、最终session和工具回读，离线汇总 `live-uv2-attestation.json` passed5/5（SHA `71faa50e330387079615133ac96218872a772af5dc22b3f5492a86615aab2493`）。原闲鱼业务不重跑、其它电脑未更新。API仅叠加实际J的4个源文件，客户端保留其它混合字节。详见 [本轮运维](docs/operations/2026-10-19-maintenance-checkpoint-resume.md) 和 [QA](docs/qa/2026-10-19-maintenance-checkpoint-resume.json)。下方为此前已发布快照。
 
 ## 2026-10-19 知暖裸 node TTY 已修复、发布并真机通过
 

@@ -1,6 +1,30 @@
 # Windows Hermes 升级暂停与原会话续做
 
-用户已授权直接修复、测试后先推 GitHub 再发布；真机仅使用李金晋电脑，闲鱼原手机业务不重放。本节为候选实现，现场发布与跨升级验收结果须另行追加。
+用户已授权直接修复、测试后先推 GitHub 再发布；真机仅使用李金晋电脑，闲鱼原手机业务不重放。API R、Windows 客户端 U/V 已按下述范围发布。李金晋电脑已完成 U→V 的真实工作任务暂停、升级及原会话续做；服务器事件、认证目标心跳、同一 session 的原生 SQLite 工具结果和专用测试文件交叉核验通过。
+
+## 已确认的发布与现场记录
+
+API R `a6411aad5586073691b727dcea6d0f824dfd9f10` 于 `2026-10-19T03:42:53Z` 发布完成，当前 API 目录 `/opt/ziwei/releases/maintenance-resume-a6411aad5586-62297df2d67b/v2`、主 PID `510535`。它在实际 J 混合 API 上仅叠加本轮 4 个文件；主站/前端仍为 J `241f0cc59bbd2cb7800ac3072470b1a85a77dfd1`，数据库 schema、原库身份、前端及官方下载在 API 发布阶段保持。后续客户端阶段只更换官方 `ziwei-latest.tgz` 与 `release.json`，没有再次部署 API、重启其它服务或更新其它电脑。
+
+李金晋电脑先经统一请求 `client-update_ca881cc8-3d4e-472d-93f7-c2797823df59` 装入 R 基础支持，再经 `client-update_e50e1a97-0eb8-4a88-9d05-00bce1e198de` 从 R 升至 U；后者于 `2026-10-19T04:07:16.723Z` 由目标 build 认证心跳确认 succeeded。U 为 `75c35204ca708f2ae85b512c074ff854ea84ed29`，设备 build `b2cbdeb72250ef5b1a08060947e2a430619373b8635717e045730e183b5f04e5`。这是基础能力安装成功，不等于一个正在工作的任务已经跨升级续做。
+
+首轮两个任务 `action_5db8afde-53ea-4139-ab66-1ffae1032504`、`action_71a7b3a7-239a-43f9-a046-5f9aad72ec13` 均失败于 admission，原回执为 `admissionRejected:true`、`executionState:not_dispatched`、错误“维护恢复许可无效”；没有启动原生进程或写入测试/业务文件，原失败记录保留。原因是普通任务的 delivery 无维护历史时返回 null，客户端误将其当成非法恢复许可。U 修为 null/undefined 均表示本机无许可且不发送该 JSON 字段；非空恢复许可仍严格校验并完整传给 admission、Bot 启动、事件和结果。U 的定向回归 55/55 通过。
+
+U 安装后的知暖普通任务 `action_890da648-5f3b-4ca5-8ec2-0f70b86bcc99` 已 succeeded：不手动设置工具 workdir 或 cd，执行一次裸 node，返回 cwd `D:\AIUSE\life-assistant`、exit code 0，root PID `18384`、rootExitCode 0、treeConfirmed true、activeProcesses 0，原生 session `20261019_120827_d3f417`。该证据证明 U 的普通任务启动和 D 盘目录；本轮尚未独立回读此 session 的原生 SQLite 工具行，不把模型最终摘要等同于跨升级工具去重证明。
+
+V `e3ddc12f132a1cd770ba6d1486be72ee25a0bf7b` 已推送两个发布分支并于 `2026-10-19T04:09:52Z` 仅发布官方客户端：build `daf73ba86f7fb883cb022edd0807820cfddacfe6bcb3ab5b971060699240ec35`，包 SHA256 `8a3e845507d67d5d89be2b673356694dd059886801e37efe7e1f62a90c9f1ac2`。V 增加待提交维护检查点健康计数，作为本次 U→V 跨升级目标。
+
+首次 UV 实验 `action_af6754dd-7a2f-440c-957a-b4dae381fbfc` 的原生 session `20261019_121138_faaa1e` 中，terminal 参数与测试计划命令一致，但 Windows 原生 shell 传递后 eval 字符串中的反斜杠减少，工具返回 `TEST_CWD_MISMATCH`、exit_code 1，没有创建阶段文件。外层 Hermes action/CLI 最终 succeeded 不代表这个工具测试通过。只读 SQLite 证明 `action_b05f5ad6-b048-40e2-94b6-8541ccf85da3` 保留了原 tool_call 与失败工具结果；该实验没有当作产品恢复成功。随后使用独立 UV2 文件、base64 加 SHA 校验的命令重新实测，未覆盖首实验记录或重跑业务。
+
+UV2 原任务 `action_53440ccf-7295-4a03-8310-4b3612897082` 在 U 上先完成阶段1，独立只读回执确认专用文件计数为1/0。维护检查点 generation1 保留原 action、session `20261019_121912_0ff447`、`zhi-nuan-life` Profile、对应独立 HOME 及 cwd `D:\AIUSE\life-assistant`；pendingTools 0、消息数6，原根57340退出0、treeConfirmed true、activeProcesses 0。随后同一个更新请求 `client-update_cf3c86e0-8f00-4520-9c9e-d26796ce7a46` 从 U 升至 V，目标认证心跳于 `2026-10-19T04:23:20.961Z` 确认 succeeded。
+
+原任务的 `maintenance.resume` 引用同一检查点和 generation1，恢复后的 `action.started` 带同一代次。任务于 `2026-10-19T04:26:04.637Z` succeeded，仍为原 action 和原 nativeSessionId；新根44476退出0、treeConfirmed true、activeProcesses 0。没有创建替代业务 action。最终只读证明 `action_aec7ae7e-f096-4e89-8aa1-1e11062cb60b` 直接查询精确 session 的 SQLite terminal 调用：阶段1命令 SHA256 `0d916782a490d719a990f7c65f7f8900aa7bf7495df21155dd6869e160c2af2d`、阶段2 `a97abd9f31cc4132ca9c34c6740c3d0686bed4816779e5e69bc40dd49163880b`，各调用一次、各有一条原工具结果，exit_code均0；没有仅依据员工总结判断。
+
+同一只读证明确认原文件阶段1/2各一条、阶段1时间仍为升级前的 `2026-10-19T04:19:50.394Z`，阶段2为 `2026-10-19T04:24:13.117Z`，两个守卫文件有效。V 本机健康 build 正确、daemon PID44384、maintenancePausedActionCount 0、maintenancePendingCommitCount 0。命令摘要由固定只读探针从原 SQLite 参数计算，原工具结果原文/字节数/哈希随回执保留；未回传整库或全部命令正文。本次确认范围为这台 Windows 电脑、这个普通 Hermes 任务与 session 的跨升级续做，不推广成所有运行时或所有外部业务都能自动恢复。
+
+最终离线汇总 `live-uv2-attestation.json` 为 passed、5/5 检查通过，SHA256 `71faa50e330387079615133ac96218872a772af5dc22b3f5492a86615aab2493`。它仅汇总上述真实原回执，无网络请求、无凭据读取、没有重跑任务。
+
+原始发布、认证心跳观察、失败任务和普通 smoke 保存在私有目录 `.local/maintenance-resume-release/`，分别见 `server-maintenance-a6411aad5586-62297df2d67b/result.json`、对应三个 `client-maintenance-publication-*/result.json`、`li-maintenance-*-observations-*.jsonl`、`live-test-latest.json`、`phase-proof-latest.json`、`smoke-u-latest.json`、`uv-failed-sqlite-ledger-latest.json`、`uv2-4339358a42804df88999aedd5fd9695e-checkpoint-action.json`、同前缀的 `task-ledger-latest.json` 与 `20261019_121912_0ff447-final-sqlite-ledger-latest.json`。交接文档只保留非秘密的标识和结论，不复制设备令牌或恢复许可。
 
 ## 执行与恢复
 

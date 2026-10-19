@@ -1,5 +1,5 @@
 {
-  "phase": "candidate-tested-awaiting-publication-and-live-upgrade",
+  "phase": "published-installed-live-cross-upgrade-verified",
   "targetDeviceId": "device_bfd9a3d2-c2cc-4a36-8bd8-465bea492493",
   "employeeId": "employee_485327e2-16ae-4c17-97af-53d4e9d50ddf",
   "runtime": "Hermes",
@@ -8,9 +8,9 @@
   "originalPromptReplayed": false,
   "previousPhoneBusinessReplayed": false,
   "nativeInstalledMethodsReadOnlyVerified": true,
-  "published": false,
-  "installed": false,
-  "liveCrossUpgradeVerified": false,
+  "published": true,
+  "installed": true,
+  "liveCrossUpgradeVerified": true,
   "nativeProcessStackRestoration": false,
   "otherRuntimeContinuationImplemented": false,
   "contextCorruptionMigrationImplemented": false,
@@ -26,5 +26,262 @@
     "backend/repository.mjs",
     "backend/action-maintenance.mjs",
     "src/maintenance-checkpoint.mjs"
-  ]
+  ],
+  "apiPublication": {
+    "commit": "a6411aad5586073691b727dcea6d0f824dfd9f10",
+    "current": "/opt/ziwei/releases/maintenance-resume-a6411aad5586-62297df2d67b/v2",
+    "mainPid": 510535,
+    "mainSiteCommit": "241f0cc59bbd2cb7800ac3072470b1a85a77dfd1",
+    "frontendCommit": "241f0cc59bbd2cb7800ac3072470b1a85a77dfd1",
+    "schemaUnchanged": true,
+    "frontendUnchanged": true,
+    "clientFilesPreservedDuringApiPhase": true,
+    "completedAt": "2026-10-19T03:42:53.885273+00:00"
+  },
+  "officialClientPublication": {
+    "commit": "e3ddc12f132a1cd770ba6d1486be72ee25a0bf7b",
+    "clientBuild": "daf73ba86f7fb883cb022edd0807820cfddacfe6bcb3ab5b971060699240ec35",
+    "archiveSha256": "8a3e845507d67d5d89be2b673356694dd059886801e37efe7e1f62a90c9f1ac2",
+    "archiveBytes": 1171039,
+    "apiCommit": "a6411aad5586073691b727dcea6d0f824dfd9f10",
+    "servicesRestarted": false,
+    "deviceUpdatesSubmittedByPublication": 0,
+    "completedAt": "2026-10-19T04:09:52.790408+00:00",
+    "branches": [
+      "codex/remote-client-upgrade",
+      "codex/v2-20261014-release"
+    ]
+  },
+  "confirmedDeviceInstallation": {
+    "commit": "e3ddc12f132a1cd770ba6d1486be72ee25a0bf7b",
+    "clientBuild": "daf73ba86f7fb883cb022edd0807820cfddacfe6bcb3ab5b971060699240ec35",
+    "pid": 44384,
+    "requestId": "client-update_cf3c86e0-8f00-4520-9c9e-d26796ce7a46",
+    "state": "succeeded",
+    "heartbeatVerified": true,
+    "completionSource": "heartbeat",
+    "verifiedAt": "2026-10-19T04:23:20.961Z",
+    "sourceBuild": "b2cbdeb72250ef5b1a08060947e2a430619373b8635717e045730e183b5f04e5",
+    "maintenancePausedActionCount": 0,
+    "maintenancePendingCommitCount": 0,
+    "otherDevicesUpdated": false
+  },
+  "initialAdmissionFailures": {
+    "actionIds": [
+      "action_5db8afde-53ea-4139-ab66-1ffae1032504",
+      "action_71a7b3a7-239a-43f9-a046-5f9aad72ec13"
+    ],
+    "admissionRejected": true,
+    "executionState": "not_dispatched",
+    "error": "维护恢复许可无效",
+    "nativeLaunched": false,
+    "businessWrites": false,
+    "originalReceiptsRetained": true,
+    "cause": "ordinary delivery returned null; local admission treated null as an invalid permit",
+    "fixedInCommit": "75c35204ca708f2ae85b512c074ff854ea84ed29",
+    "targetedTestsPassed": 55,
+    "targetedTestsFailed": 0,
+    "wireNullRelaxed": false
+  },
+  "ordinaryTaskSmoke": {
+    "actionId": "action_890da648-5f3b-4ca5-8ec2-0f70b86bcc99",
+    "status": "succeeded",
+    "cwd": "D:\\AIUSE\\life-assistant",
+    "toolCwdOrCdProvided": false,
+    "reportedToolExitCode": 0,
+    "rootPid": 18384,
+    "rootExitCode": 0,
+    "treeConfirmed": true,
+    "activeProcesses": 0,
+    "nativeSessionId": "20261019_120827_d3f417",
+    "independentNativeSqliteReadback": false,
+    "isCrossUpgradeEvidence": false
+  },
+  "liveCrossUpgrade": {
+    "state": "verified",
+    "actionId": "action_53440ccf-7295-4a03-8310-4b3612897082",
+    "taskId": "task_6e55396d-b066-44af-b5e0-27cad179219e",
+    "updateId": "client-update_cf3c86e0-8f00-4520-9c9e-d26796ce7a46",
+    "sourceCommit": "75c35204ca708f2ae85b512c074ff854ea84ed29",
+    "targetCommit": "e3ddc12f132a1cd770ba6d1486be72ee25a0bf7b",
+    "verified": true,
+    "sameActionAndSessionVerified": true,
+    "sessionId": "20261019_121912_0ff447",
+    "generation": 1,
+    "profile": "zhi-nuan-life",
+    "home": "C:\\Users\\25941\\AppData\\Local\\hermes\\profiles\\zhi-nuan-life",
+    "cwd": "D:\\AIUSE\\life-assistant",
+    "cwdProvided": false,
+    "checkpointMessageCount": 6,
+    "pendingToolsAtCheckpoint": 0,
+    "checkpointRootPid": 57340,
+    "checkpointRootExitCode": 0,
+    "checkpointTreeConfirmed": true,
+    "resumedRootPid": 44476,
+    "resumedRootExitCode": 0,
+    "resumedTreeConfirmed": true,
+    "finalActiveProcesses": 0,
+    "finalStatus": "succeeded",
+    "completedAt": "2026-10-19T04:26:04.637Z",
+    "nativeSqliteProofActionId": "action_aec7ae7e-f096-4e89-8aa1-1e11062cb60b",
+    "phaseCountsVerified": true,
+    "beforeCounts": {
+      "phase1": 1,
+      "phase2": 0
+    },
+    "afterCounts": {
+      "phase1": 1,
+      "phase2": 1
+    },
+    "phaseOneOriginalAt": "2026-10-19T04:19:50.394Z",
+    "phaseOneOriginalAtRetained": true,
+    "phaseTwoAt": "2026-10-19T04:24:13.117Z",
+    "guardMarkersValid": true,
+    "terminalCalls": [
+      {
+        "phase": 1,
+        "commandSha256": "0d916782a490d719a990f7c65f7f8900aa7bf7495df21155dd6869e160c2af2d",
+        "count": 1,
+        "resultCount": 1,
+        "originalToolExitCode": 0,
+        "rawResultSha256": "ad34c009d977eed4f54d8acfb000ac89ab514b699d7160494cada7f5ce482822",
+        "rawResultBytes": 163
+      },
+      {
+        "phase": 2,
+        "commandSha256": "a97abd9f31cc4132ca9c34c6740c3d0686bed4816779e5e69bc40dd49163880b",
+        "count": 1,
+        "resultCount": 1,
+        "originalToolExitCode": 0,
+        "rawResultSha256": "4503f121991c5cb1c55b14ed30164a4c0e4339cf58a63f3c2ae8e4f51a018fad",
+        "rawResultBytes": 180
+      }
+    ],
+    "commandHashProvenance": "pinned read-only probe calculates hashes from the exact native SQLite tool arguments",
+    "completeCommandsOrDatabaseExported": false,
+    "priorPhoneBusinessReplayed": false
+  },
+  "privateEvidence": [
+    {
+      "path": ".local/maintenance-resume-release/server-maintenance-a6411aad5586-62297df2d67b/result.json",
+      "sha256": "de29698875cf4a3a119ee6758354f87e648f1580ff9bd8881057405234f1283b"
+    },
+    {
+      "path": ".local/maintenance-resume-release/client-maintenance-publication-a6411aad5586-f3c4f269eb45/result.json",
+      "sha256": "374154bb71eed067ad5034242cccc86528f3360eb0553fba8a218c0c9afde116"
+    },
+    {
+      "path": ".local/maintenance-resume-release/client-maintenance-publication-75c35204ca70-290436347120/result.json",
+      "sha256": "24c530cbe1c329af8bc4e682ea9302225a17bec78f4959e8411826bac0efe5c0"
+    },
+    {
+      "path": ".local/maintenance-resume-release/client-maintenance-publication-e3ddc12f132a-408245746ad9/result.json",
+      "sha256": "2af2e143fdae23503e525ec86d35a3d450387c1db5f6df8f070d1c0e587d4c42"
+    },
+    {
+      "path": ".local/maintenance-resume-release/li-maintenance-base-observations-a6411aad5586.jsonl",
+      "sha256": "42be0e80a5c76860f0d3d53cb7c36bbcc2dd490aceec38d51f563499817cadac"
+    },
+    {
+      "path": ".local/maintenance-resume-release/li-maintenance-hotfix-observations-75c35204ca70.jsonl",
+      "sha256": "82dcbf3624a5aef39b647f09a140925b86d4c3352640d8f8099233147c876a91"
+    },
+    {
+      "path": ".local/maintenance-resume-release/live-test-latest.json",
+      "sha256": "49ee0984eb2536361076fb0c5a036184c403067ec0ec0392131f2405268bb6bd"
+    },
+    {
+      "path": ".local/maintenance-resume-release/phase-proof-latest.json",
+      "sha256": "52e18ce3b838ce5d5801b187f4e669a9dad075b717796c801c758146c2406d48"
+    },
+    {
+      "path": ".local/maintenance-resume-release/smoke-u-latest.json",
+      "sha256": "476b94d29974558560f6ebb1722223f1cf1e2106cd7f0bd8a26f6da59e631d3e"
+    },
+    {
+      "path": ".local/maintenance-resume-release/uv-07f39f50c6ba412985cf0c2ef875684d-task-ledger-latest.json",
+      "sha256": "cdd2286b645496a8ff0f48c478e41f323c1eff11bb17cdd4fb76f3e48bfa69c6"
+    },
+    {
+      "path": ".local/maintenance-resume-release/uv-failed-sqlite-ledger-latest.json",
+      "sha256": "2ff581410f63db726d4f3580dc852df1828dcc6aa1cb867b3b4a5d60ef846759"
+    },
+    {
+      "path": ".local/maintenance-resume-release/uv2-4339358a42804df88999aedd5fd9695e-plan.json",
+      "sha256": "a2aea0389025b6abed26c62749c92ee1e689ae265522972854a05c08f32af1b6"
+    },
+    {
+      "path": ".local/maintenance-resume-release/uv2-4339358a42804df88999aedd5fd9695e-checkpoint-action.json",
+      "sha256": "2f851d43e05ae24faf10772abfbce94976fd9da7aa0a974035b3b00dbf9d6eb6"
+    },
+    {
+      "path": ".local/maintenance-resume-release/uv2-4339358a42804df88999aedd5fd9695e-before-proof-ledger-latest.json",
+      "sha256": "911e2492a7a1b7319145f0fada57491e54e3faa5a12c0f86ea82adfc2df36cac"
+    },
+    {
+      "path": ".local/maintenance-resume-release/uv2-4339358a42804df88999aedd5fd9695e-task-ledger-latest.json",
+      "sha256": "429f5f18aafa674302486d2ab9f1cf2f168335b6cbdab38383a3cb2e46424ccd"
+    },
+    {
+      "path": ".local/maintenance-resume-release/uv2-4339358a42804df88999aedd5fd9695e-20261019_121912_0ff447-final-sqlite-ledger.json",
+      "sha256": "051aa60ab230f108074908ab2693ad5a7ca39df38f58ddf891e6cf922c932d26"
+    },
+    {
+      "path": ".local/maintenance-resume-release/uv2-4339358a42804df88999aedd5fd9695e-20261019_121912_0ff447-final-sqlite-ledger-latest.json",
+      "sha256": "71efbf0d4e39df83ba2fb4ab36bb49c9cf07b0ff0aa4e5a7bc655ecc3f92595a"
+    },
+    {
+      "path": ".local/maintenance-resume-release/li-maintenance-cross-observations-e3ddc12f132a.jsonl",
+      "sha256": "1c9c20119fc48b1bd5d28568a61b5d0e8870e0fddcdd53308c7945c38a0eef48"
+    },
+    {
+      "path": ".local/maintenance-resume-release/live-uv2-attestation.json",
+      "sha256": "71faa50e330387079615133ac96218872a772af5dc22b3f5492a86615aab2493"
+    }
+  ],
+  "previousConfirmedDeviceInstallation": {
+    "commit": "75c35204ca708f2ae85b512c074ff854ea84ed29",
+    "clientBuild": "b2cbdeb72250ef5b1a08060947e2a430619373b8635717e045730e183b5f04e5",
+    "requestId": "client-update_e50e1a97-0eb8-4a88-9d05-00bce1e198de",
+    "state": "succeeded",
+    "heartbeatVerified": true,
+    "completionSource": "heartbeat",
+    "verifiedAt": "2026-10-19T04:07:16.723Z",
+    "baseRequestId": "client-update_ca881cc8-3d4e-472d-93f7-c2797823df59",
+    "otherDevicesUpdated": false
+  },
+  "firstUvExperiment": {
+    "actionId": "action_af6754dd-7a2f-440c-957a-b4dae381fbfc",
+    "outerActionStatus": "succeeded",
+    "nativeSessionId": "20261019_121138_faaa1e",
+    "testPassed": false,
+    "terminalMatchesPlan": true,
+    "originalToolExitCode": 1,
+    "originalToolError": "TEST_CWD_MISMATCH",
+    "cause": "Windows native shell reduced backslashes in the eval string before Node executed the test",
+    "phaseArtifactsCreated": false,
+    "readOnlySqliteProofActionId": "action_b05f5ad6-b048-40e2-94b6-8541ccf85da3",
+    "originalReceiptsRetained": true,
+    "replacementTestUsesNewUniqueFiles": true
+  },
+  "offlineLiveAttestation": {
+    "state": "passed",
+    "verified": true,
+    "checksPassed": 5,
+    "path": ".local/maintenance-resume-release/live-uv2-attestation.json",
+    "sha256": "71faa50e330387079615133ac96218872a772af5dc22b3f5492a86615aab2493",
+    "networkCalls": 0,
+    "credentialFilesRead": 0
+  },
+  "verificationScope": {
+    "devices": [
+      "device_bfd9a3d2-c2cc-4a36-8bd8-465bea492493"
+    ],
+    "runtime": "Windows Hermes",
+    "nativeVersion": "0.22",
+    "ordinaryModelTaskCrossUpgradeVerified": true,
+    "allDevicesVerified": false,
+    "allRuntimeContinuationVerified": false,
+    "phoneBusinessResumptionVerified": false
+  }
 }
