@@ -471,9 +471,11 @@ export function createRepository(options = {}, io={}) {
     const instructions = [employee?.description ? `岗位职责：${employee.description}` : '', employee?.persona ? `人格：${employee.persona}` : '', employee?.instructions, skillText, isCreator?CREATOR_BOT_GUIDANCE:''].filter(Boolean).join('\n\n');
     const phoneConfig = employee && db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='ziwei_connect_bindings'").get() ? db.prepare(`SELECT p.enabled,b.device_id,b.account_id,s.id AS skill_id,s.version FROM employee_phone_mcp p JOIN ziwei_connect_bindings b ON b.employee_id=p.employee_id AND b.workspace_id=p.workspace_id JOIN skills s ON s.workspace_id=p.workspace_id AND s.catalog_id='ziwei-phone-control' AND s.installed=1 WHERE p.employee_id=?`).get(employee.id) : null;
     const phoneRevision = phoneConfig ? hashSecret(JSON.stringify([Boolean(phoneConfig.enabled && skillIds.includes(phoneConfig.skill_id)),phoneConfig.skill_id,phoneConfig.version,employee.target_device_id,employee.runtime,employee.runtime_profile,phoneConfig.device_id,phoneConfig.account_id || null])) : null;
+    const codexConversation=selectedRuntime==='Codex' && messageId && creatorConversationBinding(employee,conversationId,messageId);
     return {
       ...(taskId ? { taskId } : {}),
       prompt: composeEmployeePrompt({ prompt:creatorConversationPrompt({prompt,employee,conversationId,messageId}), name: employee?.name, instructions }),
+      ...(codexConversation?{codexConversationInput:{schemaVersion:1,messageId:String(messageId),currentPrompt:composeEmployeePrompt({prompt,name:employee.name,instructions})}}:{}),
       runtime: selectedRuntime,
       model: selectedModel,
       profile: selectedProfile,
@@ -501,7 +503,8 @@ export function createRepository(options = {}, io={}) {
     // Rebuild from the canonical user message and server-held employee role,
     // never from a prompt which may already contain a history wrapper. Keep
     // all execution settings/credentials bound to the original queued action.
-    return {...payload,prompt:refreshed.prompt};
+    const {codexConversationInput:_oldCodexInput,...snapshot}=payload;
+    return {...snapshot,prompt:refreshed.prompt,...(refreshed.codexConversationInput?{codexConversationInput:refreshed.codexConversationInput}:{})};
   };
   // A workspace can be created after the database seed has run.  Keep the
   // four built-in runtime rows available as soon as our own bridge reports a
