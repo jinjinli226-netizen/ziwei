@@ -2,10 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {IncomingMessage,ServerResponse} from 'node:http';
 import {Duplex} from 'node:stream';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import {createRepository} from './repository.mjs';
 import {createAuthService} from './auth.mjs';
 import {createDeviceUpdateService,OFFICIAL_CLIENT_SOURCE,REMOTE_UPDATE_FEATURE} from './device-updates.mjs';
 import {createApp} from './app.mjs';
+import {createRemoteClientUpdates} from '../src/client-remote-update.mjs';
 
 const OLD='1'.repeat(64),TARGET='2'.repeat(64),SHA='3'.repeat(64),HOST='4'.repeat(64);
 function fixture(t){
@@ -212,4 +216,115 @@ test('authority removed after claim is checked again immediately before entering
  f.db.prepare("UPDATE members SET role='member' WHERE workspace_id=? AND user_id=?").run(f.repo.getWorkspace(f.slug).id,f.owner.user_id);
  const response=progress(f,a.request.id,c.claimToken,'updating');assert.equal(response.request.state,'failed');assert.equal(response.request.code,'CLIENT_UPDATE_AUTHORITY_REVOKED');
  assert.equal(f.db.prepare('SELECT state FROM device_updates WHERE id=?').get(a.request.id).state,'failed');
+});
+
+function runningAction(f,{runtime='Codex',slug=f.slug,deviceId=f.pair.deviceId,type='conversation.execute',ack=true,payload={}}={}){
+ const action=f.repo.createA2AAction(slug,{type,payload:{deviceId,runtime,prompt:'Synthetic bounded task',...payload}});
+ if(ack)f.repo.ackA2AAction(action.id,{deviceId});return action;
+}
+
+test('requested upgrade remains server queued and unclaimed while an admitted Codex execution is live',async t=>{
+ const f=fixture(t),action=runningAction(f),created=await f.create(),before=f.db.prepare('SELECT * FROM device_updates WHERE id=?').get(created.request.id);
+ for(let i=0;i<3;i++)assert.deepEqual(f.service.pending(f.slug,f.pair.deviceId,f.credential()),{request:null});
+ assert.throws(()=>claim(f,created.request.id),{code:'CLIENT_UPDATE_WAITING_EXECUTION',status:409});
+ assert.deepEqual(f.db.prepare('SELECT * FROM device_updates WHERE id=?').get(created.request.id),before);assert.equal(before.claim_token,null);assert.equal(before.state,'requested');
+ assert.equal((await f.service.get(f.slug,f.pair.deviceId,created.request.id,f.context)).request.state,'requested');assert.equal(f.repo.getA2AAction(action.id).status,'acked');
+});
+
+test('server queued upgrade does not close the actual client admission gate or pause another Hermes employee',async t=>{
+ const f=fixture(t);runningAction(f);await f.create();let paused=0,launched=0;
+ const home=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'ziwei-requested-upgrade-')));t.after(()=>fs.rmSync(home,{recursive:true,force:true}));
+ const client=createRemoteClientUpdates({home,hostId:HOST,clientBuild:OLD,enabled:true,connections:()=>[{workspace:f.slug,deviceId:f.pair.deviceId}],idle:()=>false,prepareActions:async()=>{paused++;},prepareIdle:async()=>{},hasPendingResumes:()=>false,
+  request:async(_connection,route,body)=>{assert.equal(body,undefined);assert.ok(route.startsWith('/a2a/v1/device-updates?'));return f.service.pending(f.slug,f.pair.deviceId,f.credential());},launch:async()=>{launched++;},inspectWorker:async()=>({state:'running'})});
+ await client.tick();assert.equal(client.blocksNewActions,false);assert.equal(client.status(),null);assert.equal(paused,0);assert.equal(launched,0);
+ const hermes=runningAction(f,{runtime:'Hermes'});assert.equal(f.repo.getA2AAction(hermes.id).status,'acked');
+});
+
+test('normal terminal non-Hermes completion exposes the original queued request and allows its exact claim',async t=>{
+ const f=fixture(t),action=runningAction(f),created=await f.create();assert.equal(f.service.pending(f.slug,f.pair.deviceId,f.credential()).request,null);
+ f.repo.resultA2AAction(action.id,{deviceId:f.pair.deviceId,status:'succeeded',result:{output:'Synthetic complete',processExit:{launched:true,rootConfirmed:true,rootExitCode:0,treeConfirmed:true,activeProcesses:0,cancelled:false}}});
+ assert.equal(f.service.pending(f.slug,f.pair.deviceId,f.credential()).request.id,created.request.id);assert.equal(claim(f,created.request.id).request.state,'accepted');
+});
+
+test('ordinary failed completion and quoted uncertainty text are not live execution markers',async t=>{
+ const f=fixture(t),action=runningAction(f),created=await f.create();
+ f.repo.resultA2AAction(action.id,{deviceId:f.pair.deviceId,status:'failed',error:'Synthetic normal failure',result:{output:'Quoted EXECUTION_UNCERTAIN / uncertain / still running',processExit:{launched:true,rootConfirmed:true,rootExitCode:1,treeConfirmed:true,activeProcesses:0,cancelled:false}}});
+ assert.equal(f.service.pending(f.slug,f.pair.deviceId,f.credential()).request.id,created.request.id);assert.equal(claim(f,created.request.id).request.state,'accepted');
+});
+
+test('old transient phone audit uncertainty does not block an otherwise normal terminal CLI result',async t=>{
+ const f=fixture(t),action=runningAction(f);f.repo.resultA2AAction(action.id,{deviceId:f.pair.deviceId,status:'succeeded',result:{terminalMcp:{toolCalls:[{toolName:'ziwei_phone_receipt',commandId:'original-command',executionState:'uncertain'},{toolName:'ziwei_phone_receipt',commandId:'original-command',executionState:'succeeded'}]},processExit:{launched:true,rootConfirmed:true,rootExitCode:0,treeConfirmed:true,activeProcesses:0,cancelled:false}}});
+ const created=await f.create();assert.equal(f.service.pending(f.slug,f.pair.deviceId,f.credential()).request.id,created.request.id);assert.equal(claim(f,created.request.id).request.state,'accepted');
+});
+
+test('pending Codex tasks and cooperative Hermes executions do not prevent upgrade delivery',async t=>{
+ const f=fixture(t);runningAction(f,{ack:false});runningAction(f,{runtime:'Hermes'});runningAction(f,{runtime:'Hermes',payload:{runtime:'',agent:'Hermes'}});
+ const created=await f.create();assert.equal(f.service.pending(f.slug,f.pair.deviceId,f.credential()).request.id,created.request.id);assert.equal(claim(f,created.request.id).request.state,'accepted');
+});
+
+for(const runtime of ['Claude','unsupported-fixture-runtime',''])test(`non-cooperative runtime ${runtime||'(unspecified)'} is conservatively queued after ACK`,async t=>{
+ const f=fixture(t);runningAction(f,{runtime});const created=await f.create();assert.deepEqual(f.service.pending(f.slug,f.pair.deviceId,f.credential()),{request:null});assert.throws(()=>claim(f,created.request.id),{code:'CLIENT_UPDATE_WAITING_EXECUTION'});
+});
+
+test('other device or workspace executions do not hold the authenticated target device request',async t=>{
+ const f=fixture(t),other=f.repo.claimDevicePairing({code:f.repo.createDevicePairing(f.slug,{name:'Other computer'}).code});runningAction(f,{deviceId:other.deviceId});
+ const foreign=secondWorkspaceDevice(f);runningAction(f,{slug:foreign.slug,deviceId:foreign.pair.deviceId});
+ const spoof=runningAction(f,{deviceId:other.deviceId,payload:{targetDeviceId:f.pair.deviceId}});assert.equal(f.repo.getA2AAction(spoof.id).payload.deviceId,other.deviceId);
+ const created=await f.create();assert.equal(f.service.pending(f.slug,f.pair.deviceId,f.credential()).request.id,created.request.id);assert.equal(claim(f,created.request.id).request.state,'accepted');
+});
+
+test('canonical target aliases still identify the exact authenticated device',async t=>{
+ const f=fixture(t);runningAction(f,{payload:{deviceId:'',targetDeviceId:f.pair.deviceId}});const created=await f.create();
+ assert.deepEqual(f.service.pending(f.slug,f.pair.deviceId,f.credential()),{request:null});assert.throws(()=>claim(f,created.request.id),{code:'CLIENT_UPDATE_WAITING_EXECUTION'});
+});
+
+for(const status of ['expired','failed','succeeded','cancelled','uncertain'])test(`historical ${status} result does not become a second server upgrade lock`,async t=>{
+ const f=fixture(t),action=runningAction(f),result={code:'EXECUTION_UNCERTAIN',executionState:'uncertain',processExit:{launched:true,rootConfirmed:true,rootExitCode:1,treeConfirmed:false,activeProcesses:3,backgroundProcessesRetained:true}};
+ f.db.prepare('UPDATE a2a_actions SET status=?,result_json=?,completed_at=? WHERE id=?').run(status,JSON.stringify(result),new Date().toISOString(),action.id);
+ const before=f.db.prepare('SELECT status,result_json,completed_at FROM a2a_actions WHERE id=?').get(action.id),created=await f.create();
+ assert.equal(f.service.pending(f.slug,f.pair.deviceId,f.credential()).request.id,created.request.id);
+ const accepted=claim(f,created.request.id);assert.equal(accepted.request.state,'accepted');assert.equal(accepted.request.heartbeatVerified,false);assert.equal(accepted.request.verifiedAt,null,'claim is not evidence of idle, exit or successful installation');
+ assert.deepEqual(f.db.prepare('SELECT status,result_json,completed_at FROM a2a_actions WHERE id=?').get(action.id),before,'original recovery evidence is untouched');
+});
+
+for(const raw of [null,'{'])test(`missing or malformed historical result is delegated to existing client safeguards: ${raw}`,async t=>{
+ const f=fixture(t),action=runningAction(f);f.db.prepare("UPDATE a2a_actions SET status='failed',result_json=? WHERE id=?").run(raw,action.id);const created=await f.create();
+ assert.equal(f.service.pending(f.slug,f.pair.deviceId,f.credential()).request.id,created.request.id);const accepted=claim(f,created.request.id);assert.equal(accepted.request.state,'accepted');assert.equal(accepted.request.heartbeatVerified,false);assert.equal(accepted.request.verifiedAt,null);
+});
+
+test('historical unknown result still passes through real client idle checks before any updater can launch',async t=>{
+ const f=fixture(t),action=runningAction(f);f.db.prepare("UPDATE a2a_actions SET status='expired',result_json=? WHERE id=?").run(JSON.stringify({code:'EXECUTION_UNCERTAIN',processExit:{launched:true,rootConfirmed:false,activeProcesses:3}}),action.id);const created=await f.create();let launched=0,idleChecks=0;
+ const home=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'ziwei-history-upgrade-')));t.after(()=>fs.rmSync(home,{recursive:true,force:true}));
+ const client=createRemoteClientUpdates({home,hostId:HOST,clientBuild:OLD,pid:1001,enabled:true,connections:()=>[{workspace:f.slug,deviceId:f.pair.deviceId}],idle:()=>{idleChecks++;return false;},prepareActions:async()=>{},prepareIdle:async()=>{},hasPendingResumes:()=>false,
+  request:async(_connection,route,body)=>{const match=new URL(route,'https://fixture.invalid').pathname.match(/\/device-updates\/([^/]+)\/(claim|progress)$/);if(!match)return f.service.pending(f.slug,f.pair.deviceId,f.credential());return match[2]==='claim'?f.service.claim(f.slug,f.pair.deviceId,match[1],body,f.credential()):f.service.progress(f.slug,f.pair.deviceId,match[1],body,f.credential());},launch:async()=>{launched++;},inspectWorker:async()=>({state:'running'})});
+ await client.tick();await client.tick();assert.ok(idleChecks>0);assert.equal(launched,0);assert.equal(client.blocksNewActions,true);
+ const state=(await f.service.get(f.slug,f.pair.deviceId,created.request.id,f.context)).request;assert.equal(state.state,'waiting_idle');assert.equal(state.heartbeatVerified,false);assert.equal(state.verifiedAt,null);
+ assert.equal(f.repo.getA2AAction(action.id).status,'expired','server scheduling does not clear original recovery state');
+});
+
+test('claim rechecks for a Codex execution admitted after the last poll without minting a claim token',async t=>{
+ const f=fixture(t),created=await f.create();assert.equal(f.service.pending(f.slug,f.pair.deviceId,f.credential()).request.id,created.request.id);
+ runningAction(f);assert.throws(()=>claim(f,created.request.id),{code:'CLIENT_UPDATE_WAITING_EXECUTION'});const row=f.db.prepare('SELECT state,claim_token FROM device_updates WHERE id=?').get(created.request.id);assert.equal(row.state,'requested');assert.equal(row.claim_token,null);
+});
+
+test('the new queue gate never changes an already accepted or updating maintenance transaction',async t=>{
+ const f=fixture(t),created=await f.create(),accepted=claim(f,created.request.id);runningAction(f);
+ assert.equal(f.service.pending(f.slug,f.pair.deviceId,f.credential()).request.state,'accepted');assert.equal(claim(f,created.request.id).claimToken,accepted.claimToken);
+ progress(f,created.request.id,accepted.claimToken,'waiting_idle');progress(f,created.request.id,accepted.claimToken,'updating');
+ assert.equal(f.service.pending(f.slug,f.pair.deviceId,f.credential()).request.state,'updating');assert.equal(claim(f,created.request.id).claimToken,accepted.claimToken);
+});
+
+test('queued native work never bypasses credential, actor authority or exact instance validation',async t=>{
+ const f=fixture(t);runningAction(f);const created=await f.create();
+ assert.throws(()=>f.service.claim(f.slug,f.pair.deviceId,created.request.id,{hostId:HOST,clientBuild:OLD,pid:1002},f.credential()),{code:'CLIENT_UPDATE_INSTANCE_CHANGED'});
+ f.db.prepare("UPDATE members SET role='member' WHERE workspace_id=? AND user_id=?").run(f.repo.getWorkspace(f.slug).id,f.owner.user_id);assert.throws(()=>claim(f,created.request.id),{code:'CLIENT_UPDATE_AUTHORITY_REVOKED'});
+ const credential=f.credential();f.repo.revokeDeviceCredential(f.pair.deviceId);assert.throws(()=>f.service.pending(f.slug,f.pair.deviceId,credential),{code:'CLIENT_UPDATE_DEVICE_CREDENTIAL_REQUIRED'});
+});
+
+test('actual device poll and claim routes leave a live-Codex upgrade requested without a listener',async t=>{
+ const f=fixture(t);runningAction(f);const app=createApp({memory:true,requireAuth:true,requireDeviceAuth:true,enableScheduler:false,repository:f.repo,auth:f.auth,deviceUpdates:{readRelease:async()=>f.metadata}}),cookie=`ziwei_session=${f.owner.session.token}`,base=`/api/workspaces/${f.slug}/devices/${f.pair.deviceId}/client-updates`;
+ const created=await request(app,base,{method:'POST',cookie,body:f.input});assert.equal(created.status,202);const query=`?workspace=${f.slug}&deviceId=${f.pair.deviceId}`;
+ const poll=await request(app,'/a2a/v1/device-updates'+query,{token:f.pair.deviceToken});assert.equal(poll.status,200);assert.equal(poll.json.ok,true);assert.equal(poll.json.request,null);
+ const claimed=await request(app,`/a2a/v1/device-updates/${created.json.request.id}/claim${query}`,{method:'POST',token:f.pair.deviceToken,body:{hostId:HOST,clientBuild:OLD,pid:1001}});assert.equal(claimed.status,409);assert.equal(claimed.json.code,'CLIENT_UPDATE_WAITING_EXECUTION');assert.equal(claimed.json.claimToken,undefined);
+ const admin=await request(app,base,{cookie});assert.equal(admin.json.device.operation.state,'requested');assert.equal(f.db.prepare('SELECT claim_token FROM device_updates WHERE id=?').get(created.json.request.id).claim_token,null);
 });
