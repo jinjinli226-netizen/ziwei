@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
+import {randomUUID} from 'node:crypto';
 import {executeRuntime,hermesMcpSpawnSpec,prepareManagementMcpLaunch,resetRuntimeDiscovery,runtimeInvocation} from '../src/runtime-adapters.mjs';
 
 function fixture(t) {
@@ -78,6 +79,20 @@ test('structured assistant content may quote the TTY diagnostic without being re
   const f=fixture(t);if(!f)return;
   const result=await executeRuntime({...f.options,env:{...f.env,FIXTURE_QUERY_MODE:'quoted'}});
   assert.equal(result.status,'succeeded',result.error);assert.match(result.result.output,/only quoted here/);
+});
+
+test('model execution explicitly requests owned-Job cleanup on a failed root',{skip:process.platform==='win32'},async t=>{
+  const f=fixture(t);if(!f)return;
+  const sourceUrl=new URL('../src/runtime-adapters.mjs',import.meta.url),key='model-policy-'+randomUUID();
+  globalThis[key]=[];t.after(()=>{delete globalThis[key];});
+  const wrapper=`import {spawnSupervisedRuntime as original} from ${JSON.stringify(new URL('../src/runtime-process.mjs',import.meta.url).href)};export const spawnSupervisedRuntime=spec=>{globalThis[${JSON.stringify(key)}].push(spec.cleanupOnFailure);return original(spec);};`;
+  const source=fs.readFileSync(sourceUrl,'utf8').replaceAll('import.meta.url',JSON.stringify(sourceUrl.href)).replace(/from (['"])([^'"\r\n]+)\1/g,(_all,_quote,specifier)=>{
+    const target=specifier==='./runtime-process.mjs'?'data:text/javascript,'+encodeURIComponent(wrapper):specifier.startsWith('.')?new URL(specifier,sourceUrl).href:specifier.startsWith('node:')?specifier:import.meta.resolve(specifier);
+    return 'from '+JSON.stringify(target);
+  });
+  const isolated=await import('data:text/javascript,'+encodeURIComponent(source));
+  const result=await isolated.executeRuntime(f.options);
+  assert.equal(result.status,'succeeded',result.error);assert.deepEqual(globalThis[key],[true]);
 });
 
 test('the former plain route produces no query result while the new route preserves prompt stdin',{skip:process.platform==='win32'},t=>{

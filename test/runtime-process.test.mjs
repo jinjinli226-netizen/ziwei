@@ -91,7 +91,7 @@ test('Windows cancel terminates the owned root and detached descendant and confi
   const beat = path.join(dir, 'beat.txt');
   fs.writeFileSync(child, `require('fs').writeFileSync(${JSON.stringify(path.join(dir, 'grandchild.pid'))},String(process.pid));setInterval(()=>require('fs').appendFileSync(${JSON.stringify(beat)},'x'),35);`);
   fs.writeFileSync(root, `const p=require('child_process').spawn(process.execPath,[${JSON.stringify(child)}],{detached:true,stdio:'ignore',windowsHide:true});p.unref();require('fs').writeFileSync(${JSON.stringify(path.join(dir, 'root.pid'))},String(process.pid));setInterval(()=>{},1000);`);
-  const runtime = launch({ command: process.execPath, args: [root], cwd: dir, env: process.env });
+  const runtime = launch({ command: process.execPath, args: [root], cwd: dir, env: process.env, cleanupOnFailure: true });
   t.after(() => runtime.stop());
   runtime.child.stdin.end();
   await until(() => fs.existsSync(beat) && fs.statSync(beat).size >= 3);
@@ -130,6 +130,28 @@ test('Windows normal root exit preserves an intentional detached service and rep
   const descendantPid = Number(fs.readFileSync(pidFile, 'utf8'));
   assert.equal(exists(descendantPid), true);
   await until(() => !exists(descendantPid), 5000);
+});
+
+test('Windows model failure reaps only its owned child tree and preserves the failed root exit', { skip: !windows, timeout: 30000 }, async t => {
+  const dir=scratch();t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+  const grandchild=path.join(dir,'grandchild.pid'),child=path.join(dir,'child.pid'),entry=path.join(dir,'failed-model.cjs');
+  const childProgram=`const fs=require('node:fs');fs.writeFileSync(${JSON.stringify(child)},String(process.pid));const p=require('node:child_process').spawn(process.execPath,['-e',${JSON.stringify(`require('node:fs').writeFileSync(${JSON.stringify(grandchild)},String(process.pid));setInterval(()=>{},1000);`)}],{detached:true,stdio:'ignore',windowsHide:true});p.unref();setInterval(()=>{},1000);`;
+  fs.writeFileSync(entry,`const p=require('node:child_process').spawn(process.execPath,['-e',${JSON.stringify(childProgram)}],{detached:true,stdio:'ignore',windowsHide:true});p.unref();const fs=require('node:fs'),timer=setInterval(()=>{if(fs.existsSync(${JSON.stringify(grandchild)})){clearInterval(timer);process.exit(1);}},20);`);
+  const runtime=launch({command:process.execPath,args:[entry],cwd:dir,env:process.env,cleanupOnFailure:true});runtime.child.stdin.end();
+  const evidence=await runtime.completionEvidence;
+  assert.equal(evidence.rootExitCode,1);assert.equal(evidence.rootConfirmed,true);assert.equal(evidence.cancelled,false);assert.equal(evidence.treeConfirmed,true);assert.equal(evidence.activeProcesses,0);assert.equal(evidence.backgroundProcessesRetained,false);assert.equal(evidence.failureCode,null);
+  const pids=[child,grandchild].map(file=>Number(fs.readFileSync(file,'utf8')));
+  await until(()=>pids.every(pid=>!exists(pid)),5000);
+});
+
+test('Windows model success can still preserve an intentional background service', { skip: !windows, timeout: 30000 }, async t => {
+  const dir=scratch();t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+  const pidFile=path.join(dir,'background.pid'),entry=path.join(dir,'successful-model.cjs');
+  fs.writeFileSync(entry,`const p=require('node:child_process').spawn(process.execPath,['-e','setTimeout(()=>{},2400)'],{detached:true,stdio:'ignore',windowsHide:true});p.unref();require('node:fs').writeFileSync(${JSON.stringify(pidFile)},String(p.pid));setTimeout(()=>process.exit(0),100);`);
+  const runtime=launch({command:process.execPath,args:[entry],cwd:dir,env:process.env,cleanupOnFailure:true});runtime.child.stdin.end();
+  const evidence=await runtime.completionEvidence,pid=Number(fs.readFileSync(pidFile,'utf8'));
+  assert.equal(evidence.rootExitCode,0);assert.equal(evidence.cancelled,false);assert.equal(evidence.backgroundProcessesRetained,true);assert.equal(evidence.treeConfirmed,false);assert.equal(exists(pid),true);
+  await until(()=>!exists(pid),5000);
 });
 
 test('Windows assignment failure terminates the still-suspended process without executing user code', { skip: !windows, timeout: 30000 }, async t => {

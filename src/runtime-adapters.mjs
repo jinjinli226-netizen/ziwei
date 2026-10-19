@@ -1141,7 +1141,7 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
   if(beforeSpawn) {try{await runBeforeSpawnAdmission(beforeSpawn);}catch(error){cleanupOverlay();throw error;}}
   return new Promise((resolve, reject) => {
     let supervision;
-    try { profileBinding?.verify({env:childEnv,cwd}); supervision = spawnSupervisedRuntime({ command: spec.command, args: spec.args, cwd: path.resolve(String(cwd || process.cwd())), env: childEnv }); }
+    try { profileBinding?.verify({env:childEnv,cwd}); supervision = spawnSupervisedRuntime({ command: spec.command, args: spec.args, cwd: path.resolve(String(cwd || process.cwd())), env: childEnv, cleanupOnFailure: true }); }
     catch (error) { cleanupOverlay(); reject(error); return; }
     const { child } = supervision;
     let settled = false;

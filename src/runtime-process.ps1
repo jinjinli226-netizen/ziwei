@@ -84,6 +84,7 @@ public static class ZiweiRuntimeJob {
       Directory.SetAccessControl(directory,acl);
       Stream standardInput=Console.OpenStandardInput();
       Dictionary<string,object> request=Request(standardInput);
+      bool cleanupOnFailure=request.ContainsKey("cleanupOnFailure") && request["cleanupOnFailure"] is bool && (bool)request["cleanupOnFailure"];
       parent=OpenProcess(0x00100000,false,Convert.ToUInt32(request["parentPid"]));
       Check(parent!=IntPtr.Zero,"OPEN_PARENT");
       if(Cancelled(directory,nonce) || WaitForSingleObject(parent,0)==0) { result["cancelled"]=true; result["treeConfirmed"]=true; result["activeProcesses"]=0; result["failureCode"]="RUNTIME_CANCELLED_BEFORE_LAUNCH"; Receipt(directory,"result.json",result); return 0; }
@@ -134,8 +135,9 @@ public static class ZiweiRuntimeJob {
       result["rootConfirmed"]=true; result["rootExitCode"]=exitCode;
       if(Cancelled(directory,nonce) || WaitForSingleObject(parent,0)==0) result["cancelled"]=true;
       uint count;
-      if((bool)result["cancelled"]) {
-        step="REAP_JOB";
+      bool failedRootCleanup=cleanupOnFailure && exitCode!=0;
+      if((bool)result["cancelled"] || failedRootCleanup) {
+        step=failedRootCleanup?"REAP_FAILED_JOB":"REAP_JOB";
         Check(TerminateJobObject(job,1),step);
         DateTime deadline=DateTime.UtcNow.AddSeconds(10); count=Active(job);
         while(count>0 && DateTime.UtcNow<deadline) { Thread.Sleep(20); count=Active(job); }
@@ -161,7 +163,7 @@ public static class ZiweiRuntimeJob {
         if(count!=0) throw new Exception("JOB_NOT_EMPTY");
         result["streamsComplete"]=outputPump.Join(1000) && errorPump.Join(1000);
       }
-      if(!(bool)result["cancelled"]) {
+      if(!(bool)result["cancelled"] && !failedRootCleanup) {
         // An ordinary completed CLI may intentionally leave a development service.
         // Keep kill-on-close through all waits; release only at terminal handoff.
         step="RELEASE_COMPLETED_JOB"; limits.basic.flags=0;

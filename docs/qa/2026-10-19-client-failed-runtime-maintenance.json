@@ -1,0 +1,21 @@
+{
+  "phase": "candidate-tested",
+  "deviceId": "device_bfd9a3d2-c2cc-4a36-8bd8-465bea492493",
+  "oldPid": 40628,
+  "oldBuild": "bfc96edf59be31f1be50d3878a12d6c37d154fa108ef37c7a0d7d41ee7511927",
+  "failedKRequest": "client-update_b9f94525-1577-48d3-a957-3f04ea6baeeb",
+  "failureReason": "CLIENT_UPDATE_CONTROL_REJECTED",
+  "xianyuOriginalActionId": "action_49bd64e6-0105-4fd6-aff5-53f50b520d52",
+  "xianyuFailure": "context_too_long_compaction_failed",
+  "originalRootExitCode": 1,
+  "originalTreeConfirmed": false,
+  "originalRetainedBackgroundCount": 3,
+  "currentOriginalRootDescendantsObserved": 0,
+  "originalBusinessReplayed": false,
+  "originalJournalsRewritten": false,
+  "formalPreservationRelaxed": false,
+  "validation": {"localHistoryFocusPassed": 78, "futureCleanupFocusPassed": 15, "independentPassed": 82, "independentWindowsSkipped": 9, "independentUnchangedBaselineFailures": 2},
+  "published": false,
+  "installed": false,
+  "postInstallEmployeeTestsPassed": false
+}

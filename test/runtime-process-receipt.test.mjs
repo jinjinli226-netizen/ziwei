@@ -35,10 +35,15 @@ test('Windows receipt reader retains only explicit, consistent background handof
   const cases = [
     { name: 'successful root with retained background', expected: true },
     { name: 'ordinary nonzero CLI exit with retained background', patch: { rootExitCode: 23 }, expected: true },
+    { name: 'model success may retain a background service', cleanupOnFailure: true, expected: true },
+    { name: 'model failure cannot claim retained background', cleanupOnFailure: true, patch: { rootExitCode: 1 }, failureCode: 'RUNTIME_FAILED_JOB_CLEANUP_UNCONFIRMED' },
+    { name: 'model failed Job has actually been emptied', cleanupOnFailure: true, patch: { rootExitCode: 1, treeConfirmed: true, activeProcesses: 0, backgroundProcessesRetained: false } },
+    { name: 'string policy cannot enable failed-root cleanup', cleanupOnFailure: 'true', patch: { rootExitCode: 23 }, expected: true },
     { name: 'legacy receipt does not infer retention', patch: { backgroundProcessesRetained: undefined } },
     { name: 'explicit false remains false', patch: { backgroundProcessesRetained: false } },
     { name: 'string marker is not evidence', patch: { backgroundProcessesRetained: 'true' } },
     { name: 'cancelled receipt', patch: { cancelled: true } },
+    { name: 'model cancellation retains cancellation evidence', cleanupOnFailure: true, patch: { cancelled: true } },
     { name: 'local cancellation already requested', stop: true },
     { name: 'supervisor failure', patch: { failureCode: 'RUNTIME_RELEASE_COMPLETED_JOB_5' } },
     { name: 'root not confirmed', patch: { rootConfirmed: false } },
@@ -55,7 +60,8 @@ test('Windows receipt reader retains only explicit, consistent background handof
     { name: 'host killed', hostSignal: 'SIGTERM' },
   ];
   for (const item of cases) {
-    const runtime = spawnSupervisedRuntime({ command: process.execPath, args: [], env: {} });
+    const runtime = spawnSupervisedRuntime({ command: process.execPath, args: [], env: {}, ...(item.cleanupOnFailure===undefined?{}:{cleanupOnFailure:item.cleanupOnFailure}) });
+    const frame=JSON.parse(host.stdin.read().toString('utf8'));assert.equal(frame.cleanupOnFailure,item.cleanupOnFailure===true,item.name);
     runtime.child.on('error', () => {});
     const receipt = {
       schema: 1, nonce, jobName: `Local\\Ziwei.Runtime.${nonce}`, hostPid: host.pid,
@@ -69,6 +75,8 @@ test('Windows receipt reader retains only explicit, consistent background handof
     const result = await runtime.completionEvidence;
     assert.equal(result.backgroundProcessesRetained, item.expected === true, item.name);
     assert.equal(result.activeProcesses, receipt.activeProcesses, item.name);
+    if(item.failureCode)assert.equal(result.failureCode,item.failureCode,item.name);
+    if(item.cleanupOnFailure===true&&receipt.rootExitCode===1){assert.equal(result.rootExitCode,1,item.name);assert.equal(result.cancelled,false,item.name);}
     assert.equal(result.treeConfirmed, receipt.treeConfirmed && receipt.activeProcesses === 0, item.name);
     host.stdin.destroy(); host.stdout.destroy(); host.stderr.destroy();
     runtime.child.stdout.destroy(); runtime.child.stderr.destroy();

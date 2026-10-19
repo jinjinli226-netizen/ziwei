@@ -1,0 +1,11 @@
+# 李金晋电脑失败回合阻塞远程升级
+
+2026-10-19北京时间08:40只读确认：李金晋电脑仍H build `bfc96edf59be31f1be50d3878a12d6c37d154fa108ef37c7a0d7d41ee7511927`、PID40628在线。K升级 `client-update_b9f94525-1577-48d3-a957-3f04ea6baeeb` 在05:40:56因stop_client/CONTROL_REJECTED失败，没有装入K。闲鱼原动作 `action_49bd64e6-0105-4fd6-aff5-53f50b520d52` 在05:40:08因模型上下文过长、自动压缩失败自然退出；早于升级失败，cancelled:false，不能说升级杀掉了这轮业务。
+
+原Windows回执根exit1确认、tree:false、backgroundProcessesRetained:true、active3；本次只读电脑诊断原root46856及当前后代为空，不能拿旧active3当当前活进程。维护检查报告ACTION_STATE_CORRUPT和原action的result_pending；诊断自身active1/另一acked队列不计历史阻塞。原回执、手机动作不确定与业务结果不改写，不重跑原手机任务。
+
+候选仅修客户端：模型执行显式内部cleanupOnFailure:true，在仍持有原Windows Job句柄时清理非零退出的本次子进程，保真实根退出码、cancelled:false；通用supervisor默认false、成功启动的后台服务保留。旧失败后台记录单列本地停止类别，严格校验身份、修订、隔离、非零exit/host0/真实retained标记。精确配对原action/结果blob和缓存终态的result_pending才计retainedPendingCount；不放行其它pending或嵌套本机退出未知。原action-state及queue字节完整保留，formal扫描仍拒绝原树未知。
+
+候选恢复沿原官方更新器：两次健康和文件快照/hash、暂停接单后精确pending数相等、原生清单只有精确daemon、持有真实Process句柄验证无直接子进程后停止；停止后核对进程/监听均空。仅证明本次daemon停止，回执仍originalExecutionExitConfirmed:false，不补造历史业务退出。
+
+定向新旧本地恢复78/78、未来清理相关15/15通过；独审93项82通过/9 Windows条件跳过/2项原HEAD同样失败（Mac路径与ENOENT差异）。Windows条件测试不是Mac真机通过。发布及真实升级和D盘新任务结果另行追加，不把候选测试或包发布当作设备安装完成。

@@ -27,8 +27,9 @@ function nativeCommand(command, cwd, env) {
 }
 
 /** Spawn one owned runtime. Windows evidence refers to its Job, never a PID search. */
-export function spawnSupervisedRuntime({ command, args = [], cwd = process.cwd(), env = process.env } = {}) {
+export function spawnSupervisedRuntime({ command, args = [], cwd = process.cwd(), env = process.env, cleanupOnFailure = false } = {}) {
   cwd = path.resolve(cwd);
+  cleanupOnFailure = cleanupOnFailure === true;
   if (!Array.isArray(args) || args.some(value => typeof value !== 'string' || value.includes('\0'))) throw new TypeError('Runtime arguments must be strings without NUL');
   if (!env || typeof env !== 'object') throw new TypeError('Runtime environment must be an object');
   if (process.platform !== 'win32') {
@@ -74,7 +75,7 @@ export function spawnSupervisedRuntime({ command, args = [], cwd = process.cwd()
   child.stdin.on('error', () => {});
   host.stdout.pipe(child.stdout);
   host.stderr.pipe(child.stderr);
-  host.stdin.write(JSON.stringify({ command: executable, args, cwd, env: environment, parentPid: process.pid }) + '\n');
+  host.stdin.write(JSON.stringify({ command: executable, args, cwd, env: environment, parentPid: process.pid, cleanupOnFailure }) + '\n');
   child.stdin.pipe(host.stdin);
 
   function readReceipt(file) {
@@ -109,7 +110,9 @@ export function spawnSupervisedRuntime({ command, args = [], cwd = process.cwd()
       && receipt.treeConfirmed === false && evidence.launched === true && evidence.rootConfirmed === true
       && Number.isSafeInteger(evidence.rootPid) && evidence.rootPid > 0
       && Number.isSafeInteger(evidence.rootExitCode) && evidence.activeProcesses > 0
+      && (!cleanupOnFailure || evidence.rootExitCode === 0)
       && evidence.cancelled === false && receipt.failureCode === null && !evidence.failureCode && !failure && hostCode === 0 && !hostSignal;
+    if (cleanupOnFailure && evidence.launched === true && evidence.rootConfirmed === true && Number.isSafeInteger(evidence.rootExitCode) && evidence.rootExitCode !== 0 && (evidence.treeConfirmed !== true || evidence.activeProcesses !== 0)) evidence.failureCode ||= 'RUNTIME_FAILED_JOB_CLEANUP_UNCONFIRMED';
     evidence.hostExitCode = hostCode;
     evidence.hostSignal = hostSignal || null;
     child.stdin.unpipe(host.stdin);
