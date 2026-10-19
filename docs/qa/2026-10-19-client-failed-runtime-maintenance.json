@@ -1,5 +1,5 @@
 {
-  "phase": "quiesce-first-tested-O-published-device-still-H",
+  "phase": "P-installed-zhinuan-terminal-proof-pending",
   "deviceId": "device_bfd9a3d2-c2cc-4a36-8bd8-465bea492493",
   "oldPid": 40628,
   "oldBuild": "bfc96edf59be31f1be50d3878a12d6c37d154fa108ef37c7a0d7d41ee7511927",
@@ -22,7 +22,7 @@
     "independentUnchangedBaselineFailures": 2
   },
   "published": true,
-  "installed": false,
+  "installed": true,
   "postInstallEmployeeTestsPassed": false,
   "rootTargetedPassed": 85,
   "followupTargetedPassed": 80,
@@ -53,5 +53,18 @@
   "OFailurePhase": "current_health",
   "activeCounterIncludesResultRetries": true,
   "quiesceFirstFocusPassed": 108,
-  "quiesceIndependentPassed": 108
+  "quiesceIndependentPassed": 108,
+  "PCommit": "b02683b28cb12ecdcc2b93c6a847ccdb45bbcfee",
+  "PBuild": "b40ce7117c3b43b8ff05bbc9adb541b59555125934a670a5ab43069c0ef7b405",
+  "PRequestId": "client-update_3b976a49-9b7c-4711-8a57-02edacc4f4a4",
+  "PState": "succeeded",
+  "heartbeatVerified": true,
+  "newPid": 17316,
+  "configurationPreserved": true,
+  "realWindowsOwnedFailedJobCleanupPassed": true,
+  "qingtianTask": "action_7f1cbadf-ad26-4e65-87a2-5c6ab988b585",
+  "qingtianDirectoryPassed": true,
+  "zhinuanTask": "action_7fcec325-ea8f-44e9-b194-cf070c200548",
+  "zhinuanDirectoryPassed": false,
+  "zhinuanObservedToolFailure": "stdin is not a tty"
 }
