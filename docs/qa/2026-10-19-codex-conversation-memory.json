@@ -1,0 +1,224 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-19",
+  "scope": "shared Ziwei Codex conversation integration, not an employee-specific prompt edit",
+  "apiCommits": [
+    "61f58289d19d0518842d7d20adc43db5df6a7ba4",
+    "d185cb9e6a8f5ec49b06c953706d6d136b9b502b"
+  ],
+  "clientCommit": "ed0224c94ced9e4e7322193ecc15413b18b3d257",
+  "rootCause": {
+    "employeeRuntime": "Codex",
+    "ordinaryEmployeeExcludedFromHistory": true,
+    "ephemeralWithoutResume": true,
+    "lastOriginalPromptLength": 1206,
+    "lastOriginalCurrentMessageLength": 49,
+    "priorUserIncluded": 0,
+    "priorAssistantIncluded": 0
+  },
+  "serverHistory": {
+    "currentMessageBindingRequired": true,
+    "exactWorkspaceEmployeeConversation": true,
+    "maxQuotedHistoryMessages": 16,
+    "maxQuotedHistoryCharacters": 12000,
+    "queueLateReplyUsesOriginalAuditBinding": true,
+    "futureMessagesExcluded": true,
+    "ackedInputFrozen": true,
+    "invalidPendingIsolated": true,
+    "canonicalCurrentInputStructured": true,
+    "rootFocusedTestsPassed": 20
+  },
+  "officialNativeSession": {
+    "create": "codex exec",
+    "resume": "codex exec resume <exact UUID>",
+    "ephemeralKeptForUnboundOneShotTasks": true,
+    "neverUsesLast": true,
+    "scope": [
+      "origin",
+      "workspace",
+      "deviceId",
+      "employeeId",
+      "conversationId",
+      "profile",
+      "CODEX_HOME",
+      "cwd"
+    ],
+    "threadProof": [
+      "stdout top-level thread.started",
+      "official rollout session_meta",
+      "owned process exit evidence"
+    ],
+    "bootstrapUsesQuotedCentralHistory": true,
+    "resumeUsesCanonicalCurrentInput": true,
+    "preflightFailureOnlyAffectsItsConversation": true,
+    "preflightProof": "in-process WeakMap, never wire error properties",
+    "rootFocusedTestsPassed": 26,
+    "peerNativeAndHistoryTestsPassed": 36,
+    "priorCompatibilityTestsPassed": 49
+  },
+  "realProviderCentralHistory": {
+    "employeeId": "employee_7a96cc12-61d8-4c82-8a3e-51b746b973ce",
+    "conversationId": "conv_91b31f29-c588-4883-aa4b-43dc2f9d0fcb",
+    "firstActionId": "action_8fde9c74-f176-4313-887b-0365a2ff59b6",
+    "secondActionId": "action_119fb562-35c4-42f1-b5fe-ee89da999c2c",
+    "model": "gpt-6.1-sol",
+    "currentSecondMessageDoesNotContainNonce": true,
+    "historicalPayloadContainsNonce": true,
+    "secondReplyExactlyMatchesFirstNonce": true,
+    "firstProcessExit": {
+      "launched": true,
+      "rootConfirmed": true,
+      "treeConfirmed": true,
+      "cancelled": false,
+      "backgroundProcessesRetained": false,
+      "rootPid": 4812,
+      "rootExitCode": 0,
+      "activeProcesses": 0,
+      "hostExitCode": 0,
+      "platform": "win32",
+      "supervisor": "windows-job"
+    },
+    "secondProcessExit": {
+      "launched": true,
+      "rootConfirmed": true,
+      "treeConfirmed": true,
+      "cancelled": false,
+      "backgroundProcessesRetained": false,
+      "rootPid": 49096,
+      "rootExitCode": 0,
+      "activeProcesses": 0,
+      "hostExitCode": 0,
+      "platform": "win32",
+      "supervisor": "windows-job"
+    },
+    "operationsEmployeeChattedOrStopped": false,
+    "afterMaintenance": {
+      "actionId": "action_14266dab-1aa4-4f0d-be22-a61395c5bd0e",
+      "status": "succeeded",
+      "completedAt": "2026-10-19T10:27:54.417Z",
+      "replyExactlyMatchesOriginalNonce": true,
+      "processExit": {
+        "launched": true,
+        "rootConfirmed": true,
+        "treeConfirmed": true,
+        "cancelled": false,
+        "backgroundProcessesRetained": false,
+        "rootPid": 57668,
+        "rootExitCode": 0,
+        "activeProcesses": 0,
+        "hostExitCode": 0,
+        "platform": "win32",
+        "supervisor": "windows-job"
+      },
+      "clientBuild": "e0cfb63ee43c3d837a049b9c4f0c6d1362cab64918f8987b35597b9e549c4c18",
+      "provesNativeResume": false
+    }
+  },
+  "publication": {
+    "apiCommit": "d185cb9e6a8f5ec49b06c953706d6d136b9b502b",
+    "clientBuild": "6838000c3860753937ca39e323158964cb46c8e3851d5a8da9108d177d23aa8e",
+    "archiveSha256": "e6950fcdc1237efffd9d6eea9047a19fd5ce06964f00b386a7622a2b11799e68",
+    "sourceDescriptorEntries": 29,
+    "members": 942,
+    "inheritedMembersPreserved": 937,
+    "independentlyAttested": true,
+    "newInstalledClientVerified": false
+  },
+  "nativeRealProviderAfterUpdate": {
+    "state": "not_run_client_update_refused",
+    "updateRequestId": "client-update_62047773-9954-4556-814b-376828989cdf",
+    "updateState": "failed",
+    "code": "CLIENT_UPDATE_CONTROL_REJECTED",
+    "completedAt": "2026-10-19T10:24:57.488Z",
+    "targetHeartbeatVerified": false,
+    "installedBuildStill": "e0cfb63ee43c3d837a049b9c4f0c6d1362cab64918f8987b35597b9e549c4c18",
+    "forceStopOrBlindRetrySubmitted": false,
+    "readOnlyLocalDiagnostic": {
+      "taskId": "task_59431097-49f0-4cb9-acc8-ed55c22c096d",
+      "actionId": "action_014d1d73-9242-4f83-b1e2-6f3450b7f7d6",
+      "status": "succeeded",
+      "processExit": {
+        "launched": true,
+        "rootConfirmed": true,
+        "treeConfirmed": true,
+        "cancelled": false,
+        "backgroundProcessesRetained": false,
+        "rootPid": 56848,
+        "rootExitCode": 0,
+        "activeProcesses": 0,
+        "hostExitCode": 0,
+        "platform": "win32",
+        "supervisor": "windows-job"
+      },
+      "terminal": {
+        "type": "maintenance",
+        "readOnly": true,
+        "requestId": "client-update_62047773-9954-4556-814b-376828989cdf",
+        "remoteState": "failed",
+        "supervisorState": "queued",
+        "source": "terminal",
+        "state": "failed",
+        "failureStage": "stop_client",
+        "reasonCode": "CONTROL_REJECTED",
+        "httpStatus": 409,
+        "stopReasons": [
+          {
+            "code": "ACTION_STATE_CORRUPT",
+            "count": 1
+          },
+          {
+            "code": "DELIVERY_NOT_DRAINED",
+            "count": 1
+          }
+        ]
+      },
+      "noStopUpdateOrStatusHelperInvoked": true
+    },
+    "nextStep": "Resolve the exact local maintenance record and delivery blockers while preserving business evidence before another installation attempt; native real-provider resume validation remains unrun."
+  },
+  "androidStaleBanner": {
+    "versionName": "0.5.3-internal",
+    "versionCode": 15,
+    "sourceCommit": "94379947947b2304895ee144c55acf073174e97a",
+    "apkSha256": "6938df37c25f529c522ed92e06e32b0264ec9b76fa4780a9f284563b3d0d1d6f",
+    "publicDownloadVerified": true,
+    "emulatorVerified": true,
+    "physicalPhoneVerified": false,
+    "operationsEmployeeStopped": false
+  },
+  "limitations": [
+    "No original native rollout was saved by the former ephemeral chat path; this repair seeds central chat history and does not reconstruct old tool execution stacks.",
+    "One-shot tasks without a bound conversation keep ephemeral execution.",
+    "Native profile/HOME/cwd changes require an explicit migration; no implicit selection of a different session.",
+    "Other computers are not declared upgraded by this deployment.",
+    "Existing platform-specific Hermes path fixture failure on Mac and three model/profile environment fixtures were reproduced on baseline; they were not changed.",
+    "One earlier legacy management test briefly opened an unregistered listen(0) fixture, then closed it; no residual listeners. Final focused tests deny listeners and outbound network.",
+    "Overlapping regression scopes are reported separately, not summed."
+  ],
+  "separateMaintenanceCheckpointObservation": {
+    "actionId": "action_46cc58d6-25d7-4706-8ea5-a015d40e2978",
+    "employeeId": "employee_5f157a51-a8fa-483c-90df-53d44292b5d2",
+    "status": "failed",
+    "error": "维护检查点无法验证；未重放原任务",
+    "processExit": {
+      "launched": true,
+      "rootConfirmed": true,
+      "treeConfirmed": false,
+      "cancelled": false,
+      "backgroundProcessesRetained": true,
+      "rootPid": 37996,
+      "rootExitCode": 0,
+      "activeProcesses": 3,
+      "hostExitCode": 0,
+      "platform": "win32",
+      "supervisor": "windows-job"
+    },
+    "originalTaskReplayed": false,
+    "notAssumedToBeStopClientRefusalRootCause": true
+  },
+  "temporaryQaCleanup": {
+    "conversationArchived": true,
+    "employeeSoftDeleted": true,
+    "noForceOrProfilePurge": true
+  }
+}

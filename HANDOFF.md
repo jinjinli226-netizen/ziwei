@@ -1,5 +1,13 @@
 # 紫薇项目 HandOff
 
+## 2026-10-19 Codex 员工通用聊天记忆修复
+
+已确认网站运维大神使用普通 Codex，原请求每轮 `exec --ephemeral`，没有 native resume，服务端也把普通 Codex 排除在历史注入之外。修复作用于公共聊天执行链路。API `61f5828`、`d185cb9` 已先推双分支再发布，当前 d185/PID530005；同员工/工作区/聊天的历史作为引用传入，当前消息截止、原回执关联、排队刷新、失效单动作隔离与 ACK 后冻结均已验证。旧客户端也能受益：独立 QA Codex 员工的两次真实 gpt-6.1-sol 执行均成功，第二轮未重复口令仍准确回忆，root/tree exit0。运维员工岗位/配置未改，也没有向其聊天插入测试或发送停止。
+
+官方原生会话修复 `ed0224c94ced9e4e7322193ecc15413b18b3d257` 已推双分支并发布客户端 build `6838000c3860753937ca39e323158964cb46c8e3851d5a8da9108d177d23aa8e`、归档 SHA `e6950fcdc1237efffd9d6eea9047a19fd5ce06964f00b386a7622a2b11799e68`。首次以中央历史初始化，后续仅用受信当前输入按精确 UUID `codex exec resume`；绑定 origin/workspace/device/employee/conversation/profile/HOME/cwd，不用 `--last`。坏映射的启动前错误有进程内证明，只影响本聊天，不使全机 quarantine；没有放宽真实未知退出或手机写入判定。新专项26/26、服务端20/20、独立联合36/36通过；实际发布包来源闭包、冷安装、29项哈希与保留937成员均核验。李机升级请求 `client-update_62047773-9954-4556-814b-376828989cdf` 使用 waitForIdle，于10:24:57.488 UTC因 `CLIENT_UPDATE_CONTROL_REJECTED` 失败，仍是e0cf客户端在线；没有强停或盲目重试，尚不能声称新客户端已装入或真实 native resume 已现场通过。维护失败后第三轮独立 QA `action_14266dab-1aa4-4f0d-be22-a61395c5bd0e` 仍成功准确回忆原口令，exit0/root0/tree0，验证旧版继续接任务且d185结构向后兼容。知微原 `action_46cc58d6-25d7-4706-8ea5-a015d40e2978` 的维护检查点验证失败，root0但tree未确认且3个背景进程保留，原任务未重放；随后Creator只读诊断 `action_014d1d73-9242-4f83-b1e2-6f3450b7f7d6` 成功/root0/tree0，按此次remote ledger精确读取原terminal，确认stop_client/CONTROL_REJECTED/HTTP409，stopReasons为ACTION_STATE_CORRUPT(1)及DELIVERY_NOT_DRAINED(1)，未运行stop/update/update-status，也未修改本机文件；不能把知微3个背景进程直接当成该拒绝原因。原生续接客户端仍待解决这两类维护阻塞后安装/实测，不把发布包等同现场成功。隔离记忆QA聊天已归档、临时QA员工普通删除，无force或Profile清理。运维员工仍active、updated_at原值保持。其它电脑没有被本轮宣称升级。
+
+手机 App 会话已修复历史只读截图异常造成的“顶部完成、底部待核实”误锁，发布 0.5.3-internal/code15，源码 `94379947947b2304895ee144c55acf073174e97a`，APK SHA `6938df37c25f529c522ed92e06e32b0264ec9b76fa4780a9f284563b3d0d1d6f`。原账号模拟器覆盖安装、历史草稿与真实在途保护通过，真手机尚待用户安装，不伪造旧失败回执。详细范围见 [本轮 QA](docs/qa/2026-10-19-codex-conversation-memory.json)。
+
 ## 2026-10-19 闲鱼官方压缩恢复与客户端远程升级
 
 优先采用 Hermes 官方 `compress_now`，不自建摘要、不换会话、不重跑手机/店铺旧任务。闲鱼原 session `20261015_120149_45e77a` 已真实压缩 579723 → 331744 token，未用 fallback；原配置及旧失败/手机不确定/树未知证据保留。通过原生 API 独立回读后，主聊天 `action_5cd837b4-c153-4e9e-a0d0-43177fb0d5b8` 于08:54:40 UTC 用真实 `gpt-6.1-sol` 回复“闲鱼恢复验收通过”，同一 session、root50528 exit0/tree0、无后台保留。Bot 已恢复 active r7/e23；该轮手机投影回读也为该 succeeded，不再是旧未知动作。不要再次重放原业务。
