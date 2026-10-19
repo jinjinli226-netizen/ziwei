@@ -69,6 +69,24 @@ for(const [name,override]of Object.entries({
 test('the native terminator transports large snapshots via stdin and holds one Process handle',async()=>{
  const calls=[];const terminate=createLocalHistoryHandleTerminator({runCommand:(command,args)=>{let finish;const promise=new Promise(resolve=>{finish=resolve;}),stdin=new EventEmitter();stdin.end=value=>{calls.push({command,args,data:JSON.parse(value)});finish({stdout:'{}'});};promise.child={stdin};return promise;}});await terminate({waitMs:8000,files:Array.from({length:600},(_,i)=>({path:'C:/private/'+i,sha256:'a'.repeat(64)}))});const program=Buffer.from(calls[0].args.at(-1),'base64').toString('utf16le');assert(calls[0].args.join(' ').length<32000);assert.equal(calls[0].data.files.length,600);assert.match(program,/\$heldHandle=\$p.Handle/);assert.match(program,/\$p\.Kill\(\)/);assert.match(program,/\$p\.WaitForExit/);assert.match(program,/ParentProcessId/);assert.match(program,/FileMode\]::CreateNew/);assert.doesNotMatch(program,/taskkill|Stop-Process|PRIVATE_SYNTHETIC_TOKEN/);
 });
+test('native CIM observation has a separate finite 120 second budget without extending cleanup',async()=>{
+ const calls=[];const terminate=createLocalHistoryHandleTerminator({runCommand:(command,args,options)=>{let finish;const promise=new Promise(resolve=>{finish=resolve;}),stdin=new EventEmitter();stdin.end=value=>{calls.push({command,args,options,data:JSON.parse(value)});finish({stdout:'{}'});};promise.child={stdin};return promise;}});
+ for(const waitMs of [1,8000])await terminate({waitMs});
+ assert.deepEqual(calls.map(row=>row.options.timeout),[120001,128000]);assert.deepEqual(calls.map(row=>row.data.waitMs),[1,8000]);
+ for(const row of calls){assert.equal(Buffer.from(row.args.at(-1),'base64').toString('utf16le'),LOCAL_HISTORY_STOP_HANDLE_PROGRAM);assert.match(LOCAL_HISTORY_STOP_HANDLE_PROGRAM,/\$watch.ElapsedMilliseconds -lt \$d.waitMs/);assert.match(LOCAL_HISTORY_STOP_HANDLE_PROGRAM,/\$p.WaitForExit\(\$d.waitMs\)/);}
+});
+test('native parent generations use one CIM snapshot while preserving all other reviewed native logic',()=>{
+ const program=LOCAL_HISTORY_STOP_HANDLE_PROGRAM;
+ const snapshot=' $rows=@(Get-CimInstance Win32_Process -ErrorAction Stop);$byPid=@{};foreach($snapshotRow in $rows){$byPid[[int]$snapshotRow.ProcessId]=$snapshotRow};$added=0;$more=$true';
+ const parent='$owner=$byPid[[int]$row.ParentProcessId];Tree-Fact';
+ assert.equal(program.split(snapshot).length,2);assert.equal(program.split(parent).length,2);
+ assert.match(program,/\$owner.CreationDate.ToUniversalTime\(\).ToString\('o'\) -ceq \$parent.created.ToString\('o'\)/);
+ assert.match(program,/\$parent.process.HasExited -and \$created -le \$parent.process.ExitTime.ToUniversalTime\(\)/);
+ assert.match(program,/\$null=\$child.Handle/);assert.match(program,/\$current=Get-CimInstance Win32_Process -Filter \('ProcessId = '\+\$id\)/);
+ assert.match(program,/!\$protected.ContainsKey\(\$id\)/);assert.match(program,/!\$protected.ContainsKey\(\[int\]\$d.pid\)/);
+ const previous=program.replace(snapshot,' $rows=@(Get-CimInstance Win32_Process -ErrorAction Stop);$added=0;$more=$true').replace(parent,"$owner=Get-CimInstance Win32_Process -Filter ('ProcessId = '+[int]$row.ParentProcessId);Tree-Fact");
+ assert.equal(sha(previous),'01810933e42b7a61a733e0b50f23d550ecf1f44ac28139959f0eea44d2039897');
+});
 test('the official history fallback never operates on a non-Windows host',async()=>{if(process.platform!=='win32')assert.deepEqual(await recoverLocalHistoryStopForUpdate({}),{recovered:false,reason:'not_applicable'});});
 
 

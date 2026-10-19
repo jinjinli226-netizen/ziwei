@@ -66,8 +66,8 @@ function No-Link($f){$i=Get-Item -LiteralPath $f -Force;while($i){Assert-Fact 'L
 $tree=@{}
 function Tree-Fact($v){if(!$v){$script:ziweiLocalHistoryRule='LH20_DAEMON_CHILDREN';throw 'ZIWEI_MAINTENANCE_TREE_UNCONFIRMED'}}
 function Capture-Tree{
- $rows=@(Get-CimInstance Win32_Process -ErrorAction Stop);$added=0;$more=$true
- while($more){$more=$false;foreach($row in $rows){$id=[int]$row.ProcessId;$parent=$tree[[int]$row.ParentProcessId];if(!$parent -or $tree.ContainsKey($id)){continue};$created=$row.CreationDate.ToUniversalTime();if($created -lt $parent.created){continue};if($parent.process.HasExited){if($created -gt $parent.process.ExitTime.ToUniversalTime()){continue}}else{$owner=Get-CimInstance Win32_Process -Filter ('ProcessId = '+[int]$row.ParentProcessId);Tree-Fact (($owner -and $owner.CreationDate.ToUniversalTime().ToString('o') -ceq $parent.created.ToString('o')) -or ($parent.process.HasExited -and $created -le $parent.process.ExitTime.ToUniversalTime()))}
+ $rows=@(Get-CimInstance Win32_Process -ErrorAction Stop);$byPid=@{};foreach($snapshotRow in $rows){$byPid[[int]$snapshotRow.ProcessId]=$snapshotRow};$added=0;$more=$true
+ while($more){$more=$false;foreach($row in $rows){$id=[int]$row.ProcessId;$parent=$tree[[int]$row.ParentProcessId];if(!$parent -or $tree.ContainsKey($id)){continue};$created=$row.CreationDate.ToUniversalTime();if($created -lt $parent.created){continue};if($parent.process.HasExited){if($created -gt $parent.process.ExitTime.ToUniversalTime()){continue}}else{$owner=$byPid[[int]$row.ParentProcessId];Tree-Fact (($owner -and $owner.CreationDate.ToUniversalTime().ToString('o') -ceq $parent.created.ToString('o')) -or ($parent.process.HasExited -and $created -le $parent.process.ExitTime.ToUniversalTime()))}
   Tree-Fact (!$protected.ContainsKey($id) -and $tree.Count -lt 257 -and $parent.depth -lt 32)
   $child=$null
   try{$child=Get-Process -Id $id -ErrorAction Stop;$null=$child.Handle;Tree-Fact ([Math]::Abs(($child.StartTime.ToUniversalTime()-$created).TotalMilliseconds) -le 2);$current=Get-CimInstance Win32_Process -Filter ('ProcessId = '+$id);Tree-Fact ((!$current -and $child.HasExited) -or ($current -and $current.CreationDate.ToUniversalTime().ToString('o') -ceq $created.ToString('o') -and $current.ParentProcessId -eq $row.ParentProcessId));$tree[$id]=[pscustomobject]@{process=$child;created=$created;parentPid=[int]$row.ParentProcessId;depth=($parent.depth+1);requested=$false};$child=$null;$added++;$more=$true}
@@ -135,8 +135,10 @@ try{
 }
 `;
 export function createLocalHistoryHandleTerminator({runCommand=run}={}){return async data=>{
+ // CIM observation may exceed 30 seconds on a real descendant tree; this
+ // bounded host budget does not extend the native cleanup waitMs deadline.
  let output;
- try{const pending=runCommand('powershell.exe',['-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(LOCAL_HISTORY_STOP_HANDLE_PROGRAM,'utf16le').toString('base64')],{encoding:'utf8',windowsHide:true,timeout:data.waitMs+15000,maxBuffer:64*1024});if(!pending.child?.stdin){await pending;throw nativeFailure('LH00_NATIVE_ERROR');}pending.child.stdin.on('error',()=>{});pending.child.stdin.end(JSON.stringify(data));output=await pending;}
+ try{const pending=runCommand('powershell.exe',['-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(LOCAL_HISTORY_STOP_HANDLE_PROGRAM,'utf16le').toString('base64')],{encoding:'utf8',windowsHide:true,timeout:data.waitMs+120000,maxBuffer:64*1024});if(!pending.child?.stdin){await pending;throw nativeFailure('LH00_NATIVE_ERROR');}pending.child.stdin.on('error',()=>{});pending.child.stdin.end(JSON.stringify(data));output=await pending;}
  catch(error){throw nativeFailure(closedNativeRule(error?.stdout)||'LH00_NATIVE_ERROR');}
  const rule=closedNativeRule(output?.stdout);if(rule)throw nativeFailure(rule);
  try{return JSON.parse(output.stdout.replace(/^\uFEFF/,'').trim());}catch{throw nativeFailure('LH00_NATIVE_ERROR');}
