@@ -23,6 +23,10 @@ test('the current update authority is retained until its paused actions resume',
   const f=fixture(t);f.observation('complete');await f.client.tick();assert.equal(f.polls(),0);assert.equal(f.client.checkpointAuthority(f.receipt).updateId,f.receipt.updateId);
   f.pending(false);await f.client.tick();assert.equal(f.polls(),1);
 });
+test('a heartbeat cannot admit a newer upgrade before the previous installer finishes, even without paused tasks',async t=>{
+  const f=fixture(t);f.pending(false);await f.client.tick();assert.equal(f.polls(),0);
+  f.observation('complete');await f.client.tick();assert.equal(f.polls(),1);
+});
 test('cancelled queued maintenance can continue in its original daemon without launching an updater',async t=>{
   const f=fixture(t,{state:'cancelled',stage:null,worker:false,source:true});
   assert.deepEqual(await f.client.maintenanceResumeReadiness(f.receipt),{ready:true,sourceIdle:{workerAbsent:true,maintenanceLockAbsent:true,installedBuild:'1'.repeat(64),pid:99}});

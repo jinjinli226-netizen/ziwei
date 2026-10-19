@@ -144,6 +144,7 @@ export function createRemoteClientUpdates({ home, hostId, clientBuild, enabled =
         await flushFailedReports();
         if(current?.state==='succeeded'&&current.stage==='worker_launch'&&!installationSettled){
           installationSettled=(await this.maintenanceResumeReadiness({updateId:current.request.id,targetBuild:current.request.targetBuild})).ready===true;
+          if(!installationSettled)return;
         }
         // The accepted update is also the immutable authority for its paused
         // actions. Do not overwrite it with a newer request before they resume.
