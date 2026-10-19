@@ -81,7 +81,7 @@ function snapshot(file,files,read){
     // partial headers and every nonzero magic still require native recovery.
     if(suffix==='-journal'&&bytes.length&&(bytes.length<28||!bytes.subarray(0,8).equals(Buffer.alloc(8))))throw Error('NATIVE_DATABASE_RECOVERY_REQUIRED');
   }
-  if(!source[0].proof.exists){if(source[1].proof.exists||source[3].proof.exists)throw Error('NATIVE_DATABASE_ORPHAN_WAL');return null;}
+  if(!source[0].proof.exists){if(source[2].bytes?.length)throw Error('NATIVE_DATABASE_RECOVERY_REQUIRED');if(source[1].proof.exists||source[3].proof.exists)throw Error('NATIVE_DATABASE_ORPHAN_WAL');return null;}
   if(source[1].proof.exists||source[3].proof.exists)validateWal(source[1].bytes||Buffer.alloc(0),source[0].bytes,source[3].bytes);
   const directory=fs.mkdtempSync(path.join(os.tmpdir(),'ziwei-native-read-')),copy=path.join(directory,path.basename(file));let db;
   try{

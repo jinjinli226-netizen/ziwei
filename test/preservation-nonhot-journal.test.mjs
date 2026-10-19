@@ -49,3 +49,12 @@ test('a non-hot journal changing during the private read still fails the existin
   assert.throws(()=>readDatabaseSnapshot(f.file,db=>{assert.equal(db.prepare('SELECT COUNT(*) n FROM fixture').get().n,1);fs.appendFileSync(f.journal,'changed by isolated fixture');}),/NATIVE_DATABASE_CHANGED/);
   same(f.file,databaseBefore);assert.equal(fs.statSync(f.journal).size,28+Buffer.byteLength('changed by isolated fixture'));
 });
+
+test('a nonempty zero-magic journal without its original main database remains refused and is not removed',t=>{
+  const f=fixture(t),missing=path.join(path.dirname(f.file),'missing.sqlite'),journal=missing+'-journal';
+  for(const length of [28,8720]){
+    fs.writeFileSync(journal,Buffer.alloc(length));const before=evidence(journal);
+    assert.throws(()=>readDatabaseSnapshot(missing,()=>assert.fail('reader must not run')),/NATIVE_DATABASE_RECOVERY_REQUIRED/);
+    assert.equal(fs.existsSync(missing),false);same(journal,before);
+  }
+});
