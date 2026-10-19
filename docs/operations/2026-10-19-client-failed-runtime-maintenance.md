@@ -14,3 +14,6 @@
 L `2a801ef702bd3deb16ba76f37b52d07db9782e09` 已推GitHub并发布客户端：build `27b255fb7b48777bcdedaf3c81eafe8518ac607ebd1b5eb3fbafa677d0e8b6bc`、SHA `577d1e4557014737a11620f83fe597382d3d13e4628afcd1fbf9090ace70fedf`。主控85项通过；Linux离线冷装与helper导入通过。真实请求 `client-update_f1fc8b9f-14cd-49fc-9f2d-50b023a86ebd` 又在stop_client/CONTROL_REJECTED失败，原H/PID40628保持，未停电脑或换安装。
 
 后续发现分类夹具用了executor_failed，而真实Hermes adapter返回runtime_failed，dispatcher会原样保留（而非统一改executor_failed）。补丁仅允许这两个已知码，不接受任意code；新夹具通过真实dispatcher接收runtime_failed先红后绿，另测无code默认executor_failed与未知码拒绝，定向80/80通过。后续候选发布与设备结果另记；原L失败保留，不用测试总数代替现场验收。
+
+
+M `e0fa8e2a4e265e678e82d948b289dc69c62bd2d9` 只准备了包和发布stage，未执行发布。现场只读诊断进一步确认：旧回执包含手机工具深层 executing/uncertain 状态，原纯判定即使归一code仍拒绝。补齐严格同workspace/employee/action/runtime/profile的已加载ziwei-terminal业务子树局部判定：仅本地legacy业务状态检查省略该手机子树，完整原视图仍检查任意嵌套本机exit/native/control/quarantine。使用完整真实原结果形状的本地纯探针通过，原数据不变；含深层状态、scope错绑、子树未知进程/控制状态的91项回归全通过。不会先把未通过真实形状的M发到设备。

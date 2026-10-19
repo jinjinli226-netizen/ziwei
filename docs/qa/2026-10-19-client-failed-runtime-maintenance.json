@@ -1,5 +1,5 @@
 {
-  "phase": "L-published-device-attempt-failed-followup-tested",
+  "phase": "deep-phone-followup-tested-M-not-published",
   "deviceId": "device_bfd9a3d2-c2cc-4a36-8bd8-465bea492493",
   "oldPid": 40628,
   "oldBuild": "bfc96edf59be31f1be50d3878a12d6c37d154fa108ef37c7a0d7d41ee7511927",
@@ -30,5 +30,11 @@
   "LRequestId": "client-update_f1fc8b9f-14cd-49fc-9f2d-50b023a86ebd",
   "LState": "failed",
   "LReason": "CLIENT_UPDATE_CONTROL_REJECTED",
-  "followupReason": "actual dispatcher retains runtime_failed"
+  "followupReason": "actual dispatcher retains runtime_failed",
+  "MCommit": "e0fa8e2a4e265e678e82d948b289dc69c62bd2d9",
+  "MPublished": false,
+  "deepPhoneTargetedPassed": 91,
+  "fullRealResultPureShapeAccepted": true,
+  "realBusinessStateUnchanged": true,
+  "originalTreeConfirmedStillFalse": true
 }

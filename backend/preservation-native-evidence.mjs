@@ -160,11 +160,11 @@ function backgroundControlUnknown(value){
 // nested runtime/control uncertainty must still block maintenance.
 function failedBackgroundHistoryUnknown(view){
   const result=view.result.result,terminal=result.terminalMcp;
-  if(terminal?.failure?.code!=='terminal_mcp_receipt_incomplete'||terminal.failure.phoneExecutionState!=='uncertain')return legacyHistoryUncertain(view);
-  const cleanResult={...result},cleanTerminal={...terminal};
+  if(terminal?.failure?.code!=='terminal_mcp_receipt_incomplete'||terminal.failure.phoneExecutionState!=='uncertain'||terminal.configured!==true||terminal.injected!==true||terminal.loaded!==true||terminal.transport!=='stdio'||terminal.serverName!=='ziwei-terminal'||terminal.status!=='loaded'||terminal.workspace!==view.identity.workspace||terminal.employeeId!==result.botIsolation?.employeeId||terminal.actionId!==view.result.actionId||!['Codex','Hermes'].includes(result.runtime)||terminal.runtime!==result.runtime||typeof result.profile!=='string'||!result.profile||terminal.profile!==result.profile||terminal.runtimeProfile!==result.profile||result.botIsolation.profile!==result.profile||typeof terminal.targetDeviceId!=='string'||!terminal.targetDeviceId)return legacyHistoryUncertain(view);
+  const {terminalMcp:_phoneBusiness,...cleanResult}=result;
   if(cleanResult.executionState==='uncertain')delete cleanResult.executionState;
-  if(cleanTerminal.executionState==='uncertain')delete cleanTerminal.executionState;
-  cleanResult.terminalMcp=cleanTerminal;
+  // Phone status/receipts are retained in the original bytes. Local exit and
+  // control validation below still inspects that entire original subtree.
   return legacyHistoryUncertain({...view,result:{...view.result,result:cleanResult}});
 }
 
