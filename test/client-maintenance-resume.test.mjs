@@ -36,3 +36,9 @@ test('the resumed native admission carries the durable attempt instead of silent
   try{await authorizeNativeExecution(action,{apiBase:'https://fixture.invalid',workspace:'fixture',deviceId:'device-fixture',deviceToken:'private-fixture',maintenanceAttempt:attempt});assert.deepEqual(body.maintenanceAttempt,attempt);}
   finally{global.fetch=original;}
 });
+test('an ordinary delivery without a checkpoint returns null and still passes native admission',async()=>{
+  const action={id:'ordinary-admission-fixture',type:'task.execute',payload:{runtime:'Hermes'}},original=global.fetch;let body;
+  global.fetch=async(_url,init)=>{body=JSON.parse(init.body);return{ok:true,json:async()=>({allowed:true,actionId:action.id,executionBinding:executionBinding(action)})};};
+  try{await authorizeNativeExecution(action,{apiBase:'https://fixture.invalid',workspace:'fixture',deviceId:'device-fixture',deviceToken:'private-fixture',maintenanceAttempt:null});assert.deepEqual(body,{workspace:'fixture'});}
+  finally{global.fetch=original;}
+});
