@@ -37,3 +37,9 @@ artifacts/*.tgz
 # Runtime database journals and root-level review captures
 data/*.sqlite-*
 /*.png
+
+# Android signing material stays private.
+*.keystore
+*.jks
+*.p12
+*.pfx
