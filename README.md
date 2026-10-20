@@ -1,12 +1,10 @@
 # 紫薇
 
-## 换电脑接手（2026-10-20）
+## AI 从这里开始
 
-先读 [AI_HANDOFF.md](AI_HANDOFF.md)，再看[分层版本地图](docs/handoffs/2026-10-20-release-map.md)与 [HANDOFF.md](HANDOFF.md) 顶部最新记录。推荐分支为 `codex/remote-client-upgrade`；本轮更新前已核实它和 `codex/v2-20261014-release` 均为 `faea63d`，交接文档可以领先产品部署。不要默认从旧 `main` 或旧主目录接续。
+先读 [AI_HANDOFF.md](AI_HANDOFF.md)，了解紫薇的用途、目录与执行链路；再按当前任务在[功能索引](docs/FEATURE_MAP.md)查代码、测试和专题说明。新会话可使用[简短提示词](NEW_AI_SESSION_PROMPT.md)，项目规则见[AGENTS.md](AGENTS.md)。
 
-[新AI提示词](NEW_AI_SESSION_PROMPT.md) 已改为使用实际仓库目录；[AGENTS.md](AGENTS.md) 保存可随Git迁移的项目规则。[TRO员工交接](docs/operations/2026-10-20-xiaohongshu-tro-employee.md)记录本次员工、风格、产物和最终原图头像。
-
-GitHub保存源码与脱敏文档；未提交修改另有私有离线交接包，权限、数据库及设备HOME按交接清单另行配置。下方不同日期的功能说明是历史资料，不能替代最新分层状态或用于整树覆盖生产。
+需要核对上线或设备版本时读[分层版本地图](docs/handoffs/2026-10-20-release-map.md)，需要迁移电脑时读[迁移专题](docs/handoffs/cross-computer-guide.md)，查历史时读[HANDOFF](HANDOFF.md)的相关记录。源码接续分支为 `codex/remote-client-upgrade`；下方各日期说明保留为历史资料。
 
 Windows 早期客户端若因缺少健康身份/任务字段而无法 update，可使用官方 PowerShell 入口执行只读检查及一次明确确认的迁移。旧版任务状态保持未知，恢复连接可能重新取得未完成任务；流程、身份保护和验收边界见 [早期 Windows 升级记录](docs/operations/2026-10-12-legacy-windows-upgrade.md)。
 

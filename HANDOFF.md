@@ -1,5 +1,11 @@
 # 紫薇项目 HandOff
 
+## 2026-10-20 AI 按需功能导航
+
+用户要求先理解项目用途及目录，再按具体任务找对应功能。入口现为 [AI_HANDOFF.md](AI_HANDOFF.md) → [功能索引](docs/FEATURE_MAP.md) → 相关源码/测试；AGENTS 和新会话提示词同步采用按需读取。功能索引覆盖员工/Creator/Bot、会话记忆、目录、执行恢复、升级、手机读图、MCP授权、定时与移动通知等，并区分不在主树的 Android 和私仓。
+
+Creator 的跨电脑整理本地提交 ca7bcc9 已保留；迁移细节移入[专题说明](docs/handoffs/cross-computer-guide.md)，版本地图和旧验收记录保持。员工 Creator 会话已回复停工，子代理停止、无未结束命令。此次为项目文档导航整理，不部署产品或升级设备。下方为历史记录。
+
 ## 2026-10-20 跨电脑AI统一交接
 
 跨电脑开发与运维先读 [AI_HANDOFF.md](AI_HANDOFF.md)，使用新版 [NEW_AI_SESSION_PROMPT.md](NEW_AI_SESSION_PROMPT.md)；项目规则已写入 [AGENTS.md](AGENTS.md)。本轮基于 `codex/remote-client-upgrade@faea63d`，该基线与 `codex/v2-20261014-release` 已通过远端核对；文档提交不代表产品重新发布。
