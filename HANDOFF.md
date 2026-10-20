@@ -1,5 +1,13 @@
 # 紫薇项目 HandOff
 
+## 2026-10-20 跨电脑AI统一交接
+
+跨电脑开发与运维先读 [AI_HANDOFF.md](AI_HANDOFF.md)，使用新版 [NEW_AI_SESSION_PROMPT.md](NEW_AI_SESSION_PROMPT.md)；项目规则已写入 [AGENTS.md](AGENTS.md)。本轮基于 `codex/remote-client-upgrade@faea63d`，该基线与 `codex/v2-20261014-release` 已通过远端核对；文档提交不代表产品重新发布。
+
+[分层版本地图](docs/handoffs/2026-10-20-release-map.md)分别标明主站/API、前端、中控、官方Windows包、两台实际电脑、Android及并行分支，保留生产混合源码边界。[TRO员工摘要](docs/operations/2026-10-20-xiaohongshu-tro-employee.md)与[脱敏QA](docs/qa/2026-10-20-xiaohongshu-tro-employee.json)补齐本次员工、原聊天、风格决定、产物、最终用户原图头像及AGENTS写保护未完成项；风格完成来自主聊天UI观察，未伪造服务器终态证据。
+
+原Mac旧主目录及其它工作树不重置；Git历史和未提交patch另存被忽略的私有离线包，清单/恢复规则见统一入口。业务库、设备HOME、登录与SSH权限不放进Git。已有受控入口另行授权，新电脑不依赖旧Mac私有helper才能读懂状态。本轮无产品部署、设备升级、旧业务重放或正式数据改写。
+
 ## 2026-10-20 公司台式 Creator 已修复、已远程升级及真实两轮验收
 
 公共Codex启动逻辑此前向缺少原生手机MCP的电脑注入enabled-only表，导致invalid transport。现先用官方mcp list读取同CLI/HOME/Profile/cwd的现有配置，仅禁用实际存在的项；读取失败有受信未启动证明，不隔离整台设备。原Creator的精确无线程解析失败映射在新消息时恢复，保留原失败，不重放旧任务。38项包内及独立审查通过。

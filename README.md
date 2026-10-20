@@ -1,10 +1,12 @@
 # 紫薇
 
-## 换电脑接手（2026-10-15）
+## 换电脑接手（2026-10-20）
 
-先读现有 [HANDOFF.md](HANDOFF.md#2026-10-15-最新接手状态)：里面记录最新发布版本、验收证据、设备升级状态与待处理问题。当前发布分支为 `codex/v2-20261014-release`，主站/API 代码为 `ead2ac9281c47624929f433bc190b44e2659498c`；交接文档提交可能领先生产。
+先读 [AI_HANDOFF.md](AI_HANDOFF.md)，再看[分层版本地图](docs/handoffs/2026-10-20-release-map.md)与 [HANDOFF.md](HANDOFF.md) 顶部最新记录。推荐分支为 `codex/remote-client-upgrade`；本轮更新前已核实它和 `codex/v2-20261014-release` 均为 `faea63d`，交接文档可以领先产品部署。不要默认从旧 `main` 或旧主目录接续。
 
-GitHub 保存已提交源码与项目文档，不自动包含完整 Codex 聊天、Windows Profile/HOME、登录凭据或服务器数据库。下方功能说明按各自日期保留，最新状态以交接入口为准。
+[新AI提示词](NEW_AI_SESSION_PROMPT.md) 已改为使用实际仓库目录；[AGENTS.md](AGENTS.md) 保存可随Git迁移的项目规则。[TRO员工交接](docs/operations/2026-10-20-xiaohongshu-tro-employee.md)记录本次员工、风格、产物和最终原图头像。
+
+GitHub保存源码与脱敏文档；未提交修改另有私有离线交接包，权限、数据库及设备HOME按交接清单另行配置。下方不同日期的功能说明是历史资料，不能替代最新分层状态或用于整树覆盖生产。
 
 Windows 早期客户端若因缺少健康身份/任务字段而无法 update，可使用官方 PowerShell 入口执行只读检查及一次明确确认的迁移。旧版任务状态保持未知，恢复连接可能重新取得未完成任务；流程、身份保护和验收边界见 [早期 Windows 升级记录](docs/operations/2026-10-12-legacy-windows-upgrade.md)。
 
@@ -42,7 +44,7 @@ Creator 的默认管理 MCP 只在当前身份有权访问的工作区内使用�
 
 ## 维护与 AI 接手
 
-开发、启动、架构、真实完成边界、扩展规范、故障排查、发布门槛和接手顺序统一维护在 [PROJECT_MANAGEMENT.md](PROJECT_MANAGEMENT.md)；项目级变更摘要见 [CHANGELOG.md](CHANGELOG.md)。需要把项目交给新 AI 时，直接使用 [NEW_AI_SESSION_PROMPT.md](NEW_AI_SESSION_PROMPT.md) 中的提示词。任何 AI 接手项目时先读维护手册，再读本文件和 `HANDOFF.md`；不要只依据旧截图或历史计划判断当前状态。
+跨电脑接手统一从 [AI_HANDOFF.md](AI_HANDOFF.md) 开始；架构与历史维护流程见 [PROJECT_MANAGEMENT.md](PROJECT_MANAGEMENT.md)，变更摘要见 [CHANGELOG.md](CHANGELOG.md)。使用 [NEW_AI_SESSION_PROMPT.md](NEW_AI_SESSION_PROMPT.md) 开始新会话，先核对代码、分层版本和实际权限，不只依据旧截图或历史计划判断状态。
 
 ## 默认自动管理 MCP（2026-10-09 当前发布）
 
@@ -110,6 +112,8 @@ Creator 的默认管理 MCP 只在当前身份有权访问的工作区内使用�
 
 ## 启动
 
+以下为历史默认开发命令示例，不是新电脑的启动/端口许可；先按 [AI_HANDOFF.md](AI_HANDOFF.md) 与目标电脑端口中心核对本地配置，再仅执行本次实际开发所需命令。只读交接不安装或启动服务。
+
 ```powershell
 npm install
 npm test
@@ -130,6 +134,8 @@ npm run diagnose  # 单次健康检查
 普通平台员工自动接入管理 MCP，不需要执行 `mcp:token` 或编辑私有 token 文件。上述两个命令只保留给明确需要独立外部集成的开发场景。
 
 ## 验收环境边界
+
+本节记录早期Windows的bjc-ops/test_222环境，保留用于识别旧证据；不是当前生产workspace、用户目录或运行实例的推定值。当前身份和各层现场按最新交接核对，不运行旧配对/切换来“恢复”这个历史环境。
 
 - **本地代码验收**：项目 checkout、本地前端 `5178`、本地 API `4178`、单元/API 测试和浏览器回归使用项目 `data/ziwei_user.json` 的 `bjc-ops` 工作区。需要运行项目 daemon 时，只使用项目入口并先核对该配置；它代表本地代码环境。
 - **真实服务器 daemon/A2A 验收**：使用全局 `D:\work\nodejs\node_global\ziwei_user`，读取用户配置 `C:\Users\25941\AppData\Local\Ziwei\ziwei_user\ziwei_user.json`，目标服务器 API 为 `https://qzelynth.top`，工作区为 `test_222`。先核对 `ziwei_user status --json` 和 `http://127.0.0.1:20242/readyz` 的工作区身份。

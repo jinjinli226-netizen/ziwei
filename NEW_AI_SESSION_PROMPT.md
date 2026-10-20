@@ -1,42 +1,23 @@
-# 新 AI 会话接手提示词
+# 新电脑 / 新 AI 会话接手提示词
 
-把新会话的工作目录设为：
+更新时间：2026-10-20（北京时间）。先取得当前 `codex/remote-client-upgrade` 分支；克隆、权限和私有迁移说明见 [AI_HANDOFF.md](AI_HANDOFF.md)。已有目录先检查修改和分支，不覆盖旧工作。
 
-```text
-D:\灵光爸爸拆解
-```
-
-然后直接发送下面的提示词：
+把新会话的工作目录设置为实际取得的仓库目录，不固定盘符、用户名或操作系统，然后发送：
 
 ```text
-你现在接手的是本地项目：D:\灵光爸爸拆解。
+你现在接手当前工作目录中的“紫薇”项目。请先只读理解状态，不凭历史聊天或截图猜测。
 
-这是一个 Vue 3 + Vite 前端、Express + SQLite 后端、以及本机 ziwei_user daemon 组成的智能工作区项目。请先理解项目，再开始修改，禁止凭截图或历史聊天猜测状态。
+1. 阅读当前目录及祖先适用的AGENTS.md，再读AI_HANDOFF.md、docs/handoffs/2026-10-20-release-map.md、HANDOFF.md顶部最新日期及相关运维/QA。PROJECT_MANAGEMENT.md、README.md下方旧日期内容作为历史资料。
+2. 查看git status --short --branch、git worktree list、git log -5 --oneline和git remote -v；可访问GitHub时用git ls-remote核对推荐分支SHA。保留修改，不reset、clean或覆盖式切分支。当前推荐codex/remote-client-upgrade，目录名和默认main不代表最新版本。
+3. 分别识别主站/API、网页、中控私仓、Windows官方包、实际电脑、Android及并行分支基线。文档是观察时点，未实时核对项标未核实；不把单一Git HEAD当生产完整快照。
+4. 列出已具备和缺失的GitHub、网页workspace、服务器SSH、私仓及设备访问权限；只报告可用性，不打印密码、token、Cookie或私钥。通过用户认可的正常方式配置访问，不从旧本机helper搬用凭据。
+5. 接续原电脑未提交工作时，先取得私有交接包并校验manifest/SHA，在独立树按对应base审查patch。未跟踪输出、原始.local、业务库、设备HOME和完整聊天不会因clone自动迁移。仅换开发电脑不自动迁移员工运行电脑、重新配对或重建员工。
+6. 阅读本轮小红书TRO交接，复用原workspace/employee/device/Profile/HOME/聊天及产物。账号风格、最终原图头像及保护文件写入未完成边界均有记录，不重发旧创建或风格任务，不绕过受保护文件审批。
+7. 核对当前电脑的端口规则。本轮首次只读接手不安装、不跑模型/业务、不启停服务、不升级设备、不改配置/数据库、不发布。将来需要监听服务时先在目标电脑端口中心登记，不直接照抄旧机器端口。
 
-请按这个顺序执行：
+先输出：源码分支/提交，已提交与未提交工作，各生产层最后证据与本轮核验范围，权限及私有材料缺口，当前待办和建议的下一步。然后按我的具体任务继续。
 
-1. 阅读 PROJECT_MANAGEMENT.md，它是当前唯一维护入口。
-2. 阅读 README.md 和 HANDOFF.md，了解启动方式、历史变更和明确延期项。
-3. 如果存在 AGENTS.md，读取其中的项目约束。
-4. 执行 git status --short。工作区已有修改不要 reset、clean、checkout 覆盖或删除。
-5. 检查本地代码服务：
-   - 前端 http://127.0.0.1:5178
-   - 后端 http://127.0.0.1:4178/healthz
-   - 项目 `data/ziwei_user.json` 仅代表本地 `bjc-ops`；只有明确进行本地 daemon 验收时才核对项目入口和对应 `/readyz`。
-6. 真实服务器 daemon/A2A 验收必须单独使用全局 `D:\work\nodejs\node_global\ziwei_user`、用户配置 `C:\Users\25941\AppData\Local\Ziwei\ziwei_user\ziwei_user.json`、服务器 `https://qzelynth.top` 和 `test_222` 工作区，再核对 `ziwei_user status --json` 与 `http://127.0.0.1:20242/readyz`；不要用项目 daemon 或本地 `bjc-ops` 结果冒充服务器证据。test-111 只是默认示例，不能假定它是当前工作区。
-7. 修改前先说明：问题属于前端、API、SQLite/repository、A2A、daemon 还是 CLI 层；先复现并记录证据，再做最小修改。
-8. 不要使用伪数据、静态成功状态或扩大超时掩盖执行失败；不要依赖 AuraBaba daemon。
-9. 完成修改后至少运行：npm test、npm run lint、npm run build；涉及 daemon/A2A/CLI 时还要做一次真实本地链路验证。
-10. 最后报告：改了什么、为什么、验证结果、未验证边界、回滚方法，并更新 PROJECT_MANAGEMENT.md 或 CHANGELOG.md。
-
-先执行第 1～6 步，只输出当前项目状态和你建议的下一步，暂时不要改代码。
+后续实际修改时按风险选择测试与构建，保留正式数据及原失败/未知回执。源码验证、GitHub推送、服务部署、设备安装与业务完成分别验收；新的交接进度写入仓库内脱敏文档，秘密留在安全存储。
 ```
 
-## 新会话的正确打开方式
-
-1. 在 Codex/其他 AI 中选择或打开项目目录 `D:\灵光爸爸拆解`。
-2. 粘贴上面的提示词。
-3. 等它完成状态盘点后，再告诉它具体要修改的功能。
-4. 如果换了电脑，先把整个项目目录和 `data` 的必要备份恢复，再让它检查端口和配置。
-
-不要只把本次聊天截图或零散描述发给新会话；维护手册、代码、测试和运行状态才是项目事实来源。
+本提示词不替代生产授权，也不自动触发旧业务。无需复制本次Codex完整聊天即可理解已记录状态；有权现场读取后再确认动态状态。

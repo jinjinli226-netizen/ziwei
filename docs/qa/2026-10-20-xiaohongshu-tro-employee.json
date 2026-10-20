@@ -1,0 +1,249 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-20",
+  "timezone": "Asia/Shanghai",
+  "scope": "Existing Xiaohongshu TRO employee creation, delegated role decisions, and final original-photo avatar; sanitized cross-computer handoff",
+  "selfContained": true,
+  "liveStatusPromise": false,
+  "identity": {
+    "site": "https://qzelynth.top",
+    "workspace": "bigtron",
+    "employeeId": "employee_e6b7a53c-c647-4a38-be18-46bc30381bad",
+    "name": "小红书 TRO 运营",
+    "runtime": "Hermes",
+    "visibility": "workspace",
+    "deviceId": "device_11af6d85-6c5c-4cbe-9a25-31599a474e5d",
+    "deviceName": "公司台式",
+    "mainConversationId": "conv_94eb84bf-d569-453c-bed1-06dca015bc3a",
+    "instanceMode": "owned_profile",
+    "profile": "bot-5626d724d71935aa28c3c125",
+    "home": "C:\\Users\\PC\\AppData\\Local\\hermes\\profiles\\bot-5626d724d71935aa28c3c125",
+    "conversationWorkingDirectory": "D:\\AIUSE\\xiaohongshu-tro",
+    "employeeDefaultWorkingDirectory": null,
+    "employeeDefaultWorkingDirectorySetByConversationPicker": false
+  },
+  "creation": {
+    "provenance": "authenticated_production_UI_and_exact_employee_scoped_server_readback",
+    "provisionActionId": "action_668cedfa-5245-444c-a485-ae8964d6d544",
+    "provisionStatus": "succeeded",
+    "templateProfile": "default",
+    "validationActionId": "action_692dab25-541b-4738-81bd-c83f32616d87",
+    "validationStatus": "succeeded",
+    "validationRootAndTreeExitConfirmed": true,
+    "directoryInspectActionId": "action_30dfede3-ef39-4f17-b2a1-ca25960c0e38",
+    "directoryInspectStatus": "succeeded",
+    "configurationRevision": 2,
+    "controlEpoch": 3
+  },
+  "initialization": {
+    "provenance": "exact_employee_scoped_server_result_and_coordinator_observed_completed_UI_tools",
+    "observedAt": "2026-10-20T03:20:07.178399+00:00",
+    "messageId": "convmsg_f10c62be-7df7-4bc8-a058-cfb9c217699b",
+    "actionId": "action_0aa13660-4a67-4e65-acc1-c8626383e82b",
+    "createdAt": "2026-10-20T03:10:53.130Z",
+    "ackedAt": "2026-10-20T03:10:55.714Z",
+    "completedAt": "2026-10-20T03:15:22.940Z",
+    "status": "succeeded",
+    "actualModel": "gpt-6.1-sol",
+    "nativeSessionId": "20261020_111101_694e10",
+    "configurationRevision": 2,
+    "processExit": {
+      "launched": true,
+      "rootConfirmed": true,
+      "treeConfirmed": true,
+      "rootPid": 10684,
+      "rootExitCode": 0,
+      "hostExitCode": 0,
+      "activeProcesses": 0,
+      "backgroundProcessesRetained": false,
+      "cancelled": false,
+      "platform": "win32",
+      "supervisor": "windows-job"
+    },
+    "managementMcp": {
+      "configured": true,
+      "injected": true,
+      "loaded": true,
+      "status": "loaded",
+      "transport": "stdio",
+      "tool": "ziwei_get_employee",
+      "toolOk": true
+    },
+    "completedToolsObservedInUI": [
+      "mcp__ziwei_management__ziwei_get_employee",
+      "terminal",
+      "write_file",
+      "terminal"
+    ],
+    "botIsolation": {
+      "enabled": true,
+      "kind": "hermes-bot",
+      "mode": "owned_profile",
+      "profile": "bot-5626d724d71935aa28c3c125",
+      "home": "C:\\Users\\PC\\AppData\\Local\\hermes\\profiles\\bot-5626d724d71935aa28c3c125",
+      "authMode": "source-native-store"
+    },
+    "artifact": {
+      "path": "D:\\AIUSE\\xiaohongshu-tro\\TRO-小红书运营启动清单.md",
+      "bytes": 4704,
+      "sha256": "2239e72c5248dbbea85b6fe0adf9e2d7630dd835fedb3980bce372194ec3dbf9",
+      "utf8ReadbackReported": true,
+      "evidence": "Completed write/read tools observed in UI; file readback details retained in the actual execution reply stored by the server",
+      "freshDeviceReadForThisHandoff": false
+    },
+    "finalMarker": "TRO_XHS_READY"
+  },
+  "styleDelegation": {
+    "authorization": "User delegated account style and skill decisions to the existing employee",
+    "marker": "TRO_STYLE_DELEGATION_20261020_01",
+    "messageId": "convmsg_4315a2af-6110-41fd-bf37-8034c51b1a3a",
+    "messageCreatedAt": "2026-10-20T03:41:42.459Z",
+    "actionId": "action_fd901c1a-1711-4ed5-9804-c1f818e84548",
+    "ackedAt": "2026-10-20T03:41:46.041Z",
+    "ackSnapshot": {
+      "provenance": "exact_employee_and_conversation_scoped_server_readback",
+      "observedAt": "2026-10-20T03:42:22.073337+00:00",
+      "status": "acked",
+      "employeeConversationDeviceProfileAndCwdMatched": true,
+      "matchingActionCount": 1
+    },
+    "completionObservation": {
+      "provenance": "coordinator_observed_main_chat_UI",
+      "displayedCompletion": "2026-10-20 11:54 Asia/Shanghai",
+      "displayedState": "completed",
+      "displayedPhaseCount": 265,
+      "serverTerminalReceiptSeparatelyCaptured": false,
+      "serverTerminalStatus": null,
+      "processExitSeparatelyCaptured": false,
+      "actualModelSeparatelyCaptured": false,
+      "oldAckAndCompletedFalseIntentPreserved": true
+    },
+    "employeeDecision": {
+      "positioning": "冷静的跨境案件工作台",
+      "columns": [
+        "TRO案件核对",
+        "收到通知以后",
+        "一案一拆"
+      ],
+      "palette": [
+        "暖白",
+        "深青",
+        "石墨",
+        "琥珀"
+      ],
+      "candidateSkillSourcesRead": 6,
+      "externalSkillsInstalled": 0,
+      "existingSkillObservedLoaded": "hermes-agent",
+      "research": {
+        "saibeiOfficialSiteSamples": 3,
+        "homepageAndAuthorAssociationsObserved": true,
+        "wechatOriginalArticlesObtained": false
+      }
+    },
+    "artifactsReportedInObservedMainChat": [
+      "D:\\AIUSE\\xiaohongshu-tro\\账号风格规范.md",
+      "D:\\AIUSE\\xiaohongshu-tro\\技能决策清单.md",
+      "D:\\AIUSE\\xiaohongshu-tro\\研究来源与核验记录.md",
+      "D:\\AIUSE\\xiaohongshu-tro\\TRO-示范稿-咨询材料整理.md",
+      "D:\\AIUSE\\xiaohongshu-tro\\执行进度与阻碍.md",
+      "D:\\AIUSE\\xiaohongshu-tro\\验收记录.json"
+    ],
+    "artifactBytesHashesAndContentsSeparatelyCaptured": false,
+    "agentsPersistence": {
+      "file": "AGENTS.md",
+      "persistentWriteBlockedByProtectionApproval": true,
+      "bypassAttempted": false,
+      "adoptedInCurrentChat": true,
+      "crossSessionAutomaticLoadingVerified": false,
+      "repairedInThisHandoff": false
+    }
+  },
+  "finalAvatar": {
+    "provenance": "authenticated_production_edit_partner_UI_then_exact_employee_scoped_readonly_server_comparison",
+    "selection": "user_uploaded_original_photo",
+    "generatedCandidateIsFinal": false,
+    "imageAssetIncluded": false,
+    "stored": true,
+    "mime": "image/jpeg",
+    "decodedBytes": 158346,
+    "sha256": "16aafe5e7a0a164a0a00e368a0a5704feae0f78166a92e61eb3459ad6077f473",
+    "baselineObservedAt": "2026-10-20T06:14:02.655254+00:00",
+    "employeeUpdatedAt": "2026-10-20T06:14:56.248Z",
+    "verifiedAt": "2026-10-20T06:16:49.919702+00:00",
+    "state": "verified_saved",
+    "avatarBytesMimeAndSha256Matched": true,
+    "saveSubmittedOnce": true,
+    "firstReadbackAttempt": {
+      "state": "unavailable",
+      "errorCode": "SSH_BANNER_UNAVAILABLE",
+      "productionQueryExecuted": false
+    },
+    "subsequentReadbackAttempt": {
+      "separatelyAuthorized": true,
+      "attemptCount": 1,
+      "state": "verified_saved"
+    },
+    "nonAvatarComparison": {
+      "hashMethod": "SHA-256 of UTF-8 canonical JSON; ensure_ascii=false, sorted keys, comma/colon separators; excludes avatar, created_at, updated_at",
+      "columnCount": 17,
+      "columns": [
+        "id",
+        "workspace_id",
+        "name",
+        "runtime",
+        "model_id",
+        "description",
+        "visibility",
+        "skills_json",
+        "instructions",
+        "status",
+        "runtime_profile",
+        "owner_user_id",
+        "persona",
+        "target_device_id",
+        "management_mcp_enabled",
+        "default_working_directory",
+        "default_working_directory_device_id"
+      ],
+      "nonAvatarConfigSha256": "f7301d04d900a59b1cb8eccc4822911881ca2f170a960f2d543d48329d14e077",
+      "allColumnsAndPerFieldHashesMatched": true,
+      "changedNonAvatarFields": [],
+      "botConfigSha256": "cd67d285f0ffc6d5173998535305af5a5abc8a41c0617580984d4d1cee68ba4d",
+      "botProfileBindingSha256": "f3cfacf2cbcca99a3268c45a519e2a9cc50c12f02eb82e0b4ba4968638470fc6",
+      "allBotBaselineFieldsMatched": true,
+      "changedBotFields": []
+    },
+    "lastObservedBotState": {
+      "configurationRevision": 2,
+      "controlEpoch": 3,
+      "validatedRevision": 2,
+      "controlState": "active",
+      "activeActionId": null,
+      "mainConversationId": "conv_94eb84bf-d569-453c-bed1-06dca015bc3a"
+    }
+  },
+  "handoffBoundaries": [
+    "This is a dated snapshot, not current health or permission state; reread the authorized live workspace before new work.",
+    "Reuse the existing employee and main conversation; do not recreate the employee or replay these actions.",
+    "Conversation cwd is on D drive; owned native HOME remains the explicit C drive profile path. No silent cwd fallback or identity borrowing.",
+    "Configured, injected, loaded, ACK, UI completion, server terminal state and native process exit remain separate evidence levels.",
+    "Style completion and its artifact names are coordinator-observed main-chat UI evidence, not a newly captured server or native tool receipt.",
+    "AGENTS.md persistent write was blocked without bypass; cross-session automatic loading remains unverified.",
+    "No credentials, full chat bodies, user photos or generated image assets are included.",
+    "No product code change, service deployment, new Mac listener or new employee action was performed for this handoff."
+  ],
+  "optionalOriginalMacTrace": {
+    "requiredToUnderstandThisHandoff": false,
+    "trackedInGit": false,
+    "baseDirectory": "/Users/zhangjie/.codex/worktrees/bot-historical-recovery/紫薇/.local",
+    "files": [
+      "xhs-tro-employee-20261020/receipt.json",
+      "creator-tro-readonly/evidence.json",
+      "xhs-tro-employee-20261020/style-delegation-intent.json",
+      "xhs-tro-employee-20261020/style-delegation-server.json",
+      "xhs-tro-employee-20261020/avatar-original-baseline.json",
+      "xhs-tro-employee-20261020/avatar-original-server-receipt.json"
+    ],
+    "styleCompletionRawServerReceiptExists": false
+  }
+}

@@ -1,5 +1,13 @@
 # 紫薇项目管理与 AI 接手手册
 
+## 当前跨电脑接手入口（2026-10-20）
+
+先读 [AI_HANDOFF.md](AI_HANDOFF.md) 及 [AGENTS.md](AGENTS.md)。当前推荐源码分支为 `codex/remote-client-upgrade`；各生产层和并行分支见[版本地图](docs/handoffs/2026-10-20-release-map.md)，最新验收与失败边界见 [HANDOFF.md](HANDOFF.md) 顶部。
+
+[新AI提示词](NEW_AI_SESSION_PROMPT.md) 不再固定旧Windows目录/测试workspace；本轮[TRO员工及风格、产物、头像摘要](docs/operations/2026-10-20-xiaohongshu-tro-employee.md)已可随Git获取。未提交代码、原始.local、凭据、数据库和设备HOME按统一入口的私有迁移清单接续。
+
+本次只更新交接文档，不改产品代码、不部署、不升级设备。其余历史章节（包括未带日期的启动示例、验收和路线图）用于追溯；旧路径、版本/PID及“当前”结论不能盖过统一入口或授权后的现场核对。发生冲突以本节、AI_HANDOFF.md及AGENTS.md为准。
+
 ## 2026-10-18 Windows升级及默认不限/真实并行已验收
 
 李金晋电脑已运行161cc990客户端。闲鱼大神默认不限轮数、24小时预算经原生配置检查确认；闲鱼与知微在同机真实模型+终端任务均成功，原始工具区间重叠45.394秒，两棵执行树均退出0。无需重建或逐个开启；本轮未改业务配置或重放旧任务。详见[验收记录](docs/qa/2026-10-18-bot-unlimited-parallel-live.json)和[HANDOFF最新节](HANDOFF.md)。
@@ -785,7 +793,7 @@ npm run build
 
 变更数据库结构时优先采用向后兼容的 `CREATE TABLE IF NOT EXISTS`、`ALTER TABLE ... ADD COLUMN` 或明确版本迁移；不得要求用户删除 SQLite 才能启动。破坏性数据变更必须提供备份和回滚步骤。
 
-发布前备份示例：
+以下是旧本地开发环境的文件路径示例；生产SQLite（含WAL）须依当前专项流程取得一致性备份，不能对运行中的生产库机械执行此Copy-Item示例：
 
 ```powershell
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
@@ -794,10 +802,10 @@ Copy-Item data/ziwei.sqlite "data/ziwei.sqlite.$stamp.bak"
 
 回滚原则：
 
-- 先停止新代码对应的服务，再恢复代码和数据库备份。
-- 不删除用户日志、动作历史和附件对象。
-- 对失败的 A2A action 使用重试/新 dedupe key，不直接改写旧终态。
-- 回滚后重新执行健康检查和最小真实任务。
+- 先核对实际分层源码和当前数据保护范围，按对应专项方案回退代码。正常代码回退保留当前业务数据库，不默认恢复旧库或停止其它服务。
+- 数据恢复必须另有明确范围、一致性备份和授权；保留用户后续新增/删除、日志、动作历史与附件，不能以整库旧快照覆盖当前状态。
+- 保留原失败/不确定动作与去重键，先回读原结果。仅在当前业务授权和产品重试合同允许时执行精确重试，不为验收随意换dedupe key重放旧任务。
+- 回退后先做只读健康/身份/字节核验；需要真实模型或业务验收时另按本次已授权范围执行，不自动重放历史任务。
 
 ### 2026-10-06 前端控件样式统一发布
 
@@ -810,17 +818,9 @@ Copy-Item data/ziwei.sqlite "data/ziwei.sqlite.$stamp.bak"
 
 ## 10. 给其他 AI 的接手顺序
 
-`HANDOFF-CLAUDE-进度记录.md` 是一次历史接手记录，保留用于追溯，不是当前事实来源。任何新 AI 接手本项目时，按下面顺序执行：
+统一执行 [AI_HANDOFF.md](AI_HANDOFF.md) 第6节和 [NEW_AI_SESSION_PROMPT.md](NEW_AI_SESSION_PROMPT.md)。首次接手只读盘点源码、分层证据、权限、私有材料和待办，不默认安装/全跑测试/启动固定端口或发真实任务。后续开发按实际改动和风险选择测试及现场验证。
 
-1. 阅读本文，再读 `README.md`、`HANDOFF.md` 和最近的 `docs/plans/*.md`。
-2. 执行 `git status --short`，把已有工作区修改视为用户资产，不要覆盖或清理。
-3. 检查 5178/4178/20242 和三份日志；不要为了“确认启动”重复启动服务。
-4. 运行 `npm test`、`npm run lint`、`npm run build`，建立当前基线。
-5. 根据问题所在层定位：页面 → API → repository/SQLite → A2A → daemon → CLI。
-6. 先复现并记录证据，再改一个根因；不要用假数据、静态成功状态或扩大超时掩盖问题。
-7. 完成功能后跑对应专项测试和一次真实本地链路验证。
-8. 更新本文的“当前状态”“已知限制”和“最近验证”；同时在 `HANDOFF.md` 追加简短时间线。
-9. 最终报告必须说明：改了什么、为什么、验证了什么、未验证什么、如何回滚。
+`HANDOFF-CLAUDE-进度记录.md` 及本节早期流程仅供历史追溯。问题定位仍按页面→API→repository/SQLite→A2A→daemon→CLI分层，先复现并记录证据；完成后报告改动、验证、未验证边界及恢复依据，并更新可随Git迁移的脱敏交接。
 
 接手时禁止做的事：
 
