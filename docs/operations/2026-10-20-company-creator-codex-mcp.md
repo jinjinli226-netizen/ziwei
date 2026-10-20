@@ -19,3 +19,13 @@
 - 一次额外旧 `runtime-adapters.test.mjs` 全文件检查包含 Mac 上失败的既有 Windows 路径断言；已保留记录，未将其记作全量通过，也未添加 Mac 产品适配。
 
 发布必须先推送 GitHub，再发布官方下载包；随后仅对公司台式使用统一远程升级，收到目标 build 的新认证心跳后，在原 Creator 聊天用真实 provider 验收。发布及真机结果追加于本文件，不能以合成测试代替。
+
+## 发布与公司台式真机验收完成
+
+源码 `df311dfd07858f298c2f0ab1f727e71670275e73` 已先推 GitHub 双分支，随后于02:41:50 UTC发布官方客户端。Build `7c249fffd02e0a529e333bbbc56864a8b694809861cb6cfce0ee3c6c265a1e26`，包 SHA `beb75315e5e52c9f6e8e821e17c8a683b137e3010e29033c42205d60642fb10c`，1188216字节。942成员仅改3源及descriptor，其余938字节与权限保持；包内38/38及服务器冷测通过。另以HTTPS独立下载核对包摘要和三个Git源。API、主站、数据库、APK、维护helper及scanner保持，没有重启服务。
+
+统一远程升级 `client-update_f133c641-ebef-471c-857d-0bd56ade70e3` 于02:43:59.015 UTC收到公司台式新build认证心跳，succeeded、heartbeatVerified:true、completionSource:heartbeat；设备在线，确实完成安装。仅更新公司台式，未更新其他电脑。
+
+原员工 `employee_20031698-3abd-42a0-9b96-48a7c97bb88e`、原聊天 `conv_ffe2d620-ea56-41d0-b5fb-1fdd578b91a4` 实测两轮真实gpt-6.1-sol。第一轮 `action_5636e27d-e560-4104-8fd9-fbcae643228e` 官方exec回复启动验收通过；第二轮 `action_ad2cc7e1-b5e1-45bd-8ae8-b7379af25026` 官方exec.resume使用同一线程 `01a15732-bcb3-7002-8405-416c53099c73`，正确回忆仅在上一条出现的口令，实际ziwei_get_employee成功读取自己原记录。两轮管理MCP均已加载，code/root0、tree确认、active0、无后台残留。旧两条failed记录保留，没有重跑旧消息，没有以新建替代员工掩盖原聊天故障；验收没有创建或修改业务员工。
+
+完整机器可读结果见[QA记录](../qa/2026-10-20-company-creator-codex-mcp.json)。

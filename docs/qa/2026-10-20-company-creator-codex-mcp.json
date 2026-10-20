@@ -1,0 +1,193 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-20",
+  "status": "published_and_real_windows_accepted",
+  "sourceCommit": "df311dfd07858f298c2f0ab1f727e71670275e73",
+  "sourcePushedBeforePublication": true,
+  "workspace": "bigtron",
+  "employeeId": "employee_20031698-3abd-42a0-9b96-48a7c97bb88e",
+  "employeeName": "数字员工·Creator",
+  "conversationId": "conv_ffe2d620-ea56-41d0-b5fb-1fdd578b91a4",
+  "deviceId": "device_11af6d85-6c5c-4cbe-9a25-31599a474e5d",
+  "deviceName": "公司台式",
+  "cwd": "C:\\Users\\PC",
+  "originalFailures": {
+    "actionIds": [
+      "action_abf6da5c-58be-49c5-a7aa-8beef9d8e2d9",
+      "action_c514566f-fdb7-48a7-8fd7-4f4a6351a758"
+    ],
+    "cause": "Injected enabled=false into absent mcp_servers.ziwei-terminal, leaving no valid transport.",
+    "recordsPreserved": true,
+    "businessTasksReplayed": false
+  },
+  "tests": {
+    "packaged": {
+      "total": 38,
+      "passed": 38,
+      "skipped": 0,
+      "testSha256": {
+        "test/codex-mcp-configuration.test.mjs": "679cf7b3eb9e1e65a29144cc3b9ae33043b3e46643c6bcc27af39ae2c4a994d5",
+        "test/codex-conversation-session.test.mjs": "4fcf297fac831f6d9a7ef76264e09a9669bdc79a85569b9372e6cb130c159b24"
+      },
+      "noListeners": true,
+      "noNetwork": true,
+      "syntheticCliSubprocessesAllowed": true,
+      "guardGroups": {
+        "strict": {
+          "files": [
+            "test/codex-mcp-configuration.test.mjs"
+          ],
+          "tests": 5,
+          "pass": 5,
+          "fail": 0,
+          "skipped": 0,
+          "noListeners": true,
+          "noNetwork": true,
+          "noNetworkOrHelpers": true
+        },
+        "network": {
+          "files": [
+            "test/codex-conversation-session.test.mjs"
+          ],
+          "tests": 33,
+          "pass": 33,
+          "fail": 0,
+          "skipped": 0,
+          "noListeners": true,
+          "noNetwork": true,
+          "syntheticCliSubprocessesAllowed": true
+        }
+      }
+    },
+    "independentTargetedPassed": 56,
+    "managementConfigPassedSeparately": 4,
+    "countsOverlap": true,
+    "officialCliParseMatrix": {
+      "realOfficialCli": true,
+      "version": "codex-cli 0.162.0-alpha.17.2",
+      "passed": true,
+      "cases": [
+        {
+          "case": "absent",
+          "passed": true,
+          "phonePresent": false,
+          "nativeConfigUnchanged": true,
+          "modelCalls": 0,
+          "listeners": 0
+        },
+        {
+          "case": "stdio",
+          "passed": true,
+          "phonePresent": true,
+          "nativeConfigUnchanged": true,
+          "modelCalls": 0,
+          "listeners": 0
+        },
+        {
+          "case": "http",
+          "passed": true,
+          "phonePresent": true,
+          "nativeConfigUnchanged": true,
+          "modelCalls": 0,
+          "listeners": 0
+        },
+        {
+          "case": "unrelated",
+          "passed": true,
+          "phonePresent": false,
+          "nativeConfigUnchanged": true,
+          "modelCalls": 0,
+          "listeners": 0
+        }
+      ]
+    },
+    "extraBaselineFailure": "Existing Windows path assertion in runtime-adapters.test.mjs fails on Mac; retained and not counted as passing. No Mac product adaptation."
+  },
+  "publication": {
+    "completedAt": "2026-10-20T02:41:50.549916+00:00",
+    "clientBuild": "7c249fffd02e0a529e333bbbc56864a8b694809861cb6cfce0ee3c6c265a1e26",
+    "sourceBuild": "073a1c064d085947d578a1b5687717b40f414f1c510ef6b897b517dbdd55a85c",
+    "archiveSha256": "beb75315e5e52c9f6e8e821e17c8a683b137e3010e29033c42205d60642fb10c",
+    "archiveBytes": 1188216,
+    "members": 942,
+    "changedSources": [
+      "src/runtime-adapters.mjs",
+      "src/runtime-launch-evidence.mjs",
+      "src/codex-conversation-session.mjs"
+    ],
+    "otherMembersPreserved": 938,
+    "officialHttpsVerified": true,
+    "apiCommit": "d185cb9e6a8f5ec49b06c953706d6d136b9b502b",
+    "mainSiteCommit": "241f0cc59bbd2cb7800ac3072470b1a85a77dfd1",
+    "servicesRestarted": false,
+    "databasePreserved": true,
+    "apkChanged": false,
+    "resultSha256": "6bb798abc5a3bb972b80d83130903fb242a552a9848211c437b11a150329fcf5"
+  },
+  "unifiedRemoteUpdate": {
+    "id": "client-update_f133c641-ebef-471c-857d-0bd56ade70e3",
+    "state": "succeeded",
+    "currentBuild": "15687444502be073f3dc432d8c6817ec27b2f6635019da28f97dde1b3635d0f7",
+    "targetBuild": "7c249fffd02e0a529e333bbbc56864a8b694809861cb6cfce0ee3c6c265a1e26",
+    "sha256": "beb75315e5e52c9f6e8e821e17c8a683b137e3010e29033c42205d60642fb10c",
+    "heartbeatVerified": true,
+    "completionSource": "heartbeat",
+    "verifiedAt": "2026-10-20T02:43:59.015Z"
+  },
+  "realProviderAcceptance": {
+    "passed": true,
+    "originalEmployee": true,
+    "originalConversation": true,
+    "first": {
+      "actionId": "action_5636e27d-e560-4104-8fd9-fbcae643228e",
+      "status": "succeeded",
+      "error": null,
+      "code": 0,
+      "output": "Creator启动验收通过",
+      "model": "gpt-6.1-sol",
+      "threadId": "01a15732-bcb3-7002-8405-416c53099c73",
+      "method": "codex.exec",
+      "durable": true,
+      "rootExit": 0,
+      "rootConfirmed": true,
+      "treeConfirmed": true,
+      "activeProcesses": 0,
+      "managementLoaded": true,
+      "managementToolCalls": []
+    },
+    "second": {
+      "actionId": "action_ad2cc7e1-b5e1-45bd-8ae8-b7379af25026",
+      "status": "succeeded",
+      "error": null,
+      "code": 0,
+      "output": "我将只读查询指定员工一次，并返回验收口令和实际配置。\n\n- 验收口令：ZW-CREATOR-741926\n- 员工名称：数字员工·Creator\n- 运行时：Codex\n- 绑定电脑：device_11af6d85-6c5c-4cbe-9a25-31599a474e5d",
+      "model": "gpt-6.1-sol",
+      "threadId": "01a15732-bcb3-7002-8405-416c53099c73",
+      "method": "codex.exec.resume",
+      "durable": true,
+      "rootExit": 0,
+      "rootConfirmed": true,
+      "treeConfirmed": true,
+      "activeProcesses": 0,
+      "managementLoaded": true,
+      "managementToolCalls": [
+        {
+          "toolName": "ziwei_get_employee",
+          "ok": true,
+          "resourceId": "employee_20031698-3abd-42a0-9b96-48a7c97bb88e",
+          "ids": {
+            "resourceId": "employee_20031698-3abd-42a0-9b96-48a7c97bb88e"
+          }
+        }
+      ]
+    },
+    "sameNativeThread": true,
+    "realProvider": true,
+    "oldMessagesReplayed": false
+  },
+  "scopeLimitations": [
+    "Only Company Desktop was remotely updated for this release.",
+    "Management validation reads the original Creator record; no business employee was created or changed.",
+    "Authorized scoped MCP name collisions with existing HTTP native entries are outside this fix."
+  ]
+}
