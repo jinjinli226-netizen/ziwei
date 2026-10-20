@@ -71,6 +71,62 @@ function saveHistory(f,record,exit=rootExit,modify=()=>{}){
  const end={key,identity:{...identity},result:{actionId:record.actionId,status:'failed',completedAt:Date.now()+5,result:{processExit:exit}}};const state={version:2,started:[start],completed:[end]};modify(state);fs.writeFileSync(path.join(f.runtimeDir,'action-state.json'),JSON.stringify(state),{mode:0o600});
 }
 
+function legacyTransportRejection(f,modify=()=>{}){
+ const action=f.action(),s=f.start(action);s.markSpawned();assert.throws(()=>s.complete({processExit:{...rootExit,rootExitCode:1},code:1}),{code:'CODEX_CONVERSATION_THREAD_UNCONFIRMED'});s.close();
+ const record=JSON.parse(fs.readFileSync(f.record(),'utf8'));
+ saveHistory(f,record,{...rootExit,rootExitCode:1,hostExitCode:0,backgroundProcessesRetained:false},state=>{
+  const result=state.completed[0].result;result.code='CODEX_CONVERSATION_THREAD_UNCONFIRMED';result.error='Codex 原生会话或退出回执无法核对，未关联其他会话、未重跑旧任务';
+  Object.assign(result.result,{runtime:'Codex',code:1,signal:null,truncated:false,output:'Error loading config.toml: invalid transport\nin `mcp_servers.ziwei-terminal`\n',diagnostics:null,
+   codexConversation:{status:'unconfirmed',durable:false,reasonCode:'CODEX_CONVERSATION_THREAD_UNCONFIRMED'},
+   managementMcp:{configured:true,injected:true,loaded:false,status:'not_loaded',runtime:'Codex',transport:'stdio',workspace:'bigtron',runtimeProfile:'default',toolCalls:[],tool_calls:[]}});
+  modify(state);
+ });return{action,record};
+}
+function currentMessage(f,prompt='ONLY THE NEW AUTHENTICATED MESSAGE'){
+ const messageId='convmsg_'+randomUUID();return f.action({messageId,codexConversationInput:{schemaVersion:1,messageId,currentPrompt:prompt}});
+}
+
+test('exact legacy pre-model transport rejection permits only a new canonical message and preserves failed history',t=>{
+ const f=fixture(t),legacy=legacyTransportRejection(f),historyFile=path.join(f.runtimeDir,'action-state.json'),history=fs.readFileSync(historyFile),oldMap=fs.readFileSync(f.record());
+ const next=f.start(currentMessage(f),{invocation:{args:['exec','--json','--ephemeral','-'],stdin:'OLD FAILED PROMPT MUST NEVER BE REPLAYED'}});
+ assert.equal(next.invocation.args.includes('resume'),false);assert.equal(next.invocation.stdin,'ONLY THE NEW AUTHENTICATED MESSAGE');
+ assert.notEqual(JSON.parse(fs.readFileSync(f.record(),'utf8')).actionId,legacy.action.id);assert.deepEqual(fs.readFileSync(historyFile),history);
+ next.close();assert.deepEqual(fs.readFileSync(f.record()),oldMap,'a failure before the new model starts restores the original empty mapping');
+ const retry=f.start(currentMessage(f,'FRESH MODEL REQUEST'));const id=f.event(retry);const receipt=finish(retry);assert.equal(receipt.method,'codex.exec');assert.equal(receipt.durable,true);assert.deepEqual(fs.readFileSync(historyFile),history);
+ const resume=f.start(currentMessage(f,'NEXT MESSAGE'));assert.equal(resume.invocation.args.at(-2),id);assert.equal(resume.invocation.stdin,'NEXT MESSAGE');resume.close();
+});
+
+test('legacy no-thread recovery refuses other errors, incomplete tree evidence, tool effects and ambiguous output',t=>{
+ const mutations={
+  'another diagnostic':s=>{s.completed[0].result.result.output='Connection error\n';},
+  'quoted parser text':s=>{s.completed[0].result.result.output='assistant: '+s.completed[0].result.result.output;},
+  'truncated output':s=>{s.completed[0].result.result.truncated=true;},
+  'extra diagnostics':s=>{s.completed[0].result.result.diagnostics='additional model activity';},
+  'other MCP name':s=>{s.completed[0].result.result.output='Error loading config.toml: invalid transport\nin `mcp_servers.unrelated`\n';},
+  'missing outer failure':s=>{delete s.completed[0].result.code;},
+  'successful outer status':s=>{s.completed[0].result.status='succeeded';},
+  'different runtime':s=>{s.completed[0].result.result.runtime='Hermes';},
+  'different exit code':s=>{s.completed[0].result.result.processExit.rootExitCode=125;},
+  'unconfirmed tree':s=>{s.completed[0].result.result.processExit.treeConfirmed=false;},
+  'remaining child':s=>{s.completed[0].result.result.processExit.activeProcesses=1;},
+  'cancelled':s=>{s.completed[0].result.result.processExit.cancelled=true;},
+  'background retained':s=>{s.completed[0].result.result.processExit.backgroundProcessesRetained=true;},
+  'uncertain model effects':s=>{s.completed[0].result.result.executionState='uncertain';},
+  'phone evidence':s=>{s.completed[0].result.result.terminalMcp={loaded:false};},
+  'management loaded':s=>{s.completed[0].result.result.managementMcp.loaded=true;},
+  'management tool':s=>{s.completed[0].result.result.managementMcp.toolCalls=[{toolName:'ziwei_create_employee',ok:true}];},
+  'native session':s=>{s.completed[0].result.result.nativeSessionId=randomUUID();},
+  'foreign completed identity':s=>{s.completed[0].identity.deviceId='device_foreign';},
+ };
+ for(const[name,change]of Object.entries(mutations)){const f=fixture(t);legacyTransportRejection(f,change);const before=fs.readFileSync(f.record());assert.throws(()=>f.start(currentMessage(f)),error=>['CODEX_CONVERSATION_PREVIOUS_UNCONFIRMED','CODEX_CONVERSATION_THREAD_UNCONFIRMED'].includes(error.code),name);assert.deepEqual(fs.readFileSync(f.record()),before,name);}
+});
+
+test('legacy pre-model rejection cannot replay its own action or unstructured historical prompt',t=>{
+ for(const kind of['same action','no canonical input','pending mapping']){const f=fixture(t),legacy=legacyTransportRejection(f);let action=currentMessage(f);if(kind==='same action')action.id=legacy.action.id;if(kind==='no canonical input')action=f.action();if(kind==='pending mapping'){const value=JSON.parse(fs.readFileSync(f.record(),'utf8'));value.state='pending';fs.writeFileSync(f.record(),JSON.stringify(value),{mode:0o600});}
+  const before=fs.readFileSync(f.record());assert.throws(()=>f.start(action),{code:'CODEX_CONVERSATION_THREAD_UNCONFIRMED'},kind);assert.deepEqual(fs.readFileSync(f.record()),before,kind);
+ }
+});
+
 test('restart pending recovers from exact existing dispatcher action root evidence without replaying prompt',t=>{
  const f=fixture(t),s=f.start(),id=f.event(s);s.markSpawned();s.close();const r=JSON.parse(fs.readFileSync(f.record(),'utf8'));saveHistory(f,r,{...rootExit,rootExitCode:125});const next=f.start();assert.equal(next.invocation.args.at(-2),id);next.close();
 });
@@ -118,8 +174,10 @@ test('unsupported invocation fails before pending mapping and symlinked private 
 function fakeCli(f,t){
  const bin=path.join(f.root,'bin');fs.mkdirSync(bin);const script=`const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
 if(process.argv[2]==='--version'){console.log('codex-cli 0.162.0-alpha.17.2');process.exit(0);}
+if(process.argv.includes('mcp')&&process.argv.includes('list')){if(process.env.FAKE_MCP_FAILURE){console.error('private-native-config');process.exit(1);}console.log(process.env.FAKE_MCP_CONFIG||'[]');process.exit(0);}
 let input='';process.stdin.on('data',x=>input+=x);process.stdin.on('end',()=>{const args=process.argv.slice(2),resumed=args.includes('resume'),id=resumed?args.at(-2):crypto.randomUUID(),now=new Date(),home=process.env.CODEX_HOME;
 fs.appendFileSync(path.join(home,'calls.jsonl'),JSON.stringify({args,input,id})+'\\n');
+if(process.env.FAKE_PARSE_REJECTION==='1'){console.error('Error loading config.toml: invalid transport\\nin '+String.fromCharCode(96)+'mcp_servers.ziwei-terminal'+String.fromCharCode(96));process.exitCode=1;return;}
 if(process.env.FAKE_PHONE_UNCERTAIN==='1'&&process.env.ZIWEI_TERMINAL_AUDIT_FILE)fs.writeFileSync(process.env.ZIWEI_TERMINAL_AUDIT_FILE,[{method:'initialize',ok:true},{method:'tools/call',toolName:'ziwei_phone_action',ok:false,error:'isolated response lost'}].map(JSON.stringify).join('\\n')+'\\n');
 if(!resumed){const directory=path.join(home,'sessions',String(now.getUTCFullYear()),String(now.getUTCMonth()+1).padStart(2,'0'),String(now.getUTCDate()).padStart(2,'0'));fs.mkdirSync(directory,{recursive:true});fs.writeFileSync(path.join(directory,'rollout-fixture-'+id+'.jsonl'),JSON.stringify({type:'session_meta',payload:{id,cwd:process.cwd(),timestamp:now.toISOString()}})+'\\n');}
 const event=JSON.stringify({type:'thread.started',thread_id:id});if(process.env.FAKE_STDERR_ID)console.error(event);else console.log(event);
@@ -139,6 +197,49 @@ test('real local runtime adapter persists then resumes fake native session and e
  const second=await run(f.action({prompt:'second unique prompt'}),{FAKE_FAIL:'1'});assert.equal(second.status,'failed');assert.equal(second.code,'runtime_failed');assert.equal(second.result.codexConversation.durable,true);assert.equal(second.result.nativeSessionId,first.result.nativeSessionId);assert.equal(second.result.codexConversation.method,'codex.exec.resume');
  const calls=fake.calls();assert.equal(calls.length,2);assert.equal(calls[0].args.includes('--ephemeral'),false);assert.equal(calls[1].args.includes('resume'),true);assert.equal(calls[1].input,'second unique prompt');assert.equal(calls[1].args.at(-2),calls[0].id);
  const other=await run(f.action({employeeId:'employee_stderr'}),{FAKE_STDERR_ID:'1'});assert.equal(other.status,'failed');assert.equal(other.code,'CODEX_CONVERSATION_THREAD_UNCONFIRMED');
+});
+
+test('trusted Codex disable policy touches only existing native transports and keeps literal server keys',async t=>{
+ const f=fixture(t),fake=fakeCli(f,t),servers=[{name:'key.with.dot',transport:{type:'stdio',command:'never-run-fixture'}},{name:'ziwei-terminal',transport:{type:'streamable_http',url:'https://example.test/mcp'}}];
+ const result=await executeRuntime({runtime:'Codex',prompt:'isolated native policy fixture',cwd:f.cwd,env:{CODEX_HOME:f.home,FAKE_MCP_CONFIG:JSON.stringify(servers)},codexMcpDisabledServers:['key.with.dot','missing-server'],codexConversation:f.host(f.action())});
+ assert.equal(result.status,'succeeded');const args=fake.calls()[0].args;
+ assert.ok(args.includes('mcp_servers={"key.with.dot"={enabled=false}}'));assert.ok(args.includes('mcp_servers.ziwei-terminal.enabled=false'));
+ assert.equal(args.some(value=>value.includes('missing-server')),false);
+ const absent=await executeRuntime({runtime:'Codex',prompt:'isolated no-server policy fixture',cwd:f.cwd,env:{CODEX_HOME:f.home},codexMcpDisabledServers:['missing-server']});
+ assert.equal(absent.status,'succeeded');const noServers=fake.calls()[1].args;
+ assert.equal(noServers.some(value=>value.startsWith('mcp_servers=')),false);assert.equal(noServers.includes('mcp_servers.ziwei-terminal.enabled=false'),false);
+});
+
+test('failed native inventory does not launch a model or reserve a persistent conversation',async t=>{
+ const f=fixture(t),fake=fakeCli(f,t),a=f.action();let error;
+ try{await executeRuntime({runtime:'Codex',prompt:'never start a model',cwd:f.cwd,env:{CODEX_HOME:f.home,FAKE_MCP_FAILURE:'1'},codexConversation:f.host(a)});}catch(caught){error=caught;}
+ assert.equal(error?.code,'CODEX_MCP_CONFIG_DISCOVERY_FAILED');assert.equal(consumeRuntimePrelaunchEvidence(error)?.processExit.launched,false);
+ assert.equal(fs.existsSync(path.join(f.home,'calls.jsonl')),false);assert.equal(fs.existsSync(path.join(f.runtimeDir,'codex-conversation-sessions')),false);
+ const valid=await executeRuntime({runtime:'Codex',prompt:'new valid read-only fixture',cwd:f.cwd,env:{CODEX_HOME:f.home},codexConversation:f.host(f.action())});assert.equal(valid.status,'succeeded');assert.equal(fake.calls().length,1);
+});
+
+test('native MCP discovery refusal finishes a real dispatched action without quarantining the device',async t=>{
+ const f=fixture(t),fake=fakeCli(f,t),tokenFile=path.join(f.root,'management.json');fs.writeFileSync(tokenFile,JSON.stringify({token:'ISOLATED_FIXTURE',workspaces:['bigtron']}),{mode:0o600});
+ const execute=createLocalActionExecutor({runtimeDir:f.runtimeDir,defaultWorkdir:f.cwd,workspace:'bigtron',deviceId:'device_alpha',apiBase:'https://example.test',admissionHandledByDispatcher:true,managementMcpConfig:{enabled:true,tokenFile,baseUrl:'https://example.test'}});
+ const dispatcher=new ActionDispatcher({execute,workspace:'bigtron',deviceId:'device_alpha',workdir:f.cwd,stateFile:path.join(f.runtimeDir,'action-state.json')});
+ const action=f.action({deviceId:'device_alpha',prompt:'never launch the model',env:{CODEX_HOME:f.home,FAKE_MCP_FAILURE:'1'}});action.dedupeKey='conversation:conv_alpha:convmsg_inventory';
+ const result=await dispatcher.dispatch(action);assert.equal(result.status,'failed');assert.equal(result.code,'CODEX_MCP_CONFIG_DISCOVERY_FAILED');assert.equal(result.result.prelaunch.source,'codex-mcp-config-discovery');assert.equal(result.result.processExit.launched,false);assert.equal(result.result.processExit.treeConfirmed,true);assert.equal(dispatcher.quarantined,false);assert.equal(fs.existsSync(path.join(f.home,'calls.jsonl')),false);
+});
+
+test('actual dispatcher preserves the exact legacy parser failure code used for empty-thread recovery',async t=>{
+ const f=fixture(t);fakeCli(f,t);const tokenFile=path.join(f.root,'management.json');fs.writeFileSync(tokenFile,JSON.stringify({token:'ISOLATED_FIXTURE',workspaces:['bigtron']}),{mode:0o600});
+ const execute=createLocalActionExecutor({runtimeDir:f.runtimeDir,defaultWorkdir:f.cwd,workspace:'bigtron',deviceId:'device_alpha',apiBase:'https://example.test',admissionHandledByDispatcher:true,managementMcpConfig:{enabled:true,tokenFile,baseUrl:'https://example.test'}});
+ const stateFile=path.join(f.runtimeDir,'action-state.json'),dispatcher=new ActionDispatcher({execute,workspace:'bigtron',deviceId:'device_alpha',workdir:f.cwd,stateFile});
+ const old=currentMessage(f,'FAILED OLD MESSAGE');Object.assign(old.payload,{deviceId:'device_alpha',prompt:'FAILED OLD MESSAGE',env:{CODEX_HOME:f.home,FAKE_PARSE_REJECTION:'1'}});old.dedupeKey='conversation:conv_alpha:'+old.payload.messageId;
+ const failed=await dispatcher.dispatch(old);assert.equal(failed.status,'failed');assert.equal(failed.code,'CODEX_CONVERSATION_THREAD_UNCONFIRMED');assert.equal(dispatcher.quarantined,false);
+ const state=JSON.parse(fs.readFileSync(stateFile,'utf8'));assert.equal(state.completed[0].result.code,'CODEX_CONVERSATION_THREAD_UNCONFIRMED');assert.equal(state.completed[0].result.result.code,1);assert.equal(state.completed[0].result.result.truncated,false);
+ const history=fs.readFileSync(stateFile),start=()=>f.start(currentMessage(f,'NEW CANONICAL MESSAGE'),{invocation:{args:['exec','--json','-'],stdin:'OLD HISTORY MUST NOT BE USED'}});
+ if(state.completed[0].result.result.processExit.treeConfirmed!==true){
+  // A direct macOS fixture has no complete Windows Job tree receipt. It must
+  // retain that uncertainty; the exact Windows evidence is tested above.
+  assert.throws(start,{code:'CODEX_CONVERSATION_THREAD_UNCONFIRMED'});
+ }else{const next=start();assert.equal(next.invocation.args.includes('resume'),false);assert.equal(next.invocation.stdin,'NEW CANONICAL MESSAGE');next.close();}
+ assert.deepEqual(fs.readFileSync(stateFile),history);
 });
 
 test('real fake CLI permits separate employee concurrency while same conversation launches once',async t=>{

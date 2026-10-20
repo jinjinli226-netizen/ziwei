@@ -48,13 +48,26 @@ function ownedRootExited(exit){
  return exit.launched===true&&exit.rootConfirmed===true&&Number.isSafeInteger(exit.rootPid)&&exit.rootPid>0&&Number.isSafeInteger(exit.rootExitCode)&&(exit.cancelled!==true||exit.treeConfirmed===true&&exit.activeProcesses===0);
 }
 function ownedNeverLaunched(exit){return exit?.launched===false&&exit.treeConfirmed===true&&exit.activeProcesses===0&&exit.rootPid===null&&exit.rootExitCode===null;}
-function priorActionExited(file,record){
+function priorActionResult(file,record){
  let state;try{state=readJson(file,32*1024*1024);}catch{return false;}
  if(state?.version!==2||!Array.isArray(state.started)||!Array.isArray(state.completed))return false;
  const starts=state.started.filter(row=>row?.actionId===record.actionId),ends=state.completed.filter(row=>row?.result?.actionId===record.actionId);if(starts.length!==1||ends.length!==1)return false;
  const start=starts[0],end=ends[0],identity=start.identity,binding=start.resourceBinding,scope=record.scope;
  if(!identity||identity.workspace!==scope.workspace||identity.deviceId!==scope.deviceId||identity.targetDeviceId!==undefined&&identity.targetDeviceId!==scope.deviceId||!exact(end.identity,Object.keys(identity))||Object.keys(identity).some(k=>end.identity[k]!==identity[k])||start.key!==end.key||typeof start.key!=='string'||!start.key.startsWith('conversation:'+scope.conversationId+':')||binding?.type!=='conversation.execute'||binding.employeeId!==scope.employeeId||!['failed','succeeded'].includes(end.result.status)||!Number.isFinite(start.startedAt)||start.startedAt>record.startedAt||!Number.isFinite(end.result.completedAt)||end.result.completedAt<record.startedAt)return false;
- return ownedRootExited(end.result.result?.processExit);
+ return end.result;
+}
+// A config parser rejection happens before Codex creates a model thread. Only
+// this exact legacy failure can discard its empty mapping, and only for a new
+// authenticated message. Other absent thread receipts remain unconfirmed.
+function recoverableTransportRejection(result,record,host){
+ const value=result?.result,exit=value?.processExit,mcp=value?.managementMcp;
+ return record.state==='unconfirmed'&&record.threadId===null&&record.rollout===null&&record.actionId!==host.actionId&&host.currentPrompt!==null&&
+  result?.status==='failed'&&result.code==='CODEX_CONVERSATION_THREAD_UNCONFIRMED'&&value?.runtime==='Codex'&&value.code===1&&value.signal==null&&
+  value.truncated===false&&typeof value.output==='string'&&/^Error loading config\.toml: invalid transport\r?\nin `mcp_servers\.ziwei-terminal`\r?\n?$/.test(value.output)&&value.diagnostics==null&&value.nativeSessionId==null&&value.executionState==null&&value.partialEffectsPossible!==true&&
+  exact(value.codexConversation,['status','durable','reasonCode'])&&value.codexConversation.status==='unconfirmed'&&value.codexConversation.durable===false&&value.codexConversation.reasonCode==='CODEX_CONVERSATION_THREAD_UNCONFIRMED'&&
+  ownedRootExited(exit)&&exit.rootExitCode===1&&exit.treeConfirmed===true&&exit.activeProcesses===0&&exit.cancelled===false&&exit.backgroundProcessesRetained!==true&&(exit.hostExitCode==null||exit.hostExitCode===0)&&
+  mcp?.configured===true&&mcp.injected===true&&mcp.loaded===false&&mcp.status==='not_loaded'&&mcp.runtime==='Codex'&&mcp.transport==='stdio'&&mcp.workspace===record.scope.workspace&&mcp.runtimeProfile===record.scope.profile&&
+  Array.isArray(mcp.toolCalls)&&mcp.toolCalls.length===0&&Array.isArray(mcp.tool_calls)&&mcp.tool_calls.length===0&&value.terminalMcp==null;
 }
 function rolloutMetadata(home,relative,threadId,cwd){
  if(typeof relative!=='string'||path.isAbsolute(relative)||relative.includes('\0'))throw fail('CODEX_CONVERSATION_NATIVE_SESSION_MISSING','Codex 原生会话路径无效，未重新执行旧任务');
@@ -81,18 +94,24 @@ function prepareSession({binding,invocation,codexHome,profile='default',cwd,now=
  const scope={origin:host.origin,workspace:host.workspace,deviceId:host.deviceId,employeeId:host.employeeId,conversationId:host.conversationId,profile:profile||'default',home:realDirectory(codexHome),cwd:realDirectory(cwd)};
  const key=digest([scope.origin,scope.workspace,scope.deviceId,scope.employeeId,scope.conversationId]),directory=privateDirectory(host.privateDirectory),file=path.join(directory,key+'.json'),reservation=directory+'\0'+key;
  if(activeScopes.has(reservation))throw fail('CODEX_CONVERSATION_BUSY','此员工的这条聊天仍在执行，尚未启动并行的同会话调用');activeScopes.add(reservation);
- let previous=null,current=null,observed=null,streamError=null,buffer='',closed=false,settled=false,spawned=false;
+ let previous=null,restorePrevious=null,recoveredParseFailure=false,current=null,observed=null,streamError=null,buffer='',closed=false,settled=false,spawned=false;
  const release=()=>{if(!closed){closed=true;activeScopes.delete(reservation);}};
  try{
   try{previous=validateRecord(readJson(file),key,scope);}catch(error){if(error.code!=='ENOENT'){if(error.code?.startsWith('CODEX_CONVERSATION_'))throw error;throw fail('CODEX_CONVERSATION_STATE_INVALID','此聊天的 Codex 会话映射无法读取，未修改原记录');}}
+  restorePrevious=previous;
   if(previous&&previous.state!=='ready'){
-   if(!priorActionExited(host.stateFile,previous))throw fail('CODEX_CONVERSATION_PREVIOUS_UNCONFIRMED','此聊天上次 Codex 执行尚无匹配退出证据；仅暂停此会话，未重放旧任务');
-   if(!previous.threadId)throw fail('CODEX_CONVERSATION_THREAD_UNCONFIRMED','上次 Codex 执行已退出，但没有原生 thread.started 回执；未猜测或新建会话');
-   const rollout=previous.rollout||findRollout(scope.home,previous.threadId,scope.cwd,previous.startedAt,now());rolloutMetadata(scope.home,rollout,previous.threadId,scope.cwd);previous={...previous,state:'ready',rollout,updatedAt:now()};writeJson(file,previous);
+   const prior=priorActionResult(host.stateFile,previous);
+   if(!prior||!ownedRootExited(prior.result?.processExit))throw fail('CODEX_CONVERSATION_PREVIOUS_UNCONFIRMED','此聊天上次 Codex 执行尚无匹配退出证据；仅暂停此会话，未重放旧任务');
+   if(!previous.threadId){
+    if(!recoverableTransportRejection(prior,previous,host))throw fail('CODEX_CONVERSATION_THREAD_UNCONFIRMED','上次 Codex 执行已退出，但没有原生 thread.started 回执；未猜测或新建会话');
+    previous=null;recoveredParseFailure=true;
+   }else{
+    const rollout=previous.rollout||findRollout(scope.home,previous.threadId,scope.cwd,previous.startedAt,now());rolloutMetadata(scope.home,rollout,previous.threadId,scope.cwd);previous={...previous,state:'ready',rollout,updatedAt:now()};writeJson(file,previous);restorePrevious=previous;
+   }
   }
   if(previous)rolloutMetadata(scope.home,previous.rollout,previous.threadId,scope.cwd);
   const selectedInvocation=conversationInvocation(invocation,previous?.threadId);
-  if(previous&&host.currentPrompt!==null){if(typeof resumePromptSuffix!=='string'||resumePromptSuffix.length>1024*1024)throw fail('CODEX_CONVERSATION_INPUT_INVALID','Codex 本次图片指令无效，未恢复会话');selectedInvocation.stdin=host.currentPrompt+resumePromptSuffix;}
+  if((previous||recoveredParseFailure)&&host.currentPrompt!==null){if(typeof resumePromptSuffix!=='string'||resumePromptSuffix.length>1024*1024)throw fail('CODEX_CONVERSATION_INPUT_INVALID','Codex 本次图片指令无效，未恢复会话');selectedInvocation.stdin=host.currentPrompt+resumePromptSuffix;}
   current={schemaVersion:1,key,scope,state:'pending',threadId:previous?.threadId||null,rollout:previous?.rollout||null,actionId:host.actionId,attemptId:randomUUID(),startedAt:now(),updatedAt:now()};writeJson(file,current);
   const receipt=status=>({schemaVersion:1,kind:'codex.conversation',scopeKey:key,threadId:current.threadId,method:previous?'codex.exec.resume':'codex.exec',status,durable:status==='bound',actionId:host.actionId});
   const save=()=>{current.updatedAt=now();writeJson(file,current);};
@@ -107,7 +126,7 @@ function prepareSession({binding,invocation,codexHome,profile='default',cwd,now=
     if(!ownedRootExited(processExit)||signal||streamError||!observed){current.state='unconfirmed';save();settled=true;throw fail(streamError||(!ownedRootExited(processExit)?'CODEX_CONVERSATION_EXIT_UNCONFIRMED':'CODEX_CONVERSATION_THREAD_UNCONFIRMED'),'Codex 原生会话或退出回执无法核对，未关联其他会话、未重跑旧任务');}
     current.rollout=previous?.rollout||findRollout(scope.home,observed,scope.cwd,current.startedAt,now());rolloutMetadata(scope.home,current.rollout,observed,scope.cwd);current.threadId=observed;current.state='ready';save();settled=true;return receipt('bound');
    },
-   notLaunched(){if(settled)return;if(previous)writeJson(file,previous);else{noLinks(file);fs.unlinkSync(file);}settled=true;},
+   notLaunched(){if(settled)return;if(restorePrevious)writeJson(file,restorePrevious);else{noLinks(file);fs.unlinkSync(file);}settled=true;},
    close(){try{if(!settled){if(!spawned)this.notLaunched();else{current.state='unconfirmed';save();settled=true;}}}finally{release();}},
   };
  }catch(error){release();throw error;}

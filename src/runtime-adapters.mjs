@@ -16,7 +16,7 @@ import { normalizeBotConfig, effectiveBotMaxTurns } from './hermes-bot-config.mj
 import {hermesBotToolsets} from './hermes-mcp-config.mjs';
 import {parseBotReasoningProof} from './hermes-bot-reasoning.mjs';
 import {resolveHermesLauncher} from './hermes-launcher.mjs';
-import {runBeforeSpawnAdmission} from './runtime-launch-evidence.mjs';
+import {runBeforeSpawnAdmission,markCodexMcpConfigurationFailure} from './runtime-launch-evidence.mjs';
 import {markMaintenancePaused, validateMaintenancePause} from './maintenance-checkpoint.mjs';
 import {prepareCodexConversationSession} from './codex-conversation-session.mjs';
 export {parseBotReasoningProof} from './hermes-bot-reasoning.mjs';
@@ -121,12 +121,47 @@ function updateHermesTerminalServer({ profile, env, entry, profileBaseHome, herm
   return selectedHome;
 }
 
-export function prepareTerminalMcpLaunch({ runtime, profile, config = {}, workspace, request, auditDirectory, actionId, invocation, env = {}, profileBaseHome, hermesOverlayHome, selectedProfileHome } = {}) {
+/** Read native effective configuration through the selected CLI, without
+ * retaining its environment/header values or starting an employee/model. */
+export function discoverCodexMcpServers({ binary, profile, cwd, env } = {}) {
+  try {
+    const args = [...(profile && profile !== 'default' ? ['--profile', profile] : []), 'mcp', 'list', '--json'];
+    const spec = runtimeSpawnSpec(binary, args);
+    const output = execFileSync(spec.command, spec.args, { cwd, env, encoding: 'utf8', timeout: 5000, maxBuffer: 1024 * 1024, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    const rows = JSON.parse(output);
+    if (!Array.isArray(rows) || rows.length > 256) throw new Error();
+    const names = new Set();
+    for (const row of rows) {
+      const name = row?.name, transport = row?.transport;
+      if (typeof name !== 'string' || !name || name.length > 200 || /[\u0000-\u001f\u007f]/.test(name) || names.has(name) ||
+          !transport || typeof transport !== 'object' || Array.isArray(transport) ||
+          !(transport.type === 'stdio' && typeof transport.command === 'string' && transport.command.trim() ||
+            transport.type === 'streamable_http' && typeof transport.url === 'string' && transport.url.trim())) throw new Error();
+      names.add(name);
+    }
+    return Object.freeze([...names]);
+  } catch {
+    // The CLI output can contain private native env/header values. Do not
+    // attach raw stdout/stderr, the subprocess error, or parsed configuration.
+    throw markCodexMcpConfigurationFailure(Object.assign(new Error('无法读取 Codex 原生 MCP 配置；未启动员工。请检查该电脑 Codex 配置或稍后重试。'), { code: 'CODEX_MCP_CONFIG_DISCOVERY_FAILED' }));
+  }
+}
+
+/** Internal host policy only; a missing native server must not become an
+ * enabled-only table. Literal dotted keys stay quoted in the TOML table. */
+export function codexMcpDisabledServerOverrides(disabledServers = [], configuredServers = []) {
+  if (!Array.isArray(disabledServers) || disabledServers.some(name => typeof name !== 'string' || !name || name.length > 200 || /[\u0000-\u001f\u007f]/.test(name))) throw new Error('Codex MCP 禁用名单必须是安全的服务名数组');
+  const table = [...new Set(disabledServers)].filter(name => configuredServers.includes(name)).map(name => `${JSON.stringify(name)}={enabled=false}`).join(',');
+  return table ? ['--config', `mcp_servers={${table}}`] : [];
+}
+
+export function prepareTerminalMcpLaunch({ runtime, profile, config = {}, workspace, request, auditDirectory, actionId, invocation, env = {}, profileBaseHome, hermesOverlayHome, selectedProfileHome, codexMcpServers = [] } = {}) {
   const args = [...invocation.args];
   const childEnv = { ...env };
   for (const key of [...TERMINAL_ENV_KEYS, ...LEGACY_TERMINAL_ENV_KEYS]) delete childEnv[key];
-  // Override the user's global Codex phone server for every employee invocation.
-  if (runtime === 'Codex') {
+  // Codex validates a server's transport even when disabled. Only override an
+  // existing native entry; an enabled-only phantom table has no transport.
+  if (runtime === 'Codex' && codexMcpServers.includes('ziwei-terminal')) {
     const index = args.lastIndexOf('-');
     args.splice(index < 0 ? args.length : index, 0, '--config', 'mcp_servers.ziwei-terminal.enabled=false');
   }
@@ -1083,17 +1118,13 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
   let codexSession=null;
   let selectedModel = model || null;
   try {
-    // Internal executor policy, never an A2A payload field. Apply the complete
-    // host table before scoped MCP injection: a later table override would
-    // erase this execution's authorized management/phone transport entries.
-    if (resolvedRuntime === 'Codex' && codexMcpDisabledServers.length) {
-      if (!Array.isArray(codexMcpDisabledServers) || codexMcpDisabledServers.some(name=>typeof name !== 'string' || !name || name.length > 200 || /[\u0000-\u001f\u007f]/.test(name))) throw new Error('Codex MCP 禁用名单必须是安全的服务名数组');
-      // Codex splits dotted override paths without parsing quoted segments.
-      // Quote server keys in a TOML inline-table value instead, also supporting
-      // literal names containing dots without editing native HOME config.
-      const table=[...new Set(codexMcpDisabledServers)].map(name=>`${JSON.stringify(name)}={enabled=false}`).join(',');
-      const flags=['--config',`mcp_servers={${table}}`];
-      const index=invocation.args.lastIndexOf('-');invocation.args.splice(index<0?invocation.args.length:index,0,...flags);
+    // Native configuration is read before adding this execution's scoped
+    // servers. Host disable policy must precede authorized scoped overrides.
+    const codexMcpServers = resolvedRuntime === 'Codex' ? discoverCodexMcpServers({binary:discovered.binary,profile:normalizeRuntimeProfile(profile),cwd,env:childEnv}) : [];
+    if (resolvedRuntime === 'Codex') {
+      const flags = codexMcpDisabledServerOverrides(codexMcpDisabledServers, codexMcpServers);
+      const index = invocation.args.lastIndexOf('-');
+      invocation.args.splice(index < 0 ? invocation.args.length : index, 0, ...flags);
     }
     let botPrepared=null;
     if(hermesBot) {
@@ -1136,7 +1167,7 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
       const overlay=createHermesExecutionOverlay({profile,baseHome:profileBaseHome,selectedProfileHome,managedDirectory:childEnv.HERMES_MANAGED_DIR,privateDirectory:path.join(maintenance.directory,'overlays')});
       childEnv.HERMES_HOME=overlay.sourceHome;childEnv.HERMES_MANAGED_DIR=overlay.home;launch.overlayHome=overlay.home;cleanupOverlay=overlay.cleanup;invocation.args.unshift('--profile',profile||'default');
     }
-    const phoneLaunch = prepareTerminalMcpLaunch({ runtime: resolvedRuntime, profile, invocation, env: childEnv, profileBaseHome, hermesOverlayHome: launch.overlayHome, ...(terminalMcp || {}), selectedProfileHome });
+    const phoneLaunch = prepareTerminalMcpLaunch({ runtime: resolvedRuntime, profile, invocation, env: childEnv, profileBaseHome, hermesOverlayHome: launch.overlayHome, ...(terminalMcp || {}), selectedProfileHome, codexMcpServers });
     invocation = phoneLaunch.invocation; childEnv = phoneLaunch.env; phoneReceipt = phoneLaunch.receipt;
     if(hermesBot&&phoneReceipt){const index=invocation.args.indexOf('--toolsets');if(index<0)invocation.args.push('--toolsets','ziwei-terminal');else invocation.args[index+1]+=',ziwei-terminal';}
     if (resolvedRuntime === 'Hermes' && !receipt && !phoneReceipt && !hermesBot) childEnv.HERMES_HOME = selectedProfileHome || hermesProfileHome(profile || 'default', { baseHome: profileBaseHome });

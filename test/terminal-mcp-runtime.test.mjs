@@ -162,7 +162,7 @@ test('execution bootstrap uses paired device auth and saves only a local short-l
 });
 
 test('employees with no phone skill cannot inherit the host global phone MCP or legacy admin environment', () => {
-  const disabled = runtime.prepareTerminalMcpLaunch({ runtime: 'Codex', invocation: { args: ['exec', '-'] }, env: { ZIWEI_CONTROL_AUTH: 'legacy-admin-secret', ZIWEI_CONTROL_CREDENTIALS_FILE: '/host/private.json', ZIWEI_TERMINAL_TOKEN_FILE: '/another/execution.json' } });
+  const disabled = runtime.prepareTerminalMcpLaunch({ runtime: 'Codex', codexMcpServers: ['ziwei-terminal'], invocation: { args: ['exec', '-'] }, env: { ZIWEI_CONTROL_AUTH: 'legacy-admin-secret', ZIWEI_CONTROL_CREDENTIALS_FILE: '/host/private.json', ZIWEI_TERMINAL_TOKEN_FILE: '/another/execution.json' } });
   assert.ok(disabled.invocation.args.includes('mcp_servers.ziwei-terminal.enabled=false'));
   assert.equal(disabled.receipt, null);
   assert.equal(disabled.env.ZIWEI_CONTROL_AUTH, undefined);

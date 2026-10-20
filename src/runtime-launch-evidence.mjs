@@ -34,6 +34,17 @@ export function markHermesLauncherFailure(error) {
   }));
   return failure;
 }
+// The owned adapter calls this only after its read-only native MCP inventory
+// fails, before preparing or spawning an employee/model execution. Wire error
+// fields and an arbitrary executor's rejected Promise cannot create this proof.
+export function markCodexMcpConfigurationFailure(error) {
+  const failure=error instanceof Error?error:new Error(String(error));
+  prelaunchFailures.set(failure,Object.freeze({
+    prelaunch:Object.freeze({source:'codex-mcp-config-discovery',phase:'before-runtime-spawn',spawnAttempted:false,operation:'mcp.list'}),
+    processExit:notLaunched()
+  }));
+  return failure;
+}
 // Called only by the owned Codex bind/prepare entry before native spawn.
 // Scope data from wire errors cannot create this in-process capability.
 export function markCodexConversationPrelaunchFailure(error, scope) {
