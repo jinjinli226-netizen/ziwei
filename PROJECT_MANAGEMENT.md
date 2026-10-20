@@ -2,7 +2,7 @@
 
 ## 当前跨电脑接手入口（2026-10-20）
 
-先读 [AI_HANDOFF.md](AI_HANDOFF.md) 及 [AGENTS.md](AGENTS.md)，随后根据当前任务从[功能索引](docs/FEATURE_MAP.md)定位模块。当前推荐源码分支为 `codex/remote-client-upgrade`；各生产层和并行分支见[版本地图](docs/handoffs/2026-10-20-release-map.md)，最新验收与失败边界见 [HANDOFF.md](HANDOFF.md) 顶部。
+先读 [AI_HANDOFF.md](AI_HANDOFF.md) 及 [AGENTS.md](AGENTS.md)，随后根据当前任务从[功能索引](docs/FEATURE_MAP.md)定位模块。当前推荐源码分支为 `main`；各生产层和并行分支见[版本地图](docs/handoffs/2026-10-20-release-map.md)，最新验收与失败边界见 [HANDOFF.md](HANDOFF.md) 顶部。
 
 [新AI提示词](NEW_AI_SESSION_PROMPT.md) 不再固定旧Windows目录/测试workspace；本轮[TRO员工及风格、产物、头像摘要](docs/operations/2026-10-20-xiaohongshu-tro-employee.md)已可随Git获取。未提交代码、原始.local、凭据、数据库和设备HOME按统一入口的私有迁移清单接续。
 

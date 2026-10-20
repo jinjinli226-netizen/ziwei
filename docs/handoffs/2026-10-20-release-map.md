@@ -4,15 +4,15 @@
 
 ## 1. 开发接续入口
 
-主仓库为 [`jinjinli226-netizen/ziwei`](https://github.com/jinjinli226-netizen/ziwei)。本次交接以 `codex/remote-client-upgrade` 的 `faea63d1d3814d89977407879a8e85e38c402230` 为已提交起点；该提交记录公司台式 10/20 的真实升级与验收。先读仓库根 [HANDOFF.md](../../HANDOFF.md) 的最新日期段落，再按本表进入对应层的记录。[PROJECT_MANAGEMENT.md](../../PROJECT_MANAGEMENT.md) 可补充架构和管理约定，其中历史快照不能覆盖较新的运维记录。
+主仓库为 [`jinjinli226-netizen/ziwei`](https://github.com/jinjinli226-netizen/ziwei)。当前源码入口为 [`main`](https://github.com/jinjinli226-netizen/ziwei/tree/main)，已合入主项目最新接续代码、AI 导航和原 main 改动；克隆后仍核对实际远端提交。下列固定提交、工作树和旧 main 均保留为合并前交接快照。原交接以 `codex/remote-client-upgrade` 的 `faea63d1d3814d89977407879a8e85e38c402230` 为已提交起点；该提交记录公司台式 10/20 的真实升级与验收。先读仓库根 [HANDOFF.md](../../HANDOFF.md) 的最新日期段落，再按本表进入对应层的记录。[PROJECT_MANAGEMENT.md](../../PROJECT_MANAGEMENT.md) 可补充架构和管理约定，其中历史快照不能覆盖较新的运维记录。
 
 | 入口 | 定位与使用边界 |
 | --- | --- |
-| 主源码接续 | [`codex/remote-client-upgrade@faea63d`](https://github.com/jinjinli226-netizen/ziwei/commit/faea63d1d3814d89977407879a8e85e38c402230)。这是源码与文档基线，不表示 API、网页、所有客户端和手机都运行该提交的整树。 |
+| 合并前源码基线 | [`codex/remote-client-upgrade@faea63d`](https://github.com/jinjinli226-netizen/ziwei/commit/faea63d1d3814d89977407879a8e85e38c402230)。这是源码与文档基线，不表示 API、网页、所有客户端和手机都运行该提交的整树。 |
 | 本机近期工作树 | `/Users/zhangjie/.codex/worktrees/bot-historical-recovery/紫薇` 的实际分支是 `codex/remote-client-upgrade`；目录名称不是分支或版本依据。另一台电脑应依仓库、分支和完整 SHA 重新定位，不复制 worktree 的 `.git` 指针。 |
 | 本次交接编辑树 | `/Users/zhangjie/.codex/worktrees/cross-computer-handoff/紫薇` 从上述 `faea63d` 隔离创建。交接文档的后续提交不应被误记为本轮产品发布。 |
 | 旧根工作区，不能作为最新接续入口 | `/Users/zhangjie/Documents/ChatGPT/紫薇` 停在 `codex/hermes-independent-profile@f88d6f8678face7ea3d414674e4e76707d7fc376`，有未提交的 `frontend/src/App.vue`、`frontend/src/api.js`、`frontend/src/styles.css` 及本地输出等。保留这些内容，不以 reset、clean 或整树复制处理。 |
-| 旧 `main`，不能作为最新接续入口 | 本机缓存 `origin/main` 为 `339b1db1862882c5305ebddceead85d487c8c9d0`（10/03）。本轮没有 fetch；不要因默认分支叫 `main` 就把它当作 10/20 基线。 |
+| 合并前的旧 `main` 快照 | 当时本机缓存 `origin/main` 为 `339b1db1862882c5305ebddceead85d487c8c9d0`（10/03）。该历史盘点尚未 fetch；后续已核对远端并完成 main 合并，目前以 main 实际远端提交为源码入口。 |
 
 ## 2. 生产、官方包与已装设备分别定位
 
@@ -45,7 +45,7 @@
 
 | 仓库 | 作用与可定位来源 | 接手边界 |
 | --- | --- | --- |
-| `jinjinli226-netizen/ziwei` | 主 API、网页、Windows 客户端；并行分支还包含 Android 管理 App 与 mobile 通知改动。主接续点见第 1 节。 | 一个 Git HEAD 不等于所有生产层的统一部署清单。 |
+| `jinjinli226-netizen/ziwei` | 主 API、网页、Windows 客户端；并行分支还包含 Android 管理 App 与 mobile 通知改动。当前接续点为第 1 节的 main。 | 一个 Git HEAD 不等于所有生产层的统一部署清单。 |
 | `jinjinli226-netizen/ziwei-system`（私有） | Control 与被控手机 Agent / Updater；Control 已记录发布源 `9d25509…`，Agent / Updater 待签名候选来源另列于第 3 节。 | 主仓库文档只有来源与发布证据，不包含此仓库全部源码、签名或访问权限。 |
 | `jinjinli226-netizen/ai-viral-library`（私有、可选外部 MCP） | [10/18 Bot MCP 接入记录](../operations/2026-10-18-bot-deferred-mcp-config.md)：服务修复源码 `082390c4767db1f0caa4261e60e5fe33831a7476`，`main` / `codex/long-lived-mcp-grants`；后续仅文档的两 ref 记录为 `1603dde3eb72e9249d1adfe987583561d56cfc3e`。 | 记录于 18:24:48 成功发布同一源码候选，随后精确授权和真实模型读取通过；未等待 15 分钟后真实刷新。该库基于实际源导入，不声称找回原 Git 历史。它是可选 MCP 服务，不替代紫薇的员工库和权限系统；已有授权不能推广为所有员工已连接或已加载。 |
 

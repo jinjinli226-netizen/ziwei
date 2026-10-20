@@ -44,4 +44,4 @@ Android 管理 App 源码在并行分支，不一定出现在当前目录；被�
 | 新建 AI 会话 | [简短接手提示词](NEW_AI_SESSION_PROMPT.md) |
 | 查开发约定与较早架构记录 | [项目管理手册](PROJECT_MANAGEMENT.md)、[README.md](README.md) |
 
-源码接续分支为 `codex/remote-client-upgrade`，发布接续分支为 `codex/v2-20261014-release`；实际使用前核对远端。旧目录或 `main` 的名字不能证明代码最新。生产各层可能分别发布，具体变更按对应层的记录处理。
+当前源码入口为 `main`，已合入最新主项目代码与 AI 导航文档；实际使用前核对远端提交和本地修改。`codex/remote-client-upgrade`、`codex/v2-20261014-release` 保留为接续记录。生产各层可能分别发布，具体变更按对应层的记录处理。

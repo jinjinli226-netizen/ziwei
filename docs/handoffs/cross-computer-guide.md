@@ -4,21 +4,21 @@
 
 ## 1. 取得正确源码
 
-仓库：<https://github.com/jinjinli226-netizen/ziwei>。本轮更新前通过 `git ls-remote` 核实 `codex/remote-client-upgrade` 和 `codex/v2-20261014-release` 均为 `faea63d1d3814d89977407879a8e85e38c402230`。推荐接续前者；本文所在后续提交只更新交接。取得源码后以实际远端 SHA 为准。
+仓库：<https://github.com/jinjinli226-netizen/ziwei>。当前推荐源码入口为 `main`，已合入最新主项目代码、AI 导航及原 main 改动。取得源码后以实际远端 SHA 为准。此前迁移盘点的接续基线为 `faea63d1d3814d89977407879a8e85e38c402230`，保留用于追溯，不能当作当前分支头。
 
 在新建的空目录逐行执行，PowerShell、macOS/Linux shell 均可使用：
 
 ```sh
-git clone --branch codex/remote-client-upgrade https://github.com/jinjinli226-netizen/ziwei.git ziwei
+git clone --branch main https://github.com/jinjinli226-netizen/ziwei.git ziwei
 cd ziwei
 git status --short --branch
 git log -5 --oneline
-git ls-remote --heads origin codex/remote-client-upgrade codex/v2-20261014-release
+git ls-remote --heads origin main codex/remote-client-upgrade codex/v2-20261014-release
 ```
 
 已有 checkout 先查看 status、分支、worktree 和远端，保留原修改，在独立工作树继续。不要 reset/clean/覆盖式切分支。部分旧分支没有 upstream，不能假定 `git pull` 会更新正确分支。
 
-本轮盘点时，原 Mac 主目录仍为 `codex/hermes-independent-profile@f88d6f8`，有3个前端文件未提交；`main` 也是历史版本。旧 Windows `D:\灵光爸爸拆解` 和 `bot-historical-recovery` 目录名均不能代替实际分支核对。原目录不应整份覆盖到服务器。
+合并前迁移盘点时，原 Mac 主目录为 `codex/hermes-independent-profile@f88d6f8`，有3个前端文件未提交；当时 main 尚未合入主项目最新代码，目前已完成合并。旧 Windows `D:\灵光爸爸拆解` 和 `bot-historical-recovery` 目录名均不能代替实际分支核对。原目录不应整份覆盖到服务器。
 
 ## 2. 按迁移任务选择资料
 

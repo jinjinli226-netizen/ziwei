@@ -4,7 +4,7 @@
 
 先读 [AI_HANDOFF.md](AI_HANDOFF.md)，了解紫薇的用途、目录与执行链路；再按当前任务在[功能索引](docs/FEATURE_MAP.md)查代码、测试和专题说明。新会话可使用[简短提示词](NEW_AI_SESSION_PROMPT.md)，项目规则见[AGENTS.md](AGENTS.md)。
 
-需要核对上线或设备版本时读[分层版本地图](docs/handoffs/2026-10-20-release-map.md)，需要迁移电脑时读[迁移专题](docs/handoffs/cross-computer-guide.md)，查历史时读[HANDOFF](HANDOFF.md)的相关记录。源码接续分支为 `codex/remote-client-upgrade`；下方各日期说明保留为历史资料。
+需要核对上线或设备版本时读[分层版本地图](docs/handoffs/2026-10-20-release-map.md)，需要迁移电脑时读[迁移专题](docs/handoffs/cross-computer-guide.md)，查历史时读[HANDOFF](HANDOFF.md)的相关记录。当前源码入口为 `main`，已合入最新主项目代码和 AI 导航文档；下方各日期说明保留为历史资料。
 
 Windows 早期客户端若因缺少健康身份/任务字段而无法 update，可使用官方 PowerShell 入口执行只读检查及一次明确确认的迁移。旧版任务状态保持未知，恢复连接可能重新取得未完成任务；流程、身份保护和验收边界见 [早期 Windows 升级记录](docs/operations/2026-10-12-legacy-windows-upgrade.md)。
 
