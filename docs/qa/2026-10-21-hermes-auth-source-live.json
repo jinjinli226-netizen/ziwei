@@ -1,0 +1,82 @@
+{
+  "date": "2026-10-21",
+  "scope": "Company Desktop TikTokTrendS and Li Jinjin Desktop Xianyu Hermes authentication diagnosis",
+  "authMode": "source-native-store",
+  "templateProfile": "default",
+  "sourceAndCodexSameAccountPerHost": true,
+  "sourceAndPoolSameAccount": true,
+  "companyAccessExpiryUtc": "2026-10-30T14:15:38Z",
+  "liAccessExpiryUtc": "2026-10-30T14:54:12Z",
+  "expiryMeaning": "JWT nominal expiry is metadata, not proof of absence of revocation; live provider tests below establish current usability.",
+  "companySourceStoreUpdatedAtUtc": "2026-10-21T01:26:32.600529Z",
+  "liveTests": [
+    {
+      "test": "company-fresh-bot-test",
+      "actionId": "action_844728a9-17a2-45c0-8ca6-236d2eb383e1",
+      "taskId": "task_ca7713fc-5768-40a4-bf46-6270a38c850e",
+      "completedAt": "2026-10-21T01:52:35.386Z",
+      "status": "succeeded",
+      "model": "gpt-6.1-sol",
+      "profile": "bot-f165991d1da77173908e38d7",
+      "nativeSessionId": "20261016_101227_715dbf",
+      "resumedExistingSession": true,
+      "reasoning": {
+        "provider": "openai-codex",
+        "requested": "max",
+        "actual": "max",
+        "status": "matched",
+        "requests": 2
+      },
+      "output": "TK\u65b0\u4f1a\u8bdd\u8fde\u901a\u901a\u8fc7",
+      "processExit": {
+        "rootConfirmed": true,
+        "rootExitCode": 0,
+        "treeConfirmed": true,
+        "activeProcesses": 0
+      }
+    },
+    {
+      "test": "li-fresh-bot-test",
+      "actionId": "action_a7831ce0-6e67-4719-9de9-2f6019fe88fd",
+      "taskId": "task_f63b49e7-3eec-4a3b-9c49-47f7bf0feee2",
+      "completedAt": "2026-10-21T01:54:52.290Z",
+      "status": "succeeded",
+      "model": "gpt-6.1-sol",
+      "profile": "bot-2ac0f5f778811a4cc9c15326",
+      "nativeSessionId": "20261015_120149_45e77a",
+      "resumedExistingSession": true,
+      "reasoning": {
+        "provider": "openai-codex",
+        "requested": "max",
+        "actual": "max",
+        "status": "matched",
+        "requests": 2
+      },
+      "output": "\u95f2\u9c7c\u65b0\u4f1a\u8bdd\u8fde\u901a\u901a\u8fc7",
+      "processExit": {
+        "rootConfirmed": true,
+        "rootExitCode": 0,
+        "treeConfirmed": true,
+        "activeProcesses": 0
+      }
+    }
+  ],
+  "companyHistorical401Action": "action_c3d43d5d-27a9-43b1-b613-783bc96a14f5",
+  "companyOfficialVersion": "0.22.0",
+  "officialSourceMatches": {
+    "turn_recovery.py": "0dd0c61701a44204b6e54172efd34371c8a27b92e8e66137b2e53c66af99ace9",
+    "auth_codex.py": "e821a11d699d954a96c11c5e5637f1627573c00894bdf762667aa1bd3d3e29d8"
+  },
+  "limits": [
+    "An initial SDK import probe failed. A subsequent network-disabled stdlib metadata probe passed on each device.",
+    "Test labels and requested response contain new-session wording, but actual diagnostics prove both resumed existing native sessions.",
+    "The precise cause of the earlier 401 remains unproven. Refresh timestamps and request counts do not establish whether reasoning replay, an in-flight credential switch or an upstream transient caused it.",
+    "Only two specified Bot short responses were tested. Previous business tasks were not replayed.",
+    "Read metadata contained neither published tokens nor raw account identifiers."
+  ],
+  "credentialsChanged": false,
+  "productSourceChanged": false,
+  "deployed": false,
+  "clientUpgraded": false,
+  "oldFailureRecordsPreserved": true
+}
