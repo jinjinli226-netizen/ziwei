@@ -1,6 +1,6 @@
 # 失败执行自动收尾
 
-更新：2026-10-21。本文记录候选源码与自动测试；正式部署、官方客户端下载版本和 Windows 现场恢复由发布主任务另行核验，不能据此认定已经上线或已经恢复某位员工。
+更新：2026-10-21。源码已先推 GitHub；服务端、网页、官方客户端和 Android code16 已发布。李金晋电脑仍运行旧客户端，卡在远程升级的旧版隔离计数；已要求一次外部官方更新。员工恢复与真实模型连通性尚未通过，不能据此认定闲鱼已恢复。
 
 ## 用户可见行为
 
@@ -48,3 +48,17 @@ node --test --test-concurrency=1 \
 ```
 
 上述测试使用模拟网络、组件计算与内存服务端请求，不调用真实模型、不操作手机、不重放员工业务。正式环境仍需分别核验：GitHub 源码、服务端部署、客户端下载内容、原电脑安装版本、客户端归档回执及后续正常准入。
+
+## 2026-10-21 正式发布与旧客户端首次装入边界
+
+- 产品源码 `1b9dbe40f4940a6b8105a34a670ed7094db4c3ea` 已核对推送至 `main`、`codex/remote-client-upgrade`、`codex/v2-20261014-release`，随后发布至新服务器的 `ziwei-workspace-api.service`。当前代码目录为 `/opt/ziwei/releases/failed-finalization-1b9dbe40f494-53492a2b/v2`。
+- `/healthz` 返回 `ok: true / ziwei-api`；正式网页两个新构建资产与本机构建字节一致。工作区数据库设备号/inode保持，未恢复旧库。生态服务、中控和 Nginx 未重启或替换。继承现场 Node24.22 和既有 `db.mjs` 的 WAL/FULL 设置，未用主仓旧文件覆盖。
+- 首次发布因25秒健康窗口不足回退；实际旧服务曾127秒才开始监听。按实际情况采用180秒窗口后发布通过。回退仅切代码，未回退业务数据。
+- 官方客户端下载 build `f96559041d637cb5d870c3f3d2ec93745d375f323a49edb3d3738b07fd4bb96e`，归档SHA256 `c3f70896739751c229df06d345b2ac5c33c6802c838edf274a13a1116b87963b`，1,266,787字节。外部完整下载与 release 元数据一致。Mac实际冷缓存离线安装和71包依赖检查通过；Linux候选应用factory、12项后端测试、包内CLI/依赖/build运行检查通过。Linux npm冷安装停在配置加载后，未记为通过；Windows实机安装仍待验收。
+- 闲鱼原失败 `action_a9e24edf-afc2-42dd-b779-6cb3629ef94c` 经正常Owner API建立收尾，r7/e25→r7/e26、active action清空，状态 `awaiting_client`。原status/result/error/ACK和完成时间读回不变；没有重放业务。`awaiting_client` 仍阻止新业务，不能记成员工已恢复。
+- **实际旧156874客户端存在首次装入死锁**：`remoteUpdateIdle` 虽未直接查隔离，但 `actionScheduler.activeCount` 包含 `quarantinedActionIds`。因此旧任务让远程升级永久 `waiting_idle`，新候选恢复入口尚未获得运行机会。正常停止没有该旧动作的监督句柄，不能靠服务端伪造ACK解除。此设备需从外部执行一次新版官方 `update-windows.ps1`，让候选恢复入口处理记录并装入新版；不再让用户查PID或改文件。之后以新build认证心跳、`client_archived` ACK和短模型回复分别验收。不要重复创建远升意图或声称已自动远升成功。
+- Android管理App `0.5.4-internal / code16` 已在[正式预发布页](https://github.com/jinjinli226-netizen/ziwei/releases/tag/android-manager-v0.5.4-internal)发布，产品tag对应 `6a857c54c197fc774e5549aa4ffcdca6779afc7b`。原签名、29资产、匿名完整APK及manifest核验通过；APK SHA256 `1d1cb8269472ebaa51ddd59ba8edb52770d5aae37a24323ed2c21ef5c9576366`。72项相关测试、266项JVM检查通过，真机未安装验收。旧APK不识别新收尾字段，须更新；未覆盖被控Agent/Updater下载目录。
+
+正式分层回执见[QA](../qa/2026-10-21-failed-execution-finalization-release.json)。以上发布结论不代表Windows安装、客户端归档或员工业务完成。
+
+已用正式服务端真实 mobile 投影运行已发布Android16的model、render及controller：awaiting_client/在线离线文案、ACK前发送阻断、历史列表缺失时Bot顶层receipt兜底均通过，0次业务发送，原failed/uncertain/processExit:null保留。此项是生产投影加真实App代码的验证，不能代替真机安装。

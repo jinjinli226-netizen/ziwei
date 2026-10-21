@@ -1,0 +1,101 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-10-21T11:32:16.930312+00:00",
+  "source": {
+    "commit": "1b9dbe40f4940a6b8105a34a670ed7094db4c3ea",
+    "pushedBeforeDeploy": true,
+    "refs": [
+      "main",
+      "codex/remote-client-upgrade",
+      "codex/v2-20261014-release"
+    ]
+  },
+  "server": {
+    "ok": true,
+    "current": "/opt/ziwei/releases/failed-finalization-1b9dbe40f494-53492a2b/v2",
+    "previous": "/opt/ziwei/releases/world-memory-skill-6243891548c2-969a825292ca/v2",
+    "databaseRestored": false,
+    "originalBusinessResultsPreserved": true,
+    "protectedServicesUnchanged": true,
+    "coldFactoryPassed": true,
+    "linuxRegressionPassed": true,
+    "linuxClientRuntimeProof": {
+      "verified": true,
+      "clientBuild": "f96559041d637cb5d870c3f3d2ec93745d375f323a49edb3d3738b07fd4bb96e",
+      "noListeners": true
+    },
+    "linuxNpmColdInstallVerified": false,
+    "buildHostColdInstallVerified": true
+  },
+  "public": {
+    "health": {
+      "ok": true,
+      "service": "ziwei-api",
+      "cli": "ziwei_user",
+      "time": "2026-10-21T11:25:33.353Z"
+    },
+    "commit": "1b9dbe40f4940a6b8105a34a670ed7094db4c3ea",
+    "clientBuild": "f96559041d637cb5d870c3f3d2ec93745d375f323a49edb3d3738b07fd4bb96e",
+    "sha256": "c3f70896739751c229df06d345b2ac5c33c6802c838edf274a13a1116b87963b",
+    "metadataDigestMatches": true,
+    "bytes": 1266787,
+    "assets": [
+      "/assets/index-Di1o5clA.js",
+      "/assets/index-CZSoHKUM.css"
+    ],
+    "assetProof": [
+      {
+        "path": "/assets/index-Di1o5clA.js",
+        "sha256": "1902b0ad335ebe18f240e7286aa92a7520b07590cfb0981c86178526569cd5fb",
+        "matchesBuiltAsset": true
+      },
+      {
+        "path": "/assets/index-CZSoHKUM.css",
+        "sha256": "2c69e99ae978ba9d95846547d6dfeac819af8b938d92c3320cbeb81db1c5e1ce",
+        "matchesBuiltAsset": true
+      }
+    ]
+  },
+  "windows": {
+    "deviceId": "device_bfd9a3d2-c2cc-4a36-8bd8-465bea492493",
+    "actualBuild": "15687444502be073f3dc432d8c6817ec27b2f6635019da28f97dde1b3635d0f7",
+    "targetBuild": "f96559041d637cb5d870c3f3d2ec93745d375f323a49edb3d3738b07fd4bb96e",
+    "installedVerified": false,
+    "reason": "old scheduler activeCount includes quarantinedActionIds; remote waiting_idle cannot load new recovery code",
+    "externalBootstrapRequested": true
+  },
+  "originalFailure": {
+    "actionId": "action_a9e24edf-afc2-42dd-b779-6cb3629ef94c",
+    "state": "awaiting_client",
+    "originalReceiptUnchanged": true,
+    "revision": 7,
+    "controlEpochBefore": 25,
+    "controlEpochAfter": 26,
+    "activeActionAfter": null,
+    "clientArchiveAckVerified": false,
+    "replayed": false
+  },
+  "continuityModelTest": {
+    "state": "not_started",
+    "reason": "wait for original client archive ACK and installed target build"
+  },
+  "android": {
+    "version": "0.5.4-internal",
+    "versionCode": 16,
+    "sourceRevision": "6a857c54c197fc774e5549aa4ffcdca6779afc7b",
+    "releaseUrl": "https://github.com/jinjinli226-netizen/ziwei/releases/tag/android-manager-v0.5.4-internal",
+    "apkSha256": "1d1cb8269472ebaa51ddd59ba8edb52770d5aae37a24323ed2c21ef5c9576366",
+    "manifestSha256": "fb54450c923af6348e21f376c9e8e7a4b39503d7b7a16cd636ac3793ba2766bf",
+    "anonymousDownloadVerified": true,
+    "originalSigningCertificateVerified": true,
+    "physicalDeviceTested": false,
+    "liveProjectionTest": {
+      "pendingReceiptRecognized": true,
+      "onlineLabel": "执行失败，正在自动收尾",
+      "offlineLabel": "执行失败，等待电脑连接",
+      "sendBlockedUntilClientAck": true,
+      "unconfirmedBusinessResultPreserved": true,
+      "realApiRequestsSent": 0
+    }
+  }
+}
