@@ -1,0 +1,144 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-21",
+  "scope": "web Bot roster and workbench performance",
+  "sourceCommit": "0d4f6c3f47ba9f80627268068d694dd83f9f3d8e",
+  "githubRefs": [
+    "main",
+    "codex/remote-client-upgrade",
+    "codex/v2-20261014-release"
+  ],
+  "tests": {
+    "backend": {
+      "passed": 38,
+      "failed": 0,
+      "skipped": 0
+    },
+    "frontend": {
+      "passed": 38,
+      "failed": 0,
+      "skipped": 0
+    },
+    "independentReview": "passed",
+    "build": "passed",
+    "largeHistoryDetailFixture": {
+      "fullBytes": 4224107,
+      "workbenchBytes": 11714
+    },
+    "existingMobileSuiteLimitation": "An unrelated MCP full-body/summary byte-equality assertion also fails on the unmodified HEAD; targeted mobile contract cases passed."
+  },
+  "deployment": {
+    "ok": true,
+    "completedAt": "2026-10-21T03:02:25.439121+00:00",
+    "current": "/opt/ziwei/releases/bot-page-performance-0d4f6c3f47ba-50044d9cfa51/v2",
+    "previous": "/opt/ziwei/releases/codex-native-resume-input-d185cb9e6a8f-dc22abe6a9ff/v2",
+    "apiPid": "634554",
+    "schemaUnchanged": true,
+    "databaseRestored": false,
+    "oldFrontendAssetsRetained": true,
+    "officialClientFilesPreserved": true,
+    "controlServiceRestarted": false,
+    "nginxRestarted": false,
+    "deviceUpdatesSubmitted": 0,
+    "employeeActionsSubmitted": 0,
+    "publicFrontend": {
+      "indexSha256": "7e0eef83ecc860d43cf283a3a7e8ecc55c4a7102958d28d98b02101dd1992059",
+      "assets": [
+        {
+          "path": "assets/index-BEqxu_al.js",
+          "sha256": "aec118151aa7eebce15452306eb7a6b32e3018e60f91d5c31d7774c48ff857a1"
+        },
+        {
+          "path": "assets/index-CZSoHKUM.css",
+          "sha256": "2c69e99ae978ba9d95846547d6dfeac819af8b938d92c3320cbeb81db1c5e1ce"
+        }
+      ],
+      "redirectsAllowed": false
+    }
+  },
+  "productionReadMeasurements": {
+    "before-list": {
+      "phase": "before-list",
+      "route": "/api/workspaces/bigtron/bots",
+      "status": 200,
+      "headersMs": 15144,
+      "downloadMs": 152389,
+      "totalMs": 167532,
+      "bytesRead": 7965123,
+      "contentLength": "7965123",
+      "truncatedAt32MiB": false,
+      "parseMs": 33,
+      "botCount": 7,
+      "topKeys": [
+        "bots"
+      ]
+    },
+    "after-list": {
+      "phase": "after-list",
+      "route": "/api/workspaces/bigtron/bots?view=roster",
+      "status": 200,
+      "headersMs": 4604,
+      "downloadMs": 620,
+      "totalMs": 5224,
+      "bytesRead": 31584,
+      "contentLength": "31584",
+      "truncatedAt32MiB": false,
+      "parseMs": 1,
+      "botCount": 7,
+      "topKeys": [
+        "bots"
+      ]
+    },
+    "after-detail": {
+      "phase": "after-detail",
+      "route": "/api/workspaces/bigtron/bots/employee_1743b9a2-dd8c-4a51-9b7d-0d25414aa234?view=workbench",
+      "status": 200,
+      "headersMs": 4970,
+      "downloadMs": 317,
+      "totalMs": 5286,
+      "bytesRead": 20206,
+      "contentLength": "20206",
+      "truncatedAt32MiB": false,
+      "parseMs": 1,
+      "botCount": null,
+      "topKeys": [
+        "id",
+        "employee_id",
+        "workspace",
+        "employee",
+        "instance",
+        "configuration_state",
+        "kind",
+        "config",
+        "revision",
+        "control_state",
+        "control_epoch",
+        "main_conversation_id",
+        "nativeResources",
+        "scheduler_authority",
+        "validation",
+        "latest_run",
+        "stop_action",
+        "effect",
+        "workbenchView",
+        "active_run",
+        "deferredConfig",
+        "capabilities",
+        "capabilityGate"
+      ]
+    }
+  },
+  "measurementCaveat": "Single authenticated request samples from this Mac include network/proxy time; not a universal render-time benchmark. Original full list was requested only once.",
+  "browser": {
+    "rosterBotCount": 7,
+    "tkDetailVisible": true,
+    "settingsFieldsAvailable": true,
+    "settingsAvailableWhileHistoryLoading": true,
+    "alerts": [],
+    "consoleErrors": [],
+    "businessWritesSubmitted": 0,
+    "historyRequestedOnActivityTab": true
+  },
+  "localListenersStarted": 0,
+  "temporaryUnusedPortReservationReleased": 414
+}
