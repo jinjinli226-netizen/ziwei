@@ -1,0 +1,93 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-10-21T14:07:44.883859+00:00",
+  "source": {
+    "commit": "c67d2cd00fc0526f2c2da3528a220d03263fa143",
+    "pushedBeforePublication": true,
+    "refs": [
+      "main",
+      "codex/remote-client-upgrade",
+      "codex/v2-20261014-release"
+    ]
+  },
+  "originalUserFailure": {
+    "failureStage": "recover_history",
+    "reasonCode": "OPERATION_TIMEOUT",
+    "installedBuild": "15687444502be073f3dc432d8c6817ec27b2f6635019da28f97dde1b3635d0f7",
+    "originalStep": "unknown because old error omitted phase and step",
+    "attributedToUserCommand": false
+  },
+  "changes": {
+    "authorizationReadAttempts": 3,
+    "authorizationReadDeadlinesMs": [
+      8000,
+      16000,
+      24000
+    ],
+    "backoffMs": [
+      100,
+      200
+    ],
+    "authorizationReadMaximumWaitMs": 48300,
+    "mutationRetry": false,
+    "responseBodySharesDeadline": true,
+    "pauseFailureResumesExactInstance": true,
+    "safeStepDiagnostics": true,
+    "originalFailureRetained": true,
+    "executionExitInvented": false
+  },
+  "validation": {
+    "recoveryTests": {
+      "passed": 62,
+      "failed": 0,
+      "skipped": 1,
+      "skipReason": "Windows native stale-lock handle test on non-Windows"
+    },
+    "updaterCompatibilityTests": {
+      "passed": 12,
+      "failed": 0,
+      "skipped": 0
+    },
+    "lintSourceFiles": 238,
+    "coldProof": {
+      "verified": true,
+      "noListeners": true,
+      "noNetworkOrHelpers": true,
+      "dependencyPackages": 71
+    },
+    "linuxPackagedRuntime": {
+      "clientBuild": "b6261c0c383b03ba419312e8b116081c72162e6469acb4e4f80277e06d51dae3",
+      "verified": true,
+      "noListeners": true
+    },
+    "localListenersStarted": false
+  },
+  "publication": {
+    "ok": true,
+    "clientBuild": "b6261c0c383b03ba419312e8b116081c72162e6469acb4e4f80277e06d51dae3",
+    "clientSha256": "570ae5c333280a61d0c9fe0fc234155561331cb08cde5ee74142e3ba72cd7ee3",
+    "apiChanged": false,
+    "databaseChanged": false,
+    "bootstrapChanged": false,
+    "apiPid": "397608",
+    "apiCurrent": "/opt/ziwei/releases/failed-finalization-1b9dbe40f494-53492a2b/v2",
+    "allOtherDownloadsPreserved": true
+  },
+  "publicDownload": {
+    "verified": true,
+    "commit": "c67d2cd00fc0526f2c2da3528a220d03263fa143",
+    "clientBuild": "b6261c0c383b03ba419312e8b116081c72162e6469acb4e4f80277e06d51dae3",
+    "sha256": "570ae5c333280a61d0c9fe0fc234155561331cb08cde5ee74142e3ba72cd7ee3",
+    "bytes": 1268383,
+    "pairedApiCommit": "1b9dbe40f4940a6b8105a34a670ed7094db4c3ea",
+    "frontendCommit": "1b9dbe40f4940a6b8105a34a670ed7094db4c3ea",
+    "windowsValidation": "pending-user-update"
+  },
+  "windowsAcceptance": {
+    "state": "pending-user-update",
+    "requestSent": true,
+    "archiveAckVerified": false,
+    "modelContinuityVerified": false
+  },
+  "mobileUpdateRequiredForThisTimeoutPatch": false
+}
