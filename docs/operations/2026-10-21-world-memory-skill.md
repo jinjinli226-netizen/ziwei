@@ -21,3 +21,9 @@
 9项新增内存仓库测试及46项相关检查通过，禁网络、监听和外部助手。覆盖新旧员工、多工作区、身份稳定、原技能去重、按名称卸载及重装、主要执行入口；独立23项相关检查通过（与前项重叠不累加）。官方Skill校验、语法及diff检查通过。
 
 服务端增量发布仅覆盖repository/catalog及两份技能文件。生产catalog与Git基线的28处差异仅CRLF，归一后逻辑相同，保留实际生产摘要作发布前置校验。源码先推GitHub，再发布；正式目录读取与发布结果另记QA。
+
+## 已发布与现场目录验收
+
+源码 `6243891548c2951cf03b05cec24183a998e2b728` 已先推送三分支，北京时间2026-10-21 12:02完成服务端发布。新进程健康、Linux候选9项测试通过；网页、数据库结构、中控、客户端和APK保持，无员工业务任务或设备升级。正常认证API已确认bigtron和phone_ai两个工作区各有唯一1.0.0指南，installed:true、validation_status:valid、defaultEnabled:true，同时setupRequired:true、connectionStatus:not_verified。
+
+此现场验收证明目录可用和代码已上线；没有为真实员工安装CLI、签发知识库身份或执行真实检索。员工首次按任务使用时仍需官方管理员批准，其后复用自己的授权。机器可读记录见[QA](../qa/2026-10-21-world-memory-skill.json)。

@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-21",
+  "sourceGuide": "https://world.qzelynth.top/doc/guide.md",
+  "sourceCommit": "6243891548c2951cf03b05cec24183a998e2b728",
+  "tests": {
+    "newSkill": 9,
+    "relatedTotalPassed": 55,
+    "independentRelatedPassed": 23,
+    "countsOverlap": true,
+    "failed": 0,
+    "noListeners": true,
+    "noNetwork": true
+  },
+  "deployment": {
+    "ok": true,
+    "completedAt": "2026-10-21T04:02:10.903284+00:00",
+    "current": "/opt/ziwei/releases/world-memory-skill-6243891548c2-969a825292ca/v2",
+    "previous": "/opt/ziwei/releases/conversation-history-performance-0494db8fb9ee-1b7652cf99dd/v2",
+    "mainPid": "638473",
+    "serverOnly": true,
+    "frontendUnchanged": true,
+    "schemaUnchanged": true,
+    "databaseRestored": false,
+    "officialClientFilesPreserved": true,
+    "deviceUpdatesSubmitted": 0,
+    "employeeActionsSubmitted": 0
+  },
+  "liveCatalog": [
+    {
+      "workspace": "bigtron",
+      "skillId": "skill_4fc7039a-dbf9-4caf-8820-c7c71486dff4",
+      "name": "紫薇映界·共享知识库",
+      "installed": true,
+      "version": "1.0.0",
+      "validation_status": "valid",
+      "integration": {
+        "kind": "knowledge_guide",
+        "defaultEnabled": true,
+        "setupRequired": true,
+        "apiOrigin": "https://world.qzelynth.top",
+        "guideUrl": "https://world.qzelynth.top/doc/guide.md",
+        "credentialMode": "independent_employee_profile",
+        "transport": "stdio",
+        "mcpServer": "memory_world",
+        "supportedRuntimes": [
+          "Codex",
+          "Hermes"
+        ],
+        "connectionStatus": "not_verified"
+      }
+    },
+    {
+      "workspace": "phone_ai",
+      "skillId": "skill_7dd4a0ff-749c-4a27-92ce-425f610c81ee",
+      "name": "紫薇映界·共享知识库",
+      "installed": true,
+      "version": "1.0.0",
+      "validation_status": "valid",
+      "integration": {
+        "kind": "knowledge_guide",
+        "defaultEnabled": true,
+        "setupRequired": true,
+        "apiOrigin": "https://world.qzelynth.top",
+        "guideUrl": "https://world.qzelynth.top/doc/guide.md",
+        "credentialMode": "independent_employee_profile",
+        "transport": "stdio",
+        "mcpServer": "memory_world",
+        "supportedRuntimes": [
+          "Codex",
+          "Hermes"
+        ],
+        "connectionStatus": "not_verified"
+      }
+    }
+  ],
+  "runtimeGuideCoverage": [
+    "existing employees",
+    "new employees",
+    "multiple workspaces",
+    "Codex",
+    "Hermes",
+    "chat",
+    "task",
+    "Routine",
+    "Gateway",
+    "collaboration"
+  ],
+  "realKnowledgeConnection": {
+    "verified": false,
+    "cliInstalledByThisChange": false,
+    "employeeAuthorizationGrantedByThisChange": false,
+    "actualSearchPerformed": false,
+    "firstUse": "Official per-employee no-browser administrator approval; existing trusted profile reused."
+  },
+  "privateKnowledgePublished": false,
+  "localListenersStarted": 0
+}

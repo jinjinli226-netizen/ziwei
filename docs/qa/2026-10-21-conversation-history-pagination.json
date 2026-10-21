@@ -143,8 +143,15 @@
   },
   "measurementCaveat": "Single authenticated HTTP samples include this Mac network conditions; messages can be added by ongoing authorized employee work between samples.",
   "browserVerification": {
-    "state": "not_confirmed",
-    "reason": "In-app browser navigation and module loading timed out; no browser rendering pass claimed. API ten-message pages and frontend component/integration tests passed."
+    "state": "passed",
+    "initialCount": 10,
+    "afterLoadCount": 20,
+    "originalMessagesRetained": true,
+    "uniqueCount": 20,
+    "alerts": [],
+    "workPanelInitiallyClosed": true,
+    "consoleErrors": [],
+    "note": "Initial in-app navigation timed out; a fresh verification tab loaded and the actual 10→20 message UI passed; temporary tab closed."
   },
   "modelAndMobileFullHistoryContract": "unchanged",
   "localListenersStarted": 0
