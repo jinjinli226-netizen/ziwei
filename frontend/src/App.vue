@@ -2,6 +2,7 @@
 import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { ZiAvatar, ZiButton, ZiCard, ZiEmptyState, ZiFormField, ZiIcon, ZiInput, ZiMetricCard, ZiModal, ZiProgress, ZiStatusTag, ZiSwitch, ZiTabs, ZiTextarea } from '@ziwei/ui';
 import { API_BASE, api, setWorkspaceSlug, workspaceSlug } from './api.js';
+import {loadBotPageOptions,mergeBotRosterEmployee,workspaceDataKey} from './bot-page-load.js';
 import { connectWorkspaceRealtime } from './realtime.js';
 import WorkspaceShell from './components/WorkspaceShell.vue';
 import ZiSelect from './components/ZiSelect.vue';
@@ -445,7 +446,12 @@ const docsUsedPercent = computed(() => Math.min(100, (docsUsedBytes.value / (10 
 // focused conversation id in Vue state so selecting/creating a conversation
 // immediately switches the inbox into the dedicated persistent-session view.
 const conversationRouteId = ref(conversationIdFromPath());
-let workspaceLoadGeneration = 0;
+let workspaceLoadGeneration = 0,fullWorkspaceDataKey='';
+watch(()=>authState.value.user?.id,()=>{
+  workspaceLoadGeneration++;fullWorkspaceDataKey='';loadedBotOptionsWorkspace.value='';
+  employeeBots.value=[];employeeBotsWorkspace.value='';employees.value=[];tasks.value=[];
+});
+
 let conversationOpenGeneration = 0;
 let conversationListGeneration = 0;
 const conversationRequests = createConversationRequestSequence();
@@ -456,7 +462,7 @@ const employeeProfileTasks = computed(() => { const employee = employeeProfile.v
 const employeeProfileConversations = computed(() => { const employee = employeeProfile.value; if (!employee) return []; return conversations.value.filter(item => item.employee_id === employee.id); });
 const pageTitle = computed(() => ({home:'首页',issues:'问题与任务',calendar:'日历',docs:'项目文档',members:'成员与设备',runtimes:'运行时',skills:'技能中心',settings:'工作区设置',invite:'邀请加入紫薇',open:'开放平台',automations:'自动化',inbox:focusedConversation.value ? '持久会话' : '收件箱',employee:employeeProfile.value?.name || '数字伙伴','ziwei-connect':'紫薇·互联'}[page.value] || '紫薇'));
 
-function navigate(key) { botChatIntent.value=null; if(key==='members')void load();  if (key==='bots') { botWorkspace.value=workspaceSlug();botRouteId.value='';botInitialTab.value='chat'; }  if (key === 'workflow') key='automations'; if (key === 'skills') { search.value=''; skillScope.value='platform'; skillTab.value='all'; } if (key === 'inbox') { clearConversationAttachment({preserve:true}); ++conversationOpenGeneration; selectedConversation.value=null; conversationExecution.value=null; conversationDraft.value=''; conversationRouteId.value=''; clearConversationAttachment(); stopConversationPolling(); } if (key !== 'employee') { employeeRouteId.value=''; employeeActionId.value=''; } page.value = key; history.pushState({},'',routePath(key)); if (key === 'open') loadApiKeys(); if (key === 'ziwei-connect') void loadZiweiConnect(); }
+function navigate(key) { const leavingBotPage=page.value==='bots';botChatIntent.value=null;  if (key==='bots') { botWorkspace.value=workspaceSlug();botRouteId.value='';botInitialTab.value='chat'; }  if (key === 'workflow') key='automations'; if (key === 'skills') { search.value=''; skillScope.value='platform'; skillTab.value='all'; } if (key === 'inbox') { clearConversationAttachment({preserve:true}); ++conversationOpenGeneration; selectedConversation.value=null; conversationExecution.value=null; conversationDraft.value=''; conversationRouteId.value=''; clearConversationAttachment(); stopConversationPolling(); } if (key !== 'employee') { employeeRouteId.value=''; employeeActionId.value=''; } page.value = key; history.pushState({},'',routePath(key)); if(key==='members'||(leavingBotPage&&key!=='bots'&&fullWorkspaceDataKey!==workspaceDataKey(workspaceSlug(),authState.value.user?.id)))void load(); if (key === 'open') loadApiKeys(); if (key === 'ziwei-connect') void loadZiweiConnect(); }
 async function switchWorkspace(slug) {
   const nextSlug=String(slug || '').trim();
   if (!nextSlug || nextSlug === workspaceSlug()) return;
@@ -539,13 +545,18 @@ async function changeLanguage(value) {
   applyDisplayPreferences();
   try { await api.updatePreferences({ language:value }); } catch (error) { notify(error.message); }
 }
+function refreshVisibleWorkspace() {
+  void loadNotifications();
+  if(page.value==='bots')return;
+  void refreshTasks();void refreshConversationState();
+}
 function openRealtime() {
   closeRealtime();
   if (!authState.value.authenticated) return;
   eventSource.value = connectWorkspaceRealtime({
     wsUrl: api.websocketUrl(), sseUrl: api.streamUrl(),
-    onReady: () => { loadNotifications(); refreshTasks(); refreshConversationState(); },
-    onEvent: () => { loadNotifications(); refreshTasks(); refreshConversationState(); }
+    onReady: refreshVisibleWorkspace,
+    onEvent: refreshVisibleWorkspace
   });
 }
 onUnmounted(() => { conversationForwarder.dispose(); closeRealtime(); stopConversationPolling(); stopVoiceInput(); if (ziweiConnectRunTimer) clearTimeout(ziweiConnectRunTimer); ziweiConnectRunTimer=null; dismissToast(); });
@@ -1023,8 +1034,8 @@ function deviceSetupDismissedKey() {
 function dismissDeviceSetup() { try { localStorage.setItem(deviceSetupDismissedKey(), '1'); } catch {} closeDeviceModal(); }
 function openSkillCatalog() { skillScope.value='platform'; skillTab.value='all'; notify('已打开平台技能目录'); }
 async function load() {
-  const activeWorkspace=workspaceSlug(), generation=++workspaceLoadGeneration;
-  const current=()=>activeWorkspace===workspaceSlug() && generation===workspaceLoadGeneration;
+  const activeWorkspace=workspaceSlug(),actorId=authState.value.user?.id,generation=++workspaceLoadGeneration;
+  const current=()=>authState.value.authenticated&&actorId===authState.value.user?.id&&activeWorkspace===workspaceSlug()&&generation===workspaceLoadGeneration;
   loading.value = true;
   try {
     // Keep stale response data from a previous workspace from rendering while
@@ -1040,6 +1051,16 @@ async function load() {
     const settingsRequest = canReadWorkspaceSettings
       ? api.settings()
       : Promise.resolve({ workspace: { name: summary.value.workspace?.name || activeWorkspace, timezone: summary.value.workspace?.timezone || 'Asia/Shanghai', preferences: {} } });
+    if(page.value==='bots'){
+      const value=await loadBotPageOptions(api,settingsRequest);
+      if(!current())return;
+      summary.value=value.summary;models.value=value.models;skills.value=value.skills;devices.value=value.devices;
+      settings.value=value.settings;loadedBotOptionsWorkspace.value=activeWorkspace;
+      const st=value.settings.workspace;
+      workspaceName.value=st.name;workspaceTimezone.value=st.timezone;workspaceLanguage.value=st.preferences?.language||'zh-CN';workspaceTheme.value=st.preferences?.theme||'light';
+      await loadNotifications();if(current())openRealtime();
+      return;
+    }
     const [s,t,r,mo,sk,d,a,m,dev,e,c,st,ag] = await Promise.all([api.summary(),api.tasks(),api.runtimes(),api.models(),api.skills(),api.documents(),api.automations(),api.members(),api.devices(),api.employees(),api.calendar(),settingsRequest,api.agents()]);
     if(!current())return;
     const runtimeRows = Array.isArray(r?.runtimes) ? r.runtimes.filter(item => item && typeof item === 'object') : [];
@@ -1050,7 +1071,7 @@ async function load() {
     conversationDeviceId.value=selectedConversation.value
       ? selectedConversation.value.device_id || conversationDeviceId.value || ''
       : devices.value.find(device => device.status === 'online')?.id || devices.value[0]?.id || '';
-    employees.value=Array.isArray(e?.employees) ? e.employees.filter(item => item && typeof item === 'object') : []; if (!conversationEmployeeId.value) conversationEmployeeId.value=employees.value[0]?.id || 'unassigned'; calendar.value=c.calendars; settings.value=st; workspaceName.value=st.workspace.name; workspaceTimezone.value=st.workspace.timezone; workspaceDescription.value=st.workspace.description || ''; workspaceContext.value=st.workspace.context || ''; workspaceVisibility.value=st.workspace.visibility || 'workspace'; workspacePrefix.value=st.workspace.prefix || ''; profileName.value=st.workspace.profile?.name || authState.value.user?.name || ''; workspaceLanguage.value=st.workspace.preferences?.language || 'zh-CN'; workspaceTheme.value=st.workspace.preferences?.theme || 'light'; workspaceWeekStart.value=st.workspace.preferences?.weekStart || 'monday'; switchValue.value = st.workspace.preferences?.daemonHeartbeat !== false; automationDefaultMode.value = st.workspace.preferences?.automationDefaultMode || 'notification'; agents.value=ag.agents;
+    employees.value=Array.isArray(e?.employees) ? e.employees.filter(item => item && typeof item === 'object') : []; if (!conversationEmployeeId.value) conversationEmployeeId.value=employees.value[0]?.id || 'unassigned'; calendar.value=c.calendars; settings.value=st; workspaceName.value=st.workspace.name; workspaceTimezone.value=st.workspace.timezone; workspaceDescription.value=st.workspace.description || ''; workspaceContext.value=st.workspace.context || ''; workspaceVisibility.value=st.workspace.visibility || 'workspace'; workspacePrefix.value=st.workspace.prefix || ''; profileName.value=st.workspace.profile?.name || authState.value.user?.name || ''; workspaceLanguage.value=st.workspace.preferences?.language || 'zh-CN'; workspaceTheme.value=st.workspace.preferences?.theme || 'light'; workspaceWeekStart.value=st.workspace.preferences?.weekStart || 'monday'; switchValue.value = st.workspace.preferences?.daemonHeartbeat !== false; automationDefaultMode.value = st.workspace.preferences?.automationDefaultMode || 'notification'; agents.value=ag.agents;fullWorkspaceDataKey=workspaceDataKey(activeWorkspace,actorId);
     await Promise.all([loadNotifications(),loadConversations()]);
     if(!current())return;
     openRealtime();void refreshEmployeeBots(activeWorkspace,generation);
@@ -1458,9 +1479,10 @@ function openEmployeeActions(employee) { employeeActionId.value = employeeAction
 function botForEmployee(employee){return employeeBotsWorkspace.value===workspaceSlug()?employeeBots.value.find(bot=>bot.id===employee?.id):null;}
 async function refreshEmployeeBots(workspace,generation){
   try{const result=await api.bots(workspace);if(workspace!==workspaceSlug()||generation!==workspaceLoadGeneration)return;employeeBots.value=result.bots||[];employeeBotsWorkspace.value=workspace;
-    for(const bot of employeeBots.value){const index=employees.value.findIndex(employee=>employee.id===bot.id);if(index>=0)employees.value.splice(index,1,bot.employee);}
+    for(const bot of employeeBots.value){const index=employees.value.findIndex(employee=>employee.id===bot.id);if(index>=0)employees.value.splice(index,1,mergeBotRosterEmployee(employees.value[index],bot.employee));}
   }catch{if(workspace===workspaceSlug()&&employeeBotsWorkspace.value!==workspace){employeeBots.value=[];employeeBotsWorkspace.value='';}}
 }
+function botChanged(){void refreshEmployeeBots(workspaceSlug(),workspaceLoadGeneration);}
 function returnBotToTeam(employee){navigate('members');employeeActionId.value=employee.id;}
 function selectBotRoute(id) {
   botRouteId.value=id;botInitialTab.value='chat';history.pushState({},'',routePath('bots',id,botWorkspace.value));
@@ -1716,7 +1738,7 @@ onMounted(async () => { applyDisplayPreferences(); if (page.value==='android-ins
             <button class="notice-dismiss" type="button" aria-label="关闭提示" @click="dismissToast"><X :size="15"/></button>
           </div>
         </Transition>
-        <BotWorkbench v-if="page==='bots'" :key="botWorkspace" :workspace="botWorkspace" :actor-id="authState.user?.id || ''" :bot-id="botRouteId" :initial-tab="botInitialTab" :models="loadedBotOptionsWorkspace===botWorkspace?models:[]" :skills="loadedBotOptionsWorkspace===botWorkspace?skills:[]" @select="selectBotRoute" @section="selectBotSection" @chat="openBotConversation" @creator="openBotCreator" @phone="openBotPhone" @employee="returnBotToTeam" @changed="load"/>
+        <BotWorkbench v-if="page==='bots'" :key="botWorkspace" :workspace="botWorkspace" :actor-id="authState.user?.id || ''" :bot-id="botRouteId" :initial-tab="botInitialTab" :models="loadedBotOptionsWorkspace===botWorkspace?models:[]" :skills="loadedBotOptionsWorkspace===botWorkspace?skills:[]" @select="selectBotRoute" @section="selectBotSection" @chat="openBotConversation" @creator="openBotCreator" @phone="openBotPhone" @employee="returnBotToTeam" @changed="botChanged"/>
         <section v-if="page==='inbox'&&!botChatView.shell&&conversationBotId&&selectedConversation?.employee_id===conversationBotId" class="bot-chat-toolbar" aria-label="当前 Bot 快捷操作"><span>Hermes Bot · {{selectedConversation?.employee?.name || activeConversationEmployee?.name}}</span><div><button class="pill" @click="navigate('bots')">Bot 名册</button><button class="pill" @click="openBotSettings(conversationBotId)">Bot 设置</button><button class="pill" @click="openBotSettings(conversationBotId,'routines')">Routine</button><button class="pill" @click="openBotSettings(conversationBotId,'activity')">运行与控制</button></div></section>
         <div v-if="botChatView.pending" class="bot-chat-loading" role="status">正在打开这位 Bot 的主聊天…<button class="pill" @click="navigate('bots')">返回紫薇</button></div>
         <BotMainChat v-if="botChatView.ready" :bot="conversationBotBinding" :conversation="selectedConversation" :execution="conversationExecution" :events="executionEventRows(conversationExecution?.events||[])" v-model:draft="conversationDraft" :attachments="conversationAttachments" :device="selectedConversationDevice" :model-label="models.find(model=>model.id===(conversationBotBinding?.employee?.model_id||conversationModelId))?.label || conversationBotBinding?.employee?.model_id || '沿用 Profile 模型'" :working-directory="conversationWorkingDirectory" :send-pending="conversationSendPending" :attachment-reading="conversationAttachmentReading" :status-loading="conversationStatusLoading" :send-error="conversationSendError" :stop-busy="botChatStopBusy" :reconcile-busy="botChatReconcileBusy" :can-stop="conversationExecutionBusy||executionUncertain(conversationExecution)" :preview="previewMode" :work="botChatWork" :work-loading="botChatWorkLoading" :work-error="botChatWorkError" :preview-src="conversationAttachmentPreviewSrc" :size-label="conversationAttachmentSizeLabel" :forward-selecting="conversationForward.selecting" :forward-selected="conversationForward.messageIds" :forward-error="conversationForward.error" :forward-result="conversationForward.result" @forward-view="openForwardTargetConversation" :read-scope="conversationReadScope" @forward="startConversationForward($event)" @forward-select="startConversationForward($event,true)" @forward-toggle="conversationForwarder.toggle($event)" @forward-open="openConversationForward" @forward-cancel="conversationForwarder.cancel()" :on-visible-message="markVisibleConversationMessage" @send="sendConversationMessage" @retry-message="restoreConversationMessage" @settings="openBotSettings(conversationBotBinding.id,$event)" @return="openBotSettings(conversationBotBinding.id,'chat')" @directory="openConversationDirectoryPicker" @attachment="handleConversationAttachment" @paste-attachment="handleConversationPaste" @remove-attachment="removeConversationAttachment" @preview-image="openConversationImage" @download="downloadConversationAttachment" @stop="stopBotChat" @reconcile="reconcileBotChat" @refresh-work="loadBotChatWork" @phone="openBotPhone({workspace:workspaceSlug(),employeeId:conversationBotBinding.id})" @workspace-tasks="navigate('issues')"/>

@@ -16,9 +16,10 @@ export function botDraft(bot) {
   return {revision:bot.revision,employee:{name:employee.name || '',description:employee.description || '',instructions:employee.instructions || '',persona:employee.persona || '',avatar:employee.avatar || null,visibility:employee.visibility || 'personal',model:employee.model_id || null,skills:[...(employee.skills || [])]},config:clone(bot.config)};
 }
 export function botDraftDirty(bot,draft) {return Boolean(bot&&draft&&JSON.stringify(draft)!==JSON.stringify(botDraft(bot)));}
-export function createBotWorkbench({api,wrap=value=>value,wait=ms=>new Promise(resolve=>setTimeout(resolve,ms)),capabilityCheckAttempts=60}) {
+export function botWorkbenchReadOptions(tab) {return {runs:tab==='activity',routines:tab==='chat'||tab==='routines'};}
+export function createBotWorkbench({api,wrap=value=>value,wait=ms=>new Promise(resolve=>setTimeout(resolve,ms)),capabilityCheckAttempts=60,getReadOptions=()=>({runs:true,routines:true})}) {
   const scope=createBotRequestScope();let workspaceGeneration=0,listGeneration=0;
-  const state=wrap({workspace:'',selectedId:'',bots:[],bot:null,draft:null,runs:[],routines:[],loading:false,reading:false,busy:false,capabilityBusy:false,error:'',errorCode:'',notice:'',conflict:false,writeUnknown:false,pendingOperation:null});
+  const state=wrap({workspace:'',selectedId:'',bots:[],bot:null,draft:null,runs:[],routines:[],loading:false,reading:false,recordsReading:false,busy:false,capabilityBusy:false,error:'',errorCode:'',notice:'',conflict:false,writeUnknown:false,pendingOperation:null});
   const apply = bot => {
     if (!bot || bot.id!==state.selectedId || (bot.workspace && bot.workspace!==state.workspace)) throw new Error('Bot 响应归属与当前选择不一致');
     state.bot=bot;
@@ -31,32 +32,51 @@ export function createBotWorkbench({api,wrap=value=>value,wait=ms=>new Promise(r
     catch(error){if(generation===workspaceGeneration)state.error=botErrorMessage(error);}
     finally{if(generation===workspaceGeneration&&request===listGeneration)state.loading=false;}
   }
-  async function refresh({resetDraft=false}={}) {
-    if(!state.selectedId)return;
-    const request=scope.begin('read'),workspace=state.workspace,id=state.selectedId;state.reading=true;
-    let results;
-    try{
-      const bot=await api.bot(id,workspace);
-      if(!scope.current(request))return;
-      const records=bot.configuration_state==='uninitialized'?[{status:'fulfilled',value:{runs:[]}},{status:'fulfilled',value:{routines:[]}}]:await Promise.allSettled([api.botRuns(id,workspace),api.botRoutines(id,workspace)]);
-      results=[{status:'fulfilled',value:bot},...records];
-    }catch(error){results=[{status:'rejected',reason:error}];}
-    if(!scope.current(request))return;
+  const getBot=(id,workspace)=>(api.botWorkbench||api.bot).call(api,id,workspace);
+  function readOptions(overrides={}) {const defaults=getReadOptions()||{};return {runs:overrides.runs??defaults.runs??true,routines:overrides.routines??defaults.routines??true};}
+  async function loadRecords(options={}, {readRequest=null,confirmUnknown=false}={}) {
+    if(!state.bot||!state.selectedId||state.bot.configuration_state==='uninitialized')return;
+    const request=scope.begin('records'),workspace=state.workspace,id=state.selectedId;
+    const current=()=>scope.current(request)&&(!readRequest||scope.current(readRequest));
+    const selected=readOptions(options),names=['runs','routines'].filter(name=>selected[name]);
+    if(!names.length){state.recordsReading=false;return;}
+    state.recordsReading=true;
+    const results=await Promise.allSettled(names.map(name=>Promise.resolve().then(()=>name==='runs'?api.botRuns(id,workspace):api.botRoutines(id,workspace))));
+    if(!current())return;
     try {
-      if(results[0].status==='rejected')throw results[0].reason;
-      apply(results[0].value);
-      if(!state.pendingOperation&&results.length===3&&results.every(result=>result.status==='fulfilled'))state.writeUnknown=false;
-      if(resetDraft || !state.draft){state.draft=botDraft(state.bot);state.conflict=false;}
-      if(results[1].status==='fulfilled')state.runs=results[1].value.runs || [];
-      if(results[2].status==='fulfilled')state.routines=results[2].value.routines || [];
-      const partial=results.slice(1).find(result=>result.status==='rejected');
-      state.error=partial?`部分记录未能刷新：${botErrorMessage(partial.reason)}`:'';
-    }catch(error){state.error=botErrorMessage(error);}
-    finally{state.reading=false;}
+      for(let index=0;index<names.length;index++)if(results[index].status==='fulfilled')state[names[index]]=results[index].value[names[index]]||[];
+      const partial=results.find(result=>result.status==='rejected');
+      if(partial)state.error=`部分记录未能刷新：${botErrorMessage(partial.reason)}`;
+      else if(state.error.startsWith('部分记录未能刷新：'))state.error='';
+      // Unknown writes require the same complete readback as before; a lazy
+      // tab read alone cannot prove that an earlier mutation has settled.
+      if(confirmUnknown&&!state.pendingOperation&&selected.runs&&selected.routines&&!partial)state.writeUnknown=false;
+    }finally{if(current())state.recordsReading=false;}
+  }
+  async function refresh({resetDraft=false,...options}={}) {
+    if(!state.selectedId)return;
+    const request=scope.begin('read'),workspace=state.workspace,id=state.selectedId;scope.begin('records');state.recordsReading=false;state.reading=true;
+    try {
+      const bot=await getBot(id,workspace);
+      if(!scope.current(request))return;
+      apply(bot);
+      if(resetDraft||!state.draft){state.draft=botDraft(state.bot);state.conflict=false;}
+      state.error='';state.reading=false;
+      if(bot.configuration_state==='uninitialized'){
+        state.runs=[];state.routines=[];if(!state.pendingOperation)state.writeUnknown=false;return;
+      }
+      const selected=readOptions(options);
+      if(state.writeUnknown&&!state.pendingOperation){selected.runs=true;selected.routines=true;}
+      // A stop may refer to an older execution rather than latest_run. Keep
+      // its exact target proof available even outside the activity tab.
+      if(bot.stop_action?.payload?.actionId&&bot.stop_action.payload.actionId!==bot.latest_run?.id)selected.runs=true;
+      await loadRecords(selected,{readRequest:request,confirmUnknown:true});
+    }catch(error){if(scope.current(request))state.error=botErrorMessage(error);}
+    finally{if(scope.current(request))state.reading=false;}
   }
   async function select(id) {
     if(state.selectedId===id && state.bot)return;
-    scope.select(state.workspace,id);state.selectedId=id;state.bot=null;state.draft=null;state.runs=[];state.routines=[];state.error='';state.errorCode='';state.notice='';state.conflict=false;state.writeUnknown=false;state.busy=false;state.capabilityBusy=false;
+    scope.select(state.workspace,id);state.selectedId=id;state.bot=null;state.draft=null;state.runs=[];state.routines=[];state.reading=false;state.recordsReading=false;state.error='';state.errorCode='';state.notice='';state.conflict=false;state.writeUnknown=false;state.busy=false;state.capabilityBusy=false;
     state.pendingOperation=readPending(pendingKey(state.workspace,id));state.writeUnknown=Boolean(state.pendingOperation);
     if(id)await refresh({resetDraft:true});
   }
@@ -67,15 +87,15 @@ export function createBotWorkbench({api,wrap=value=>value,wait=ms=>new Promise(r
   async function mutate(operation,notice,{readback=false,resetDraft=false,recovering=false,verifyReadback=null}={}) {
     if(state.busy || (state.writeUnknown&&!recovering) || !state.bot)return false;
     const request=scope.begin('write'),workspace=state.workspace,id=state.selectedId;
-    scope.begin('read');state.reading=false;
+    scope.begin('read');scope.begin('records');state.reading=false;state.recordsReading=false;
     state.busy=true;state.error='';state.errorCode='';state.notice='';
     let accepted=false;
     try {
       const result=await operation(id,workspace);accepted=true;
       if(!scope.current(request))return false;
-      scope.begin('read');state.reading=false;
+      scope.begin('read');scope.begin('records');state.reading=false;state.recordsReading=false;
       if(readback){
-        const persisted=await api.bot(id,workspace);
+        const persisted=await getBot(id,workspace);
         if(!scope.current(request))return false;
         if(result?.revision && persisted.revision<result.revision)throw new Error('读回配置版本落后于保存回执');
         if(verifyReadback)verifyReadback(persisted,result);
@@ -110,6 +130,9 @@ export function createBotWorkbench({api,wrap=value=>value,wait=ms=>new Promise(r
   async function save() {
     if(!state.draft)return false;
     const draft=clone(state.draft);
+    // Avatar URLs identify the saved image; only changed image data or an
+    // explicit removal may be sent back as a replacement.
+    if((draft.employee.avatar??null)===(state.bot?.employee?.avatar??null))delete draft.employee.avatar;
     draft.config.provider=draft.config.provider?.trim() || null;
     return mutate((id,workspace)=>api.updateBot(id,{expectedRevision:draft.revision,employee:draft.employee,config:draft.config},workspace),'配置已保存。',{readback:true,resetDraft:true});
   }
@@ -168,5 +191,5 @@ export function createBotWorkbench({api,wrap=value=>value,wait=ms=>new Promise(r
   }
   async function recoverRoutine(){const pending=state.pendingOperation;if(pending?.kind==='routine_run')return runRoutine(pending.routineId,{recovering:true});return false;}
   function dispose(){workspaceGeneration++;scope.dispose();}
-  return {state,setWorkspace,select,list,refresh,initialize,removeEmployee,save,enableCapability,control,reconcile,validate,mutate,runRoutine,recoverRoutine,dispose};
+  return {state,setWorkspace,select,list,refresh,loadRecords,initialize,removeEmployee,save,enableCapability,control,reconcile,validate,mutate,runRoutine,recoverRoutine,dispose};
 }

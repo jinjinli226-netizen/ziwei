@@ -838,10 +838,10 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   function registerBotRoutes(prefix,guard,contextFor) {
     const base=`${prefix}/workspaces/:slug/bots`, bots=management.bots;
     app.get(`${base}/capabilities`,guard,(req,res)=>res.json(bots.capabilities(req.params.slug,req.query,contextFor(req))));
-    app.get(base,guard,(req,res)=>{const mobile=prefix==='/api'&&req.query.view==='mobile',context=contextFor(req),values=bots.list(req.params.slug,context,mobile?{view:'mobile'}:undefined);if(mobile){res.setHeader('Cache-Control','no-store');res.vary('Cookie');}res.json({bots:mobile?values.map(value=>mobileReadView.bot(req.params.slug,mobileGroupAction.bot(req.params.slug,value,context,{partial:true}))):values});});
+    app.get(base,guard,(req,res)=>{const mobile=prefix==='/api'&&req.query.view==='mobile',roster=prefix==='/api'&&req.query.view==='roster',context=contextFor(req),values=bots.list(req.params.slug,context,mobile?{view:'mobile'}:roster?{view:'roster'}:undefined);if(mobile||roster){res.setHeader('Cache-Control','no-store');res.vary('Cookie');}res.json({bots:mobile?values.map(value=>mobileReadView.bot(req.params.slug,mobileGroupAction.bot(req.params.slug,value,context,{partial:true}))):values});});
     app.post(base,guard,(req,res)=>{const result=bots.create(req.params.slug,req.body,contextFor(req));res.status(result.duplicate?200:202).json(result);});
     app.post(`${prefix}/workspaces/:slug/employees/:id/bot`,guard,(req,res)=>res.json(bots.initialize(req.params.slug,req.params.id,req.body,contextFor(req))));
-    app.get(`${base}/:id`,guard,(req,res)=>{const mobile=prefix==='/api'&&req.query.view==='mobile',context=contextFor(req),value=bots.get(req.params.slug,req.params.id,context,mobile?{view:'mobile'}:undefined);if(mobile){res.setHeader('Cache-Control','no-store');res.vary('Cookie');}res.json(mobile?mobileReadView.bot(req.params.slug,mobileGroupAction.bot(req.params.slug,value,context)):value);});
+    app.get(`${base}/:id`,guard,(req,res)=>{const mobile=prefix==='/api'&&req.query.view==='mobile',workbench=prefix==='/api'&&req.query.view==='workbench',context=contextFor(req),value=bots.get(req.params.slug,req.params.id,context,mobile?{view:'mobile'}:workbench?{view:'workbench'}:undefined);if(mobile||workbench){res.setHeader('Cache-Control','no-store');res.vary('Cookie');}res.json(mobile?mobileReadView.bot(req.params.slug,mobileGroupAction.bot(req.params.slug,value,context)):value);});
     app.patch(`${base}/:id`,guard,(req,res)=>{
       const context=contextFor(req);
       try {

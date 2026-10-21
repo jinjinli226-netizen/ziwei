@@ -4,7 +4,7 @@ import {Bot,Plus,MessageCircle,Settings2,Clock3,Activity,RefreshCw,ChevronRight,
 import {ZiButton,ZiModal,ZiFormField,ZiInput,ZiTextarea} from '@ziwei/ui';
 import ZiSelect from './ZiSelect.vue';
 import {api,API_BASE} from '../api.js';
-import {createBotWorkbench,botDraftDirty,botPresence,capabilityPresentation,executionUncertain} from '../bot-workbench.js';
+import {createBotWorkbench,botWorkbenchReadOptions,botDraftDirty,botPresence,capabilityPresentation,executionUncertain} from '../bot-workbench.js';
 import {botStopPresentation,botRecoveryEvent,botRecoveryDetail,processExitConfirmed} from '../bot-presentation.js';
 import {operatorForceAbandonRecovery} from '../operator-force-abandon-recovery.mjs';
 import {botErrorMessage,botTime} from '../bot-state.js';
@@ -21,7 +21,7 @@ const emit=defineEmits(['select','section','chat','employee','creator','phone','
 const previewMode=import.meta.env.VITE_ZIWEI_PREVIEW==='true';
 const nativePreview=import.meta.env.VITE_ZIWEI_NATIVE_PREVIEW==='true';
 const fixtureBot=computed(()=>previewMode&&(!nativePreview||s.bot?.employee?.runtime_profile==='preview-fixture'));
-const workbench=createBotWorkbench({api,wrap:reactive});const s=workbench.state;
+const workbench=createBotWorkbench({api,wrap:reactive,getReadOptions:()=>botWorkbenchReadOptions(tab.value)});const s=workbench.state;
 const workbenchRoot=ref(null),avatarReading=ref(false);
 const forceAbandonState=ref(null),forceAbandonBusy=ref(false),forceAbandonError=ref('');
 let forceAbandonKey='';
@@ -33,7 +33,7 @@ let createVisit=0;
 const routineEditor=ref(null),routineForm=ref({}),routineKey=ref(''),routineScope=ref(null);
 const routineKind=ref('prompt'),routineTarget=ref('');
 const nativeBlocked=ref(false),nativeTabs=['knowledge','collaboration','channels','proactive'];
-let generation=0,disposed=false,pollTimer=null;
+let generation=0,disposed=false,pollTimer=null,forceAbandonRead=null;
 const tabs=[['chat','聊天',MessageCircle],['settings','基础配置',Settings2],['capabilities','能力组合',Sparkles],['knowledge','资料与工具',Settings2],['collaboration','伙伴协作',MessageCircle],['channels','消息与音频',MessageCircle],['proactive','主动工作',Activity],['routines','例行工作',Clock3],['activity','运行记录',Activity]];
 const bots=computed(()=>s.bots.filter(item=>`${item.employee?.name || ''} ${item.employee?.description || ''}`.toLowerCase().includes(search.value.toLowerCase())));
 const selectedDevice=computed(()=>discovery.value?.devices?.find(item=>item.id===s.bot?.employee?.target_device_id));
@@ -53,7 +53,7 @@ const validationLabel=computed(()=>({not_checked:'尚未检查',pending:'检查�
 const nextRoutine=computed(()=>s.routines.filter(item=>item.status==='active'&&item.next_run).sort((a,b)=>Date.parse(a.next_run)-Date.parse(b.next_run))[0]);
 const activeRun=computed(()=>s.bot?.latest_run);
 const forceRemovalAvailable=computed(()=>canForceRemoveEmployee(s.bot,s.errorCode));
-const stopPresentation=computed(()=>botStopPresentation(s.bot,s.runs.find(run=>run.id===s.bot?.stop_action?.payload?.actionId)||activeRun.value));
+const stopPresentation=computed(()=>botStopPresentation(s.bot,s.bot?.stop_action?.payload?.actionId===activeRun.value?.id?activeRun.value:s.runs.find(run=>run.id===s.bot?.stop_action?.payload?.actionId)||activeRun.value));
 const runBusy=computed(()=>['pending','acked','running','queued'].includes(activeRun.value?.status) || executionUncertain(activeRun.value));
 const checkedCurrent=computed(()=>s.bot?.validation?.status==='succeeded' && s.bot.validation.revision===s.bot.revision);
 const toolsetsText=computed({get:()=>s.draft?.config.toolsets?.join('\n') || '',set:value=>{s.draft.config.toolsets=value.split(/[\n,]/).map(item=>item.trim()).filter(Boolean);}});
@@ -108,10 +108,17 @@ async function initialize(){if(await workbench.initialize())emit('changed');}
 async function removeEmployee(force=false){if(!s.bot||s.busy||s.writeUnknown||!window.confirm(employeeRemovalPrompt(s.bot.employee,force)))return;if(await workbench.removeEmployee({force})){emit('select','');emit('changed');await workbench.list();}}
 async function control(operation){if(await workbench.control(operation))emit('changed');}
 async function reconcile(run){if(await workbench.reconcile(run))emit('changed');}
+function forceAbandonReadKey(){return JSON.stringify([generation,props.workspace,s.selectedId,s.bot?.revision,s.bot?.control_epoch,s.bot?.latest_run?.id]);}
 async function loadForceAbandon(){
-  const visit=generation,workspace=props.workspace,id=s.selectedId;if(!id)return;
-  try{const value=await api.botForceAbandonStatus(id,workspace);if(scopeCurrent(visit,workspace)&&s.selectedId===id)forceAbandonState.value=value;}
-  catch{if(scopeCurrent(visit,workspace)&&s.selectedId===id)forceAbandonState.value=null;}
+  const visit=generation,workspace=props.workspace,id=s.selectedId,key=forceAbandonReadKey();if(!id)return;
+  if(forceAbandonRead?.key===key)return forceAbandonRead.promise;
+  const current=()=>scopeCurrent(visit,workspace)&&s.selectedId===id&&forceAbandonReadKey()===key;
+  const promise=(async()=>{
+    try{const value=await api.botForceAbandonStatus(id,workspace);if(current())forceAbandonState.value=value;}
+    catch{if(current())forceAbandonState.value=null;}
+    finally{if(forceAbandonRead?.key===key)forceAbandonRead=null;}
+  })();
+  forceAbandonRead={key,promise};return promise;
 }
 async function forceAbandon(){
   if(forceAbandonBusy.value||!forceAbandonState.value?.eligible||!s.bot)return;
@@ -138,7 +145,7 @@ async function create(){
   emit('select',result.id);await workbench.select(result.id);if(disposed||workspace!==props.workspace||s.selectedId!==result.id)return;
   ownedCreate.acknowledge(result.id);tab.value='chat';emit('changed');s.notice='Bot 和主聊天已保存。专属 Profile、HOME 与模型就绪状态见下方。';
 }
-async function refreshInstance(){await Promise.all([workbench.refresh(),loadDiscovery(),loadForceAbandon()]);}
+async function refreshInstance({refreshDiscovery=true}={}){await Promise.all([workbench.refresh(),...(refreshDiscovery?[loadDiscovery()]:[]),loadForceAbandon()]);}
 async function recoverInstance(){if(!instanceStatus.value.canRecover)return;const revision=s.bot.revision,actionId=instanceStatus.value.actionId;await workbench.mutate((id,workspace)=>api.provisionBot(id,{expectedRevision:revision,idempotencyKey:`bot-profile-recover-${id}-${actionId}`},workspace),'已查询同一专属 Profile 的恢复请求，请等待原设备回执。',{readback:true});}
 async function prepareInstance(){
   if(preparing.value||!instanceStatus.value.canValidate||configDirty.value||s.busy||s.writeUnknown)return;
@@ -160,7 +167,8 @@ async function runRoutine(routine){await workbench.runRoutine(routine.id);}
 function schedulePoll(){
   clearTimeout(pollTimer);pollTimer=setTimeout(async()=>{
     if(disposed)return;
-    if(!document.hidden && s.bot && !s.busy && !s.reading && (s.bot.validation?.status==='pending' || runBusy.value || ['provisioning','discovery_pending'].includes(instanceStatus.value.stage)))await refreshInstance();
+    const discovering=['provisioning','discovery_pending'].includes(instanceStatus.value.stage);
+    if(!document.hidden && s.bot && !s.busy && !s.reading && !s.recordsReading && (s.bot.validation?.status==='pending' || runBusy.value || discovering))await refreshInstance({refreshDiscovery:discovering});
     schedulePoll();
   },4000);
 }
@@ -173,6 +181,7 @@ watch(()=>props.actorId,()=>{ownedCreate.dispose();ownedCreate=createOwnedBotReq
 watch(()=>props.botId,id=>{if(id!==s.selectedId){clearTransientDrafts();void workbench.select(id);}});
 watch(()=>[props.workspace,s.bot?.id,s.bot?.revision,s.bot?.control_epoch,s.bot?.latest_run?.id],()=>{forceAbandonState.value=null;forceAbandonBusy.value=false;forceAbandonError.value='';forceAbandonKey='';void loadForceAbandon();});
 watch(()=>props.initialTab,value=>{if(tab.value!==value){routineEditor.value=null;tab.value=value;}});
+watch(tab,()=>{if(s.bot&&!s.busy&&!s.reading)void workbench.loadRecords();});
 onBeforeUnmount(()=>{disposed=true;generation++;ownedCreate.dispose();clearTimeout(pollTimer);workbench.dispose();});schedulePoll();
 </script>
 
@@ -229,14 +238,14 @@ onBeforeUnmount(()=>{disposed=true;generation++;ownedCreate.dispose();clearTimeo
           <section v-else-if="tab==='routines'" class="bot-form-section">
             <div class="bot-section-heading"><div><h3>{{s.bot.employee.name}} 的 Routine</h3><p>按计划运行，结果回到主聊天。运行电脑需保持在线。</p></div><button class="bot-button" :disabled="s.busy||s.writeUnknown||s.bot.configuration_state==='uninitialized'||(instanceStatus.mode==='owned_profile'&&!instanceStatus.provisioned)" @click="editRoutine()"><Plus :size="16"/>添加计划</button></div>
             <p v-if="previewMode" class="bot-banner warning">本地预览已关闭自动调度。计划可保存；手动运行按所选伙伴的实际运行来源执行。</p><details class="bot-advanced"><summary>高级信息</summary><p>调度：{{s.bot.scheduler_authority==='ziwei'?'紫薇统一调度':s.bot.scheduler_authority||'待确认'}}。</p></details>
-            <p v-if="s.bot.effect?.pendingReason" class="bot-help">{{s.bot.effect.pendingReason}}</p><div v-if="!s.routines.length" class="bot-empty"><Clock3 :size="32"/><h3>把重复工作交给这个 Bot</h3><p>设置时间、时区和任务内容，每次结果回到同一主聊天。</p></div>
+            <p v-if="s.bot.effect?.pendingReason" class="bot-help">{{s.bot.effect.pendingReason}}</p><p v-if="s.recordsReading" class="bot-help" role="status">正在读取例行工作…</p><div v-if="!s.recordsReading&&!s.routines.length" class="bot-empty"><Clock3 :size="32"/><h3>把重复工作交给这个 Bot</h3><p>设置时间、时区和任务内容，每次结果回到同一主聊天。</p></div>
             <article v-for="routine in s.routines" :key="routine.id" class="bot-routine"><div class="bot-section-heading"><h3>{{routine.name}}</h3><span class="bot-status" :data-tone="routine.status==='active'?'success':'muted'">{{routine.status==='active'?'计划已启用':'计划已暂停'}}</span></div><p>{{routine.prompt}}</p><dl><div><dt>计划</dt><dd>{{routine.schedule}} · {{routine.timezone||'时区未返回'}}</dd></div><div><dt>下次运行</dt><dd>{{botTime(routine.next_run,routine.timezone)}}</dd></div><div><dt>结果会话</dt><dd><button class="bot-link" @click="chat">当前 Bot 主聊天</button></dd></div></dl><p v-if="routine.last_result">最近结果：{{routine.last_result.status}} · {{routine.last_result.message||routine.last_result.error||'查看主聊天与运行记录'}}</p><div class="bot-actions"><button class="bot-button" :disabled="s.busy||s.writeUnknown" @click="toggleRoutine(routine)">{{routine.status==='active'?'暂停':'恢复'}}</button><button class="bot-button" :disabled="s.busy||s.writeUnknown||s.bot.control_state!=='active'" @click="runRoutine(routine)">手动运行</button><button class="bot-button" :disabled="s.busy||s.writeUnknown" @click="editRoutine(routine)">编辑</button><button class="bot-button danger" :disabled="s.busy||s.writeUnknown" @click="deleteRoutine(routine)">删除</button><button class="bot-link" @click="changeSection('activity')">结果与失败记录</button></div></article>
             <p class="bot-help">失败或执行待核实时先查看原记录；手动运行会创建新意图，不会重放未知执行。</p>
           </section>
           <section v-else-if="tab==='activity'" class="bot-form-section">
             <div class="bot-section-heading"><div><h3>运行与控制</h3><p>{{present.detail}}</p></div><button class="bot-button" :disabled="s.reading||s.busy" @click="workbench.refresh()"><RefreshCw :size="15"/>刷新回执</button></div>
             <div class="bot-surface"><h3>{{validationLabel}}</h3><p v-if="s.bot.validation?.error" class="bot-error-text">{{s.bot.validation.error}}</p><p>检查模型、工具和运行设置是否完整。</p><p v-if="fixtureBot" class="bot-help">当前使用预览数据。</p><div class="bot-actions"><button class="bot-button" :disabled="s.busy||s.writeUnknown||s.bot.configuration_state==='uninitialized'||(instanceStatus.mode==='owned_profile'&&!instanceStatus.provisioned)||configDirty||runBusy||!instanceStatus.canValidate" @click="workbench.validate()"><ShieldCheck :size="16"/>检查已保存配置</button><button v-if="s.bot.control_state==='draft'" class="bot-button primary" :disabled="s.busy||s.writeUnknown||!checkedCurrent||configDirty||runBusy" @click="control('activate')"><Play :size="15"/>启用 Bot</button><button v-else-if="s.bot.control_state==='paused'" class="bot-button" :disabled="s.busy||s.writeUnknown||!checkedCurrent||runBusy" @click="control('resume')"><Play :size="15"/>恢复 Bot</button><button v-else class="bot-button" :disabled="s.busy||s.writeUnknown" @click="control('pause')"><Pause :size="15"/>暂停 Bot</button><button class="bot-button danger" :disabled="s.busy||s.writeUnknown||!runBusy" @click="control('stop')"><Square :size="14"/>请求停止当前执行</button></div><p v-if="configDirty" class="bot-help">有未保存草稿，请先保存，再检查和启用。</p></div>
-            <article v-if="s.bot.stop_action" class="bot-surface"><h3>停止请求回执</h3><p>请求 {{s.bot.stop_action.id}} · {{s.bot.stop_action.status}}</p><p v-if="s.bot.stop_action.error" class="bot-error-text">{{s.bot.stop_action.error}}</p><p>{{stopPresentation.label}}</p></article><div v-if="!s.runs.length" class="bot-empty">尚无运行记录。状态未知时不会显示为已成功。</div>
+            <article v-if="s.bot.stop_action" class="bot-surface"><h3>停止请求回执</h3><p>请求 {{s.bot.stop_action.id}} · {{s.bot.stop_action.status}}</p><p v-if="s.bot.stop_action.error" class="bot-error-text">{{s.bot.stop_action.error}}</p><p>{{stopPresentation.label}}</p></article><p v-if="s.recordsReading" class="bot-help" role="status">正在读取运行记录…</p><div v-if="!s.recordsReading&&!s.runs.length" class="bot-empty">尚无运行记录。状态未知时不会显示为已成功。</div>
             <article v-for="run in s.runs" :key="run.id" class="bot-run"><div><strong>{{run.type==='hermes.bot.validate'?'配置检查':run.type||'工作执行'}}</strong><span class="bot-status" :data-tone="executionUncertain(run)?'warning':(botStopPresentation(s.bot,run).confirmed||botStopPresentation(s.bot,run).notStarted)?'muted':run.status==='succeeded'?'success':run.status==='failed'?'error':'muted'">{{executionUncertain(run)?'执行待核实':operatorForceAbandonRecovery(run)?'旧任务已强制放弃':botStopPresentation(s.bot,run).notStarted?'原模型未启动 · 已恢复':botStopPresentation(s.bot,run).confirmed?'原执行已停止':({succeeded:'已完成',failed:'失败',pending:'等待接收',acked:'执行中',cancelled:'已取消',expired:'已过期'}[run.status]||run.status)}}</span></div><time>{{botTime(run.created_at)}}</time><p v-if="botStopPresentation(s.bot,run).notStarted||operatorForceAbandonRecovery(run)" class="bot-help">{{botStopPresentation(s.bot,run).label}}</p><details v-if="(botStopPresentation(s.bot,run).notStarted||operatorForceAbandonRecovery(run))&&run.error"><summary>原始失败记录（已保留）</summary><p>{{run.error}}</p></details><p v-else-if="run.error" class="bot-error-text">{{run.error}}</p><p v-if="executionUncertain(run)" class="bot-help">{{botRecoveryDetail(run)}}</p><button v-if="botRecoveryEvent(run)" class="bot-button" :disabled="s.busy||s.reading||s.writeUnknown" @click="reconcile(run)">{{s.busy?'正在核实…':'核实并恢复回执'}}</button><details><summary>查看执行标识与回执</summary><p>执行 ID：{{run.id}}</p><p>完成时间：{{botTime(run.completed_at)}}</p><p v-if="operatorForceAbandonRecovery(run)">旧任务已强制放弃，原执行结果仍未知；原始失败记录已保留。</p><p v-else-if="botStopPresentation(s.bot,run).notStarted">历史恢复：模型未启动；原失败状态与回执已保留。</p><p v-else-if="run.result?.executionState">执行状态：{{run.result.executionState}}</p><p v-if="run.result?.stopConfirmed!==undefined">{{botStopPresentation(s.bot,run).label}}</p><p v-if="run.result?.processExit">进程退出证据：{{processExitConfirmed(run.result)?'根进程与进程树退出均已确认':'尚未完整确认'}}</p><p v-for="event in (run.events||[])" :key="event.id">{{event.message||event.type}}</p><button class="bot-link" @click="chat">进入主聊天查看结果与产物</button></details></article>
           </section>
           <BotNativeWorkspace v-if="s.draft" :key="actorId" v-show="nativeTabs.includes(tab)" :workspace="workspace" :actor-id="actorId" :bot="s.bot" :draft="s.draft" :bots="s.bots" :section="tab" :config-busy="s.busy||s.writeUnknown||nativeBlocked" :refresh-bot="refreshNativeBot" @busy="nativeBlocked=$event" @save-config="save" @stop-current="control('stop')"/>
