@@ -1,5 +1,7 @@
 # 紫薇 Android 管理 App
 
+待发布候选：`0.5.4-internal / code 16` 已补齐服务端“本轮失败自动收尾”合同的显示与发送判断。原电脑归档后可继续派新工作，待收尾时显示自动处理，保留原未知结果，不要求用户手工核实。候选检查通过，尚未发布或真机安装；见[候选验收](../docs/operations/2026-10-21-android-failure-finalization-candidate.md)。
+
 最近已交付的内部测试版：`0.5.3-internal`（code 15），包名 `com.ziwei.manager`，Android 8.0（API 26）及以上。[下载安装包](https://github.com/jinjinli226-netizen/ziwei/releases/download/android-manager-v0.5.3-internal/ziwei-manager-0.5.3-internal-code15.apk)。它是现有紫薇的手机管理入口；受控手机上的 Agent / Updater 继续使用原应用，Hermes 继续在绑定的常开电脑执行。
 
 0.3 起加入的手机功能随本版保留。群组分页依赖电脑客户端协议，旧电脑缺少分页回执时仍要求升级；通知验收不代表所有群组和电脑组合已测通。最近提醒及自建通知服务已与主控同步上线。

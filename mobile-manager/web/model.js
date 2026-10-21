@@ -1,5 +1,6 @@
 // Shared presentation uses the same receipt rules as the desktop product.
 import {botPresence, botStopPresentation, executionUncertain, executionOccupiesSlot} from './bot-presentation.js';
+import {pendingFinalizationAction} from './failure-finalization.mjs';
 
 export {executionUncertain, botStopPresentation};
 function executionScopeMatches(run, state, {requireEmployee = false} = {}) {
@@ -20,6 +21,7 @@ export function blockingChatExecution(state) {
   const conversationMatches=conversation?.employee_id===employeeId && executionScopeMatches(conversation,state);
   const botMatches=bot?.id===employeeId && executionScopeMatches(bot,state);
   const candidates = [
+    botMatches ? pendingFinalizationAction(bot) : null,
     conversationMatches && executionScopeMatches(conversation.execution,state) ? conversation.execution : null,
     ...list(state.runs,'runs').filter(run=>executionScopeMatches(run,state,{requireEmployee:true})),
     botMatches && executionScopeMatches(bot.latest_run,state) ? bot.latest_run : null,

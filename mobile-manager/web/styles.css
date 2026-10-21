@@ -510,6 +510,8 @@ details[open] > summary > .icon:last-child { transform: rotate(180deg); }
 .run-panel div > span.stop-detail { white-space: normal; overflow: visible; text-overflow: clip; }
 .run-panel.uncertain { background: #fcf5e7; border-color: #f2e4c6; }
 .run-panel.uncertain strong, .run-panel.uncertain div > span { color: #b38c4b; }
+.run-panel.failed { background: #fff3f3; border-color: #f3dede; }
+.run-panel.failed strong, .run-panel.failed div > span { color: #aa5364; }
 .summary-content + .sticky-action { display: flex; gap: 10px; align-items: stretch; }
 .summary-content + .sticky-action > .secondary { width: auto; min-width: 108px; font-size: 12px; padding: 10px 11px; }
 .summary-content + .sticky-action > .primary { flex: 1; font-size: 13px; }

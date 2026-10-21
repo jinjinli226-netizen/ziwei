@@ -9,6 +9,7 @@ import { createMobileGroups } from './mobile-groups.js';
 import { createMobileTasks } from './mobile-tasks.js';
 import { createMobileNotifications } from './mobile-notifications.js';
 import { createNotificationPresence } from './notification-presence.js';
+import {failureFinalization,finalizationPresentation} from './failure-finalization.mjs';
 
 const IMAGE_LIMIT = 10 * 1024 * 1024;
 const avatarLimit = 2 * 1024 * 1024;
@@ -503,7 +504,8 @@ export function createController({ state, api, render = () => {}, storage = glob
       return;
     }
     if (!state.conversation?.id || !state.selectedEmployee) throw new Error('请先打开员工聊天');
-    if (blockingChatExecution(state)) throw new Error('当前工作尚未结束，请等待回执或使用停止入口');
+    const blocking=blockingChatExecution(state);
+    if(blocking){const finalization=failureFinalization(blocking);throw new Error(finalization?finalizationPresentation(finalization).detail:'当前工作尚未结束，请等待回执或使用停止入口');}
     stashComposer();
     const item = composer(), content = item.draft.trim(), attachments = [...item.attachments];
     if (!content && !attachments.length) return;

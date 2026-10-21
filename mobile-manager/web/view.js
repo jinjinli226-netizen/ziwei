@@ -1,4 +1,5 @@
 import { escapeHtml, employeeName, avatarUrl, presence, messageText, formatTime, executionUncertain, botStopPresentation, blockingChatExecution } from './model.js';
+import {failureFinalization,finalizationPresentation} from './failure-finalization.mjs';
 import { renderBotSettings } from './bot-settings.js';
 import { renderDeviceSettings } from './device-settings.js';
 import { isForwardableMessage, orderedForwardMessages, FORWARD_MESSAGE_LIMIT, FORWARD_NOTE_LIMIT } from './forwarding.js';
@@ -192,9 +193,11 @@ function runPanel(state) {
   if (!run) return '';
   const employee=state.selectedEmployee, bot=state.bot || employee?.bot || rows(state.bots).find(item=>item.id===employee?.id);
   const events=rows(run.events), event=events[events.length-1], uncertain=executionUncertain(run);
+  const finalization=failureFinalization(run),device=finalization&&rows(state.devices).find(item=>item.id===finalization.receipt.subject.deviceId);
+  const finalized=finalizationPresentation(finalization,{offline:device?.status==='offline'});
   const stopping=bot?.stop_action?.payload?.actionId===run.id, stop=stopping ? botStopPresentation(bot,run) : null;
-  const description=stop?.label || event?.message || event?.data?.message || run.summary || (uncertain?'原执行结果需要核实':workStatus(run.status).label);
-  return `<div class="run-panel ${uncertain?'uncertain':''}" role="status"><span class="activity-pulse"></span><div><strong>${e(uncertain?'执行待核实':workStatus(run.status).label)}</strong><span class="${stopping?'stop-detail':''}">${e(description)}</span></div>${bot?.configuration_state==='initialized'&&employee?.id?`<button class="button danger-quiet" data-action="stop-run" data-id="${e(employee.id)}" ${stopping?'disabled':disabled(state)}>${icon('stop')}${state.stopBusy?'提交中':'停止'}</button>`:''}</div>`;
+  const description=finalized?.detail || stop?.label || event?.message || event?.data?.message || run.summary || (uncertain?'原执行结果需要核实':workStatus(run.status).label);
+  return `<div class="run-panel ${uncertain?'uncertain':finalized?'failed':''}" role="status"><span class="activity-pulse"></span><div><strong>${e(finalized?.label || (uncertain?'执行待核实':workStatus(run.status).label))}</strong><span class="${stopping?'stop-detail':''}">${e(description)}</span></div>${!finalization&&bot?.configuration_state==='initialized'&&employee?.id?`<button class="button danger-quiet" data-action="stop-run" data-id="${e(employee.id)}" ${stopping?'disabled':disabled(state)}>${icon('stop')}${state.stopBusy?'提交中':'停止'}</button>`:''}</div>`;
 }
 function imageAttachment(attachment) {
   const item=typeof attachment==='string'?{url:attachment}:attachment || {};
