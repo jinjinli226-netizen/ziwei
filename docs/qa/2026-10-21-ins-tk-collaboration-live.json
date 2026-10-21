@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-21",
+  "purpose": "User-authorized read-only InsTrendS and TikTokTrendS message round trip; no business execution",
+  "state": "blocked_by_server_migration",
+  "acceptancePassed": false,
+  "workspace": "bigtron",
+  "employees": [
+    {
+      "name": "InsTrendS",
+      "id": "employee_faa2798d-b918-4c37-b9c2-7fe3baa9772b",
+      "conversationId": "conv_0c53ec1d-5800-433c-bbfe-cc797b712091",
+      "before": {
+        "revision": 2,
+        "controlEpoch": 3,
+        "controlState": "active",
+        "collaborationConfigured": false
+      },
+      "lastConfirmed": {
+        "revision": 3,
+        "controlEpoch": 4,
+        "controlState": "draft",
+        "collaborationEnabled": true,
+        "targetEmployeeIds": [
+          "employee_1743b9a2-dd8c-4a51-9b7d-0d25414aa234"
+        ]
+      },
+      "validationRequest": {
+        "responseHttp": 502,
+        "outcome": "unknown; inspect original action before stable-key retry",
+        "idempotencyKey": "ins-tk-live-validation-0b59f9dcf3324df2b6f6d17702277a85",
+        "expectedRevision": 3
+      }
+    },
+    {
+      "name": "TikTokTrendS",
+      "id": "employee_1743b9a2-dd8c-4a51-9b7d-0d25414aa234",
+      "conversationId": "conv_f2b31905-27b7-44bd-92de-da7ff2c1b1df",
+      "before": {
+        "revision": 4,
+        "controlEpoch": 9,
+        "controlState": "active",
+        "collaborationConfigured": false
+      },
+      "configurationPatch": {
+        "responseHttp": 502,
+        "outcome": "unknown; read latest config before any retry",
+        "requestedChange": "enable collaboration with InsTrendS only; preserve all other config"
+      }
+    }
+  ],
+  "collaborationMessagesDispatched": 0,
+  "realModelTurnsStartedByTest": 0,
+  "businessTasksReplayed": false,
+  "serverObservation": {
+    "capturedAt": "2026-10-21T09:21:15.160941+00:00",
+    "current": "/opt/ziwei/releases/world-memory-skill-6243891548c2-969a825292ca/v2",
+    "apiState": "inactive",
+    "apiExitStatus": "15",
+    "controlState": "inactive",
+    "nginxState": "active",
+    "publicApiHttp": 502,
+    "userConfirmedMigrationOrRestartInProgress": true
+  },
+  "serviceRestartOrDeploymentPerformed": false,
+  "nextSteps": [
+    "After migration restore API and device connectivity; inspect both current configurations and original Ins validation outcome before retries.",
+    "Complete supported validation and restore the previously active state after true validation success.",
+    "Use an Ins native message wrapper to TK; TK sends one message_agent reply to Ins and exits without waiting; Ins acknowledges in its own chat and does not reply again.",
+    "Verify both real model actions, source/target IDs, unique marker, result content and process exits. Native wrapper alone is not a model conversation."
+  ],
+  "privacy": "No cookies, login credentials, raw employee descriptions or expired authorization codes included."
+}

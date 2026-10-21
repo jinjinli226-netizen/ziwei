@@ -1,5 +1,9 @@
 # 紫薇项目 HandOff
 
+## 2026-10-21 Ins 与 TK 互聊验收遇到服务器迁移，尚未发信
+
+用户明确授权 InsTrendS 与 TikTokTrendS 互聊测试。两位原配置未启用协作；仅 Ins 已保存精确 TK 目标，r2/e3 active→r3/e4 draft，待真实校验后恢复启用。TK 保存返回502，是否生效未知；Ins 校验也返回502，是否排队未知，禁止直接换键重复提交。只读确认17:21旧API及Control均inactive、Nginx仍active，用户确认正在迁移或重启；没有重启旧服或派发互聊/模型业务。迁完先回读两位配置、原校验及设备状态，再完成验证/启用和双向握手，不把这次算互聊成功。精确ID、校验稳定键与避免互相等待的验收步骤见[QA](docs/qa/2026-10-21-ins-tk-collaboration-live.json)。
+
 ## 2026-10-21 换服务器前 main 与正式源码核对
 
 重新 fetch/回读 GitHub，三条主接续分支同 a9ef04e，今早 Bot 页性能0d4f6c3、聊天每页10条0494db8、知识库指南6243891均已合入main，当前接续树无差异。只读核对正式目录，今早相关API文件匹配main；整体仍是分层混合部署，不能仅clone后当完整服务器镜像。数据库/附件/密钥、Control私仓与数据、下载产物及服务配置需单独迁移；本次未切服或部署。范围及迁移边界见[核对记录](docs/handoffs/2026-10-21-server-migration-source-audit.md)。
