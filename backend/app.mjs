@@ -29,6 +29,7 @@ import {createBotFailureFinalization} from './bot-failure-finalization.mjs';
 import {createDeviceUpdateService} from './device-updates.mjs';
 import {createActionMaintenanceService} from './action-maintenance.mjs';
 import { toolDefinitions as managementTools } from '../scripts/ziwei-mcp.mjs';
+import {registerWorkspaceCliDocs} from './workspace-cli-docs.mjs';
 
 const allowedOrigin = process.env.FRONTEND_ORIGIN || 'http://127.0.0.1:5178';
 
@@ -334,6 +335,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
     res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
     next();
   });
+  registerWorkspaceCliDocs(app);
   // Task attachments are sent as Base64 JSON; allow the 10 MiB attachment
   // limit plus encoding and envelope overhead without accepting unbounded
   // request bodies.

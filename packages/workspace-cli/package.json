@@ -1,0 +1,12 @@
+{
+  "name":"@ziwei/workspace-cli",
+  "version":"1.0.0",
+  "description":"Independent Ziwei workspace management CLI, machine contract v1",
+  "type":"module",
+  "license":"MIT",
+  "engines":{"node":">=20.11"},
+  "bin":{"ziwei-workspace":"bin/ziwei-workspace.mjs"},
+  "exports":{".":"./src/main.mjs","./registry":"./src/registry.mjs"},
+  "files":["bin","src","vendor","scripts/build.mjs","README.md","COMPATIBILITY.md"],
+  "scripts":{"build":"node scripts/build.mjs","test":"node --test test/*.test.mjs","prepack":"npm run build"}
+}
