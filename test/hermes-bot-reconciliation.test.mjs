@@ -58,15 +58,15 @@ test('same-device definitive stopped result settles the original expired convers
   assert.equal(f.repo.db.prepare("SELECT COUNT(*) n FROM a2a_actions WHERE type='conversation.execute'").get().n,1);
 });
 
-test('late definitive stop replaces an uncertain failure using the same original action and trusted device',t=>{
+test('late stop cannot rewrite a finalized ambiguous failure or replay its original work',t=>{
   const f=fixture(t),action=f.conversation();
   f.repo.resultA2AAction(action.id,{deviceId,status:'failed',error:'Stopping not confirmed',result:{code:'EXECUTION_UNCERTAIN',executionState:'uncertain'}});
-  assert.equal(f.repo.ackA2AAction(action.id,{deviceId,receiptOnly:true}).reconciliationRequired,true);
+  assert.equal(f.repo.ackA2AAction(action.id,{deviceId,receiptOnly:true}).reconciliationRequired,false);
   const messagesBefore=f.repo.getConversation(f.bot.main_conversation_id).messages.length;
   const settled=f.repo.resultA2AAction(action.id,{deviceId,status:'failed',error:'Original process tree has exited',result:{processExit:{...exitProof,cancelled:true}}});
-  assert.equal(settled.result.stopConfirmed,true);assert.equal(settled.result.code,undefined);
+  assert.equal(settled.duplicate,true);assert.equal(settled.result.code,'EXECUTION_UNCERTAIN');assert.equal(settled.failureFinalization.state,'awaiting_client');
   assert.equal(f.repo.db.prepare('SELECT active_action_id FROM hermes_bots WHERE employee_id=?').get(f.bot.id).active_action_id,null);
-  assert.equal(f.repo.getA2AAction(action.id).events.find(event=>event.type==='action.reconciled').data.previousStatus,'failed');
+  assert.equal(f.repo.getA2AAction(action.id).events.some(event=>event.type==='action.reconciled'),false);
   assert.equal(f.repo.getConversation(f.bot.main_conversation_id).messages.length,messagesBefore);
 });
 
@@ -137,7 +137,8 @@ test('late Routine completion settles only its existing run without retries, web
   const routine=f.bots.createRoutine(slug,f.bot.id,{name:'Bounded routine',prompt:'Original work',schedule:'每天 09:00',timezone:'Asia/Shanghai',webhookUrl:'https://example.com/result',idempotencyKey:'routine'});
   const run=f.bots.runRoutine(slug,f.bot.id,routine.id,{idempotencyKey:'once'}),action=f.repo.getA2AAction(run.action_id);f.repo.ackA2AAction(action.id,{deviceId});
   f.repo.resultA2AAction(action.id,{deviceId,status:'failed',error:'Stop not confirmed',result:{code:'EXECUTION_UNCERTAIN',executionState:'uncertain'}});
-  assert.equal(f.repo.listAutomationRuns(routine.id)[0].status,'uncertain');
+  assert.equal(f.repo.listAutomationRuns(routine.id)[0].status,'failed');
+  assert.equal(f.repo.getA2AAction(action.id).failureFinalization.state,'awaiting_client');
   const actions=f.repo.db.prepare('SELECT COUNT(*) n FROM a2a_actions').get().n,messages=f.repo.getConversation(f.bot.main_conversation_id).messages.length,webhooks=f.repo.db.prepare('SELECT COUNT(*) n FROM webhook_deliveries').get().n;
   f.repo.completeAutomationRun=()=>{throw new Error('Reconciliation must not enter automatic completion side effects');};
   f.repo.queueAutomationRetry=()=>{throw new Error('Reconciliation must not retry');};

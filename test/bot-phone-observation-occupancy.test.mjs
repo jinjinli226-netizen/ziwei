@@ -113,5 +113,5 @@ test('native session maintenance can start without completing or retrying the ol
 test('the same Bot still rejects a new chat when the original write has no final receipt',t=>{
   const f=liveRepositoryFixture(t);for(const call of f.failure.result.terminalMcp.toolCalls)if(call.commandId==='write-0'){call.commandStatus=call.status='queued';call.commandExecutionState='pending';}
   f.repo.resultA2AAction(f.action.id,{status:'failed',error:'Original write not observed',result:f.failure.result});
-  assert.throws(()=>f.repo.addConversationMessage(f.bot.main_conversation_id,{content:'new work'}),{code:'BOT_BUSY'});
+  assert.throws(()=>f.repo.addConversationMessage(f.bot.main_conversation_id,{content:'new work'}),{code:'BOT_FAILURE_FINALIZATION_PENDING'});
 });

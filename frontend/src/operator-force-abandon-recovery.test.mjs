@@ -87,7 +87,7 @@ test('result flags and event bodies cannot stand in for independently projected 
   const original=fixture(),base=structuredClone(original);delete base.forceAbandonRecovery;
   for(const run of [base,{...base,abandoned:true,disposition:'abandoned_by_user'},{...base,result:{...base.result,forceAbandonRecovery:original.forceAbandonRecovery}},{...base,events:[{type:'bot.operator_force_abandon',data:{receipt:original.forceAbandonRecovery}}]}]){
     assert.equal(operatorForceAbandonRecovery(run),null);assert.equal(executionUncertain(run),true);assert.equal(executionNeedsPolling(run),true);
-    assert.equal(executionPresentation(run).summary,'执行待核实');assert.equal(executionPresentation(run).retryable,false);
+    assert.equal(executionPresentation(run).summary,'失败');assert.equal(executionPresentation(run).retryable,false);
   }
 });
 

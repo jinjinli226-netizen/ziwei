@@ -25,6 +25,7 @@ import { createManagementBootstrap } from './management-bootstrap.mjs';
 import {createBotMcpConnections} from './bot-mcp-connections.mjs';
 import {createBotHistoricalRecovery} from './bot-historical-recovery.mjs';
 import {createBotForceAbandon} from './bot-force-abandon.mjs';
+import {createBotFailureFinalization} from './bot-failure-finalization.mjs';
 import {createDeviceUpdateService} from './device-updates.mjs';
 import {createActionMaintenanceService} from './action-maintenance.mjs';
 import { toolDefinitions as managementTools } from '../scripts/ziwei-mcp.mjs';
@@ -307,6 +308,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   if(options.enableDeferredConfig!==false&&options.enableScheduler!==false)botDeferredConfig.start(botMcpConnections.deferredHandlers);
   const botHistoricalRecovery=createBotHistoricalRecovery(repo,{readA2AToken:()=>readA2AToken({create:true})});
   const botForceAbandon=createBotForceAbandon(repo,{readA2AToken:()=>readA2AToken({create:true})});
+  const botFailureFinalization=createBotFailureFinalization(repo,management);
   const deviceUpdates=createDeviceUpdateService(repo,options.deviceUpdates);
   const actionMaintenance=createActionMaintenanceService(repo,options.actionMaintenance);
   const phoneMcp = createPhoneMcpService(repo,ziweiConnect,management,options);
@@ -321,6 +323,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   app.locals.botDeferredConfig=botDeferredConfig;
   app.locals.botHistoricalRecovery=botHistoricalRecovery;
   app.locals.botForceAbandon=botForceAbandon;
+  app.locals.botFailureFinalization=botFailureFinalization;
   app.locals.deviceUpdates=deviceUpdates;
   app.locals.actionMaintenance=actionMaintenance;
   app.locals.employeeTemplates = employeeTemplates;
@@ -874,6 +877,8 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   registerBotRoutes('/api',requireRole('owner','admin','member'),employeeContext);
   app.get('/api/workspaces/:slug/bots/:id/force-abandon',requireRole('owner','admin'),(req,res)=>{res.setHeader('Cache-Control','no-store');res.json(botForceAbandon.status(req.params.slug,req.params.id,employeeContext(req)));});
   app.post('/api/workspaces/:slug/bots/:id/force-abandon',requireRole('owner','admin'),(req,res)=>{res.setHeader('Cache-Control','no-store');res.json(botForceAbandon.authorize(req.params.slug,req.params.id,req.body,employeeContext(req)));});
+  app.get('/api/workspaces/:slug/bots/:id/failure-finalization',requireRole('owner','admin'),(req,res)=>{res.setHeader('Cache-Control','no-store');res.json(botFailureFinalization.status(req.params.slug,req.params.id,employeeContext(req)));});
+  app.post('/api/workspaces/:slug/bots/:id/failure-finalization',requireRole('owner','admin'),(req,res)=>{res.setHeader('Cache-Control','no-store');res.json(botFailureFinalization.finalize(req.params.slug,req.params.id,req.body,employeeContext(req)));});
   registerBotRoutes('/mcp/v1',mcpGuard,mcpContext);
   app.get('/mcp/v1/workspaces/:slug/phone-mcp/setup',mcpGuard,async(req,res,next)=>{try{res.json(await phoneMcp.setup(req.params.slug,{...mcpContext(req),userId:req.mcpCredential.actorUserId}));}catch(error){next(error);}});
   app.post('/mcp/v1/workspaces/:slug/skills/:id/install',mcpGuard,(req,res)=>{if(!repo.listSkills(req.params.slug).some(row=>row.id===req.params.id))return res.status(404).json({error:'技能不属于当前工作区'});res.json(repo.setSkillInstalled(req.params.id,req.body?.installed!==false));});
@@ -958,6 +963,9 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
     deviceVerifier: req => verifyDeviceRequest(repo, req)
   }));
   const updateDevice = req => ({slug:String(req.query.workspace||''),id:String(req.query.deviceId||'')});
+  app.get('/a2a/v1/failure-finalizations',(req,res)=>{res.setHeader('Cache-Control','no-store');res.json(botFailureFinalization.pending(req.deviceCredential,req.query));});
+  app.get('/a2a/v1/actions/:id/failure-finalization',(req,res)=>{res.setHeader('Cache-Control','no-store');if(!assertA2AActionWorkspace(repo,req,res))return;res.json(botFailureFinalization.read(req.params.id,req.deviceCredential));});
+  app.post('/a2a/v1/actions/:id/failure-finalization/ack',(req,res)=>{res.setHeader('Cache-Control','no-store');if(!assertA2AActionWorkspace(repo,req,res))return;res.json(botFailureFinalization.acknowledge(req.params.id,req.deviceCredential,req.body));});
   app.get('/a2a/v1/device-updates',(req,res)=>{res.setHeader('Cache-Control','no-store');const{slug,id}=updateDevice(req);res.json({ok:true,...deviceUpdates.pending(slug,id,req.deviceCredential)});});
   app.post('/a2a/v1/device-updates/:requestId/claim',(req,res)=>{res.setHeader('Cache-Control','no-store');const{slug,id}=updateDevice(req);res.json({ok:true,...deviceUpdates.claim(slug,id,req.params.requestId,req.body,req.deviceCredential)});});
   app.post('/a2a/v1/device-updates/:requestId/progress',(req,res)=>{res.setHeader('Cache-Control','no-store');const{slug,id}=updateDevice(req);res.json({ok:true,...deviceUpdates.progress(slug,id,req.params.requestId,req.body,req.deviceCredential)});});

@@ -67,7 +67,7 @@ test('Bot activation, paused and raw execution routes share the same gate and tr
   } finally {f.repo.db.close();}
 });
 
-test('Bot Routine shares binding and result delivery; uncertain execution never retries or frees occupancy',()=>{
+test('Bot Routine retains unknown business receipt while failure finalization awaits the original computer',()=>{
   const f=fixture();try {
     const bot=activate(f,f.bots.create('test-111',f.input));
     const routine=f.bots.createRoutine('test-111',bot.id,{name:'daily',prompt:'report',schedule:'每天 9:00',timezone:'Asia/Shanghai',idempotencyKey:'routine'});
@@ -76,9 +76,10 @@ test('Bot Routine shares binding and result delivery; uncertain execution never 
     assert.equal(action.payload.employeeId,bot.id);assert.equal(action.payload.conversationId,bot.main_conversation_id);assert.equal(action.payload.hermesBot.revision,1);
     f.repo.ackA2AAction(action.id,{deviceId:'bot-pc'});
     f.repo.resultA2AAction(action.id,{status:'failed',error:'not confirmed',result:{code:'EXECUTION_UNCERTAIN',executionState:'uncertain'}});
-    assert.equal(f.repo.listAutomationRuns(routine.id)[0].status,'uncertain');
+    assert.equal(f.repo.listAutomationRuns(routine.id)[0].status,'failed');
+    assert.equal(f.repo.getA2AAction(action.id).failureFinalization.state,'awaiting_client');
     assert.throws(()=>f.repo.queueAutomationRetry(run.id),{code:'BOT_RETRY_FORBIDDEN'});
-    assert.throws(()=>f.repo.runAutomation(routine.id),{code:'BOT_BUSY'});
+    assert.throws(()=>f.repo.runAutomation(routine.id),{code:'BOT_FAILURE_FINALIZATION_PENDING'});
     assert.equal(f.repo.getConversation(bot.main_conversation_id).messages.filter(item=>item.role==='assistant').length,1);
   } finally {f.repo.db.close();}
 });

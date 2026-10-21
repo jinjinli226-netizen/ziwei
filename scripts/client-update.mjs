@@ -32,12 +32,16 @@ SAFE_ERROR_CODES.add('LOCAL_HISTORY_STOP_RECOVERY_REFUSED');
 SAFE_ERROR_CODES.add('RETAINED_STOP_RECOVERY_REFUSED');
 SAFE_ERROR_CODES.add('HISTORICAL_PRELAUNCH_RECOVERY_REFUSED');
 SAFE_ERROR_CODES.add('CLIENT_FORCE_ABANDON_REFUSED');
+for(const code of ['FAILURE_FINALIZATION_BUSY','FAILURE_FINALIZATION_TRANSPORT','FAILURE_FINALIZATION_LOCAL_MISMATCH','FAILURE_FINALIZATION_CLIENT_IDENTITY','FAILURE_FINALIZATION_STOP_UNCONFIRMED','FAILURE_FINALIZATION_RECEIPT_INVALID','FAILURE_FINALIZATION_SCOPE_MISMATCH','FAILURE_FINALIZATION_STATE_CHANGED','FAILURE_FINALIZATION_UNSAFE_PATH','FAILURE_FINALIZATION_ARCHIVE_MISSING','FAILURE_FINALIZATION_ARCHIVE_CHANGED','FAILURE_FINALIZATION_RESPONSE_INVALID'])SAFE_ERROR_CODES.add(code);
 for (const code of ['LEGACY_STOP_CONFIRMATION_REQUIRED', 'LEGACY_CONFIRMATION_INVALID', 'LEGACY_IDENTITY_UNVERIFIED', 'LEGACY_PROTOCOL_MISMATCH', 'LEGACY_PROOF_INVALID', 'LEGACY_PROOF_EXPIRED', 'LEGACY_IDENTITY_CHANGED', 'LEGACY_SOURCE_UNRECOGNIZED', 'LEGACY_CONFIG_MISMATCH', 'LEGACY_CONFIG_NAMESPACE_UNVERIFIED', 'LEGACY_STOP_PROOF_REQUIRED', 'LEGACY_STOP_FAILED']) SAFE_ERROR_CODES.add(code);
 const FAILURE_REASONS = {
   LOCAL_HISTORY_STOP_RECOVERY_REFUSED: '历史原始记录已保留；当前客户端实例、空闲状态或文件证据已变化，停止尚未完成',
   CLIENT_FORCE_ABANDON_REFUSED: '已授权的旧任务放弃尚未完成；原始归档已保留，请查看具体恢复步骤、规则或服务端原因',
   HISTORICAL_PRELAUNCH_RECOVERY_REFUSED: '旧任务自动恢复尚未完成；原始记录已保留，请查看具体恢复步骤、规则或服务端原因',
   CONTROL_REJECTED: '客户端拒绝停止，请查看具体阻塞记录',
+  FAILURE_FINALIZATION_BUSY: '已有其他任务仍在运行，本次未结束其他员工；失败记录将自动重试收尾',
+  FAILURE_FINALIZATION_TRANSPORT: '失败记录已保留，服务器暂不可达；连接恢复后自动继续收尾',
+  FAILURE_FINALIZATION_LOCAL_MISMATCH: '当前失败记录与设备收尾授权不一致，未改动其他任务',
   RETAINED_STOP_RECOVERY_REFUSED: '历史记录未满足自动恢复条件，客户端未被强制停止',
   LEGACY_STOP_CONFIRMATION_REQUIRED: '旧版无法报告当前任务，执行状态未知；须先核验实例并明确确认停止后迁移',
   LEGACY_CONFIRMATION_INVALID: '旧版迁移需要本次明确确认与同一实例的检查凭据',
@@ -275,7 +279,8 @@ async function performClientUpdateInternal({ root, env = process.env, directory,
   };
   try {
     progress.stage = 'recover_history';
-    const recovery = await recoverBeforeClientUpdateStop({ candidate, root, env, log });
+    const finalization = await recoverFailureFinalizationsBeforeUpdateStop({candidate,root,env,log});
+    const recovery = finalization.recovered ? finalization : await recoverBeforeClientUpdateStop({ candidate, root, env, log });
     // Historical quarantine is included in the old daemon's active count. Its
     // audited recovery must run before the ordinary zero-active drain loop.
     if (recovery.recovered) stopped = { ...recovery };
@@ -349,6 +354,13 @@ async function performClientUpdateInternal({ root, env = process.env, directory,
     log('update_failed', { ...describeUpdateFailure(captured, captured.failureStage), originalRestored: recovered, originalInstallationRestored, runningStateRestored, code: captured.code, ...(recoveryFailure ? { recoveryFailure } : {}), backup: moved ? backup : null });
     throw captured;
   }
+}
+
+export async function recoverFailureFinalizationsBeforeUpdateStop({candidate,root,env=process.env,log=()=>{},load=specifier=>import(specifier)}={}) {
+  const module=await load(pathToFileURL(path.join(candidate,'src/client-failed-action-finalization-recovery.mjs')).href);
+  const result=await module.recoverFailedActionFinalizationsForUpdate({root,env,log});
+  if(result?.recovered===true&&(result.stopped!==true||result.wasRunning!==true||result.originalExecutionExitConfirmed!==false||result.executionConfirmedStopped!==false))throw failure('FAILURE_FINALIZATION_STOP_UNCONFIRMED','失败记录收尾未返回本客户端实例的停止结果');
+  return result||{recovered:false};
 }
 
 export async function recoverBeforeClientUpdateStop({candidate,root,env=process.env,log=()=>{},load=specifier=>import(specifier)}={}) {

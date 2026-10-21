@@ -252,6 +252,17 @@ export function createActionDelivery({directory,identity,post,dispatch,recoverRe
  }
  function execute(action){if(!action?.id)return Promise.reject(new TypeError('Action ID required'));try{validateTarget(action);}catch(error){return Promise.reject(error);}const actionBinding=binding(action,connection);if(active.has(action.id))return activeBindings.get(action.id)===actionBinding?active.get(action.id):Promise.reject(new Error(`Action delivery identity mismatch: ${action.id}`));const promise=Promise.resolve().then(()=>run(action)).finally(()=>{active.delete(action.id);activeBindings.delete(action.id);});active.set(action.id,promise);activeBindings.set(action.id,actionBinding);return promise;}
  return {
+  failureFinalizationReady(receipt){
+   const subject=receipt?.subject,id=subject?.actionId;
+   return typeof id==='string'&&subject.workspace===connection.workspace&&subject.deviceId===connection.deviceId&&!active.has(id)&&!eventFlushes.has(id);
+  },
+  failureFinalizationApplied(receipt){
+   const id=receipt?.subject?.actionId;
+   if(!this.failureFinalizationReady(receipt))throw Object.assign(new Error('FAILURE_FINALIZATION_BUSY'),{code:'FAILURE_FINALIZATION_BUSY'});
+   // The archival module has durably replaced this exact journal. Drop the
+   // former in-memory object so event/recovery passes cannot restore it.
+   records.delete(id);activeBindings.delete(id);return true;
+  },
   canDeliverWithoutExecution(action){try{const record=action?.id&&read(action,{create:false});return Boolean(record&&(record.state==='result_pending'||definitive(resultBody(recoverResult(record.action)||{}))));}catch{return false;}},
   execute,
   recoverOriginal,

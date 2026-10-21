@@ -80,10 +80,10 @@ export function createBotManagementActionReader(repo){
     }
     // These rare historical dispositions must retain their verified, complete
     // original binding. A marker alone is never projected as recovery authority.
-    const marker=db.prepare("SELECT 1 FROM management_requests WHERE workspace_id=? AND request_key=? AND kind IN ('bot-historical-prelaunch-recovery-v1','bot-force-abandon-recovery-v1') LIMIT 1").get(workspaceId,actionId);
+    const marker=db.prepare("SELECT 1 FROM management_requests WHERE workspace_id=? AND request_key=? AND kind IN ('bot-historical-prelaunch-recovery-v1','bot-force-abandon-recovery-v1','bot-failure-finalization-v1') LIMIT 1").get(workspaceId,actionId);
     if(marker){
       const original=repo.getA2AAction(actionId,{eventView:'none'});
-      for(const key of ['prelaunchRecovery','forceAbandonRecovery'])if(original?.[key])view[key]=original[key];
+      for(const key of ['prelaunchRecovery','forceAbandonRecovery','failureFinalization'])if(original?.[key])view[key]=original[key];
       // The pinned force-abandon validator requires exactly the original result.
       // Its committed original body is small and server verified, never output.
       if(original?.forceAbandonRecovery&&canonical(original.result).length<8192)view.result=original.result;

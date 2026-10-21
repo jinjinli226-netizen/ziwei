@@ -93,7 +93,8 @@ test('a late deletion response cannot clear a newly selected Bot',async()=>{
   const delayed=deferred();const ui=fixture({bot:async id=>bot(id),deleteEmployee:()=>delayed.promise});await ui.setWorkspace('qa','a');const removal=ui.removeEmployee({force:true});await ui.select('b');delayed.resolve({deleted:true,forced:true,executionConfirmedStopped:false});assert.equal(await removal,false);assert.equal(ui.state.bot.id,'b');assert.equal(ui.state.selectedId,'b');assert.equal(ui.state.notice,'');
 });
 test('Bot status distinguishes execution uncertainty from ordinary failure and device availability',()=>{
-  assert.match(module.botPresence({...bot(),latest_run:{status:'failed',result:{code:'EXECUTION_UNCERTAIN'}}}).label,/待核实/);
+  assert.equal(module.botPresence({...bot(),latest_run:{status:'failed',result:{code:'EXECUTION_UNCERTAIN'}}}).label,'上次执行失败');
+  assert.equal(module.executionUncertain({status:'failed',result:{code:'EXECUTION_UNCERTAIN'}}),true,'失败文字不能伪造业务已确认');
   assert.match(module.botPresence({...bot(),control_state:'active',latest_run:null}).label,/待命/);
   assert.equal(module.capabilityPresentation({status:'not_integrated'}).tone,'muted');
   assert.notEqual(module.capabilityPresentation({status:'unexpected'}).tone,'success');

@@ -2,6 +2,8 @@ import {executionBinding} from './execution-admission.mjs';
 import {markMaintenancePaused,consumeMaintenancePaused,validateMaintenancePause} from './maintenance-checkpoint.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
+import {createHash} from 'node:crypto';
+import {finalizationDigest,validateFailureFinalizationReceipt} from './bot-failure-finalization-contract.mjs';
 import {actionExecutionTimeoutMs,ACTION_EXECUTION_LEASE_BUFFER_MS} from './action-execution-budget.mjs';
 import {consumeRuntimePrelaunchEvidence,completeRuntimeExit} from './runtime-launch-evidence.mjs';
 import {markDispatcherAdmissionRejected,consumeDispatcherAdmissionRejected,isDispatcherAdmissionRejected} from './dispatcher-admission-evidence.mjs';
@@ -152,7 +154,7 @@ export class ActionDispatcher {
     return [...entries.entries()].find(([, item]) => String(getActionId(item) ?? '') === String(actionId)) || null;
   }
   #uncertain(action, reason, error, extra = {}) {
-    return this.#failure(action, `执行状态无法安全确认，需人工核实后处理：${error instanceof Error ? error.message : String(error)}`, {code: 'EXECUTION_UNCERTAIN', executionState: 'uncertain', reason, ...extra});
+    return this.#failure(action, `本次执行失败；原执行结果未确认：${error instanceof Error ? error.message : String(error)}`, {code: 'EXECUTION_UNCERTAIN', executionState: 'uncertain', reason, ...extra});
   }
   #duplicate(action, result) {
     return {status: 'duplicate', actionId: action?.id, originalStatus: result.status, result: result.result, error: result.error, completedAt: result.completedAt, ...(result.code ? {code: result.code} : {}), ...(result.reason ? {reason: result.reason} : {}), ...(result.executionState ? {executionState: result.executionState} : {})};
@@ -297,7 +299,7 @@ export class ActionDispatcher {
       this.#markStarted(action, key, identity,{startedAt:resumeTiming?.startedAt,hardDeadline});
       if(maintenanceResume)this.#onEvent('action.maintenance_resumed',{actionId,updateId:maintenanceResume.updateId,targetBuild:maintenanceResume.targetBuild});
       this.#onEvent('action.started', {actionId, type: action.type});
-      let stopReason = null; let resolveStop; let supervision = null; let stopInvoked = false; let stopInFlight = false;
+      let stopReason = null; let resolveStop; let supervision = null; let stopInvoked = false; let stopInFlight = false;let stopPending=null;
       let residentExit=null;
       const onResidentExit=proof=>{
         const worker=proof?.worker,p=action.payload||{};
@@ -331,13 +333,13 @@ export class ActionDispatcher {
         return value;
       }, () => null);
       const invokeStop = (retry = false) => {
-        if (!supervision || stopInFlight || (stopInvoked && !retry)) return;
+        if (!supervision || stopInFlight || (stopInvoked && !retry)) return stopPending;
         stopInvoked = true; stopInFlight = true;
-        void observeEvidence(Promise.resolve().then(() => supervision.stop())).finally(() => { stopInFlight = false; });
+        stopPending=observeEvidence(Promise.resolve().then(() => supervision.stop())).finally(() => { stopInFlight = false; });return stopPending;
       };
       const requestStop = reason => {
-        if (stopReason) return;
-        stopReason = reason; controller.abort(); invokeStop(); resolveStop({kind: 'stop'});
+        if (stopReason) return stopPending;
+        stopReason = reason; controller.abort();const pending=invokeStop(); resolveStop({kind: 'stop'});return pending;
       };
       controller.signal.addEventListener('abort', () => { if (!stopReason) requestStop('cancelled'); }, {once: true});
       const bounded = async promise => {
@@ -418,6 +420,11 @@ export class ActionDispatcher {
       if (stopReason) {
         invokeStop();
         const stopped = await bounded(Promise.all([execution, confirmed]));
+        const prelaunch=!supervision&&!supervisionRejected&&stopped?.[0]?.error?consumeRuntimePrelaunchEvidence(stopped[0].error):null;
+        if(prelaunch){
+          const cancelled=stopReason==='cancelled';
+          return this.#failure(action,cancelled?'A2A action cancelled before runtime launch':'A2A action timed out before runtime launch',{code:cancelled?'cancelled':'action_timeout',result:{...prelaunch,processExit:safeProcessExit(prelaunch.processExit)}});
+        }
         const receipt = {result: {processExit: safeProcessExit(stoppedEvidence || latestEvidence), partialEffectsPossible: true}};
         if (!stopped || (supervision ? !stoppedEvidence : !executionSettled)) {
           this.#quarantine(key, 'STOP_UNCONFIRMED');
@@ -555,5 +562,56 @@ export class ActionDispatcher {
     return this.#duplicate(action, entry[1]);
   }
   cancel(actionId) { const id = String(actionId), controller = this.#controllers.get(id), stop = this.#stopHandlers.get(id);if(!controller&&!stop){const entry=this.#findByActionId(this.#started,id,item=>item.actionId);if(!entry||this.#completed.has(entry[0])||!this.#validPaused(entry[1]))return false;const result=this.#failure({id},'A2A action cancelled after maintenance pause; completed tool effects remain',{code:'cancelled',result:{maintenanceCancelled:true,processExit:entry[1].maintenancePause.processExit,maintenanceCheckpoint:entry[1].maintenancePause,partialEffectsPossible:true}});this.#completed.set(entry[0],result);this.#completedIdentity.set(entry[0],entry[1].identity);try{this.#saveState();}catch{this.#completed.delete(entry[0]);this.#completedIdentity.delete(entry[0]);return false;}this.#onEvent('action.result_recovered',{actionId:id,status:'failed'});return true;} if (controller && !controller.signal.aborted) controller.abort(); else if (stop) stop(); this.#onEvent('action.cancel_requested', {actionId, stopConfirmed: false}); return true; }
+  #finalizationEntry(receipt) {
+    if(this.#stateError||!validateFailureFinalizationReceipt(receipt,{workspace:this.#workspace,deviceId:this.#deviceId}))return null;
+    const subject=receipt.subject,entry=this.#findByActionId(this.#started,subject.actionId,item=>item.actionId);
+    if(!entry)return null;
+    const [key,item]=entry,binding=item.resourceBinding,identity=item.identity;
+    if(key!==(subject.dedupeKey??subject.actionId)||item.nativeRuntime!==true||identity?.workspace!==subject.workspace||identity.deviceId!==subject.deviceId
+      ||identity.workspaceId&&identity.workspaceId!==subject.workspaceId||identity.targetDeviceId&&identity.targetDeviceId!==subject.deviceId
+      ||identity.actionWorkspace&&identity.actionWorkspace!==subject.workspace||binding?.type!==subject.actionType||binding.employeeId!==subject.employeeId
+      ||binding.revision!==subject.originalRevision||binding.controlEpoch!==subject.originalControlEpoch)return null;
+    return entry;
+  }
+  async prepareFailureFinalization(receipt) {
+    if(!validateFailureFinalizationReceipt(receipt,{workspace:this.#workspace,deviceId:this.#deviceId}))throw Object.assign(new Error('FAILURE_FINALIZATION_SCOPE_MISMATCH'),{code:'FAILURE_FINALIZATION_SCOPE_MISMATCH'});
+    const id=receipt.subject.actionId,entry=this.#finalizationEntry(receipt),done=this.#completed.get(receipt.subject.dedupeKey??id);
+    if(!entry){
+      if(done?.actionId===id&&done.code==='FAILURE_FINALIZED'&&done.result?.failureFinalization?.receiptId===receipt.id)return {localProcessDisposition:'no_live_instance'};
+      throw Object.assign(new Error('FAILURE_FINALIZATION_LOCAL_MISMATCH'),{code:'FAILURE_FINALIZATION_LOCAL_MISMATCH'});
+    }
+    const stop=this.#stopHandlers.get(id),controller=this.#controllers.get(id),hadOwnedHandle=Boolean(stop||controller);
+    if(controller&&!controller.signal.aborted)controller.abort();
+    let stopSettled=!stop;const stopping=stop?Promise.resolve().then(()=>stop()).catch(()=>null).finally(()=>{stopSettled=true;}):Promise.resolve();
+    const pending=this.#inFlight.get(entry[0])?.promise;
+    if(pending||stop){let timer;try{await Promise.race([Promise.all([pending?.catch(()=>{}),stopping]),new Promise(resolve=>{timer=setTimeout(resolve,this.#stopGraceMs);})]);}finally{clearTimeout(timer);}}
+    // A failed server decision does not grant permission to overwrite a live
+    // controller. Exact owned cleanup must finish before archival may proceed.
+    if(!stopSettled||this.#controllers.has(id)||this.#inFlight.has(entry[0]))throw Object.assign(new Error('FAILURE_FINALIZATION_BUSY'),{code:'FAILURE_FINALIZATION_BUSY'});
+    // The exact cleanup attempt has settled. Preserve any incomplete exit in
+    // the original archive; it must not become an endless bookkeeping lock.
+    if(stop&&this.#stopHandlers.get(id)===stop)this.#stopHandlers.delete(id);
+    const exit=this.#completed.get(entry[0])?.result?.processExit;
+    return {localProcessDisposition:hadOwnedHandle&&completeRuntimeExit(exit)?'terminated_exact_instance':'unobservable'};
+  }
+  applyFailureFinalization({receipt,receiptDigest,expectedStateSha256,completed}) {
+    const entry=this.#finalizationEntry(receipt),subject=receipt?.subject,id=subject?.actionId,key=subject?.dedupeKey??id;
+    if(!entry||!this.#stateFile||finalizationDigest(receipt)!==receiptDigest||this.#controllers.has(id)||this.#inFlight.has(key)||this.#stopHandlers.has(id)
+      ||createHash('sha256').update(fs.readFileSync(this.#stateFile)).digest('hex')!==expectedStateSha256
+      ||completed?.key!==key||finalizationDigest(completed.identity)!==finalizationDigest(entry[1].identity)||completed.result?.status!=='failed'||completed.result.actionId!==id
+      ||completed.result.code!=='FAILURE_FINALIZED'||completed.result.result?.failureFinalization?.receiptId!==receipt.id
+      ||completed.result.result.failureFinalization.receiptDigest!==receiptDigest||completed.result.result.failureFinalization.originalResultDigest!==subject.originalResultDigest
+      ||completed.result.result.partialEffectsPossible!==true||completed.result.result.processExit!==undefined)return false;
+    const before={result:this.#completed.get(key),identity:this.#completedIdentity.get(key),admission:this.#admissionRejected.get(key),legacy:this.#legacyCompleted.has(key),quarantined:this.#quarantines.has(key)};
+    this.#started.delete(key);this.#quarantines.delete(key);this.#completed.set(key,completed.result);this.#completedIdentity.set(key,completed.identity);this.#admissionRejected.delete(key);this.#legacyCompleted.delete(key);
+    try{this.#saveState();}catch(error){
+      this.#started.set(key,entry[1]);if(before.quarantined)this.#quarantines.add(key);
+      if(before.result===undefined)this.#completed.delete(key);else this.#completed.set(key,before.result);
+      if(before.identity===undefined)this.#completedIdentity.delete(key);else this.#completedIdentity.set(key,before.identity);
+      if(before.admission!==undefined)this.#admissionRejected.set(key,before.admission);if(before.legacy)this.#legacyCompleted.add(key);throw error;
+    }
+    this.#maintenanceCommitted.delete(key);this.#maintenanceActions.delete(key);
+    this.#onEvent('action.failure_finalized',{actionId:id,originalExecutionExitConfirmed:false});return true;
+  }
   status(actionId) { const id = String(actionId); return {actionId: id, running: this.#controllers.has(id) || this.quarantinedActionIds.includes(id), quarantined: this.quarantinedActionIds.includes(id),paused:Boolean(this.getMaintenancePause(id)), completed: [...this.#completed.values()].find(item => String(item.actionId) === id) || null}; }
 }

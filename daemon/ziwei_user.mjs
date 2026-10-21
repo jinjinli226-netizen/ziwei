@@ -17,6 +17,7 @@ import {createProductionClientIdentityHandler} from '../backend/preservation-sou
 import {loadPrivateClientIdentityConfiguration,privateClientConnections,createPrivateClientStateReader,createPrivateIdentityHttpRoute} from './private-preservation-identity.mjs';
 import { createRemoteClientUpdates, remoteMaintenanceHostId, REMOTE_CLIENT_UPDATE_FEATURE } from '../src/client-remote-update.mjs';
 import { createClientMaintenanceResume } from '../src/client-maintenance-resume.mjs';
+import { createClientFailureFinalizations } from '../src/client-failed-action-finalization.mjs';
 import { launchRemoteClientUpdate, inspectRemoteClientUpdateWorker, recoverRemoteClientUpdateWorker } from '../scripts/client-remote-update-worker.mjs';
 
 const ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -121,6 +122,19 @@ function installConnections() {
       onSuccess: async action => { if (action.type === 'hermes.profile.create') await refreshRuntimeDiscovery(state); },
       onEvent: (event, extra) => log(event, { workspace: config.workspace, ...extra }),
     });
+    state.failureFinalizations=createClientFailureFinalizations({runtimeDir:connectionRuntimeDir,
+      identity:{apiBase:config.apiBase,workspace:config.workspace,deviceId:config.deviceId},
+      prepareLocal:receipt=>state.dispatcher.prepareFailureFinalization(receipt),
+      applyLocal:options=>state.dispatcher.applyFailureFinalization(options),
+      deliveryReady:receipt=>state.actionDelivery.failureFinalizationReady(receipt),
+      deliveryApplied:receipt=>state.actionDelivery.failureFinalizationApplied(receipt),
+      request:async(pathname,body)=>{
+        const response=await fetch(config.apiBase+pathname,{method:body?'POST':'GET',redirect:'error',
+          headers:daemonHeaders(state,{json:Boolean(body),a2a:true}),...(body?{body:JSON.stringify(body)}:{}),
+          signal:AbortSignal.any([AbortSignal.timeout(8000),shutdownAbort.signal])});
+        if(!response.ok)throw Object.assign(new Error('FAILURE_FINALIZATION_TRANSPORT'),{status:response.status});
+        return response.json();
+      },onEvent:(event,extra)=>log(event,{workspace:config.workspace,...extra})});
     state.actionScheduler = createActionScheduler({
       execute: action => state.actionDelivery.execute(action),
       canStart: (action, admission) => {
@@ -181,7 +195,7 @@ remoteClientUpdates = createRemoteClientUpdates({
   log,
 });
 function clientRuntimeDiscovery() {
-  return { checkedAt: runtimeDiscovery.discoveredAt, platform: runtimeDiscovery.bridge.platform, arch: runtimeDiscovery.bridge.arch, clientBuild: CLIENT_BUILD, features: ['bot_mcp_oauth_relay_v1', ...(remoteUpdateEnabled ? [REMOTE_CLIENT_UPDATE_FEATURE,'maintenance_checkpoint_resume_v1'] : [])], ...(maintenanceHostId ? { maintenanceHostId } : {}) };
+  return { checkedAt: runtimeDiscovery.discoveredAt, platform: runtimeDiscovery.bridge.platform, arch: runtimeDiscovery.bridge.arch, clientBuild: CLIENT_BUILD, features: ['bot_mcp_oauth_relay_v1','failed_action_finalization_v1', ...(remoteUpdateEnabled ? [REMOTE_CLIENT_UPDATE_FEATURE,'maintenance_checkpoint_resume_v1'] : [])], ...(maintenanceHostId ? { maintenanceHostId } : {}) };
 }
 process.on('uncaughtException', error => log('uncaught_exception', { error: error.stack || error.message }));
 process.on('unhandledRejection', error => log('unhandled_rejection', { error: error?.stack || String(error) }));
@@ -206,6 +220,9 @@ function heartbeatConnection(connection) {
 async function performHeartbeatConnection(connection) {
   if (draining) return;
   const config = connection.config;
+  // A failed record is settled before polling can admit another employee
+  // task. Provider/MCP preparation never controls this recovery mechanism.
+  try {await connection.failureFinalizations.reconcile();}catch(error){log('failure_finalization_retry',{workspace:config.workspace,code:error.status===404?'SERVER_UNSUPPORTED':'FAILURE_FINALIZATION_TRANSPORT'});}
   try { await connection.managementBootstrap.prepare({signal: shutdownAbort.signal}); } catch {}
   if (draining || shutdownAbort.signal.aborted) return;
   connection.managementStatus = connection.managementBootstrap.status();
@@ -366,6 +383,19 @@ const privateIdentityHandler=privateIdentityConfiguration?createProductionClient
 const privateIdentityRoute=createPrivateIdentityHttpRoute(privateIdentityHandler);
 const health = http.createServer((req, res) => {
   if(privateIdentityRoute(req,res))return;
+  if(req.url==='/local/failure-finalizations'){
+    const supplied=Buffer.from(String(req.headers['x-ziwei-local-control']||'')),expected=Buffer.from(String(config.deviceToken||''));
+    const local=['127.0.0.1','::1','::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
+    if(req.method!=='POST'||!local||!expected.length||supplied.length!==expected.length||!timingSafeEqual(supplied,expected)){res.writeHead(401);res.end();return;}
+    let body='';req.on('data',chunk=>{body+=chunk;if(body.length>1024)req.destroy();});
+    req.on('end',async()=>{
+      let nonce;try{({nonce}=JSON.parse(body));}catch{}
+      if(nonce!==lifecycleNonce){res.writeHead(409);res.end();return;}
+      try{const outcomes=await Promise.all([...connections.values()].map(connection=>connection.failureFinalizations.reconcile()));
+        res.writeHead(200,{'content-type':'application/json','cache-control':'no-store'});res.end(JSON.stringify({ok:true,applied:outcomes.reduce((n,row)=>n+row.applied.length,0),pending:outcomes.reduce((n,row)=>n+row.pending.length,0),localPending:outcomes.reduce((n,row)=>n+row.pending.filter(id=>!row.locallyApplied.includes(id)).length,0)}));
+      }catch{res.writeHead(503,{'content-type':'application/json'});res.end(JSON.stringify({error:'FAILURE_FINALIZATION_RETRY'}));}
+    });return;
+  }
   if (req.url === '/local/connection-control') {
     const supplied = Buffer.from(String(req.headers['x-ziwei-local-control'] || '')); const expected = Buffer.from(String(config.deviceToken || ''));
     const local = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);

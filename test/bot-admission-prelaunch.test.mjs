@@ -79,7 +79,7 @@ test('real local action and final runtime admission rejection produce a durable 
   assert.equal(duplicate.status,'duplicate');assert.equal(duplicate.originalStatus,'failed');assert.equal(restarted.quarantined,false);assert.equal(requests.length,2);
 });
 
-for(const kind of ['transport','json','server','forged'])test(`real local action does not trust an unsealed ${kind} admission response`,posix,async t=>{
+for(const kind of ['transport','json','server','forged'])test(`owned final admission ${kind} failure records no launch instead of trusting response evidence`,posix,async t=>{
   const f=nativeFixture(t),s=serverFixture(t);let registrations=0,starts=0;
   t.mock.method(globalThis,'fetch',async(url)=>{
     if(url.endsWith('/execution-admission'))return Response.json(s.repo.authorizeActionExecution(s.original.id,{deviceId:scope.deviceId}));
@@ -90,7 +90,10 @@ for(const kind of ['transport','json','server','forged'])test(`real local action
   });
   const execute=createLocalActionExecutor({runtimeDir:path.join(f.root,'runtime'),defaultWorkdir:f.root,hermesHomePath:f.home,workspace:scope.workspace,apiBase:'https://admission.invalid',deviceId:scope.deviceId,deviceToken:'ISOLATED_DEVICE_FIXTURE',admissionHandledByDispatcher:true});
   const d=new ActionDispatcher({workdir:f.root,workspace:scope.workspace,deviceId:scope.deviceId,authorizeExecute:execute.authorizeExecution,execute:(a,c)=>execute(a,{...c,onSupervision:value=>{registrations++;c.onSupervision(value);}})}),result=await d.dispatch(s.original);
-  assert.equal(starts,1);assert.equal(registrations,0);assert.equal(result.code,'EXECUTION_UNCERTAIN');assert.equal(result.result.processExit,null);assert.equal(d.quarantined,true);assert.equal(fs.existsSync(f.launched),false);
+  assert.equal(starts,1);assert.equal(registrations,0);assert.equal(result.status,'failed');assert.equal(result.code,kind==='transport'?'BOT_START_UNAVAILABLE':kind==='json'?'BOT_START_RESPONSE_INVALID':'BOT_START_HTTP_FAILED');
+  assert.equal(result.result.processExit.launched,false);assert.equal(result.result.processExit.rootPid,null);assert.equal(result.result.processExit.treeConfirmed,true);assert.equal(d.quarantined,false);assert.equal(fs.existsSync(f.launched),false);
+  assert.equal(result.result.prelaunch.actionId,s.original.id);assert.equal(result.result.prelaunch.employeeId,s.bot.id);
+  assert.notEqual(result.result.prelaunch.denial?.code,'FORGED_CODE');assert.doesNotMatch(JSON.stringify(result),/ISOLATED_DEVICE_FIXTURE|fixture refusal|fixture network failure/);
 });
 
 for(const code of ['BOT_REVISION_CONFLICT','BOT_NOT_ACTIVE','BOT_NOT_VALIDATED','BOT_START_INVALID'])test(`only a sealed final admission denial proves no spawn (${code})`,async t=>{

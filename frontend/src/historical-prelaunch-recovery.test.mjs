@@ -80,7 +80,7 @@ test('generic flags, uncommitted events and receipts for another action cannot r
   for(const change of [r=>{r.subject.actionId='another';},r=>{r.subject.deviceId='another';},r=>{r.subject.profile='another';},r=>{r.admissionProof.scope='all-processes';},r=>{r.admissionProof.treeConfirmed=true;},r=>{r.processExit={launched:false,treeConfirmed:true};},r=>{r.daemonExit.stopped=false;},r=>{r.sourcePolicyDigest='bad';}]){
     const run=structuredClone(valid);change(run.prelaunchRecovery);rejected.push(run);
   }
-  for(const run of rejected){assert.equal(historicalPrelaunchRecovery(run),null);assert.equal(executionUncertain(run),true);assert.equal(executionNeedsPolling(run),true);assert.equal(executionPresentation(run).summary,'执行待核实');}
+  for(const run of rejected){assert.equal(historicalPrelaunchRecovery(run),null);assert.equal(executionUncertain(run),true);assert.equal(executionNeedsPolling(run),true);assert.equal(executionPresentation(run).summary,'失败');}
 });
 
 test('chat and workbench templates compile with a separate preserved original-failure disclosure',async()=>{

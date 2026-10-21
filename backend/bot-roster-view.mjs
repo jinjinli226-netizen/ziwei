@@ -2,6 +2,7 @@ import {botProfileBinding} from './bot-profiles.mjs';
 import {createBotManagementActionReader} from './bot-management-view.mjs';
 import {createMobileReadView} from './mobile-read-view.mjs';
 import {botExecutionOccupiesSlot} from './bot-execution-occupancy.mjs';
+import {pendingBotFailureFinalization} from './bot-failure-finalization.mjs';
 
 // A roster needs identity and status, not the last 100 prompts, event streams,
 // generated files, or native-resource contents of every employee. Keep the
@@ -41,6 +42,7 @@ export function createBotRosterView(repo) {
         main_conversation_id:row?.main_conversation_id||conversation.get(employee.id,workspaceId)?.id||null,
         ...(binding?{instance:{mode:binding.mode,profile:binding.profile||employee.runtime_profile,templateProfile:binding.templateProfile||employee.runtime_profile}}:{}),
         latest_run:active||recent,active_run:active,
+        failureFinalization:row?pendingBotFailureFinalization(db,workspaceId,employee.id):null,
         rosterView:{schemaVersion:1,historyIncluded:false,configurationIncluded:false,detailOperation:'GET bot by id'},
       };
     });

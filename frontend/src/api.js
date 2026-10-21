@@ -130,6 +130,8 @@ export const api = {
   validateBot: (id, body, slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/bots/${encodeURIComponent(id)}/validate`, {method:'POST',body:JSON.stringify(body)}),
   controlBot: (id, body, slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/bots/${encodeURIComponent(id)}/control`, {method:'POST',body:JSON.stringify(body)}),
   reconcileBotAction: (id, actionId, body, slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/bots/${encodeURIComponent(id)}/actions/${encodeURIComponent(actionId)}/reconcile`, {method:'POST',body:JSON.stringify(body)}),
+  botFailureFinalizationStatus: (id, slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/bots/${encodeURIComponent(id)}/failure-finalization`),
+  finalizeBotFailure: (id, body, slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/bots/${encodeURIComponent(id)}/failure-finalization`, {method:'POST',body:JSON.stringify(body)}),
   botForceAbandonStatus: (id, slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/bots/${encodeURIComponent(id)}/force-abandon`),
   forceAbandonBot: (id, body, slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/bots/${encodeURIComponent(id)}/force-abandon`, {method:'POST',body:JSON.stringify(body)}),
   botRuns: (id, slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/bots/${encodeURIComponent(id)}/runs`),

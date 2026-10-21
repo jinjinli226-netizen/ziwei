@@ -32,6 +32,7 @@ import { botFailure } from '../src/hermes-bot-config.mjs';
 import { CREATOR_BOT_GUIDANCE } from './employees/creator-template.mjs';
 import { assertMaintenanceAttempt, maintenancePublicEventData, maintenanceActionDeadline, guardMaintenanceExecutionAdmission, isMaintenanceTerminalInput, settleExpiredMaintenanceAction } from './action-maintenance.mjs';
 import {createConversationThreadView} from './conversation-thread-view.mjs';
+import {automaticallyFinalizeBotFailure,readBotFailureFinalization} from './bot-failure-finalization.mjs';
 
 // Constructor provenance is private; exported queries cannot register callers.
 const repositoryOrigins=new WeakMap();
@@ -576,7 +577,7 @@ export function createRepository(options = {}, io={}) {
     const { managementMcp: _oldManagement, ...rest } = trusted;
     return employeeWorkspace ? { ...rest, managementMcp: { enabled: true, workspace: employeeWorkspace } } : rest;
   };
-  const historicalActionMetadata = row => { const prelaunchRecovery=readHistoricalPrelaunchRecovery(db,row),forceAbandonRecovery=readForceAbandonRecovery(db,row); return {...(prelaunchRecovery?{prelaunchRecovery}:{}),...(forceAbandonRecovery?{forceAbandonRecovery}:{})}; };
+  const historicalActionMetadata = row => { const prelaunchRecovery=readHistoricalPrelaunchRecovery(db,row),forceAbandonRecovery=readForceAbandonRecovery(db,row),failureFinalization=readBotFailureFinalization(db,row); return {...(prelaunchRecovery?{prelaunchRecovery}:{}),...(forceAbandonRecovery?{forceAbandonRecovery}:{}),...(failureFinalization?{failureFinalization,reconciliationRequired:false}:{})}; };
   const actionView = (row, { includeEvents = false, eventView = 'full' } = {}) => row ? ({
     id: row.id,
     task_id: row.task_id,
@@ -844,6 +845,9 @@ export function createRepository(options = {}, io={}) {
         Gemini: ['research', 'vision', 'chat'],
         Hermes: ['orchestration', 'a2a', 'automation']
       };
+      // Standalone registration and heartbeat registration share one atomic metadata write.
+      db.exec('SAVEPOINT runtime_registration');
+      try {
       for (const [nameValue, raw] of entries) {
         const name = runtimeName(nameValue); if (!name || !raw || typeof raw !== 'object') continue;
         const version = raw.version ? String(raw.version) : null;
@@ -877,7 +881,13 @@ export function createRepository(options = {}, io={}) {
             .run(id('runtime'), ws.id, name, providers[name] || name, version, 'online', JSON.stringify(capabilities[name] || []), timestamp);
         }
       }
-      return this.listRuntimes(slug);
+      const runtimes = this.listRuntimes(slug);
+      db.exec('RELEASE runtime_registration');
+      return runtimes;
+      } catch (error) {
+        db.exec('ROLLBACK TO runtime_registration; RELEASE runtime_registration');
+        throw error;
+      }
     },
     listHermesProfiles(slug, options = {}) {
       const ws = workspace(slug); if (!ws) throw new Error('Workspace not found');
@@ -1392,6 +1402,9 @@ export function createRepository(options = {}, io={}) {
       let row = db.prepare('SELECT * FROM devices WHERE workspace_id=? AND id=?').get(ws.id, deviceId);
       if (row && row.bridge_name && row.bridge_name !== 'ziwei_user') throw new Error('Device is not registered to ziwei_user');
       if (row?.status === 'disabled') return this.listDevices(slug).find(device => device.id === row.id) || null;
+      // Commit one heartbeat's related metadata together, including nested runtime writes.
+      db.exec('SAVEPOINT device_heartbeat');
+      try {
       if (!row) {
         db.prepare('INSERT INTO devices(id,workspace_id,name,os,status,last_seen,ip_hint,version,pid,bridge_name,bridge_version,bridge_status,heartbeat_at,heartbeat_interval_ms,workdir,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(deviceId, ws.id, String(input.name || 'ziwei_user').trim() || 'ziwei_user', String(input.os || 'Windows'), 'online', timestamp, String(input.ipHint || input.ip_hint || '127.0.0.1'), String(input.version || input.daemon_version || ownVersion()), Number(input.pid) || null, 'ziwei_user', String(input.bridgeVersion || input.bridge_version || input.version || input.daemon_version || ownVersion()), 'online', timestamp, Number(input.heartbeatMs || input.heartbeat_ms) || null, String(input.workdir || input.workingDirectory || input.cwd || '').trim() || null, timestamp);
         row = db.prepare('SELECT * FROM devices WHERE id=?').get(deviceId);
@@ -1426,7 +1439,13 @@ export function createRepository(options = {}, io={}) {
       }
       if(input.terminalMcp && typeof input.terminalMcp==='object') {const metadata=input.terminalMcp;const safe={configured:metadata.configured===true,workspace:String(metadata.workspace || slug),transport:'stdio',serverName:'ziwei-terminal',supportedRuntimes:Array.isArray(metadata.supportedRuntimes)?metadata.supportedRuntimes.map(String).slice(0,20):[],...(metadata.reason?{reason:String(metadata.reason).slice(0,400)}:{})};db.prepare('UPDATE devices SET terminal_mcp_json=? WHERE id=? AND workspace_id=?').run(JSON.stringify(safe),deviceId,ws.id);}
       observeDeviceUpdateHeartbeat(db,deviceId);
-      return this.listDevices(slug).find(device => device.id === row.id) || null;
+      const device = this.listDevices(slug).find(device => device.id === row.id) || null;
+      db.exec('RELEASE device_heartbeat');
+      return device;
+      } catch (error) {
+        db.exec('ROLLBACK TO device_heartbeat; RELEASE device_heartbeat');
+        throw error;
+      }
     },
     requestManagementMcpRetry(slug, deviceId, context = {}) {
       const role = String(context.actorRole || context.role || '').toLowerCase();
@@ -2182,7 +2201,7 @@ export function createRepository(options = {}, io={}) {
           if (!receiptOnly || !recoverableBotCompletion(row) || !input.deviceId || input.deviceId !== actionTargetDevice(row)) throw new Error('A2A action expired');
           response = { ...a2aResponseView(row, { receiptOnly, includeResult:false }), duplicate:true, deliveryOnly:true, leaseRenewed:false };
         }
-        else if (['succeeded','failed'].includes(row.status)) response = { ...a2aResponseView(row, { receiptOnly, includeResult:!receiptOnly }), duplicate:true };
+        else if (['succeeded','failed'].includes(row.status)) response = { ...a2aResponseView(row, { receiptOnly, includeResult:!receiptOnly }),...historicalActionMetadata(row), duplicate:true };
         else {
           const timestamp = now();
           if(row.status==='pending')assertBotExecution(db,row.workspace_id,{...parse(row.payload_json),...(!actionTargetDevice(row)&&(input.deviceId||input.device_id)?{deviceId:String(input.deviceId||input.device_id).trim()}:{})},{validation:botActionMaintenance(row.type,parse(row.payload_json)),provisioning:row.type==='hermes.bot.provision',requireProfile:row.type!=='hermes.bot.provision',actionId,readOnlyInspection:botActionReadOnlyInspection(row.type,parse(row.payload_json))});
@@ -2313,9 +2332,10 @@ export function createRepository(options = {}, io={}) {
       assertMaintenanceAttempt(db,row,input);
       const receiptOnly = explicitBoolean(input.receiptOnly);
       const maintenanceTerminal = isMaintenanceTerminalInput(db,row,input);
-      const recovering = recoverableBotCompletion(row) || maintenanceTerminal;
+      const finalized=readBotFailureFinalization(db,row);
+      const recovering = !finalized&&(recoverableBotCompletion(row) || maintenanceTerminal);
       const reconciliation = !maintenanceTerminal && (recovering || Boolean(input[botReplayEvent]));
-      if (['succeeded', 'failed', 'expired'].includes(row.status) && !recovering) return { ...a2aResponseView(row, { receiptOnly }), duplicate: true };
+      if (['succeeded', 'failed', 'expired'].includes(row.status) && !recovering) return { ...a2aResponseView(row, { receiptOnly }),...historicalActionMetadata(row), duplicate: true };
       let status = String(input.status || (input.error ? 'failed' : 'succeeded'));
       if (!['succeeded', 'failed'].includes(status)) throw new Error('A2A result status must be succeeded or failed');
       const payload = parse(row.payload_json);
@@ -2397,6 +2417,7 @@ export function createRepository(options = {}, io={}) {
           if (reconciliation || maintenanceTerminal) db.prepare("UPDATE automation_runs SET status=?,result_json=?,error=?,finished_at=?,message=? WHERE id=? AND action_id=? AND status NOT IN ('completed','failed')").run(status==='succeeded'?'completed':'failed',JSON.stringify(result),error,timestamp,maintenanceTerminal?'维护暂停后原任务已终结；没有重新派发或重试':'已核实原执行终态；未重新派发或重试',payload.runId,actionId);
           else this.completeAutomationRun(payload.runId, { status: status === 'succeeded' ? 'completed' : 'failed', result, error, botInternal:BOT_INTERNAL,sourceActionId:actionId });
         }
+        if(status==='failed'&&botUncertain(result)&&payload.hermesBot)automaticallyFinalizeBotFailure(this,actionId);
         db.exec('RELEASE conversation_result');
       } catch (writeError) {
         db.exec('ROLLBACK TO conversation_result; RELEASE conversation_result');
@@ -2406,7 +2427,7 @@ export function createRepository(options = {}, io={}) {
       // Notify only after the result savepoint was released. Recovery workers
       // schedule their own work and cannot change this committed reply.
       if(payload.hermesBot)for(const listener of botActionCompletionListeners)try{listener({actionId,employeeId:payload.employeeId,workspace:ws.slug});}catch{}
-      return a2aResponseView(updated, { payload, receiptOnly });
+      return {...a2aResponseView(updated, { payload, receiptOnly }),...historicalActionMetadata(updated)};
     },
     getA2AAction(actionId, { workspaceSlug = null, actorUserId = null, eventView = 'full' } = {}) {
       const row = db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(String(actionId || ''));

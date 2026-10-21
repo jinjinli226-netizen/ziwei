@@ -2,6 +2,7 @@ import {executionUncertain,botPresence,capabilityPresentation,botStopPresentatio
 export {executionUncertain,botPresence,capabilityPresentation};
 import {createBotRequestScope, botErrorMessage} from './bot-state.js';
 import {employeeRemovalNotice} from './employee-removal.js';
+import {failureFinalizationRequest,pendingBotFailureFinalization} from './bot-failure-finalization.mjs';
 import {enabledCapabilityConfig,capabilitySavedEnabled} from './bot-capability-actions.js';
 import {createDefaultBotConfig} from '../../src/hermes-bot-config.mjs';
 
@@ -170,6 +171,17 @@ export function createBotWorkbench({api,wrap=value=>value,wait=ms=>new Promise(r
     if(scope.current(request)){const error=state.error;await refresh();if(scope.current(request)&&!ok)state.error=error;}
     return ok;
   }
+  async function finalizeFailure(run){
+    if(state.busy||state.writeUnknown||!failureFinalizationRequest(state.bot,run)||!state.runs.some(item=>item.id===run.id))return false;
+    const request=scope.begin('failure-finalization');
+    const ok=await mutate(async(id,workspace)=>{
+      const current=await getBot(id,workspace);if(!scope.current(request))throw new Error('当前员工已变化');
+      const body=failureFinalizationRequest(current,run);
+      return body?api.finalizeBotFailure(id,body,workspace):current;
+    },bot=>pendingBotFailureFinalization(bot)?'本轮已失败，系统正在原电脑自动收尾。':'已刷新原执行状态，原始失败回执保留。',{readback:true});
+    if(scope.current(request)){const error=state.error;await refresh();if(scope.current(request)&&!ok)state.error=error;}
+    return ok;
+  }
   async function validate() {
     const revision=state.bot?.revision,key=`bot-validate-${state.selectedId}-${revision}-${crypto.randomUUID()}`;
     const ok=await mutate((id,workspace)=>api.validateBot(id,{expectedRevision:revision,idempotencyKey:key},workspace),'正在检查配置。');
@@ -191,5 +203,5 @@ export function createBotWorkbench({api,wrap=value=>value,wait=ms=>new Promise(r
   }
   async function recoverRoutine(){const pending=state.pendingOperation;if(pending?.kind==='routine_run')return runRoutine(pending.routineId,{recovering:true});return false;}
   function dispose(){workspaceGeneration++;scope.dispose();}
-  return {state,setWorkspace,select,list,refresh,loadRecords,initialize,removeEmployee,save,enableCapability,control,reconcile,validate,mutate,runRoutine,recoverRoutine,dispose};
+  return {state,setWorkspace,select,list,refresh,loadRecords,initialize,removeEmployee,save,enableCapability,control,reconcile,finalizeFailure,validate,mutate,runRoutine,recoverRoutine,dispose};
 }

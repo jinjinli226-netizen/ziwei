@@ -134,11 +134,11 @@ try{
  exit 1
 }
 `;
-export function createLocalHistoryHandleTerminator({runCommand=run}={}){return async data=>{
+export function createLocalHistoryHandleTerminator({runCommand=run,program=LOCAL_HISTORY_STOP_HANDLE_PROGRAM}={}){return async data=>{
  // CIM observation may exceed 30 seconds on a real descendant tree; this
  // bounded host budget does not extend the native cleanup waitMs deadline.
  let output;
- try{const pending=runCommand('powershell.exe',['-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(LOCAL_HISTORY_STOP_HANDLE_PROGRAM,'utf16le').toString('base64')],{encoding:'utf8',windowsHide:true,timeout:data.waitMs+120000,maxBuffer:64*1024});if(!pending.child?.stdin){await pending;throw nativeFailure('LH00_NATIVE_ERROR');}pending.child.stdin.on('error',()=>{});pending.child.stdin.end(JSON.stringify(data));output=await pending;}
+ try{const pending=runCommand('powershell.exe',['-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(program,'utf16le').toString('base64')],{encoding:'utf8',windowsHide:true,timeout:data.waitMs+120000,maxBuffer:64*1024});if(!pending.child?.stdin){await pending;throw nativeFailure('LH00_NATIVE_ERROR');}pending.child.stdin.on('error',()=>{});pending.child.stdin.end(JSON.stringify(data));output=await pending;}
  catch(error){throw nativeFailure(closedNativeRule(error?.stdout)||'LH00_NATIVE_ERROR');}
  const rule=closedNativeRule(output?.stdout);if(rule)throw nativeFailure(rule);
  try{return JSON.parse(output.stdout.replace(/^\uFEFF/,'').trim());}catch{throw nativeFailure('LH00_NATIVE_ERROR');}
@@ -146,7 +146,7 @@ export function createLocalHistoryHandleTerminator({runCommand=run}={}){return a
 
 const nativeTerminate=createLocalHistoryHandleTerminator(),nativeInventory=createForceAbandonInventory(),nativeListenerCount=createForceAbandonListenerCount();
 
-function validatedMaintenanceCleanup(value,record,nonce,finishedAt){
+export function validatedMaintenanceCleanup(value,record,nonce,finishedAt){
  fact(value&&same(Object.keys(value).sort(),['schemaVersion','scope','rootPid','rootCreationTime','rootExitedAt','nonce','complete','descendantCount','terminatedCount','processes'].sort())&&value.schemaVersion===1&&value.scope==='held-daemon-descendant-closure'&&value.rootPid===record.pid&&value.rootCreationTime===record.creationTime&&Number.isFinite(Date.parse(value.rootExitedAt))&&Date.parse(value.rootExitedAt)>=Date.parse(record.creationTime)&&Date.parse(value.rootExitedAt)<=Date.parse(finishedAt)&&value.nonce===nonce&&value.complete===true&&Array.isArray(value.processes)&&value.processes.length<=256&&value.descendantCount===value.processes.length&&Number.isSafeInteger(value.terminatedCount)&&value.terminatedCount>=0&&value.terminatedCount<=value.descendantCount);
  const known=new Map([[record.pid,{created:Date.parse(record.creationTime),exited:Date.parse(value.rootExitedAt)}]]),pending=new Map();let requested=0;
  for(const row of value.processes){fact(row&&same(Object.keys(row).sort(),['pid','parentPid','creationTime','exitedAt','exitConfirmed','exitCode','terminationRequested'].sort())&&Number.isSafeInteger(row.pid)&&row.pid>0&&row.pid!==record.pid&&!pending.has(row.pid)&&Number.isSafeInteger(row.parentPid)&&row.parentPid>0&&Number.isFinite(Date.parse(row.creationTime))&&Number.isFinite(Date.parse(row.exitedAt))&&Date.parse(row.exitedAt)>=Date.parse(row.creationTime)&&Date.parse(row.exitedAt)<=Date.parse(finishedAt)&&row.exitConfirmed===true&&Number.isSafeInteger(row.exitCode)&&typeof row.terminationRequested==='boolean');pending.set(row.pid,row);if(row.terminationRequested)requested++;}

@@ -34,7 +34,7 @@ function harness(overrides={}, { realOpen=false,realtime=false,focused=false }={
   const polling = [];
   const bindings = {
     focusedConversation:{value:focused},
-    botChatIntent:{value:null},botBindingPending:{value:false},selectedConversation, conversations, conversationExecution:{ value:selectedConversation.value.execution }, conversationEmployeeId:{ value:'employee' }, conversationStatusLoading:{ value:false },
+    botChatIntent:{value:null},botBindingPending:{value:false},conversationBotBinding:{value:null},refreshBotChatFailureState:async()=>{},selectedConversation, conversations, conversationExecution:{ value:selectedConversation.value.execution }, conversationEmployeeId:{ value:'employee' }, conversationStatusLoading:{ value:false },
     workspaceSlug:()=>workspace.value, conversationIdFromPath:()=> 'conversation', conversationRouteId:{ value:'conversation' },
     api:{ conversation:async()=>selectedConversation.value, conversations:async()=>({conversations:conversations.value}), ...overrides },
     openConversation:async item=>reopened.push(item), stopConversationPolling:()=>polling.push('stop'), startConversationPolling:()=>polling.push('start'), notify:()=>{},
@@ -214,8 +214,8 @@ test('actual polling waits for its current slow request instead of starving acce
   let tick,requests=0;
   const response=deferred();
   const start=app.indexOf('function startConversationPolling('),end=app.indexOf('\n}',start);
-  const begin=new Function('selectedConversation','page','setInterval','clearInterval','refreshSelectedConversation','refreshConversationState','conversationExecutionBusy','executionNeedsPolling','conversationExecution',`let conversationPollTimer=null,conversationOpenGeneration=0;function stopConversationPolling(){conversationPollTimer=null;}return (${app.slice(start,end+2)});`)(
-    {value:{id:'conversation'}},{value:'inbox'},callback=>{tick=callback;return 'fixture-timer';},()=>{},()=>{requests++;return response.promise;},()=>{requests++;return response.promise;},{value:true},state.executionNeedsPolling,{value:execution('running','acked')},
+  const begin=new Function('selectedConversation','page','setInterval','clearInterval','refreshSelectedConversation','refreshConversationState','conversationExecutionBusy','executionNeedsPolling','conversationExecution','conversationBotBinding',`let conversationPollTimer=null,conversationOpenGeneration=0;function stopConversationPolling(){conversationPollTimer=null;}return (${app.slice(start,end+2)});`)(
+    {value:{id:'conversation'}},{value:'inbox'},callback=>{tick=callback;return 'fixture-timer';},()=>{},()=>{requests++;return response.promise;},()=>{requests++;return response.promise;},{value:true},state.executionNeedsPolling,{value:execution('running','acked')},{value:null},
   );
   begin();const first=tick(),overlap=tick();
   assert.equal(requests,1);
