@@ -1,73 +1,284 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "date": "2026-10-21",
-  "purpose": "User-authorized read-only InsTrendS and TikTokTrendS message round trip; no business execution",
-  "state": "blocked_by_server_migration",
-  "acceptancePassed": false,
+  "purpose": "User-authorized InsTrendS and TikTokTrendS internal text-message round trip; no operational task",
+  "state": "passed",
+  "acceptancePassed": true,
+  "recordedAt": "2026-10-21T09:54:55.050318+00:00",
   "workspace": "bigtron",
-  "employees": [
+  "marker": "INS-TK-20261021-3892379E",
+  "replyCode": "Q7N4K2",
+  "sourceCommit": "afd0ccc34d59b06a813d1793154630f9e9fabdd4",
+  "testMethod": "Normal authenticated collaboration API first sends an Ins native wrapper to TK. TK model calls message_agent once to Ins; Ins model acknowledges the exact marker and independently generated reply code. Initial Ins wrapper is not an Ins model turn.",
+  "configurationAfter": [
     {
       "name": "InsTrendS",
       "id": "employee_faa2798d-b918-4c37-b9c2-7fe3baa9772b",
-      "conversationId": "conv_0c53ec1d-5800-433c-bbfe-cc797b712091",
-      "before": {
-        "revision": 2,
-        "controlEpoch": 3,
-        "controlState": "active",
-        "collaborationConfigured": false
-      },
-      "lastConfirmed": {
-        "revision": 3,
-        "controlEpoch": 4,
-        "controlState": "draft",
-        "collaborationEnabled": true,
-        "targetEmployeeIds": [
-          "employee_1743b9a2-dd8c-4a51-9b7d-0d25414aa234"
-        ]
-      },
-      "validationRequest": {
-        "responseHttp": 502,
-        "outcome": "unknown; inspect original action before stable-key retry",
-        "idempotencyKey": "ins-tk-live-validation-0b59f9dcf3324df2b6f6d17702277a85",
-        "expectedRevision": 3
-      }
+      "revision": 3,
+      "controlEpoch": 5,
+      "controlState": "active",
+      "activeActionId": null,
+      "authorizedPartnerId": "employee_1743b9a2-dd8c-4a51-9b7d-0d25414aa234"
     },
     {
       "name": "TikTokTrendS",
       "id": "employee_1743b9a2-dd8c-4a51-9b7d-0d25414aa234",
-      "conversationId": "conv_f2b31905-27b7-44bd-92de-da7ff2c1b1df",
-      "before": {
-        "revision": 4,
-        "controlEpoch": 9,
-        "controlState": "active",
-        "collaborationConfigured": false
-      },
-      "configurationPatch": {
-        "responseHttp": 502,
-        "outcome": "unknown; read latest config before any retry",
-        "requestedChange": "enable collaboration with InsTrendS only; preserve all other config"
-      }
+      "revision": 5,
+      "controlEpoch": 11,
+      "controlState": "active",
+      "activeActionId": null,
+      "authorizedPartnerId": "employee_faa2798d-b918-4c37-b9c2-7fe3baa9772b"
     }
   ],
-  "collaborationMessagesDispatched": 0,
-  "realModelTurnsStartedByTest": 0,
-  "businessTasksReplayed": false,
-  "serverObservation": {
-    "capturedAt": "2026-10-21T09:21:15.160941+00:00",
-    "current": "/opt/ziwei/releases/world-memory-skill-6243891548c2-969a825292ca/v2",
-    "apiState": "inactive",
-    "apiExitStatus": "15",
-    "controlState": "inactive",
-    "nginxState": "active",
-    "publicApiHttp": 502,
-    "userConfirmedMigrationOrRestartInProgress": true
-  },
-  "serviceRestartOrDeploymentPerformed": false,
-  "nextSteps": [
-    "After migration restore API and device connectivity; inspect both current configurations and original Ins validation outcome before retries.",
-    "Complete supported validation and restore the previously active state after true validation success.",
-    "Use an Ins native message wrapper to TK; TK sends one message_agent reply to Ins and exits without waiting; Ins acknowledges in its own chat and does not reply again.",
-    "Verify both real model actions, source/target IDs, unique marker, result content and process exits. Native wrapper alone is not a model conversation."
+  "validation": [
+    {
+      "employeeId": "employee_faa2798d-b918-4c37-b9c2-7fe3baa9772b",
+      "id": "action_339e76f4-4737-49f4-beff-f6961a3d74bf",
+      "status": "succeeded",
+      "valid": true,
+      "revision": 3,
+      "toolsets": [
+        "web",
+        "browser",
+        "file",
+        "terminal",
+        "vision",
+        "skills",
+        "todo",
+        "memory",
+        "session_search",
+        "code_execution",
+        "ziwei_collaboration"
+      ]
+    },
+    {
+      "employeeId": "employee_1743b9a2-dd8c-4a51-9b7d-0d25414aa234",
+      "id": "action_024847da-6335-42f8-93f0-578497816083",
+      "status": "succeeded",
+      "valid": true,
+      "revision": 5,
+      "toolsets": [
+        "web",
+        "browser",
+        "file",
+        "terminal",
+        "vision",
+        "skills",
+        "todo",
+        "memory",
+        "session_search",
+        "code_execution",
+        "ziwei_collaboration",
+        "viral_library"
+      ]
+    }
   ],
-  "privacy": "No cookies, login credentials, raw employee descriptions or expired authorization codes included."
+  "nativeWrapper": {
+    "id": "action_d74a428e-4c32-4374-8c46-2f6d7f1ac5bb",
+    "status": "succeeded",
+    "receipt": {
+      "schemaVersion": 2,
+      "employeeId": "employee_faa2798d-b918-4c37-b9c2-7fe3baa9772b",
+      "revision": 3,
+      "resource": "collaboration",
+      "operation": "message",
+      "status": "succeeded"
+    },
+    "processExit": {
+      "launched": true,
+      "rootConfirmed": true,
+      "treeConfirmed": true,
+      "cancelled": false,
+      "backgroundProcessesRetained": false,
+      "rootPid": 20120,
+      "rootExitCode": 0,
+      "activeProcesses": 0,
+      "hostExitCode": 0,
+      "platform": "win32",
+      "supervisor": "windows-job"
+    },
+    "targetActionId": "action_087373a0-e0c9-41ec-b71f-9262a0af8987"
+  },
+  "tkModelTurn": {
+    "id": "action_087373a0-e0c9-41ec-b71f-9262a0af8987",
+    "type": "conversation.execute",
+    "status": "succeeded",
+    "createdAt": "2026-10-21T09:43:21.315Z",
+    "ackedAt": "2026-10-21T09:43:25.112Z",
+    "completedAt": "2026-10-21T09:51:19.397Z",
+    "employeeId": "employee_1743b9a2-dd8c-4a51-9b7d-0d25414aa234",
+    "profile": "bot-f165991d1da77173908e38d7",
+    "deviceId": "device_11af6d85-6c5c-4cbe-9a25-31599a474e5d",
+    "sourceEmployeeId": "employee_faa2798d-b918-4c37-b9c2-7fe3baa9772b",
+    "sourceActionId": "action_d74a428e-4c32-4374-8c46-2f6d7f1ac5bb",
+    "runtime": "Hermes",
+    "model": "gpt-6.1-sol",
+    "nativeSessionId": "20261016_101227_715dbf",
+    "code": 0,
+    "processExit": {
+      "launched": true,
+      "rootConfirmed": true,
+      "treeConfirmed": true,
+      "cancelled": false,
+      "backgroundProcessesRetained": false,
+      "rootPid": 28708,
+      "rootExitCode": 0,
+      "activeProcesses": 0,
+      "hostExitCode": 0,
+      "platform": "win32",
+      "supervisor": "windows-job"
+    },
+    "reasoning": {
+      "schemaVersion": 1,
+      "employeeId": "employee_1743b9a2-dd8c-4a51-9b7d-0d25414aa234",
+      "revision": 5,
+      "provider": "openai-codex",
+      "model": "gpt-6.1-sol",
+      "requested": "max",
+      "effective": "max",
+      "actual": "max",
+      "status": "matched",
+      "phase": "request",
+      "evidence": "native_codex_transport",
+      "actualModel": "gpt-6.1-sol",
+      "nativeActual": "max",
+      "mode": "native",
+      "requests": 8
+    },
+    "output": "回信码：Q7N4K2\n工具状态：dispatched；action 状态：pending\n回信 action ID：action_d147e513-4954-4e38-a9fb-044d23308930"
+  },
+  "tkMessageAgentStages": [
+    {
+      "at": "2026-10-21T09:45:04.990Z",
+      "detail": "工具：message_agent · 执行中"
+    },
+    {
+      "at": "2026-10-21T09:45:15.652Z",
+      "detail": "工具：message_agent · 已完成"
+    }
+  ],
+  "insModelTurn": {
+    "id": "action_d147e513-4954-4e38-a9fb-044d23308930",
+    "type": "conversation.execute",
+    "status": "succeeded",
+    "createdAt": "2026-10-21T09:45:10.538Z",
+    "ackedAt": "2026-10-21T09:45:16.768Z",
+    "completedAt": "2026-10-21T09:51:08.956Z",
+    "employeeId": "employee_faa2798d-b918-4c37-b9c2-7fe3baa9772b",
+    "profile": "bot-0f42ef66774a78f0a7385a5d",
+    "deviceId": "device_11af6d85-6c5c-4cbe-9a25-31599a474e5d",
+    "sourceEmployeeId": "employee_1743b9a2-dd8c-4a51-9b7d-0d25414aa234",
+    "sourceActionId": "action_087373a0-e0c9-41ec-b71f-9262a0af8987",
+    "runtime": "Hermes",
+    "model": "gpt-6.1-sol",
+    "nativeSessionId": "20261017_105051_a79540",
+    "code": 0,
+    "processExit": {
+      "launched": true,
+      "rootConfirmed": true,
+      "treeConfirmed": true,
+      "cancelled": false,
+      "backgroundProcessesRetained": false,
+      "rootPid": 30636,
+      "rootExitCode": 0,
+      "activeProcesses": 0,
+      "hostExitCode": 0,
+      "platform": "win32",
+      "supervisor": "windows-job"
+    },
+    "reasoning": {
+      "schemaVersion": 1,
+      "employeeId": "employee_faa2798d-b918-4c37-b9c2-7fe3baa9772b",
+      "revision": 3,
+      "provider": "openai-codex",
+      "model": "gpt-6.1-sol",
+      "requested": "max",
+      "effective": "max",
+      "actual": "max",
+      "status": "matched",
+      "phase": "request",
+      "evidence": "native_codex_transport",
+      "actualModel": "gpt-6.1-sol",
+      "nativeActual": "max",
+      "mode": "native",
+      "requests": 2
+    },
+    "output": "Ins已收到TK回信\n测试编号：INS-TK-20261021-3892379E\n回信码：Q7N4K2"
+  },
+  "collaborationMessagesDispatched": 2,
+  "realModelTurnsStartedByTest": 2,
+  "businessTasksReplayed": false,
+  "businessToolCalls": false,
+  "configurationChanged": true,
+  "changeScope": "Enable collaboration only for this precise pair, preserve existing model/Profile/HOME/other MCP settings. Both validated and restored active.",
+  "credentialsManuallyChanged": false,
+  "serviceRestartOrDeploymentPerformed": false,
+  "clientUpgraded": false,
+  "history": [
+    {
+      "state": "blocked_by_server_migration",
+      "serverObservation": {
+        "capturedAt": "2026-10-21T09:21:15.160941+00:00",
+        "current": "/opt/ziwei/releases/world-memory-skill-6243891548c2-969a825292ca/v2",
+        "apiState": "inactive",
+        "apiExitStatus": "15",
+        "controlState": "inactive",
+        "nginxState": "active",
+        "publicApiHttp": 502,
+        "userConfirmedMigrationOrRestartInProgress": true
+      },
+      "employees": [
+        {
+          "name": "InsTrendS",
+          "id": "employee_faa2798d-b918-4c37-b9c2-7fe3baa9772b",
+          "conversationId": "conv_0c53ec1d-5800-433c-bbfe-cc797b712091",
+          "before": {
+            "revision": 2,
+            "controlEpoch": 3,
+            "controlState": "active",
+            "collaborationConfigured": false
+          },
+          "lastConfirmed": {
+            "revision": 3,
+            "controlEpoch": 4,
+            "controlState": "draft",
+            "collaborationEnabled": true,
+            "targetEmployeeIds": [
+              "employee_1743b9a2-dd8c-4a51-9b7d-0d25414aa234"
+            ]
+          },
+          "validationRequest": {
+            "responseHttp": 502,
+            "outcome": "unknown; inspect original action before stable-key retry",
+            "idempotencyKey": "ins-tk-live-validation-0b59f9dcf3324df2b6f6d17702277a85",
+            "expectedRevision": 3
+          }
+        },
+        {
+          "name": "TikTokTrendS",
+          "id": "employee_1743b9a2-dd8c-4a51-9b7d-0d25414aa234",
+          "conversationId": "conv_f2b31905-27b7-44bd-92de-da7ff2c1b1df",
+          "before": {
+            "revision": 4,
+            "controlEpoch": 9,
+            "controlState": "active",
+            "collaborationConfigured": false
+          },
+          "configurationPatch": {
+            "responseHttp": 502,
+            "outcome": "unknown; read latest config before any retry",
+            "requestedChange": "enable collaboration with InsTrendS only; preserve all other config"
+          }
+        }
+      ],
+      "collaborationMessagesDispatched": 0,
+      "acceptancePassed": false
+    }
+  ],
+  "limits": [
+    "This exact pair and text round trip were tested; other employees, autonomous multi-round loops, voice calls, and group discussion were not tested.",
+    "TK output reported the Ins action pending at send time; the independently read final Ins action subsequently succeeded.",
+    "Raw native session history was not read; authenticated linked action payloads, native tool-stage events and final process receipts establish this acceptance."
+  ],
+  "privacy": "No login credentials, cookies, raw employee persona/history or unrelated business output included."
 }

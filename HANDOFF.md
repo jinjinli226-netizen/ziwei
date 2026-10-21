@@ -1,5 +1,9 @@
 # 紫薇项目 HandOff
 
+## 2026-10-21 Ins 与 TK 文字互聊真实验收通过
+
+用户要求迁移后继续测试，已回读原状态、补齐精确伙伴授权并在公司台式真实校验，两位恢复 active（Ins r3/e5、TK r5/e11）。原生Ins发信 d74a428e→TK模型087373a0，TK实际message_agent回信 d147e513→Ins模型，回信码Q7N4K2及本次编号完全匹配。两边真实gpt-6.1-sol均于17:51完成，code0/root0/tree0、无后台保留，最终无在途动作。不执行业务、不改产品源码或部署。首封是原生协作入口，后续为两位模型往返，不推广为语音/群聊或任意无限多轮。见[运维](docs/operations/2026-10-21-ins-tk-collaboration-live.md)及[QA](docs/qa/2026-10-21-ins-tk-collaboration-live.json)。下方保留迁移期间的未完成快照。
+
 ## 2026-10-21 Ins 与 TK 互聊验收遇到服务器迁移，尚未发信
 
 用户明确授权 InsTrendS 与 TikTokTrendS 互聊测试。两位原配置未启用协作；仅 Ins 已保存精确 TK 目标，r2/e3 active→r3/e4 draft，待真实校验后恢复启用。TK 保存返回502，是否生效未知；Ins 校验也返回502，是否排队未知，禁止直接换键重复提交。只读确认17:21旧API及Control均inactive、Nginx仍active，用户确认正在迁移或重启；没有重启旧服或派发互聊/模型业务。迁完先回读两位配置、原校验及设备状态，再完成验证/启用和双向握手，不把这次算互聊成功。精确ID、校验稳定键与避免互相等待的验收步骤见[QA](docs/qa/2026-10-21-ins-tk-collaboration-live.json)。
