@@ -667,7 +667,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
     if (!employeeId) return res.status(400).json({ error: '新建会话必须绑定数字员工' });
     return res.status(201).json(repo.createConversation(req.params.slug, { ...(req.body || {}), employeeId, ...employeeContext(req), enforceDeviceOwnership: true }));
   });
-  app.get('/api/conversations/:id', (req, res) => { const context=employeeContext(req),conversation=repo.getConversation(req.params.id, context); if(!conversation) return res.status(404).json({error:'Conversation not found'}); if(req.query.view==='mobile'){res.setHeader('Cache-Control','no-store');res.vary('Cookie');return res.json(mobileReadView.conversation(mobileGroupAction.conversation(conversation,context)));} res.json(conversation); });
+  app.get('/api/conversations/:id', (req, res) => { const context=employeeContext(req),thread=req.query.view==='thread',conversation=repo.getConversation(req.params.id, context,thread?{...req.query,view:'thread'}:undefined); if(!conversation) return res.status(404).json({error:'Conversation not found'}); if(req.query.view==='mobile'||thread){res.setHeader('Cache-Control','no-store');res.vary('Cookie');return res.json(mobileReadView.conversation(mobileGroupAction.conversation(conversation,context)));} res.json(conversation); });
   const conversationImage=(req,res)=>{
     const image=mobileReadView.conversationImage(req.params.id,req.params.messageId,req.params.index,employeeContext(req),req.params.forwardIndex);
     if(!image||req.query.v!==undefined&&req.query.v!==image.version)return res.status(404).json({error:'Conversation image not found'});

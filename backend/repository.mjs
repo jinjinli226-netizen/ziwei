@@ -31,6 +31,7 @@ import {botReasoningProof} from '../src/hermes-bot-reasoning.mjs';
 import { botFailure } from '../src/hermes-bot-config.mjs';
 import { CREATOR_BOT_GUIDANCE } from './employees/creator-template.mjs';
 import { assertMaintenanceAttempt, maintenancePublicEventData, maintenanceActionDeadline, guardMaintenanceExecutionAdmission, isMaintenanceTerminalInput, settleExpiredMaintenanceAction } from './action-maintenance.mjs';
+import {createConversationThreadView} from './conversation-thread-view.mjs';
 
 // Constructor provenance is private; exported queries cannot register callers.
 const repositoryOrigins=new WeakMap();
@@ -629,16 +630,17 @@ export function createRepository(options = {}, io={}) {
   // Conversation messages are dispatched through a2a_actions.  Expose the
   // latest dispatch and its progress events alongside the messages so the UI
   // can show whether ziwei_user has received, started, or finished a reply.
-  // The action payload is JSON (rather than a separate FK), therefore filter
-  // the candidate rows after parsing to avoid matching a conversation id that
-  // happens to occur in the prompt text.
-  const conversationExecution = conversationId => {
+  // Preserve the legacy full-reader contract. The opt-in thread reader selects
+  // its exact workspace/conversation binding in SQLite without hydrating old
+  // action payloads that merely mention this conversation in their prompt.
+  let conversationThreadView;
+  const conversationExecution = (conversationId,thread=null,workspaceId=null) => {
     // A persistent conversation can be dispatched directly as
     // `conversation.execute`, or through a task created for a digital
     // employee (`task.execute`).  Both payloads carry conversationId.  The
     // UI needs the latest one regardless of which dispatch path was used.
-    const candidates = db.prepare("SELECT * FROM a2a_actions WHERE payload_json LIKE ? AND type IN ('task.execute','conversation.execute') ORDER BY created_at DESC, rowid DESC").all(`%${String(conversationId)}%`);
-    const row = candidates.find(candidate => parse(candidate.payload_json)?.conversationId === conversationId);
+    const candidates = thread?null:db.prepare("SELECT * FROM a2a_actions WHERE payload_json LIKE ? AND type IN ('task.execute','conversation.execute') ORDER BY created_at DESC, rowid DESC").all(`%${String(conversationId)}%`);
+    const row = thread?thread.latestAction(workspaceId,conversationId):candidates.find(candidate => parse(candidate.payload_json)?.conversationId === conversationId);
     if (!row) return null;
     let current = row;
     if (!rollout && ['pending','acked'].includes(current.status) && current.expires_at && Date.parse(current.expires_at) <= Date.now() && db.prepare('SELECT ziwei_v2_admitted(?) admitted').get(current.id).admitted===1) {
@@ -646,8 +648,9 @@ export function createRepository(options = {}, io={}) {
       db.prepare("UPDATE a2a_actions SET status='expired',completed_at=? WHERE id=? AND ziwei_v2_admitted(id)=1 AND status IN ('pending','acked')").run(timestamp, current.id);
       current = { ...current, status:'expired', completed_at:timestamp };
     }
-    const view = conversationActionView(current);
-    view.events = actionEvents(current.id);
+    const view = thread?thread.execution(current.id,workspaceId):conversationActionView(current);
+    view.events = actionEvents(current.id,thread?'mobile':'full');
+    if(thread)view.event_count=db.prepare('SELECT COUNT(*) AS count FROM a2a_action_events WHERE action_id=?').get(current.id).count;
     return view;
   };
   const taskExecutionMessage = (taskId, status, error = null, result = null) => {
@@ -1853,17 +1856,20 @@ export function createRepository(options = {}, io={}) {
       if (row.employee_id && !employeeVisible(employee, employeeAccessContext(input))) return null;
       return row;
     },
-    getConversation(conversationId, input = {}) {
+    getConversation(conversationId, input = {},options={}) {
       const row=db.prepare('SELECT * FROM conversations WHERE id=?').get(conversationId); if(!row) return null;
       const employee = row.employee_id ? db.prepare('SELECT * FROM employees WHERE id=? AND workspace_id=?').get(row.employee_id,row.workspace_id) : null;
       if (row.employee_id && !employeeVisible(employee, employeeAccessContext(input))) return null;
+      const thread=options?.view==='thread'?(conversationThreadView??=createConversationThreadView(this)):null;
+      const page=thread?.messages(conversationId,options);
       return {
         ...row,
         employee: conversationEmployeeView(employee),
         employee_binding: employee ? 'bound' : 'unassigned_legacy',
         requires_employee_assignment: !employee,
-        execution:conversationExecution(conversationId),
-        messages:db.prepare('SELECT * FROM conversation_messages WHERE conversation_id=? ORDER BY created_at,rowid').all(conversationId).map(conversationMessageView)
+        execution:conversationExecution(conversationId,thread,row.workspace_id),
+        messages:(page?page.rows:db.prepare('SELECT * FROM conversation_messages WHERE conversation_id=? ORDER BY created_at,rowid').all(conversationId)).map(conversationMessageView),
+        ...(page?{messagePage:page.messagePage}:{})
       };
     },
     createConversation(slug,input={}) {

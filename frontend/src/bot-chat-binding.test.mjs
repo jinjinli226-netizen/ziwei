@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {createConversationComposerStore} from './conversation-compose.js';
 import {conversationSettingsSnapshot} from './workdir.js';
+import {loadBotPageOptions} from './bot-page-load.js';
 const app=await readFile(new URL('./App.vue',import.meta.url),'utf8');
 function source(name){const start=app.search(new RegExp(`(?:async )?function ${name}\\(`));assert.ok(start>=0);return app.slice(start,app.indexOf('\n}',start)+2);}
 function actual(name,bindings){return new Function(...Object.keys(bindings),`let conversationSettingsBaseline=null;let conversationOpenGeneration=0;return (${source(name)});`)(...Object.values(bindings));}
@@ -18,10 +19,10 @@ test('actual Bot device selector cannot rewrite its binding or launch directory 
 });
 test('failed workspace load cannot authorize prior workspace model and skill options',async()=>{
   const refs=Object.fromEntries([...source('load').matchAll(/(\w+)\.value/g)].map(match=>[match[1],{value:[]}]));
-  refs.authState.value={memberships:[{slug:'b',role:'owner'}]};refs.summary.value={workspace:{slug:'a'}};refs.loadedBotOptionsWorkspace.value='a';refs.models.value=[{id:'a-private'}];refs.skills.value=[{id:'a-skill'}];
+  refs.page.value='bots';refs.focusedConversation.value=false;refs.authState.value={authenticated:true,user:{id:'qa-owner'},memberships:[{slug:'b',role:'owner'}]};refs.summary.value={workspace:{slug:'a'}};refs.loadedBotOptionsWorkspace.value='a';refs.models.value=[{id:'a-private'}];refs.skills.value=[{id:'a-skill'}];
   const blank={workspace:{slug:'b',preferences:{}},tasks:[],runtimes:[],models:[],skills:[],documents:[],automations:[],members:[],devices:[],employees:[],calendars:[],agents:[]};
-  const api=Object.fromEntries(['summary','tasks','runtimes','models','skills','documents','automations','members','devices','employees','calendar','settings','agents'].map(name=>[name,async()=>blank]));api.tasks=async()=>{throw new Error('load failed');};
-  const load=new Function(...Object.keys({...refs,api}),`let workspaceLoadGeneration=0;const workspaceSlug=()=> 'b';const notify=()=>{};return (${source('load')});`)(...Object.values({...refs,api}));
+  const api=Object.fromEntries(['summary','tasks','runtimes','models','skills','documents','automations','members','devices','employees','calendar','settings','agents'].map(name=>[name,async()=>blank]));api.skills=async()=>{throw new Error('load failed');};
+  const load=new Function(...Object.keys({...refs,api,loadBotPageOptions}),`let workspaceLoadGeneration=0;const workspaceSlug=()=> 'b';const notify=()=>{};return (${source('load')});`)(...Object.values({...refs,api,loadBotPageOptions}));
   await load();assert.equal(refs.loading.value,false);assert.equal(refs.summary.value.workspace.slug,'b');assert.equal(refs.loadedBotOptionsWorkspace.value,'a');
   assert.match(app,/:models="loadedBotOptionsWorkspace===botWorkspace\?/);assert.match(app,/:skills="loadedBotOptionsWorkspace===botWorkspace\?/);
 });

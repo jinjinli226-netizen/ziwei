@@ -205,7 +205,12 @@ export const api = {
   },
   createConversation: body => request(`/api/workspaces/${encodeURIComponent(workspaceSlug())}/conversations`, { method:'POST', body:JSON.stringify(body) }),
   updateConversation: (id, body) => request(`/api/conversations/${encodeURIComponent(id)}`, { method:'PATCH', body:JSON.stringify(body) }),
-  conversation: (id, options = {}) => boundedRequest(`/api/conversations/${id}`,options),
+  conversation: (id, options = {}) => {
+    const {before,...readOptions}=options;
+    const query=new URLSearchParams({view:'thread',limit:'10'});
+    if(before)query.set('before',before);
+    return boundedRequest(`/api/conversations/${encodeURIComponent(id)}?${query}`,readOptions);
+  },
   forwardConversation: (id, body) => request(`/api/conversations/${encodeURIComponent(id)}/forwards`, { method:'POST', body:JSON.stringify(body) }),
   markConversationRead: (id, messageId) => request(`/api/conversations/${encodeURIComponent(id)}/read`, { method:'POST', body:JSON.stringify({messageId}) }),
   inspectConversationDirectory: (id, body = {}) => request(`/api/conversations/${encodeURIComponent(id)}/workdir/inspect`, { method:'POST', body:JSON.stringify(body) }),

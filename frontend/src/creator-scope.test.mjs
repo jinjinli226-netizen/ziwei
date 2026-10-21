@@ -1,21 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
-import {createConversationRequestSequence,mergeConversationDetail,mergeConversationLists} from './conversation-execution-state.mjs';
+import {createConversationRequestSequence,mergeConversationDetail,mergeConversationLists,executionNeedsPolling} from './conversation-execution-state.mjs';
 import {conversationSettingsSnapshot,mergeConversationSettingsDraft} from './workdir.js';
+import {loadBotPageOptions,workspaceDataKey} from './bot-page-load.js';
 const app=await readFile(new URL('./App.vue',import.meta.url),'utf8');
 function source(name){const start=app.search(new RegExp(`(?:async )?function ${name}\\(`));assert.ok(start>=0);return app.slice(start,app.indexOf('\n}',start)+2);}
 function implementation(name,bindings){
   const dependencies=name==='openConversation'?['conversationRequestScope','applyConversationDetail']:[];
   const stateBindings=dependencies.length?{createConversationRequestSequence,mergeConversationDetail,mergeConversationLists,conversationSettingsSnapshot,mergeConversationSettingsDraft}:{};
-  const allBindings={refreshEmployeeBots:async()=>{},...stateBindings,...bindings};
-  return new Function(...Object.keys(allBindings),`let conversationSettingsBaseline=null;let workspaceLoadGeneration=0,conversationOpenGeneration=0,conversationListGeneration=0;${dependencies.length?'const conversationRequests=createConversationRequestSequence();':''}${dependencies.map(source).join('\n')}\nreturn (${source(name)});`)(...Object.values(allBindings));
+  const allBindings={refreshEmployeeBots:async()=>{},executionNeedsPolling,loadBotPageOptions,workspaceDataKey,...stateBindings,...bindings};
+  return new Function(...Object.keys(allBindings),`let conversationSettingsBaseline=null;let fullWorkspaceDataKey='';let workspaceLoadGeneration=0,conversationOpenGeneration=0,conversationListGeneration=0;${dependencies.length?'const conversationRequests=createConversationRequestSequence();':''}${dependencies.map(source).join('\n')}\nreturn (${source(name)});`)(...Object.values(allBindings));
 }
 
 test('actual App load never commits a delayed previous workspace snapshot',async()=>{
   let slug='a',releaseA;const delayed=new Promise(resolve=>releaseA=resolve);
   const refs=Object.fromEntries([...source('load').matchAll(/(\w+)\.value/g)].map(match=>[match[1],{value:[]}]));
-  refs.authState.value={memberships:[{slug:'a',role:'member'},{slug:'b',role:'member'}],user:{name:'QA'}};refs.summary.value={workspace:{slug:'a'}};refs.selectedConversation.value=null;
+  refs.focusedConversation.value=false;refs.page.value='home';refs.authState.value={authenticated:true,memberships:[{slug:'a',role:'member'},{slug:'b',role:'member'}],user:{id:'qa-user',name:'QA'}};refs.summary.value={workspace:{slug:'a'}};refs.selectedConversation.value=null;
   const blank={tasks:[],runtimes:[],models:[],skills:[],documents:[],automations:[],members:[],devices:[],employees:[],calendars:[],agents:[]};
   const api=Object.fromEntries(['tasks','runtimes','models','skills','documents','automations','members','devices','employees','calendar','agents'].map(name=>[name,()=>Promise.resolve({...blank,devices:[{id:slug}],employees:[{id:slug}],workspace:{slug,name:slug,preferences:{}}})]));
   api.summary=()=>{const requestSlug=slug;return requestSlug==='a'?delayed:Promise.resolve({workspace:{slug:requestSlug,name:requestSlug}});};
@@ -25,7 +26,7 @@ test('actual App load never commits a delayed previous workspace snapshot',async
 });
 test('actual conversation open preserves the latest same-workspace selection',async()=>{
   let resolveOld;const old=new Promise(resolve=>resolveOld=resolve);const refs=Object.fromEntries([...['openConversation','conversationRequestScope','applyConversationDetail'].map(source).join('\n').matchAll(/(\w+)\.value/g)].map(match=>[match[1],{value:[]}]));
-  refs.devices.value=[];refs.page.value='inbox';refs.conversationExecutionBusy.value=false;
+  refs.devices.value=[];refs.page.value='inbox';
   refs.selectedConversation.value=null;refs.conversationEmployeeId.value='creator';refs.conversations.value=[{id:'old',execution:null},{id:'creator',execution:null}];
   const latestExecution={id:'creator-action',status:'pending',created_at:'2026-10-12T01:00:02.000Z'};
   const open=implementation('openConversation',{...refs,api:{conversation:id=>id==='old'?old:Promise.resolve({id,employee_id:'creator',messages:[],execution:latestExecution})},workspaceSlug:()=> 'qa',clearConversationAttachment:()=>{},loadConversationExecution:async()=>{},startConversationPolling:()=>{},stopConversationPolling:()=>{},notify:()=>{}});
@@ -36,7 +37,7 @@ test('actual conversation open preserves the latest same-workspace selection',as
 test('same-workspace load preserves the selected conversation second device throughout delayed list refresh',async()=>{
   for(const persistedDevice of ['second',null]){
     const refs=Object.fromEntries([...source('load').matchAll(/(\w+)\.value/g)].map(match=>[match[1],{value:[]}]));
-    refs.authState.value={memberships:[{slug:'qa',role:'member'}],user:{name:'QA'}};refs.summary.value={workspace:{slug:'qa'}};
+    refs.focusedConversation.value=false;refs.page.value='home';refs.authState.value={authenticated:true,memberships:[{slug:'qa',role:'member'}],user:{id:'qa-user',name:'QA'}};refs.summary.value={workspace:{slug:'qa'}};
     refs.selectedConversation={value:{id:'creator-conversation',device_id:persistedDevice,employee_id:'creator'}};refs.conversationDeviceId.value=persistedDevice?'first':'second';
     const blank={tasks:[],runtimes:[],models:[],skills:[],documents:[],automations:[],members:[],devices:[{id:'first',status:'online'},{id:'second',status:'online'}],employees:[{id:'creator'}],calendars:[],agents:[]};
     const api=Object.fromEntries(['tasks','runtimes','models','skills','documents','automations','members','devices','employees','calendar','agents'].map(name=>[name,()=>Promise.resolve(blank)]));api.summary=()=>Promise.resolve({workspace:{slug:'qa',name:'QA'}});

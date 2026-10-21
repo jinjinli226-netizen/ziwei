@@ -26,13 +26,14 @@ async function readApi(app,path,cookie) {
   });}finally{socket.destroy();}
 }
 
-function harness(overrides={}, { realOpen=false,realtime=false }={}) {
+function harness(overrides={}, { realOpen=false,realtime=false,focused=false }={}) {
   const selectedConversation = { value:conversation(execution('A','succeeded')) };
   const conversations = { value:[conversation(execution('A','succeeded'))] };
   const workspace = { value:'workspace' };
   const reopened = [];
   const polling = [];
   const bindings = {
+    focusedConversation:{value:focused},
     botChatIntent:{value:null},botBindingPending:{value:false},selectedConversation, conversations, conversationExecution:{ value:selectedConversation.value.execution }, conversationEmployeeId:{ value:'employee' }, conversationStatusLoading:{ value:false },
     workspaceSlug:()=>workspace.value, conversationIdFromPath:()=> 'conversation', conversationRouteId:{ value:'conversation' },
     api:{ conversation:async()=>selectedConversation.value, conversations:async()=>({conversations:conversations.value}), ...overrides },
@@ -45,7 +46,7 @@ function harness(overrides={}, { realOpen=false,realtime=false }={}) {
     conversationSettingsSnapshot,mergeConversationSettingsDraft,
   };
   bindings.api.websocketUrl=()=> 'ws://fixture';bindings.api.streamUrl=()=> '/fixture';
-  const names = ['conversationRequestScope','applyConversationDetail','loadConversationExecution','loadConversations','refreshSelectedConversation','refreshConversationState',...(realOpen?['openConversation','refreshConversationFromRoute']:[]),...(realtime?['openRealtime']:[])];
+  const names = ['conversationRequestScope','applyConversationDetail','loadConversationExecution','loadConversations','refreshSelectedConversation','refreshConversationState',...(realOpen?['openConversation','refreshConversationFromRoute']:[]),...(realtime?['refreshVisibleWorkspace','openRealtime']:[])];
   const functions = names.map(name => {
     const pattern = new RegExp(`(?:async )?function ${name}\\(`);
     const start = app.search(pattern);
@@ -253,4 +254,16 @@ test('a user reopening the current conversation starts its own refresh without w
   user.resolve(conversation(execution('B','pending',2)));assert.equal(await opening,true);assert.equal(ui.conversationExecution.value.id,'B');
   background.resolve(conversation(execution('A','succeeded')));await old;
   assert.equal(ui.conversationExecution.value.id,'B');assert.equal(ui.conversations.value[0].execution.id,'B');assert.equal(ui.conversationDraft.value,'unsent draft');
+});
+
+test('focused chat realtime coalesces progress bursts without downloading the conversation list',async()=>{
+  const first=deferred(),trailing=deferred();let detailRequests=0,listRequests=0;
+  const ui=harness({conversation:()=> (++detailRequests===1?first:trailing).promise,conversations:async()=>{listRequests++;return {conversations:[]};}},{realtime:true,focused:true});
+  ui.openRealtime();const current=ui.refreshConversationState();
+  ui.realtimeSubscription.value.onReady();for(let index=0;index<30;index++)ui.realtimeSubscription.value.onEvent({type:'fixture.progress'});
+  assert.equal(detailRequests,1,'focused progress must share the in-flight request');assert.equal(listRequests,0);
+  first.resolve(conversation(execution('B','acked',2)));await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(ui.conversationExecution.value.id,'B');assert.equal(detailRequests,2);assert.equal(listRequests,0);
+  trailing.resolve(conversation(execution('B','succeeded',2)));await current;
+  assert.equal(ui.conversationExecution.value.status,'succeeded');assert.equal(detailRequests,2);assert.equal(listRequests,0);
 });

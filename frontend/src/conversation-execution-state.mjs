@@ -1,3 +1,4 @@
+import {mergeConversationLatest} from './conversation-history.mjs';
 import {historicalPrelaunchRecovery,HISTORICAL_PRELAUNCH_RECOVERY_DETAIL} from './historical-prelaunch-recovery.mjs';
 import {operatorForceAbandonRecovery,OPERATOR_FORCE_ABANDON_DETAIL} from './operator-force-abandon-recovery.mjs';
 const terminal = new Set(['succeeded','failed','expired','cancelled']);
@@ -42,9 +43,10 @@ function newestExecution(previous, incoming) {
 export function mergeConversationDetail(previous, incoming) {
   if (!previous || previous.id!==incoming?.id) return incoming;
   const execution=newestExecution(previous.execution,incoming.execution);
+  const merged=mergeConversationLatest(previous,incoming);
   return execution===previous.execution && execution!==incoming.execution
-    ? { ...incoming,execution,messages:previous.messages }
-    : { ...incoming,execution };
+    ? { ...merged,execution,messages:previous.messages }
+    : { ...merged,execution };
 }
 
 // A list snapshot never becomes the selected detail authority. The selected

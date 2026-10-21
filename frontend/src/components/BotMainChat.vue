@@ -3,6 +3,7 @@ import {computed,nextTick,onBeforeUnmount,onMounted,ref,watch} from 'vue';
 import {ArrowLeft,ArrowUp,Plus,Settings2,PanelRight,ChevronDown,Monitor,Folder,MoreHorizontal,Smartphone,X,RefreshCw,Square,Download,FileText,Clock3} from 'lucide-vue-next';
 import {botPresence,executionUncertain,botStopPresentation,botRecoveryEvent,botRecoveryDetail,processExitConfirmed} from '../bot-presentation.js';
 import {chatLocalTime,conversationFiles} from '../bot-main-chat.js';
+import {isConversationNearBottom,shouldLoadEarlierHistory,restoreConversationPrependScroll} from '../conversation-history.mjs';
 import {ownedBotChatBlockReason} from '../bot-owned-profile.js';
 import {executionPresentation} from '../conversation-execution-state.mjs';
 import {historicalPrelaunchRecovery} from '../historical-prelaunch-recovery.mjs';
@@ -10,11 +11,13 @@ import {operatorForceAbandonRecovery} from '../operator-force-abandon-recovery.m
 import ConversationForwardCard from './ConversationForwardCard.vue';
 import {isConversationForward} from '../conversation-forward-card.mjs';
 import {createMessageReadObserver} from '../conversation-read.mjs';
-const props=defineProps({bot:Object,conversation:Object,execution:Object,events:{type:Array,default:()=>[]},draft:{type:String,default:''},attachments:{type:Array,default:()=>[]},device:Object,modelLabel:String,workingDirectory:String,sendPending:Boolean,attachmentReading:Boolean,statusLoading:Boolean,sendError:String,stopBusy:Boolean,reconcileBusy:Boolean,canStop:Boolean,preview:Boolean,work:{type:Object,default:()=>({runs:[],routines:[],tasks:[]})},workLoading:Boolean,workError:String,previewSrc:Function,sizeLabel:Function,forwardSelecting:Boolean,forwardSelected:{type:Array,default:()=>[]},forwardError:String,forwardResult:Object,readScope:String,onVisibleMessage:Function});
-const emit=defineEmits(['forward-view','forward','forward-select','forward-toggle','forward-open','forward-cancel','retry-message','update:draft','send','settings','return','directory','attachment','paste-attachment','remove-attachment','preview-image','download','stop','reconcile','refresh-work','phone','workspace-tasks']);
+const props=defineProps({bot:Object,conversation:Object,execution:Object,events:{type:Array,default:()=>[]},draft:{type:String,default:''},attachments:{type:Array,default:()=>[]},device:Object,modelLabel:String,workingDirectory:String,sendPending:Boolean,attachmentReading:Boolean,statusLoading:Boolean,historyLoading:Boolean,historyError:String,sendError:String,stopBusy:Boolean,reconcileBusy:Boolean,canStop:Boolean,preview:Boolean,work:{type:Object,default:()=>({runs:[],routines:[],tasks:[]})},workLoading:Boolean,workError:String,previewSrc:Function,sizeLabel:Function,forwardSelecting:Boolean,forwardSelected:{type:Array,default:()=>[]},forwardError:String,forwardResult:Object,readScope:String,onVisibleMessage:Function});
+const emit=defineEmits(['load-history','forward-view','forward','forward-select','forward-toggle','forward-open','forward-cancel','retry-message','update:draft','send','settings','return','directory','attachment','paste-attachment','remove-attachment','preview-image','download','stop','reconcile','refresh-work','phone','workspace-tasks']);
 function attachReadObserver(element){const scope=props.readScope;element._readScope=scope;element._messageRead=createMessageReadObserver(element,messageId=>{if(scope===props.readScope)return props.onVisibleMessage?.({messageId,scope});return false;});}
 const vConversationRead={mounted:attachReadObserver,updated(element){if(element._readScope!==props.readScope){element._messageRead?.();attachReadObserver(element);}else element._messageRead?.update();},beforeUnmount(element){element._messageRead?.();}};
-const panel=ref(typeof window!=='undefined'&&window.innerWidth>=1100),menu=ref(''),popoverStyle=ref({}),fileInput=ref(null),timeline=ref(null),followLatest=ref(true);
+const panel=ref(false),menu=ref(''),popoverStyle=ref({}),fileInput=ref(null),timeline=ref(null),followLatest=ref(true);
+const historyRequested=ref(false),hasEarlierHistory=computed(()=>props.conversation?.messagePage?.hasMore===true);
+let disposed=false,renderGeneration=0,renderedConversation='',renderedFirstMessage='',previousScrollTop=0,userScrollIntent=false,touchY=null,prependAnchor=null;
 const historicalRecovery=computed(()=>historicalPrelaunchRecovery(props.execution)||operatorForceAbandonRecovery(props.execution));
 const uncertain=computed(()=>executionUncertain(props.execution));
 const recoveryEvent=computed(()=>botRecoveryEvent(props.execution));
@@ -22,16 +25,62 @@ const stopState=computed(()=>botStopPresentation(props.bot,props.execution));
 const blockedReason=computed(()=>ownedBotChatBlockReason(props.bot));
 function toggleMenu(value,event){menu.value=menu.value===value?'':value;if(!menu.value)return;const anchor=event.currentTarget;nextTick(()=>{const box=document.querySelector('.bot-main-chat .bot-chat-popover');if(!box)return;const rect=anchor.getBoundingClientRect(),width=box.offsetWidth,height=box.offsetHeight;popoverStyle.value={position:'fixed',left:Math.max(12,Math.min(rect.left,window.innerWidth-width-12))+'px',top:Math.max(12,Math.min(value==='more'?rect.bottom+8:rect.top-height-10,window.innerHeight-height-12))+'px',bottom:'auto',right:'auto'};});}
 function resized(){menu.value='';if(window.innerWidth<1000)panel.value=false;}
+function toggleWorkPanel(){panel.value=!panel.value;if(panel.value)emit('refresh-work');}
 const presence=computed(()=>botPresence(props.bot)),executionState=computed(()=>stopState.value.confirmed?{label:stopState.value.label,summary:'原执行已停止',busy:false,tone:'muted',retryable:false}:executionPresentation(props.execution)),files=computed(()=>conversationFiles(props.conversation?.messages));
 const name=computed(()=>props.bot?.employee?.name||props.conversation?.employee?.name||'Hermes Bot');
 const directoryLabel=computed(()=>String(props.workingDirectory||'').split(/[\\/]/).filter(Boolean).at(-1)||'选择工作目录');
 const status=computed(()=>props.device?.status==='offline'?'电脑离线':props.execution?(executionState.value.summary||executionState.value.label):presence.value.label);
 function keydown(event){if(event.isComposing)return;if(event.key==='Enter'&&!event.shiftKey&&!event.ctrlKey&&!event.altKey&&!event.metaKey){event.preventDefault();if(!uncertain.value&&!blockedReason.value&&!props.sendPending&&!props.attachmentReading&&!props.statusLoading)emit('send');}}
 function closeMenus(event){if(event.key==='Escape'){menu.value='';panel.value=false;}else if(!event.target.closest?.('.bot-chat-chip-menu'))menu.value='';}
-function scrollLatest(){nextTick(()=>{const node=timeline.value;if(node&&followLatest.value)node.scrollTop=node.scrollHeight;});}
-watch(()=>props.conversation?.messages,scrollLatest,{deep:true});
-onMounted(()=>{window.addEventListener('resize',resized);document.addEventListener('keydown',closeMenus);document.addEventListener('pointerdown',closeMenus);nextTick(()=>{if(timeline.value)timeline.value.scrollTop=timeline.value.scrollHeight;});});
-onBeforeUnmount(()=>{window.removeEventListener('resize',resized);document.removeEventListener('keydown',closeMenus);document.removeEventListener('pointerdown',closeMenus);});
+function scrollLatest(){nextTick(()=>{const node=timeline.value;if(!disposed&&node&&followLatest.value){node.scrollTop=node.scrollHeight;previousScrollTop=node.scrollTop;}});}
+function timelineAnchor(node){
+  if(!node)return null;
+  const viewport=node.getBoundingClientRect(),messages=[...node.querySelectorAll('[data-message-id]')];
+  const message=messages.find(item=>item.getBoundingClientRect().bottom>viewport.top)||messages[0];
+  return {conversationId:props.conversation?.id,messageId:message?.dataset.messageId,anchorOffset:message?message.getBoundingClientRect().top-viewport.top:undefined,scrollTop:node.scrollTop,scrollHeight:node.scrollHeight};
+}
+function restoreTimelineAnchor(anchor){
+  const node=timeline.value;if(disposed||!node||!anchor||anchor.conversationId!==props.conversation?.id)return;
+  const message=[...node.querySelectorAll('[data-message-id]')].find(item=>item.dataset.messageId===anchor.messageId);
+  const nextAnchorOffset=message?message.getBoundingClientRect().top-node.getBoundingClientRect().top:undefined;
+  node.scrollTop=restoreConversationPrependScroll({...anchor,...(message?{scrollTop:node.scrollTop}:{}),nextScrollHeight:node.scrollHeight,nextAnchorOffset});previousScrollTop=node.scrollTop;
+}
+function requestEarlierHistory(){
+  if(!hasEarlierHistory.value||props.historyLoading||historyRequested.value)return;
+  followLatest.value=false;userScrollIntent=false;historyRequested.value=true;emit('load-history');
+  nextTick(()=>{if(!props.historyLoading)historyRequested.value=false;});
+}
+function checkEarlierHistory(node,previous){
+  if(shouldLoadEarlierHistory({hasMore:hasEarlierHistory.value,loading:props.historyLoading||historyRequested.value,error:props.historyError,scrollTop:node.scrollTop,previousScrollTop:previous,userInitiated:userScrollIntent}))requestEarlierHistory();
+}
+function timelineScrolled(event){
+  const node=event.currentTarget;followLatest.value=isConversationNearBottom(node);checkEarlierHistory(node,previousScrollTop);previousScrollTop=node.scrollTop;
+}
+function timelineIntent(upwards){
+  prependAnchor=null;userScrollIntent=upwards;
+  const node=timeline.value;if(upwards&&node)checkEarlierHistory(node,node.scrollTop+1);
+}
+function timelineWheel(event){if(event.deltaY)timelineIntent(event.deltaY<0);}
+function timelineTouchStart(event){touchY=event.touches?.[0]?.clientY??null;prependAnchor=null;userScrollIntent=false;}
+function timelineTouchMove(event){const next=event.touches?.[0]?.clientY;if(touchY!==null&&next!==undefined&&next!==touchY)timelineIntent(next>touchY);touchY=next??null;}
+function timelineKey(event){if(['ArrowUp','PageUp','Home'].includes(event.key))timelineIntent(true);else if(['ArrowDown','PageDown','End'].includes(event.key))timelineIntent(false);}
+function timelinePointer(){prependAnchor=null;userScrollIntent=true;}
+function timelineMediaLoaded(){if(prependAnchor)nextTick(()=>restoreTimelineAnchor(prependAnchor));else scrollLatest();}
+watch(()=>props.historyLoading,loading=>{if(!loading)historyRequested.value=false;});
+watch(()=>[props.conversation?.id,props.conversation?.messages],async([id,messages])=>{
+  const generation=++renderGeneration,same=id===renderedConversation;
+  const prepended=same&&renderedFirstMessage&&(messages||[]).findIndex(message=>message.id===renderedFirstMessage)>0;
+  const anchor=prepended?timelineAnchor(timeline.value):null;
+  if(!same){followLatest.value=true;historyRequested.value=false;userScrollIntent=false;prependAnchor=null;previousScrollTop=0;}
+  else if(prepended)followLatest.value=false;
+  renderedConversation=id;renderedFirstMessage=messages?.[0]?.id||'';
+  await nextTick();if(disposed||generation!==renderGeneration||id!==props.conversation?.id)return;
+  if(anchor){prependAnchor=anchor;restoreTimelineAnchor(anchor);}
+  else if(prependAnchor&&!followLatest.value)restoreTimelineAnchor(prependAnchor);
+  else scrollLatest();
+},{deep:true,flush:'pre',immediate:true});
+onMounted(()=>{window.addEventListener('resize',resized);document.addEventListener('keydown',closeMenus);document.addEventListener('pointerdown',closeMenus);scrollLatest();});
+onBeforeUnmount(()=>{disposed=true;renderGeneration++;prependAnchor=null;window.removeEventListener('resize',resized);document.removeEventListener('keydown',closeMenus);document.removeEventListener('pointerdown',closeMenus);});
 </script>
 <template>
   <section class="bot-main-chat" role="region" aria-label="Bot 主聊天" :data-bot-id="bot.id" :data-conversation-id="conversation.id">
@@ -39,14 +88,15 @@ onBeforeUnmount(()=>{window.removeEventListener('resize',resized);document.remov
       <button class="bot-chat-return" aria-label="返回紫薇" title="返回当前 Bot" @click="emit('return')"><ArrowLeft :size="19"/></button>
       <img v-if="bot?.employee?.avatar" :src="bot.employee.avatar" class="bot-chat-avatar" alt=""/><span v-else class="bot-chat-avatar">{{name.slice(0,1)}}</span>
       <div class="bot-chat-identity"><strong>{{name}}</strong><span><i :data-tone="executionState.busy?'working':presence.tone"/>{{status}}<small> · 主聊天</small></span></div>
-      <div class="bot-chat-header-actions"><span v-if="preview" class="bot-chat-local">本地预览</span><button aria-label="Bot 设置" title="Bot 设置" @click="emit('settings','settings')"><Settings2 :size="18"/><span>Bot 设置</span></button><button aria-label="工作面板" :aria-expanded="panel" @click="panel=!panel"><PanelRight :size="18"/><span>工作面板</span></button>
+      <div class="bot-chat-header-actions"><span v-if="preview" class="bot-chat-local">本地预览</span><button aria-label="Bot 设置" title="Bot 设置" @click="emit('settings','settings')"><Settings2 :size="18"/><span>Bot 设置</span></button><button aria-label="工作面板" :aria-expanded="panel" @click="toggleWorkPanel"><PanelRight :size="18"/><span>工作面板</span></button>
         <div class="bot-chat-chip-menu"><button aria-label="更多能力" :aria-expanded="menu==='more'" @click="toggleMenu('more',$event)"><MoreHorizontal :size="20"/></button><div v-if="menu==='more'" class="bot-chat-popover header-popover" :style="popoverStyle" role="menu"><button role="menuitem" :disabled="preview" @click="menu='';emit('phone')"><Smartphone :size="16"/>手机互联</button><small v-if="preview">本地预览未连接手机，正式入口沿用同一员工。</small><button role="menuitem" @click="menu='';emit('settings','routines')"><Clock3 :size="16"/>例行工作</button><button role="menuitem" @click="menu='';emit('settings','activity')">运行与控制</button></div></div>
       </div>
     </header>
     <div class="bot-chat-body" :class="{'with-panel':panel}">
       <main class="bot-chat-main">
-        <div ref="timeline" v-conversation-read class="bot-chat-timeline" aria-live="polite" @scroll="followLatest=$event.target.scrollHeight-$event.target.scrollTop-$event.target.clientHeight<180">
+        <div ref="timeline" v-conversation-read class="bot-chat-timeline" aria-live="polite" tabindex="0" aria-label="聊天记录" @scroll="timelineScrolled" @wheel.passive="timelineWheel" @touchstart.passive="timelineTouchStart" @touchmove.passive="timelineTouchMove" @pointerdown="timelinePointer" @keydown="timelineKey" @load.capture="timelineMediaLoaded">
           <div class="bot-chat-transcript">
+            <div v-if="hasEarlierHistory||historyLoading||historyError" class="bot-chat-history" :aria-busy="historyLoading"><button v-if="hasEarlierHistory" type="button" :disabled="historyLoading||historyRequested" @click="requestEarlierHistory"><RefreshCw v-if="historyLoading" :size="13"/>{{historyLoading?'正在加载更早消息…':historyError?'重试加载更早消息':'加载更早消息'}}</button><p v-if="historyError" role="alert">{{historyError}}</p></div>
             <p class="bot-chat-day">同一位伙伴，同一条长期对话</p><div v-if="forwardResult" class="chat-forward-result"><span>聊天记录已转发</span><button type="button" @click="emit('forward-view')">查看接收聊天</button></div><div v-if="forwardSelecting" class="chat-forward-selection"><span>已选 {{forwardSelected.length}} / 20 条</span><button type="button" @click="emit('forward-cancel')">取消</button><button type="button" :disabled="!forwardSelected.length" @click="emit('forward-open')">转发</button><small v-if="forwardError" role="alert">{{forwardError}}</small></div>
             <article v-for="message in conversation?.messages" :key="message.id" class="bot-chat-message" :class="message.role" :data-message-id="message.id">
               <label v-if="forwardSelecting" class="chat-forward-select"><input type="checkbox" :checked="forwardSelected.includes(message.id)" :aria-label="'选择消息：'+(message.content?.slice(0,30)||'聊天记录')" @change="emit('forward-toggle',message.id)"/>选择</label>
