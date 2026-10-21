@@ -4,7 +4,9 @@
 
 公司台式 TK 曾在09:26收到订阅接口401；default来源授权在同轮已有更新，当前来源、凭据池与该机Codex为同账号。李金晋电脑的来源授权同样存在；所查知微旧错误为额度429、闲鱼旧错误为连接失败，不能统称需要重新登录。两台当前JWT名义到期均为10月30日，实际可用性另以真实调用验证。独立Bot继续隔离Profile/HOME，模型授权引用default原生store。
 
-TK与闲鱼的真实gpt-6.1-sol/max短回复均succeeded、code0、root/tree退出确认；实际resume各自原nativeSessionId，没有重建Bot或换会话，未继续旧业务。公司Hermes认证及恢复源码SHA与官方v0.22.0相同。本轮没有改凭据或产品源码、没有部署或升级。旧失败记录保留；现有日志不足以反推之前401的精确根因。脱敏回执见[QA](docs/qa/2026-10-21-hermes-auth-source-live.json)。
+TK与闲鱼的真实gpt-6.1-sol/max短回复均succeeded、code0、root/tree退出确认；实际resume各自原nativeSessionId，没有重建Bot或换会话，未继续旧业务。公司Hermes认证及恢复源码SHA与官方v0.22.0相同。本轮没有改凭据或产品源码、没有部署或升级。旧失败记录保留。脱敏回执见[QA](docs/qa/2026-10-21-hermes-auth-source-live.json)。
+
+继续取证已在公司台式精确查到旧刷新错误：`2026-10-21T01:26:32.563878Z` 的原生 `last_auth_error.code=refresh_token_reused`，表示本轮提交的刷新令牌此前已被使用，接口拒绝刷新。同一session先有官方推理内容恢复，后有刷新凭证终态失效及请求401收尾；不能把后两条日志算成额外两次刷新。授权store在错误后36.651毫秒已有更新，但仍不足以指认哪个进程消耗了令牌、哪个恢复分支写入或为何当轮未继续。旧`relogin_required:true`会保留，不能覆盖后来原会话真实成功的结论；不要再据此要求用户登录。李金晋电脑不能未经日志取证就归为同一原因。
 
 ## 2026-10-20 最新主项目代码已合入 main
 

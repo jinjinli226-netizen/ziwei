@@ -70,13 +70,134 @@
   "limits": [
     "An initial SDK import probe failed. A subsequent network-disabled stdlib metadata probe passed on each device.",
     "Test labels and requested response contain new-session wording, but actual diagnostics prove both resumed existing native sessions.",
-    "The precise cause of the earlier 401 remains unproven. Refresh timestamps and request counts do not establish whether reasoning replay, an in-flight credential switch or an upstream transient caused it.",
     "Only two specified Bot short responses were tested. Previous business tasks were not replayed.",
-    "Read metadata contained neither published tokens nor raw account identifiers."
+    "Read metadata contained neither published tokens nor raw account identifiers.",
+    "The concrete failed-refresh code is now established as refresh_token_reused. The consumer and the failed in-flight recovery transition remain unproven."
   ],
   "credentialsChanged": false,
   "productSourceChanged": false,
   "deployed": false,
   "clientUpgraded": false,
-  "oldFailureRecordsPreserved": true
+  "oldFailureRecordsPreserved": true,
+  "incidentLogEvidence": {
+    "readOnlyDiagnosticActionId": "action_691990ea-d45a-44e8-be0b-4e93eae0a10f",
+    "sessionId": "20261016_101227_715dbf",
+    "records": [
+      {
+        "file": "profiles\\bot-f165991d1da77173908e38d7\\logs\\agent.log",
+        "lineInTail": 318,
+        "timestamp": "2026-10-21 09:26:27",
+        "categories": [
+          "reasoning_recovered",
+          "reasoning_replay_rejected",
+          "reasoning_recovery"
+        ],
+        "sessionMatched": true
+      },
+      {
+        "file": "profiles\\bot-f165991d1da77173908e38d7\\logs\\agent.log",
+        "lineInTail": 319,
+        "timestamp": "2026-10-21 09:26:32",
+        "categories": [
+          "oauth_grant_dead",
+          "oauth_reauth_required",
+          "pool"
+        ],
+        "sessionMatched": true
+      },
+      {
+        "file": "profiles\\bot-f165991d1da77173908e38d7\\logs\\agent.log",
+        "lineInTail": 320,
+        "timestamp": "2026-10-21 09:26:32",
+        "categories": [
+          "token_expired",
+          "refresh_failure",
+          "refresh_attempt",
+          "http401"
+        ],
+        "sessionMatched": true
+      },
+      {
+        "file": "profiles\\bot-f165991d1da77173908e38d7\\logs\\agent.log",
+        "lineInTail": 321,
+        "timestamp": "2026-10-21 09:26:32",
+        "categories": [
+          "token_expired",
+          "refresh_failure",
+          "refresh_attempt"
+        ],
+        "sessionMatched": true
+      }
+    ],
+    "timestampsAreLocalAsiaShanghai": true,
+    "duplicateErrorsLogRecordsExcluded": true,
+    "rawLogBodiesPublished": false,
+    "established": "The original incident session first entered official encrypted-reasoning recovery. At 2026-10-21T01:26:32.563878Z the native credential pool recorded refresh_token_reused: the submitted refresh token had already been used and refresh was refused. Later records are the request-failure and terminal client-error records, not proof of further refresh attempts.",
+    "notEstablished": "The process that previously consumed the refresh token is not identified. The source store was subsequently updated 36.651 ms after this error, but absent INFO/DEBUG evidence does not establish which recovery branch wrote it or why the in-flight turn ended instead of adopting usable credentials.",
+    "logLevel": "Bot generated configuration uses WARNING; successful refresh/adoption INFO and key-switch DEBUG evidence may not have been retained.",
+    "lastAuthError": {
+      "code": "refresh_token_reused",
+      "at": "2026-10-21T01:26:32.563878+00:00",
+      "relogin_required": true
+    },
+    "lastAuthErrorReasonWithheldByInitialProbeAllowlist": true,
+    "lastAuthErrorIsHistorical": true,
+    "classifiedNativeRecords": [
+      {
+        "line": 318,
+        "time": "2026-10-21 09:26:27",
+        "level": "WARNING",
+        "sameSession": true,
+        "logger": "agent.turn_recovery_codex",
+        "categories": [
+          "reasoning_recovered"
+        ],
+        "statusCodes": [],
+        "reasons": []
+      },
+      {
+        "line": 319,
+        "time": "2026-10-21 09:26:32",
+        "level": "WARNING",
+        "sameSession": true,
+        "logger": "agent.credential_pool",
+        "categories": [
+          "oauth_grant_dead"
+        ],
+        "statusCodes": [],
+        "reasons": []
+      },
+      {
+        "line": 320,
+        "time": "2026-10-21 09:26:32",
+        "level": "WARNING",
+        "sameSession": true,
+        "logger": "agent.conversation_loop",
+        "categories": [
+          "api_attempt_failed"
+        ],
+        "statusCodes": [
+          "401"
+        ],
+        "reasons": []
+      },
+      {
+        "line": 321,
+        "time": "2026-10-21 09:26:32",
+        "level": "ERROR",
+        "sameSession": true,
+        "logger": "agent.conversation_loop",
+        "categories": [
+          "api_terminal_client_error"
+        ],
+        "statusCodes": [],
+        "reasons": [
+          "invalid_request",
+          "token_expired"
+        ]
+      }
+    ],
+    "errorCodeDiagnosticActionId": "action_93c07258-bc4a-43af-89d6-0e95f39ffa57",
+    "currentStatus": "Both original Bot native sessions subsequently succeeded without this investigation changing credentials. The retained historical relogin_required flag is not evidence that current reauthorization remains necessary."
+  }
 }
