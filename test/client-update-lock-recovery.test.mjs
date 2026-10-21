@@ -194,3 +194,22 @@ test('safe server refusal facts survive terminal-log fallback while the recorded
  fs.writeFileSync(path.join(f.directory,'maintenance.jsonl'),JSON.stringify({at:'2026-10-18T01:00:00Z',pid:61536,event:'maintenance_failed',failureStage:'recover_history',reasonCode:'CLIENT_FORCE_ABANDON_REFUSED',recoveryReasonCode:'SERVER_REFUSED',recoveryPhase:'offline_prepare',serverCode:'BOT_FORCE_ABANDON_HOLDER_CONFLICT',httpStatus:409,error:'PRIVATE_SERVER_BODY'})+'\n');
  const result=await readUpdateResult({env:{ZIWEI_USER_HOME:f.home},inspectProcess:f.inspect});assert.equal(result.state,'failed');assert.equal(result.serverCode,'BOT_FORCE_ABANDON_HOLDER_CONFLICT');assert.equal(result.httpStatus,409);assert.equal(result.recoveryPhase,'offline_prepare');assert.equal(result.recoveryReasonCode,'SERVER_REFUSED');assert.match(result.message,/BOT_FORCE_ABANDON_HOLDER_CONFLICT/);assert.doesNotMatch(JSON.stringify(result),/PRIVATE_/);
 });
+
+test('recovery timeouts retain the exact safe step in the result and terminal-log fallback',async t=>{
+ const f=fixture(t),timeout=new DOMException('PRIVATE_URL_OR_TOKEN','TimeoutError');
+ const error=Object.assign(new Error('PRIVATE_RESPONSE',{cause:timeout}),{recoveryPhase:'grant_probe',recoveryStep:'remote_list',recoveryAttempt:3,recoveryElapsedMs:24001});
+ const result=updateFailureResult(error,'recover_history');
+ assert.equal(result.reasonCode,'OPERATION_TIMEOUT');assert.equal(result.recoveryStep,'remote_list');assert.equal(result.recoveryAttempt,3);assert.equal(result.recoveryElapsedMs,24001);
+ assert.match(result.message,/grant_probe \/ remote_list/);assert.match(result.message,/24001ms/);assert.doesNotMatch(JSON.stringify(result),/PRIVATE_/);
+ fs.writeFileSync(f.resultFile,JSON.stringify({state:'running',operation:'update'}));fs.writeFileSync(f.lockFile,JSON.stringify(f.legacy()));
+ fs.writeFileSync(path.join(f.directory,'maintenance.jsonl'),JSON.stringify({at:'2026-10-21T13:00:00Z',pid:61536,event:'maintenance_failed',failureStage:'recover_history',reasonCode:'OPERATION_TIMEOUT',recoveryPhase:'grant_probe',recoveryStep:'remote_list',recoveryAttempt:3,recoveryElapsedMs:24001,error:'PRIVATE_BODY'})+'\n');
+ const saved=await readUpdateResult({env:{ZIWEI_USER_HOME:f.home},inspectProcess:f.inspect});
+ assert.equal(saved.reasonCode,'OPERATION_TIMEOUT');assert.equal(saved.recoveryStep,'remote_list');assert.equal(saved.recoveryAttempt,3);assert.equal(saved.recoveryElapsedMs,24001);assert.match(saved.message,/remote_list/);assert.doesNotMatch(JSON.stringify(saved),/PRIVATE_/);
+});
+
+test('recovery step diagnostics reject private labels and invalid numeric facts',()=>{
+ for(const step of ['PRIVATE_URL_OR_TOKEN','remote_list PRIVATE_TOKEN',{},null])for(const attempt of [0,4,'3',NaN])for(const elapsed of [-1,180001,'8',Infinity]){
+  const result=updateFailureResult({name:'TimeoutError',recoveryPhase:'grant_probe',recoveryStep:step,recoveryAttempt:attempt,recoveryElapsedMs:elapsed},'recover_history');
+  assert.equal(Object.hasOwn(result,'recoveryStep'),false);assert.equal(Object.hasOwn(result,'recoveryAttempt'),false);assert.equal(Object.hasOwn(result,'recoveryElapsedMs'),false);assert.doesNotMatch(JSON.stringify(result),/PRIVATE_/);
+ }
+});

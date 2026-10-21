@@ -131,3 +131,98 @@ test('the stable old worker entry preserves every original fallback when no gene
  const calls=[],input={root:'/old-install'},entry=createHistoricalUpdateRecoveryEntry({finalize:async value=>{assert.equal(value,input);calls.push('generic');return {recovered:false};},retain:async()=>{calls.push('retained');return {recovered:false};},force:async()=>{calls.push('force');return {recovered:false};},original:async()=>{calls.push('original');return {recovered:false,reason:'not_applicable'};}});
  assert.deepEqual(await entry(input),{recovered:false,reason:'not_applicable'});assert.deepEqual(calls,['generic','retained','force','original']);
 });
+
+const timeout=()=>new DOMException('fixture sensitive transport details','TimeoutError');
+for(const stage of ['headers','body'])test('read-only authorization retries '+stage+' timeouts then archives the same pinned action',async t=>{
+ const f=updater(t),events=[],delays=[];let reads=0;
+ const fetchImpl=async(input,options)=>{
+  if(new URL(input).pathname==='/a2a/v1/failure-finalizations'){
+   reads++;assert.equal(options.method,'GET');assert.ok(options.signal instanceof AbortSignal);
+   if(reads<3){if(stage==='headers')throw timeout();return {ok:true,status:200,json:async()=>{throw timeout();}};}
+  }
+  return f.fetchImpl(input,options);
+ };
+ const result=await createFailedActionFinalizationRecovery({...f.deps,sleep:async ms=>{delays.push(ms);}})({...f,fetchImpl,log:(event,data)=>events.push({event,...data})});
+ assert.equal(reads,3);assert.deepEqual(delays,[100,200]);assert.equal(result.finalizationsApplied,1);assert.equal(f.counts().acknowledgements,1);
+ assert.deepEqual(fs.readFileSync(path.join(f.runtimeDir,'failure-finalizations',f.f.base,'state.original.json')),f.f.stateBytes);
+ assert.deepEqual(events.filter(x=>x.event==='failure_finalization_read_retry').map(x=>x.attempt),[1,2]);
+ assert.ok(!JSON.stringify(events).includes('sensitive'));assert.ok(!JSON.stringify(events).includes('fixture-device-credential'));
+});
+test('three exhausted authorization reads preserve originals and report exact timeout step and attempt',async t=>{
+ const f=updater(t,{online:true}),stateFile=path.join(f.runtimeDir,'action-state.json'),before=fs.readFileSync(stateFile);let reads=0;
+ const fetchImpl=async(input,options)=>{if(new URL(input).pathname==='/a2a/v1/failure-finalizations'){reads++;throw timeout();}return f.fetchImpl(input,options);};
+ await assert.rejects(createFailedActionFinalizationRecovery({...f.deps,sleep:async()=>{}})({...f,fetchImpl}),error=>{
+  assert.equal(error.name,'TimeoutError');assert.equal(error.recoveryPhase,'grant_probe');assert.equal(error.recoveryStep,'remote_list');assert.equal(error.recoveryAttempt,3);assert.ok(Number.isSafeInteger(error.recoveryElapsedMs));return true;
+ });
+ assert.equal(reads,3);assert.equal(f.counts().terminated,0);assert.equal(f.counts().draining,false);assert.deepEqual(fs.readFileSync(stateFile),before);
+});
+test('transient HTTP authorization errors are retried but denied access is not',async t=>{
+ for(const status of [503,403]){
+  const f=updater(t),reads=[];
+  const fetchImpl=async(input,options)=>{if(new URL(input).pathname==='/a2a/v1/failure-finalizations'){reads.push(status);return new Response('private body',{status});}return f.fetchImpl(input,options);};
+  await assert.rejects(createFailedActionFinalizationRecovery({...f.deps,sleep:async()=>{}})({...f,fetchImpl}),{code:'FAILURE_FINALIZATION_TRANSPORT',httpStatus:status,recoveryStep:'remote_list'});
+  assert.equal(reads.length,status===503?3:1);assert.equal(f.counts().terminated,0);
+ }
+});
+test('malformed authorization JSON is not retried',async t=>{
+ const f=updater(t);let reads=0;
+ const fetchImpl=async(input,options)=>{if(new URL(input).pathname==='/a2a/v1/failure-finalizations'){reads++;return new Response('{');}return f.fetchImpl(input,options);};
+ await assert.rejects(createFailedActionFinalizationRecovery({...f.deps,sleep:async()=>{}})({...f,fetchImpl}),{name:'SyntaxError',recoveryPhase:'grant_probe',recoveryStep:'remote_list'});assert.equal(reads,1);
+});
+test('archive ACK timeout is never retried as a mutation and the exact archive remains recoverable',async t=>{
+ const f=updater(t),events=[];let acknowledgements=0;
+ const fetchImpl=async(input,options)=>{if(new URL(input).pathname.endsWith('/failure-finalization/ack')){acknowledgements++;assert.equal(options.method,'POST');return {ok:true,status:200,json:async()=>{throw timeout();}};}return f.fetchImpl(input,options);};
+ const result=await createFailedActionFinalizationRecovery(f.deps)({...f,fetchImpl,log:(event,data)=>events.push({event,...data})});
+ assert.equal(result.finalizationsApplied,1);assert.equal(acknowledgements,1);assert.equal(JSON.parse(fs.readFileSync(path.join(f.runtimeDir,'action-state.json'))).completed[0].result.code,'FAILURE_FINALIZED');
+ assert.ok(events.some(x=>x.event==='failure_finalization_step_failed'&&x.phase==='receipt_commit'&&x.step==='remote_ack'&&x.attempt===1));
+});
+for(const target of ['local_health','local_notify'])test(target+' response body timeout cannot become a false missing daemon or trigger a kill',async t=>{
+ const f=updater(t,{online:true}),pathname=target==='local_health'?'/healthz':'/local/failure-finalizations';let requests=0;
+ const fetchImpl=async(input,options)=>{if(new URL(input).pathname===pathname){requests++;return {ok:true,status:200,json:async()=>{throw timeout();}};}return f.fetchImpl(input,options);};
+ await assert.rejects(createFailedActionFinalizationRecovery(f.deps)({...f,fetchImpl}),{name:'TimeoutError',recoveryPhase:target==='local_health'?'current_health':'prepare',recoveryStep:target,recoveryAttempt:1});
+ assert.equal(requests,1);assert.equal(f.counts().terminated,0);assert.equal(f.counts().draining,false);
+});
+test('accepted pause followed by response timeout resumes the exact old daemon and retains the original failure phase',async t=>{
+ const f=updater(t,{online:true}),operations=[];
+ const fetchImpl=async(input,options)=>{
+  if(new URL(input).pathname==='/local/connection-control'){
+   const body=JSON.parse(options.body);operations.push(body.operation);const response=await f.fetchImpl(input,options);
+   if(body.operation==='pause')return {ok:true,status:200,json:async()=>{throw timeout();}};return response;
+  }
+  return f.fetchImpl(input,options);
+ };
+ await assert.rejects(createFailedActionFinalizationRecovery(f.deps)({...f,fetchImpl}),{name:'TimeoutError',recoveryPhase:'pause_drain',recoveryStep:'local_pause',recoveryAttempt:1});
+ assert.deepEqual(operations,['pause','resume']);assert.equal(f.counts().draining,false);assert.equal(f.counts().terminated,0);assert.equal(f.counts().acknowledgements,0);
+});
+test('native process observation timeout reports its own step without widening process cleanup',async t=>{
+ const f=updater(t,{online:true});
+ await assert.rejects(createFailedActionFinalizationRecovery({...f.deps,inspectProcess:async()=>{throw Object.assign(Error('private native stderr'),{code:'ETIMEDOUT'});}})(f),{code:'ETIMEDOUT',recoveryPhase:'source_validation',recoveryStep:'process_identity',recoveryAttempt:1});
+ assert.equal(f.counts().terminated,0);assert.equal(f.counts().draining,false);
+});
+
+test('authorization read retries allow the observed slow server to respond within a bounded deadline budget',async t=>{
+ const f=updater(t),deadlines=[],original=AbortSignal.timeout.bind(AbortSignal);let reads=0;
+ t.mock.method(AbortSignal,'timeout',ms=>{deadlines.push(ms);return original(ms);});
+ const fetchImpl=async(input,options)=>{if(new URL(input).pathname==='/a2a/v1/failure-finalizations'&&++reads<3)throw timeout();return f.fetchImpl(input,options);};
+ const result=await createFailedActionFinalizationRecovery({...f.deps,sleep:async()=>{}})({...f,fetchImpl});
+ assert.deepEqual(deadlines.slice(0,3),[8000,16000,24000]);assert.equal(result.finalizationsApplied,1);assert.equal(f.counts().acknowledgements,1);
+});
+
+test('a rejected pause retains its original failure step after the verified instance is resumed',async t=>{
+ const f=updater(t,{online:true}),operations=[];
+ const fetchImpl=async(input,options)=>{
+  if(new URL(input).pathname==='/local/connection-control'){
+   const body=JSON.parse(options.body);operations.push(body.operation);const response=await f.fetchImpl(input,options);
+   return body.operation==='pause'?Response.json({error:'fixture denied'},{status:409}):response;
+  }
+  return f.fetchImpl(input,options);
+ };
+ await assert.rejects(createFailedActionFinalizationRecovery(f.deps)({...f,fetchImpl}),{code:'FAILURE_FINALIZATION_BUSY',recoveryPhase:'pause_drain',recoveryStep:'local_pause'});
+ assert.deepEqual(operations,['pause','resume']);assert.equal(f.counts().draining,false);assert.equal(f.counts().terminated,0);
+});
+
+test('diagnostic logging failures do not interrupt an acknowledged archive or lose its stop receipt',async t=>{
+ const f=updater(t,{online:true});
+ const result=await createFailedActionFinalizationRecovery(f.deps)({...f,log:()=>{throw Error('fixture log unavailable');}});
+ assert.equal(result.recovered,true);assert.equal(result.stopped,true);assert.equal(result.finalizationsApplied,1);assert.equal(f.counts().acknowledgements,1);assert.equal(f.counts().terminated,1);
+});
