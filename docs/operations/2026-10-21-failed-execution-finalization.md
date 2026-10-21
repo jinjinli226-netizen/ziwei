@@ -93,3 +93,7 @@ node --test --test-concurrency=1 \
 新增12项旧真实health回归、native输入快照及负例；另用旧官方包6种矩阵验证，包括历史pending/blocked/confirmed、动态辅助排空及本轮主体也属于已审计历史时的两种排重。业务执行次数均为0。旧兼容测试中解析单行函数的过期测试已改为调用实际 `createHistoricalUpdateRecoveryEntry` 工厂。`scripts/client-update.mjs` 仅输出闭合FF规则及有界整数计数，终态文件和旧日志回读保持同一脱敏字段；不输出原始健康、路径、Token或任意异常文本。BUSY及transport文案不再声称存在其它员工或保证旧daemon会自动重试。
 
 本节先记录源码验证。正式包发布、实际Windows新build心跳、client_archived归档和后续真实模型短回复需分别核对；服务端/UI/Android无需因这两处客户端兼容修改重发。
+
+源码 `2e731c9c141a2db1c035f5f89f7d86354fb6cc35` 已先推三条接续引用后，仅发布官方客户端build `d3d8f25b9d429192e54adb911484476fe41fffa072956a45bf4667bd9bdf2878`，包SHA256 `c5f690b838da2d22b5df13ae07de898033739f4f60d7b5953a6c5e33f7e9deb6`，1,269,465字节，完整公开下载与清单匹配。只叠加两个运行文件及包描述，所有其它混合生产包字节和依赖保留。75项恢复/诊断、97项历史/更新兼容通过，Windows原生1项平台跳过；lint238、Mac冷安装71包、Linux实际包内CLI/build和独立审查通过。没有本地监听服务，API原进程397608、数据库、其它下载和Android保持。
+
+发布后通过普通Owner API回读：电脑在线仍156874，目标已是d3d8f25；闲鱼active r7/e26、无active action，但独立收尾仍awaiting_client，原失败各字段不变，原远程升级意图保持cancelled。未发新升级意图或模型/业务任务。现场具体健康规则、实际装入、归档ACK与真实模型短回复仍未完成，先等待已请求的只读本机健康摘要，不要求用户再次盲更新。详见[本次QA](../qa/2026-10-21-client-recovery-legacy-health-fix.json)。
