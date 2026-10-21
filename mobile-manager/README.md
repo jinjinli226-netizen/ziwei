@@ -1,8 +1,8 @@
 # 紫薇 Android 管理 App
 
-待发布候选：`0.5.4-internal / code 16` 已补齐服务端“本轮失败自动收尾”合同的显示与发送判断。原电脑归档后可继续派新工作，待收尾时显示自动处理，保留原未知结果，不要求用户手工核实。候选检查通过，尚未发布或真机安装；见[候选验收](../docs/operations/2026-10-21-android-failure-finalization-candidate.md)。
+`0.5.4-internal / code 16` 已发布内部测试版，补齐服务端“本轮失败自动收尾”合同的显示与发送判断。原电脑归档后可继续派新工作，待收尾时显示自动处理，保留原未知结果，不要求用户手工核实。公开安装包与 manifest 已匿名下载核验；本版尚未安装真机或模拟器。见[本轮验收与发布记录](../docs/operations/2026-10-21-android-failure-finalization-candidate.md)。
 
-最近已交付的内部测试版：`0.5.3-internal`（code 15），包名 `com.ziwei.manager`，Android 8.0（API 26）及以上。[下载安装包](https://github.com/jinjinli226-netizen/ziwei/releases/download/android-manager-v0.5.3-internal/ziwei-manager-0.5.3-internal-code15.apk)。它是现有紫薇的手机管理入口；受控手机上的 Agent / Updater 继续使用原应用，Hermes 继续在绑定的常开电脑执行。
+最近已交付的内部测试版：`0.5.4-internal`（code 16），包名 `com.ziwei.manager`，Android 8.0（API 26）及以上。[下载安装包](https://github.com/jinjinli226-netizen/ziwei/releases/download/android-manager-v0.5.4-internal/ziwei-manager-0.5.4-internal-code16.apk)。它是现有紫薇的手机管理入口；受控手机上的 Agent / Updater 继续使用原应用，Hermes 继续在绑定的常开电脑执行。
 
 0.3 起加入的手机功能随本版保留。群组分页依赖电脑客户端协议，旧电脑缺少分页回执时仍要求升级；通知验收不代表所有群组和电脑组合已测通。最近提醒及自建通知服务已与主控同步上线。
 
@@ -47,7 +47,7 @@
 
 ## 安装和使用
 
-使用 `ziwei-manager-0.5.3-internal-code15.apk` 同签名覆盖更新，不要先卸载。具体构建和验收见[本轮交付记录](../docs/operations/2026-10-19-android-historical-observation-occupancy.md)。系统询问时，仅为本次使用的下载或文件应用允许安装来源；打开「紫薇」，按需登录原账号并选择原工作区。在「最近提醒」开启消息通知、允许系统通知权限，开启后会保留持续接收状态通知；不需要无障碍或设备管理员权限。准确 code14 → code15 已在同一模拟器验证原登录、UID、首次安装时间和旧草稿保留；其他旧版的登录是否仍有效以实际会话为准。
+使用 `ziwei-manager-0.5.4-internal-code16.apk` 同签名覆盖更新，不要先卸载。构建与公开产物校验见[本轮交付记录](../docs/operations/2026-10-21-android-failure-finalization-candidate.md)。系统询问时，仅为本次使用的下载或文件应用允许安装来源；打开「紫薇」，按需登录原账号并选择原工作区。在「最近提醒」开启消息通知、允许系统通知权限，开启后会保留持续接收状态通知；不需要无障碍或设备管理员权限。历史 code14 → code15 已在同一模拟器验证原登录、UID、首次安装时间和旧草稿保留；code16 的实际覆盖安装、登录和通知尚待真机验收。
 
 这是独立管理应用的内部签名，不覆盖或升级互联 Agent / Updater。后续更新管理应用须沿用同一签名；不要卸载应用来做常规升级，以免清除本机汇报队列。生产签名、应用商店发布不属于本次交付。
 

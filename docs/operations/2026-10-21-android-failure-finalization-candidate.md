@@ -1,6 +1,6 @@
-# Android 本轮失败自动收尾：候选验收
+# Android 本轮失败自动收尾：验收与发布
 
-日期：2026-10-21。范围：Android 管理 App 的状态判定与发送入口；本记录不代表已发布或真机验收。
+日期：2026-10-21。范围：Android 管理 App 的状态判定与发送入口；已发布内部测试版，尚未真机或模拟器安装验收。
 
 ## 原问题与改动
 
@@ -25,4 +25,13 @@
 
 签名证书 SHA-256：`507531ee91afe6369a2d519d653713a76d2fa54b8f5f76119672f668230ced35`，与正式 code 15 的公开 manifest 相同，沿用原内部管理 App 签名。
 
-私有初次候选位于 `.local/android-failure-finalization-code16/candidate/`，包含 APK、SHA256 和 manifest；不随 Git 上传。发布前先推送源代码，重新核对正式最新版本，防止覆盖并发发布。本页不代表已创建 GitHub release 或已发布。旧 APK 不会因服务器网页更新而自动获得这段内置状态逻辑，需要安装新版本。
+私有初次候选位于 `.local/android-failure-finalization-code16/candidate/`，不随 Git 上传，未作为正式安装包发布。旧 APK 不会因服务器网页更新而自动获得这段内置状态逻辑，需要安装新版本。
+
+## 已发布产物
+
+2026-10-21 19:24 北京时间，确认配套服务端 `1b9dbe40f4940a6b8105a34a670ed7094db4c3ea` 已上线并通过健康检查后，发布 [Android 管理 App 0.5.4 内部测试版](https://github.com/jinjinli226-netizen/ziwei/releases/tag/android-manager-v0.5.4-internal)。产品源码先推送 `codex/android-selfhost-notifications`，再从干净提交 `6a857c54c197fc774e5549aa4ffcdca6779afc7b` 重建；公开 tag 精确指向该提交。
+
+- [APK 下载](https://github.com/jinjinli226-netizen/ziwei/releases/download/android-manager-v0.5.4-internal/ziwei-manager-0.5.4-internal-code16.apk)：SHA-256 `1d1cb8269472ebaa51ddd59ba8edb52770d5aae37a24323ed2c21ef5c9576366`。
+- [正式 manifest](https://github.com/jinjinli226-netizen/ziwei/releases/download/android-manager-v0.5.4-internal/manifest-code16.json)：SHA-256 `fb54450c923af6348e21f376c9e8e7a4b39503d7b7a16cd636ac3793ba2766bf`。
+- APK 完整匿名下载、manifest 原字节、SHA 文件和远端 tag 已核对；29 份内置资产同时匹配正式 APK 和准确产品提交。沿用原签名，`nativeProfile: selfhost`、`pushSdk: null`、`deviceVerified: false`。
+- 未替换受控手机 Agent/Updater 下载目录；未安装管理手机或模拟器，未声明覆盖安装、登录或真实员工业务已验收。私有发布回执位于 `.local/android-failure-finalization-code16/`，公开产物和本页提供可迁移的核对入口。
