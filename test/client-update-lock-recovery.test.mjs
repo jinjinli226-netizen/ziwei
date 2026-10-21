@@ -213,3 +213,18 @@ test('recovery step diagnostics reject private labels and invalid numeric facts'
   assert.equal(Object.hasOwn(result,'recoveryStep'),false);assert.equal(Object.hasOwn(result,'recoveryAttempt'),false);assert.equal(Object.hasOwn(result,'recoveryElapsedMs'),false);assert.doesNotMatch(JSON.stringify(result),/PRIVATE_/);
  }
 });
+
+test('finalization busy diagnostics show only closed rules and bounded health counts, including stale-log fallback',async t=>{
+ const f=fixture(t),error={code:'FAILURE_FINALIZATION_BUSY',recoveryPhase:'current_health',recoveryStep:'local_health',recoveryRule:'FF_PENDING_DELIVERIES',
+  recoveryCounters:{pending:2,expectedPending:1,active:1,quarantined:1,authorized:1,privateToken:'PRIVATE_TOKEN',blocked:-1,auxiliary:'PRIVATE_TOKEN',polling:1000001},message:'PRIVATE_BODY'};
+ const expected={active:1,quarantined:1,pending:2,authorized:1,expectedPending:1},result=updateFailureResult(error,'recover_history');
+ assert.equal(result.recoveryRule,'FF_PENDING_DELIVERIES');assert.deepEqual(result.recoveryCounters,expected);
+ assert.match(result.message,/FF_PENDING_DELIVERIES/);assert.doesNotMatch(JSON.stringify(result),/PRIVATE_|其他任务仍在运行|自动重试/);
+ fs.writeFileSync(f.resultFile,JSON.stringify({state:'running',operation:'update'}));fs.writeFileSync(f.lockFile,JSON.stringify(f.legacy()));
+ fs.writeFileSync(path.join(f.directory,'maintenance.jsonl'),JSON.stringify({at:'2026-10-21T14:30:00Z',pid:61536,event:'maintenance_failed',failureStage:'recover_history',reasonCode:error.code,...error,code:undefined})+'\n');
+ const saved=await readUpdateResult({env:{ZIWEI_USER_HOME:f.home},inspectProcess:f.inspect});
+ assert.equal(saved.recoveryRule,'FF_PENDING_DELIVERIES');assert.deepEqual(saved.recoveryCounters,expected);assert.doesNotMatch(JSON.stringify(saved),/PRIVATE_/);
+ for(const recoveryRule of ['FF_PRIVATE_TOKEN','PRIVATE_TOKEN',{},null]){
+  const invalid=describeUpdateFailure({...error,recoveryRule},'recover_history');assert.equal(Object.hasOwn(invalid,'recoveryRule'),false);assert.equal(Object.hasOwn(invalid,'recoveryCounters'),false);
+ }
+});

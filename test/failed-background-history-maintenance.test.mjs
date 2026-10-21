@@ -7,7 +7,7 @@ import {createHash} from 'node:crypto';
 import {ActionDispatcher} from '../src/daemon.mjs';
 import {actionExecutionTimeoutMs} from '../src/action-execution-budget.mjs';
 import {recoverBeforeClientUpdateStop} from '../scripts/client-update.mjs';
-import vm from 'node:vm';
+import {createHistoricalUpdateRecoveryEntry} from '../scripts/client-historical-prelaunch-recovery.mjs';
 import {pathToFileURL} from 'node:url';
 import {createActionDelivery} from '../src/daemon-action-delivery.mjs';
 import {inspectLocalDaemonMaintenanceFiles,scanNativeFiles,isRetainedFailedBackgroundCompletion} from '../backend/preservation-native-evidence.mjs';
@@ -41,8 +41,7 @@ for(const deliveryState of ['result_pending','blocked','confirmed'])test(`failed
 });
 test('the official candidate recover_history entry uses its own scanner while old daemon still reports corrupt history',async t=>{
  const f=await fixture(t),before=snapshots(f.runtime);assert.equal(f.health.maintenance.stopSafe,false);assert.equal(f.inspect().stopSafe,true);assert.equal(typeof f.state.started[0].hardDeadline,'number');
- const source=fs.readFileSync(new URL('../scripts/client-historical-prelaunch-recovery.mjs',import.meta.url),'utf8'),line=source.split(/\r?\n/).find(line=>line.startsWith('export async function recoverHistoricalPrelaunchForUpdate('));assert(line);
- const candidateRecovery=f.make(),hook=vm.runInNewContext('('+line.replace('export ','')+')',{recoverLocalHistoryStopForUpdate:input=>candidateRecovery({...input,configPath:f.configPath,fetchImpl:f.recoveryInput.fetchImpl}),recoverForceAbandonForUpdate:()=>{throw Error('must use candidate retained-history recovery first');},recoverOriginalHistoricalPrelaunch:()=>{throw Error('no legacy task rewriting');}});
+ const candidateRecovery=f.make(),hook=createHistoricalUpdateRecoveryEntry({finalize:async()=>({recovered:false}),retain:input=>candidateRecovery({...input,configPath:f.configPath,fetchImpl:f.recoveryInput.fetchImpl}),force:()=>{throw Error('must use candidate retained-history recovery first');},original:()=>{throw Error('no legacy task rewriting');}});
  const candidate=path.join(f.root,'candidate'),result=await recoverBeforeClientUpdateStop({candidate,root:f.root,env:f.recoveryInput.env,load:async specifier=>{assert.equal(specifier,pathToFileURL(path.join(candidate,'scripts/client-historical-prelaunch-recovery.mjs')).href);return{recoverHistoricalPrelaunchForUpdate:hook};}});
  assert.equal(result.recovered,true);assert.equal(result.stopped,true);assert.equal(result.originalExecutionExitConfirmed,false);assert.equal(result.executionConfirmedStopped,false);assert.equal(result.retainedHistoryPreserved,true);assert.equal(Object.hasOwn(result,'backgroundProcessesPreserved'),false);assert.equal(f.kills,1);assert.deepEqual(snapshots(f.runtime),before);assert.equal(f.state.completed[0].result.result.processExit.treeConfirmed,false);assert.equal(f.state.completed[0].result.result.terminalMcp.executionState,'uncertain');
 });

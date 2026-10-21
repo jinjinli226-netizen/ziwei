@@ -1,0 +1,138 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-10-21T15:41:36.816512+00:00",
+  "source": {
+    "commit": "2e731c9c141a2db1c035f5f89f7d86354fb6cc35",
+    "pushedBeforePublication": true,
+    "refs": [
+      "main",
+      "codex/remote-client-upgrade",
+      "codex/v2-20261014-release"
+    ]
+  },
+  "userFailure": {
+    "updateId": "update-5daf1875-2269-45c9-90b9-48e87ffb1e76",
+    "failureStage": "recover_history",
+    "reasonCode": "FAILURE_FINALIZATION_BUSY",
+    "recoveryPhase": "current_health",
+    "recoveryStep": "local_health",
+    "recoveryAttempt": 1,
+    "recoveryElapsedMs": 270,
+    "newInvocationConfirmed": true,
+    "specificLiveRuleConfirmed": false,
+    "localHealthSummaryReceived": false
+  },
+  "independentlyReproduced": {
+    "officialOldBuild": "15687444502be073f3dc432d8c6817ec27b2f6635019da28f97dde1b3635d0f7",
+    "originalComponents": [
+      "ActionDispatcher",
+      "ActionDelivery",
+      "ActionScheduler",
+      "inspectLocalDaemonMaintenanceFiles",
+      "healthPayload"
+    ],
+    "healthFunctionNormalizedSha256": "ccd5b99acc2a029a2cc5c717abb8440b9dc2f9664666ff89b55489de8ab903b8",
+    "oldPackageMatricesPassed": 6,
+    "businessExecutionCount": 0,
+    "cases": [
+      "audited result_pending history",
+      "audited blocked history",
+      "confirmed history",
+      "auxiliary count drains 1 to 0",
+      "authorized subject overlaps retained pending history",
+      "authorized subject overlaps retained blocked history"
+    ]
+  },
+  "validation": {
+    "recoveryAndDiagnostics": {
+      "passed": 75,
+      "failed": 0,
+      "skipped": 1,
+      "skipReason": "Windows native stale-lock handle test on non-Windows"
+    },
+    "historyAndUpdaterCompatibility": {
+      "passed": 97,
+      "failed": 0,
+      "skipped": 0
+    },
+    "lintSourceFiles": 238,
+    "independentReviewPassed": true,
+    "coldProof": {
+      "verified": true,
+      "noListeners": true,
+      "noNetworkOrHelpers": true,
+      "dependencyPackages": 71
+    },
+    "linuxPackagedRuntime": {
+      "clientBuild": "d3d8f25b9d429192e54adb911484476fe41fffa072956a45bf4667bd9bdf2878",
+      "verified": true,
+      "noListeners": true
+    },
+    "localListenersStarted": false,
+    "newWindowsNativeRunClaimed": false
+  },
+  "changes": {
+    "runtimeOverlays": [
+      "scripts/client-update.mjs",
+      "src/client-failed-action-finalization-recovery.mjs"
+    ],
+    "unrelatedPackageBytesPreserved": true,
+    "nativeStopProgramChanged": false,
+    "authorizedSubjectCountedOnce": true,
+    "retainedHistoriesIndividuallyAuditedAndHashed": true,
+    "immutableBootIdentityRemainsPinned": true,
+    "drainedAuxiliaryCountMustEqualZero": true,
+    "unrelatedInFlightStillBlocks": true,
+    "closedRuleAndBoundedCounters": true,
+    "misleadingAutomaticRetryCopyRemoved": true,
+    "originalFailureUnchanged": true,
+    "businessReplay": false
+  },
+  "publication": {
+    "ok": true,
+    "commit": "2e731c9c141a2db1c035f5f89f7d86354fb6cc35",
+    "apiChanged": false,
+    "databaseChanged": false,
+    "bootstrapChanged": false,
+    "clientBuild": "d3d8f25b9d429192e54adb911484476fe41fffa072956a45bf4667bd9bdf2878",
+    "clientSha256": "c5f690b838da2d22b5df13ae07de898033739f4f60d7b5953a6c5e33f7e9deb6",
+    "coldInstallVerifiedOnBuildHost": true,
+    "apiPid": "397608",
+    "allOtherDownloadsPreserved": true
+  },
+  "windowsAcceptance": {
+    "state": "pending-local-health-summary-and-actual-install",
+    "observed": {
+      "bot": {
+        "control_state": "active",
+        "revision": 7,
+        "control_epoch": 26,
+        "active_action_id": null
+      },
+      "action": {
+        "id": "action_a9e24edf-afc2-42dd-b779-6cb3629ef94c",
+        "status": "failed"
+      },
+      "failureFinalizationState": "awaiting_client",
+      "device": {
+        "status": "online",
+        "currentBuild": "15687444502be073f3dc432d8c6817ec27b2f6635019da28f97dde1b3635d0f7",
+        "targetBuild": "d3d8f25b9d429192e54adb911484476fe41fffa072956a45bf4667bd9bdf2878"
+      }
+    },
+    "originalFailureUnchanged": true,
+    "archiveAckVerified": false,
+    "modelContinuityVerified": false
+  },
+  "mobileUpdateRequiredForThisPatch": false,
+  "publicDownload": {
+    "verified": true,
+    "commit": "2e731c9c141a2db1c035f5f89f7d86354fb6cc35",
+    "clientBuild": "d3d8f25b9d429192e54adb911484476fe41fffa072956a45bf4667bd9bdf2878",
+    "sha256": "c5f690b838da2d22b5df13ae07de898033739f4f60d7b5953a6c5e33f7e9deb6",
+    "bytes": 1269465,
+    "pairedApiCommit": "1b9dbe40f4940a6b8105a34a670ed7094db4c3ea",
+    "frontendCommit": "1b9dbe40f4940a6b8105a34a670ed7094db4c3ea",
+    "windowsValidation": "pending-user-update"
+  }
+}
