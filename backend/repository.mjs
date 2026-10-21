@@ -18,7 +18,7 @@ import { composeEmployeePrompt, normalizeRuntimeProfile } from '../src/employee-
 import { listHermesProfiles, validateHermesProfile, terminalMcpExecutionFailure } from '../src/runtime-adapters.mjs';
 import { fetchSafeUrl, validateSafeUrl } from './ssrf.mjs';
 import { acceptInvitationMembership } from './invitation-membership.mjs';
-import { syncPhoneSkill } from './skills/catalog.mjs';
+import { syncPhoneSkill, syncWorldMemorySkill, defaultEmployeeSkillIds, worldMemoryEmployeeIdentity, WORLD_MEMORY_CATALOG_ID } from './skills/catalog.mjs';
 import { redactSecrets } from '../src/redaction.mjs';
 import { normalizeConversationAttachments } from './conversation-attachments.mjs';
 import {forwardConversationMessages as forwardMessages,CONVERSATION_FORWARD_INTERNAL} from './conversation-forwarding.mjs';
@@ -466,8 +466,9 @@ export function createRepository(options = {}, io={}) {
     const selectedModel = model || employee?.model_id || null;
     const selectedProfile = normalizeRuntimeProfile(profile ?? employee?.runtime_profile);
     const employeeWorkspace = employee ? db.prepare('SELECT slug FROM workspaces WHERE id=?').get(employee.workspace_id)?.slug : null;
-    const skillIds = employee ? (Array.isArray(employee.skills) ? employee.skills : parse(employee.skills_json)) : [];
-    const skillText = skillIds.map(skillId => db.prepare('SELECT name,content,description FROM skills WHERE workspace_id=? AND (id=? OR name=?)').get(employee.workspace_id, String(skillId), String(skillId))).filter(Boolean).map(skill => `技能：${skill.name}\n${String(skill.content || skill.description || '').slice(0, 100000)}`).join('\n\n');
+    const skillIds = employee ? [...new Set([...(Array.isArray(employee.skills) ? employee.skills : parse(employee.skills_json)),...defaultEmployeeSkillIds(db,employee.workspace_id)])] : [];
+    const skillRows = skillIds.map(skillId => db.prepare('SELECT id,catalog_id,name,content,description,installed FROM skills WHERE workspace_id=? AND (id=? OR name=?)').get(employee.workspace_id, String(skillId), String(skillId))).filter(skill => skill && (skill.catalog_id!==WORLD_MEMORY_CATALOG_ID || skill.installed===1));
+    const skillText = [...new Map(skillRows.map(skill => [skill.id,skill])).values()].map(skill => `技能：${skill.name}\n${String(skill.content || skill.description || '').slice(0, 100000)}${skill.catalog_id===WORLD_MEMORY_CATALOG_ID ? '\n'+worldMemoryEmployeeIdentity(employee.workspace_id,employee.id) : ''}`).join('\n\n');
     const isCreator=employee && trustedTemplatePayload(employee.workspace_id,{employeeId:employee.id}).employeeTemplateId==='ziwei-employee-creator';
     const instructions = [employee?.description ? `岗位职责：${employee.description}` : '', employee?.persona ? `人格：${employee.persona}` : '', employee?.instructions, skillText, isCreator?CREATOR_BOT_GUIDANCE:''].filter(Boolean).join('\n\n');
     const phoneConfig = employee && db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='ziwei_connect_bindings'").get() ? db.prepare(`SELECT p.enabled,b.device_id,b.account_id,s.id AS skill_id,s.version FROM employee_phone_mcp p JOIN ziwei_connect_bindings b ON b.employee_id=p.employee_id AND b.workspace_id=p.workspace_id JOIN skills s ON s.workspace_id=p.workspace_id AND s.catalog_id='ziwei-phone-control' AND s.installed=1 WHERE p.employee_id=?`).get(employee.id) : null;
@@ -956,6 +957,7 @@ export function createRepository(options = {}, io={}) {
       const ws = workspace(slug);
       if (!ws) throw new Error('Workspace not found');
       syncPhoneSkill(db, ws.id);
+      syncWorldMemorySkill(db, ws.id);
       const normalized = typeof filters === 'string' ? { category: filters } : (filters || {});
       const clauses = ['workspace_id=?']; const params = [ws.id];
       if (normalized.category && normalized.category !== 'all') { clauses.push('category=?'); params.push(String(normalized.category)); }

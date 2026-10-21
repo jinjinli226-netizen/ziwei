@@ -1,0 +1,24 @@
+{
+  "id": "ziwei-world-memory",
+  "catalog_id": "ziwei-world-memory",
+  "name": "紫薇映界·共享知识库",
+  "description": "按员工独立身份检索公司知识、经验和工具，保存真实汇报；提供全员使用指南，连接仍需实际授权。",
+  "version": "1.0.0",
+  "category": "productivity",
+  "scope": "platform",
+  "author": "紫薇平台团队",
+  "icon": "📚",
+  "tags": ["知识库", "记忆", "汇报", "Skill", "MCP"],
+  "integration": {
+    "kind": "knowledge_guide",
+    "defaultEnabled": true,
+    "setupRequired": true,
+    "apiOrigin": "https://world.qzelynth.top",
+    "guideUrl": "https://world.qzelynth.top/doc/guide.md",
+    "credentialMode": "independent_employee_profile",
+    "transport": "stdio",
+    "mcpServer": "memory_world",
+    "supportedRuntimes": ["Codex", "Hermes"],
+    "connectionStatus": "not_verified"
+  }
+}

@@ -1,0 +1,151 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-21",
+  "sourceCommit": "0494db8fb9ee72f2fe8d509b7b7bf00477939a0f",
+  "pageSize": 10,
+  "tests": {
+    "backendPassed": 106,
+    "frontendPassed": 113,
+    "failed": 0,
+    "build": "passed"
+  },
+  "deployment": {
+    "ok": true,
+    "completedAt": "2026-10-21T03:36:48.896565+00:00",
+    "current": "/opt/ziwei/releases/conversation-history-performance-0494db8fb9ee-1b7652cf99dd/v2",
+    "previous": "/opt/ziwei/releases/bot-page-performance-0d4f6c3f47ba-50044d9cfa51/v2",
+    "mainPid": "636738",
+    "schemaUnchanged": true,
+    "databaseRestored": false,
+    "oldFrontendAssetsRetained": true,
+    "officialClientFilesPreserved": true,
+    "deviceUpdatesSubmitted": 0,
+    "employeeActionsSubmitted": 0,
+    "publicFrontend": {
+      "indexSha256": "b8a2d011f6597d78acfd5fdd72765f9aa5145c1c28340440bff48fa6c7e6a4ac",
+      "assets": [
+        {
+          "path": "assets/index-CWBJiea9.js",
+          "sha256": "6e0f55fdcc76a2eab0575f57bc9a06f916b2d9319d6a9de422bcac07ed0df106"
+        },
+        {
+          "path": "assets/index-CZSoHKUM.css",
+          "sha256": "2c69e99ae978ba9d95846547d6dfeac819af8b938d92c3320cbeb81db1c5e1ce"
+        }
+      ],
+      "redirectsAllowed": false
+    }
+  },
+  "measurements": {
+    "before-detail": {
+      "phase": "before-detail",
+      "route": "/api/conversations/conv_f2b31905-27b7-44bd-92de-da7ff2c1b1df",
+      "status": 200,
+      "headersMs": 11108,
+      "downloadMs": 54149,
+      "totalMs": 65256,
+      "bytesRead": 3314679,
+      "contentLength": "3314679",
+      "truncatedAt32MiB": false,
+      "parseMs": 10,
+      "messageCount": 98,
+      "messagePage": null,
+      "topKeys": [
+        "id",
+        "workspace_id",
+        "employee_id",
+        "title",
+        "status",
+        "created_at",
+        "updated_at",
+        "model_id",
+        "working_directory",
+        "device_id",
+        "employee",
+        "employee_binding",
+        "requires_employee_assignment",
+        "execution",
+        "messages"
+      ]
+    },
+    "after-detail": {
+      "phase": "after-detail",
+      "route": "/api/conversations/conv_f2b31905-27b7-44bd-92de-da7ff2c1b1df?view=thread&limit=10",
+      "status": 200,
+      "headersMs": 5070,
+      "downloadMs": 58,
+      "totalMs": 5128,
+      "bytesRead": 8122,
+      "contentLength": "8122",
+      "truncatedAt32MiB": false,
+      "parseMs": 0,
+      "messageCount": 10,
+      "messagePage": {
+        "hasMore": true,
+        "beforeCursor": "convmsg_81d632e0-f9d3-4b69-8e00-7089ad51c533",
+        "total": 100
+      },
+      "topKeys": [
+        "id",
+        "workspace_id",
+        "employee_id",
+        "title",
+        "status",
+        "created_at",
+        "updated_at",
+        "model_id",
+        "working_directory",
+        "device_id",
+        "employee",
+        "employee_binding",
+        "requires_employee_assignment",
+        "execution",
+        "messages",
+        "messagePage"
+      ]
+    },
+    "after-older": {
+      "phase": "after-older",
+      "route": "/api/conversations/conv_f2b31905-27b7-44bd-92de-da7ff2c1b1df?view=thread&limit=10&before=convmsg_81d632e0-f9d3-4b69-8e00-7089ad51c533",
+      "status": 200,
+      "headersMs": 5560,
+      "downloadMs": 341,
+      "totalMs": 5900,
+      "bytesRead": 10147,
+      "contentLength": "10147",
+      "truncatedAt32MiB": false,
+      "parseMs": 0,
+      "messageCount": 10,
+      "messagePage": {
+        "hasMore": true,
+        "beforeCursor": "convmsg_8b422fa2-05a4-41ff-8802-c42f9349a08b",
+        "total": 100
+      },
+      "topKeys": [
+        "id",
+        "workspace_id",
+        "employee_id",
+        "title",
+        "status",
+        "created_at",
+        "updated_at",
+        "model_id",
+        "working_directory",
+        "device_id",
+        "employee",
+        "employee_binding",
+        "requires_employee_assignment",
+        "execution",
+        "messages",
+        "messagePage"
+      ]
+    }
+  },
+  "measurementCaveat": "Single authenticated HTTP samples include this Mac network conditions; messages can be added by ongoing authorized employee work between samples.",
+  "browserVerification": {
+    "state": "not_confirmed",
+    "reason": "In-app browser navigation and module loading timed out; no browser rendering pass claimed. API ten-message pages and frontend component/integration tests passed."
+  },
+  "modelAndMobileFullHistoryContract": "unchanged",
+  "localListenersStarted": 0
+}
