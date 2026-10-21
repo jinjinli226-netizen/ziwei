@@ -62,7 +62,12 @@
     "targetBuild": "f96559041d637cb5d870c3f3d2ec93745d375f323a49edb3d3738b07fd4bb96e",
     "installedVerified": false,
     "reason": "old scheduler activeCount includes quarantinedActionIds; remote waiting_idle cannot load new recovery code",
-    "externalBootstrapRequested": true
+    "externalBootstrapRequested": true,
+    "remoteUpdateRequest": {
+      "id": "client-update_9f383ad1-0b28-47e1-9bad-9c2b1deed3e3",
+      "finalState": "cancelled",
+      "reason": "old client quarantined record blocks idle; avoid leaving a non-progressing maintenance gate before external bootstrap"
+    }
   },
   "originalFailure": {
     "actionId": "action_a9e24edf-afc2-42dd-b779-6cb3629ef94c",
