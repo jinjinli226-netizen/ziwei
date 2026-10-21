@@ -1,5 +1,9 @@
 # 紫薇项目 HandOff
 
+## 2026-10-21 旧客户端恢复 BUSY 兼容修复
+
+用户本次确为新更新任务5daf1875，270ms在current_health/local_health收到FAILURE_FINALIZATION_BUSY，不再是上次请求超时。原统一提示不能证明存在其它在途员工。用旧156874官方包的真实Dispatcher/Delivery/Scheduler/scanner及healthPayload独立复现：已审计保留历史的result_pending/blocked也计入旧health，而恢复入口只数授权主体；另动态managedAuxiliaryCount从1排空到0会被完整lifecycle比较误判换代。现逐文件读取已审计且有快照的保留历史计算精确计数，只从不可变启动身份比较中移除动态数量，同时要求当前辅助数量和Gateway均已清空。真正未授权在途、身份变化及未审计回执继续拒绝，原失败与历史字节保留。增加闭合FF规则和有界计数，取消“必有其它员工/会自动重试”的误导文案。源码测试通过；官方包发布及Windows现场验收另记本节后续与QA，不能预称闲鱼已恢复。详见[专题末节](docs/operations/2026-10-21-failed-execution-finalization.md)。
+
 ## 2026-10-21 外部更新恢复超时补丁
 
 用户已正确执行一次官方外部更新，实际仍报recover_history/OPERATION_TIMEOUT，原电脑156874和原失败均保持。旧错误缺步骤不能事后指认故障点；已确认共享API近期存在超过8秒的已完成请求，旧未知POST立即404。补上授权只读GET三次8/16/24秒预算、明确阶段/步骤/次数/耗时、暂停部分成功后恢复同一连接、日志失败不打断归档；不重复提交停止或ACK、不改退出证据。相关测试62通过、Windows原生1跳过，现场安装仍未验收。详见[专题末节](docs/operations/2026-10-21-failed-execution-finalization.md)。源码c67d2cd已先推三条接续引用，再仅发布官方电脑包b6261c0；完整下载核验通过，另12项兼容检查及冷安装验证通过。已请求用户一次外部更新，Windows仍待实测。API/网页/Android未重发，不要重复创建已取消的远升意图。见[本次QA](docs/qa/2026-10-21-client-recovery-timeout-fix.json)。

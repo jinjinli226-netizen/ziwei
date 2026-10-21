@@ -11,6 +11,9 @@ import {createLocalHistoryHandleTerminator,validatedMaintenanceCleanup,LOCAL_HIS
 
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
+// Auxiliary workers are a live count, not part of the boot generation. They
+// must drain to zero; the remaining lifecycle fields stay pinned exactly.
+const bootIdentity=life=>{if(!life)return null;const {managedAuxiliaryCount,...identity}=life;return identity;};
 const failure=code=>Object.assign(new Error(code),{code});
 const fact=(value,code='FAILURE_FINALIZATION_LOCAL_MISMATCH')=>{if(!value)throw failure(code);};
 const samePath=(a,b)=>typeof a==='string'&&typeof b==='string'&&path.resolve(a).toLowerCase()===path.resolve(b).toLowerCase();
@@ -124,10 +127,10 @@ export function createFailedActionFinalizationRecovery({platform=process.platfor
         const outcome=notified.value;fact(outcome?.ok===true);
         // The new daemon owns its memory. Never fall back to a legacy kill
         // merely because its archive ACK was lost or an exact stop is busy.
-        fact(outcome.pending===0||outcome.localPending===0,'FAILURE_FINALIZATION_BUSY');
+        if(!(outcome.pending===0||outcome.localPending===0))throw Object.assign(failure('FAILURE_FINALIZATION_BUSY'),{recoveryRule:'FF_LIVE_CLIENT_PENDING'});
         return {recovered:false,finalizationsApplied:(outcome.applied||0)+(outcome.localPending===0?outcome.pending||0:0)};
       }
-      else fact(notified.status===404,'FAILURE_FINALIZATION_BUSY');
+      else if(notified.status!==404)throw Object.assign(failure('FAILURE_FINALIZATION_BUSY'),{recoveryRule:'FF_LIVE_CLIENT_REFUSED'});
       // An obsolete daemon cannot own a half-applied new in-memory record.
       // Only after the new endpoint is ruled out may offline copies be ACKed.
       await settlePreviouslyApplied();
@@ -138,38 +141,60 @@ export function createFailedActionFinalizationRecovery({platform=process.platfor
         // A timed-out response may follow an accepted pause. Always resume
         // the same verified instance if this pass has not actually stopped it.
         const paused=await localRequest('/local/connection-control',{operation:'pause',nonce:life.nonce});
-        fact(paused.ok,'FAILURE_FINALIZATION_BUSY');
+        if(!paused.ok)throw Object.assign(failure('FAILURE_FINALIZATION_BUSY'),{recoveryRule:'FF_PAUSE_REFUSED'});
         // Only source state can justify the legacy active-count allowance.
         // A healthy in-flight task without its own finalization blocks this
         // maintenance pass; it is never killed as an unrelated employee.
         const check=body=>{
+          const counters={active:body?.activeActionCount,quarantined:body?.quarantinedActionCount,polling:body?.pollingCount,
+            auxiliary:body?.lifecycle?.managedAuxiliaryCount,pending:body?.maintenance?.pendingDeliveryCount,blocked:body?.maintenance?.blockedDeliveryCount,authorized:subjects.length};
+          const requireCheck=(value,rule)=>{if(!value)throw Object.assign(failure('FAILURE_FINALIZATION_BUSY'),{recoveryRule:rule,recoveryCounters:counters});};
+          requireCheck(body&&body.pid===record.pid&&body.clientBuild===build,'FF_CLIENT_CHANGED');
+          requireCheck(same(bootIdentity(body.lifecycle),bootIdentity(life)),'FF_BOOT_CHANGED');
+          requireCheck(body.connectionState==='draining','FF_NOT_DRAINING');
+          requireCheck(body.lifecycle.managedAuxiliaryCount===0&&body.maintenance?.gatewaySafe===true&&Array.isArray(body.maintenance.gatewayWorkers)&&body.maintenance.gatewayWorkers.length===0,'FF_AUXILIARIES');
           let authorizedPending=0,authorizedBlocked=0;
+          const subjectPaths=new Set();
           for(const item of subjects){
             const local=inspectFailureFinalizationLocal({runtimeDir:item.connection.runtimeDir,identity:item.identity,receipt:item.row.receipt,receiptDigest:item.row.receiptDigest});
+            if(local.delivery?.file)subjectPaths.add(local.delivery.file);
             const state=local.delivery?.value.state;
             if(state==='blocked')authorizedBlocked++;
             else if(state&&!['confirmed','maintenance_paused'].includes(state))authorizedPending++;
           }
-          fact(body&&body.pid===record.pid&&body.clientBuild===build&&same(body.lifecycle,life)&&body.connectionState==='draining'
-            &&body.maintenance?.gatewaySafe===true&&Array.isArray(body.maintenance.gatewayWorkers)&&body.maintenance.gatewayWorkers.length===0
-            &&body.maintenance.pendingDeliveryCount===authorizedPending&&body.maintenance.blockedDeliveryCount===authorizedBlocked
-            &&Number.isSafeInteger(body.activeActionCount)&&body.activeActionCount>=0
-            &&Number.isSafeInteger(body.quarantinedActionCount)&&body.quarantinedActionCount>=0
-            &&body.activeActionCount<=subjects.length&&body.quarantinedActionCount<=subjects.length,'FAILURE_FINALIZATION_BUSY');
+          // The old daemon counts all retained delivery journals in health.
+          // Add only histories the existing evidence scanner independently
+          // audited as retainable, never a blanket allowance for pending work.
+          const evidence=inspectEvidence({connections:connections.map(c=>({apiBase:c.apiBase,workspace:c.workspace,deviceId:c.deviceId,runtimeDir:c.runtimeDir}))});
+          const blockedPaths=new Set(evidence.stopIssues.filter(issue=>issue.code==='DELIVERY_NOT_DRAINED').map(issue=>issue.path));
+          const retainedPaths=new Set(evidence.issues.filter(issue=>issue.code==='DELIVERY_NOT_DRAINED'&&!blockedPaths.has(issue.path)&&!subjectPaths.has(issue.path)).map(issue=>issue.path));
+          for(const file of retainedPaths){
+            const snapshot=evidence.files.find(item=>item.exists&&item.path===file),original=bytes(file);
+            fact(snapshot&&hash(original)===snapshot.sha256);
+            const state=JSON.parse(original.toString('utf8').replace(/^\uFEFF/,'')).state;
+            if(state==='blocked')authorizedBlocked++;
+            else if(state&&!['confirmed','maintenance_paused'].includes(state))authorizedPending++;
+          }
+          counters.expectedPending=authorizedPending;counters.expectedBlocked=authorizedBlocked;
+          requireCheck(body.maintenance.pendingDeliveryCount===authorizedPending,'FF_PENDING_DELIVERIES');
+          requireCheck(body.maintenance.blockedDeliveryCount===authorizedBlocked,'FF_BLOCKED_DELIVERIES');
+          requireCheck(Number.isSafeInteger(body.activeActionCount)&&body.activeActionCount>=0&&body.activeActionCount<=subjects.length,'FF_ACTIVE_ACTIONS');
+          requireCheck(Number.isSafeInteger(body.quarantinedActionCount)&&body.quarantinedActionCount>=0&&body.quarantinedActionCount<=subjects.length&&body.executionQuarantined===(body.quarantinedActionCount>0),'FF_QUARANTINED_ACTIONS');
+          requireCheck(Number.isSafeInteger(body.pollingCount)&&body.pollingCount>=0,'FF_POLLING');
           for(const connection of connections){
             const file=path.join(connection.runtimeDir,'action-state.json');if(!fs.existsSync(file))continue;
             const state=JSON.parse(bytes(file));fact(state.version===2&&Array.isArray(state.started)&&Array.isArray(state.completed));
             const authorized=subjects.filter(item=>item.connection.workspace===connection.workspace).map(item=>item.row.receipt.subject.actionId);
             for(const start of state.started){const complete=state.completed.find(item=>item.key===start.key);
-              if(!complete||start.quarantine?.stopConfirmed===false)fact(authorized.includes(start.actionId),'FAILURE_FINALIZATION_BUSY');}
+              if(!complete||start.quarantine?.stopConfirmed===false)requireCheck(authorized.includes(start.actionId),'FF_UNAUTHORIZED_ACTION');}
           }
+          const allowed=new Set(subjects.map(item=>item.row.receipt.subject.actionId));
+          requireCheck(evidence.stopIssues.every(issue=>allowed.has(issue.actionId)&&['STARTED_WITHOUT_RESULT','ACTION_RESULT_UNCERTAIN','DELIVERY_NOT_DRAINED','UNMAPPED_NATIVE_EXECUTION'].includes(issue.code)),'FF_LOCAL_EVIDENCE');
+          return evidence;
         };
-        let current=await health();check(current);const deadline=Date.now()+15000;
-        while(current.pollingCount){fact(Date.now()<deadline,'FAILURE_FINALIZATION_BUSY');await new Promise(resolve=>setTimeout(resolve,100));current=await health();check(current);}
+        let current=await health(),evidence=check(current);const deadline=Date.now()+15000;
+        while(current.pollingCount){if(Date.now()>=deadline)throw Object.assign(failure('FAILURE_FINALIZATION_BUSY'),{recoveryRule:'FF_POLLING_DRAIN_TIMEOUT'});await sleep(100);current=await health();evidence=check(current);}
         mark('local_archive_validation','inspect_maintenance_evidence');
-        const evidence=inspectEvidence({connections:connections.map(c=>({apiBase:c.apiBase,workspace:c.workspace,deviceId:c.deviceId,runtimeDir:c.runtimeDir}))});
-        const allowed=new Set(subjects.map(item=>item.row.receipt.subject.actionId));
-        fact(evidence.stopIssues.every(issue=>allowed.has(issue.actionId)&&['STARTED_WITHOUT_RESULT','ACTION_RESULT_UNCERTAIN','DELIVERY_NOT_DRAINED','UNMAPPED_NATIVE_EXECUTION'].includes(issue.code)),'FAILURE_FINALIZATION_LOCAL_MISMATCH');
         mark('archive_backup','save_original_records');
         const parent=path.join(resolveDaemonDataDirectory({root,env}),'maintenance');noLinks(parent);fs.mkdirSync(parent,{recursive:true,mode:0o700});
         const directory=path.join(parent,'failed-action-stop-'+randomUUID());fs.mkdirSync(directory,{mode:0o700});const snapshots=[];
