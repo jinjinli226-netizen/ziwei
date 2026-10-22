@@ -97,3 +97,13 @@ node --test --test-concurrency=1 \
 源码 `2e731c9c141a2db1c035f5f89f7d86354fb6cc35` 已先推三条接续引用后，仅发布官方客户端build `d3d8f25b9d429192e54adb911484476fe41fffa072956a45bf4667bd9bdf2878`，包SHA256 `c5f690b838da2d22b5df13ae07de898033739f4f60d7b5953a6c5e33f7e9deb6`，1,269,465字节，完整公开下载与清单匹配。只叠加两个运行文件及包描述，所有其它混合生产包字节和依赖保留。75项恢复/诊断、97项历史/更新兼容通过，Windows原生1项平台跳过；lint238、Mac冷安装71包、Linux实际包内CLI/build和独立审查通过。没有本地监听服务，API原进程397608、数据库、其它下载和Android保持。
 
 发布后通过普通Owner API回读：电脑在线仍156874，目标已是d3d8f25；闲鱼active r7/e26、无active action，但独立收尾仍awaiting_client，原失败各字段不变，原远程升级意图保持cancelled。未发新升级意图或模型/业务任务。现场具体健康规则、实际装入、归档ACK与真实模型短回复仍未完成，先等待已请求的只读本机健康摘要，不要求用户再次盲更新。详见[本次QA](../qa/2026-10-21-client-recovery-legacy-health-fix.json)。
+
+## 2026-10-22 Windows实际装入与真实接口验收
+
+用户执行外部更新并启动后，普通Owner API已确认在线新build d3d8f25与官方目标一致；闲鱼原a9失败在 `2026-10-22T01:23:35.507Z`（北京时间09:23:35）获得原电脑client_archived确认，原失败status/result/error/ACK/完成时间均与发布前快照一致，原执行退出仍unknown/unobservable。旧远程意图保持cancelled，本次是外部更新完成后的独立心跳证明。未再需要用户读取本机健康记录。
+
+首条新短测 `action_8d3d4cd2-dc8e-40b2-9b4b-0577c0abd2be` 因bot-start准入10秒超时失败，可信prelaunch为spawnAttempted:false/launched:false/rootPid:null/treeConfirmed:true，正常收尾且未再隔离。错误没有HTTP status，表明fetch尚未完成取得Response，不能从总执行耗时或没有匹配日志指认服务器处理耗时或根本网络原因。
+
+确认电脑新鲜在线、员工active无占位且精确绑定保持后，仅新建第二条短测 `action_329b86f6-6902-42b9-bbf8-76af08435a4d`，没有复活首条失败。实际原Hermes/Profile/session/gpt-6.1-sol/max请求返回HTTP429使用额度上限；原生reasoning请求边界matched，CLI/root退出1、tree确认、activeProcesses:0，无后台保留。两MCP工具调用数组为空，未声称完整原生工具调用审计。原生边界requests:6不等于已证明6次HTTP请求。没有预期短答，不能标记模型验收成功，也不再继续发请求。
+
+最终回读闲鱼active r7/e26、active action为空、failureFinalization为空，旧原失败reconciliationRequired:false，最新429保持failed，无待核实锁。升级及原失败归档已验，后续模型回复仍受当前订阅额度限制；未改凭据或产品源码、未重新部署、未派发店铺/手机业务。下次无需再次更新客户端，等额度恢复或用户选择有额度的授权后再验证回复。脱敏证据见[Windows现场QA](../qa/2026-10-22-failure-finalization-windows-live.json)。

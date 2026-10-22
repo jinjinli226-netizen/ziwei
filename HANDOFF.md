@@ -1,5 +1,11 @@
 # 紫薇项目 HandOff
 
+## 2026-10-22 李金晋电脑新版及闲鱼归档已确认，真实短回复受订阅额度限制
+
+用户报告升级完成后，已正常API确认闲鱼原a9失败在北京时间09:23:35获得client_archived归档，localProcessDisposition仍unobservable，原失败和未知退出保持。用户启动后，新版d3d8f25在线心跳与官方目标一致；旧远程意图仍cancelled，不能改称远升成功。闲鱼active r7/e26，无active action/待收尾；本次正常失败未重新锁住。
+
+实测第一条8d3d4cd2在bot-start准入10秒超时，可信prelaunch证明Hermes未启动，正常失败已释放占位；没有复活或重跑该action。第二条新短测329b86f6确实进入原Hermes/Profile/session（20261015_120149_45e77a）、gpt-6.1-sol/max原生请求，返回HTTP429 “The usage limit has been reached”。CLI1/root1/tree已确认、active0，无后台保留，两MCP调用数组为空；不据此宣称完整原生工具审计。模型没有返回预期短答，provider验收未通过；请求边界计数6不解释为6次HTTP。停止继续请求，未改账号、模型、产品代码或部署，没重放店铺/手机业务。不用为此再更新客户端；下一步是订阅额度恢复或用户选择有额度的授权后再短测。见[本次QA](docs/qa/2026-10-22-failure-finalization-windows-live.json)，下方为此前尚未装入的历史快照。
+
 ## 2026-10-21 旧客户端恢复 BUSY 兼容修复
 
 用户本次确为新更新任务5daf1875，270ms在current_health/local_health收到FAILURE_FINALIZATION_BUSY，不再是上次请求超时。原统一提示不能证明存在其它在途员工。用旧156874官方包的真实Dispatcher/Delivery/Scheduler/scanner及healthPayload独立复现：已审计保留历史的result_pending/blocked也计入旧health，而恢复入口只数授权主体；另动态managedAuxiliaryCount从1排空到0会被完整lifecycle比较误判换代。现逐文件读取已审计且有快照的保留历史计算精确计数，只从不可变启动身份比较中移除动态数量，同时要求当前辅助数量和Gateway均已清空。真正未授权在途、身份变化及未审计回执继续拒绝，原失败与历史字节保留。增加闭合FF规则和有界计数，取消“必有其它员工/会自动重试”的误导文案。源码测试通过；官方包发布及Windows现场验收另记本节后续与QA，不能预称闲鱼已恢复。详见[专题末节](docs/operations/2026-10-21-failed-execution-finalization.md)。
