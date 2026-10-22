@@ -1,6 +1,6 @@
 import {CliError,fail,httpFailure} from './errors.mjs';
 import {uncertainCompletion} from '../vendor/native-completion.mjs';
-export async function requestJson({origin,path,method='GET',body,query,credential,timeout=30000,signal,fetchImpl=globalThis.fetch,resultQuery=null,idempotencyKey}){
+export async function requestJson({origin,path,method='GET',body,form,acceptErrors=false,query,credential,timeout=30000,signal,fetchImpl=globalThis.fetch,resultQuery=null,idempotencyKey}){
   const mutation=!['GET','HEAD'].includes(method);let sent=false,timer,abortListener;
   const controller=new AbortController();
   const uncertain=()=>({outcomeUnknown:mutation&&sent,resultQuery,...(idempotencyKey?{idempotencyKey}:{}),reconciliation:mutation&&sent?'Do not repeat the mutation automatically. Read the original resource or original server action; retain the original idempotency key.':null});
@@ -11,7 +11,9 @@ export async function requestJson({origin,path,method='GET',body,query,credentia
   const headers={accept:'application/json'};
   if(credential?.mode==='native')headers.cookie=`ziwei_session=${encodeURIComponent(credential.session)}`;
   if(credential?.mode==='managed')headers.authorization=`Bearer ${credential.token}`;
+  if(credential?.mode==='unified')headers.authorization=`Bearer ${credential.accessToken}`;
   if(body!==undefined)headers['content-type']='application/json';
+  if(form!==undefined)headers['content-type']='application/x-www-form-urlencoded';
   // One dispatch only. The end-to-end deadline includes response-body consumption.
   const abortPromise=new Promise((_,reject)=>{
     timer=setTimeout(()=>{controller.abort();reject(new CliError(mutation&&sent?'OUTCOME_UNKNOWN':'SERVICE_UNAVAILABLE','Workspace request timed out',uncertain()));},timeout);
@@ -20,11 +22,11 @@ export async function requestJson({origin,path,method='GET',body,query,credentia
   });
   const work=async()=>{
     sent=true;
-    const response=await fetchImpl(url,{method,headers,redirect:'error',signal:controller.signal,...(body!==undefined?{body:JSON.stringify(body)}:{})});
+    const response=await fetchImpl(url,{method,headers,redirect:'error',signal:controller.signal,...(body!==undefined?{body:JSON.stringify(body)}:{}),...(form!==undefined?{body:new URLSearchParams(form).toString()}:{})});
     const text=await response.text();let payload;
     try{payload=text?JSON.parse(text):null;}catch{if(!response.ok)throw httpFailure(response.status,{error:`Workspace API returned a non-JSON error (HTTP ${response.status})`});throw new CliError(mutation?'OUTCOME_UNKNOWN':'SERVICE_UNAVAILABLE','Workspace API returned an invalid JSON response',uncertain());}
-    if(!response.ok)throw httpFailure(response.status,payload);
-    return{payload,status:response.status,headers:response.headers};
+    if(!response.ok&&!acceptErrors)throw httpFailure(response.status,payload);
+    return{payload,status:response.status,headers:response.headers,ok:response.ok};
   };
   try{return await Promise.race([work(),abortPromise]);}
   catch(error){if(error instanceof CliError)throw error;if(signal?.aborted)throw new CliError('CANCELLED','Cancelled by user',uncertain());throw new CliError(mutation&&sent?'OUTCOME_UNKNOWN':'SERVICE_UNAVAILABLE','Workspace transport failed',uncertain());}

@@ -45,6 +45,8 @@ async function request(path, options = {}) {
 }
 function boundedRequest(path,options){return boundedRead(signal=>request(path,{signal}),options);}
 export const api = {
+  identityConfig: () => request('/api/identity/config'),
+  identityLoginUrl: () => new URL('/api/identity/login', window.location.origin).href,
   authStatus: () => request('/api/auth/status'),
   authSetup: body => request('/api/auth/setup', { method:'POST', body:JSON.stringify(body) }),
   authRegister: body => request('/api/auth/register', { method:'POST', body:JSON.stringify(body) }),

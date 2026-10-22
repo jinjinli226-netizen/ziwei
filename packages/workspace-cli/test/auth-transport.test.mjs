@@ -15,7 +15,10 @@ const imported=()=>({managed:true,token:secret,workspace:'team',audience:'ziwei-
 async function fixture(fn){const root=await fs.mkdtemp(path.join(os.tmpdir(),'workspace-auth-'));try{await fn(root);}finally{await fs.rm(root,{recursive:true,force:true});}}
 async function call(root,args,options={}){
   assert.equal(typeof main.runCli,'function','CLI injectable runner must exist');
-  let stdout='',stderr='';const result=await main.runCli([...args,'--api',origin],{env:{ZIWEI_WORKSPACE_CONFIG_DIR:root},stdout:v=>{stdout+=v;},stderr:v=>{stderr+=v;},readStdin:async()=>'',...options});
+  // Existing transport regressions explicitly opt into legacy compatibility.
+  if(args[0]==='auth'&&args[1]==='login'&&!args.includes('--mode'))args=[...args,'--mode','native'];
+  const fetchLegacy=options.fetchImpl||(async()=>assert.fail('no implicit network in legacy fixtures'));
+  let stdout='',stderr='';const result=await main.runCli([...args,'--api',origin],{env:{ZIWEI_WORKSPACE_CONFIG_DIR:root},stdout:v=>{stdout+=v;},stderr:v=>{stderr+=v;},readStdin:async()=>'',...options,fetchImpl:async(url,init)=>new URL(url).pathname==='/api/identity/config'?Response.json({service:'workspace',mode:'legacy',legacyAllowed:true}):fetchLegacy(url,init)});
   return{...result,stdout,stderr,json:JSON.parse(stdout)};
 }
 async function loginManaged(root,overrides={},args=[]){return call(root,['auth','login','--mode','managed','--purpose','employee','--managed-stdin',...args],{readStdin:async()=>JSON.stringify({...imported(),...overrides})});}
@@ -72,8 +75,8 @@ test('public profile selects only the credential slot while native profile comes
   const stored=await call(root,['auth','status','--profile','work','--purpose','employee','--local']);assert.equal(stored.exitCode,0);assert.equal(stored.json.data.profile,'work');
   const missing=await call(root,['profiles','create','--profile','work','--purpose','employee','--input','{"deviceId":"fixture-device","soul":"placeholder role"}'],{fetchImpl:async()=>assert.fail('credential slot must never supply a native business profile')});assert.equal(missing.exitCode,2);
 }));
-test('unified login is explicitly pending and never calls a local issuer',()=>fixture(async root=>{
-  const r=await call(root,['auth','login','--mode','unified'],{fetchImpl:async()=>assert.fail('no issuer exists')});assert.equal(r.exitCode,9);assert.equal(r.json.error.details.status,'pending');
+test('unified login rejects a server that only advertises legacy compatibility',()=>fixture(async root=>{
+  const r=await call(root,['auth','login','--mode','unified','--workspace','team'],{fetchImpl:async()=>assert.fail('no issuer exists')});assert.equal(r.exitCode,9);
 }));
 test('all native HTTP error classes preserve status/code and redact nested secrets and echoed credential strings',()=>fixture(async root=>{
   await loginManaged(root);
@@ -173,7 +176,7 @@ test('phone setup summary uses original bounded native conversion and installs u
   await loginManaged(root);
   const setup=await call(root,['phone-mcp','setup','--purpose','employee','--view','summary'],{fetchImpl:async url=>{assert.equal(new URL(url).searchParams.has('view'),false);return Response.json({api:{status:'healthy'},phones:[{id:'phone-one',alias:'one',status:'online'},{id:'phone-one',alias:'duplicate'}],employees:[{id:'employee'}],computers:[{id:'computer'}]});}});
   assert.equal(setup.json.data.native.scope,'control_catalog');assert.equal(setup.json.data.native.counts.phones,1);
-  const store=new cfg.CredentialStore(root);await store.save({origin,profile:'default',account:'default',purpose:'person'},{mode:'native',session:secret,workspace:'team',identitySource:'legacy-native'});
+  const store=new cfg.CredentialStore(root);await store.save({origin,profile:'default',account:'default',purpose:'person'},{mode:'native',legacyCompatibility:true,session:secret,workspace:'team',identitySource:'legacy-native'});
   const install=await call(root,['skills','install','--id','skill'],{fetchImpl:async(url,init)=>{assert.equal(new URL(url).pathname,'/api/skills/skill');assert.equal(init.method,'PATCH');assert.equal(JSON.parse(init.body).installed,true);return Response.json({id:'skill',installed:true});}});assert.equal(install.exitCode,0);
 }));
 test('write transport loss returns outcome unknown once with safe reconciliation; reads remain unavailable',()=>fixture(async root=>{
@@ -207,7 +210,7 @@ test('SIGINT while waiting for another credential writer cancels without clearin
   const local=await call(root,['auth','status','--purpose','employee','--local']);assert.equal(local.exitCode,0);
 }));
 test('native logout cancellation preserves local cleanup and unknown remote revocation',()=>fixture(async root=>{
-  const store=new cfg.CredentialStore(root);await store.save({origin,profile:'default',account:'default',purpose:'person'},{mode:'native',session:secret,workspace:'team',identitySource:'legacy-native'});
+  const store=new cfg.CredentialStore(root);await store.save({origin,profile:'default',account:'default',purpose:'person'},{mode:'native',legacyCompatibility:true,session:secret,workspace:'team',identitySource:'legacy-native'});
   const controller=new AbortController();const r=await call(root,['auth','logout'],{signal:controller.signal,fetchImpl:async()=>{queueMicrotask(()=>controller.abort());return new Promise(()=>{});}});
   assert.equal(r.exitCode,130);assert.equal(r.json.error.details.localCleared,true);assert.equal(r.json.error.details.outcomeUnknown,true);assert.equal(r.json.error.details.remoteRevocation,'unknown');
 }));
@@ -224,7 +227,7 @@ test('human routes are explicit and do not guess MCP paths; managed workspace sw
   await loginManaged(root);
   const cross=await call(root,['employees','list','--purpose','employee','--workspace','different'],{fetchImpl:async()=>assert.fail('scoped import must not switch workspaces')});assert.equal(cross.exitCode,4);
   assert.equal(typeof cfg.CredentialStore,'function');
-  const store=new cfg.CredentialStore(root);await store.save({origin,profile:'default',account:'default',purpose:'person'},{mode:'native',session:secret,workspace:'team',identitySource:'legacy-native',expiresAt:new Date(Date.now()+60000).toISOString(),identity:{id:'u'}});
+  const store=new cfg.CredentialStore(root);await store.save({origin,profile:'default',account:'default',purpose:'person'},{mode:'native',legacyCompatibility:true,session:secret,workspace:'team',identitySource:'legacy-native',expiresAt:new Date(Date.now()+60000).toISOString(),identity:{id:'u'}});
   const task=await call(root,['tasks','get','--id','task-1'],{fetchImpl:async url=>{assert.equal(new URL(url).pathname,'/api/tasks/task-1');return Response.json({id:'task-1',state:'todo'});}});assert.equal(task.exitCode,0);
   const noRoute=await call(root,['employees','get','--id','employee-1'],{fetchImpl:async()=>assert.fail('no fabricated human get route')});assert.equal(noRoute.exitCode,9);
 }));

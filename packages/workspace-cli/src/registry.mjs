@@ -1,8 +1,8 @@
 import {toolDefinitions} from '../vendor/native-schemas.mjs';
 import {NATIVE_OPERATIONS} from '../vendor/hermes-native-contract.mjs';
 import {fail} from './errors.mjs';
-export const CLI_VERSION='1.0.0';
-export const STANDARD_VERSION='1.2.0';
+export const CLI_VERSION='2.0.0';
+export const STANDARD_VERSION='1.3.0';
 export const DOCS_URL='https://ziwei.qzelynth.top/docs';
 export const DEFAULT_API='https://ziwei.qzelynth.top';
 const tools=new Map(toolDefinitions.map(t=>[t.name,t]));
@@ -50,9 +50,11 @@ function botDataSchema(nativeOperation){
   return data;
 }
 function nativeSchema(tool){const s=structuredClone(tool.inputSchema);s.additionalProperties=false;return s;}
-function permissionDescription(name){return ['Original server workspace membership and role policy',...(name.startsWith('documents.')?['Original document ownership/workspace guard']:[]),...(name.startsWith('bots.')||name.startsWith('employees.')||name.startsWith('phone-mcp.')?['Original employee visibility and device scope checks']:[])];}
+function unifiedAuthorization(name,method){const requiredRole=name==='phone-mcp.configure'?'admin':method==='GET'?'read':'write';return{requiresAccess:true,requiredRole,requiredScope:requiredRole==='read'?'workspace:read':'workspace:write',nativeOwnerAdmin:requiredRole==='admin',verification:'server every request; issued/current roles and scopes intersect native policy'};}
+function permissionDescription(name,authorization){return [`Unified site roles: access AND ${authorization.requiredRole}; issued/current intersection`,`Unified scope: ${authorization.requiredScope}; issued/current intersection`,'Original server workspace membership and role policy',...(authorization.nativeOwnerAdmin?['Original native workspace owner/admin required']:[]),...(name.startsWith('documents.')?['Original document ownership/workspace guard']:[]),...(name.startsWith('bots.')||name.startsWith('employees.')||name.startsWith('phone-mcp.')?['Original employee visibility and device scope checks']:[])];}
 function operation({name,tool,method,mcp,human,effects,idempotent,query,nativeOperation,inputSchema}){
-  return {name,description:tool.description,nativeTool:tool.name,...(nativeOperation?{nativeOperation}:{}),inputSchema:inputSchema||nativeSchema(tool),readOnly:method==='GET'&&effects.length===0,sideEffects:effects,requiredPermissions:permissionDescription(name),supportsDryRun:false,idempotency:idempotent?'supported':'unsupported',idempotencyScope:idempotent?'Only original endpoint semantics; stable key, same authorized actor/workspace and original resource. Never an automatic retry guarantee.':null,resultQuery:query,transports:{managed:mcp?'supported':'unsupported',native:human?'supported':'unsupported'},routes:{managed:mcp?{method,path:`/mcp/v1/workspaces/{workspace}${mcp}`}:null,native:human?{method,path:human.startsWith('@')?human.slice(1):`/api/workspaces/{workspace}${human}`} :null}};
+  const authorization=unifiedAuthorization(name,method);
+  return {name,description:tool.description,nativeTool:tool.name,...(nativeOperation?{nativeOperation}:{}),inputSchema:inputSchema||nativeSchema(tool),readOnly:method==='GET'&&effects.length===0,sideEffects:effects,requiredPermissions:permissionDescription(name,authorization),unifiedAuthorization:authorization,supportsDryRun:false,idempotency:idempotent?'supported':'unsupported',idempotencyScope:idempotent?'Only original endpoint semantics; stable key, same authorized actor/workspace and original resource. Never an automatic retry guarantee.':null,resultQuery:query,transports:{managed:mcp?'supported':'unsupported',native:human?'supported':'unsupported'},routes:{managed:mcp?{method,path:`/mcp/v1/workspaces/{workspace}${mcp}`}:null,native:human?{method,path:human.startsWith('@')?human.slice(1):`/api/workspaces/{workspace}${human}`} :null}};
 }
 export const operations=entries.map(([name,toolName,method,mcp,human,effects,idempotent,query])=>operation({name,tool:tools.get(toolName),method,mcp,human,effects,idempotent,query}));
 for(const entry of operations){
@@ -80,12 +82,11 @@ operations.push(waitOperation);
 // Named unsupported commands are deliberate boundaries; no fabricated cancel API or issuer.
 export const unsupportedOperations=Object.freeze({
   'actions.cancel':'The workspace backend has no generic action cancel endpoint. Bot control stop and cancelMcpConnection have their documented, narrower boundaries.',
-  'auth.unified':'Unified identity is pending the coordinator identity contract. No local issuer, email merge or client-asserted employee identity is accepted.',
   'bots.force-abandon':'Privileged failure recovery is not exposed by this CLI version.',
   'bots.failure-finalization':'Privileged failure recovery is not exposed by this CLI version.'
 });
 export const getOperation=name=>operations.find(o=>o.name===name);
-export function getCapabilities(){return{cliVersion:CLI_VERSION,standardVersion:STANDARD_VERSION,contract:'v1',operations:structuredClone(operations),unsupportedOperations:{...unsupportedOperations},authorization:{verification:'offline',grantsVerified:false,note:'Catalog describes implemented endpoints. Installation and local credential presence grant no permission; the backend checks every request.'},identity:{native:'legacy migration compatibility',managed:'legacy managed workspace/device credential',unified:'pending'}};}
+export function getCapabilities(){return{cliVersion:CLI_VERSION,standardVersion:STANDARD_VERSION,contract:'v1',operations:structuredClone(operations),unsupportedOperations:{...unsupportedOperations},authorization:{verification:'offline',grantsVerified:false,note:'Catalog describes implemented endpoints. Installation and local credential presence grant no permission; the backend checks every request.'},identity:{native:'explicit legacy compatibility requires server declaration',managed:'explicit legacy compatibility requires server declaration',unified:'implemented; requires configured ready server and trusted identity provider; production deployment pending',clientId:'ziwei-workspace-cli',audience:'ziwei-workspace-api',requestedScopes:['openid','workspace:read','workspace:write'],flow:'device_authorization',transport:'Public server cliTransports must explicitly allow native or mcp. Prefer the mapped native route; otherwise use the mapped mcp route. Both carry the same current-site access token, never a legacy managed token. Original per-route idempotency applies.',machine:'not_supported; never substitutes shared administrator credentials'}};}
 export function createOperationRequest(op,input,{mode,workspace}){
   const route=op.routes[mode];if(!route)fail('NOT_SUPPORTED',`${op.name} has no corresponding ${mode} endpoint in this backend version`,{operation:op.name});
   const values={...input,workspace};

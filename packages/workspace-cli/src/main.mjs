@@ -3,6 +3,7 @@ import {CliError,EXIT_CODES,fail,redact} from './errors.mjs';
 import {readBusinessInput} from './input.mjs';
 import {assertCredential,configurationRoot,CredentialStore,selector,validateOrigin,validateWorkspace} from './config.mjs';
 import {authCommand} from './auth.mjs';
+import {identityConfig,requireLegacy} from './unified.mjs';
 import {requestJson,nativeOperationView} from './transport.mjs';
 import {phoneSetupSummary} from '../vendor/native-schemas.mjs';
 import {normalizeNativeOperation} from '../vendor/hermes-native-contract.mjs';
@@ -33,7 +34,7 @@ function parse(argv){
 }
 function validateOptions(options,allowed){for(const key of Object.keys(options))if(!allowed.has(key)&&!publicFlags.has(key))fail('USAGE','Option is not valid for this command; use its --help');}
 export function helpText(operation){
-  const lines=[`ziwei-workspace ${CLI_VERSION} (contract v1; standard ${STANDARD_VERSION})`,'Independent digital employee workspace management CLI.','Usage: ziwei-workspace <resource> <action> [options]','  ziwei-workspace capabilities','  ziwei-workspace auth login|status|logout','  ziwei-workspace config show','Public options, before or after commands:','  --help --version --json --non-interactive --contract v1','  --timeout <100..300000 milliseconds> (default 30000) --profile <name>','  --api <HTTPS origin> --account <slot> --purpose person|employee --workspace <slug>','Business input: --input <JSON> | --input-file <path> | --input-stdin (mutually exclusive).','Native field shortcuts use the exact field name, e.g. --id <string> or --data <JSON>.','Reserved public flags select CLI settings only. For profiles create, supply native profile in JSON; --profile selects the credential slot.','Secrets must use the existing authorized Profile/environment reference, never ordinary business input.','Auth: native --email <email> --workspace <slug> --password-stdin; managed --mode managed --purpose employee --managed-file <path> (or --managed-stdin).','auth status verifies the original server by default; --local reports only stored metadata.','auth logout clears this slot and attempts original native session revocation; managed revocation is unsupported.','Unified identity: pending; auth login --mode unified returns NOT_SUPPORTED.','All ordinary calls emit one v1 JSON envelope. Help/version are text. No write retries or fabricated dry-run.','actions wait --id <original-action-id> polls only the existing action; actions cancel is unsupported.'];
+  const lines=[`ziwei-workspace ${CLI_VERSION} (contract v1; standard ${STANDARD_VERSION})`,'Independent digital employee workspace management CLI.','Usage: ziwei-workspace <resource> <action> [options]','  ziwei-workspace capabilities','  ziwei-workspace auth login|complete|wait|refresh|status|logout','  ziwei-workspace config show','Public options, before or after commands:','  --help --version --json --non-interactive --contract v1','  --timeout <100..300000 milliseconds> (default 30000) --profile <name>','  --api <HTTPS origin> --account <slot> --purpose person|employee --workspace <slug>','Business input: --input <JSON> | --input-file <path> | --input-stdin (mutually exclusive).','Native field shortcuts use the exact field name, e.g. --id <string> or --data <JSON>.','Reserved public flags select CLI settings only. For profiles create, supply native profile in JSON; --profile selects the credential slot.','Secrets must use the existing authorized Profile/environment reference, never ordinary business input.','Auth default: auth login --mode unified --workspace <slug> starts a public device grant and returns only public verification URI/user code.','auth complete polls once when due; auth wait polls within --timeout; both require an explicit prior login. No browser or input prompt is opened.','auth refresh explicitly rotates the online refresh grant, then verifies the API identity and native binding. No offline_access or automatic mutation retry.','auth status verifies the selected server by default; --local reports stored metadata only and never grants permissions.','auth logout atomically clears this slot and requests current-site latest AT/RT revocation. RFC 7009 HTTP 200 is accepted, not confirmed inactive; --local skips remote revocation.','Legacy requires explicit --mode native --email <email> --workspace <slug> --password-stdin or --mode managed --purpose employee --managed-file <path> (or --managed-stdin), plus server legacy declaration.','Machine client credentials are NOT_SUPPORTED; shared administrator credentials are never substituted.','Unified identity requires public ready /api/identity/config and trusted issuer discovery. Production deployment remains pending.','All ordinary calls emit one v1 JSON envelope. Help/version are text. No write retries or fabricated dry-run.','actions wait --id <original-action-id> polls only the existing action; actions cancel is unsupported.'];
   if(operation)lines.push(`Command: ${operation.name.replace('.',' ')}`,operation.description,'Input schema:',JSON.stringify(operation.inputSchema,null,2),'Behavior:',JSON.stringify({readOnly:operation.readOnly,sideEffects:operation.sideEffects,idempotency:operation.idempotency,transports:operation.transports,resultQuery:operation.resultQuery},null,2));
   else lines.push('Commands:',...operations.map(o=>`  ${o.name.replace('.',' ')}${o.readOnly?'':' [see side effects in capabilities]'}`));
   lines.push(`Documentation: ${DOCS_URL}`);return lines.join('\n')+'\n';
@@ -75,14 +76,15 @@ export async function runCli(argv,{env=process.env,fetchImpl=globalThis.fetch,st
     if(options.help||words.length===0||name==='help'){if(words.length>2)fail('USAGE','Unexpected positional arguments');stdout(helpText(op));return{exitCode:0};}
     if(words.length>2)fail('USAGE','Unexpected positional arguments');
     if(unsupportedOperations[name])fail('NOT_SUPPORTED',unsupportedOperations[name],{status:name==='auth.unified'?'pending':'unsupported'});
-    const origin=validateOrigin(options.api||DEFAULT_API),selection=selector(options,origin);
+    const origin=validateOrigin(options.api||DEFAULT_API,{allowLoopbackHttp:env.ZIWEI_WORKSPACE_ALLOW_LOOPBACK_HTTP==='1'}),selection=selector(options,origin);
     const store=new CredentialStore(configurationRoot(env),{signal});
     const request=init=>requestJson({origin,timeout:options.timeout,signal,fetchImpl,...init});
+    const authContext={store,selection,request,readStdin:readSelectedStdin,secrets,env,signal};
     let data;
     if(name==='capabilities'){
       validateOptions(options,new Set());data=getCapabilities();
     }else if(words[0]==='auth'){
-      validateOptions(options,words[1]==='login'?authFlags:new Set(['local']));data=await authCommand(words[1],options,{store,selection,request,readStdin:readSelectedStdin,secrets});
+      validateOptions(options,words[1]==='login'?authFlags:['status','logout'].includes(words[1])?new Set(['local']):new Set());data=await authCommand(words[1],options,authContext);
     }else if(name==='config.show'){
       validateOptions(options,new Set());const credential=await store.load(selection);data={service:'workspace',...selection,configured:Boolean(credential),workspace:credential?.workspace||null,docs:DOCS_URL};
     }else{
@@ -103,10 +105,16 @@ export async function runCli(argv,{env=process.env,fetchImpl=globalThis.fetch,st
         if(input.data?.config)(op.nativeOperation==='create'?createDefaultBotConfig:normalizeBotConfig)(input.data.config);
       }catch(error){if(error instanceof CliError)throw error;fail('USAGE','Input violates the original Bot/native schema',{nativeCode:error.code||'BOT_INPUT_INVALID'});}}
       if(options['dry-run'])fail('NOT_SUPPORTED','This original endpoint has no non-submitting dry-run mode',{operation:op.name});
-      const credential=await store.load(selection);assertCredential(credential);secrets.push(credential.session||credential.token);
+      const credential=await store.load(selection);assertCredential(credential);secrets.push(...[credential.session,credential.token,credential.accessToken,credential.refreshToken].filter(Boolean));
       const workspace=validateWorkspace(input.workspace||credential.workspace);
       if(credential.mode==='managed'&&(workspace!==credential.workspace||credential.apiBase!==origin||credential.audience!=='ziwei-management'))fail('FORBIDDEN','Managed credentials are limited to their original workspace and API audience');
-      const init=createOperationRequest(op,input,{mode:credential.mode,workspace});
+      let transportMode=credential.mode;
+      if(credential.mode==='unified'){
+        const config=await identityConfig(authContext,credential);
+        transportMode=config.cliTransports.includes('native')&&op.routes.native?'native':config.cliTransports.includes('mcp')&&op.routes.managed?'managed':null;
+        if(!transportMode)fail('NOT_SUPPORTED','The selected server does not advertise a unified transport for this operation',{operation:op.name});
+      }else await requireLegacy(authContext,credential);
+      const init=createOperationRequest(op,input,{mode:transportMode,workspace});
       let resultQuery=op.resultQuery;
       if(resultQuery?.command&&input.id)resultQuery={...resultQuery,command:resultQuery.command.replace('<actionId>',JSON.stringify(input.id)).replace('<employeeId>',JSON.stringify(input.id)).replace('<taskId>',JSON.stringify(input.id))};
       const idempotencyKey=init.body?.idempotencyKey;

@@ -36,4 +36,4 @@ await extractedModule('backend/repository.mjs','native-completion.mjs',code=>{
   const start=code.indexOf('const uncertainCompletion = '),end=code.indexOf('\nconst recoverableBotCompletion',start);
   return start>=0&&end>start?`import {terminalMcpExecutionFailure} from './phone-completion.mjs';\nexport ${code.slice(start,end)}`:null;
 });
-process.stdout.write('workspace-cli 1.0.0: independent native schemas ready\n');
+process.stdout.write('workspace-cli 2.0.0: independent native schemas ready\n');

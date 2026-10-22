@@ -1,6 +1,6 @@
 # 紫薇驾驶舱 CLI 接入说明
 
-CLI 1.0.0 · 规范 1.2.0 · 机器契约 v1 · 文档 1.0.0 · 更新 2026-10-22
+CLI 2.0.0 · 规范 1.3.0 · 身份契约 1.0.1 · 机器契约 v1 · 文档 2.0.0 · 更新 2026-10-22
 
 本站：https://ziwei.qzelynth.top。公开索引：https://ziwei.qzelynth.top/docs；完整说明：https://ziwei.qzelynth.top/docs/cli.md；发现索引：https://ziwei.qzelynth.top/llms.txt。匿名阅读这些说明不授予任何业务权限。
 
@@ -10,17 +10,19 @@ CLI 1.0.0 · 规范 1.2.0 · 机器契约 v1 · 文档 1.0.0 · 更新 2026-10-2
 
 本主版本新 CLI 默认机器契约 v1，也接受显式 `--contract v1`。原有 `ziwei_user` 是电脑执行客户端，原管理 MCP 仍保留；手机 Control 的 `ziwei` 是配套工具。本 CLI 不安装或启动这些程序。
 
-当前是源码实现和本地 artifact 候选包，尚未发布到公共 npm，未部署这次文档路由或 CLI 改动到生产。以下绝对 URL 是本站发布目标，公网可用性 pending；仓库文件和本地测试不代表该 URL 已上线。统一账号/SSO 目标尚未配置，跨站身份验收 C13 为 pending。
+当前统一身份已在候选源码接线，CLI 使用公共设备授权、按站 AT/RT、显式刷新与退出；真实 OP、本站端到端和生产切换的验收须分别核实，不能以离线通过盖章 C13。尚未发布到公共 npm，未部署这次身份、文档路由或 CLI 改动到生产。以下绝对 URL 是本站发布目标，公网可用性 pending；仓库文件和本地测试不表示 URL 已上线。
 
-源码基线 commit：b8c8a669e0fb18623166628bd3e1088dfb133249；候选实现标识：workspace-cli-contract-v1；命令目录 SHA-256：124fe8f0764312bc8fce46b76ec97ca3707590d7c45c48e9c14ebc66926d0352。该指纹标识本文实际引用的 registry，不是安装包校验和，也不是生产版本。最终源码 commit、artifact SHA-256 与发布状态应从交付记录分别核对。
+准备期服务器默认 legacy，保留现网原入口；CLI 默认 unified，这是 2.0.0 的明确行为变更。只有部署方显式配置 `ZIWEI_IDENTITY_MODE=unified`、完整受信 issuer/API 与 web secret/session key，并完成原生身份绑定后，默认 CLI 登录才可用。配置缺失不自动降级旧密码。准备兼容不是最终统一身份交付。
 
-已有操作见下方从 registry 生成的 44 项命令/schema。原生网页登录身份和受限 managed 身份的覆盖不同，逐项以 transports 为准；未实现的后台功能仍可沿其原入口使用，不能由本 CLI 自动推断支持。未覆盖：统一身份、通用 actions cancel、dry-run、特权 force-abandon/failure-finalization、其他站点的业务命令。
+源码基线 commit：19876c0f006af18c9fe3b6ef4a7d9e94c75c14c6；候选实现标识：workspace-unified-identity（未提交增量，尚无新的发布 commit）；命令目录 SHA-256：cffc6c3b931fe0944b3e37d577824de9e198812f3736651416006c908c7f6abf。该指纹只标识本文实际引用的 registry，不是安装包校验和或生产版本。最终源码 commit、artifact SHA-256 与发布状态须从交付记录分别核对。
+
+已有操作见下方从 registry 生成的 44 项命令/schema。统一身份只在服务器公开配置明确允许的 native/mcp HTTP 路由上传本站 AT：优先对应 native 路由，否则可用原有 MCP 路由。原生资源、角色和幂等边界保持逐项定义。员工绑定可能只允许自己的员工/Bot 路径，集合查询可被明确拒绝。未覆盖：员工机器 client_credentials、全站 OP 退出、通用 actions cancel、dry-run、特权 force-abandon/failure-finalization、其他站点业务命令。
 
 ## 安装、升级、卸载与包校验
 
 运行要求：Node.js >=20.11 与 npm；使用 Node 内置 fetch，无运行时第三方依赖。设计面向 Windows、macOS、Linux；各平台的实际安装验收以交付证据为准，不将本地 Windows 验证称为三平台实测。
 
-分发来源是本项目维护者交付的独立 tarball `ziwei-workspace-cli-1.0.0.tgz`，需要通过已授权的交付渠道取得文件及其独立可信 SHA-256。当前没有可宣称的公共 npm 包或公共下载地址。不要把旧电脑客户端的下载包当成本包。以下所有尖括号内容都必须替换为自己的授权参数。
+分发来源是本项目维护者交付的独立 tarball `ziwei-workspace-cli-2.0.0.tgz`，须通过授权渠道取得文件及独立可信 SHA-256。真实不可变 HTTPS 下载 URL 在发布后由交付回执提供；当前没有可宣称已可用的公共 npm 包或公共下载地址。不要把电脑客户端的下载包当成本包。以下尖括号必须替换为真实获授权的交付参数。
 
 在 PowerShell 中先验证；文件名可按实际交付路径替换：
 
@@ -28,6 +30,8 @@ CLI 1.0.0 · 规范 1.2.0 · 机器契约 v1 · 文档 1.0.0 · 更新 2026-10-2
 (Get-FileHash -Algorithm SHA256 -LiteralPath "<artifact-file.tgz>").Hash
 # 将结果与可信交付记录中的 <expected-sha256> 逐字比对，相同才安装。
 npm install --global "<artifact-file.tgz>"
+# 发布后也可直接安装回执给出的真实 HTTPS 版本包；下面 URL 是模板，当前不可声称已上线。
+npm install --global "https://<trusted-release-origin>/<release-path>/ziwei-workspace-cli-2.0.0.tgz"
 ziwei-workspace --version
 ziwei-workspace --help
 ```
@@ -43,19 +47,45 @@ npm uninstall --global @ziwei/workspace-cli
 
 ## 登录、身份、权限和安全输入
 
-统一身份的目标是同一人或员工身份、每站分别授权及限定令牌受众。当前保留迁移期 native 登录与 legacy managed 工作区/设备凭据，未接通受信 SSO；`auth login --mode unified` 返回 `NOT_SUPPORTED` 并注明 pending。不会按同名或邮箱合并账号，不接受客户端自报 employeeId 作为身份。
+统一身份使用同一人或员工的受信 `(issuer, subject)`，每站分别授权并限制 audience。本站公共设备客户端固定 `ziwei-workspace-cli`，API audience 为 `ziwei-workspace-api`。只申请 `openid workspace:read workspace:write`，普通刷新不申请 `offline_access`。不会按同名/邮箱合并账号，也不把客户端自报 employeeId、email 或角色当身份。
 
-native 模式默认使用已有账号和工作区成员权限，需 `--email`、`--workspace`、`--password-stdin`。密码只从 stdin 读，命令不弹浏览器或交互提示，也不注册用户。下面 PowerShell 模板从仅本人可读的输入文件提供密码；也可通过自己的可信秘密管理器提供 stdin。不要把真实密码写进 argv、命令历史、业务 JSON 或日志。
+CLI 默认 unified；`auth login --mode unified --workspace "<workspace-slug>"` 先匿名读取所选 origin 的 `GET /api/identity/config`，精确核对服务、client、audience、scope、issuer 与 readiness。可选 `ZIWEI_IDENTITY_ISSUER` 只作精确 pin；服务器配置缺失时不能使用缓存 issuer 降级。OP discovery issuer 必须一致，device/token/revocation endpoint 必须是该 issuer origin/realm 下的受信 HTTPS 地址，拒绝重定向。公开 `ready:true` 只表示本地配置齐备，不证明 OP/DNS/绑定/生产已验收。
+
+每次设备流生成随机 PKCE S256。login 返回公开 verificationUri/userCode 与 `state:authorization_required,completed:false`；CLI 不自动打开浏览器、不等人工输入、不隐式创建账号。device_code 与原 verifier 仅在私有凭据文件中跨进程保存，兑换/退出后删除，不进入 stdout、普通日志或安装包。
+
+```sh
+ziwei-workspace auth login --mode unified --workspace "<workspace-slug>" --profile "<profile>" --account "<account-slot>" --non-interactive --json --contract v1
+# 在自己的浏览器访问公开 verificationUri 并输入 userCode；未批准时继续 pending。
+ziwei-workspace auth complete --profile "<profile>" --account "<account-slot>" --non-interactive --json
+ziwei-workspace auth wait --profile "<profile>" --account "<account-slot>" --timeout 30000 --non-interactive --json
+ziwei-workspace auth status --profile "<profile>" --account "<account-slot>" --json
+ziwei-workspace auth refresh --profile "<profile>" --account "<account-slot>" --non-interactive --json
+ziwei-workspace auth logout --profile "<profile>" --account "<account-slot>" --json
+```
+
+`auth complete` 只在轮询间隔到期后兑换一次；`auth wait` 按 interval/slow_down 在总 --timeout 内等待，已知未批准时返回 `state:pending,completed:false,timedOut:true`，不把待批准说成登录完成。每流只允许一个兑换在途。终止拒绝/到期只清理对应版本；已发兑换或刷新超时/SIGINT保留 unknown，禁止自动重放。
+
+CLI 将 AT/RT 作为不透明凭据；保存登录/刷新前必须用新 AT 请求 `GET /api/identity/me`，由服务器实际验签、逐次 confidential introspection 与原生绑定验证，并确认工作区 membership。刷新必须保持原 issuer/subject。每个后续业务请求还需本站 access/read/write/admin 角色、scope 与原生资源权限交集；安装和本地凭据不授予权限。员工可用自己的交互设备账号，但本 CLI 的非交互机器 client_credentials 明确 NOT_SUPPORTED，不借用管理员 token。
+
+每项命令公开 `unifiedAuthorization` 的实际 requiredRole/requiredScope，并与服务器两个路由族做对照测试。尤其 `phone-mcp configure` 是绑定管理，需当前 access + admin、workspace:write 及原生工作区 owner/admin；普通 task/document 写仍需 write。字段是离线规则，不能据此宣称当前账号有 grant。
+
+`auth status` 默认验证 `/api/identity/me`，区分 unified 与 legacy，并保留安全的服务器原生状态；`--local` 只报告本地非敏感摘要、`verification:local,serverVerified:false`。短跨进程锁和版本 CAS 保护凭据：网络与等待不持锁；logout 原子取走最新 AT/RT，迟到刷新/兑换不复活槽，并尽力显式撤销返回 token。异常清理失败或结果未知如实保留。
+
+统一模式 logout 默认只撤当前站点/槽最新 RT 和 AT，直接使用公共 client 的受信 OP revocation endpoint，不把 RT 发给业务 API。RFC 7009 HTTP 200 仅报告 `remoteRevocation:accepted,revocationConfirmed:false`，不证明 token 已 inactive。`--local` 为 not_requested；远端失败/超时不抹去 localCleared。它不代表全站或 OP SSO 退出。待批准设备码本地退出后按 OP 原期限失效，不虚称已取消 OP 授权。
+
+准备期显式兼容：只有服务器公开声明 `mode:legacy,legacyAllowed:true` 时，才可使用 `--mode native` 或 `--mode managed`。统一服务器拒绝旧密码、旧 Cookie、静态 owner Bearer 和旧 MCP 网站凭据；不以兼容请求成功算统一交付。1.x 本地 legacy 记录须重新显式授权后才能供服务器调用，仍可读取本地摘要和退出。
+
+legacy native 需 `--mode native`、`--email`、`--workspace`、`--password-stdin`。密码只从 stdin 读且不保存，记录原 Set-Cookie 会话。下面模板只在准备期 legacy 服务器使用；保护秘密输入文件及 OS 权限，不把真实密码放入 argv、历史、业务 JSON 或日志。
 
 ```powershell
-Get-Content -LiteralPath "<protected-password-file>" -Raw | ziwei-workspace auth login --email "<account-email>" --workspace "<workspace-slug>" --password-stdin --profile "<profile>" --account "<account-slot>" --purpose person --non-interactive --json --contract v1
+Get-Content -LiteralPath "<protected-password-file>" -Raw | ziwei-workspace auth login --mode native --email "<account-email>" --workspace "<workspace-slug>" --password-stdin --profile "<profile>" --account "<account-slot>" --purpose person --non-interactive --json --contract v1
 ziwei-workspace auth status --profile "<profile>" --account "<account-slot>" --purpose person --json
 ziwei-workspace auth status --local --profile "<profile>" --account "<account-slot>" --purpose person --json
 ziwei-workspace config show --profile "<profile>" --account "<account-slot>" --purpose person --json
 ziwei-workspace auth logout --profile "<profile>" --account "<account-slot>" --purpose person --json
 ```
 
-`auth status` 默认实际请求原 `/api/auth/me`（native）或对应工作区管理 health（managed）验证，只有成功才显示 `verification:server`；`--local` 仅检查本地非敏感摘要，`verification:local` 不表示权限有效。native/managed 身份来源明确标为 legacy。`config show` 只输出公开 selector/是否配置等信息，不输出凭据。
+显式 legacy status 实际请求原 `/api/auth/me`（native）或对应工作区管理 health（managed），成功才显示 `verification:server`。native/managed 来源标为 legacy。`config show` 只输出公开 selector/配置状态，不输出凭据。
 
 managed 模式只导入操作者明确提供的原生短期受限凭据，不扫描其他程序配置、不使用管理员通用 token。必须选择 `--purpose employee`；这只是隔离存储用途，不是员工身份认证。凭据文件要求原生 `managed:true`、`audience:"ziwei-management"`、唯一 workspace、deviceId、未来 expiresAt、匹配本站 apiBase 及原 token。无通用凭据样例，也不在文档放真实账号或密钥。
 
@@ -70,7 +100,7 @@ ziwei-workspace auth logout --purpose employee --profile "<profile>" --account "
 
 每次业务调用继续由原服务校验会话/受众、工作区成员、角色、员工可见性、资源所有权及设备范围。安装、离线 catalog 或本地存在凭据不会产生权限。无凭据返回退出码 3；身份有效但资源/动作不允许返回 4。managed 不能跨其受限 workspace/origin 使用。
 
-`auth logout` 默认清理当前槽并尝试撤销该 native 会话，分别报告 localCleared 和 remoteRevocation；`--local` 仅本地清理。managed 远端撤销未由本 CLI 提供，标记 unsupported。网络失败可能是 unknown/failed，不能因此声称所有会话已撤销。无跨站全部退出操作。
+legacy native logout 清当前槽并尝试原会话退出；legacy managed 远端撤销未由本 CLI 提供，报告 unsupported。此项兼容退出与统一 OP grant 撤销有不同语义，均分别报告本地与远端结果。
 
 ## 公共参数与输入规则
 
@@ -82,7 +112,7 @@ ziwei-workspace auth logout --purpose employee --profile "<profile>" --account "
 | `--contract v1` | 本包仅支持 v1，默认也是 v1 |
 | `--profile <name>` | 环境槽名称，默认 default |
 | `--timeout <ms>` | 整数 100–300000，默认 30000，含响应正文读取；wait 采用总等待上限 |
-| `--api <HTTPS-origin>` | 默认本站 origin；无 userinfo、query 或业务子路径，仅隔离本机测试允许 loopback HTTP |
+| `--api <HTTPS-origin>` | 默认本站 origin；无 userinfo、query 或业务子路径；仅显式 ZIWEI_WORKSPACE_ALLOW_LOOPBACK_HTTP=1 的隔离测试可用 literal loopback HTTP |
 | `--account <slot>` | 本站账号槽标识，默认 default，不代表已认证账号 |
 | `--purpose person` / `--purpose employee` | 凭据用途隔离；默认 person |
 | `--workspace <slug>` | 明确目标工作区，须通过原服务器权限验证；与业务 JSON 同字段不可重复 |
@@ -99,7 +129,7 @@ ziwei-workspace actions get --id "<original-action-id>" --json
 ziwei-workspace capabilities --json --contract v1
 ```
 
-`capabilities` 是离线命令/schema 说明，`authorization.verification:offline`、`grantsVerified:false`，不等于当前账号已获授权。`config show`、`auth login/status/logout` 是本地配置/身份辅助命令；`actions wait --id "<original-action-id>" --timeout 30000` 只轮询已有 action，不创建动作。
+`capabilities` 是离线命令/schema 说明，`authorization.verification:offline`、`grantsVerified:false`，不等于当前账号已获授权。`config show`、`auth login/complete/wait/refresh/status/logout` 是配置/身份命令；`actions wait --id "<original-action-id>" --timeout 30000` 只轮询已有 action，不创建动作。
 
 ## v1 输出和固定退出码
 
@@ -177,9 +207,11 @@ ziwei-workspace capabilities --json --contract v1
 
 ## 原管理 MCP 接入
 
-本项目已有管理 MCP 是 stdio 服务器 `scripts/ziwei-mcp.mjs`。可核对[官方仓库源码](https://github.com/jinjinli226-netizen/ziwei/blob/b8c8a669e0fb18623166628bd3e1088dfb133249/scripts/ziwei-mcp.mjs)（私有仓库需相应仓库权限）。它在内部调用原管理 HTTP API，HTTP 管理 API 地址不是远程 MCP transport URL。本包不新增 `ziwei-workspace mcp` 命令，也没有可宣称的公网 HTTP MCP endpoint。
+本项目已有管理 MCP 是 stdio 服务器 `scripts/ziwei-mcp.mjs`。可核对[保留的原管理 MCP 源码](https://github.com/jinjinli226-netizen/ziwei/blob/543e81d344fa0337328b088134cf742128c1d43d/scripts/ziwei-mcp.mjs)（私有仓库需权限；该文件与当前候选字节一致，该远端标识不含本轮未提交身份增量）。它内部调用管理 HTTP API，HTTP API 地址不是远程 MCP transport URL。本包不新增 `ziwei-workspace mcp` 命令，也没有可宣称的公网 HTTP MCP endpoint。
 
-已通过平台接入的员工沿原 ziwei_user 自动配置与短期设备/workspace scope 工作，不需要手工复制凭据。需要外部客户端的操作者须单独取得原授权源和受限凭据，使用如下 stdio 客户端配置模板；路径均为自己的已授权来源/私有文件占位。
+原 stdio 脚本未新增统一 OP 授权、设备流或 RT 刷新。其保留的 managed token-file 模板只适用于原协议受控兼容条件，不能当成统一模式 CLI 的代理授权，也不能推断所有 Bot 管理 MCP 已迁完。CLI 的统一 AT HTTP 路由覆盖与 stdio 运行时身份迁移分别验收。既有 daemon pairing/A2A/terminal 机器协议有独立认证边界，不自动等于网站 MCP 授权。
+
+以下 stdio 模板仅用于已获授权且服务端允许的旧协议/准备兼容；服务器 unified 时不能用旧 managed token 绕过 AT 验证。路径均为自己的授权来源/私有文件占位：
 
 ```json
 {
@@ -199,11 +231,11 @@ ziwei-workspace capabilities --json --contract v1
 }
 ```
 
-MCP 继续复用原业务 schema 和受限授权，不因读取本文或安装本 CLI 获得管理员、其他工作区或其他站权限。MCP stdout 保留 JSON-RPC 协议；原电脑执行客户端与手机绑定约束按原系统生效。
+MCP 业务 schema 与资源边界保留，原脚本 stdout 仍为 JSON-RPC。统一身份下每个实际员工运行时/工具的凭据获取、刷新、撤销、actor 与原生范围仍须专项验收；未完成时如实 pending，不借用共享管理员凭据。
 
 ## 命令目录与完整输入 schema
 
-以下内容直接由本包 registry 生成。命令拼写保留原资源和动作（包括大小写）；inputSchema 是该命令实际 CLI 校验。transports.native/managed 表示实现覆盖，routes 说明对应原 API；idempotencyByTransport 存在时须优先按实际传输判断幂等。readOnly、sideEffects、requiredPermissions、supportsDryRun、idempotency 与 resultQuery 同 capabilities 共用来源。Bot 的 data 保留原生嵌套 schema/业务校验，示例中的空对象需要根据原生能力补齐，不能据此推断任意字段有效。
+以下内容直接由本包 registry 生成。命令拼写保留原资源和动作（包括大小写）；inputSchema 是实际 CLI 校验。transports.native/managed 与 routes 说明原 API 族；unified 根据本站公开 cliTransports 在这些精确路由上使用 AT，不导入旧 managed token。idempotencyByTransport 须按实际选中的路由族判断。readOnly、sideEffects、requiredPermissions、supportsDryRun、idempotency 与 resultQuery 同 capabilities 共源。Bot data 保留原生嵌套校验，示例空对象须按原生能力补齐，不代表任意字段有效。
 
 逐项 JSON 示例只展示根 schema 所需字段；请把它保存到自己的业务输入文件再使用该条命令。所有 ID、路径和其他尖括号值都是占位符。
 <!-- operation:workdirs.inspect -->
@@ -254,8 +286,17 @@ MCP 继续复用原业务 schema 和受限授权，不因读取本文或安装�
     "Inspect remote filesystem; create only when createIfMissing:true"
   ],
   "requiredPermissions": [
+    "Unified site roles: access AND write; issued/current intersection",
+    "Unified scope: workspace:write; issued/current intersection",
     "Original server workspace membership and role policy"
   ],
+  "unifiedAuthorization": {
+    "requiresAccess": true,
+    "requiredRole": "write",
+    "requiredScope": "workspace:write",
+    "nativeOwnerAdmin": false,
+    "verification": "server every request; issued/current roles and scopes intersect native policy"
+  },
   "supportsDryRun": false,
   "idempotency": "supported",
   "idempotencyScope": "Only original endpoint semantics; stable key, same authorized actor/workspace and original resource. Never an automatic retry guarantee.",
@@ -353,8 +394,17 @@ ziwei-workspace workdirs inspect --input-file "<business-input.json>" --json --c
     "Create persistent employee conversation; no message or execution"
   ],
   "requiredPermissions": [
+    "Unified site roles: access AND write; issued/current intersection",
+    "Unified scope: workspace:write; issued/current intersection",
     "Original server workspace membership and role policy"
   ],
+  "unifiedAuthorization": {
+    "requiresAccess": true,
+    "requiredRole": "write",
+    "requiredScope": "workspace:write",
+    "nativeOwnerAdmin": false,
+    "verification": "server every request; issued/current roles and scopes intersect native policy"
+  },
   "supportsDryRun": false,
   "idempotency": "unsupported",
   "idempotencyScope": "No transport-independent guarantee: only the managed endpoint supports original persisted keys; native endpoint is unsupported. See idempotencyByTransport.",
@@ -420,8 +470,17 @@ ziwei-workspace conversations create --input-file "<business-input.json>" --json
   "readOnly": true,
   "sideEffects": [],
   "requiredPermissions": [
+    "Unified site roles: access AND read; issued/current intersection",
+    "Unified scope: workspace:read; issued/current intersection",
     "Original server workspace membership and role policy"
   ],
+  "unifiedAuthorization": {
+    "requiresAccess": true,
+    "requiredRole": "read",
+    "requiredScope": "workspace:read",
+    "nativeOwnerAdmin": false,
+    "verification": "server every request; issued/current roles and scopes intersect native policy"
+  },
   "supportsDryRun": false,
   "idempotency": "unsupported",
   "idempotencyScope": null,
@@ -485,8 +544,17 @@ ziwei-workspace management health --input-file "<business-input.json>" --json --
   "readOnly": true,
   "sideEffects": [],
   "requiredPermissions": [
+    "Unified site roles: access AND read; issued/current intersection",
+    "Unified scope: workspace:read; issued/current intersection",
     "Original server workspace membership and role policy"
   ],
+  "unifiedAuthorization": {
+    "requiresAccess": true,
+    "requiredRole": "read",
+    "requiredScope": "workspace:read",
+    "nativeOwnerAdmin": false,
+    "verification": "server every request; issued/current roles and scopes intersect native policy"
+  },
   "supportsDryRun": false,
   "idempotency": "unsupported",
   "idempotencyScope": null,
@@ -556,9 +624,18 @@ ziwei-workspace environment discover --input-file "<business-input.json>" --json
   "readOnly": true,
   "sideEffects": [],
   "requiredPermissions": [
+    "Unified site roles: access AND read; issued/current intersection",
+    "Unified scope: workspace:read; issued/current intersection",
     "Original server workspace membership and role policy",
     "Original employee visibility and device scope checks"
   ],
+  "unifiedAuthorization": {
+    "requiresAccess": true,
+    "requiredRole": "read",
+    "requiredScope": "workspace:read",
+    "nativeOwnerAdmin": false,
+    "verification": "server every request; issued/current roles and scopes intersect native policy"
+  },
   "supportsDryRun": false,
   "idempotency": "unsupported",
   "idempotencyScope": null,
@@ -627,9 +704,18 @@ ziwei-workspace employees get --input-file "<business-input.json>" --json --cont
   "readOnly": true,
   "sideEffects": [],
   "requiredPermissions": [
+    "Unified site roles: access AND read; issued/current intersection",
+    "Unified scope: workspace:read; issued/current intersection",
     "Original server workspace membership and role policy",
     "Original employee visibility and device scope checks"
   ],
+  "unifiedAuthorization": {
+    "requiresAccess": true,
+    "requiredRole": "read",
+    "requiredScope": "workspace:read",
+    "nativeOwnerAdmin": false,
+    "verification": "server every request; issued/current roles and scopes intersect native policy"
+  },
   "supportsDryRun": false,
   "idempotency": "unsupported",
   "idempotencyScope": null,
@@ -724,8 +810,17 @@ ziwei-workspace employees mcp-status --input-file "<business-input.json>" --json
     "Create isolated Hermes Profile on the selected computer"
   ],
   "requiredPermissions": [
+    "Unified site roles: access AND write; issued/current intersection",
+    "Unified scope: workspace:write; issued/current intersection",
     "Original server workspace membership and role policy"
   ],
+  "unifiedAuthorization": {
+    "requiresAccess": true,
+    "requiredRole": "write",
+    "requiredScope": "workspace:write",
+    "nativeOwnerAdmin": false,
+    "verification": "server every request; issued/current roles and scopes intersect native policy"
+  },
   "supportsDryRun": false,
   "idempotency": "supported",
   "idempotencyScope": "Only original endpoint semantics; stable key, same authorized actor/workspace and original resource. Never an automatic retry guarantee.",
@@ -804,8 +899,17 @@ ziwei-workspace profiles create --input-file "<business-input.json>" --json --co
   "readOnly": true,
   "sideEffects": [],
   "requiredPermissions": [
+    "Unified site roles: access AND read; issued/current intersection",
+    "Unified scope: workspace:read; issued/current intersection",
     "Original server workspace membership and role policy"
   ],
+  "unifiedAuthorization": {
+    "requiresAccess": true,
+    "requiredRole": "read",
+    "requiredScope": "workspace:read",
+    "nativeOwnerAdmin": false,
+    "verification": "server every request; issued/current roles and scopes intersect native policy"
+  },
   "supportsDryRun": false,
   "idempotency": "unsupported",
   "idempotencyScope": null,
@@ -881,8 +985,17 @@ ziwei-workspace actions get --input-file "<business-input.json>" --json --contra
   "readOnly": true,
   "sideEffects": [],
   "requiredPermissions": [
+    "Unified site roles: access AND read; issued/current intersection",
+    "Unified scope: workspace:read; issued/current intersection",
     "Original server workspace membership and role policy"
   ],
+  "unifiedAuthorization": {
+    "requiresAccess": true,
+    "requiredRole": "read",
+    "requiredScope": "workspace:read",
+    "nativeOwnerAdmin": false,
+    "verification": "server every request; issued/current roles and scopes intersect native policy"
+  },
   "supportsDryRun": false,
   "idempotency": "unsupported",
   "idempotencyScope": null,
@@ -948,9 +1061,18 @@ ziwei-workspace tasks get --input-file "<business-input.json>" --json --contract
   "readOnly": true,
   "sideEffects": [],
   "requiredPermissions": [
+    "Unified site roles: access AND read; issued/current intersection",
+    "Unified scope: workspace:read; issued/current intersection",
     "Original server workspace membership and role policy",
     "Original employee visibility and device scope checks"
   ],
+  "unifiedAuthorization": {
+    "requiresAccess": true,
+    "requiredRole": "read",
+    "requiredScope": "workspace:read",
+    "nativeOwnerAdmin": false,
+    "verification": "server every request; issued/current roles and scopes intersect native policy"
+  },
   "supportsDryRun": false,
   "idempotency": "unsupported",
   "idempotencyScope": null,
@@ -1076,9 +1198,18 @@ ziwei-workspace employees list --input-file "<business-input.json>" --json --con
     "Create employee; may create required management configuration"
   ],
   "requiredPermissions": [
+    "Unified site roles: access AND write; issued/current intersection",
+    "Unified scope: workspace:write; issued/current intersection",
     "Original server workspace membership and role policy",
     "Original employee visibility and device scope checks"
   ],
+  "unifiedAuthorization": {
+    "requiresAccess": true,
+    "requiredRole": "write",
+    "requiredScope": "workspace:write",
+    "nativeOwnerAdmin": false,
+    "verification": "server every request; issued/current roles and scopes intersect native policy"
+  },
   "supportsDryRun": false,
   "idempotency": "supported",
   "idempotencyScope": "Only original endpoint semantics; stable key, same authorized actor/workspace and original resource. Never an automatic retry guarantee.",
@@ -1208,9 +1339,18 @@ ziwei-workspace employees create --input-file "<business-input.json>" --json --c
     "Change employee configuration for future execution"
   ],
   "requiredPermissions": [
+    "Unified site roles: access AND write; issued/current intersection",
+    "Unified scope: workspace:write; issued/current intersection",
     "Original server workspace membership and role policy",
     "Original employee visibility and device scope checks"
   ],
+  "unifiedAuthorization": {
+    "requiresAccess": true,
+    "requiredRole": "write",
+    "requiredScope": "workspace:write",
+    "nativeOwnerAdmin": false,
+    "verification": "server every request; issued/current roles and scopes intersect native policy"
+  },
   "supportsDryRun": false,
   "idempotency": "unsupported",
   "idempotencyScope": null,
@@ -1288,8 +1428,17 @@ ziwei-workspace employees update --input-file "<business-input.json>" --json --c
   "readOnly": true,
   "sideEffects": [],
   "requiredPermissions": [
+    "Unified site roles: access AND read; issued/current intersection",
+    "Unified scope: workspace:read; issued/current intersection",
     "Original server workspace membership and role policy"
   ],
+  "unifiedAuthorization": {
+    "requiresAccess": true,
+    "requiredRole": "read",
+    "requiredScope": "workspace:read",
+    "nativeOwnerAdmin": false,
+    "verification": "server every request; issued/current roles and scopes intersect native policy"
+  },
   "supportsDryRun": false,
   "idempotency": "unsupported",
   "idempotencyScope": null,
@@ -1394,8 +1543,17 @@ ziwei-workspace tasks list --input-file "<business-input.json>" --json --contrac
     "Create task; execute:true dispatches real employee work and may use paid models"
   ],
   "requiredPermissions": [
+    "Unified site roles: access AND write; issued/current intersection",
+    "Unified scope: workspace:write; issued/current intersection",
     "Original server workspace membership and role policy"
   ],
+  "unifiedAuthorization": {
+    "requiresAccess": true,
+    "requiredRole": "write",
+    "requiredScope": "workspace:write",
+    "nativeOwnerAdmin": false,
+    "verification": "server every request; issued/current roles and scopes intersect native policy"
+  },
   "supportsDryRun": false,
   "idempotency": "unsupported",
   "idempotencyScope": "No transport-independent guarantee: only the managed endpoint supports original persisted keys; native endpoint is unsupported. See idempotencyByTransport.",
@@ -1464,9 +1622,18 @@ ziwei-workspace tasks create --input-file "<business-input.json>" --json --contr
   "readOnly": true,
   "sideEffects": [],
   "requiredPermissions": [
+    "Unified site roles: access AND read; issued/current intersection",
+    "Unified scope: workspace:read; issued/current intersection",
     "Original server workspace membership and role policy",
     "Original document ownership/workspace guard"
   ],
+  "unifiedAuthorization": {
+    "requiresAccess": true,
+    "requiredRole": "read",
+    "requiredScope": "workspace:read",
+    "nativeOwnerAdmin": false,
+    "verification": "server every request; issued/current roles and scopes intersect native policy"
+  },
   "supportsDryRun": false,
   "idempotency": "unsupported",
   "idempotencyScope": null,
@@ -1536,9 +1703,18 @@ ziwei-workspace documents list --input-file "<business-input.json>" --json --con
   "readOnly": true,
   "sideEffects": [],
   "requiredPermissions": [
+    "Unified site roles: access AND read; issued/current intersection",
+    "Unified scope: workspace:read; issued/current intersection",
     "Original server workspace membership and role policy",
     "Original document ownership/workspace guard"
   ],
+  "unifiedAuthorization": {
+    "requiresAccess": true,
+    "requiredRole": "read",
+    "requiredScope": "workspace:read",
+    "nativeOwnerAdmin": false,
+    "verification": "server every request; issued/current roles and scopes intersect native policy"
+  },
   "supportsDryRun": false,
   "idempotency": "unsupported",
   "idempotencyScope": null,
@@ -1627,9 +1803,18 @@ ziwei-workspace documents get --input-file "<business-input.json>" --json --cont
     "Create or update workspace document"
   ],
   "requiredPermissions": [
+    "Unified site roles: access AND write; issued/current intersection",
+    "Unified scope: workspace:write; issued/current intersection",
     "Original server workspace membership and role policy",
     "Original document ownership/workspace guard"
   ],
+  "unifiedAuthorization": {
+    "requiresAccess": true,
+    "requiredRole": "write",
+    "requiredScope": "workspace:write",
+    "nativeOwnerAdmin": false,
+    "verification": "server every request; issued/current roles and scopes intersect native policy"
+  },
   "supportsDryRun": false,
   "idempotency": "unsupported",
   "idempotencyScope": null,
@@ -1706,9 +1891,18 @@ ziwei-workspace documents write --input-file "<business-input.json>" --json --co
   "readOnly": true,
   "sideEffects": [],
   "requiredPermissions": [
+    "Unified site roles: access AND read; issued/current intersection",
+    "Unified scope: workspace:read; issued/current intersection",
     "Original server workspace membership and role policy",
     "Original employee visibility and device scope checks"
   ],
+  "unifiedAuthorization": {
+    "requiresAccess": true,
+    "requiredRole": "read",
+    "requiredScope": "workspace:read",
+    "nativeOwnerAdmin": false,
+    "verification": "server every request; issued/current roles and scopes intersect native policy"
+  },
   "supportsDryRun": false,
   "idempotency": "unsupported",
   "idempotencyScope": null,
@@ -1784,8 +1978,17 @@ ziwei-workspace phone-mcp setup --input-file "<business-input.json>" --json --co
     "Install/uninstall an existing platform skill, preserving history"
   ],
   "requiredPermissions": [
+    "Unified site roles: access AND write; issued/current intersection",
+    "Unified scope: workspace:write; issued/current intersection",
     "Original server workspace membership and role policy"
   ],
+  "unifiedAuthorization": {
+    "requiresAccess": true,
+    "requiredRole": "write",
+    "requiredScope": "workspace:write",
+    "nativeOwnerAdmin": false,
+    "verification": "server every request; issued/current roles and scopes intersect native policy"
+  },
   "supportsDryRun": false,
   "idempotency": "unsupported",
   "idempotencyScope": null,
@@ -1884,9 +2087,19 @@ ziwei-workspace skills install --input-file "<business-input.json>" --json --con
     "Persist exact employee/phone/runtime binding; no device command"
   ],
   "requiredPermissions": [
+    "Unified site roles: access AND admin; issued/current intersection",
+    "Unified scope: workspace:write; issued/current intersection",
     "Original server workspace membership and role policy",
+    "Original native workspace owner/admin required",
     "Original employee visibility and device scope checks"
   ],
+  "unifiedAuthorization": {
+    "requiresAccess": true,
+    "requiredRole": "admin",
+    "requiredScope": "workspace:write",
+    "nativeOwnerAdmin": true,
+    "verification": "server every request; issued/current roles and scopes intersect native policy"
+  },
   "supportsDryRun": false,
   "idempotency": "unsupported",
   "idempotencyScope": null,
@@ -1962,9 +2175,18 @@ ziwei-workspace phone-mcp configure --input-file "<business-input.json>" --json 
   "readOnly": true,
   "sideEffects": [],
   "requiredPermissions": [
+    "Unified site roles: access AND read; issued/current intersection",
+    "Unified scope: workspace:read; issued/current intersection",
     "Original server workspace membership and role policy",
     "Original employee visibility and device scope checks"
   ],
+  "unifiedAuthorization": {
+    "requiresAccess": true,
+    "requiredRole": "read",
+    "requiredScope": "workspace:read",
+    "nativeOwnerAdmin": false,
+    "verification": "server every request; issued/current roles and scopes intersect native policy"
+  },
   "supportsDryRun": false,
   "idempotency": "unsupported",
   "idempotencyScope": null,
@@ -2041,9 +2263,18 @@ ziwei-workspace phone-mcp status --input-file "<business-input.json>" --json --c
     "Create real employee conversation/action and load phone MCP for list/status; may use paid model"
   ],
   "requiredPermissions": [
+    "Unified site roles: access AND write; issued/current intersection",
+    "Unified scope: workspace:write; issued/current intersection",
     "Original server workspace membership and role policy",
     "Original employee visibility and device scope checks"
   ],
+  "unifiedAuthorization": {
+    "requiresAccess": true,
+    "requiredRole": "write",
+    "requiredScope": "workspace:write",
+    "nativeOwnerAdmin": false,
+    "verification": "server every request; issued/current roles and scopes intersect native policy"
+  },
   "supportsDryRun": false,
   "idempotency": "supported",
   "idempotencyScope": "Only original endpoint semantics; stable key, same authorized actor/workspace and original resource. Never an automatic retry guarantee.",
@@ -2131,9 +2362,18 @@ ziwei-workspace phone-mcp check --input-file "<business-input.json>" --json --co
     "Create real employee execution and issue phone health or screenshot; may use paid model and physical device"
   ],
   "requiredPermissions": [
+    "Unified site roles: access AND write; issued/current intersection",
+    "Unified scope: workspace:write; issued/current intersection",
     "Original server workspace membership and role policy",
     "Original employee visibility and device scope checks"
   ],
+  "unifiedAuthorization": {
+    "requiresAccess": true,
+    "requiredRole": "write",
+    "requiredScope": "workspace:write",
+    "nativeOwnerAdmin": false,
+    "verification": "server every request; issued/current roles and scopes intersect native policy"
+  },
   "supportsDryRun": false,
   "idempotency": "supported",
   "idempotencyScope": "Only original endpoint semantics; stable key, same authorized actor/workspace and original resource. Never an automatic retry guarantee.",
@@ -2357,9 +2597,18 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
   "readOnly": true,
   "sideEffects": [],
   "requiredPermissions": [
+    "Unified site roles: access AND read; issued/current intersection",
+    "Unified scope: workspace:read; issued/current intersection",
     "Original server workspace membership and role policy",
     "Original employee visibility and device scope checks"
   ],
+  "unifiedAuthorization": {
+    "requiresAccess": true,
+    "requiredRole": "read",
+    "requiredScope": "workspace:read",
+    "nativeOwnerAdmin": false,
+    "verification": "server every request; issued/current roles and scopes intersect native policy"
+  },
   "supportsDryRun": false,
   "idempotency": "unsupported",
   "idempotencyScope": null,
@@ -2577,9 +2826,18 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
   "readOnly": true,
   "sideEffects": [],
   "requiredPermissions": [
+    "Unified site roles: access AND read; issued/current intersection",
+    "Unified scope: workspace:read; issued/current intersection",
     "Original server workspace membership and role policy",
     "Original employee visibility and device scope checks"
   ],
+  "unifiedAuthorization": {
+    "requiresAccess": true,
+    "requiredRole": "read",
+    "requiredScope": "workspace:read",
+    "nativeOwnerAdmin": false,
+    "verification": "server every request; issued/current roles and scopes intersect native policy"
+  },
   "supportsDryRun": false,
   "idempotency": "unsupported",
   "idempotencyScope": null,
@@ -2805,9 +3063,18 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
     "Create employee, isolated Profile provisioning action and main conversation"
   ],
   "requiredPermissions": [
+    "Unified site roles: access AND write; issued/current intersection",
+    "Unified scope: workspace:write; issued/current intersection",
     "Original server workspace membership and role policy",
     "Original employee visibility and device scope checks"
   ],
+  "unifiedAuthorization": {
+    "requiresAccess": true,
+    "requiredRole": "write",
+    "requiredScope": "workspace:write",
+    "nativeOwnerAdmin": false,
+    "verification": "server every request; issued/current roles and scopes intersect native policy"
+  },
   "supportsDryRun": false,
   "idempotency": "supported",
   "idempotencyScope": "Only original endpoint semantics; stable key, same authorized actor/workspace and original resource. Never an automatic retry guarantee.",
@@ -3042,9 +3309,18 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
     "Initialize Bot on the same employee and create main conversation if absent"
   ],
   "requiredPermissions": [
+    "Unified site roles: access AND write; issued/current intersection",
+    "Unified scope: workspace:write; issued/current intersection",
     "Original server workspace membership and role policy",
     "Original employee visibility and device scope checks"
   ],
+  "unifiedAuthorization": {
+    "requiresAccess": true,
+    "requiredRole": "write",
+    "requiredScope": "workspace:write",
+    "nativeOwnerAdmin": false,
+    "verification": "server every request; issued/current roles and scopes intersect native policy"
+  },
   "supportsDryRun": false,
   "idempotency": "supported",
   "idempotencyScope": "Only original endpoint semantics; stable key, same authorized actor/workspace and original resource. Never an automatic retry guarantee.",
@@ -3273,9 +3549,18 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
   "readOnly": true,
   "sideEffects": [],
   "requiredPermissions": [
+    "Unified site roles: access AND read; issued/current intersection",
+    "Unified scope: workspace:read; issued/current intersection",
     "Original server workspace membership and role policy",
     "Original employee visibility and device scope checks"
   ],
+  "unifiedAuthorization": {
+    "requiresAccess": true,
+    "requiredRole": "read",
+    "requiredScope": "workspace:read",
+    "nativeOwnerAdmin": false,
+    "verification": "server every request; issued/current roles and scopes intersect native policy"
+  },
   "supportsDryRun": false,
   "idempotency": "unsupported",
   "idempotencyScope": null,
@@ -3503,9 +3788,18 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
     "Update versioned configuration; deferred update can later validate, reconnect MCP and restore original authorization"
   ],
   "requiredPermissions": [
+    "Unified site roles: access AND write; issued/current intersection",
+    "Unified scope: workspace:write; issued/current intersection",
     "Original server workspace membership and role policy",
     "Original employee visibility and device scope checks"
   ],
+  "unifiedAuthorization": {
+    "requiresAccess": true,
+    "requiredRole": "write",
+    "requiredScope": "workspace:write",
+    "nativeOwnerAdmin": false,
+    "verification": "server every request; issued/current roles and scopes intersect native policy"
+  },
   "supportsDryRun": false,
   "idempotency": "unsupported",
   "idempotencyScope": null,
@@ -3741,9 +4035,18 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
     "Queue original employee Profile provisioning/recovery"
   ],
   "requiredPermissions": [
+    "Unified site roles: access AND write; issued/current intersection",
+    "Unified scope: workspace:write; issued/current intersection",
     "Original server workspace membership and role policy",
     "Original employee visibility and device scope checks"
   ],
+  "unifiedAuthorization": {
+    "requiresAccess": true,
+    "requiredRole": "write",
+    "requiredScope": "workspace:write",
+    "nativeOwnerAdmin": false,
+    "verification": "server every request; issued/current roles and scopes intersect native policy"
+  },
   "supportsDryRun": false,
   "idempotency": "supported",
   "idempotencyScope": "Only original endpoint semantics; stable key, same authorized actor/workspace and original resource. Never an automatic retry guarantee.",
@@ -3979,9 +4282,18 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
     "Queue native configuration validation; no model generation"
   ],
   "requiredPermissions": [
+    "Unified site roles: access AND write; issued/current intersection",
+    "Unified scope: workspace:write; issued/current intersection",
     "Original server workspace membership and role policy",
     "Original employee visibility and device scope checks"
   ],
+  "unifiedAuthorization": {
+    "requiresAccess": true,
+    "requiredRole": "write",
+    "requiredScope": "workspace:write",
+    "nativeOwnerAdmin": false,
+    "verification": "server every request; issued/current roles and scopes intersect native policy"
+  },
   "supportsDryRun": false,
   "idempotency": "supported",
   "idempotencyScope": "Only original endpoint semantics; stable key, same authorized actor/workspace and original resource. Never an automatic retry guarantee.",
@@ -4224,9 +4536,18 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
     "Activate/resume enables scheduling; pause cancels pending work; stop may request running work and descendant termination; requires revision and control epoch"
   ],
   "requiredPermissions": [
+    "Unified site roles: access AND write; issued/current intersection",
+    "Unified scope: workspace:write; issued/current intersection",
     "Original server workspace membership and role policy",
     "Original employee visibility and device scope checks"
   ],
+  "unifiedAuthorization": {
+    "requiresAccess": true,
+    "requiredRole": "write",
+    "requiredScope": "workspace:write",
+    "nativeOwnerAdmin": false,
+    "verification": "server every request; issued/current roles and scopes intersect native policy"
+  },
   "supportsDryRun": false,
   "idempotency": "unsupported",
   "idempotencyScope": null,
@@ -4456,9 +4777,18 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
   "readOnly": true,
   "sideEffects": [],
   "requiredPermissions": [
+    "Unified site roles: access AND read; issued/current intersection",
+    "Unified scope: workspace:read; issued/current intersection",
     "Original server workspace membership and role policy",
     "Original employee visibility and device scope checks"
   ],
+  "unifiedAuthorization": {
+    "requiresAccess": true,
+    "requiredRole": "read",
+    "requiredScope": "workspace:read",
+    "nativeOwnerAdmin": false,
+    "verification": "server every request; issued/current roles and scopes intersect native policy"
+  },
   "supportsDryRun": false,
   "idempotency": "unsupported",
   "idempotencyScope": null,
@@ -4680,9 +5010,18 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
   "readOnly": true,
   "sideEffects": [],
   "requiredPermissions": [
+    "Unified site roles: access AND read; issued/current intersection",
+    "Unified scope: workspace:read; issued/current intersection",
     "Original server workspace membership and role policy",
     "Original employee visibility and device scope checks"
   ],
+  "unifiedAuthorization": {
+    "requiresAccess": true,
+    "requiredRole": "read",
+    "requiredScope": "workspace:read",
+    "nativeOwnerAdmin": false,
+    "verification": "server every request; issued/current roles and scopes intersect native policy"
+  },
   "supportsDryRun": false,
   "idempotency": "unsupported",
   "idempotencyScope": null,
@@ -4909,9 +5248,18 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
     "Persist schedule; active schedule can dispatch future paid work"
   ],
   "requiredPermissions": [
+    "Unified site roles: access AND write; issued/current intersection",
+    "Unified scope: workspace:write; issued/current intersection",
     "Original server workspace membership and role policy",
     "Original employee visibility and device scope checks"
   ],
+  "unifiedAuthorization": {
+    "requiresAccess": true,
+    "requiredRole": "write",
+    "requiredScope": "workspace:write",
+    "nativeOwnerAdmin": false,
+    "verification": "server every request; issued/current roles and scopes intersect native policy"
+  },
   "supportsDryRun": false,
   "idempotency": "supported",
   "idempotencyScope": "Only original endpoint semantics; stable key, same authorized actor/workspace and original resource. Never an automatic retry guarantee.",
@@ -5144,9 +5492,18 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
     "Change schedule and future execution"
   ],
   "requiredPermissions": [
+    "Unified site roles: access AND write; issued/current intersection",
+    "Unified scope: workspace:write; issued/current intersection",
     "Original server workspace membership and role policy",
     "Original employee visibility and device scope checks"
   ],
+  "unifiedAuthorization": {
+    "requiresAccess": true,
+    "requiredRole": "write",
+    "requiredScope": "workspace:write",
+    "nativeOwnerAdmin": false,
+    "verification": "server every request; issued/current roles and scopes intersect native policy"
+  },
   "supportsDryRun": false,
   "idempotency": "unsupported",
   "idempotencyScope": null,
@@ -5377,9 +5734,18 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
     "Delete original Routine schedule"
   ],
   "requiredPermissions": [
+    "Unified site roles: access AND write; issued/current intersection",
+    "Unified scope: workspace:write; issued/current intersection",
     "Original server workspace membership and role policy",
     "Original employee visibility and device scope checks"
   ],
+  "unifiedAuthorization": {
+    "requiresAccess": true,
+    "requiredRole": "write",
+    "requiredScope": "workspace:write",
+    "nativeOwnerAdmin": false,
+    "verification": "server every request; issued/current roles and scopes intersect native policy"
+  },
   "supportsDryRun": false,
   "idempotency": "unsupported",
   "idempotencyScope": null,
@@ -5612,9 +5978,18 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
     "Dispatch real Routine work; may use paid models or configured native driver"
   ],
   "requiredPermissions": [
+    "Unified site roles: access AND write; issued/current intersection",
+    "Unified scope: workspace:write; issued/current intersection",
     "Original server workspace membership and role policy",
     "Original employee visibility and device scope checks"
   ],
+  "unifiedAuthorization": {
+    "requiresAccess": true,
+    "requiredRole": "write",
+    "requiredScope": "workspace:write",
+    "nativeOwnerAdmin": false,
+    "verification": "server every request; issued/current roles and scopes intersect native policy"
+  },
   "supportsDryRun": false,
   "idempotency": "supported",
   "idempotencyScope": "Only original endpoint semantics; stable key, same authorized actor/workspace and original resource. Never an automatic retry guarantee.",
@@ -6074,9 +6449,18 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
     "Queue original native operation; effects depend on resource/operation including memory writes, skill install, MCP external calls, goal/heartbeat/group steps, kanban dispatch, gateway messages and voice provider calls"
   ],
   "requiredPermissions": [
+    "Unified site roles: access AND write; issued/current intersection",
+    "Unified scope: workspace:write; issued/current intersection",
     "Original server workspace membership and role policy",
     "Original employee visibility and device scope checks"
   ],
+  "unifiedAuthorization": {
+    "requiresAccess": true,
+    "requiredRole": "write",
+    "requiredScope": "workspace:write",
+    "nativeOwnerAdmin": false,
+    "verification": "server every request; issued/current roles and scopes intersect native policy"
+  },
   "supportsDryRun": false,
   "idempotency": "supported",
   "idempotencyScope": "Only original endpoint semantics; stable key, same authorized actor/workspace and original resource. Never an automatic retry guarantee.",
@@ -6318,9 +6702,18 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
     "Dispatch explicitly authorized messages/delegation/group work to employees; may use paid models"
   ],
   "requiredPermissions": [
+    "Unified site roles: access AND write; issued/current intersection",
+    "Unified scope: workspace:write; issued/current intersection",
     "Original server workspace membership and role policy",
     "Original employee visibility and device scope checks"
   ],
+  "unifiedAuthorization": {
+    "requiresAccess": true,
+    "requiredRole": "write",
+    "requiredScope": "workspace:write",
+    "nativeOwnerAdmin": false,
+    "verification": "server every request; issued/current roles and scopes intersect native policy"
+  },
   "supportsDryRun": false,
   "idempotency": "supported",
   "idempotencyScope": "Only original endpoint semantics; stable key, same authorized actor/workspace and original resource. Never an automatic retry guarantee.",
@@ -6555,9 +6948,18 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
     "May prune expired OAuth relay entries in server process memory; no device action or persisted business write"
   ],
   "requiredPermissions": [
+    "Unified site roles: access AND read; issued/current intersection",
+    "Unified scope: workspace:read; issued/current intersection",
     "Original server workspace membership and role policy",
     "Original employee visibility and device scope checks"
   ],
+  "unifiedAuthorization": {
+    "requiresAccess": true,
+    "requiredRole": "read",
+    "requiredScope": "workspace:read",
+    "nativeOwnerAdmin": false,
+    "verification": "server every request; issued/current roles and scopes intersect native policy"
+  },
   "supportsDryRun": false,
   "idempotency": "unsupported",
   "idempotencyScope": null,
@@ -6787,9 +7189,18 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
     "Queue native inspect/authorize on target employee Profile; opens OAuth authorization workflow when required"
   ],
   "requiredPermissions": [
+    "Unified site roles: access AND write; issued/current intersection",
+    "Unified scope: workspace:write; issued/current intersection",
     "Original server workspace membership and role policy",
     "Original employee visibility and device scope checks"
   ],
+  "unifiedAuthorization": {
+    "requiresAccess": true,
+    "requiredRole": "write",
+    "requiredScope": "workspace:write",
+    "nativeOwnerAdmin": false,
+    "verification": "server every request; issued/current roles and scopes intersect native policy"
+  },
   "supportsDryRun": false,
   "idempotency": "supported",
   "idempotencyScope": "Only original endpoint semantics; stable key, same authorized actor/workspace and original resource. Never an automatic retry guarantee.",
@@ -7024,9 +7435,18 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
     "Cancel the original OAuth connection action; does not promise cancellation of unrelated work"
   ],
   "requiredPermissions": [
+    "Unified site roles: access AND write; issued/current intersection",
+    "Unified scope: workspace:write; issued/current intersection",
     "Original server workspace membership and role policy",
     "Original employee visibility and device scope checks"
   ],
+  "unifiedAuthorization": {
+    "requiresAccess": true,
+    "requiredRole": "write",
+    "requiredScope": "workspace:write",
+    "nativeOwnerAdmin": false,
+    "verification": "server every request; issued/current roles and scopes intersect native policy"
+  },
   "supportsDryRun": false,
   "idempotency": "unsupported",
   "idempotencyScope": null,
@@ -7103,8 +7523,17 @@ Bounded readonly polling of the original actions.get endpoint until a terminal s
   "readOnly": true,
   "sideEffects": [],
   "requiredPermissions": [
+    "Unified site roles: access AND read; issued/current intersection",
+    "Unified scope: workspace:read; issued/current intersection",
     "Original server workspace membership and role policy"
   ],
+  "unifiedAuthorization": {
+    "requiresAccess": true,
+    "requiredRole": "read",
+    "requiredScope": "workspace:read",
+    "nativeOwnerAdmin": false,
+    "verification": "server every request; issued/current roles and scopes intersect native policy"
+  },
   "supportsDryRun": false,
   "idempotency": "unsupported",
   "idempotencyScope": null,
@@ -7150,12 +7579,13 @@ ziwei-workspace actions wait --input-file "<business-input.json>" --json --contr
 ## 明确不支持项
 
 - `actions cancel`：The workspace backend has no generic action cancel endpoint. Bot control stop and cancelMcpConnection have their documented, narrower boundaries.
-- `auth unified`：Unified identity is pending the coordinator identity contract. No local issuer, email merge or client-asserted employee identity is accepted.
 - `bots force-abandon`：Privileged failure recovery is not exposed by this CLI version.
 - `bots failure-finalization`：Privileged failure recovery is not exposed by this CLI version.
 
+- 员工机器 client_credentials、全站 OP 退出和原 stdio MCP 的统一授权迁移未由本 CLI 实现。
+
 ## 版本与线上边界
 
-CLI 1.0.0 · 规范 1.2.0 · 机器契约 v1 · 文档 1.0.0 · 更新 2026-10-22
+CLI 2.0.0 · 规范 1.3.0 · 身份契约 1.0.1 · 机器契约 v1 · 文档 2.0.0 · 更新 2026-10-22
 
-此文档和三个匿名入口是当前候选源码的一部分。包构建/安装、本地 HTTP、生产源码发布与公网读取分别验收；未部署前公网与 SSO 保持 pending。本站业务 API 和私有资料继续执行原鉴权。
+此文档和三个匿名入口是候选源码的一部分。服务器准备期 legacy 与 CLI 默认 unified 必须分别核对；统一切换需经受控发布窗口、完整配置/显式绑定及验收，不能用长期兼容替代交付。包构建/安装、纯 handler/本地 HTTP、真实 OP、生产源码和公网读取分别验收。未部署前公网与生产 SSO 保持 pending。

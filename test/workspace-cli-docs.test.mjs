@@ -51,7 +51,7 @@ test('three exact anonymous GET routes serve real UTF-8 bodies without an auth d
   const appSource = fs.readFileSync(path.join(root, 'backend/app.mjs'), 'utf8');
   const registration = appSource.indexOf('registerWorkspaceCliDocs(app)');
   assert.ok(registration >= 0);
-  assert.ok(registration < appSource.indexOf("app.use('/api', sessionMiddleware"));
+  assert.ok(registration < appSource.indexOf("app.use('/api', unifiedIdentity?.apiGuard || sessionMiddleware"));
   assert.ok(appSource.includes("app.use('/api/workspaces/:slug', workspaceMembershipGuard"));
   assert.ok(appSource.includes("app.use('/api', resourceWorkspaceGuard"));
 });
@@ -110,4 +110,32 @@ test('public instructions state distribution, identity, native MCP and deploymen
   for (const code of [0,1,2,3,4,5,6,7,8,9,130]) assert.match(markdown, new RegExp(`\\| ${code} \\|`));
   for (const url of [`${origin}/docs`, `${origin}/docs/cli.md`, `${origin}/llms.txt`]) assert.ok(files['llms.txt'].includes(url));
   assert.doesNotMatch(markdown, /npm install --global @ziwei\/workspace-cli|https:\/\/ziwei\.qzelynth\.top\/mcp(?:\s|["')])/);
+});
+
+test('identity round docs distinguish server preparation default from CLI default and state the full public protocol', async () => {
+  const {buildWorkspaceCliDocs} = await import(generatorUrl);
+  const files = buildWorkspaceCliDocs(), markdown = files['cli.md'];
+  for (const text of ['CLI 2.0.0', '规范 1.3.0', '身份契约 1.0.1', 'ZIWEI_IDENTITY_MODE=unified', '服务器默认 legacy', 'CLI 默认 unified', 'auth complete', 'auth wait', 'auth refresh', 'PKCE S256', 'ziwei-workspace-api', 'ziwei-workspace-cli', '/api/identity/config', '/api/identity/me', 'offline_access', 'revocationConfirmed:false', 'legacyAllowed:true', 'stdio 脚本未新增统一 OP 授权']) assert.ok(markdown.includes(text), text);
+  assert.doesNotMatch(markdown, /统一身份[^\n]{0,80}返回[^\n]{0,40}NOT_SUPPORTED|native 模式默认|未覆盖：统一身份|ziwei-workspace-cli-1\.0\.0\.tgz/);
+  assert.match(markdown, /npm install --global "https:\/\/[^"\n]+2\.0\.0\.tgz"/);
+  for (const name of ['index.html','llms.txt']) {
+    assert.match(files[name], /2\.0\.0/);
+    assert.match(files[name], /1\.0\.1/);
+    assert.match(files[name], /legacy/);
+    assert.match(files[name], /unified/);
+  }
+});
+
+test('all 44 CLI routes advertise the actual server unified role and scope including phone binding admin', async () => {
+  const {requiredPermission} = await import('../backend/identity/native.mjs');
+  assert.equal(operations.length,44);
+  for (const op of operations) for (const route of Object.values(op.routes).filter(Boolean)) {
+    const permission=requiredPermission({method:route.method,originalUrl:route.path.replaceAll('{workspace}','example-workspace').replace(/\{[^}]+\}/g,'example-id')});
+    assert.equal(op.unifiedAuthorization?.requiredRole,permission,op.name);
+    assert.equal(op.unifiedAuthorization?.requiredScope,permission==='read'?'workspace:read':'workspace:write',op.name);
+    assert.equal(op.unifiedAuthorization?.requiresAccess,true,op.name);
+    assert.equal(op.unifiedAuthorization?.nativeOwnerAdmin,permission==='admin',op.name);
+  }
+  assert.equal(operations.find(op=>op.name==='phone-mcp.configure').unifiedAuthorization.requiredRole,'admin');
+  assert.equal(operations.find(op=>op.name==='tasks.create').unifiedAuthorization.requiredRole,'write');
 });

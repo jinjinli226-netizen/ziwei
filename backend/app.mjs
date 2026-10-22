@@ -10,6 +10,7 @@ import {createProductionApiIdentityHandler} from './preservation-source-namespac
 import { RealtimeHub } from './realtime.mjs';
 import { exportDocumentsToGit, importDocumentsFromGit } from './git-sync.mjs';
 import { createAuthService } from './auth.mjs';
+import {installUnifiedIdentity} from './identity/routes.mjs';
 import { deviceTokenFromRequest, readA2AToken, safeTokenEqual, tokenFromRequest } from './a2a-auth.mjs';
 import { mcpTokenRequired } from './mcp-auth.mjs';
 import { createZiweiConnect } from './ziwei-connect.mjs';
@@ -150,7 +151,12 @@ function verifyDeviceRequest(repo, req) {
   const token = deviceTokenFromRequest(req);
   if (!token) return null;
   const workspaceSlug = deviceWorkspaceForRequest(repo, req);
-  const deviceId = req.body?.deviceId || req.body?.device_id || req.query?.deviceId || req.query?.device_id || null;
+  // Only the explicit device heartbeat route gives params.id device meaning.
+  // Task/action routes use the same parameter name for unrelated resources.
+  const heartbeatDeviceId = /^\/api\/workspaces\/[^/]+\/devices\/[^/]+\/heartbeat\/?$/i.test(String(req.originalUrl || req.path || '').split('?')[0]) ? req.params?.id : null;
+  const suppliedDeviceIds = [heartbeatDeviceId, req.body?.deviceId, req.body?.device_id, req.query?.deviceId, req.query?.device_id].filter(value => value != null && value !== '');
+  if (new Set(suppliedDeviceIds.map(String)).size > 1) return null;
+  const deviceId = suppliedDeviceIds[0] || null;
   const credential = repo.authenticateDeviceToken(token, { workspaceSlug, deviceId });
   if (!credential) return null;
   // A paired credential is bound to one machine. Never allow the request body
@@ -162,7 +168,13 @@ function verifyDeviceRequest(repo, req) {
 function requireDeviceCredential(repo) {
   return (req, res, next) => {
     const credential = verifyDeviceRequest(repo, req);
-    if (credential) { req.deviceCredential = credential; return next(); }
+    if (credential) {
+      req.deviceCredential = credential;
+      // Missing caller input must never select the repository's legacy default
+      // device instead of the authenticated paired computer.
+      if (/\/heartbeat\/?$/i.test(String(req.originalUrl || req.path || '').split('?')[0])) req.body = { ...(req.body || {}), deviceId: credential.deviceId };
+      return next();
+    }
     if (!req.app.locals.requireDeviceAuth && !deviceTokenFromRequest(req)) return next();
     return res.status(401).json({ error: '需要有效的 ziwei_user 设备凭证' });
   };
@@ -340,6 +352,8 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   // limit plus encoding and envelope overhead without accepting unbounded
   // request bodies.
   app.use(express.json({limit:'16mb'}));
+  const unifiedIdentity=installUnifiedIdentity(app,repo.db,options.identityOptions);
+  if(unifiedIdentity) {app.locals.authBypass=false;app.locals.requireDeviceAuth=true;}
   app.get('/api/mcp-oauth/callback',(req,res)=>{
     res.setHeader('Cache-Control','no-store');res.setHeader('Referrer-Policy','no-referrer');res.setHeader('Content-Security-Policy',"default-src 'none'; frame-ancestors 'none'; base-uri 'none'");
     try {botMcpConnections.deliver(req.query);res.type('html').send('<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>紫薇 · MCP 授权</title><h2>已收到授权</h2><p>员工正在验证连接。请返回紫薇员工页面，结果会自动更新。</p></html>');}
@@ -349,9 +363,9 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
     const handler=createProductionApiIdentityHandler({db:repo.db,hostId:privateIdentity.hostId,trust:privateIdentity.trust},productionIdentityIo);
     app.post('/internal/preservation/identity',handler);
   }
-  const authBypass = options.requireAuth === false || (options.memory === true && options.requireAuth !== true);
+  const authBypass = !unifiedIdentity && (options.requireAuth === false || (options.memory === true && options.requireAuth !== true));
   app.locals.authBypass = authBypass;
-  app.locals.requireDeviceAuth = options.requireDeviceAuth === undefined ? !authBypass : Boolean(options.requireDeviceAuth);
+  app.locals.requireDeviceAuth = unifiedIdentity ? true : (options.requireDeviceAuth === undefined ? !authBypass : Boolean(options.requireDeviceAuth));
   app.locals.a2aToken = () => readA2AToken({ create: !authBypass });
   // The certificate is public material, but the endpoint remains explicitly
   // opt-in through a configured file so an accidental deployment cannot expose
@@ -401,7 +415,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   app.post('/terminal-mcp/v1/workspaces/:slug/employees/:id/call', async(req,res,next)=>{
     try{res.setHeader('Cache-Control','no-store');res.json(await phoneMcp.call(req.params.slug,req.params.id,tokenFromRequest(req),req.body || {}));}catch(error){const rejected=phoneMcp.callFailure(error);if(rejected)return res.status(Number(error.status)>=400&&Number(error.status)<=599?Number(error.status):400).json(rejected);next(error);}
   });
-  app.use('/api', sessionMiddleware(auth, { bypass: authBypass }));
+  app.use('/api', unifiedIdentity?.apiGuard || sessionMiddleware(auth, { bypass: authBypass }));
   app.use('/api/workspaces/:slug', workspaceMembershipGuard(auth, { bypass: authBypass }));
   app.use('/api', resourceWorkspaceGuard(repo, auth, { bypass: authBypass }));
   // Keep one policy for workspace resources. Individual routes retain their
@@ -820,7 +834,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
     res.setHeader('Cache-Control', 'no-store');
     res.json(repo.requestManagementMcpRetry(req.params.slug, String(req.body?.deviceId || ''), employeeContext(req)));
   });
-  const mcpGuard = mcpTokenRequired({ ...mcpOptions, authorize: managementBootstrap.authorize });
+  const mcpGuard = unifiedIdentity?.mcpGuard || mcpTokenRequired({ ...mcpOptions, authorize: managementBootstrap.authorize });
   const mcpContext = req => ({ actorUserId: req.mcpCredential.actorUserId, actorRole: req.mcpCredential.actorRole, deviceScope: req.mcpCredential.deviceScope, deviceCredentialDeviceId: req.mcpCredential.deviceId, authenticatedMcp:true, enforceEmployeeVisibility: true, enforceDeviceOwnership: true });
   const mcpEmployeeGuard = (req, _res, next) => {
     try {
@@ -1046,6 +1060,7 @@ export function attachRealtimeWebSocket(server, app, { pathPrefix = '/api/worksp
       if (!slug) { reject(socket, 404, 'Not Found'); return; }
       const origin = String(req.headers.origin || '');
       if (origin && origin !== allowedOrigin) { reject(socket, 403, 'Forbidden'); return; }
+      if(app.locals.identity) {reject(socket,403,'Forbidden');return;}
       const auth = app.locals.auth;
       const bypass = app.locals.authBypass === true;
       const principal = bypass ? null : auth?.authenticate(req);

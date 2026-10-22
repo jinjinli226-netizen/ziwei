@@ -3,7 +3,7 @@ export class CliError extends Error {
   constructor(code,message,details={}) {super(message);this.name='CliError';this.code=code;this.details=details;}
 }
 export const fail=(code,message,details)=>{throw new CliError(code,message,details);};
-const sensitiveKey=/(?:password|passwd|secret|token|cookie|authorization|api[_-]?key|private[_-]?key|credential|bearer|^session$)/i;
+const sensitiveKey=/(?:password|passwd|secret|token|cookie|authorization|api[_-]?key|private[_-]?key|credential|bearer|device[_-]?code|code[_-]?verifier|^session$)/i;
 const protocolKeys=new Set(['schemaVersion','service','ok','data','error','requestId','code','message','details','httpStatus','nativeCode','native','operation','state','completed','nativeState','serverReceiptId','receiptKind','resultQuery']);
 function publicAuthorizationUrl(key,value){
   if(key!=='authorizationUrl'||typeof value!=='string')return false;
@@ -15,7 +15,7 @@ export function redact(value,secrets=[]) {
     let output=input;
     for(const secret of known) output=output.split(secret).join('[REDACTED]');
     return output.replace(/\bBearer\s+[A-Za-z0-9._~+\/-]+=*/gi,'Bearer [REDACTED]')
-      .replace(/((?:password|passwd|[\w-]*secret|[\w-]*token|api[_-]?key|authorization|cookie)["']?\s*[=:]\s*)(?:"[^"]*"|'[^']*'|[^\s,;}&]+)/gi,'$1[REDACTED]');
+      .replace(/((?:password|passwd|[\w-]*secret|[\w-]*token|device[_-]?code|code[_-]?verifier|api[_-]?key|authorization|cookie)["']?\s*[=:]\s*)(?:"[^"]*"|'[^']*'|[^\s,;}&]+)/gi,'$1[REDACTED]');
   };
   const walk=(node,depth)=>{
     if(depth>50)return '[TRUNCATED]';
