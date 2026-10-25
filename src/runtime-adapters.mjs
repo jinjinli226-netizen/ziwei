@@ -1,3 +1,6 @@
+import {redactBoundBotSecret} from './bot-secret-output.mjs';
+import {loadBotProviderCredential,hasLocalBotProviderCredential} from './bot-provider-credential-client.mjs';
+import {createBotInteractionBridge} from './bot-interaction-client.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -782,10 +785,12 @@ export function withBotTurnLimitValidation(result,context,prepared) {
   return {...result,botValidation:{...validation,effective:{...validation.effective,turnLimit:{...turnLimit,status:'validated'}}}};
 }
 
-export async function validateHermesBotRuntimeSupervised({context,baseHome,privateDirectory,workspace,apiBase,binary,signal,onSupervision}={}) {
+export async function validateHermesBotRuntimeSupervised({context,baseHome,privateDirectory,workspace,apiBase,binary,deviceToken,actionId,signal,onSupervision}={}) {
   const profile=context.sourceProfile || 'default',prepared=prepareHermesBotHome({context,sourceHome:hermesProfileHome(profile,{baseHome}),privateDirectory,workspace,apiBase}),overlay=createHermesExecutionOverlay({profile,baseHome,privateDirectory:path.join(privateDirectory,'overlays')});
   const env={...process.env,HERMES_HOME:overlay.sourceHome,HERMES_MANAGED_DIR:overlay.home,...prepared.env};
   try {
+    if(deviceToken){const secret=await loadBotProviderCredential({apiBase,workspace,deviceId:context.deviceId,deviceToken},context,{signal,actionId});if(secret.independent){Object.assign(env,{ZIWEI_BOT_PROVIDER_KEY:secret.key,ZIWEI_BOT_KEY_PROVIDER:secret.provider,ZIWEI_BOT_KEY_ENDPOINT:prepared.config.model.base_url});prepared.receipt.authMode='employee-independent-key';secret.key=null;}}
+    else if(context.providerCredentialIndependent||hasLocalBotProviderCredential({apiBase,workspace,deviceId:context.deviceId},context.employeeId))throw new Error('BOT_SECRET_DEVICE_AUTH_REQUIRED');
     const launcher=binary || discoverInstalledRuntimes().runtimes.Hermes?.binary;if(!launcher)throw new Error('目标电脑未发现 Hermes CLI');
     const spec=hermesMcpSpawnSpec(launcher,['--profile',profile],{env});spec.args.splice(spec.modeInsertIndex??5,0,'--config-only');
     const execution=await runBotValidationProcess({...spec,cwd:process.cwd(),env},{signal,onSupervision});
@@ -797,11 +802,12 @@ export async function validateHermesBotRuntimeSupervised({context,baseHome,priva
     if(reasoning&&reasoning.status!=='matched')return {status:'failed',code:'BOT_REASONING_UNSATISFIED',error:'原生实际推理等级与明确请求不一致；未启动模型',result:{botValidation:{valid:false,schemaVersion:1,employeeId:context.employeeId,revision:context.revision,effective:{reasoning}},externalModelCalls:0,processExit:error.processExit}};
     const rejection=String(error.stderr||'').match(/Hermes Bot bootstrap rejected before model startup: (BOT_REASONING_[A-Z_]+)/)?.[1];
     if(context.config.reasoningEffort&&rejection)return {status:'failed',code:rejection,error:'原生明确推理配置被拒绝；未启动模型',result:{botValidation:{valid:false,schemaVersion:1,employeeId:context.employeeId,revision:context.revision,effective:{reasoning:{requested:context.config.reasoningEffort,actual:null,status:'rejected',code:rejection}}},externalModelCalls:0,processExit:error.processExit}};
-    return {status:'failed',code:'BOT_VALIDATION_FAILED',error:`Hermes 配置检查失败；未启动模型。${redactSecrets(String(error.stderr||error.message)).slice(0,800)}`,result:{processExit:error.processExit||null}};
+    return {status:'failed',code:'BOT_VALIDATION_FAILED',error:`Hermes 配置检查失败；未启动模型。${redactSecrets(redactBoundBotSecret(String(error.stderr||error.message),env.ZIWEI_BOT_PROVIDER_KEY)).slice(0,800)}`,result:{processExit:error.processExit||null}};
   } finally {overlay.cleanup();}
 }
 
 export function validateHermesBotRuntime({context,baseHome,privateDirectory,workspace,apiBase,binary}={}) {
+  if(context.providerCredentialIndependent||hasLocalBotProviderCredential({apiBase,workspace,deviceId:context.deviceId},context.employeeId))throw new Error('BOT_SECRET_ASYNC_VALIDATION_REQUIRED');
   const profile=context.sourceProfile || 'default';
   const prepared=prepareHermesBotHome({context,sourceHome:hermesProfileHome(profile,{baseHome}),privateDirectory,workspace,apiBase});
   const overlay=createHermesExecutionOverlay({profile,baseHome,privateDirectory:path.join(privateDirectory,'overlays')});
@@ -821,7 +827,7 @@ export function validateHermesBotRuntime({context,baseHome,privateDirectory,work
     if(reasoning?.status!=='matched'&&reasoning)return{status:'failed',code:'BOT_REASONING_UNSATISFIED',error:'原生实际推理等级与明确请求不一致；未启动模型',result:{botValidation:{valid:false,schemaVersion:1,employeeId:context.employeeId,revision:context.revision,effective:{reasoning}},externalModelCalls:0}};
     const rejection=String(error.stderr || '').match(/Hermes Bot bootstrap rejected before model startup: (BOT_REASONING_[A-Z_]+)/)?.[1];
     if(context.config.reasoningEffort&&rejection)return{status:'failed',code:rejection,error:'原生明确推理配置被拒绝；未启动模型',result:{botValidation:{valid:false,schemaVersion:1,employeeId:context.employeeId,revision:context.revision,effective:{reasoning:{requested:context.config.reasoningEffort,actual:null,status:'rejected',code:rejection}}},externalModelCalls:0}};
-    throw new Error(`Hermes 配置检查失败；未启动模型。${redactSecrets(String(error.stderr || error.message || '')).slice(0,800)}`);
+    throw new Error(`Hermes 配置检查失败；未启动模型。${redactSecrets(redactBoundBotSecret(String(error.stderr || error.message || ''),env.ZIWEI_BOT_PROVIDER_KEY)).slice(0,800)}`);
   } finally {overlay.cleanup();}
 }
 
@@ -833,7 +839,7 @@ function hasCredential(value) {
   });
 }
 
-export function hermesProfileReadiness(profile, { baseHome = null, selectedProfileHome = null } = {}) {
+export function hermesProfileReadiness(profile, { baseHome = null, selectedProfileHome = null, independentCredential = false } = {}) {
   const name = normalizeRuntimeProfile(profile) || 'default';
   const selectedHome = selectedProfileHome || hermesProfileHome(name, { baseHome });
   const base = { authentication: 'missing', provider: 'missing', ready: false, source: 'profile-files' };
@@ -842,7 +848,7 @@ export function hermesProfileReadiness(profile, { baseHome = null, selectedProfi
   try { config = parseYaml(fs.readFileSync(path.join(selectedHome, 'config.yaml'), 'utf8')) || {}; }
   catch (error) { return { ...base, code: error.code === 'ENOENT' ? 'provider_missing' : 'profile_config_invalid', reason: `Hermes profile ${name} 缺少有效 provider 配置；请在该 profile 运行 hermes setup` }; }
   const provider = String(config.model?.provider || config.provider || '').trim();
-  if (!provider || ['auto', 'none'].includes(provider)) return { ...base, code: 'provider_missing', reason: `Hermes profile ${name} 未指定 provider；请在该 profile 运行 hermes setup` };
+  if (!independentCredential && (!provider || ['auto', 'none'].includes(provider))) return { ...base, code: 'provider_missing', reason: `Hermes profile ${name} 未指定 provider；请在该 profile 运行 hermes setup` };
   let credentialHome=selectedHome,authMode='profile-native-store';
   const ownership=readPrivateJson(path.join(selectedHome,'ziwei-instance.json'));
   if(ownership.mode==='owned_profile'){
@@ -852,6 +858,7 @@ export function hermesProfileReadiness(profile, { baseHome = null, selectedProfi
       credentialHome=source;authMode='source-native-store';
     }catch{return{...base,code:'profile_binding_invalid',reason:'Bot 专属 Profile 的认证来源绑定不匹配'};}
   }
+  if(independentCredential)return {...base,provider:'configured',authentication:'configured',ready:true,providerName:provider,authMode:'employee-independent-key'};
   const auth = readPrivateJson(path.join(credentialHome, 'auth.json'));
   const providerAuth = auth.providers?.[provider] || auth.credential_pool?.[provider];
   let dotEnv = '';
@@ -1090,8 +1097,11 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
   const profileBinding = resolvedRuntime === 'Hermes' && executionGuard ? executionGuard.select({sourceHome:hermesProfileHome(profile || 'default',{baseHome:profileBaseHome}),profile:profile || 'default',baseHome:profileBaseHome}) : null;
   const selectedProfileHome=profileBinding?.home;
   if(profileBinding) {profileBinding.verify({cwd});childEnv.HERMES_HOME=selectedProfileHome;childEnv.ZIWEI_EXECUTION_PROFILE_BOUND='1';}
+  let resolvedBotCredential=null;
+  if(resolvedRuntime==='Hermes'&&hermesBot&&botAuthority?.deviceToken&&managementMcp?.apiBase)resolvedBotCredential=await loadBotProviderCredential({apiBase:managementMcp.apiBase,workspace:hermesBot.workspace,deviceId:hermesBot.deviceId,deviceToken:botAuthority.deviceToken},hermesBot,{signal,actionId:botAuthority.actionId});
+  else if(hermesBot?.providerCredentialIndependent)throw new Error('BOT_SECRET_DEVICE_AUTH_REQUIRED');
   if (resolvedRuntime === 'Hermes') {
-    const readiness = hermesProfileReadiness(profile || 'default', { baseHome: childEnv.HERMES_HOME, selectedProfileHome });
+    const readiness = hermesProfileReadiness(profile || 'default', { baseHome: childEnv.HERMES_HOME, selectedProfileHome,independentCredential:resolvedBotCredential?.independent===true });
     if (!readiness.ready) return Promise.reject(new Error(readiness.reason));
   } else if (resolvedRuntime === 'Codex') {
     const readiness = runtimeReadiness('Codex', { codexHome: childEnv.CODEX_HOME || path.join(os.homedir(), '.codex') });
@@ -1115,6 +1125,7 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
   let reasoningProvider=null;
   let reasoningRejection=null;
   let maintenancePrepared=null;
+  let interactionBridge=null;
   let codexSession=null;
   let selectedModel = model || null;
   try {
@@ -1145,6 +1156,10 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
         launch.overlayHome=overlay.home;invocation.args.unshift('--profile',profile || 'default');
       }
       Object.assign(childEnv,botPrepared.env);creatorPrepared=botPrepared.receipt;
+      if(botAuthority?.deviceToken&&managementMcp?.apiBase){
+        const secret=resolvedBotCredential;
+        if(secret.independent){Object.assign(childEnv,{ZIWEI_BOT_PROVIDER_KEY:secret.key,ZIWEI_BOT_KEY_PROVIDER:secret.provider,ZIWEI_BOT_KEY_ENDPOINT:botPrepared.config.model.base_url});creatorPrepared.authMode='employee-independent-key';secret.key=null;}
+      }else if(hermesBot.providerCredentialIndependent||(managementMcp?.apiBase&&hasLocalBotProviderCredential({apiBase:managementMcp.apiBase,workspace:hermesBot.workspace,deviceId:hermesBot.deviceId},hermesBot.employeeId)))throw new Error('BOT_SECRET_DEVICE_AUTH_REQUIRED');
       if(botAuthority){if(typeof botAuthority.actionId!=='string'||typeof botAuthority.deviceToken!=='string'||!botAuthority.deviceToken)throw new Error('Bot 协作缺少受信执行凭据');Object.assign(childEnv,{ZIWEI_BOT_ACTION_ID:botAuthority.actionId,ZIWEI_BOT_DEVICE_TOKEN:botAuthority.deviceToken,ZIWEI_API_BASE:managementMcp.apiBase});}
       for(let i=invocation.args.length-2;i>=0;i--)if(invocation.args[i]==='--toolsets')invocation.args.splice(i,2);
       const selected=hermesBotToolsets(hermesBot.config,{management:Boolean(receipt)});
@@ -1181,10 +1196,16 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
       invocation=codexSession.invocation;
     }
   } catch (error) { codexSession?.close();maintenancePrepared?.close();cleanupOverlay(); return Promise.reject(error); }
+  // A missing/older relay does not disable ordinary work or claim that secure
+  // prompts are supported. Only an authenticated user chat can open this bridge.
+  if(hermesBot&&botAuthority?.deviceToken&&managementMcp?.apiBase&&hermesBot.config.permissions.mode!=='read_only'){
+    try{interactionBridge=await createBotInteractionBridge({apiBase:managementMcp.apiBase,workspace:hermesBot.workspace,deviceId:hermesBot.deviceId,deviceToken:botAuthority.deviceToken,context:hermesBot,actionId:botAuthority.actionId,signal,onWait:value=>onStage?.({type:'interaction',...value})});Object.assign(childEnv,interactionBridge.env);}
+    catch{onStage?.({type:'interaction',state:'unsupported',code:'BOT_INTERACTION_RELAY_UNAVAILABLE'});}
+  }
   childEnv = runtimeTerminalEnvironment({ runtime: resolvedRuntime, invocation, env: childEnv });
   let spec;
   try { spec = resolvedRuntime === 'Hermes' && childEnv.HERMES_MANAGED_DIR && (receipt || hermesBot || profileBinding || controlledImages.length>1 || maintenancePrepared) ? hermesMcpSpawnSpec(discovered.binary, invocation.args, { env: childEnv, boundProfile:profileBinding, inputImages:controlledImages.length>1?controlledImages:[],maintenanceControl:maintenancePrepared?.controlFile }) : runtimeSpawnSpec(discovered.binary, invocation.args); }
-  catch (error) { codexSession?.close();maintenancePrepared?.close();cleanupOverlay(); return Promise.reject(error); }
+  catch (error) { interactionBridge?.close();codexSession?.close();maintenancePrepared?.close();cleanupOverlay(); return Promise.reject(error); }
   // The desktop user session may have a proxy configured in Windows Internet
   // Settings while the daemon process has no proxy variables in its service
   // environment. Propagate that proxy to each local CLI child, preserving any
@@ -1195,6 +1216,7 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
       if (!String(childEnv[key] || '').trim()) childEnv[key] = proxy;
     }
   }
+  const redactBoundSecret=value=>redactBoundBotSecret(value,childEnv.ZIWEI_BOT_PROVIDER_KEY);
   const state = { output: '', response: '', bytes: 0, truncated: false, lineBuffer: '' };
   const emitOutput = chunk => { if (!signal?.aborted) onOutput?.(chunk); };
   const emitStage = stage => { if (!signal?.aborted) onStage?.(stage); };
@@ -1223,13 +1245,13 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
     state.lineBuffer += String(chunk || '');
     const lines = state.lineBuffer.split(/\r?\n/);
     state.lineBuffer = lines.pop() || '';
-    for (const line of lines) parseRuntimeStreamLine(line, state, emitOutput, emitStage);
+    for (const line of lines) parseRuntimeStreamLine(redactBoundSecret(line), state, emitOutput, emitStage);
   };
-  if(beforeSpawn) {try{await runBeforeSpawnAdmission(beforeSpawn);}catch(error){codexSession?.close();maintenancePrepared?.close();cleanupOverlay();throw error;}}
+  if(beforeSpawn) {try{await runBeforeSpawnAdmission(beforeSpawn);}catch(error){interactionBridge?.close();codexSession?.close();maintenancePrepared?.close();cleanupOverlay();throw error;}}
   return new Promise((resolve, reject) => {
     let supervision;
     try { profileBinding?.verify({env:childEnv,cwd}); supervision = spawnSupervisedRuntime({ command: spec.command, args: spec.args, cwd: path.resolve(String(cwd || process.cwd())), env: childEnv, cleanupOnFailure: true }); }
-    catch (error) { codexSession?.close();maintenancePrepared?.close();cleanupOverlay(); reject(error); return; }
+    catch (error) { interactionBridge?.close();codexSession?.close();maintenancePrepared?.close();cleanupOverlay(); reject(error); return; }
     codexSession?.markSpawned();
     const { child } = supervision;
     let settled = false;
@@ -1237,6 +1259,7 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
     const finish = (result, error = null) => {
       if (settled) return;
       settled = true;
+      interactionBridge?.close();
       try{codexSession?.close();}catch(cleanupError){if(!error){if(result)result={...result,status:'failed',code:'CODEX_CONVERSATION_WRITE_FAILED',error:'Codex 会话映射未能持久保存；未重跑原任务'};else error=cleanupError;}}
       maintenancePrepared?.close();
       cleanupOverlay();
@@ -1264,7 +1287,7 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
     child.once('close', async (code, childSignal) => {
       const processExit = await supervision.completionEvidence;
       if (diagnosticBuffer) consumeDiagnostics('\n');
-      if (state.lineBuffer) parseRuntimeStreamLine(state.lineBuffer, state, emitOutput, emitStage);
+      if (state.lineBuffer) parseRuntimeStreamLine(redactBoundSecret(state.lineBuffer), state, emitOutput, emitStage);
       const exitResult = { runtime: resolvedRuntime, code, signal: childSignal, processExit, output: state.output, truncated: state.truncated };
       let codexSessionReceipt=null,codexSessionError=null;
       if(codexSession)try{if(launchError&&processExit.launched===false&&processExit.rootPid===null)codexSession.notLaunched();else codexSessionReceipt=codexSession.complete({processExit,code,signal:childSignal});}catch(error){codexSessionError=error;}

@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import {normalizeBotConfig,botFailure} from '../src/hermes-bot-config.mjs';
+import {normalizeBotConfigUpdate,botFailure} from '../src/hermes-bot-config.mjs';
 
 const canonical=value=>JSON.stringify(value,(_key,item)=>item&&typeof item==='object'&&!Array.isArray(item)?Object.fromEntries(Object.entries(item).sort(([a],[b])=>a.localeCompare(b))):item);
 const digest=value=>crypto.createHash('sha256').update(canonical(value)).digest('hex');
@@ -101,7 +101,7 @@ export function createBotDeferredConfig(repo,{resolve,get,update,validate,contro
     const checked=resolve(slug,id,context),actor=actorFor(checked.context,checked.ws),actorKey=canonical([actor.context.actorUserId||null,actor.credential?.id||null]);
     const names=input.connectMcpServers??[];
     if(!Array.isArray(names)||names.length>20||names.some(name=>typeof name!=='string'||!/^[a-z][a-z0-9_-]{0,63}$/.test(name))||new Set(names).size!==names.length)fail('BOT_DEFERRED_INPUT_INVALID');
-    const request={expectedRevision:input.expectedRevision,expectedControlEpoch:input.expectedControlEpoch,employee:employeePatch(input.employee),config:input.config===undefined?null:normalizeBotConfig(input.config),connectMcpServers:[...names]};
+    const request={expectedRevision:input.expectedRevision,expectedControlEpoch:input.expectedControlEpoch,employee:employeePatch(input.employee),config:input.config===undefined?null:normalizeBotConfigUpdate(input.config,parse(checked.row.config_json)),connectMcpServers:[...names]};
     const fingerprint=digest(request),prior=db.prepare('SELECT * FROM bot_deferred_configs WHERE workspace_id=? AND employee_id=? AND actor_key=? AND request_key=?').get(checked.ws.id,id,actorKey,input.idempotencyKey);
     if(prior){if(prior.fingerprint!==fingerprint)fail('BOT_DEFERRED_IDEMPOTENCY_CONFLICT');return{...get(slug,id,checked.context),deferred:true,duplicate:true,deferredConfig:projection(prior)};}
     if(checked.row.revision!==input.expectedRevision||checked.row.control_epoch!==input.expectedControlEpoch)fail('BOT_DEFERRED_VERSION_CHANGED');

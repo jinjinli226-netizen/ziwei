@@ -14,10 +14,10 @@ function fixture(t){
   return{repo,management,bots,create,employee};
 }
 
-test('new creation defaults enable the fixed core toolsets while legacy normalization remains unchanged',()=>{
-  const config=createDefaultBotConfig();assert.equal(config.permissions.mode,'execute');assert.deepEqual(config.toolsets,['web','browser','file','terminal','vision','skills','todo','memory','session_search','code_execution']);
-  assert.deepEqual(normalizeBotConfig().toolsets,[]);assert.equal(normalizeBotConfig().permissions.mode,'read_only');assert.deepEqual(normalizeBotConfig(config),config);
-  assert.notEqual(config.toolsets,BOT_DEFAULT_TOOLSETS);config.toolsets.pop();assert.equal(createDefaultBotConfig().toolsets.length,10);
+test('new creation defaults enable the fixed core toolsets including missing permissions during normalization',()=>{
+  const config=createDefaultBotConfig();assert.equal(config.permissions.mode,'execute');assert.deepEqual(config.toolsets,['web','browser','file','terminal','vision','skills','todo','memory','session_search','code_execution','ziwei_autonomy']);
+  assert.deepEqual(normalizeBotConfig().toolsets,BOT_DEFAULT_TOOLSETS);assert.equal(normalizeBotConfig().permissions.mode,'execute');assert.deepEqual(normalizeBotConfig(config),config);
+  assert.notEqual(config.toolsets,BOT_DEFAULT_TOOLSETS);config.toolsets.pop();assert.equal(createDefaultBotConfig().toolsets.length,11);
 });
 
 test('explicit chat-only, empty tool list and disabled settings remain authoritative',()=>{
@@ -26,7 +26,7 @@ test('explicit chat-only, empty tool list and disabled settings remain authorita
   assert.deepEqual(createDefaultBotConfig({toolsets:[]}).toolsets,[]);assert.equal(createDefaultBotConfig({toolsets:[]}).permissions.mode,'execute');
   assert.deepEqual(createDefaultBotConfig({toolsets:['file']}).toolsets,['file']);
   assert.throws(()=>createDefaultBotConfig({permissions:{mode:'read_only'},toolsets:['file']}),{code:'BOT_PERMISSION_CONFLICT'});
-  for(const name of ['all','cron','heartbeat','goals','kanban','delegation','bot_mode'])assert.throws(()=>createDefaultBotConfig({toolsets:[name]}),{code:'BOT_SCHEDULER_AUTHORITY'});
+  assert.deepEqual(createDefaultBotConfig({toolsets:['cron']}).toolsets,['ziwei_autonomy']);assert.throws(()=>createDefaultBotConfig({toolsets:['delegation']}),{code:'BOT_TARGET_NOT_AUTHORIZED'});
   for(const input of [null,[],{permissions:[]},{permissions:'execute'},{unknown:true}])assert.throws(()=>createDefaultBotConfig(input));
 });
 

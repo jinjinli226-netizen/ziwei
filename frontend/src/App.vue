@@ -3,6 +3,7 @@ import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, react
 import { ZiAvatar, ZiButton, ZiCard, ZiEmptyState, ZiFormField, ZiIcon, ZiInput, ZiMetricCard, ZiModal, ZiProgress, ZiStatusTag, ZiSwitch, ZiTabs, ZiTextarea } from '@ziwei/ui';
 import { API_BASE, api, setWorkspaceSlug, workspaceSlug } from './api.js';
 import {loadBotPageOptions,mergeBotRosterEmployee,workspaceDataKey} from './bot-page-load.js';
+import {hydrateRosterEmployee} from './bot-roster-entry.js';
 import {prependConversationHistory} from './conversation-history.mjs';
 import { connectWorkspaceRealtime } from './realtime.js';
 import WorkspaceShell from './components/WorkspaceShell.vue';
@@ -1536,7 +1537,24 @@ function openEmployeeModal(employee = null) {
   if (employeeForm.value.runtime === 'Hermes' && employeeTargetDeviceId.value) void refreshHermesProfilesForDevice();
 }
 function openEmployeeActions(employee) { employeeActionId.value = employeeActionId.value === employee?.id ? '' : (employee?.id || ''); }
-function botForEmployee(employee){return employeeBotsWorkspace.value===workspaceSlug()?employeeBots.value.find(bot=>bot.id===employee?.id):null;}
+function botForEmployee(employee){return employeeBotsWorkspace.value===workspaceSlug()?employeeBots.value.find(bot=>bot.id===employee?.id&&(bot.employee?.runtime||bot.runtime)==='Hermes'):null;}
+function rosterEmployee({workspace,employee}={}){
+  if(workspace!==workspaceSlug()||!employee?.id)return null;
+  const current=employees.value.find(item=>item.id===employee.id);
+  if(current)return current;
+  employees.value.push(employee);return employee;
+}
+let rosterEntryGeneration=0;
+function openRosterEmployeeChat(value){rosterEntryGeneration++;const employee=rosterEmployee(value);if(employee)return openEmployeeConversation(employee);}
+async function openRosterEmployeeSettings(value){
+  const generation=++rosterEntryGeneration,workspaceGeneration=workspaceLoadGeneration;
+  try{
+    const employee=await hydrateRosterEmployee(value,{getWorkspace:workspaceSlug,fetchEmployees:api.employees,isCurrent:()=>generation===rosterEntryGeneration&&workspaceGeneration===workspaceLoadGeneration&&page.value==='bots'});
+    if(!employee)return;
+    const index=employees.value.findIndex(item=>item.id===employee.id);if(index>=0)employees.value.splice(index,1,employee);else employees.value.push(employee);
+    return openEmployeeProfile(employee);
+  }catch(error){if(generation===rosterEntryGeneration&&value.workspace===workspaceSlug())notify(error.message);}
+}
 async function refreshEmployeeBots(workspace,generation){
   try{const result=await api.bots(workspace);if(workspace!==workspaceSlug()||generation!==workspaceLoadGeneration)return;employeeBots.value=result.bots||[];employeeBotsWorkspace.value=workspace;
     for(const bot of employeeBots.value){const index=employees.value.findIndex(employee=>employee.id===bot.id);if(index>=0)employees.value.splice(index,1,mergeBotRosterEmployee(employees.value[index],bot.employee));}
@@ -1545,6 +1563,7 @@ async function refreshEmployeeBots(workspace,generation){
 function botChanged(){void refreshEmployeeBots(workspaceSlug(),workspaceLoadGeneration);}
 function returnBotToTeam(employee){navigate('members');employeeActionId.value=employee.id;}
 function selectBotRoute(id) {
+  rosterEntryGeneration++;
   botRouteId.value=id;botInitialTab.value='chat';history.pushState({},'',routePath('bots',id,botWorkspace.value));
 }
 function botSectionFromPath(){const value=new URLSearchParams(location.search).get('section');return ['chat','settings','capabilities','knowledge','collaboration','channels','proactive','routines','activity'].includes(value)?value:'chat';}
@@ -1798,7 +1817,7 @@ onMounted(async () => { applyDisplayPreferences(); if (page.value==='android-ins
             <button class="notice-dismiss" type="button" aria-label="关闭提示" @click="dismissToast"><X :size="15"/></button>
           </div>
         </Transition>
-        <BotWorkbench v-if="page==='bots'" :key="botWorkspace" :workspace="botWorkspace" :actor-id="authState.user?.id || ''" :bot-id="botRouteId" :initial-tab="botInitialTab" :models="loadedBotOptionsWorkspace===botWorkspace?models:[]" :skills="loadedBotOptionsWorkspace===botWorkspace?skills:[]" @select="selectBotRoute" @section="selectBotSection" @chat="openBotConversation" @creator="openBotCreator" @phone="openBotPhone" @employee="returnBotToTeam" @changed="botChanged"/>
+        <BotWorkbench v-if="page==='bots'" :key="botWorkspace" :workspace="botWorkspace" :actor-id="authState.user?.id || ''" :bot-id="botRouteId" :initial-tab="botInitialTab" :models="loadedBotOptionsWorkspace===botWorkspace?models:[]" :skills="loadedBotOptionsWorkspace===botWorkspace?skills:[]" @select="selectBotRoute" @section="selectBotSection" @chat="openBotConversation" @employee-chat="openRosterEmployeeChat" @employee-settings="openRosterEmployeeSettings" @creator="openBotCreator" @phone="openBotPhone" @employee="returnBotToTeam" @changed="botChanged"/>
         <section v-if="page==='inbox'&&!botChatView.shell&&conversationBotId&&selectedConversation?.employee_id===conversationBotId" class="bot-chat-toolbar" aria-label="当前 Bot 快捷操作"><span>Hermes Bot · {{selectedConversation?.employee?.name || activeConversationEmployee?.name}}</span><div><button class="pill" @click="navigate('bots')">Bot 名册</button><button class="pill" @click="openBotSettings(conversationBotId)">Bot 设置</button><button class="pill" @click="openBotSettings(conversationBotId,'routines')">Routine</button><button class="pill" @click="openBotSettings(conversationBotId,'activity')">运行与控制</button></div></section>
         <div v-if="botChatView.pending" class="bot-chat-loading" role="status">正在打开这位 Bot 的主聊天…<button class="pill" @click="navigate('bots')">返回紫薇</button></div>
         <BotMainChat v-if="botChatView.ready" :bot="conversationBotBinding" :conversation="selectedConversation" :execution="conversationExecution" :events="executionEventRows(conversationExecution?.events||[])" v-model:draft="conversationDraft" :attachments="conversationAttachments" :device="selectedConversationDevice" :model-label="models.find(model=>model.id===(conversationBotBinding?.employee?.model_id||conversationModelId))?.label || conversationBotBinding?.employee?.model_id || '沿用 Profile 模型'" :working-directory="conversationWorkingDirectory" :send-pending="conversationSendPending" :attachment-reading="conversationAttachmentReading" :status-loading="conversationStatusLoading" :history-loading="conversationHistoryLoading" :history-error="conversationHistoryError" @load-history="loadEarlierConversationMessages" :send-error="conversationSendError" :stop-busy="botChatStopBusy" :reconcile-busy="botChatReconcileBusy" :finalization-busy="botChatFinalizationBusy" :can-stop="!failureFinalization(conversationExecution)&&!pendingBotFailureFinalization(conversationBotBinding)&&(conversationExecutionBusy||executionUncertain(conversationExecution))" :preview="previewMode" :work="botChatWork" :work-loading="botChatWorkLoading" :work-error="botChatWorkError" :preview-src="conversationAttachmentPreviewSrc" :size-label="conversationAttachmentSizeLabel" :forward-selecting="conversationForward.selecting" :forward-selected="conversationForward.messageIds" :forward-error="conversationForward.error" :forward-result="conversationForward.result" @forward-view="openForwardTargetConversation" :read-scope="conversationReadScope" @forward="startConversationForward($event)" @forward-select="startConversationForward($event,true)" @forward-toggle="conversationForwarder.toggle($event)" @forward-open="openConversationForward" @forward-cancel="conversationForwarder.cancel()" :on-visible-message="markVisibleConversationMessage" @send="sendConversationMessage" @retry-message="restoreConversationMessage" @settings="openBotSettings(conversationBotBinding.id,$event)" @return="openBotSettings(conversationBotBinding.id,'chat')" @directory="openConversationDirectoryPicker" @attachment="handleConversationAttachment" @paste-attachment="handleConversationPaste" @remove-attachment="removeConversationAttachment" @preview-image="openConversationImage" @download="downloadConversationAttachment" @stop="stopBotChat" @reconcile="reconcileBotChat" @finalize-failure="finalizeBotChatFailure" @refresh-work="loadBotChatWork" @phone="openBotPhone({workspace:workspaceSlug(),employeeId:conversationBotBinding.id})" @workspace-tasks="navigate('issues')"/>

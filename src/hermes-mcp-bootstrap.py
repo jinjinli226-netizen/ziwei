@@ -29,7 +29,7 @@ def validate_bot_toolsets(selected, central, native_toolsets):
     enabled = {name for name, entry in servers.items() if isinstance(entry, dict) and entry.get('enabled', True) is True}
     if any(name in native_toolsets or name == 'all' for name in enabled if servers[name].get('auth') == 'oauth'):
         raise UnsupportedNativeHermes('BOT_MCP_NAME_CONFLICT')
-    if any(not isinstance(name, str) or name == 'all' or name not in native_toolsets and name != 'ziwei_collaboration' and name not in enabled for name in selected):
+    if any(not isinstance(name, str) or name == 'all' or name not in native_toolsets and name not in {'ziwei_collaboration', 'ziwei_autonomy'} and name not in enabled for name in selected):
         raise UnsupportedNativeHermes('bot toolset unknown')
 
 
@@ -413,7 +413,8 @@ def prepare_creator_home(current, *, preserve_oauth_relay=False):
                     'ZIWEI_CREATOR_HOME', 'ZIWEI_CREATOR_SOURCE_HOME', 'ZIWEI_CREATOR_KEY',
                     'ZIWEI_CREATOR_WORKSPACE', 'ZIWEI_CREATOR_EMPLOYEE_ID', 'ZIWEI_CREATOR_PROFILE',
                     'ZIWEI_INSTANCE_KIND', 'ZIWEI_BOT_REVISION', 'ZIWEI_BOT_ACTION_ID', 'ZIWEI_BOT_DEVICE_TOKEN', 'ZIWEI_BOT_PROFILE_MODE', 'ZIWEI_BOT_REASONING_EFFORT',
-                    'HERMES_KANBAN_HOME', 'HERMES_KANBAN_DB'}
+                    'HERMES_KANBAN_HOME', 'HERMES_KANBAN_DB', 'ZIWEI_BOT_PROVIDER_KEY', 'ZIWEI_BOT_KEY_PROVIDER', 'ZIWEI_BOT_KEY_ENDPOINT',
+                    'ZIWEI_INTERACTION_PIPE', 'ZIWEI_INTERACTION_PIPE_KEY', 'ZIWEI_INTERACTION_BINDING'}
     # Only an explicit mcp.authorize child may receive the trusted device relay.
     # Native dotenv may not introduce these keys, and other modes lose them below.
     if is_bot and preserve_oauth_relay:
@@ -656,8 +657,15 @@ def run():
 
         config.load_config = isolated_bot_config
     isolation = confirm_creator_home(current, config, prepared_isolation)
+    if isolation and os.environ.get('ZIWEI_BOT_PROVIDER_KEY'):
+        isolation['authMode'] = 'employee-independent-key'
     if isolation:
         print('ZIWEI_CREATOR_ISOLATION:' + json.dumps(isolation), file=sys.stderr, flush=True)
+    if isolation and isolation.get('kind') == 'hermes-bot':
+        spec = importlib.util.spec_from_file_location('ziwei_provider_key', Path(__file__).with_name('hermes-provider-key.py'))
+        key_bridge = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(key_bridge)
+        key_bridge.install(UnsupportedNativeHermes, validate=config_only)
     reasoning_proof=None
     if isolation and isolation.get('kind')=='hermes-bot' and os.environ.get('ZIWEI_BOT_REASONING_EFFORT'):
         module=importlib.util.spec_from_file_location('ziwei_bot_reasoning',Path(__file__).with_name('hermes-bot-reasoning.py'))
@@ -712,6 +720,11 @@ def run():
                             'memory': effective.get('memory', {}).get('memory_enabled'),
                             'toolsets': selected}}, 'externalModelCalls': 0}))
         return 0
+    if isolation and isolation.get('kind') == 'hermes-bot' and 'ziwei_autonomy' in config.load_config().get('platform_toolsets', {}).get('cli', []):
+        spec = importlib.util.spec_from_file_location('ziwei_autonomy_tools', Path(__file__).with_name('hermes-autonomy-tools.py'))
+        autonomy = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(autonomy)
+        autonomy.install(isolation)
     if isolation and isolation.get('kind') == 'hermes-bot' and 'ziwei_collaboration' in config.load_config().get('platform_toolsets', {}).get('cli', []):
         spec = importlib.util.spec_from_file_location('ziwei_native_bridge', Path(__file__).with_name('hermes-native-bridge.py'))
         bridge = importlib.util.module_from_spec(spec)
@@ -765,8 +778,20 @@ def run():
         checkpoint = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(checkpoint)
         finish_maintenance = checkpoint.install(maintenance_control, str(Path(current['paths']['main']).parent.parent))
+    finish_interaction = None
+    if isolation and isolation.get('kind') == 'hermes-bot' and not (config_only or native_operation or gateway_worker):
+        interaction_spec = importlib.util.spec_from_file_location('ziwei_interaction_bridge', Path(__file__).with_name('hermes-interaction-bridge.py'))
+        interaction = importlib.util.module_from_spec(interaction_spec)
+        interaction_spec.loader.exec_module(interaction)
+        try:
+            finish_interaction = interaction.install_from_environment(str(Path(current['paths']['main']).parent.parent))
+        except (interaction.InteractionUnsupported, ImportError, AttributeError):
+            print('ZIWEI_INTERACTION:' + json.dumps({'schemaVersion': 1, 'state': 'unsupported', 'code': 'HERMES_INTERACTION_UNSUPPORTED'}), file=sys.stderr, flush=True)
+    for interaction_key in ('ZIWEI_INTERACTION_PIPE', 'ZIWEI_INTERACTION_PIPE_KEY', 'ZIWEI_INTERACTION_BINDING'):
+        os.environ.pop(interaction_key, None)
+        if prepared_isolation: prepared_isolation[3].pop(interaction_key, None)
     owned = isolation and isolation.get('kind') == 'hermes-bot' and isolation.get('mode') == 'owned_profile'
-    if not owned and maintenance_control is None:
+    if not owned and maintenance_control is None and finish_interaction is None:
         return native.main
     def managed_main():
         native_exit = None
@@ -779,6 +804,8 @@ def run():
             native_exit = error.code
         finally:
             try:
+                if finish_interaction:
+                    finish_interaction()
                 if owned:
                     finalize_owned_storage(current, isolation)
             finally:

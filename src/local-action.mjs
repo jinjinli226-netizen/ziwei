@@ -1,3 +1,5 @@
+import {normalizeNativeOperation,nativeIsExecution} from './hermes-native-contract.mjs';
+import {loadBotProviderCredential} from './bot-provider-credential-client.mjs';
 import fs from 'node:fs';
 import {executeHermesNative} from './hermes-native-runtime.mjs';
 import {createBotGatewayManager} from './hermes-gateway-runtime.mjs';
@@ -385,6 +387,7 @@ export function createLocalActionExecutor({runtimeDir, admissionHandledByDispatc
       if(!action.payload?.hermesBot)return;
       if(!deviceToken || action.payload.hermesBot.workspace!==workspace)throw new Error('Bot 缺少当前工作区已配对设备凭据');
       const bot=action.payload.hermesBot;
+      if(!['hermes.bot.provision','directory.inspect','device.directory.inspect'].includes(type)&&!(type==='hermes.bot.native'&&!nativeIsExecution(normalizeNativeOperation(action.payload.nativeOperation)))){const credential=await loadBotProviderCredential({apiBase,workspace,deviceId,deviceToken},bot,{signal:context.signal,actionId:action.id});credential.key=null;}
       return requestBotStartAdmission({apiBase,deviceToken,signal:context.signal,maintenanceAttempt,actionId:action.id,workspace,employeeId:bot.employeeId,deviceId,profile:bot.sourceProfile,revision:bot.revision,controlEpoch:bot.controlEpoch});
     };
     if (type === 'device.workspace.connect') {
@@ -433,7 +436,7 @@ export function createLocalActionExecutor({runtimeDir, admissionHandledByDispatc
     }
     if(type==='hermes.bot.validate') {
       await authorizeBot();
-      return validateHermesBotRuntimeSupervised({context:action.payload.hermesBot,baseHome:hermesHomePath || hermesHome(),privateDirectory:path.join(runtimeDir,'bot-instances'),workspace,apiBase,signal:context.signal,onSupervision:context.onSupervision});
+      return validateHermesBotRuntimeSupervised({context:action.payload.hermesBot,baseHome:hermesHomePath || hermesHome(),privateDirectory:path.join(runtimeDir,'bot-instances'),workspace,apiBase,deviceToken,actionId:action.id,signal:context.signal,onSupervision:context.onSupervision});
     }
     // Native model calls intentionally use the installed local CLI.  This is
     // the one action family with full local permissions; the ordinary file and

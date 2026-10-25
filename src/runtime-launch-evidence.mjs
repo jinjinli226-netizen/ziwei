@@ -29,7 +29,7 @@ export async function requestBotStartAdmission({apiBase,deviceToken,signal,maint
   let response;
   try {
     response=await fetchImpl(`${String(apiBase).replace(/\/$/,'')}/a2a/v1/actions/${encodeURIComponent(admission.actionId)}/bot-start`,{
-      method:'POST',headers:{'content-type':'application/json','x-ziwei-device-token':deviceToken},
+      method:'POST',headers:{'content-type':'application/json','x-ziwei-device-token':deviceToken,'x-ziwei-bot-secret-protocol':'1'},
       body:JSON.stringify({workspace:admission.workspace,...(maintenanceAttempt?{maintenanceAttempt}:{})}),
       signal:signal?AbortSignal.any([signal,AbortSignal.timeout(10000)]):AbortSignal.timeout(10000),redirect:'error',
     });

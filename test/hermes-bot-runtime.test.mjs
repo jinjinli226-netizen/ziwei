@@ -18,7 +18,7 @@ test('Bot home adapter exists and configuration is applied without cloning auth 
     const config=yaml(fs.readFileSync(path.join(first.home,'config.yaml'),'utf8'));
     assert.equal(config.model.default,'configured-model');assert.equal(config.memory.memory_enabled,false);assert.equal(config.agent.max_turns,Number.MAX_SAFE_INTEGER);
     assert.equal(config.agent.run_budget_seconds,86400);
-    assert.deepEqual(config.agent.disabled_toolsets,['all']);assert.equal(config.agent.bot_mode_protocol,false);
+    assert.deepEqual(config.agent.disabled_toolsets,['cronjob','delegation','kanban']);assert.equal(config.agent.bot_mode_protocol,false);
     assert.equal(fs.existsSync(path.join(first.home,'auth.json')),false);assert.equal(fs.existsSync(path.join(first.home,'memories','MEMORY.md')),false);
     assert.match(fs.readFileSync(path.join(first.home,'SOUL.md'),'utf8'),/独立人格/);
     fs.mkdirSync(path.join(first.home,'memories'));fs.writeFileSync(path.join(first.home,'memories','MEMORY.md'),'A LEARNED');
@@ -26,7 +26,7 @@ test('Bot home adapter exists and configuration is applied without cloning auth 
     assert.equal(fs.readFileSync(path.join(first.home,'memories','MEMORY.md'),'utf8'),'A LEARNED');
     assert.equal(fs.readFileSync(path.join(source,'auth.json'),'utf8'),'source-private-auth');
     const otherProvider=runtime.prepareHermesBotHome({...args,context:{...args.context,employeeId:'employee_other_provider',config:{provider:'anthropic'}}});
-    assert.equal(otherProvider.config.model.provider,'anthropic');assert.equal(otherProvider.config.model.base_url,undefined);
+    assert.equal(otherProvider.config.model.provider,'anthropic');assert.equal(otherProvider.config.model.base_url,'https://api.anthropic.com');
   }finally{fs.rmSync(root,{recursive:true,force:true});}
 });
 

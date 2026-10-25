@@ -18,7 +18,15 @@ export function botDraft(bot) {
 }
 export function botDraftDirty(bot,draft) {return Boolean(bot&&draft&&JSON.stringify(draft)!==JSON.stringify(botDraft(bot)));}
 export function botWorkbenchReadOptions(tab) {return {runs:tab==='activity',routines:tab==='chat'||tab==='routines'};}
-export function createBotWorkbench({api,wrap=value=>value,wait=ms=>new Promise(resolve=>setTimeout(resolve,ms)),capabilityCheckAttempts=60,getReadOptions=()=>({runs:true,routines:true})}) {
+export const botRosterRuntime=bot=>bot?.employee?.runtime||bot?.runtime||'unconfigured';
+export function botRosterPresence(bot){
+  if(botRosterRuntime(bot)==='Hermes')return botPresence(bot);
+  if(botRosterRuntime(bot)==='unconfigured')return{label:'待配置运行时',tone:'muted'};
+  return{label:({active:'员工已启用',paused:'已暂停',archived:'已归档',draft:'待配置'})[bot.employee?.status]||'员工状态待核实',tone:'muted'};
+}
+export function botRosterRuntimeOptions(bots=[]) {return [{value:'all',label:'全部'},...[...new Set(bots.map(botRosterRuntime))].map(value=>({value,label:value==='unconfigured'?'未配置运行时':value}))];}
+export function filterBotRoster(bots=[],{runtime='all',search=''}={}) {const query=search.trim().toLowerCase();return bots.filter(bot=>(runtime==='all'||botRosterRuntime(bot)===runtime)&&`${bot.employee?.name||''} ${bot.employee?.description||''} ${botRosterRuntime(bot)}`.toLowerCase().includes(query));}
+export function createBotWorkbench({api,wrap=value=>value,wait=ms=>new Promise(resolve=>setTimeout(resolve,ms)),capabilityCheckAttempts=60,getReadOptions=()=>({runs:true,routines:true}),onEmployeeSelect=()=>{}}) {
   const scope=createBotRequestScope();let workspaceGeneration=0,listGeneration=0;
   const state=wrap({workspace:'',selectedId:'',bots:[],bot:null,draft:null,runs:[],routines:[],loading:false,reading:false,recordsReading:false,busy:false,capabilityBusy:false,error:'',errorCode:'',notice:'',conflict:false,writeUnknown:false,pendingOperation:null});
   const apply = bot => {
@@ -76,6 +84,12 @@ export function createBotWorkbench({api,wrap=value=>value,wait=ms=>new Promise(r
     finally{if(scope.current(request))state.reading=false;}
   }
   async function select(id) {
+    const rosterEntry=state.bots.find(item=>item.id===id);
+    if(rosterEntry&&botRosterRuntime(rosterEntry)!=='Hermes'){
+      scope.select(state.workspace,'');state.selectedId='';state.bot=null;state.draft=null;state.runs=[];state.routines=[];
+      state.reading=false;state.recordsReading=false;state.error='';state.pendingOperation=null;state.writeUnknown=false;
+      await onEmployeeSelect({workspace:state.workspace,employee:rosterEntry.employee,conversationId:rosterEntry.main_conversation_id||null});return;
+    }
     if(state.selectedId===id && state.bot)return;
     scope.select(state.workspace,id);state.selectedId=id;state.bot=null;state.draft=null;state.runs=[];state.routines=[];state.reading=false;state.recordsReading=false;state.error='';state.errorCode='';state.notice='';state.conflict=false;state.writeUnknown=false;state.busy=false;state.capabilityBusy=false;
     state.pendingOperation=readPending(pendingKey(state.workspace,id));state.writeUnknown=Boolean(state.pendingOperation);
@@ -83,7 +97,8 @@ export function createBotWorkbench({api,wrap=value=>value,wait=ms=>new Promise(r
   }
   async function setWorkspace(workspace,id='') {
     workspaceGeneration++;state.workspace=workspace;state.bots=[];state.selectedId='';
-    await Promise.all([select(id),list()]);
+    const generation=workspaceGeneration,clearing=select(''),selection=state.selectedId,listing=list();await clearing;await listing;
+    if(generation===workspaceGeneration&&state.selectedId===selection&&id)await select(id);
   }
   async function mutate(operation,notice,{readback=false,resetDraft=false,recovering=false,verifyReadback=null}={}) {
     if(state.busy || (state.writeUnknown&&!recovering) || !state.bot)return false;

@@ -1,3 +1,4 @@
+import {syncBotProviderCredentials} from '../src/bot-provider-credential-client.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
@@ -275,6 +276,7 @@ async function performHeartbeatConnection(connection) {
       });
       await registered.arrayBuffer();
     } catch {}
+    if(config.deviceToken&&process.platform==='win32'){try{await syncBotProviderCredentials(config,{signal:AbortSignal.any([AbortSignal.timeout(8000),shutdownAbort.signal])});}catch{/* Status remains pending; never log request contents. */}}
     log('heartbeat', { ok: true, workspace: config.workspace, apiBase: config.apiBase, deviceId: body.device?.id || payload.deviceId, status: body.device?.status || 'online', runtimes: Object.fromEntries(Object.entries(runtimeDiscovery.runtimes).map(([name, item]) => [name, item.status === 'available' ? item.version : item.detection?.reasonCode || item.status])) });
   } catch (error) { log('heartbeat_failed', { workspace: config.workspace, error: error.message, apiBase: config.apiBase }); } finally { rotate(); }
 }
@@ -291,6 +293,7 @@ function daemonHeaders(connection, { json = false, a2a = false } = {}) {
 async function postAction(connection, pathname, body, { timeoutMs = ACTION_TRANSPORT_BUDGETS.ack } = {}) {
   const config = connection.config;
   const headers = daemonHeaders(connection, { json: true, a2a: true });
+  if(/\/a2a\/v1\/actions\/[^/]+\/result$/.test(pathname))headers['x-ziwei-bot-secret-protocol']='1';
   const response = await fetch(`${config.apiBase}${pathname}`, { method:'POST', headers, body:JSON.stringify(body), signal:AbortSignal.timeout(timeoutMs) });
   let payload;try { payload=await response.json(); } catch { throw Object.assign(new Error(`Invalid A2A response (HTTP ${response.status})`), response.ok ? {} : {status:response.status}); }
   if (!response.ok) throw Object.assign(new Error(payload.error || `A2A HTTP ${response.status}`), {status:response.status});

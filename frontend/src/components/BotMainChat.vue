@@ -12,6 +12,7 @@ import {failureFinalization,pendingBotFailureFinalization,finalizationPresentati
 import ConversationForwardCard from './ConversationForwardCard.vue';
 import {isConversationForward} from '../conversation-forward-card.mjs';
 import {createMessageReadObserver} from '../conversation-read.mjs';
+import BotInteractionCard from './BotInteractionCard.vue';
 const props=defineProps({bot:Object,conversation:Object,execution:Object,events:{type:Array,default:()=>[]},draft:{type:String,default:''},attachments:{type:Array,default:()=>[]},device:Object,modelLabel:String,workingDirectory:String,sendPending:Boolean,attachmentReading:Boolean,statusLoading:Boolean,historyLoading:Boolean,historyError:String,sendError:String,stopBusy:Boolean,reconcileBusy:Boolean,finalizationBusy:Boolean,canStop:Boolean,preview:Boolean,work:{type:Object,default:()=>({runs:[],routines:[],tasks:[]})},workLoading:Boolean,workError:String,previewSrc:Function,sizeLabel:Function,forwardSelecting:Boolean,forwardSelected:{type:Array,default:()=>[]},forwardError:String,forwardResult:Object,readScope:String,onVisibleMessage:Function});
 const emit=defineEmits(['load-history','forward-view','forward','forward-select','forward-toggle','forward-open','forward-cancel','retry-message','update:draft','send','settings','return','directory','attachment','paste-attachment','remove-attachment','preview-image','download','stop','reconcile','finalize-failure','refresh-work','phone','workspace-tasks']);
 function attachReadObserver(element){const scope=props.readScope;element._readScope=scope;element._messageRead=createMessageReadObserver(element,messageId=>{if(scope===props.readScope)return props.onVisibleMessage?.({messageId,scope});return false;});}
@@ -99,6 +100,7 @@ onBeforeUnmount(()=>{disposed=true;renderGeneration++;prependAnchor=null;window.
     </header>
     <div class="bot-chat-body" :class="{'with-panel':panel}">
       <main class="bot-chat-main">
+        <BotInteractionCard v-if="bot?.employee?.runtime==='Hermes'&&bot?.workspace&&bot?.id&&!preview" :workspace="bot.workspace" :employee-id="bot.id" :action-id="execution?.id||bot.latest_run?.id"/>
         <div ref="timeline" v-conversation-read class="bot-chat-timeline" aria-live="polite" tabindex="0" aria-label="聊天记录" @scroll="timelineScrolled" @wheel.passive="timelineWheel" @touchstart.passive="timelineTouchStart" @touchmove.passive="timelineTouchMove" @pointerdown="timelinePointer" @keydown="timelineKey" @load.capture="timelineMediaLoaded">
           <div class="bot-chat-transcript">
             <div v-if="hasEarlierHistory||historyLoading||historyError" class="bot-chat-history" :aria-busy="historyLoading"><button v-if="hasEarlierHistory" type="button" :disabled="historyLoading||historyRequested" @click="requestEarlierHistory"><RefreshCw v-if="historyLoading" :size="13"/>{{historyLoading?'正在加载更早消息…':historyError?'重试加载更早消息':'加载更早消息'}}</button><p v-if="historyError" role="alert">{{historyError}}</p></div>

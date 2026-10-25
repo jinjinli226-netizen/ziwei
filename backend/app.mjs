@@ -28,6 +28,10 @@ import {createBotForceAbandon} from './bot-force-abandon.mjs';
 import {createBotFailureFinalization} from './bot-failure-finalization.mjs';
 import {createDeviceUpdateService} from './device-updates.mjs';
 import {createActionMaintenanceService} from './action-maintenance.mjs';
+import {createBotProviderCredentialService} from './bot-provider-credentials.mjs';
+import {createBotAutonomyService} from './bot-autonomy.mjs';
+import {createBotInteractions} from './bot-interactions.mjs';
+import {botActionMaintenance} from './bots.mjs';
 import { toolDefinitions as managementTools } from '../scripts/ziwei-mcp.mjs';
 
 const allowedOrigin = process.env.FRONTEND_ORIGIN || 'http://127.0.0.1:5178';
@@ -304,6 +308,13 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   const employeeTemplates = createEmployeeTemplateService(repo, management);
   const managementBootstrap = createManagementBootstrap(repo, options);
   const botMcpConnections=createBotMcpConnections(repo,management.bots,{apiBase:managementBootstrap.apiBase,now:options.mcpOAuthNow});
+  const botProviderCredentials=createBotProviderCredentialService(repo,{bots:management.bots});
+  const botAutonomy=createBotAutonomyService(repo,{bots:management.bots});
+  const botInteractions=createBotInteractions(repo,management.bots);
+  const assertProviderRuntime=(actionId,credential,protocolVersion)=>{
+    const action=repo.getA2AAction(actionId);
+    if(action?.payload?.hermesBot&&(action.type==='hermes.bot.validate'||!botActionMaintenance(action.type,action.payload)))botProviderCredentials.assertRuntimeReady(actionId,credential,{protocolVersion});
+  };
   const botDeferredConfig=management.bots.deferredConfig;
   if(options.enableDeferredConfig!==false&&options.enableScheduler!==false)botDeferredConfig.start(botMcpConnections.deferredHandlers);
   const botHistoricalRecovery=createBotHistoricalRecovery(repo,{readA2AToken:()=>readA2AToken({create:true})});
@@ -320,6 +331,9 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   app.locals.phoneMcp = phoneMcp;
   app.locals.managementBootstrap = managementBootstrap;
   app.locals.botMcpConnections=botMcpConnections;
+  app.locals.botProviderCredentials=botProviderCredentials;
+  app.locals.botAutonomy=botAutonomy;
+  app.locals.botInteractions=botInteractions;
   app.locals.botDeferredConfig=botDeferredConfig;
   app.locals.botHistoricalRecovery=botHistoricalRecovery;
   app.locals.botForceAbandon=botForceAbandon;
@@ -398,6 +412,15 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   });
   app.post('/terminal-mcp/v1/workspaces/:slug/employees/:id/call', async(req,res,next)=>{
     try{res.setHeader('Cache-Control','no-store');res.json(await phoneMcp.call(req.params.slug,req.params.id,tokenFromRequest(req),req.body || {}));}catch(error){const rejected=phoneMcp.callFailure(error);if(rejected)return res.status(Number(error.status)>=400&&Number(error.status)<=599?Number(error.status):400).json(rejected);next(error);}
+  });
+  // Dedicated encrypted device channel; never accepts the shared A2A bearer.
+  for(const [method,route,operation] of [['post','register','register'],['get','deliveries','deliveries'],['post','ack','acknowledge']])app[method](`/api/workspaces/:slug/bot-provider-credentials/device/${route}`,(req,res)=>{
+    const credential=repo.authenticateDeviceToken(deviceTokenFromRequest(req),{workspaceSlug:req.params.slug});
+    res.setHeader('Cache-Control','no-store');res.json(botProviderCredentials[operation](req.params.slug,credential,req.body||{}));
+  });
+  app.get('/api/workspaces/:slug/bots/:id/provider-credential/runtime',(req,res)=>{
+    const credential=repo.authenticateDeviceToken(deviceTokenFromRequest(req),{workspaceSlug:req.params.slug});
+    res.setHeader('Cache-Control','no-store');res.json(botProviderCredentials.runtime(req.params.slug,req.params.id,credential));
   });
   app.use('/api', sessionMiddleware(auth, { bypass: authBypass }));
   app.use('/api/workspaces/:slug', workspaceMembershipGuard(auth, { bypass: authBypass }));
@@ -875,6 +898,11 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
     app.post(`${base}/:id/routines/:routineId/run`,guard,(req,res)=>res.status(202).json(bots.runRoutine(req.params.slug,req.params.id,req.params.routineId,req.body,contextFor(req))));
   }
   registerBotRoutes('/api',requireRole('owner','admin','member'),employeeContext);
+  app.get('/api/workspaces/:slug/bots/:id/provider-credential',requireRole('owner','admin','member'),(req,res)=>{res.setHeader('Cache-Control','no-store');res.json(botProviderCredentials.get(req.params.slug,req.params.id,employeeContext(req)));});
+  app.put('/api/workspaces/:slug/bots/:id/provider-credential',requireRole('owner','admin','member'),(req,res)=>{res.setHeader('Cache-Control','no-store');res.json(botProviderCredentials.put(req.params.slug,req.params.id,req.body||{},employeeContext(req)));});
+  app.get('/api/workspaces/:slug/bots/:id/interactions',requireRole('owner','admin','member'),(req,res)=>{res.setHeader('Cache-Control','no-store');res.json(botInteractions.list(req.params.slug,req.params.id,employeeContext(req)));});
+  app.post('/api/workspaces/:slug/bots/:id/interactions/:requestId',requireRole('owner','admin','member'),(req,res)=>{res.setHeader('Cache-Control','no-store');res.json(botInteractions.answer(req.params.slug,req.params.id,req.params.requestId,req.body||{},employeeContext(req)));});
+  app.delete('/api/workspaces/:slug/bots/:id/interactions/:requestId',requireRole('owner','admin','member'),(req,res)=>{res.setHeader('Cache-Control','no-store');res.json(botInteractions.cancel(req.params.slug,req.params.id,req.params.requestId,employeeContext(req)));});
   app.get('/api/workspaces/:slug/bots/:id/force-abandon',requireRole('owner','admin'),(req,res)=>{res.setHeader('Cache-Control','no-store');res.json(botForceAbandon.status(req.params.slug,req.params.id,employeeContext(req)));});
   app.post('/api/workspaces/:slug/bots/:id/force-abandon',requireRole('owner','admin'),(req,res)=>{res.setHeader('Cache-Control','no-store');res.json(botForceAbandon.authorize(req.params.slug,req.params.id,req.body,employeeContext(req)));});
   app.get('/api/workspaces/:slug/bots/:id/failure-finalization',requireRole('owner','admin'),(req,res)=>{res.setHeader('Cache-Control','no-store');res.json(botFailureFinalization.status(req.params.slug,req.params.id,employeeContext(req)));});
@@ -986,7 +1014,11 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   app.post('/a2a/v1/actions/:id/maintenance-checkpoint',(req,res)=>{res.setHeader('Cache-Control','no-store');if(!assertA2AActionWorkspace(repo,req,res))return;res.json(actionMaintenance.checkpoint(req.params.id,req.body,req.deviceCredential));});
   app.post('/a2a/v1/actions/:id/authorize-maintenance-resume',(req,res)=>{res.setHeader('Cache-Control','no-store');if(!assertA2AActionWorkspace(repo,req,res))return;res.json(actionMaintenance.resume(req.params.id,req.body,req.deviceCredential));});
   app.post('/a2a/v1/actions/:id/execution-admission',(req,res)=>{if(!assertA2AActionWorkspace(repo,req,res))return;actionMaintenance.assertAttempt(req.params.id,req.body);res.json(repo.authorizeActionExecution(req.params.id,{deviceId:req.deviceCredential?.deviceId,...(req.body?.maintenanceAttempt?{maintenanceAttempt:req.body.maintenanceAttempt}:{})}));});
-  app.post('/a2a/v1/actions/:id/bot-start',(req,res)=>{if(!assertA2AActionWorkspace(repo,req,res))return;actionMaintenance.assertAttempt(req.params.id,req.body);res.json(repo.authorizeBotStart(req.params.id,{deviceId:req.deviceCredential?.deviceId}));});
+  app.post('/a2a/v1/actions/:id/bot-start',(req,res)=>{if(!assertA2AActionWorkspace(repo,req,res))return;actionMaintenance.assertAttempt(req.params.id,req.body);assertProviderRuntime(req.params.id,req.deviceCredential,Number(req.headers['x-ziwei-bot-secret-protocol']));res.json(repo.authorizeBotStart(req.params.id,{deviceId:req.deviceCredential?.deviceId}));});
+  app.post('/a2a/v1/actions/:id/bot-autonomy',(req,res)=>{if(!assertA2AActionWorkspace(repo,req,res))return;res.setHeader('Cache-Control','no-store');res.json(botAutonomy.dispatch(req.params.id,req.body||{},req.deviceCredential));});
+  app.post('/a2a/v1/actions/:id/interactions',(req,res)=>{if(!assertA2AActionWorkspace(repo,req,res))return;res.setHeader('Cache-Control','no-store');res.json(botInteractions.publish(req.params.id,req.deviceCredential,req.body||{}));});
+  app.post('/a2a/v1/actions/:id/interactions/start',(req,res)=>{if(!assertA2AActionWorkspace(repo,req,res))return;res.setHeader('Cache-Control','no-store');res.json(botInteractions.begin(req.params.id,req.deviceCredential));});
+  app.post('/a2a/v1/actions/:id/interactions/:requestId/claim',(req,res)=>{if(!assertA2AActionWorkspace(repo,req,res))return;res.setHeader('Cache-Control','no-store');res.json(botInteractions.claim(req.params.id,req.params.requestId,req.deviceCredential));});
   app.post('/a2a/v1/actions/:id/bot-gateway-lease',(req,res)=>{if(!assertA2AActionWorkspace(repo,req,res))return;res.json(repo.authorizeBotGateway(req.params.id,{deviceId:req.deviceCredential?.deviceId}));});
   app.post('/a2a/v1/actions/:id/bot-gateway-ingress',(req,res)=>{if(!assertA2AActionWorkspace(repo,req,res))return;res.status(202).json(repo.receiveBotGateway(req.params.id,{...req.body,deviceId:req.deviceCredential?.deviceId}));});
   app.get('/a2a/v1/actions/:id/bot-gateway-deliveries/:deliveryId',(req,res)=>{if(!assertA2AActionWorkspace(repo,req,res))return;res.json(repo.botGatewayDelivery(req.params.id,req.params.deliveryId,{deviceId:req.deviceCredential?.deviceId}));});
@@ -996,7 +1028,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   app.post('/a2a/v1/actions/:id/bot-collaboration',(req,res)=>{if(!assertA2AActionWorkspace(repo,req,res))return;const deviceId=req.deviceCredential?.deviceId,action=repo.deviceAction(req.params.id,{deviceId}),bot=action.payload.hermesBot;if(!bot)return res.status(404).json({error:'Bot action 不存在'});res.status(202).json(management.bots.collaboration(bot.workspace,bot.employeeId,{...req.body,sourceActionId:action.id,expectedRevision:bot.revision,expectedControlEpoch:bot.controlEpoch},{authenticatedMcp:true,deviceCredentialDeviceId:deviceId,deviceScope:deviceId}));});
   app.post('/a2a/v1/actions/:id/events', (req, res) => { if (!assertA2AActionWorkspace(repo, req, res)) return; actionMaintenance.assertAttempt(req.params.id,req.body);return res.status(202).json(repo.recordA2AEvent(req.params.id, { ...(req.body || {}), deviceId:req.deviceCredential?.deviceId })); });
   app.get('/a2a/v1/actions/:id/events', (req, res) => { if (!assertA2AActionWorkspace(repo, req, res)) return; return res.json({ events: repo.listA2AEvents(req.params.id) }); });
-  app.post('/a2a/v1/actions/:id/result', (req, res) => { if (!assertA2AActionWorkspace(repo, req, res)) return; actionMaintenance.assertAttempt(req.params.id,req.body);return res.json(repo.resultA2AAction(req.params.id, { ...(req.body || {}), deviceId:req.deviceCredential?.deviceId })); });
+  app.post('/a2a/v1/actions/:id/result', (req, res) => { if (!assertA2AActionWorkspace(repo, req, res)) return; actionMaintenance.assertAttempt(req.params.id,req.body);if(req.body?.status==='succeeded')assertProviderRuntime(req.params.id,req.deviceCredential,Number(req.headers['x-ziwei-bot-secret-protocol']));return res.json(repo.resultA2AAction(req.params.id, { ...(req.body || {}), deviceId:req.deviceCredential?.deviceId })); });
   app.post('/a2a/v1/tasks', (req, res, next) => { const workspace = String(req.body.workspace || req.body.workspace_slug || '').trim(); if (!workspace) return res.status(400).json({ error: 'A2A task 必须明确 workspace' }); try { const task = repo.createA2ATask(workspace, req.body); return res.status(201).json({ id:task.id, status:{state:'submitted', timestamp:task.created_at}, task }); } catch (error) { return next(error); } });
   app.get('/a2a/v1/tasks', (req, res, next) => { const workspace = String(req.query.workspace || '').trim(); if (!workspace) return res.status(400).json({ error: 'A2A tasks 必须明确 workspace' }); try { const tasks = repo.listTasks(workspace, { state: req.query.state, q: req.query.q }); return res.json({ tasks: tasks.map(task => ({ id: task.id, status: { state: task.state, timestamp: task.updated_at }, task })) }); } catch (error) { return next(error); } });
   app.get('/a2a/v1/tasks/:id', (req, res) => { if (!assertA2ATaskWorkspace(repo, req, res)) return; const task=repo.getTask(req.params.id); if(!task) return res.status(404).json({error:'Task not found'}); res.json({id:task.id,status:{state:task.state,timestamp:task.updated_at},task,messages:repo.getTaskMessages(task.id)}); });

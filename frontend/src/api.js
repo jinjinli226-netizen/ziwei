@@ -127,6 +127,8 @@ export const api = {
   provisionBot: (id, body, slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/bots/${encodeURIComponent(id)}/provision`, {method:'POST',body:JSON.stringify(body)}),
   initializeEmployeeBot: (id, body, slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/employees/${encodeURIComponent(id)}/bot`, {method:'POST',body:JSON.stringify(body)}),
   updateBot: (id, body, slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/bots/${encodeURIComponent(id)}`, {method:'PATCH',body:JSON.stringify(body)}),
+  botProviderCredential: (id, slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/bots/${encodeURIComponent(id)}/provider-credential`),
+  setBotProviderCredential: (id, body, slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/bots/${encodeURIComponent(id)}/provider-credential`, {method:'PUT',body:JSON.stringify(body)}),
   validateBot: (id, body, slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/bots/${encodeURIComponent(id)}/validate`, {method:'POST',body:JSON.stringify(body)}),
   controlBot: (id, body, slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/bots/${encodeURIComponent(id)}/control`, {method:'POST',body:JSON.stringify(body)}),
   reconcileBotAction: (id, actionId, body, slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/bots/${encodeURIComponent(id)}/actions/${encodeURIComponent(actionId)}/reconcile`, {method:'POST',body:JSON.stringify(body)}),

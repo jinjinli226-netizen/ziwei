@@ -16,18 +16,19 @@ export function createBotRosterView(repo) {
   ) WHERE ordinal=1 AND employee_id IS NOT NULL`);
   const bindings=db.prepare('SELECT employee_id,revision,control_epoch,control_state,main_conversation_id,active_action_id,profile_binding_json FROM hermes_bots WHERE workspace_id=?');
   const creatorIds=db.prepare("SELECT employee_id FROM employee_template_instances WHERE workspace_id=? AND template_id='ziwei-employee-creator'");
-  const conversation=db.prepare("SELECT id FROM conversations WHERE employee_id=? AND workspace_id=? ORDER BY updated_at DESC LIMIT 1");
+  const conversations=db.prepare("SELECT employee_id,id FROM (SELECT employee_id,id,row_number() OVER (PARTITION BY employee_id ORDER BY updated_at DESC,rowid DESC) ordinal FROM conversations WHERE workspace_id=?) WHERE ordinal=1");
   return(slug,workspaceId,employees)=>{
     const latest=new Map(latestByEmployee.all(workspaceId).map(row=>[row.employee_id,row.id]));
     const bots=new Map(bindings.all(workspaceId).map(row=>[row.employee_id,row]));
     const creators=new Set(creatorIds.all(workspaceId).map(row=>row.employee_id));
+    const conversationByEmployee=new Map(conversations.all(workspaceId).map(row=>[row.employee_id,row.id]));
     const actionCache=new Map(),action=id=>{
       if(!id)return null;
       if(!actionCache.has(id))actionCache.set(id,readAction(id,workspaceId));
       return actionCache.get(id);
     };
     return employees.map(employee=>{
-      const row=bots.get(employee.id),binding=row?botProfileBinding(row):null;
+      const hermes=employee.runtime==='Hermes',row=hermes?bots.get(employee.id):null,binding=row?botProfileBinding(row):null;
       const fields=['id','workspace_id','name','description','avatar','runtime','model_id','runtime_profile','target_device_id','status','visibility','owner_user_id'];
       const identity=images.employee(slug,Object.fromEntries(fields.map(key=>[key,employee[key]])));
       const current=row?action(row.active_action_id):null,recent=row?action(latest.get(employee.id)):null;
@@ -36,14 +37,15 @@ export function createBotRosterView(repo) {
       const active=current&&botExecutionOccupiesSlot(current,{workspaceId,employeeId:employee.id})?current:null;
       return {
         id:employee.id,employee_id:employee.id,workspace:slug,employee:identity,
-        configuration_state:row?'initialized':'uninitialized',kind:!row&&creators.has(employee.id)?'creator':'employee',
+        runtime:employee.runtime||null,canUseHermesBot:hermes,entry:hermes?'hermes_bot':'employee',
+        configuration_state:hermes?(row?'initialized':'uninitialized'):'not_applicable',kind:!row&&creators.has(employee.id)?'creator':'employee',
         revision:row?.revision||0,control_epoch:row?.control_epoch||0,
         control_state:row?.control_state||(employee.status==='paused'?'paused':'draft'),
-        main_conversation_id:row?.main_conversation_id||conversation.get(employee.id,workspaceId)?.id||null,
+        main_conversation_id:row?.main_conversation_id||conversationByEmployee.get(employee.id)||null,
         ...(binding?{instance:{mode:binding.mode,profile:binding.profile||employee.runtime_profile,templateProfile:binding.templateProfile||employee.runtime_profile}}:{}),
         latest_run:active||recent,active_run:active,
         failureFinalization:row?pendingBotFailureFinalization(db,workspaceId,employee.id):null,
-        rosterView:{schemaVersion:1,historyIncluded:false,configurationIncluded:false,detailOperation:'GET bot by id'},
+        rosterView:{schemaVersion:1,historyIncluded:false,configurationIncluded:false,detailOperation:hermes?'GET bot by id':'GET employee by id'},
       };
     });
   };

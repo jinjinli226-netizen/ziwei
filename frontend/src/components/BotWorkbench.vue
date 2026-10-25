@@ -4,7 +4,7 @@ import {Bot,Plus,MessageCircle,Settings2,Clock3,Activity,RefreshCw,ChevronRight,
 import {ZiButton,ZiModal,ZiFormField,ZiInput,ZiTextarea} from '@ziwei/ui';
 import ZiSelect from './ZiSelect.vue';
 import {api,API_BASE} from '../api.js';
-import {createBotWorkbench,botWorkbenchReadOptions,botDraftDirty,botPresence,capabilityPresentation,executionUncertain} from '../bot-workbench.js';
+import {createBotWorkbench,botWorkbenchReadOptions,botDraftDirty,botPresence,capabilityPresentation,executionUncertain,botRosterRuntimeOptions,filterBotRoster,botRosterRuntime,botRosterPresence} from '../bot-workbench.js';
 import {botStopPresentation,botRecoveryEvent,botRecoveryDetail,processExitConfirmed} from '../bot-presentation.js';
 import {operatorForceAbandonRecovery} from '../operator-force-abandon-recovery.mjs';
 import {failureFinalization,pendingBotFailureFinalization,finalizationPresentation,failureFinalizationRequest} from '../bot-failure-finalization.mjs';
@@ -16,14 +16,17 @@ import {nativeRoutineDriver,routineDriver} from '../bot-native-data.js';
 import {createOwnedBotRequest,botCreateAdmission,botInstanceStatus} from '../bot-owned-profile.js';
 import BotInstancePanel from './BotInstancePanel.vue';
 import BotAvatarEditor from './BotAvatarEditor.vue';
+import BotProviderCredential from './BotProviderCredential.vue';
+import {botProviderOptions,botProviderModelOptions,switchBotProvider} from '../bot-provider-settings.js';
+import {BOT_DEFAULT_TOOLSETS} from '../../../src/hermes-bot-config.mjs';
 const BotNativeWorkspace=defineAsyncComponent(()=>import('./BotNativeWorkspace.vue'));
 
 const props=defineProps({workspace:{type:String,required:true},actorId:{type:String,default:''},botId:{type:String,default:''},models:{type:Array,default:()=>[]},skills:{type:Array,default:()=>[]},initialTab:{type:String,default:'chat'}});
-const emit=defineEmits(['select','section','chat','employee','creator','phone','changed']);
+const emit=defineEmits(['select','section','chat','employee','creator','phone','changed','employee-chat','employee-settings']);
 const previewMode=import.meta.env.VITE_ZIWEI_PREVIEW==='true';
 const nativePreview=import.meta.env.VITE_ZIWEI_NATIVE_PREVIEW==='true';
 const fixtureBot=computed(()=>previewMode&&(!nativePreview||s.bot?.employee?.runtime_profile==='preview-fixture'));
-const workbench=createBotWorkbench({api,wrap:reactive,getReadOptions:()=>botWorkbenchReadOptions(tab.value)});const s=workbench.state;
+const workbench=createBotWorkbench({api,wrap:reactive,getReadOptions:()=>botWorkbenchReadOptions(tab.value),onEmployeeSelect:value=>emit(value.employee.runtime?'employee-chat':'employee-settings',value)});const s=workbench.state;
 const workbenchRoot=ref(null),avatarReading=ref(false);
 const forceAbandonState=ref(null),forceAbandonBusy=ref(false),forceAbandonError=ref('');
 let forceAbandonKey='';
@@ -37,7 +40,9 @@ const routineKind=ref('prompt'),routineTarget=ref('');
 const nativeBlocked=ref(false),nativeTabs=['knowledge','collaboration','channels','proactive'];
 let generation=0,disposed=false,pollTimer=null,forceAbandonRead=null;
 const tabs=[['chat','聊天',MessageCircle],['settings','基础配置',Settings2],['capabilities','能力组合',Sparkles],['knowledge','资料与工具',Settings2],['collaboration','伙伴协作',MessageCircle],['channels','消息与音频',MessageCircle],['proactive','主动工作',Activity],['routines','例行工作',Clock3],['activity','运行记录',Activity]];
-const bots=computed(()=>s.bots.filter(item=>`${item.employee?.name || ''} ${item.employee?.description || ''}`.toLowerCase().includes(search.value.toLowerCase())));
+const runtimeFilter=ref('all');
+const runtimeOptions=computed(()=>botRosterRuntimeOptions(s.bots));
+const bots=computed(()=>filterBotRoster(s.bots,{runtime:runtimeFilter.value,search:search.value}));
 const selectedDevice=computed(()=>discovery.value?.devices?.find(item=>item.id===s.bot?.employee?.target_device_id));
 const deviceOptions=computed(()=>[{value:'',label:'选择当前工作区的电脑'},...(discovery.value?.devices || []).map(device=>({value:device.id,label:`${device.name || device.id} · ${device.status==='online'?'在线':'离线'}`}))]);
 const createDevice=computed(()=>discovery.value?.devices?.find(item=>item.id===createForm.value.targetDeviceId));
@@ -46,7 +51,10 @@ const sourceProfiles=computed(()=>(createRuntime.value?.profiles||[]).filter(pro
 const profileOptions=computed(()=>[{value:'',label:'选择已发现的初始化来源'},...sourceProfiles.value.map(profile=>({value:typeof profile==='string'?profile:profile.name,label:typeof profile==='string'?profile:profile.name}))]);
 const createReadiness=computed(()=>botCreateAdmission(discovery.value,{workspace:props.workspace,deviceId:createForm.value.targetDeviceId,sourceProfile:createForm.value.sourceProfile}));
 const instanceStatus=computed(()=>botInstanceStatus(s.bot,discovery.value));
-const modelOptions=computed(()=>[{value:'',label:'沿用来源 profile 模型'},...props.models.map(model=>({value:model.id,label:model.label || model.id}))]);
+const modelOptions=computed(()=>botProviderModelOptions(s.draft?.config.provider,props.models,s.draft?.employee.model));
+const createModelOptions=computed(()=>botProviderModelOptions(null,props.models,createForm.value.model));
+const providerOptions=computed(()=>botProviderOptions(s.draft?.config.provider));
+const providerSelection=computed({get:()=>s.draft?.config.provider||'',set:value=>switchBotProvider(s.draft,value)});
 const reasoningOptions=[{value:'',label:'未指定（运行时默认）'},...Object.entries({minimal:'最低',low:'低',medium:'中',high:'高',xhigh:'超高',max:'最大',ultra:'极高（需服务支持）'}).map(([value,label])=>({value,label:`${value} · ${label}`}))];
 const reasoningEffort=computed({get:()=>s.draft?.config.reasoningEffort||'',set:value=>{if(!s.draft)return;if(value==='')delete s.draft.config.reasoningEffort;else s.draft.config.reasoningEffort=value;}});
 const present=computed(()=>botPresence(s.bot));
@@ -63,6 +71,7 @@ const checkedCurrent=computed(()=>s.bot?.validation?.status==='succeeded' && s.b
 const toolsetsText=computed({get:()=>s.draft?.config.toolsets?.join('\n') || '',set:value=>{s.draft.config.toolsets=value.split(/[\n,]/).map(item=>item.trim()).filter(Boolean);}});
 const disabledSkillsText=computed({get:()=>s.draft?.config.skills?.disabled?.join('\n') || '',set:value=>{s.draft.config.skills.disabled=value.split(/[\n,]/).map(item=>item.trim()).filter(Boolean);}});
 const autoLoadSkillsText=computed({get:()=>s.draft?.config.skills?.autoLoad?.join('\n')||'',set:value=>{s.draft.config.skills.autoLoad=value.split(/[\n,]/).map(item=>item.trim()).filter(Boolean);}});
+const permissionMode=computed({get:()=>s.draft?.config.permissions.mode||'execute',set:value=>{if(!s.draft)return;s.draft.config.permissions.mode=value;if(value==='read_only'){s.draft.config.toolsets=[];for(const server of Object.values(s.draft.config.mcpServers||{}))server.enabled=false;}else if(!s.draft.config.toolsets.length)s.draft.config.toolsets=[...BOT_DEFAULT_TOOLSETS];}});
 const managementAllowed=computed({get:()=>s.draft?.config.permissions?.management!==false,set:value=>{s.draft.config.permissions.management=value;}});
 const driverBudget=computed({get:()=>s.draft?.config.drivers?.maxTotalTurns??100,set:value=>{s.draft.config.drivers={...s.draft.config.drivers,maxTotalTurns:Number(value)};}});
 const driverExpiry=computed({get:()=>s.draft?.config.drivers?.expiresAt||'',set:value=>{s.draft.config.drivers={...s.draft.config.drivers,expiresAt:value||null};}});
@@ -80,7 +89,7 @@ async function loadDiscovery(){
   finally{if(scopeCurrent(visit,workspace))discoveryLoading.value=false;}
 }
 function clearTransientDrafts(){routineEditor.value=null;routineScope.value=null;}
-function selectBot(id){if(id===s.selectedId)return;if(configDirty.value&&!window.confirm('当前 Bot 有未保存修改，切换会丢弃草稿。继续切换？'))return;tab.value='chat';clearTransientDrafts();emit('select',id);void workbench.select(id);}
+function selectBot(id){if(id===s.selectedId)return;if(configDirty.value&&!window.confirm('当前 Bot 有未保存修改，切换会丢弃草稿。继续切换？'))return;tab.value='chat';clearTransientDrafts();const selected=s.bots.find(bot=>bot.id===id);if(selected&&botRosterRuntime(selected)!=='Hermes'){void workbench.select(id);return;}emit('select',id);void workbench.select(id);}
 function chat(){if(s.bot?.main_conversation_id)emit('chat',{workspace:props.workspace,employee:s.bot.employee,conversation:{id:s.bot.main_conversation_id},botId:s.bot.id});}
 async function refresh(){await Promise.all([workbench.list(),workbench.refresh(),loadDiscovery(),loadForceAbandon()]);}
 async function save(){if(avatarReading.value)return;if(nativeBlocked.value){s.error='仍有原生操作待核实，请先查看原回执。';return;}if(await workbench.save())emit('changed');}
@@ -191,13 +200,13 @@ onBeforeUnmount(()=>{disposed=true;generation++;ownedCreate.dispose();clearTimeo
 </script>
 
 <template>
-  <section ref="workbenchRoot" class="bot-workbench" aria-label="Hermes Bot 工作台">
+  <section ref="workbenchRoot" class="bot-workbench" aria-label="Bot 伙伴工作台">
     <div class="bot-layout">
-      <aside class="bot-roster" aria-label="当前工作区 Bot 名册"><div class="bot-roster-top"><strong>Hermes 员工 <small>{{s.bots.length}}</small></strong><button class="bot-icon-button" aria-label="刷新 Bot 列表与状态" :disabled="s.loading||s.reading||s.busy" @click="refresh"><RefreshCw :size="16"/></button></div><label class="bot-search"><Search :size="16"/><input v-model="search" placeholder="搜索名称或岗位" aria-label="搜索 Bot"/></label>
+      <aside class="bot-roster" aria-label="当前工作区员工名册"><div class="bot-roster-top"><strong>全部员工 <small>{{s.bots.length}}</small></strong><button class="bot-icon-button" aria-label="刷新 Bot 列表与状态" :disabled="s.loading||s.reading||s.busy" @click="refresh"><RefreshCw :size="16"/></button></div><label class="bot-search"><Search :size="16"/><input v-model="search" placeholder="搜索名称或岗位" aria-label="搜索 Bot"/></label><ZiSelect v-model="runtimeFilter" :options="runtimeOptions" aria-label="筛选员工运行时"/>
         <div class="bot-roster-actions"><button class="bot-button primary" @click="newBot"><Plus :size="16"/>创建 Bot</button><button class="bot-button" @click="emit('creator')"><Sparkles :size="16"/>伙伴市场 Creator</button></div>
-        <p v-if="s.loading&&!s.bots.length" class="bot-empty" role="status">正在读取工作区 Bot…</p>
-        <button v-for="item in bots" :key="item.id" class="bot-roster-row" :class="{selected:s.selectedId===item.id}" :aria-current="s.selectedId===item.id?'true':undefined" @click="selectBot(item.id)"><span class="bot-avatar"><img v-if="item.employee?.avatar" :src="item.employee.avatar" alt=""/><span v-else>{{item.employee?.name?.slice(0,1)||'✦'}}</span><i :data-tone="botPresence(item).tone"/></span><span class="bot-roster-copy"><strong>{{item.employee?.name||'未命名 Bot'}}</strong><span>{{item.employee?.description||'Hermes 数字伙伴'}}</span><small>{{botPresence(item).label}}</small></span><ChevronRight :size="14"/></button>
-        <div v-if="!s.loading&&!bots.length" class="bot-empty"><Bot :size="30"/><p>{{search?'没有匹配的 Bot':'在当前工作区创建第一个 Bot'}}</p><small>Bot 是同一数字员工的 Hermes 工作视图。创建后也会出现在团队管理。</small></div>
+        <p v-if="s.loading&&!s.bots.length" class="bot-empty" role="status">正在读取工作区员工…</p>
+        <button v-for="item in bots" :key="item.id" class="bot-roster-row" :class="{selected:s.selectedId===item.id}" :aria-current="s.selectedId===item.id?'true':undefined" @click="selectBot(item.id)"><span class="bot-avatar"><img v-if="item.employee?.avatar" :src="item.employee.avatar" alt=""/><span v-else>{{item.employee?.name?.slice(0,1)||'✦'}}</span><i :data-tone="botRosterPresence(item).tone"/></span><span class="bot-roster-copy"><strong>{{item.employee?.name||'未命名 Bot'}}</strong><span>{{item.employee?.description||'数字员工'}}</span><small>{{botRosterRuntime(item)==='unconfigured'?'待配置':botRosterRuntime(item)}} · {{botRosterPresence(item).label}}</small></span><ChevronRight :size="14"/></button>
+        <div v-if="!s.loading&&!bots.length" class="bot-empty"><Bot :size="30"/><p>{{search||runtimeFilter!=='all'?'没有匹配的员工':'当前没有可见员工'}}</p><small>这里展示当前账号可见的全部员工，与团队管理使用同一员工身份。</small></div>
         <footer class="bot-roster-footer">工作区 · {{workspace}}<br/>仅在指定电脑及客户端可用时工作</footer>
       </aside>
       <main class="bot-main" :aria-busy="s.reading||s.busy">
@@ -223,9 +232,12 @@ onBeforeUnmount(()=>{disposed=true;generation++;ownedCreate.dispose();clearTimeo
           </section>
           <section v-else-if="tab==='settings'&&s.draft" class="bot-form-section">
             <div class="bot-section-heading"><div><h3>身份与工作方式</h3><p>这些设置只作用于当前工作区的这个 Bot。</p></div><span class="bot-status" :data-tone="checkedCurrent?'success':'warning'">{{validationLabel}}</span></div>
-            <fieldset :disabled="s.busy||s.writeUnknown||s.bot.configuration_state==='uninitialized'||(instanceStatus.mode==='owned_profile'&&!instanceStatus.provisioned)"><div class="bot-fields"><label>名称<input v-model="s.draft.employee.name" maxlength="100"/></label><label>岗位 / 简介<input v-model="s.draft.employee.description" maxlength="1000"/></label><BotAvatarEditor :key="`${workspace}:${s.selectedId}`" v-model="s.draft.employee.avatar" :saved-value="s.bot.employee.avatar" :name="s.draft.employee.name" :disabled="s.busy||s.writeUnknown" :saving="s.busy" :uncertain="s.writeUnknown" @reading="avatarReading=$event"/><label>可见范围<ZiSelect v-model="s.draft.employee.visibility" :options="[{value:'personal',label:'仅自己'},{value:'workspace',label:'工作区'}]" aria-label="Bot 可见范围"/></label><label class="wide">人格<textarea v-model="s.draft.employee.persona" rows="3" placeholder="希望它以怎样的方式与你协作"/></label><label class="wide">长期职责与交付标准<textarea v-model="s.draft.employee.instructions" aria-label="岗位职责" rows="5" placeholder="它负责什么，怎样算完成，需要遵守哪些边界"/></label><label>模型<ZiSelect :model-value="s.draft.employee.model||''" :options="modelOptions" aria-label="Bot 模型" @update:model-value="s.draft.employee.model=$event||null"/></label><label>Provider<input v-model="s.draft.config.provider" placeholder="留空沿用来源 profile"/></label><label>推理强度<ZiSelect v-model="reasoningEffort" :options="reasoningOptions" aria-label="Bot 推理强度"/></label><p class="wide bot-help">选择模型支持的推理强度，留空使用模型默认值。</p></div>
-              <details class="bot-advanced"><summary>高级运行设置</summary><div class="bot-fields"><label>主动工作累计回合上限<input v-model="driverBudget" type="number" min="1" max="1000"/></label><label>主动工作截止时间<input v-model="driverExpiry" placeholder="例如 2026-10-14T18:00:00+08:00"/></label><label class="bot-check"><input v-model="managementAllowed" type="checkbox"/>允许使用工作区管理能力</label><label>工具权限<ZiSelect v-model="s.draft.config.permissions.mode" :options="[{value:'read_only',label:'仅对话（不启用工具）'},{value:'execute',label:'启用明确选择的工具'}]" aria-label="Bot 工具权限"/></label></div><p>单次最多24小时，可手动停止。</p><p>运行电脑：{{selectedDevice?.name||s.bot.employee.target_device_id}}；Profile：{{s.bot.employee.runtime_profile||'默认'}}。</p></details>
+            <fieldset :disabled="s.busy||s.writeUnknown||s.bot.configuration_state==='uninitialized'||(instanceStatus.mode==='owned_profile'&&!instanceStatus.provisioned)"><div class="bot-fields"><label>名称<input v-model="s.draft.employee.name" maxlength="100"/></label><label>岗位 / 简介<input v-model="s.draft.employee.description" maxlength="1000"/></label><BotAvatarEditor :key="`${workspace}:${s.selectedId}`" v-model="s.draft.employee.avatar" :saved-value="s.bot.employee.avatar" :name="s.draft.employee.name" :disabled="s.busy||s.writeUnknown" :saving="s.busy" :uncertain="s.writeUnknown" @reading="avatarReading=$event"/><label>可见范围<ZiSelect v-model="s.draft.employee.visibility" :options="[{value:'personal',label:'仅自己'},{value:'workspace',label:'工作区'}]" aria-label="Bot 可见范围"/></label><label class="wide">人格<textarea v-model="s.draft.employee.persona" rows="3" placeholder="希望它以怎样的方式与你协作"/></label><label class="wide">长期职责与交付标准<textarea v-model="s.draft.employee.instructions" aria-label="岗位职责" rows="5" placeholder="它负责什么，怎样算完成，需要遵守哪些边界"/></label><label v-if="!s.draft.config.provider?.startsWith('custom:')">模型<ZiSelect :model-value="s.draft.employee.model||''" :options="modelOptions" aria-label="Bot 模型" @update:model-value="s.draft.employee.model=$event||null"/></label><label v-if="s.draft.config.provider?.startsWith('custom:')">模型名称<input v-model="s.draft.employee.model" placeholder="填写服务商提供的模型 ID"/></label><label>服务商 / Provider<ZiSelect v-model="providerSelection" :options="providerOptions" aria-label="Bot 服务商"/></label><label class="wide">自定义服务商名称<input :value="s.draft.config.provider" @change="switchBotProvider(s.draft,$event.target.value.trim())" placeholder="需要时填写已有原生服务商，如 custom:office" aria-label="自定义 Bot 服务商"/></label><label class="wide">API Base URL<input v-model="s.draft.config.baseUrl" placeholder="留空使用服务商默认地址" :disabled="s.draft.config.provider==='deepseek'" aria-label="Bot API Base URL"/></label><label>推理强度<ZiSelect v-model="reasoningEffort" :options="reasoningOptions" :disabled="s.draft.config.provider==='deepseek'" aria-label="Bot 推理强度"/></label><p class="wide bot-help">在基础配置选择服务商和对应模型；保存后检查配置，再启用。DeepSeek 当前使用模型默认推理设置。</p></div>
+              <details class="bot-advanced"><summary>高级运行设置</summary><div class="bot-fields"><label>主动工作累计回合上限<input v-model="driverBudget" type="number" min="1" max="1000"/></label><label>主动工作截止时间<input v-model="driverExpiry" placeholder="例如 2026-10-14T18:00:00+08:00"/></label><label class="bot-check"><input v-model="managementAllowed" type="checkbox"/>允许使用工作区管理能力</label><label>工具权限<ZiSelect v-model="permissionMode" :options="[{value:'read_only',label:'仅对话（不启用工具）'},{value:'execute',label:'完整执行（已授权工具与受控自主工作）'}]" aria-label="Bot 工具权限"/></label></div><p>单次最多24小时，可手动停止。</p><p>运行电脑：{{selectedDevice?.name||s.bot.employee.target_device_id}}；Profile：{{s.bot.employee.runtime_profile||'默认'}}。</p></details>
             </fieldset>
+            <p class="bot-help">当前已保存权限：{{s.bot.config.permissions.mode==='read_only'?'仅对话，无工具':'完整执行，受员工授权范围约束'}}；{{s.bot.config.toolsets.length}} 个工具集。{{s.bot.validation?.revision===s.bot.revision&&s.bot.validation?.status==='succeeded'?'当前配置已检查':'运行加载待检查'}}。例行工作由紫薇统一调度，可随时停止。</p>
+            <BotProviderCredential :key="`${workspace}:${s.selectedId}`" :workspace="workspace" :bot="s.bot" :dirty="configDirty" @saved="refreshNativeBot"/>
+
             <div class="bot-save-bar"><p>修改运行设置后需要检查配置。</p><button class="bot-button primary" :disabled="avatarReading||s.busy||s.writeUnknown||s.bot.configuration_state==='uninitialized'||(instanceStatus.mode==='owned_profile'&&!instanceStatus.provisioned)||s.conflict||!s.draft.employee.name.trim()" @click="save">{{s.busy?'处理中…':'保存配置'}}</button></div>
           </section>
           <section v-else-if="tab==='capabilities'&&s.draft" class="bot-form-section">
@@ -263,7 +275,7 @@ onBeforeUnmount(()=>{disposed=true;generation++;ownedCreate.dispose();clearTimeo
       <fieldset :disabled="createBusy||Boolean(ownedCreateState.pending)"><div class="bot-fields">
         <label>名称<input v-model="createForm.name" required maxlength="100" placeholder="例如：资料研究员"/></label>
         <label>运行电脑<ZiSelect v-model="createForm.targetDeviceId" :options="deviceOptions" aria-label="新 Bot 运行电脑"/></label>
-      </div><details class="bot-advanced"><summary>高级初始化选项</summary><div class="bot-fields"><label class="wide">初始化来源 Profile<ZiSelect v-model="createForm.sourceProfile" :options="profileOptions" aria-label="新 Bot 初始化来源 Profile"/></label><label>模型<ZiSelect v-model="createForm.model" :options="modelOptions" aria-label="新 Bot 模型"/></label><label>可见范围<ZiSelect v-model="createForm.visibility" :options="[{value:'personal',label:'仅自己'},{value:'workspace',label:'工作区'}]" aria-label="新 Bot 可见范围"/></label></div><p>新 Bot 从所选 Profile 读取模型和认证配置，拥有自己的工作目录。</p></details></fieldset>
+      </div><details class="bot-advanced"><summary>高级初始化选项</summary><div class="bot-fields"><label class="wide">初始化来源 Profile<ZiSelect v-model="createForm.sourceProfile" :options="profileOptions" aria-label="新 Bot 初始化来源 Profile"/></label><label>模型<ZiSelect v-model="createForm.model" :options="createModelOptions" aria-label="新 Bot 模型"/></label><label>可见范围<ZiSelect v-model="createForm.visibility" :options="[{value:'personal',label:'仅自己'},{value:'workspace',label:'工作区'}]" aria-label="新 Bot 可见范围"/></label></div><p>新 Bot 从所选 Profile 读取模型和认证配置，拥有自己的工作目录。</p></details></fieldset>
       <p v-if="ownedCreateState.pending" class="bot-help">原请求：{{ownedCreateState.pending.requestKey}}{{ownedCreateState.pending.botId?' · Bot '+ownedCreateState.pending.botId:''}}。继续查询保持同一身份和主聊天。</p>
       <p v-if="discoveryError" class="bot-error-text">{{discoveryError}}</p><p v-if="createForm.targetDeviceId&&!createReadiness.ready&&!ownedCreateState.pending" class="bot-help">{{createReadiness.issues.join('；')}}</p><p v-if="createReadiness.ready&&!createReadiness.authenticationReady" class="bot-help">来源 Profile 已发现，模型认证尚未就绪。可以创建专属目录，运行前仍需配置检查。</p>
       <div class="bot-dialog-actions"><button type="button" class="bot-button" :disabled="discoveryLoading||createBusy" @click="loadDiscovery">刷新环境</button><button type="submit" class="bot-button primary" :disabled="createBusy||(!ownedCreateState.pending&&(!createForm.name?.trim()||!createReadiness.ready))">{{createBusy?'正在查询原创建请求…':ownedCreateState.pending?'继续查询原 Bot 创建':'创建并配置'}}</button></div>

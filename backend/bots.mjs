@@ -2,7 +2,8 @@ import crypto from 'node:crypto';
 import {guardBotService} from './version-preservation.mjs';
 import {botProfileBinding,botProfileView,assertBotProfileReady} from './bot-profiles.mjs';
 import {normalizeNativeOperation,nativeIsExecution,nativeNeedsTools} from '../src/hermes-native-contract.mjs';
-import { normalizeBotConfig, createDefaultBotConfig, botFailure, BOT_CAPABILITY_CATALOG } from '../src/hermes-bot-config.mjs';
+import { normalizeBotConfig, normalizeBotConfigUpdate, createDefaultBotConfig, botFailure, BOT_CAPABILITY_CATALOG } from '../src/hermes-bot-config.mjs';
+import {resolveBotProviderRoute} from '../src/bot-provider-routing.mjs';
 import {deriveBotCapabilities} from './bot-capabilities.mjs';
 import {readHistoricalPrelaunchRecovery} from './bot-historical-recovery-view.mjs';
 import {createBotDeferredConfig} from './bot-deferred-config.mjs';
@@ -31,7 +32,8 @@ export const botSnapshot = (db, employeeId, workspaceId) => {
   if (!row) return null;
   const employee = db.prepare('SELECT * FROM employees WHERE id=? AND workspace_id=?').get(employeeId,workspaceId);
   const workspace = db.prepare('SELECT slug FROM workspaces WHERE id=?').get(workspaceId)?.slug;
-  return {schemaVersion:1,employeeId,workspace,revision:row.revision,controlEpoch:row.control_epoch,config:parse(row.config_json),sourceProfile:employee.runtime_profile,instance:botProfileBinding(row),deviceId:employee.target_device_id,model:employee.model_id,persona:employee.persona,instructions:employee.instructions,description:employee.description,name:employee.name,conversationId:row.main_conversation_id};
+  const providerCredentialIndependent=Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='bot_provider_secrets'").get()&&db.prepare('SELECT 1 FROM bot_provider_secrets WHERE workspace_id=? AND employee_id=?').get(workspaceId,employeeId));
+  return {schemaVersion:1,employeeId,workspace,revision:row.revision,controlEpoch:row.control_epoch,config:parse(row.config_json),...(providerCredentialIndependent?{providerCredentialIndependent:true}:{}),sourceProfile:employee.runtime_profile,instance:botProfileBinding(row),deviceId:employee.target_device_id,model:employee.model_id,persona:employee.persona,instructions:employee.instructions,description:employee.description,name:employee.name,conversationId:row.main_conversation_id};
 };
 export function assertBotExecution(db, workspaceId, payload, { validation = false, provisioning = false, requireProfile = !validation, actionId = null, readOnlyInspection = false } = {}) {
   // Retired owned profiles cannot be addressed through a raw action without employeeId.
@@ -247,7 +249,7 @@ export function createBotService(repo, management) {
       if(source)return {actions:repo.dispatchBotCollaboration(slug,manifest,input.idempotencyKey)};
       return {action:idempotent(slug,`collaboration:${id}`,input,context,()=>repo.createA2AAction(slug,{type:'hermes.bot.native',botInternal:BOT_INTERNAL,dedupeKey:`bot-collaboration:${id}:${input.idempotencyKey}`,payload:{employeeId:id,collaborationManifest:manifest,nativeOperation:{schemaVersion:2,resource:'collaboration',operation:'message',requestId:input.idempotencyKey,input:{targets,content:input.content,mode:manifest.mode,...(groupId?{groupId}:{})}}}}),actionId=>management.action(slug,actionId,context))};
     });},
-    list(slug,context={},options={}) {const {ws,context:actor}=scope(slug,context),employees=repo.listEmployees(slug,{...actor,enforceEmployeeVisibility:true}).filter(employee=>employee.runtime==='Hermes'&&employee.status!=='deleted'&&(!actor.deviceScope||employee.target_device_id===actor.deviceScope));return options.view==='roster'?rosterView(slug,ws.id,employees):employees.map(employee=>get(slug,employee.id,actor,options));},
+    list(slug,context={},options={}) {const {ws,context:actor}=scope(slug,context),employees=repo.listEmployees(slug,{...actor,enforceEmployeeVisibility:true}).filter(employee=>(options.view==='roster'||employee.runtime==='Hermes')&&employee.status!=='deleted'&&(!actor.deviceScope||employee.target_device_id===actor.deviceScope));return options.view==='roster'?rosterView(slug,ws.id,employees):employees.map(employee=>get(slug,employee.id,actor,options));},
     initialize(slug,id,input={},context={}) {
       return idempotent(slug,`initialize:${id}`,input,context,()=>{
         const {context:actor}=scope(slug,context),employee=management.employee(slug,id,actor);
@@ -272,6 +274,7 @@ export function createBotService(repo, management) {
       if(Object.keys(input).some(key=>!allowed.includes(key)))throw botFailure('BOT_CREATE_UNSUPPORTED','Bot 创建包含未支持字段；身份与归属由当前认证工作区决定',400);
       if(input.workspace && input.workspace!==slug)throw botFailure('BOT_WORKSPACE_CONFLICT','请求与认证工作区不一致',403);
       const config=createDefaultBotConfig(input.config || {});
+      if(config.provider)resolveBotProviderRoute(config,input.model,{});
       if (input.runtime && input.runtime!=='Hermes') throw botFailure('BOT_RUNTIME_UNSUPPORTED','Bot 目标运行时必须为 Hermes',400);
       if(input.sourceProfile&&input.runtimeProfile&&input.sourceProfile!==input.runtimeProfile)throw botFailure('BOT_BINDING_CONFLICT','sourceProfile 与 runtimeProfile 初始化来源不一致');
       return idempotent(slug,'create',input,context,()=>{
@@ -312,7 +315,9 @@ export function createBotService(repo, management) {
       const patch=input.employee || {};
       const allowed=['name','avatar','description','persona','instructions','skills','model','visibility'];
       if(Object.keys(patch).some(key=>!allowed.includes(key)))throw botFailure('BOT_PATCH_UNSUPPORTED','Bot 员工修改仅支持 name/avatar/description/persona/instructions/skills/model/visibility；电脑/profile迁移不允许隐式执行',400);
-      const config=input.config===undefined?parse(row.config_json):normalizeBotConfig(input.config);
+      const config=input.config===undefined?parse(row.config_json):normalizeBotConfigUpdate(input.config,parse(row.config_json));
+      const effectiveModel=Object.hasOwn(patch,'model')?patch.model:employee.model_id;
+      if(config.provider&&(effectiveModel||config.provider!==parse(row.config_json)?.provider))resolveBotProviderRoute(config,effectiveModel,{});
       const runtimeChanged=canonical(config)!==canonical(parse(row.config_json)) || ['persona','instructions','skills','model'].some(key=>Object.hasOwn(patch,key)&&canonical(patch[key])!==canonical(key==='model'?employee.model_id:employee[key]));
       if(runtimeChanged)assertBotExecution(db,row.workspace_id,{employeeId:id},{validation:true});
       if(Object.keys(patch).length)management.updateEmployee(slug,id,patch,{...context,botConfigurationWrite:true});

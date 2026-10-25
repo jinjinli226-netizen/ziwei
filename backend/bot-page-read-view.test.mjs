@@ -186,3 +186,18 @@ test('root and nested legacy receipts never supply missing binding or completion
     assert(!JSON.stringify(compact).includes('PRIVATE_OLD_PROMPTS'));
   }
 });
+
+test('mixed desktop roster includes every permitted runtime without initializing employees or N detail reads',async t=>{
+ const f=fixture(t);
+ const codex=f.repo.createEmployee(f.slug,{name:'Codex original',runtime:'Codex',visibility:'workspace'});
+ const pending=f.repo.createEmployee(f.slug,{name:'Unconfigured original',runtime:'Codex',visibility:'workspace'});f.db.prepare('UPDATE employees SET runtime=? WHERE id=?').run('',pending.id);
+ const hidden=f.repo.createEmployee(f.slug,{name:'Private Codex',runtime:'Codex',visibility:'personal',ownerUserId:f.owner.user_id});
+ const conversation=f.repo.createConversation(f.slug,{employeeId:codex.id,title:'Existing Codex conversation'});
+ const before=f.db.prepare('SELECT count(*) n FROM hermes_bots').get().n;let reads=0;const original=f.repo.getA2AAction;f.repo.getA2AAction=()=>{reads++;throw Error('No full action reads');};
+ const response=await request(f.app,`/api/workspaces/${f.slug}/bots?view=roster`,f.cookie);assert.equal(response.status,200);
+ const item=response.json.bots.find(row=>row.id===codex.id);assert(item);assert.equal(item.employee.id,codex.id);assert.equal(item.runtime,'Codex');assert.equal(item.canUseHermesBot,false);assert.equal(item.entry,'employee');assert.equal(item.main_conversation_id,conversation.id);assert.equal(item.configuration_state,'not_applicable');
+ assert(response.json.bots.some(row=>row.id===pending.id&&row.runtime===null));assert.equal(reads,0);assert.equal(f.db.prepare('SELECT count(*) n FROM hermes_bots').get().n,before);f.repo.getA2AAction=original;
+ const member=await request(f.app,`/api/workspaces/${f.slug}/bots?view=roster`,f.memberCookie);assert(!member.json.bots.some(row=>row.id===hidden.id));assert(member.json.bots.some(row=>row.id===codex.id));
+ assert.equal((await request(f.app,`/api/workspaces/${f.slug}/bots/${codex.id}?view=workbench`,f.cookie)).status,400);
+ const legacy=f.bots.list(f.slug,f.context);assert(!legacy.some(row=>row.id===codex.id));
+});

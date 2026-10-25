@@ -5,8 +5,9 @@ import { createHash, randomUUID } from 'node:crypto';
 import { parseDocument, stringify } from 'yaml';
 import { normalizeBotConfig, effectiveBotMaxTurns, botFailure, permittedCredentialName } from './hermes-bot-config.mjs';
 import {hermesBotToolsets,nativeHermesMcpServers} from './hermes-mcp-config.mjs';
+import {resolveBotProviderRoute} from './bot-provider-routing.mjs';
 
-export const BOT_RUNTIME_ENV_KEYS=['ZIWEI_INSTANCE_KIND','ZIWEI_BOT_REVISION','ZIWEI_BOT_ACTION_ID','ZIWEI_BOT_DEVICE_TOKEN','ZIWEI_BOT_PROFILE_MODE','ZIWEI_BOT_REASONING_EFFORT'];
+export const BOT_RUNTIME_ENV_KEYS=['ZIWEI_BOT_PROVIDER_KEY','ZIWEI_BOT_KEY_PROVIDER','ZIWEI_BOT_KEY_ENDPOINT','ZIWEI_INSTANCE_KIND','ZIWEI_BOT_REVISION','ZIWEI_BOT_ACTION_ID','ZIWEI_BOT_DEVICE_TOKEN','ZIWEI_BOT_PROFILE_MODE','ZIWEI_BOT_REASONING_EFFORT'];
 const hash=value=>createHash('sha256').update(value).digest('hex');
 function noLink(file) {try{if(fs.lstatSync(file).isSymbolicLink())throw botFailure('BOT_HOME_INVALID','Bot 状态路径不能是链接');}catch(error){if(error.code!=='ENOENT')throw error;}}
 function write(file,text) {noLink(file);const tmp=`${file}.${randomUUID()}.tmp`;try{fs.writeFileSync(tmp,text,{flag:'wx',mode:0o600});fs.renameSync(tmp,file);}finally{try{fs.unlinkSync(tmp);}catch{}}}
@@ -52,13 +53,9 @@ export function prepareHermesBotHome({context,sourceHome,privateDirectory,worksp
   if(owned){noLink(sourceHome);noLink(path.dirname(sourceHome));}
   let source=fs.realpathSync.native(sourceHome);
   const sourceConfig=readConfig(path.join(source,'config.yaml')),config=normalizeBotConfig(context.config);
-  const provider=config.provider || sourceConfig.model?.provider || sourceConfig.provider;
-  const model=context.model || sourceConfig.model?.default;
+  const {provider,model,endpoint,apiMode}=resolveBotProviderRoute(config,context.model,sourceConfig,context.providerCredentialIndependent===true);
   if(typeof provider!=='string'||!provider||typeof model!=='string'||!model)throw botFailure('BOT_PROVIDER_REQUIRED','Bot 需要明确模型和服务商');
   const providerName=provider.replace(/^custom:/,'');const custom=sourceConfig.providers?.[providerName];
-  const sameProvider=provider===(sourceConfig.model?.provider || sourceConfig.provider);
-  const endpoint=custom?.base_url || (sameProvider?sourceConfig.model?.base_url:null);
-  const apiMode=custom?.api_mode || (sameProvider?sourceConfig.model?.api_mode:null);
   if(custom && !permittedCredentialName(custom.key_env))throw botFailure('BOT_PROVIDER_UNSUPPORTED','自定义 provider 必须使用来源 profile 的外部服务 key_env 引用');
   let home,key,binding;
   if(owned){

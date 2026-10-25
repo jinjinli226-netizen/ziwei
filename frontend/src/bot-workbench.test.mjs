@@ -7,8 +7,8 @@ function fixture(overrides={}) {let current=bot();const calls=[];const api={bots
 
 test('new editor defaults enable the shared builtin tools without sharing mutable configuration',()=>{
   const first=module.defaultBotConfig(),second=module.defaultBotConfig();
-  assert.equal(first.permissions.mode,'execute');assert.deepEqual(first.toolsets,['web','browser','file','terminal','vision','skills','todo','memory','session_search','code_execution']);
-  first.toolsets.length=0;first.memory.enabled=false;assert.equal(second.toolsets.length,10);assert.equal(second.memory.enabled,true);
+  assert.equal(first.permissions.mode,'execute');assert.deepEqual(first.toolsets,['web','browser','file','terminal','vision','skills','todo','memory','session_search','code_execution','ziwei_autonomy']);
+  first.toolsets.length=0;first.memory.enabled=false;assert.equal(second.toolsets.length,11);assert.equal(second.memory.enabled,true);
 });
 test('loading and saving an existing readonly empty-tool draft never fills new creation defaults',async()=>{
   const ui=fixture();await ui.setWorkspace('qa','a');assert.equal(ui.state.draft.config.permissions.mode,'read_only');assert.deepEqual(ui.state.draft.config.toolsets,[]);
@@ -26,7 +26,7 @@ test('Bot save verifies persisted readback and keeps complete config with expect
 test('a late Bot read or save cannot replace another selected Bot',async()=>{
   const pending=deferred();let count=0;
   const ui=fixture({bot:async id=>++count===1?pending.promise:bot(id)});
-  const old=ui.setWorkspace('qa','a');await ui.select('b');pending.resolve(bot('a'));await old;
+  const old=ui.setWorkspace('qa','a');await new Promise(resolve=>setImmediate(resolve));await ui.select('b');pending.resolve(bot('a'));await old;
   assert.equal(ui.state.bot.id,'b');
   const saving=deferred();const second=fixture({updateBot:()=>saving.promise,bot:async id=>bot(id)});
   await second.setWorkspace('qa','a');const save=second.save();await second.select('b');saving.resolve(bot('a',2));await save;
