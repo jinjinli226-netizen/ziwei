@@ -176,10 +176,11 @@ function checkpointControlEnvelope(value){
 // nested runtime/control uncertainty must still block maintenance.
 function failedBackgroundHistoryUnknown(view){
   const result=view.result.result,terminal=result.terminalMcp;
-  const knownFailure=terminal?.failure?.code==='terminal_mcp_receipt_incomplete'&&terminal.failure.phoneExecutionState==='uncertain'||retainedTerminalReceiptFailure(view);
+  const incompletePhone=terminal?.failure?.code==='terminal_mcp_receipt_incomplete'&&terminal.failure.phoneExecutionState==='uncertain';
+  const knownFailure=incompletePhone||retainedTerminalReceiptFailure(view);
   if(!knownFailure||!scopedPhoneReceipt(view))return legacyHistoryUncertain(view);
   const {terminalMcp:_phoneBusiness,...cleanResult}=result;
-  if(cleanResult.executionState==='uncertain')delete cleanResult.executionState;
+  if(incompletePhone&&cleanResult.executionState==='uncertain')delete cleanResult.executionState;
   // Phone status/receipts are retained in the original bytes. Local exit and
   // control validation below still inspects that entire original subtree.
   return legacyHistoryUncertain({...view,result:{...view.result,result:cleanResult}});
@@ -196,9 +197,65 @@ function scopedPhoneReceipt(completed){
 function retainedTerminalReceiptFailure(completed){
   const wrapper=completed?.result,result=wrapper?.result,terminal=result?.terminalMcp;
   if(result?.runtime!=='Hermes'||wrapper.code!=='terminal_mcp_receipt_failed'||!scopedPhoneReceipt(completed)||wrapper.error!==terminal.failure?.error||checkpointControlEnvelope(result))return false;
+  // This producer writes outer executionState only for an uncertain phone
+  // outcome. A terminal failure cannot explain independent outer uncertainty.
+  if(Object.hasOwn(result,'executionState')||Object.hasOwn(result,'execution_state')||!knownTerminalReceiptShape(terminal))return false;
   if(!Array.isArray(terminal.toolCalls)&&!Array.isArray(terminal.tool_calls)||terminal.toolCalls&&terminal.tool_calls&&!equal(terminal.toolCalls,terminal.tool_calls))return false;
   let failure;try{failure=terminalMcpExecutionFailure(terminal);}catch{return false;}
-  return failure?.code==='terminal_mcp_receipt_failed'&&['failed','not_started'].includes(failure.phoneExecutionState)&&failure.retryAllowed===false&&failure.nextAction==='observe'&&equal(failure,terminal.failure);
+  return failure?.code==='terminal_mcp_receipt_failed'&&['failed','not_started'].includes(failure.phoneExecutionState)&&failure.retryAllowed===false&&failure.nextAction==='observe'&&equal(failure,terminal.failure)&&knownFinalPhoneStates(terminal.toolCalls||terminal.tool_calls);
+}
+
+function knownFinalPhoneStates(calls){
+  const observed=new Map(),terminalStates=new Set(['succeeded','committed','failed','expired','cancelled','superseded','aborted','rejected','timed_out']);
+  const read=(value,kind,receipt=false)=>{
+    const id=value[`${kind}Id`]||value.ids?.[`${kind}Id`],prefix=receipt?'':kind==='command'?'command':null;
+    const state=prefix===null?undefined:receipt?value.executionState:value.commandExecutionState;
+    const executing=prefix===null?undefined:receipt?value.executingConfirmed:value.commandExecutingConfirmed;
+    if(!id){
+      if(value.commandId||value.updateId||value.ids?.commandId||value.ids?.updateId){
+        if(receipt||prefix===null)return true;
+        return !(['pending','uncertain'].includes(state)||executing===true);
+      }
+      if(['unknown','uncertain','unconfirmed','queued','pending','running','executing','started','blocked'].includes(value.status))return false;
+      return !(['pending','uncertain'].includes(state)||executing===true);
+    }
+    const key=`${kind}:${id}`,next={...(observed.get(key)||{})},status=value[`${kind}Status`]||value.status;
+    if(status!==undefined)next.status=status;
+    if(state!==undefined)next.state=state;
+    if(executing!==undefined)next.executing=executing;
+    observed.set(key,next);return true;
+  };
+  // Include observed-but-unsubmitted IDs too. The producer intentionally only
+  // tracks issued IDs; that is insufficient authority to erase other pending
+  // evidence from a maintenance inspection view.
+  for(const call of calls){for(const kind of ['command','update'])if(!read(call,kind))return false;for(const receipt of call.receipts||[])for(const kind of ['command','update'])if(!read(receipt,kind,true))return false;}
+  // executingConfirmed is historical evidence that execution was observed;
+  // the producer preserves it on succeeded/failed receipts. It is not a live
+  // process flag and cannot overrule an explicit final status/state for that ID.
+  return [...observed.values()].every(value=>terminalStates.has(value.status)&&(!value.state||['not_started','succeeded','failed'].includes(value.state)));
+}
+
+function knownTerminalReceiptShape(terminal){
+  const fields=['configured','injected','loaded','transport','serverName','workspace','runtime','profile','runtimeProfile','employeeId','targetDeviceId','actionId','status','toolCalls','tool_calls','retryAllowed','executionState','failure'];
+  if(Object.keys(terminal).some(key=>!fields.includes(key))||terminal.executionState!==terminal.failure?.phoneExecutionState||terminal.retryAllowed!==false)return false;
+  const strings=(value,allowed)=>value&&typeof value==='object'&&!Array.isArray(value)&&Object.entries(value).every(([key,item])=>allowed.includes(key)&&typeof item==='string');
+  const metadata=['error','executionState','executingConfirmed','errorCode'];
+  const states=new Set(['not_started','succeeded','failed','uncertain','pending']);
+  const validMetadata=value=>Object.entries(value).every(([key,item])=>key==='executingConfirmed'?typeof item==='boolean':key==='executionState'?states.has(item):key==='errorCode'?typeof item==='string'&&/^[A-Z0-9_]{1,100}$/.test(item):typeof item==='string');
+  const ids=['deviceId','commandId','updateId','requestId'];
+  const callFields=['toolName','ok',...ids,'ids','status','commandStatus','updateStatus','commandError','commandExecutionState','commandExecutingConfirmed','commandErrorCode','error','receipts'];
+  for(const calls of [terminal.toolCalls,terminal.tool_calls].filter(value=>value!==undefined)){
+    if(!Array.isArray(calls))return false;
+    for(const call of calls){
+      if(!call||typeof call!=='object'||Array.isArray(call)||Object.keys(call).some(key=>!callFields.includes(key))||typeof call.toolName!=='string'||typeof call.ok!=='boolean')return false;
+      if(call.ids!==undefined&&!strings(call.ids,ids))return false;
+      if(ids.some(key=>call[key]!==undefined&&call.ids?.[key]!==undefined&&call[key]!==call.ids[key]))return false;
+      if(call.commandExecutionState!==undefined&&!states.has(call.commandExecutionState)||call.commandErrorCode!==undefined&&!/^[A-Z0-9_]{1,100}$/.test(call.commandErrorCode))return false;
+      if(Object.entries(call).some(([key,value])=>!['ids','receipts'].includes(key)&&(key==='ok'||key==='commandExecutingConfirmed'?typeof value!=='boolean':typeof value!=='string')))return false;
+      if(call.receipts!==undefined&&(!Array.isArray(call.receipts)||call.receipts.some(receipt=>!receipt||typeof receipt!=='object'||Array.isArray(receipt)||!(receipt.commandId||receipt.updateId)||Object.keys(receipt).some(key=>!['commandId','updateId','status',...metadata].includes(key))||!validMetadata(receipt))))return false;
+    }
+  }
+  return true;
 }
 
 // Native dispatch now persists hardDeadline. It is timing metadata, never an
@@ -253,10 +310,13 @@ export function isRetainedBackgroundCompletion(input){return retainedBackgroundC
 export function isRetainedFailedBackgroundCompletion(input){return retainedBackgroundCompletion(input,true);}
 
 function retainableFailedBackgroundDelivery(record,action,result,state,identity){
-  if(!state||!record.retainEvidence||record.dispatcherStatus!=='failed'||!['result_pending','blocked','confirmed'].includes(record.state)||record.state==='confirmed'&&(record.serverStatus!=='failed'||!Number.isFinite(Date.parse(record.confirmedAt)))||record.state==='blocked'&&(!Number.isInteger(record.blockedStatus)||record.blockedStatus<400||record.blockedStatus>499||[408,429].includes(record.blockedStatus))||record.serverStatus!==undefined&&record.serverStatus!==null&&record.serverStatus!=='failed'||!Array.isArray(record.events)||record.events.length||result?.receiptOnly!==true||result.status!=='failed')return false;
+  if(!state||record.dispatcherStatus!=='failed'||!['result_pending','blocked','confirmed'].includes(record.state)||record.state==='confirmed'&&(record.serverStatus!=='failed'||!Number.isFinite(Date.parse(record.confirmedAt)))||record.state==='blocked'&&(!Number.isInteger(record.blockedStatus)||record.blockedStatus<400||record.blockedStatus>499||[408,429].includes(record.blockedStatus))||record.serverStatus!==undefined&&record.serverStatus!==null&&record.serverStatus!=='failed'||!Array.isArray(record.events)||record.events.length||result?.receiptOnly!==true||result.status!=='failed')return false;
   const matches=state.completed.filter(row=>row?.result?.actionId===record.action.id),starts=state.started.filter(row=>row?.actionId===record.action.id);
   if(matches.length!==1||starts.length!==1)return false;
   const completed=matches[0],started=starts[0];
+  // A known terminal phone failure is not marked uncertain by the producer.
+  // Retain its exact pending bytes without inventing a retainEvidence flag.
+  if(record.retainEvidence!==true&&!(record.retainEvidence===false&&retainedTerminalReceiptFailure(completed)))return false;
   return isRetainedFailedBackgroundCompletion({started,completed,identity,action})&&isRetainedFailedBackgroundCompletion({started,completed,identity,action:record.action})&&result.error===completed.result.error&&equal(result.result,completed.result.result);
 }
 

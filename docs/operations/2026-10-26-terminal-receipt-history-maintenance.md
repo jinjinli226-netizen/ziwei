@@ -9,3 +9,11 @@
 隔离回归：229项维护/保留恢复测试通过；producer回归35通过、1项平台条件跳过。新增正例由真实ActionDispatcher和delivery链产生，覆盖result_pending/blocked/confirmed；反例对双别名一致注入第二条未知手机调用，确保真正由producer判定拒绝，而非仅被别名差异拦住。原生只读候选扫描stopSafe=true、retainedPendingCount=1、stopIssues=[]，与旧health stopSafe=false的分类差异得到解释。
 
 源码修复、补丁包、实际安装和设备认证心跳另行记录在共享CLIENT-UPGRADE-STATE.json；旧3f源码包及ba7383a构建保留，不能拿旧hash校验新包。维护沿原官方更新器的finalize→retain→force→prelaunch链：保留原文件、暂停接单并排空当前工作、精确Process句柄核验停止、原路径替换和恢复。未执行付费模型、手机或原聊天重放。
+
+## 补充审查门禁
+
+b5f5608只推送源码，未用于真实停止或安装。总控审查发现新failed类别不应解释外层独立executionState，且不能整段剥掉未知嵌套本机状态；补充红测试已复现后修复。新分支拒绝所有外层executionState/execution_state，只有旧incomplete/uncertain分支保留原有特定豁免。手机回执及调用/ID/嵌套receipt仅允许真实producer的字段和标量类型；额外other.localTask、对象诊断等均拒绝。fixture按真实producer去掉外层uncertain并保留retryAllowed:false；正常phone失败的delivery retainEvidence:false只在严格同一新类别、原action/result/blob精确匹配时保留，不改原flag。
+
+最终定向271项：270通过、1项POSIX专用在Windows跳过；lint通过。包含两条独立P1复现、未知嵌套、双别名一致的第二条queued/executing/uncertain/未确认提交、原字节保留和原生恢复链测试。正确收紧后，实际原生只读扫描仍stopSafe=true、retainedPendingCount=1。最终独审/提交/新包与现场安装回执另以共享文件和后续提交为准，旧3f及ba7383a产物保持原样。
+
+最终补充：metadata执行状态限真实producer枚举，并独立折叠全部观测command/update ID（含未提交的只读receipt），未知第二ID、无归属状态和kind错配pending继续拒绝。executingConfirmed按真实commandOutcome定义是历史见证，成功/失败终态仍可携带true；不能将其误当当前活进程，也不据此证明本机子树已退出。117项维护测试及独立复核通过。最终原生只读scanner字段哈希543a5050…对应stopSafe=true、retainedPendingCount=1、stopIssues为空；打包后还将按实际归档字节再次核实。b5f5608未被安装；仅后续完成P1修正的新提交/新包可用于现场维护。
