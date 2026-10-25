@@ -1,0 +1,11 @@
+# 2026-10-26 历史手机回执失败阻塞客户端维护
+
+原发布3f9487a的电脑端仍待升级。重新核对真实Windows原生命名空间后，action_49bd64e6-0105-4fd6-aff5-53f50b520d52自身已通过失败后台保留分类；普通Bot失败收尾不适用并不等于没有通用维护链。原整树扫描实际被action_e28a8cd1-fa99-47f7-a08c-465f59bc5cd6的合法后处理失败记录提前中止。
+
+该历史记录为同workspace/employee/profile的Hermes conversation.execute，dispatcher保留terminal_mcp_receipt_failed，原CLI root/host退出均0，tree:false且backgroundProcessesRetained:true。已加载的ziwei-terminal回执明确failed，与wrapper error一致。它来自runtime-adapters的真实producer；不把root0解释为手机业务成功，不把历史activeProcesses数当作当前活进程。
+
+将纯terminalMcpExecutionFailure及其脱敏元数据函数抽到src/terminal-mcp-receipt-failure.mjs，runtime继续导出原接口。独立审查逐字规范化核实producer等价。保留分类复算所有已提交手机ID的终态以及未确认提交；只接收确切phone failure/error、完整作用域、root0/host0/真实retained标志及原配置/控制绑定。两份toolCalls别名必须一致。第二条queued/executing/uncertain或未确认提交、嵌套本机退出未知、控制/隔离/合成证据仍拒绝。正式scan仍unsafe，原业务结果/租约/字节不改。
+
+隔离回归：229项维护/保留恢复测试通过；producer回归35通过、1项平台条件跳过。新增正例由真实ActionDispatcher和delivery链产生，覆盖result_pending/blocked/confirmed；反例对双别名一致注入第二条未知手机调用，确保真正由producer判定拒绝，而非仅被别名差异拦住。原生只读候选扫描stopSafe=true、retainedPendingCount=1、stopIssues=[]，与旧health stopSafe=false的分类差异得到解释。
+
+源码修复、补丁包、实际安装和设备认证心跳另行记录在共享CLIENT-UPGRADE-STATE.json；旧3f源码包及ba7383a构建保留，不能拿旧hash校验新包。维护沿原官方更新器的finalize→retain→force→prelaunch链：保留原文件、暂停接单并排空当前工作、精确Process句柄核验停止、原路径替换和恢复。未执行付费模型、手机或原聊天重放。
