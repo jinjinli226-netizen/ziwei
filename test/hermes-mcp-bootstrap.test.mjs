@@ -87,6 +87,19 @@ test('Hermes bootstrap fails clearly when native managed overlay or gate support
   assert.throws(() => runtime.hermesMcpSpawnSpec(f.launcher, f.args, { env: f.env }), /Hermes.*更新|Hermes.*兼容/);
 });
 
+test('existing owned profiles do not require native profile creation helpers removed in Hermes 0.22.5',t=>{
+  const f=fixture(t);if(!f)return;
+  const profiles=path.join(f.directory,'hermes_cli','profiles.py');
+  fs.writeFileSync(profiles,'def get_profile_dir(name):\n return name\ndef profile_exists(name):\n return True\n');
+  const authBefore=fs.readFileSync(path.join(f.home,'auth.json'));
+  const spec=runtime.hermesMcpSpawnSpec(f.launcher,f.args,{env:{...f.env,ZIWEI_BOT_PROFILE_MODE:'owned_profile'}});
+  const binding=JSON.parse(spec.args[spec.args.indexOf('--binding')+1]);
+  assert.equal(binding.paths.profiles,fs.realpathSync(profiles));
+  assert.deepEqual(fs.readFileSync(path.join(f.home,'auth.json')),authBefore);
+  fs.writeFileSync(profiles,'def profile_exists(name):\n return True\n');
+  assert.throws(()=>runtime.hermesMcpSpawnSpec(f.launcher,f.args,{env:{...f.env,ZIWEI_BOT_PROFILE_MODE:'owned_profile'}}),/Hermes/);
+});
+
 test('Hermes bootstrap revalidates native source binding before execution and preserves auth on refusal', t => {
   const f = fixture(t); if (!f) return;
   const spec = runtime.hermesMcpSpawnSpec(f.launcher, f.args, { env: f.env });

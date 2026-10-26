@@ -121,7 +121,10 @@ def _binding(launcher, multi_images=False, launcher_binding=None, expected=None)
     if os.environ.get('ZIWEI_BOT_PROFILE_MODE') == 'owned_profile':
         target = Path(paths['main']).with_name('profiles.py')
         functions = {node.name for node in ast.parse(target.read_text(encoding='utf-8')).body if isinstance(node, ast.FunctionDef)}
-        if not {'get_profile_dir', 'profile_exists', '_bootstrap_profile_dir', '_finish_profile_layout'}.issubset(functions):
+        # Existing owned profiles only use native lookup here. Profile creation
+        # has its own contract in hermes-owned-profile.py; Hermes 0.22.5 removed
+        # _finish_profile_layout without removing the existing-profile API.
+        if not {'get_profile_dir', 'profile_exists'}.issubset(functions):
             raise UnsupportedNativeHermes('owned profile layout')
         paths['profiles'] = str(target.resolve(strict=True))
     if os.environ.get('ZIWEI_EXECUTION_PROFILE_BOUND') == '1':
