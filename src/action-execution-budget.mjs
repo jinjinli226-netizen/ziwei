@@ -4,6 +4,7 @@ export const ACTION_EXECUTION_LEASE_BUFFER_MS = 60 * 1000;
 
 const longTasks = new Set(['conversation.execute', 'agent.execute', 'runtime.execute', 'automation.execute']);
 export function actionExecutionTimeoutMs(action = {}) {
+  if(action.type==='employee.capabilities.inspect')return 15000;
   const payload = action.payload || {}, value = payload.timeoutMs ?? payload.timeout_ms;
   if (value !== undefined && value !== null && String(value).trim() !== '' && Number.isFinite(Number(value))) {
     // Node timers accept signed 32-bit delays; an overflow would stop immediately.
@@ -20,6 +21,7 @@ export function actionExecutionTimeoutMs(action = {}) {
 }
 
 export function actionExecutionLeaseMs(action = {}) {
+  if(action.type==='employee.capabilities.inspect')return 60000;
   // A deliberately short execution still needs the existing result-upload and
   // retry window. This lease does not extend the dispatcher's execution timer.
   return Math.max(DEFAULT_ACTION_EXECUTION_TIMEOUT_MS, actionExecutionTimeoutMs(action)) + ACTION_EXECUTION_LEASE_BUFFER_MS;

@@ -160,7 +160,7 @@ export function deriveBotCapabilities({bot,capabilities=[],device=null,runtime=n
       default:cap={...cap,state:'unavailable',reason:'当前版本没有此能力的状态检查入口。'};
     }
     if(bot?.configuration_state!=='initialized')cap={...cap,state:'needs_configuration',enabled:null,reason:`${cap.label}尚未初始化。`,action:gate.action,blockedBy:gate.state};
-    else if(gate.state!=='ready'&&['ready','enabled'].includes(cap.state))cap={...cap,state:gate.state,blockedBy:gate.state};
+    else if(gate.state!=='ready')cap={...cap,blockedBy:gate.state,runtimeBarrier:{...gate}};
     if(cap.action?.kind==='enable'&&bot?.instance?.mode==='owned_profile'&&provision?.status!=='provisioned')cap={...cap,state:gate.state,action:gate.action,blockedBy:gate.state};
     return cap;
   });

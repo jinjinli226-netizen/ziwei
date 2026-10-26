@@ -19,6 +19,24 @@ function native(f,resource,operation,data={},overrides={}){
 }
 const derive=f=>deriveBotCapabilities(f),cap=(f,id)=>derive(f).capabilities.find(item=>item.id===id);
 
+test('runtime barrier preserves saved capability and successful observation as separate evidence',()=>{
+  const f=fixture();
+  native(f,'mcp','inspect',{connected:true,tools:[{name:'read'}]});
+  const before=cap(f,'tools_mcp');
+  f.device.status='offline';
+  const after=cap(f,'tools_mcp');
+  assert.equal(after.state,'ready');
+  assert.equal(after.runtimeBarrier.state,'offline');
+  assert.equal(after.blockedBy,'offline');
+  assert.deepEqual(after.evidence,before.evidence);
+  assert.equal(after.checkedAt,before.checkedAt);
+  assert.equal(cap(f,'profile_memory').state,'enabled');
+  assert.equal(derive(f).capabilityGate.state,'offline');
+  f.device.status='online';f.runtime.cli_status='missing';
+  assert.equal(cap(f,'tools_mcp').state,'ready');
+  assert.equal(cap(f,'tools_mcp').runtimeBarrier.state,'unavailable');
+});
+
 test('configuration validation preserves legacy status without claiming tools, audio or model execution',()=>{
   const f=fixture(),view=derive(f);
   assert.equal(view.capabilityGate.state,'ready');
@@ -173,7 +191,7 @@ test('real Bot facade derives phone configuration from installed attached skill 
 test('shared global gate reflects saved-but-unvalidated settings and paused state without repeating generic reasons',()=>{
   const f=fixture();f.bot.validation={status:'stale',revision:2};
   assert.equal(derive(f).capabilityGate.state,'needs_check');assert.equal(derive(f).capabilityGate.action.kind,'validate');
-  assert.equal(cap(f,'profile_memory').state,'needs_check');assert.equal(cap(f,'profile_memory').enabled,true);assert.equal(cap(f,'profile_memory').reason,'独立记忆已开启。');
+  assert.equal(cap(f,'profile_memory').state,'enabled');assert.equal(cap(f,'profile_memory').runtimeBarrier.state,'needs_check');assert.equal(cap(f,'profile_memory').enabled,true);assert.equal(cap(f,'profile_memory').reason,'独立记忆已开启。');
   f.bot.validation={status:'pending',revision:3};assert.equal(derive(f).capabilityGate.state,'checking');
   f.bot.validation={status:'succeeded',revision:3};f.bot.control_state='paused';assert.equal(derive(f).capabilityGate.action.kind,'activate');
   f.device.status='offline';assert.equal(derive(f).capabilityGate.state,'offline');

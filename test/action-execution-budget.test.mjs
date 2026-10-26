@@ -90,6 +90,13 @@ test('a caller can still request a shorter native deadline',async t=>{
   t.mock.timers.tick(1);const result=await f.pending;assert.equal(result.code,'action_timeout');assert.match(result.error,/100ms/);assert.equal(f.stops,1);
 });
 
+test('read-only inventory gets its fixed hard deadline without a caller timeout',async t=>{
+  const f=await running(t,{id:'inventory-budget',type:'employee.capabilities.inspect',payload:{}});
+  t.mock.timers.tick(14999);await flush();assert.equal(f.signal.aborted,false);
+  t.mock.timers.tick(1);await flush();assert.equal(f.signal.aborted,true);
+  const result=await f.pending;assert.equal(result.code,'action_timeout');assert.equal(f.stops,1);
+});
+
 test('an existing short ACK lease still clamps a new long default and preserves its shutdown reserve',async t=>{
   const f=await running(t,action(),60250);
   t.mock.timers.tick(249);await flush();assert.equal(f.signal.aborted,false);

@@ -71,3 +71,14 @@ test('unchanged saved avatar URLs are not resubmitted while replacements and rem
   ui.state.draft.employee.avatar='data:image/png;base64,changed';assert.equal(await ui.save(),true);assert.equal(ui.calls[1][1].employee.avatar,'data:image/png;base64,changed');
   ui.state.draft.employee.avatar=null;assert.equal(await ui.save(),true);assert.equal(ui.calls[2][1].employee.avatar,null);
 });
+
+test('older roster revision cannot hide employee ownership or binding changes behind a cached detail',async()=>{
+ const employee={id:'a',name:'original',runtime:'Hermes',owner_user_id:'owner-one',runtime_profile:'bot-a',target_device_id:'pc',visibility:'workspace',instructions:'private detail'};
+ const detail={...bot('a'),revision:5,control_epoch:7,employee};let rows=[{...detail,employee:{...employee,instructions:undefined}}];
+ const ui=createBotWorkbench({api:{bots:async()=>({bots:rows}),bot:async()=>detail},getReadOptions:()=>({runs:false,routines:false})});await ui.setWorkspace('qa','a');
+ rows=[{...detail,revision:4,employee:{...employee,name:'older summary',instructions:undefined}}];await ui.list();assert.equal(ui.state.bots[0].employee.instructions,'private detail');
+ for(const patch of [{owner_user_id:'owner-two'},{runtime:'Codex'},{runtime_profile:'another-profile'},{target_device_id:'another-pc'},{visibility:'personal'}]){
+  rows=[{...detail,revision:4,employee:{...employee,...patch,instructions:undefined}}];await ui.list();for(const[key,value]of Object.entries(patch))assert.equal(ui.state.bots[0].employee[key],value);assert.equal(ui.state.bots[0].employee.instructions,undefined);
+ }
+ ui.dispose();
+});

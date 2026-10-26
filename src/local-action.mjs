@@ -1,6 +1,8 @@
 import {normalizeNativeOperation,nativeIsExecution} from './hermes-native-contract.mjs';
 import {loadBotProviderCredential} from './bot-provider-credential-client.mjs';
 import fs from 'node:fs';
+import os from 'node:os';
+import {collectEmployeeCapabilityInventory,createMachineCapabilityInventory,deriveCapabilityRuntimeContext} from './employee-capability-inventory.mjs';
 import {executeHermesNative} from './hermes-native-runtime.mjs';
 import {createBotGatewayManager} from './hermes-gateway-runtime.mjs';
 import {authorizeNativeExecution,assertNoOwnedBotResource,createHermesExecutionGuard,PRODUCT_ROLE} from './execution-admission.mjs';
@@ -20,6 +22,7 @@ import {bindCodexConversationToHost} from './codex-conversation-session.mjs';
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_OUTPUT_BYTES = 1024 * 1024;
 const MAX_DIRECTORY_ENTRIES = 200;
+const sharedMachineCapabilityInventory=createMachineCapabilityInventory();
 
 function localDirectoryRoots() {
   if (process.platform !== 'win32') return ['/'];
@@ -369,7 +372,7 @@ function runCommand({runtimeDir, action, executable, baseArgs = [], allowedExecu
  * Unknown/unsupported actions fail loudly so the cloud never sees a fake
  * success merely because an action was accepted by the daemon.
  */
-export function createLocalActionExecutor({runtimeDir, admissionHandledByDispatcher = false, defaultWorkdir = process.cwd(), allowedExecutables = [], executorCommand = null, executorArgs = [], defaultRuntime = null, hermesHomePath = null, codexMcpDisabledServers = [], managementMcpConfig = {}, managementBootstrap = null, terminalMcpConfig = {}, workspace = null, apiBase = null, deviceId = null, deviceToken = null, onWorkspaceConnect = null} = {}) {
+export function createLocalActionExecutor({runtimeDir, admissionHandledByDispatcher = false, defaultWorkdir = process.cwd(), allowedExecutables = [], executorCommand = null, executorArgs = [], defaultRuntime = null, hermesHomePath = null, codexMcpDisabledServers = [], managementMcpConfig = {}, managementBootstrap = null, terminalMcpConfig = {}, workspace = null, apiBase = null, deviceId = null, deviceToken = null, onWorkspaceConnect = null, capabilityCollector = collectEmployeeCapabilityInventory, machineCapabilityInventory = sharedMachineCapabilityInventory} = {}) {
   if (!runtimeDir) throw new TypeError('runtimeDir is required');
   fs.mkdirSync(runtimeDir, {recursive: true});
   const automaticManagement = managementBootstrap || (workspace && deviceToken ? createManagementBootstrap({ workspace, apiBase, deviceId, deviceToken, cacheDirectory: path.join(runtimeDir, 'management-mcp-credentials') }) : null);
@@ -383,6 +386,13 @@ export function createLocalActionExecutor({runtimeDir, admissionHandledByDispatc
     const type = String(action?.type || '');
     if (action?.payload?.deviceId && deviceId && action.payload.deviceId !== deviceId) throw new Error('执行目标设备与本机已配对设备不一致；不会回退其他设备');
     if (action?.workspace && workspace && action.workspace !== workspace) throw new Error('执行工作区与本机已配对工作区不一致');
+    if(type==='employee.capabilities.inspect'){
+      const payload=action.payload||{},inspection=payload.capabilityInspection,subject=inspection?.subject;
+      if(inspection?.schemaVersion!==1||!subject||subject.workspace!==workspace||payload.workspace!==workspace||subject.deviceId!==deviceId||payload.deviceId!==deviceId||subject.runtime!==payload.runtime||(subject.profile??null)!==(payload.profile??null)||payload.hermesBot||payload.employeeId)throw Object.assign(new Error('能力清单检查身份不匹配'),{code:'EMPLOYEE_CAPABILITIES_SUBJECT_INVALID'});
+      const runtimeContext=deriveCapabilityRuntimeContext({payload,hermesHome:hermesHomePath||hermesHome(),codexHome:process.env.CODEX_HOME||path.join(os.homedir(),'.codex'),defaultWorkdir:payload.workdir||defaultWorkdir});
+      const employeeCapabilities=await capabilityCollector({subject,config:inspection.config||{},runtimeContext,machineInventory:machineCapabilityInventory});
+      return{status:'succeeded',result:{employeeCapabilities}};
+    }
     const authorizeBot=async()=>{
       if(!action.payload?.hermesBot)return;
       if(!deviceToken || action.payload.hermesBot.workspace!==workspace)throw new Error('Bot 缺少当前工作区已配对设备凭据');

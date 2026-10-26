@@ -5,6 +5,7 @@ import {employeeRemovalNotice} from './employee-removal.js';
 import {failureFinalizationRequest,pendingBotFailureFinalization} from './bot-failure-finalization.mjs';
 import {enabledCapabilityConfig,capabilitySavedEnabled} from './bot-capability-actions.js';
 import {createDefaultBotConfig} from '../../src/hermes-bot-config.mjs';
+import {inventoryEmployeeBindingChanged} from './employee-capability-inventory.js';
 
 const clone = value => JSON.parse(JSON.stringify(value));
 const pendingRuns=new Map();
@@ -37,7 +38,7 @@ export function createBotWorkbench({api,wrap=value=>value,wait=ms=>new Promise(r
   };
   async function list() {
     const workspace=state.workspace,generation=workspaceGeneration,request=++listGeneration;state.loading=true;
-    try {const result=await api.bots(workspace);if(generation===workspaceGeneration&&request===listGeneration){state.bots=(result.bots || []).map(bot=>bot.id===state.bot?.id&&(bot.revision<state.bot.revision || (bot.revision===state.bot.revision&&bot.control_epoch<state.bot.control_epoch))?state.bot:bot);}}
+    try {const result=await api.bots(workspace);if(generation===workspaceGeneration&&request===listGeneration){state.bots=(result.bots || []).map(bot=>bot.id===state.bot?.id&&!inventoryEmployeeBindingChanged(state.bot.employee,bot.employee)&&(bot.revision<state.bot.revision || (bot.revision===state.bot.revision&&bot.control_epoch<state.bot.control_epoch))?state.bot:bot);}}
     catch(error){if(generation===workspaceGeneration)state.error=botErrorMessage(error);}
     finally{if(generation===workspaceGeneration&&request===listGeneration)state.loading=false;}
   }

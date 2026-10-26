@@ -220,6 +220,12 @@ export class ActionDispatcher {
     return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
   }
   #validateWorkdir(action) {
+    if(action?.type==='employee.capabilities.inspect'){
+      const requested=action.payload?.capabilityInspection?.runtimeContext?.cwd||this.#workdir;
+      if(process.platform==='win32')return resolveWindowsWorkdir(this.#workdir,requested);
+      const candidate=path.resolve(this.#workdir,requested);
+      return fs.realpathSync.native(candidate);
+    }
     const requested = action?.payload?.workdir ?? action?.payload?.workingDirectory ?? (process.platform === 'win32' ? action?.payload?.working_directory : undefined) ?? action?.payload?.cwd;
     if (process.platform === 'win32' && isNativeRuntimeAction(action)) {
       const payload = action.payload || {};
@@ -283,7 +289,7 @@ export class ActionDispatcher {
       const nativeRuntime = isNativeRuntimeAction(action);
       const requestedTimeout = action.payload?.timeoutMs ?? action.payload?.timeout_ms;
       const hasHardTimeout = requestedTimeout !== undefined && requestedTimeout !== null && String(requestedTimeout).trim() !== '' && Number.isFinite(Number(requestedTimeout));
-      let hardTimeoutMs = hasHardTimeout || nativeRuntime ? actionExecutionTimeoutMs(action) : null;
+      let hardTimeoutMs = hasHardTimeout || nativeRuntime || action.type==='employee.capabilities.inspect' ? actionExecutionTimeoutMs(action) : null;
       if (nativeRuntime && expiresAt) {
         const remaining = Date.parse(String(expiresAt)) - this.#now() - ACTION_EXECUTION_LEASE_BUFFER_MS;
         if (!Number.isFinite(remaining) || remaining < 100) return this.#rejectAdmission(action,key,identity,'lease','A2A action lease leaves insufficient time for execution and confirmed shutdown','ACTION_LEASE_INSUFFICIENT');

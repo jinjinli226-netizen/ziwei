@@ -24,6 +24,7 @@ import { normalizeConversationAttachments } from './conversation-attachments.mjs
 import {forwardConversationMessages as forwardMessages,CONVERSATION_FORWARD_INTERNAL} from './conversation-forwarding.mjs';
 import { resolveEmployeeDefaultWorkdir } from './employee-workdir.mjs';
 import { assertBotExecution, botUncertain, BOT_INTERNAL, botActionMaintenance, botActionReadOnlyInspection } from './bots.mjs';
+import {assertEmployeeCapabilitySubject,EMPLOYEE_CAPABILITY_INSPECTION_TYPE} from './employee-capability-inventory.mjs';
 import {verifyBotProvisionReceipt} from './bot-profiles.mjs';
 import {readHistoricalPrelaunchRecovery} from './bot-historical-recovery-view.mjs';
 import {readForceAbandonRecovery} from './bot-force-abandon.mjs';
@@ -2076,6 +2077,10 @@ export function createRepository(options = {}, io={}) {
       const existing = db.prepare('SELECT * FROM a2a_actions WHERE workspace_id=? AND dedupe_key=? ORDER BY created_at DESC LIMIT 1').get(ws.id, dedupeKey);
       if (existing) return { ...existing, duplicate: true, payload: parse(existing.payload_json), result: parse(existing.result_json) };
       let payload = trustedTemplatePayload(ws.id,input.payload && typeof input.payload === 'object' ? input.payload : {});
+      if(input.type===EMPLOYEE_CAPABILITY_INSPECTION_TYPE){
+        if(input.botInternal!==BOT_INTERNAL)throw botFailure('EMPLOYEE_CAPABILITIES_ROUTE_REQUIRED','请使用员工只读能力清单入口');
+        assertEmployeeCapabilitySubject(db,ws.id,payload);
+      }
       const isValidation=input.type==='hermes.bot.validate';
       const isProvisioning=input.type==='hermes.bot.provision';
       const readOnlyInspection=botActionReadOnlyInspection(input.type,payload);
@@ -2132,6 +2137,10 @@ export function createRepository(options = {}, io={}) {
             return input.executionDelivery===true?[]:[{...a2aResponseView(row,{includeResult:input.includeResult!==false}),...historicalActionMetadata(row),historyBindingError:{code:error.code,message:error.message}}];
           }
         });
+    },
+    assertEmployeeCapabilitiesInspection(actionId){
+      const row=db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId);
+      if(row?.type===EMPLOYEE_CAPABILITY_INSPECTION_TYPE)assertEmployeeCapabilitySubject(db,row.workspace_id,parse(row.payload_json));
     },
     authorizeBotStart(actionId,input={}) {
       const row=db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId);
@@ -2196,6 +2205,7 @@ export function createRepository(options = {}, io={}) {
         if (!row) throw new Error('A2A action not found');
         if (input.agentId && String(input.agentId) !== row.agent_id) throw new Error('A2A agent mismatch');
         assertActionDevice(row, input);
+        if(['pending','acked'].includes(row.status)&&row.type===EMPLOYEE_CAPABILITY_INSPECTION_TYPE)assertEmployeeCapabilitySubject(db,row.workspace_id,parse(row.payload_json));
         if(settleExpiredMaintenanceAction(this,row,input)){const updated=db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId);response={...a2aResponseView(updated,{receiptOnly,includeResult:!receiptOnly}),duplicate:true};}
         else if (row.status === 'expired') {
           if (!receiptOnly || !recoverableBotCompletion(row) || !input.deviceId || input.deviceId !== actionTargetDevice(row)) throw new Error('A2A action expired');

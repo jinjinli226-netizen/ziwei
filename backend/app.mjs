@@ -31,6 +31,7 @@ import {createActionMaintenanceService} from './action-maintenance.mjs';
 import {createBotProviderCredentialService} from './bot-provider-credentials.mjs';
 import {createBotAutonomyService} from './bot-autonomy.mjs';
 import {createBotInteractions} from './bot-interactions.mjs';
+import {createEmployeeCapabilityInventory} from './employee-capability-inventory.mjs';
 import {botActionMaintenance} from './bots.mjs';
 import { toolDefinitions as managementTools } from '../scripts/ziwei-mcp.mjs';
 
@@ -300,6 +301,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   });
   const auth = options.auth || createAuthService(repo.db, options.authOptions);
   const management = createManagementService(repo);
+  const employeeCapabilityInventory=createEmployeeCapabilityInventory(repo,{management});
   const mobileReadView = createMobileReadView(repo);
   const conversationReads = createConversationReadService(repo);
   const mobileNotifications = createMobileNotificationReadService(repo);
@@ -761,6 +763,8 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
     create: options.mcpOptions?.create ?? false
   };
   app.get('/api/workspaces/:slug/mcp/discovery', requireRole('owner','admin','member'), (req, res) => res.json(management.discovery(req.params.slug, { ...req.query, userId: req.auth?.user_id })));
+  app.get('/api/workspaces/:slug/employees/:id/capability-inventory',requireRole('owner','admin','member'),(req,res)=>{res.setHeader('Cache-Control','no-store');res.vary('Cookie');res.json(employeeCapabilityInventory.get(req.params.slug,req.params.id,employeeContext(req)));});
+  app.post('/api/workspaces/:slug/employees/:id/capability-inventory/refresh',requireRole('owner','admin','member'),(req,res)=>{res.setHeader('Cache-Control','no-store');res.status(202).json(employeeCapabilityInventory.refresh(req.params.slug,req.params.id,req.body||{},employeeContext(req)));});
   app.get('/api/workspaces/:slug/phone-mcp/setup',requireRole('owner','admin','member'),async(req,res,next)=>{try{const value=await phoneMcp.setup(req.params.slug,{...employeeContext(req),userId:req.auth?.user_id});res.json(req.query.view==='mobile'?{...value,employees:value.employees.map(employee=>mobileReadView.employee(req.params.slug,employee))}:value);}catch(error){next(error);}});
   app.put('/api/workspaces/:slug/employees/:id/phone-mcp',requireRole('owner','admin'),async(req,res,next)=>{
     try {ensureEmployeeInWorkspace(req.params.slug,req.params.id,req);res.json(await phoneMcp.save(req.params.slug,req.params.id,req.body || {},employeeContext(req)));} catch(error) {next(error);}

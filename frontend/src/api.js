@@ -123,6 +123,8 @@ export const api = {
   bot: (id, slug = workspaceSlug(), options = {}) => boundedRequest(`/api/workspaces/${encodeURIComponent(slug)}/bots/${encodeURIComponent(id)}`,options),
   botWorkbench: (id, slug = workspaceSlug(), options = {}) => boundedRequest(`/api/workspaces/${encodeURIComponent(slug)}/bots/${encodeURIComponent(id)}?view=workbench`,options),
   botCapabilities: (deviceId = '', slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/bots/capabilities${deviceId ? `?deviceId=${encodeURIComponent(deviceId)}` : ''}`),
+  employeeCapabilityInventory: (slug, id) => boundedRequest(`/api/workspaces/${encodeURIComponent(slug)}/employees/${encodeURIComponent(id)}/capability-inventory`),
+  refreshEmployeeCapabilityInventory: (slug, id, body = {}) => request(`/api/workspaces/${encodeURIComponent(slug)}/employees/${encodeURIComponent(id)}/capability-inventory/refresh`, {method:'POST',body:JSON.stringify(body)}),
   createBot: (body, slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/bots`, {method:'POST',body:JSON.stringify(body)}),
   provisionBot: (id, body, slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/bots/${encodeURIComponent(id)}/provision`, {method:'POST',body:JSON.stringify(body)}),
   initializeEmployeeBot: (id, body, slug = workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/employees/${encodeURIComponent(id)}/bot`, {method:'POST',body:JSON.stringify(body)}),

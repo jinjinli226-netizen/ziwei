@@ -40,7 +40,8 @@ watch(serverName,()=>{toolName.value='';argumentsText.value='{}';});
 onBeforeUnmount(()=>connections.dispose());
 </script>
 <template>
-  <section class="native-section mcp-section" aria-label="MCP 与工具">
+  <section id="employee-mcp-management" tabindex="-1" class="native-section mcp-section" aria-label="MCP 与工具">
+    <p class="native-help">能力明细中的“已配置”不等于已授权或本轮已加载；连接和实际工具检查仍使用下方原入口。</p>
     <div class="native-toolbar"><div><h3>MCP 与工具</h3><p class="native-help">连接外部服务，让这位员工使用它的工具。</p></div><div class="native-actions mcp-toolbar-actions"><button class="bot-button" :disabled="!enabled||configBusy" @click="preset">添加爆款库</button><button class="bot-button primary" :disabled="!enabled||configBusy" @click="edit()">添加 MCP</button></div></div>
     <div v-if="!Object.keys(servers).length" class="native-empty">还没有添加 MCP 服务。</div>
     <div class="native-list">
