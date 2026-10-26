@@ -17,3 +17,15 @@ b5f5608只推送源码，未用于真实停止或安装。总控审查发现新f
 最终定向271项：270通过、1项POSIX专用在Windows跳过；lint通过。包含两条独立P1复现、未知嵌套、双别名一致的第二条queued/executing/uncertain/未确认提交、原字节保留和原生恢复链测试。正确收紧后，实际原生只读扫描仍stopSafe=true、retainedPendingCount=1。最终独审/提交/新包与现场安装回执另以共享文件和后续提交为准，旧3f及ba7383a产物保持原样。
 
 最终补充：metadata执行状态限真实producer枚举，并独立折叠全部观测command/update ID（含未提交的只读receipt），未知第二ID、无归属状态和kind错配pending继续拒绝。executingConfirmed按真实commandOutcome定义是历史见证，成功/失败终态仍可携带true；不能将其误当当前活进程，也不据此证明本机子树已退出。117项维护测试及独立复核通过。最终原生只读scanner字段哈希543a5050…对应stopSafe=true、retainedPendingCount=1、stopIssues为空；打包后还将按实际归档字节再次核实。b5f5608未被安装；仅后续完成P1修正的新提交/新包可用于现场维护。
+
+## 实际发布与原机升级验收
+
+最终产品源码446e32071ffa2c285b0287ac14e686a2e09fc78c已推送。补充包SHA256 d45eaa9f70cf71fdd089dc2376486dae553ee86803b22f531d3986bf7cabfba6（1220431 bytes），实际安装build ed4a194fbb6c56ff00afe80ba62433f86c50b64fd3db348c59cfaa475646ad72。semver仍0.1.0，以descriptor/103个程序文件哈希/实际build验收；旧3f与ba7383a产物保留。两域公开manifest和实际包字节独立重读吻合；服务器API/UI未随本次客户端补充发布替换。
+
+直接WMI启动更新器被自动审批以blocked by policy拒绝，未执行且未换shell重试。用户明确同意后，由唯一生产写入者仅发布客户端渠道，再用统一身份Web BFF及产品设备更新API提交waitForIdle=true，固定幂等键maintenance-446e320-device-bfd9a3d2。请求client-update_a3e316d3-480d-4db7-b69a-0073d744f25e在2026-10-26T01:37:50.063Z（北京时间09:37:50）由目标新build认证心跳确认为succeeded/heartbeatVerified:true；临时Web会话已注销，凭据/Cookie未落普通文件。
+
+原安装D:/work/nodejs/node_global/node_modules/ziwei由PID20028/d3d8f25b更新为PID68016/ed4a194f，仍原ZHENG/25941用户、bigtron设备、数据根、配置与20242唯一监听；readyz200。原生更新回执complete、configurationPreserved/restoredRunning均true；配置哈希7913bf1c...、62个配置/认证/人格/记忆标记和Hermes Profile名单保持。原生维护生成retained-local-history-stop归档，130个原文件快照全部SHA吻合，originalExecutionExitConfirmed:false。action49bd与e28a的cached started/completed记录保持等值，原业务仍failed/uncertain、历史tree:false。少量已确认成功投递索引由原生保留策略正常轮转，其原字节仍在该归档；没有手工清队列或重放业务。
+
+持久daemon心跳日志及独立maintenance退出/恢复日志已核实。常驻只读exit-watch重挂同样被自动审批拒绝，未执行、不绕过；端口登记备注明确待生效，不能把旧watcher当作已挂到新PID。未对真机执行异常终止验收，未运行收费模型、手机或员工业务。
+
+现场脱敏总回执：D:/AINavtie/ops/ziwei/bot-provider-deploy-3f9487a-20261025/CLIENT-UPGRADE-FINAL-ACCEPTANCE.json；配置/归档详情仍留原用户受保护目录，不随Git迁移原始聊天/凭据。此段是仅文档的验收追加，不重建或改变已发布446e320包。
