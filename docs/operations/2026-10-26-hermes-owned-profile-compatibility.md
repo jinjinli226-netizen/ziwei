@@ -33,3 +33,13 @@ node --test test/hermes-mcp-bootstrap.test.mjs test/hermes-launcher.test.mjs tes
 原 Windows 用户、安装位置、工作区/设备、配置路径、Profile 名单和 63 个受保护文件指纹均保持一致。两条原失败回执摘要哈希一致，仍是 failed/uncertain，没有补造退出或业务成功。已安装文件在完整独立员工标志、合成 HOME 与禁止联网/子进程/安装写入的条件下，`--probe` 退出 0 并返回有效绑定。
 
 独立只读退出/健康观察器已重新挂接新 PID，10 秒采样至少 16 条健康且身份匹配，端口登记仅更新诊断备注，原端口不变。详细脱敏证据位于本机 `D:\AINavtie\ops\ziwei\hermes-managed-mcp-20261026\CLIENT-INSTALLATION-ACCEPTANCE.json`；未上传本机私有原始材料。原业务未自动重试，也未调用付费模型验收。
+
+## 后续文字聊天参数兼容（23:07 用户回报）
+
+已有 Profile 的初始 probe 通过后，用户重试进一步到达 Hermes 的 Gateway 聊天入口，但被 `Unsupported gateway CLI options: --run-budget` 拒绝，退出码 2。实际安装的 `hermes_cli/gateway_chat.py` 明确拒绝此参数，并要求使用 `agent.run_budget_seconds`。这与前一项查询契约故障是不同的启动阶段；初始 probe 通过不能代表完整聊天已验收。
+
+紫薇已经在员工独立的 `config.yaml` 中生成 `agent.run_budget_seconds: 86400`，因此本项去掉重复且被新版拒绝的 CLI 参数，不删除时间限制。这里的预算是单次执行最长时间（24 小时），不是费用或 token 额度；正常完成会提前退出。轮数设置、聚合任务预算、外层进程监督、员工身份和权限保持原合同。`hermesBotChatInvocation` 由实际执行路径调用，便于在 Windows 上直接测试最终聊天参数；原 POSIX 实际 spawn 回归仍保留。
+
+验证先用保留旧参数的构造器重现回归失败，再去掉参数通过。相关回归 36 项中 32 通过、4 因 POSIX shebang / 默认 Python 测试发现限制跳过、0 失败；lint 检查 264 个源码文件通过。另用现场已绑定原生 Python，在合成 HOME 和审计保护下执行实际安装的完整 argparse、Gateway `validate_options` 函数和原生 effective-config reader：修正后的文字聊天参数接受，恢复旧参数则准确重现原拒绝，读取的时间预算仍为 86400、最大轮数仍为 9007199254740991。无 Gateway、模型、真实 MCP 或业务启动；原生依赖探测 Windows 版本的三次子进程尝试均由保护钩子拦截，其余外部写入/业务读取不允许。详细证明在本机 `D:\AINavtie\ops\ziwei\hermes-run-budget-20261026\NATIVE-CHAT-CONTRACT.json`。
+
+本项验证覆盖此次文字聊天参数拒绝及配置读取，不宣称新版 Gateway 的读图、Provider 请求、工具调用和实际业务已经通过。原 `--image` 路径与完整 Gateway 生命周期若有其他变化，须依据对应现场结果单独验收；不擅自改走其他运行时。原失败记录保留，不自动重试。正式客户端安装需另外确认目标 build、文件哈希和认证心跳，不能把源码修复或离线包就绪当作已经生效。

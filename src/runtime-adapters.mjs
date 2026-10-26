@@ -1004,6 +1004,13 @@ export function parseRuntimeStreamLine(line, state, onOutput = () => {}, onStage
   }
 }
 
+/** Build the noninteractive Bot chat command; budgets live in its native YAML. */
+export function hermesBotChatInvocation(context,prepared,{content,imageInputs=[]}={}) {
+  // Both classic Hermes and its gateway read agent.run_budget_seconds from
+  // this Bot's native config. The gateway rejects the old --run-budget flag.
+  return {args:['chat','--query-file','-','-c','Ziwei '+String(context.conversationId || 'Bot Chat'),'--create-if-missing','--format','stream-json','--model',prepared.effectiveModel,'--provider',prepared.provider,'--max-turns',String(effectiveBotMaxTurns(context.config)),...(imageInputs.length===1?['--image',imageInputs[0].path]:[])],stdin:content,format:'json-lines'};
+}
+
 /** Execute an installed CLI using an explicit argv, with full local approval. */
 export async function executeRuntime({ runtime, prompt, model = null, profile = null, cwd = process.cwd(), env = {}, attachments = [], imageArtifacts = null, codexMcpDisabledServers = [], codexConversation = null, managementMcp = null, terminalMcp = null, creatorInstance, creatorInstanceDirectory, hermesBot, botInstanceDirectory, botAuthority, beforeSpawn, executionGuard, maintenance, signal, onOutput, onProgress, onStage, onActivity, onSupervision } = {}) {
   if (signal?.aborted) return Promise.resolve({ status: 'failed', code: 'cancelled', error: 'runtime execution cancelled before launch' });
@@ -1097,7 +1104,7 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
       if(resolvedRuntime!=='Hermes')throw new Error('Bot 必须使用 Hermes');
       botPrepared=prepareHermesBotHome({context:hermesBot,sourceHome:hermesProfileHome(profile || 'default',{baseHome:profileBaseHome}),privateDirectory:botInstanceDirectory,workspace:managementMcp?.workspace,apiBase:managementMcp?.apiBase});
       reasoningProvider=botPrepared.provider;
-      invocation={args:['chat','--query-file','-','-c','Ziwei '+String(hermesBot.conversationId || 'Bot Chat'),'--create-if-missing','--format','stream-json','--model',botPrepared.effectiveModel,'--provider',botPrepared.provider,'--max-turns',String(effectiveBotMaxTurns(hermesBot.config)),'--run-budget',String(botPrepared.config.agent.run_budget_seconds),...(imageInputs.length===1?['--image',imageInputs[0].path]:[])],stdin:content,format:'json-lines'};
+      invocation=hermesBotChatInvocation(hermesBot,botPrepared,{content,imageInputs});
       botTurnLimit=botTurnLimitConfig(hermesBot,botPrepared);
     }
     const launch = hermesBot && (hermesBot.config.permissions.mode==='read_only'||hermesBot.config.permissions.management===false) ? {invocation,env:childEnv,receipt:null} : prepareManagementMcpLaunch({ runtime: resolvedRuntime, profile, model, invocation, env: childEnv, ...(managementMcp || {}), creatorInstance, creatorInstanceDirectory, selectedProfileHome });

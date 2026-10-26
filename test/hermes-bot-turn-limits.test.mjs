@@ -6,7 +6,7 @@ import path from 'node:path';
 import {createRequire} from 'node:module';
 import {parse as yaml} from 'yaml';
 import {BOT_UNLIMITED_NATIVE_MAX_TURNS,effectiveBotMaxTurns,normalizeBotConfig,createDefaultBotConfig} from '../src/hermes-bot-config.mjs';
-import {prepareHermesBotHome,executeRuntime,resetRuntimeDiscovery,validateHermesBotRuntime,withBotTurnLimitValidation} from '../src/runtime-adapters.mjs';
+import {prepareHermesBotHome,executeRuntime,resetRuntimeDiscovery,validateHermesBotRuntime,withBotTurnLimitValidation,hermesBotChatInvocation} from '../src/runtime-adapters.mjs';
 
 test('every Bot defaults to unlimited execution while preserving legacy wire and aggregate budgets',()=>{
  const legacy=normalizeBotConfig();assert.equal(legacy.maxTurns,20);assert.equal(Object.hasOwn(legacy,'turnLimitMode'),false);assert.equal(Object.hasOwn(createDefaultBotConfig(),'turnLimitMode'),false);
@@ -38,6 +38,19 @@ test('default and legacy Bot settings all produce unlimited native YAML without 
  assert.equal(fs.readFileSync(path.join(f.home,'config.yaml'),'utf8'),f.source);assert.equal(fs.existsSync(path.join(f.home,'state.db')),false);
 });
 
+test('text Bot chat uses gateway-compatible options and keeps its budget in the isolated native config',t=>{
+ const f=homeFixture(t),prepared=prepareHermesBotHome(f.options);
+ const invocation=hermesBotChatInvocation(f.context,prepared,{content:'isolated text'}),args=invocation.args;
+ assert.equal(invocation.stdin,'isolated text');assert.equal(invocation.format,'json-lines');
+ assert.equal(args[0],'chat');assert.equal(args[args.indexOf('--query-file')+1],'-');
+ assert.equal(args[args.indexOf('-c')+1],'Ziwei Bot Chat');assert.equal(args.includes('--create-if-missing'),true);
+ assert.equal(args[args.indexOf('--format')+1],'stream-json');assert.equal(args[args.indexOf('--model')+1],prepared.effectiveModel);
+ assert.equal(args[args.indexOf('--provider')+1],prepared.provider);assert.equal(args[args.indexOf('--max-turns')+1],String(Number.MAX_SAFE_INTEGER));
+ assert.equal(args.includes('--run-budget'),false,'Hermes gateway rejects the legacy CLI budget override');
+ assert.equal(yaml(fs.readFileSync(path.join(prepared.home,'config.yaml'),'utf8')).agent.run_budget_seconds,86400);
+ assert.equal(fs.readFileSync(path.join(f.home,'config.yaml'),'utf8'),f.source);
+});
+
 // This installed-CLI-shaped fixture captures the actual spawned argv and YAML.
 // It never imports a model SDK, uses credentials, opens a listener, or performs
 // a provider request. Native model behavior is not claimed by these tests.
@@ -55,7 +68,7 @@ test('real adapter spawning sends the same exact positive ceiling as native YAML
  const f=cliFixture(t);
  for(const [turnLimitMode,maxTurns,effective]of [['unlimited',7,Number.MAX_SAFE_INTEGER],['bounded',7,Number.MAX_SAFE_INTEGER],[undefined,100,Number.MAX_SAFE_INTEGER]]){
   const config={...f.context.config,maxTurns,...(turnLimitMode?{turnLimitMode}:{})},context={...f.context,config},outcome=await executeRuntime({runtime:'Hermes',prompt:'isolated no-model argv fixture',cwd:f.root,env:f.env,hermesBot:context,botInstanceDirectory:f.options.privateDirectory,managementMcp:{workspace:context.workspace,apiBase:f.options.apiBase}});
-  assert.equal(outcome.status,'succeeded',outcome.error);const {args,config:native}=f.read();assert.equal(args[args.indexOf('--max-turns')+1],String(effective));assert.equal(native.agent.max_turns,effective);assert.equal(args[args.indexOf('--run-budget')+1],'86400');assert.equal(native.agent.run_budget_seconds,86400);assert.equal(outcome.result.processExit.rootConfirmed,true);
+  assert.equal(outcome.status,'succeeded',outcome.error);const {args,config:native}=f.read();assert.equal(args[args.indexOf('--max-turns')+1],String(effective));assert.equal(native.agent.max_turns,effective);assert.equal(args.includes('--run-budget'),false);assert.equal(native.agent.run_budget_seconds,86400);assert.equal(outcome.result.processExit.rootConfirmed,true);
   assert.deepEqual(outcome.result.turnLimit,{mode:'unlimited',effectiveMaxTurns:effective,runBudgetSeconds:86400,status:'configured'});
  }
 });
