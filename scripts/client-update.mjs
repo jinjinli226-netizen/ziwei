@@ -281,7 +281,7 @@ async function performClientUpdateInternal({ root, env = process.env, directory,
     // helper independently proves the port is free and the restarted instance
     // actually belongs to this installation and unchanged configuration.
     if (legacyMigration && (await lifecycle.inspectClientMaintenance({ root, env })).state !== 'stopped') throw failure('CLIENT_RESTARTED', '恢复前已有运行实例，未启动第二个客户端');
-    await run(process.execPath, [path.join(root, 'scripts/start-ziwei-user.mjs')], { env, cwd: userHome, timeout: 30_000, windowsHide: true });
+    await run(process.execPath, [path.join(root, 'scripts/start-ziwei-user.mjs')], { env, cwd: userHome, timeout: 90_000, windowsHide: true });
     if (legacyMigration) {
       const running = await lifecycle.inspectClientMaintenance({ root, env });
       if (!running.wasRunning || !['ready', 'legacy_confirmation_required'].includes(running.state)) throw failure('HEALTH_MISSING', '原生启动退出后未核验到此安装的运行实例');

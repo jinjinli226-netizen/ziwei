@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { resolveConfigFile, resolveConfigPath, isNativeDaemonProcess, resolveDaemonDataDirectory } from '../daemon/config.mjs';
 import { stopClient } from './client-lifecycle.mjs';
 import { clientBuildIdentity, clientBuildMismatch } from '../src/management-bootstrap.mjs';
+import { waitForClientReady, CLIENT_START_READY_TIMEOUT_MS } from '../src/client-start-readiness.mjs';
 
 const ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const VERSION = process.env.ZIWEI_USER_VERSION || JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
@@ -126,20 +127,13 @@ async function main() {
   child.unref();
   console.log(`已启动 ziwei_user（PID ${child.pid || '后台进程'}），等待首次心跳...`);
 
-  for (let attempt = 0; attempt < 15; attempt += 1) {
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    const ready = await probeReady();
-    if (ready.ok) {
-      if (Number(ready.body.pid) !== child.pid || ready.body.clientBuild !== CLIENT_BUILD) {
-        console.error('ziwei_user 接口响应就绪，但 PID 或实际运行代码 build 不匹配；未报告客户端升级成功，请查看用户目录诊断日志。');
-        return 1;
-      }
-      console.log(`ziwei_user 已就绪 (${readyUrl})`);
-      return 0;
-    }
+  const ready = await waitForClientReady({probeReady,expectedPid:child.pid,expectedBuild:CLIENT_BUILD});
+  if (ready.ok) {
+    console.log(`ziwei_user 已就绪 (${readyUrl})`);
+    return 0;
   }
 
-  console.error(`ziwei_user 未能在 15 秒内就绪，请查看 .local/logs/daemon.log：${readyUrl}`);
+  console.error(`ziwei_user 未能在 ${CLIENT_START_READY_TIMEOUT_MS/1000} 秒内就绪，请查看用户目录诊断日志：${readyUrl}`);
   return 1;
 }
 

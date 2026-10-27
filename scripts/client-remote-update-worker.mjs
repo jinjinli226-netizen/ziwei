@@ -1,21 +1,28 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { resolveWorkspaceConnections } from '../daemon/config.mjs';
 import { downloadVerifiedPackage, launchClientUpdate, readUpdateResult } from './client-update.mjs';
 import { validateRemoteUpdateRequest, readRemoteUpdateJson, writeRemoteUpdateJson, remoteUpdatePath, remoteUpdateErrorCode } from '../src/client-remote-update.mjs';
+import { inspectNativeUpdateReceipt } from '../src/client-remote-update-receipt.mjs';
+import { clientBuildIdentity } from '../src/management-bootstrap.mjs';
 
-export const REMOTE_UPDATE_HELPER_FILES = Object.freeze(['package.json', 'daemon/config.mjs', 'src/management-bootstrap.mjs', 'src/client-remote-update.mjs', 'scripts/client-remote-update-worker.mjs', 'scripts/client-update.mjs', 'scripts/client-update-worker.mjs', 'scripts/client-lifecycle.mjs', 'scripts/client-retained-stop-recovery.mjs', 'scripts/client-legacy-identity.mjs', 'scripts/client-legacy-identity.ps1']);
+export const REMOTE_UPDATE_HELPER_FILES = Object.freeze(['package.json', 'daemon/config.mjs', 'src/management-bootstrap.mjs', 'src/client-remote-update.mjs', 'src/client-remote-update-receipt.mjs', 'scripts/client-remote-update-worker.mjs', 'scripts/client-update.mjs', 'scripts/client-update-worker.mjs', 'scripts/client-lifecycle.mjs', 'scripts/client-retained-stop-recovery.mjs', 'scripts/client-legacy-identity.mjs', 'scripts/client-legacy-identity.ps1']);
 const failure = code => Object.assign(new Error(code), { code });
 function outside(file, root) { const relative = path.relative(path.resolve(root), path.resolve(file)); return relative && relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative) ? false : Boolean(relative); }
 
 /** Called only by the daemon, never from an employee action/Job. This outer
  * supervisor copies its whole import closure outside npm before spawning. */
-export async function launchRemoteClientUpdate({ root, home, configPath, request, claimToken, env = process.env, spawnProcess = spawn } = {}) {
+export async function launchRemoteClientUpdate({ root, home, configPath, request, claimToken, sourceBuild, env = process.env, spawnProcess = spawn } = {}) {
   if (process.platform !== 'win32') throw failure('WINDOWS_ONLY');
   if (!outside(home, root) || !outside(configPath, root)) throw failure('CLIENT_UPDATE_UNSAFE_PATH');
+  if (!/^[a-f0-9]{64}$/.test(sourceBuild || '') || clientBuildIdentity(root) !== sourceBuild) throw failure('CLIENT_UPDATE_SOURCE_BUILD_UNVERIFIED');
+  readRemoteUpdateJson(configPath);
+  const configStat=fs.lstatSync(configPath);
+  if(!configStat.isFile()||configStat.nlink!==1)throw failure('CLIENT_UPDATE_UNSAFE_PATH');
+  const configSha256=createHash('sha256').update(fs.readFileSync(configPath)).digest('hex');
   const directory = path.join(path.resolve(home), 'maintenance', 'remote-update-' + randomUUID());
   const helper = path.join(directory, 'helper');
   fs.mkdirSync(helper, { recursive: true, mode: 0o700 });
@@ -25,7 +32,7 @@ export async function launchRemoteClientUpdate({ root, home, configPath, request
     fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 }); fs.copyFileSync(source, target);
   }
   const jobFile = path.join(directory, 'remote-job.json');
-  writeRemoteUpdateJson(jobFile, { schemaVersion: 1, root: path.resolve(root), home: path.resolve(home), configPath: path.resolve(configPath), directory, request, claimToken });
+  writeRemoteUpdateJson(jobFile, { schemaVersion: 1, root: path.resolve(root), home: path.resolve(home), configPath: path.resolve(configPath), directory, request, claimToken, sourceBuild, configSha256 });
   const statusFile = path.join(directory, 'supervisor-result.json');
   writeRemoteUpdateJson(statusFile, { state: 'starting', startedAt: Date.now() });
   const child = spawnProcess(process.execPath, [path.join(helper, 'scripts/client-remote-update-worker.mjs'), jobFile], { env: { ...env, ZIWEI_USER_HOME: path.resolve(home), ZIWEI_CONFIG: path.resolve(configPath) }, cwd: directory, detached: true, windowsHide: true, stdio: 'ignore' });
@@ -76,7 +83,7 @@ export async function runRemoteClientUpdateWorker({ jobFile, download = download
   }
 }
 
-export async function inspectRemoteClientUpdateWorker(worker, { home, env = process.env, readStatus = readUpdateResult, now = Date.now(), processAlive = pid => { try { process.kill(pid, 0); return true; } catch (error) { return error.code !== 'ESRCH'; } } } = {}) {
+export async function inspectRemoteClientUpdateWorker(worker, { home, env = process.env, readStatus = readUpdateResult, now = Date.now(), processAlive = pid => { try { process.kill(pid, 0); return true; } catch (error) { return error.code !== 'ESRCH'; } }, ...context } = {}) {
   if (!worker || !Number.isFinite(worker.startedAt)) return { state: 'interrupted', code: 'CLIENT_UPDATE_INTERRUPTED' };
   const parent = path.join(path.resolve(home), 'maintenance');
   if (path.dirname(path.resolve(worker.directory || '')) !== parent || !/^remote-update-[a-f0-9-]{36}$/.test(path.basename(worker.directory))) return { state: 'failed', code: 'CLIENT_UPDATE_STATE_INVALID' };
@@ -88,6 +95,10 @@ export async function inspectRemoteClientUpdateWorker(worker, { home, env = proc
     const resultPath = path.resolve(status.resultFile || '');
     if (path.dirname(path.dirname(resultPath)) !== parent || !/^update-[a-f0-9-]{36}$/.test(path.basename(path.dirname(resultPath))) || path.basename(resultPath) !== 'result.json') return { state: 'failed', code: 'CLIENT_UPDATE_STATE_INVALID' };
     const result = await readStatus({ env: { ...env, ZIWEI_USER_HOME: home }, resultFile: resultPath });
+    if (context.request && ['complete', 'failed', 'interrupted'].includes(result.state)) {
+      const evidence = await inspectNativeUpdateReceipt({ ...context, worker, status, home, env, expectedState: result.state });
+      return { state: result.state === 'complete' ? 'complete' : 'failed', ...(result.state === 'complete' ? {} : { code: remoteUpdateErrorCode({ code: result.reasonCode || result.code }), originalInstallationRestored: Boolean(evidence.rollbackEvidence) }), ...evidence };
+    }
     if (result.state === 'complete') return { state: 'complete' };
     if (['failed', 'interrupted'].includes(result.state)) return { state: 'failed', code: remoteUpdateErrorCode({ code: result.reasonCode || result.code }),originalInstallationRestored:result.state==='failed'&&result.operation==='update'&&result.originalInstallationRestored===true };
     return { state: 'updating' };

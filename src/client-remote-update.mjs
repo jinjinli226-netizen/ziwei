@@ -7,6 +7,7 @@ export const REMOTE_CLIENT_UPDATE_SOURCE = 'https://qzelynth.top/downloads/cli/z
 const digest = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 const identifier = value => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{0,159}$/.test(value);
 const states = new Set(['requested', 'accepted', 'waiting_idle', 'updating', 'awaiting_heartbeat', 'succeeded', 'complete', 'failed', 'canceled', 'cancelled']);
+const completionProtocols = new Set(['native_worker_v1', 'legacy_heartbeat']);
 const fail = code => Object.assign(new Error(code), { code });
 export const remoteUpdateErrorCode = error => {
   const code = error?.code || '';
@@ -43,9 +44,9 @@ export function remoteMaintenanceHostId(home) {
   return value;
 }
 export function validateRemoteUpdateRequest(request, { workspace, deviceId, hostId } = {}) {
-  if (!request || !identifier(request.id) || request.workspace !== workspace || request.deviceId !== deviceId || request.hostId !== hostId || !digest(request.targetBuild) || !digest(request.sha256) || request.source !== REMOTE_CLIENT_UPDATE_SOURCE || !states.has(request.state)) throw fail('CLIENT_UPDATE_REQUEST_INVALID');
+  if (!request || !identifier(request.id) || request.workspace !== workspace || request.deviceId !== deviceId || request.hostId !== hostId || !digest(request.targetBuild) || !digest(request.sha256) || request.source !== REMOTE_CLIENT_UPDATE_SOURCE || !states.has(request.state) || request.completionProtocol !== undefined && !completionProtocols.has(request.completionProtocol)) throw fail('CLIENT_UPDATE_REQUEST_INVALID');
   // Never retain or execute additional server-supplied commands, arguments or URLs.
-  return { id: request.id, workspace, deviceId, hostId, targetBuild: request.targetBuild, sha256: request.sha256, source: REMOTE_CLIENT_UPDATE_SOURCE, state: request.state };
+  return { id: request.id, workspace, deviceId, hostId, targetBuild: request.targetBuild, sha256: request.sha256, source: REMOTE_CLIENT_UPDATE_SOURCE, state: request.state, ...(digest(request.currentBuild) ? { currentBuild: request.currentBuild } : {}), ...(request.completionProtocol ? { completionProtocol: request.completionProtocol } : {}) };
 }
 export function remoteUpdatePath(request, operation) {
   const query = `workspace=${encodeURIComponent(request.workspace)}&deviceId=${encodeURIComponent(request.deviceId)}`;
@@ -71,12 +72,19 @@ export function createRemoteClientUpdates({ home, hostId, clientBuild, enabled =
   function validateStored(value) { try { return validateRemoteUpdateRequest(value, value); } catch { return null; } }
   const save = () => writeRemoteUpdateJson(file, current);
   const saveOutbox = () => writeRemoteUpdateJson(outboxFile, outbox);
+  const archive = () => { if (current) writeRemoteUpdateJson(path.join(path.dirname(file), 'remote-client-update-history', current.request.id + '.json'), current); };
   const connectionFor = value => connections().find(row => row.workspace === value.workspace && row.deviceId === value.deviceId);
-  const progressBody = (row, state) => ({ state, hostId, clientBuild: digest(row.reportBuild) ? row.reportBuild : clientBuild, claimToken: row.claimToken, ...(row.worker?.workerPid ? { workerPid: row.worker.workerPid } : {}), ...(row.code ? { code: row.code } : {}) });
+  const progressBody = (row, state) => ({ state, hostId, clientBuild: row.observedFailure ? clientBuild : digest(row.reportBuild) ? row.reportBuild : clientBuild, claimToken: row.claimToken, ...(row.worker?.workerPid ? { workerPid: row.worker.workerPid } : {}), ...(row.code ? { code: row.code } : {}), ...(state === 'failed' && row.rollbackEvidence ? { rollbackEvidence: row.rollbackEvidence } : {}), ...(state === 'failed' && row.observedFailure ? { observedFailure: row.observedFailure } : {}), ...(state === 'awaiting_heartbeat' && row.workerReceipt ? { workerReceipt: row.workerReceipt } : {}) });
   const report = async state => {
     const connection = connectionFor(current.request); if (!connection) throw fail('CLIENT_UPDATE_CONNECTION_MISSING');
     const response = await request(connection, remoteUpdatePath(current.request, 'progress'), progressBody(current, state));
     if (response?.request?.id !== current.request.id) throw fail('CLIENT_UPDATE_RESPONSE_INVALID');
+    if (state === 'failed' && current.observedFailure && response.observedFailureRecorded === true) {
+      current.reported = 'failed'; current.requiresReconciliation = response.requiresReconciliation === true; save(); return true;
+    }
+    // A former heartbeat success is not an acknowledgement of a later native
+    // rollback. Preserve the local terminal fact and retry its exact receipt.
+    if (state === 'failed' && response.request.state !== 'failed') throw fail('CLIENT_UPDATE_PROGRESS_CONFLICT');
     if (terminal(response.request.state)) {
       current.state = response.request.state;
       if (response.request.code) current.code = remoteUpdateErrorCode({ code: response.request.code });
@@ -87,7 +95,7 @@ export function createRemoteClientUpdates({ home, hostId, clientBuild, enabled =
     return true;
   };
   const queueFailedReport = () => {
-    const entry = { request: current.request, claimToken: current.claimToken, reportBuild: clientBuild, code: current.code, ...(current.worker?.workerPid ? { worker: { workerPid: current.worker.workerPid } } : {}) };
+    const entry = { request: current.request, claimToken: current.claimToken, reportBuild: clientBuild, code: current.code, ...(current.worker ? { worker: current.worker } : {}), ...(current.rollbackEvidence ? { rollbackEvidence: current.rollbackEvidence } : {}), ...(current.observedFailure ? { observedFailure: current.observedFailure } : {}) };
     const previous = outbox.findIndex(row => row.request.id === entry.request.id);
     if (previous < 0) outbox.push(entry); else outbox[previous] = entry;
     saveOutbox();
@@ -97,7 +105,10 @@ export function createRemoteClientUpdates({ home, hostId, clientBuild, enabled =
       const connection = connectionFor(entry.request); if (!connection) continue;
       try {
         const result = await request(connection, remoteUpdatePath(entry.request, 'progress'), progressBody(entry, 'failed'));
-        if (result?.request?.id === entry.request.id && terminal(result.request.state)) { outbox = outbox.filter(row => row.request.id !== entry.request.id); saveOutbox(); }
+        if (result?.request?.id === entry.request.id && (result.request.state === 'failed' || entry.observedFailure && result.observedFailureRecorded === true)) {
+          if (current?.request.id === entry.request.id && current.state === 'failed') { current.reported = 'failed'; if (entry.observedFailure) current.requiresReconciliation = result.requiresReconciliation === true; save(); }
+          outbox = outbox.filter(row => row.request.id !== entry.request.id); saveOutbox();
+        }
       } catch (error) { log('remote_update_failed_report_pending', { code: remoteUpdateErrorCode(error) }); }
     }
   };
@@ -105,8 +116,72 @@ export function createRemoteClientUpdates({ home, hostId, clientBuild, enabled =
     current.state = state; current.code = code || undefined; current.updatedAt = clock(); save();
     if (state === 'failed') { try { await report('failed'); } catch { queueFailedReport(); } }
   };
+  const lockAbsent = () => {
+    const lock = path.join(path.dirname(file), 'operation.lock');
+    try { noLinks(lock); return !fs.existsSync(lock); } catch { return false; }
+  };
+  const inspect = () => inspectWorker(current.worker, { request: current.request, claimToken: current.claimToken, sourceBuild: current.sourceBuild, pid });
+  const verifiedReceipt = (value, state, legacy = false) => {
+    if (!value || value.schemaVersion !== 1 || value.operation !== 'update' || value.state !== state || !digest(current.sourceBuild)) return false;
+    if (legacy && (state !== 'complete' || current.request.completionProtocol !== 'legacy_heartbeat')) return false;
+    const binding = { requestId: current.request.id, hostId, deviceId: current.request.deviceId, sourceBuild: current.sourceBuild, targetBuild: current.request.targetBuild, sha256: current.request.sha256 };
+    const allowed = ['schemaVersion', 'operation', 'state', 'binding', 'supervisorPid', 'workerPid', 'daemonPid', 'installedBuild', ...(!legacy ? ['configSha256'] : []), 'terminalSha256', 'workerIdentitySha256', 'finishedAt', 'workerExited', 'maintenanceLockAbsent', 'configurationPreserved', 'nativeStartupVerified', ...(state === 'complete' ? ['restoredRunning'] : ['originalInstallationRestored', 'runningStateRestored'])];
+    if (Object.keys(value).some(key => !allowed.includes(key)) || Object.keys(value.binding || {}).some(key => !Object.hasOwn(binding, key)) || Object.keys(binding).some(key => value.binding?.[key] !== binding[key])) return false;
+    if (value.supervisorPid !== current.worker?.workerPid || !Number.isSafeInteger(value.workerPid) || value.workerPid < 1 || value.daemonPid !== pid || value.installedBuild !== clientBuild || value.installedBuild !== (state === 'complete' ? current.request.targetBuild : current.sourceBuild)) return false;
+    if (![...(!legacy ? ['configSha256'] : []), 'terminalSha256', 'workerIdentitySha256'].every(key => digest(value[key])) || !Number.isFinite(Date.parse(value.finishedAt))) return false;
+    if (!['workerExited', 'maintenanceLockAbsent', 'configurationPreserved', 'nativeStartupVerified'].every(key => value[key] === true)) return false;
+    return state === 'complete' ? value.restoredRunning === true : value.originalInstallationRestored === true && value.runningStateRestored === true;
+  };
+  const verifiedHistoricalFailure = value => {
+    if (!value || value.schemaVersion !== 1 || value.operation !== 'update' || value.state !== 'failed' || !digest(current.sourceBuild)) return false;
+    const binding = { requestId: current.request.id, hostId, deviceId: current.request.deviceId, sourceBuild: current.sourceBuild, targetBuild: current.request.targetBuild, sha256: current.request.sha256 };
+    if (Object.keys(binding).some(key => value[key] !== binding[key])) return false;
+    const allowed = ['schemaVersion', 'operation', 'state', ...Object.keys(binding), 'supervisorPid', 'workerPid', 'workerIdentitySha256', 'terminalSha256', 'finishedAt', 'workerExited', 'maintenanceLockAbsent', 'originalInstallationRestored', 'runningStateRestored', 'reasonCode', 'failureStage', 'exitCode'];
+    if (Object.keys(value).some(key => !allowed.includes(key)) || value.supervisorPid !== current.worker?.workerPid || !Number.isSafeInteger(value.workerPid) || value.workerPid < 1 || !digest(value.workerIdentitySha256) || !digest(value.terminalSha256) || !Number.isFinite(Date.parse(value.finishedAt))) return false;
+    if (value.reasonCode !== undefined && !/^[A-Z][A-Z0-9_]{0,63}$/.test(value.reasonCode) || value.failureStage !== undefined && !/^[a-z][a-z0-9_]{0,63}$/.test(value.failureStage) || value.exitCode !== undefined && !Number.isSafeInteger(value.exitCode)) return false;
+    return ['workerExited', 'maintenanceLockAbsent', 'originalInstallationRestored', 'runningStateRestored'].every(key => value[key] === true);
+  };
+  const bindSourceBuild = async () => {
+    if (!digest(current.sourceBuild) && digest(current.request.currentBuild)) { current.sourceBuild = current.request.currentBuild; save(); }
+    if (digest(current.sourceBuild) && completionProtocols.has(current.request.completionProtocol)) return;
+    const connection = connectionFor(current.request); if (!connection) return;
+    const remote = (await request(connection, remoteUpdatePath(current.request)))?.request;
+    if (!remote || !sameTarget(current.request, validateRemoteUpdateRequest(remote, { ...connection, hostId }))) return;
+    if (current.request.completionProtocol && remote.completionProtocol && current.request.completionProtocol !== remote.completionProtocol) throw fail('CLIENT_UPDATE_TARGET_CHANGED');
+    if (!digest(current.sourceBuild) && digest(remote.currentBuild)) current.sourceBuild = remote.currentBuild;
+    if (!current.request.completionProtocol && completionProtocols.has(remote.completionProtocol)) current.request = { ...current.request, completionProtocol: remote.completionProtocol };
+    save();
+  };
+  const observeInstallation = async () => {
+    if (!current || current.stage !== 'worker_launch' || !['updating', 'awaiting_heartbeat', 'succeeded', 'complete'].includes(current.state)) return;
+    await bindSourceBuild();
+    if (!current.worker) { current.worker = await recoverWorker(current.request, current.claimToken); save(); }
+    if (!current.worker) return;
+    const observation = await inspect();
+    if (observation.state === 'failed' && (verifiedReceipt(observation.rollbackEvidence, 'failed') || verifiedHistoricalFailure(observation.observedFailure)) && lockAbsent()) {
+      if (['succeeded', 'complete'].includes(current.state)) current.previousServerState = current.state;
+      if (verifiedReceipt(observation.rollbackEvidence, 'failed')) current.rollbackEvidence = observation.rollbackEvidence;
+      if (verifiedHistoricalFailure(observation.observedFailure)) { current.observedFailure = observation.observedFailure; current.requiresReconciliation = true; }
+      installationSettled = true;
+      await finish('failed', observation.code || 'CLIENT_UPDATE_FAILED'); archive();
+    } else if (observation.state === 'complete' && verifiedReceipt(observation.workerReceipt, 'complete') && lockAbsent()) {
+      current.workerReceipt = observation.workerReceipt; save();
+      if (current.workerReceiptReported !== current.workerReceipt.terminalSha256) {
+        await report('awaiting_heartbeat');
+        current.workerReceiptReported = current.workerReceipt.terminalSha256; save();
+      }
+      installationSettled = current.state === 'succeeded' || current.state === 'complete';
+      if (installationSettled) archive();
+    } else if (observation.state === 'complete' && verifiedReceipt(observation.legacyCompletion, 'complete', true) && lockAbsent()) {
+      // This request was created under the old heartbeat protocol. Its native
+      // terminal proof is local readiness evidence, never a full worker receipt.
+      current.legacyCompletion = observation.legacyCompletion; save();
+      installationSettled = current.state === 'succeeded' || current.state === 'complete';
+      if (installationSettled) archive();
+    }
+  };
   return {
-    get blocksNewActions() { return enabled && (['accepted', 'waiting_idle', 'updating','awaiting_heartbeat'].includes(current?.state)||current?.state==='succeeded'&&current.stage==='worker_launch'&&!installationSettled); },
+    get blocksNewActions() { return enabled && (['accepted', 'waiting_idle', 'updating','awaiting_heartbeat'].includes(current?.state)||['succeeded', 'complete'].includes(current?.state)&&current.stage==='worker_launch'&&!installationSettled); },
     status() { return current ? { id: current.request.id, state: current.state, targetBuild: current.request.targetBuild, ...(current.code ? { code: current.code } : {}) } : null; },
     checkpointAuthority(receipt) {
       if (!enabled || !current || current.request.id !== receipt?.updateId || current.request.targetBuild !== receipt?.targetBuild) return null;
@@ -117,11 +192,12 @@ export function createRemoteClientUpdates({ home, hostId, clientBuild, enabled =
       // A verified new daemon can heartbeat before the package worker releases
       // its installation lease. Neither a heartbeat nor a result file alone
       // permits business execution in that window.
-      const lock = path.join(path.resolve(home), 'maintenance', 'operation.lock');
-      try { noLinks(lock); if (fs.existsSync(lock)) return { ready: false }; } catch { return { ready: false }; }
-      if (current.state === 'succeeded' && current.request.targetBuild === clientBuild) {
+      if (!lockAbsent()) return { ready: false };
+      if (['succeeded', 'complete'].includes(current.state) && current.request.targetBuild === clientBuild) {
         if (!current.worker) current.worker = await recoverWorker(current.request, current.claimToken);
-        if (!current.worker || (await inspectWorker(current.worker)).state !== 'complete') return { ready: false };
+        if (!current.worker) return { ready: false };
+        const result = await inspect();
+        if (result.state !== 'complete' || !(verifiedReceipt(result.workerReceipt, 'complete') || verifiedReceipt(result.legacyCompletion, 'complete', true))) return { ready: false };
         return { ready: true };
       }
       // A cancelled queued upgrade did not replace this still-running daemon.
@@ -130,7 +206,7 @@ export function createRemoteClientUpdates({ home, hostId, clientBuild, enabled =
         return { ready: true, sourceIdle: { workerAbsent: true, maintenanceLockAbsent: true, installedBuild: clientBuild, pid } };
       }
       if(current.state==='failed'&&current.worker){
-        const result=await inspectWorker(current.worker);
+        const result=await inspect();
         if(result.state==='failed'&&result.originalInstallationRestored===true)return {
           ready:true,sourceIdle:{workerTerminal:true,originalInstallationRestored:true,maintenanceLockAbsent:true,installedBuild:clientBuild,pid},
         };
@@ -142,7 +218,8 @@ export function createRemoteClientUpdates({ home, hostId, clientBuild, enabled =
       if (!enabled || ticking) return; ticking = true;
       try {
         await flushFailedReports();
-        if(current?.state==='succeeded'&&current.stage==='worker_launch'&&!installationSettled){
+        await observeInstallation();
+        if(['succeeded', 'complete'].includes(current?.state)&&current.stage==='worker_launch'&&!installationSettled){
           installationSettled=(await this.maintenanceResumeReadiness({updateId:current.request.id,targetBuild:current.request.targetBuild})).ready===true;
           if(!installationSettled)return;
         }
@@ -150,16 +227,17 @@ export function createRemoteClientUpdates({ home, hostId, clientBuild, enabled =
         // actions. Do not overwrite it with a newer request before they resume.
         if(current&&terminal(current.state)&&hasPendingResumes(current.request))return;
         if (current && current.request.targetBuild === clientBuild && ['accepted', 'waiting_idle', 'updating', 'awaiting_heartbeat'].includes(current.state)) {
-          // Actual success is decided by the server's fresh target-build heartbeat.
+          // Startup is provisional until the worker's terminal receipt and a
+          // matching fresh target-build heartbeat both reach the server.
           current.state = 'awaiting_heartbeat'; save();
           if (current.reported !== current.state && !await report(current.state)) return;
         }
         if (current?.state === 'updating') {
           if (!current.worker) { current.worker = await recoverWorker(current.request, current.claimToken); save(); }
-          const observation = await inspectWorker(current.worker);
+          const observation = await inspect();
           if (observation.state === 'failed' || observation.state === 'interrupted') await finish('failed', observation.code || 'CLIENT_UPDATE_INTERRUPTED');
           // A worker's claimed success cannot replace a new daemon heartbeat.
-          else if (observation.state === 'complete') { current.state = 'awaiting_heartbeat'; save(); await report(current.state); }
+          else if (observation.state === 'complete' && verifiedReceipt(observation.workerReceipt, 'complete') && lockAbsent()) { current.workerReceipt = observation.workerReceipt; current.state = 'awaiting_heartbeat'; save(); await report(current.state); }
           return;
         }
         let remote, connection;
@@ -179,6 +257,7 @@ export function createRemoteClientUpdates({ home, hostId, clientBuild, enabled =
         }
         remote = validateRemoteUpdateRequest(remote, { ...connection, hostId });
         if (current?.request.id === remote.id && !sameTarget(current.request, remote)) throw fail('CLIENT_UPDATE_TARGET_CHANGED');
+        if (current?.request.id === remote.id && current.request.completionProtocol && remote.completionProtocol && current.request.completionProtocol !== remote.completionProtocol) throw fail('CLIENT_UPDATE_TARGET_CHANGED');
         if (['succeeded', 'complete', 'failed', 'canceled', 'cancelled'].includes(remote.state)) {
           if (current?.request.id === remote.id) { current.state = remote.state; save(); }
           return;
@@ -190,8 +269,9 @@ export function createRemoteClientUpdates({ home, hostId, clientBuild, enabled =
         if (!current || current.request.id !== remote.id) {
           const claim = await request(connection, remoteUpdatePath(remote, 'claim'), { hostId, clientBuild, pid });
           const claimed = validateRemoteUpdateRequest(claim.request, { ...connection, hostId });
-          if (!sameTarget(remote, claimed) || typeof claim.claimToken !== 'string' || claim.claimToken.length < 16 || claim.claimToken.length > 512) throw fail('CLIENT_UPDATE_CLAIM_INVALID');
-          current = { schemaVersion: 1, request: claimed, claimToken: claim.claimToken, state: 'accepted', acceptedAt: clock(), updatedAt: clock() }; save();
+          if (!sameTarget(remote, claimed) || remote.completionProtocol && claimed.completionProtocol !== remote.completionProtocol || typeof claim.claimToken !== 'string' || claim.claimToken.length < 16 || claim.claimToken.length > 512) throw fail('CLIENT_UPDATE_CLAIM_INVALID');
+          archive(); installationSettled = false;
+          current = { schemaVersion: 1, request: claimed, claimToken: claim.claimToken, sourceBuild: digest(claimed.currentBuild) ? claimed.currentBuild : clientBuild, state: 'accepted', acceptedAt: clock(), updatedAt: clock() }; save();
           if (['updating', 'awaiting_heartbeat'].includes(remote.state)) {
             current.state = 'updating'; current.worker = await recoverWorker(current.request, current.claimToken); save();
             if (!current.worker) await finish('failed', 'CLIENT_UPDATE_LOCAL_STATE_MISSING');
@@ -210,7 +290,7 @@ export function createRemoteClientUpdates({ home, hostId, clientBuild, enabled =
         // Reporting is asynchronous. A Gateway event or valid collaboration
         // child may have entered meanwhile; never close it based on old idle.
         if (!idle()) { await finish('failed', 'CLIENT_UPDATE_BUSY_AT_DRAIN'); return; }
-        try { await prepareIdle(); current.stage = 'worker_launch'; save(); current.worker = await launch({ request: current.request, claimToken: current.claimToken }); save(); }
+        try { await prepareIdle(); current.stage = 'worker_launch'; save(); current.worker = await launch({ request: current.request, claimToken: current.claimToken, sourceBuild: current.sourceBuild }); save(); }
         catch (error) { await finish('failed', remoteUpdateErrorCode(error)); }
       } catch (error) {
         if (current && (['accepted', 'waiting_idle'].includes(current.state) || current.state === 'updating' && current.stage === 'before_worker') && permanentFailure(error)) await finish('failed', remoteUpdateErrorCode(error));

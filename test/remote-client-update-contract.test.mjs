@@ -7,12 +7,12 @@ import os from 'node:os';
 import path from 'node:path';
 import {createRepository} from '../backend/repository.mjs';
 import {createAuthService} from '../backend/auth.mjs';
-import {createDeviceUpdateService, REMOTE_UPDATE_FEATURE, OFFICIAL_CLIENT_SOURCE} from '../backend/device-updates.mjs';
+import {createDeviceUpdateService, REMOTE_UPDATE_FEATURE, OFFICIAL_CLIENT_SOURCE,NATIVE_WORKER_UPDATE_VERIFICATION_FEATURE} from '../backend/device-updates.mjs';
 import {createRemoteClientUpdates} from '../src/client-remote-update.mjs';
 
 const sourceBuild = '1'.repeat(64), targetBuild = '2'.repeat(64), hostId = '3'.repeat(64);
 
-async function fixture(t) {
+async function fixture(t,{native=false}={}) {
   const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ziwei-remote-contract-')));
   const repo = createRepository({memory: true});
   t.after(() => { repo.db.close(); fs.rmSync(home, {recursive: true, force: true}); });
@@ -24,7 +24,7 @@ async function fixture(t) {
   const context = {actorUserId: owner.user_id};
   const heartbeat = (build = sourceBuild, pid = 401) => repo.heartbeatDevice(workspace, {
     deviceId: pair.deviceId, os: 'Windows', pid, clientBuild: build,
-    runtimeDiscovery: {features: [REMOTE_UPDATE_FEATURE], maintenanceHostId: hostId},
+    runtimeDiscovery: {features: [REMOTE_UPDATE_FEATURE,...(native?[NATIVE_WORKER_UPDATE_VERIFICATION_FEATURE]:[])], maintenanceHostId: hostId},
   });
   heartbeat();
   const service = createDeviceUpdateService(repo, {readRelease: async () => ({
@@ -50,7 +50,9 @@ async function fixture(t) {
     launch: async () => { launches++; return {workerPid: 403, startedAt: Date.now(), directory: path.join(home, 'maintenance', 'isolated-worker')}; },
     inspectWorker: async () => ({state: 'updating'}), log: (event, data) => diagnostics.push({event, ...data}), ...extra,
   });
+  const nativeCompletion=()=>({schemaVersion:1,operation:'update',state:'complete',binding:{requestId:created.request.id,hostId,deviceId:pair.deviceId,sourceBuild,targetBuild,sha256:'4'.repeat(64)},supervisorPid:403,workerPid:404,daemonPid:402,installedBuild:targetBuild,terminalSha256:'6'.repeat(64),workerIdentitySha256:'7'.repeat(64),finishedAt:new Date().toISOString(),workerExited:true,maintenanceLockAbsent:true,configurationPreserved:true,nativeStartupVerified:true,restoredRunning:true});
   return {repo, service, created, context, workspace, pair, heartbeat, makeClient, request, diagnostics,
+    nativeCompletion,
     idle: value => { allWorkspacesIdle = value; }, launches: () => launches, polls: () => polls,
     read: async () => (await service.get(workspace, pair.deviceId, created.request.id, context)).request};
 }
@@ -76,11 +78,19 @@ test('real protocol waits for every workspace, launches once, and succeeds only 
   assert.equal((await f.read()).heartbeatVerified, true);
   // A fresh daemon can heartbeat while the installer still owns its lease.
   assert.equal(replacement.blocksNewActions, true);
-  const settled = f.makeClient(targetBuild, {inspectWorker: async () => ({state:'complete'})});
+  const settled = f.makeClient(targetBuild, {inspectWorker: async () => ({state:'complete',legacyCompletion:f.nativeCompletion()})});
   await settled.tick();
   assert.equal(settled.blocksNewActions, false);
   assert.equal(replacement.status().state, 'succeeded');
   assert.equal(f.launches(), 1);
+});
+
+test('negotiated native worker protocol remains pending after heartbeat until bound terminal verification',async t=>{
+ const f=await fixture(t,{native:true});f.idle(true);const source=f.makeClient();await source.tick();assert.equal(f.launches(),1);
+ const target=f.makeClient(targetBuild);await target.tick();f.heartbeat(targetBuild,402);await target.tick();
+ assert.equal((await f.read()).completionProtocol,'native_worker_v1');assert.equal((await f.read()).state,'awaiting_heartbeat');assert.equal(target.blocksNewActions,true);
+ const settled=f.makeClient(targetBuild,{inspectWorker:async()=>({state:'complete',workerReceipt:{...f.nativeCompletion(),configSha256:'5'.repeat(64)}})});
+ await settled.tick();assert.equal((await f.read()).state,'succeeded');assert.equal((await f.read()).workerVerified,true);assert.equal(settled.blocksNewActions,false);assert.equal(f.launches(),1);
 });
 
 test('an already idle host still follows the server phase contract instead of skipping waiting_idle', async t => {

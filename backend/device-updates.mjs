@@ -1,6 +1,7 @@
-import {randomUUID,randomBytes,timingSafeEqual} from 'node:crypto';
+import {randomUUID,randomBytes,timingSafeEqual,createHash} from 'node:crypto';
 
 export const REMOTE_UPDATE_FEATURE='remote_client_update_v1';
+export const NATIVE_WORKER_UPDATE_VERIFICATION_FEATURE='native_worker_update_verification_v1';
 export const OFFICIAL_CLIENT_SOURCE='https://qzelynth.top/downloads/cli/ziwei-latest.tgz';
 export const OFFICIAL_CLIENT_MANIFEST='https://qzelynth.top/downloads/cli/release.json';
 const HASH=/^[a-f0-9]{64}$/;
@@ -13,9 +14,24 @@ const sameSecret=(a,b)=>typeof a==='string'&&typeof b==='string'&&HASH.test(a)&&
 const runtimeExecutionTypes=['conversation.execute','task.execute','agent.execute','runtime.execute','automation.execute'];
 const fresh=(row,now)=>{const seen=Date.parse(row.heartbeat_at||row.last_seen||'');return row.status!=='disabled'&&Number.isFinite(seen)&&seen<=now+5_000&&now-seen<90_000;};
 const host=row=>parse(row.runtime_discovery_json).maintenanceHostId;
-const REASONS=Object.freeze({CLIENT_UPDATE_AUTHORITY_REVOKED:'原升级授权已失效，请由当前管理员重新发起',CLIENT_UPDATE_INTERRUPTED:'维护程序已中断，可重新发起官方升级',CLIENT_UPDATE_UNCONFIRMED_TIMEOUT:'维护回执超时，尚未确认升级结果；下次请求仍检查本机维护进程',CLIENT_UPDATE_RELEASE_CHANGED:'官方安装包已变化，请重新发起升级',CLIENT_UPDATE_WORKER_FAILED:'本机官方升级程序失败，原安装及连接配置按维护结果保留',CLIENT_UPDATE_SOURCE_INVALID:'官方更新地址校验失败',CLIENT_UPDATE_BUILD_MISMATCH:'安装版本与本次升级目标不一致',CLIENT_UPDATE_CANCELLED:'升级请求已取消'});
+const REASONS=Object.freeze({CLIENT_UPDATE_AUTHORITY_REVOKED:'原升级授权已失效，请由当前管理员重新发起',CLIENT_UPDATE_INTERRUPTED:'维护程序已中断，可重新发起官方升级',CLIENT_UPDATE_UNCONFIRMED_TIMEOUT:'维护回执超时，尚未确认升级结果；下次请求仍检查本机维护进程',CLIENT_UPDATE_RELEASE_CHANGED:'官方安装包已变化，请重新发起升级',CLIENT_UPDATE_WORKER_FAILED:'本机官方升级程序失败，原安装及连接配置按维护结果保留',CLIENT_UPDATE_SOURCE_INVALID:'官方更新地址校验失败',CLIENT_UPDATE_BUILD_MISMATCH:'安装版本与本次升级目标不一致',CLIENT_UPDATE_CANCELLED:'升级请求已取消',CLIENT_UPDATE_ROLLED_BACK:'原生维护失败并已核验恢复原安装及运行状态'});
 const reasonFor=code=>code?(REASONS[code]||'客户端升级未完成，请查看官方维护结果'):null;
-const view=row=>row?{id:row.id,deviceId:row.device_id,state:row.state,idempotencyKey:row.idempotency_key,currentBuild:row.source_build,targetBuild:row.target_build,sha256:row.sha256,source:OFFICIAL_CLIENT_SOURCE,version:row.version,createdAt:row.created_at,updatedAt:row.updated_at,code:row.reason_code||null,reason:reasonFor(row.reason_code),heartbeatVerified:row.state==='succeeded',completionSource:row.state==='succeeded'?'heartbeat':null,verifiedAt:row.verified_at||null}:null;
+const evidence=row=>parse(row.evidence_json);
+function view(row){
+ if(!row)return null;
+ const value=evidence(row),native=value.workerReceiptRequired===true,succeeded=row.state==='succeeded';
+ return{id:row.id,deviceId:row.device_id,state:row.state,idempotencyKey:row.idempotency_key,
+  currentBuild:row.source_build,targetBuild:row.target_build,sha256:row.sha256,source:OFFICIAL_CLIENT_SOURCE,
+  version:row.version,createdAt:row.created_at,updatedAt:row.updated_at,code:row.reason_code||null,
+  reason:reasonFor(row.reason_code),heartbeatVerified:succeeded,
+  completionProtocol:native?'native_worker_v1':'legacy_heartbeat',
+  completionSource:succeeded?(native?'heartbeat+native_worker':'heartbeat'):null,verifiedAt:row.verified_at||null,
+  targetHeartbeatObserved:Boolean(value.heartbeat),workerVerified:Boolean(value.workerReceipt),
+  rollbackVerified:Boolean(value.rollbackEvidence),observedFailureRecorded:Boolean(value.observedFailure),
+  requiresReconciliation:succeeded&&Boolean(value.observedFailure)&&!value.rollbackEvidence,
+  previousSuccessVerifiedAt:(value.rollbackEvidence||value.observedFailure)?row.verified_at||null:null,
+  evidenceHistory:value.history||[]};
+}
 
 export function initializeDeviceUpdates(db){
  db.exec(`CREATE TABLE IF NOT EXISTS device_updates (
@@ -26,10 +42,27 @@ export function initializeDeviceUpdates(db){
  UNIQUE(workspace_id,idempotency_key),FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,FOREIGN KEY(device_id) REFERENCES devices(id) ON DELETE CASCADE);
  CREATE UNIQUE INDEX IF NOT EXISTS idx_device_updates_one_host ON device_updates(host_id) WHERE state NOT IN ('succeeded','failed','cancelled');
  CREATE INDEX IF NOT EXISTS idx_device_updates_device ON device_updates(device_id,created_at);`);
+ if(!db.prepare('PRAGMA table_info(device_updates)').all().some(column=>column.name==='evidence_json'))db.exec("ALTER TABLE device_updates ADD COLUMN evidence_json TEXT NOT NULL DEFAULT '{}'");
 }
 
-// A worker receipt never marks an update successful. Only a subsequently
-// authenticated heartbeat from the same installation host and new process does.
+// A heartbeat and a native terminal receipt are independent requirements. A
+// candidate can heartbeat before its installer completes or rolls it back.
+function recordEvidenceFact(value,type,at,receipt){
+ const digest=createHash('sha256').update(JSON.stringify(receipt)).digest('hex');
+ value.history||=[];
+ if(!value.history.some(row=>row.type===type&&row.sha256===digest))value.history.push({type,at,sha256:digest,receipt});
+}
+function completedTarget(row,device,at){
+ const value=evidence(row),worker=value.workerReceipt,seen=Date.parse(device.heartbeat_at||'');
+ const heartbeatMatches=host(device)===row.host_id&&device.client_build===row.target_build
+  &&Number.isSafeInteger(device.pid)&&device.pid>0&&device.pid!==row.source_pid&&fresh(device,at)
+  &&Number.isFinite(seen)&&seen>=Date.parse(row.created_at)&&value.heartbeat?.pid===device.pid;
+ return Boolean(heartbeatMatches&&(value.workerReceiptRequired!==true||worker&&device.pid===worker.daemonPid));
+}
+function finishVerifiedUpdate(db,row,device,at){
+ if(TERMINAL.has(row.state)||!completedTarget(row,device,at))return;
+ db.prepare("UPDATE device_updates SET state='succeeded',updated_at=?,verified_at=? WHERE id=? AND state NOT IN ('succeeded','failed','cancelled')").run(new Date(at).toISOString(),device.heartbeat_at,row.id);
+}
 export function expireUnconfirmedDeviceUpdates(db,hostId,at=Date.now()){
  if(!HASH.test(hostId||''))return;
  // This expires only the server maintenance intent. It does not claim a
@@ -54,7 +87,77 @@ export function observeDeviceUpdateHeartbeat(db,deviceId){
  const row=db.prepare("SELECT * FROM device_updates WHERE device_id=? AND state NOT IN ('succeeded','failed','cancelled')").get(deviceId);if(!row)return;
  const seen=Date.parse(device.heartbeat_at||'');
  if(host(device)!==row.host_id||device.client_build!==row.target_build||!Number.isInteger(device.pid)||device.pid<=0||device.pid===row.source_pid||!Number.isFinite(seen)||seen<Date.parse(row.created_at)||device.status==='disabled')return;
- db.prepare("UPDATE device_updates SET state='succeeded',updated_at=?,verified_at=? WHERE id=? AND state NOT IN ('succeeded','failed','cancelled')").run(device.heartbeat_at,device.heartbeat_at,row.id);
+ const value=evidence(row);
+ if(value.heartbeat?.pid!==device.pid)recordEvidenceFact(value,'target_heartbeat_observed',device.heartbeat_at,{pid:device.pid,clientBuild:device.client_build});
+ value.heartbeat={pid:device.pid,at:device.heartbeat_at};
+ db.prepare('UPDATE device_updates SET evidence_json=? WHERE id=?').run(JSON.stringify(value),row.id);
+ finishVerifiedUpdate(db,{...row,evidence_json:JSON.stringify(value)},device,Date.now());
+}
+
+const RECEIPT_BINDING=['requestId','hostId','deviceId','sourceBuild','targetBuild','sha256'];
+const RECEIPT_COMMON=['schemaVersion','operation','state','supervisorPid','workerPid','workerIdentitySha256','terminalSha256','finishedAt','workerExited','maintenanceLockAbsent'];
+const RECEIPT_NATIVE=['daemonPid','installedBuild','configSha256','configurationPreserved','nativeStartupVerified'];
+const RECEIPT_FAILURE=['originalInstallationRestored','runningStateRestored'];
+const RECEIPT_OPTIONAL=['reasonCode','failureStage','exitCode'];
+const positivePid=value=>Number.isSafeInteger(value)&&value>0;
+const receiptHash=value=>typeof value==='string'&&HASH.test(value);
+function validatedReceipt(input,kind,request,progress,at){
+ const historical=kind==='observedFailure',complete=kind==='workerReceipt';
+ const required=[...RECEIPT_COMMON,...(historical?RECEIPT_BINDING:['binding',...RECEIPT_NATIVE]),...(complete?['restoredRunning']:RECEIPT_FAILURE)];
+ const allowed=[...required,...(complete?[]:RECEIPT_OPTIONAL)];
+ const valid=input&&typeof input==='object'&&!Array.isArray(input)&&required.every(key=>Object.hasOwn(input,key))&&Object.keys(input).every(key=>allowed.includes(key));
+ if(!valid)fail('CLIENT_UPDATE_RECEIPT_INVALID','原生维护回执缺少必要字段或含未知字段',400);
+ const bindings={requestId:request.id,hostId:request.host_id,deviceId:request.device_id,sourceBuild:request.source_build,targetBuild:request.target_build,sha256:request.sha256};
+ const supplied=historical?input:input.binding;
+ if(!supplied||typeof supplied!=='object'||!historical&&(Object.keys(supplied).length!==RECEIPT_BINDING.length||Object.keys(supplied).some(key=>!RECEIPT_BINDING.includes(key))))fail('CLIENT_UPDATE_RECEIPT_INVALID','原生维护回执缺少完整请求绑定',400);
+ const finished=Date.parse(input.finishedAt),created=Date.parse(request.created_at),priorSuccess=Date.parse(request.verified_at||'');
+ const invalid=input.schemaVersion!==1||input.operation!=='update'||input.state!==(complete?'complete':'failed')
+  ||Object.entries(bindings).some(([key,value])=>supplied[key]!==value)
+  ||!positivePid(input.supervisorPid)||!positivePid(input.workerPid)||input.workerPid===input.supervisorPid
+  ||input.supervisorPid!==(request.worker_pid||progress.workerPid)
+  ||progress.workerPid!==undefined&&progress.workerPid!==input.supervisorPid
+  ||!receiptHash(input.workerIdentitySha256)||!receiptHash(input.terminalSha256)
+  ||typeof input.finishedAt!=='string'||!Number.isFinite(finished)||finished<created||finished>at+5000
+  ||!complete&&Number.isFinite(priorSuccess)&&finished<priorSuccess
+  ||input.workerExited!==true||input.maintenanceLockAbsent!==true
+  ||!historical&&(!positivePid(input.daemonPid)||input.daemonPid===request.source_pid||input.daemonPid===input.workerPid
+   ||input.installedBuild!==(complete?request.target_build:request.source_build)||!receiptHash(input.configSha256)
+   ||input.configurationPreserved!==true||input.nativeStartupVerified!==true)
+  ||(complete?input.restoredRunning!==true:input.originalInstallationRestored!==true||input.runningStateRestored!==true)
+  ||input.reasonCode!==undefined&&!(typeof input.reasonCode==='string'&&/^[A-Z][A-Z0-9_]{0,80}$/.test(input.reasonCode))
+  ||input.failureStage!==undefined&&!(typeof input.failureStage==='string'&&/^[a-z][a-z_]{0,63}$/.test(input.failureStage))
+  ||input.exitCode!==undefined&&(!Number.isInteger(input.exitCode)||Math.abs(input.exitCode)>2147483647);
+ if(invalid)fail('CLIENT_UPDATE_RECEIPT_INVALID','原生维护回执与请求、进程或终端结果不匹配',400);
+ return Object.fromEntries(allowed.filter(key=>Object.hasOwn(input,key)).map(key=>[key,key==='binding'?bindings:input[key]]));
+}
+function applyNativeReceipt(db,request,device,input,at){
+ const kinds=['workerReceipt','rollbackEvidence','observedFailure'].filter(key=>Object.hasOwn(input,key));
+ if(kinds.length!==1)fail('CLIENT_UPDATE_RECEIPT_INVALID','一次状态回报只能包含一种原生证据',400);
+ const kind=kinds[0],complete=kind==='workerReceipt',observed=kind==='observedFailure';
+ if(input.state!==(complete?'awaiting_heartbeat':'failed'))fail('CLIENT_UPDATE_RECEIPT_INVALID','原生证据与状态回报不一致',400);
+ const receipt=validatedReceipt(input[kind],kind,request,input,at),value=evidence(request),timestamp=new Date(at).toISOString();
+ if(observed&&(!fresh(device,at)||input.clientBuild!==device.client_build))fail('CLIENT_UPDATE_HISTORY_UNCONFIRMED','历史补充回执需要当前实际构建的新鲜设备心跳');
+ if(value[kind]){
+  if(JSON.stringify(value[kind])!==JSON.stringify(receipt))fail('CLIENT_UPDATE_RECEIPT_CONFLICT','已保存的原生维护事实不能被另一回执覆盖');
+  return{request:view(request),...(observed?{observedFailureRecorded:true,requiresReconciliation:view(request).requiresReconciliation}:{})};
+ }
+ const legacySucceeded=complete&&request.state==='succeeded'&&value.workerReceiptRequired!==true;
+ if(complete&&TERMINAL.has(request.state)&&!legacySucceeded)fail('CLIENT_UPDATE_TERMINAL','终态维护记录不接受新的完成回执');
+ if(complete&&!['updating','awaiting_heartbeat'].includes(request.state)&&!legacySucceeded)fail('CLIENT_UPDATE_PROGRESS_CONFLICT','维护程序尚未进入安装阶段');
+ if(!complete&&!observed&&(!fresh(device,at)||host(device)!==request.host_id||device.client_build!==request.source_build||device.pid!==receipt.daemonPid||Date.parse(device.heartbeat_at||'')<Date.parse(request.created_at)))fail('CLIENT_UPDATE_ROLLBACK_UNCONFIRMED','尚未核验原安装的新鲜运行心跳');
+ if(request.state==='cancelled')fail('CLIENT_UPDATE_TERMINAL','取消记录不接受原生结果改写');
+ if(request.state==='succeeded')recordEvidenceFact(value,value.workerReceiptRequired===true?'native_success_verified':'legacy_success_observed',request.verified_at||request.updated_at,{state:'succeeded',verifiedAt:request.verified_at||null,targetBuild:request.target_build});
+ value[kind]=receipt;
+ recordEvidenceFact(value,complete?'native_worker_completed':observed?'native_failure_observed':'native_rollback_verified',timestamp,receipt);
+ const state=legacySucceeded?'succeeded':complete?'awaiting_heartbeat':observed?request.state:'failed';
+ db.exec('SAVEPOINT device_update_receipt');
+ try{
+  db.prepare('UPDATE device_updates SET state=?,reason_code=?,worker_pid=COALESCE(worker_pid,?),evidence_json=?,updated_at=? WHERE id=?').run(state,observed?request.reason_code:complete?null:'CLIENT_UPDATE_ROLLED_BACK',receipt.supervisorPid,JSON.stringify(value),timestamp,request.id);
+  if(complete)finishVerifiedUpdate(db,{...request,state,evidence_json:JSON.stringify(value)},device,at);
+  db.exec('RELEASE device_update_receipt');
+ }catch(error){db.exec('ROLLBACK TO device_update_receipt; RELEASE device_update_receipt');throw error;}
+ const recorded=view(db.prepare('SELECT * FROM device_updates WHERE id=?').get(request.id));
+ return{request:recorded,...(observed?{observedFailureRecorded:true,requiresReconciliation:recorded.requiresReconciliation}:{})};
 }
 
 export function createDeviceUpdateService(repo,{now=()=>Date.now(),fetch:fetcher=globalThis.fetch,readRelease}={}){
@@ -112,7 +215,8 @@ export function createDeviceUpdateService(repo,{now=()=>Date.now(),fetch:fetcher
   const active=db.prepare("SELECT * FROM device_updates WHERE host_id=? AND state NOT IN ('succeeded','failed','cancelled')").get(host(row));
   if(active){if(active.device_id!==id)fail('DEVICE_MAINTENANCE_BUSY','这台电脑已有维护请求');return{request:view(active),duplicate:true};}
   const createdAt=stamp(),requestId=`client-update_${randomUUID()}`;
-  try{db.prepare("INSERT INTO device_updates(id,workspace_id,device_id,host_id,idempotency_key,actor_user_id,source_build,target_build,sha256,version,state,source_pid,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,'requested',?,?,?)").run(requestId,identity.ws.id,id,host(row),input.idempotencyKey,identity.userId,row.client_build,manifest.targetBuild,manifest.sha256,manifest.version,row.pid,createdAt,createdAt);}catch(error){
+  const verification={workerReceiptRequired:(parse(refreshed.runtime_discovery_json).features||[]).includes(NATIVE_WORKER_UPDATE_VERIFICATION_FEATURE)};
+  try{db.prepare("INSERT INTO device_updates(id,workspace_id,device_id,host_id,idempotency_key,actor_user_id,source_build,target_build,sha256,version,state,source_pid,created_at,updated_at,evidence_json) VALUES(?,?,?,?,?,?,?,?,?,?,'requested',?,?,?,?)").run(requestId,identity.ws.id,id,host(row),input.idempotencyKey,identity.userId,row.client_build,manifest.targetBuild,manifest.sha256,manifest.version,row.pid,createdAt,createdAt,JSON.stringify(verification));}catch(error){
    // Only a demonstrated host uniqueness race becomes a maintenance conflict.
    // Disk, schema and unrelated constraints retain their real failure.
    const conflict=db.prepare("SELECT * FROM device_updates WHERE host_id=? AND state NOT IN ('succeeded','failed','cancelled')").get(host(row));
@@ -141,12 +245,15 @@ export function createDeviceUpdateService(repo,{now=()=>Date.now(),fetch:fetcher
   if(!fresh(row,now()))fail('DEVICE_OFFLINE','电脑尚未提供新鲜心跳');if(!input||Object.keys(input).some(key=>!['hostId','clientBuild','pid'].includes(key))||input.hostId!==request.host_id||host(row)!==request.host_id||input.clientBuild!==request.source_build||row.client_build!==request.source_build||!Number.isInteger(input.pid)||input.pid<=0||input.pid!==row.pid)fail('CLIENT_UPDATE_INSTANCE_CHANGED','当前客户端与升级请求绑定不一致');if(TERMINAL.has(request.state))fail('CLIENT_UPDATE_TERMINAL','升级请求已结束');if(request.state==='requested'){if(nonPausableExecutionInFlight(row))fail('CLIENT_UPDATE_WAITING_EXECUTION','升级已排队，等待这台电脑上不支持检查点的执行结束；其他员工仍可继续工作');const token=randomBytes(32).toString('hex');db.prepare("UPDATE device_updates SET state='accepted',claim_token=?,updated_at=? WHERE id=? AND state='requested'").run(token,stamp(),request.id);}const accepted=db.prepare('SELECT * FROM device_updates WHERE id=?').get(request.id);return{request:{...view(accepted),workspace:slug,hostId:accepted.host_id},claimToken:accepted.claim_token};}
  function progress(slug,id,requestId,input={},credential){
   let{row,request}=bound(slug,id,requestId,credential);
-  const allowed=['state','hostId','clientBuild','claimToken','workerPid','code'];
-  if(!input||Object.keys(input).some(key=>!allowed.includes(key))||!['accepted','waiting_idle','updating','awaiting_heartbeat','failed'].includes(input.state)||input.hostId!==request.host_id||host(row)!==request.host_id||![request.source_build,request.target_build].includes(input.clientBuild)||!sameSecret(input.claimToken,request.claim_token)||input.workerPid!==undefined&&(!Number.isInteger(input.workerPid)||input.workerPid<=0)||input.code!==undefined&&!/^CLIENT_UPDATE_[A-Z0-9_]{1,64}$/.test(input.code))fail('CLIENT_UPDATE_PROGRESS_INVALID','升级状态回报不符合绑定契约',400);
+  const allowed=['state','hostId','clientBuild','claimToken','workerPid','code','workerReceipt','rollbackEvidence','observedFailure'];
+  const historical=Boolean(input&&Object.hasOwn(input,'observedFailure'));
+  if(!input||Object.keys(input).some(key=>!allowed.includes(key))||!['accepted','waiting_idle','updating','awaiting_heartbeat','failed'].includes(input.state)||input.hostId!==request.host_id||host(row)!==request.host_id||!([request.source_build,request.target_build].includes(input.clientBuild)||historical&&input.clientBuild===row.client_build&&fresh(row,now()))||!sameSecret(input.claimToken,request.claim_token)||input.workerPid!==undefined&&(!Number.isInteger(input.workerPid)||input.workerPid<=0)||input.code!==undefined&&!/^CLIENT_UPDATE_[A-Z0-9_]{1,64}$/.test(input.code))fail('CLIENT_UPDATE_PROGRESS_INVALID','升级状态回报不符合绑定契约',400);
   if(input.state==='updating'&&['requested','accepted','waiting_idle'].includes(request.state)){
    invalidateUnauthorizedPreUpdateIntents(db,request.host_id,now());
    request=db.prepare('SELECT * FROM device_updates WHERE id=?').get(request.id);
   }
+  if(['workerReceipt','rollbackEvidence','observedFailure'].some(key=>Object.hasOwn(input,key)))return applyNativeReceipt(db,request,row,input,now());
+  if(request.state==='succeeded'&&input.state==='failed')fail('CLIENT_UPDATE_ROLLBACK_EVIDENCE_REQUIRED','成功观察之后的失败必须附带同请求的原生终端证据');
   if(TERMINAL.has(request.state))return{request:view(request)};
   if(input.state===request.state)return{request:view(request)};
   const rank=state=>STATES.indexOf(state);

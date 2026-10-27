@@ -13,6 +13,15 @@ import { validateUpdateSource, downloadVerifiedPackage, resolveInstalledPackage,
 
 const run = promisify(execFile);
 
+// These package-swap fixtures have no action history. Declare that capability
+// explicitly; recovery authorization has its own tests and realistic config.
+function fixtureRecovery(target) {
+  for(const [relative,name] of [['src/client-failed-action-finalization-recovery.mjs','recoverFailedActionFinalizationsForUpdate'],['scripts/client-historical-prelaunch-recovery.mjs','recoverHistoricalPrelaunchForUpdate']]) {
+    const file=path.join(target,relative);
+    fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,`export async function ${name}(){return {recovered:false};}\n`);
+  }
+}
+
 // Match the package-outside detached worker layout produced by launchClientUpdate.
 function detachedUpdateWorker(directory) {
   const source=path.resolve(import.meta.dirname,'..'),helper=path.join(directory,'helper');
@@ -145,6 +154,7 @@ test('Windows staged npm update copies the complete runtime dependency tree befo
     fs.mkdirSync(path.join(target, 'scripts'), { recursive: true });
     fs.writeFileSync(path.join(target, 'package.json'), JSON.stringify({ name: 'ziwei', version, type: 'module', bin: { ziwei_user: 'scripts/ziwei-user.mjs' } }));
     fs.writeFileSync(path.join(target, 'scripts/ziwei-user.mjs'), `#!/usr/bin/env node\nconsole.log('ziwei_user ${version}');\n`);
+    fixtureRecovery(target);
   }
   fixture(root, '0.1.0'); fixture(source, '0.1.1');
   const dependencyCount = bundleInstalledRuntimeDependencies(source);
@@ -268,6 +278,7 @@ test('failed startup after package swap restores the original program and connec
     fs.mkdirSync(path.join(target, 'scripts'), { recursive: true });
     fs.writeFileSync(path.join(target, 'package.json'), JSON.stringify({ name: 'ziwei', version, type: 'module', bin: { ziwei_user: 'scripts/ziwei-user.mjs' } }));
     fs.writeFileSync(path.join(target, 'scripts/ziwei-user.mjs'), `console.log('ziwei_user ${version}');\n`);
+    fixtureRecovery(target);
   }
   const home = path.join(directory, 'user-data'); fs.mkdirSync(home);
   const configFile = path.join(home, 'ziwei_user.json');

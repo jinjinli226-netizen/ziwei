@@ -6,11 +6,13 @@ import path from 'node:path';
 import {createRemoteClientUpdates,writeRemoteUpdateJson,REMOTE_CLIENT_UPDATE_SOURCE} from '../src/client-remote-update.mjs';
 function fixture(t,{state='succeeded',stage='worker_launch',worker=true,source=false}={}){
   const home=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'ziwei-maintenance-update-')));t.after(()=>fs.rmSync(home,{recursive:true,force:true}));
-  const build='2'.repeat(64),hostId='3'.repeat(64),connection={workspace:'fixture',deviceId:'device-fixture'},request={id:'update-fixture',...connection,hostId,targetBuild:build,sha256:'4'.repeat(64),source:REMOTE_CLIENT_UPDATE_SOURCE,state};
+  const build='2'.repeat(64),hostId='3'.repeat(64),connection={workspace:'fixture',deviceId:'device-fixture'},request={id:'update-fixture',...connection,hostId,targetBuild:build,sha256:'4'.repeat(64),source:REMOTE_CLIENT_UPDATE_SOURCE,state,completionProtocol:'native_worker_v1'};
   let observation='updating',pending=true,polls=0;
-  const ledger={schemaVersion:1,request,claimToken:'private-fixture-claim',state,stage,...(worker?{worker:{workerPid:123,startedAt:1,directory:'fixture'}}:{})};
+  const sourceBuild='1'.repeat(64);
+  const completeReceipt={schemaVersion:1,operation:'update',state:'complete',binding:{requestId:request.id,hostId,deviceId:connection.deviceId,sourceBuild,targetBuild:build,sha256:request.sha256},supervisorPid:123,workerPid:124,daemonPid:99,installedBuild:build,configSha256:'5'.repeat(64),terminalSha256:'6'.repeat(64),workerIdentitySha256:'7'.repeat(64),finishedAt:'2026-10-27T03:34:29.916Z',workerExited:true,maintenanceLockAbsent:true,configurationPreserved:true,nativeStartupVerified:true,restoredRunning:true};
+  const ledger={schemaVersion:1,request,sourceBuild,claimToken:'private-fixture-claim',state,stage,...(worker?{worker:{workerPid:123,startedAt:1,directory:'fixture'}}:{})};
   writeRemoteUpdateJson(path.join(home,'maintenance','remote-client-update.json'),ledger);
-    const client=createRemoteClientUpdates({home,hostId,clientBuild:source?'1'.repeat(64):build,enabled:true,pid:99,connections:()=>[connection],idle:()=>true,hasPendingResumes:()=>pending,request:async()=>{polls++;return{request:null};},inspectWorker:async()=>typeof observation==='string'?{state:observation}:observation,recoverWorker:async()=>null});
+    const client=createRemoteClientUpdates({home,hostId,clientBuild:source?sourceBuild:build,enabled:true,pid:99,connections:()=>[connection],idle:()=>true,hasPendingResumes:()=>pending,request:async(_connection,_route,body)=>{if(body)return{request:{...request,state:'succeeded'}};polls++;return{request:null};},inspectWorker:async()=>observation==='complete'?{state:'complete',workerReceipt:completeReceipt}:typeof observation==='string'?{state:observation}:observation,recoverWorker:async()=>null});
   return {home,client,receipt:{updateId:request.id,targetBuild:build},observation:v=>observation=v,pending:v=>pending=v,polls:()=>polls};
 }
 test('new-build heartbeat cannot resume while the installer holds its lease or has not finished',async t=>{

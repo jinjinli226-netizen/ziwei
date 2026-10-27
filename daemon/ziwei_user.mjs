@@ -190,13 +190,13 @@ remoteClientUpdates = createRemoteClientUpdates({
     const payload = await response.json(); if (payload.ok !== true) throw Object.assign(new Error('CLIENT_UPDATE_RESPONSE_INVALID'), { code: 'CLIENT_UPDATE_RESPONSE_INVALID' });
     return payload;
   },
-  launch: ({ request, claimToken }) => launchRemoteClientUpdate({ root: ROOT, home: dataDir, configPath, request, claimToken }),
-  inspectWorker: worker => inspectRemoteClientUpdateWorker(worker, { home: dataDir }),
+  launch: ({ request, claimToken, sourceBuild }) => launchRemoteClientUpdate({ root: ROOT, home: dataDir, configPath, request, claimToken, sourceBuild }),
+  inspectWorker: (worker, context) => inspectRemoteClientUpdateWorker(worker, { ...context, root: ROOT, home: dataDir, configPath }),
   recoverWorker: (request, claimToken) => recoverRemoteClientUpdateWorker({ home: dataDir, request, claimToken }),
   log,
 });
 function clientRuntimeDiscovery() {
-  return { checkedAt: runtimeDiscovery.discoveredAt, platform: runtimeDiscovery.bridge.platform, arch: runtimeDiscovery.bridge.arch, clientBuild: CLIENT_BUILD, features: ['employee_capabilities_inspect_v1','bot_mcp_oauth_relay_v1','failed_action_finalization_v1', ...(remoteUpdateEnabled ? [REMOTE_CLIENT_UPDATE_FEATURE,'maintenance_checkpoint_resume_v1'] : [])], ...(maintenanceHostId ? { maintenanceHostId } : {}) };
+  return { checkedAt: runtimeDiscovery.discoveredAt, platform: runtimeDiscovery.bridge.platform, arch: runtimeDiscovery.bridge.arch, clientBuild: CLIENT_BUILD, features: ['employee_capabilities_inspect_v1','bot_mcp_oauth_relay_v1','failed_action_finalization_v1', ...(remoteUpdateEnabled ? [REMOTE_CLIENT_UPDATE_FEATURE,'maintenance_checkpoint_resume_v1','native_worker_update_verification_v1'] : [])], ...(maintenanceHostId ? { maintenanceHostId } : {}) };
 }
 process.on('uncaughtException', error => log('uncaught_exception', { error: error.stack || error.message }));
 process.on('unhandledRejection', error => log('unhandled_rejection', { error: error?.stack || String(error) }));
