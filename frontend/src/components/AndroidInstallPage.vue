@@ -103,8 +103,8 @@ onUnmounted(() => { controller?.abort(); controller = null; window.clearTimeout(
 
         <aside class="install-qr-card" aria-labelledby="qr-heading">
           <span class="install-qr-icon"><Monitor :size="19"/></span><h2 id="qr-heading">电脑浏览，手机扫码</h2><p>用安卓手机浏览器打开安装页</p>
-          <a :href="INSTALL_URL" aria-label="打开紫薇·互联手机安装页" class="install-qr-link"><img src="/android-install-qr.svg" width="188" height="188" alt="安装页二维码，内容为 https://qzelynth.top/android-install" data-testid="install-qr"/></a>
-          <a :href="INSTALL_URL" class="install-page-url">qzelynth.top/android-install</a>
+          <a :href="INSTALL_URL" aria-label="打开紫薇·互联手机安装页" class="install-qr-link"><img src="/android-install-qr.svg" width="188" height="188" :alt="`安装页二维码，内容为 ${INSTALL_URL}`" data-testid="install-qr"/></a>
+          <a :href="INSTALL_URL" class="install-page-url">{{ INSTALL_URL.replace('https://', '') }}</a>
           <span class="install-qr-note">在微信内无法下载时，<br/>请用系统浏览器打开。</span>
         </aside>
       </div>

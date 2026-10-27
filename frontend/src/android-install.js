@@ -1,6 +1,8 @@
-export const PUBLIC_ORIGIN = 'https://qzelynth.top';
+export const PUBLIC_ORIGIN = 'https://ziwei.qzelynth.top';
 export const INSTALL_URL = `${PUBLIC_ORIGIN}/android-install`;
-export const CONTROL_URL = PUBLIC_ORIGIN;
+// The machine API is served at this verified HTTPS root; it is not a download URL.
+export const CONTROL_URL = 'https://ziwei.qzelynth.top';
+const LEGACY_ORIGIN = 'https://qzelynth.top';
 
 const DOWNLOAD_PREFIX = '/downloads/android/';
 const INDEX_URL = `${PUBLIC_ORIGIN}${DOWNLOAD_PREFIX}index.json`;
@@ -39,7 +41,10 @@ export function detectInstallPlatform(userAgent = '') {
 // segments, backslashes and encoded traversal before callers can inspect them.
 function artifactHref(value, extension) {
   if (typeof value !== 'string') throw new Error('下载地址未通过安全校验，请联系管理员。');
-  const path = value.startsWith(`${PUBLIC_ORIGIN}/`) ? value.slice(PUBLIC_ORIGIN.length) : value;
+  // Old published manifests remain valid inputs. Always return the canonical
+  // same-origin URL so a legacy absolute path cannot reintroduce browser CORS.
+  const inputOrigin = [PUBLIC_ORIGIN, LEGACY_ORIGIN].find(origin => value.startsWith(`${origin}/`));
+  const path = inputOrigin ? value.slice(inputOrigin.length) : value;
   if (!path.startsWith(DOWNLOAD_PREFIX) || /[\\%?#\s]/.test(path)) {
     throw new Error('下载地址未通过安全校验，请联系管理员。');
   }

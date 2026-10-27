@@ -40,9 +40,9 @@ function source(releases = [release()], manifests = {}, override) {
 }
 
 test('installation and control links stay on the canonical public origin', () => {
-  assert.equal(PUBLIC_ORIGIN, 'https://qzelynth.top');
+  assert.equal(PUBLIC_ORIGIN, 'https://ziwei.qzelynth.top');
   assert.equal(INSTALL_URL, `${PUBLIC_ORIGIN}/android-install`);
-  assert.equal(CONTROL_URL, PUBLIC_ORIGIN);
+  assert.equal(CONTROL_URL, 'https://ziwei.qzelynth.top', 'device control origin is independently verified, not inferred from installation links');
   assert.equal(installPageHref('phone_ai'), `${INSTALL_URL}?workspace=phone_ai`);
   assert.equal(managementHref('my-team'), `${PUBLIC_ORIGIN}/my-team/ziwei-connect`);
   for (const slug of ['', null, '../admin', 'x/y', 'https://evil.example', 'x?token=secret', 'x%2fy', ' x ', 'x'.repeat(200)]) {
