@@ -1,0 +1,1144 @@
+diff --git a/agent/codex_runtime.py b/agent/codex_runtime.py
+index 27b89aeaee6..886a5cbef86 100644
+--- a/agent/codex_runtime.py
++++ b/agent/codex_runtime.py
+@@ -750,6 +750,8 @@ def run_codex_app_server_turn(agent, *, user_message: str, original_user_message
+                               turn_id: Any = None) -> dict[str, Any]:
+     """Hand the turn to a ``codex app-server`` subprocess and project its events into ``messages``.
+     Returns the chat_completions result shape. The user message is ALREADY in ``messages`` — never append it again."""
++    from agent.strict_reasoning import require_supported_transport
++    require_supported_transport(agent)
+     # Defense in depth for compression.checkpoint_required: agent init refuses the combination, but
+     # api_mode is mutable. Explicit-True check matches compress_context().
+     if getattr(agent, "compression_checkpoint_required", False) is True:
+@@ -1263,7 +1265,9 @@ def run_codex_stream(agent, api_kwargs: dict, client: Any = None, on_first_delta
+             )
+         stream_kwargs = _sanitize_consumer_codex_request(agent, next_api_kwargs)
+         stream_kwargs["stream"] = True
+-        return active_client.responses.create(**bypass_sdk_request_transform(stream_kwargs))
++        from agent.strict_reasoning import guard_codex_request
++        stream_kwargs = guard_codex_request(agent, bypass_sdk_request_transform(stream_kwargs))
++        return active_client.responses.create(**stream_kwargs)
+ 
+     def _log_failure(exc: BaseException) -> None:
+         request_body_bytes, exception_chain = _codex_request_failure_details(exc)
+diff --git a/agent/session_client_env.py b/agent/session_client_env.py
+index 63b6573af52..faa4c4e6520 100644
+--- a/agent/session_client_env.py
++++ b/agent/session_client_env.py
+@@ -36,6 +36,31 @@ _MAX_BYTES = 256 * 1024
+ 
+ # (env, local) for the session executing here; None outside a shell client's session.
+ _BOUND: ContextVar = ContextVar('session_client_env', default=None)
++_STRICT_REASONING: ContextVar = ContextVar('strict_reasoning_admission', default=None)
++
++
++def validate_strict_effort(value):
++    from hermes_constants import VALID_REASONING_EFFORTS
++    if value not in VALID_REASONING_EFFORTS:
++        raise ValueError('strict_reasoning_invalid_effort')
++    return value
++
++
++@contextmanager
++def strict_reasoning_scope(effort=None, model=None, provider=None):
++    """One admitted turn's immutable requested route; never a mutation of its resumed policy."""
++    value = None if effort is None else {'effort': validate_strict_effort(effort),
++                                        'model': model, 'provider': provider}
++    token = _STRICT_REASONING.set(value)
++    try:
++        yield
++    finally:
++        _STRICT_REASONING.reset(token)
++
++
++def strict_reasoning_route():
++    value = _STRICT_REASONING.get()
++    return None if value is None else dict(value)
+ 
+ 
+ def configured_names(config) -> frozenset:
+diff --git a/agent/strict_reasoning.py b/agent/strict_reasoning.py
+new file mode 100644
+index 00000000000..182485caee2
+--- /dev/null
++++ b/agent/strict_reasoning.py
+@@ -0,0 +1,61 @@
++"""Opt-in, per-admission Codex wire checks. Proof contains no request body or credentials."""
++from __future__ import annotations
++
++import re
++import uuid
++
++from agent.session_client_env import strict_reasoning_route, validate_strict_effort
++
++
++def require_supported_transport(agent):
++    route = strict_reasoning_route()
++    if route is None:
++        return None
++    validate_strict_effort(route['effort'])
++    if not route.get('model') or not route.get('provider'):
++        raise ValueError('strict_reasoning_route_unavailable')
++    if (_safe_model(route['model']) is None or route['provider'] != 'openai-codex'
++            or getattr(agent, 'provider', None) != route['provider']
++            or getattr(agent, 'api_mode', None) != 'codex_responses'
++            or getattr(agent, 'model', None) != route['model']):
++        raise ValueError('strict_reasoning_unsupported_route')
++    return route
++
++
++def _safe_model(model):
++    return model if isinstance(model, str) and re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9./:_-]{0,159}', model) else None
++
++
++def guard_codex_request(agent, request):
++    """After Relay/middleware/sanitization and SDK transform bypass, immediately before create."""
++    route = require_supported_transport(agent)
++    if route is None:
++        return request
++    from hermes_constants import VALID_REASONING_EFFORTS
++    requested = route['effort']
++    extra = request.get('extra_body')
++    if extra is not None and not isinstance(extra, dict):
++        raise ValueError('strict_reasoning_invalid_extra_body')
++    wire = {**request, **(extra or {})}
++    reasoning = wire.get('reasoning')
++    actual = reasoning.get('effort') if isinstance(reasoning, dict) else None
++    native_actual, mode = actual, 'native'
++    configured = getattr(agent, 'reasoning_config', None) or {}
++    if (route['model'] == 'gpt-6.1-sol' and requested == 'max' and actual == 'xhigh'
++            and 'reasoning' not in (extra or {})
++            and configured.get('effort') == 'max' and configured.get('enabled') is not False):
++        request = {**request, 'reasoning': {**reasoning, 'effort': 'max'}}
++        actual, mode = 'max', 'verified_gpt61_sol_max'
++    matched = wire.get('model') == route['model'] and actual == requested
++    proof = {'schemaVersion': 1, 'model': _safe_model(wire.get('model')) if matched else None, 'provider': 'openai-codex',
++             'requested': requested, 'actual': actual if actual in VALID_REASONING_EFFORTS else None,
++             'nativeActual': native_actual if native_actual in VALID_REASONING_EFFORTS else None,
++             'mode': mode, 'status': 'matched' if matched else 'mismatch', 'phase': 'request',
++             'api_request_id': uuid.uuid4().hex}
++    callback = getattr(agent, 'event_callback', None)
++    if not callable(callback):
++        raise ValueError('strict_reasoning_receipt_unavailable')
++    callback('inference:request', proof)
++    if not matched:
++        raise ValueError('strict_reasoning_wire_mismatch')
++    return request
+diff --git a/agent/turn_api_request.py b/agent/turn_api_request.py
+index e4468c52756..c5607230b00 100644
+--- a/agent/turn_api_request.py
++++ b/agent/turn_api_request.py
+@@ -98,6 +98,8 @@ def build_request_payload(
+     """The provider payload through the LLM request middleware, with no turn hook fired: the
+     turn loop's :func:`build_api_request` and off-turn side requests (``ctx.side_question``,
+     which reports through ``pre/post_auxiliary_call``) share it."""
++    from agent.strict_reasoning import require_supported_transport
++    require_supported_transport(agent)
+     from agent.conversation_loop import _redecorate_prompt_cache_for_provider
+ 
+     agent._reset_stream_delivery_tracking()
+diff --git a/apps/shared/src/gateway-contract.generated.ts b/apps/shared/src/gateway-contract.generated.ts
+index 6e777117819..9ea60f83de8 100644
+--- a/apps/shared/src/gateway-contract.generated.ts
++++ b/apps/shared/src/gateway-contract.generated.ts
+@@ -4766,6 +4766,8 @@ export interface RuntimeDescribeResult {
+ export interface SessionCreateDescriptor {
+   sources: string[]
+   parameters: string[]
++  shell_private_mcp_v1?: boolean
++  strict_reasoning_receipts_v1?: boolean
+ }
+ /** ``tui_gateway/change_watcher.py::resolve_skin`` — the resolved active skin (``HermesSkin``). ``{}`` when the skin engine failed to load. Colour maps are token → colour string. */
+ export interface SkinPayload {
+@@ -5175,6 +5177,9 @@ export interface CanonicalSubmitParams {
+   turn_author?: CanonicalTurnAuthor | null
+   api_text?: string | null
+   model_override?: CanonicalModelOverride | null
++  strict_reasoning_effort?: string | null
++  strict_reasoning_model?: string | null
++  strict_reasoning_provider?: string | null
+   clarify_batch?: boolean
+ }
+ export interface CanonicalAttachment {
+@@ -5639,6 +5644,24 @@ export interface StreamDeltaPayload {
+   rendered?: string | null
+   verbose?: boolean | null
+ }
++/** ``gateway/local_viewer_events.py``: normalized request evidence bound by its execution owner. */
++export interface InferenceRequestPayload {
++  schemaVersion?: 1
++  model: string | null
++  provider: string
++  requested: string
++  actual: string | null
++  nativeActual: string | null
++  mode: 'native' | 'verified_gpt61_sol_max'
++  status: 'matched' | 'mismatch' | 'unsupported'
++  phase: 'request'
++  session_id: string
++  profile_id: string
++  admission_id: string
++  execution_generation: number
++  authority_epoch: number
++  api_request_id: string
++}
+ /** ``prompt_turn._interim_assistant_cb`` / ``agent_callbacks`` interim_assistant_callback. */
+ export interface MessageInterimPayload {
+   text: string
+@@ -7012,6 +7035,8 @@ export interface BackendGatewayEventMap {
+   'free_tier.challenge': FreeTierChallengePayload
+   /** First frame of a connection: the resolved skin, the change-event capability and the replay epoch. */
+   'gateway.ready': GatewayReadyPayload
++  /** Sanitized request model and effort, stamped by the owner for the admitted execution. */
++  'inference.request': InferenceRequestPayload
+   /** The turn ended: final text, usage and outcome. */
+   'message.complete': MessageCompletePayload
+   /** One streamed chunk of the assistant reply (null text: segment boundary). */
+@@ -7153,6 +7178,7 @@ export const GATEWAY_EVENT_TYPES = [
+   'error',
+   'free_tier.challenge',
+   'gateway.ready',
++  'inference.request',
+   'message.complete',
+   'message.delta',
+   'message.interim',
+diff --git a/apps/shared/src/gateway-contract.openrpc.json b/apps/shared/src/gateway-contract.openrpc.json
+index 6b23ca77f24..20974ee6f23 100644
+--- a/apps/shared/src/gateway-contract.openrpc.json
++++ b/apps/shared/src/gateway-contract.openrpc.json
+@@ -11120,6 +11120,42 @@
+             ],
+             "default": null
+           },
++          "strict_reasoning_effort": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "default": null,
++            "title": "Strict Reasoning Effort"
++          },
++          "strict_reasoning_model": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "default": null,
++            "title": "Strict Reasoning Model"
++          },
++          "strict_reasoning_provider": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "default": null,
++            "title": "Strict Reasoning Provider"
++          },
+           "clarify_batch": {
+             "default": false,
+             "title": "Clarify Batch",
+@@ -20811,6 +20847,126 @@
+         "title": "ImageGenerateResult",
+         "type": "object"
+       },
++      "InferenceRequestPayload": {
++        "additionalProperties": false,
++        "description": "``gateway/local_viewer_events.py``: normalized request evidence bound by its execution owner.",
++        "properties": {
++          "schemaVersion": {
++            "const": 1,
++            "default": 1,
++            "title": "Schemaversion",
++            "type": "integer"
++          },
++          "model": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Model"
++          },
++          "provider": {
++            "title": "Provider",
++            "type": "string"
++          },
++          "requested": {
++            "title": "Requested",
++            "type": "string"
++          },
++          "actual": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Actual"
++          },
++          "nativeActual": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Nativeactual"
++          },
++          "mode": {
++            "enum": [
++              "native",
++              "verified_gpt61_sol_max"
++            ],
++            "title": "Mode",
++            "type": "string"
++          },
++          "status": {
++            "enum": [
++              "matched",
++              "mismatch",
++              "unsupported"
++            ],
++            "title": "Status",
++            "type": "string"
++          },
++          "phase": {
++            "const": "request",
++            "title": "Phase",
++            "type": "string"
++          },
++          "session_id": {
++            "title": "Session Id",
++            "type": "string"
++          },
++          "profile_id": {
++            "title": "Profile Id",
++            "type": "string"
++          },
++          "admission_id": {
++            "title": "Admission Id",
++            "type": "string"
++          },
++          "execution_generation": {
++            "minimum": 0,
++            "title": "Execution Generation",
++            "type": "integer"
++          },
++          "authority_epoch": {
++            "minimum": 0,
++            "title": "Authority Epoch",
++            "type": "integer"
++          },
++          "api_request_id": {
++            "pattern": "^[a-f0-9]{32}$",
++            "title": "Api Request Id",
++            "type": "string"
++          }
++        },
++        "required": [
++          "model",
++          "provider",
++          "requested",
++          "actual",
++          "nativeActual",
++          "mode",
++          "status",
++          "phase",
++          "session_id",
++          "profile_id",
++          "admission_id",
++          "execution_generation",
++          "authority_epoch",
++          "api_request_id"
++        ],
++        "title": "InferenceRequestPayload",
++        "type": "object"
++      },
+       "InflightTurn": {
+         "additionalProperties": false,
+         "description": "``session_auto_continue._inflight_snapshot``: the live (or retained failed) turn a reconnecting\nclient rebuilds its bubbles from.",
+@@ -36109,6 +36265,16 @@
+             },
+             "title": "Parameters",
+             "type": "array"
++          },
++          "shell_private_mcp_v1": {
++            "default": false,
++            "title": "Shell Private Mcp V1",
++            "type": "boolean"
++          },
++          "strict_reasoning_receipts_v1": {
++            "default": false,
++            "title": "Strict Reasoning Receipts V1",
++            "type": "boolean"
+           }
+         },
+         "required": [
+@@ -48840,6 +49006,18 @@
+         }
+       ]
+     },
++    {
++      "name": "inference.request",
++      "summary": "Sanitized request model and effort, stamped by the owner for the admitted execution.",
++      "params": [
++        {
++          "name": "payload",
++          "schema": {
++            "$ref": "#/components/schemas/InferenceRequestPayload"
++          }
++        }
++      ]
++    },
+     {
+       "name": "message.complete",
+       "summary": "The turn ended: final text, usage and outcome.",
+diff --git a/gateway/local_viewer_events.py b/gateway/local_viewer_events.py
+index c3353f94f06..90ff6318699 100644
+--- a/gateway/local_viewer_events.py
++++ b/gateway/local_viewer_events.py
+@@ -57,6 +57,26 @@ def wire(turn, agent) -> dict:
+     return previous
+ 
+ 
++def publish_inference_request(turn, proof):
++    """Attach only the owner's current claim, never binding values from a request or an agent."""
++    owner = getattr(turn, '_approval_owner', None)
++    if owner is None:
++        raise ValueError('strict_reasoning_receipt_unavailable')
++    authority, session_id, generation = owner
++    stream = authority.sessions[session_id].event_stream
++    with stream.lock:
++        stamp = dict(stream.execution)
++        if (authority.executing.get(session_id) != generation
++                or stamp.get('execution_generation') != generation or not stamp.get('admission_id')):
++            raise ValueError('strict_reasoning_stale_admission')
++        payload = {key: proof[key] for key in ('schemaVersion', 'model', 'provider', 'requested', 'actual',
++                   'nativeActual', 'mode', 'status', 'phase', 'api_request_id')}
++        payload.update(session_id=session_id, profile_id=authority.profile_id,
++                       admission_id=stamp['admission_id'], authority_epoch=stamp['authority_epoch'],
++                       execution_generation=generation)
++        turn._publish_execution('inference.request', payload)
++
++
+ # Launch sources whose viewer never sets the session flag; main's TUI gateway defaulted it from config.
+ _CONFIG_DEFAULT_SOURCES = frozenset({"tui", "gui"})
+ 
+diff --git a/gateway/run_turn_progress.py b/gateway/run_turn_progress.py
+index 6200c3367ae..dfc05fb0889 100644
+--- a/gateway/run_turn_progress.py
++++ b/gateway/run_turn_progress.py
+@@ -905,6 +905,10 @@ class GatewayTurnProgressMixin:
+         )
+ 
+     def _event_callback_sync(self, event_type: str, context: dict) -> None:
++        if event_type == 'inference:request':
++            from gateway.local_viewer_events import publish_inference_request
++            publish_inference_request(self, context)
++            return
+         ctx = self._ctx
+         try:
+             asyncio.run_coroutine_threadsafe(ctx._hooks_ref.emit(event_type, context), ctx._loop_for_step)
+diff --git a/gateway/session_cli_turn.py b/gateway/session_cli_turn.py
+index 62140b3b70a..f59a5054192 100644
+--- a/gateway/session_cli_turn.py
++++ b/gateway/session_cli_turn.py
+@@ -12,7 +12,8 @@ from contextvars import ContextVar
+ 
+ from hermes_state_runtime import RuntimeStoreError
+ 
+-_SUBMIT_FIELDS = ('turn_author', 'api_text', 'model_override', 'clarify_batch')
++_SUBMIT_FIELDS = ('turn_author', 'api_text', 'model_override', 'clarify_batch',
++                  'strict_reasoning_effort', 'strict_reasoning_model', 'strict_reasoning_provider')
+ _API_TEXT_LIMIT = 1_000_000
+ _cli_turn: ContextVar[tuple | None] = ContextVar('cli_turn', default=None)
+ 
+@@ -25,6 +26,18 @@ def submit_cli_turn_fields(params):
+ def admit_cli_turn(params):
+     """Wire fields -> committed ``cli_turn_v1`` (``{}`` when absent); malformed values are refused."""
+     committed = {}
++    strict = {key: params[key] for key in _SUBMIT_FIELDS if key.startswith('strict_reasoning_') and key in params}
++    if strict:
++        import re
++        from agent.session_client_env import validate_strict_effort
++        try:
++            validate_strict_effort(strict.get('strict_reasoning_effort'))
++            if not all(isinstance(strict.get(key), str) and re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9./:_-]{0,159}', strict[key])
++                       for key in ('strict_reasoning_model', 'strict_reasoning_provider')):
++                raise ValueError('strict_reasoning_invalid_route')
++        except ValueError as error:
++            raise RuntimeStoreError('invalid_params', field='strict_reasoning_effort') from error
++        committed.update(strict)
+     if params.get('turn_author') is not None:
+         from agent.turn_author import parse_turn_author
+         author = parse_turn_author(params['turn_author'])
+@@ -65,8 +78,12 @@ def admit_cli_turn(params):
+ @contextmanager
+ def cli_turn_scope(admission_id, committed):
+     token = _cli_turn.set((admission_id, committed) if committed else None)
++    from agent.session_client_env import strict_reasoning_scope
++    fields = committed.get('cli_turn_v1', committed) if committed else {}
+     try:
+-        yield
++        with strict_reasoning_scope(fields.get('strict_reasoning_effort'), fields.get('strict_reasoning_model'),
++                                    fields.get('strict_reasoning_provider')):
++            yield
+     finally:
+         _cli_turn.reset(token)
+ 
+diff --git a/gateway/session_controls.py b/gateway/session_controls.py
+index 5b727a96e28..3e8dccb9563 100644
+--- a/gateway/session_controls.py
++++ b/gateway/session_controls.py
+@@ -502,7 +502,9 @@ class AuthorityConnection:
+                 'capabilities': ['durable-admission-v1', 'event-replay-v1', 'local-cli-create-v1', 'acp-editor-policy-v1',
+                                  'acp-session-mcp-v1', 'clarify-batch-v1'],
+                 'session_create': {'sources': sorted(SURFACES),
+-                                   'parameters': sorted(CREATE_FIELDS | {'title'})},
++                                   'parameters': sorted(CREATE_FIELDS | {'title'}),
++                                   'shell_private_mcp_v1': True,
++                                   'strict_reasoning_receipts_v1': True},
+                 # Main's ``gateway.ready.skin``: the canonical client's own ready carries it.
+                 'skin': await asyncio.to_thread(resolved_skin)}
+ 
+@@ -763,7 +765,8 @@ class AuthorityConnection:
+             raise RuntimeStoreError('permission_denied')
+         forbidden = set(params) - {'session_id', 'text', 'submission_id', 'input_id', 'queued', 'attachments', 'finite', 'unattended',
+                                    'surface', 'voice_context', 'interrupted', 'voice_turn', 'display_kind', 'title_preview',
+-                                   'turn_author', 'api_text', 'model_override', 'clarify_batch'}
++                                   'turn_author', 'api_text', 'model_override', 'clarify_batch', 'strict_reasoning_effort',
++                                   'strict_reasoning_model', 'strict_reasoning_provider'}
+         if forbidden:
+             raise RuntimeStoreError('invalid_params')
+         request_id = params.get('submission_id') or params.get('input_id')
+diff --git a/gateway/session_local_editor.py b/gateway/session_local_editor.py
+index b0f2182fa4e..35a3be80a02 100644
+--- a/gateway/session_local_editor.py
++++ b/gateway/session_local_editor.py
+@@ -14,13 +14,14 @@ def validate_editor(source, editor):
+     """
+     if editor is None:
+         return
+-    if source != 'acp':
++    if source not in {'acp', 'cli', 'oneshot'}:
+         raise RuntimeStoreError('invalid_params', field='editor',
+-                                detail=f'an editor policy is only accepted from an ACP launch, not {source}')
++                                detail=f'private MCP is only accepted from ACP or shell launches, not {source}')
+     if not isinstance(editor, dict):
+         raise RuntimeStoreError('invalid_params', field='editor',
+                                 detail=f'must be a mapping, got {type(editor).__name__}')
+-    unknown = sorted(set(editor) - {'mcp_servers', 'edit_approval_policy'})
++    allowed = {'mcp_servers', 'edit_approval_policy'} if source == 'acp' else {'mcp_servers'}
++    unknown = sorted(set(editor) - allowed)
+     if unknown:
+         raise RuntimeStoreError('invalid_params', field=f'editor.{unknown[0]}',
+                                 detail='unknown editor key')
+diff --git a/gateway/session_local_mcp.py b/gateway/session_local_mcp.py
+index 005c136db8c..c9e8ab092ac 100644
+--- a/gateway/session_local_mcp.py
++++ b/gateway/session_local_mcp.py
+@@ -338,7 +338,7 @@ async def prepare_editor_mcp(authority, live, payload, prepared, *, servers):
+     from gateway.session_policy import restore_policy
+     receipt = prepared['snapshot']['receipt']
+     old = restore_policy(receipt['policy'])
+-    if old.source != 'acp':
++    if old.source not in {'acp', 'cli', 'oneshot'}:
+         raise RuntimeStoreError('invalid_params')
+     policy, changed = await asyncio.to_thread(rebind_editor_mcp, authority, receipt['session_id'], old, servers)
+     names = json.loads(policy.editor_mcp_json or '{}').get('names', {})
+diff --git a/hermes_cli/gateway_chat_view.py b/hermes_cli/gateway_chat_view.py
+index 2cbcbbb1124..8dc72808f89 100644
+--- a/hermes_cli/gateway_chat_view.py
++++ b/hermes_cli/gateway_chat_view.py
+@@ -2,6 +2,8 @@
+ import asyncio
+ from contextlib import suppress
+ import logging
++import json
++import re
+ import sys
+ import uuid
+ 
+@@ -68,6 +70,9 @@ class GatewayChatView:
+         self.client = client
+         self.session_id = snapshot["stored_session_id"]
+         self.generation = snapshot.get("execution_generation", 0)
++        self.profile_id = snapshot.get('profile_id') or (snapshot.get('info') or {}).get('profile_id')
++        self.authority_epoch = snapshot.get('authority_epoch')
++        self.inference_request_callback = None
+         self.prompts = {p["prompt_id"]: p for p in snapshot.get("prompts", [])}
+         self.pending = snapshot.get("pending", [])
+         self.model = str((snapshot.get("info") or {}).get("model") or "Hermes").split("/")[-1]
+@@ -122,6 +127,23 @@ class GatewayChatView:
+             if params.get("session_id") != self.session_id:
+                 continue
+             kind, payload = params.get("type"), params.get("payload", {})
++            if kind == 'inference.request':
++                binding = {'session_id': self.session_id, 'profile_id': self.profile_id,
++                           'admission_id': params.get('admission_id'),
++                           'authority_epoch': params.get('authority_epoch'),
++                           'execution_generation': params.get('execution_generation')}
++                if (not self.profile_id or not binding['admission_id']
++                        or type(binding['authority_epoch']) is not int or binding['authority_epoch'] < 0
++                        or type(binding['execution_generation']) is not int
++                        or binding['execution_generation'] < self.generation
++                        or any(payload.get(key) != value for key, value in binding.items())
++                        or not isinstance(payload.get('api_request_id'), str)
++                        or not re.fullmatch('[a-f0-9]{32}', payload['api_request_id'])):
++                    continue
++                if self.authority_epoch is not None and binding['authority_epoch'] != self.authority_epoch:
++                    continue
++                binding['api_request_id'] = payload['api_request_id']
++                payload = {**payload, '_native_binding': binding}
+             self.generation = params.get("execution_generation", self.generation)
+             if kind == "session.replay_gap":
+                 await self._reattach()
+@@ -167,6 +189,7 @@ class GatewayChatView:
+             if self.session_id != sid:
+                 return  # /new or /branch moved this view meanwhile
+             self.generation = snapshot.get("execution_generation", self.generation)
++            self.authority_epoch = snapshot.get('authority_epoch', self.authority_epoch)
+             self.pending, prompts = snapshot.get("pending", self.pending), {p["prompt_id"]: p for p in snapshot.get("prompts", [])}
+             for prompt_id in prompts.keys() - self.prompts.keys() if not self.finite else ():
+                 self.show_prompt(prompts[prompt_id])
+@@ -226,11 +249,23 @@ class GatewayChatView:
+             "approval.request": self._request, "clarify.request": self._request,
+             "approval.settled": self._settled, "clarify.settled": self._settled,
+             "session.info": self._session_info,
++            "inference.request": self._inference_request,
+             "status.update": self._notice, "notification.show": self._notice,
+         }.get(kind)
+         if handler:
+             handler(admission, payload)
+ 
++    def _inference_request(self, admission, payload):
++        binding = payload.get('_native_binding')
++        if not binding or binding['admission_id'] != admission:
++            return
++        safe = {key: payload[key] for key in ('schemaVersion', 'model', 'provider', 'requested', 'actual',
++                'nativeActual', 'mode', 'status', 'phase', *binding)}
++        if callable(self.inference_request_callback):
++            self.inference_request_callback(safe, dict(binding))
++        else:
++            print('HERMES_INFERENCE_REQUEST:' + json.dumps(safe), file=sys.stderr, flush=True)
++
+     def _session_info(self, admission, payload):
+         self.pending = payload.get("pending", self.pending)
+         self.generation = payload.get("execution_generation", self.generation)
+diff --git a/tests/agent/test_strict_reasoning_receipts.py b/tests/agent/test_strict_reasoning_receipts.py
+new file mode 100644
+index 00000000000..7765dbac999
+--- /dev/null
++++ b/tests/agent/test_strict_reasoning_receipts.py
+@@ -0,0 +1,235 @@
++"""Strict effort is a final SDK-boundary fact, isolated to one admitted turn."""
++from concurrent.futures import ThreadPoolExecutor
++from copy import deepcopy
++from types import SimpleNamespace
++from types import MethodType
++
++import pytest
++
++from agent.codex_runtime import run_codex_stream
++from agent.session_client_env import accept_client_env, client_env_scope, collect_client_env
++from agent.session_client_env import strict_reasoning_scope, strict_reasoning_route
++
++LEGACY_ENV = 'HERMES_STRICT_REASONING_EFFORT'
++
++
++def agent_and_sdk(*, model='gpt-6.1-sol', provider='openai-codex'):
++    events, requests = [], []
++    agent = SimpleNamespace(
++        model=model, provider=provider, api_mode='codex_responses', session_id='session-fixture',
++        reasoning_config={'enabled': True, 'effort': 'max'}, _is_codex_backend=lambda: True,
++        _interrupt_requested=False, show_commentary=True,
++        _claim_stream_writer=lambda: 1, _stream_writer_is_current=lambda _: True,
++        _fire_stream_delta=lambda _: None, _fire_reasoning_delta=lambda _: None,
++        _fire_streamed_codex_commentary=lambda _: None, interim_assistant_callback=None,
++        _touch_activity=lambda _: None, _client_log_context=lambda: 'fixture',
++        event_callback=lambda kind, payload: events.append((kind, payload)),
++    )
++
++    def create(**kwargs):
++        requests.append(kwargs)
++        final = SimpleNamespace(id='response-fixture', status='completed', usage=None, output=[],
++                                incomplete_details=None, error=None)
++        return iter([SimpleNamespace(type='response.completed', response=final)])
++
++    return agent, SimpleNamespace(responses=SimpleNamespace(create=create)), events, requests
++
++
++def merged(request):
++    return {**request, **(request.get('extra_body') or {})}
++
++
++def test_final_sdk_receives_verified_max_and_only_safe_request_evidence():
++    agent, sdk, events, requests = agent_and_sdk()
++    request = {'model': agent.model, 'reasoning': {'effort': 'xhigh'},
++               'input': [{'role': 'user', 'content': 'PRIVATE_PROMPT'}],
++               'extra_body': {'api_key': 'SYNTHETIC_PRIVATE_KEY'}}
++    with strict_reasoning_scope('max', agent.model, agent.provider):
++        run_codex_stream(agent, request, client=sdk)
++    assert merged(requests[0])['reasoning']['effort'] == 'max'
++    kind, proof = events[-1]
++    assert kind == 'inference:request'
++    assert len(proof.pop('api_request_id')) == 32
++    assert proof == {'schemaVersion': 1, 'model': agent.model, 'provider': agent.provider,
++                     'requested': 'max', 'actual': 'max', 'nativeActual': 'xhigh',
++                     'mode': 'verified_gpt61_sol_max', 'status': 'matched', 'phase': 'request'}
++    assert 'PRIVATE' not in repr(events)
++    assert request['reasoning']['effort'] == 'xhigh'
++
++
++@pytest.mark.parametrize('override', [
++    {'model': 'other-model'}, {'reasoning': {'effort': 'low'}},
++    {'extra_body': {'reasoning': {'effort': 'low'}}},
++    {'extra_body': {'reasoning': {'effort': 'xhigh'}}},
++    {'extra_body': {'model': 'other-model'}},
++])
++def test_late_middleware_or_extra_body_mismatch_never_calls_sdk(override):
++    agent, sdk, events, requests = agent_and_sdk()
++    request = {'model': agent.model, 'reasoning': {'effort': 'max'}, **override}
++    with strict_reasoning_scope('max', agent.model, agent.provider), pytest.raises(ValueError, match='strict_reasoning'):
++        run_codex_stream(agent, request, client=sdk)
++    assert requests == []
++    assert events[-1][1]['status'] == 'mismatch'
++
++
++def test_no_marker_does_not_change_request_or_emit_a_receipt():
++    agent, sdk, events, requests = agent_and_sdk()
++    with client_env_scope({}):
++        run_codex_stream(agent, {'model': agent.model, 'reasoning': {'effort': 'xhigh'}}, client=sdk)
++    assert merged(requests[0])['reasoning']['effort'] == 'xhigh'
++    assert events == []
++
++
++def test_a_daemon_launch_marker_cannot_enable_strictness_for_unmarked_sessions(monkeypatch):
++    monkeypatch.setenv(LEGACY_ENV, 'max')
++    agent, sdk, events, requests = agent_and_sdk()
++    with client_env_scope(None):
++        run_codex_stream(agent, {'model': agent.model, 'reasoning': {'effort': 'xhigh'}}, client=sdk)
++    assert merged(requests[0])['reasoning']['effort'] == 'xhigh'
++    assert events == []
++
++
++def test_parallel_sessions_keep_strict_effort_scoped_and_preflight_cannot_emit():
++    def run(effort):
++        agent, sdk, events, requests = agent_and_sdk()
++        with strict_reasoning_scope(effort, agent.model, agent.provider):
++            assert events == []  # A session marker/preflight is not a request.
++            run_codex_stream(agent, {'model': agent.model, 'reasoning': {'effort': effort}}, client=sdk)
++        return merged(requests[0])['reasoning']['effort'], events[-1][1]['actual']
++    with ThreadPoolExecutor(max_workers=2) as pool:
++        assert list(pool.map(run, ['high', 'max'])) == [('high', 'high'), ('max', 'max')]
++
++
++def test_arbitrary_environment_is_not_a_strict_admission_interface():
++    assert collect_client_env({LEGACY_ENV: 'high'}) == {}
++    assert accept_client_env({LEGACY_ENV: 'SYNTHETIC_PRIVATE_KEY'}, {}, local=False) == {}
++    with pytest.raises(ValueError, match='strict_reasoning'):
++        with strict_reasoning_scope('SYNTHETIC_PRIVATE_KEY', 'fixture', 'openai-codex'):
++            pass
++
++
++def test_old_session_admission_can_add_strictness_without_mutating_its_policy():
++    from gateway.session_cli_turn import admit_cli_turn, cli_turn_scope
++    committed = admit_cli_turn({'strict_reasoning_effort': 'high', 'strict_reasoning_model': 'gpt-6.1-sol',
++                               'strict_reasoning_provider': 'openai-codex'})
++    original = {'PATH': 'fixture'}
++    with client_env_scope(original):
++        with cli_turn_scope('admission-fixture', committed):
++            assert strict_reasoning_route() == {'effort': 'high', 'model': 'gpt-6.1-sol', 'provider': 'openai-codex'}
++        assert strict_reasoning_route() is None
++    assert original == {'PATH': 'fixture'}
++
++
++@pytest.mark.parametrize('override', [{'provider': 'other-provider'}, {'api_mode': 'chat_completions'},
++                                     {'model': 'fallback-model'}])
++def test_unsupported_provider_and_transport_are_refused_before_request_assembly(override):
++    from agent.turn_api_request import build_request_payload
++    agent, _, _, requests = agent_and_sdk()
++    for name, value in override.items():
++        setattr(agent, name, value)
++    with strict_reasoning_scope('high', 'gpt-6.1-sol', 'openai-codex'), pytest.raises(ValueError, match='strict_reasoning'):
++        build_request_payload(agent, api_messages=[], _moa_prepared_request=None, tools_for_api=[],
++                              system_message='', api_call_count=0, api_request_id='fixture',
++                              effective_task_id=None, turn_id='fixture')
++    assert requests == []
++
++
++def test_client_environment_cannot_activate_strictness_without_an_admission():
++    agent, sdk, events, requests = agent_and_sdk()
++    with client_env_scope({LEGACY_ENV: 'max'}):
++        run_codex_stream(agent, {'model': agent.model, 'reasoning': {'effort': 'max'}}, client=sdk)
++    assert not events and len(requests) == 1
++
++
++def test_unsupported_app_server_is_refused_before_it_can_spawn():
++    from agent.codex_runtime import run_codex_app_server_turn
++    agent, _, events, requests = agent_and_sdk()
++    agent.api_mode = 'codex_app_server'
++    with strict_reasoning_scope('max', agent.model, agent.provider), pytest.raises(ValueError, match='strict_reasoning'):
++        run_codex_app_server_turn(agent, user_message='fixture', original_user_message='fixture',
++                                  messages=[], effective_task_id='fixture')
++    assert not events and not requests
++
++
++def owner_turn():
++    from gateway.session_authority import SessionAuthority
++    from gateway.session_events import SessionEvents
++    from gateway.run_turn_runner import TurnRunner
++    frames, stream = [], SessionEvents()
++    stream.execution = {'authority_epoch': 7, 'execution_generation': 5, 'admission_id': 'admission-fixture'}
++    stream.observers.add(lambda frame: frames.append(deepcopy(frame)))
++    authority = SimpleNamespace(profile_id='profile-fixture', executing={'session-fixture': 5},
++                                sessions={'session-fixture': SimpleNamespace(event_stream=stream)})
++    authority.publish_execution = MethodType(SessionAuthority.publish_execution, authority)
++    turn = object.__new__(TurnRunner)
++    turn._approval_owner = (authority, 'session-fixture', 5)
++    return turn, authority, frames
++
++
++def test_sdk_event_reaches_native_gateway_with_its_own_claim_not_agent_supplied_identity():
++    turn, _, frames = owner_turn()
++    agent, sdk, _, requests = agent_and_sdk()
++    agent.event_callback = turn._event_callback_sync
++    with client_env_scope({}), strict_reasoning_scope('max', agent.model, agent.provider):
++        run_codex_stream(agent, {'model': agent.model, 'reasoning': {'effort': 'xhigh'},
++                                'input': 'PRIVATE_PROMPT'}, client=sdk)
++    assert len(requests) == len(frames) == 1
++    frame = frames[0]['params']
++    assert frame['type'] == 'inference.request'
++    for key in ('authority_epoch', 'execution_generation', 'admission_id', 'session_id'):
++        assert frame['payload'][key] == frame[key]
++    assert frame['payload']['profile_id'] == 'profile-fixture'
++    assert 'PRIVATE' not in repr(frame)
++    from tui_gateway.contracts.registry import EVENTS
++    EVENTS['inference.request'].payload.model_validate(frame['payload'])
++
++
++def test_retired_gateway_claim_does_not_send_an_sdk_request_or_borrow_a_new_admission():
++    turn, authority, frames = owner_turn()
++    authority.executing['session-fixture'] = 6
++    agent, sdk, _, requests = agent_and_sdk()
++    agent.event_callback = turn._event_callback_sync
++    with strict_reasoning_scope('max', agent.model, agent.provider), pytest.raises(ValueError, match='stale_admission'):
++        run_codex_stream(agent, {'model': agent.model, 'reasoning': {'effort': 'max'}}, client=sdk)
++    assert requests == frames == []
++
++
++@pytest.mark.parametrize('epoch', [0, 7])
++def test_view_only_emits_current_admission_proof_from_verified_outer_binding(capsys, epoch):
++    from hermes_cli.gateway_chat_view import GatewayChatView
++    turn, _, frames = owner_turn()
++    agent, sdk, _, _ = agent_and_sdk()
++    agent.event_callback = turn._event_callback_sync
++    with strict_reasoning_scope('max', agent.model, agent.provider):
++        run_codex_stream(agent, {'model': agent.model, 'reasoning': {'effort': 'max'}}, client=sdk)
++    correct = frames[0]
++    correct['params']['authority_epoch'] = correct['params']['payload']['authority_epoch'] = epoch
++    other_session, other_admission, other_profile, stale, other_epoch = (deepcopy(correct) for _ in range(5))
++    other_session['params']['session_id'] = 'other-session'
++    other_admission['params']['admission_id'] = other_admission['params']['payload']['admission_id'] = 'other-admission'
++    other_profile['params']['payload']['profile_id'] = 'other-profile'
++    stale['params']['execution_generation'] = stale['params']['payload']['execution_generation'] = 3
++    other_epoch['params']['authority_epoch'] = other_epoch['params']['payload']['authority_epoch'] = epoch + 1
++    sequence = iter([other_session, other_admission, other_profile, stale, other_epoch, correct, RuntimeError('end')])
++
++    class Events:
++        async def get(self):
++            return next(sequence)
++
++    view = GatewayChatView(SimpleNamespace(events=Events()), {
++        'stored_session_id': 'session-fixture', 'profile_id': 'profile-fixture',
++        'authority_epoch': epoch, 'execution_generation': 4})
++    view.finite, view.finite_admission = True, 'admission-fixture'
++    received = []
++    view.inference_request_callback = lambda payload, binding: received.append((payload, binding))
++    # All fake I/O completes inline: Windows' event-loop socketpair is unnecessary.
++    with pytest.raises(StopIteration):
++        view.render().send(None)
++    assert len(received) == 1
++    payload, binding = received[0]
++    assert binding == {key: payload[key] for key in ('session_id', 'profile_id', 'admission_id',
++                      'authority_epoch', 'execution_generation', 'api_request_id')}
++    view.inference_request_callback = None
++    view._inference_request('admission-fixture', {**payload, '_native_binding': binding,
++                                               'arbitrary_secret': 'PRIVATE_KEY'})
++    assert capsys.readouterr().err.startswith('HERMES_INFERENCE_REQUEST:')
+diff --git a/tests/gateway/test_shell_private_mcp.py b/tests/gateway/test_shell_private_mcp.py
+new file mode 100644
+index 00000000000..6ab5dc366b9
+--- /dev/null
++++ b/tests/gateway/test_shell_private_mcp.py
+@@ -0,0 +1,178 @@
++"""Shell MCP transports stay private and keep the source and owner scope they launched with."""
++from contextlib import contextmanager
++from dataclasses import asdict
++import json
++import os
++from pathlib import Path
++import tempfile
++from types import SimpleNamespace
++import unittest
++from unittest.mock import patch
++
++
++def immediate(coroutine):
++    """These unit boundaries await only inline work; no listener or event loop is needed."""
++    try:
++        coroutine.send(None)
++    except StopIteration as done:
++        return done.value
++    raise AssertionError('unexpected asynchronous work')
++
++
++async def inline_thread(function, *args, **kwargs):
++    return function(*args, **kwargs)
++
++
++class ShellPrivateMcpTests(unittest.TestCase):
++    def setUp(self):
++        self.temp = tempfile.TemporaryDirectory(prefix='shell-private-mcp-')
++        self.addCleanup(self.temp.cleanup)
++        self.home = Path(self.temp.name)
++        self.env = patch.dict(os.environ, {'HERMES_HOME': str(self.home)})
++        self.env.start()
++        self.addCleanup(self.env.stop)
++        self.user_home = patch.object(Path, 'home', return_value=self.home)
++        self.user_home.start()
++        self.addCleanup(self.user_home.stop)
++        self.spec = {'name': 'owned-management', 'command': 'offline-peer', 'args': [],
++                     'env': [{'name': 'ACTION_TOKEN', 'value': 'SYNTHETIC_PRIVATE_A'}]}
++
++        @contextmanager
++        def discovered(authority, scope, servers, names, cwd, *, partial=False):
++            yield {f'mcp__{name}__ping': {'name': f'mcp__{name}__ping',
++                                        'parameters': {'type': 'object'}}
++                   for name in names.values()}, list(names)
++        self.transport = patch('gateway.session_local_mcp._borrowed', discovered)
++        self.transport.start()
++        self.addCleanup(self.transport.stop)
++        self.disconnect = patch('gateway.session_local_mcp._disconnect')
++        self.disconnect.start()
++        self.addCleanup(self.disconnect.stop)
++
++    def owner(self, profile='owned-profile'):
++        return SimpleNamespace(instance_id='owned', epoch=1, profile_id=profile, runner=object())
++
++    def policy(self, source, authority, sid, specs=None):
++        from gateway.session_policy import build_policy, bind_launch_key
++        private = {}
++        policy = build_policy({'source': source, 'cwd': str(self.home), 'model': 'local',
++            'toolsets': [], 'editor': {'mcp_servers': specs or [self.spec]}},
++            {'memory': {'memory_enabled': True}, 'agent': {'max_turns': 99}},
++            private_secrets=private)
++        return bind_launch_key(authority, sid, policy, None, config_secrets=private)
++
++    def test_shell_create_resume_keeps_private_transport_and_real_source(self):
++        from gateway.session_local_mcp import resume_editor_mcp
++        from gateway.session_policy import restore_policy
++        from hermes_state_runtime import RuntimeStoreError
++        for source in ('cli', 'oneshot'):
++            with self.subTest(source=source):
++                owner = self.owner()
++                policy = self.policy(source, owner, 'same-session')
++                self.assertEqual(policy.source, source)
++                self.assertEqual(policy.platform, 'cli')
++                self.assertTrue(policy.config()['memory']['memory_enabled'])
++                self.assertEqual(policy.config()['agent']['max_turns'], 99)
++                durable = json.dumps(asdict(policy))
++                self.assertNotIn('SYNTHETIC_PRIVATE_A', durable)
++                self.assertNotIn('offline-peer', durable)
++                self.assertIn('fingerprint', durable)
++                cold = self.owner()
++                cold.sessions = {'same-session': SimpleNamespace(source=object())}
++                restored = restore_policy(json.loads(durable))
++                with patch('gateway.session_policy.policy_for_source', return_value=restored):
++                    resume_editor_mcp(cold, SimpleNamespace(session_id='same-session'),
++                                      {'mcp_servers': [self.spec]})
++                    changed = json.loads(json.dumps(self.spec))
++                    changed['env'][0]['value'] = 'SYNTHETIC_PRIVATE_B'
++                    with self.assertRaisesRegex(RuntimeStoreError, 'acp_mcp_policy_conflict'):
++                        resume_editor_mcp(cold, SimpleNamespace(session_id='same-session'),
++                                          {'mcp_servers': [changed]})
++                left = json.loads(restored.editor_mcp_json)['scope']
++                right = json.loads(self.policy(source, self.owner('other-profile'),
++                                               'same-session').editor_mcp_json)['scope']
++                self.assertNotEqual(left, right)
++
++    def test_shell_rotation_uses_the_existing_fenced_mutation_preparation(self):
++        from gateway.session_local_mcp import prepare_editor_mcp, install_editor_mcp
++        for source in ('cli', 'oneshot'):
++            with self.subTest(source=source):
++                owner = self.owner()
++                policy = self.policy(source, owner, 'rotated-session')
++                changed = json.loads(json.dumps(self.spec))
++                changed['env'][0]['value'] = 'SYNTHETIC_PRIVATE_B'
++                prepared = {'snapshot': {'receipt': {'session_id': 'rotated-session',
++                                                    'policy': asdict(policy)}},
++                            'expected_revision': 7, 'expected_generation': 3}
++                with patch('asyncio.to_thread', inline_thread):
++                    result = immediate(prepare_editor_mcp(owner, None, {}, prepared,
++                                                         servers=[changed]))
++                self.assertEqual(result['expected_revision'], 7)
++                self.assertEqual(result['expected_generation'], 3)
++                self.assertEqual(result['policy']['source'], source)
++                self.assertNotIn('SYNTHETIC_PRIVATE_B', json.dumps(result))
++                with patch('hermes_state_local.local_receipt',
++                           return_value={'policy': result['policy']}):
++                    owner.db = object()
++                    install_editor_mcp(owner, 'rotated-session', [changed])
++                selected = next(iter(owner._local_editor_mcp.values()))
++                self.assertEqual(selected[0]['env'][0]['value'], 'SYNTHETIC_PRIVATE_B')
++
++    def test_shell_mcp_does_not_grant_editor_policy_or_other_surfaces(self):
++        from gateway.session_local_editor import validate_editor
++        from hermes_state_runtime import RuntimeStoreError
++        for source in ('cli', 'oneshot'):
++            with self.assertRaises(RuntimeStoreError):
++                validate_editor(source, {'mcp_servers': [self.spec],
++                                         'edit_approval_policy': 'auto'})
++        for source in ('tui', 'gui', 'tool'):
++            with self.assertRaises(RuntimeStoreError):
++                validate_editor(source, {'mcp_servers': [self.spec]})
++        validate_editor('acp', {'mcp_servers': [self.spec], 'edit_approval_policy': 'ask'})
++
++    def test_runtime_descriptor_negotiates_shell_private_mcp(self):
++        from gateway.session_controls import AuthorityConnection
++        from tui_gateway.contracts.canonical import RuntimeDescribeResult
++        owner = self.owner()
++        connection = SimpleNamespace(authority=owner)
++
++        async def ping(*_):
++            return {'pong': True}
++        connection.ping = ping
++        with patch('asyncio.to_thread', inline_thread), \
++                patch('gateway.session_skin.resolved_skin', return_value={}):
++            description = immediate(AuthorityConnection.describe(connection, None, {}))
++        self.assertIs(description['session_create']['shell_private_mcp_v1'], True)
++        self.assertIs(description['session_create']['strict_reasoning_receipts_v1'], True)
++        RuntimeDescribeResult.model_validate(description)
++
++    def test_inference_request_contract_requires_owner_binding_and_forbids_secrets(self):
++        from pydantic import ValidationError
++        from tui_gateway.contracts.registry import EVENTS
++        payload = EVENTS['inference.request'].payload
++        proof = {'schemaVersion': 1, 'model': 'local', 'provider': 'openai-codex',
++                 'requested': 'high', 'actual': 'high', 'nativeActual': 'high',
++                 'mode': 'native', 'status': 'matched', 'phase': 'request',
++                 'session_id': 's', 'profile_id': 'p', 'admission_id': 'a',
++                 'execution_generation': 3, 'authority_epoch': 27,
++                 'api_request_id': 'a' * 32}
++        payload.model_validate(proof)
++        with self.assertRaises(ValidationError):
++            payload.model_validate({key: value for key, value in proof.items()
++                                    if key != 'admission_id'})
++        with self.assertRaises(ValidationError):
++            payload.model_validate({**proof, 'api_key': 'SYNTHETIC_PRIVATE_A'})
++
++    def test_submit_contract_preserves_strict_effort_as_admission_data(self):
++        from tui_gateway.contracts.registry import CANONICAL_METHODS
++        parsed = CANONICAL_METHODS['prompt.submit'].params.model_validate(
++            {'session_id': 's', 'input_id': 'i', 'text': 'fixed',
++             'strict_reasoning_effort': 'high', 'strict_reasoning_model': 'local',
++             'strict_reasoning_provider': 'openai-codex'})
++        self.assertEqual(parsed.strict_reasoning_effort, 'high')
++        self.assertEqual(parsed.strict_reasoning_model, 'local')
++        self.assertEqual(parsed.strict_reasoning_provider, 'openai-codex')
++
++
++if __name__ == '__main__':
++    unittest.main()
+diff --git a/tui_gateway/contracts/canonical.py b/tui_gateway/contracts/canonical.py
+index 393cf24bb4b..1a7ac538274 100644
+--- a/tui_gateway/contracts/canonical.py
++++ b/tui_gateway/contracts/canonical.py
+@@ -336,6 +336,8 @@ class RuntimeDescribeParams(Params):
+ class SessionCreateDescriptor(Result):
+     sources: list[str]
+     parameters: list[str]
++    shell_private_mcp_v1: bool = False
++    strict_reasoning_receipts_v1: bool = False
+ 
+ 
+ class RuntimeDescribeResult(Result):
+diff --git a/tui_gateway/contracts/canonical_sessions.py b/tui_gateway/contracts/canonical_sessions.py
+index 8ba38f8d295..79f27ee819e 100644
+--- a/tui_gateway/contracts/canonical_sessions.py
++++ b/tui_gateway/contracts/canonical_sessions.py
+@@ -227,6 +227,10 @@ class CanonicalSubmitParams(CanonicalSessionParams):
+     turn_author: CanonicalTurnAuthor | None = None
+     api_text: str | None = None
+     model_override: CanonicalModelOverride | None = None
++    # A strict request belongs to this admission, including an older resumed session.
++    strict_reasoning_effort: str | None = None
++    strict_reasoning_model: str | None = None
++    strict_reasoning_provider: str | None = None
+     # The submitter answers the clarify tool's whole batch in one ``clarify`` server request (main's
+     # batch panel); without it the turn's viewers get one ``clarify.request`` card per question.
+     clarify_batch: bool = False
+diff --git a/tui_gateway/contracts/events.py b/tui_gateway/contracts/events.py
+index 58e2209d206..8844509c586 100644
+--- a/tui_gateway/contracts/events.py
++++ b/tui_gateway/contracts/events.py
+@@ -15,6 +15,8 @@ closed, so a drifted emitter fails the suite (``registry.check_payload`` raises
+ 
+ from __future__ import annotations
+ 
++from typing import Literal
++
+ from pydantic import Field
+ 
+ from .base import JsonValue, Payload, WireEnum
+@@ -169,6 +171,30 @@ class MessageDeltaPayload(StreamDeltaPayload):
+ event("message.delta", MessageDeltaPayload, doc="One streamed chunk of the assistant reply (null text: segment boundary).")
+ event("reasoning.delta", StreamDeltaPayload, doc="One streamed chunk of the model's reasoning.")
+ event("reasoning.available", StreamDeltaPayload, doc="A completed reasoning block (non-streaming providers).")
++
++
++class InferenceRequestPayload(Payload):
++    """``gateway/local_viewer_events.py``: normalized request evidence bound by its execution owner."""
++
++    schemaVersion: Literal[1] = 1
++    model: str | None
++    provider: str
++    requested: str
++    actual: str | None
++    nativeActual: str | None
++    mode: Literal['native', 'verified_gpt61_sol_max']
++    status: Literal['matched', 'mismatch', 'unsupported']
++    phase: Literal['request']
++    session_id: str
++    profile_id: str
++    admission_id: str
++    execution_generation: int = Field(ge=0)
++    authority_epoch: int = Field(ge=0)
++    api_request_id: str = Field(pattern='^[a-f0-9]{32}$')
++
++
++event('inference.request', InferenceRequestPayload,
++      doc='Sanitized request model and effort, stamped by the owner for the admitted execution.')
+ event("thinking.delta", StreamDeltaPayload, doc="Legacy thinking-text chunk (thinking_callback).")
+ 
+ 
