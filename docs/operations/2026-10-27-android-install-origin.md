@@ -36,3 +36,13 @@ node --test test/android-install.test.mjs test/android-install-origin.test.mjs t
 ## 负责人、证据与待发布边界
 
 脱敏证据及精确工件保存在 `D:/AINavtie/ops/ziwei/android-install-index-20261027/`，持续状态为 `OWNER-STATUS.json`。源码维护分支 `codex/android-install-origin-fix`；审核由既有驾驶舱总控进行，正式写入沿既有 sole-writer 的新事件租约执行。完整候选和哈希交审前不发布；源码推送、候选通过和实际上线分别记录，不用旧 Hermes 授权触发旧发布、客户端升级或消息重放。
+
+## 正式发布与独立读回
+
+源码 `b75b4c82ce7abbfb792782b53e28b8635d971d39` 已推送并核对远端。冻结工件 `android-install-origin-b75b4c8.tgz` 为 1385570 字节、37 文件，SHA `7d6713d3373df3f7483f62518a348810f59e88846a680734a5f4fddbe62b790a`；清单 SHA `f8dec63f22db1b25edda3db9f06717d29019bda06d9cedc425b379b10435fe45`。总控独立审核后，既有发布者在本事件的新限定静态窗口内发布，保留全部 25 个旧指纹资源；窗口已关闭。
+
+正式匿名浏览器没有注入本地 dist 或替换响应，实际读取公网页面后完成同源索引/清单、双按钮下载及 SHA/大小、二维码截图解码、中控地址复制、bigtron 返回、旧域 308 保留工作区验收，无 CORS、页面或脚本错误。正式证据为 `PUBLICATION-RESULT.json`（SHA `262021fb4603c3aa78e33150c65032be1cee446e92969075e9663c960ae2a1cc`）和 `POST-PUBLICATION-ACCEPTANCE.json`（SHA `36d486c9411f9a9b34f865893f81cc6613d58410a19a763c8d78220e0a360a0b`）。原 API/Control PID、其他 1059 源文件和 116 个受保护下载字节保留，无数据库写入、服务重启、edge 修改、手机或客户端升级。
+
+源码维护者随后独立公网 GET 再核三项均为 HTTP 200、与候选精确匹配：页面 SHA `7ea9916ca614e77e5d7870ddd876196d2e0f8de5c92e3f8ca0584e67f3458d21`，入口 `/assets/index-CS62dT4c.js` SHA `a3ea981d56af483ef27016641a2b2984f2ab083fe0c97bbac09019a09cd3bd8d`，二维码 SHA `5cdd42b9b24dd939c71e9275b8ab77d86777f4dbb98be1819dd9c4899307704c`。结果为 `SOURCE-MAINTAINER-PUBLIC-READBACK.json`，verified=true。
+
+同期另报的两员工推理配置事件单独保留。用户在发布会话自行操作后明确“我已经恢复了”，该事件状态仅记 `user_confirmed_recovered`，停止后续配置、代码上线、校验、升级和测试消息；没有用历史回执或模型能力缓存冒充新的现场验收，也没有将其混入本安装页工件。
