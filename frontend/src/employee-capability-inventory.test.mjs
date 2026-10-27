@@ -44,3 +44,93 @@ test('actual roster replacement updates external owner metadata, clears cached i
 });
 test('Hermes binding changes are distinct from a harmless roster name refresh',()=>{const previous={id:'e',owner_user_id:'one',runtime:'Hermes',runtime_profile:'bot-e',target_device_id:'pc',visibility:'workspace',name:'old'};assert.equal(inventoryEmployeeBindingChanged(previous,{...previous,name:'new'}),false);assert.equal(inventoryEmployeeBindingChanged(previous,{...previous,owner_user_id:'two'}),true);assert.equal(inventoryEmployeeBindingChanged(previous,{...previous,runtime:'Codex'}),true);assert.equal(inventoryEmployeeBindingChanged(previous,null),true);});
 test('a network read failure demotes a fresh cache to explicit historical evidence without losing rows',async()=>{let reads=0;const ui=createEmployeeCapabilityInventory({api:{employeeCapabilityInventory:async()=>{if(++reads===1)return inventory(subject(),{summary:{skills:1,mcp:null,cli:0}});throw Error('synthetic transport detail');}}});await ui.select(subject(),{active:true});await ui.load();assert.equal(ui.state.value.status,'unknown');assert.equal(ui.state.value.stale,true);const section=inventorySections(ui.state.value)[0];assert.equal(section.historical,true);assert.equal(section.items[0].name,'Safe skill');assert.match(inventoryLayerRows(section.items[0],{historical:section.historical})[1].text,/上次/);assert(!ui.state.error.includes('synthetic'));ui.dispose();});
+
+for(const status of [401,403,404,410])test(`a definitive refresh HTTP ${status} removes prior employee details and does not claim an ambiguous write`,async()=>{
+ const ui=createEmployeeCapabilityInventory({api:{employeeCapabilityInventory:async()=>inventory(),refreshEmployeeCapabilityInventory:async()=>{throw Object.assign(Error('INTERNAL_TOKEN_NOT_FOR_UI'),{status});}}});
+ await ui.select(subject(),{active:true});assert.equal(ui.state.value.sections.skills.items.length,1);
+ await ui.refresh();assert.equal(ui.state.value,null,'a revoked/hidden subject must not keep displaying the old inventory');
+ assert.equal(ui.state.writeUnknown,false,'the server definitively refused this request');assert.equal(ui.state.refreshing,false);
+ assert(!ui.state.error.includes('INTERNAL_TOKEN_NOT_FOR_UI'));assert(!ui.state.error.includes('结果未确认'));
+ if(status===401)assert.match(ui.state.error,/登录/);ui.dispose();
+});
+
+test('a refresh response for another owner cannot retain the prior owner inventory',async()=>{
+ const expected={...subject(),ownerUserId:'owner-one'};
+ const ui=createEmployeeCapabilityInventory({api:{employeeCapabilityInventory:async()=>inventory(expected),refreshEmployeeCapabilityInventory:async()=>inventory({...expected,ownerUserId:'owner-two'})}});
+ await ui.select(expected,{active:true});await ui.refresh();assert.equal(ui.state.errorCode,'CAPABILITY_INVENTORY_SCOPE_CHANGED');
+ assert.equal(ui.state.value,null);assert.equal(ui.state.writeUnknown,false);ui.dispose();
+});
+
+test('a late refresh success cannot restore employee details after a cached read denies authorization',async()=>{
+ const late=deferred();let reads=0;
+ const ui=createEmployeeCapabilityInventory({api:{employeeCapabilityInventory:async()=>{if(++reads===1)return inventory();throw Object.assign(Error('private auth details'),{status:401});},refreshEmployeeCapabilityInventory:async()=>late.promise}});
+ await ui.select(subject(),{active:true});const refreshing=ui.refresh();assert.equal(ui.state.refreshing,true);
+ await ui.load();assert.equal(ui.state.value,null);assert.equal(ui.state.refreshing,false);assert.equal(ui.state.writeUnknown,false);
+ late.resolve(inventory());await refreshing;assert.equal(ui.state.value,null);assert.match(ui.state.error,/登录/);ui.dispose();
+});
+
+test('a late refresh success cannot replace the next employee or new device/profile binding',async()=>{
+ const late=deferred(),next={...subject('employee_b'),ownerUserId:'owner-two',deviceId:'pc-two',profile:'bot-b'};
+ const ui=createEmployeeCapabilityInventory({api:{employeeCapabilityInventory:async(_workspace,id)=>inventory(id==='employee_b'?next:subject()),refreshEmployeeCapabilityInventory:async()=>late.promise}});
+ await ui.select(subject(),{active:true});const refreshing=ui.refresh();await ui.select(next,{active:true});
+ late.resolve(inventory());await refreshing;assert.deepEqual(ui.state.value.subject,next);assert.equal(ui.state.refreshing,false);ui.dispose();
+});
+
+test('a denied pending-cache read clears its polling timer without dispatching work',async()=>{
+ const timers=new Set();let reads=0,posts=0;
+ const ui=createEmployeeCapabilityInventory({setTimer:fn=>{timers.add(fn);return fn;},clearTimer:fn=>timers.delete(fn),api:{employeeCapabilityInventory:async()=>{if(++reads===1)return inventory(subject(),{pending:true});throw Object.assign(Error('revoked'),{status:410});},refreshEmployeeCapabilityInventory:async()=>posts++}});
+ await ui.select(subject(),{active:true});assert.equal(timers.size,1);await ui.load();
+ assert.equal(timers.size,0);assert.equal(ui.state.value,null);assert.equal(posts,0);ui.dispose();
+});
+
+for(const status of [409,422])test(`refresh HTTP ${status} still requires readback before another POST`,async()=>{
+ let posts=0;const ui=createEmployeeCapabilityInventory({api:{employeeCapabilityInventory:async()=>inventory(),refreshEmployeeCapabilityInventory:async()=>{posts++;throw Object.assign(Error('unconfirmed'),{status});}}});
+ await ui.select(subject(),{active:true});await ui.refresh();await ui.refresh();assert.equal(posts,1);assert.equal(ui.state.writeUnknown,true);
+ await ui.load();assert.equal(ui.state.writeUnknown,false);ui.dispose();
+});
+
+test('a known non-Hermes configuration change reloads a previously loaded identical identity',async()=>{
+ const selected={...subject('employee_codex'),runtime:'Codex',profile:null};let reads=0;
+ const ui=createEmployeeCapabilityInventory({api:{employeeCapabilityInventory:async()=>inventory(selected,{source:'device_readonly',checkedAt:`read-${++reads}`})}});
+ await ui.select(selected,{active:true,configurationKey:'known-config-one'});await ui.select(selected,{active:true,configurationKey:'known-config-two'});
+ assert.equal(reads,2);assert.equal(ui.state.value.checkedAt,'read-2');ui.dispose();
+});
+
+test('a deferred inventory reply cannot cross a known non-Hermes configuration change',async()=>{
+ const selected={...subject('employee_codex'),runtime:'Codex',profile:null},old=deferred();let reads=0;
+ const ui=createEmployeeCapabilityInventory({api:{employeeCapabilityInventory:async()=>++reads===1?old.promise:inventory(selected,{checkedAt:'current-config'})}});
+ const pending=ui.select(selected,{active:true,configurationKey:'actual-loaded-old-config'});
+ await ui.select(selected,{active:true,configurationKey:'actual-loaded-new-config'});
+ old.resolve(inventory(selected,{checkedAt:'late-old-config',configFingerprint:'cannot-self-assert-current'}));await pending;
+ assert.equal(reads,2);assert.equal(ui.state.value.checkedAt,'current-config');ui.dispose();
+});
+
+test('known public employee configuration has a stable key without using response snapshot claims',async()=>{
+ const {inventoryEmployeeConfigurationKey:key}=await import('./employee-capability-inventory.js');assert.equal(typeof key,'function');
+ const current={id:'employee_codex',runtime:'Codex',skills:['b','a'],management_mcp_enabled:true,model_id:'model-one',status:'active',default_working_directory:'D:/private/work',default_working_directory_device_id:'pc'};
+ const initial=key(current);assert.equal(key({...current,name:'harmless renamed',skills:['a','b']}),initial);
+ for(const change of [{skills:['a']},{management_mcp_enabled:false},{model_id:'model-two'},{status:'paused'},{default_working_directory:'D:/other'},{default_working_directory_device_id:'pc-two'}])assert.notEqual(key({...current,...change}),initial,JSON.stringify(change));
+});
+
+test('the actual inventory component watches loaded non-Hermes configuration and reloads its cache',async()=>{
+ const fs=await import('node:fs/promises'),vue=await import('vue'),compiler=await import('@vue/compiler-sfc');
+ const file=new URL('./components/EmployeeCapabilityInventory.vue',import.meta.url),{descriptor}=compiler.parse(await fs.readFile(file,'utf8'));
+ const compiled=compiler.compileScript(descriptor,{id:'inventory-config-watch'});let reads=0;const cleanup=[];
+ const props=vue.reactive({workspace:'one',active:true,employee:{id:'employee_codex',runtime:'Codex',runtime_profile:null,target_device_id:'pc',owner_user_id:'owner',skills:['one'],model_id:'old',status:'active'}});
+ const fakeApi={employeeCapabilityInventory:async()=>{reads++;return inventory({workspace:'one',employeeId:props.employee.id,ownerUserId:'owner',deviceId:'pc',runtime:'Codex',profile:null});}};
+ const bindings={};let code=compiled.content;
+ for(const match of [...code.matchAll(/^import (.*?) from ['"]([^'"]+)['"];?\r?$/gm)]){
+  const spec=match[2];let value;
+  if(spec==='vue')value={...vue,onBeforeUnmount:fn=>cleanup.push(fn)};
+  else if(spec==='lucide-vue-next')value=new Proxy({},{get:()=>({})});
+  else if(spec==='../api.js')value={api:fakeApi};
+  else value=await import(new URL(spec,file).href);
+  for(const token of match[1].slice(1,-1).split(',')){const [name,alias]=token.trim().split(/\s+as\s+/);bindings[alias||name]=value[name];}
+  code=code.replace(match[0],'');
+ }
+ const component=new Function(...Object.keys(bindings),code.replace('export default','return'))(...Object.values(bindings));
+ const instance=component.setup(props,{expose(){},emit(){}});
+ try{await new Promise(setImmediate);assert.equal(reads,1);props.employee={...props.employee,skills:['two'],model_id:'new'};
+  await vue.nextTick();await new Promise(setImmediate);assert.equal(reads,2);assert.equal(instance.s.value.subject.employeeId,'employee_codex');
+ }finally{cleanup.forEach(fn=>fn());}
+});

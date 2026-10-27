@@ -41,7 +41,7 @@ const version=value=>typeof value==='string'&&/^[0-9][0-9A-Za-z.+-]{0,39}$/.test
 const baseLayers=()=>({installation:'unknown',visibility:'unknown',configuration:'unknown',authorization:'unknown',loaded:'unknown'});
 const section=(items,status='ready',reason=null)=>({status,reason,items});
 function reasonFor(error){return ['ENOENT','ENOTDIR'].includes(error?.code)?'metadata_missing':error?.code==='CAPABILITY_METADATA_TOO_LARGE'?'metadata_too_large':'metadata_unreadable';}
-function filesystem(io={}){return{lstatSync:io.lstatSync||fs.lstatSync,statSync:io.statSync||fs.statSync,readFileSync:io.readFileSync||fs.readFileSync,readdirSync:io.readdirSync||fs.readdirSync};}
+function filesystem(io={}){return{lstatSync:io.lstatSync||fs.lstatSync,statSync:io.statSync||fs.statSync,readFileSync:io.readFileSync||fs.readFileSync,opendirSync:io.opendirSync||fs.opendirSync};}
 function noLinks(file,io){
  if(!path.isAbsolute(file)||/[\0\r\n]/.test(file))throw Error('CAPABILITY_PATH_INVALID');
  let current=path.resolve(file),count=0;
@@ -97,7 +97,9 @@ export function createMachineCapabilityInventory({npmRoots=deriveMachineCapabili
 function defaultSkillRoots(subject,context){const roots=[];if(context.home)roots.push({path:path.join(context.home,'skills'),scope:'runtime'});if(context.cwd&&subject.runtime==='Codex'){roots.push({path:path.join(context.cwd,'.agents','skills'),scope:'project'});roots.push({path:path.join(context.cwd,'.codex','skills'),scope:'project'});}return roots;}
 function skillEntries(root,io){
  const entriesFound=[],queue=[{directory:root,depth:0}];let visited=0,truncated=false;
- while(queue.length&&visited<400&&entriesFound.length<MAX_ITEMS){const{directory,depth}=queue.shift();noLinks(directory,io);const listed=io.readdirSync(directory,{withFileTypes:true});if(listed.length>MAX_ITEMS)truncated=true;const entries=listed.slice(0,MAX_ITEMS).sort((a,b)=>a.name.localeCompare(b.name));
+ while(queue.length&&visited<400&&entriesFound.length<MAX_ITEMS){const{directory,depth}=queue.shift();noLinks(directory,io);const stream=io.opendirSync(directory),entries=[];
+  try{for(let n=0;n<=MAX_ITEMS;n++){const entry=stream.readSync();if(!entry)break;if(n===MAX_ITEMS){truncated=true;break;}entries.push(entry);}}finally{stream.closeSync();}
+  entries.sort((a,b)=>a.name.localeCompare(b.name));
   for(const entry of entries){if(visited>=400||entriesFound.length>=MAX_ITEMS){truncated=true;break;}visited++;if(!entry.isDirectory()||entry.isSymbolicLink()||!(slug(entry.name)||entry.name==='.system'))continue;
    const folder=path.join(directory,entry.name),file=path.join(folder,'SKILL.md');let exists=false;try{const st=io.lstatSync(file);exists=st.isFile()&&!st.isSymbolicLink();}catch(error){if(!['ENOENT','ENOTDIR'].includes(error.code))throw error;}
    if(exists)entriesFound.push({name:entry.name,file});else if(depth<2)queue.push({directory:folder,depth:depth+1});else truncated=true;
@@ -108,8 +110,8 @@ function skillEntries(root,io){
 }
 function collectSkills(subject,config,context,io){
  const roots=Array.isArray(context.skillRoots)?context.skillRoots.slice(0,16):defaultSkillRoots(subject,context),items=[],seen=new Set();let readable=0,failed=0,runtimeRootObserved=false,externalNotInspected=false,truncated=Array.isArray(context.skillRoots)&&context.skillRoots.length>16;
- let nativeDisabled=[];
- if(subject.runtime==='Hermes'&&context.home){try{const native=parseYaml(readMetadata(path.join(context.home,'config.yaml'),io));nativeDisabled=Array.isArray(native.skills?.disabled)?native.skills.disabled.filter(slug).slice(0,MAX_ITEMS):[];const declared=[...(Array.isArray(native.skills?.external_dirs)?native.skills.external_dirs:[]),...(native.skills?.create_dir?[native.skills.create_dir]:[])];externalNotInspected=declared.some(value=>typeof value!=='string'||!path.isAbsolute(value)||!roots.some(root=>typeof root.path==='string'&&path.isAbsolute(root.path)&&path.resolve(root.path)===path.resolve(value)));}catch{/* No native enablement is inferred when policy is absent or unreadable. */}}
+ let nativeDisabled=[],nativePolicyUnreadable=false;
+ if(subject.runtime==='Hermes'&&context.home){try{const native=parseYaml(readMetadata(path.join(context.home,'config.yaml'),io));nativeDisabled=Array.isArray(native.skills?.disabled)?native.skills.disabled.filter(slug).slice(0,MAX_ITEMS):[];const declared=[...(Array.isArray(native.skills?.external_dirs)?native.skills.external_dirs:[]),...(native.skills?.create_dir?[native.skills.create_dir]:[])];externalNotInspected=declared.some(value=>typeof value!=='string'||!path.isAbsolute(value)||!roots.some(root=>typeof root.path==='string'&&path.isAbsolute(root.path)&&path.resolve(root.path)===path.resolve(value)));}catch{nativePolicyUnreadable=true;}}
  if(!roots.length)return section([],'unknown','runtime_context_unavailable');
  for(const root of roots){if(items.length>=MAX_ITEMS){truncated=true;break;}if(!object(root)||!['runtime','project','shared'].includes(root.scope)||typeof root.path!=='string'){failed++;continue;}
   let entries;try{noLinks(root.path,io);const scan=skillEntries(root.path,io);entries=scan.entries;truncated||=scan.truncated;readable++;if(root.scope==='runtime')runtimeRootObserved=true;}catch(error){if(!['ENOENT','ENOTDIR'].includes(error.code))failed++;continue;}
@@ -123,18 +125,32 @@ function collectSkills(subject,config,context,io){
    const item={id:`skill:${root.scope}:${name}`,name,description:safeSummary(meta.description),version:version(String(meta.version??'')),hash:createHash('sha256').update(content).digest('hex'),source:`${root.scope}_skill`,...baseLayers(),installation:'installed',visibility:'visible',configuration:'configured',assigned,enabled,onDemand:enabled==='disabled'?'unavailable':evidence(context,'onDemandEvidence','skills',subject,name)?'available':'unknown',authorization:evidence(context,'authorizationEvidence','skills',subject,name)?'authorized':'unknown',loaded:evidence(context,'loadedEvidence','skills',subject,name)?'loaded':'unknown',reason:null};items.push(item);
   }
  }
- const incomplete=failed||!runtimeRootObserved||externalNotInspected||truncated;
- return section(items,truncated?'partial':incomplete?(items.length?'partial':'unknown'):readable?'ready':'unknown',truncated?'inventory_truncated':externalNotInspected?'external_roots_not_inspected':failed?'some_metadata_unreadable':!runtimeRootObserved?'runtime_skill_root_missing':readable?null:'skill_roots_missing');
+ const incomplete=failed||!runtimeRootObserved||externalNotInspected||nativePolicyUnreadable||truncated;
+ return section(items,truncated?'partial':incomplete?(items.length?'partial':'unknown'):readable?'ready':'unknown',truncated?'inventory_truncated':externalNotInspected?'external_roots_not_inspected':nativePolicyUnreadable?'native_configuration_unreadable':failed?'some_metadata_unreadable':!runtimeRootObserved?'runtime_skill_root_missing':readable?null:'skill_roots_missing');
 }
 
-function tomlMcp(content){const servers=Object.create(null);let name=null,count=0,truncated=false;for(const line of content.split(/\r?\n/)){const header=line.match(/^\s*\[mcp_servers\.(?:([A-Za-z0-9_-]+)|"([A-Za-z0-9_-]+)")\]\s*(?:#.*)?$/);if(header){name=header[1]||header[2];if(!Object.hasOwn(servers,name)){if(count>=MAX_ITEMS){truncated=true;break;}count++;servers[name]={};}continue;}if(/^\s*\[/.test(line)){name=null;continue;}if(!name)continue;if(/^\s*command\s*=/.test(line))servers[name].transport='stdio';if(/^\s*url\s*=/.test(line))servers[name].transport='http';const enabled=line.match(/^\s*enabled\s*=\s*(true|false)\s*(?:#.*)?$/);if(enabled)servers[name].enabled=enabled[1]==='true';}return{servers,truncated};}
+function tomlMcp(content){
+ const servers=Object.create(null);let name=null,count=0,truncated=false,incomplete=false;
+ const table=/^\s*\[mcp_servers\.(?:([A-Za-z0-9_-]+)|"((?:[^"\\]|\\.)*)"|'([^']*)')(\.[A-Za-z0-9_.-]+)?\]\s*(?:#.*)?$/;
+ for(const line of content.split(/\r?\n/)){
+  if(/^\s*\[/.test(line)){
+   name=null;const header=line.match(table);
+   if(!header){if(/^\s*\[\[?mcp_servers(?:\.|\])/.test(line))incomplete=true;continue;}
+   let parsed;try{parsed=header[1]??(header[2]!==undefined?JSON.parse('"'+header[2]+'"'):header[3]);}catch{incomplete=true;continue;}
+   if(!safeName(parsed)){incomplete=true;continue;}if(header[4])continue;
+   name=parsed;if(!Object.hasOwn(servers,name)){if(count>=MAX_ITEMS){truncated=true;break;}count++;servers[name]={};}continue;
+  }
+  if(!name)continue;if(/^\s*command\s*=/.test(line))servers[name].transport='stdio';if(/^\s*url\s*=/.test(line))servers[name].transport='http';const enabled=line.match(/^\s*enabled\s*=\s*(true|false)\s*(?:#.*)?$/);if(enabled)servers[name].enabled=enabled[1]==='true';
+ }
+ return{servers,truncated,incomplete};
+}
 function collectMcp(subject,config,context,io){
- const items=[],entries=new Map();let read=false,failed=false,truncated=false;
+ const items=[],entries=new Map();let read=false,failed=false,truncated=false,incomplete=false;
  const add=(value,source)=>{const values=Array.isArray(value)?value.map(v=>[v?.name,v]):object(value)?Object.entries(value):[];if(values.length>MAX_ITEMS)truncated=true;for(const[name,v]of values.slice(0,MAX_ITEMS)){if(!safeName(name)||!object(v))continue;if(entries.size>=MAX_ITEMS&&!entries.has(name)){truncated=true;continue;}entries.set(name,{entry:v,source});}};
- try{if(object(context.mcpConfiguration)){add(context.mcpConfiguration,'runtime_config');read=true;}else if(context.home){const file=subject.runtime==='Hermes'?path.join(context.home,'config.yaml'):path.join(context.home,!subject.profile||subject.profile==='default'?'config.toml':`${subject.profile}.config.toml`),raw=readMetadata(file,io);if(subject.runtime==='Hermes')add(parseYaml(raw).mcp_servers,'runtime_config');else{const scan=tomlMcp(raw);truncated||=scan.truncated;add(scan.servers,'runtime_config');}read=true;}}catch{failed=true;}
+ try{if(object(context.mcpConfiguration)){add(context.mcpConfiguration,'runtime_config');read=true;}else if(context.home){const file=subject.runtime==='Hermes'?path.join(context.home,'config.yaml'):path.join(context.home,!subject.profile||subject.profile==='default'?'config.toml':`${subject.profile}.config.toml`),raw=readMetadata(file,io);if(subject.runtime==='Hermes')add(parseYaml(raw).mcp_servers,'runtime_config');else{const scan=tomlMcp(raw);truncated||=scan.truncated;incomplete||=scan.incomplete;add(scan.servers,'runtime_config');}read=true;}}catch{failed=true;}
  add(config.mcpServers,'platform_config');
  for(const[name,{entry,source}]of entries){let transport=entry.transport||entry.type;if(transport==='streamable-http'||transport==='streamable_http')transport='http';if(!['stdio','http','sse'].includes(transport))transport=typeof entry.command==='string'?'stdio':typeof entry.url==='string'?'http':'unknown';const disabled=entry.enabled===false;items.push({id:`mcp:${name}`,name,source,transport,...baseLayers(),configuration:'configured',visibility:source==='runtime_config'?'visible':'unknown',enabled:disabled?'disabled':'enabled',authorization:evidence(context,'authorizationEvidence','mcp',subject,name)?'authorized':'unknown',loaded:evidence(context,'loadedEvidence','mcp',subject,name)?'loaded':'unknown',reason:null});}
- return section(items,truncated?'partial':failed?(items.length?'partial':'unknown'):read||items.length?'ready':'unknown',truncated?'inventory_truncated':failed?'native_configuration_unreadable':read||items.length?null:'runtime_context_unavailable');
+ return section(items,truncated||incomplete?'partial':failed?(items.length?'partial':'unknown'):read||items.length?'ready':'unknown',truncated?'inventory_truncated':incomplete?'native_configuration_partial':failed?'native_configuration_unreadable':read||items.length?null:'runtime_context_unavailable');
 }
 
 function normalizeMachineCli(machine,subject,context){const items=[];for(const raw of (Array.isArray(machine?.items)?machine.items:[]).slice(0,64)){

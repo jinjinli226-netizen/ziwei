@@ -2,7 +2,10 @@ const UNKNOWN='unknown';
 const scopeKey=subject=>JSON.stringify(['workspace','employeeId','ownerUserId','deviceId','runtime','profile','revision','controlEpoch'].map(key=>subject?.[key]??null));
 const identityFields=['workspace','employeeId','ownerUserId','deviceId','runtime','profile','revision','controlEpoch'];
 const object=value=>value&&typeof value==='object'&&!Array.isArray(value);
-export function inventoryEmployeeBindingChanged(previous,next){return !next||['id','owner_user_id','runtime','runtime_profile','target_device_id','visibility'].some(key=>(previous?.[key]??null)!==(next[key]??null));}
+// Only the employee configuration already loaded by the parent may invalidate
+// a visit. An inventory response cannot declare its own fingerprint current.
+export function inventoryEmployeeConfigurationKey(employee={}){return JSON.stringify([Array.isArray(employee.skills)?employee.skills.filter(value=>typeof value==='string').slice().sort():[],employee.management_mcp_enabled??null,employee.model_id??employee.model??null,employee.status??null,employee.default_working_directory??null,employee.default_working_directory_device_id??null]);}
+export function inventoryEmployeeBindingChanged(previous,next){return !next||['id','owner_user_id','runtime','runtime_profile','target_device_id','visibility'].some(key=>(previous?.[key]??null)!==(next[key]??null))||inventoryEmployeeConfigurationKey(previous)!==inventoryEmployeeConfigurationKey(next);}
 export function syncInventoryRosterSelection(selection,rows=[]){if(!selection?.employee?.id)return null;const row=rows.find(value=>value.id===selection.employee.id&&(!value.workspace||value.workspace===selection.workspace));if(!row?.employee)return null;if(row.employee===selection.employee)return selection;return{...selection,employee:row.employee,conversationId:row.main_conversation_id||null};}
 const layerDefinitions=[['installed','安装','installation'],['configured','配置','configuration'],['visible','可见','visibility'],['assigned','员工分配','assigned'],['enabled','启用','enabled'],['onDemand','按需读取','onDemand'],['authorization','授权','authorization'],['loaded','本轮加载','loaded']];
 const layerLabels={installed:'已安装',missing:'未安装',configured:'已配置',not_configured:'未配置',visible:'可见',not_visible:'不可见',assigned:'已分配',not_assigned:'未分配',enabled:'已启用',disabled:'未启用',available:'可按需读取',unavailable:'不可按需读取',authorized:'已授权',denied:'未获授权',authorization_required:'需要本人授权',loaded:'已取得加载证据',not_loaded:'未加载',unknown:'尚未核实',pending:'等待核实',not_applicable:'不适用'};
@@ -18,10 +21,12 @@ export function inventorySections(value){const historical=Boolean(value?.stale&&
 function responseScope(value,subject){if(value?.schemaVersion!==1||!object(value.subject)||identityFields.some(key=>Object.hasOwn(subject,key)&&value.subject[key]!==subject[key]))throw Object.assign(Error('scope'),{code:'CAPABILITY_INVENTORY_SCOPE_CHANGED'});return value;}
 export function createEmployeeCapabilityInventory({api,wrap=value=>value,setTimer=setTimeout,clearTimer=clearTimeout,now=Date.now,pollIntervalMs=2000,pollLimit=30,pollBudgetMs=60000}={}){
  const state=wrap({subject:null,value:null,loading:false,refreshing:false,error:'',errorCode:'',notice:'',writeUnknown:false});
- let generation=0,request=0,disposed=false,loaded=false,active=false,timer=null,polls=0,deadline=0;
+ let generation=0,request=0,disposed=false,loaded=false,active=false,timer=null,polls=0,deadline=0,configuration=null;
  const current=(visit,sequence)=>!disposed&&visit===generation&&sequence===request;
  function clearPoll(){if(timer!==null){clearTimer(timer);timer=null;}}
  function resetPoll(){clearPoll();polls=0;deadline=0;}
+ const definitive=error=>error?.code==='CAPABILITY_INVENTORY_SCOPE_CHANGED'||[401,403,404,410].includes(error?.status);
+ function clearDenied(){state.value=null;state.refreshing=false;state.writeUnknown=false;loaded=false;resetPoll();}
  function schedulePoll(){
   clearPoll();
   if(disposed||!active||!state.value?.pending)return;
@@ -31,20 +36,20 @@ export function createEmployeeCapabilityInventory({api,wrap=value=>value,setTime
   timer=setTimer(async()=>{timer=null;if(disposed||!active||visit!==generation||subject!==scopeKey(state.subject))return;polls++;await load();},Math.max(1,Math.min(pollIntervalMs,deadline-now())));
   timer?.unref?.();
  }
- function fail(error){state.errorCode=error?.code==='CAPABILITY_INVENTORY_SCOPE_CHANGED'?error.code:'CAPABILITY_INVENTORY_UNAVAILABLE';state.error=error?.code==='CAPABILITY_INVENTORY_SCOPE_CHANGED'?'员工归属或配置已经变化，请重新选择后刷新。':error?.status===403?'当前账号不能读取此员工的能力明细。':error?.status===404?'能力明细暂不可用，请确认服务端和电脑客户端已更新。':'能力明细未能读取，请检查连接后重试。';}
+ function fail(error){state.errorCode=error?.code==='CAPABILITY_INVENTORY_SCOPE_CHANGED'?error.code:'CAPABILITY_INVENTORY_UNAVAILABLE';state.error=error?.code==='CAPABILITY_INVENTORY_SCOPE_CHANGED'?'员工归属或配置已经变化，请重新选择后刷新。':error?.status===401?'登录状态已失效，请重新登录后读取员工能力明细。':error?.status===403?'当前账号不能读取此员工的能力明细。':error?.status===404?'能力明细暂不可用，请确认服务端和电脑客户端已更新。':'能力明细未能读取，请检查连接后重试。';}
  async function load(){
   if(!state.subject||state.loading||disposed)return;
   const subject={...state.subject},visit=generation,sequence=++request;clearPoll();state.loading=true;state.error='';state.errorCode='';
   try{const value=await api.employeeCapabilityInventory(subject.workspace,subject.employeeId);if(!current(visit,sequence))return;state.value=responseScope(value,subject);loaded=true;state.writeUnknown=false;if(!value.pending)resetPoll();return value;}
-  catch(error){if(current(visit,sequence)){fail(error);if(error?.code==='CAPABILITY_INVENTORY_SCOPE_CHANGED'||[401,403,404].includes(error?.status)){state.value=null;resetPoll();}else if(state.value){
+  catch(error){if(current(visit,sequence)){fail(error);if(definitive(error)){clearDenied();}else if(state.value){
    const previous=state.value,snapshot=previous.snapshot||{schemaVersion:1,subject:previous.subject,checkedAt:previous.checkedAt,source:previous.source,sections:previous.sections,summary:previous.summary};
    state.value={...previous,status:'unknown',stale:true,reasonCode:'CACHE_READ_UNAVAILABLE',snapshot,sections:Object.fromEntries(['skills','mcp','cli'].map(key=>[key,{status:'unknown',reason:'CACHE_READ_UNAVAILABLE',items:[]}])),summary:{skills:null,mcp:null,cli:null}};
   }}}
   finally{if(current(visit,sequence)){state.loading=false;schedulePoll();}}
  }
- async function select(subject,{active:visible=false}={}){
-  const next=subject?.workspace&&subject?.employeeId?{...subject}:null,changed=scopeKey(next)!==scopeKey(state.subject);
-  if(changed){generation++;request++;resetPoll();state.subject=next;state.value=null;state.loading=false;state.refreshing=false;state.error='';state.errorCode='';state.notice='';state.writeUnknown=false;loaded=false;}
+ async function select(subject,{active:visible=false,configurationKey=null}={}){
+  const next=subject?.workspace&&subject?.employeeId?{...subject}:null,nextConfiguration=typeof configurationKey==='string'?configurationKey:null,changed=scopeKey(next)!==scopeKey(state.subject)||configuration!==nextConfiguration;
+  if(changed){generation++;request++;resetPoll();configuration=nextConfiguration;state.subject=next;state.value=null;state.loading=false;state.refreshing=false;state.error='';state.errorCode='';state.notice='';state.writeUnknown=false;loaded=false;}
   if(active&&!visible){request++;resetPoll();state.loading=false;if(state.refreshing)state.writeUnknown=true;state.refreshing=false;loaded=false;}
   active=visible;
   if(active&&next&&!loaded&&!state.loading)await load();
@@ -57,7 +62,7 @@ export function createEmployeeCapabilityInventory({api,wrap=value=>value,setTime
    const value=await api.refreshEmployeeCapabilityInventory(subject.workspace,subject.employeeId,{});if(!current(visit,sequence))return;
    if(value?.schemaVersion===1&&value?.subject)state.value=responseScope(value,subject);else state.value={...(state.value||{schemaVersion:1,subject,sections:{}}),pending:true};
    loaded=true;state.notice=state.value.pending?'只读刷新已受理，等待运行电脑返回检查结果。':state.value.status==='ready'&&!state.value.stale?'只读检查结果已返回；配置、授权和本轮加载状态分别列出。':'尚未开始新的电脑检查，请按当前原因处理后重试。';return value;
-  }catch(error){if(current(visit,sequence)){fail(error);state.writeUnknown=true;state.error='刷新请求结果未确认，请先读取缓存状态，暂不重复提交。';}}
+  }catch(error){if(current(visit,sequence)){fail(error);if(definitive(error)){clearDenied();}else{state.writeUnknown=true;state.error='刷新请求结果未确认，请先读取缓存状态，暂不重复提交。';}}}
   finally{if(current(visit,sequence)){state.refreshing=false;schedulePoll();}}
  }
  return{state,select,load,refresh,dispose(){disposed=true;generation++;request++;clearPoll();}};

@@ -2,7 +2,7 @@ import {createHash,randomUUID} from 'node:crypto';
 import {BOT_INTERNAL} from './bots.mjs';
 import {redactSecrets} from '../src/redaction.mjs';
 
-export const EMPLOYEE_CAPABILITY_INSPECTION_FEATURE='employee_capabilities_inspect_v1';
+export const EMPLOYEE_CAPABILITY_INSPECTION_FEATURE='employee_capabilities_inspect_v2';
 export const EMPLOYEE_CAPABILITY_INSPECTION_TYPE='employee.capabilities.inspect';
 const parse=(value,fallback=null)=>{try{return JSON.parse(value)??fallback;}catch{return fallback;}};
 const canonical=value=>JSON.stringify(value,(_key,item)=>item&&typeof item==='object'&&!Array.isArray(item)?Object.fromEntries(Object.entries(item).filter(([,v])=>v!==undefined).sort(([a],[b])=>a.localeCompare(b))):item);
@@ -10,6 +10,7 @@ const digest=value=>createHash('sha256').update(canonical(value)).digest('hex');
 const same=(a,b)=>canonical(a)===canonical(b);
 const fail=(code,status=409)=>{throw Object.assign(new Error(code),{code,status});};
 const object=value=>value&&typeof value==='object'&&!Array.isArray(value);
+const supportsInspection=device=>{const features=parse(device?.runtime_discovery_json,{})?.features;return Array.isArray(features)&&features.includes(EMPLOYEE_CAPABILITY_INSPECTION_FEATURE);};
 const safeText=(value,max=200)=>typeof value==='string'?redactSecrets(value).replace(/[\u0000-\u001f\u007f]/g,' ').replace(/https?:\/\/\S+/gi,'[link]').replace(/\b(?:sk-|ghp_|github_pat_|xox[baprs]-)[A-Za-z0-9_-]{8,}/g,'[REDACTED]').replace(/\b[A-Za-z0-9_+/-]{40,}={0,2}\b/g,'[REDACTED]').replace(/(?:[A-Za-z]:[\\/]|\/(?:home|Users|tmp|etc)\/)[^\s]+/g,'[path]').slice(0,max):null;
 
 export function employeeCapabilitySubject(db,workspaceId,employeeId){
@@ -23,6 +24,23 @@ export function employeeCapabilitySubject(db,workspaceId,employeeId){
  return{workspace:workspace.slug,workspaceId,employeeId,ownerUserId:employee.owner_user_id||null,deviceId:employee.target_device_id||null,runtime:employee.runtime||null,profile:employee.runtime_profile||null,revision:bot?.revision??null,controlEpoch:bot?.control_epoch??null,configFingerprint:digest(config)};
 }
 
+// Apply the same current membership, personal visibility and device-owner
+// predicates to cached reads and the original requester's later execution.
+export function assertEmployeeCapabilityAuthority(db,workspaceId,current,requester){
+ if(!object(requester))fail('EMPLOYEE_CAPABILITIES_AUTHORITY_UNKNOWN',403);
+ if(requester.deviceScope&&requester.deviceScope!==current.deviceId)fail('DEVICE_SCOPE_MISMATCH',403);
+ if(requester.userId){
+  const member=db.prepare('SELECT role FROM members WHERE workspace_id=? AND user_id=?').get(workspaceId,requester.userId);
+  if(!member)fail('EMPLOYEE_CAPABILITIES_AUTHORITY_REVOKED',403);
+  const role=['owner','admin'].includes(member.role)&&['owner','admin'].includes(requester.role)?member.role:'member';
+  const privileged=['owner','admin'].includes(role),employee=db.prepare('SELECT visibility,owner_user_id FROM employees WHERE id=? AND workspace_id=?').get(current.employeeId,workspaceId);
+  if(!employee||employee.visibility==='personal'&&employee.owner_user_id!==requester.userId&&!privileged)fail('EMPLOYEE_CAPABILITIES_AUTHORITY_REVOKED',403);
+  const workspace=db.prepare('SELECT kind FROM workspaces WHERE id=?').get(workspaceId);
+  const device=current.deviceId?db.prepare('SELECT owner_user_id FROM devices WHERE id=? AND workspace_id=?').get(current.deviceId,workspaceId):null;
+  if(device&&workspace?.kind!=='team'&&!privileged&&device.owner_user_id!==requester.userId)fail('EMPLOYEE_CAPABILITIES_AUTHORITY_REVOKED',403);
+ }else if(!['owner','admin'].includes(requester.role)&&!requester.deviceScope)fail('EMPLOYEE_CAPABILITIES_AUTHORITY_UNKNOWN',403);
+}
+
 // Shared by create, ACK, device admission and readback. No writes, runtime
 // startup, profile initialization or process/model probing belong in this helper.
 export function assertEmployeeCapabilitySubject(db,workspaceId,payload){
@@ -31,21 +49,15 @@ export function assertEmployeeCapabilitySubject(db,workspaceId,payload){
  const current=employeeCapabilitySubject(db,workspaceId,inspection.subject.employeeId);
  if(!same(current,inspection.subject)||payload.workspace!==current.workspace||payload.workspaceId!==workspaceId||payload.deviceId!==current.deviceId||payload.runtime!==current.runtime||(payload.profile??null)!==current.profile)fail('EMPLOYEE_CAPABILITIES_SUBJECT_CHANGED');
  if(!current.deviceId)fail('EMPLOYEE_CAPABILITIES_DEVICE_UNKNOWN');
- const device=db.prepare('SELECT status FROM devices WHERE id=? AND workspace_id=?').get(current.deviceId,workspaceId);
+ const device=db.prepare('SELECT status,runtime_discovery_json FROM devices WHERE id=? AND workspace_id=?').get(current.deviceId,workspaceId);
  if(!device||device.status==='disabled')fail('EMPLOYEE_CAPABILITIES_DEVICE_REVOKED',403);
+ if(!supportsInspection(device))fail('EMPLOYEE_CAPABILITIES_CLIENT_NOT_REPORTED');
  const deviceCredential=db.prepare('SELECT revoked_at FROM device_credentials WHERE device_id=? AND workspace_id=?').get(current.deviceId,workspaceId);
  if(deviceCredential?.revoked_at)fail('EMPLOYEE_CAPABILITIES_DEVICE_REVOKED',403);
  const requester=inspection.requestedBy;
  if(!object(requester))fail('EMPLOYEE_CAPABILITIES_AUTHORITY_UNKNOWN',403);
- if(requester.deviceScope&&requester.deviceScope!==current.deviceId)fail('DEVICE_SCOPE_MISMATCH',403);
- if(payload.userId){
-  if(requester.userId!==payload.userId)fail('EMPLOYEE_CAPABILITIES_AUTHORITY_CHANGED',403);
-  const member=db.prepare('SELECT role FROM members WHERE workspace_id=? AND user_id=?').get(workspaceId,payload.userId);
-  if(!member)fail('EMPLOYEE_CAPABILITIES_AUTHORITY_REVOKED',403);
-  const employee=db.prepare('SELECT visibility,owner_user_id FROM employees WHERE id=? AND workspace_id=?').get(current.employeeId,workspaceId);
-  const currentRole=['owner','admin'].includes(member.role)&&['owner','admin'].includes(requester.role)?member.role:'member';
-  if(employee.visibility==='personal'&&employee.owner_user_id!==payload.userId&&!['owner','admin'].includes(currentRole))fail('EMPLOYEE_CAPABILITIES_AUTHORITY_REVOKED',403);
- }else if(!['owner','admin'].includes(requester.role)&&!requester.deviceScope)fail('EMPLOYEE_CAPABILITIES_AUTHORITY_UNKNOWN',403);
+ if((requester.userId||null)!==(payload.userId||null))fail('EMPLOYEE_CAPABILITIES_AUTHORITY_CHANGED',403);
+ assertEmployeeCapabilityAuthority(db,workspaceId,current,requester);
  return current;
 }
 
@@ -77,18 +89,17 @@ export function createEmployeeCapabilityInventory(repo,{management,now=Date.now,
  function scoped(slug,id,context){
   const employee=management.employee(slug,id,context);
   const ws=db.prepare('SELECT * FROM workspaces WHERE id=? AND slug=?').get(employee.workspace_id,slug);if(!ws)fail('EMPLOYEE_NOT_FOUND',404);
-  if(context.actorUserId&&!db.prepare('SELECT 1 FROM members WHERE workspace_id=? AND user_id=?').get(ws.id,context.actorUserId))fail('WORKSPACE_FORBIDDEN',403);
-  if(context.deviceScope&&context.deviceScope!==employee.target_device_id)fail('DEVICE_SCOPE_MISMATCH',403);
   const device=employee.target_device_id?db.prepare('SELECT * FROM devices WHERE id=? AND workspace_id=?').get(employee.target_device_id,ws.id):null;
-  if(device&&context.actorUserId&&!['owner','admin'].includes(context.actorRole)&&ws.kind!=='team'&&!repo.canManageDevice(device.id,context.actorUserId,context.actorRole,slug))fail('DEVICE_FORBIDDEN',403);
-  return{employee,ws,device,subject:employeeCapabilitySubject(db,ws.id,id)};
+  const subject=employeeCapabilitySubject(db,ws.id,id);
+  assertEmployeeCapabilityAuthority(db,ws.id,subject,{userId:context.actorUserId||null,role:context.actorRole||'owner',deviceScope:context.deviceScope||null});
+  return{employee,ws,device,subject};
  }
  const rowsFor=(ws,id)=>db.prepare("SELECT * FROM a2a_actions WHERE workspace_id=? AND type=? AND json_valid(payload_json) AND json_extract(payload_json,'$.capabilityInspection.subject.employeeId')=? ORDER BY rowid DESC LIMIT 50").all(ws.id,EMPLOYEE_CAPABILITY_INSPECTION_TYPE,id);
  function deviceReason(device){
   if(!device)return'DEVICE_UNASSIGNED';if(device.status==='disabled')return'DEVICE_REVOKED';
   const credential=db.prepare('SELECT revoked_at FROM device_credentials WHERE device_id=? AND workspace_id=?').get(device.id,device.workspace_id);if(credential?.revoked_at)return'DEVICE_REVOKED';
   const seen=Date.parse(device.last_seen||device.heartbeat_at||'');if(device.status!=='online'||!Number.isFinite(seen)||now()-seen>Math.max(45000,Number(device.heartbeat_interval_ms||10000)*4))return'DEVICE_OFFLINE';
-  if(!parse(device.runtime_discovery_json,{})?.features?.includes(EMPLOYEE_CAPABILITY_INSPECTION_FEATURE))return'CLIENT_NOT_REPORTED';return null;
+  if(!supportsInspection(device))return'CLIENT_NOT_REPORTED';return null;
  }
  function receipt(row){
   if(row.status!=='succeeded'||typeof row.result_json!=='string'||row.result_json.length>524288)return null;

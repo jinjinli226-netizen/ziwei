@@ -3,18 +3,19 @@ import {computed,onBeforeUnmount,reactive,ref,watch} from 'vue';
 import {RefreshCw,Search,Layers3} from 'lucide-vue-next';
 import {api} from '../api.js';
 import {botTime} from '../bot-state.js';
-import {createEmployeeCapabilityInventory,inventorySections,inventoryLayerRows,inventoryReason,inventorySource,inventoryProfileLabel} from '../employee-capability-inventory.js';
+import {createEmployeeCapabilityInventory,inventorySections,inventoryLayerRows,inventoryReason,inventorySource,inventoryProfileLabel,inventoryEmployeeConfigurationKey} from '../employee-capability-inventory.js';
 const props=defineProps({workspace:{type:String,required:true},employee:{type:Object,required:true},revision:Number,controlEpoch:Number,active:{type:Boolean,default:false},managed:{type:Boolean,default:false}});
 const emit=defineEmits(['manage']);
 const ui=createEmployeeCapabilityInventory({api,wrap:reactive});const s=ui.state,query=ref('');
 const subject=computed(()=>({workspace:props.workspace,employeeId:props.employee.id,ownerUserId:props.employee.owner_user_id??null,deviceId:props.employee.target_device_id??null,runtime:props.employee.runtime??null,profile:props.employee.runtime_profile??null,...(Number.isInteger(props.revision)&&props.revision>0?{revision:props.revision}:{}),...(Number.isInteger(props.controlEpoch)&&props.controlEpoch>0?{controlEpoch:props.controlEpoch}:{})}));
+const configurationKey=computed(()=>inventoryEmployeeConfigurationKey(props.employee));
 const sections=computed(()=>inventorySections(s.value).map(section=>({...section,visibleItems:section.items.filter(item=>`${item.name||''} ${item.description||''} ${item.packageName||''}`.toLowerCase().includes(query.value.trim().toLowerCase()))})));
 const checkedAt=computed(()=>s.value?.checkedAt||s.value?.snapshot?.checkedAt);
 const source=computed(()=>s.value?.source||s.value?.snapshot?.source);
 const stateLabel=section=>section.historical?'上次检查记录':({ready:'已返回检查记录',partial:'部分信息待核实',unknown:'尚未核实',pending:'等待检查',offline:'电脑离线',failed:'检查未完成'}[section.state]||'尚未核实');
 function ownerLabel(item){const owner=item.owner;if(!owner?.employeeId)return '当前员工检查视图；分配状态见下方';if(owner.employeeId!==props.employee.id)return '归属与当前员工不一致，需重新检查';return `当前员工${owner.profile?' · '+owner.profile:''}`;}
 function manage(section){emit('manage',{section:section.key,workspace:props.workspace,employee:props.employee});}
-watch(()=>[subject.value.workspace,subject.value.employeeId,subject.value.ownerUserId,subject.value.deviceId,subject.value.runtime,subject.value.profile,subject.value.revision,subject.value.controlEpoch,props.active],()=>{void ui.select(subject.value,{active:props.active});},{immediate:true});
+watch(()=>[subject.value.workspace,subject.value.employeeId,subject.value.ownerUserId,subject.value.deviceId,subject.value.runtime,subject.value.profile,subject.value.revision,subject.value.controlEpoch,configurationKey.value,props.active],()=>{void ui.select(subject.value,{active:props.active,configurationKey:configurationKey.value});},{immediate:true});
 watch(()=>[props.workspace,props.employee.id],()=>query.value='');
 onBeforeUnmount(()=>ui.dispose());
 </script>

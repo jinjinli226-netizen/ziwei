@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { normalizeRuntimeProfile } from '../src/employee-runtime.mjs';
 import { createBotService } from './bots.mjs';
 import {botProfileBinding,assertBotProfileReady} from './bot-profiles.mjs';
+import {assertEmployeeCapabilityAuthority,assertEmployeeCapabilitySubject,EMPLOYEE_CAPABILITY_INSPECTION_TYPE} from './employee-capability-inventory.mjs';
 
 const parse = (value, fallback = {}) => { try { return JSON.parse(value) ?? fallback; } catch { return fallback; } };
 const fingerprint = value => crypto.createHash('sha256').update(JSON.stringify(canonical(value))).digest('hex');
@@ -102,6 +103,15 @@ export function createManagementService(repo) {
     const actor = trustedContext(context);
     const payload = item.payload || {};
     if (!['owner', 'admin'].includes(actor.actorRole) && payload.userId && payload.userId !== actor.actorUserId) return false;
+    if(item.type===EMPLOYEE_CAPABILITY_INSPECTION_TYPE){
+      // Inventory uses a nested, immutable subject rather than a business Bot
+      // payload. Generic action history must not bypass its current fences.
+      try{
+        const current=assertEmployeeCapabilitySubject(db,ws(slug).id,payload);
+        assertEmployeeCapabilityAuthority(db,ws(slug).id,current,{userId:actor.actorUserId,role:actor.actorRole,deviceScope:context.deviceScope});
+        if(!repo.listEmployees(slug,actor).some(row=>row.id===current.employeeId))return false;
+      }catch{return false;}
+    }
     const linkedEmployeeId = payload.employeeId || (payload.conversationId ? db.prepare('SELECT employee_id FROM conversations WHERE id=? AND workspace_id=?').get(payload.conversationId, ws(slug).id)?.employee_id : null);
     if (linkedEmployeeId && !repo.listEmployees(slug, actor).some(row => row.id === linkedEmployeeId)) return false;
     const deviceId = payload.deviceId || (linkedEmployeeId ? db.prepare('SELECT target_device_id FROM employees WHERE id=? AND workspace_id=?').get(linkedEmployeeId, ws(slug).id)?.target_device_id : null);
