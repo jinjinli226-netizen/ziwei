@@ -264,6 +264,8 @@ def install(config, isolation, *, overlay='', reject=RuntimeError, active=True):
     servers = _overlay_servers(config, overlay, reject)
     effort = os.environ.get('ZIWEI_BOT_REASONING_EFFORT')
     _check(effort is None or effort in _EFFORTS, reject, 'BOT_REASONING_INVALID')
+    if not servers and not effort:
+        return False
     context = contextvars.ContextVar('ziwei_gateway_execution', default=None)
 
     class View(native_view):

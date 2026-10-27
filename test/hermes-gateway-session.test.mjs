@@ -113,6 +113,9 @@ if request.get('composeKey'):
  key.install(GatewayClientError)
 spec=importlib.util.spec_from_file_location('session_bridge',request['bridge']);bridge=importlib.util.module_from_spec(spec);spec.loader.exec_module(bridge)
 args=argparse.Namespace(reasoning=None,resume='session-fixture' if request.get('resume') else None,provider=None,base_url=None,api_key=None,query='Synthetic fixture only',quiet=True,continue_last='Ziwei fixture' if request.get('titled') else None,create_if_missing=bool(request.get('titled')))
+if request.get('plain'):
+ os.environ.pop('ZIWEI_BOT_REASONING_EFFORT',None)
+ effective['mcp_servers']={}
 before=dict(vars(args));before_argv=list(sys.argv);stderr=io.StringIO();caught=None;result=None
 try:
  with contextlib.redirect_stderr(stderr):
@@ -169,4 +172,9 @@ test('a declared capability without an actual SDK receipt cannot report chat suc
 });
 test('session bridge composes with independent provider key namespace wrapper',t=>{
  const out=run(t,{composeKey:true});assert.equal(out.result,'complete',JSON.stringify(out));assert.equal(out.proofs.length,1);
+});
+
+test('ordinary Gateway chats without private MCP or strict reasoning retain the native path',t=>{
+ const out=run(t,{plain:true,missingMcpCap:true,missingReasoningCap:true});
+ assert.equal(out.result,'not-installed');assert.equal(out.caught,null);assert.deepEqual(out.calls,[]);
 });
