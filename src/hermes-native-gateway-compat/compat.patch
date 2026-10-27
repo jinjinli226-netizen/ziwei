@@ -459,6 +459,20 @@ index 6200c3367ae..dfc05fb0889 100644
          ctx = self._ctx
          try:
              asyncio.run_coroutine_threadsafe(ctx._hooks_ref.emit(event_type, context), ctx._loop_for_step)
+diff --git a/gateway/session_authority.py b/gateway/session_authority.py
+index 3dd8ef66f7a..73884db8ab4 100644
+--- a/gateway/session_authority.py
++++ b/gateway/session_authority.py
+@@ -669,7 +669,8 @@ class SessionAuthority:
+         self._require_admission_open(queue_only=queue_only)
+         if (request.intent != 'queue' or not {'text'} <= set(request.payload) <= {
+                 'text', 'attachments', 'finite', 'unattended', 'surface', 'voice_context', 'interrupted',
+-                'voice_turn', 'display_kind', 'title_preview', 'turn_author', 'api_text', 'model_override', 'clarify_batch'}
++                'voice_turn', 'display_kind', 'title_preview', 'turn_author', 'api_text', 'model_override', 'clarify_batch',
++                'strict_reasoning_effort', 'strict_reasoning_model', 'strict_reasoning_provider'}
+                 or not isinstance(request.payload['text'], str)):
+             raise RuntimeStoreError('invalid_params')
+         from gateway.session_ingress_media import admit_attachments
 diff --git a/gateway/session_cli_turn.py b/gateway/session_cli_turn.py
 index 62140b3b70a..f59a5054192 100644
 --- a/gateway/session_cli_turn.py
@@ -1070,6 +1084,167 @@ index 00000000000..6ab5dc366b9
 +
 +if __name__ == '__main__':
 +    unittest.main()
+diff --git a/tests/gateway/test_strict_reasoning_admission.py b/tests/gateway/test_strict_reasoning_admission.py
+new file mode 100644
+index 00000000000..9f149a40f2f
+--- /dev/null
++++ b/tests/gateway/test_strict_reasoning_admission.py
+@@ -0,0 +1,155 @@
++"""Strict CLI inputs cross the real wire dispatcher and durable admission boundary."""
++from copy import deepcopy
++from types import SimpleNamespace
++
++import pytest
++from tui_gateway.contracts.registry import EVENTS
++
++
++def immediate(coroutine):
++    try:
++        coroutine.send(None)
++    except StopIteration as done:
++        return done.value
++    raise AssertionError('unexpected asynchronous work')
++
++
++@pytest.fixture
++def owner(tmp_path, monkeypatch):
++    from gateway.session_authority import LiveSession, SessionAuthority
++    from gateway.session_controls import AuthorityConnection
++    from gateway.config import Platform
++    from hermes_state import SessionDB
++    from hermes_state_runtime import begin_runtime_epoch
++
++    monkeypatch.setenv('HERMES_HOME', str(tmp_path))
++    with SessionDB(db_path=tmp_path / 'state.db') as db:
++        db.create_session('s', source='oneshot')
++        runner = SimpleNamespace(_draining=False, config=SimpleNamespace(multiplex_profiles=False))
++        authority = SessionAuthority(runner, profile_id=str(tmp_path), instance_id='strict-test', db=db,
++                                     epoch=begin_runtime_epoch(db, instance_id='strict-test'))
++        connection = AuthorityConnection(authority, object(), {'user_id': 'human'})
++        authority.sessions['s'] = LiveSession(SimpleNamespace(platform=Platform.LOCAL,
++                                                            user_id=connection.actor.subject), 'fixture-route')
++        connection.subscriptions['s'] = 'fixture-attachment'
++        scheduled = []
++        monkeypatch.setattr(authority, '_schedule', lambda ref: scheduled.append(ref.session_id))
++
++        async def inline_write(_authority, function, *, then=None, after=None, **_kwargs):
++            row = function()  # Real SQLite transaction; only the worker-thread hop is synchronous.
++            result = then(row) if then else row
++            if after:
++                after(result)
++            return result
++        monkeypatch.setattr('gateway.session_runtime_workers.tracked_write', inline_write)
++        yield connection, authority, db, scheduled
++
++
++STRICT = {'strict_reasoning_effort': 'max', 'strict_reasoning_model': 'gpt-6.1-sol',
++          'strict_reasoning_provider': 'openai-codex'}
++
++
++def submit(connection, **changes):
++    params = {'session_id': 's', 'input_id': 'strict-input', 'text': 'Synthetic admission only',
++              'finite': True, **STRICT, **changes}
++    return immediate(connection.dispatch({'jsonrpc': '2.0', 'id': 1,
++                                          'method': 'prompt.submit', 'params': params}))
++
++
++def test_real_dispatch_commits_strict_route_and_retries_exactly_once(owner):
++    from hermes_state_runtime import get_session_admission, list_session_admissions
++    connection, authority, db, _scheduled = owner
++    reply = submit(connection)
++    assert 'result' in reply, reply
++    admission = reply['result']['admission_id']
++    row = get_session_admission(db, admission_id=admission)
++    assert row['payload']['cli_turn_v1'] == STRICT
++    assert row['target_session_id'] == 's' and row['principal_id'] == connection.actor.subject
++    assert row['status'] == 'queued'
++    assert db.get_session('s')['source'] == 'oneshot'
++    assert submit(connection)['result']['admission_id'] == admission
++    conflict = submit(connection, strict_reasoning_effort='high')
++    assert conflict['error']['message'] == 'admission_conflict', conflict
++    assert len(list_session_admissions(db, session_id='s', pending_only=False)) == 1
++
++
++def test_real_dispatch_admission_drives_the_sdk_receipt_with_its_persisted_binding(owner):
++    from agent.session_client_env import strict_reasoning_route
++    from agent.codex_runtime import run_codex_stream
++    from gateway.run_turn_runner import TurnRunner
++    from gateway.session_cli_turn import cli_turn_scope
++    from hermes_cli.gateway_chat_view import GatewayChatView
++    from hermes_state_runtime import claim_session_input
++    from tests.agent.test_strict_reasoning_receipts import agent_and_sdk
++
++    connection, authority, db, _scheduled = owner
++    reply = submit(connection)
++    assert 'result' in reply, reply
++    row = claim_session_input(db, epoch=authority.epoch, session_id='s')
++    assert row['admission_id'] == reply['result']['admission_id']
++    generation = row['generation']
++    authority.executing['s'] = generation
++    stream = authority.sessions['s'].event_stream
++    stream.execution = {'authority_epoch': authority.epoch, 'execution_generation': generation,
++                        'admission_id': row['admission_id']}
++    frames = []
++    stream.observers.add(lambda frame: frames.append(deepcopy(frame)))
++    turn = object.__new__(TurnRunner)
++    turn._approval_owner = authority, 's', generation
++    agent, sdk, _, requests = agent_and_sdk()
++    agent.event_callback = turn._event_callback_sync
++    with cli_turn_scope(row['admission_id'], row['payload']):
++        assert strict_reasoning_route()['effort'] == 'max'
++        run_codex_stream(agent, {'model': 'gpt-6.1-sol', 'reasoning': {'effort': 'xhigh'}}, client=sdk)
++    assert len(requests) == 1 and requests[0]['reasoning']['effort'] == 'max'
++    assert strict_reasoning_route() is None
++    frame, = [item for item in frames if item['params']['type'] == 'inference.request']
++    payload = frame['params']['payload']
++    EVENTS['inference.request'].payload.model_validate(payload)
++    assert payload['session_id'] == 's' and payload['admission_id'] == row['admission_id']
++    assert payload['profile_id'] == authority.profile_id and payload['authority_epoch'] == authority.epoch
++    assert payload['execution_generation'] == generation
++
++    sequence = iter([frame, RuntimeError('offline end')])
++    class EventsQueue:
++        async def get(self):
++            return next(sequence)
++    snapshot = {'stored_session_id': 's', 'info': {'profile_id': authority.profile_id},
++                'authority_epoch': authority.epoch, 'execution_generation': generation}
++    view = GatewayChatView(SimpleNamespace(events=EventsQueue()), snapshot)
++    view.finite, view.finite_admission = True, row['admission_id']
++    receipts = []
++    view.inference_request_callback = lambda proof, binding: receipts.append((proof, binding))
++    immediate(view.render())
++    assert len(receipts) == 1
++    assert receipts[0][1]['admission_id'] == row['admission_id']
++    assert receipts[0][1]['profile_id'] == authority.profile_id
++
++
++@pytest.mark.parametrize('changes', [
++    {'strict_reasoning_token': 'forbidden'}, {'strict_reasoning_effort': 'invalid'},
++    {'strict_reasoning_provider': None}, {'strict_reasoning_model': ''},
++])
++def test_invalid_or_unknown_fields_still_fail_without_an_admission(owner, changes):
++    from hermes_state_runtime import list_session_admissions
++    connection, _authority, db, _scheduled = owner
++    reply = submit(connection, **changes)
++    assert reply['error']['message'] == 'invalid_params', reply
++    assert list_session_admissions(db, session_id='s', pending_only=False) == []
++
++
++@pytest.mark.parametrize('boundary', ['profile', 'capability', 'source'])
++def test_strict_inputs_do_not_bypass_original_authorization(owner, boundary):
++    from gateway.session_contract import Principal
++    from hermes_state_runtime import list_session_admissions
++    connection, authority, db, _scheduled = owner
++    actor = connection.actor
++    if boundary == 'profile':
++        connection.actor = Principal(actor.subject, 'other-profile', actor.capabilities, actor.transport_id)
++    elif boundary == 'capability':
++        connection.actor = Principal(actor.subject, actor.profile_id, frozenset({'session:read'}), actor.transport_id)
++    else:
++        authority.sessions['s'].source.user_id = 'other-user'
++    reply = submit(connection)
++    assert reply['error']['message'] in {'profile_mismatch', 'permission_denied'}, reply
++    assert list_session_admissions(db, session_id='s', pending_only=False) == []
 diff --git a/tui_gateway/contracts/canonical.py b/tui_gateway/contracts/canonical.py
 index 393cf24bb4b..1a7ac538274 100644
 --- a/tui_gateway/contracts/canonical.py

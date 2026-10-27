@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "baseCommit": "c2c5eef14924a09021ef8af1e8b9f1135879d89e",
-  "patchSha256": "2613c24cc9c94b419f8bfa0dc707681db43fc4e5c1afacf1c3a0ff4229c1e3bf",
+  "patchSha256": "250ae4ec4b178eb7e18e8ad1c51d33ce02bb034044e1a5100b0eaa37d00f8018",
   "sourceCommit": null,
   "candidateIdentity": "base-plus-compatibility-patch",
-  "validatedNativeTests": 39,
+  "validatedNativeTests": 35,
   "validatedSubtests": 4,
   "externalModelCalls": 0,
   "upstreamPublication": false,
@@ -50,6 +50,11 @@
       "afterSourceSha256": "a4dc4bc005aad378530b756abb64eed4784bf1173ff7e0562be2e37e779318c6"
     },
     {
+      "path": "gateway/session_authority.py",
+      "beforeSourceSha256": "273ea041311e43bfa53e6c531afc904d67f3999e049ce53a1c048680c1f4089c",
+      "afterSourceSha256": "202f0a696d5fd2501ccafdbc414150054048685736150d59969d02c6b00cc55a"
+    },
+    {
       "path": "gateway/session_cli_turn.py",
       "beforeSourceSha256": "86e16dbefe035b07474465f5c8854cac227c723205ab46559a686391a3cd3032",
       "afterSourceSha256": "5a5703be02029e1bb8d281e93e8ab2cd0caa3effbb8ce0dabc12671bea3ee526"
@@ -89,5 +94,6 @@
       "beforeSourceSha256": "8d7386fcd43356992176f6207a3c7d4054f8e83ab75b77fe6a764834344bf7b3",
       "afterSourceSha256": "e2a569e21d905b0c59f95092be96c139f13379244fdb039b8a14448f3f7173ee"
     }
-  ]
+  ],
+  "validatedAdmissionDispatchTests": 9
 }

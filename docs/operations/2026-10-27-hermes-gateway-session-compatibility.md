@@ -38,4 +38,12 @@
 
 夹具先改成实际原生形状，原实现出现 7 项预期失败，再实施修复。复制本机实际原生 `gateway_chat.py` 的前端路径参与父会话复核，27 项桥接、独立 Key 及 SDK 回执测试通过，零跳过；独立 Key 仍限隔离 RPC 验证。原第二条失败动作和退出证明保留，新包安装及下一条消息仍需独立现场验收。
 
+## 原生 authority 的提交闭集补齐
+
+第三条新消息已恢复既有原生会话，但在模型前以 `invalid_params / exit 1` 失败。真实 `SessionConnection.dispatch` 已在 wire schema、connection submission 和 `cli_turn_v1` 接齐严格推理参数，随后 `SessionAuthority._submit` 的独立闭集却仍拒绝这三个字段。原假 RPC 测试没有经过该边界，不能替代实际分发链路。
+
+原生增量仅在 `gateway/session_authority.py` 的闭集加入 `strict_reasoning_effort`、`strict_reasoning_model` 和 `strict_reasoning_provider`；AST 比较确认其他语义不变。原 16 个兼容文件及原补丁块逐字节保留，完整补丁扩大为 17 个运行文件。此增量独立于已发布的 `0.1.3 / 56511f8f…` 客户端，正式客户端工件及其内含旧补丁材料保持不可变，不能因此改写已发布包的 SHA。
+
+新增测试经过真实 dispatch、authority、SQLite、幂等、离线 SDK 和 typed view receipt；先在原 authority 复现两个正例被拒绝，修复后 9 项通过，原未知参数、权限及 source 拒绝保留。官方 runner 的相关三文件合计 35 项通过。第三方 Pydantic 插件的环境扫描曾触发隔离测试 HOME guard；仅在私有测试 runner 禁用插件扫描，产品代码及 HOME guard 均未放宽。现场重载仍须单文件 SHA、原生 external drain、两次零在途检查、官方 restart 和新消息验收，不能将离线测试直接记为业务成功。
+
 本机脱敏事件证据在 `D:\AINavtie\ops\ziwei\hermes-gateway-parked-20261027\`；原生独立退出/健康日志在 `D:\灵光爸爸拆解\.local\hermes-gateway-parked-20261027\observer\logs`，10 秒采样，已以隔离进程验证正常退出、外部终止、unclean 恢复、身份错配、重复实例及轮转。源码测试通过不自动表示安装或产品聊天已完成，最终结论以本事件验收回执为准。
