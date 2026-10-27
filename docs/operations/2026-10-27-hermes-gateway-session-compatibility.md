@@ -64,4 +64,14 @@
 
 统一切换前另完成全部 14 个 served Profile 的双视图只读核验：70 项 config/.env/SQLite/WAL/SHM 与 14 个 memories 聚合摘要均相同或明确同时不存在；现存文件各视图两次摘要稳定，差异及不稳定项为零。没有 SQL 连接、checkpoint、Profile 写入或模型调用。证据为 `ALL-PROFILES-NAMESPACE-COMPARISON-FINAL.json`，SHA `83389e476408311b9e7f5e11cd053ec6111402f712c7f91bbb1016eb13a17b3d`，不能用单个员工的数据比较代替涉及全部 Profile 的上下文切换检查。
 
+## 最终现场验收
+
+2026-10-27 15:10（Asia/Shanghai），在上述隔离整单及负例、真实 stdio 双上下文、全部 Profile 数据核验通过后，统一从现有桌面 Explorer 的系统进程接口执行官方 `hermes.exe --profile default gateway restart`。只做这一次上下文切换，没有再次发布客户端、改源码或配置、搬 HOME、复制数据库。原生新 PID 为 59448；首次就绪探测延迟记录保留，独立只读复核随后确认 17 源文件、14 served、零 parked、无 drain 和两项兼容能力均通过。
+
+最后一条唯一新消息使用 `hermes-gateway-recovery-20261027-zhiwei-v5`，正式 action `action_d96d2a13-6114-417d-aca8-a26a3bc09b9c`，状态 `succeeded`；助手实际回复“知微在线，验证通过”。实际安装仍为 `0.1.3 / 56511f8fa78ed5dad96064c6fceb6df41445ec8b42740081b657f89268e92148`，本机 PID 48228，配置原字节 SHA 未变。
+
+该次真实 SDK 证据为 `native_gateway_sdk / phase=request / requests=1`，`openai-codex / gpt-6.1-sol / requested=effective=actual=max / nativeActual=max / mode=native`，六项执行绑定一致。沿用原生会话 `20261017_013836_f47f1b`；管理 MCP `loaded=true`、实际业务工具调用为零；Windows 根进程退出 0、进程树确认且活动子进程为零。员工配置和六条既有失败回执在消息前后 SHA 均不变，未重放原业务。
+
+脱敏最终证据为事件目录 `BOT-SMOKE-V5.json`（verified=true）、`INTEGRATED-ROLLOUT-GATE.json` 和 `NATIVE-GATEWAY-CONTEXT-READBACK.json`；真实客户端强协议升级的独立证据是 `CLIENT-PRODUCT-UPDATE-V3-READONLY-ACCEPTANCE.json`（worker+heartbeat 均验证）。本机与网关独立退出观察器分别为 4904→48228、75832→59448，均为 10 秒采样并保留原日志历史。此结论仅覆盖实际知微 OAuth 路径和本次无业务工具调用的有限验收，独立 Provider Key 仍仅隔离测试，不宣称所有供应商或全部管理/手机业务操作均已实测。
+
 本机脱敏事件证据在 `D:\AINavtie\ops\ziwei\hermes-gateway-parked-20261027\`；原生独立退出/健康日志在 `D:\灵光爸爸拆解\.local\hermes-gateway-parked-20261027\observer\logs`，10 秒采样，已以隔离进程验证正常退出、外部终止、unclean 恢复、身份错配、重复实例及轮转。源码测试通过不自动表示安装或产品聊天已完成，最终结论以本事件验收回执为准。
