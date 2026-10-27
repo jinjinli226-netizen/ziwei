@@ -46,4 +46,22 @@
 
 新增测试经过真实 dispatch、authority、SQLite、幂等、离线 SDK 和 typed view receipt；先在原 authority 复现两个正例被拒绝，修复后 9 项通过，原未知参数、权限及 source 拒绝保留。官方 runner 的相关三文件合计 35 项通过。第三方 Pydantic 插件的环境扫描曾触发隔离测试 HOME guard；仅在私有测试 runner 禁用插件扫描，产品代码及 HOME guard 均未放宽。现场重载仍须单文件 SHA、原生 external drain、两次零在途检查、官方 restart 和新消息验收，不能将离线测试直接记为业务成功。
 
+## Windows 审计文件视图与整体验收
+
+原生增量已按 `ec355e92…` 应用并官方重载至 PID 61328，17 文件、14 个 served Profile、零 parked、无残留 drain 的独立只读复核通过。第四条消息已真实生成固定答复且 Windows 根进程/进程树正常退出，但产品仍以 `management_mcp_not_loaded` 拒绝。真实 stdio 子进程已经完成 initialize/tools-list；其正确 action 审计文件存在于 Codex/MSIX 的文件视图，在实际 `ziwei_user` 的系统视图却不存在。不能将其改判成功、伪写握手、关闭 loaded 校验或盲目搬迁 HOME。
+
+只读双视图比较确认 Hermes 17 源文件及知微配置、记忆和 SQLite/WAL/SHM 均相同。因此修复方向是让官方网关从已验证的系统上下文启动，使真正 MCP 子进程和本机客户端读取同一审计文件。启动前用实际 Node 核验真实配置 SHA，保留原安装、Profile、HOME、身份和原失败回执；不用 WMI 启动 updater，不以 UI 输入终端命令。
+
+用户随后明确要求“修复好再上线”。后续发布和本机服务变更因此暂停，先补以下隔离验收；不能再用分段单测代替整单成功：
+
+- 真 stdio 双上下文用实际安装的 `scripts/ziwei-mcp.mjs` 完成 initialize/tools-list，各返回 24 个工具，并由实际 `managementMcpReceipt()` 读取。重现旧视图分叉后，系统上下文的真实子进程、客户端读取和独立观察器得到同一审计 SHA、loaded=true。网络、业务工具调用、模型调用、生产变更均为零。
+- 整单入口直接导入实际安装的 `0.1.3 / 56511f8f…` 执行器，经过 Windows Job、实际原生 dispatch/SQLite/SDK guard/typed view/bridge/parser 和实际 stdio audit，到真实 ActionDispatcher 最终 succeeded；同 SID 历史 2→4，前缀及每例两条旧失败的 SHA 保留。
+- 缺失审计、缺失/错绑 SDK 回执、action 授权错绑四类负例均按原生产门禁拒绝。父会话独立复跑同一入口，五例全部通过，exit 0。
+
+整单夹具明确替换 CLI 发现、授权 HTTP、SDK 返回、WebSocket 传输和 MCP 池编排；stdio adapter、manifest、审计与产品读取/成功判断实际运行。离线 SDK 不证明新物理模型请求，不能把此测试写成现场聊天已成功。单入口及替身边界保存在事件目录 `offline-acceptance/ACCEPTANCE.md`，执行为 `node --experimental-vm-modules <事件目录>/offline-acceptance/run.mjs`；父会话证明 SHA 为 `1b4a755ddcc86faab406bbc2e48b840d4f89827eb7b5f1886f90067042cad8b5`。真实双上下文证明为 `MCP-DUAL-CONTEXT-ISOLATED-ACCEPTANCE.json`，SHA 为 `dbdbc3245576745f9b855166929b6717562bc3b54fa6a2a4360d034905197afb`。
+
+隔离验收通过后仍需统一切换的原生进程/文件视图复核，以及一条新的有限真实消息：同一个既有原生会话，实际 SDK 请求回执、管理 MCP 握手、产品 succeeded、实际助手回复和旧失败记录保护全部通过后，才可宣告修复完成。
+
+统一切换前另完成全部 14 个 served Profile 的双视图只读核验：70 项 config/.env/SQLite/WAL/SHM 与 14 个 memories 聚合摘要均相同或明确同时不存在；现存文件各视图两次摘要稳定，差异及不稳定项为零。没有 SQL 连接、checkpoint、Profile 写入或模型调用。证据为 `ALL-PROFILES-NAMESPACE-COMPARISON-FINAL.json`，SHA `83389e476408311b9e7f5e11cd053ec6111402f712c7f91bbb1016eb13a17b3d`，不能用单个员工的数据比较代替涉及全部 Profile 的上下文切换检查。
+
 本机脱敏事件证据在 `D:\AINavtie\ops\ziwei\hermes-gateway-parked-20261027\`；原生独立退出/健康日志在 `D:\灵光爸爸拆解\.local\hermes-gateway-parked-20261027\observer\logs`，10 秒采样，已以隔离进程验证正常退出、外部终止、unclean 恢复、身份错配、重复实例及轮转。源码测试通过不自动表示安装或产品聊天已完成，最终结论以本事件验收回执为准。
