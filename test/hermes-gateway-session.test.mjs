@@ -39,7 +39,16 @@ agent=module('agent');agent.__path__=[]
 module('agent.session_source',create_surface=lambda value:value)
 module('agent.session_client_env',collect_client_env=lambda **kw:{'PATH':'fixture-path','ZIWEI_MCP_TOKEN':secret})
 module('hermes_cli.config_effective',load_user_config_effective=lambda _: {})
-snapshot={'stored_session_id':'session-fixture','profile_id':str(home),'authority_epoch':3,'revision':5,'execution_generation':7,'messages':[{'role':'assistant','content':'Existing synthetic history'}],'info':{'launch_request':{'model':'gpt-6.1-sol','provider':'openai-codex'}}}
+# Canonical SessionConnection.resume returns identity under info, including when create calls resume.
+snapshot={'session_id':'session-fixture','stored_session_id':'session-fixture','authority_epoch':3,'revision':5,'execution_generation':7,'messages':[{'role':'assistant','content':'Existing synthetic history'}],'info':{'profile_id':str(home),'launch_request':{'model':'gpt-6.1-sol','provider':'openai-codex'}}}
+profile_case=request.get('snapshotProfile')
+if profile_case=='matching-top':snapshot['profile_id']=str(home)
+if profile_case=='conflicting-top':snapshot['profile_id']=str(root/'wrong-home')
+if profile_case=='missing-nested':snapshot['info'].pop('profile_id')
+if profile_case=='wrong-nested':snapshot['info']['profile_id']=str(root/'wrong-home')
+if profile_case=='wrong-nested-matching-top':snapshot['info']['profile_id']=str(root/'wrong-home');snapshot['profile_id']=str(home)
+if profile_case=='invalid-info':snapshot['info']=None
+if 'snapshotEpoch' in request:snapshot['authority_epoch']=request['snapshotEpoch']
 class Client:
  async def rpc(self,method,**params):
   calls.append(method);params_seen.append((method,params))
@@ -79,6 +88,7 @@ class View:
   self.client=client;self.snapshot=snapshot;self.inference_request_callback=None;views.append(self)
  async def run(self,*args,**kwargs):
   assert self.snapshot['messages']==snapshot['messages'],'EXISTING_HISTORY_LOST'
+  assert self.snapshot==snapshot,'NATIVE_SNAPSHOT_MUTATED'
   await self.client.rpc('prompt.submit',session_id='session-fixture',input_id='input-fixture',text='Synthetic fixture only')
   binding={'profile_id':str(home),'session_id':'session-fixture','admission_id':'admission-fixture','execution_generation':8,'authority_epoch':3}
   payload={**binding,'schemaVersion':1,'api_request_id':'a'*32,'model':'gpt-6.1-sol','provider':'openai-codex','requested':'max','actual':'max','nativeActual':'xhigh','mode':'verified_gpt61_sol_max','status':'matched','phase':'request','unknownSecret':secret,'body':{'content':secret}}
@@ -177,4 +187,21 @@ test('session bridge composes with independent provider key namespace wrapper',t
 test('ordinary Gateway chats without private MCP or strict reasoning retain the native path',t=>{
  const out=run(t,{plain:true,missingMcpCap:true,missingReasoningCap:true});
  assert.equal(out.result,'not-installed');assert.equal(out.caught,null);assert.deepEqual(out.calls,[]);
+});
+test('canonical nested profile identity is preserved across create, resume, receipt and existing history',t=>{
+ for(const options of [{},{resume:true},{titled:true},{resume:true,rotate:true},{snapshotProfile:'matching-top'}]){
+  const out=run(t,options);assert.equal(out.result,'complete',JSON.stringify(out));assert.equal(out.proofs.length,1);
+  assert.equal(out.proofs[0].authority_epoch,3);assert.equal(out.proofs[0].session_id,'session-fixture');
+ }
+});
+test('missing, wrong, invalid or contradictory native snapshot profiles refuse before any prompt',t=>{
+ for(const snapshotProfile of ['conflicting-top','missing-nested','wrong-nested','wrong-nested-matching-top','invalid-info']){
+  const out=run(t,{snapshotProfile});assert.equal(out.result,null);assert.match(out.caught.message,/BOT_GATEWAY_SESSION_MISMATCH/);
+  assert.equal(out.calls.includes('prompt.submit'),false);assert.equal(out.proofs.length,0);
+ }
+});
+test('native snapshot authority epoch must match the authenticated description before admission',t=>{
+ for(const snapshotEpoch of [4,'3',true,-1,9007199254740992]){
+  const out=run(t,{snapshotEpoch});assert.equal(out.result,null);assert.equal(out.calls.includes('prompt.submit'),false);assert.equal(out.proofs.length,0);
+ }
 });

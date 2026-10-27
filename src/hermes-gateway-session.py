@@ -116,10 +116,23 @@ class _Session:
         _check(type(epoch) is int and 0 <= epoch <= 2**53 - 1, self.reject, 'BOT_GATEWAY_BINDING_INVALID')
         self.description = result
 
+    def snapshot_profile(self, result):
+        info = result.get('info') if isinstance(result, dict) else None
+        _check(isinstance(info, dict), self.reject, 'BOT_GATEWAY_SESSION_MISMATCH')
+        profile = info.get('profile_id')
+        _check(_profile(profile) and profile == self.description['profile_id']
+               and ('profile_id' not in result or result['profile_id'] == profile),
+               self.reject, 'BOT_GATEWAY_SESSION_MISMATCH')
+        return profile
+
     def snapshot(self, result):
         _check(self.description is not None, self.reject, 'BOT_GATEWAY_CAPABILITY_UNCONFIRMED')
-        sid, profile = result.get('stored_session_id'), result.get('profile_id')
-        _check(_identifier(sid) and profile == self.description['profile_id'], self.reject, 'BOT_GATEWAY_SESSION_MISMATCH')
+        self.snapshot_profile(result)
+        sid = result.get('stored_session_id')
+        _check(_identifier(sid), self.reject, 'BOT_GATEWAY_SESSION_MISMATCH')
+        epoch = result.get('authority_epoch')
+        _check(type(epoch) is int and 0 <= epoch <= 2**53 - 1 and epoch == self.description['authority_epoch'],
+               self.reject, 'BOT_GATEWAY_BINDING_INVALID')
         self.snapshots[sid] = result
 
     def receipt(self, payload, binding, snapshot):
@@ -131,8 +144,8 @@ class _Session:
         _check(sid == snapshot.get('stored_session_id') and sid in self.snapshots and _identifier(sid)
                and _identifier(aid) and (sid, aid) in self.admissions,
                reject, 'BOT_REASONING_GATEWAY_BINDING_MISMATCH')
-        _check(binding.get('profile_id') == self.description['profile_id'] == snapshot.get('profile_id')
-               and binding.get('authority_epoch') == self.description['authority_epoch'],
+        _check(binding.get('profile_id') == self.description['profile_id'] == self.snapshot_profile(snapshot)
+               and binding.get('authority_epoch') == self.description['authority_epoch'] == snapshot.get('authority_epoch'),
                reject, 'BOT_REASONING_GATEWAY_BINDING_MISMATCH')
         for field in _BINDING:
             _check(payload.get(field) == binding.get(field), reject, 'BOT_REASONING_GATEWAY_BINDING_MISMATCH')

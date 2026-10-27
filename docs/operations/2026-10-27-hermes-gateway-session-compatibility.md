@@ -30,4 +30,12 @@
 
 产品验收必须是新的小型验证消息，完整动作 `succeeded`，实际助手回复匹配固定内容，推理实际请求回执存在，管理 MCP 已握手，Windows 根进程与进程树退出均确认。原 `profile_parked` 动作及较早失败/unknown 回执原样保留；不重放原业务。
 
+## 原生快照字段修复（0.1.3）
+
+本机实际安装 `0.1.2 / cffd5404…` 后，第二条新验收消息在模型调用前以 `BOT_GATEWAY_SESSION_MISMATCH / exit 125` 被拒绝，不能记为聊天修复完成。仅只读连接原生知微 Profile，按精确既有标题读取、恢复同一会话，确认原生 snapshot 没有顶层 `profile_id`，身份在 `info.profile_id`；与 `runtime.describe` 的 Profile、authority epoch 均匹配，既有历史为 406 条，未创建会话或提交 prompt。原生 `gateway/session_controls.py`、`gateway/session_local.py` 与 `GatewayChatView` 的实际投影也相符。
+
+前端桥此前误读顶层字段，隔离夹具也错误添加了该字段。修复统一读取原生嵌套身份，要求与已认证 describe 相同；若同时出现顶层字段，必须一致。缺失、冲突、非法 Profile 或 epoch 均在 admission 前拒绝；实际请求证明同样绑定该身份，不向 snapshot 填造字段、不清历史、不放宽 HOME/模型/MCP 校验。客户端及 lockfile 版本递增至 `0.1.3`。
+
+夹具先改成实际原生形状，原实现出现 7 项预期失败，再实施修复。复制本机实际原生 `gateway_chat.py` 的前端路径参与父会话复核，27 项桥接、独立 Key 及 SDK 回执测试通过，零跳过；独立 Key 仍限隔离 RPC 验证。原第二条失败动作和退出证明保留，新包安装及下一条消息仍需独立现场验收。
+
 本机脱敏事件证据在 `D:\AINavtie\ops\ziwei\hermes-gateway-parked-20261027\`；原生独立退出/健康日志在 `D:\灵光爸爸拆解\.local\hermes-gateway-parked-20261027\observer\logs`，10 秒采样，已以隔离进程验证正常退出、外部终止、unclean 恢复、身份错配、重复实例及轮转。源码测试通过不自动表示安装或产品聊天已完成，最终结论以本事件验收回执为准。
