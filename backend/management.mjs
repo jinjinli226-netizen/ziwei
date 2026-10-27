@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { normalizeRuntimeProfile } from '../src/employee-runtime.mjs';
 import { createBotService } from './bots.mjs';
 import {botProfileBinding,assertBotProfileReady} from './bot-profiles.mjs';
-import {assertEmployeeCapabilityAuthority,assertEmployeeCapabilitySubject,EMPLOYEE_CAPABILITY_INSPECTION_TYPE} from './employee-capability-inventory.mjs';
+import {assertEmployeeCapabilityAuthority,assertEmployeeCapabilitySubject,projectEmployeeCapabilityAction,EMPLOYEE_CAPABILITY_INSPECTION_TYPE} from './employee-capability-inventory.mjs';
 
 const parse = (value, fallback = {}) => { try { return JSON.parse(value) ?? fallback; } catch { return fallback; } };
 const fingerprint = value => crypto.createHash('sha256').update(JSON.stringify(canonical(value))).digest('hex');
@@ -132,7 +132,7 @@ export function createManagementService(repo) {
   const action = (slug, actionId, context = {}) => {
     const item = repo.getA2AAction(actionId, { workspaceSlug: slug });
     if (!actionVisible(slug, item, context)) fail('执行请求不存在于当前工作区', 'ACTION_NOT_FOUND', 404);
-    return item;
+    return projectEmployeeCapabilityAction(item);
   };
   const employeeStatus = (slug, employeeId, context = {}) => {
     const item = employee(slug, employeeId, context);

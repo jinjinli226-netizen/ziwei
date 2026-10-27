@@ -81,6 +81,24 @@ function projectSections(sections){
  if(!object(sections)||!['skills','mcp','cli'].every(key=>object(sections[key])&&Array.isArray(sections[key].items)))return null;
  return Object.fromEntries(['skills','mcp','cli'].map(key=>{const section=sections[key];return[key,{status:status(section.status),reason:section.reason===null?null:safeText(section.reason,300)||'UNKNOWN',items:section.items.slice(0,300).map(projectItem).filter(Boolean)}];}));
 }
+// Generic browser action reads cross the same public projection boundary as
+// inventory GET. Device result/error/events are stored intact, but their
+// arbitrary diagnostics are not a second public inventory response schema.
+export function projectEmployeeCapabilityAction(action){
+ if(action?.type!==EMPLOYEE_CAPABILITY_INSPECTION_TYPE)return action;
+ const payload=action.payload,subject=payload.capabilityInspection.subject;
+ const value=action.result?.employeeCapabilities||action.result?.result?.employeeCapabilities;
+ const sections=action.status==='succeeded'&&object(value)&&value.schemaVersion===1&&value.source==='device_readonly'&&same(value.subject,subject)?projectSections(value.sections):null;
+ const checkedAt=Date.parse(value?.checkedAt),result=sections&&Number.isFinite(checkedAt)?{employeeCapabilities:{schemaVersion:1,subject,source:'device_readonly',checkedAt:new Date(checkedAt).toISOString(),sections}}:null;
+ const out=Object.fromEntries(['id','task_id','agent_id','type','status','dedupe_key','created_at','acked_at','completed_at'].filter(key=>Object.hasOwn(action,key)).map(key=>[key,action[key]]));
+ out.payload={workspace:payload.workspace,workspaceId:payload.workspaceId,userId:payload.userId||null,deviceId:payload.deviceId,runtime:payload.runtime,profile:payload.profile,capabilityInspection:{schemaVersion:1,subject}};
+ out.result=result;out.error=action.error?'EMPLOYEE_CAPABILITIES_INSPECTION_FAILED':null;
+ if(Array.isArray(action.events)){
+  const types=new Set(['created','acked','progress','succeeded','failed','expired','cancelled']);
+  out.events=action.events.map(event=>({id:event.id,action_id:action.id,type:types.has(event.type)?event.type:'event',created_at:event.created_at}));
+ }
+ return out;
+}
 const unknownSections=reason=>Object.fromEntries(['skills','mcp','cli'].map(key=>[key,{status:'unknown',reason,items:[]}]));
 const sectionSummary=sections=>Object.fromEntries(['skills','mcp','cli'].map(key=>[key,sections[key]?.status==='ready'?sections[key].items.length:null]));
 

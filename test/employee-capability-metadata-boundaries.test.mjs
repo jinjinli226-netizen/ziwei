@@ -27,3 +27,9 @@ test('valid quoted TOML MCP names with dots stay visible without reading authent
 test('unsupported MCP table spelling is explicit partial rather than a complete empty list',async t=>{
  const home=fixture(t);fs.writeFileSync(path.join(home,'config.toml'),'[mcp_servers."name with spaces"]\ncommand="fixture"\n');const value=await collect(home,{subject:{...subject,runtime:'Codex',profile:null}});assert.equal(value.sections.mcp.status,'partial');assert.equal(value.sections.mcp.reason,'native_configuration_partial');
 });
+
+for(const header of ['[ mcp_servers.foo ]','[mcp_servers . foo]','[ "mcp_servers" . foo ]',"[ 'mcp_servers' . foo ]",'["mcp_\\u0073ervers".foo]','[[ mcp_servers.foo ]]'])test(`unrecognized legal MCP-like TOML header fails closed (${header})`,async t=>{
+ const home=fixture(t);fs.writeFileSync(path.join(home,'config.toml'),header+'\ncommand="fixture-never-executed"\n');
+ const value=await collect(home,{subject:{...subject,runtime:'Codex',profile:null}});
+ assert.equal(value.sections.mcp.status,'partial');assert.equal(value.sections.mcp.reason,'native_configuration_partial');assert.equal(value.sections.mcp.items.length,0);
+});

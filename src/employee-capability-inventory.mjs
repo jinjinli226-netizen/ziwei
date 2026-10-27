@@ -135,7 +135,13 @@ function tomlMcp(content){
  for(const line of content.split(/\r?\n/)){
   if(/^\s*\[/.test(line)){
    name=null;const header=line.match(table);
-   if(!header){if(/^\s*\[\[?mcp_servers(?:\.|\])/.test(line))incomplete=true;continue;}
+   if(!header){
+    // A legal TOML root can contain whitespace or be quoted/escaped. An
+    // unhandled MCP header is incomplete evidence, never an exact empty list.
+    const root=line.match(/^\s*\[\s*\[?\s*(?:([A-Za-z0-9_-]+)|("(?:[^"\\]|\\.)*")|'([^']*)')(?=\s*(?:\.|\]))/);
+    let key=root?.[1]??root?.[3];if(root?.[2])try{key=JSON.parse(root[2]);}catch{incomplete=true;}
+    if(key==='mcp_servers')incomplete=true;continue;
+   }
    let parsed;try{parsed=header[1]??(header[2]!==undefined?JSON.parse('"'+header[2]+'"'):header[3]);}catch{incomplete=true;continue;}
    if(!safeName(parsed)){incomplete=true;continue;}if(header[4])continue;
    name=parsed;if(!Object.hasOwn(servers,name)){if(count>=MAX_ITEMS){truncated=true;break;}count++;servers[name]={};}continue;

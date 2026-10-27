@@ -158,3 +158,38 @@ for(const phase of ['ack','execution-admission'])test(`personal workspace device
  assert.equal((await f.read()).status,403);
  const response=await f.deviceRequest(id,phase);assert.equal(response.status,403);assert.equal(response.json.code,'EMPLOYEE_CAPABILITIES_AUTHORITY_REVOKED');assert.equal(f.calls.length,0);
 });
+
+test('generic inventory HTTP read projects authenticated device result and event extras while dedicated GET keeps safe sections',async t=>{
+ const f=fixture(t),r=await f.refresh(),id=r.json.pending.actionId,{result}=await f.dispatch(id),secret='DEVICE_SUPPLIED_RAW_SECRET_MUST_NOT_LEAK';
+ assert.equal((await f.deviceRequest(id,'events',{type:secret,message:secret,data:{apiKey:secret,rawConfig:{token:secret},output:secret}})).status,202);
+ result.result.apiKey=secret;result.result.rawConfig={password:secret};result.result.output=secret;result.result.employeeCapabilities.rawSecret=secret;result.result.employeeCapabilities.sections.skills.items[0].rawSecret=secret;
+ assert.equal((await f.deviceRequest(id,'result',{status:'succeeded',result:result.result})).status,200);
+ const dedicated=await f.read();assert.equal(dedicated.json.status,'ready');assert.equal(dedicated.json.sections.skills.items[0].name,'fixture-local');
+ const view=await request(f.app,`/api/workspaces/${SLUG}/actions/${id}`,{cookie:f.cookie});assert.equal(view.status,200);
+ assert.equal(JSON.stringify(view.json).includes(secret),false);
+ assert.equal(view.json.result.employeeCapabilities.sections.skills.items[0].name,'fixture-local');
+ assert.equal(view.json.dedupe_key,f.repo.getA2AAction(id).dedupe_key);assert.deepEqual(view.json.payload.capabilityInspection.subject,dedicated.json.subject);
+ for(const field of ['apiKey','rawConfig','rawSecret','output'])assert.equal(JSON.stringify(view.json).includes('"'+field+'"'),false);
+ // Source receipt and diagnostic events remain intact for device/history storage.
+ assert.equal(f.repo.getA2AAction(id).result.rawConfig.password,secret);
+ assert.ok(f.repo.getA2AAction(id).events.some(event=>event.message===secret));
+});
+
+test('generic failed inventory HTTP read does not return raw device error, output or event diagnostic',async t=>{
+ const f=fixture(t),r=await f.refresh(),id=r.json.pending.actionId,secret='RAW_FAILURE_CREDENTIAL_DIAGNOSTIC_MUST_NOT_LEAK';
+ assert.equal((await f.deviceRequest(id,'ack')).status,200);
+ assert.equal((await f.deviceRequest(id,'events',{type:'progress',message:secret,data:{rawSecret:secret}})).status,202);
+ assert.equal((await f.deviceRequest(id,'result',{status:'failed',error:secret,result:{output:secret,rawSecret:secret}})).status,200);
+ const view=await request(f.app,`/api/workspaces/${SLUG}/actions/${id}`,{cookie:f.cookie});assert.equal(view.status,200);
+ assert.equal(view.json.status,'failed');assert.equal(JSON.stringify(view.json).includes(secret),false);assert.equal(view.json.result,null);
+ assert.equal(f.repo.getA2AAction(id).error,secret);assert.equal(f.repo.getA2AAction(id).result.output,secret);
+});
+
+test('generic non-inventory HTTP read retains its original result error and events',async t=>{
+ const f=fixture(t),secret='UNRELATED_ACTION_ORIGINAL_DIAGNOSTIC',action=f.repo.createA2AAction(SLUG,{type:'fixture.diagnostic',payload:{deviceId:f.pair.deviceId},dedupeKey:'unrelated-diagnostic'}),id=action.id;
+ assert.equal((await f.deviceRequest(id,'ack')).status,200);
+ assert.equal((await f.deviceRequest(id,'events',{type:'progress',message:secret,data:{rawSecret:secret}})).status,202);
+ assert.equal((await f.deviceRequest(id,'result',{status:'failed',error:secret,result:{output:secret}})).status,200);
+ const view=await request(f.app,`/api/workspaces/${SLUG}/actions/${id}`,{cookie:f.cookie});assert.equal(view.status,200);
+ assert.equal(view.json.error,secret);assert.equal(view.json.result.output,secret);assert.ok(view.json.events.some(event=>event.message===secret));
+});
