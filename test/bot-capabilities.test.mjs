@@ -201,9 +201,10 @@ test('shared global gate reflects saved-but-unvalidated settings and paused stat
 test('only the actual active lock blocks globally, including expired ACK from an old epoch',()=>{
   const f=fixture(),a=native(f,'memory','read',{});a.status='expired';a.acked_at='2026-10-15T03:59:00Z';a.payload.hermesBot.controlEpoch=5;
   assert.equal(derive(f).capabilityGate.state,'ready');
-  f.activeAction=a;assert.equal(derive(f).capabilityGate.state,'failed');assert.equal(derive(f).capabilityGate.action.tab,'activity');
+  f.activeAction=a;assert.equal(derive(f).capabilityGate.state,'ready');
   f.activeAction={...a,status:'acked'};assert.equal(derive(f).capabilityGate.state,'checking');
-  f.activeAction={...a,status:'failed',result:{code:'EXECUTION_UNCERTAIN'}};assert.equal(derive(f).capabilityGate.state,'failed');
+  f.activeAction={...a,status:'failed',result:{code:'EXECUTION_UNCERTAIN'}};assert.equal(derive(f).capabilityGate.state,'ready');
+  f.activeAction={...a,status:'failed',result:{processAlive:true}};assert.equal(derive(f).capabilityGate.state,'failed');
 });
 
 test('routines report actual saved schedule and do not imply a successful model execution',()=>{
@@ -223,6 +224,6 @@ test('real in-memory Bot facade reports profile validation, oneclick save and ol
     const msg=repo.addConversationMessage(bot.main_conversation_id,{content:'等待原回执'});repo.ackA2AAction(msg.execution.id,{deviceId:'bot-pc'});
     bots.control('test-111',bot.id,{expectedRevision:1,expectedControlEpoch:2,operation:'pause'});
     repo.db.prepare("UPDATE a2a_actions SET status='expired' WHERE id=?").run(msg.execution.id);
-    bot=bots.get('test-111',bot.id);assert.equal(bot.capabilityGate.state,'failed');assert.match(bot.capabilityGate.reason,/原执行/);
+    bot=bots.get('test-111',bot.id);assert.notEqual(bot.capabilityGate.state,'failed');assert.doesNotMatch(bot.capabilityGate.reason,/未核实/);
   }finally{repo.db.close();}
 });

@@ -194,7 +194,7 @@ export function createBotWorkbench({api,wrap=value=>value,wait=ms=>new Promise(r
       const current=await getBot(id,workspace);if(!scope.current(request))throw new Error('当前员工已变化');
       const body=failureFinalizationRequest(current,run);
       return body?api.finalizeBotFailure(id,body,workspace):current;
-    },bot=>pendingBotFailureFinalization(bot)?'本轮已失败，系统正在原电脑自动收尾。':'已刷新原执行状态，原始失败回执保留。',{readback:true});
+    },bot=>pendingBotFailureFinalization(bot)?'本轮执行失败，原始回执已保留。':'已刷新原执行状态，原始失败回执保留。',{readback:true});
     if(scope.current(request)){const error=state.error;await refresh();if(scope.current(request)&&!ok)state.error=error;}
     return ok;
   }

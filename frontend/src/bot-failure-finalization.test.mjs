@@ -24,20 +24,20 @@ function metadata(state='awaiting_client'){
 const withFinalization=(state='awaiting_client')=>({...runFixture(),failureFinalization:metadata(state)});
 
 test('separate disposition changes the failed presentation and polling without confirming business or process exit',()=>{
-  const original=runFixture();assert.equal(executionPresentation(original).summary,'失败');assert.equal(executionNeedsPolling(original),true);
-  const pending=withFinalization();assert.equal(finalization.failureFinalization(pending),pending.failureFinalization);assert.equal(executionPresentation(pending).summary,'失败，正在自动收尾');assert.equal(executionNeedsPolling(pending),true);
-  const archived=withFinalization('client_archived');assert.equal(executionPresentation(archived).summary,'失败 · 已结束本次执行');assert.equal(executionNeedsPolling(archived),false);assert.equal(executionPresentation(archived).retryable,false);
+  const original=runFixture();assert.equal(executionPresentation(original).summary,'失败');assert.equal(executionNeedsPolling(original),false);
+  const pending=withFinalization();assert.equal(finalization.failureFinalization(pending),pending.failureFinalization);assert.equal(executionPresentation(pending).summary,'失败');assert.equal(executionNeedsPolling(pending),false);
+  const archived=withFinalization('client_archived');assert.equal(executionPresentation(archived).summary,'失败');assert.equal(executionNeedsPolling(archived),false);assert.equal(executionPresentation(archived).retryable,false);
   assert.equal(presentation.executionUncertain(archived),true);assert.equal(presentation.processExitConfirmed(archived.result),false);assert.equal(presentation.botStopPresentation(botFixture(archived)).confirmed,false);assert.equal(presentation.botRecoveryEvent(archived),null);
   assert.deepEqual(archived.result,original.result);assert.equal(archived.error,original.error);
 });
 test('cross-action, nested result flags and incomplete ACKs never unlock the failed execution',()=>{
   const candidates=[{...runFixture(),result:{...runFixture().result,failureFinalization:metadata('client_archived')}},{...runFixture(),events:[{type:'bot.failed_execution_finalization',data:metadata('client_archived')}]},withFinalization('client_archived'),withFinalization('client_archived'),withFinalization('client_archived')];
   candidates[2].failureFinalization.receipt.subject.actionId='other';candidates[3].failureFinalization.acknowledgement.ack.receiptDigest='b'.repeat(64);delete candidates[4].failureFinalization.acknowledgement;
-  for(const run of candidates){assert.equal(finalization.failureFinalization(run),null);assert.equal(executionNeedsPolling(run),true);assert.equal(presentation.executionUncertain(run),true);}
+  for(const run of candidates){assert.equal(finalization.failureFinalization(run),null);assert.equal(executionNeedsPolling(run),false);assert.equal(presentation.executionUncertain(run),true);}
 });
-test('pending Bot disposition remains visible and polls when a readonly action is newer',()=>{
+test('pending archive stays diagnostic without keeping receipt polling alive',()=>{
   const bot={...botFixture(),active_action_id:null,failureFinalization:metadata(),latest_run:{id:'read-only-inspection',status:'succeeded'}};
-  assert.equal(executionNeedsPolling(bot.latest_run,bot),true);assert.equal(presentation.botPresence(bot).label,'失败，正在自动收尾');assert.equal(finalization.finalizationPresentation(finalization.pendingBotFailureFinalization(bot),{offline:true}).summary,'失败，等待电脑连接');
+  assert.equal(executionNeedsPolling(bot.latest_run,bot),false);assert.equal(presentation.botPresence(bot).label,'上次已完成');assert.equal(finalization.finalizationPresentation(finalization.pendingBotFailureFinalization(bot),{offline:true}).summary,'失败');
   assert.equal(finalization.pendingBotFailureFinalization({...bot,id:'another'}),null);
 });
 test('legacy request pins active action, employee, computer, profile and current control version with a stable key',()=>{
@@ -61,7 +61,7 @@ function chatHarness(overrides={}){
   return{refs,writes,notices,refreshes,reads,initial,persisted,run:actualFunction(app,'finalizeBotChatFailure',bindings,'let conversationOpenGeneration=0,botChatBindingGeneration=0')};
 }
 test('actual chat ends the exact failed action through finalization API, then rereads server state without replaying or fake stopping',async()=>{
-  const ui=chatHarness();await ui.run();assert.deepEqual(ui.writes,[['employee',finalization.failureFinalizationRequest(ui.initial,ui.initial.latest_run),'qa']]);assert.equal(ui.reads.length,2);assert.deepEqual(ui.refreshes,[{force:true}]);assert.equal(ui.refs.conversationBotBinding.value,ui.persisted);assert.equal(ui.refs.conversationExecution.value.status,'failed');assert.equal(ui.refs.botChatFinalizationBusy.value,false);assert.match(ui.notices[0][0],/自动收尾/);assert.doesNotMatch(ui.notices[0][0],/已停止|已成功|已完成/);
+  const ui=chatHarness();await ui.run();assert.deepEqual(ui.writes,[['employee',finalization.failureFinalizationRequest(ui.initial,ui.initial.latest_run),'qa']]);assert.equal(ui.reads.length,2);assert.deepEqual(ui.refreshes,[{force:true}]);assert.equal(ui.refs.conversationBotBinding.value,ui.persisted);assert.equal(ui.refs.conversationExecution.value.status,'failed');assert.equal(ui.refs.botChatFinalizationBusy.value,false);assert.match(ui.notices[0][0],/执行失败/);assert.doesNotMatch(ui.notices[0][0],/已停止|已成功|已完成/);
 });
 test('actual chat rechecks current occupancy before mutation and does not target a newer action',async()=>{
   const ui=chatHarness({bot:async()=>({...botFixture(),active_action_id:'newer'})});await ui.run();assert.equal(ui.writes.length,0);assert.deepEqual(ui.refreshes,[{force:true}]);assert.equal(ui.refs.botChatFinalizationBusy.value,false);
@@ -74,12 +74,24 @@ test('late finalization completion cannot overwrite another employee or toast on
 });
 function componentState(run,bot=botFixture(run),device={status:'online'}){
   const source=component.slice(component.indexOf('<script setup>')+14,component.indexOf('function closeMenus(')).replace(/^import .*;\r?\n/gm,'');
-  const sent=[],bindings={computed,ref,defineProps:()=>({bot,execution:run,conversation:{id:'conversation',messages:[]},device,draft:'next work',attachments:[]}),defineEmits:()=>name=>sent.push(name),...finalization,...presentation,chatLocalTime,conversationFiles,historicalPrelaunchRecovery,operatorForceAbandonRecovery,ownedBotChatBlockReason};
+  const sent=[],bindings={computed,ref,executionPresentation,defineProps:()=>({bot,execution:run,conversation:{id:'conversation',messages:[]},device,draft:'next work',attachments:[]}),defineEmits:()=>name=>sent.push(name),...finalization,...presentation,chatLocalTime,conversationFiles,historicalPrelaunchRecovery,operatorForceAbandonRecovery,ownedBotChatBlockReason};
   return new Function(...Object.keys(bindings),`${source};return {blocksSending,canFinalize,executionState,status,keydown,sent:arguments[arguments.length-1]};`)(...Object.values(bindings),sent);
 }
-test('actual composer shows a real legacy end button, blocks during cleanup, and accepts Enter only after client archive',()=>{
-  const legacy=componentState(runFixture());assert.equal(legacy.canFinalize.value,true);assert.equal(legacy.blocksSending.value,true);
-  const pending=componentState(withFinalization(),{...botFixture(withFinalization()),failureFinalization:metadata(),active_action_id:null},{status:'offline'});assert.equal(pending.canFinalize.value,false);assert.equal(pending.blocksSending.value,true);assert.equal(pending.status.value,'失败，等待电脑连接');pending.keydown({key:'Enter',preventDefault(){}});assert.deepEqual(pending.sent,[]);
+test('an old pending archive never overrides a newer running action',()=>{
+  const next={id:'next-action',status:'acked',payload:{employeeId:'employee'}},bot={...botFixture(),active_action_id:next.id,failureFinalization:metadata(),latest_run:next};
+  assert.equal(presentation.botPresence(bot).label,'正在执行');assert.equal(executionNeedsPolling(next,bot),true);
+  const ui=componentState(next,bot);assert.equal(ui.executionState.value.summary,'执行中');assert.equal(ui.blocksSending.value,false);
+});
+
+test('positive live-process evidence blocks a new message without changing the failed presentation',()=>{
+  const run={...runFixture(),result:{...runFixture().result,processAlive:true}},ui=componentState(run);
+  assert.equal(ui.status.value,'失败');assert.equal(ui.blocksSending.value,true);
+  ui.keydown({key:'Enter',preventDefault(){}});assert.deepEqual(ui.sent,[]);
+});
+
+test('actual composer accepts the next message before archive ACK and blocks only a live process',()=>{
+  const legacy=componentState(runFixture());assert.equal(legacy.canFinalize.value,false);assert.equal(legacy.blocksSending.value,false);
+  const pending=componentState(withFinalization(),{...botFixture(withFinalization()),failureFinalization:metadata(),active_action_id:null},{status:'offline'});assert.equal(pending.canFinalize.value,false);assert.equal(pending.blocksSending.value,false);assert.equal(pending.status.value,'失败');pending.keydown({key:'Enter',preventDefault(){}});assert.deepEqual(pending.sent,['send']);
   const archived=componentState(withFinalization('client_archived'),{...botFixture(withFinalization('client_archived')),active_action_id:null});assert.equal(archived.blocksSending.value,false);assert.equal(archived.executionState.value.tone,'error');archived.keydown({key:'Enter',preventDefault(){}});assert.deepEqual(archived.sent,['send']);
   assert.match(component,/@click="emit\('finalize-failure'\)"/);assert.match(app,/@finalize-failure="finalizeBotChatFailure"/);
 });
@@ -89,5 +101,5 @@ test('actual failure polling rereads Bot binding so a client ACK cannot leave a 
 });
 test('workbench finalization keeps drafts and original failed result, and refreshes server disposition',async()=>{
   const original=runFixture();let bot=botFixture(original),writes=[];const ui=createBotWorkbench({api:{bots:async()=>({bots:[bot]}),bot:async()=>bot,botRuns:async()=>({runs:[bot.latest_run]}),botRoutines:async()=>({routines:[]}),finalizeBotFailure:async(...args)=>{writes.push(args);bot={...bot,active_action_id:null,control_epoch:26,failureFinalization:metadata(),latest_run:withFinalization()};return metadata();}}});
-  await ui.setWorkspace('qa','employee');ui.state.draft.employee.name='Keep unsaved name';assert.equal(await ui.finalizeFailure(original),true);assert.equal(writes.length,1);assert.equal(writes[0][1].expectedActionId,'action-original');assert.equal(ui.state.draft.employee.name,'Keep unsaved name');assert.equal(ui.state.bot.latest_run.status,'failed');assert.deepEqual(ui.state.bot.latest_run.result,original.result);assert.match(ui.state.notice,/自动收尾/);
+  await ui.setWorkspace('qa','employee');ui.state.draft.employee.name='Keep unsaved name';assert.equal(await ui.finalizeFailure(original),true);assert.equal(writes.length,1);assert.equal(writes[0][1].expectedActionId,'action-original');assert.equal(ui.state.draft.employee.name,'Keep unsaved name');assert.equal(ui.state.bot.latest_run.status,'failed');assert.deepEqual(ui.state.bot.latest_run.result,original.result);assert.match(ui.state.notice,/执行失败/);
 });

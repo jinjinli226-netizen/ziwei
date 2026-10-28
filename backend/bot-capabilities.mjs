@@ -1,4 +1,5 @@
 import {validateHistoricalPrelaunchReceipt} from '../src/bot-historical-prelaunch-policy.mjs';
+import {botExecutionOccupiesSlot} from './bot-execution-occupancy.mjs';
 const navigate=(label,tab)=>({kind:'navigate',label,tab});
 const short=value=>String(value||'').replace(/[\r\n]+/g,' ').slice(0,160);
 const uncertain=value=>Boolean(value&&typeof value==='object'&&(value.code==='EXECUTION_UNCERTAIN'||value.executionState==='uncertain'||Object.values(value).some(uncertain)));
@@ -30,7 +31,7 @@ export function deriveBotCapabilities({bot,capabilities=[],device=null,runtime=n
   if(bot?.configuration_state!=='initialized')setGate('needs_configuration',bot?.kind==='creator'?'此 Creator 使用原管理入口。':'此员工尚未初始化 Bot。',navigate(bot?.kind==='creator'?'打开 Creator 聊天':'初始化 Bot',bot?.kind==='creator'?'chat':'settings'));
   else if(bot?.effect?.executionAdmission?.deviceExecution==='blocked')setGate('unavailable',short(bot.effect.executionAdmission.message)||'运行电脑需要更新客户端。',navigate('检查电脑客户端','settings'));
   else if(bot?.instance?.mode==='owned_profile'&&(provision?.status!=='provisioned'||!bot.instance.home))setGate(['pending','acked','not_started'].includes(provision?.status)?'checking':'failed',provision?.status==='uncertain'?'专属 Profile 创建结果待核实。':short(provision?.error)||'专属 Profile 尚未取得创建成功回执。',navigate('查看创建状态','settings'));
-  else if(blockingAction&&!recoveredConversation(blockingAction)&&(uncertain(blockingAction.result)||blockingAction.status==='expired'&&blockingAction.acked_at))setGate('failed','原执行结果尚未核实，暂不能派发新工作。',navigate('核实原执行','activity'));
+  else if(blockingAction&&!inFlight(blockingAction)&&!recoveredConversation(blockingAction)&&botExecutionOccupiesSlot(blockingAction))setGate('failed','本轮已失败，原进程仍在运行，可请求停止。',navigate('查看原进程','activity'));
   else if(blockingAction&&inFlight(blockingAction))setGate('checking','原执行仍在进行，等待本次结果后才能派发新工作。',navigate('查看原执行','activity'));
   else if(!device||device.id!==employee.target_device_id||device.status!=='online'||device.healthy===false)setGate('offline',!device?'尚未发现此 Bot 的运行电脑。':'此 Bot 的运行电脑离线或心跳已过期。',navigate('检查运行电脑','settings'));
   else if(!runtime||runtime.cli_status!=='available'||runtime.available===false)setGate('unavailable',short(runtime?.issues?.[0]?.message)||'运行电脑尚未发现可用 Hermes CLI。',navigate('检查 Hermes 环境','settings'));

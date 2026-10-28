@@ -1,7 +1,7 @@
 <script setup>
 import {computed,nextTick,onBeforeUnmount,onMounted,ref,watch} from 'vue';
 import {ArrowLeft,ArrowUp,Plus,Settings2,PanelRight,ChevronDown,Monitor,Folder,MoreHorizontal,Smartphone,X,RefreshCw,Square,Download,FileText,Clock3} from 'lucide-vue-next';
-import {botPresence,executionUncertain,botStopPresentation,botRecoveryEvent,botRecoveryDetail,processExitConfirmed} from '../bot-presentation.js';
+import {botPresence,executionUncertain,botStopPresentation,botRecoveryEvent,botRecoveryDetail,processExitConfirmed,executionProcessActive} from '../bot-presentation.js';
 import {chatLocalTime,conversationFiles} from '../bot-main-chat.js';
 import {isConversationNearBottom,shouldLoadEarlierHistory,restoreConversationPrependScroll} from '../conversation-history.mjs';
 import {ownedBotChatBlockReason} from '../bot-owned-profile.js';
@@ -22,10 +22,10 @@ const historyRequested=ref(false),hasEarlierHistory=computed(()=>props.conversat
 let disposed=false,renderGeneration=0,renderedConversation='',renderedFirstMessage='',previousScrollTop=0,userScrollIntent=false,touchY=null,prependAnchor=null;
 const historicalRecovery=computed(()=>historicalPrelaunchRecovery(props.execution)||operatorForceAbandonRecovery(props.execution));
 const uncertain=computed(()=>executionUncertain(props.execution));
-const finalization=computed(()=>pendingBotFailureFinalization(props.bot)||failureFinalization(props.execution));
+const finalization=computed(()=>failureFinalization(props.execution)||(!props.execution?pendingBotFailureFinalization(props.bot):null));
 const finalizationState=computed(()=>finalizationPresentation(finalization.value,{offline:props.device?.status==='offline'}));
-const canFinalize=computed(()=>Boolean(failureFinalizationRequest(props.bot,props.execution)));
-const blocksSending=computed(()=>finalizationState.value?.pending||uncertain.value&&!failureFinalization(props.execution));
+const canFinalize=computed(()=>executionProcessActive(props.execution?.result)&&Boolean(failureFinalizationRequest(props.bot,props.execution)));
+const blocksSending=computed(()=>executionProcessActive(props.execution?.result)&&props.bot?.active_action_id===props.execution?.id);
 const recoveryEvent=computed(()=>botRecoveryEvent(props.execution));
 const stopState=computed(()=>botStopPresentation(props.bot,props.execution));
 const blockedReason=computed(()=>ownedBotChatBlockReason(props.bot));
@@ -123,10 +123,10 @@ onBeforeUnmount(()=>{disposed=true;renderGeneration++;prependAnchor=null;window.
                 <div class="bot-chat-chip-menu"><button class="bot-chat-chip" aria-label="绑定电脑" :aria-expanded="menu==='device'" @click="toggleMenu('device',$event)"><Monitor :size="14"/><span>{{device?.name||'电脑状态待同步'}}</span><ChevronDown :size="12"/></button><div v-if="menu==='device'" class="bot-chat-popover" :style="popoverStyle"><strong>{{device?.name||'绑定电脑'}}</strong><p>{{device?.status==='online'?'当前在线':device?.status==='offline'?'当前离线':'状态待同步'}}</p><small>{{bot?.instance?.mode==='owned_profile'?'专属 Profile':'来源 Profile'}}：{{bot?.employee?.runtime_profile||'待核对'}}。绑定保持在同一 Bot。</small><button @click="menu='';emit('settings','settings')">查看运行绑定</button></div></div>
                 <button class="bot-chat-chip directory-chip" aria-label="选择目录" :title="workingDirectory||'检查并选择工作目录'" @click="emit('directory')"><Folder :size="14"/><span>{{directoryLabel}}</span><ChevronDown :size="12"/></button>
               </div>
-              <button v-if="canFinalize" class="bot-chat-stop" aria-label="结束本次失败执行" :disabled="finalizationBusy||stopBusy||reconcileBusy||statusLoading" @click="emit('finalize-failure')"><Square :size="16"/>{{finalizationBusy?'正在结束…':'结束本次执行'}}</button><button v-else-if="canStop&&!finalizationState" class="bot-chat-stop" aria-label="请求停止当前执行" :disabled="stopBusy||reconcileBusy" @click="emit('stop')"><Square :size="16"/>{{stopBusy?'请求中':'停止'}}</button><button v-else class="bot-chat-send" aria-label="发送" :disabled="Boolean(blockedReason)||blocksSending||finalizationBusy||sendPending||attachmentReading||statusLoading||(!draft.trim()&&!attachments.length)" @click="emit('send')"><ArrowUp :size="21"/></button>
+              <button v-if="canFinalize" class="bot-chat-stop" aria-label="结束本次失败执行" :disabled="finalizationBusy||stopBusy||reconcileBusy||statusLoading" @click="emit('finalize-failure')"><Square :size="16"/>{{finalizationBusy?'正在结束…':'结束本次执行'}}</button><button v-else-if="canStop" class="bot-chat-stop" aria-label="请求停止当前执行" :disabled="stopBusy||reconcileBusy" @click="emit('stop')"><Square :size="16"/>{{stopBusy?'请求中':'停止'}}</button><button v-else class="bot-chat-send" aria-label="发送" :disabled="Boolean(blockedReason)||blocksSending||finalizationBusy||sendPending||attachmentReading||statusLoading||(!draft.trim()&&!attachments.length)" @click="emit('send')"><ArrowUp :size="21"/></button>
             </div>
           </div>
-          <p v-if="finalizationState" class="bot-chat-error" role="status"><strong>{{finalizationState.summary}}</strong> · {{finalizationState.detail}}</p><p v-if="blockedReason" class="bot-chat-error" role="status">{{blockedReason}} <button class="bot-chat-text-link" @click="emit('settings','activity')">打开 Bot 设置</button></p><p v-if="sendError" class="bot-chat-error" role="alert">{{sendError}}</p><p class="bot-chat-compose-note">{{attachmentReading?'正在读取图片…':sendPending?'正在核对原发送请求…':finalizationState?.pending?'可先写下下一条消息，自动收尾完成后可发送。':canFinalize?'点击“结束本次执行”，系统会在原电脑自动收尾。':blocksSending?'正在等待原执行回执，可请求停止。':'Enter 发送 · Shift + Enter 换行'}}<span>支持 PNG、JPG/JPEG、GIF、WebP · 每条最多 20 张，合计最多 10 MB。</span></p>
+          <p v-if="finalizationState" class="bot-chat-error" role="status"><strong>{{finalizationState.summary}}</strong> · {{finalizationState.detail}}</p><p v-if="blockedReason" class="bot-chat-error" role="status">{{blockedReason}} <button class="bot-chat-text-link" @click="emit('settings','activity')">打开 Bot 设置</button></p><p v-if="sendError" class="bot-chat-error" role="alert">{{sendError}}</p><p class="bot-chat-compose-note">{{attachmentReading?'正在读取图片…':sendPending?'正在核对原发送请求…':blocksSending?'本轮已失败，原进程仍在运行，可请求停止。':'Enter 发送 · Shift + Enter 换行'}}<span>支持 PNG、JPG/JPEG、GIF、WebP · 每条最多 20 张，合计最多 10 MB。</span></p>
         </footer>
       </main>
       <aside v-if="panel" class="bot-chat-work" aria-label="Bot 工作面板"><div class="bot-chat-work-heading"><strong>工作面板</strong><button aria-label="关闭工作面板" @click="panel=false"><X :size="18"/></button></div><button class="bot-chat-work-refresh" :disabled="workLoading" @click="emit('refresh-work')"><RefreshCw :size="14"/>{{workLoading?'同步中…':'刷新实际记录'}}</button><p v-if="workError" class="bot-chat-error">{{workError}}</p>

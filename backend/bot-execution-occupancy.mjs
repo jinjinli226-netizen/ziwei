@@ -1,8 +1,8 @@
+import {executionProcessActive} from '../src/bot-execution-state.mjs';
 // Occupancy and business success are separate. This exception never changes an
 // old action's unknown phone result, retries its work, or proves its tree exited.
 const object=value=>Boolean(value&&typeof value==='object'&&!Array.isArray(value));
 const decode=value=>{if(object(value))return value;try{const parsed=JSON.parse(value);return object(parsed)?parsed:null;}catch{return null;}};
-const uncertain=value=>{const seen=new Set();while(object(value)){if(seen.has(value)||seen.size>100||value.code==='EXECUTION_UNCERTAIN'||value.executionState==='uncertain')return true;seen.add(value);value=value.result;}return false;};
 const identifier=value=>typeof value==='string'&&/^[A-Za-z0-9_-][A-Za-z0-9._:-]{0,199}$/.test(value);
 const knownKeys=(value,keys)=>object(value)&&Object.keys(value).every(key=>keys.includes(key));
 const equal=(left,right)=>JSON.stringify(left)===JSON.stringify(right);
@@ -107,9 +107,9 @@ export function exitedReadOnlyPhoneObservation(action,expected={}){
   return phoneObservationOnly(phone);
 }
 
-/** Preserve the existing occupancy rule, with the narrow observation exception. */
+/** Terminal failures reserve a slot only for positive live-process evidence. */
 export function botExecutionOccupiesSlot(action,expected={}){
   if(!action)return false;
-  if(['pending','acked'].includes(action.status)||action.status==='expired'&&action.acked_at)return true;
-  return uncertain(decode(action.result??action.result_json))&&!exitedReadOnlyPhoneObservation(action,expected);
+  if(['pending','acked'].includes(action.status))return true;
+  return executionProcessActive(decode(action.result??action.result_json))&&!exitedReadOnlyPhoneObservation(action,expected);
 }

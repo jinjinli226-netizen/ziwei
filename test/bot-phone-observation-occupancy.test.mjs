@@ -47,7 +47,7 @@ keepBusy('a still-running root remains busy',a=>{a.result.processExit.rootExitCo
 keepBusy('a failed supervisor remains busy',a=>{a.result.processExit.failureCode='WINDOWS_JOB_UNKNOWN';});
 keepBusy('a cancelled signal remains busy',a=>{a.result.processExit.signal='SIGTERM';});
 keepBusy('an unclassified retained process tree remains busy',a=>{delete a.result.processExit.backgroundProcessesRetained;});
-keepBusy('contradictory empty retained process evidence remains busy',a=>{a.result.processExit.activeProcesses=0;});
+test('an empty process count does not hold a failed slot for an uncertain receipt',()=>{const action=fixtureAction();action.result.processExit.activeProcesses=0;assert.equal(botExecutionOccupiesSlot(action),false);});
 keepBusy('unknown native execution evidence remains busy',a=>{a.result.nativeOperation={status:'uncertain'};});
 keepBusy('unknown supervision evidence remains busy',a=>{a.result.supervision={rootConfirmed:false};});
 keepBusy('unrecognized future runtime evidence remains busy',a=>{a.result.unrecognizedNativeEvidence={safe:true};});
@@ -97,7 +97,7 @@ function liveRepositoryFixture(t){
 test('a new Bot chat replaces occupancy without rewriting the original unknown result or old events',t=>{
   const f=liveRepositoryFixture(t);f.repo.resultA2AAction(f.action.id,{status:'failed',error:'Synthetic context capacity failure',result:f.failure.result});
   const before=f.repo.db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(f.action.id),events=f.repo.listA2AEvents(f.action.id);
-  assert.equal(f.repo.db.prepare('SELECT active_action_id FROM hermes_bots WHERE employee_id=?').get(f.bot.id).active_action_id,f.action.id);
+  assert.equal(f.repo.db.prepare('SELECT active_action_id FROM hermes_bots WHERE employee_id=?').get(f.bot.id).active_action_id,null);
   const next=f.repo.addConversationMessage(f.bot.main_conversation_id,{content:'Read only current health; do not replay the previous business'});
   assert.notEqual(next.execution.id,f.action.id);assert.equal(f.repo.db.prepare('SELECT active_action_id FROM hermes_bots WHERE employee_id=?').get(f.bot.id).active_action_id,next.execution.id);
   assert.deepEqual(f.repo.db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(f.action.id),before);assert.deepEqual(f.repo.listA2AEvents(f.action.id),events);assert.equal(botUncertain(JSON.parse(before.result_json)),true);
@@ -113,5 +113,5 @@ test('native session maintenance can start without completing or retrying the ol
 test('the same Bot still rejects a new chat when the original write has no final receipt',t=>{
   const f=liveRepositoryFixture(t);for(const call of f.failure.result.terminalMcp.toolCalls)if(call.commandId==='write-0'){call.commandStatus=call.status='queued';call.commandExecutionState='pending';}
   f.repo.resultA2AAction(f.action.id,{status:'failed',error:'Original write not observed',result:f.failure.result});
-  assert.throws(()=>f.repo.addConversationMessage(f.bot.main_conversation_id,{content:'new work'}),{code:'BOT_FAILURE_FINALIZATION_PENDING'});
+  assert.throws(()=>f.repo.addConversationMessage(f.bot.main_conversation_id,{content:'new work'}),{code:'BOT_BUSY'});
 });

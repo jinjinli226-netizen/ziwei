@@ -179,10 +179,10 @@ export function createMobileNotificationReadService(repo){
     else if(run.status==='failed')confirmed=notLaunched||confirmed&&(Number.isSafeInteger(exit?.rootExitCode)||exit?.rootExitCode===null&&(exit.cancelled===true||typeof exit.signal==='string'&&Boolean(exit.signal)));
     else confirmed=false;
     if(!run.acked_at&&receipt?.code==='BOT_CANCELLED_BEFORE_START'||confirmed&&(exit.cancelled===true||receipt.stop_confirmed==='1'||receipt.nested_stop_confirmed==='1'))return null;
-    const kind=confirmed?(run.status==='succeeded'?'execution.completed':'execution.failed'):'attention.required';
+    const kind=run.status==='failed'?'execution.failed':confirmed&&run.status==='succeeded'?'execution.completed':'attention.required';
     const name=boundedText(owner.name,80)||'数字员工';
     return {id:row.event_id,kind,createdAt:row.created_at,title:boundedText(`${name} · ${kind==='execution.completed'?'执行完成':kind==='execution.failed'?'执行失败':'执行待核实'}`,120),
-      summary:boundedText(kind==='execution.completed'?'执行已结束，可查看原聊天中的结果。':kind==='execution.failed'?(notLaunched?'执行在启动前未能开始，请查看原记录。':'执行已结束并返回失败，请查看原记录。'):'原执行的结束状态尚未完整确认，请查看原回执；不会自动重试。',240),target,executionState:confirmed?'confirmed':'uncertain'};
+      summary:boundedText(kind==='execution.completed'?'执行已结束，可查看原聊天中的结果。':kind==='execution.failed'?(notLaunched?'执行在启动前未能开始，请查看原记录。':'执行失败，原始回执已保留，不会自动重跑。'):'原执行的结束状态尚未完整确认，请查看原回执；不会自动重试。',240),target,executionState:confirmed?'confirmed':'uncertain'};
   }
   function itemFor(row,ws,actor){
     if(row.archived_at||!validId(row.event_id)||!row.created_at)return null;

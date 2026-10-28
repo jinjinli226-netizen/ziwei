@@ -1,6 +1,6 @@
 import {botFailure} from '../src/hermes-bot-config.mjs';
 import {botProfileBinding} from './bot-profiles.mjs';
-import {botExecutionOccupiesSlot} from './bot-execution-occupancy.mjs';
+import {botExecutionOccupiesSlot,exitedReadOnlyPhoneObservation} from './bot-execution-occupancy.mjs';
 import {FAILURE_FINALIZATION_KIND as KIND,canonicalFinalizationValue as canonical,finalizationDigest as digest,finalizationBytesDigest as bytesDigest,validateFailureFinalizationReceipt,validateFailureFinalizationAck} from '../src/bot-failure-finalization-contract.mjs';
 
 const REQUEST_KIND='bot-failure-finalization-v1',IDEMPOTENCY_KIND='bot-failure-finalization-request-v1',ACK_KIND='bot-failure-finalization-ack-v1',ACK_EVENT='bot.failed_execution_finalization_archived';
@@ -52,7 +52,8 @@ function writeDisposition(repo,row,{actorUserId,actorRole,expectedRevision,expec
   repo.preservation?.assertAction(row.id);repo.serverCodeRollout?.assertExecution();
   const body={schemaVersion:1,kind:KIND,subject,actorUserId,actorRole,expectedRevision,expectedControlEpoch,resultingControlEpoch:expectedControlEpoch+1,disposition,status:'failed',executionState:'uncertain',executionConfirmedStopped:false,partialEffectsPossible:true,recordedAt:new Date(now()).toISOString()},receipt={...body,id:digest(body)};
   if(!validateFailureFinalizationReceipt(receipt))fail('BOT_FAILURE_FINALIZATION_INVALID','执行收尾合同校验失败');
-  const changed=db.prepare('UPDATE hermes_bots SET active_action_id=NULL,control_epoch=control_epoch+1,updated_at=? WHERE employee_id=? AND workspace_id=? AND active_action_id=? AND revision=? AND control_epoch=? AND ziwei_v2_admitted(?)=1').run(body.recordedAt,subject.employeeId,subject.workspaceId,row.id,expectedRevision,expectedControlEpoch,row.id);
+  const activeActionId=botExecutionOccupiesSlot(row)?row.id:null;
+  const changed=db.prepare('UPDATE hermes_bots SET active_action_id=?,control_epoch=control_epoch+1,updated_at=? WHERE employee_id=? AND workspace_id=? AND active_action_id=? AND revision=? AND control_epoch=? AND ziwei_v2_admitted(?)=1').run(activeActionId,body.recordedAt,subject.employeeId,subject.workspaceId,row.id,expectedRevision,expectedControlEpoch,row.id);
   if(changed.changes!==1)fail('BOT_FAILURE_FINALIZATION_CONTROL_CONFLICT','执行收尾时原占位发生并发变化');
   const eventId=`action-event_${receipt.id}`;
   db.prepare('INSERT INTO a2a_action_events(id,action_id,type,message,data_json,created_at) VALUES(?,?,?,?,?,?)').run(eventId,row.id,KIND,'本轮按失败结束；原执行和业务结果保持未确认，不自动重跑',JSON.stringify(receipt),body.recordedAt);
@@ -65,7 +66,7 @@ function writeDisposition(repo,row,{actorUserId,actorRole,expectedRevision,expec
 // Called only after the authenticated original device result has been saved.
 // A genuinely ambiguous result is retained; the paired client handles cleanup.
 export function automaticallyFinalizeBotFailure(repo,actionId){return atomic(repo.db,()=>{
-  const db=repo.db,row=db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId),subject=rawSubject(db,row);if(!subject||!botExecutionOccupiesSlot(row,{workspaceId:row.workspace_id,employeeId:subject.employeeId,deviceId:subject.deviceId,profile:subject.profile}))return null;
+  const db=repo.db,row=db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId),subject=rawSubject(db,row);if(!subject||exitedReadOnlyPhoneObservation(row))return null;
   const existing=db.prepare('SELECT 1 FROM management_requests WHERE workspace_id=? AND kind=? AND request_key=?').get(row.workspace_id,REQUEST_KIND,row.id);if(existing)return readBotFailureFinalization(db,row);
   const bot=db.prepare('SELECT revision,control_epoch,active_action_id FROM hermes_bots WHERE employee_id=? AND workspace_id=?').get(subject.employeeId,subject.workspaceId);if(bot?.active_action_id!==row.id)return null;
   return writeDisposition(repo,row,{actorUserId:null,actorRole:'system',expectedRevision:bot.revision,expectedControlEpoch:bot.control_epoch,disposition:'failed_automatically'});
@@ -120,6 +121,7 @@ export function createBotFailureFinalization(repo,management,{now=Date.now}={}){
       const recordedAt=new Date(now()).toISOString(),record={ack:input,deviceId:granted.device_id,credentialId:granted.id,recordedAt},eventId=`action-event_finalized_${digest(record)}`;
       db.prepare('INSERT INTO a2a_action_events(id,action_id,type,message,data_json,created_at) VALUES(?,?,?,?,?,?)').run(eventId,row.id,ACK_EVENT,'原电脑已归档本轮失败；未重放业务，原业务结果仍以原回执为准',JSON.stringify(record),recordedAt);
       db.prepare('INSERT INTO management_requests(workspace_id,kind,request_key,fingerprint,resource_id,created_at) VALUES(?,?,?,?,?,?)').run(row.workspace_id,ACK_KIND,row.id,digest(record),eventId,recordedAt);
+      if(['no_live_instance','terminated_exact_instance'].includes(input.localProcessDisposition))db.prepare('UPDATE hermes_bots SET active_action_id=NULL WHERE employee_id=? AND workspace_id=? AND active_action_id=?').run(value.receipt.subject.employeeId,row.workspace_id,row.id);
       return readBotFailureFinalization(db,row);
     });},
   };

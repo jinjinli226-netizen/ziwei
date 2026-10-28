@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import {botExecutionOccupiesSlot} from './bot-execution-occupancy.mjs';
 import {actionExecutionLeaseMs} from '../src/action-execution-budget.mjs';
 import {observeDeviceUpdateHeartbeat} from './device-updates.mjs';
 import { guardRepository } from './version-preservation.mjs';
@@ -78,7 +79,7 @@ const executionResultMessage = (status, error, result, fallback = '执行完成'
   const output = executionOutput(result);
   if (status === 'succeeded') return output || fallback;
   const phoneState = result?.terminalMcp?.executionState || result?.result?.terminalMcp?.executionState;
-  const label = botUncertain(result) || phoneState === 'uncertain' ? '执行结果未确认' : phoneState === 'not_started' ? '手机动作未执行' : '执行失败';
+  const label = phoneState === 'not_started' ? '手机动作未执行' : '执行失败';
   const detail = `${label}：${error || '员工未提供具体错误'}`;
   return output && output.trim() !== String(error || '').trim() ? `${detail}\n\n${output}` : detail;
 };
@@ -1269,12 +1270,11 @@ export function createRepository(options = {}, io={}) {
       const botRun=db.prepare('SELECT r.action_id FROM automation_runs r JOIN bot_routines b ON b.automation_id=r.automation_id WHERE r.id=?').get(runId);
       if(botRun && (input.botInternal!==BOT_INTERNAL || input.sourceActionId!==botRun.action_id))throw botFailure('BOT_RESULT_ROUTE_REQUIRED','Bot Routine 结果只接受原设备 action 的真实回执');
       const run=db.prepare('SELECT * FROM automation_runs WHERE id=?').get(runId); if(!run) throw new Error('Automation run not found'); if(['completed','failed'].includes(run.status)) return {...run,duplicate:true,result:jsonObject(run.result_json)};
-      if(botUncertain(input.result)) {db.prepare("UPDATE automation_runs SET status='uncertain',result_json=?,error=?,message=?,finished_at=? WHERE id=?").run(JSON.stringify(input.result),input.error || '执行未确认','执行不确定；只允许查询原回执，不重跑业务',now(),runId);return {...db.prepare('SELECT * FROM automation_runs WHERE id=?').get(runId),result:input.result};}
+      if(botUncertain(input.result)) {db.prepare("UPDATE automation_runs SET status='failed',result_json=?,error=?,message=?,finished_at=? WHERE id=?").run(JSON.stringify(input.result),input.error || '执行失败','执行失败；原始回执已保留，不自动重跑',now(),runId);return {...db.prepare('SELECT * FROM automation_runs WHERE id=?').get(runId),result:input.result};}
       const status=String(input.status || (input.error ? 'failed' : 'completed')); if(!['completed','failed'].includes(status)) throw new Error('Automation run status must be completed or failed'); const result=input.result === undefined ? null : JSON.stringify(input.result); const error=input.error ? String(input.error) : null; const finished=now();
-      if(!rollout && status==='failed' && !phoneRetryForbidden(input.result) && !db.prepare('SELECT 1 FROM bot_routines WHERE automation_id=?').get(run.automation_id) && Number(run.attempt || 0)+1 < Number(run.max_attempts || 1)) { const nextAttempt=Number(run.attempt || 0)+1; const auto=db.prepare('SELECT * FROM automations WHERE id=?').get(run.automation_id); const retryAt=new Date(Date.now()+Number(auto?.retry_backoff_ms || 1000)*2**Math.max(0,nextAttempt-1)).toISOString(); db.prepare("UPDATE automation_runs SET status='retrying',error=?,result_json=?,attempt=?,next_retry_at=?,message=?,finished_at=? WHERE id=?").run(error,result,nextAttempt,retryAt,'执行失败，已安排重试',null,runId); return this.queueAutomationRetry(runId,retryAt); }
       db.prepare('UPDATE automation_runs SET status=?,error=?,result_json=?,finished_at=?,message=? WHERE id=?').run(status,error,result,finished,status==='completed'?'执行完成':'执行失败',runId); const ws=db.prepare('SELECT slug FROM workspaces WHERE id=?').get(run.workspace_id); audit(ws.slug,'ziwei_user',`automation.${status}`,{automationId:run.automation_id,runId,error}); const delivery=rollout?null:this.queueWebhookDelivery(runId,status,input.result,error); if (delivery) void this.dispatchWebhookDeliveries(); return {...db.prepare('SELECT * FROM automation_runs WHERE id=?').get(runId),result:jsonObject(result),webhook:delivery};
     },
-    queueAutomationRetry(runId, retryAt = now()) { const run=db.prepare('SELECT * FROM automation_runs WHERE id=?').get(runId); if(!run) throw new Error('Automation run not found'); if(phoneRetryForbidden(parse(run.result_json)))throw botFailure('PHONE_RETRY_FORBIDDEN','手机动作已有原回执；系统继续读取原回执和当前页面，不允许重放整轮业务'); if(run.status==='uncertain' || db.prepare('SELECT 1 FROM bot_routines WHERE automation_id=?').get(run.automation_id))throw botFailure('BOT_RETRY_FORBIDDEN','Bot Routine 不自动重试；先核对原执行证据'); const auto=db.prepare('SELECT * FROM automations WHERE id=?').get(run.automation_id); const ws=db.prepare('SELECT slug FROM workspaces WHERE id=?').get(run.workspace_id); const action=this.createA2AAction(ws.slug,{type:'automation.execute',dedupeKey:`automation:${run.automation_id}:${run.id}:${run.attempt}`,payload:{automationId:run.automation_id,runId:run.id,prompt:auto.prompt,outputMode:auto.output_mode,webhookUrl:auto.webhook_url,attempt:run.attempt}}); db.prepare('UPDATE automation_runs SET status=\'queued\',action_id=?,next_retry_at=? WHERE id=?').run(action.id,retryAt,runId); return {...db.prepare('SELECT * FROM automation_runs WHERE id=?').get(runId),action_id:action.id}; },
+    queueAutomationRetry(runId, retryAt = now()) { const run=db.prepare('SELECT * FROM automation_runs WHERE id=?').get(runId); if(!run) throw new Error('Automation run not found'); if(phoneRetryForbidden(parse(run.result_json)))throw botFailure('PHONE_RETRY_FORBIDDEN','手机动作已有原回执；系统继续读取原回执和当前页面，不允许重放整轮业务'); if(botUncertain(parse(run.result_json)) || run.status==='uncertain' || db.prepare('SELECT 1 FROM bot_routines WHERE automation_id=?').get(run.automation_id))throw botFailure('BOT_RETRY_FORBIDDEN','Bot Routine 不自动重试；先核对原执行证据'); const auto=db.prepare('SELECT * FROM automations WHERE id=?').get(run.automation_id); const ws=db.prepare('SELECT slug FROM workspaces WHERE id=?').get(run.workspace_id); const action=this.createA2AAction(ws.slug,{type:'automation.execute',dedupeKey:`automation:${run.automation_id}:${run.id}:${run.attempt}`,payload:{automationId:run.automation_id,runId:run.id,prompt:auto.prompt,outputMode:auto.output_mode,webhookUrl:auto.webhook_url,attempt:run.attempt}}); db.prepare('UPDATE automation_runs SET status=\'queued\',action_id=?,next_retry_at=? WHERE id=?').run(action.id,retryAt,runId); return {...db.prepare('SELECT * FROM automation_runs WHERE id=?').get(runId),action_id:action.id}; },
     listMembers(slug) { const ws=workspace(slug); if (!ws) throw new Error('Workspace not found'); return db.prepare('SELECT * FROM members WHERE workspace_id=? ORDER BY joined_at').all(ws.id); },
     createMember(slug, input = {}) {
       const ws=workspace(slug); if (!ws) throw new Error('Workspace not found');
@@ -2358,6 +2358,7 @@ export function createRepository(options = {}, io={}) {
       if (error) status = 'failed';
       if (status === 'failed' && !error) error = '员工执行失败，未提供具体错误';
       let result = input.result;
+      if(botUncertain(result)){status='failed';error ||= '执行失败';}
       if (reconciliation) {
         this.preservation?.assertAction(actionId);
         this.serverCodeRollout?.assertExecution();
@@ -2412,7 +2413,6 @@ export function createRepository(options = {}, io={}) {
         if(payload.hermesBot) {
           const validation=result?.botValidation || result?.result?.botValidation;
           if(row.type==='hermes.bot.validate' && status==='succeeded' && validation?.valid===true && validation.schemaVersion===1 && validation.employeeId===payload.employeeId && validation.revision===payload.hermesBot.revision) db.prepare('UPDATE hermes_bots SET validated_revision=? WHERE employee_id=? AND revision=? AND control_epoch=? AND validation_action_id=?').run(validation.revision,payload.employeeId,validation.revision,payload.hermesBot.controlEpoch,actionId);
-          if(!botUncertain(result)&&!botActionReadOnlyInspection(row.type,payload))db.prepare('UPDATE hermes_bots SET active_action_id=NULL WHERE employee_id=? AND active_action_id=?').run(payload.employeeId,actionId);
         }
         audit(ws.slug, 'ziwei_user', `a2a.action.${status}`, { actionId, type: row.type, error });
         if (row.task_id && !(reconciliation && row.status==='failed')) taskExecutionMessage(row.task_id, status, error, result);
@@ -2428,6 +2428,7 @@ export function createRepository(options = {}, io={}) {
           else this.completeAutomationRun(payload.runId, { status: status === 'succeeded' ? 'completed' : 'failed', result, error, botInternal:BOT_INTERNAL,sourceActionId:actionId });
         }
         if(status==='failed'&&botUncertain(result)&&payload.hermesBot)automaticallyFinalizeBotFailure(this,actionId);
+        if(payload.hermesBot&&!botExecutionOccupiesSlot({ ...row,status,completed_at:timestamp,result,payload })&&!botActionReadOnlyInspection(row.type,payload))db.prepare('UPDATE hermes_bots SET active_action_id=NULL WHERE employee_id=? AND active_action_id=?').run(payload.employeeId,actionId);
         db.exec('RELEASE conversation_result');
       } catch (writeError) {
         db.exec('ROLLBACK TO conversation_result; RELEASE conversation_result');

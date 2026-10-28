@@ -58,15 +58,15 @@ test('normal browser API needs authenticated owner and device list/ack require r
   assert.equal((await request(app,ackUrl,{body:f.ack(r.body),token:other.deviceToken})).status,403);
   const acked=await request(app,ackUrl,{body:f.ack(r.body),token:f.pair.deviceToken});assert.equal(acked.status,200,JSON.stringify(acked.body));assert.equal(acked.body.state,'client_archived');
 });
-test('new execution waits for paired-client archival and becomes admissible after exact acknowledgement',t=>{
-  const f=fixture(t),value=f.finalize();assert.throws(f.admit,{code:'BOT_FAILURE_FINALIZATION_PENDING'});assert.equal(pendingBotFailureFinalization(f.db,f.ws.id,f.bot.id).receipt.id,value.receipt.id);
+test('new execution is admissible before and after optional paired-client archival',t=>{
+  const f=fixture(t),value=f.finalize();assert(f.admit());assert.equal(pendingBotFailureFinalization(f.db,f.ws.id,f.bot.id).receipt.id,value.receipt.id);
   for(const patch of[{receiptDigest:'b'.repeat(64)},{receiptId:'b'.repeat(64)},{archiveSha256:'missing'},{localProcessDisposition:'tree_exited'},{executionConfirmedStopped:true}])assert.throws(()=>f.service.acknowledge(f.input.expectedActionId,f.credential,{...f.ack(value),...patch}),{code:'BOT_FAILURE_FINALIZATION_ACK_INVALID'});
   const result=f.service.acknowledge(f.input.expectedActionId,f.credential,f.ack(value));assert.equal(result.state,'client_archived');assert.equal(result.acknowledgement.ack.localProcessDisposition,'unobservable');assert(f.admit());assert.equal(pendingBotFailureFinalization(f.db,f.ws.id,f.bot.id),null);assert.deepEqual(f.service.pending(f.credential).finalizations,[]);
   assert.equal(f.service.acknowledge(f.input.expectedActionId,f.credential,f.ack(value)).duplicate,true);assert.throws(()=>f.service.acknowledge(f.input.expectedActionId,f.credential,{...f.ack(value),archiveSha256:'b'.repeat(64)}),{code:'BOT_FAILURE_FINALIZATION_ACK_CONFLICT'});
 });
 test('new failed ambiguous completion automatically ends admission bookkeeping and preserves exact original unknown result',t=>{
   const f=fixture(t,{status:'acked',event:false}),response=f.repo.resultA2AAction(f.input.expectedActionId,{status:'failed',error:f.error,result:f.result,deviceId:f.pair.deviceId});
-  assert.equal(response.failureFinalization.receipt.disposition,'failed_automatically');assert.equal(response.failureFinalization.receipt.actorRole,'system');assert.equal(response.failureFinalization.receipt.actorUserId,null);assert.deepEqual(JSON.parse(f.raw().result_json),f.result);assert.equal(f.raw().status,'failed');assert.equal(f.read().receipt.subject.failedEvent,null);assert.throws(f.admit,{code:'BOT_FAILURE_FINALIZATION_PENDING'});
+  assert.equal(response.failureFinalization.receipt.disposition,'failed_automatically');assert.equal(response.failureFinalization.receipt.actorRole,'system');assert.equal(response.failureFinalization.receipt.actorUserId,null);assert.deepEqual(JSON.parse(f.raw().result_json),f.result);assert.equal(f.raw().status,'failed');assert.equal(f.read().receipt.subject.failedEvent,null);assert(f.admit());
   // A late normal failed event does not erase the exact result-pinned intent.
   f.db.prepare('INSERT INTO a2a_action_events(id,action_id,type,message,data_json,created_at) VALUES(?,?,?,?,?,?)').run('late_failed',f.input.expectedActionId,'failed','late',JSON.stringify({result:f.result,error:f.error}),new Date().toISOString());assert(f.read());
   const original=f.raw(),repeated=f.repo.resultA2AAction(f.input.expectedActionId,{status:'failed',error:'must not replace',result:{code:'EXECUTION_UNCERTAIN'},deviceId:f.pair.deviceId});assert.equal(repeated.duplicate,true);assert.deepEqual(f.raw(),original);
@@ -74,14 +74,59 @@ test('new failed ambiguous completion automatically ends admission bookkeeping a
 test('ordinary complete-exit failure follows existing failed path and needs no finalization',t=>{
   const f=fixture(t,{status:'acked',uncertain:false,event:false}),response=f.repo.resultA2AAction(f.input.expectedActionId,{status:'failed',error:f.error,result:f.result,deviceId:f.pair.deviceId});assert.equal(response.failureFinalization,undefined);assert.equal(f.read(),null);assert.equal(f.db.prepare('SELECT active_action_id FROM hermes_bots WHERE employee_id=?').get(f.bot.id).active_action_id,null);assert(f.admit());
 });
+
+test('business uncertainty with a confirmed exited tree is failed and admits new work without an archive ACK',t=>{
+  const f=fixture(t,{status:'acked',event:false}),result={code:'EXECUTION_UNCERTAIN',executionState:'uncertain',processExit:{launched:true,rootConfirmed:true,treeConfirmed:true,activeProcesses:0},terminalMcp:{executionState:'uncertain'}};
+  const response=f.repo.resultA2AAction(f.input.expectedActionId,{status:'failed',error:f.error,result,deviceId:f.pair.deviceId});
+  assert.equal(response.status,'failed');assert.deepEqual(JSON.parse(f.raw().result_json),result);assert(f.admit());
+});
+
+test('only positive live-process evidence keeps the failed employee occupied',t=>{
+  const f=fixture(t);
+  f.db.prepare('UPDATE a2a_actions SET result_json=? WHERE id=?').run(JSON.stringify({...f.result,processExit:{rootConfirmed:true,treeConfirmed:false,activeProcesses:1}}),f.input.expectedActionId);
+  const value=f.finalize();assert.equal(value.state,'awaiting_client');assert.throws(f.admit,{code:'BOT_BUSY'});
+  assert.equal(f.db.prepare('SELECT active_action_id FROM hermes_bots WHERE employee_id=?').get(f.bot.id).active_action_id,f.input.expectedActionId);
+  f.service.acknowledge(f.input.expectedActionId,f.credential,{...f.ack(value),localProcessDisposition:'terminated_exact_instance'});
+  assert(f.admit());
+});
+
+test('unconfirmed process results fail immediately without creating an ACK dependency',t=>{
+  const f=fixture(t,{status:'acked',event:false});
+  const response=f.repo.resultA2AAction(f.input.expectedActionId,{status:'succeeded',result:f.result,deviceId:f.pair.deviceId});
+  assert.equal(response.status,'failed');assert.equal(f.read().state,'awaiting_client');assert(f.admit());assert.deepEqual(JSON.parse(f.raw().result_json),f.result);
+});
+
+test('uncertain automation results are persisted as failed without retrying',t=>{
+  const f=fixture(t),auto=f.repo.createAutomation(f.ws.slug,{name:'Failure fixture',prompt:'Do not execute',maxRetries:3}),run=f.repo.runAutomation(auto.id);
+  const result={code:'EXECUTION_UNCERTAIN',executionState:'uncertain'};
+  const completed=f.repo.completeAutomationRun(run.id,{status:'completed',result});
+  assert.equal(completed.status,'failed');assert(completed.finished_at);assert.deepEqual(completed.result,result);
+  assert.throws(()=>f.repo.queueAutomationRetry(run.id),{code:'BOT_RETRY_FORBIDDEN'});
+});
+
+test('ordinary failed automation runs do not automatically enqueue another attempt',t=>{
+  const f=fixture(t),auto=f.repo.createAutomation(f.ws.slug,{name:'No replay',prompt:'Do not execute',maxRetries:3}),run=f.repo.runAutomation(auto.id);
+  const before=f.db.prepare('SELECT count(*) n FROM a2a_actions').get().n;
+  const completed=f.repo.completeAutomationRun(run.id,{status:'failed',error:'Model failed',result:{code:1}});
+  assert.equal(completed.status,'failed');assert(completed.finished_at);assert.equal(completed.attempt,run.attempt);
+  assert.equal(f.db.prepare('SELECT count(*) n FROM a2a_actions').get().n,before);
+});
+
+test('ordinary failures retain only a positively live process slot and project that fact to the workbench',t=>{
+  const f=fixture(t,{status:'acked',event:false}),result={code:1,processAlive:true};
+  const response=f.repo.resultA2AAction(f.input.expectedActionId,{status:'failed',error:f.error,result,deviceId:f.pair.deviceId});
+  assert.equal(response.status,'failed');assert.throws(f.admit,{code:'BOT_BUSY'});
+  const view=createManagementService(f.repo).bots.get(f.ws.slug,f.bot.id,f.context,{view:'workbench'});
+  assert(view.active_run.result,JSON.stringify(view.active_run));assert.equal(view.active_run.result.processAlive,true);assert.equal(view.active_action_id,f.input.expectedActionId);
+});
 test('pending/succeeded and a different current execution cannot be force-ended',t=>{
   const f=fixture(t);f.db.prepare("UPDATE a2a_actions SET status='acked' WHERE id=?").run(f.input.expectedActionId);assert.throws(f.finalize,{code:'BOT_FAILURE_FINALIZATION_INELIGIBLE'});f.db.prepare("UPDATE a2a_actions SET status='failed' WHERE id=?").run(f.input.expectedActionId);f.db.prepare("UPDATE hermes_bots SET active_action_id='another' WHERE employee_id=?").run(f.bot.id);assert.throws(f.finalize,{code:'BOT_FAILURE_FINALIZATION_CONTROL_CONFLICT'});
 });
 test('event, marker, action and acknowledgement tampering fail closed',t=>{
   const f=fixture(t),value=f.finalize(),marker=f.db.prepare("SELECT * FROM management_requests WHERE kind='bot-failure-finalization-v1'").get();
-  f.db.prepare("UPDATE management_requests SET fingerprint='tampered' WHERE kind='bot-failure-finalization-v1'").run();assert.equal(f.read(),null);assert.throws(f.admit,{code:'BOT_FAILURE_FINALIZATION_CONFLICT'});f.db.prepare("UPDATE management_requests SET fingerprint=? WHERE kind='bot-failure-finalization-v1'").run(marker.fingerprint);
+  f.db.prepare("UPDATE management_requests SET fingerprint='tampered' WHERE kind='bot-failure-finalization-v1'").run();assert.equal(f.read(),null);assert.throws(()=>pendingBotFailureFinalization(f.db,f.ws.id,f.bot.id),{code:'BOT_FAILURE_FINALIZATION_CONFLICT'});f.db.prepare("UPDATE management_requests SET fingerprint=? WHERE kind='bot-failure-finalization-v1'").run(marker.fingerprint);
   const original=f.raw();f.db.prepare('UPDATE a2a_actions SET error=? WHERE id=?').run('tampered',f.input.expectedActionId);assert.equal(f.read(),null);f.db.prepare('UPDATE a2a_actions SET error=? WHERE id=?').run(original.error,f.input.expectedActionId);
-  f.service.acknowledge(f.input.expectedActionId,f.credential,f.ack(value));f.db.prepare("UPDATE management_requests SET fingerprint='tampered' WHERE kind='bot-failure-finalization-ack-v1'").run();assert.equal(f.read(),null);assert.throws(f.admit,{code:'BOT_FAILURE_FINALIZATION_CONFLICT'});
+  f.service.acknowledge(f.input.expectedActionId,f.credential,f.ack(value));f.db.prepare("UPDATE management_requests SET fingerprint='tampered' WHERE kind='bot-failure-finalization-ack-v1'").run();assert.equal(f.read(),null);assert.throws(()=>pendingBotFailureFinalization(f.db,f.ws.id,f.bot.id),{code:'BOT_FAILURE_FINALIZATION_CONFLICT'});
 });
 test('transaction failure restores the old slot and epoch instead of half-finalizing',t=>{
   const f=fixture(t),before=f.db.prepare('SELECT * FROM hermes_bots WHERE employee_id=?').get(f.bot.id);f.db.exec("CREATE TRIGGER fail_finalization BEFORE INSERT ON a2a_action_events WHEN NEW.type='bot.failed_execution_finalization' BEGIN SELECT RAISE(ABORT,'fixture event failure'); END");assert.throws(f.finalize,/fixture event failure/);assert.deepEqual(f.db.prepare('SELECT * FROM hermes_bots WHERE employee_id=?').get(f.bot.id),before);assert.equal(f.read(),null);

@@ -26,7 +26,7 @@ export const BOT_INTERNAL = Symbol('trusted bot validation');
 export const botActionMaintenance=(type,payload)=>['hermes.bot.provision','hermes.bot.validate','directory.inspect'].includes(type) || type==='hermes.bot.native' && !nativeIsExecution(normalizeNativeOperation(payload.nativeOperation));
 export const botActionReadOnlyInspection=(type,payload)=>type==='directory.inspect' && payload?.createIfMissing===false && !Object.hasOwn(payload,'create_if_missing');
 const canonical = value => JSON.stringify(value, (_key,item) => item && typeof item === 'object' && !Array.isArray(item) ? Object.fromEntries(Object.entries(item).sort(([a],[b])=>a.localeCompare(b))) : item);
-export const botUncertain = value => Boolean(value && (value.code === 'EXECUTION_UNCERTAIN' || value.executionState === 'uncertain' || botUncertain(value.result)));
+export const botUncertain = value => Boolean(value && (value.code === 'EXECUTION_UNCERTAIN' || value.executionState === 'uncertain' || value.status === 'uncertain' || botUncertain(value.result)));
 export const botSnapshot = (db, employeeId, workspaceId) => {
   const row = db.prepare('SELECT * FROM hermes_bots WHERE employee_id=? AND workspace_id=?').get(employeeId,workspaceId);
   if (!row) return null;
@@ -73,7 +73,6 @@ export function assertBotExecution(db, workspaceId, payload, { validation = fals
   if (!validation && (row.control_state !== 'active' || employee.status !== 'active')) throw botFailure('BOT_NOT_ACTIVE','Bot 未启用或已暂停');
   if (!validation && row.validated_revision !== row.revision) throw botFailure('BOT_NOT_VALIDATED','Bot 当前配置尚未通过目标电脑验证');
   if(!validation&&!readOnlyInspection){
-    if(pendingBotFailureFinalization(db,workspaceId,employeeId))throw botFailure('BOT_FAILURE_FINALIZATION_PENDING','上次执行已按失败结束，正在由原电脑自动收尾；电脑连接后即可继续');
     const deferred=db.prepare("SELECT state,intent_json FROM bot_deferred_configs WHERE employee_id=? AND state IN ('pending','validating','connecting')").get(employeeId);
     if(deferred&&(!actionId||deferred.state!=='pending'||parse(deferred.intent_json)?.blocking?.id!==actionId))throw botFailure('BOT_DEFERRED_CONFIG_BUSY','已接受此员工的延后配置，等待原执行结束及配置、连接流程完成后再派新工作');
   }

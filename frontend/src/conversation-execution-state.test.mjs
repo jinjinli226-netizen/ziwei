@@ -58,13 +58,13 @@ function harness(overrides={}, { realOpen=false,realtime=false,focused=false }={
   return { ...bindings, ...api, workspace, reopened, polling };
 }
 
-test('opening an uncertain conversation starts receipt polling even though execution is not busy',async()=>{
+test('opening an uncertain conversation shows failure and stops polling',async()=>{
   const unknown={...execution('original','failed'),result:{code:'EXECUTION_UNCERTAIN',executionState:'uncertain'}};
   const ui=harness({conversation:async()=>conversation(unknown)},{realOpen:true});
   ui.selectedConversation.value=null;
   assert.equal(await ui.openConversation('conversation'),true);
   assert.equal(state.executionPresentation(ui.conversationExecution.value).busy,false);
-  assert.deepEqual(ui.polling,['start']);
+  assert.deepEqual(ui.polling,['stop']);
 });
 
 test('opening a confirmed failed conversation does not keep receipt polling alive',async()=>{
@@ -74,13 +74,13 @@ test('opening a confirmed failed conversation does not keep receipt polling aliv
   assert.deepEqual(ui.polling,['stop']);
 });
 
-test('restoring the same conversation route refreshes details and restarts unresolved receipt polling',async()=>{
+test('restoring the same conversation route refreshes the failed result without receipt polling',async()=>{
   const unknown={...execution('original','failed'),result:{code:'EXECUTION_UNCERTAIN',executionState:'uncertain'}};
   let detailReads=0;
   const ui=harness({conversation:async()=>{detailReads++;return conversation(unknown);}},{realOpen:true});
   await ui.refreshConversationFromRoute();
   assert.equal(detailReads,1);
-  assert.deepEqual(ui.polling,['start']);
+  assert.deepEqual(ui.polling,['stop']);
   assert.equal(ui.conversationDraft.value,'unsent draft');
   const popstate=app.slice(app.indexOf("window.addEventListener('popstate'"),app.indexOf("window.addEventListener('ziwei:auth-required'"));
   assert.match(popstate,/page\.value==='inbox'\) void refreshConversationFromRoute\(\)/);

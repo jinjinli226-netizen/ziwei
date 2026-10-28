@@ -70,7 +70,7 @@ for(const kind of ['uncertain','missing-tree','abandoned','expired-acked'])test(
   const f=fixture(t),action=f.run();f.enqueue();
   if(kind==='expired-acked')f.db.prepare("UPDATE a2a_actions SET status='expired' WHERE id=?").run(action.id);
   else f.complete(action,{status:kind==='missing-tree'?'succeeded':'failed',error:kind==='missing-tree'?undefined:'unknown',result:kind==='missing-tree'?{processExit:{...tree,treeConfirmed:false}}:{code:'EXECUTION_UNCERTAIN',executionState:'uncertain',forceAbandonRecovery:{disposition:'abandoned_by_user'},processExit:null}});
-  f.drain();assert.equal(f.raw().revision,1);assert.equal(f.current().deferredConfig.state,'pending');
+  f.drain();assert.equal(f.raw().revision,1);assert.equal(f.current().deferredConfig.state,['uncertain','abandoned'].includes(kind)?'failed':'pending');
 });
 
 for(const mutation of ['pause','revision','device','profile','membership','deleted','metadata'])test(`${mutation} after enqueue conflicts instead of overwriting or resuming`,t=>{

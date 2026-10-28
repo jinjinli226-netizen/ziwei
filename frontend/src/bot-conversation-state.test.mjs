@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {executionPresentation} from './conversation-execution-state.mjs';
-test('uncertain Bot execution remains visibly unconfirmed instead of ordinary failed or idle',()=>{
+test('uncertain Bot execution is displayed as failed immediately',()=>{
   for(const execution of [{status:'failed',result:{code:'EXECUTION_UNCERTAIN'}},{status:'failed',result:{executionState:'uncertain'}},{status:'uncertain'}]){
     const view=executionPresentation(execution);
-    assert.match(view.label,/待核实|未确认/);assert.equal(view.tone,'warning');assert.equal(view.retryable,false);
+    assert.match(view.label,/失败/);assert.equal(view.tone,'error');assert.equal(view.retryable,false);
   }
 });
 test('ordinary known failure still permits editing a new request',()=>{

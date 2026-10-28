@@ -1,6 +1,7 @@
 import {historicalPrelaunchRecovery,HISTORICAL_PRELAUNCH_RECOVERY_DETAIL} from './historical-prelaunch-recovery.mjs';
 import {operatorForceAbandonRecovery,OPERATOR_FORCE_ABANDON_DETAIL} from './operator-force-abandon-recovery.mjs';
 import {failureFinalization,pendingBotFailureFinalization,finalizationPresentation} from './bot-failure-finalization.mjs';
+export {executionProcessActive} from '../../src/bot-execution-state.mjs';
 export function executionUncertain(run) {
   if(operatorForceAbandonRecovery(run))return false;
   if(historicalPrelaunchRecovery(run))return false;
@@ -19,7 +20,7 @@ export function botRecoveryDetail(run) {
   if(finalization)return finalization.detail;
   if(operatorForceAbandonRecovery(run))return OPERATOR_FORCE_ABANDON_DETAIL;
   if(historicalPrelaunchRecovery(run))return HISTORICAL_PRELAUNCH_RECOVERY_DETAIL;
-  return botRecoveryEvent(run)?'服务器已保存终态与进程退出证据，可恢复原回执。':run?.status==='failed'?'本轮已失败，原业务结果未确认。可结束本次执行，由原电脑自动收尾；原始回执保留，不会自动重跑。':'正在等待原电脑回传执行结果；可以请求停止本次执行。';
+  return botRecoveryEvent(run)?'服务器已保存终态与进程退出证据，可恢复原回执。':'本轮已失败，原始回执已保留，不会自动重跑。';
 }
 export function botStopPresentation(bot,run=bot?.latest_run) {
   const finalization=finalizationPresentation(failureFinalization(run),{offline:bot?.device?.status==='offline'});
@@ -39,12 +40,12 @@ export function botStopPresentation(bot,run=bot?.latest_run) {
 }
 export function botPresence(bot) {
   const run=bot?.latest_run;
-  const finalization=finalizationPresentation(pendingBotFailureFinalization(bot)||failureFinalization(run),{offline:bot?.device?.status==='offline'});
+  const finalization=finalizationPresentation(failureFinalization(run)||(!run?pendingBotFailureFinalization(bot):null),{offline:bot?.device?.status==='offline'});
   if(finalization)return {label:finalization.summary,tone:finalization.tone,detail:finalization.detail};
   if(bot?.configuration_state==='uninitialized')return {label:bot.kind==='creator'?'Creator · 管理伙伴':'Bot 能力待初始化',tone:'muted',detail:bot.kind==='creator'?'Creator 沿用原管理身份与记忆。':'这是团队管理中的同一位员工；初始化只增加 Bot 配置，不创建第二位员工。'};
   if(operatorForceAbandonRecovery(run))return {label:bot?.control_state==='paused'?'已暂停 · 旧记录已放弃':'旧记录已放弃',tone:'muted',detail:OPERATOR_FORCE_ABANDON_DETAIL};
   if(historicalPrelaunchRecovery(run))return {label:bot?.control_state==='paused'?'已暂停 · 原模型未启动':'原模型未启动',tone:'muted',detail:HISTORICAL_PRELAUNCH_RECOVERY_DETAIL};
-  if (executionUncertain(run)) return {label:run?.status==='failed'?'上次执行失败':'执行状态待确认',tone:run?.status==='failed'?'error':'warning',detail:botRecoveryDetail(run)};
+  if (executionUncertain(run)) return {label:'上次执行失败',tone:'error',detail:botRecoveryDetail(run)};
   if (botStopPresentation(bot,run).confirmed)return {label:'原执行已停止',tone:'muted',detail:botStopPresentation(bot,run).label};
   if (run?.type==='hermes.bot.validate') {
     if(['pending','acked'].includes(run.status))return {label:'配置检查中',tone:'running',detail:'无模型配置检查正在等待本机回执。'};

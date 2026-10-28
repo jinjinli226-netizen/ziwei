@@ -39,8 +39,8 @@ test('recovery is offered only for an uncertain original action with a complete 
     {...receipt,data:{result:{fixture:true,processExit:proof}}},
   ])assert.equal(botRecoveryEvent({...run,events:[event]}),null);
   assert.equal(processExitConfirmed({result:{processExit:proof}}),true);
-  assert.match(botRecoveryDetail(run),/尚未收到.*检查原电脑/);
-  assert.match(botRecoveryDetail({...run,events:[receipt]}),/可核实并恢复/);
+  assert.match(botRecoveryDetail(run),/已失败.*原始回执已保留/);
+  assert.match(botRecoveryDetail({...run,events:[receipt]}),/可恢复原回执/);
 });
 
 test('ordinary successful work and configuration validation keep their existing presentation',()=>{

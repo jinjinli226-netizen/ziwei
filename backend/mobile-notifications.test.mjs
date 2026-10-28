@@ -42,6 +42,13 @@ function fixture(t,{kind='team'}={}){
   return {app,repo,auth,db,owner,member,outsider,slug,ws,employee,chat,service,context,audit,execution,list,cookie:who=>`ziwei_session=${who.session.token}`};
 }
 
+test('failed execution notification does not wait for process evidence or archive ACK',t=>{
+  const f=fixture(t),run=f.execution({status:'failed',result:{code:'EXECUTION_UNCERTAIN',executionState:'uncertain'}});
+  const item=f.service.resolve(f.slug,run.eventId,f.context).item;
+  assert.equal(item.kind,'execution.failed');assert.match(item.title,/执行失败/);assert.doesNotMatch(item.title+item.summary,/待核实|等待|收尾/);
+  assert.equal(item.executionState,'uncertain');
+});
+
 test('confirmed original execution yields small typed reminders and exact original target',t=>{
   const f=fixture(t),message=f.repo.addConversationMessage(f.chat.id,{content:'Original request',dispatch:false,actorUserId:f.owner.user_id});
   const a=f.execution({payload:{messageId:message.id}}),b=f.execution({status:'failed',error:'private token must never be shown'}),rows=f.list();
@@ -145,7 +152,7 @@ test('prelaunch classification requires every definitive no-launch field and kee
   for(const extra of [{fixture:true},{code:'EXECUTION_UNCERTAIN'},{executionState:'uncertain'},{nested:{status:'uncertain'}},{many:Array.from({length:520},()=>0)}])f.execution({status:'failed',result:{...evidence,...extra}});
   f.execution({status:'failed',result:{...evidence,processExit:{...base,padding:'x'.repeat(9000)}}});
   f.execution({status:'succeeded',result:evidence});
-  const items=f.list({limit:50}).items;assert.equal(items.length,variants.length+7);assert(items.every(item=>item.kind==='attention.required'&&item.executionState==='uncertain'));
+  const items=f.list({limit:50}).items;assert.equal(items.length,variants.length+7);assert.equal(items.filter(item=>item.kind==='execution.failed').length,variants.length+6);assert(items.every(item=>item.executionState==='uncertain'));
 });
 
 test('large image/output/prompt strings never hydrate through repo APIs or escape the thin projection',t=>{

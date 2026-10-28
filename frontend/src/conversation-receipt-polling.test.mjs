@@ -12,33 +12,27 @@ const confirmed={id:'original',status:'failed',result:{code:'executor_failed',pr
 function fixture(refresh) {
   const execution={value:unknown},selected={value:{id:'original-conversation'}},page={value:'inbox'},timers=new Map();
   let now=100000,serial=0,reads=0;
-  const create=new Function('selectedConversation','page','conversationExecution','conversationExecutionBusy','executionNeedsPolling','refreshConversationState','setInterval','clearInterval','Date',`
+  const create=new Function('selectedConversation','page','conversationExecution','conversationExecutionBusy','executionNeedsPolling','refreshConversationState','setInterval','clearInterval','Date','conversationBotBinding',`
     let conversationPollTimer=null,conversationOpenGeneration=1;
     function stopConversationPolling(){if(conversationPollTimer){clearInterval(conversationPollTimer);conversationPollTimer=null;}}
     ${pollingSource}
     return {start:startConversationPolling,stop:stopConversationPolling,current:()=>conversationPollTimer,changeGeneration:()=>conversationOpenGeneration++};
   `);
   const controller=create(selected,page,execution,{get value(){return executionPresentation(execution.value).busy;}},executionNeedsPolling,
-    async()=>{reads++;await refresh(execution);},callback=>{const id=++serial;timers.set(id,callback);return id;},id=>timers.delete(id),{now:()=>now});
+    async()=>{reads++;await refresh(execution);},callback=>{const id=++serial;timers.set(id,callback);return id;},id=>timers.delete(id),{now:()=>now},{value:null});
   return {...controller,execution,selected,page,timers,get reads(){return reads;},async tick(elapsed=1500){now+=elapsed;await timers.get(controller.current())?.();}};
 }
 
-test('uncertain receipts continue GET polling and accept a late definitive result without replay',async()=>{
-  let received=false;
-  const f=fixture(async execution=>{if(received)execution.value=confirmed;});
-  f.start();await f.tick();
-  assert.equal(f.reads,1);assert.equal(f.timers.size,1);
-  assert.equal(executionPresentation(f.execution.value).busy,false);
+test('failed or uncertain receipts stop polling immediately without waiting for ACK',async()=>{
+  const f=fixture(async()=>assert.fail('must not poll a failed execution'));
+  f.start();await f.tick();assert.equal(f.reads,0);assert.equal(f.timers.size,0);
+  assert.equal(executionPresentation(f.execution.value).summary,'失败');
   assert.equal(executionPresentation(f.execution.value).retryable,false);
-  await f.tick();assert.equal(f.reads,1,'unresolved receipt reads back off');
-  received=true;await f.tick(4500);
-  assert.equal(f.reads,2);assert.equal(f.execution.value,confirmed);
-  assert.equal(f.timers.size,0,'definitive receipt ends fallback polling');
 });
 
-test('only pending or unconfirmed receipts need polling; a known failure does not',()=>{
-  for(const value of [unknown,{status:'expired',acked_at:'2026-10-17T00:00:00Z'},{status:'pending'},{status:'acked'}])assert.equal(executionNeedsPolling(value),true);
-  for(const value of [null,undefined,confirmed,{status:'succeeded'},{status:'expired'},{status:'cancelled'}])assert.equal(executionNeedsPolling(value),false);
+test('only active executions need polling',()=>{
+  for(const value of [{status:'pending'},{status:'acked'}])assert.equal(executionNeedsPolling(value),true);
+  for(const value of [unknown,{status:'uncertain'},{status:'expired',acked_at:'2026-10-17T00:00:00Z'},null,undefined,confirmed,{status:'succeeded'},{status:'expired'},{status:'cancelled'}])assert.equal(executionNeedsPolling(value),false);
 });
 
 test('leaving the conversation stops receipt polling without another request',async()=>{
@@ -49,7 +43,7 @@ test('leaving the conversation stops receipt polling without another request',as
 test('an old response cannot stop the new conversation polling timer',async()=>{
   let resolve;
   const pending=new Promise(done=>{resolve=done;}),f=fixture(async()=>pending);
-  f.start();const first=f.tick(),old=f.current();
+  f.execution.value={id:'active',status:'acked'};f.start();const first=f.tick(),old=f.current();
   f.changeGeneration();f.start();assert.notEqual(f.current(),old);
   f.execution.value=confirmed;resolve();await first;
   assert.equal(f.timers.size,1,'only the new request scope owns its timer');

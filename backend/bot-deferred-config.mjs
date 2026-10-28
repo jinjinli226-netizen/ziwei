@@ -15,6 +15,7 @@ const reasons={
   BOT_DEFERRED_VERSION_CHANGED:'配置或控制版本已变化，未覆盖后来的修改或暂停。',
   BOT_DEFERRED_RECORD_INVALID:'延后配置原始意图无法完整读取。',
   BOT_DEFERRED_VALIDATION_FAILED:'新配置的原生验证未成功，Bot 未自动恢复工作。',
+  BOT_DEFERRED_EXECUTION_FAILED:'原执行失败，延后配置已结束；未自动应用配置。',
   BOT_DEFERRED_CONNECTION_FAILED:'MCP 原连接未成功；保留原连接回执，不重复派发。',
   BOT_DEFERRED_APPLY_FAILED:'延后配置未能完成，保留当前配置与原执行记录。',
   BOT_MCP_CLIENT_REQUIRED:'目标电脑的客户端尚不支持远程 MCP 授权，未创建替代连接。',
@@ -123,8 +124,11 @@ export function createBotDeferredConfig(repo,{resolve,get,update,validate,contro
   function step(row){return atomic(()=>{
     const intent=intentFor(row),checked=authorized(row,intent),{row:bot,employee,context}=checked;
     if(row.state==='pending'){
+      const blockingAction=intent.blocking?repo.getA2AAction(intent.blocking.id):null;
+      if(intent.blocking&&(!blockingAction||canonical(actionBinding(blockingAction))!==canonical(intent.blocking)))fail('BOT_DEFERRED_BINDING_CHANGED');
+      if(blockingAction?.status==='failed'&&!deferredConfigIdleEvidence(blockingAction)){finish(row,'failed','BOT_DEFERRED_EXECUTION_FAILED');return;}
       if(bot.revision!==intent.request.expectedRevision||bot.control_epoch!==intent.request.expectedControlEpoch||bot.control_state!==intent.baseControlState||employee.status!==intent.baseEmployeeStatus||digest(parse(bot.config_json))!==intent.baseConfigDigest||Object.entries(intent.baseEmployee).some(([key,value])=>canonical(employeeValue(employee,key))!==canonical(value)))fail('BOT_DEFERRED_VERSION_CHANGED');
-      if(intent.blocking){const action=repo.getA2AAction(intent.blocking.id);if(!action||canonical(actionBinding(action))!==canonical(intent.blocking))fail('BOT_DEFERRED_BINDING_CHANGED');if(!deferredConfigIdleEvidence(action)){db.prepare('UPDATE bot_deferred_configs SET phase=?,updated_at=? WHERE id=?').run('waiting_for_execution_evidence',now(),row.id);return;}}
+      if(blockingAction&&!deferredConfigIdleEvidence(blockingAction)){db.prepare('UPDATE bot_deferred_configs SET phase=?,updated_at=? WHERE id=?').run('waiting_for_execution_evidence',now(),row.id);return;}
       if(bot.active_action_id){if(bot.active_action_id!==intent.blocking?.id)fail('BOT_DEFERRED_VERSION_CHANGED');return;}
       const saved=update(intent.workspace,row.employee_id,{expectedRevision:bot.revision,employee:intent.request.employee,config:intent.config},context);
       const fresh=resolve(intent.workspace,row.employee_id,context),applied={revision:saved.revision,controlEpoch:saved.control_epoch,controlState:saved.control_state,employeeStatus:fresh.employee.status,configDigest:digest(saved.config),employee:Object.fromEntries(Object.keys(intent.request.employee).map(key=>[key,employeeValue(fresh.employee,key)]))};

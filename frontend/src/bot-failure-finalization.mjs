@@ -32,8 +32,7 @@ export function pendingBotFailureFinalization(bot){
 }
 export function finalizationPresentation(value,{offline=false}={}){
   if(!value)return null;
-  const pending=value.state==='awaiting_client';
-  return{pending,busy:false,retryable:false,tone:'error',summary:pending?(offline?'失败，等待电脑连接':'失败，正在自动收尾'):'失败 · 已结束本次执行',label:pending?(offline?'本轮已失败，电脑连接后自动收尾':'本轮已失败，正在由原电脑自动收尾'):'本轮已按失败结束',detail:pending?'系统会在原电脑结束本轮并归档，不会自动重跑；原始失败回执已保留。':'原电脑已归档本轮失败，原始回执已保留。原业务结果仍未确认，不会自动重跑。'};
+  return{pending:false,busy:false,retryable:false,tone:'error',summary:'失败',label:'本轮执行失败',detail:'本轮已失败，原始回执已保留，不会自动重跑。'};
 }
 export function failureFinalizationRequest(bot,run){
   if(!bot?.id||!run?.id||bot.active_action_id!==run.id||run.status!=='failed'||!run.acked_at||!run.completed_at||!uncertain(run)||failureFinalization(run)||!integer(bot.revision)||!integer(bot.control_epoch))return null;

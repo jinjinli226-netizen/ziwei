@@ -1,17 +1,13 @@
 import {mergeConversationLatest} from './conversation-history.mjs';
 import {historicalPrelaunchRecovery,HISTORICAL_PRELAUNCH_RECOVERY_DETAIL} from './historical-prelaunch-recovery.mjs';
 import {operatorForceAbandonRecovery,OPERATOR_FORCE_ABANDON_DETAIL} from './operator-force-abandon-recovery.mjs';
-import {failureFinalization,pendingBotFailureFinalization,finalizationPresentation} from './bot-failure-finalization.mjs';
+import {failureFinalization,finalizationPresentation} from './bot-failure-finalization.mjs';
 const terminal = new Set(['succeeded','failed','expired','cancelled']);
 const uncertainExecution = execution => execution?.result?.code === 'EXECUTION_UNCERTAIN' || execution?.code === 'EXECUTION_UNCERTAIN' || execution?.result?.executionState === 'uncertain' || execution?.status === 'uncertain' || (execution?.status === 'expired' && Boolean(execution?.acked_at));
 
-// A failed transport receipt can still acquire a definitive result later.
-// Waiting for that receipt does not make the original task retryable.
+// Background cleanup never keeps a failed conversation polling.
 export function executionNeedsPolling(execution,bot) {
-  if(pendingBotFailureFinalization(bot))return true;
-  const finalization=failureFinalization(execution);
-  if(finalization)return finalization.state==='awaiting_client';
-  return !operatorForceAbandonRecovery(execution) && !historicalPrelaunchRecovery(execution) && Boolean(execution && (['pending','acked'].includes(execution.status) || uncertainExecution(execution)));
+  return Boolean(execution && ['pending','acked'].includes(execution.status) && !uncertainExecution(execution));
 }
 
 export function executionPresentation(execution) {
@@ -21,7 +17,7 @@ export function executionPresentation(execution) {
   if(historicalPrelaunchRecovery(execution))return {label:HISTORICAL_PRELAUNCH_RECOVERY_DETAIL,summary:'原模型未启动 · 已恢复',busy:false,tone:'muted',retryable:false};
   const status = execution?.status;
   const uncertain = uncertainExecution(execution);
-  if (uncertain) return status==='failed'?{label:'本轮执行失败，原业务结果未确认',summary:'失败',busy:false,tone:'error',retryable:false}:{label:'正在等待原电脑的执行回执',summary:'执行状态待确认',busy:false,tone:'warning',retryable:false};
+  if (uncertain) return {label:'本轮执行失败',summary:'失败',busy:false,tone:'error',retryable:false};
   const labels = {
     pending:['已提交，等待 ziwei_user 接收','等待接收'],
     acked:['数字伙伴执行中','执行中'],
