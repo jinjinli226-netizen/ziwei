@@ -1,6 +1,7 @@
 import {createHash,randomUUID} from 'node:crypto';
 import {BOT_INTERNAL} from './bots.mjs';
 import {redactSecrets} from '../src/redaction.mjs';
+import {createEmployeeCapabilityReports} from './employee-capability-reports.mjs';
 
 export const EMPLOYEE_CAPABILITY_INSPECTION_FEATURE='employee_capabilities_inspect_v2';
 export const EMPLOYEE_CAPABILITY_INSPECTION_TYPE='employee.capabilities.inspect';
@@ -104,6 +105,7 @@ const sectionSummary=sections=>Object.fromEntries(['skills','mcp','cli'].map(key
 
 export function createEmployeeCapabilityInventory(repo,{management,now=Date.now,ttlMs=300000,actionTimeoutMs=60000}={}){
  const db=repo.db;if(!management?.employee)throw Error('Employee inventory requires scoped management service');
+ const reports=createEmployeeCapabilityReports(db,{now});
  function scoped(slug,id,context){
   const employee=management.employee(slug,id,context);
   const ws=db.prepare('SELECT * FROM workspaces WHERE id=? AND slug=?').get(employee.workspace_id,slug);if(!ws)fail('EMPLOYEE_NOT_FOUND',404);
@@ -154,9 +156,10 @@ export function createEmployeeCapabilityInventory(repo,{management,now=Date.now,
   const sections=fresh?snapshot.sections:unknownSections(reason||'REFRESH_PENDING');
   const summary=fresh?sectionSummary(sections):{skills:null,mcp:null,cli:null};
   const lastAttempt=latest?{actionId:latest.id,status:latest.status,createdAt:latest.created_at,completedAt:latest.completed_at||null,reasonCode:attemptReason}:null;
-  return{schemaVersion:1,workspace:slug,employeeId:id,subject,status:pending?'pending':fresh?'ready':'unknown',reasonCode:pending?'REFRESH_PENDING':fresh?null:reason,stale:Boolean(snapshot&&!fresh),snapshot:snapshot?{...snapshot,stale:!fresh}:null,sections,pending,summary,lastAttempt,countsAreObserved:true};
+  return{schemaVersion:1,workspace:slug,employeeId:id,subject,status:pending?'pending':fresh?'ready':'unknown',reasonCode:pending?'REFRESH_PENDING':fresh?null:reason,stale:Boolean(snapshot&&!fresh),snapshot:snapshot?{...snapshot,stale:!fresh}:null,sections,pending,summary,lastAttempt,countsAreObserved:true,reported:reports.read(subject)};
  }
  function get(slug,id,context={}){return read(slug,id,context);}
+ function report(slug,id,input,context={}){const data=scoped(slug,id,context);return reports.save(data.subject,input,context);}
  function refresh(slug,id,input={},context={}){
   if(!object(input)||Object.keys(input).some(key=>key!=='idempotencyKey')||input.idempotencyKey!==undefined&&(typeof input.idempotencyKey!=='string'||!/^[-A-Za-z0-9_.:]{1,128}$/.test(input.idempotencyKey)))fail('EMPLOYEE_CAPABILITIES_INPUT_INVALID',400);
   const data=scoped(slug,id,context),before=read(slug,id,context,data);if(before.pending)return{...before,duplicate:true};
@@ -169,5 +172,5 @@ export function createEmployeeCapabilityInventory(repo,{management,now=Date.now,
   repo.createA2AAction(slug,{agentId:'ziwei_user',type:EMPLOYEE_CAPABILITY_INSPECTION_TYPE,botInternal:BOT_INTERNAL,dedupeKey:`employee-capabilities:${id}:${digest(subject)}:${digest(key)}`,expiresAt:new Date(now()+actionTimeoutMs).toISOString(),payload});
   return read(slug,id,context,data);
  }
- return{get,refresh};
+ return{get,refresh,report};
 }

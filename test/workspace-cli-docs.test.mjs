@@ -88,7 +88,7 @@ test('generated files are current and every registry schema/behavior has one exa
     const marker = `<!-- operation:${operation.name} -->`;
     assert.equal(markdown.split(marker).length - 1, 1, `${operation.name} appears exactly once`);
     assert.ok(markdown.includes(JSON.stringify(operation.inputSchema, null, 2)), `${operation.name} schema drift`);
-    assert.ok(markdown.includes(`### ${operation.name.replace('.', ' ')}`));
+    assert.ok(markdown.includes(`### ${operation.name.replaceAll('.', ' ')}`));
     const {name, description, inputSchema, ...details} = operation;
     assert.ok(markdown.includes(JSON.stringify(details, null, 2)), `${operation.name} behavior drift`);
   }
@@ -126,9 +126,9 @@ test('identity round docs distinguish server preparation default from CLI defaul
   }
 });
 
-test('all 44 CLI routes advertise the actual server unified role and scope including phone binding admin', async () => {
+test('all 46 CLI routes advertise the actual server unified role and scope including phone binding admin', async () => {
   const {requiredPermission} = await import('../backend/identity/native.mjs');
-  assert.equal(operations.length,44);
+  assert.equal(operations.length,46);
   for (const op of operations) for (const route of Object.values(op.routes).filter(Boolean)) {
     const permission=requiredPermission({method:route.method,originalUrl:route.path.replaceAll('{workspace}','example-workspace').replace(/\{[^}]+\}/g,'example-id')});
     assert.equal(op.unifiedAuthorization?.requiredRole,permission,op.name);

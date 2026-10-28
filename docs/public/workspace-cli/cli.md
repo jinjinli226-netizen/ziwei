@@ -14,9 +14,9 @@ CLI 2.0.0 · 规范 1.3.0 · 身份契约 1.0.1 · 机器契约 v1 · 文档 2.0
 
 准备期服务器默认 legacy，保留现网原入口；CLI 默认 unified，这是 2.0.0 的明确行为变更。只有部署方显式配置 `ZIWEI_IDENTITY_MODE=unified`、完整受信 issuer/API 与 web secret/session key，并完成原生身份绑定后，默认 CLI 登录才可用。配置缺失不自动降级旧密码。准备兼容不是最终统一身份交付。
 
-源码基线 commit：19876c0f006af18c9fe3b6ef4a7d9e94c75c14c6；候选实现标识：workspace-unified-identity（未提交增量，尚无新的发布 commit）；命令目录 SHA-256：cffc6c3b931fe0944b3e37d577824de9e198812f3736651416006c908c7f6abf。该指纹只标识本文实际引用的 registry，不是安装包校验和或生产版本。最终源码 commit、artifact SHA-256 与发布状态须从交付记录分别核对。
+源码基线 commit：19876c0f006af18c9fe3b6ef4a7d9e94c75c14c6；候选实现标识：workspace-unified-identity（未提交增量，尚无新的发布 commit）；命令目录 SHA-256：64a46b405e9a48f73d74472c2fe9bcd7f95c54c05da71f052420c20fba494949。该指纹只标识本文实际引用的 registry，不是安装包校验和或生产版本。最终源码 commit、artifact SHA-256 与发布状态须从交付记录分别核对。
 
-已有操作见下方从 registry 生成的 44 项命令/schema。统一身份只在服务器公开配置明确允许的 native/mcp HTTP 路由上传本站 AT：优先对应 native 路由，否则可用原有 MCP 路由。原生资源、角色和幂等边界保持逐项定义。员工绑定可能只允许自己的员工/Bot 路径，集合查询可被明确拒绝。未覆盖：员工机器 client_credentials、全站 OP 退出、通用 actions cancel、dry-run、特权 force-abandon/failure-finalization、其他站点业务命令。
+已有操作见下方从 registry 生成的 46 项命令/schema。统一身份只在服务器公开配置明确允许的 native/mcp HTTP 路由上传本站 AT：优先对应 native 路由，否则可用原有 MCP 路由。原生资源、角色和幂等边界保持逐项定义。员工绑定可能只允许自己的员工/Bot 路径，集合查询可被明确拒绝。未覆盖：员工机器 client_credentials、全站 OP 退出、通用 actions cancel、dry-run、特权 force-abandon/failure-finalization、其他站点业务命令。
 
 ## 安装、升级、卸载与包校验
 
@@ -751,6 +751,243 @@ ziwei-workspace employees get --input-file "<business-input.json>" --json --cont
 
 ```sh
 ziwei-workspace employees mcp-status --input-file "<business-input.json>" --json --contract v1
+```
+
+<!-- operation:employees.capabilities.get -->
+### employees capabilities get
+
+读取员工 Skill/MCP/CLI 能力清单与 AI 回填记录。agent_reported 为自报来源，不代表已授权、已加载或独立验证。
+
+输入 schema：
+
+```json
+{
+  "type": "object",
+  "required": [
+    "id"
+  ],
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "workspace": {
+      "type": "string",
+      "description": "可选的明确目标工作区；必须已经在本MCP bearer授权scope中，省略沿用当前工作区。"
+    }
+  },
+  "additionalProperties": false
+}
+```
+
+行为、权限与真实查询入口：
+
+```json
+{
+  "nativeTool": "ziwei_get_employee_capabilities",
+  "readOnly": true,
+  "sideEffects": [],
+  "requiredPermissions": [
+    "Unified site roles: access AND read; issued/current intersection",
+    "Unified scope: workspace:read; issued/current intersection",
+    "Original server workspace membership and role policy",
+    "Original employee visibility and device scope checks"
+  ],
+  "unifiedAuthorization": {
+    "requiresAccess": true,
+    "requiredRole": "read",
+    "requiredScope": "workspace:read",
+    "nativeOwnerAdmin": false,
+    "verification": "server every request; issued/current roles and scopes intersect native policy"
+  },
+  "supportsDryRun": false,
+  "idempotency": "unsupported",
+  "idempotencyScope": null,
+  "resultQuery": null,
+  "transports": {
+    "managed": "supported",
+    "native": "supported"
+  },
+  "routes": {
+    "managed": {
+      "method": "GET",
+      "path": "/mcp/v1/workspaces/{workspace}/employees/{id}/capability-inventory"
+    },
+    "native": {
+      "method": "GET",
+      "path": "/api/workspaces/{workspace}/employees/{id}/capability-inventory"
+    }
+  },
+  "idempotencyByTransport": {
+    "managed": "unsupported",
+    "native": "unsupported"
+  }
+}
+```
+
+输入文件模板：
+
+```json
+{
+  "id": "<id>"
+}
+```
+
+```sh
+ziwei-workspace employees capabilities get --input-file "<business-input.json>" --json --contract v1
+```
+
+<!-- operation:employees.capabilities.report -->
+### employees capabilities report
+
+安装、配置变更或调用结果变化后，回填当前授权员工的 Skill/MCP/CLI 能力；无变化不用重复报告。不扫描电脑、不安装工具、不执行业务。source 固定 agent_reported，不授予权限或伪造可用证据。相同 kind/id 更新原条目；status removed 移除条目。使用稳定 idempotencyKey；回读 ziwei_get_employee_capabilities。command 仅填命令名，不含参数、路径或密钥。evidenceActionId 可引用同员工电脑/Profile的原终态执行，但不自动验证具体工具。
+
+输入 schema：
+
+```json
+{
+  "type": "object",
+  "required": [
+    "id",
+    "entries",
+    "idempotencyKey"
+  ],
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "idempotencyKey": {
+      "type": "string",
+      "maxLength": 128
+    },
+    "entries": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "id",
+          "name",
+          "status"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "skill",
+              "mcp",
+              "cli"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "maxLength": 160
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 160
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "declared",
+              "working",
+              "failed",
+              "removed"
+            ]
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "version": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "command": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "evidenceActionId": {
+            "type": "string",
+            "maxLength": 200
+          }
+        }
+      }
+    },
+    "workspace": {
+      "type": "string",
+      "description": "可选的明确目标工作区；必须已经在本MCP bearer授权scope中，省略沿用当前工作区。"
+    }
+  },
+  "additionalProperties": false
+}
+```
+
+行为、权限与真实查询入口：
+
+```json
+{
+  "nativeTool": "ziwei_report_employee_capabilities",
+  "readOnly": false,
+  "sideEffects": [
+    "Persist agent_reported entries only; no installation, authorization, runtime verification or business execution"
+  ],
+  "requiredPermissions": [
+    "Unified site roles: access AND write; issued/current intersection",
+    "Unified scope: workspace:write; issued/current intersection",
+    "Original server workspace membership and role policy",
+    "Original employee visibility and device scope checks"
+  ],
+  "unifiedAuthorization": {
+    "requiresAccess": true,
+    "requiredRole": "write",
+    "requiredScope": "workspace:write",
+    "nativeOwnerAdmin": false,
+    "verification": "server every request; issued/current roles and scopes intersect native policy"
+  },
+  "supportsDryRun": false,
+  "idempotency": "supported",
+  "idempotencyScope": "Only original endpoint semantics; stable key, same authorized actor/workspace and original resource. Never an automatic retry guarantee.",
+  "resultQuery": {
+    "command": "ziwei-workspace employees capabilities get --id <employeeId>",
+    "idField": "id"
+  },
+  "transports": {
+    "managed": "supported",
+    "native": "supported"
+  },
+  "routes": {
+    "managed": {
+      "method": "POST",
+      "path": "/mcp/v1/workspaces/{workspace}/employees/{id}/capability-inventory/reports"
+    },
+    "native": {
+      "method": "POST",
+      "path": "/api/workspaces/{workspace}/employees/{id}/capability-inventory/reports"
+    }
+  },
+  "idempotencyByTransport": {
+    "managed": "supported",
+    "native": "supported"
+  }
+}
+```
+
+输入文件模板：
+
+```json
+{
+  "id": "<id>",
+  "entries": [],
+  "idempotencyKey": "<idempotencyKey>"
+}
+```
+
+```sh
+ziwei-workspace employees capabilities report --input-file "<business-input.json>" --json --contract v1
 ```
 
 <!-- operation:profiles.create -->

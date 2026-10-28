@@ -12,12 +12,14 @@ import {createLocalActionExecutor} from '../src/local-action.mjs';
 import {createMachineCapabilityInventory} from '../src/employee-capability-inventory.mjs';
 import {executionBinding} from '../src/execution-admission.mjs';
 import {EMPLOYEE_CAPABILITY_INSPECTION_FEATURE} from './employee-capability-inventory.mjs';
+import {runCli} from '../packages/workspace-cli/src/main.mjs';
+import {createMcpClient,createMcpHandler} from '../scripts/ziwei-mcp.mjs';
 
 const SLUG='inventory-integration';
 const FIXTURES='D:/AINavtie/ops/ziwei/employee-capability-inventory-rollout-20261027/test-fixtures';
-function request(app,url,{cookie='',token='',method='GET',body}={}){
+function request(app,url,{cookie='',token='',bearer='',method='GET',body}={}){
  const socket=new Duplex({read(){},write(_chunk,_encoding,done){done();}}),req=new IncomingMessage(socket),res=new ServerResponse(req),chunks=[],bytes=body===undefined?null:Buffer.from(JSON.stringify(body));
- req.method=method;req.url=url;req.headers={host:'inventory.fixture',cookie,...(token?{'x-ziwei-device-token':token}:{}),...(bytes?{'content-type':'application/json','content-length':String(bytes.length)}:{})};
+ req.method=method;req.url=url;req.headers={host:'inventory.fixture',cookie,...(token?{'x-ziwei-device-token':token}:{}),...(bearer?{authorization:`Bearer ${bearer}`} :{}),...(bytes?{'content-type':'application/json','content-length':String(bytes.length)}:{})};
  return new Promise((resolve,reject)=>{
   res.write=(chunk,encoding,done)=>{if(chunk)chunks.push(Buffer.from(chunk,typeof encoding==='string'?encoding:undefined));done?.();return true;};
   res.end=(chunk,encoding,done)=>{if(chunk)chunks.push(Buffer.from(chunk,typeof encoding==='string'?encoding:undefined));done?.();const text=Buffer.concat(chunks).toString();resolve({status:res.statusCode,headers:res.getHeaders(),json:text?JSON.parse(text):null});res.emit('finish');socket.destroy();return res;};
@@ -61,6 +63,62 @@ function fixture(t,{feature=true,features,kind='team'}={}){
  t.after(async()=>{await execute.close();db.close();fs.rmSync(root,{recursive:true,force:true});});
  return{repo,db,auth,app,owner,member,actor,employee,pair,ws,root,profileHome,counts,url,cookie,memberCookie,read,refresh,deviceRequest,dispatch,calls};
 }
+
+test('AI capability reports persist without a device probe, preserve their source, and update individual entries',async t=>{
+ const f=fixture(t,{feature:false}),before=f.counts(),body={idempotencyKey:'report-one',entries:[{kind:'cli',id:'custom-video',name:'Custom video CLI',command:'custom-video',status:'working',description:'Local executable outside the discovery catalog'}]};
+ const report=()=>request(f.app,f.url(f.employee.id)+'/reports',{method:'POST',cookie:f.cookie,body});
+ const saved=await report();assert.equal(saved.status,201,JSON.stringify(saved.json));assert.equal(saved.json.source,'agent_reported');assert.equal(saved.json.duplicate,false);
+ assert.equal((await report()).json.duplicate,true);assert.deepEqual(f.counts(),before);
+ let view=(await f.read()).json;assert.equal(view.reported.length,1);assert.equal(view.reported[0].name,'Custom video CLI');assert.equal(view.reported[0].status,'working');assert.equal(view.reported[0].source,'agent_reported');assert.equal(view.reported[0].verified,false);assert.equal(view.sections.cli.items.length,0);
+ const changed=await request(f.app,f.url(f.employee.id)+'/reports',{method:'POST',cookie:f.cookie,body:{...body,entries:[{...body.entries[0],status:'failed'}]}});assert.equal(changed.status,409);
+ await request(f.app,f.url(f.employee.id)+'/reports',{method:'POST',cookie:f.cookie,body:{...body,idempotencyKey:'report-two',entries:[{...body.entries[0],status:'failed'}]}});
+ view=(await f.read()).json;assert.equal(view.reported.length,1);assert.equal(view.reported[0].status,'failed');
+ await request(f.app,f.url(f.employee.id)+'/reports',{method:'POST',cookie:f.cookie,body:{idempotencyKey:'report-remove',entries:[{kind:'cli',id:'custom-video',name:'Custom video CLI',status:'removed'}]}});
+ assert.equal((await f.read()).json.reported.length,0);
+});
+
+test('AI capability reports enforce employee authority and do not accept invented verification or unrelated evidence',async t=>{
+ const f=fixture(t),body={idempotencyKey:'authority',entries:[{kind:'mcp',id:'my-tools',name:'My tools',status:'declared'}]},url=f.url(f.employee.id)+'/reports';
+ assert.equal((await request(f.app,url,{method:'POST',body})).status,401);
+ f.repo.updateEmployee(f.employee.id,{visibility:'personal'},f.actor);
+ assert.equal((await request(f.app,url,{method:'POST',body,cookie:f.memberCookie})).status,404);
+ for(const entry of [{...body.entries[0],verified:true},{...body.entries[0],evidenceActionId:'action-not-owned'}])assert.equal((await request(f.app,url,{method:'POST',body:{...body,entries:[entry]},cookie:f.cookie})).status,400);
+ const saved=await request(f.app,url,{method:'POST',body,cookie:f.cookie});assert.equal(saved.status,201);
+ f.repo.updateEmployee(f.employee.id,{runtimeProfile:'different-profile'},f.actor);
+ assert.equal((await f.read()).json.reported.length,0);
+});
+
+test('incremental AI reports retain unrelated older entries after more than a hundred updates',async t=>{
+ const f=fixture(t);
+ const post=async(entries,key)=>request(f.app,f.url(f.employee.id)+'/reports',{method:'POST',cookie:f.cookie,body:{entries,idempotencyKey:key}});
+ await post([{kind:'skill',id:'keep',name:'Keep this skill',status:'declared'}],'keep');
+ for(let index=0;index<101;index++)await post([{kind:'cli',id:'frequent',name:'Updated CLI',status:index%2?'working':'failed'}],'update-'+index);
+ const view=(await f.read()).json;assert.equal(view.reported.length,2);assert(view.reported.some(item=>item.id==='keep'));
+});
+
+test('actual CLI and MCP reporting share authenticated persistence and GET works while the computer is offline',async t=>{
+ const f=fixture(t),credential=f.repo.authenticateDeviceToken(f.pair.deviceToken),bootstrap=f.app.locals.managementBootstrap.bootstrap(SLUG,credential),origin='https://inventory.fixture';
+ const paths=[];
+ const fetchImpl=async(url,init={})=>{
+  const parsed=new URL(url);paths.push(parsed.pathname);
+  if(parsed.pathname==='/api/identity/config')return Response.json({service:'workspace',mode:'legacy',legacyAllowed:true});
+  const reply=await request(f.app,parsed.pathname+parsed.search,{method:init.method||'GET',bearer:(init.headers?.authorization||'').replace(/^Bearer /,''),body:init.body?JSON.parse(init.body):undefined});
+  return Response.json(reply.json,{status:reply.status});
+ };
+ async function cli(args,stdin=''){
+  let output='';const result=await runCli([...args,'--api',origin],{env:{ZIWEI_WORKSPACE_CONFIG_DIR:path.join(f.root,'cli-config')},fetchImpl,readStdin:async()=>stdin,stdout:value=>output+=value,stderr(){}});
+  assert(!output.includes(bootstrap.token));return{...result,json:JSON.parse(output)};
+ }
+ const login=await cli(['auth','login','--mode','managed','--managed-stdin','--purpose','employee'],JSON.stringify({...bootstrap,apiBase:origin}));assert.equal(login.exitCode,0,JSON.stringify(login.json));
+ f.db.prepare("UPDATE devices SET status='offline' WHERE id=?").run(f.pair.deviceId);
+ const entry={kind:'cli',id:'my-cli',name:'My CLI',command:'my-cli',status:'working'},body={id:f.employee.id,idempotencyKey:'cli-report',entries:[entry]};
+ const saved=await cli(['employees','capabilities','report','--purpose','employee','--input',JSON.stringify(body)]);assert.equal(saved.exitCode,0,JSON.stringify(saved.json));
+ const read=await cli(['employees','capabilities','get','--purpose','employee','--id',f.employee.id]);assert.equal(read.exitCode,0,JSON.stringify(read.json));assert.equal(read.json.data.native.reported[0].name,'My CLI');
+ const client=createMcpClient({baseUrl:origin,workspace:SLUG,token:bootstrap.token,fetchImpl}),handler=createMcpHandler(client);
+ const called=await handler({jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'ziwei_report_employee_capabilities',arguments:{...body,idempotencyKey:'mcp-report',entries:[{...entry,status:'failed'}]}}});
+ assert.equal(called.result.isError,undefined,JSON.stringify(called));assert.equal((await f.read()).json.reported[0].status,'failed');
+ assert(paths.some(value=>value.endsWith('/capability-inventory/reports')));
+});
 
 test('real cached HTTP GET admits no work; explicit refresh completes via dispatcher, native file collector and authenticated result',async t=>{
  const f=fixture(t),before=f.counts();

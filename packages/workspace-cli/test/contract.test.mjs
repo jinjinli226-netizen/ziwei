@@ -14,6 +14,13 @@ async function invoke(args, options={}) {
     return {...result,stdout,stderr,json:stdout.startsWith('{')?JSON.parse(stdout):null};
   } finally {await fs.rm(root,{recursive:true,force:true});}
 }
+test('employee capabilities expose three-part get/report commands with both transports',async()=>{
+ const get=registry.getOperation('employees.capabilities.get'),report=registry.getOperation('employees.capabilities.report');
+ assert.ok(get);assert.ok(report);assert.equal(report.readOnly,false);assert.equal(report.idempotency,'supported');
+ assert.match(report.routes.managed.path,/capability-inventory\/reports$/);assert.match(report.routes.native.path,/capability-inventory\/reports$/);
+ const help=await invoke(['employees','capabilities','report','--help']);assert.equal(help.exitCode,0);assert.match(help.stdout,/employees capabilities report/);assert.match(help.stdout,/agent_reported/);
+});
+
 test('public flags work before and after commands and ordinary output is one v1 envelope', async()=>{
   const a=await invoke(['--json','--contract','v1','capabilities','--profile','test','--non-interactive']);
   assert.equal(a.exitCode,0); assert.equal(a.json.schemaVersion,1); assert.equal(a.json.service,'workspace'); assert.equal(a.json.ok,true);
@@ -45,7 +52,7 @@ test('catalog covers all native tools and every Bot operation without cross-site
   assert.equal(typeof registry.getCapabilities,'function');
   const c=registry.getCapabilities();
   for(const o of c.operations) for(const field of ['name','inputSchema','readOnly','sideEffects','requiredPermissions','supportsDryRun','idempotency','resultQuery']) assert.ok(Object.hasOwn(o,field),`${o.name}.${field}`);
-  assert.equal(new Set(c.operations.map(o=>o.nativeTool)).size,24);
+  assert.equal(new Set(c.operations.map(o=>o.nativeTool)).size,26);
   assert.ok(c.operations.some(o=>o.name==='bots.cancelMcpConnection'));
   assert.ok(c.operations.some(o=>o.name==='actions.wait'&&o.readOnly));
   assert.ok(c.operations.find(o=>o.name==='phone-mcp.check').sideEffects.length>0);

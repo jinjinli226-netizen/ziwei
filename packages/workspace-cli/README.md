@@ -140,3 +140,7 @@ Errors preserve safe original HTTP status and native error code. The end-to-end 
 The retained `scripts/ziwei-mcp.mjs` stdio implementation has no new OP device/refresh flow. Its original managed token-file configuration is not a unified CLI authorization proxy. CLI AT support for declared MCP HTTP routes, retained independent daemon/A2A/terminal credentials, and migration of every employee's actual management MCP runtime are separate acceptance items. The last item remains pending until tested with the intended employee identity and native scope.
 
 See [COMPATIBILITY.md](COMPATIBILITY.md) for every retained computer-client entrypoint, original management MCP tool mapping, intentional unsupported operations and the independent Control boundary.
+
+## 员工能力主动回填
+
+`ziwei-workspace employees capabilities get --id <employeeId>` 读取检测与 AI 回填记录。`ziwei-workspace employees capabilities report --input-file report.json` 增量登记 Skill/MCP/CLI，body 含 `id`、稳定 `idempotencyKey` 与 `entries`；条目含 `kind`、`id`、`name`、`status`（declared/working/failed/removed）。可选 description/version/command/evidenceActionId；command 仅命令名。来源固定 agent_reported，自报不等于已授权、已加载或独立验证；不运行额外业务。沿用当前身份选择参数，未知写入结果先 get 回读。

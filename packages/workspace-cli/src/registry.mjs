@@ -15,6 +15,8 @@ const entries=[
   ['environment.discover','ziwei_discover_environment','GET','/discovery','/mcp/discovery',[],false,null],
   ['employees.get','ziwei_get_employee','GET','/employees/{id}',null,[],false,null],
   ['employees.mcp-status','ziwei_get_employee_mcp_status','GET','/employees/{id}/mcp/status','/employees/{id}/mcp/status',[],false,null],
+  ['employees.capabilities.get','ziwei_get_employee_capabilities','GET','/employees/{id}/capability-inventory','/employees/{id}/capability-inventory',[],false,null],
+  ['employees.capabilities.report','ziwei_report_employee_capabilities','POST','/employees/{id}/capability-inventory/reports','/employees/{id}/capability-inventory/reports',['Persist agent_reported entries only; no installation, authorization, runtime verification or business execution'],true,{command:'ziwei-workspace employees capabilities get --id <employeeId>',idField:'id'}],
   ['profiles.create','ziwei_create_hermes_profile','POST','/hermes/profiles/requests','/hermes/profiles/requests',['Create isolated Hermes Profile on the selected computer'],true,actionQuery],
   ['actions.get','ziwei_get_action','GET','/actions/{id}','/actions/{id}',[],false,actionQuery],
   ['tasks.get','ziwei_get_task','GET','/tasks/{id}','@/api/tasks/{id}',[],false,null],

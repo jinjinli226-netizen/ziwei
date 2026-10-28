@@ -162,14 +162,14 @@ export function buildWorkspaceCliDocs() {
   ].join('\n');
   const catalog = operations.map(operation => [
     `<!-- operation:${operation.name} -->`,
-    `### ${operation.name.replace('.', ' ')}`, '',
+    `### ${operation.name.replaceAll('.', ' ')}`, '',
     operation.description, '',
     '输入 schema：', '', jsonBlock(operation.inputSchema), '',
     '行为、权限与真实查询入口：', '', jsonBlock(behavior(operation)), '',
     '输入文件模板：', '', jsonBlock(exampleForSchema(operation.inputSchema)), '',
-    fence + 'sh', `ziwei-workspace ${operation.name.replace('.', ' ')} --input-file "<business-input.json>" --json --contract v1`, fence, ''
+    fence + 'sh', `ziwei-workspace ${operation.name.replaceAll('.', ' ')} --input-file "<business-input.json>" --json --contract v1`, fence, ''
   ].join('\n')).join('\n');
-  const unsupported = Object.entries(unsupportedOperations).map(([name, reason]) => '- `' + name.replace('.', ' ') + '`：' + reason).join('\n');
+  const unsupported = Object.entries(unsupportedOperations).map(([name, reason]) => '- `' + name.replaceAll('.', ' ') + '`：' + reason).join('\n');
   const markdown = intro + catalog + '\n## 明确不支持项\n\n' + unsupported + '\n\n- 员工机器 client_credentials、全站 OP 退出和原 stdio MCP 的统一授权迁移未由本 CLI 实现。\n\n## 版本与线上边界\n\n' + metadata + '\n\n此文档和三个匿名入口是候选源码的一部分。服务器准备期 legacy 与 CLI 默认 unified 必须分别核对；统一切换需经受控发布窗口、完整配置/显式绑定及验收，不能用长期兼容替代交付。包构建/安装、纯 handler/本地 HTTP、真实 OP、生产源码和公网读取分别验收。未部署前公网与生产 SSO 保持 pending。\n';
   const html = [
     '<!doctype html>', '<html lang="zh-CN">', '<head>', '<meta charset="utf-8">', '<meta name="viewport" content="width=device-width,initial-scale=1">',

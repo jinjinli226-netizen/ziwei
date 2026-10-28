@@ -4,6 +4,13 @@ import {createEmployeeCapabilityInventory,inventorySections,inventoryLayerRows,i
 const subject=(id='employee_a',workspace='one')=>({workspace,employeeId:id,deviceId:'pc',runtime:'Hermes',profile:'bot-a',revision:2,controlEpoch:3});
 const inventory=(s=subject(),patch={})=>({schemaVersion:1,subject:s,checkedAt:'2026-10-26T00:00:00Z',source:'device_inventory',sections:{skills:{status:'ready',items:[{id:'s',name:'Safe skill',configuration:'configured',visibility:'visible',assigned:'assigned',enabled:'enabled',onDemand:'available',loaded:'unknown'}]},mcp:{status:'unknown',reason:'DEVICE_OFFLINE',items:[]},cli:{status:'ready',items:[]}},pending:false,stale:false,...patch});
 const deferred=()=>{let resolve;return{promise:new Promise(done=>resolve=done),resolve:value=>resolve(value)};};
+
+test('AI reports appear in the correct tool group without fabricating installation, authorization or loading',()=>{
+ const value=inventory(subject(),{reported:[{kind:'cli',id:'new-cli',name:'New CLI',source:'agent_reported',status:'working',verified:false,stale:false,reportedAt:'2026-10-28T01:00:00Z'}]});
+ const cli=inventorySections(value).find(section=>section.key==='cli'),item=cli.items[0];
+ assert.equal(item.name,'New CLI');assert.equal(item.source,'agent_reported');assert.equal(item.reportedStatus,'working');
+ for(const layer of inventoryLayerRows(item))assert.equal(layer.state,'unknown');
+});
 test('inventory is lazy and reads only the selected employee once per visit',async()=>{const calls=[];const ui=createEmployeeCapabilityInventory({api:{employeeCapabilityInventory:async(w,id)=>{calls.push([w,id]);return inventory(subject(id,w));}}});await ui.select(subject(),{active:false});assert.equal(calls.length,0);await ui.select(subject(),{active:true});await ui.select(subject(),{active:true});assert.deepEqual(calls,[['one','employee_a']]);});
 test('late employee and workspace responses cannot replace current inventory',async()=>{const pending=deferred();const ui=createEmployeeCapabilityInventory({api:{employeeCapabilityInventory:async(w,id)=>id==='employee_a'?pending.promise:inventory(subject(id,w))}});const old=ui.select(subject(),{active:true});await ui.select(subject('employee_b','two'),{active:true});pending.resolve(inventory());await old;assert.equal(ui.state.value.subject.employeeId,'employee_b');assert.equal(ui.state.value.subject.workspace,'two');});
 test('bound inventory rejects another device or profile without presenting an empty result',async()=>{const ui=createEmployeeCapabilityInventory({api:{employeeCapabilityInventory:async()=>inventory({...subject(),deviceId:'other'})}});await ui.select(subject(),{active:true});assert.equal(ui.state.value,null);assert.equal(ui.state.errorCode,'CAPABILITY_INVENTORY_SCOPE_CHANGED');});

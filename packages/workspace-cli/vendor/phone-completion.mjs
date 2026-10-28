@@ -1,15 +1,15 @@
-// Generated from src/runtime-adapters.mjs; pure original completion semantics only.
+// Generated from src/terminal-mcp-receipt-failure.mjs; pure original completion semantics only.
+// Pure producer/replay policy shared by runtime and local history inspection.
 import {redactSecrets} from './redaction.mjs';
 const phoneExecutionStates = new Set(['not_started', 'succeeded', 'failed', 'uncertain', 'pending']);
-const phoneDiagnostic = value => typeof value === 'string' ? redactSecrets(value).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '').trim().slice(0, 800) : '';
-const phoneReceiptMetadata = (value, prefix = '') => {
+export const phoneDiagnostic = value => typeof value === 'string' ? redactSecrets(value).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '').trim().slice(0, 800) : '';
+export const phoneReceiptMetadata = (value, prefix = '') => {
   const error = phoneDiagnostic(value?.[`${prefix}Error`] ?? value?.error);
   const executionState = value?.[`${prefix}ExecutionState`] ?? value?.executionState;
   const executingConfirmed = value?.[`${prefix}ExecutingConfirmed`] ?? value?.executingConfirmed;
   const errorCode = value?.[`${prefix}ErrorCode`] ?? value?.errorCode;
   return { ...(error ? { error } : {}), ...(phoneExecutionStates.has(executionState) ? { executionState } : {}), ...(typeof executingConfirmed === 'boolean' ? { executingConfirmed } : {}), ...(typeof errorCode === 'string' && /^[A-Z0-9_]{1,100}$/.test(errorCode) ? { errorCode } : {}) };
 };
-
 export function terminalMcpExecutionFailure(receipt) {
   if (!receipt) return null;
   if (!receipt.loaded) return { code: 'terminal_mcp_not_loaded', error: `${receipt.runtime} 已退出但未收到手机 MCP 实际握手；恢复目标为独立 profile、工具配置及本机 MCP 连接` };

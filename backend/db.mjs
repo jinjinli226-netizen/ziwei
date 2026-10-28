@@ -287,6 +287,15 @@ export function openDatabase(options = {}, {serverCodeRolloutIo={}}={}) {
       FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
       FOREIGN KEY(employee_id) REFERENCES employees(id) ON DELETE SET NULL
     );
+    CREATE TABLE IF NOT EXISTS employee_capability_reports (
+      id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, employee_id TEXT NOT NULL,
+      subject_json TEXT NOT NULL, entries_json TEXT NOT NULL, actor_user_id TEXT,
+      request_key TEXT NOT NULL, fingerprint TEXT NOT NULL, created_at TEXT NOT NULL,
+      UNIQUE(workspace_id,employee_id,request_key),
+      FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
+      FOREIGN KEY(employee_id) REFERENCES employees(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_employee_capability_reports ON employee_capability_reports(workspace_id,employee_id);
     CREATE TABLE IF NOT EXISTS employee_template_instances (
       id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, owner_user_id TEXT NOT NULL,
       employee_id TEXT NOT NULL UNIQUE, template_id TEXT NOT NULL, template_version TEXT,

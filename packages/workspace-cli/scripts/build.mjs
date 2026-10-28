@@ -18,7 +18,7 @@ try {
   // A packed install is already self-contained. Rebuilding never discovers credentials.
   await fs.access(output);
 }
-for(const name of ['hermes-bot-config.mjs','hermes-mcp-config.mjs','hermes-native-contract.mjs','redaction.mjs']){
+for(const name of ['hermes-bot-config.mjs','bot-provider-routing.mjs','hermes-mcp-config.mjs','hermes-native-contract.mjs','redaction.mjs']){
   const target=path.join(root,'vendor',name);
   try{const code=(await fs.readFile(path.resolve(root,'../../src',name),'utf8')).replace(/\r\n/g,'\n');await fs.writeFile(target,`// Vendored original pure validation module; no credential/environment reads.\n${code}`);}
   catch(error){if(error.code!=='ENOENT')throw error;await fs.access(target);}
@@ -28,10 +28,7 @@ async function extractedModule(sourceFile,targetFile,extract){
   try{const code=(await fs.readFile(path.resolve(root,'../..',sourceFile),'utf8')).replace(/\r\n/g,'\n');const result=extract(code);if(!result)throw Error(`Native extraction boundary missing: ${sourceFile}`);await fs.writeFile(target,`// Generated from ${sourceFile}; pure original completion semantics only.\n${result.trimEnd()}\n`);}
   catch(error){if(error.code!=='ENOENT')throw error;await fs.access(target);}
 }
-await extractedModule('src/runtime-adapters.mjs','phone-completion.mjs',code=>{
-  const start=code.indexOf('const phoneExecutionStates = '),helpersEnd=code.indexOf('export function terminalMcpReceipt',start),failureStart=code.indexOf('export function terminalMcpExecutionFailure('),end=code.indexOf('\nfunction localManagementConfiguration',failureStart);
-  return start>=0&&helpersEnd>start&&failureStart>=0&&end>failureStart?`import {redactSecrets} from './redaction.mjs';\n${code.slice(start,helpersEnd)}\n${code.slice(failureStart,end)}`:null;
-});
+await extractedModule('src/terminal-mcp-receipt-failure.mjs','phone-completion.mjs',code=>code);
 await extractedModule('backend/repository.mjs','native-completion.mjs',code=>{
   const start=code.indexOf('const uncertainCompletion = '),end=code.indexOf('\nconst recoverableBotCompletion',start);
   return start>=0&&end>start?`import {terminalMcpExecutionFailure} from './phone-completion.mjs';\nexport ${code.slice(start,end)}`:null;
