@@ -1,0 +1,106 @@
+{
+  "standardVersion": "1.2.0",
+  "contract": "v1",
+  "service": "workspace",
+  "date": "2026-10-22",
+  "timezone": "Asia/Shanghai",
+  "baseCommit": "b8c8a669e0fb18623166628bd3e1088dfb133249",
+  "candidateBranch": "codex/workspace-cli-contract-v1",
+  "cli": {
+    "name": "@ziwei/workspace-cli",
+    "binary": "ziwei-workspace",
+    "version": "1.0.0",
+    "operations": 44,
+    "nativeManagementTools": 24,
+    "defaultContract": "v1"
+  },
+  "checks": {
+    "cliAndDocs": {
+      "passed": 52,
+      "failed": 0,
+      "command": "node --test packages/workspace-cli/test/*.test.mjs test/workspace-cli-docs.test.mjs"
+    },
+    "nativeAuthorization": {
+      "passed": 16,
+      "failed": 0,
+      "command": "node --test test/management-bootstrap-security.test.mjs",
+      "scope": "original in-memory Repository, not production identities"
+    },
+    "legacyOffline": {
+      "passed": 5,
+      "failed": 0,
+      "scope": "targeted original CLI tests; listener/device lifecycle tests not executed"
+    },
+    "lint": {
+      "passed": true,
+      "sourceFiles": 239
+    },
+    "docsGeneration": {
+      "passed": true,
+      "files": 3,
+      "operations": 44
+    },
+    "specReview": {
+      "status": "passed_after_fixes",
+      "closed": [
+        "global profile vs native Profile input",
+        "unknown completion and expired acknowledged Bot receipts"
+      ]
+    },
+    "qualityReview": {
+      "status": "passed_after_fixes",
+      "closed": [
+        "cross-process credential transaction race",
+        "sensitive object/array subtree redaction"
+      ],
+      "additionalOfflineFaultInjectionsPassed": 7
+    }
+  },
+  "artifact": {
+    "filename": "ziwei-workspace-cli-1.0.0.tgz",
+    "bytes": 44744,
+    "sha256": "97f2c3cc8ec8de89c50bcb873166c085a54609d224bc4af58dfc2066c6d8270c",
+    "twoPacksIdentical": true,
+    "independentWindowsInstall": "passed",
+    "uninstall": "passed",
+    "realCredentialsUsed": false,
+    "publicNpmPublication": "not_published"
+  },
+  "aiDocs": {
+    "localHttp": "passed_disposable_registered_fixture",
+    "routes": [
+      "/docs",
+      "/docs/cli.md",
+      "/llms.txt"
+    ],
+    "anonymous": true,
+    "executesJavaScript": false,
+    "businessAuthorizationVerifiedByDocsFixture": false,
+    "fixtureStopped": true,
+    "temporaryPortReleased": true,
+    "publicHttp": "pending_deployment",
+    "publicObservation": {
+      "docs": "connection_timeout",
+      "cliMarkdown": "200_text_html_SPA_shell",
+      "llmsTxt": "200_text_html_SPA_shell"
+    }
+  },
+  "identity": {
+    "status": "pending_common_identity_contract",
+    "legacyNativeAndManaged": "preserved",
+    "crossSiteC13": "pending"
+  },
+  "deployment": {
+    "status": "not_deployed",
+    "productionDataOrServicesChanged": false,
+    "devicesOrPaidModelsExecuted": false
+  },
+  "limitations": [
+    "No unified issuer/audience/client or explicit native-identity binding has been deployed",
+    "Native management health and single employee get are explicitly unsupported; original supported interfaces remain",
+    "No generic actions cancel, dry-run or privileged force-abandon exposed",
+    "Local CLI routes use injected transport tests and native domain authorization regressions; live production login was not attempted",
+    "macOS/Linux install execution and public docs rollout remain unverified"
+  ],
+  "evidenceReceipt": "D:/AINavtie/ops/cli-standard/receipts/workspace.json"
+}

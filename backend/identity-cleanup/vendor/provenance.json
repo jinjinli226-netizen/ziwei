@@ -1,0 +1,10 @@
+{
+  "identityContractVersion": "1.0.1",
+  "standardVersion": "1.3.0",
+  "upstreamCommit": "b6c53862fb07b2e23f2a05fea39ca843dd7c61e3",
+  "sources": [
+    {"file":"cleanup-manifest.mjs","upstream":"unified-cli/integrations/identity/cleanup-manifest.mjs","sha256":"4ee1e6e3ccfbc912adc5de3dcf525a7c422b2bb2415308fd1c6cc85e963ef5f6"},
+    {"file":"cleanup-manifest.schema.json","upstream":"ops/identity/cleanup-manifest.schema.json","sha256":"f9c94f6f66124d8a9af68a0afe42aff3495dd2d5b5ec3095dad7ca8cf3f02334"}
+  ],
+  "policy":"Vendored unchanged. Runtime uses repository-local imports; independently compare upstream hashes when updating. No source baseline or reviewed batch is inferred from this metadata."
+}

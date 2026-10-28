@@ -1,0 +1,15 @@
+# 紫薇驾驶舱
+
+> 本站管理工作区、数字员工、Bot、任务和文档；命令 ziwei-workspace，包 @ziwei/workspace-cli。
+
+CLI 2.0.0 · 规范 1.3.0 · 身份契约 1.0.1 · 机器契约 v1 · 文档 2.0.0 · 更新 2026-10-22
+
+- 文档索引: https://ziwei.qzelynth.top/docs
+- 完整 CLI 使用说明和 schema: https://ziwei.qzelynth.top/docs/cli.md
+- 本发现索引: https://ziwei.qzelynth.top/llms.txt
+
+范围：本地候选源码/独立 artifact；未发布到公共 npm；此次文档与 CLI 改动未部署，公网读取 pending。
+身份：CLI 默认 unified 已接线；服务器默认 legacy 供准备期，显式启用 unified 并完整配置/绑定后才可默认授权。真实 OP/C13、生产 SSO 与切换待分项验收。
+MCP：原 scripts/ziwei-mcp.mjs 是 stdio；原 managed 模板仅受控兼容，不能当成统一授权。实际 Bot MCP 迁移 pending；不提供虚构的公网 HTTP MCP URL。
+能力目录是离线说明，不是当前账号授权；业务权限仍由原服务逐次校验。
+这是普通纯文本发现索引，不是授权接口，也不保证任何 AI 产品自动发现或执行。

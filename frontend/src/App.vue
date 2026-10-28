@@ -7,6 +7,7 @@ import {hydrateRosterEmployee} from './bot-roster-entry.js';
 import {prependConversationHistory} from './conversation-history.mjs';
 import { connectWorkspaceRealtime } from './realtime.js';
 import WorkspaceShell from './components/WorkspaceShell.vue';
+import UnifiedIdentityLogin from './components/UnifiedIdentityLogin.vue';
 import ZiSelect from './components/ZiSelect.vue';
 import TerminalConsole from './components/terminal/TerminalConsole.vue';
 import AndroidInstallPage from './components/AndroidInstallPage.vue';
@@ -524,6 +525,8 @@ function dismissToast() { toast.value = ''; if (toastTimer) { window.clearTimeou
 function notify(message, tone = 'success') { dismissToast(); toastTone.value = tone; toast.value = String(message || ''); toastTimer = window.setTimeout(dismissToast, 3200); }
 async function refreshAuth() {
   try {
+    const identityConfig = await api.identityConfig();
+    authState.value = {...authState.value,identity_mode:identityConfig.mode};
     const status = await api.authStatus();
     authState.value = { ...authState.value, ...status, configured:!status.setup_required, loading:false };
     authMode.value = status.setup_required ? 'setup' : (inviteQuery.get('code') ? 'register' : 'login');
@@ -583,6 +586,7 @@ function refreshVisibleWorkspace() {
 function openRealtime() {
   closeRealtime();
   if (!authState.value.authenticated) return;
+  if(authState.value.identity_mode==='unified'){const timer=setInterval(refreshVisibleWorkspace,15000);eventSource.value={close:()=>clearInterval(timer)};return;}
   eventSource.value = connectWorkspaceRealtime({
     wsUrl: api.websocketUrl(), sseUrl: api.streamUrl(),
     onReady: refreshVisibleWorkspace,
@@ -1780,9 +1784,10 @@ onMounted(async () => { applyDisplayPreferences(); if (page.value==='android-ins
   <section v-else-if="!authState.authenticated" class="auth-screen">
     <div class="auth-card">
       <img src="/ziwei-logo.png" alt="紫薇"/>
-      <h1>{{ authMode==='login' ? '登录紫薇' : authMode==='setup' ? '创建紫薇账号' : '注册紫薇账号' }}</h1>
-      <p>{{ authMode==='login' ? (inviteCode ? '登录受邀账号后，确认接受此邀请。' : '使用账号进入工作区。') : authMode==='setup' ? '首次使用先创建账号，登录后再建立你的第一个工作区。' : '使用有效邀请加入指定工作区；没有邀请时可留空创建个人工作区。' }}</p>
-      <form class="form-stack" novalidate @submit.prevent="submitAuth">
+      <h1>{{ authState.identity_mode==='unified' ? '登录紫薇' : authMode==='login' ? '登录紫薇' : authMode==='setup' ? '创建紫薇账号' : '注册紫薇账号' }}</h1>
+      <p v-if="authState.identity_mode!=='unified'">{{ authMode==='login' ? (inviteCode ? '登录受邀账号后，确认接受此邀请。' : '使用账号进入工作区。') : authMode==='setup' ? '首次使用先创建账号，登录后再建立你的第一个工作区。' : '使用有效邀请加入指定工作区；没有邀请时可留空创建个人工作区。' }}</p>
+      <UnifiedIdentityLogin v-if="authState.identity_mode==='unified'" :login-url="api.identityLoginUrl()" :error="authError"/>
+      <form v-else class="form-stack" novalidate @submit.prevent="submitAuth">
         <ZiFormField v-if="authMode!=='login'" label="姓名"><ZiInput v-model="authForm.name" name="name" autocomplete="name" placeholder="你的姓名"/></ZiFormField>
         <ZiFormField v-if="authMode==='register'" label="工作区标识" hint="邀请链接会自动填写，请保持与邀请一致"><ZiInput v-model="authWorkspaceSlug" name="workspace" autocomplete="off" placeholder="可留空，或填写受邀工作区"/></ZiFormField>
         <ZiFormField v-if="authMode==='register'" label="邀请码" hint="使用邀请链接中的 code；无邀请时可留空"><ZiInput v-model="authForm.invitationCode" name="invitationCode" autocomplete="off" placeholder="可留空，加入工作区时填写"/></ZiFormField>
@@ -1792,7 +1797,7 @@ onMounted(async () => { applyDisplayPreferences(); if (page.value==='android-ins
         <div v-if="authError" ref="authErrorPanel" class="auth-error" data-auth-error role="alert" aria-live="assertive" tabindex="-1">{{ authError }}</div>
         <button type="submit" class="ziwei-button ziwei-button--primary ziwei-button--md" :disabled="authBusy" :aria-busy="authBusy">{{ authBusy ? '处理中…' : authMode==='login' ? '登录' : '创建账号并登录' }}</button>
       </form>
-      <button type="button" class="link-button" @click="switchAuthMode">{{ authMode==='login' ? '注册新账号' : '已有账号，登录' }}</button>
+      <button v-if="authState.identity_mode!=='unified'" type="button" class="link-button" @click="switchAuthMode">{{ authMode==='login' ? '注册新账号' : '已有账号，登录' }}</button>
     </div>
   </section>
   <section v-else-if="page==='invite-accept'" class="auth-screen">

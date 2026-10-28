@@ -1,0 +1,532 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ziwei:identity:cleanup-manifest:1",
+  "title": "Identity cleanup manifest: read-only dry-run review",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "service",
+    "dryRun",
+    "batch",
+    "administrator",
+    "inventory",
+    "items",
+    "backup",
+    "restore"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "service": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "sourceVersion",
+        "sourceFingerprint",
+        "inventoryFingerprint"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "enum": [
+            "ecosystem",
+            "workspace",
+            "world",
+            "viral",
+            "beeftv",
+            "xianyu",
+            "growth",
+            "collaboration"
+          ]
+        },
+        "sourceVersion": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "sourceFingerprint": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "inventoryFingerprint": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "dryRun": {
+      "const": true
+    },
+    "batch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "createdAt",
+        "summary"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "createdAt": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,3})?Z$"
+        },
+        "summary": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "total",
+            "preserve",
+            "delete",
+            "pending",
+            "digest"
+          ],
+          "properties": {
+            "total": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "preserve": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "delete": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "pending": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "digest": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          }
+        }
+      }
+    },
+    "administrator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "email",
+        "accountResolution",
+        "loginAccountRefs",
+        "associatedResourceRefs",
+        "evidenceRefs"
+      ],
+      "properties": {
+        "email": {
+          "const": "2594156182@qq.com"
+        },
+        "accountResolution": {
+          "type": "string",
+          "enum": [
+            "verified",
+            "not-present-verified",
+            "pending"
+          ]
+        },
+        "loginAccountRefs": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 100000,
+          "items": {
+            "$ref": "#/$defs/reference"
+          }
+        },
+        "associatedResourceRefs": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 100000,
+          "items": {
+            "$ref": "#/$defs/reference"
+          }
+        },
+        "evidenceRefs": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100000,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        }
+      }
+    },
+    "inventory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "complete",
+        "stableIds"
+      ],
+      "properties": {
+        "complete": {
+          "type": "boolean"
+        },
+        "stableIds": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 100000,
+          "items": {
+            "$ref": "#/$defs/reference"
+          }
+        }
+      }
+    },
+    "items": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 100000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "resource",
+          "decision",
+          "reason",
+          "ownership",
+          "dependencies",
+          "cascade",
+          "nativeDisposition",
+          "evidenceRefs"
+        ],
+        "properties": {
+          "resource": {
+            "$ref": "#/$defs/reference"
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "preserve",
+              "delete",
+              "pending"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "ownership": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "classification",
+              "loginAccountRefs",
+              "evidenceRefs"
+            ],
+            "properties": {
+              "classification": {
+                "type": "string",
+                "enum": [
+                  "preserved-admin",
+                  "other-login-account",
+                  "shared",
+                  "global",
+                  "unowned",
+                  "mixed",
+                  "unknown"
+                ]
+              },
+              "loginAccountRefs": {
+                "type": "array",
+                "minItems": 0,
+                "maxItems": 100000,
+                "items": {
+                  "$ref": "#/$defs/reference"
+                }
+              },
+              "evidenceRefs": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 100000,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              }
+            }
+          },
+          "dependencies": {
+            "type": "array",
+            "minItems": 0,
+            "maxItems": 100000,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "target",
+                "relation",
+                "onTargetDelete",
+                "evidenceRefs"
+              ],
+              "properties": {
+                "target": {
+                  "$ref": "#/$defs/reference"
+                },
+                "relation": {
+                  "type": "string",
+                  "enum": [
+                    "requires",
+                    "references",
+                    "owns"
+                  ]
+                },
+                "onTargetDelete": {
+                  "type": "string",
+                  "enum": [
+                    "blocks",
+                    "no-impact",
+                    "unknown"
+                  ]
+                },
+                "evidenceRefs": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 100000,
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  }
+                }
+              }
+            }
+          },
+          "cascade": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "mode",
+              "targets",
+              "explanation",
+              "evidenceRefs"
+            ],
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "explicit-only",
+                  "unresolved"
+                ]
+              },
+              "targets": {
+                "type": "array",
+                "minItems": 0,
+                "maxItems": 100000,
+                "items": {
+                  "$ref": "#/$defs/reference"
+                }
+              },
+              "explanation": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000
+              },
+              "evidenceRefs": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 100000,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              }
+            }
+          },
+          "nativeDisposition": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "treatment",
+                  "evidenceRefs"
+                ],
+                "properties": {
+                  "treatment": {
+                    "type": "string",
+                    "enum": [
+                      "separately-reviewed-user-asset",
+                      "retain-dependency",
+                      "not-a-login-account",
+                      "pending"
+                    ]
+                  },
+                  "evidenceRefs": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 100000,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          "evidenceRefs": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100000,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          }
+        }
+      }
+    },
+    "backup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "evidenceRef",
+        "artifactFingerprint",
+        "sourceFingerprint",
+        "consistencyEvidenceRef",
+        "accessPolicyRef",
+        "retentionPolicyRef"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "planned",
+            "verified"
+          ]
+        },
+        "evidenceRef": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "artifactFingerprint": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "sourceFingerprint": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "consistencyEvidenceRef": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "accessPolicyRef": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "retentionPolicyRef": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      }
+    },
+    "restore": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "evidenceRef",
+        "backupArtifactFingerprint",
+        "isolated",
+        "verifiedInventoryFingerprint",
+        "administratorPreserved",
+        "collaborationPreserved"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "not-run",
+            "verified"
+          ]
+        },
+        "evidenceRef": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "backupArtifactFingerprint": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "isolated": {
+          "type": "boolean"
+        },
+        "verifiedInventoryFingerprint": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "administratorPreserved": {
+          "type": "boolean"
+        },
+        "collaborationPreserved": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      }
+    }
+  },
+  "$defs": {
+    "reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "type",
+        "id"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "login-account",
+            "business-resource",
+            "native-actor",
+            "platform-account",
+            "device-pairing",
+            "system-credential"
+          ]
+        },
+        "type": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        }
+      }
+    }
+  }
+}
