@@ -65,7 +65,7 @@ ziwei-workspace auth logout --profile "<profile>" --account "<account-slot>" --j
 
 `auth complete` 只在轮询间隔到期后兑换一次；`auth wait` 按 interval/slow_down 在总 --timeout 内等待，已知未批准时返回 `state:pending,completed:false,timedOut:true`，不把待批准说成登录完成。每流只允许一个兑换在途。终止拒绝/到期只清理对应版本；已发兑换或刷新超时/SIGINT保留 unknown，禁止自动重放。
 
-CLI 将 AT/RT 作为不透明凭据；保存登录/刷新前必须用新 AT 请求 `GET /api/identity/me`，由服务器实际验签、逐次 confidential introspection 与原生绑定验证，并确认工作区 membership。刷新必须保持原 issuer/subject。每个后续业务请求还需本站 access/read/write/admin 角色、scope 与原生资源权限交集；安装和本地凭据不授予权限。员工可用自己的交互设备账号，但本 CLI 的非交互机器 client_credentials 明确 NOT_SUPPORTED，不借用管理员 token。
+CLI 将 AT/RT 作为不透明凭据；保存登录/刷新前必须用新 AT 请求 `GET /api/identity/me`，由服务器实际验签、逐次 confidential introspection 与原生绑定验证，并确认工作区 membership。刷新必须保持原 issuer/subject。每个后续业务请求还需本站 access/read/write/admin 角色、scope 与原生资源权限交集；安装和本地凭据不授予权限。员工可用自己的交互设备账号，非交互员工使用 `auth login --mode machine --purpose employee --workspace <slug> --worker-file <绝对私有JSON>`，文件固定本站 issuer/origin/clientId/subject/clientSecret；仅登记的单员工 client 可用，300秒 AT 先经后端验签、实时 introspection 和原生绑定，secret 不进 token 槽；过期需显式重新授权。
 
 每项命令公开 `unifiedAuthorization` 的实际 requiredRole/requiredScope，并与服务器两个路由族做对照测试。尤其 `phone-mcp configure` 是绑定管理，需当前 access + admin、workspace:write 及原生工作区 owner/admin；普通 task/document 写仍需 write。字段是离线规则，不能据此宣称当前账号有 grant。
 

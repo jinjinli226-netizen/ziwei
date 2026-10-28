@@ -18,7 +18,7 @@ const text=(value,max)=>{
 // their intentional line breaks and URLs through the separate text path.
 const title=value=>text(String(value||'').replace(/[\r\n\t\u2028\u2029]+/g,' '),160);
 
-export function createMobileNotificationV2Service(repo,auth,realtime,{now=Date.now}={}){
+export function createMobileNotificationV2Service(repo,auth,realtime,{now=Date.now,authorize}={}){
   const db=repo.db,v1=createMobileNotificationReadService(repo),groups=createMobileGroupActionView(repo);
   const workspace=db.prepare('SELECT id,slug,kind FROM workspaces WHERE slug=?');
   const membership=db.prepare('SELECT role FROM members WHERE workspace_id=? AND user_id=?');
@@ -64,7 +64,7 @@ export function createMobileNotificationV2Service(repo,auth,realtime,{now=Date.n
     ${capped('payload_json','$.nativeOperation')} AS request_json,${capped('payload_json','$.hermesBot',4096)} AS binding_json,${nativeColumns.join(',')}
     FROM a2a_actions WHERE id=? AND workspace_id=?`);
   function transaction(read){db.exec('SAVEPOINT mobile_notification_v2_read');try{const result=read();db.exec('RELEASE mobile_notification_v2_read');return result;}catch(error){db.exec('ROLLBACK TO mobile_notification_v2_read; RELEASE mobile_notification_v2_read');throw error;}}
-  function identity(req){const actor=auth.sessionReference?.(req);if(!actor||!session.get(actor.id,actor.userId,new Date(now()).toISOString()))fail(401,'MOBILE_NOTIFICATION_USER_REQUIRED','请先登录紫薇');return actor;}
+  function identity(req){if(req.auth?.verified===true&&req.auth.verification==='server'&&req.auth.identity?.issuer&&req.auth.identity?.subject&&req.auth.user_id)return {id:`unified:${req.auth.identity.issuer}:${req.auth.identity.subject}`,userId:req.auth.user_id};const actor=auth.sessionReference?.(req);if(!actor||!session.get(actor.id,actor.userId,new Date(now()).toISOString()))fail(401,'MOBILE_NOTIFICATION_USER_REQUIRED','请先登录紫薇');return actor;}
   function scope(slug,who){const ws=workspace.get(slug);if(!ws)fail(404,'MOBILE_NOTIFICATION_WORKSPACE_NOT_FOUND','工作区不存在');const member=membership.get(ws.id,who.userId);if(!member||!['owner','admin','member'].includes(member.role))fail(403,'MOBILE_NOTIFICATION_FORBIDDEN','当前用户无权访问该工作区');return {...ws,role:member.role};}
   const context=who=>({actorUserId:who.userId});
   function chat(id,ws,who){
@@ -126,17 +126,16 @@ export function createMobileNotificationV2Service(repo,auth,realtime,{now=Date.n
     if(!Object.hasOwn(input,'cursor')||input.baseline!==undefined||!Number.isInteger(seconds)||seconds<1||seconds>25)fail(400,'MOBILE_NOTIFICATION_WAIT_INVALID','请携带当前游标等待提醒，最长25秒');
     if(active>=256||(counts.get(who.id)||0)>=3)fail(429,'MOBILE_NOTIFICATION_WAIT_LIMIT','提醒连接已达上限');active++;counts.set(who.id,(counts.get(who.id)||0)+1);
     return new Promise((resolvePromise,reject)=>{
-      let done=false,timer,scheduled,unsubscribe;
+      let done=false,timer,scheduled,unsubscribe,chain=Promise.resolve();
       const finish=(error,value)=>{if(done)return;done=true;clearTimeout(timer);clearImmediate(scheduled);unsubscribe?.();req.off('aborted',abort);res.off('close',abort);active--;const count=(counts.get(who.id)||1)-1;if(count)counts.set(who.id,count);else counts.delete(who.id);error?reject(error):resolvePromise(value);};
       const abort=()=>finish(null,null);
-      const read=()=>{if(done)return;try{const page=list(req,slug,{cursor:input.cursor,...(input.limit!==undefined?{limit:input.limit}:{})});if(page.items.length||page.nextCursor!==input.cursor||page.hasMore)finish(null,page);return page;}catch(error){finish(error);}};
+      const read=()=>{chain=chain.then(async()=>{if(done)return;try{await authorize?.(req);if(done)return;const page=list(req,slug,{cursor:input.cursor,...(input.limit!==undefined?{limit:input.limit}:{})});if(page.items.length||page.nextCursor!==input.cursor||page.hasMore)finish(null,page);return page;}catch(error){finish(error);}});return chain;};
       // Subscribe before the first durable read; a hub event only wakes a new
       // authorization/query, and its payload is never a notification response.
       try{
         unsubscribe=realtime.subscribe(slug,()=>{if(!done&&!scheduled)scheduled=setImmediate(()=>{scheduled=null;read();});});
         req.once('aborted',abort);res.once('close',abort);if(req.aborted||res.destroyed)return abort();
-        if(!read()||done)return;
-        timer=setTimeout(()=>{const page=read();if(!done)finish(null,page);},seconds*1000);
+        void read().then(page=>{if(!page||done)return;timer=setTimeout(()=>{void read().then(last=>{if(!done)finish(null,last);});},seconds*1000);});
       }catch(error){finish(error);}
     });
   }

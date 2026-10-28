@@ -390,8 +390,8 @@ test("Express case-insensitive static segments and trailing slash cannot bypass 
       "/API/WORKSPACES/case-fixture/MOBILE/notifications-v2/",
     ]) {
       const r = await handle(app, url);
-      assert.equal(r.status, 403);
-      assert.equal(r.body.code, "UNIFIED_STREAM_DISABLED");
+      assert.equal(r.status, 401);
+      assert.equal(r.body.code, "UNAUTHENTICATED");
     }
   } finally {
     app.locals.botDeferredConfig.stop();

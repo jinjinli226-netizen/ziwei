@@ -1,0 +1,15 @@
+import { escapeHtml as e, employeeName, list, accountId, workspaceId } from './model.js';
+import { MOBILE_TASK_FILTERS, MOBILE_TASK_LIMITS, filterMobileTasks } from './mobile-tasks.js';
+
+export function renderMobileTaskFilters(state) {
+  const selected = MOBILE_TASK_FILTERS.some(item => item.id === state.taskFilter) ? state.taskFilter : 'all';
+  return `<div class="segmented task-filters" role="group" aria-label="工作筛选">${MOBILE_TASK_FILTERS.map(item => `<button type="button" data-action="work-filter" data-id="${item.id}" class="${selected === item.id ? 'active' : ''}" aria-pressed="${selected === item.id}">${item.label}<span>${filterMobileTasks(state.tasks, item.id).length}</span></button>`).join('')}</div>`;
+}
+
+export function renderMobileTaskForm(state) {
+  const data = state.mobileTaskForm;
+  if (!data || data.scope !== JSON.stringify([accountId(state), workspaceId(state)])) return '<main class="page-content"><p role="status">待办表单暂未打开，请返回工作页重新打开。</p><button class="button secondary" data-action="back">返回</button></main>';
+  const locked = data.saving || data.unknown || data.savedTask, disabled = locked ? ' disabled' : '';
+  const employees = list(state.employees).filter(employee => typeof employee?.id === 'string' && employee.id && employee.status !== 'deleted');
+  return `<header class="page-header"><button type="button" class="icon-button" data-action="back" aria-label="返回"><span aria-hidden="true">‹</span></button><div><h1>记待办</h1><p>把下一件事先记下来</p></div></header><main class="page-content mobile-task-new">${data.error ? `<div class="banner error" role="alert"><span>${e(data.error)}</span></div>` : ''}${data.refreshError ? `<div class="banner error" role="alert"><span>${e(data.refreshError)}</span></div>` : ''}<form class="panel form-panel" data-form="mobile-task" data-state-fields><label class="field-label">待办名称<input type="text" name="mobile-task-title" value="${e(data.title)}" maxlength="${MOBILE_TASK_LIMITS.title}" placeholder="例如：整理本周选品清单" required${disabled}></label><label class="field-label">补充说明<textarea name="mobile-task-description" rows="6" maxlength="${MOBILE_TASK_LIMITS.description}" placeholder="需要记下的背景、要求或资料"${disabled}>${e(data.description)}</textarea></label><label class="field-label">负责人<select name="mobile-task-assignee"${disabled}><option value=""${!data.assignee ? ' selected' : ''}>暂不指定</option>${employees.map(employee => `<option value="${e(employee.id)}"${data.assignee === employee.id ? ' selected' : ''}>${e(employeeName(employee))}</option>`).join('')}</select></label><p class="page-footnote">保存为计划事项，员工不会立即执行。</p><button type="submit" class="button primary full"${disabled}>${data.saving ? '正在保存…' : data.unknown ? '保存结果待核对' : '保存待办'}</button></form>${data.unknown ? `<div class="mobile-task-review"><p>先在工作列表查看这次记录，未确认前不会再次提交。</p><button type="button" class="button secondary full" data-action="mobile-task-review">去工作列表核对</button>${data.reviewed ? '<button type="button" class="text-button" data-action="mobile-task-another">记另一件事</button>' : ''}</div>` : ''}</main>`;
+}

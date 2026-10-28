@@ -3,6 +3,7 @@ import { createBindingStore } from "./bindings.mjs";
 import { createOpAdapter } from "./op.mjs";
 import { createSiteIdentity } from "./verifier.mjs";
 import { createNativeAuthorization, requiredPermission } from "./native.mjs";
+import {assertUnifiedFloor} from './floor.mjs';
 export function createUnifiedIdentity({
   db,
   env = process.env,
@@ -10,6 +11,7 @@ export function createUnifiedIdentity({
   now = () => Date.now(),
   allowLoopback = false,
 } = {}) {
+  assertUnifiedFloor(db,env);
   const config = readConfig(env, { allowLoopback });
   if (!config) return null;
   const bindings = createBindingStore(db),
@@ -24,6 +26,7 @@ export function createUnifiedIdentity({
       resolveBinding: ({ issuer, subject }) => bindings.get(issuer, subject),
       nativeAuthorize: native.native,
       machineClients: bindings.machines(),
+      androidClientId: config.androidClientId,
       allowLoopback,
       now,
     });
@@ -58,6 +61,7 @@ export function createUnifiedIdentity({
       apiClientId: config.apiClientId,
       webClientId: config.webClientId,
       cliClientId: config.cliClientId,
+      ...(config.androidClientId ? { androidClientId: config.androidClientId } : {}),
       scopes: ["openid", "workspace:read", "workspace:write"],
       ready: true,
       legacyAllowed: false,

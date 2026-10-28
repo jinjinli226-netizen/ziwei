@@ -1,4 +1,5 @@
 import { fail } from "./common.mjs";
+import {managedWorkspaceBindingAllowed} from "../member-provisioning/service.mjs";
 // Explicit enablement only: importing this module never migrates a database.
 export function createBindingStore(db) {
   db.exec(
@@ -19,7 +20,7 @@ export function createBindingStore(db) {
       employeeId: row.employee_id,
       clientId: row.client_id,
       workspaceIds: JSON.parse(row.workspace_ids),
-      enabled: row.enabled === 1,
+      enabled: row.enabled === 1 && managedWorkspaceBindingAllowed(db,issuer,subject,row.native_user_id),
       version: row.version,
       site: "workspace",
       principalId:
@@ -29,6 +30,12 @@ export function createBindingStore(db) {
   }
   return {
     get,
+    addCreatedWorkspace({issuer,subject,nativeUserId,workspaceId}) {
+      const old=get(issuer,subject);
+      if(!old?.enabled||old.kind!=='human'||old.nativeUserId!==nativeUserId||!db.prepare("SELECT 1 FROM members WHERE user_id=? AND workspace_id=? AND role='owner'").get(nativeUserId,workspaceId))fail('FORBIDDEN','A verified human creator and original owner membership are required.',403);
+      if(old.workspaceIds.includes(workspaceId))return;
+      db.prepare('UPDATE unified_identity_bindings SET workspace_ids=?,version=CAST(CAST(version AS INTEGER)+1 AS TEXT) WHERE issuer=? AND subject=? AND enabled=1').run(JSON.stringify([...old.workspaceIds,workspaceId]),issuer,subject);
+    },
     bind(input) {
       const {
         issuer,

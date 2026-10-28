@@ -586,7 +586,6 @@ function refreshVisibleWorkspace() {
 function openRealtime() {
   closeRealtime();
   if (!authState.value.authenticated) return;
-  if(authState.value.identity_mode==='unified'){const timer=setInterval(refreshVisibleWorkspace,15000);eventSource.value={close:()=>clearInterval(timer)};return;}
   eventSource.value = connectWorkspaceRealtime({
     wsUrl: api.websocketUrl(), sseUrl: api.streamUrl(),
     onReady: refreshVisibleWorkspace,

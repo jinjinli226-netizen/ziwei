@@ -84,7 +84,7 @@ export function assertCredential(credential){
   if(credential.expiresAt&&!(Date.parse(credential.expiresAt)>Date.now()))fail('UNAUTHENTICATED','The selected credential has expired; explicitly authorize this slot again');
   validateWorkspace(credential.workspace);
   if(!['native','managed','unified'].includes(credential.mode)||!(credential.mode==='native'?credential.session:credential.mode==='unified'?credential.accessToken:credential.token))fail('UNAUTHENTICATED','The selected credential is incomplete; finish device authorization or authorize this slot');
-  if(credential.mode==='unified'&&(!credential.issuer||credential.audience!=='ziwei-workspace-api'||credential.clientId!=='ziwei-workspace-cli'||!credential.identity?.subject))fail('UNAUTHENTICATED','The unified credential is incomplete');
+  if(credential.mode==='unified'&&(!credential.issuer||credential.audience!=='ziwei-workspace-api'||!(credential.clientId==='ziwei-workspace-cli'||credential.identitySource==='unified-oidc-machine'&&/^ziwei-workspace-worker-[A-Za-z0-9_-]{1,128}$/.test(credential.clientId))||!credential.identity?.subject))fail('UNAUTHENTICATED','The unified credential is incomplete');
   if(credential.mode==='managed'){
     if(!credential.expiresAt||!credential.deviceId||!credential.apiBase)fail('UNAUTHENTICATED','The selected managed credential is incomplete');
     validateManagedToken(credential.token,credential,'UNAUTHENTICATED');

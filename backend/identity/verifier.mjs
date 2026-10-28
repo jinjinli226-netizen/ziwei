@@ -45,6 +45,7 @@ export function createSiteIdentity({
   resolveBinding,
   nativeAuthorize,
   machineClients = [],
+  androidClientId,
   allowLoopback = false,
   now = () => Date.now(),
 }) {
@@ -65,8 +66,10 @@ export function createSiteIdentity({
     throw new TypeError(
       "Use the exact canonical OIDC issuer without a trailing slash.",
     );
+  if (androidClientId !== undefined && (service !== "workspace" || androidClientId !== "ziwei-android-manager"))
+    throw new TypeError("Only the registered Workspace Android human client is allowed.");
   const audience = `ziwei-${service}-api`,
-    humanClients = new Set([`ziwei-${service}-web`, `ziwei-${service}-cli`]),
+    humanClients = new Set([`ziwei-${service}-web`, `ziwei-${service}-cli`, ...(androidClientId ? [androidClientId] : [])]),
     machines = new Map();
   for (const item of machineClients) {
     if (
@@ -122,6 +125,8 @@ export function createSiteIdentity({
         "An enabled, explicit native identity binding is required.",
         403,
       );
+    if (payload.azp === androidClientId && binding.kind !== "human")
+      fail("FORBIDDEN", "Android manager requires an existing human identity binding.", 403);
     const machine = machines.get(payload.azp);
     if (!machine && binding.kind === "employee" && binding.employeeClientId)
       fail(

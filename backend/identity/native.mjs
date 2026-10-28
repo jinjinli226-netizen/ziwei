@@ -61,6 +61,16 @@ export function createNativeAuthorization(db, bindings) {
     const rows = memberships(principal.nativeUserId, binding);
     if (!rows.length) return false;
     const path = identityRoutePath(req);
+    if(path.toLowerCase()==='/api/workspaces'&&req.method==='POST'){
+      // Managed onboarding is pinned to its existing workspace, even for owner.
+      try {
+        if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='member_enrollment_members'").get() &&
+            db.prepare("SELECT 1 FROM member_enrollment_members WHERE site='workspace' AND (native_id=? OR (issuer=? AND subject=?))").get(principal.nativeUserId, principal.issuer, principal.subject)) return false;
+      } catch { return false; }
+      const owner=rows.find(row=>['owner','admin'].includes(row.role));
+      if(binding.kind!=='human'||permission!=='admin'||!owner)return false;
+      req.workspaceRole=owner.role;return true;
+    }
     let slug;
     try {
       slug = decodeURIComponent(
@@ -81,7 +91,7 @@ export function createNativeAuthorization(db, bindings) {
       direct &&
       ({
         skills: { import: ["POST"], copy: ["POST"] },
-        notifications: { read: ["POST"] },
+        notifications: { read: ["POST"],stream:["GET"],ws:["GET"] },
         devices: { pairing: ["POST"] },
         documents: { trash: ["GET", "HEAD"] },
         bots: { capabilities: ["GET", "HEAD"] },

@@ -1,0 +1,278 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {createController} from '../web/controller.js';
+import {createApi} from '../web/api.js';
+import {initialState} from '../web/model.js';
+import {createChatPreferences} from '../web/chat-preferences.js';
+
+const workspaces=[{id:'member_1',workspace_id:'workspace_1',slug:'work-one',role:'owner'},{id:'member_2',workspace_id:'workspace_2',slug:'work-two',role:'owner'}];
+const employees=[{id:'employee_one',name:'员工甲',runtime:'Other'}];
+const eventId='event_original';
+const item=(target={kind:'conversation',id:'original_chat',employeeId:'employee_one',messageId:'original_message'})=>({id:eventId,kind:'execution.completed',title:'工作已完成',summary:'查看结果',createdAt:'2026-10-17T11:00:00.000Z',executionState:'confirmed',target});
+const envelope=(slug='work-one',extra={})=>({schemaVersion:2,accountId:'user_one',workspaceId:workspaces.find(row=>row.slug===slug).workspace_id,workspaceSlug:slug,...extra});
+function storageFixture(){const values=new Map();return {get length(){return values.size;},key:i=>[...values.keys()][i],getItem:k=>values.get(k)??null,setItem:(k,v)=>values.set(k,String(v)),removeItem:k=>values.delete(k),values};}
+function deferred(){let resolve;const promise=new Promise(yes=>{resolve=yes;});return {promise,resolve};}
+const settle=async()=>{for(let index=0;index<8;index++)await new Promise(resolve=>setImmediate(resolve));};
+function nativeEvents(t){
+  const events=new EventTarget(),previous=new Map(['addEventListener','removeEventListener'].map(name=>[name,Object.getOwnPropertyDescriptor(globalThis,name)]));
+  for(const name of previous.keys())Object.defineProperty(globalThis,name,{configurable:true,value:events[name].bind(events)});
+  t.after(()=>{for(const [name,descriptor]of previous){if(descriptor)Object.defineProperty(globalThis,name,descriptor);else delete globalThis[name];}});
+  return events;
+}
+function fixture(t,overrides={},nativeOverrides={}){
+  const state={...initialState(),phase:'ready',user:{user_id:'user_one'},workspace:workspaces[0],workspaces,employees:[...employees]},storage=storageFixture(),calls=[],nativeCalls=[];
+  const api={
+    employees:async()=>({employees}),bots:async()=>({bots:[]}),tasks:async()=>({tasks:[]}),chats:async()=>({chats:[]}),
+    conversation:async id=>{calls.push(['conversation',id]);return {id,employee_id:'employee_one',messages:[{id:'original_message',role:'user',content:'原消息'}]};},
+    getEmployeeConversation:async()=>({id:'latest_chat',employee_id:'employee_one',messages:[]}),
+    mobileNotifications:async slug=>envelope(slug,{items:[item()],nextCursor:'Zmlyc3Q',hasMore:false,historyWindow:true}),
+    mobileNotification:async(slug,id)=>{calls.push(['resolve',slug,id]);return envelope(slug,{item:item()});},
+    task:async id=>({id,workspace_id:'workspace_1',title:'原待办',state:'planned'}),logout:async()=>({ok:true}),
+    ...overrides,
+  };
+  const native={getStatus:()=>JSON.stringify({available:false,enabled:false}),clear:()=>{nativeCalls.push('clear');},...nativeOverrides};
+  const controller=createController({state,api,storage,nativeNotifications:native});t.after(()=>controller.dispose());return {state,storage,api,calls,nativeCalls,controller};
+}
+const pendingNativeStatus=()=>JSON.stringify({available:true,enabled:true,subscriptionState:'enabled',permission:'granted',accountId:'user_one',workspaceSlug:'work-one',pendingTarget:true});
+const pendingNativeTarget=()=>JSON.stringify({accountId:'user_one',workspaceId:'workspace_1',workspaceSlug:'work-one',eventId});
+async function heldNativeFixture(t,prepare,consume){
+  const events=nativeEvents(t),status=deferred();let held=false,consumed=0;
+  const f=fixture(t,{authMe:async()=>({user_id:'user_one'}),workspaces:async()=>({workspaces})},{
+    getStatus:()=>held?status.promise:JSON.stringify({available:false,enabled:false}),
+    consumePendingTarget:()=>{consumed++;return consume?consume():pendingNativeTarget();},
+  });
+  await f.controller.boot();await settle();await prepare(f);
+  held=true;events.dispatchEvent(new Event('ziwei:notifications'));await settle();
+  return {...f,status,consumed:()=>consumed,release:async()=>{status.resolve(pendingNativeStatus());await settle();}};
+}
+
+test('feature entries flush the current chat draft before leaving and keep their own page',async t=>{
+  const f=fixture(t);await f.controller.actions.chat({id:'employee_one'});await f.controller.change({name:'draft',value:'继续写的草稿'});
+  await f.controller.actions['groups-open']();assert.equal(f.state.page,'groups');assert.equal(f.state.selectedEmployee,null);
+  assert.equal(createChatPreferences({storage:f.storage}).getDraft({accountId:'user_one',workspaceId:'work-one'},'employee_one'),'继续写的草稿');
+  await f.controller.actions['mobile-task-new']();assert.equal(f.state.page,'mobile-task-new');
+  await f.controller.actions['notifications-open']();assert.equal(f.state.page,'notifications');assert.equal(f.state.notifications.items.length,1);
+});
+
+test('notification resolves the original event before opening its exact chat and message',async t=>{
+  const f=fixture(t);await f.controller.actions['notifications-open']();await f.controller.actions['notifications-target']({id:eventId});
+  assert.deepEqual(f.calls,[['resolve','work-one',eventId],['conversation','original_chat']]);
+  assert.equal(f.state.page,'chat');assert.equal(f.state.conversation.id,'original_chat');assert.equal(f.state.chatJump.messageId,'original_message');
+  assert.deepEqual(f.state.notifications.readIds,[eventId]);
+});
+
+test('notification opens the fresh resolve target rather than its cached list target',async t=>{
+  const f=fixture(t,{mobileNotification:async()=>envelope('work-one',{item:item({kind:'task',id:'original_task'})})});
+  await f.controller.actions['notifications-open']();await f.controller.actions['notifications-target']({id:eventId});
+  assert.equal(f.state.page,'task');assert.equal(f.state.task.id,'original_task');assert.equal(f.calls.length,0);
+});
+
+test('a revoked notification does not navigate or mark its cached target read',async t=>{
+  const f=fixture(t,{mobileNotification:async()=>{throw Object.assign(new Error('当前无法查看此提醒'),{status:404});}});
+  await f.controller.actions['notifications-open']();await f.controller.actions['notifications-target']({id:eventId});
+  assert.equal(f.state.page,'notifications');assert.deepEqual(f.state.notifications.readIds,[]);assert.equal(f.calls.length,0);
+});
+
+test('logout clears the system subscription and rejects an old event resolve result',async t=>{
+  const pending=deferred(),f=fixture(t,{mobileNotification:()=>pending.promise});
+  await f.controller.actions['notifications-open']();const opening=f.controller.actions['notifications-target']({id:eventId});
+  await f.controller.actions.logout();pending.resolve(envelope('work-one',{item:item()}));await opening;
+  assert.equal(f.state.phase,'login');assert.equal(f.state.notifications,null);assert(f.nativeCalls.includes('clear'));assert.equal(f.calls.length,0);
+});
+
+test('old workspace resolve cannot open a conversation after choosing another workspace',async t=>{
+  const pending=deferred(),f=fixture(t,{mobileNotification:()=>pending.promise});
+  await f.controller.actions['notifications-open']();const opening=f.controller.actions['notifications-target']({id:eventId});
+  await f.controller.actions['select-workspace']({id:'work-two'});pending.resolve(envelope('work-one',{item:item()}));await opening;
+  assert.equal(f.state.workspace.slug,'work-two');assert.equal(f.state.page,'home');assert.equal(f.calls.length,0);
+});
+
+test('a late notification resolve cannot reopen chat after returning or switching tabs',async t=>{
+  for (const leave of ['back','navigate']) {
+    const pending=deferred(),f=fixture(t,{mobileNotification:()=>pending.promise});
+    await f.controller.actions['notifications-open']();
+    const opening=f.controller.actions['notifications-target']({id:eventId});
+    if(leave==='back')await f.controller.actions.back();
+    else await f.controller.actions.navigate({tab:'employees'});
+    pending.resolve(envelope('work-one',{item:item()}));await opening;
+    assert.equal(f.state.page,'home'); assert.equal(f.state.selectedEmployee,null);
+    assert.equal(f.calls.length,0); assert.deepEqual(f.state.notifications.readIds,[]);
+  }
+});
+
+test('returning to reminders does not revive an earlier visit notification resolve',async t=>{
+  const pending=deferred(),f=fixture(t,{mobileNotification:()=>pending.promise});
+  await f.controller.actions['notifications-open']();
+  const opening=f.controller.actions['notifications-target']({id:eventId});
+  await f.controller.actions.navigate({tab:'employees'});
+  await f.controller.actions['notifications-open']();
+  pending.resolve(envelope('work-one',{item:item()}));await opening;
+  assert.equal(f.state.page,'notifications');assert.equal(f.calls.length,0);
+  assert.deepEqual(f.state.notifications.readIds,[]);
+});
+
+test('a notification task lookup cannot navigate after the user leaves reminders',async t=>{
+  const detail=deferred(),started=deferred(),f=fixture(t,{
+    mobileNotification:async()=>envelope('work-one',{item:item({kind:'task',id:'original_task'})}),
+    task:()=>{started.resolve();return detail.promise;},
+  });
+  await f.controller.actions['notifications-open']();
+  const opening=f.controller.actions['notifications-target']({id:eventId});await started.promise;
+  await f.controller.actions.navigate({tab:'employees'});
+  detail.resolve({id:'original_task',workspace_id:'workspace_1'});await opening;
+  assert.equal(f.state.page,'home');assert.equal(f.state.tab,'employees');assert.equal(f.state.task,null);
+  assert.deepEqual(f.state.notifications.readIds,[]);
+});
+
+test('a delayed native status keeps its pending click unconsumed after manual navigation',async t=>{
+  const status=deferred();let consumed=0;
+  const f=fixture(t,{},{getStatus:()=>status.promise,consumePendingTarget:()=>{consumed++;return JSON.stringify({accountId:'user_one',workspaceId:'workspace_1',workspaceSlug:'work-one',eventId});}});
+  const opening=f.controller.actions['notifications-open']();
+  await f.controller.actions.navigate({tab:'employees'});
+  status.resolve(JSON.stringify({available:true,enabled:true,subscriptionState:'enabled',permission:'granted',accountId:'user_one',workspaceSlug:'work-one',pendingTarget:true}));
+  await opening;
+  assert.equal(f.state.page,'home');assert.equal(f.state.tab,'employees');assert.equal(consumed,0);assert.equal(f.calls.length,0);
+});
+
+for(const route of ['group-new','group-open','group-back','groups-source','groupSource-change'])test(`a held native click cannot replace the delegated ${route} navigation`,async t=>{
+  const f=await heldNativeFixture(t,async f=>{
+    await f.controller.actions['groups-open']();
+    if(route==='group-back'||route==='group-open')await f.controller.actions['group-new']();
+    if(route==='groups-source'||route==='groupSource-change'){
+      f.state.employees=[{...employees[0],runtime:'Hermes'}];
+      f.api.bot=async()=>({id:'employee_one',workspace:'work-one',configuration_state:'initialized',revision:1,control_epoch:1});
+    }
+  });
+  if(route==='group-back')await f.controller.actions.back();
+  else if(route==='groups-source')await f.controller.actions['groups-source']({id:'employee_one'});
+  else if(route==='groupSource-change')await f.controller.change({name:'groupSource',value:'employee_one'});
+  else await f.controller.actions[route]({id:'group_existing'});
+  const page=f.state.page,room=f.state.groups.room?.room_id,source=f.state.groups.sourceId;
+  assert.equal(page,route==='group-new'||route==='group-open'?'group':'groups');
+  if(route==='group-open')assert.equal(room,'group_existing');
+  if(route==='groups-source'||route==='groupSource-change')assert.equal(source,'employee_one');
+  await f.release();
+  assert.equal(f.state.page,page);assert.equal(f.state.groups.room?.room_id,room);assert.equal(f.state.groups.sourceId,source);
+  assert.equal(f.consumed(),0);assert.equal(f.calls.length,0);
+});
+
+for(const route of ['image','chat-find-open','message-menu','phone'])test(`a held native click respects the user's ${route} context`,async t=>{
+  const f=await heldNativeFixture(t,async f=>{
+    await f.controller.actions.chat({id:'employee_one'});
+    f.state.conversation.messages=[{id:'original_message',role:'user',content:'可转发原消息'}];
+    f.state.messages=f.state.conversation.messages;
+    if(route==='phone'){
+      f.state.phones=[{id:'phone_one'}];f.api.phones=async()=>({devices:[{id:'phone_one'}]});
+      f.api.phone=async()=>({device:{id:'phone_one'}});f.api.phoneSnapshot=async()=>({snapshot:null});
+    }
+  });
+  await f.controller.actions[route]({id:route==='phone'?'phone_one':'original_message',src:'https://example.invalid/image.png'});
+  const page=f.state.page;
+  if(route==='image')assert(f.state.imagePreview);
+  if(route==='chat-find-open')assert(f.state.chatFind);
+  if(route==='message-menu')assert.equal(f.state.forward.phase,'menu');
+  if(route==='phone')assert.equal(page,'phone');
+  await f.release();
+  assert.equal(f.state.page,page);assert.equal(f.consumed(),0);assert.equal(f.calls.length,0);
+});
+
+test('manual group navigation also revokes a native click already awaiting consumePendingTarget',async t=>{
+  const target=deferred(),started=deferred();
+  const f=await heldNativeFixture(t,f=>f.controller.actions['groups-open'](),()=>{started.resolve();return target.promise;});
+  f.status.resolve(pendingNativeStatus());await started.promise;
+  await f.controller.actions['group-new']();target.resolve(pendingNativeTarget());await settle();
+  assert.equal(f.state.page,'group');assert.equal(f.state.groups.newGroup,true);
+  assert.equal(f.consumed(),1);assert.equal(f.calls.length,0);
+});
+
+test('ordinary refresh and automatic mark-read do not revoke a current native click',async t=>{
+  const f=await heldNativeFixture(t,async f=>{
+    await f.controller.actions.chat({id:'employee_one'});
+    f.state.conversation.messages=[{id:'original_message',role:'user',content:'可见原消息'}];f.state.messages=f.state.conversation.messages;
+    f.api.conversation=async id=>({id,employee_id:'employee_one',messages:[{id:'original_message',role:'user',content:'可见原消息'}]});
+    f.api.markConversationRead=async(conversationId,{messageId})=>({conversationId,lastReadMessageId:messageId,unreadCount:0});
+  });
+  await f.controller.refresh({silent:true});
+  await f.controller.actions['mark-thread-read']({conversationId:'latest_chat',messageId:'original_message'});
+  await f.release();
+  assert.equal(f.consumed(),1);assert.equal(f.state.page,'chat');assert.equal(f.state.conversation.id,'original_chat');
+  assert.equal(f.state.chatJump.messageId,'original_message');
+});
+
+test('a task detail with mismatched identity cannot be opened from a notification',async t=>{
+  const f=fixture(t,{mobileNotification:async()=>envelope('work-one',{item:item({kind:'task',id:'original_task'})}),task:async()=>({id:'another_task',workspace_id:'workspace_1'})});
+  await f.controller.actions['notifications-open']();await f.controller.actions['notifications-target']({id:eventId});assert.equal(f.state.page,'notifications');assert.deepEqual(f.state.notifications.readIds,[]);
+});
+
+test('a native click selects the authorized membership by workspace_id before resolving the original chat',async t=>{
+  let pending=true,consumed=0;
+  const f=fixture(t,{},{
+    getStatus:()=>JSON.stringify({available:true,enabled:true,subscriptionState:'enabled',permission:'granted',accountId:'user_one',workspaceSlug:'work-one',pendingTarget:pending}),
+    consumePendingTarget:()=>{pending=false;consumed++;return JSON.stringify({accountId:'user_one',workspaceId:'workspace_2',workspaceSlug:'work-two',eventId});},
+  });
+  await f.controller.actions['notifications-open']();
+  assert.equal(consumed,1);assert.equal(f.state.workspace.id,'member_2');assert.equal(f.state.workspace.workspace_id,'workspace_2');
+  assert.equal(f.state.page,'chat');assert.equal(f.state.conversation.id,'original_chat');
+  assert.deepEqual(f.calls,[['resolve','work-two',eventId],['conversation','original_chat']]);
+});
+
+test('a native click carrying the membership row id cannot impersonate the workspace id',async t=>{
+  const f=fixture(t,{},{
+    getStatus:()=>JSON.stringify({available:true,enabled:true,subscriptionState:'enabled',permission:'granted',accountId:'user_one',workspaceSlug:'work-one',pendingTarget:true}),
+    consumePendingTarget:()=>JSON.stringify({accountId:'user_one',workspaceId:'member_2',workspaceSlug:'work-two',eventId}),
+  });
+  await f.controller.actions['notifications-open']();
+  assert.equal(f.state.workspace.slug,'work-one');assert.equal(f.state.page,'notifications');
+  assert.deepEqual(f.calls,[]);assert.match(f.state.notifications.nativeError,/不可用/);
+});
+
+test('mobile APIs encode identifiers and request only explicit mobile action projection',async()=>{
+  const calls=[],api=createApi({fetchImpl:async(path,options)=>{calls.push({path,method:options.method,body:options.body});return {ok:true,status:200,headers:{get:()=>null},json:async()=>({})};}});
+  await api.managementAction('work/one','action?one');await api.mobileNotifications('work/one',{cursor:'a_b',limit:20});await api.mobileNotification('work/one','event?one');
+  await api.botNativeAction('work/one','employee/one',{resource:'groups'});await api.collaborateBot('work/one','employee/one',{mode:'group'});
+  assert.deepEqual(calls.map(row=>[row.path,row.method]),[
+    ['/api/workspaces/work%2Fone/actions/action%3Fone?view=mobile','GET'],
+    ['/api/workspaces/work%2Fone/mobile/notifications-v2?cursor=a_b&limit=20','GET'],
+    ['/api/workspaces/work%2Fone/mobile/notifications-v2/items/event%3Fone','GET'],
+    ['/api/workspaces/work%2Fone/bots/employee%2Fone/native/actions','POST'],
+    ['/api/workspaces/work%2Fone/bots/employee%2Fone/collaboration','POST'],
+  ]);
+});
+
+test('an unavailable Bot list item preserves its prior execution and other employees still refresh',async t=>{
+  const old={id:'employee_one',configuration_state:'initialized',latest_run:{id:'original_action',status:'running'}},
+    f=fixture(t,{bots:async()=>({bots:[{id:'employee_one',employee_id:'employee_one',workspace:'work-one',resourceState:'unavailable',readError:{code:'GROUP_MOBILE_SCOPE_REQUIRED',message:'群组暂不可读'}},{id:'employee_two',configuration_state:'initialized',latest_run:{id:'second_action',status:'succeeded'}}]})});
+  f.state.bots=[old];f.state.employees=[{...employees[0],bot:old}];await f.controller.actions.navigate({tab:'employees'});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(f.state.bots.find(row=>row.id==='employee_one'),old);assert.equal(f.state.employees[0].bot.latest_run.status,'running');
+  assert.equal(f.state.bots.find(row=>row.id==='employee_two').latest_run.id,'second_action');assert.equal(f.state.resources.bots.phase,'error');
+});
+
+test('a self-hosted notification opens its freshly authorized original employee message and keeps the current draft',async t=>{
+  const eventId='new-reply',presence=[];
+  const f=fixture(t,{mobileNotification:async (_slug,id)=>{
+    f.calls.push(['message-resolve',id]);return envelope('work-one',{item:{...item(),id:'new-reply',kind:'message.received',executionState:'not_applicable'}});
+  }},{
+    getStatus:()=>JSON.stringify({available:true,enabled:true,subscriptionState:'enabled',permission:'granted',accountId:'user_one',workspaceSlug:'work-one',pendingTarget:true,deliveryMode:'selfhost',foregroundServiceRunning:true,connectionState:'connected'}),
+    consumePendingTarget:()=>JSON.stringify({accountId:'user_one',workspaceId:'workspace_1',workspaceSlug:'work-one',eventId}),
+    setForeground:id=>presence.push(id),
+  });
+  await f.controller.actions.chat({id:'employee_one'});await f.controller.change({name:'draft',value:'尚未发送的草稿'});
+  await f.controller.actions['notifications-open']();
+  assert.equal(f.state.page,'chat');assert.equal(f.state.selectedEmployee.id,'employee_one');assert.equal(f.state.conversation.id,'original_chat');
+  assert.equal(f.state.chatJump.messageId,'original_message');assert.equal(f.state.draft,'尚未发送的草稿');
+  assert(f.calls.some(row=>row[0]==='message-resolve'&&row[1]===eventId));assert.equal(presence.at(-1),'original_chat');
+  assert(f.state.notifications.readIds.includes('new-reply'));
+});
+
+test('a denied self-hosted notification keeps the saved composer and shows the permission error in reminders',async t=>{
+  const eventId='denied-reply',f=fixture(t,{mobileNotification:async()=>{throw Object.assign(new Error('这条通知当前不可查看'),{status:404});}},{
+    getStatus:()=>JSON.stringify({available:true,enabled:true,subscriptionState:'enabled',permission:'granted',accountId:'user_one',workspaceSlug:'work-one',pendingTarget:true}),
+    consumePendingTarget:()=>JSON.stringify({accountId:'user_one',workspaceId:'workspace_1',workspaceSlug:'work-one',eventId}),
+  });
+  await f.controller.actions.chat({id:'employee_one'});await f.controller.change({name:'draft',value:'拒绝通知后也保留'});
+  await f.controller.actions['notifications-open']();
+  assert.equal(f.state.page,'notifications');assert.match(f.state.notifications.targetError,/当前不可查看/);
+  assert.equal(createChatPreferences({storage:f.storage}).getDraft({accountId:'user_one',workspaceId:'work-one'},'employee_one'),'拒绝通知后也保留');
+  assert.equal(f.calls.some(row=>row[0]==='conversation'),false);assert.deepEqual(f.state.notifications.readIds,[]);
+});

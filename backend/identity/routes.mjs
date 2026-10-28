@@ -1,8 +1,10 @@
 import express from "express";
+import {createNativeProvisioningRuntime} from "../member-provisioning/runtime.mjs";
 import { createUnifiedIdentity } from "./index.mjs";
 import { createIdentitySessions } from "./sessions.mjs";
 import { fail } from "./common.mjs";
 import { identityRoutePath } from "./route-path.mjs";
+import {installControlIdentityBridge} from './control-bridge.mjs';
 const asyncRoute = (fn) => (req, res, next) =>
   Promise.resolve()
     .then(() => fn(req, res))
@@ -39,8 +41,11 @@ export function installUnifiedIdentity(app, db, options = {}) {
     );
   });
   if (!identity) return null;
+  const memberProvisioning=createNativeProvisioningRuntime({site:"workspace",db,identityConfig:identity.config,env:options.env??process.env,fetch:options.fetch});
+  app.use((req,res,next)=>{memberProvisioning.handler(req,res).then(handled=>{if(!handled)next();},next);});
   const sessions = createIdentitySessions(db, identity, options);
   identity.attachSessions(sessions);
+  installControlIdentityBridge(app,identity,options);
   app.use(["/api/identity", "/api/auth"], (_req, res, next) => {
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("Referrer-Policy", "no-referrer");
@@ -119,19 +124,6 @@ export function installUnifiedIdentity(app, db, options = {}) {
   // Express middleware continues only after asynchronous verification finishes.
   const apiGuard = (req, res, next) => {
     if (machineRequest(req)) return next();
-    if (
-      /\/notifications\/(?:stream|ws)(?:\?|$)|\/mobile\/notifications-v2(?:\/|\?|$)/i.test(
-        identityRoutePath(req),
-      )
-    )
-      return next(
-        Object.assign(
-          new Error(
-            "Use authenticated notification polling in unified identity mode.",
-          ),
-          { status: 403, code: "UNIFIED_STREAM_DISABLED" },
-        ),
-      );
     identity.authorizeRequest(req).then((principal) => {
       req.auth = principal;
       next();

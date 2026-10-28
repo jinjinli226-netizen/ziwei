@@ -51,6 +51,9 @@ export function readConfig(env = process.env, { allowLoopback = false } = {}) {
     { allowLoopback },
   );
   const key = Buffer.from(env.ZIWEI_IDENTITY_SESSION_KEY || "", "base64url");
+  const androidClientId = env.ZIWEI_IDENTITY_ANDROID_CLIENT_ID;
+  if (androidClientId !== undefined && androidClientId !== "ziwei-android-manager")
+    fail("IDENTITY_CONFIGURATION", "Use only the registered Android manager client.", 503);
   if (
     issuer !== env.ZIWEI_IDENTITY_ISSUER ||
     site.pathname !== "/" ||
@@ -70,6 +73,7 @@ export function readConfig(env = process.env, { allowLoopback = false } = {}) {
     apiClientId: "ziwei-workspace-api",
     webClientId: "ziwei-workspace-web",
     cliClientId: "ziwei-workspace-cli",
+    androidClientId,
     apiSecret: env.ZIWEI_IDENTITY_API_SECRET,
     webSecret: env.ZIWEI_IDENTITY_WEB_SECRET,
     key,

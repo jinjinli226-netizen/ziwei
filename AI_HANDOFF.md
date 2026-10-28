@@ -23,7 +23,7 @@ test/               本机运行与端到端协议的自动测试
 docs/               功能说明、接口合同、运维与 QA 记录
 ```
 
-Android 管理 App 源码在并行分支，不一定出现在当前目录；被控手机 Agent/Updater 和 Control 在独立私仓。处理它们时查[版本与仓库地图](docs/handoffs/2026-10-20-release-map.md)。
+Android 管理 App 源码在 `mobile-manager/`，已归并 code18 统一登录的验收来源；被控手机 Agent/Updater 和 Control 在独立私仓。最新源码归并范围见[main 集成记录](docs/operations/2026-10-28-github-main-source-integration.md)，历史发布层见[版本与仓库地图](docs/handoffs/2026-10-20-release-map.md)。
 
 ## AI 如何接任务
 

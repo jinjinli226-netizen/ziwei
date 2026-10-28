@@ -12,6 +12,8 @@ const run=(command,args,cwd=root)=>execFileSync(command,args,{cwd,encoding:'utf8
 function replace(text,needle,value,file){const count=text.split(needle).length-1;if(count!==1)throw new Error(`Baseline anchor mismatch ${file}: ${count}`);return text.replace(needle,value);}
 function patch(file,apply){fs.writeFileSync(file,apply(fs.readFileSync(file,'utf8').replace(/\r\n/g,'\n')));}
 const shared=['src/action-execution-budget.mjs','backend/server-code-rollout.mjs','backend/server.mjs','scripts/server-code-rollout.mjs','daemon/private-preservation-identity.mjs','backend/version-preservation.mjs','backend/preservation-native-evidence.mjs','backend/preservation-native-databases.mjs','backend/preservation-legacy-archive.mjs','backend/preservation-legacy-source.mjs','backend/preservation-source-namespace.mjs','backend/preservation-legacy-coverage.mjs','backend/preservation-legacy-integration.mjs','backend/preservation-source-native-windows.ps1','backend/production-preservation.mjs','scripts/production-source-proof.mjs','src/execution-admission.mjs','src/hermes-profile-binding.py','scripts/preservation-profile-patch.mjs','scripts/client-lifecycle.mjs','scripts/v2-preservation.mjs','scripts/verify-preservation-packages.mjs'];
+function cutoverLeaves(prefix){return fs.readdirSync(path.join(root,prefix),{withFileTypes:true}).flatMap(entry=>entry.isDirectory()?cutoverLeaves(path.posix.join(prefix,entry.name)):[path.posix.join(prefix,entry.name)]);}
+shared.push(...cutoverLeaves('backend/identity'),...cutoverLeaves('scripts/identity-provisioner'),'backend/workspace-cli-docs.mjs',...cutoverLeaves('docs/public/workspace-cli'),...cutoverLeaves('packages/workspace-cli'));
 export function v1Overlay(directory){
   fs.copyFileSync(path.join(root,'backend/db.mjs'),path.join(directory,'backend/db.mjs'));
   patch(path.join(directory,'backend/repository.mjs'),text=>{
@@ -73,7 +75,7 @@ export function buildPackages({output=path.join(root,'.local','preservation-pack
   const npmCli=preservationNpmCli();
   for(const role of ['v1-compat','v2']){
     const baseline=role==='v2'?FROZEN_VERSIONS.v2:FROZEN_VERSIONS.v1,directory=path.join(output,role),archive=path.join(output,`${role}-baseline.tar`);fs.mkdirSync(directory);
-    run('git',['archive','--format=tar',baseline,`--output=${archive}`]);run('tar',['-xf',archive,'-C',directory]);
+    run('git',['archive','--format=tar',role==='v2'?candidateCommit:baseline,`--output=${archive}`]);run('tar',['-xf',archive,'-C',directory]);
     for(const file of shared){fs.mkdirSync(path.dirname(path.join(directory,file)),{recursive:true});fs.copyFileSync(path.join(root,file),path.join(directory,file));}
     if(role==='v1-compat')v1Overlay(directory);else for(const file of overlays)fs.copyFileSync(path.join(root,file),path.join(directory,file));
     patch(path.join(directory,'src/execution-admission.mjs'),text=>text.replace("PRODUCT_ROLE='v2'",`PRODUCT_ROLE='${role}'`));
@@ -89,7 +91,7 @@ export function buildPackages({output=path.join(root,'.local','preservation-pack
     const pack=JSON.parse(run(process.execPath,[npmCli,'pack','--json','--ignore-scripts','--offline','--pack-destination',output],directory));
     const clientFile=path.join(output,`${role}-windows-client.tgz`);fs.renameSync(path.join(output,pack[0].filename),clientFile);
     const frontendFile=path.join(output,`${role}-frontend.zip`);run('tar',['-a','-cf',frontendFile,'-C',path.join(directory,'frontend/dist'),'.']);
-    const apiFile=path.join(output,`${role}-api.zip`);run('tar',['-a','-cf',apiFile,'-C',directory,'backend','src','scripts','skills','daemon','package.json','package-lock.json','preservation-package.json']);
+    const apiFile=path.join(output,`${role}-api.zip`);run('tar',['-a','-cf',apiFile,'-C',directory,'backend','src','scripts','skills','daemon','package.json','package-lock.json','preservation-package.json','docs/public/workspace-cli','packages/workspace-cli']);
     const runtime=verifyOfflineRuntimeClosure({clientFile,apiFile}),clientContents=runtime.clientContents,installationChanges=clientContents.filter(row=>fs.existsSync(path.join(directory,row.path))&&sha(fs.readFileSync(path.join(directory,row.path)))!==row.sha256).map(row=>({...row,sourceSha256:sha(fs.readFileSync(path.join(directory,row.path)))}));
     const contents=fileList(directory),manifest={...descriptor,sourceClientBuild:clientBuildIdentity(directory),clientBuild:runtime.clientBuild,clientContents,installationChanges,contents,buildDigest:sha(JSON.stringify(contents)),artifacts:[clientFile,frontendFile,apiFile].map(file=>({path:file,sha256:sha(fs.readFileSync(file)),bytes:fs.statSync(file).size})),offlineDependenciesBundled:runtime.receipt.verified,offlineRuntimeClosure:runtime.receipt,apiDependencies:'Install bundled local client into an isolated prefix; link API node_modules to the installed node_modules/ziwei/node_modules. No global installation.'};
     fs.writeFileSync(path.join(output,`${role}-manifest.json`),JSON.stringify(manifest,null,2));packages.push({role,directory,manifest});

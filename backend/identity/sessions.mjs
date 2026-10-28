@@ -232,7 +232,7 @@ export function createIdentitySessions(
             proof.sid,
             seal(config.key, tokens),
             proof.exp * 1000,
-            now() + 8 * 60 * 60 * 1000,
+            now() + 7 * 24 * 60 * 60 * 1000,
             config.issuer,
             now(),
             proof.sid,
@@ -241,7 +241,7 @@ export function createIdentitySessions(
           ).changes;
         if (!saved) reject();
         return {
-          cookie: cookie(SESSION_COOKIE, raw, 8 * 60 * 60),
+          cookie: cookie(SESSION_COOKIE, raw, 7 * 24 * 60 * 60),
           clearTransaction: cookie(TRANSACTION_COOKIE, "", 0),
           location: config.origin + "/",
         };

@@ -11,6 +11,7 @@ import { RealtimeHub } from './realtime.mjs';
 import { exportDocumentsToGit, importDocumentsFromGit } from './git-sync.mjs';
 import { createAuthService } from './auth.mjs';
 import {installUnifiedIdentity} from './identity/routes.mjs';
+import {createAuthorizedStream} from './identity/stream.mjs';
 import { deviceTokenFromRequest, readA2AToken, safeTokenEqual, tokenFromRequest } from './a2a-auth.mjs';
 import { mcpTokenRequired } from './mcp-auth.mjs';
 import { createZiweiConnect } from './ziwei-connect.mjs';
@@ -319,7 +320,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   const conversationReads = createConversationReadService(repo);
   const mobileNotifications = createMobileNotificationReadService(repo);
   const mobileGroupAction = createMobileGroupActionView(repo);
-  const mobileNotificationsV2=createMobileNotificationV2Service(repo,auth,realtime,options.mobileNotificationsV2);
+  const mobileNotificationsV2=createMobileNotificationV2Service(repo,auth,realtime,{...options.mobileNotificationsV2,authorize:async req=>{if(app.locals.identity)req.auth=await app.locals.identity.authorizeRequest(req);}});
   const employeeTemplates = createEmployeeTemplateService(repo, management);
   const managementBootstrap = createManagementBootstrap(repo, options);
   const botMcpConnections=createBotMcpConnections(repo,management.bots,{apiBase:managementBootstrap.apiBase,now:options.mcpOAuthNow});
@@ -484,7 +485,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
     try {
       const principal = req.auth || auth.authenticate(req);
       if (!principal?.user_id) return res.status(401).json({ error: '请先登录紫薇' });
-      res.status(201).json(auth.createWorkspace(principal.user_id, req.body || {}));
+      res.status(201).json(auth.createWorkspace(principal.user_id, req.body || {},unifiedIdentity?{onCreated:({workspaceId,userId})=>unifiedIdentity.bindings.addCreatedWorkspace({issuer:principal.identity.issuer,subject:principal.identity.subject,nativeUserId:userId,workspaceId})}:{}));
     } catch (error) { next(error); }
   });
   // The scheduler is repository backed: every workspace is scanned from its
@@ -676,7 +677,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   app.get('/api/workspaces/:slug/notifications', (req, res) => res.json({ notifications: repo.listNotifications(req.params.slug, Number(req.query.limit) || 50, { unread: req.query.unread === '1' || req.query.unread === 'true', archived: req.query.archived === '1' || req.query.archived === 'true' }), stats: repo.notificationStats(req.params.slug) }));
   app.post('/api/workspaces/:slug/notifications/read', (req, res) => res.json({ ok:true, stats:repo.markNotificationsRead(req.params.slug, req.body?.ids) }));
   app.post('/api/notifications/:id/archive', (req, res) => res.json(repo.archiveNotification(req.params.id, req.body?.archived !== false)));
-  app.get('/api/workspaces/:slug/notifications/stream', (req, res) => { res.statusCode=200; res.setHeader('Content-Type','text/event-stream'); res.setHeader('Cache-Control','no-cache'); res.setHeader('Connection','keep-alive'); res.flushHeaders?.(); const send=event=>res.write(`event: notification\ndata: ${JSON.stringify(event)}\n\n`); const unsubscribe=realtime.subscribe(req.params.slug,send); const timer=setInterval(()=>res.write(': heartbeat\n\n'),15000); req.on('close',()=>{clearInterval(timer);unsubscribe();}); send({type:'ready',workspace:req.params.slug}); });
+  app.get('/api/workspaces/:slug/notifications/stream', (req, res) => { res.statusCode=200; res.setHeader('Content-Type','text/event-stream'); res.setHeader('Cache-Control','no-cache'); res.setHeader('Connection','keep-alive'); res.flushHeaders?.();const stream=createAuthorizedStream({authorize:async()=>{if(unifiedIdentity)req.auth=await unifiedIdentity.authorizeRequest(req);},deliver:event=>res.write(event===null?': heartbeat\n\n':`event: notification\ndata: ${JSON.stringify(event)}\n\n`),close:()=>res.end()});const send=event=>void stream.send(event); const unsubscribe=realtime.subscribe(req.params.slug,send); const timer=setInterval(()=>void stream.send(null),15000);const cleanup=()=>{clearInterval(timer);unsubscribe();stream.close();};req.on('close',cleanup);res.on('close',cleanup);send({type:'ready',workspace:req.params.slug}); });
   app.get('/api/workspaces/:slug/chats', (req,res)=>res.json(conversationReads.list(req.params.slug,employeeContext(req))));
   app.get('/api/workspaces/:slug/mobile/notifications', (req,res)=>{
     res.setHeader('Cache-Control','no-store');res.vary('Cookie');
@@ -1085,7 +1086,7 @@ export function attachRealtimeWebSocket(server, app, { pathPrefix = '/api/worksp
     socket.on('error', () => socket.destroy());
     socket.end(`HTTP/1.1 ${status} ${message}\r\nConnection: close\r\n${status === 503 ? 'Retry-After: 1\r\n' : ''}\r\n`, () => socket.destroy());
   };
-  server.on('upgrade', (req, socket, head) => {
+  server.on('upgrade', async (req, socket, head) => {
     // Upgrade callbacks run outside Express's request error middleware.
     // Authentication touches session rows, so even a transient SQLite lock
     // must reject this handshake without escaping the server event callback.
@@ -1095,13 +1096,12 @@ export function attachRealtimeWebSocket(server, app, { pathPrefix = '/api/worksp
       const slug = matchPath(url.pathname);
       if (!slug) { reject(socket, 404, 'Not Found'); return; }
       const origin = String(req.headers.origin || '');
-      if (origin && origin !== allowedOrigin) { reject(socket, 403, 'Forbidden'); return; }
-      if(app.locals.identity) {reject(socket,403,'Forbidden');return;}
+      if (origin && origin !== (app.locals.identity?.config.origin||allowedOrigin)) { reject(socket, 403, 'Forbidden'); return; }
       const auth = app.locals.auth;
       const bypass = app.locals.authBypass === true;
-      const principal = bypass ? null : auth?.authenticate(req);
+      const principal = bypass ? null : app.locals.identity?await app.locals.identity.authorizeRequest(req):auth?.authenticate(req);
       if (!bypass && !principal) { reject(socket, 401, 'Unauthorized'); return; }
-      if (!bypass && !auth?.canAccess(principal.user_id, slug)) { reject(socket, 403, 'Forbidden'); return; }
+      if (!bypass && !(app.locals.identity?principal.memberships?.some(m=>m.slug===slug):auth?.canAccess(principal.user_id, slug))) { reject(socket, 403, 'Forbidden'); return; }
       sockets.handleUpgrade(req, socket, head, ws => {
         sockets.emit('connection', ws, req, { slug, principal });
       });
@@ -1111,9 +1111,8 @@ export function attachRealtimeWebSocket(server, app, { pathPrefix = '/api/worksp
     }
   });
   sockets.on('connection', (ws, _req, context) => {
-    const send = event => {
-      if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: 'notification', event }));
-    };
+    const stream=createAuthorizedStream({authorize:async()=>{if(app.locals.identity)await app.locals.identity.authorizeRequest(_req);},deliver:value=>{if(ws.readyState===ws.OPEN)ws.send(JSON.stringify(value));},close:()=>ws.close(1008,'Authorization ended')});
+    const send=event=>void stream.send({type:'notification',event});
     const unsubscribe = app.locals.realtime.subscribe(context.slug, send);
     ws.send(JSON.stringify({ type: 'ready', workspace: context.slug }));
     ws.on('message', raw => {
@@ -1122,11 +1121,13 @@ export function attachRealtimeWebSocket(server, app, { pathPrefix = '/api/worksp
       // supplied workspace value.
       try {
         const message = JSON.parse(String(raw));
-        if (message?.type === 'ping') ws.send(JSON.stringify({ type: 'pong' }));
+        if (message?.type === 'ping')void stream.send({type:'pong'});
       } catch {}
     });
-    ws.on('close', unsubscribe);
-    ws.on('error', unsubscribe);
+    const timer=setInterval(()=>void stream.send({type:'heartbeat'}),15000);timer.unref?.();
+    const cleanup=()=>{clearInterval(timer);unsubscribe();stream.close();};
+    ws.on('close',cleanup);
+    ws.on('error',cleanup);
   });
   return sockets;
 }

@@ -11,7 +11,12 @@ export function openDatabase(options = {}, {serverCodeRolloutIo={}}={}) {
   preflightServerCodeRollout(options);
   if (!memory) fs.mkdirSync(path.dirname(filename), { recursive: true });
   const db = new DatabaseSync(memory ? ':memory:' : filename);
-  let rollout;try{rollout=initializeServerCodeRollout(db,options,serverCodeRolloutIo);}catch(error){db.close();throw error;}
+  let rollout;try{
+    // Opt in only for a database already migrated to WAL. Keep FULL durability
+    // and remove obsolete reset tails required by the native snapshot preflight.
+    if(db.prepare('PRAGMA journal_mode').get().journal_mode==='wal')db.exec('PRAGMA synchronous=FULL; PRAGMA journal_size_limit=0');
+    rollout=initializeServerCodeRollout(db,options,serverCodeRolloutIo);
+  }catch(error){db.close();throw error;}
   // Read-only backups briefly hold shared locks. Give normal writes a bounded
   // opportunity to commit after that reader releases its snapshot.
   db.exec('PRAGMA busy_timeout = 5000');

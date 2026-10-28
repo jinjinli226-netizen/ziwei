@@ -201,7 +201,7 @@ export function createAuthService(db, { sessionTtlMs = SESSION_TTL_MS, cookieNam
       const updated = db.prepare('SELECT * FROM local_users WHERE id=?').get(user.id);
       return { ...principal(updated), session: issueSession(user.id) };
     },
-    createWorkspace(userId, input = {}) {
+    createWorkspace(userId, input = {}, {onCreated} = {}) {
       const user = db.prepare('SELECT * FROM local_users WHERE id=?').get(userId);
       if (!user) throw new Error('请先登录紫薇');
       const name = String(input.name || '').trim();
@@ -219,6 +219,7 @@ export function createAuthService(db, { sessionTtlMs = SESSION_TTL_MS, cookieNam
           .run(workspaceId, slug, name, kind, 'free', String(input.timezone || 'Asia/Shanghai'), timestamp);
         db.prepare('INSERT INTO members(id,user_id,workspace_id,name,email,role,avatar,joined_at) VALUES(?,?,?,?,?,?,?,?)')
           .run(memberId, user.id, workspaceId, user.name, user.email, 'owner', null, timestamp);
+        onCreated?.({workspaceId,userId});
         db.exec('COMMIT');
       } catch (error) { try { db.exec('ROLLBACK'); } catch {} throw error; }
       const membership = memberships(user.id).find(item => item.slug === slug);

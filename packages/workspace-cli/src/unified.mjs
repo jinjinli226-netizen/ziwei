@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import {CliError,fail} from './errors.mjs';
 import {assertCredential,publicCredential,validateWorkspace} from './config.mjs';
+import {workerCredentialSource} from './machine.mjs';
 const CLIENT='ziwei-workspace-cli',AUDIENCE='ziwei-workspace-api';
 const SCOPES=['openid','workspace:read','workspace:write'];
 const loopback=url=>url.protocol==='http:'&&['127.0.0.1','[::1]'].includes(url.hostname);
@@ -28,7 +29,7 @@ export async function identityConfig(context,credential){
   if(config.cliClientId!==CLIENT||config.audience!==AUDIENCE||!Array.isArray(config.scopes)||!SCOPES.every(scope=>config.scopes.includes(scope))||config.scopes.some(scope=>!SCOPES.includes(scope))||!Array.isArray(config.cliTransports)||!config.cliTransports.some(mode=>['native','mcp'].includes(mode)))fail('SERVICE_UNAVAILABLE','The public workspace identity client, audience, scopes or transports conflict with the common contract');
   const issuer=trustedUrl(config.issuer,env).href.replace(/\/$/,'');
   if(config.issuer!==issuer||env.ZIWEI_IDENTITY_ISSUER&&env.ZIWEI_IDENTITY_ISSUER!==issuer)fail('SERVICE_UNAVAILABLE','The selected API issuer conflicts with the explicit trusted issuer configuration');
-  if(credential&&(credential.mode!=='unified'||credential.issuer!==issuer||credential.apiBase!==selection.origin||credential.clientId!==CLIENT||credential.audience!==AUDIENCE))fail('UNAUTHENTICATED','The stored identity does not match the selected workspace API configuration');
+  if(credential&&(credential.mode!=='unified'||credential.issuer!==issuer||credential.apiBase!==selection.origin||!(credential.clientId===CLIENT||credential.identitySource==='unified-oidc-machine'&&selection.purpose==='employee'&&/^ziwei-workspace-worker-[A-Za-z0-9_-]{1,128}$/.test(credential.clientId))||credential.audience!==AUDIENCE))fail('UNAUTHENTICATED','The stored identity does not match the selected workspace API configuration');
   return{...config,issuer};
 }
 export async function requireLegacy(context,credential){
@@ -82,7 +83,7 @@ export async function revokeUnified(context,endpoints,credential){
   if(!endpoints.revocation_endpoint)return{remoteRevocation:'unsupported',revocationConfirmed:false,results:{}};
   const results={};let cancelled=false;
   for(const[name,value,hint]of entries){
-    try{const result=await oauth(context,endpoints.revocation_endpoint,{client_id:CLIENT,token:value,token_type_hint:hint});results[name]=result.ok?'accepted':'failed';}
+    try{const worker=credential.identitySource==='unified-oidc-machine'?workerCredentialSource(credential,context):null;const result=await oauth(context,endpoints.revocation_endpoint,{client_id:worker?.clientId||CLIENT,...(worker?{client_secret:worker.clientSecret}:{}),token:value,token_type_hint:hint});results[name]=result.ok?'accepted':'failed';}
     catch(error){results[name]=error.details?.outcomeUnknown?'unknown':error.code==='CANCELLED'?'not_attempted':'failed';cancelled||=error.code==='CANCELLED';}
   }
   const values=Object.values(results),remoteRevocation=values.includes('unknown')?'unknown':values.every(value=>value==='accepted')?'accepted':'failed';

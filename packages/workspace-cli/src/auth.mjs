@@ -3,9 +3,13 @@ import {fail,CliError} from './errors.mjs';
 import {parseJsonStrict} from './input.mjs';
 import {assertCredential,publicCredential,validateOrigin,validateWorkspace,validateManagedToken} from './config.mjs';
 import {unifiedCommand,logoutUnified,requireLegacy} from './unified.mjs';
+import {machineLogin} from './machine.mjs';
 export async function authCommand(action,options,context){
   const{store,selection,request,readStdin,secrets}=context;
-  if(options.mode==='machine')fail('NOT_SUPPORTED','Explicit registered per-employee per-site machine clients are not supported by this CLI version');
+  if(options.mode==='machine'){
+    if(action==='login'&&options['worker-file'])return machineLogin(context,options);
+    fail('NOT_SUPPORTED','Machine login requires an explicit protected per-employee --worker-file');
+  }
   if(action==='login'&&(options.mode||'unified')==='unified'){
     if(options.local)fail('USAGE','--local applies only to auth status/logout');
     return unifiedCommand(action,options,context);
