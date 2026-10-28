@@ -4,13 +4,12 @@ import {Bot,Plus,MessageCircle,Settings2,Clock3,Activity,RefreshCw,ChevronRight,
 import {ZiButton,ZiModal,ZiFormField,ZiInput,ZiTextarea} from '@ziwei/ui';
 import ZiSelect from './ZiSelect.vue';
 import {api,API_BASE} from '../api.js';
-import {createBotWorkbench,botWorkbenchReadOptions,botDraftDirty,botPresence,capabilityPresentation,executionUncertain,botRosterRuntimeOptions,filterBotRoster,botRosterRuntime,botRosterPresence} from '../bot-workbench.js';
+import {createBotWorkbench,botWorkbenchReadOptions,botDraftDirty,botPresence,executionUncertain,botRosterRuntimeOptions,filterBotRoster,botRosterRuntime,botRosterPresence} from '../bot-workbench.js';
 import {botStopPresentation,botRecoveryEvent,botRecoveryDetail,processExitConfirmed,executionProcessActive} from '../bot-presentation.js';
 import {operatorForceAbandonRecovery} from '../operator-force-abandon-recovery.mjs';
 import {failureFinalization,pendingBotFailureFinalization,finalizationPresentation,failureFinalizationRequest} from '../bot-failure-finalization.mjs';
 import {executionPresentation} from '../conversation-execution-state.mjs';
 import {botErrorMessage,botTime} from '../bot-state.js';
-import {botCapabilityAction,botCapabilityDestination,focusCapabilityTarget} from '../bot-capability-actions.js';
 import {canForceRemoveEmployee,employeeRemovalPrompt,forceEmployeeRemovalDetail} from '../employee-removal.js';
 import {nativeRoutineDriver,routineDriver} from '../bot-native-data.js';
 import {createOwnedBotRequest,botCreateAdmission,botInstanceStatus} from '../bot-owned-profile.js';
@@ -43,7 +42,7 @@ const routineEditor=ref(null),routineForm=ref({}),routineKey=ref(''),routineScop
 const routineKind=ref('prompt'),routineTarget=ref('');
 const nativeBlocked=ref(false),nativeTabs=['knowledge','collaboration','channels','proactive'];
 let generation=0,disposed=false,pollTimer=null,forceAbandonRead=null;
-const tabs=[['chat','聊天',MessageCircle],['settings','基础配置',Settings2],['capabilities','能力组合',Sparkles],['knowledge','资料与工具',Settings2],['collaboration','伙伴协作',MessageCircle],['channels','消息与音频',MessageCircle],['proactive','主动工作',Activity],['routines','例行工作',Clock3],['activity','运行记录',Activity]];
+const tabs=[['chat','聊天',MessageCircle],['settings','基础配置',Settings2],['capabilities','能力配置',Sparkles],['knowledge','资料与工具',Settings2],['collaboration','伙伴协作',MessageCircle],['channels','消息与音频',MessageCircle],['proactive','主动工作',Activity],['routines','例行工作',Clock3],['activity','运行记录',Activity]];
 const runtimeFilter=ref('all');
 const runtimeOptions=computed(()=>botRosterRuntimeOptions(s.bots));
 const bots=computed(()=>filterBotRoster(s.bots,{runtime:runtimeFilter.value,search:search.value}));
@@ -81,9 +80,6 @@ const driverBudget=computed({get:()=>s.draft?.config.drivers?.maxTotalTurns??100
 const driverExpiry=computed({get:()=>s.draft?.config.drivers?.expiresAt||'',set:value=>{s.draft.config.drivers={...s.draft.config.drivers,expiresAt:value||null};}});
 function memoryLimit(field){return computed({get:()=>s.draft?.config.memory?.[field]??'',set:value=>{if(value==='')delete s.draft.config.memory[field];else s.draft.config.memory[field]=Number(value);}});}
 const memoryCharLimit=memoryLimit('charLimit'),userCharLimit=memoryLimit('userCharLimit');
-const capabilities=computed(()=>s.bot?.capabilities || []);
-const capabilityGate=computed(()=>s.bot?.capabilityGate);
-function displayCapability(capability){return fixtureBot.value&&capability.status==='available'?{label:'预览状态',tone:'muted'}:capabilityPresentation(capability);}
 const scopeCurrent=(visit,workspace)=>!disposed && visit===generation && props.workspace===workspace;
 
 async function loadDiscovery(){
@@ -100,28 +96,6 @@ async function refresh(){await Promise.all([workbench.list(),workbench.refresh()
 async function save(){if(avatarReading.value)return;if(nativeBlocked.value){s.error='仍有原生操作待核实，请先查看原回执。';return;}if(await workbench.save())emit('changed');}
 async function refreshNativeBot(){const reset=!configDirty.value;await workbench.refresh({resetDraft:reset});emit('changed');}
 function changeSection(value){if(tab.value===value)return;routineEditor.value=null;tab.value=value;emit('section',value);}
-function capabilityActionDisabled(capability){const action=botCapabilityAction(capability);return s.busy||s.capabilityBusy||(action?.kind!=='navigate'&&s.writeUnknown);}
-async function actOnCapability(capability){
-  const action=botCapabilityAction(capability);if(!action||capabilityActionDisabled(capability))return;
-  const visit=generation,workspace=props.workspace,id=s.selectedId;
-  if(action.kind==='navigate'){
-    if(action.tab==='chat'){chat();return;}
-    changeSection(action.tab);
-    if(action.tab==='routines'&&capability.id==='routines'&&/添加|创建/.test(action.label)){editRoutine();return;}
-    const destination=botCapabilityDestination(capability);
-    for(let attempt=0;attempt<20&&scopeCurrent(visit,workspace)&&s.selectedId===id&&tab.value===action.tab;attempt++){
-      await nextTick();if(focusCapabilityTarget(workbenchRoot.value,destination?.selector))break;await new Promise(resolve=>setTimeout(resolve,50));
-    }
-    return;
-  }
-  if(configDirty.value){s.error='有未保存的修改，请先保存当前草稿，再继续。';return;}
-  if(nativeBlocked.value){s.error='还有操作正在处理，请等待完成后再继续。';return;}
-  try{
-    if(action.kind==='enable')await workbench.enableCapability(action.key);
-    else if(action.kind==='validate')await workbench.validate();
-    else if(action.kind==='activate')await workbench.control(s.bot.control_state==='paused'?'resume':'activate');
-  }finally{if(scopeCurrent(visit,workspace)&&s.selectedId===id)emit('changed');}
-}
 async function initialize(){if(await workbench.initialize())emit('changed');}
 async function removeEmployee(force=false){if(!s.bot||s.busy||s.writeUnknown||!window.confirm(employeeRemovalPrompt(s.bot.employee,force)))return;if(await workbench.removeEmployee({force})){emit('select','');emit('changed');await workbench.list();}}
 async function control(operation){if(await workbench.control(operation))emit('changed');}
@@ -255,11 +229,7 @@ onBeforeUnmount(()=>{disposed=true;generation++;ownedCreate.dispose();clearTimeo
             <div class="bot-save-bar"><p>修改运行设置后需要检查配置。</p><button class="bot-button primary" :disabled="avatarReading||s.busy||s.writeUnknown||s.bot.configuration_state==='uninitialized'||(instanceStatus.mode==='owned_profile'&&!instanceStatus.provisioned)||s.conflict||!s.draft.employee.name.trim()" @click="save">{{s.busy?'处理中…':'保存配置'}}</button></div>
           </section>
           <section v-else-if="tab==='capabilities'&&s.draft" class="bot-form-section">
-            <div class="bot-section-heading"><h3>能力组合</h3><button class="bot-button" :disabled="s.reading||s.busy||s.capabilityBusy" @click="workbench.refresh()"><RefreshCw :size="15"/>刷新状态</button></div>
-            <div v-if="capabilityGate&&capabilityGate.state!=='ready'" class="bot-banner" data-capability-gate :data-state="capabilityGate.state"><strong>{{displayCapability(capabilityGate).label}}</strong><p>{{capabilityGate.reason}}</p><button v-if="botCapabilityAction(capabilityGate)" class="bot-button" data-capability-action :disabled="capabilityActionDisabled(capabilityGate)" @click="actOnCapability(capabilityGate)">{{botCapabilityAction(capabilityGate).label}}</button></div>
-            <p v-if="s.capabilityBusy" class="bot-help" role="status">正在保存并检查此能力…</p>
-            <div class="bot-capability-grid"><article v-for="capability in capabilities" :key="capability.id" class="bot-capability" :data-capability-id="capability.id" :data-state="capability.state||capability.status"><div><strong>{{capability.label}}</strong><span class="bot-status" :data-tone="displayCapability(capability).tone">{{displayCapability(capability).label}}</span></div><p v-if="capability.reason&&capability.reason!==capabilityGate?.reason">{{capability.reason}}</p><p v-if="capability.runtimeBarrier" class="bot-help" data-runtime-barrier>当前运行障碍：{{capability.runtimeBarrier.reason||displayCapability(capability.runtimeBarrier).label}}</p><small v-if="capability.checkedAt">最近检查：{{botTime(capability.checkedAt)}}</small><details v-if="capability.evidence?.length||fixtureBot" class="bot-advanced"><summary>诊断详情</summary><p v-if="fixtureBot">此页面使用预览数据。</p><ul><li v-for="(evidence,index) in capability.evidence||[]" :key="index">{{typeof evidence==='string'?evidence:JSON.stringify(evidence)}}</li></ul></details><button v-if="botCapabilityAction(capability)" class="bot-button" data-capability-action :disabled="capabilityActionDisabled(capability)" @click="actOnCapability(capability)">{{botCapabilityAction(capability).label}}</button></article></div>
-            <p v-if="!capabilities.length" class="bot-banner warning">能力状态暂未加载，请刷新重试。</p>
+            <div class="bot-section-heading"><div><h3>能力配置</h3><p>配置记忆、技能和工具；实际工具记录在“资料与工具”中查看。</p></div></div>
             <fieldset :disabled="s.busy||s.writeUnknown||s.bot.configuration_state==='uninitialized'||(instanceStatus.mode==='owned_profile'&&!instanceStatus.provisioned)"><div class="bot-surface"><h3>记忆与会话</h3><label class="bot-check"><input v-model="s.draft.config.memory.enabled" type="checkbox"/>启用此 Bot 的长期记忆</label><label class="bot-check"><input v-model="s.draft.config.memory.userProfile" type="checkbox"/>启用此 Bot 的用户画像记忆</label><div class="bot-fields"><label>长期记忆字符上限<input v-model="memoryCharLimit" type="number" min="100" max="50000" placeholder="留空沿用原生默认"/></label><label>用户画像字符上限<input v-model="userCharLimit" type="number" min="100" max="50000" placeholder="留空沿用原生默认"/></label></div><p>记忆与主聊天分别保存。正文、用户画像和会话检索在资料与工具中管理。</p><button class="bot-link" @click="changeSection('knowledge')">管理记忆正文与会话</button></div>
               <div class="bot-surface"><h3>技能与工具</h3><p>紫薇技能挂载与 Hermes 原生技能禁用名单分别设置。</p><div class="bot-skill-list"><label v-for="skill in skills" :key="skill.id" class="bot-check"><input v-model="s.draft.employee.skills" type="checkbox" :value="skill.id"/>{{skill.name}}</label><p v-if="!skills.length">当前工作区没有可选择的技能。</p></div><div class="bot-fields"><label>Hermes 原生工具集<textarea v-model="toolsetsText" rows="4" placeholder="每行一个工具集名称"/></label><label>自动加载的 Hermes 原生技能<textarea v-model="autoLoadSkillsText" rows="4" placeholder="每行一个实际技能名称"/></label><label>禁用的 Hermes 原生技能<textarea v-model="disabledSkillsText" rows="4" placeholder="每行一个原生技能名称"/></label></div><p v-if="s.draft.config.permissions.mode==='read_only'">当前只允许对话。要配置工具或 MCP，请先在基础配置允许使用工具。</p></div>
               <div class="bot-surface"><h3>MCP 与高级连接</h3><p>连接你需要的外部工具和服务。</p><button class="bot-button" @click="changeSection('knowledge')">配置并检查 MCP</button></div>
@@ -279,7 +249,7 @@ onBeforeUnmount(()=>{disposed=true;generation++;ownedCreate.dispose();clearTimeo
             <article v-if="s.bot.stop_action" class="bot-surface"><h3>停止请求回执</h3><p>请求 {{s.bot.stop_action.id}} · {{s.bot.stop_action.status}}</p><p v-if="s.bot.stop_action.error" class="bot-error-text">{{s.bot.stop_action.error}}</p><p>{{stopPresentation.label}}</p></article><p v-if="s.recordsReading" class="bot-help" role="status">正在读取运行记录…</p><div v-if="!s.recordsReading&&!s.runs.length" class="bot-empty">尚无运行记录。状态未知时不会显示为已成功。</div>
             <article v-for="run in s.runs" :key="run.id" class="bot-run"><div><strong>{{run.type==='hermes.bot.validate'?'配置检查':run.type||'工作执行'}}</strong><span class="bot-status" :data-tone="runPresentation(run).tone">{{runPresentation(run).summary}}</span></div><time>{{botTime(run.created_at)}}</time><p v-if="botStopPresentation(s.bot,run).notStarted||operatorForceAbandonRecovery(run)||failureFinalization(run)" class="bot-help">{{botStopPresentation(s.bot,run).label}}</p><details v-if="(botStopPresentation(s.bot,run).notStarted||operatorForceAbandonRecovery(run)||failureFinalization(run))&&run.error"><summary>原始失败记录（已保留）</summary><p>{{run.error}}</p></details><p v-else-if="run.error" class="bot-error-text">{{run.error}}</p><p v-if="executionUncertain(run)" class="bot-help">{{botRecoveryDetail(run)}}</p><button v-if="failureFinalizationRequest(s.bot,run)" class="bot-button danger" :disabled="s.busy||s.reading||s.writeUnknown" @click="finalizeFailure(run)">{{s.busy?'正在结束…':'结束本次执行'}}</button><button v-if="botRecoveryEvent(run)" class="bot-button" :disabled="s.busy||s.reading||s.writeUnknown" @click="reconcile(run)">{{s.busy?'正在核实…':'核实并恢复回执'}}</button><details><summary>查看执行标识与回执</summary><p>执行 ID：{{run.id}}</p><p>完成时间：{{botTime(run.completed_at)}}</p><p v-if="operatorForceAbandonRecovery(run)">旧任务已强制放弃，原执行结果仍未知；原始失败记录已保留。</p><p v-else-if="botStopPresentation(s.bot,run).notStarted">历史恢复：模型未启动；原失败状态与回执已保留。</p><p v-else-if="run.result?.executionState">执行状态：{{run.result.executionState}}</p><p v-if="run.result?.stopConfirmed!==undefined">{{botStopPresentation(s.bot,run).label}}</p><p v-if="run.result?.processExit">进程退出证据：{{processExitConfirmed(run.result)?'根进程与进程树退出均已确认':'尚未完整确认'}}</p><p v-for="event in (run.events||[])" :key="event.id">{{event.message||event.type}}</p><button class="bot-link" @click="chat">进入主聊天查看结果与产物</button></details></article>
           </section>
-          <EmployeeCapabilityInventory :key="actorId+workspace+s.bot.id" v-if="['capabilities','knowledge'].includes(tab)" :workspace="workspace" :employee="s.bot.employee" :revision="s.bot.revision" :control-epoch="s.bot.control_epoch" :active="true" managed @manage="inventoryManage"/>
+          <EmployeeCapabilityInventory :key="actorId+workspace+s.bot.id" v-if="tab==='knowledge'" :workspace="workspace" :employee="s.bot.employee" :revision="s.bot.revision" :control-epoch="s.bot.control_epoch" :active="true" managed @manage="inventoryManage"/>
           <BotNativeWorkspace v-if="s.draft" :key="actorId" v-show="nativeTabs.includes(tab)" :workspace="workspace" :actor-id="actorId" :bot="s.bot" :draft="s.draft" :bots="s.bots" :section="tab" :config-busy="s.busy||s.writeUnknown||nativeBlocked" :refresh-bot="refreshNativeBot" @busy="nativeBlocked=$event" @save-config="save" @stop-current="control('stop')"/>
         </template>
         <section v-else-if="externalEmployee" class="bot-form-section" aria-label="员工能力明细工作区">
