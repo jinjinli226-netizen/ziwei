@@ -49,7 +49,7 @@ test('offline disposition requires exact absence observations and cannot borrow 
     r=>{r.forceAbandonRecovery.subject.installation.build='8'.repeat(64);},r=>{r.forceAbandonRecovery.subject.installation.configSha256='bad';},r=>{r.forceAbandonRecovery.subject.serverHeartbeat.clientBuild='8'.repeat(64);},r=>{r.forceAbandonRecovery.subject.serverHeartbeat.pid=0;},r=>{r.forceAbandonRecovery.subject.serverHeartbeat.lastSeen='bad';},
     r=>{r.forceAbandonRecovery.subject.schemaVersion=1;},r=>{r.forceAbandonRecovery.executionState='not_started';},r=>{r.forceAbandonRecovery.executionConfirmedStopped=true;},r=>{r.forceAbandonRecovery.partialEffectsPossible=false;},r=>{r.forceAbandonRecovery.subject.originalPayloadSha256='8'.repeat(64);},r=>{r.forceAbandonRecovery.subject.originalError='another';},
   ];
-  for(const mutate of mutations){const run=absentFixture();mutate(run);assert.equal(operatorForceAbandonRecovery(run),null,mutate.toString());assert.equal(executionUncertain(run),true);assert.equal(executionNeedsPolling(run),true);assert.equal(executionPresentation(run).retryable,false);}
+  for(const mutate of mutations){const run=absentFixture();mutate(run);assert.equal(operatorForceAbandonRecovery(run),null,mutate.toString());assert.equal(executionUncertain(run),true);assert.equal(executionNeedsPolling(run),false);assert.equal(executionPresentation(run).retryable,false);}
   const run=absentFixture(),receipt=run.forceAbandonRecovery;delete run.forceAbandonRecovery;
   for(const forged of [{...run,currentDaemonAbsent:true},{...run,result:{...run.result,forceAbandonRecovery:receipt}},{...run,events:[{type:'bot.operator_force_abandon',data:{receipt}}]}])assert.equal(operatorForceAbandonRecovery(forged),null);
 });
@@ -86,7 +86,7 @@ test('paused Bot presence discloses abandonment without turning the old executio
 test('result flags and event bodies cannot stand in for independently projected abandonment metadata',()=>{
   const original=fixture(),base=structuredClone(original);delete base.forceAbandonRecovery;
   for(const run of [base,{...base,abandoned:true,disposition:'abandoned_by_user'},{...base,result:{...base.result,forceAbandonRecovery:original.forceAbandonRecovery}},{...base,events:[{type:'bot.operator_force_abandon',data:{receipt:original.forceAbandonRecovery}}]}]){
-    assert.equal(operatorForceAbandonRecovery(run),null);assert.equal(executionUncertain(run),true);assert.equal(executionNeedsPolling(run),true);
+    assert.equal(operatorForceAbandonRecovery(run),null);assert.equal(executionUncertain(run),true);assert.equal(executionNeedsPolling(run),false);
     assert.equal(executionPresentation(run).summary,'失败');assert.equal(executionPresentation(run).retryable,false);
   }
 });
@@ -99,7 +99,7 @@ test('another action, altered raw failure, wrong binding or a process-tree claim
     r=>{r.forceAbandonRecovery.grantId='another';},r=>{r.forceAbandonRecovery.grantDigest='8'.repeat(64);},r=>{r.forceAbandonRecovery.resultingControlEpoch=8;},r=>{r.forceAbandonRecovery.executionState='not_started';},r=>{r.forceAbandonRecovery.executionConfirmedStopped=true;},r=>{r.forceAbandonRecovery.partialEffectsPossible=false;},r=>{r.forceAbandonRecovery.disposition='recovered';},r=>{r.forceAbandonRecovery.subject.originalDaemonExit={stopped:true};},
     r=>{r.forceAbandonRecovery.currentDaemonExit.pid++;},r=>{r.forceAbandonRecovery.currentDaemonExit.scope='process-tree';},r=>{r.forceAbandonRecovery.currentDaemonExit.treeConfirmed=true;},r=>{r.forceAbandonRecovery.currentDaemonExit.exitedAt='2026-10-17T16:00:00.000Z';},r=>{r.forceAbandonRecovery.processExit={treeConfirmed:true};},r=>{r.forceAbandonRecovery.policyDigest='bad';},r=>{r.forceAbandonRecovery.policyDigest='8'.repeat(64);},r=>{r.forceAbandonRecovery.subject.originalResultDigest='8'.repeat(64);},
   ];
-  for(const mutate of mutations){const run=fixture();mutate(run);assert.equal(operatorForceAbandonRecovery(run),null,mutate.toString());if(run.status==='failed'){assert.equal(executionUncertain(run),true);assert.equal(executionNeedsPolling(run),true);assert.equal(executionPresentation(run).retryable,false);}}
+  for(const mutate of mutations){const run=fixture();mutate(run);assert.equal(operatorForceAbandonRecovery(run),null,mutate.toString());if(run.status==='failed'){assert.equal(executionUncertain(run),true);assert.equal(executionNeedsPolling(run),false);assert.equal(executionPresentation(run).retryable,false);}}
 });
 
 test('a later execution has its own status and does not inherit the abandoned action metadata',()=>{

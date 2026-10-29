@@ -58,7 +58,7 @@ test('a restart after durable started without a terminal result refuses to execu
   assert.equal(result.status, 'failed');
   assert.equal(result.code, 'EXECUTION_UNCERTAIN');
   assert.equal(result.reason, 'STARTED_WITHOUT_RESULT');
-  assert.match(result.error, /人工|核实|uncertain/i);
+  assert.equal(result.executionState, 'uncertain');
   assert.equal(executions, 0);
   assert.equal(JSON.parse(fs.readFileSync(f.stateFile, 'utf8')).started.length, 1);
 });

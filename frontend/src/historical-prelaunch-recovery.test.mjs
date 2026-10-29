@@ -48,7 +48,7 @@ test('post-update holder proof cannot weaken the original-generation time rule o
     r=>{r.admissionProof.treeConfirmed=true;},r=>{r.processExit={launched:false,treeConfirmed:true};},
     r=>{r.schemaVersion=1;r.policy='6666a63-bot-start-admission-prelaunch-v1';r.daemonExit=r.maintenanceHolderExit;delete r.maintenanceHolderExit;delete r.mode;delete r.migrationEvidenceDigest;delete r.verifiedUpdateFinishedAt;},
   ]){const run=structuredClone(base);mutate(run.prelaunchRecovery);invalid.push(run);}
-  for(const run of invalid){assert.equal(historicalPrelaunchRecovery(run),null);assert.equal(executionUncertain(run),true);assert.equal(executionNeedsPolling(run),true);}
+  for(const run of invalid){assert.equal(historicalPrelaunchRecovery(run),null);assert.equal(executionUncertain(run),true);assert.equal(executionNeedsPolling(run),false);}
   const old=fixture();old.prelaunchRecovery.daemonExit.creationTime='2026-10-17T03:00:00.000Z';
   assert.equal(historicalPrelaunchRecovery(old),null,'schema 1 still requires the original pre-start generation');
 });
@@ -80,7 +80,7 @@ test('generic flags, uncommitted events and receipts for another action cannot r
   for(const change of [r=>{r.subject.actionId='another';},r=>{r.subject.deviceId='another';},r=>{r.subject.profile='another';},r=>{r.admissionProof.scope='all-processes';},r=>{r.admissionProof.treeConfirmed=true;},r=>{r.processExit={launched:false,treeConfirmed:true};},r=>{r.daemonExit.stopped=false;},r=>{r.sourcePolicyDigest='bad';}]){
     const run=structuredClone(valid);change(run.prelaunchRecovery);rejected.push(run);
   }
-  for(const run of rejected){assert.equal(historicalPrelaunchRecovery(run),null);assert.equal(executionUncertain(run),true);assert.equal(executionNeedsPolling(run),true);assert.equal(executionPresentation(run).summary,'失败');}
+  for(const run of rejected){assert.equal(historicalPrelaunchRecovery(run),null);assert.equal(executionUncertain(run),true);assert.equal(executionNeedsPolling(run),false);assert.equal(executionPresentation(run).summary,'失败');}
 });
 
 test('chat and workbench templates compile with a separate preserved original-failure disclosure',async()=>{

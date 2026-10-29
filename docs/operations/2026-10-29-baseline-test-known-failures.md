@@ -2,15 +2,15 @@
 
 核对日期：2026-10-29。代码基线为 `8e4f37a`，父提交 `b0febd9` 仅保存基线对齐文档。本记录区分原基线失败、测试夹具修正和本轮 IME／滚动验证，不表示已部署或现网验收。
 
-## 保留的五项失败
+## 初次审计复现的五项失败
 
-直接运行以下未修改的测试文件，结果为 **14 项，9 通过、5 失败**：
+在 IME／滚动提交 `4f3f65c` 中保留原测试时，直接运行以下未修改的测试文件，结果为 **14 项，9 通过、5 失败**：
 
 ```powershell
 node --test frontend/src/historical-prelaunch-recovery.test.mjs frontend/src/operator-force-abandon-recovery.test.mjs
 ```
 
-| 测试位置 | 原测试名称 | 当前失败断言 |
+| 测试位置 | 原测试名称 | 初次失败断言 |
 | --- | --- | --- |
 | `frontend/src/historical-prelaunch-recovery.test.mjs:51` | post-update holder proof cannot weaken the original-generation time rule or substitute a process-tree claim | `executionNeedsPolling(run)` 期望 `true`，实际 `false` |
 | `frontend/src/historical-prelaunch-recovery.test.mjs:83` | generic flags, uncommitted events and receipts for another action cannot remove the original block | 同上 |
@@ -18,11 +18,11 @@ node --test frontend/src/historical-prelaunch-recovery.test.mjs frontend/src/ope
 | `frontend/src/operator-force-abandon-recovery.test.mjs:89` | result flags and event bodies cannot stand in for independently projected abandonment metadata | 同上 |
 | `frontend/src/operator-force-abandon-recovery.test.mjs:102` | another action, altered raw failure, wrong binding or a process-tree claim keeps the original uncertainty fenced | 同上 |
 
-以上两个测试文件，以及它们涉及的 `historical-prelaunch-recovery.mjs`、`operator-force-abandon-recovery.mjs`、`bot-presentation.js`、`conversation-execution-state.mjs`、`src/bot-force-abandon-contract.mjs`，逐文件与 Git HEAD 比较一致（只归一化 CRLF/LF）。这五项失败不是本轮 IME／滚动改动造成的。
+初次审计时，以上两个测试文件，以及它们涉及的 `historical-prelaunch-recovery.mjs`、`operator-force-abandon-recovery.mjs`、`bot-presentation.js`、`conversation-execution-state.mjs`、`src/bot-force-abandon-contract.mjs`，逐文件与原基线 Git HEAD 比较一致（只归一化 CRLF/LF）。这五项失败不是本轮 IME／滚动改动造成的。
 
 `343bfbea20d8ced38476f09023426c0fcc4f1a58` 已把失败／不确定执行的前台轮询改为直接结束：`executionNeedsPolling` 只对非不确定的 `pending`、`acked` 返回 `true`，不再等待归档 ACK。上述旧断言仍要求失败且不确定的执行继续轮询。拒绝伪造恢复凭证、保留不确定结果的前序断言仍通过，不能把这次失败解释为恢复凭证校验已失效。
 
-同一提交规定：仅 `processAlive === true` 或 `processExit.activeProcesses > 0` 的明确进程证据保留执行位；失败终态、业务结果不确定和进程占位是独立判断。不能为了让旧轮询断言通过而恢复无限等待 ACK，也不能伪造进程退出或重放业务。本轮保留这五条断言及恢复实现，后续对齐测试语义应作为单独审查事项。
+同一提交规定：仅 `processAlive === true` 或 `processExit.activeProcesses > 0` 的明确进程证据保留执行位；失败终态、业务结果不确定和进程占位是独立判断。不能为了让旧轮询断言通过而恢复无限等待 ACK，也不能伪造进程退出或重放业务。IME／滚动提交先保留这五条断言及恢复实现，再单独审查测试语义。
 
 规则原说明：`docs/operations/2026-10-28-failed-execution-terminal.md`。
 
@@ -37,9 +37,25 @@ node --test frontend/src/historical-prelaunch-recovery.test.mjs frontend/src/ope
 
 它们是基线测试夹具遗漏，不是本轮新发现并修复的产品功能缺陷。修正后上述五项通过。
 
-## 本轮验证范围
+## IME／滚动提交时的验证记录
 
 - IME／滚动及相关分页、附件、目录、绑定、发送竞态、失败发送门禁：11 个测试文件，**77／77 通过**。包含实际 Vue 组件 setup 和 App 滚动 watcher，覆盖 229、composition、500ms、40px／120px 边界、用户上滚、跳至最新、分页锚点与晚到图片。
 - 全部 `frontend/src/**/*.test.mjs`：**479 项，474 通过、上述 5 项失败**；不能描述为前端全量通过。
 - `npm run lint`：通过；`npm run build`：通过，保留既有主包超过 500kB 的提示；`git diff --check`：通过。
 - 未启动业务服务、调用模型、部署网页或使用 Computer Use。
+
+## 后续仅对齐测试语义
+
+复审确认五处失败均发生在恢复凭证已被拒绝、`executionUncertain(run) === true` 的断言通过之后；失败点仅为要求 failed 执行继续轮询的旧期望。因此在独立 test／doc 提交中，只把表内五处 `executionNeedsPolling(run)` 的期望从 `true` 改为 `false`。
+
+未改变任何恢复、凭证、轮询或占位业务实现。全部伪证变体、`recovery(run) === null`、`uncertain === true`、`retryable === false` 和失败展示断言保留；真实活进程阻止新工作的正向门禁也保留。停止前台轮询不代表确认进程退出，不允许据此重放原任务。
+
+后续验证：两份恢复测试 **14／14 通过**；当前全部前端测试在加入队列 UI 的 7 项测试后为 **486／486 通过**。上文 **479／474／5** 是初次审计的历史结果，不是对齐后的当前结果。此记录保留原始失败证据和修正依据，不以改动测试掩盖产品安全回归。
+
+## Daemon 持久化恢复测试的旧文案期望
+
+`test/daemon-persistence-recovery.test.mjs:61` 的 `a restart after durable started without a terminal result refuses to execute again`，原来要求 `result.error` 匹配 `/人工|核实|uncertain/i`。主代理和 DSH 审计已在原基线确认同一旧文案断言失败；生产实现仍返回失败及不确定状态，未重复启动原执行。
+
+此次只将该行改为稳定的结构化断言 `result.executionState === 'uncertain'`。原有 `status === 'failed'`、`code === 'EXECUTION_UNCERTAIN'`、`reason === 'STARTED_WITHOUT_RESULT'`、执行次数为零、持久化 started 记录仍存在的断言全部保留，未改 daemon 恢复实现。该文件 **15／15 通过**。
+
+将两份前端恢复测试与前后端失败门禁、进程占位、停止协议、dispatcher 和 daemon 持久化恢复一起复核，8 个文件 **111／111 通过**，包含真实存活进程仍拒绝下一条 ACK 的验证。
