@@ -7,12 +7,13 @@ import {parse,compileStyleAsync} from '@vue/compiler-sfc';
 import {createManagerHarness,managerFixture} from './bot-management-harness.mjs';
 
 const root=fileURLToPath(new URL('../../',import.meta.url)),require=createRequire(import.meta.url);
-const unified=process.argv.includes('--chat');
+const avatarPreview=process.argv.includes('--avatars');
+const unified=process.argv.includes('--chat')||avatarPreview;
 const output=path.resolve(root,process.argv[2]?.startsWith('--')?(unified?'.local/employee-workbench-preview':'.local/bot-management-preview'):process.argv[2]||(unified?'.local/employee-workbench-preview':'.local/bot-management-preview'));
 await fs.mkdir(output,{recursive:true});
 const css=[];
 for(const file of [require.resolve('@ziwei/ui/style.css'),path.join(root,'frontend/src/styles.css'),path.join(root,'frontend/src/workspace-shell.css')])css.push(await fs.readFile(file,'utf8'));
-for(const name of ['BotWorkbench','BotInstancePanel','ZiSelect',...(unified?['BotMainChat','ConversationQueuePanel']:[])]){
+for(const name of ['BotWorkbench','BotInstancePanel','ZiSelect','EmployeeAvatar','BotAvatarEditor',...(unified?['BotMainChat','ConversationQueuePanel']:[])]){
   const filename=path.join(root,'frontend/src/components',name+'.vue'),{descriptor}=parse(await fs.readFile(filename,'utf8'),{filename});
   for(const style of descriptor.styles){
     const source=style.src?await fs.readFile(path.resolve(path.dirname(filename),style.src),'utf8'):style.content;
@@ -22,6 +23,9 @@ for(const name of ['BotWorkbench','BotInstancePanel','ZiSelect',...(unified?['Bo
 }
 const logo='data:image/png;base64,'+(await fs.readFile(path.join(root,'frontend/public/ziwei-logo.png'))).toString('base64');
 const fixture=managerFixture();
+fixture.bot.employee.avatar='grok:gem:violet';
+fixture.roster[1].employee.avatar='grok:clover:green';
+fixture.roster[2].employee.avatar='grok:bean:cyan';
 for(const [index,name] of ['绮映','拆解哥','libtv 爆款学习','小红书 TRO 运营','品牌内容伙伴','资料研究员','产品交付伙伴','设计审校伙伴','客户服务伙伴','活动策划伙伴','数据分析伙伴','自动化伙伴'].entries()){
   const example=structuredClone(fixture.roster[1]);example.id=example.employee.id='example-'+index;example.employee.name=name;example.employee.description='示例岗位 · 归属于同一工作区';fixture.roster.push(example);
 }
@@ -61,13 +65,16 @@ const {targetId}=await call('Target.createTarget',{url:'about:blank'});
 const {sessionId}=await call('Target.attachToTarget',{targetId,flatten:true});
 await call('Page.enable',{},sessionId);await call('Runtime.enable',{},sessionId);
 try{
-const scenarios=unified?['Hermes','DSH','Codex'].flatMap(runtime=>[{runtime,section:'chat',expanded:false},{runtime,section:'settings',expanded:false},{runtime,section:'chat',expanded:true}]):[['chat',false],['settings',false],['chat',true]].map(([section,expanded])=>({section,expanded}));
-for(const {runtime,section,expanded} of scenarios){
-  const view=(runtime?runtime.toLowerCase()+'-':'')+section+(expanded?'-employees':'');
-  const harness=await createManagerHarness({fixture:structuredClone(fixture),shell:true,initial:{initialTab:section},chat:unified?{runtime}:false});
+const scenarios=avatarPreview?['character','image'].map(avatarMode=>({runtime:'Hermes',section:'settings',expanded:false,avatarMode})):unified?['Hermes','DSH','Codex'].flatMap(runtime=>[{runtime,section:'chat',expanded:false},{runtime,section:'settings',expanded:false},{runtime,section:'chat',expanded:true}]):[['chat',false],['settings',false],['chat',true]].map(([section,expanded])=>({section,expanded}));
+for(const {runtime,section,expanded,avatarMode} of scenarios){
+  const view=(runtime?runtime.toLowerCase()+'-':'')+section+(expanded?'-employees':'')+(avatarMode?'-'+avatarMode:'');
+  const sample=structuredClone(fixture);
+  if(avatarMode==='image')sample.bot.employee.avatar=logo;
+  const harness=await createManagerHarness({fixture:sample,shell:true,initial:{initialTab:section},chat:unified?{runtime}:false});
+  if(avatarMode==='character'){harness.button('选择形状与颜色').props.onClick();await harness.settle();}
   if(expanded){harness.byClass('bot-mobile-roster-heading')[0].props.onClick();await harness.settle();}
   const markup=harness.html().replace('src="/ziwei-logo.png"','src="'+logo+'"');harness.dispose();
-  const html=`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>紫薇员工工作台 · 示例预览</title><style>${css.join('\n')}\nbody{margin:0}.preview-note{height:28px;box-sizing:border-box;display:flex;align-items:center;justify-content:center;gap:8px;background:#fff8e9;color:#846333;font:11px/1.3 sans-serif}.preview-frame .workspace-shell{height:calc(100dvh - 28px)}</style></head><body><div class="preview-note">示例预览 · 真实组件与样例数据 · 未连接线上设备或模型</div><div class="preview-frame">${markup}</div><script>${layoutScript}</script></body></html>`;
+  const html=`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>紫薇员工工作台 · 示例预览</title><style>${css.join('\n')}\nbody{margin:0}.preview-note{height:28px;box-sizing:border-box;display:flex;align-items:center;justify-content:center;gap:8px;background:#fff8e9;color:#846333;font:11px/1.3 sans-serif}.preview-frame .workspace-shell{height:calc(100dvh - 28px)}</style></head><body><div class="preview-note">示例预览 · 真实组件与样例数据 · 未连接线上设备或模型</div><div class="preview-frame">${markup}</div><script>${layoutScript}${avatarPreview?`addEventListener('load',()=>{const editor=document.querySelector('.bot-avatar-editor'),drawer=document.querySelector('.bot-management-drawer');if(editor&&drawer)drawer.scrollTop=editor.offsetTop-drawer.offsetTop-65;});`:''}</script></body></html>`;
   const file=path.join(output,view+'.html');await fs.writeFile(file,html);
   for(const [width,height] of (unified?[[1440,1000],[390,844],[844,360]]:[[1440,1000],[390,844],[390,640],[844,390],[844,360]])){
     const screenshot=path.join(output,view+'-'+width+'x'+height+'.png');

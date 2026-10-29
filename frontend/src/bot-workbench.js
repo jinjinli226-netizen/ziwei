@@ -15,7 +15,7 @@ function writePending(key,value){if(value)pendingRuns.set(key,value);else pendin
 export const defaultBotConfig = () => createDefaultBotConfig();
 export function botDraft(bot) {
   const employee=bot.employee || {};
-  return {revision:bot.revision,employee:{name:employee.name || '',description:employee.description || '',instructions:employee.instructions || '',persona:employee.persona || '',avatar:employee.avatar || null,visibility:employee.visibility || 'personal',model:employee.model_id || null,skills:[...(employee.skills || [])]},config:clone(bot.config)};
+  return {revision:bot.revision,employee:{name:employee.name || '',description:employee.description || '',instructions:employee.instructions || '',persona:employee.persona || '',avatar:employee.avatar_character||employee.avatar||null,visibility:employee.visibility || 'personal',model:employee.model_id || null,skills:[...(employee.skills || [])]},config:clone(bot.config)};
 }
 export function botDraftDirty(bot,draft) {return Boolean(bot&&draft&&JSON.stringify(draft)!==JSON.stringify(botDraft(bot)));}
 export function botWorkbenchReadOptions(tab) {return {runs:tab==='activity',routines:tab==='chat'||tab==='routines'};}
@@ -147,9 +147,9 @@ export function createBotWorkbench({api,wrap=value=>value,wait=ms=>new Promise(r
   async function save() {
     if(!state.draft)return false;
     const draft=clone(state.draft);
-    // Avatar URLs identify the saved image; only changed image data or an
-    // explicit removal may be sent back as a replacement.
-    if((draft.employee.avatar??null)===(state.bot?.employee?.avatar??null))delete draft.employee.avatar;
+    // Saved avatar references are not replacements; only changed photo data,
+    // character choices or explicit removal may replace the saved avatar.
+    if((draft.employee.avatar??null)===(state.bot?.employee?.avatar_character||state.bot?.employee?.avatar||null))delete draft.employee.avatar;
     draft.config.provider=draft.config.provider?.trim() || null;
     return mutate((id,workspace)=>api.updateBot(id,{expectedRevision:draft.revision,employee:draft.employee,config:draft.config},workspace),'配置已保存。',{readback:true,resetDraft:true});
   }

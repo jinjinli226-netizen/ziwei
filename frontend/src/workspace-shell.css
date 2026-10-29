@@ -709,3 +709,9 @@
 :root[data-theme="dark"] .agent-composer-creator > button[aria-expanded="true"] { background:var(--ziwei-violet-soft); }
 .bot-chat-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 17px;border:1px solid #e7def3;border-radius:12px;background:#faf7ff;margin:0 0 18px;color:#79628f;font-size:12px}.bot-chat-toolbar>div{display:flex;flex-wrap:wrap;gap:8px}.conversation-status[data-status=warning],.conversation-row-status[data-status=uncertain]{color:#9b793b;background:#fff7e5}@media(max-width:760px){.bot-chat-toolbar{align-items:flex-start;flex-direction:column}}
 .bot-preview-banner{padding:10px 14px;background:#fff8e9;border:1px solid #eddfba;border-radius:9px;color:#967649;font-size:12px;line-height:1.7;margin:0 0 18px}
+
+.employee-basic-grid.employee-basic-grid--details { grid-template-columns:minmax(0,1fr); }
+.employee-basic-grid--details .employee-field-name,.employee-basic-grid--details .employee-field-description { grid-column:1; }
+.employee-create-modal__body>.bot-avatar-editor { margin-top:18px; }
+.org-employee-avatar,.employee-composer-avatar { width:32px; height:32px; border-radius:9px; }
+.employee-profile-avatar { width:56px; height:56px; border-radius:14px; }

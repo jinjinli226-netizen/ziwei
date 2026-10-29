@@ -1,3 +1,4 @@
+import {avatarSpec,avatarValue} from '../../src/employee-avatar.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {employeeConversationView} from './employee-conversation-view.js';
@@ -94,7 +95,7 @@ for(const kind of ['employee','creator'])test(`forward navigation opens a new un
 test('actual employee creation refreshes the persistent roster without remounting the workspace',async()=>{
   const source=appFunction('addEmployee'),refs=Object.fromEntries([...source.matchAll(/(\w+)\.value/g)].map(match=>[match[1],ref('')])),requests=[];
   Object.assign(refs,{employeeCreating:ref(false),employeeForm:ref({name:'新员工',runtime:'DSH',instructions:''}),employeeReady:ref({ready:true}),employeeEditId:ref(''),showEmployee:ref(true),employeeModel:ref('default'),employeeRuntimeProfile:ref('native-bot'),employeeTargetDeviceId:ref('pc'),employeeSkillIds:ref([]),employeeRosterRefreshKey:ref(0)});
-  const ui=functions(['addEmployee'],{...refs,workspaceSlug:()=> 'team',employeeDefaultWorkdirPayload:()=>({}),api:{createEmployee:async(body,workspace)=>{requests.push({body,workspace});return{id:'new-employee'};}},load:async()=>{},notify(){},openPhoneSkillSetup(){}},'let employeeEditorGeneration=1;');
+  const ui=functions(['addEmployee'],{avatarSpec,avatarValue,...refs,workspaceSlug:()=> 'team',employeeDefaultWorkdirPayload:()=>({}),api:{createEmployee:async(body,workspace)=>{requests.push({body,workspace});return{id:'new-employee'};}},load:async()=>{},notify(){},openPhoneSkillSetup(){}},'let employeeEditorGeneration=1;');
   await ui.addEmployee();assert.equal(requests.length,1);assert.equal(requests[0].workspace,'team');assert.equal(requests[0].body.runtimeProfile,'native-bot');assert.equal(refs.employeeRosterRefreshKey.value,1);assert.equal(refs.showEmployee.value,false);
 });
 
@@ -159,4 +160,10 @@ test('the real App setup initializes ordinary, management and employee routes wi
     }finally{scope.stop();}
   }
   assert.deepEqual(calls,[]);
+});
+
+
+test('the actual employee submit waits for the avatar file reader before building a request',async()=>{
+  const ui=functions(['addEmployee'],{employeeCreating:ref(false),employeeAvatarReading:ref(true)});
+  await ui.addEmployee();
 });

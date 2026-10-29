@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createBotWorkbench,botWorkbenchReadOptions} from './bot-workbench.js';
+import {createBotWorkbench,botWorkbenchReadOptions,botDraft} from './bot-workbench.js';
 
 const deferred=()=>{let resolve,reject;return {promise:new Promise((done,fail)=>{resolve=done;reject=fail;}),get resolve(){return resolve;},get reject(){return reject;}};};
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
@@ -81,4 +81,13 @@ test('older roster revision cannot hide employee ownership or binding changes be
   rows=[{...detail,revision:4,employee:{...employee,...patch,instructions:undefined}}];await ui.list();for(const[key,value]of Object.entries(patch))assert.equal(ui.state.bots[0].employee[key],value);assert.equal(ui.state.bots[0].employee.instructions,undefined);
  }
  ui.dispose();
+});
+
+
+test('character descriptors enter the real draft without echoing derived fields or unchanged saved avatars',async()=>{
+  const ui=fixture({readOptions:()=>({runs:false,routines:false})});await ui.setWorkspace('qa','a');
+  ui.state.bot.employee.avatar_character='grok:cloud:green';ui.state.draft=botDraft(ui.state.bot);
+  assert.equal(ui.state.draft.employee.avatar,'grok:cloud:green');assert.equal('avatar_character' in ui.state.draft.employee,false);
+  ui.state.draft.employee.name='renamed';assert.equal(await ui.save(),true);assert.equal('avatar' in ui.calls[0][1].employee,false);
+  ui.state.draft.employee.avatar='grok:star:violet';assert.equal(await ui.save(),true);assert.equal(ui.calls[1][1].employee.avatar,'grok:star:violet');assert.equal('avatar_character' in ui.calls[1][1].employee,false);
 });

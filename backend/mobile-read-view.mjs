@@ -1,5 +1,6 @@
 import {createHash} from 'node:crypto';
 import {canonicalRasterMimeType,rasterImageMimeType} from '../src/raster-image.mjs';
+import {isCharacterAvatar,avatarSvg} from '../src/employee-avatar.mjs';
 
 const terminalEventTypes=new Set(['succeeded','failed','cancelled','expired']);
 // Mobile run metadata omits recognized inline raster bytes from these explicit
@@ -103,12 +104,18 @@ function projectAttachments(values,urlFor) {
   return changed?projected:values;
 }
 
+function avatarSource(value) {
+  if(!isCharacterAvatar(value))return imageSource(value);
+  const [,shape,color]=value.split(':'),svg=avatarSvg(shape,color);
+  return {mimeType:'image/svg+xml',content:encodeURIComponent(svg),base64:false,character:value,version:createHash('sha256').update(svg).digest('hex')};
+}
+
 export function createMobileReadView(repo) {
   const db=repo.db;
   function employee(slug,value) {
     if(!value?.id)return value;
-    const source=imageSource(value.avatar);
-    return source?{...value,avatar:`/api/workspaces/${encodeURIComponent(slug)}/employees/${encodeURIComponent(value.id)}/avatar?v=${source.version}`}:value;
+    const source=avatarSource(value.avatar);
+    return source?{...value,avatar:`/api/workspaces/${encodeURIComponent(slug)}/employees/${encodeURIComponent(value.id)}/avatar?v=${source.version}`,...(source.character?{avatar_character:source.character}:{})}:value;
   }
   function mainConversationId(value) {
     const bot=db.prepare('SELECT main_conversation_id FROM hermes_bots WHERE workspace_id=? AND employee_id=?').get(value.workspace_id,value.id);
@@ -171,7 +178,7 @@ export function createMobileReadView(repo) {
   function avatar(slug,id,context) {
     const workspace=repo.getWorkspace(slug),value=repo.getEmployee(id,context);
     if(!workspace||!value||value.workspace_id!==workspace.id)return null;
-    const source=imageSource(value.avatar);
+    const source=avatarSource(value.avatar);
     if(!source)return null;
     try {
       const bytes=source.base64?Buffer.from(source.content.replace(/\s/g,''),'base64'):Buffer.from(decodeURIComponent(source.content),'utf8');

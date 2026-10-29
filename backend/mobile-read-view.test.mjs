@@ -125,6 +125,60 @@ test('avatar image bytes, MIME, private validators and version invalidation pres
   const next=await request(f.app,fresh,{cookie:f.memberCookie});assert.equal(next.status,200);assert.equal(next.headers['content-type'],'image/gif');assert.deepEqual(next.bytes,rasterFixtures.gif);assert.notEqual(next.headers.etag,image.headers.etag);
 });
 
+test('employee API saves character tokens in the same avatar field and rejects invalid shape or color before mutation',async t=>{
+  const f=fixture(t),path=`/api/workspaces/${f.slug}/employees`,avatar='grok:cloud:violet';
+  const created=await request(f.app,path,{cookie:f.ownerCookie,method:'POST',body:{name:'Character employee',runtime:'Codex',avatar}});
+  assert.equal(created.status,201);const employee=created.json();assert.equal(employee.avatar,avatar);
+  assert.equal(f.repo.getEmployee(employee.id).avatar,avatar);
+  const count=f.repo.listEmployees(f.slug).length;
+  for(const invalid of ['grok:unknown:green','grok:blob:unknown','grok:blob:green:extra','grok:<script>:green','GROK:blob:green']){
+    const rejected=await request(f.app,path,{cookie:f.ownerCookie,method:'POST',body:{name:'Rejected character',runtime:'Codex',avatar:invalid}});
+    assert.equal(rejected.status,400,invalid);
+    const updated=await request(f.app,`/api/employees/${employee.id}`,{cookie:f.ownerCookie,method:'PATCH',body:{avatar:invalid}});
+    assert.equal(updated.status,400,invalid);assert.equal(f.repo.getEmployee(employee.id).avatar,avatar);
+  }
+  assert.equal(f.repo.listEmployees(f.slug).length,count);
+});
+
+test('character avatars project an authorized image URL and editable token while SVG pixels come only from saved enums',async t=>{
+  const f=fixture(t),avatar='grok:cloud:violet';f.repo.updateEmployee(f.ordinary.id,{avatar});
+  const rows=(await request(f.app,`/api/workspaces/${f.slug}/employees?view=mobile`,{cookie:f.ownerCookie})).json().employees;
+  const employee=rows.find(row=>row.id===f.ordinary.id);assert.equal(employee.avatar_character,avatar);
+  assert.match(employee.avatar,/\/avatar\?v=[a-f0-9]{64}$/);assert.equal(f.repo.getEmployee(employee.id).avatar,avatar);
+  const image=await request(f.app,employee.avatar+'&shape=<script>&color=red',{cookie:f.memberCookie});
+  assert.equal(image.status,200);assert.match(image.headers['content-type'],/^image\/svg\+xml/);
+  assert.match(image.bytes.toString(),/avatar-eyes/);assert.match(image.bytes.toString(),/fill="#9159FE"/);assert.doesNotMatch(image.bytes.toString(),/<script|#FF263C/);
+  assert.equal(image.headers.etag,`"${createHash('sha256').update(image.bytes).digest('hex')}"`);
+  assert.equal(image.headers['content-security-policy'],"default-src 'none'; sandbox");
+  const cached=await request(f.app,employee.avatar,{cookie:f.memberCookie,headers:{'if-none-match':image.headers.etag}});assert.equal(cached.status,304);
+  const chats=(await request(f.app,`/api/workspaces/${f.slug}/chats`,{cookie:f.memberCookie})).json().chats;
+  const chat=chats.find(row=>row.employeeId===f.ordinary.id);assert.equal(chat.employee.avatar,employee.avatar);assert.equal(chat.employee.avatar_character,avatar);
+});
+
+test('character avatar endpoint keeps private-employee access and invalidates the prior image version after editing',async t=>{
+  const f=fixture(t);f.repo.updateEmployee(f.privateEmployee.id,{avatar:'grok:leaf:green'});
+  const view=createMobileReadView(f.repo),employee=view.employee(f.slug,f.repo.getEmployee(f.privateEmployee.id));
+  const image=await request(f.app,employee.avatar,{cookie:f.ownerCookie});assert.equal(image.status,200);
+  assert.equal((await request(f.app,employee.avatar,{cookie:f.memberCookie,headers:{'if-none-match':image.headers.etag}})).status,404);
+  assert.equal((await request(f.app,employee.avatar,{headers:{'if-none-match':image.headers.etag}})).status,401);
+  f.repo.updateEmployee(f.privateEmployee.id,{avatar:'grok:star:blue'});
+  assert.equal((await request(f.app,employee.avatar,{cookie:f.ownerCookie})).status,404);
+  const updated=view.employee(f.slug,f.repo.getEmployee(f.privateEmployee.id));assert.equal(updated.avatar_character,'grok:star:blue');assert.notEqual(updated.avatar,employee.avatar);
+  assert.equal((await request(f.app,updated.avatar,{cookie:f.ownerCookie})).status,200);
+});
+
+test('Hermes avatar-only updates round trip characters and raster images without changing execution configuration',t=>{
+  const f=fixture(t),bots=createManagementService(f.repo).bots,context={actorUserId:f.owner.user_id,actorRole:'owner'};
+  const before=bots.get(f.slug,f.bot.id,context),character=bots.update(f.slug,f.bot.id,{expectedRevision:before.revision,employee:{avatar:'grok:bean:cyan'}},context);
+  assert.equal(character.employee.avatar,'grok:bean:cyan');assert.equal(character.revision,before.revision);assert.equal(character.control_epoch,before.control_epoch);
+  assert.deepEqual(character.config,before.config);assert.equal(character.instance.profile,before.instance.profile);
+  const compact=bots.get(f.slug,f.bot.id,context,{view:'workbench'});assert.equal(compact.employee.avatar_character,'grok:bean:cyan');assert.match(compact.employee.avatar,/\/avatar\?v=/);
+  const image=bots.update(f.slug,f.bot.id,{expectedRevision:character.revision,employee:{avatar:f.avatar}},context);
+  assert.equal(image.employee.avatar,f.avatar);const projected=createMobileReadView(f.repo).employee(f.slug,image.employee);
+  assert.equal(Object.hasOwn(projected,'avatar_character'),false);assert.equal(image.revision,before.revision);
+  const removed=bots.update(f.slug,f.bot.id,{expectedRevision:image.revision,employee:{avatar:null}},context);assert.equal(removed.employee.avatar,null);
+});
+
 test('avatar authorization happens before cache validation and never exposes another workspace or private employee',async t=>{
   const f=fixture(t),path=id=>`/api/workspaces/${f.slug}/employees/${id}/avatar`,image=await request(f.app,path(f.privateEmployee.id),{cookie:f.ownerCookie});
   assert.equal(image.status,200);

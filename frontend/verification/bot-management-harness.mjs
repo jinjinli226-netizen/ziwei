@@ -43,7 +43,7 @@ async function loadComponent(name,api,cache=new Map()){
       else if(spec==='@ziwei/ui')value=new Proxy({},{get:(_target,key)=>placeholder(key)});
       else if(spec.endsWith('.vue')){
         const child=spec.split('/').at(-1).replace('.vue','');
-        value={default:['ZiSelect','BotInstancePanel','ConversationQueuePanel'].includes(child)?await loadComponent(child,api,cache):placeholder(child)};
+        value={default:['ZiSelect','BotInstancePanel','ConversationQueuePanel','EmployeeAvatar','BotAvatarEditor'].includes(child)?await loadComponent(child,api,cache):placeholder(child)};
       }else value=await import(new URL(spec,filename));
       if(specifier.startsWith('{'))for(const token of specifier.slice(1,-1).split(',')){
         const [key,alias]=token.trim().split(/\s+as\s+/);bindings[alias||key]=value[key];
