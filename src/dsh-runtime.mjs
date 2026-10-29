@@ -15,17 +15,17 @@ async function rpc(baseUrl, botName, method, args, signal, fetchImpl=globalThis.
   return body.result.value;
 }
 
-export function listDshSessions({baseUrl='http://127.0.0.1:7879',botName,signal,fetchImpl=globalThis.fetch}={}) {
+export function listDshSessions({baseUrl=process.env.ZIWEI_DSH_BASE_URL||'http://127.0.0.1:7878',botName,signal,fetchImpl=globalThis.fetch}={}) {
   if(!botName) return Promise.reject(new Error('DSH runtime requires botName'));
   return rpc(baseUrl,botName,'session/list',{_request:{}},signal,fetchImpl);
 }
 
-export function cancelDshSession({baseUrl='http://127.0.0.1:7879',botName,sessionId,signal,fetchImpl=globalThis.fetch}={}) {
+export function cancelDshSession({baseUrl=process.env.ZIWEI_DSH_BASE_URL||'http://127.0.0.1:7878',botName,sessionId,signal,fetchImpl=globalThis.fetch}={}) {
   if(!botName || !sessionId) return Promise.reject(new Error('DSH session cancellation requires botName and sessionId'));
   return rpc(baseUrl,botName,'session/cancel',{request:{sessionId}},signal,fetchImpl);
 }
 
-export async function executeDshRuntime({baseUrl='http://127.0.0.1:7879',botName,prompt,cwd=process.cwd(),sessionId=null,signal,onOutput,onStage,sessionAuthority={},onSessionSupervision,cancellationTimeoutMs=3000,fetchImpl=globalThis.fetch,WebSocketImpl=WebSocket}={}) {
+export async function executeDshRuntime({baseUrl=process.env.ZIWEI_DSH_BASE_URL||'http://127.0.0.1:7878',botName,prompt,cwd=process.cwd(),sessionId=null,signal,onOutput,onStage,sessionAuthority={},onSessionSupervision,cancellationTimeoutMs=3000,fetchImpl=globalThis.fetch,WebSocketImpl=WebSocket}={}) {
   if(!botName) throw new Error('DSH runtime requires botName');
   const session=sessionId || (await rpc(baseUrl,botName,'session/create',{request:{cwd}},signal,fetchImpl))?.sessionId;
   if(!session) throw new Error('DSH session/create did not return sessionId');

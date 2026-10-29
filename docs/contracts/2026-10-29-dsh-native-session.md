@@ -6,6 +6,8 @@
 
 - `src/local-action.mjs` 在正常执行授权、工作目录校验后，从 `profile` / `runtimeProfile` / `runtime_profile` 或显式 Bot 标识选择真实 Bot；不回退员工显示名称。
 - DSH endpoint 来自本机 `ZIWEI_DSH_BASE_URL` 或 executor 的本机配置；动作 payload 的 endpoint 不生效。
+- 无显式配置时默认 `http://127.0.0.1:7878`。来源为 2026-10-29 只读核对的 `D:/dshbot/server.rs:56`（`SERVER_PORT_FIRST = 7878`）、`server.rs:3884` 起的原生候选端口逻辑，以及 `start.ps1:17` 的显式 `-Port` 传参行为。`README.md:20` 的 7879 配合 `.local/review-bots`，属于隔离验收示例，不能作为正式默认 endpoint。
+- 原生 Hub 可按其自身配置使用其他端口；此适配器不扫描、不按失败自动递增端口，也不启动 Hub。若 Hub 被显式放在其他端口，由本机 `ZIWEI_DSH_BASE_URL` 指向已核准的实际地址。
 - DSH 保留自身 provider、模型、MCP 和插件配置。该分支不准备 Hermes owned Profile、provider 凭据或 Codex / Hermes 专用 MCP，也不改其现有实现。
 - 每次请求保留当前会话绑定，调用 `session/create` 或续用指定 session，再通过 `session/prompt` 的 `requestId` 关联原生事件。断线只重建 follow，不重复提交 prompt。
 
@@ -61,6 +63,7 @@ DSH 服务端 session 投影和过期 / stop 回执恢复必须单独理解 `ses
 ## 验证入口
 
 - `test/dsh-current-runtime.test.mjs`、`test/fixtures/dsh-protocol.mjs`：原生 envelope、流式帧、终态关联、工具事件、断线恢复且不重发。
+- `test/dsh-current-endpoint.test.mjs`：runtime、群 primitive、backend adapter 与本机 executor 共用原生默认 endpoint 和显式本机配置，全程内存 transport，无网络探测。
 - `test/dsh-current-supervision.test.mjs`：持久去重、正常 / 失败、确认取消、ACK-only 隔离、晚到终态、伪造证据、hard timeout、stop control。
 - `test/dsh-current-local-action.test.mjs`：真实 Bot 与本机 endpoint、专用运行时隔离、本机 executor 到 dispatcher。
 - `test/dsh-current-group.test.mjs`、`backend/dsh-current-adapter.test.mjs`：群成员 session / 部分失败、原生错误、RPC 关联和 routine 取消。

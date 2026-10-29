@@ -1,6 +1,6 @@
 // This adapter is transport only. Routes must resolve the authenticated
 // workspace's visible employee/Bot binding before calling any operation.
-export function createDshAdapter({baseUrl=process.env.ZIWEI_DSH_BASE_URL||'http://127.0.0.1:7879',fetchImpl=globalThis.fetch}={}) {
+export function createDshAdapter({baseUrl=process.env.ZIWEI_DSH_BASE_URL||'http://127.0.0.1:7878',fetchImpl=globalThis.fetch}={}) {
   const request=async(pathname,{method='GET',body=null,signal}={})=>{
     const response=await fetchImpl(`${String(baseUrl).replace(/\/$/,'')}${pathname}`,{method,headers:body?{'content-type':'application/json'}:undefined,body:body?JSON.stringify(body):undefined,signal:signal||AbortSignal.timeout(3000)});
     const value=await response.json().catch(()=>({}));
