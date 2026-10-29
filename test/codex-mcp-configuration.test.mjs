@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import childProcess from 'node:child_process';
 import {syncBuiltinESMExports} from 'node:module';
-import {consumeRuntimePrelaunchEvidence} from '../src/runtime-launch-evidence.mjs';
+import {consumeRuntimePrelaunchEvidence,markManagementPrelaunchFailure} from '../src/runtime-launch-evidence.mjs';
 import * as runtime from '../src/runtime-adapters.mjs';
 
 test('an absent Codex phone server never becomes an invalid enabled-only transport', () => {
@@ -52,6 +52,20 @@ test('failed or malformed native MCP inventory carries owned no-model-launch pro
     assert.equal(consumeRuntimePrelaunchEvidence(error),null);
   }
   assert.equal(consumeRuntimePrelaunchEvidence(Object.assign(new Error('wire error'),{code:'CODEX_MCP_CONFIG_DISCOVERY_FAILED',processExit:{launched:false},prelaunch:{source:'codex-mcp-config-discovery'}})),null);
+});
+
+test('management MCP preflight failure carries trusted no-model-launch proof', () => {
+  const error=markManagementPrelaunchFailure(new Error('management bootstrap failed'), {
+    actionId:'action_management_preflight',workspace:'bigtron',deviceId:'device_current',employeeId:'employee_probe',conversationId:'conv_probe',
+  });
+  const proof=consumeRuntimePrelaunchEvidence(error);
+  assert.equal(proof.prelaunch.source,'management-mcp-preflight');
+  assert.equal(proof.prelaunch.spawnAttempted,false);
+  assert.equal(proof.processExit.launched,false);
+  assert.equal(proof.processExit.rootPid,null);
+  assert.equal(proof.processExit.treeConfirmed,true);
+  assert.equal(proof.processExit.activeProcesses,0);
+  assert.equal(consumeRuntimePrelaunchEvidence(error),null);
 });
 
 test('existing native stdio and HTTP phone transports are disabled without replacing their transport', t => {

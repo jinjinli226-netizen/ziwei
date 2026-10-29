@@ -99,6 +99,19 @@ export function markCodexConversationPrelaunchFailure(error, scope) {
   prelaunchFailures.set(error,Object.freeze({prelaunch:Object.freeze({schemaVersion:1,source:'codex-conversation-preflight',phase:'before-runtime-spawn',spawnAttempted:false,actionId:scope.actionId,workspace:scope.workspace,deviceId:scope.deviceId,employeeId:scope.employeeId,conversationId:scope.conversationId}),processExit:notLaunched()}));
   return error;
 }
+
+// Management bootstrap runs before any native model process is spawned. Keep
+// that boundary auditable so a rejected/expired device credential becomes a
+// terminal no-start failure instead of an execution with unknown side effects.
+export function markManagementPrelaunchFailure(error, scope) {
+  const id=(value,prefix)=>typeof value==='string'&&new RegExp(`^${prefix}[A-Za-z0-9_-]{1,120}$`).test(value);
+  if(!(error instanceof Error)||!id(scope?.actionId,'action_')||!id(scope?.deviceId,'device_')||!id(scope?.employeeId,'employee_')||!id(scope?.conversationId,'conv_')||typeof scope?.workspace!=='string'||!/^[a-z0-9][a-z0-9_-]{0,99}$/i.test(scope.workspace))return error;
+  prelaunchFailures.set(error,Object.freeze({
+    prelaunch:Object.freeze({schemaVersion:1,source:'management-mcp-preflight',phase:'before-runtime-spawn',spawnAttempted:false,actionId:scope.actionId,workspace:scope.workspace,deviceId:scope.deviceId,employeeId:scope.employeeId,conversationId:scope.conversationId}),
+    processExit:notLaunched(),
+  }));
+  return error;
+}
 export function consumeRuntimePrelaunchEvidence(error) {
   const evidence=prelaunchFailures.get(error);if(evidence)prelaunchFailures.delete(error);return evidence || null;
 }
