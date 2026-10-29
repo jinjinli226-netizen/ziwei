@@ -5,6 +5,7 @@ import {imageArtifactDeliveryBody,imageArtifactEventResult} from './conversation
 import {isCancellationAction} from './daemon-action-scheduler.mjs';
 import {consumeMaintenancePaused,validateMaintenancePause} from './maintenance-checkpoint.mjs';
 import {executionBinding} from './execution-admission.mjs';
+import {isDshAction,matchesDshSessionBinding,sameDshSessionBinding,confirmedDshSessionExit} from './dsh-session-receipt.mjs';
 
 // The production 10 MiB image roundtrip took 472 seconds. Polling can also
 // contain full image input. Small authenticated receipts have a separate budget.
@@ -26,7 +27,7 @@ function durableBytes(file,bytes){
  } finally {if(fd!==undefined)fs.closeSync(fd);if(fs.existsSync(temp))fs.unlinkSync(temp);}
 }
 const durableWrite=(file,value)=>durableBytes(file,JSON.stringify(value));
-function minimalAction(action){const p=action.payload||{};return {...Object.fromEntries(['id','type','workspace_id','workspaceId','workspace','workspace_slug','agent_id','agentId','status','dedupe_key','dedupeKey','expires_at','expiresAt','acked_at'].filter(key=>action[key]!==undefined).map(key=>[key,action[key]])),payload:Object.fromEntries(['deviceId','device_id','targetDeviceId','target_device_id','employeeId','employee_id','assignee','conversationId','conversation_id','messageId','message_id'].filter(key=>p[key]!==undefined).map(key=>[key,p[key]]))};}
+function minimalAction(action){const p=action.payload||{};return {...Object.fromEntries(['id','type','workspace_id','workspaceId','workspace','workspace_slug','agent_id','agentId','status','dedupe_key','dedupeKey','expires_at','expiresAt','acked_at'].filter(key=>action[key]!==undefined).map(key=>[key,action[key]])),payload:Object.fromEntries(['deviceId','device_id','targetDeviceId','target_device_id','employeeId','employee_id','assignee','conversationId','conversation_id','messageId','message_id',...(isDshAction(action)?['runtime','agent','runtimeName','profile','runtimeProfile','runtime_profile','dshBotName','botName','runtimeSessionId','runtime_session_id','sessionId','session_id']:[])].filter(key=>p[key]!==undefined).map(key=>[key,p[key]]))};}
 
 /** Durable ACK/result delivery. Execution durability belongs to ActionDispatcher.
  * A journal cannot authorize execution: every recovery first checks an authenticated
@@ -111,8 +112,14 @@ export function createActionDelivery({directory,identity,post,dispatch,recoverRe
   // envelope. An overflow is explicit in diagnostics, never unbounded retries.
   if(record.events.length>=256){report('a2a_event_queue_full',{actionId:id,type});return false;}
   const safeData=imageArtifactEventResult(data);
+  const dshBinding=type==='action.stage'&&safeData?.stage==='session'&&safeData.progress?.phase==='stage'?safeData.progress.dshSessionBinding:null;
+  const previousDshBinding=record.dshSessionBinding;
+  if(dshBinding){
+   if(!matchesDshSessionBinding(record.action,dshBinding)||previousDshBinding&&!sameDshSessionBinding(previousDshBinding,dshBinding)){report('a2a_dsh_binding_rejected',{actionId:id});return false;}
+   record.dshSessionBinding={...dshBinding};
+  }
   record.events.push({agentId:'ziwei_user',eventId:randomUUID(),type,message:String(data?.message||'').slice(0,8192),data:safeData,...(record.maintenanceAttempt?{maintenanceAttempt:{...record.maintenanceAttempt}}:{})});
-  try{save(record);}catch(error){record.events.pop();report('a2a_event_persistence_failed',{actionId:id,type,error:error.message});return false;}
+  try{save(record);}catch(error){record.events.pop();if(previousDshBinding)record.dshSessionBinding=previousDshBinding;else delete record.dshSessionBinding;report('a2a_event_persistence_failed',{actionId:id,type,error:error.message});return false;}
   void flushEvents(record).catch(error=>report('a2a_event_pending',{actionId:id,error:error.message}));
   return true;
  }
@@ -124,7 +131,8 @@ export function createActionDelivery({directory,identity,post,dispatch,recoverRe
    : outcome;
   return imageArtifactDeliveryBody({status,result:wireResult,error:status==='failed'?(result.error||'ziwei_user execution failed'):null,receiptOnly:true,...(attempt?{maintenanceAttempt:{...attempt}}:{})});
  }
- function definitive(delivery){
+ function definitive(delivery,record){
+  if(isDshAction(record?.action))return Boolean(confirmedDshSessionExit(record.action,delivery,record.dshSessionBinding));
   const value=delivery?.result,exit=value?.processExit;
   if(!['succeeded','failed'].includes(delivery?.status)||value?.code==='EXECUTION_UNCERTAIN'||value?.executionState==='uncertain'||exit?.launched!==true||!Number.isSafeInteger(exit.rootPid)||exit.rootPid<=0||exit.rootConfirmed!==true||exit.treeConfirmed!==true||exit.activeProcesses!==0)return false;
   if(delivery.status==='succeeded')return exit.rootExitCode===0&&exit.cancelled!==true&&!exit.failureCode&&!exit.signal&&!exit.hostSignal;
@@ -139,7 +147,7 @@ export function createActionDelivery({directory,identity,post,dispatch,recoverRe
  }
  function restoreCompleted(record){
   const result=recoverResult(record.action);
-  if(!result||result.result?.maintenanceServerTerminal||!definitive(resultBody(result)))return false;
+  if(!result||result.result?.maintenanceServerTerminal||!definitive(resultBody(result),record))return false;
   // A previously confirmed uncertain record retains its original binding blob.
   // A definitive terminal receipt must never reopen an ordinary server final.
   if(record.state==='confirmed'&&!record.retainEvidence){
@@ -160,7 +168,7 @@ export function createActionDelivery({directory,identity,post,dispatch,recoverRe
   const record=read(metadata.action,{create:false});
   if(!record)return {state:'unconfirmed',status:null};
   const restored=restoreCompleted(record);
-  if(!restored&&!(record.state==='result_pending'&&definitive(readBlob(record,'result'))))return {state:record.state==='confirmed'&&!record.retainEvidence?'confirmed':'unconfirmed',status:record.serverStatus||null};
+  if(!restored&&!(record.state==='result_pending'&&definitive(readBlob(record,'result'),record)))return {state:record.state==='confirmed'&&!record.retainEvidence?'confirmed':'unconfirmed',status:record.serverStatus||null};
   return execute(record.action);
  }
  async function run(action){
@@ -174,7 +182,7 @@ export function createActionDelivery({directory,identity,post,dispatch,recoverRe
    if(record.state==='maintenance_paused'&&record.pauseDigest&&!record.resultDigest&&terminal.has(receipt.status)){await confirm(record,receipt.status);return {state:'confirmed',status:receipt.status};}
    if(receipt.status==='expired'||receipt.reconciliationRequired===true){
     restoreCompleted(record);
-    if(!(receipt.acked_at||record.action.acked_at)||record.state!=='result_pending'||!definitive(readBlob(record,'result'))){
+    if(!(receipt.acked_at||record.action.acked_at)||record.state!=='result_pending'||!definitive(readBlob(record,'result'),record)){
      report('a2a_expired_result_unconfirmed',{actionId:action.id,status:receipt.status});return {state:'unconfirmed',status:receipt.status};
     }
     reconciling=true;resumingResult=true;
@@ -185,6 +193,7 @@ export function createActionDelivery({directory,identity,post,dispatch,recoverRe
    const lease=receipt.expires_at||receipt.expiresAt;
    if(!reconciling&&(!lease||!Number.isFinite(Date.parse(lease))||Date.parse(lease)<=now()))throw new Error('Invalid or expired action ACK lease; execution was not authorized');
    record.action={...record.action,status:'acked',acked_at:receipt.acked_at||record.action.acked_at,expires_at:lease,expiresAt:lease,...(receipt.deviceId?{payload:{...record.action.payload,deviceId:receipt.deviceId}}:{})};
+   if(isDshAction(record.action)&&receipt.runtimeSessionId)record.action.payload={...record.action.payload,runtimeSessionId:receipt.runtimeSessionId};
    if(record.state!=='result_pending'){record.state='acked';save(record);
     const original=readBlob(record,'action').action;
     const result=await dispatch({...original,...record.action,payload:{...original.payload,...record.action.payload}});
@@ -220,7 +229,7 @@ export function createActionDelivery({directory,identity,post,dispatch,recoverRe
     const renewal=await retry(()=>post(`/a2a/v1/actions/${encodeURIComponent(action.id)}/ack`,{agentId:'ziwei_user',receiptOnly:true,renewLease:true},{timeoutMs:ACTION_TRANSPORT_BUDGETS.ack}));
     if(renewal?.id!==action.id||!['acked',...terminal].includes(renewal?.status)|| (renewal.deviceId&&connection.deviceId&&renewal.deviceId!==connection.deviceId))throw new Error('Invalid result delivery ACK receipt');
     if(renewal.status==='expired'||renewal.reconciliationRequired===true){
-     if(!(renewal.acked_at||record.action.acked_at)||!definitive(readBlob(record,'result'))){report('a2a_expired_result_unconfirmed',{actionId:action.id,status:renewal.status});return {state:'unconfirmed',status:renewal.status};}
+     if(!(renewal.acked_at||record.action.acked_at)||!definitive(readBlob(record,'result'),record)){report('a2a_expired_result_unconfirmed',{actionId:action.id,status:renewal.status});return {state:'unconfirmed',status:renewal.status};}
      reconciling=true;
     }else if(terminal.has(renewal.status)){await confirm(record,renewal.status);return {state:'confirmed',status:renewal.status};}
     record.action={...record.action,expires_at:renewal.expires_at,expiresAt:renewal.expires_at};save(record);
@@ -263,7 +272,7 @@ export function createActionDelivery({directory,identity,post,dispatch,recoverRe
    // former in-memory object so event/recovery passes cannot restore it.
    records.delete(id);activeBindings.delete(id);return true;
   },
-  canDeliverWithoutExecution(action){try{const record=action?.id&&read(action,{create:false});return Boolean(record&&(record.state==='result_pending'||definitive(resultBody(recoverResult(record.action)||{}))));}catch{return false;}},
+  canDeliverWithoutExecution(action){try{const record=action?.id&&read(action,{create:false});return Boolean(record&&(record.state==='result_pending'||definitive(resultBody(recoverResult(record.action)||{}),record)));}catch{return false;}},
   execute,
   recoverOriginal,
   recordEvent,

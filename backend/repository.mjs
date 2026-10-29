@@ -1,5 +1,7 @@
 import crypto from 'node:crypto';
 import {createConversationQueue} from './conversation-queue.mjs';
+import {createDshSessionReceipts,recoverableDshCompletion} from './dsh-session-receipts.mjs';
+import {isDshAction} from '../src/dsh-session-receipt.mjs';
 import {botExecutionOccupiesSlot} from './bot-execution-occupancy.mjs';
 import {actionExecutionLeaseMs} from '../src/action-execution-budget.mjs';
 import {observeDeviceUpdateHeartbeat} from './device-updates.mjs';
@@ -106,6 +108,7 @@ const a2aReceiptView = (row, { includeResult = false } = {}) => {
     deviceId:String(payload.deviceId || payload.device_id || payload.targetDeviceId || payload.target_device_id || '').trim() || null
   };
   if (recoverableBotCompletion(row)) view.reconciliationRequired = true;
+  if(isDshAction({payload})&&payload.runtimeSessionId)view.runtimeSessionId=payload.runtimeSessionId;
   if (includeResult) {
     const result = parse(row.result_json);
     const output = typeof result === 'string' ? result : (result?.output || result?.text || result?.result?.output || result?.result?.text || '');
@@ -373,6 +376,7 @@ const ownDevice = devices => {
 export function createRepository(options = {}, io={}) {
   const db = openDatabase(options,io);
   const conversationQueue=createConversationQueue(db);
+  const dshSessionReceipts=createDshSessionReceipts(db);
   const botActionCompletionListeners=new Set();
   const allowLocalNetwork = options.memory === true;
   const rollout=serverCodeRolloutFor(db);if(rollout)options={...options,objectStoreDir:rollout.objectStoreDir};
@@ -482,10 +486,12 @@ export function createRepository(options = {}, io={}) {
     const phoneConfig = employee && db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='ziwei_connect_bindings'").get() ? db.prepare(`SELECT p.enabled,b.device_id,b.account_id,s.id AS skill_id,s.version FROM employee_phone_mcp p JOIN ziwei_connect_bindings b ON b.employee_id=p.employee_id AND b.workspace_id=p.workspace_id JOIN skills s ON s.workspace_id=p.workspace_id AND s.catalog_id='ziwei-phone-control' AND s.installed=1 WHERE p.employee_id=?`).get(employee.id) : null;
     const phoneRevision = phoneConfig ? hashSecret(JSON.stringify([Boolean(phoneConfig.enabled && skillIds.includes(phoneConfig.skill_id)),phoneConfig.skill_id,phoneConfig.version,employee.target_device_id,employee.runtime,employee.runtime_profile,phoneConfig.device_id,phoneConfig.account_id || null])) : null;
     const codexConversation=selectedRuntime==='Codex' && messageId && creatorConversationBinding(employee,conversationId,messageId);
+    const dshSession=selectedRuntime==='DSH'&&conversationId?dshSessionReceipts.session({conversationId,workspaceId,employeeId:employee?.id,deviceId:selectedDeviceId,profile:selectedProfile}):null;
     return {
       ...(taskId ? { taskId } : {}),
       prompt: composeEmployeePrompt({ prompt:creatorConversationPrompt({prompt,employee,conversationId,messageId}), name: employee?.name, instructions }),
       ...(codexConversation?{codexConversationInput:{schemaVersion:1,messageId:String(messageId),currentPrompt:composeEmployeePrompt({prompt,name:employee.name,instructions})}}:{}),
+      ...(dshSession?{runtimeSessionId:dshSession}:{}),
       runtime: selectedRuntime,
       model: selectedModel,
       profile: selectedProfile,
@@ -500,7 +506,7 @@ export function createRepository(options = {}, io={}) {
     };
   };
   const pendingConversationPayload = (row,payload) => {
-    if(row.status!=='pending' || row.type!=='conversation.execute' || !['Codex','Hermes'].includes(payload.runtime) || !payload.employeeId || !payload.conversationId || !payload.messageId)return payload;
+    if(row.status!=='pending' || row.type!=='conversation.execute' || !['Codex','Hermes','DSH'].includes(payload.runtime) || !payload.employeeId || !payload.conversationId || !payload.messageId)return payload;
     const employee=db.prepare("SELECT * FROM employees WHERE id=? AND workspace_id=? AND status<>'deleted'").get(String(payload.employeeId),row.workspace_id);
     const message=db.prepare("SELECT * FROM conversation_messages WHERE id=? AND conversation_id=? AND role='user'").get(String(payload.messageId),String(payload.conversationId));
     const mismatch=()=>Object.assign(new Error('待执行聊天与当前员工、工作区、目标电脑或用户消息不一致'),{code:'EXECUTION_HISTORY_BINDING_MISMATCH',status:409});
@@ -514,7 +520,7 @@ export function createRepository(options = {}, io={}) {
     // never from a prompt which may already contain a history wrapper. Keep
     // all execution settings/credentials bound to the original queued action.
     const {codexConversationInput:_oldCodexInput,...snapshot}=payload;
-    return {...snapshot,prompt:refreshed.prompt,...(refreshed.codexConversationInput?{codexConversationInput:refreshed.codexConversationInput}:{})};
+    return {...snapshot,prompt:refreshed.prompt,...(payload.runtime==='DSH'?{runtimeSessionId:refreshed.runtimeSessionId||null}:{}),...(refreshed.codexConversationInput?{codexConversationInput:refreshed.codexConversationInput}:{})};
   };
   // A workspace can be created after the database seed has run.  Keep the
   // four built-in runtime rows available as soon as our own bridge reports a
@@ -1894,6 +1900,7 @@ export function createRepository(options = {}, io={}) {
       return {
         ...row,
         employee: conversationEmployeeView(employee),
+        ...dshSessionReceipts.view(row,employee),
         employee_binding: employee ? 'bound' : 'unassigned_legacy',
         requires_employee_assignment: !employee,
         execution:conversationExecution(conversationId,thread,row.workspace_id),
@@ -2101,6 +2108,7 @@ export function createRepository(options = {}, io={}) {
       const existing = db.prepare('SELECT * FROM a2a_actions WHERE workspace_id=? AND dedupe_key=? ORDER BY created_at DESC LIMIT 1').get(ws.id, dedupeKey);
       if (existing) return { ...existing, duplicate: true, payload: parse(existing.payload_json), result: parse(existing.result_json) };
       let payload = trustedTemplatePayload(ws.id,input.payload && typeof input.payload === 'object' ? input.payload : {});
+      if(isDshAction({payload})){const {dshSessionBinding:_untrusted,...unbound}=payload;payload=unbound;}
       if(input.type===EMPLOYEE_CAPABILITY_INSPECTION_TYPE){
         if(input.botInternal!==BOT_INTERNAL)throw botFailure('EMPLOYEE_CAPABILITIES_ROUTE_REQUIRED','请使用员工只读能力清单入口');
         assertEmployeeCapabilitySubject(db,ws.id,payload);
@@ -2234,10 +2242,10 @@ export function createRepository(options = {}, io={}) {
         if(['pending','acked'].includes(row.status)&&row.type===EMPLOYEE_CAPABILITY_INSPECTION_TYPE)assertEmployeeCapabilitySubject(db,row.workspace_id,parse(row.payload_json));
         if(settleExpiredMaintenanceAction(this,row,input)){const updated=db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId);response={...a2aResponseView(updated,{receiptOnly,includeResult:!receiptOnly}),duplicate:true};}
         else if (row.status === 'expired') {
-          if (!receiptOnly || !recoverableBotCompletion(row) || !input.deviceId || input.deviceId !== actionTargetDevice(row)) throw new Error('A2A action expired');
+          if (!receiptOnly || !(recoverableBotCompletion(row)||recoverableDshCompletion(row)) || !input.deviceId || input.deviceId !== actionTargetDevice(row)) throw new Error('A2A action expired');
           response = { ...a2aResponseView(row, { receiptOnly, includeResult:false }), duplicate:true, deliveryOnly:true, leaseRenewed:false };
         }
-        else if (['succeeded','failed'].includes(row.status)) response = { ...a2aResponseView(row, { receiptOnly, includeResult:!receiptOnly }),...historicalActionMetadata(row), duplicate:true };
+        else if (['succeeded','failed'].includes(row.status)) response = { ...a2aResponseView(row, { receiptOnly, includeResult:!receiptOnly }),...historicalActionMetadata(row), ...(recoverableDshCompletion(row)?{reconciliationRequired:true}:{}), duplicate:true };
         else {
           const timestamp = now();
           conversationQueue.assertAdmission(row);
@@ -2297,6 +2305,8 @@ export function createRepository(options = {}, io={}) {
         const dataJson = JSON.stringify(eventData);
         if (dataJson === undefined) throw new Error('A2A event data must be JSON');
         const data = JSON.parse(dataJson);
+        const dshBinding=type==='action.stage'&&data?.stage==='session'&&data.progress?.phase==='stage'?data.progress.dshSessionBinding:null;
+        const lateDshBinding=Boolean(dshBinding&&recoverableDshCompletion(row));
         const existing = db.prepare('SELECT * FROM a2a_action_events WHERE id=? AND action_id=?').get(eventId, actionId);
         if (existing) {
           if (existing.type !== type || existing.message !== message || canonicalJson(parse(existing.data_json)) !== canonicalJson(data)) {
@@ -2304,14 +2314,15 @@ export function createRepository(options = {}, io={}) {
           }
           event = { id:existing.id, action_id:existing.action_id, type:existing.type, message:existing.message, data:parse(existing.data_json), created_at:existing.created_at, duplicate:true };
         } else {
-          if (['succeeded','failed','expired'].includes(row.status)) throw new Error('A2A action is already terminal');
+          if (['succeeded','failed','expired'].includes(row.status)&&!lateDshBinding) throw new Error('A2A action is already terminal');
           const timestamp = now();
-          if (row.expires_at && Date.parse(row.expires_at) <= Date.parse(timestamp)) {
+          if (!lateDshBinding&&row.expires_at && Date.parse(row.expires_at) <= Date.parse(timestamp)) {
             db.prepare("UPDATE a2a_actions SET status='expired',completed_at=? WHERE id=? AND ziwei_v2_admitted(id)=1 AND status IN ('pending','acked')").run(timestamp, actionId);
             expired = true;
           } else {
             event = { id:eventId, action_id:actionId, type, message, data, created_at:timestamp };
             db.prepare('INSERT INTO a2a_action_events(id,action_id,type,message,data_json,created_at) VALUES(?,?,?,?,?,?)').run(event.id,event.action_id,type,message,dataJson,event.created_at);
+            if(dshBinding)dshSessionReceipts.register(row,dshBinding,input.deviceId);
             const leaseExpiry = new Date(Date.parse(timestamp) + actionExecutionLeaseMs({type:row.type,payload:parse(row.payload_json)})).toISOString();
             if(!rollout&&!maintenance)db.prepare("UPDATE a2a_actions SET expires_at=? WHERE id=? AND ziwei_v2_admitted(id)=1 AND status IN ('pending','acked')").run(leaseExpiry,actionId);
             const ws = db.prepare('SELECT slug FROM workspaces WHERE id=?').get(row.workspace_id);
@@ -2372,7 +2383,8 @@ export function createRepository(options = {}, io={}) {
       const receiptOnly = explicitBoolean(input.receiptOnly);
       const maintenanceTerminal = isMaintenanceTerminalInput(db,row,input);
       const finalized=readBotFailureFinalization(db,row);
-      const recovering = !finalized&&(recoverableBotCompletion(row) || maintenanceTerminal);
+      const dsh=isDshAction({payload:parse(row.payload_json)});
+      const recovering = !finalized&&(recoverableBotCompletion(row) || recoverableDshCompletion(row) || maintenanceTerminal);
       const reconciliation = !maintenanceTerminal && (recovering || Boolean(input[botReplayEvent]));
       if (['succeeded', 'failed', 'expired'].includes(row.status) && !recovering) return { ...a2aResponseView(row, { receiptOnly }),...historicalActionMetadata(row), duplicate: true };
       let status = String(input.status || (input.error ? 'failed' : 'succeeded'));
@@ -2388,12 +2400,14 @@ export function createRepository(options = {}, io={}) {
       if (status === 'failed' && !error) error = '员工执行失败，未提供具体错误';
       let result = input.result;
       if(botUncertain(result)){status='failed';error ||= '执行失败';}
+      if(dsh&&(status==='succeeded'||result?.processExit!==undefined||result?.sessionExit&&result.code!=='EXECUTION_UNCERTAIN'&&result.executionState!=='uncertain'))dshSessionReceipts.assertReceipt(row,{...input,status,result});
       if (reconciliation) {
         this.preservation?.assertAction(actionId);
         this.serverCodeRollout?.assertExecution();
-        assertBotCompletionReceipt(row, { ...input, status });
+        if(dsh)dshSessionReceipts.assertReceipt(row,{...input,status,result});else assertBotCompletionReceipt(row, { ...input, status });
       }
-      if (status === 'failed' && confirmedBotCompletion(result, status) && (result?.processExit || result?.result?.processExit)?.cancelled === true) result = { ...result, stopConfirmed:true };
+      if (!dsh && status === 'failed' && confirmedBotCompletion(result, status) && (result?.processExit || result?.result?.processExit)?.cancelled === true) result = { ...result, stopConfirmed:true };
+      if(dsh&&status==='failed'&&dshSessionReceipts.confirmed(row,{status,result})?.reason==='aborted')result={...result,stopConfirmed:true};
       let outputArtifacts = [];
       // `attachments` contains materialized user input paths in older CLI
       // results. Only the explicit outputArtifacts contract can become a new
@@ -2415,7 +2429,7 @@ export function createRepository(options = {}, io={}) {
           outputArtifacts = [];
         }
       }
-      if (reconciliation) assertBotCompletionReceipt(row, { ...input, status, result });
+      if (reconciliation) {if(dsh)dshSessionReceipts.assertReceipt(row,{...input,status,result});else assertBotCompletionReceipt(row, { ...input, status, result });}
       const timestamp = now();
       db.exec('SAVEPOINT conversation_result');
       try {

@@ -316,6 +316,14 @@ export function openDatabase(options = {}, {serverCodeRolloutIo={}}={}) {
       conversation_id TEXT PRIMARY KEY, paused INTEGER NOT NULL DEFAULT 0 CHECK(paused IN (0,1)), updated_at TEXT NOT NULL,
       FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS conversation_dsh_sessions (
+      conversation_id TEXT NOT NULL, workspace_id TEXT NOT NULL, employee_id TEXT NOT NULL, device_id TEXT NOT NULL,
+      bot_name TEXT NOT NULL, session_id TEXT NOT NULL, updated_at TEXT NOT NULL,
+      PRIMARY KEY(conversation_id,employee_id,device_id,bot_name),
+      FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
+      FOREIGN KEY(employee_id) REFERENCES employees(id) ON DELETE CASCADE,
+      FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+    );
     CREATE TABLE IF NOT EXISTS conversation_reads (
       workspace_id TEXT NOT NULL, conversation_id TEXT NOT NULL, user_id TEXT NOT NULL,
       last_message_id TEXT, last_message_rowid INTEGER NOT NULL DEFAULT 0, last_read_at TEXT NOT NULL,

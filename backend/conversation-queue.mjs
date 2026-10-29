@@ -1,6 +1,9 @@
+import {isDshAction,confirmedDshSessionExit} from '../src/dsh-session-receipt.mjs';
+
 const removedCode='CONVERSATION_QUEUE_REMOVED';
 const fail=(code,message,status=409)=>{throw Object.assign(new Error(message),{code,status});};
-const payload=row=>{try{return JSON.parse(row.payload_json);}catch{return {};}};
+const parse=value=>{try{return JSON.parse(value);}catch{return {};}};
+const payload=row=>parse(row.payload_json);
 
 // Actions remain the only durable work queue. This table controls admission;
 // no second dispatcher or copy of the user message is created here.
@@ -30,6 +33,8 @@ export function createConversationQueue(db){
   if(!controlled(row)||row.status!=='pending')return;
   const data=payload(row);
   if(paused(data.conversationId))fail('CONVERSATION_QUEUE_PAUSED','此会话的待发消息已暂停，请恢复队列');
+  const unsettled=db.prepare("SELECT * FROM a2a_actions WHERE workspace_id=? AND id<>? AND acked_at IS NOT NULL AND status IN ('failed','expired') AND json_valid(payload_json) AND json_extract(payload_json,'$.employeeId')=?").all(row.workspace_id,row.id,data.employeeId);
+  if(unsettled.some(other=>{const p=payload(other);return isDshAction({payload:p})&&p.dshSessionBinding&&!confirmedDshSessionExit({id:other.id,payload:p},{status:other.status,result:parse(other.result_json)});}))fail('DSH_SESSION_UNCONFIRMED','此员工的原生 DSH turn 终态尚未确认；保留原回执，不能领取下一条消息');
   const earlier=db.prepare(`SELECT a.*,a.rowid AS action_rowid FROM a2a_actions a
    WHERE workspace_id=? AND id<>? AND status IN ('pending','acked') AND json_valid(payload_json)
     AND json_extract(payload_json,'$.employeeId')=? ORDER BY created_at,rowid`).all(row.workspace_id,row.id,data.employeeId);
