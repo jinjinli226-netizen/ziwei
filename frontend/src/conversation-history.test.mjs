@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mergeConversationLatest,prependConversationHistory,isConversationNearBottom,shouldLoadEarlierHistory,restoreConversationPrependScroll} from './conversation-history.mjs';
+import {mergeConversationLatest,prependConversationHistory,isConversationNearBottom,shouldShowConversationLatest,shouldLoadEarlierHistory,restoreConversationPrependScroll} from './conversation-history.mjs';
 const message=(id,minute,content=id)=>({id,created_at:`2026-10-21T01:${String(minute).padStart(2,'0')}:00.000Z`,content});
 const conversation=(messages,page={},extra={})=>({id:'chat-a',messages,messagePage:{hasMore:true,beforeCursor:messages[0]?.id||null,total:100,...page},...extra});
 
@@ -54,6 +54,14 @@ test('prepending keeps the same viewport anchor and following new messages depen
   // A later image above the retained anchor grows by 200px after the first
   // restoration. Apply that delta to the current viewport, not its old offset.
   assert.equal(restoreConversationPrependScroll({scrollTop:675,anchorOffset:-10,nextAnchorOffset:190}),875);
-  assert.equal(isConversationNearBottom({scrollHeight:1000,scrollTop:500,clientHeight:400}),true);
+  assert.equal(isConversationNearBottom({scrollHeight:1000,scrollTop:500,clientHeight:400}),false);
   assert.equal(isConversationNearBottom({scrollHeight:1000,scrollTop:100,clientHeight:400}),false);
+});
+
+test('following includes the 40px boundary and jumping appears only beyond 120px',()=>{
+  const viewport=distance=>({scrollHeight:1000,scrollTop:600-distance,clientHeight:400});
+  for(const distance of [0,39,40])assert.equal(isConversationNearBottom(viewport(distance)),true);
+  for(const distance of [41,120,121])assert.equal(isConversationNearBottom(viewport(distance)),false);
+  for(const distance of [0,40,120])assert.equal(shouldShowConversationLatest(viewport(distance)),false);
+  assert.equal(shouldShowConversationLatest(viewport(121)),true);
 });

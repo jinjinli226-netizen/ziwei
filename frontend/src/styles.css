@@ -210,6 +210,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .conversation-row-status[data-status="succeeded"] { color:#22845b; }
 .conversation-row-status[data-status="failed"], .conversation-row-status[data-status="expired"] { color:#bd4b4b; }
 .conversation-messages { display:flex; flex-direction:column; gap:10px; max-height:340px; overflow:auto; padding:10px 0; }
+.conversation-timeline-wrap { position:relative; min-width:0; }
+.conversation-jump-latest { position:absolute; bottom:8px; left:50%; transform:translateX(-50%); display:flex; align-items:center; gap:5px; min-height:30px; padding:5px 13px; border:0; border-radius:15px; background:#fff; color:#7350d7; box-shadow:inset 0 0 0 .5px #d8cbed,0 3px 12px #32294712; font-size:12px; white-space:nowrap; cursor:pointer; }
+.conversation-jump-latest:hover { background:#f4f1fb; }
+.conversation-jump-latest:focus-visible { outline:2px solid #a88af0; outline-offset:3px; }
 .conversation-message { max-width:86%; padding:10px 12px; border-radius:10px; background:#f2f5f9; }
 .conversation-message.user { align-self:flex-end; background:#edf4fb; }
 .conversation-message strong { font-size:12px; color:#5a6b80; }

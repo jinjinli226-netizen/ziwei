@@ -42,8 +42,33 @@ export function prependConversationHistory(current,older) {
   return {...current,messages,...(messagePage?{messagePage}:{})};
 }
 
-export function isConversationNearBottom({scrollHeight=0,scrollTop=0,clientHeight=0}={},distance=180) {
-  return scrollHeight-scrollTop-clientHeight<distance;
+export function isConversationNearBottom({scrollHeight=0,scrollTop=0,clientHeight=0}={},distance=40) {
+  return scrollHeight-scrollTop-clientHeight<=distance;
+}
+export function shouldShowConversationLatest({scrollHeight=0,scrollTop=0,clientHeight=0}={}) {
+  return scrollHeight-scrollTop-clientHeight>120;
+}
+export function createConversationScrollTracker({wrap=value=>value}={}) {
+  const state=wrap({followLatest:true,showLatest:false});
+  let previousTop=0,upwards=false,touchY=null;
+  function pause(){state.followLatest=false;}
+  function intent(up){upwards=up;if(up)pause();}
+  function refresh(node){
+    if(!node)return;
+    if(state.followLatest)node.scrollTop=node.scrollHeight;
+    previousTop=node.scrollTop;state.showLatest=shouldShowConversationLatest(node);
+  }
+  return {
+    state,pause,refresh,
+    reset(){state.followLatest=true;state.showLatest=false;previousTop=0;upwards=false;touchY=null;},
+    jump(node){state.followLatest=true;upwards=false;refresh(node);},
+    scroll({currentTarget:node}){state.followLatest=!(upwards&&node.scrollTop<previousTop)&&isConversationNearBottom(node);previousTop=node.scrollTop;state.showLatest=shouldShowConversationLatest(node);},
+    wheel(event){if(event.deltaY)intent(event.deltaY<0);},
+    touchStart(event){touchY=event.touches?.[0]?.clientY??null;upwards=false;},
+    touchMove(event){const next=event.touches?.[0]?.clientY;if(touchY!==null&&next!==undefined&&next!==touchY)intent(next>touchY);touchY=next??null;},
+    key(event){if(['ArrowUp','PageUp','Home'].includes(event.key))intent(true);else if(['ArrowDown','PageDown','End'].includes(event.key))intent(false);},
+    pointer(){upwards=true;}
+  };
 }
 export function shouldLoadEarlierHistory({hasMore=false,loading=false,error='',scrollTop=0,previousScrollTop=0,userInitiated=false}={}) {
   return Boolean(hasMore&&!loading&&!error&&userInitiated&&scrollTop<previousScrollTop&&scrollTop<=160);

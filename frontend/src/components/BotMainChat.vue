@@ -3,7 +3,8 @@ import {computed,nextTick,onBeforeUnmount,onMounted,ref,watch} from 'vue';
 import {ArrowLeft,ArrowUp,Plus,Settings2,PanelRight,ChevronDown,Monitor,Folder,MoreHorizontal,Smartphone,X,RefreshCw,Square,Download,FileText,Clock3} from 'lucide-vue-next';
 import {botPresence,executionUncertain,botStopPresentation,botRecoveryEvent,botRecoveryDetail,processExitConfirmed,executionProcessActive} from '../bot-presentation.js';
 import {chatLocalTime,conversationFiles} from '../bot-main-chat.js';
-import {isConversationNearBottom,shouldLoadEarlierHistory,restoreConversationPrependScroll} from '../conversation-history.mjs';
+import {isConversationNearBottom,shouldShowConversationLatest,shouldLoadEarlierHistory,restoreConversationPrependScroll} from '../conversation-history.mjs';
+import {createConversationEnterGuard} from '../conversation-compose.js';
 import {ownedBotChatBlockReason} from '../bot-owned-profile.js';
 import {executionPresentation} from '../conversation-execution-state.mjs';
 import {historicalPrelaunchRecovery} from '../historical-prelaunch-recovery.mjs';
@@ -17,7 +18,7 @@ const props=defineProps({bot:Object,conversation:Object,execution:Object,events:
 const emit=defineEmits(['load-history','forward-view','forward','forward-select','forward-toggle','forward-open','forward-cancel','retry-message','update:draft','send','settings','return','directory','attachment','paste-attachment','remove-attachment','preview-image','download','stop','reconcile','finalize-failure','refresh-work','phone','workspace-tasks']);
 function attachReadObserver(element){const scope=props.readScope;element._readScope=scope;element._messageRead=createMessageReadObserver(element,messageId=>{if(scope===props.readScope)return props.onVisibleMessage?.({messageId,scope});return false;});}
 const vConversationRead={mounted:attachReadObserver,updated(element){if(element._readScope!==props.readScope){element._messageRead?.();attachReadObserver(element);}else element._messageRead?.update();},beforeUnmount(element){element._messageRead?.();}};
-const panel=ref(false),menu=ref(''),popoverStyle=ref({}),fileInput=ref(null),timeline=ref(null),followLatest=ref(true);
+const panel=ref(false),menu=ref(''),popoverStyle=ref({}),fileInput=ref(null),timeline=ref(null),followLatest=ref(true),showLatest=ref(false);
 const historyRequested=ref(false),hasEarlierHistory=computed(()=>props.conversation?.messagePage?.hasMore===true);
 let disposed=false,renderGeneration=0,renderedConversation='',renderedFirstMessage='',previousScrollTop=0,userScrollIntent=false,touchY=null,prependAnchor=null;
 const historicalRecovery=computed(()=>historicalPrelaunchRecovery(props.execution)||operatorForceAbandonRecovery(props.execution));
@@ -36,9 +37,11 @@ const presence=computed(()=>botPresence(props.bot)),executionState=computed(()=>
 const name=computed(()=>props.bot?.employee?.name||props.conversation?.employee?.name||'Hermes Bot');
 const directoryLabel=computed(()=>String(props.workingDirectory||'').split(/[\\/]/).filter(Boolean).at(-1)||'选择工作目录');
 const status=computed(()=>finalizationState.value?.summary||(props.device?.status==='offline'?'电脑离线':props.execution?(executionState.value.summary||executionState.value.label):presence.value.label));
-function keydown(event){if(event.isComposing)return;if(event.key==='Enter'&&!event.shiftKey&&!event.ctrlKey&&!event.altKey&&!event.metaKey){event.preventDefault();if(!blocksSending.value&&!blockedReason.value&&!props.sendPending&&!props.attachmentReading&&!props.statusLoading&&!props.finalizationBusy)emit('send');}}
+const enterGuard=createConversationEnterGuard();
+function keydown(event){if(enterGuard.shouldSend(event)&&!blocksSending.value&&!blockedReason.value&&!props.sendPending&&!props.attachmentReading&&!props.statusLoading&&!props.finalizationBusy)emit('send');}
 function closeMenus(event){if(event.key==='Escape'){menu.value='';panel.value=false;}else if(!event.target.closest?.('.bot-chat-chip-menu'))menu.value='';}
-function scrollLatest(){nextTick(()=>{const node=timeline.value;if(!disposed&&node&&followLatest.value){node.scrollTop=node.scrollHeight;previousScrollTop=node.scrollTop;}});}
+function scrollLatest(){nextTick(()=>{const node=timeline.value;if(disposed||!node)return;if(followLatest.value){node.scrollTop=node.scrollHeight;previousScrollTop=node.scrollTop;}showLatest.value=shouldShowConversationLatest(node);});}
+function jumpLatest(){prependAnchor=null;userScrollIntent=false;followLatest.value=true;scrollLatest();}
 function timelineAnchor(node){
   if(!node)return null;
   const viewport=node.getBoundingClientRect(),messages=[...node.querySelectorAll('[data-message-id]')];
@@ -49,7 +52,7 @@ function restoreTimelineAnchor(anchor){
   const node=timeline.value;if(disposed||!node||!anchor||anchor.conversationId!==props.conversation?.id)return;
   const message=[...node.querySelectorAll('[data-message-id]')].find(item=>item.dataset.messageId===anchor.messageId);
   const nextAnchorOffset=message?message.getBoundingClientRect().top-node.getBoundingClientRect().top:undefined;
-  node.scrollTop=restoreConversationPrependScroll({...anchor,...(message?{scrollTop:node.scrollTop}:{}),nextScrollHeight:node.scrollHeight,nextAnchorOffset});previousScrollTop=node.scrollTop;
+  node.scrollTop=restoreConversationPrependScroll({...anchor,...(message?{scrollTop:node.scrollTop}:{}),nextScrollHeight:node.scrollHeight,nextAnchorOffset});previousScrollTop=node.scrollTop;showLatest.value=shouldShowConversationLatest(node);
 }
 function requestEarlierHistory(){
   if(!hasEarlierHistory.value||props.historyLoading||historyRequested.value)return;
@@ -60,10 +63,10 @@ function checkEarlierHistory(node,previous){
   if(shouldLoadEarlierHistory({hasMore:hasEarlierHistory.value,loading:props.historyLoading||historyRequested.value,error:props.historyError,scrollTop:node.scrollTop,previousScrollTop:previous,userInitiated:userScrollIntent}))requestEarlierHistory();
 }
 function timelineScrolled(event){
-  const node=event.currentTarget;followLatest.value=isConversationNearBottom(node);checkEarlierHistory(node,previousScrollTop);previousScrollTop=node.scrollTop;
+  const node=event.currentTarget;followLatest.value=!(userScrollIntent&&node.scrollTop<previousScrollTop)&&isConversationNearBottom(node);showLatest.value=shouldShowConversationLatest(node);checkEarlierHistory(node,previousScrollTop);previousScrollTop=node.scrollTop;
 }
 function timelineIntent(upwards){
-  prependAnchor=null;userScrollIntent=upwards;
+  prependAnchor=null;userScrollIntent=upwards;if(upwards)followLatest.value=false;
   const node=timeline.value;if(upwards&&node)checkEarlierHistory(node,node.scrollTop+1);
 }
 function timelineWheel(event){if(event.deltaY)timelineIntent(event.deltaY<0);}
@@ -77,7 +80,7 @@ watch(()=>[props.conversation?.id,props.conversation?.messages],async([id,messag
   const generation=++renderGeneration,same=id===renderedConversation;
   const prepended=same&&renderedFirstMessage&&(messages||[]).findIndex(message=>message.id===renderedFirstMessage)>0;
   const anchor=prepended?timelineAnchor(timeline.value):null;
-  if(!same){followLatest.value=true;historyRequested.value=false;userScrollIntent=false;prependAnchor=null;previousScrollTop=0;}
+  if(!same){followLatest.value=true;showLatest.value=false;historyRequested.value=false;userScrollIntent=false;prependAnchor=null;previousScrollTop=0;}
   else if(prepended)followLatest.value=false;
   renderedConversation=id;renderedFirstMessage=messages?.[0]?.id||'';
   await nextTick();if(disposed||generation!==renderGeneration||id!==props.conversation?.id)return;
@@ -101,7 +104,7 @@ onBeforeUnmount(()=>{disposed=true;renderGeneration++;prependAnchor=null;window.
     <div class="bot-chat-body" :class="{'with-panel':panel}">
       <main class="bot-chat-main">
         <BotInteractionCard v-if="bot?.employee?.runtime==='Hermes'&&bot?.workspace&&bot?.id&&!preview" :workspace="bot.workspace" :employee-id="bot.id" :action-id="execution?.id||bot.latest_run?.id"/>
-        <div ref="timeline" v-conversation-read class="bot-chat-timeline" aria-live="polite" tabindex="0" aria-label="聊天记录" @scroll="timelineScrolled" @wheel.passive="timelineWheel" @touchstart.passive="timelineTouchStart" @touchmove.passive="timelineTouchMove" @pointerdown="timelinePointer" @keydown="timelineKey" @load.capture="timelineMediaLoaded">
+        <div class="bot-chat-timeline-wrap"><div ref="timeline" v-conversation-read class="bot-chat-timeline" aria-live="polite" tabindex="0" aria-label="聊天记录" @scroll="timelineScrolled" @wheel.passive="timelineWheel" @touchstart.passive="timelineTouchStart" @touchmove.passive="timelineTouchMove" @pointerdown="timelinePointer" @keydown="timelineKey" @load.capture="timelineMediaLoaded">
           <div class="bot-chat-transcript">
             <div v-if="hasEarlierHistory||historyLoading||historyError" class="bot-chat-history" :aria-busy="historyLoading"><button v-if="hasEarlierHistory" type="button" :disabled="historyLoading||historyRequested" @click="requestEarlierHistory"><RefreshCw v-if="historyLoading" :size="13"/>{{historyLoading?'正在加载更早消息…':historyError?'重试加载更早消息':'加载更早消息'}}</button><p v-if="historyError" role="alert">{{historyError}}</p></div>
             <p class="bot-chat-day">同一位伙伴，同一条长期对话</p><div v-if="forwardResult" class="chat-forward-result"><span>聊天记录已转发</span><button type="button" @click="emit('forward-view')">查看接收聊天</button></div><div v-if="forwardSelecting" class="chat-forward-selection"><span>已选 {{forwardSelected.length}} / 20 条</span><button type="button" @click="emit('forward-cancel')">取消</button><button type="button" :disabled="!forwardSelected.length" @click="emit('forward-open')">转发</button><small v-if="forwardError" role="alert">{{forwardError}}</small></div>
@@ -113,10 +116,10 @@ onBeforeUnmount(()=>{disposed=true;renderGeneration++;prependAnchor=null;window.
             <div v-if="!conversation?.messages?.length" class="bot-chat-empty"><span class="bot-chat-avatar">{{name.slice(0,1)}}</span><h2>从这里，继续合作</h2><p>消息和执行结果会留在这条主聊天里。</p></div>
             <details v-if="execution" :open="uncertain&&!finalizationState" class="bot-chat-progress" :data-tone="executionState.tone"><summary><span><i/>{{executionState.summary||executionState.label}}</span><small>{{events.length?events.length+' 个阶段':'查看执行记录'}}<ChevronDown :size="14"/></small></summary><div class="bot-chat-progress-events"><p v-if="historicalRecovery">{{stopState.label}}</p><details v-if="(historicalRecovery||finalizationState||canFinalize)&&execution.error"><summary>原始失败记录（已保留）</summary><p>{{execution.error}}</p></details><p v-else-if="execution.error">{{execution.error}}</p><p v-if="uncertain&&!finalizationState">{{botRecoveryDetail(execution)}}</p><button v-if="recoveryEvent" :disabled="reconcileBusy||stopBusy||finalizationBusy||statusLoading" @click="emit('reconcile')">{{reconcileBusy?'正在核实…':'核实并恢复回执'}}</button><p v-for="event in events" :key="event.id"><strong>{{event.label}}</strong><span>{{event.detail}}</span><time>{{chatLocalTime(event.created_at)}}</time></p><p v-if="execution.result?.processExit">进程退出证据：{{processExitConfirmed(execution.result)?'根进程与进程树退出均已确认':'尚未完整确认'}}</p><p v-if="!historicalRecovery&&(bot.stop_action?.payload?.actionId===execution.id||stopState.confirmed)">{{stopState.label}}</p><button @click="emit('settings','activity')">查看原执行与停止回执</button></div></details>
           </div>
-        </div>
+        </div><button v-if="showLatest" type="button" class="bot-chat-jump-latest" @click="jumpLatest"><ChevronDown :size="14"/>跳至最新</button></div>
         <footer class="bot-chat-compose">
           <div v-if="attachments.length" class="bot-chat-draft-files"><div v-for="(attachment,index) in attachments" :key="index"><button :aria-label="'查看待发送图片：'+attachment.name" @click="emit('preview-image',attachment)"><img :src="previewSrc?.(attachment)" :alt="attachment.name"/></button><span>{{attachment.name}}</span><button :aria-label="'移除图片：'+attachment.name" @click="emit('remove-attachment',index)"><X :size="13"/></button></div></div>
-          <div class="bot-chat-editor"><textarea :value="draft" rows="3" aria-label="主聊天消息" :placeholder="'继续交给 '+name+'…'" @input="emit('update:draft',$event.target.value)" @paste="emit('paste-attachment',$event)" @keydown="keydown"/>
+          <div class="bot-chat-editor"><textarea :value="draft" rows="3" aria-label="主聊天消息" :placeholder="'继续交给 '+name+'…'" @input="emit('update:draft',$event.target.value)" @paste="emit('paste-attachment',$event)" @compositionstart="enterGuard.compositionStart" @compositionend="enterGuard.compositionEnd" @keydown="keydown"/>
             <div class="bot-chat-compose-tools"><button class="bot-chat-add" aria-label="添加图片" title="添加图片" :disabled="sendPending||attachmentReading" @click="fileInput?.click()"><Plus :size="20"/></button><input ref="fileInput" hidden type="file" accept=".png,.jpg,.jpeg,.gif,.webp,image/png,image/jpeg,image/gif,image/webp" multiple @change="emit('attachment',$event)"/>
               <div class="bot-chat-chips">
                 <div class="bot-chat-chip-menu"><button class="bot-chat-chip" aria-label="会话模型" :aria-expanded="menu==='model'" @click="toggleMenu('model',$event)"><span>{{modelLabel||'沿用 Profile 模型'}}</span><ChevronDown :size="12"/></button><div v-if="menu==='model'" class="bot-chat-popover" :style="popoverStyle"><strong>当前模型</strong><p>{{modelLabel||'沿用已绑定 Profile 的模型配置'}}</p><small>模型跟随这位 Bot 的运行绑定。</small><button @click="menu='';emit('settings','settings')">在 Bot 设置调整模型</button></div></div>

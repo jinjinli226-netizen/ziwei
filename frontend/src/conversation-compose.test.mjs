@@ -1,9 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createConversationComposerStore, imageMimeFromBytes, readConversationImages } from './conversation-compose.js';
+import { createConversationComposerStore, createConversationEnterGuard, imageMimeFromBytes, readConversationImages } from './conversation-compose.js';
 
 const image={name:'one.png',mimeType:'image/png',contentEncoding:'base64',content:'iVBORw0KGgo=',size:8};
 function store(){let count=0;return createConversationComposerStore({makeId:()=>`message-${++count}`});}
+
+test('composer Enter keeps IME selection native and blocks the first 500ms after composition',()=>{
+  let now=1000,prevented=0;const guard=createConversationEnterGuard({now:()=>now});
+  const enter=patch=>guard.shouldSend({key:'Enter',preventDefault(){prevented++;},...patch});
+  assert.equal(enter({isComposing:true}),false);assert.equal(enter({keyCode:229}),false);assert.equal(prevented,0);
+  guard.compositionStart();assert.equal(enter(),false);guard.compositionEnd();
+  for(const elapsed of [0,100,499]){now=1000+elapsed;assert.equal(enter(),false);}
+  now=1500;assert.equal(enter(),true);assert.equal(prevented,4);
+  for(const modifier of ['shiftKey','ctrlKey','altKey','metaKey'])assert.equal(enter({[modifier]:true}),false);
+  assert.equal(guard.shouldSend({key:'a'}),false);assert.equal(prevented,4);
+  assert.equal(createConversationEnterGuard({now:()=>now}).shouldSend({key:'Enter',preventDefault(){}}),true);
+});
 
 test('same conversation cannot start a second submission and failed retry retains its identity',()=>{
   const drafts=store();drafts.updateDraft('a','hello');drafts.setAttachments('a',[image]);

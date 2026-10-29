@@ -1,5 +1,19 @@
 export const CONVERSATION_IMAGE_LIMIT = 10 * 1024 * 1024;
 
+export function createConversationEnterGuard({now=()=>Date.now()}={}) {
+  let composing=false,endedAt=-Infinity;
+  return {
+    compositionStart(){composing=true;},
+    compositionEnd(){composing=false;endedAt=now();},
+    shouldSend(event){
+      if(event.key!=='Enter'||event.shiftKey||event.ctrlKey||event.altKey||event.metaKey)return false;
+      if(composing||event.isComposing||event.keyCode===229)return false;
+      event.preventDefault();
+      return now()-endedAt>=500;
+    }
+  };
+}
+
 export function clipboardImageFiles(clipboardData) {
   const images=Array.from(clipboardData?.items || [])
     .filter(item=>item.kind==='file' && /^image\//i.test(item.type || ''))

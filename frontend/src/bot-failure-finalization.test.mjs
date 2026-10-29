@@ -11,6 +11,7 @@ import {operatorForceAbandonRecovery} from './operator-force-abandon-recovery.mj
 import {ownedBotChatBlockReason} from './bot-owned-profile.js';
 import {chatLocalTime,conversationFiles} from './bot-main-chat.js';
 import {createBotWorkbench} from './bot-workbench.js';
+import {createConversationEnterGuard} from './conversation-compose.js';
 
 const clone=value=>JSON.parse(JSON.stringify(value)),hex='a'.repeat(64),deferred=()=>{let resolve;return{promise:new Promise(done=>resolve=done),resolve};};
 const runFixture=()=>({id:'action-original',agent_id:'ziwei_user',type:'conversation.execute',status:'failed',acked_at:'2026-10-21T10:00:01Z',completed_at:'2026-10-21T10:00:02Z',payload:{runtime:'Hermes',employeeId:'employee',deviceId:'device',profile:'bot-profile'},error:'原始失败：未知执行结果',result:{code:'EXECUTION_UNCERTAIN',executionState:'uncertain',partialEffectsPossible:true,processExit:null},events:[]});
@@ -74,7 +75,7 @@ test('late finalization completion cannot overwrite another employee or toast on
 });
 function componentState(run,bot=botFixture(run),device={status:'online'}){
   const source=component.slice(component.indexOf('<script setup>')+14,component.indexOf('function closeMenus(')).replace(/^import .*;\r?\n/gm,'');
-  const sent=[],bindings={computed,ref,executionPresentation,defineProps:()=>({bot,execution:run,conversation:{id:'conversation',messages:[]},device,draft:'next work',attachments:[]}),defineEmits:()=>name=>sent.push(name),...finalization,...presentation,chatLocalTime,conversationFiles,historicalPrelaunchRecovery,operatorForceAbandonRecovery,ownedBotChatBlockReason};
+  const sent=[],bindings={computed,ref,executionPresentation,createConversationEnterGuard,defineProps:()=>({bot,execution:run,conversation:{id:'conversation',messages:[]},device,draft:'next work',attachments:[]}),defineEmits:()=>name=>sent.push(name),...finalization,...presentation,chatLocalTime,conversationFiles,historicalPrelaunchRecovery,operatorForceAbandonRecovery,ownedBotChatBlockReason};
   return new Function(...Object.keys(bindings),`${source};return {blocksSending,canFinalize,executionState,status,keydown,sent:arguments[arguments.length-1]};`)(...Object.values(bindings),sent);
 }
 test('an old pending archive never overrides a newer running action',()=>{
