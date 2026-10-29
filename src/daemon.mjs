@@ -7,6 +7,7 @@ import {finalizationDigest,validateFailureFinalizationReceipt} from './bot-failu
 import {actionExecutionTimeoutMs,ACTION_EXECUTION_LEASE_BUFFER_MS} from './action-execution-budget.mjs';
 import {consumeRuntimePrelaunchEvidence,completeRuntimeExit} from './runtime-launch-evidence.mjs';
 import {markDispatcherAdmissionRejected,consumeDispatcherAdmissionRejected,isDispatcherAdmissionRejected} from './dispatcher-admission-evidence.mjs';
+import {dshSessionSupervision,dshBotNameForAction} from './dsh-session-evidence.mjs';
 import { isNativeRuntimeAction, resolveWindowsWorkdir, resolveWindowsWorkdirPath } from './windows-workdir.mjs';
 
 function needsNativeCwd(action) {
@@ -161,6 +162,7 @@ export class ActionDispatcher {
   }
   #markStarted(action, key, identity,timing={}) {
     this.#started.set(key, {key, actionId: action?.id ?? null, identity, startedAt: timing.startedAt??this.#now(),...(timing.hardDeadline!==undefined?{hardDeadline:timing.hardDeadline}:{}), ...(isNativeRuntimeAction(action) ? {nativeRuntime: true,resourceBinding:{type:action.type,employeeId:action.payload?.employeeId||null,revision:action.payload?.hermesBot?.revision||null,controlEpoch:action.payload?.hermesBot?.controlEpoch||null,resource:action.payload?.nativeOperation?.resource||null,operation:action.payload?.nativeOperation?.operation||null,platform:action.payload?.nativeOperation?.input?.platform||null}} : {})});
+    if(isNativeRuntimeAction(action)&&String(action.payload?.runtime||action.payload?.agent||action.payload?.runtimeName||'').toLowerCase()==='dsh')this.#started.get(key).dshBinding={botName:dshBotNameForAction(action),conversationId:action.payload?.conversationId||null};
     try { this.#saveState(); }
     catch (error) { throw Object.assign(new Error(error?.message || String(error)), {code: 'ACTION_STATE_WRITE_FAILED'}); }
   }
@@ -176,7 +178,7 @@ export class ActionDispatcher {
     const item = this.#started.get(key); if (!item) return;
     if (!result || result.status !== 'failed') return;
     const previous = item.quarantine;
-    item.quarantine = {...previous, stopConfirmed: true, confirmedAt: this.#now(), processExit: result.result.processExit};
+    item.quarantine = {...previous, stopConfirmed: true, confirmedAt: this.#now(), ...(result.result.sessionExit?{sessionExit:result.result.sessionExit}:{processExit:result.result.processExit})};
     this.#completed.set(key, result); this.#completedIdentity.set(key, item.identity);
     try { this.#saveState(); }
     catch { item.quarantine = previous; this.#completed.delete(key); this.#completedIdentity.delete(key); return; }
@@ -257,6 +259,61 @@ export class ActionDispatcher {
   #rejectAdmission(action,key,identity,phase,error,code='ACTION_ADMISSION_REJECTED') {
     return markDispatcherAdmissionRejected(this.#failure(action,error,{code,executionState:'not_dispatched',admissionRejected:true,result:{admissionRejected:true,executionState:'not_dispatched'}}),{key,identity,phase});
   }
+  #hasCompletedDshSession(actionId) {
+    const entry=this.#findByActionId(this.#started,actionId,item=>item.actionId);
+    if(!entry?.[1].dshBinding)return false;
+    const [key,item]=entry,exit=this.#completed.get(key)?.result?.sessionExit;
+    return exit?.source==='dsh-native-session'&&exit.terminalConfirmed===true&&exit.actionId===item.actionId&&exit.employeeId===item.resourceBinding?.employeeId&&exit.botName===item.dshBinding.botName&&exit.conversationId===item.dshBinding.conversationId;
+  }
+  async #runDshSession(action,key,executableAction,controller,{hardDeadline,idleTimeoutMs,enforceIdle}) {
+    let supervision=null,sessionExit=null,stopReason=null,stopInvoked=false,executionSettled=false,resolveStop,resolveConfirmed;
+    const stopped=new Promise(resolve=>{resolveStop=resolve;}),confirmed=new Promise(resolve=>{resolveConfirmed=resolve;});
+    const invokeStop=()=>{if(!supervision||stopInvoked)return;stopInvoked=true;void Promise.resolve().then(()=>supervision.stop()).catch(()=>{});};
+    const requestStop=reason=>{if(stopReason)return;stopReason=reason;controller.abort();invokeStop();resolveStop({kind:'stop'});};
+    const receipt=()=>({...sessionExit?{sessionId:sessionExit.sessionId,sessionExit}:{},partialEffectsPossible:true});
+    const recover=()=>{if(executionSettled&&sessionExit)this.#confirmQuarantineStopped(key,this.#failure(action,'DSH 当前 turn 已确认结束；已产生的工具影响保留',{code:stopReason==='cancelled'?'cancelled':'execution_stopped',result:receipt()}));};
+    const bounded=async promise=>{let timer;try{return await Promise.race([promise,new Promise(resolve=>{timer=setTimeout(()=>resolve(null),this.#stopGraceMs);})]);}finally{clearTimeout(timer);}};
+    controller.signal.addEventListener('abort',()=>requestStop('cancelled'),{once:true});
+    this.#stopHandlers.set(String(action.id),()=>requestStop('cancelled'));
+    let lastActivity=this.#now(),waiting=false;
+    const activity=()=>{lastActivity=this.#now();};
+    const hardTimer=hardDeadline===null?null:setTimeout(()=>requestStop('hard'),Math.max(0,hardDeadline-this.#now()));
+    const idleTimer=setInterval(()=>{
+      if(stopReason||this.#now()-lastActivity<idleTimeoutMs)return;
+      if(enforceIdle)requestStop('idle');
+      else if(!waiting){waiting=true;this.#onEvent('action.waiting',{actionId:action.id,type:action.type,message:'DSH 仍在等待当前 turn 终态',idleMs:this.#now()-lastActivity});}
+    },Math.max(25,Math.min(1000,Math.floor(idleTimeoutMs/4))));
+    try {
+      const execution=Promise.resolve().then(()=>this.#execute(executableAction,{
+        signal:controller.signal,onActivity:activity,
+        onDshSessionSupervision:capability=>{
+          const expected={actionId:action.id,employeeId:action.payload?.employeeId||null,conversationId:action.payload?.conversationId||null,botName:dshBotNameForAction(action)};
+          const requestedSession=action.payload?.runtimeSessionId||action.payload?.runtime_session_id||action.payload?.sessionId||action.payload?.session_id;
+          if(requestedSession)expected.sessionId=requestedSession;
+          const owned=dshSessionSupervision(capability,expected);
+          if(supervision||!owned)throw new Error('Invalid DSH session supervision registration');
+          supervision=owned;
+          void owned.completionEvidence.then(value=>{sessionExit=value;resolveConfirmed(true);recover();});
+          if(stopReason)invokeStop();
+        },
+        onOutput:chunk=>{if(stopReason)return;activity();this.#onEvent('action.output',{actionId:action.id,type:action.type,...classifyOutputStage(chunk),bytes:Buffer.byteLength(String(chunk||''))});},
+        onStage:stage=>{if(stopReason)return;activity();this.#onEvent('action.stage',{actionId:action.id,type:action.type,stage:stage?.stage||'output',message:stage?.message||'DSH 执行活动',detail:stage?.detail||'',...(stage?.summary?{summary:stage.summary}:{}),progress:{phase:'stage',...stage}});}
+      })).then(value=>({kind:'execution',value}),error=>({kind:'execution',error})).then(outcome=>{executionSettled=true;recover();return outcome;});
+      const outcome=await Promise.race([execution,stopped]);
+      if(stopReason){
+        await bounded(Promise.all([execution,confirmed]));
+        if(!sessionExit||!executionSettled){this.#quarantine(key,'DSH_SESSION_STOP_UNCONFIRMED');return this.#uncertain(action,'DSH_SESSION_STOP_UNCONFIRMED','DSH 已请求取消当前任务，但 turn 终态未确认',{result:receipt()});}
+        return this.#failure(action,stopReason==='cancelled'?'DSH execution cancelled':'DSH execution timed out',{code:stopReason==='cancelled'?'cancelled':'action_timeout',result:receipt()});
+      }
+      if(!sessionExit&&supervision)await bounded(confirmed);
+      if(!sessionExit){this.#quarantine(key,'DSH_SESSION_TERMINAL_UNCONFIRMED');return this.#uncertain(action,'DSH_SESSION_TERMINAL_UNCONFIRMED',outcome.error||outcome.value?.error||'未收到匹配当前请求的 DSH turn/end',{result:receipt()});}
+      if(outcome.error)return this.#failure(action,outcome.error,{code:'executor_failed',result:receipt()});
+      const value=outcome.value;
+      const result={output:value?.output??value?.result?.output??'',sessionId:sessionExit.sessionId,sessionExit};
+      if(value?.status!=='succeeded')return this.#failure(action,value?.error||'DSH 执行失败',{code:value?.code||'executor_failed',result});
+      return {status:'succeeded',actionId:action.id,result,completedAt:this.#now()};
+    } finally {clearTimeout(hardTimer);clearInterval(idleTimer);}
+  }
   async #run(action, key, identity,maintenanceResume=null,resumeTiming=null) {
     const actionId = action?.id; const controller = new AbortController(); let hardTimeoutHandle = null; let idleWatchdogHandle = null; this.#controllers.set(String(actionId), controller);
     let admissionPhase='authorization';
@@ -272,7 +329,7 @@ export class ActionDispatcher {
         this.#markStarted(action, key, identity);
         const target = String(action.payload?.actionId || action.payload?.action_id || ''); const cancellationRequested = target !== String(actionId) && this.cancel(target);
         const completed = this.status(target).completed, exit = completed?.result?.processExit;
-        const targetResultAvailable = Boolean(completed && exit?.rootConfirmed === true && exit.treeConfirmed === true && exit.activeProcesses === 0);
+        const targetResultAvailable = Boolean(completed && exit?.rootConfirmed === true && exit.treeConfirmed === true && exit.activeProcesses === 0)||this.#hasCompletedDshSession(target);
         return {status: cancellationRequested || targetResultAvailable ? 'succeeded' : 'failed', actionId, result: {targetActionId: target, cancellationRequested, targetResultAvailable, stopConfirmed: false, message: cancellationRequested ? '取消请求已接受；目标是否停止须以目标动作的停止回执为准' : targetResultAvailable ? '已有目标动作退出终态，正在核实原动作回执' : '没有可用的目标动作控制器或可信退出终态，无法确认目标是否停止'}, completedAt: this.#now(), ...(cancellationRequested || targetResultAvailable ? {} : {code: 'CANCEL_TARGET_UNCONFIRMED', error: 'target execution stop is unconfirmed'})};
       }
       admissionPhase='expiry';
@@ -305,6 +362,7 @@ export class ActionDispatcher {
       this.#markStarted(action, key, identity,{startedAt:resumeTiming?.startedAt,hardDeadline});
       if(maintenanceResume)this.#onEvent('action.maintenance_resumed',{actionId,updateId:maintenanceResume.updateId,targetBuild:maintenanceResume.targetBuild});
       this.#onEvent('action.started', {actionId, type: action.type});
+      if(nativeRuntime&&String(action.payload?.runtime||action.payload?.agent||action.payload?.runtimeName||'').toLowerCase()==='dsh')return await this.#runDshSession(action,key,executableAction,controller,{hardDeadline,idleTimeoutMs,enforceIdle});
       let stopReason = null; let resolveStop; let supervision = null; let stopInvoked = false; let stopInFlight = false;let stopPending=null;
       let residentExit=null;
       const onResidentExit=proof=>{

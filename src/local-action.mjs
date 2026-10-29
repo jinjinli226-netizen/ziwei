@@ -18,6 +18,8 @@ import { isNativeRuntimeAction, resolveWindowsWorkdir, resolveWindowsWorkdirPath
 import { createImageArtifactSession } from './conversation-image-artifacts.mjs';
 import {requestBotStartAdmission} from './runtime-launch-evidence.mjs';
 import {bindCodexConversationToHost} from './codex-conversation-session.mjs';
+import {executeDshRuntime} from './dsh-runtime.mjs';
+import {dshBotNameForAction} from './dsh-session-evidence.mjs';
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_OUTPUT_BYTES = 1024 * 1024;
@@ -372,7 +374,7 @@ function runCommand({runtimeDir, action, executable, baseArgs = [], allowedExecu
  * Unknown/unsupported actions fail loudly so the cloud never sees a fake
  * success merely because an action was accepted by the daemon.
  */
-export function createLocalActionExecutor({runtimeDir, admissionHandledByDispatcher = false, defaultWorkdir = process.cwd(), allowedExecutables = [], executorCommand = null, executorArgs = [], defaultRuntime = null, hermesHomePath = null, codexMcpDisabledServers = [], managementMcpConfig = {}, managementBootstrap = null, terminalMcpConfig = {}, workspace = null, apiBase = null, deviceId = null, deviceToken = null, onWorkspaceConnect = null, capabilityCollector = collectEmployeeCapabilityInventory, machineCapabilityInventory = sharedMachineCapabilityInventory} = {}) {
+export function createLocalActionExecutor({runtimeDir, admissionHandledByDispatcher = false, defaultWorkdir = process.cwd(), allowedExecutables = [], executorCommand = null, executorArgs = [], defaultRuntime = null, hermesHomePath = null, codexMcpDisabledServers = [], managementMcpConfig = {}, managementBootstrap = null, terminalMcpConfig = {}, workspace = null, apiBase = null, deviceId = null, deviceToken = null, onWorkspaceConnect = null, capabilityCollector = collectEmployeeCapabilityInventory, machineCapabilityInventory = sharedMachineCapabilityInventory, dshBaseUrl=process.env.ZIWEI_DSH_BASE_URL||'http://127.0.0.1:7879', dshRuntime=executeDshRuntime} = {}) {
   if (!runtimeDir) throw new TypeError('runtimeDir is required');
   fs.mkdirSync(runtimeDir, {recursive: true});
   const automaticManagement = managementBootstrap || (workspace && deviceToken ? createManagementBootstrap({ workspace, apiBase, deviceId, deviceToken, cacheDirectory: path.join(runtimeDir, 'management-mcp-credentials') }) : null);
@@ -465,6 +467,15 @@ export function createLocalActionExecutor({runtimeDir, admissionHandledByDispatc
       const attachmentPaths = materializeRuntimeAttachments({attachments: payload.attachments, cwd: safeCwd, actionId: action.id});
       const attachmentPromptSuffix=attachmentPaths.length?`\n\n[本机附件]\n${attachmentPaths.map(item => `- ${item.name}: ${item.path}`).join('\n')}`:'';
       const promptWithAttachments = attachmentPromptSuffix ? String(prompt || '').trim()+attachmentPromptSuffix : prompt;
+      if(String(runtime).toLowerCase()==='dsh'){
+        const botName=dshBotNameForAction(action);
+        if(!botName)throw new Error('DSH 员工缺少真实 Bot 绑定；显示名称不能作为运行时标识');
+        if(payload.hermesBot)throw new Error('DSH 执行不能使用 Hermes owned Profile 身份');
+        return dshRuntime({baseUrl:dshBaseUrl,botName,prompt:promptWithAttachments,cwd:safeCwd,
+          sessionId:payload.runtimeSessionId||payload.runtime_session_id||payload.sessionId||payload.session_id||null,
+          sessionAuthority:{actionId:action.id,employeeId:payload.employeeId||null,conversationId:payload.conversationId||null},
+          signal:context.signal,onOutput:context.onOutput,onStage:context.onStage,onSessionSupervision:context.onDshSessionSupervision});
+      }
       // Refuse unsupported vision combinations before preparing any MCP session.
       runtimeInvocation(runtime,{prompt:promptWithAttachments,attachments:attachmentPaths});
       const imageArtifacts = createImageArtifactSession({runtimeDir,actionId:action.id,conversationId:payload.conversationId || null});
