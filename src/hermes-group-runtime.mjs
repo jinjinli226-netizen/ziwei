@@ -3,23 +3,29 @@ import {executionUncertain} from './hermes-driver-runtime.mjs';
 
 /** One parent lifetime; completed children never close admission for later turns. */
 export function createGroupSupervision(onStop=()=>{}) {
-  const children=[];let sealed=false,stopping=false,resolveCompletion;
+  const children=[];let sealed=false,stopping=false,resolveCompletion,resolveStop,stopEvidence;
   const completionEvidence=new Promise(resolve=>{resolveCompletion=resolve;});
+  const known=item=>item?.treeConfirmed===true&&item.activeProcesses===0;
   const finish=()=>{
-    if(!sealed||children.some(item=>!item.evidence))return;
-    const evidence=children.map(item=>item.evidence),known=item=>item.treeConfirmed===true&&item.activeProcesses===0;
-    resolveCompletion({platform:process.platform,supervisor:'runtime-group',launched:evidence.some(item=>item.launched!==false),rootPid:null,rootExitCode:null,rootConfirmed:evidence.every(item=>item.rootConfirmed===true||item.launched===false&&known(item)),treeConfirmed:evidence.every(known),activeProcesses:evidence.every(known)?0:null,cancelled:stopping||evidence.some(item=>item.cancelled),failureCode:evidence.some(item=>!known(item))?'RUNTIME_GROUP_UNCONFIRMED':null,children:evidence});
+    if(!sealed||children.some(item=>!item.evidence||item.stopping))return;
+    const evidence=children.map(item=>item.evidence);
+    const result={platform:process.platform,supervisor:'runtime-group',launched:evidence.some(item=>item.launched!==false),rootPid:null,rootExitCode:null,rootConfirmed:evidence.every(item=>item.rootConfirmed===true||item.launched===false&&known(item)),treeConfirmed:evidence.every(known),activeProcesses:evidence.every(known)?0:null,cancelled:stopping||evidence.some(item=>item.cancelled),failureCode:evidence.some(item=>!known(item))?'RUNTIME_GROUP_UNCONFIRMED':null,children:evidence};
+    resolveCompletion(result);if(stopping)resolveStop(result);
   };
-  const stopChild=item=>{if(!item.stopped&&!item.evidence){item.stopped=true;Promise.resolve().then(()=>item.child.stop()).catch(()=>{});}};
+  const stopChild=item=>{
+    if(item.stopped||known(item.evidence))return;
+    item.stopped=true;item.stopping=true;
+    Promise.resolve().then(()=>item.child.stop()).then(evidence=>{if(evidence){item.evidence=evidence;item.cleaned=true;}},()=>{item.evidence||={rootConfirmed:false,treeConfirmed:false,activeProcesses:null};}).finally(()=>{item.stopping=false;finish();});
+  };
   return {
     completionEvidence,
     assertRunning(){if(stopping||sealed)throw Object.assign(new Error('GROUP_STOPPED'),{code:'GROUP_STOPPED',definitive:true});},
     add(child){
       const item={child};children.push(item);
-      Promise.resolve(child.completionEvidence).then(evidence=>{item.evidence=evidence;finish();},()=>{item.evidence={rootConfirmed:false,treeConfirmed:false,activeProcesses:null};finish();});
+      Promise.resolve(child.completionEvidence).then(evidence=>{if(!item.cleaned)item.evidence=evidence;finish();},()=>{if(!item.cleaned)item.evidence={rootConfirmed:false,treeConfirmed:false,activeProcesses:null};finish();});
       if(stopping||sealed)stopChild(item);
     },
-    stop(){if(!stopping){stopping=true;onStop();for(const item of children)stopChild(item);}return completionEvidence;},
+    stop(){if(!stopping){stopping=true;stopEvidence=new Promise(resolve=>{resolveStop=resolve;});onStop();for(const item of children)stopChild(item);finish();}return stopEvidence;},
     seal(){sealed=true;finish();},
   };
 }
