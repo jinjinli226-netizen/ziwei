@@ -31,16 +31,16 @@ export async function executeDshRuntime({baseUrl=process.env.ZIWEI_DSH_BASE_URL|
   if(!session) throw new Error('DSH session/create did not return sessionId');
   const requestId=crypto.randomUUID();
   return new Promise(resolve=>{
-    let socket,followId,eventsId,retryTimer,cancelTimer,terminalExit,settled=false,cancelling=false,cancelSent=false,promptSent=false,retries=0,currentTurn=null,targetTurn=null;
+    let socket,followId,eventsId,retryTimer,cancelTimer,terminalExit,pendingFailure,settled=false,cancelling=false,cancelSent=false,promptSent=false,retries=0,currentTurn=null,targetTurn=null;
     const evidence=createDshSessionEvidence({...sessionAuthority,botName,sessionId:session,requestId},()=>cancel());
     const seen=new Set(); const messages=new Map(); const liveText=new Map(); const attempts=new Map();
     const output=()=>[...new Map([...liveText,...messages]).values()].filter(Boolean).join('\n\n');
-    const stage=(value)=>onStage?.({...value,sessionId:session});
+    const stage=value=>{try{onStage?.({...value,sessionId:session});}catch(error){stopForFailure({status:'failed',code:'adapter_error',error:errorText(error)});}};
     const finish=value=>{
       if(settled)return;settled=true;clearTimeout(retryTimer);clearTimeout(cancelTimer);signal?.removeEventListener('abort',cancel);
       try{socket?.close();}catch{}
       const uncertain=promptSent&&!terminalExit?{status:'failed',code:'EXECUTION_UNCERTAIN',executionState:'uncertain'}:{};
-      resolve({...value,...uncertain,output:output(),sessionId:session,...(terminalExit?{sessionExit:terminalExit}:{})});
+      resolve({...value,...pendingFailure,...uncertain,output:output(),sessionId:session,...(terminalExit?{sessionExit:terminalExit}:{})});
     };
     const sendCancellation=async()=>{
       if(cancelSent||settled||targetTurn===null)return;cancelSent=true;
@@ -50,6 +50,11 @@ export async function executeDshRuntime({baseUrl=process.env.ZIWEI_DSH_BASE_URL|
       if(cancelling || settled)return;cancelling=true;
       cancelTimer=setTimeout(()=>finish({status:'failed',code:'EXECUTION_UNCERTAIN',executionState:'uncertain',error:'DSH 已请求取消当前任务，但 turn 终态未确认'}),cancellationTimeoutMs);
       await sendCancellation();
+    };
+    const stopForFailure=value=>{
+      if(settled)return;
+      pendingFailure ||= value;
+      if(promptSent)void cancel();else finish(value);
     };
     const publish=(key,text)=>{
       const before=liveText.get(key)||'';liveText.set(key,text);
@@ -116,7 +121,7 @@ export async function executeDshRuntime({baseUrl=process.env.ZIWEI_DSH_BASE_URL|
     const submit=()=>{
       if(promptSent || settled || cancelling)return;promptSent=true;
       void rpc(baseUrl,botName,'session/prompt',{request:{requestId,sessionId:session,mode:'queue',content:[{type:'text',text:String(prompt||'')}],clientTimeZone:'Asia/Shanghai'}},signal,fetchImpl).catch(error=>{
-        if(!signal?.aborted)finish({status:'failed',code:'prompt_failed',error:error.message});
+        if(!signal?.aborted)stopForFailure({status:'failed',code:'prompt_failed',error:error.message});
       });
     };
     const connect=()=>{
@@ -130,16 +135,17 @@ export async function executeDshRuntime({baseUrl=process.env.ZIWEI_DSH_BASE_URL|
       });
       activeSocket.on('message',raw=>{
         if(settled || socket!==activeSocket)return;
-        let frame;try{frame=JSON.parse(String(raw));}catch{finish({status:'failed',code:'invalid_frame',error:'DSH returned invalid stream JSON'});return;}
-        if(frame.type==='item' && (!frame.value || typeof frame.value!=='object')) {finish({status:'failed',code:'invalid_frame',error:'DSH stream item is missing its native value'});return;}
+        try {
+        let frame;try{frame=JSON.parse(String(raw));}catch{stopForFailure({status:'failed',code:'invalid_frame',error:'DSH returned invalid stream JSON'});return;}
+        if(frame.type==='item' && (!frame.value || typeof frame.value!=='object')) {stopForFailure({status:'failed',code:'invalid_frame',error:'DSH stream item is missing its native value'});return;}
         if(frame.streamId===thisEventsId && frame.type==='item') {
           const value=frame.value;
           if(value.type==='waterfall' && value.event==='approval/request' && value.agentId===session)stage({stage:'approval',message:'DSH 等待审批',detail:value.request?.toolName || '工具审批',requestId:value.eventId});
-          if(value.type==='emit' && value.event==='api-session/error' && value.args?.[0]===session && targetTurn!==null)finish({status:'failed',code:'session_error',error:errorText(value.args[1])});
+          if(value.type==='emit' && value.event==='api-session/error' && value.args?.[0]===session && targetTurn!==null)stopForFailure({status:'failed',code:'session_error',error:errorText(value.args[1])});
           return;
         }
         if(frame.streamId!==thisFollowId)return;
-        if(frame.type==='error'){finish({status:'failed',code:'stream_error',error:errorText(frame.error)});return;}
+        if(frame.type==='error'){stopForFailure({status:'failed',code:'stream_error',error:errorText(frame.error)});return;}
         if(frame.type==='end'){activeSocket.close();return;}
         if(frame.type!=='item')return;
         const value=frame.value;
@@ -150,12 +156,14 @@ export async function executeDshRuntime({baseUrl=process.env.ZIWEI_DSH_BASE_URL|
           submit();
         } else if(value.type==='event' || value.type==='chunks')acceptRecord(value);
         else if(value.type==='assistant-stream')acceptAssistant(value.frame);
+        } catch(error){stopForFailure({status:'failed',code:'adapter_error',error:errorText(error)});}
       });
-      activeSocket.on('error',()=>{});
+      activeSocket.on('error',error=>stopForFailure({status:'failed',code:'stream_error',error:errorText(error)}));
       activeSocket.on('close',()=>{
         if(settled || socket!==activeSocket)return;
-        if(retries>=3){finish({status:'failed',code:'stream_closed',error:'DSH 实时订阅连接中断，未收到当前 turn/end'});return;}
-        stage({stage:'progress',message:'DSH 正在恢复实时订阅',detail:`Bot ${botName} · session ${session}`});
+        stopForFailure({status:'failed',code:'stream_closed',error:'DSH 实时订阅连接中断，已请求取消当前 turn'});
+        if(settled||retries>=3)return;
+        stage({stage:'progress',message:'DSH 正在恢复订阅以核实停止',detail:`Bot ${botName} · session ${session}`});
         retryTimer=setTimeout(connect,200*2**retries++);
       });
     };

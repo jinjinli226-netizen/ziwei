@@ -130,3 +130,13 @@ test('DSH stop control recognizes the exact already durable session terminal',as
   const result=await d.instance.dispatch({id:'dsh-stop-control',type:'action.cancel',payload:{actionId:d.action.id}});
   assert.equal(result.status,'succeeded');assert.equal(result.result.targetResultAvailable,true);assert.equal(result.result.stopConfirmed,false);
 });
+
+for(const field of ['sessionId','requestId'])test(`DSH stop control rejects a cached terminal with mismatched ${field}`,async t=>{
+  const f=await dshFixture(t),d=dispatcher(t,f);await d.instance.dispatch(d.action);
+  const saved=JSON.parse(fs.readFileSync(d.settings.stateFile,'utf8'));
+  saved.completed[0].result.result.sessionExit[field]='unrelated-session-or-request';
+  fs.writeFileSync(d.settings.stateFile,JSON.stringify(saved));
+  const reopened=new ActionDispatcher({...d.settings,execute:()=>{throw Error('must not execute');}});
+  const result=await reopened.dispatch({id:'dsh-stop-mismatch-'+field,type:'action.cancel',payload:{actionId:d.action.id}});
+  assert.equal(result.status,'failed');assert.equal(result.result.targetResultAvailable,false);
+});

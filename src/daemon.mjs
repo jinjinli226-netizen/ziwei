@@ -263,7 +263,7 @@ export class ActionDispatcher {
     const entry=this.#findByActionId(this.#started,actionId,item=>item.actionId);
     if(!entry?.[1].dshBinding)return false;
     const [key,item]=entry,exit=this.#completed.get(key)?.result?.sessionExit;
-    return exit?.source==='dsh-native-session'&&exit.terminalConfirmed===true&&exit.actionId===item.actionId&&exit.employeeId===item.resourceBinding?.employeeId&&exit.botName===item.dshBinding.botName&&exit.conversationId===item.dshBinding.conversationId;
+    return exit?.source==='dsh-native-session'&&exit.terminalConfirmed===true&&exit.actionId===item.actionId&&exit.employeeId===item.resourceBinding?.employeeId&&exit.botName===item.dshBinding.botName&&exit.conversationId===item.dshBinding.conversationId&&exit.sessionId===item.dshBinding.sessionId&&exit.requestId===item.dshBinding.requestId;
   }
   async #runDshSession(action,key,executableAction,controller,{hardDeadline,idleTimeoutMs,enforceIdle}) {
     let supervision=null,sessionExit=null,stopReason=null,stopInvoked=false,executionSettled=false,resolveStop,resolveConfirmed;
@@ -303,10 +303,11 @@ export class ActionDispatcher {
         onStage:stage=>{if(stopReason)return;activity();this.#onEvent('action.stage',{actionId:action.id,type:action.type,stage:stage?.stage||'output',message:stage?.message||'DSH 执行活动',detail:stage?.detail||'',...(stage?.summary?{summary:stage.summary}:{}),progress:{phase:'stage',...stage}});}
       })).then(value=>({kind:'execution',value}),error=>({kind:'execution',error})).then(outcome=>{executionSettled=true;recover();return outcome;});
       const outcome=await Promise.race([execution,stopped]);
+      if(!sessionExit&&(outcome.error||outcome.value?.status==='failed'))requestStop('executor_error');
       if(stopReason){
         await bounded(Promise.all([execution,confirmed]));
         if(!sessionExit||!executionSettled){this.#quarantine(key,'DSH_SESSION_STOP_UNCONFIRMED');return this.#uncertain(action,'DSH_SESSION_STOP_UNCONFIRMED','DSH 已请求取消当前任务，但 turn 终态未确认',{result:receipt()});}
-        return this.#failure(action,stopReason==='cancelled'?'DSH execution cancelled':'DSH execution timed out',{code:stopReason==='cancelled'?'cancelled':'action_timeout',result:receipt()});
+        return this.#failure(action,stopReason==='cancelled'?'DSH execution cancelled':stopReason==='executor_error'?outcome.error||outcome.value?.error||'DSH executor failed':'DSH execution timed out',{code:stopReason==='cancelled'?'cancelled':stopReason==='executor_error'?'executor_failed':'action_timeout',result:receipt()});
       }
       if(!sessionExit&&supervision)await bounded(confirmed);
       if(!sessionExit){this.#quarantine(key,'DSH_SESSION_TERMINAL_UNCONFIRMED');return this.#uncertain(action,'DSH_SESSION_TERMINAL_UNCONFIRMED',outcome.error||outcome.value?.error||'未收到匹配当前请求的 DSH turn/end',{result:receipt()});}

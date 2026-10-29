@@ -9,7 +9,7 @@
 - 无显式配置时默认 `http://127.0.0.1:7878`。来源为 2026-10-29 只读核对的 `D:/dshbot/server.rs:56`（`SERVER_PORT_FIRST = 7878`）、`server.rs:3884` 起的原生候选端口逻辑，以及 `start.ps1:17` 的显式 `-Port` 传参行为。`README.md:20` 的 7879 配合 `.local/review-bots`，属于隔离验收示例，不能作为正式默认 endpoint。
 - 原生 Hub 可按其自身配置使用其他端口；此适配器不扫描、不按失败自动递增端口，也不启动 Hub。若 Hub 被显式放在其他端口，由本机 `ZIWEI_DSH_BASE_URL` 指向已核准的实际地址。
 - DSH 保留自身 provider、模型、MCP 和插件配置。该分支不准备 Hermes owned Profile、provider 凭据或 Codex / Hermes 专用 MCP，也不改其现有实现。
-- 每次请求保留当前会话绑定，调用 `session/create` 或续用指定 session，再通过 `session/prompt` 的 `requestId` 关联原生事件。断线只重建 follow，不重复提交 prompt。
+- 每次请求保留当前会话绑定，调用 `session/create` 或续用指定 session，再通过 `session/prompt` 的 `requestId` 关联原生事件。断线立即请求取消匹配本请求的 turn，重建 follow 只核实其终态，不重复提交 prompt。
 
 ## 独立的 session 终态
 
@@ -48,6 +48,7 @@ DSH 是常驻 Bot 中的一次 HTTP / WS session turn。本机没有创建新的
 ## 取消、预算与恢复
 
 - 保留已有 hard / 显式 idle 预算。取消只请求一次原生 `session/cancel`，继续 follow；cancel ACK、订阅 end、断线均不能确认 turn 已结束。
+- 依用户明确要求，流/会话错误、坏帧、输出 adapter 异常、prompt 传输失败、首次断线及 dispatcher owned executor 失败都立即请求停止本 action 的 turn，不等人工处理。已收到原生 `turn/end` 的 error / max-tokens 已结束，无需再取消或停止共享 Bot。
 - 尚未收到本次 request echo 时不取消正在运行的前一 turn；待目标 echo 后才请求本 session 取消，未能确认则保留未知状态。
 - 缺少匹配终态时返回 `EXECUTION_UNCERTAIN`，保留 started / quarantine 和原动作身份；重启不能重跑。晚到的同一次可信终态可解除原动作隔离并保存失败回执。
 - 已完成 session 的后续 stop control 只说明有可恢复的原动作回执；`stopConfirmed` 仍由投递层核对目标回执是否已被服务端确认。

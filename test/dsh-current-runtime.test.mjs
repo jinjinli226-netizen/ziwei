@@ -37,12 +37,13 @@ test('DSH remote user cancellation and max-token termination do not claim succes
     assert.equal(result.status,'failed');assert.equal(result.code,reason.kind==='aborted'?'cancelled':'max_tokens');
   }
 });
-test('DSH reconnect follows the same session and never resubmits prompt or replays committed output',{timeout:5000},async t=>{
+test('DSH disconnect cancels the current turn then follows its terminal without resubmitting or replaying output',{timeout:5000},async t=>{
   let request;let completed=false;
   const f=await dshFixture(t,{onPrompt:ctx=>{request=ctx.request;ctx.event(request.sessionId,'assistant/message',{turn:ctx.turn,step:0,message:{content:[{type:'text',text:'第一步'}]}});ctx.connections.at(-1).close();},onFollow:ctx=>{if(ctx.connections.length>1&&!completed){completed=true;setImmediate(()=>ctx.event(request.sessionId,'turn/end',{turn:ctx.session.turn,reason:{kind:'completed'}}));}}});
   const out=[];const result=await executeDshRuntime({baseUrl:f.baseUrl,...f.transport,botName:'research-bot',prompt:'继续到完成',onOutput:c=>out.push(c)});
-  assert.equal(result.status,'succeeded');assert.equal(result.output,'第一步');assert.equal(out.join(''),'第一步');
+  assert.equal(result.status,'failed');assert.equal(result.sessionExit.reason,'aborted');assert.equal(result.output,'第一步');assert.equal(out.join(''),'第一步');
   assert.equal(f.calls.filter(c=>c.method==='session/prompt').length,1);assert.equal(f.sessions.size,1);assert.ok(f.connections.length>1);
+  assert.equal(f.calls.filter(c=>c.method==='session/cancel').length,1);
 });
 test('native follow error frame is a failure rather than a successful empty answer',{timeout:4000},async t=>{
   const f=await dshFixture(t,{onPrompt:({connections})=>{const ws=connections.at(-1);ws.deliver({type:'error',streamId:ws.followId,error:{code:'session/not-found',message:'会话不存在'}});}});
@@ -66,9 +67,9 @@ test('a queued request ignores the preceding active turn until its own prompt ec
   assert.equal(result.output,'本次工作结果');assert.equal(out.join(''),'本次工作结果');
 });
 
-test('reconnect restores native compressed assistant prefix and does not duplicate streamed text',{timeout:5000},async t=>{
+test('stop confirmation reconnect restores native compressed assistant prefix without duplicate streamed text',{timeout:5000},async t=>{
   let request;let restored=false;
-  const f=await dshFixture(t,{onPrompt:ctx=>{
+  const f=await dshFixture(t,{cancelAckOnly:true,onPrompt:ctx=>{
     request=ctx.request;ctx.transient(request.sessionId,{type:'start',attemptId:3,turn:ctx.turn,step:0});
     ctx.transient(request.sessionId,{type:'chunk',attemptId:3,index:0,chunk:{type:'text-delta',text:'前'}});ctx.connections.at(-1).close();
   },onFollow:ctx=>{
@@ -77,7 +78,7 @@ test('reconnect restores native compressed assistant prefix and does not duplica
     setImmediate(()=>{ctx.transient(request.sessionId,{type:'chunk',attemptId:3,index:2,chunk:{type:'text-delta',text:'后'}});f.complete(request,{reply:'前半后'});});
   }});
   const out=[];const result=await executeDshRuntime({baseUrl:f.baseUrl,...f.transport,botName:'research-bot',prompt:'流式工作',onOutput:c=>out.push(c)});
-  assert.equal(result.output,'前半后');assert.equal(out.join(''),'前半后');assert.equal(f.calls.filter(c=>c.method==='session/prompt').length,1);
+  assert.equal(result.status,'failed');assert.equal(result.sessionExit.reason,'completed');assert.equal(result.output,'前半后');assert.equal(out.join(''),'前半后');assert.equal(f.calls.filter(c=>c.method==='session/prompt').length,1);assert.equal(f.calls.filter(c=>c.method==='session/cancel').length,1);
 });
 
 test('native command failure and approval frames project real activity with matching session',{timeout:4000},async t=>{
