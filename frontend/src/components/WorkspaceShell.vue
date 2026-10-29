@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
-import { Bot, ListTodo, GitBranch, CalendarDays, BookOpenText, UsersRound, Share2, Settings, Puzzle, House, Languages, CircleHelp, ChevronUp, ChevronDown, LayoutDashboard, Check, Plus, LogOut } from 'lucide-vue-next';
+import { Bot, ListTodo, GitBranch, CalendarDays, BookOpenText, UsersRound, Share2, Settings, Puzzle, House, Languages, CircleHelp, ChevronUp, ChevronDown, LayoutDashboard, Check, Plus, LogOut, PanelLeftOpen, PanelLeftClose } from 'lucide-vue-next';
 import { ZiButton, ZiFormField, ZiInput, ZiModal } from '@ziwei/ui';
 import ZiSelect from './ZiSelect.vue';
 const props = defineProps({ page: String, focused: Boolean, account: Object, workspace: Object, workspaces: { type: Array, default: () => [] }, language: { type: String, default: 'zh-CN' } });
@@ -11,6 +11,9 @@ const sectionKeys = [
   { key:'system', items:[['invite','invite',Share2],['ziwei-connect','ziweiConnect',Share2],['settings','settings',Settings],['open','open',Puzzle]] }
 ];
 const menu = ref('');
+const botNavigationExpanded = ref(false);
+const botNavigationCollapsed = computed(() => props.page==='bots' && !props.focused && !botNavigationExpanded.value);
+watch(() => props.page, page => { if (page!=='bots') botNavigationExpanded.value=false; });
 const language = ref(props.language || localStorage.getItem('ziwei.language') || 'zh-CN');
 const help = ref(false);
 const user = computed(() => props.account || {name:'',email:'',role:null});
@@ -55,8 +58,9 @@ function submitWorkspaceCreate() { if (!workspaceCreateForm.value.name.trim()) r
 function requestLogout() { menu.value=''; emit('logout'); }
 </script>
 <template>
-  <div class="workspace-shell" :class="{'focused-workspace':focused}" @keydown.esc="handleShellKeydown">
+  <div class="workspace-shell" :class="{'focused-workspace':focused,'bot-navigation-collapsed':botNavigationCollapsed}" @keydown.esc="handleShellKeydown">
     <header v-if="!focused" class="workspace-topbar">
+      <button v-if="page==='bots'" type="button" class="shell-navigation-toggle" :title="botNavigationCollapsed?'展开工作区导航':'收起工作区导航'" :aria-label="botNavigationCollapsed?'展开工作区导航':'收起工作区导航'" :aria-expanded="!botNavigationCollapsed" aria-controls="workspace-navigation" @click="botNavigationExpanded=!botNavigationExpanded;menu=''"><component :is="botNavigationCollapsed?PanelLeftOpen:PanelLeftClose" :size="19"/></button>
       <button class="product-brand" @click="go('home')" aria-label="紫薇主页"><img src="/ziwei-logo.png" alt=""/><strong>紫薇</strong></button>
       <div class="shell-menu-anchor">
         <button class="workspace-picker" aria-haspopup="menu" :aria-expanded="menu==='workspace'" @click="menu=menu==='workspace'?'':'workspace'"><span class="workspace-initial">{{ workspace.name?.slice(0,1) || '紫' }}</span>{{ workspace.slug || workspace.name }}<ChevronDown :size="14"/></button>
@@ -65,16 +69,18 @@ function requestLogout() { menu.value=''; emit('logout'); }
       <button class="shell-home" @click="go('home')"><LayoutDashboard :size="16"/>{{ t.home }}</button>
     </header>
     <div class="workspace-body">
-      <aside v-if="!focused" class="workspace-sidebar" aria-label="工作区导航">
+      <aside v-if="!focused" id="workspace-navigation" class="workspace-sidebar" aria-label="工作区导航">
+        <div class="sidebar-sections">
         <section v-for="(section,index) in sections" :key="section.label" class="sidebar-section" :class="{'project-section':index===0,'settings-section':index===1}">
           <h2>{{ section.label }}</h2>
           <nav :aria-label="section.label">
-            <button v-for="[key,label,icon] in section.items" :key="key" :class="{selected:page===key || (key==='workflow' && page==='automations')}" :aria-current="(page===key || (key==='workflow' && page==='automations'))?'page':undefined" @click="go(key)"><component :is="icon" :size="19" :stroke-width="1.8"/><span>{{ label }}</span></button>
+            <button v-for="[key,label,icon] in section.items" :key="key" :class="{selected:page===key || (key==='workflow' && page==='automations')}" :title="label" :aria-label="label" :aria-current="(page===key || (key==='workflow' && page==='automations'))?'page':undefined" @click="go(key)"><component :is="icon" :size="19" :stroke-width="1.8"/><span>{{ label }}</span></button>
           </nav>
         </section>
+        </div>
         <footer class="sidebar-footer">
           <div class="shell-menu-anchor">
-            <button class="sidebar-account" aria-haspopup="menu" @click="menu=menu==='account'?'':'account'" :aria-expanded="menu==='account'"><span class="account-initial">{{ user.name?.slice(0,1) || '?' }}</span><span class="account-info"><strong>{{ user.name || '当前账号' }}</strong><small>{{ user.email || (user.role ? (user.role==='owner' ? t.owner : t.member) : '') }}</small></span><ChevronUp :size="17"/></button>
+            <button class="sidebar-account" :title="user.name || '当前账号'" :aria-label="(user.name || '当前账号')+'账号菜单'" aria-haspopup="menu" @click="menu=menu==='account'?'':'account'" :aria-expanded="menu==='account'"><span class="account-initial">{{ user.name?.slice(0,1) || '?' }}</span><span class="account-info"><strong>{{ user.name || '当前账号' }}</strong><small>{{ user.email || (user.role ? (user.role==='owner' ? t.owner : t.member) : '') }}</small></span><ChevronUp :size="17"/></button>
             <div v-if="menu==='account'" class="shell-popup account-popup"><strong>{{ user.name || '当前账号' }}</strong><small>{{ user.email }}</small><span>{{ user.role==='owner'?t.owner:user.role==='admin'?'管理员':t.member }}</span><button @click="go('settings')"><Settings :size="17"/>{{ t.workspaceSettings }}</button><button @click="requestLogout"><LogOut :size="17"/>{{ t.logout }}</button></div>
           </div>
           <div class="sidebar-utilities">
@@ -84,7 +90,7 @@ function requestLogout() { menu.value=''; emit('logout'); }
           </div>
         </footer>
       </aside>
-      <main class="workspace-panel" :class="{'issues-panel':page==='issues','docs-panel':page==='docs','members-panel':page==='members','runtime-panel':page==='runtimes'}"><slot/></main>
+      <main class="workspace-panel" :class="{'bots-panel':page==='bots','issues-panel':page==='issues','docs-panel':page==='docs','members-panel':page==='members','runtime-panel':page==='runtimes'}"><slot/></main>
     </div>
     <ZiModal v-if="help" :title="t.helpTitle" @close="help=false"><div class="shell-help"><p>{{ t.helpTask }}</p><p>{{ t.helpTeam }}</p><button @click="help=false;go('issues')">{{ t.openTask }}</button></div></ZiModal>
     <ZiModal v-if="workspaceCreateOpen" title="新建工作区" @close="workspaceCreateOpen=false"><div class="form-stack"><p class="modal-copy">创建后会生成独立工作区和路由。团队工作区可邀请成员共享设备与数字员工。</p><ZiFormField label="名称" required><ZiInput v-model="workspaceCreateForm.name" autofocus placeholder="例如：内容运营团队"/></ZiFormField><ZiFormField label="标识" hint="仅使用小写字母、数字、下划线或短横线"><ZiInput v-model="workspaceCreateForm.slug" placeholder="例如：content-ops"/></ZiFormField><ZiFormField label="类型"><ZiSelect v-model="workspaceCreateForm.kind" class="workspace-kind-select" :options="[{label:'个人工作区',value:'personal'},{label:'团队工作区',value:'team'}]"/></ZiFormField><div class="form-actions"><ZiButton variant="secondary" @click="workspaceCreateOpen=false">取消</ZiButton><ZiButton :disabled="!workspaceCreateForm.name.trim()" @click="submitWorkspaceCreate">创建工作区</ZiButton></div></div></ZiModal>

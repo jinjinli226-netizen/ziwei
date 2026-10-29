@@ -27,6 +27,14 @@
 .sidebar-utilities>button:first-child { color:var(--ziwei-ink); }
 .workspace-panel { position:relative; min-width:0; min-height:0; overflow:auto; border:1px solid #dde2eb; border-radius:13px; background:#edf4fb; box-shadow:0 3px 18px #384b660b; }
 .workspace-panel> .content { max-width:none; padding:28px; }
+.shell-navigation-toggle { display:grid; place-items:center; width:32px; height:32px; flex:none; padding:0; border:0; border-radius:7px; color:#657184; background:transparent; cursor:pointer; }
+.shell-navigation-toggle:hover { background:#edf4fb; }
+.shell-navigation-toggle:focus-visible { outline:2px solid var(--ziwei-violet); outline-offset:2px; }
+.sidebar-sections { display:contents; }
+.workspace-shell:has(.bots-panel) .workspace-body { padding:0; }
+.workspace-panel.bots-panel { overflow:hidden; border:0; border-radius:0; background:#fff; box-shadow:none; }
+.workspace-panel.bots-panel > .content { display:flex; flex-direction:column; height:100%; min-height:0; min-width:0; box-sizing:border-box; padding:0; overflow:hidden; }
+.bots-panel > .content > .bot-workbench { flex:1; min-height:0; width:100%; }
 .focused-workspace{background:#fff;overflow:hidden}
 .focused-workspace .workspace-body{display:block;padding:0;min-width:0}
 .focused-workspace .workspace-panel{height:100%;border:0;border-radius:0;box-shadow:none;overflow:hidden;background:#fff}
@@ -60,6 +68,29 @@
   .sidebar-account .account-info, .sidebar-account > svg { display:none; }
   .sidebar-utilities { flex-direction:column; align-items:center; }
   .account-info small { font-size:10px; }
+}
+.bot-navigation-collapsed .workspace-body { grid-template-columns:68px minmax(0,1fr); }
+.bot-navigation-collapsed .workspace-sidebar { position:relative; z-index:30; padding:12px 7px 10px; overflow:visible; border:0; border-right:1px solid #e0e4ec; border-radius:0; box-shadow:none; }
+.bot-navigation-collapsed .sidebar-sections { display:flex; flex-direction:column; flex:1; min-height:0; overflow-y:auto; overflow-x:hidden; }
+.bot-navigation-collapsed .sidebar-section { margin-bottom:12px; }
+.bot-navigation-collapsed .sidebar-section.project-section { flex:1 0 auto; min-height:0; }
+.bot-navigation-collapsed .sidebar-section h2,.bot-navigation-collapsed .sidebar-section nav button span { display:none; }
+.bot-navigation-collapsed .sidebar-section nav button { justify-content:center; gap:0; padding:8px 0; }
+.bot-navigation-collapsed .sidebar-account { justify-content:center; padding:8px 0 10px; }
+.bot-navigation-collapsed .sidebar-account .account-info,.bot-navigation-collapsed .sidebar-account > svg { display:none; }
+.bot-navigation-collapsed .sidebar-utilities { flex-direction:column; align-items:center; }
+.bot-navigation-collapsed .account-popup,.bot-navigation-collapsed .language-popup { left:calc(100% + 12px); right:auto; bottom:0; }
+@media (max-width:700px) {
+  .workspace-shell:has(.bots-panel):not(.bot-navigation-collapsed) .workspace-body { position:relative; }
+  .workspace-shell:has(.bots-panel):not(.bot-navigation-collapsed) .bots-panel { grid-column:2; }
+  .workspace-shell:has(.bots-panel):not(.bot-navigation-collapsed) .workspace-sidebar { position:absolute; z-index:60; top:8px; bottom:8px; left:8px; width:232px; box-sizing:border-box; padding:16px 10px 10px; }
+  .workspace-shell:has(.bots-panel):not(.bot-navigation-collapsed) .sidebar-section h2 { display:block; }
+  .workspace-shell:has(.bots-panel):not(.bot-navigation-collapsed) .sidebar-section nav button { justify-content:flex-start; gap:11px; padding:8px 10px; }
+  .workspace-shell:has(.bots-panel):not(.bot-navigation-collapsed) .sidebar-section nav button span { display:inline; }
+  .workspace-shell:has(.bots-panel):not(.bot-navigation-collapsed) .sidebar-account { justify-content:flex-start; gap:9px; padding:10px 9px 14px; }
+  .workspace-shell:has(.bots-panel):not(.bot-navigation-collapsed) .sidebar-account .account-info { display:flex; }
+  .workspace-shell:has(.bots-panel):not(.bot-navigation-collapsed) .sidebar-account > svg { display:block; }
+  .workspace-shell:has(.bots-panel):not(.bot-navigation-collapsed) .sidebar-utilities { flex-direction:row; justify-content:flex-end; }
 }
 
 /* Task page: faithful board geometry and controls */
