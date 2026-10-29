@@ -224,6 +224,9 @@ export const api = {
   inspectConversationDirectory: (id, body = {}) => request(`/api/conversations/${encodeURIComponent(id)}/workdir/inspect`, { method:'POST', body:JSON.stringify(body) }),
   conversationDirectoryAction: (id, actionId) => request(`/api/conversations/${encodeURIComponent(id)}/workdir/actions/${encodeURIComponent(actionId)}`),
   addConversationMessage: (id, body) => request(`/api/conversations/${id}/messages`, { method:'POST', body:JSON.stringify(body) }),
+  pauseConversationQueue: id => request(`/api/conversations/${encodeURIComponent(id)}/queue/pause`, {method:'POST',body:'{}'}),
+  resumeConversationQueue: id => request(`/api/conversations/${encodeURIComponent(id)}/queue/resume`, {method:'POST',body:'{}'}),
+  removeConversationQueueItem: (id, actionId) => request(`/api/conversations/${encodeURIComponent(id)}/queue/${encodeURIComponent(actionId)}`, {method:'DELETE'}),
   archiveConversation: (id, archived = true) => request(`/api/conversations/${id}/archive`, { method:'POST', body:JSON.stringify({archived}) }),
   streamUrl: () => `${API_BASE}/api/workspaces/${encodeURIComponent(workspaceSlug())}/notifications/stream`,
   websocketUrl: () => `${API_BASE.replace(/^http/i, 'ws')}/api/workspaces/${encodeURIComponent(workspaceSlug())}/notifications/ws`

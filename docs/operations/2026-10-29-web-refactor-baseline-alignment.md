@@ -1,6 +1,6 @@
 # 网页重构基线纠正
 
-核对日期：2026-10-29。仅对齐源码；没有发布、升级正式客户端或重放业务。现网材料来自 2026-10-28 部署回执，本轮未重新连接生产。
+核对日期：2026-10-29。仅对齐源码；没有发布、升级正式客户端或重放业务。部署材料包含 2026-10-28 回执及另一任务在 2026-10-29 提供的只读状态，本轮未重新连接生产。
 
 | GitHub main | 当前重构基线 | 已部署平台回执 | 本机安装 |
 | --- | --- | --- | --- |
@@ -9,6 +9,8 @@
 基线分支包含当前 main，以及按顺序的 `343bfbe`（失败终态）、`b5a54bc`（能力界面清理）、`8e4f37a`（员工主动回填）。已用 Git 祖先关系确认。
 
 部署状态回执位于本机 `D:/AINavtie/ops/ziwei/capability-reporting-rollout-20261028/DEPLOYMENT-STATUS.json`，详细验收为同目录 `DEPLOYMENT-ACCEPTANCE.json`。回执记录平台部署、Web/API 与本机一次 CLI/MCP 安装核验，必需部署待办为空；并不表示所有员工或设备均已在线验收。关联证据 hash 已由本轮只读核对。
+
+2026-10-29 05:36 UTC 的后续只读观测仍指向同一 release，但 Workspace API 为 `activating/auto-restart`，观测到重启计数 513；有限日志没有建立其具体原因。记录为 `D:/AINavtie/ops/ziwei/version-baseline-readonly-20261029/SUMMARY.json`。独立生态 API 的 `member_configuration` 错误由其他任务处理，不能据此推断 Workspace API 同因，也不能把昨天的部署回执当成今天服务健康的证明。本分支不接管服务修复或部署。
 
 正式 daemon 当前 `127.0.0.1:20242` 无监听，配置 API 为 `https://qzelynth.top/`，workspace 为空。Workspace CLI 现有统一身份槽属于 `https://ziwei.qzelynth.top`、person、bigtron。这两层身份和配置不得互相覆盖。
 
