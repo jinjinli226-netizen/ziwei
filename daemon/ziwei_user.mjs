@@ -9,7 +9,8 @@ import { createActionScheduler, isCancellationAction } from '../src/daemon-actio
 import { createActionDelivery, ACTION_TRANSPORT_BUDGETS } from '../src/daemon-action-delivery.mjs';
 import { createLocalActionExecutor } from '../src/local-action.mjs';
 import { redactSecrets } from '../src/redaction.mjs';
-import { discoverInstalledRuntimes, terminalMcpStatus } from '../src/runtime-adapters.mjs';
+import { terminalMcpStatus } from '../src/runtime-adapters.mjs';
+import { createRuntimeDiscovery } from '../src/dsh-runtime-discovery.mjs';
 import { readA2AToken } from '../backend/a2a-auth.mjs';
 import { createManagementBootstrap, clientBuildIdentity } from '../src/management-bootstrap.mjs';
 import { defaultUserDir, resolveConfigPath, resolveDaemonDataDirectory, resolveWorkspaceConnections, claimWorkspaceGrant } from './config.mjs';
@@ -160,7 +161,8 @@ let lastHeartbeat = null;
 let lastHeartbeatAt = 0;
 let missingWorkspaceLogged = false;
 let lastPoll = null;
-let runtimeDiscovery = discoverInstalledRuntimes({ force: true });
+const discoverRuntimes=createRuntimeDiscovery();
+let runtimeDiscovery = await discoverRuntimes({ force: true });
 let heartbeatTimer;
 let pollTimer;
 let draining = false;
@@ -208,7 +210,7 @@ async function heartbeat() {
   }
   // Reuse the bounded discovery TTL on periodic heartbeats. Starting and
   // explicit profile refresh still force probes; cached checkedAt stays real.
-  runtimeDiscovery = discoverInstalledRuntimes();
+  runtimeDiscovery = await discoverRuntimes();
   await Promise.allSettled([...connections.values()].map(heartbeatConnection));
 }
 function heartbeatConnection(connection) {
@@ -296,12 +298,12 @@ async function postAction(connection, pathname, body, { timeoutMs = ACTION_TRANS
   if(/\/a2a\/v1\/actions\/[^/]+\/result$/.test(pathname))headers['x-ziwei-bot-secret-protocol']='1';
   const response = await fetch(`${config.apiBase}${pathname}`, { method:'POST', headers, body:JSON.stringify(body), signal:AbortSignal.timeout(timeoutMs) });
   let payload;try { payload=await response.json(); } catch { throw Object.assign(new Error(`Invalid A2A response (HTTP ${response.status})`), response.ok ? {} : {status:response.status}); }
-  if (!response.ok) throw Object.assign(new Error(payload.error || `A2A HTTP ${response.status}`), {status:response.status});
+  if (!response.ok) throw Object.assign(new Error(payload.error || `A2A HTTP ${response.status}`), {status:response.status,...(typeof payload.code==='string'?{code:payload.code}:{})});
   return payload;
 }
 async function refreshRuntimeDiscovery(connection) {
   const config = connection.config;
-  runtimeDiscovery = discoverInstalledRuntimes({ force: true });
+  runtimeDiscovery = await discoverRuntimes({ force: true });
   if (!String(config.workspace || '').trim()) return;
   try {
     await fetch(`${config.apiBase}/api/workspaces/${encodeURIComponent(config.workspace)}/runtimes/register`, {
