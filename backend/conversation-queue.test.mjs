@@ -113,6 +113,9 @@ test('Hermes accepts queued input without replacing its occupied action or bypas
  const removed=f.repo.addConversationMessage(bot.main_conversation_id,{content:'HERMES_REMOVED_SECRET'}),last=f.repo.addConversationMessage(bot.main_conversation_id,{content:'AFTER_REMOVAL'});
  f.repo.removeConversationQueueItem(bot.main_conversation_id,removed.execution.id);
  f.repo.resultA2AAction(first.execution.id,{status:'succeeded',result:{output:'FIRST_REPLY',nativeSessionId:'fixture-hermes-session'}});
+ assert.throws(()=>bots.update('test-111',bot.id,{expectedRevision:bot.revision,config:{...bot.config,maxTurns:8}}),error=>error.code==='BOT_QUEUED_INPUT_PENDING');
+ assert.throws(()=>bots.update('test-111',bot.id,{expectedRevision:bot.revision,deferUntilIdle:true,config:{...bot.config,maxTurns:8}}),error=>error.code==='BOT_QUEUED_INPUT_PENDING');
+ assert.equal(bots.update('test-111',bot.id,{expectedRevision:bot.revision,employee:{name:'Queue Hermes renamed'}}).revision,bot.revision);
  const continued=f.repo.ackA2AAction(next.execution.id,{deviceId:'queue-pc'});
  assert.equal(continued.payload.hermesBot.conversationId,bot.main_conversation_id);assert.equal(continued.payload.profile,first.execution.payload.profile);
  assert.equal(f.repo.db.prepare('SELECT active_action_id FROM hermes_bots WHERE employee_id=?').get(bot.id).active_action_id,next.execution.id);

@@ -308,9 +308,13 @@ export function createBotService(repo, management) {
       },actionId=>management.action(slug,actionId,context))};
     },
     update(slug,id,input={},context={}) {return atomic(()=>{
-      if(input.deferUntilIdle===true)return deferredConfig.enqueue(slug,id,input,context);
+      const {row,employee}=resolve(slug,id,context);
+      const queued=db.prepare(`SELECT 1 FROM a2a_actions a JOIN conversation_messages m ON m.id=json_extract(a.payload_json,'$.messageId') JOIN conversations c ON c.id=m.conversation_id
+        WHERE a.workspace_id=? AND c.workspace_id=a.workspace_id AND c.employee_id=? AND a.type='conversation.execute' AND a.status='pending' AND json_valid(a.payload_json)
+          AND json_extract(a.payload_json,'$.employeeId')=c.employee_id AND json_extract(a.payload_json,'$.conversationId')=c.id LIMIT 1`).get(row.workspace_id,id);
+      if(input.deferUntilIdle===true){if(queued)throw botFailure('BOT_QUEUED_INPUT_PENDING','此员工还有待发消息；请先发送或移除待发消息，再更改运行配置');return deferredConfig.enqueue(slug,id,input,context);}
       if(input.deferUntilIdle!==undefined&&input.deferUntilIdle!==false||input.connectMcpServers!==undefined)throw botFailure('BOT_DEFERRED_INPUT_INVALID','自动连接 MCP 需要明确 deferUntilIdle:true');
-      const {row,employee}=resolve(slug,id,context);revision(row,input);
+      revision(row,input);
       const patch=input.employee || {};
       const allowed=['name','avatar','description','persona','instructions','skills','model','visibility'];
       if(Object.keys(patch).some(key=>!allowed.includes(key)))throw botFailure('BOT_PATCH_UNSUPPORTED','Bot 员工修改仅支持 name/avatar/description/persona/instructions/skills/model/visibility；电脑/profile迁移不允许隐式执行',400);
@@ -318,6 +322,7 @@ export function createBotService(repo, management) {
       const effectiveModel=Object.hasOwn(patch,'model')?patch.model:employee.model_id;
       if(config.provider&&(effectiveModel||config.provider!==parse(row.config_json)?.provider))resolveBotProviderRoute(config,effectiveModel,{});
       const runtimeChanged=canonical(config)!==canonical(parse(row.config_json)) || ['persona','instructions','skills','model'].some(key=>Object.hasOwn(patch,key)&&canonical(patch[key])!==canonical(key==='model'?employee.model_id:employee[key]));
+      if(runtimeChanged&&queued)throw botFailure('BOT_QUEUED_INPUT_PENDING','此员工还有待发消息；请先发送或移除待发消息，再更改运行配置');
       if(runtimeChanged)assertBotExecution(db,row.workspace_id,{employeeId:id},{validation:true});
       if(Object.keys(patch).length)management.updateEmployee(slug,id,patch,{...context,botConfigurationWrite:true});
       if(runtimeChanged)db.prepare("UPDATE hermes_bots SET config_json=?,revision=revision+1,control_state='draft',control_epoch=control_epoch+1,validated_revision=NULL,updated_at=? WHERE employee_id=?").run(JSON.stringify(config),now(),id);

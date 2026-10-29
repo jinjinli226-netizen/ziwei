@@ -110,8 +110,11 @@ test('native session maintenance can start without completing or retrying the ol
   assert.notEqual(next.id,f.action.id);assert.equal(next.type,'hermes.bot.native');assert.equal(f.repo.db.prepare('SELECT result_json FROM a2a_actions WHERE id=?').get(f.action.id).result_json,before);
 });
 
-test('the same Bot still rejects a new chat when the original write has no final receipt',t=>{
+test('the same Bot queues a new chat but cannot ACK it while the original write has no final receipt',t=>{
   const f=liveRepositoryFixture(t);for(const call of f.failure.result.terminalMcp.toolCalls)if(call.commandId==='write-0'){call.commandStatus=call.status='queued';call.commandExecutionState='pending';}
   f.repo.resultA2AAction(f.action.id,{status:'failed',error:'Original write not observed',result:f.failure.result});
-  assert.throws(()=>f.repo.addConversationMessage(f.bot.main_conversation_id,{content:'new work'}),{code:'BOT_BUSY'});
+  const queued=f.repo.addConversationMessage(f.bot.main_conversation_id,{content:'new work'});
+  assert.equal(queued.queue_status,'queued');
+  f.repo.resumeConversationQueue(f.bot.main_conversation_id);
+  assert.throws(()=>f.repo.ackA2AAction(queued.execution.id,{deviceId:f.action.payload.deviceId}),{code:'BOT_BUSY'});
 });
