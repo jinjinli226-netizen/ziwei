@@ -157,7 +157,9 @@ test('second upgrade advances one generation, retains the first deadline and rej
 });
 
 test('a genuine ordinary conversation model override is retained without requiring the employee default model',async t=>{
- const f=fixture(t),p=await f.prepare();f.repo.updateEmployee(f.employee.id,{model:'m1'},f.actor);
+ const f=fixture(t),p=await f.prepare();
+ f.repo.resultA2AAction(f.action.id,{deviceId:f.pair.deviceId,status:'succeeded',result:{output:'Fixture setup completed before override'}});
+ f.repo.updateEmployee(f.employee.id,{model:'m1'},f.actor);
  const conversation=f.repo.createConversation(SLUG,{employeeId:f.employee.id,modelId:'m2',workingDirectory:p.receipt.cwd}),sent=f.repo.addConversationMessage(conversation.id,{content:'Keep the conversation model'}),action=f.repo.getA2AAction(sent.execution.id);assert.equal(action.payload.model,'m2');assert.equal(f.repo.getEmployee(f.employee.id).model_id,'m1');f.repo.ackA2AAction(action.id,{deviceId:f.pair.deviceId});
  const receipt={...p.receipt,actionId:action.id,executionBinding:f.repo.authorizeActionExecution(action.id,{deviceId:f.pair.deviceId}).executionBinding};assert.equal(f.service.checkpoint(action.id,{updateId:p.update.id,claimToken:p.claimToken,receipt},f.credential()).committed,true);f.installed(p);
  assert.equal(f.service.resume(action.id,{updateId:p.update.id,checkpointDigest:DIGEST,clientBuild:TARGET},f.credential()).allowed,true);
@@ -165,7 +167,9 @@ test('a genuine ordinary conversation model override is retained without requiri
 });
 
 for(const override of ['profile','device'])test(`ordinary message ${override} override follows its genuine wire/admission rather than employee defaults`,async t=>{
- const f=fixture(t),p=await f.prepare();let pair=f.pair,host=HOST,update=p.update,claimToken=p.claimToken,profile='other';
+ const f=fixture(t),p=await f.prepare();
+ f.repo.resultA2AAction(f.action.id,{deviceId:f.pair.deviceId,status:'succeeded',result:{output:'Fixture setup completed before override'}});
+ let pair=f.pair,host=HOST,update=p.update,claimToken=p.claimToken,profile='other';
  if(override==='device'){
   profile='default';host='8'.repeat(64);pair=f.repo.claimDevicePairing({code:f.repo.createDevicePairing(SLUG,{name:'Different authorized computer'}).code});f.repo.heartbeatDevice(SLUG,{deviceId:pair.deviceId,os:'Windows',pid:1001,clientBuild:OLD,runtimeDiscovery:{features:[REMOTE_UPDATE_FEATURE],maintenanceHostId:host}});
   update=(await f.updates.create(SLUG,pair.deviceId,{idempotencyKey:'message-device-override-update',waitForIdle:true},f.actor)).request;const credential=f.repo.authenticateDeviceToken(pair.deviceToken);claimToken=f.updates.claim(SLUG,pair.deviceId,update.id,{hostId:host,clientBuild:OLD,pid:1001},credential).claimToken;f.updates.progress(SLUG,pair.deviceId,update.id,{state:'waiting_idle',hostId:host,clientBuild:OLD,claimToken},credential);
