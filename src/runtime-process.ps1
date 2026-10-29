@@ -74,7 +74,7 @@ public static class ZiweiRuntimeJob {
     PROCESS_INFORMATION process=new PROCESS_INFORMATION();
     FileStream runtimeInput=null,runtimeOutput=null,runtimeError=null;
     Thread outputPump=null,errorPump=null;
-    bool assigned=false,launched=false,attributesReady=false;
+    bool assigned=false,launched=false,attributesReady=false,rootReceiptWritten=false;
     string step="PREPARE";
     try {
       directory=Path.GetFullPath(directory);
@@ -84,7 +84,7 @@ public static class ZiweiRuntimeJob {
       Directory.SetAccessControl(directory,acl);
       Stream standardInput=Console.OpenStandardInput();
       Dictionary<string,object> request=Request(standardInput);
-      bool cleanupOnFailure=request.ContainsKey("cleanupOnFailure") && request["cleanupOnFailure"] is bool && (bool)request["cleanupOnFailure"];
+      bool cleanupOnFailure=!request.ContainsKey("cleanupOnFailure") || !(request["cleanupOnFailure"] is bool) || (bool)request["cleanupOnFailure"];
       parent=OpenProcess(0x00100000,false,Convert.ToUInt32(request["parentPid"]));
       Check(parent!=IntPtr.Zero,"OPEN_PARENT");
       if(Cancelled(directory,nonce) || WaitForSingleObject(parent,0)==0) { result["cancelled"]=true; result["treeConfirmed"]=true; result["activeProcesses"]=0; result["failureCode"]="RUNTIME_CANCELLED_BEFORE_LAUNCH"; Receipt(directory,"result.json",result); return 0; }
@@ -169,6 +169,24 @@ public static class ZiweiRuntimeJob {
         step="RELEASE_COMPLETED_JOB"; limits.basic.flags=0;
         Check(SetInformationJobObject(job,9,ref limits,(uint)Marshal.SizeOf(typeof(EXTENDED_LIMIT))),step);
         result["backgroundProcessesRetained"]=count>0 && (bool)result["rootConfirmed"] && result["failureCode"]==null;
+        if((bool)result["backgroundProcessesRetained"]) {
+          // Keep the original handle: a Job cannot be reopened after its last handle closes.
+          result["retainedHandoff"]=true; Receipt(directory,"result.json",result); rootReceiptWritten=true;
+          while((count=Active(job))>0 && WaitForSingleObject(parent,0)!=0) {
+            if(Cancelled(directory,nonce)) {
+              result["cancelled"]=true; step="REAP_RETAINED_JOB";
+              Check(TerminateJobObject(job,1),step);
+              DateTime deadline=DateTime.UtcNow.AddSeconds(10);
+              while((count=Active(job))>0 && DateTime.UtcNow<deadline) Thread.Sleep(20);
+              if(count!=0) throw new Exception("JOB_NOT_EMPTY");
+              break;
+            }
+            Thread.Sleep(30);
+          }
+          result["activeProcesses"]=count; result["treeConfirmed"]=count==0;
+          result["backgroundProcessesRetained"]=count>0 && !(bool)result["cancelled"];
+          result["retainedHandoff"]=false;
+        }
       }
     } catch(Exception error) {
       result["backgroundProcessesRetained"]=false;
@@ -188,7 +206,7 @@ public static class ZiweiRuntimeJob {
       if(handleList!=IntPtr.Zero) Marshal.FreeHGlobal(handleList);
       if(environment!=IntPtr.Zero) Marshal.FreeHGlobal(environment);
     }
-    Receipt(directory,"result.json",result);
+    Receipt(directory,rootReceiptWritten?"cleanup.json":"result.json",result);
     return result["failureCode"]==null?0:121;
   }
 }

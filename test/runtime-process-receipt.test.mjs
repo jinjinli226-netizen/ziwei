@@ -34,11 +34,12 @@ test('Windows receipt reader retains only explicit, consistent background handof
   syncBuiltinESMExports();
   const cases = [
     { name: 'successful root with retained background', expected: true },
-    { name: 'ordinary nonzero CLI exit with retained background', patch: { rootExitCode: 23 }, expected: true },
+    { name: 'explicit failed-root cleanup opt-out retains legacy evidence', cleanupOnFailure: false, patch: { rootExitCode: 23 }, expected: true },
+    { name: 'default failed root cannot claim retained background', patch: { rootExitCode: 23 }, failureCode: 'RUNTIME_FAILED_JOB_CLEANUP_UNCONFIRMED' },
     { name: 'model success may retain a background service', cleanupOnFailure: true, expected: true },
     { name: 'model failure cannot claim retained background', cleanupOnFailure: true, patch: { rootExitCode: 1 }, failureCode: 'RUNTIME_FAILED_JOB_CLEANUP_UNCONFIRMED' },
     { name: 'model failed Job has actually been emptied', cleanupOnFailure: true, patch: { rootExitCode: 1, treeConfirmed: true, activeProcesses: 0, backgroundProcessesRetained: false } },
-    { name: 'string policy cannot enable failed-root cleanup', cleanupOnFailure: 'true', patch: { rootExitCode: 23 }, expected: true },
+    { name: 'a nonboolean policy keeps the default failed-root cleanup', cleanupOnFailure: 'true', patch: { rootExitCode: 23 }, failureCode: 'RUNTIME_FAILED_JOB_CLEANUP_UNCONFIRMED' },
     { name: 'legacy receipt does not infer retention', patch: { backgroundProcessesRetained: undefined } },
     { name: 'explicit false remains false', patch: { backgroundProcessesRetained: false } },
     { name: 'string marker is not evidence', patch: { backgroundProcessesRetained: 'true' } },
@@ -61,7 +62,7 @@ test('Windows receipt reader retains only explicit, consistent background handof
   ];
   for (const item of cases) {
     const runtime = spawnSupervisedRuntime({ command: process.execPath, args: [], env: {}, ...(item.cleanupOnFailure===undefined?{}:{cleanupOnFailure:item.cleanupOnFailure}) });
-    const frame=JSON.parse(host.stdin.read().toString('utf8'));assert.equal(frame.cleanupOnFailure,item.cleanupOnFailure===true,item.name);
+    const frame=JSON.parse(host.stdin.read().toString('utf8'));assert.equal(frame.cleanupOnFailure,item.cleanupOnFailure!==false,item.name);
     runtime.child.on('error', () => {});
     const receipt = {
       schema: 1, nonce, jobName: `Local\\Ziwei.Runtime.${nonce}`, hostPid: host.pid,

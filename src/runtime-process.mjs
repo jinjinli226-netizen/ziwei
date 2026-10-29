@@ -27,9 +27,9 @@ function nativeCommand(command, cwd, env) {
 }
 
 /** Spawn one owned runtime. Windows evidence refers to its Job, never a PID search. */
-export function spawnSupervisedRuntime({ command, args = [], cwd = process.cwd(), env = process.env, cleanupOnFailure = false } = {}) {
+export function spawnSupervisedRuntime({ command, args = [], cwd = process.cwd(), env = process.env, cleanupOnFailure = true } = {}) {
   cwd = path.resolve(cwd);
-  cleanupOnFailure = cleanupOnFailure === true;
+  cleanupOnFailure = cleanupOnFailure !== false;
   if (!Array.isArray(args) || args.some(value => typeof value !== 'string' || value.includes('\0'))) throw new TypeError('Runtime arguments must be strings without NUL');
   if (!env || typeof env !== 'object') throw new TypeError('Runtime environment must be an object');
   if (process.platform !== 'win32') {
@@ -55,6 +55,7 @@ export function spawnSupervisedRuntime({ command, args = [], cwd = process.cwd()
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ziwei-runtime-'));
   const startPath = path.join(directory, 'started.json');
   const resultPath = path.join(directory, 'result.json');
+  const cleanupPath = path.join(directory, 'cleanup.json');
   const cancelPath = path.join(directory, 'cancel');
   const child = new EventEmitter();
   child.stdin = new PassThrough();
@@ -65,7 +66,7 @@ export function spawnSupervisedRuntime({ command, args = [], cwd = process.cwd()
   child.signalCode = null;
   child.killed = false;
   let evidence = baseEvidence(), settled = false, startSeen = false, stopPromise, stopTimer, startupTimer, poller;
-  let resolveCompletion;
+  let resolveCompletion, resolveStop, finalEvidence, cleanupSettled=false;
   const completionEvidence = new Promise(resolve => { resolveCompletion = resolve; });
   const powershell = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
   const host = spawn(powershell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', helper, '-Nonce', nonce, '-ReceiptDirectory', directory], { cwd, env: process.env, windowsHide: true, shell: false, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -95,12 +96,26 @@ export function spawnSupervisedRuntime({ command, args = [], cwd = process.cwd()
       child.emit('spawn');
     }
   }
-  function finish(hostCode, hostSignal, failure = null) {
-    if (settled) return;
+  function finishCleanup(hostCode = null, hostSignal = null, failure = null) {
+    if(cleanupSettled)return;
+    const receipt=readReceipt(cleanupPath);
+    if(!receipt&&!failure)return;
+    if(receipt&&host.exitCode===null&&host.signalCode===null&&!failure)return;
+    if(receipt&&receipt.rootPid===evidence.rootPid&&receipt.rootExitCode===evidence.rootExitCode&&typeof receipt.treeConfirmed==='boolean'&&Number.isSafeInteger(receipt.activeProcesses)) {
+      evidence={...evidence,treeConfirmed:receipt.treeConfirmed&&receipt.activeProcesses===0,activeProcesses:receipt.activeProcesses,cancelled:evidence.cancelled||receipt.cancelled===true,backgroundProcessesRetained:receipt.backgroundProcessesRetained===true,failureCode:receipt.failureCode||null};
+    }else evidence={...evidence,failureCode:failure||'RUNTIME_RETAINED_JOB_STOP_UNCONFIRMED'};
+    evidence.hostExitCode=hostCode??host.exitCode??null;evidence.hostSignal=hostSignal||null;
+    cleanupSettled=true;clearInterval(poller);clearTimeout(stopTimer);
+    finalEvidence=Object.freeze({...evidence});resolveStop?.(finalEvidence);
+    if(receipt&&!evidence.failureCode)try{fs.rmSync(directory,{recursive:true,force:true});}catch{}
+  }
+  function finish(hostCode, hostSignal, failure = null, retainedHandoff = false) {
+    if (settled) {finishCleanup(hostCode,hostSignal,failure||'RUNTIME_RETAINED_JOB_STOP_UNCONFIRMED');return;}
+    if(retainedHandoff&&evidence.cancelled)return;
     settled = true;
     observeStart();
-    clearInterval(poller); clearTimeout(startupTimer); clearTimeout(stopTimer);
-    const receipt = readReceipt(resultPath);
+    clearTimeout(startupTimer);
+    const receipt = readReceipt(cleanupPath)||readReceipt(resultPath);
     if (receipt && typeof receipt.launched === 'boolean' && typeof receipt.rootConfirmed === 'boolean' && typeof receipt.treeConfirmed === 'boolean' && (receipt.rootExitCode === null || Number.isSafeInteger(receipt.rootExitCode)) && (receipt.activeProcesses === null || Number.isSafeInteger(receipt.activeProcesses))) {
       evidence = { ...evidence, launched: receipt.launched, rootPid: receipt.rootPid, rootConfirmed: receipt.rootConfirmed, rootExitCode: receipt.rootExitCode, treeConfirmed: receipt.treeConfirmed && receipt.activeProcesses === 0, activeProcesses: receipt.activeProcesses, cancelled: evidence.cancelled || receipt.cancelled, failureCode: receipt.failureCode || null, streamsComplete: receipt.streamsComplete === true };
     } else evidence.failureCode = failure || evidence.failureCode || 'RUNTIME_SUPERVISOR_UNCONFIRMED';
@@ -111,9 +126,9 @@ export function spawnSupervisedRuntime({ command, args = [], cwd = process.cwd()
       && Number.isSafeInteger(evidence.rootPid) && evidence.rootPid > 0
       && Number.isSafeInteger(evidence.rootExitCode) && evidence.activeProcesses > 0
       && (!cleanupOnFailure || evidence.rootExitCode === 0)
-      && evidence.cancelled === false && receipt.failureCode === null && !evidence.failureCode && !failure && hostCode === 0 && !hostSignal;
+      && evidence.cancelled === false && receipt.failureCode === null && !evidence.failureCode && !failure && (retainedHandoff || hostCode === 0) && !hostSignal;
     if (cleanupOnFailure && evidence.launched === true && evidence.rootConfirmed === true && Number.isSafeInteger(evidence.rootExitCode) && evidence.rootExitCode !== 0 && (evidence.treeConfirmed !== true || evidence.activeProcesses !== 0)) evidence.failureCode ||= 'RUNTIME_FAILED_JOB_CLEANUP_UNCONFIRMED';
-    evidence.hostExitCode = hostCode;
+    evidence.hostExitCode = retainedHandoff ? null : hostCode;
     evidence.hostSignal = hostSignal || null;
     child.stdin.unpipe(host.stdin);
     child.stdin.destroy();
@@ -126,10 +141,14 @@ export function spawnSupervisedRuntime({ command, args = [], cwd = process.cwd()
     }
     child.emit('exit', child.exitCode, child.signalCode);
     child.emit('close', child.exitCode, child.signalCode);
-    const final = Object.freeze({ ...evidence });
-    resolveCompletion(final);
+    finalEvidence = Object.freeze({ ...evidence });
+    resolveCompletion(finalEvidence);
+    if(evidence.backgroundProcessesRetained){
+      host.stdout.unpipe(child.stdout);host.stderr.unpipe(child.stderr);host.stdout.resume();host.stderr.resume();child.stdout.end();child.stderr.end();
+      host.unref?.();host.stdin.unref?.();host.stdout.unref?.();host.stderr.unref?.();poller?.unref?.();
+    }else{clearInterval(poller);clearTimeout(stopTimer);resolveStop?.(finalEvidence);}
     // The directory has no prompt, env, or output. Keep unknown evidence for diagnosis.
-    if (receipt && !evidence.failureCode) try { fs.rmSync(directory, { recursive: true, force: true }); } catch {}
+    if (receipt && !evidence.failureCode && !evidence.backgroundProcessesRetained) try { fs.rmSync(directory, { recursive: true, force: true }); } catch {}
   }
   host.once('error', error => {
     // Node gives no PID when the OS never created the supervisor. Only that
@@ -138,16 +157,19 @@ export function spawnSupervisedRuntime({ command, args = [], cwd = process.cwd()
     finish(null, null, error.code || 'RUNTIME_SUPERVISOR_SPAWN_FAILED');
   });
   host.once('close', (code, signal) => finish(code, signal));
-  poller = setInterval(observeStart, 30);
+  poller = setInterval(()=>{
+    observeStart();
+    if(!settled&&readReceipt(resultPath)?.retainedHandoff===true)setImmediate(()=>{if(!settled)finish(null,null,null,true);});
+    else if(settled&&evidence.backgroundProcessesRetained)finishCleanup();
+  },30);
   startupTimer = setTimeout(() => { evidence.failureCode = 'RUNTIME_SUPERVISOR_START_TIMEOUT'; host.kill(); }, START_TIMEOUT_MS);
   const stop = () => {
     if (stopPromise) return stopPromise;
-    stopPromise = completionEvidence;
-    if (settled) return stopPromise;
-    if (readReceipt(resultPath)) return stopPromise;
+    if (settled&&(cleanupSettled||!evidence.backgroundProcessesRetained)) return Promise.resolve(finalEvidence);
+    stopPromise = new Promise(resolve=>{resolveStop=resolve;});
     evidence.cancelled = true; child.killed = true;
     try { fs.writeFileSync(cancelPath, nonce, { flag: 'wx', mode: 0o600 }); } catch (error) { if (error.code !== 'EEXIST') { evidence.failureCode = 'RUNTIME_CANCEL_REQUEST_FAILED'; host.kill(); } }
-    stopTimer = setTimeout(() => { evidence.failureCode = 'RUNTIME_SUPERVISOR_STOP_UNCONFIRMED'; host.kill(); }, STOP_TIMEOUT_MS);
+    stopTimer = setTimeout(() => { if(settled)finishCleanup(null,null,'RUNTIME_RETAINED_JOB_STOP_UNCONFIRMED');else{evidence.failureCode = 'RUNTIME_SUPERVISOR_STOP_UNCONFIRMED';host.kill();} }, STOP_TIMEOUT_MS);
     return stopPromise;
   };
   child.kill = () => { void stop(); return !settled; };

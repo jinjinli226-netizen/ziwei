@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import {spawn} from 'node:child_process';
 
 const moduleUrl = new URL('../src/runtime-process.mjs', import.meta.url);
 let spawnSupervisedRuntime;
@@ -115,12 +116,12 @@ test('Windows normal root exit preserves an intentional detached service and rep
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const pidFile = path.join(dir, 'descendant.pid');
   const root = path.join(dir, 'root.cjs');
-  fs.writeFileSync(root, `const fs=require('fs');const p=require('child_process').spawn(process.execPath,['-e','setTimeout(()=>{},2400)'],{detached:true,stdio:'ignore',windowsHide:true});p.unref();fs.writeFileSync(${JSON.stringify(pidFile)},String(p.pid));setTimeout(()=>process.exit(23),100);`);
+  fs.writeFileSync(root, `const fs=require('fs');const p=require('child_process').spawn(process.execPath,['-e','setTimeout(()=>{},2400)'],{detached:true,stdio:'ignore',windowsHide:true});p.unref();fs.writeFileSync(${JSON.stringify(pidFile)},String(p.pid));setTimeout(()=>process.exit(0),100);`);
   const runtime = launch({ command: process.execPath, args: [root], cwd: dir, env: process.env });
   t.after(() => runtime.stop());
   runtime.child.stdin.end();
   const evidence = await runtime.completionEvidence;
-  assert.equal(evidence.rootExitCode, 23);
+  assert.equal(evidence.rootExitCode, 0);
   assert.equal(evidence.rootConfirmed, true);
   assert.equal(evidence.treeConfirmed, false);
   assert.ok(evidence.activeProcesses > 0);
@@ -130,28 +131,59 @@ test('Windows normal root exit preserves an intentional detached service and rep
   const descendantPid = Number(fs.readFileSync(pidFile, 'utf8'));
   assert.equal(exists(descendantPid), true);
   await until(() => !exists(descendantPid), 5000);
+  await runtime.stop();
 });
 
-test('Windows model failure reaps only its owned child tree and preserves the failed root exit', { skip: !windows, timeout: 30000 }, async t => {
+test('Windows failed root cleans up its owned child tree by default and preserves the failed root exit', { skip: !windows, timeout: 30000 }, async t => {
   const dir=scratch();t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
   const grandchild=path.join(dir,'grandchild.pid'),child=path.join(dir,'child.pid'),entry=path.join(dir,'failed-model.cjs');
-  const childProgram=`const fs=require('node:fs');fs.writeFileSync(${JSON.stringify(child)},String(process.pid));const p=require('node:child_process').spawn(process.execPath,['-e',${JSON.stringify(`require('node:fs').writeFileSync(${JSON.stringify(grandchild)},String(process.pid));setInterval(()=>{},1000);`)}],{detached:true,stdio:'ignore',windowsHide:true});p.unref();setInterval(()=>{},1000);`;
+  const childProgram=`const fs=require('node:fs');fs.writeFileSync(${JSON.stringify(child)},String(process.pid));const p=require('node:child_process').spawn(process.execPath,['-e',${JSON.stringify(`require('node:fs').writeFileSync(${JSON.stringify(grandchild)},String(process.pid));setTimeout(()=>{},15000);`)}],{detached:true,stdio:'ignore',windowsHide:true});p.unref();setTimeout(()=>{},15000);`;
   fs.writeFileSync(entry,`const p=require('node:child_process').spawn(process.execPath,['-e',${JSON.stringify(childProgram)}],{detached:true,stdio:'ignore',windowsHide:true});p.unref();const fs=require('node:fs'),timer=setInterval(()=>{if(fs.existsSync(${JSON.stringify(grandchild)})){clearInterval(timer);process.exit(1);}},20);`);
-  const runtime=launch({command:process.execPath,args:[entry],cwd:dir,env:process.env,cleanupOnFailure:true});runtime.child.stdin.end();
+  const runtime=launch({command:process.execPath,args:[entry],cwd:dir,env:process.env});runtime.child.stdin.end();
   const evidence=await runtime.completionEvidence;
   assert.equal(evidence.rootExitCode,1);assert.equal(evidence.rootConfirmed,true);assert.equal(evidence.cancelled,false);assert.equal(evidence.treeConfirmed,true);assert.equal(evidence.activeProcesses,0);assert.equal(evidence.backgroundProcessesRetained,false);assert.equal(evidence.failureCode,null);
   const pids=[child,grandchild].map(file=>Number(fs.readFileSync(file,'utf8')));
   await until(()=>pids.every(pid=>!exists(pid)),5000);
 });
 
-test('Windows model success can still preserve an intentional background service', { skip: !windows, timeout: 30000 }, async t => {
+test('Windows success preserves an intentional background service until explicit stop reaps its original Job', { skip: !windows, timeout: 30000 }, async t => {
   const dir=scratch();t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
   const pidFile=path.join(dir,'background.pid'),entry=path.join(dir,'successful-model.cjs');
-  fs.writeFileSync(entry,`const p=require('node:child_process').spawn(process.execPath,['-e','setTimeout(()=>{},2400)'],{detached:true,stdio:'ignore',windowsHide:true});p.unref();require('node:fs').writeFileSync(${JSON.stringify(pidFile)},String(p.pid));setTimeout(()=>process.exit(0),100);`);
+  fs.writeFileSync(entry,`const p=require('node:child_process').spawn(process.execPath,['-e','setTimeout(()=>{},15000)'],{detached:true,stdio:'ignore',windowsHide:true});p.unref();require('node:fs').writeFileSync(${JSON.stringify(pidFile)},String(p.pid));setTimeout(()=>process.exit(0),100);`);
   const runtime=launch({command:process.execPath,args:[entry],cwd:dir,env:process.env,cleanupOnFailure:true});runtime.child.stdin.end();
   const evidence=await runtime.completionEvidence,pid=Number(fs.readFileSync(pidFile,'utf8'));
   assert.equal(evidence.rootExitCode,0);assert.equal(evidence.cancelled,false);assert.equal(evidence.backgroundProcessesRetained,true);assert.equal(evidence.treeConfirmed,false);assert.equal(exists(pid),true);
-  await until(()=>!exists(pid),5000);
+  await delay(150);assert.equal(exists(pid),true);
+  const stopped=await runtime.stop();
+  assert.equal(stopped.rootPid,evidence.rootPid);assert.equal(stopped.rootExitCode,0);assert.equal(stopped.cancelled,true);assert.equal(stopped.treeConfirmed,true);assert.equal(stopped.activeProcesses,0);assert.equal(stopped.backgroundProcessesRetained,false);assert.equal(stopped.failureCode,null);
+  await until(()=>!exists(pid),5000);assert.equal(await runtime.stop(),stopped);assert.equal(evidence.backgroundProcessesRetained,true);
+});
+
+test('Windows business failure after a zero CLI exit can still stop the owned retained tree', { skip: !windows, timeout: 30000 }, async t => {
+  const dir=scratch();t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+  const unrelated=spawn(process.execPath,['-e','setTimeout(()=>{},15000)'],{stdio:'ignore',windowsHide:true});t.after(()=>{if(unrelated.exitCode===null)unrelated.kill();});
+  const pidFile=path.join(dir,'business-child.pid'),entry=path.join(dir,'business-failure.cjs');
+  fs.writeFileSync(entry,`const p=require('node:child_process').spawn(process.execPath,['-e','setTimeout(()=>{},15000)'],{detached:true,stdio:'ignore',windowsHide:true});p.unref();require('node:fs').writeFileSync(${JSON.stringify(pidFile)},String(p.pid));setTimeout(()=>process.exit(0),100);`);
+  const runtime=launch({command:process.execPath,args:[entry],cwd:dir,env:process.env});runtime.child.stdin.end();
+  const evidence=await runtime.completionEvidence,pid=Number(fs.readFileSync(pidFile,'utf8'));
+  const failed={status:'failed',code:'MCP_RECEIPT_INCOMPLETE',processExit:evidence};
+  assert.equal(failed.processExit.rootExitCode,0);assert.equal(exists(pid),true);
+  const cleanup=await runtime.stop();
+  assert.equal(cleanup.rootPid,evidence.rootPid);assert.equal(cleanup.rootConfirmed,true);assert.equal(cleanup.treeConfirmed,true);assert.equal(cleanup.activeProcesses,0);assert.equal(cleanup.backgroundProcessesRetained,false);assert.equal(cleanup.cancelled,true);
+  await until(()=>!exists(pid),5000);assert.equal(exists(unrelated.pid),true);assert.equal(failed.status,'failed');assert.equal(failed.code,'MCP_RECEIPT_INCOMPLETE');assert.equal(evidence.activeProcesses>0,true);
+});
+
+test('Windows retained success does not keep its owner alive or kill the service when the owner exits', { skip: !windows, timeout: 30000 }, async t => {
+  const dir=scratch();t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+  const pidFile=path.join(dir,'service.pid'),receiptFile=path.join(dir,'owner-receipt.json');
+  const root=`const p=require('node:child_process').spawn(process.execPath,['-e','setTimeout(()=>{},3500)'],{detached:true,stdio:'ignore',windowsHide:true});p.unref();require('node:fs').writeFileSync(${JSON.stringify(pidFile)},String(p.pid));setTimeout(()=>process.exit(0),100);`;
+  const owner=`import fs from 'node:fs';const {spawnSupervisedRuntime}=await import(${JSON.stringify(moduleUrl.href)});const runtime=spawnSupervisedRuntime({command:process.execPath,args:['-e',${JSON.stringify(root)}],cwd:${JSON.stringify(dir)},env:process.env});runtime.child.on('error',()=>{});runtime.child.stdin.end();fs.writeFileSync(${JSON.stringify(receiptFile)},JSON.stringify(await runtime.completionEvidence));`;
+  const child=spawn(process.execPath,['--input-type=module','-e',owner],{cwd:dir,stdio:'ignore',windowsHide:true});
+  t.after(()=>{if(child.exitCode===null)child.kill();});
+  await until(()=>fs.existsSync(receiptFile));await until(()=>child.exitCode!==null,3000);
+  const receipt=JSON.parse(fs.readFileSync(receiptFile,'utf8')),pid=Number(fs.readFileSync(pidFile,'utf8'));
+  assert.equal(child.exitCode,0);assert.equal(receipt.backgroundProcessesRetained,true);assert.equal(exists(pid),true);
+  await until(()=>!exists(pid),6000);
 });
 
 test('Windows assignment failure terminates the still-suspended process without executing user code', { skip: !windows, timeout: 30000 }, async t => {
