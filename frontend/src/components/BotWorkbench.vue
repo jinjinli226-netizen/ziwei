@@ -1,6 +1,6 @@
 <script setup>
 import {computed,defineAsyncComponent,nextTick,onBeforeUnmount,reactive,ref,watch} from 'vue';
-import {Bot,Plus,MessageCircle,Settings2,Clock3,Activity,RefreshCw,ChevronRight,Pause,Play,Square,ShieldCheck,Sparkles,ArrowLeft,Search,LayoutDashboard,Monitor,FolderOpen,UsersRound,Radio,Zap} from 'lucide-vue-next';
+import {Bot,Plus,MessageCircle,Settings2,Clock3,Activity,RefreshCw,ChevronRight,Pause,Play,Square,ShieldCheck,Sparkles,ArrowLeft,Search,LayoutDashboard,Monitor,FolderOpen,UsersRound,Radio,Zap,X} from 'lucide-vue-next';
 import {ZiButton,ZiModal,ZiFormField,ZiInput,ZiTextarea} from '@ziwei/ui';
 import ZiSelect from './ZiSelect.vue';
 import {api,API_BASE} from '../api.js';
@@ -22,15 +22,17 @@ import {botProviderOptions,botProviderModelOptions,switchBotProvider} from '../b
 import {BOT_DEFAULT_TOOLSETS} from '../../../src/hermes-bot-config.mjs';
 const BotNativeWorkspace=defineAsyncComponent(()=>import('./BotNativeWorkspace.vue'));
 
-const props=defineProps({workspace:{type:String,required:true},actorId:{type:String,default:''},botId:{type:String,default:''},models:{type:Array,default:()=>[]},skills:{type:Array,default:()=>[]},initialTab:{type:String,default:'chat'}});
-const emit=defineEmits(['select','section','chat','employee','creator','phone','changed','employee-chat','employee-settings']);
+const props=defineProps({workspace:{type:String,required:true},actorId:{type:String,default:''},botId:{type:String,default:''},models:{type:Array,default:()=>[]},skills:{type:Array,default:()=>[]},initialTab:{type:String,default:'chat'},chatMode:Boolean,rosterRefreshKey:{type:Number,default:0}});
+const emit=defineEmits(['select','section','chat','employee','creator','phone','changed','employee-chat','employee-settings','employee-edit','create-employee']);
 const previewMode=import.meta.env.VITE_ZIWEI_PREVIEW==='true';
 const nativePreview=import.meta.env.VITE_ZIWEI_NATIVE_PREVIEW==='true';
 const fixtureBot=computed(()=>previewMode&&(!nativePreview||s.bot?.employee?.runtime_profile==='preview-fixture'));
 const externalEmployee=ref(null);
-const workbench=createBotWorkbench({api,wrap:reactive,getReadOptions:()=>botWorkbenchReadOptions(tab.value),onEmployeeSelect:value=>{externalEmployee.value=value;tab.value='capabilities';}});const s=workbench.state;
+const workbench=createBotWorkbench({api,wrap:reactive,getReadOptions:()=>botWorkbenchReadOptions(tab.value),onEmployeeSelect:value=>{externalEmployee.value=value;tab.value=props.chatMode?'chat':'capabilities';}});const s=workbench.state;
 const selectedEmployeeId=computed(()=>externalEmployee.value?.employee?.id||s.selectedId);
 const workbenchRoot=ref(null),avatarReading=ref(false),rosterExpanded=ref(false);
+const managementOpen=ref(props.initialTab!=='chat');
+const currentEmployee=computed(()=>s.bot?.employee||externalEmployee.value?.employee);
 const forceAbandonState=ref(null),forceAbandonBusy=ref(false),forceAbandonError=ref('');
 let forceAbandonKey='';
 const tab=ref(props.initialTab),search=ref(''),discovery=ref(null),discoveryError=ref(''),discoveryLoading=ref(false);
@@ -41,7 +43,7 @@ let createVisit=0;
 const routineEditor=ref(null),routineForm=ref({}),routineKey=ref(''),routineScope=ref(null);
 const routineKind=ref('prompt'),routineTarget=ref('');
 const nativeBlocked=ref(false),nativeTabs=['knowledge','collaboration','channels','proactive'];
-let generation=0,disposed=false,pollTimer=null,forceAbandonRead=null;
+let generation=0,selectionVisit=0,disposed=false,pollTimer=null,forceAbandonRead=null;
 const tabs=[['chat','概览',LayoutDashboard],['settings','基础配置',Settings2],['capabilities','能力配置',Sparkles],['routines','例行工作',Clock3],['activity','运行记录',Activity]];
 const managementSections=[['knowledge','资料与工具',FolderOpen,'记忆、会话、文件与 MCP'],['collaboration','伙伴协作',UsersRound,'与其他伙伴分工协作'],['channels','消息与音频',Radio,'连接消息渠道与语音'],['proactive','主动工作',Zap,'管理自主工作与授权']];
 const moreOptions=[{value:'',label:'更多管理'},...managementSections.map(([value,label])=>({value,label}))];
@@ -92,13 +94,14 @@ async function loadDiscovery(){
   finally{if(scopeCurrent(visit,workspace))discoveryLoading.value=false;}
 }
 function clearTransientDrafts(){routineEditor.value=null;routineScope.value=null;}
-function selectBot(id){if(id===selectedEmployeeId.value){rosterExpanded.value=false;return;}if(configDirty.value&&!window.confirm('当前 Bot 有未保存修改，切换会丢弃草稿。继续切换？'))return;rosterExpanded.value=false;externalEmployee.value=null;tab.value='chat';clearTransientDrafts();void workbench.select(id);emit('select',id);}
+async function selectBot(id){if(id===selectedEmployeeId.value){rosterExpanded.value=false;if(props.chatMode)openSelectedChat();return;}if(configDirty.value&&!window.confirm('当前 Bot 有未保存修改，切换会丢弃草稿。继续切换？'))return;const visit=++selectionVisit;rosterExpanded.value=false;managementOpen.value=false;externalEmployee.value=null;tab.value='chat';clearTransientDrafts();const selecting=workbench.select(id);emit('select',id);await selecting;if(!disposed&&visit===selectionVisit&&props.chatMode&&id===selectedEmployeeId.value)openSelectedChat();}
 async function inventoryManage({section}){if(section==='cli'){emit('employee-settings',{workspace:props.workspace,employee:s.bot.employee});return;}changeSection('knowledge');await nextTick();const target=workbenchRoot.value?.querySelector(section==='mcp'?'#employee-mcp-management':'#employee-skill-management');target?.scrollIntoView?.({block:'start',behavior:'smooth'});target?.focus?.();}
 function chat(){if(s.bot?.main_conversation_id)emit('chat',{workspace:props.workspace,employee:s.bot.employee,conversation:{id:s.bot.main_conversation_id},botId:s.bot.id});}
+function openSelectedChat(){if(externalEmployee.value){emit('employee-chat',externalEmployee.value);return;}if(!s.bot)return;if(s.bot.configuration_state!=='uninitialized'&&s.bot.kind!=='creator'&&s.bot.main_conversation_id){chat();return;}emit('employee-chat',{workspace:props.workspace,employee:s.bot.employee,conversationId:s.bot.main_conversation_id});}
 async function refresh(){await Promise.all([workbench.list(),workbench.refresh(),loadDiscovery(),loadForceAbandon()]);}
 async function save(){if(avatarReading.value)return;if(nativeBlocked.value){s.error='仍有原生操作待核实，请先查看原回执。';return;}if(await workbench.save())emit('changed');}
 async function refreshNativeBot(){const reset=!configDirty.value;await workbench.refresh({resetDraft:reset});emit('changed');}
-function changeSection(value){if(tab.value===value)return;routineEditor.value=null;tab.value=value;emit('section',value);}
+function changeSection(value){managementOpen.value=true;if(tab.value===value)return;routineEditor.value=null;tab.value=value;emit('section',value);}
 async function initialize(){if(await workbench.initialize())emit('changed');}
 async function removeEmployee(force=false){if(!s.bot||s.busy||s.writeUnknown||!window.confirm(employeeRemovalPrompt(s.bot.employee,force)))return;if(await workbench.removeEmployee({force})){emit('select','');emit('changed');await workbench.list();}}
 async function control(operation){if(await workbench.control(operation))emit('changed');}
@@ -169,12 +172,13 @@ function schedulePoll(){
   },4000);
 }
 watch(()=>props.workspace,async workspace=>{
-  generation++;createVisit++;externalEmployee.value=null;ownedCreate.select(workspace);clearTransientDrafts();showCreate.value=false;discovery.value=null;tab.value=props.initialTab;
+  generation++;selectionVisit++;createVisit++;externalEmployee.value=null;ownedCreate.select(workspace);clearTransientDrafts();showCreate.value=false;discovery.value=null;tab.value=props.initialTab;managementOpen.value=props.initialTab!=='chat';
   await Promise.all([workbench.setWorkspace(workspace,props.botId),loadDiscovery()]);
 },{immediate:true});
 watch(()=>[createForm.value.targetDeviceId,sourceProfiles.value],()=>{if(ownedCreateState.value.pending)return;const names=sourceProfiles.value.map(row=>typeof row==='string'?row:row.name);if(!names.includes(createForm.value.sourceProfile))createForm.value.sourceProfile=names.includes('default')?'default':names[0]||'';});
 watch(()=>props.actorId,()=>{externalEmployee.value=null;void workbench.setWorkspace(props.workspace,props.botId);ownedCreate.dispose();ownedCreate=createOwnedBotRequest({api,wrap:reactive,namespace:props.actorId,origin:API_BASE,getDiscovery:()=>discovery.value});ownedCreateState.value=ownedCreate.state;closeCreate();});
-watch(()=>props.botId,id=>{if(id!==selectedEmployeeId.value){externalEmployee.value=null;clearTransientDrafts();void workbench.select(id);}});
+watch(()=>props.botId,id=>{if(id!==selectedEmployeeId.value){selectionVisit++;externalEmployee.value=null;clearTransientDrafts();void workbench.select(id);}});
+watch(()=>props.rosterRefreshKey,()=>{void workbench.list();});
 watch(()=>s.bots,rows=>{
   if(externalEmployee.value){externalEmployee.value=syncInventoryRosterSelection(externalEmployee.value,rows);if(!externalEmployee.value)emit('select','');return;}
   if(!s.bot)return;
@@ -185,24 +189,27 @@ watch(()=>s.bots,rows=>{
   }
 });
 watch(()=>[props.workspace,s.bot?.id,s.bot?.revision,s.bot?.control_epoch,s.bot?.latest_run?.id],()=>{forceAbandonState.value=null;forceAbandonBusy.value=false;forceAbandonError.value='';forceAbandonKey='';void loadForceAbandon();});
-watch(()=>props.initialTab,value=>{if(tab.value!==value){routineEditor.value=null;tab.value=value;}});
+watch(()=>props.initialTab,value=>{if(value!=='chat')managementOpen.value=true;if(tab.value!==value){routineEditor.value=null;tab.value=value;}});
 watch(tab,()=>{if(s.bot&&!s.busy&&!s.reading)void workbench.loadRecords();});
 onBeforeUnmount(()=>{disposed=true;generation++;ownedCreate.dispose();clearTimeout(pollTimer);workbench.dispose();});schedulePoll();
 </script>
 
 <template>
   <section ref="workbenchRoot" class="bot-workbench" aria-label="Bot 伙伴工作台">
-    <div class="bot-layout">
-      <aside class="bot-roster" :class="{'mobile-expanded':rosterExpanded}" aria-label="当前工作区员工名册" @keydown.esc="rosterExpanded=false"><button class="bot-mobile-roster-heading" :aria-expanded="rosterExpanded" aria-controls="bot-employee-list" @click="rosterExpanded=!rosterExpanded"><UsersRound :size="18"/><span>{{s.bot?.employee.name||externalEmployee?.employee.name||'员工名册'}}</span><small>{{rosterExpanded?'收起名册':'选择员工'}}</small><ChevronRight :size="16"/></button><div class="bot-roster-top"><strong>全部员工 <small>{{s.bots.length}}</small></strong><button class="bot-icon-button" aria-label="刷新 Bot 列表与状态" :disabled="s.loading||s.reading||s.busy" @click="refresh"><RefreshCw :size="16"/></button></div><label class="bot-search"><Search :size="16"/><input v-model="search" placeholder="搜索名称或岗位" aria-label="搜索 Bot"/></label><ZiSelect id="bot-roster-runtime" v-model="runtimeFilter" :options="runtimeOptions" aria-label="筛选员工运行时"/>
-        <div class="bot-roster-actions"><button class="bot-button primary" @click="newBot"><Plus :size="16"/>创建 Bot</button><button class="bot-button" @click="emit('creator')"><Sparkles :size="16"/>伙伴市场 Creator</button></div>
+    <div class="bot-layout" :class="{'chat-layout':chatMode,'management-open':chatMode&&managementOpen}">
+      <aside class="bot-roster" :class="{'mobile-expanded':rosterExpanded}" aria-label="当前工作区员工名册" @keydown.esc="rosterExpanded=false"><div v-if="chatMode" class="employee-workspace-brand"><img src="/ziwei-logo.png" alt="紫薇"/><strong>紫薇伙伴</strong></div><button class="bot-mobile-roster-heading" :aria-expanded="rosterExpanded" aria-controls="bot-employee-list" @click="rosterExpanded=!rosterExpanded"><UsersRound :size="18"/><span>{{s.bot?.employee.name||externalEmployee?.employee.name||'员工名册'}}</span><small>{{rosterExpanded?'收起名册':'选择员工'}}</small><ChevronRight :size="16"/></button><div class="bot-roster-top"><strong>全部员工 <small>{{s.bots.length}}</small></strong><button class="bot-icon-button" aria-label="刷新 Bot 列表与状态" :disabled="s.loading||s.reading||s.busy" @click="refresh"><RefreshCw :size="16"/></button></div><label class="bot-search"><Search :size="16"/><input v-model="search" placeholder="搜索名称或岗位" aria-label="搜索 Bot"/></label><ZiSelect id="bot-roster-runtime" v-model="runtimeFilter" :options="runtimeOptions" aria-label="筛选员工运行时"/>
+        <div class="bot-roster-actions"><button class="bot-button primary" @click="chatMode?emit('create-employee'):newBot()"><Plus :size="16"/>{{chatMode?'新建员工':'创建 Bot'}}</button><button class="bot-button" @click="emit('creator')"><Sparkles :size="16"/>伙伴市场 Creator</button><button v-if="chatMode" class="bot-link bot-owned-create" @click="newBot"><Plus :size="13"/>创建专属 Hermes Bot</button></div>
         <div id="bot-employee-list" class="bot-roster-list">
           <p v-if="s.loading&&!s.bots.length" class="bot-empty" role="status">正在读取工作区员工…</p>
           <button v-for="item in bots" :key="item.id" class="bot-roster-row" :class="{selected:selectedEmployeeId===item.id}" :aria-current="selectedEmployeeId===item.id?'true':undefined" @click="selectBot(item.id)"><span class="bot-avatar"><img v-if="item.employee?.avatar" :src="item.employee.avatar" alt=""/><span v-else>{{item.employee?.name?.slice(0,1)||'✦'}}</span><i :data-tone="botRosterPresence(item).tone"/></span><span class="bot-roster-copy"><strong>{{item.employee?.name||'未命名 Bot'}}</strong><span>{{item.employee?.description||'数字员工'}}</span><small>{{botRosterRuntime(item)==='unconfigured'?'待配置':botRosterRuntime(item)}} · {{botRosterPresence(item).label}}</small></span></button>
           <div v-if="!s.loading&&!bots.length" class="bot-empty"><Bot :size="30"/><p>{{search||runtimeFilter!=='all'?'没有匹配的员工':'当前没有可见员工'}}</p><small>这里展示当前账号可见的员工。</small><button v-if="search||runtimeFilter!=='all'" class="bot-link" @click="search='';runtimeFilter='all'">清除筛选</button></div>
         </div>
-        <footer class="bot-roster-footer">工作区 · {{workspace}}<br/>仅在指定电脑及客户端可用时工作</footer>
+        <footer class="bot-roster-footer"><button v-if="chatMode" class="bot-link" @click="emit('employee',currentEmployee)"><ArrowLeft :size="14"/>返回工作区</button><span>工作区 · {{workspace}}</span><br/>仅在指定电脑及客户端可用时工作</footer>
       </aside>
-      <main class="bot-main" :aria-busy="s.reading||s.busy">
+      <button v-if="chatMode" class="employee-workspace-return" aria-label="返回工作区" @click="emit('employee',currentEmployee)"><ArrowLeft :size="15"/>工作区</button>
+      <section v-if="chatMode" class="employee-chat-stage" aria-label="员工聊天工作区"><slot name="chat" :employee-id="selectedEmployeeId" :open-section="changeSection"><div class="employee-chat-start"><span class="bot-avatar large">{{currentEmployee?.name?.slice(0,1)||'紫'}}</span><h2>{{currentEmployee?.name||'选择一位数字员工'}}</h2><p>{{s.reading?'正在读取员工与会话归属…':'在同一个工作台聊天、查看进展和管理能力。'}}</p><div v-if="currentEmployee&&!s.reading" class="bot-actions"><button class="bot-button primary" @click="openSelectedChat"><MessageCircle :size="16"/>打开聊天</button><button class="bot-button" @click="changeSection('chat')"><Settings2 :size="16"/>管理员工</button></div><button v-else-if="!s.reading" class="bot-button" @click="emit('create-employee')"><Plus :size="16"/>新建员工</button></div></slot></section>
+      <main v-show="!chatMode||managementOpen" class="bot-main" :class="{'bot-management-drawer':chatMode}" :aria-busy="s.reading||s.busy" @keydown.esc="managementOpen=false">
+        <div v-if="chatMode" class="bot-drawer-heading"><strong>员工管理</strong><button class="bot-icon-button" aria-label="关闭员工管理" @click="managementOpen=false"><X :size="19"/></button></div>
         <p v-if="s.error" class="bot-banner error" role="alert">{{s.error}}</p><p v-if="s.notice" class="bot-banner" role="status">{{s.notice}}</p>
         <div v-if="s.writeUnknown" class="bot-banner warning">操作结果未确认，已暂缓重复提交。<button class="bot-link" @click="workbench.refresh()">重新读取当前状态</button><button v-if="s.pendingOperation?.kind==='routine_run'" class="bot-link" :disabled="s.busy" @click="workbench.recoverRoutine()">按原请求标识查询 / 恢复</button></div>
         <div v-if="s.conflict" class="bot-banner warning">草稿保留在本页，原版本 {{s.draft?.revision}}。<button class="bot-link" @click="workbench.refresh()">读取最新状态（保留草稿）</button><button class="bot-link" @click="workbench.refresh({resetDraft:true})">放弃草稿并采用最新配置</button></div>
@@ -268,8 +275,10 @@ onBeforeUnmount(()=>{disposed=true;generation++;ownedCreate.dispose();clearTimeo
           <BotNativeWorkspace v-if="s.draft" :key="actorId" v-show="nativeTabs.includes(tab)" :workspace="workspace" :actor-id="actorId" :bot="s.bot" :draft="s.draft" :bots="s.bots" :section="tab" :config-busy="s.busy||s.writeUnknown||nativeBlocked" :refresh-bot="refreshNativeBot" @busy="nativeBlocked=$event" @save-config="save" @stop-current="control('stop')"/>
         </template>
         <section v-else-if="externalEmployee" class="bot-form-section" aria-label="员工能力明细工作区">
-          <header class="bot-detail-heading"><div class="bot-identity"><span class="bot-avatar large"><img v-if="externalEmployee.employee.avatar" :src="externalEmployee.employee.avatar" alt=""/><span v-else>{{externalEmployee.employee.name?.slice(0,1)||'✦'}}</span></span><div><h2>{{externalEmployee.employee.name}}</h2><p>{{externalEmployee.employee.description||'数字员工'}}</p></div></div><div class="bot-actions"><button type="button" class="bot-button" @click="emit('employee-settings',externalEmployee)">员工设置</button><button type="button" class="bot-button primary" @click="emit('employee-chat',externalEmployee)"><MessageCircle :size="16"/>打开原有聊天</button></div></header>
-          <EmployeeCapabilityInventory :key="actorId+workspace+':'+externalEmployee.employee.id" :workspace="workspace" :employee="externalEmployee.employee" :active="true"/>
+          <div class="bot-management-header"><header class="bot-detail-heading"><div class="bot-identity"><span class="bot-avatar large"><img v-if="externalEmployee.employee.avatar" :src="externalEmployee.employee.avatar" alt=""/><span v-else>{{externalEmployee.employee.name?.slice(0,1)||'✦'}}</span></span><div><div class="bot-name-line"><h2>{{externalEmployee.employee.name}}</h2><span v-if="chatMode" class="bot-runtime-label">{{externalEmployee.employee.runtime||'待配置'}}</span></div><p>{{externalEmployee.employee.description||'数字员工'}}</p></div></div><div class="bot-actions"><button type="button" class="bot-button" @click="emit(chatMode?'employee-edit':'employee-settings',externalEmployee)">{{chatMode?'编辑资料':'员工设置'}}</button><button v-if="!chatMode" type="button" class="bot-button primary" @click="emit('employee-chat',externalEmployee)"><MessageCircle :size="16"/>打开原有聊天</button></div></header><nav v-if="chatMode" class="bot-tabs" aria-label="员工详情"><button v-for="[key,label,icon] in tabs.filter(item=>['chat','settings','capabilities'].includes(item[0]))" :key="key" :class="{selected:tab===key}" :aria-current="tab===key?'page':undefined" @click="changeSection(key)"><component :is="icon" :size="15"/>{{label}}</button></nav></div>
+          <section v-if="chatMode&&tab==='chat'" class="bot-form-section"><div class="bot-section-heading"><div><h3>工作概览</h3><p>聊天、配置与工具记录归属于当前员工。</p></div><span class="bot-status" data-tone="muted">{{botRosterPresence(externalEmployee).label}}</span></div><div class="bot-surface"><h3>岗位职责</h3><p>{{externalEmployee.employee.description||'尚未填写岗位简介。'}}</p><button class="bot-link" @click="changeSection('settings')">基础配置 <ChevronRight :size="14"/></button><button class="bot-link" @click="changeSection('capabilities')">Skill / MCP / CLI <ChevronRight :size="14"/></button></div></section>
+          <section v-else-if="chatMode&&tab==='settings'" class="bot-form-section"><div class="bot-section-heading"><div><h3>运行绑定与模型</h3><p>设置沿用当前员工和运行端的配置。</p></div></div><dl class="employee-binding-facts"><div><dt>运行时</dt><dd>{{externalEmployee.employee.runtime||'尚未指定'}}</dd></div><div><dt>运行电脑</dt><dd>{{discovery?.devices?.find(item=>item.id===externalEmployee.employee.target_device_id)?.name||externalEmployee.employee.target_device_id||'尚未指定'}}</dd></div><div><dt>Profile / Bot</dt><dd>{{externalEmployee.employee.runtime_profile||'默认 Profile（未显式指定）'}}</dd></div><div><dt>默认模型</dt><dd>{{externalEmployee.employee.runtime==='DSH'?'沿用 DSH Bot 原生配置':externalEmployee.employee.model_id||'沿用运行时默认配置'}}</dd></div></dl><button class="bot-button" @click="emit('employee-edit',externalEmployee)"><Settings2 :size="15"/>编辑基础资料</button><button class="bot-button" @click="emit('employee-settings',externalEmployee)">高级配置</button></section>
+          <EmployeeCapabilityInventory :key="actorId+workspace+':'+externalEmployee.employee.id" v-else :workspace="workspace" :employee="externalEmployee.employee" :active="!chatMode||managementOpen"/>
         </section>
         <div v-else class="bot-start"><Bot :size="48"/><h2>{{s.reading?'正在读取 Bot…':'选择一个长期合作的伙伴'}}</h2><p>从左侧选择 Bot，继续聊天、查看进展或调整能力。</p><button v-if="!s.reading" class="bot-button primary" @click="newBot">创建 Hermes Bot</button></div>
       </main>

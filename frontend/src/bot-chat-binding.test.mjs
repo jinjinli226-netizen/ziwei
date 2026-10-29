@@ -24,7 +24,7 @@ test('failed workspace load cannot authorize prior workspace model and skill opt
   const api=Object.fromEntries(['summary','tasks','runtimes','models','skills','documents','automations','members','devices','employees','calendar','settings','agents'].map(name=>[name,async()=>blank]));api.skills=async()=>{throw new Error('load failed');};
   const load=new Function(...Object.keys({...refs,api,loadBotPageOptions}),`let workspaceLoadGeneration=0;const workspaceSlug=()=> 'b';const notify=()=>{};return (${source('load')});`)(...Object.values({...refs,api,loadBotPageOptions}));
   await load();assert.equal(refs.loading.value,false);assert.equal(refs.summary.value.workspace.slug,'b');assert.equal(refs.loadedBotOptionsWorkspace.value,'a');
-  assert.match(app,/:models="loadedBotOptionsWorkspace===botWorkspace\?/);assert.match(app,/:skills="loadedBotOptionsWorkspace===botWorkspace\?/);
+  assert.match(app,/:models="loadedBotOptionsWorkspace===employeeWorkspaceSlug\?/);assert.match(app,/:skills="loadedBotOptionsWorkspace===employeeWorkspaceSlug\?/);
 });
 
 test('actual Bot send keeps three real PNG/JPG attachments ordered and byte-identical through JSON and retry',async()=>{
