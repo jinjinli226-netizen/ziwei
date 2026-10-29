@@ -42,7 +42,8 @@ test('attachments and idempotency stay on the original queued action until its e
  assert.equal(duplicate.id,first.id);assert.equal(duplicate.execution.id,first.execution.id);assert.equal(duplicate.duplicate,true);
  assert.equal(first.queue.items[0].attachments[0].name,'queued.png');assert.equal('content' in first.queue.items[0].attachments[0],false);assert.equal(f.repo.db.prepare('SELECT expires_at FROM a2a_actions WHERE id=?').get(first.execution.id).expires_at,null);
  assert.equal(f.repo.getConversation(f.conversation.id,{},{view:'thread'}).queue.count,1);
- assert.equal(f.poll().length,0);f.repo.resumeConversationQueue(f.conversation.id);
+ assert.equal(f.repo.getConversation(f.conversation.id).queue.paused,false,'new input explicitly enables sending');
+ f.repo.pauseConversationQueue(f.conversation.id);assert.equal(f.poll().length,0);f.repo.resumeConversationQueue(f.conversation.id);
  const ack=f.repo.ackA2AAction(first.execution.id,{deviceId:'queue-pc'});
  assert.ok(Date.parse(ack.expires_at)>Date.now());assert.equal(ack.payload.attachments[0].content,attachments[0].content);
 });
@@ -87,14 +88,14 @@ test('foreign or incorrectly bound terminal actions cannot pause another convers
  assert.equal(f.repo.getConversation(f.conversation.id).queue.count,1);
 });
 
-test('terminal failure pauses only its queue and resume never replays the failed action',t=>{
+test('terminal failure leaves later input enabled and resume never replays the failed action',t=>{
  const f=fixture(t),first=f.send('FAIL');f.repo.ackA2AAction(first.execution.id,{deviceId:'queue-pc'});
  const next=f.send('NEXT'),other=f.repo.createEmployee('test-111',{name:'Other',runtime:'Codex',targetDeviceId:'queue-pc'});
  const otherConversation=f.repo.createConversation('test-111',{employeeId:other.id}),independent=f.repo.addConversationMessage(otherConversation.id,{content:'OTHER'});
  f.repo.resultA2AAction(first.execution.id,{status:'failed',error:'provider failed',result:{output:'FAILED_REPLY'}});
  assert.equal(f.repo.getA2AAction(first.execution.id).status,'failed');
- assert.equal(f.repo.getConversation(f.conversation.id).queue.paused,true);
- assert.deepEqual(f.poll().map(action=>action.id),[independent.execution.id]);
+ assert.equal(f.repo.getConversation(f.conversation.id).queue.paused,false);
+ assert.deepEqual(f.poll().map(action=>action.id),[next.execution.id,independent.execution.id]);
  f.repo.resumeConversationQueue(f.conversation.id);
  assert.deepEqual(f.poll().map(action=>action.id),[next.execution.id,independent.execution.id]);
 });
@@ -127,10 +128,10 @@ test('Hermes accepts queued input without replacing its occupied action or bypas
  assert.throws(()=>f.repo.ackA2AAction(last.execution.id,{deviceId:'queue-pc'}),error=>error.code==='BOT_BUSY');
 });
 
-test('an expired active turn pauses once and an explicit resume keeps later input available',t=>{
+test('an expired active turn leaves later input enabled without replaying the expired turn',t=>{
  const f=fixture(t),first=f.send('FIRST');f.repo.ackA2AAction(first.execution.id,{deviceId:'queue-pc'});const second=f.send('SECOND');
  f.repo.db.prepare('UPDATE a2a_actions SET expires_at=? WHERE id=?').run('2000-01-01T00:00:00.000Z',first.execution.id);
- assert.equal(f.poll().length,0);assert.equal(f.repo.getA2AAction(first.execution.id).status,'expired');assert.equal(f.repo.getConversation(f.conversation.id).queue.paused,true);
+ assert.deepEqual(f.poll().map(action=>action.id),[second.execution.id]);assert.equal(f.repo.getA2AAction(first.execution.id).status,'expired');assert.equal(f.repo.getConversation(f.conversation.id).queue.paused,false);
  f.repo.resumeConversationQueue(f.conversation.id);assert.deepEqual(f.poll().map(action=>action.id),[second.execution.id]);assert.equal(f.repo.getConversation(f.conversation.id).queue.paused,false);
 });
 

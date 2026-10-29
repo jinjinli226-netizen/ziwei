@@ -13,7 +13,8 @@ export const ACTION_TRANSPORT_BUDGETS=Object.freeze({poll:600_000,ack:15_000,eve
 const terminal=new Set(['succeeded','failed','expired']);
 const hash=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-const permanent=error=>Number.isInteger(error?.status)&&error.status>=400&&error.status<500&&![408,429].includes(error.status);
+const transientAdmission=new Set(['CONVERSATION_QUEUE_PAUSED','CONVERSATION_QUEUE_BLOCKED','BOT_BUSY','DSH_SESSION_UNCONFIRMED','BOT_NOT_ACTIVE','BOT_DEFERRED_CONFIG_BUSY']);
+const permanent=error=>Number.isInteger(error?.status)&&error.status>=400&&error.status<500&&![408,429].includes(error.status)&&!(error.status===409&&transientAdmission.has(error.code));
 const validAttempt=v=>Boolean(v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).length===2&&Number.isSafeInteger(v.generation)&&v.generation>0&&typeof v.token==='string'&&v.token.length>=16&&v.token.length<=4096&&!/[\s\x00-\x1f]/.test(v.token));
 const scope=identity=>({apiBase:String(identity.apiBase||'').replace(/\/$/,''),workspace:String(identity.workspace||''),deviceId:String(identity.deviceId||'')});
 function binding(action,identity){const p=action.payload||{};return hash({id:action.id,type:action.type,agent:action.agent_id||action.agentId||'ziwei_user',workspace:action.workspace_id||identity.workspace,device:identity.deviceId,employee:p.employeeId||p.employee_id||p.assignee||null,conversation:p.conversationId||p.conversation_id||null,message:p.messageId||p.message_id||null,dedupe:action.dedupe_key||action.dedupeKey||null});}
@@ -192,6 +193,13 @@ export function createActionDelivery({directory,identity,post,dispatch,recoverRe
    }
    const lease=receipt.expires_at||receipt.expiresAt;
    if(!reconciling&&(!lease||!Number.isFinite(Date.parse(lease))||Date.parse(lease)<=now()))throw new Error('Invalid or expired action ACK lease; execution was not authorized');
+   if(record.state!=='result_pending'&&receipt.executionInput){
+    const original=readBlob(record,'action').action;
+    const authorized={...original,payload:{...original.payload,...receipt.executionInput}};
+    if(binding(authorized,connection)!==record.binding)throw new Error('Action ACK execution identity mismatch');
+    record.actionDigest=writeBlob(action.id,'action',{identity:connection,binding:record.binding,action:authorized});
+    record.action=minimalAction({...record.action,payload:authorized.payload});
+   }
    record.action={...record.action,status:'acked',acked_at:receipt.acked_at||record.action.acked_at,expires_at:lease,expiresAt:lease,...(receipt.deviceId?{payload:{...record.action.payload,deviceId:receipt.deviceId}}:{})};
    if(isDshAction(record.action)&&receipt.runtimeSessionId)record.action.payload={...record.action.payload,runtimeSessionId:receipt.runtimeSessionId};
    if(record.state!=='result_pending'){record.state='acked';save(record);

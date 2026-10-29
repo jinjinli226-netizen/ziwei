@@ -4,6 +4,7 @@ const removedCode='CONVERSATION_QUEUE_REMOVED';
 const fail=(code,message,status=409)=>{throw Object.assign(new Error(message),{code,status});};
 const parse=value=>{try{return JSON.parse(value);}catch{return {};}};
 const payload=row=>parse(row.payload_json);
+const runtimeBinding=({controlEpoch,name,description,conversationId,...binding})=>JSON.stringify(binding,(_key,value)=>value&&typeof value==='object'&&!Array.isArray(value)?Object.fromEntries(Object.entries(value).sort(([a],[b])=>a.localeCompare(b))):value);
 
 // Actions remain the only durable work queue. This table controls admission;
 // no second dispatcher or copy of the user message is created here.
@@ -51,8 +52,19 @@ export function createConversationQueue(db){
   },
   current(conversationId){const actions=rows.all(conversationId);return actions.find(row=>row.status==='acked')||actions.find(row=>row.status==='pending')||null;},
   setPaused,assertAdmission,
+  controlBot(workspaceId,employeeId,snapshot,value){
+   for(const conversation of db.prepare('SELECT id FROM conversations WHERE workspace_id=? AND employee_id=?').all(workspaceId,employeeId)){
+    setPaused(conversation.id,value);
+    if(value)continue;
+    for(const row of rows.all(conversation.id).filter(row=>row.status==='pending'&&!row.acked_at)){
+     const data=payload(row),saved=data.hermesBot;
+     if(!saved||data.runtime!=='Hermes'||data.deviceId!==snapshot.deviceId||data.profile!==snapshot.sourceProfile||data.model!==snapshot.model||saved.conversationId!==data.conversationId||runtimeBinding(saved)!==runtimeBinding(snapshot))continue;
+     data.hermesBot={...saved,controlEpoch:snapshot.controlEpoch};
+     db.prepare("UPDATE a2a_actions SET payload_json=? WHERE id=? AND status='pending' AND acked_at IS NULL").run(JSON.stringify(data),row.id);
+    }
+   }
+  },
   deliverable(row){return !controlled(row)||row.status!=='pending'||!paused(payload(row).conversationId);},
-  onTerminal(row){if(controlled(row)&&['failed','expired'].includes(row.status)&&row.error!==removedCode)setPaused(payload(row).conversationId,true);},
   remove(conversationId,actionId){
    db.exec('BEGIN IMMEDIATE');
    try{

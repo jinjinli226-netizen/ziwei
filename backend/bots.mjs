@@ -69,8 +69,8 @@ export function assertBotExecution(db, workspaceId, payload, { validation = fals
   if(!provisioning&&requireProfile)assertBotProfileReady(db,row,employee);
   if (payload.runtime && payload.runtime !== 'Hermes' || payload.deviceId && payload.deviceId !== employee.target_device_id || payload.profile && payload.profile !== employee.runtime_profile || payload.model && payload.model !== employee.model_id) throw botFailure('BOT_BINDING_CONFLICT','Bot 执行不可覆盖已验证的运行绑定');
   if (payload.conversationId && !db.prepare('SELECT id FROM conversations WHERE id=? AND workspace_id=? AND employee_id=?').get(payload.conversationId,workspaceId,employeeId)) throw botFailure('BOT_CONVERSATION_CONFLICT','Bot 会话归属不一致');
-  if (payload.hermesBot && (payload.hermesBot.revision !== row.revision || payload.hermesBot.controlEpoch !== row.control_epoch)) throw botFailure('BOT_REVISION_CONFLICT','Bot 配置或控制状态已变化，请重新读取');
   if (!validation && (row.control_state !== 'active' || employee.status !== 'active')) throw botFailure('BOT_NOT_ACTIVE','Bot 未启用或已暂停');
+  if (payload.hermesBot && (payload.hermesBot.revision !== row.revision || payload.hermesBot.controlEpoch !== row.control_epoch)) throw botFailure('BOT_REVISION_CONFLICT','Bot 配置或控制状态已变化，请重新读取');
   if (!validation && row.validated_revision !== row.revision) throw botFailure('BOT_NOT_VALIDATED','Bot 当前配置尚未通过目标电脑验证');
   if(!validation&&!readOnlyInspection){
     const deferred=db.prepare("SELECT state,intent_json FROM bot_deferred_configs WHERE employee_id=? AND state IN ('pending','validating','connecting')").get(employeeId);
@@ -343,16 +343,20 @@ export function createBotService(repo, management) {
       if(!['activate','resume','pause','stop'].includes(input.operation))throw botFailure('BOT_CONTROL_INVALID','控制操作无效',400);
       if(repo.serverCodeRollout){db.prepare("UPDATE hermes_bots SET control_state='paused',control_epoch=control_epoch+1,updated_at=? WHERE employee_id=?").run(now(),id);db.prepare("UPDATE employees SET status='paused' WHERE id=?").run(id);return get(slug,id,context);}
       if(['activate','resume'].includes(input.operation)) {
-        assertBotExecution(db,row.workspace_id,{employeeId:id},{validation:true});
+        const active=row.active_action_id?repo.getA2AAction(row.active_action_id,{workspaceSlug:slug}):null;
+        const queued=active?.status==='pending'&&active.type==='conversation.execute'&&active.payload?.conversationId&&active.payload?.messageId;
+        assertBotExecution(db,row.workspace_id,{employeeId:id},{validation:true,queueAdmission:Boolean(queued)});
         if(row.validated_revision!==row.revision)throw botFailure('BOT_NOT_VALIDATED','先验证当前配置，再明确启用');
         db.prepare("UPDATE hermes_bots SET control_state='active',control_epoch=control_epoch+1,updated_at=? WHERE employee_id=?").run(now(),id);
         db.prepare("UPDATE employees SET status='active' WHERE id=?").run(id);
+        repo.controlBotConversationQueues(row.workspace_id,id,false);
         for(const routineRow of db.prepare("SELECT a.id FROM automations a JOIN bot_routines r ON r.automation_id=a.id WHERE r.employee_id=? AND a.status='active'").all(id))repo.updateAutomation(routineRow.id,{});
       } else {
         db.prepare("UPDATE hermes_bots SET control_state='paused',control_epoch=control_epoch+1,updated_at=? WHERE employee_id=?").run(now(),id);
         db.prepare("UPDATE employees SET status='paused' WHERE id=?").run(id);
+        repo.controlBotConversationQueues(row.workspace_id,id,true);
         const active=row.active_action_id?repo.getA2AAction(row.active_action_id,{workspaceSlug:slug}):null;
-        if(active?.status==='pending')repo.resultA2AAction(active.id,{status:'failed',error:'Bot 已暂停，未启动本次执行',result:{code:'BOT_CANCELLED_BEFORE_START',stopConfirmed:true}});
+        if(active?.status==='pending'&&(input.operation==='stop'||!(active.type==='conversation.execute'&&active.payload?.conversationId&&active.payload?.messageId)))repo.resultA2AAction(active.id,{status:'failed',error:'Bot 已暂停，未启动本次执行',result:{code:'BOT_CANCELLED_BEFORE_START',stopConfirmed:true}});
         else if(input.operation==='stop' && botExecutionOccupiesSlot(active,{workspace:slug,workspaceId:row.workspace_id,employeeId:id,deviceId:employee.target_device_id,profile:employee.runtime_profile}) && !readHistoricalPrelaunchRecovery(db,db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(active.id))) {
           const stop=requestStop(slug,active);
           db.prepare('UPDATE hermes_bots SET stop_action_id=? WHERE employee_id=?').run(stop.id,id);
