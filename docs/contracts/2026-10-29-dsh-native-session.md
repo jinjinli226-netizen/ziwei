@@ -17,6 +17,8 @@ DSH 是常驻 Bot 中的一次 HTTP / WS session turn。本机没有创建新的
 
 `src/daemon.mjs` 先完成现有 admission、预算和 started 持久化，再进入独立 DSH 分支。公开 action 回执为：
 
+注册真实 owned supervision 时，先将完整 scope 保存为本机 started 记录的 `dshBinding`，再发出 `action.stage`，其中 `progress.dshSessionBinding` 包含相同 actionId、employeeId、conversationId、botName、sessionId、requestId。此时尚未提交 prompt。服务端和投递层以先行保存的原请求绑定核对后续 sessionExit；普通最终 JSON 不能自行证明新的 requestId 或 sessionId。
+
 ```json
 {
   "result": {

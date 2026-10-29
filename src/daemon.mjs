@@ -292,6 +292,9 @@ export class ActionDispatcher {
           if(requestedSession)expected.sessionId=requestedSession;
           const owned=dshSessionSupervision(capability,expected);
           if(supervision||!owned)throw new Error('Invalid DSH session supervision registration');
+          this.#started.get(key).dshBinding={...owned.scope};
+          this.#saveState();
+          this.#onEvent('action.stage',{actionId:action.id,type:action.type,stage:'session',message:'DSH 原生会话已绑定',progress:{phase:'stage',dshSessionBinding:{...owned.scope}}});
           supervision=owned;
           void owned.completionEvidence.then(value=>{sessionExit=value;resolveConfirmed(true);recover();});
           if(stopReason)invokeStop();

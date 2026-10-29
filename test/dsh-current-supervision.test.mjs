@@ -28,6 +28,19 @@ test('DSH dispatcher persists a real session terminal without inventing process 
   assert.equal(f.calls.filter(c=>c.method==='session/prompt').length,1);
 });
 
+test('owned DSH request and session scope are durably recorded and emitted before prompt submission',async t=>{
+  const f=await dshFixture(t);let announced=null,d;
+  d=dispatcher(t,f,{onEvent:(type,event)=>{
+    if(type!=='action.stage'||!event.progress?.dshSessionBinding)return;
+    announced=event.progress.dshSessionBinding;
+    const started=JSON.parse(fs.readFileSync(d.settings.stateFile,'utf8')).started[0];
+    assert.deepEqual(started.dshBinding,announced);assert.equal(f.calls.filter(call=>call.method==='session/prompt').length,0);
+  }});
+  const result=await d.instance.dispatch(d.action);
+  assert.equal(result.status,'succeeded');assert.ok(announced.requestId);assert.equal(announced.sessionId,result.result.sessionId);
+  for(const field of ['actionId','employeeId','conversationId','botName','sessionId','requestId'])assert.equal(announced[field],result.result.sessionExit[field]);
+});
+
 test('DSH native model failure retains its independently confirmed session terminal',async t=>{
   const f=await dshFixture(t,{onPrompt:({request,complete})=>complete(request,{reason:{kind:'error',error:{message:'模型失败'}}})}),d=dispatcher(t,f);
   const result=await d.instance.dispatch(d.action);
