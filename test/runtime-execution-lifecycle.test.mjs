@@ -18,9 +18,15 @@ function fixture(t) {
   fs.writeFileSync(path.join(codexHome, 'auth.json'), JSON.stringify({ OPENAI_API_KEY: 'ISOLATED_FIXTURE_NO_REAL_CREDENTIAL' }));
   fs.writeFileSync(entry, `const fs=require('node:fs'),{spawn}=require('node:child_process');
 if(process.argv[2]==='--version'){console.log('codex-cli 0.162.0');process.exit(0);}
+if(process.argv[2]==='mcp'&&process.argv[3]==='list'){console.log('[]');process.exit(0);}
 let input='';process.stdin.on('data',x=>input+=x);process.stdin.on('end',()=>{
  fs.writeFileSync('invoked',input);
  const mode=process.env.ZIWEI_FIXTURE_MODE;
+ if(mode==='terminal-failure'||mode==='terminal-failure-after-exit'){
+  const child=spawn(process.execPath,['-e',"const fs=require('node:fs');setInterval(()=>fs.appendFileSync('failure-counter','x'),30)"],{cwd:process.cwd(),detached:true,stdio:'ignore',windowsHide:true});child.unref();
+  const timer=setInterval(()=>{if(!fs.existsSync('failure-counter'))return;clearInterval(timer);fs.writeFileSync('failed-turn','failed');if(mode==='terminal-failure-after-exit'){process.stdout.write(JSON.stringify({type:'result',is_error:true,result:'isolated failed result after root exit'}));process.exit(0);}console.log(JSON.stringify({type:'turn.failed',error:{message:'isolated provider failure'}}));},20);
+  setInterval(()=>{},1000);return;
+ }
  if(mode==='detached'){
   const grandchild=spawn(process.execPath,['-e',"const fs=require('node:fs');fs.writeFileSync('grandchild.pid',String(process.pid));let n=0;const timer=setInterval(()=>fs.writeFileSync('counter',String(++n)),30);setTimeout(()=>{clearInterval(timer);process.exit(0)},4000)"],{cwd:process.cwd(),detached:true,stdio:'ignore'});grandchild.unref();
   console.log(JSON.stringify({type:'item.started',item:{type:'mcp_tool_call',name:'fixture.wait'}}));
@@ -82,4 +88,20 @@ test('pre-aborted execution refuses to launch the CLI', windowsOnly, async t => 
   const result = await executeRuntime({ ...f.options, signal: controller.signal, onSupervision: () => launches++ });
   assert.equal(result.code, 'cancelled'); assert.equal(launches, 0);
   assert.equal(fs.existsSync(path.join(f.cwd, 'invoked')), false);
+});
+
+test('a native failed turn immediately terminates its still-running CLI and detached descendant', {...windowsOnly,timeout:15000}, async t=>{
+  const f=fixture(t);let stopCalls=0,ownedStop;
+  const pending=executeRuntime({...f.options,env:{ZIWEI_FIXTURE_MODE:'terminal-failure'},onSupervision:supervision=>{const stop=supervision.stop;ownedStop=stop;supervision.stop=()=>{stopCalls++;return stop();};}});
+  const deadline=Date.now()+10000;while(!fs.existsSync(path.join(f.cwd,'failed-turn'))&&Date.now()<deadline)await sleep(20);
+  assert.ok(fs.existsSync(path.join(f.cwd,'failed-turn')));await sleep(100);const immediateStops=stopCalls;if(!immediateStops)await ownedStop();
+  const result=await pending;assert.equal(immediateStops,1,'terminal runtime event must request shutdown before the CLI exits');assert.equal(result.status,'failed');assert.match(result.error,/isolated provider failure/);assert.equal(result.result.processExit.activeProcesses,0);
+  const bytes=fs.statSync(path.join(f.cwd,'failure-counter')).size;await sleep(100);assert.equal(fs.statSync(path.join(f.cwd,'failure-counter')).size,bytes);
+});
+
+test('a terminal failed result without newline cannot retain children behind a successful root exit code', {...windowsOnly,timeout:15000}, async t=>{
+  const f=fixture(t);
+  const result=await executeRuntime({...f.options,env:{ZIWEI_FIXTURE_MODE:'terminal-failure-after-exit'}});
+  assert.equal(result.status,'failed');assert.equal(result.code,'runtime_failed');assert.match(result.error,/isolated failed result/);assert.equal(result.result.processExit.rootExitCode,0);assert.equal(result.result.processExit.activeProcesses,0);
+  const bytes=fs.statSync(path.join(f.cwd,'failure-counter')).size;await sleep(100);assert.equal(fs.statSync(path.join(f.cwd,'failure-counter')).size,bytes);
 });

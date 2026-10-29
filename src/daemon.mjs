@@ -520,6 +520,16 @@ export class ActionDispatcher {
         try{this.#onEvent('action.failed',{actionId,type:action?.type,error:failed.error});}catch{}
         return failed;
       }
+      const result = outcome.value;
+      const executorStatus = result && typeof result === 'object' ? String(result.status || '') : '';
+      if(supervision&&executorStatus&&executorStatus!=='succeeded'&&!(rootFinished(latestEvidence)&&latestEvidence.treeConfirmed===true&&latestEvidence.activeProcesses===0)){
+        invokeStop();
+        await bounded(completeConfirmed);
+        if(!completeEvidence){
+          this.#quarantine(key,'FAILED_EXECUTOR_STOP_UNCONFIRMED');
+          return this.#uncertain(action,'FAILED_EXECUTOR_STOP_UNCONFIRMED',result.error||'失败执行已立即请求终止，但进程树退出尚未确认',{result:{...result.result,processExit:safeProcessExit(latestEvidence),partialEffectsPossible:true}});
+        }
+      }
       if (supervision && !rootFinished(latestEvidence)) {
         await bounded(observeEvidence(supervision.completionEvidence));
         if (!rootFinished(latestEvidence)) {
@@ -527,14 +537,12 @@ export class ActionDispatcher {
           return this.#uncertain(action, 'ROOT_EXIT_UNCONFIRMED', '运行时返回但未能确认原进程退出', {result: {processExit: safeProcessExit(latestEvidence), partialEffectsPossible: true}});
         }
       }
-      const result = outcome.value;
       const pause=consumeMaintenancePaused(result);
       if(pause){
         const requested=this.#maintenanceRequests.get(String(actionId));
         if(!['conversation.execute','task.execute','agent.execute','runtime.execute','automation.execute'].includes(action.type)||!requested||!supervision||!latestEvidence||!validateMaintenancePause(pause,{actionId,executionBinding:executionBinding(action),updateId:requested.id,targetBuild:requested.targetBuild,profile:action.payload?.profile||action.payload?.hermesBot?.sourceProfile||'default',cwd:workdir,processExit:latestEvidence})){this.#quarantine(key,'MAINTENANCE_CHECKPOINT_UNCONFIRMED');return this.#uncertain(action,'MAINTENANCE_CHECKPOINT_UNCONFIRMED','维护暂停缺少匹配的原生退出证据');}
         return this.#pausedResult(action,pause);
       }
-      const executorStatus = result && typeof result === 'object' ? String(result.status || '') : '';
       if (executorStatus && executorStatus !== 'succeeded') {
         if (result.code === 'EXECUTION_UNCERTAIN' || result.executionState === 'uncertain') {
           this.#quarantine(key, result.reason || 'EXECUTOR_UNCERTAIN');

@@ -989,14 +989,15 @@ export function parseRuntimeStreamLine(line, state, onOutput = () => {}, onStage
         state.response = `${state.response || ''}${state.response ? '\n' : ''}${text}`;
       }
     }
-    if (value?.type === 'error' || value?.error) {
-      const error = runtimeStreamError(value);
+    const terminalError=value.type==='turn.failed'||value.type==='result'&&(value.is_error===true||value.status==='failed'||Boolean(value.error));
+    if (value?.type === 'error' || value?.error || terminalError) {
+      const error = runtimeStreamError(value) || (terminalError ? runtimeErrorText(value.result ?? value.text) : null);
       const detail = firstLine(redactSecrets(runtimeDiagnosticLine(error)))?.slice(0, 600);
-      const terminalError = value.type === 'result' || value.type === 'turn.failed';
       if (detail && (!state.runtimeError || (terminalError && !state.runtimeErrorTerminal))) {
         state.runtimeError = detail;
         state.runtimeErrorTerminal = terminalError;
       }
+      if(terminalError)state.runtimeErrorTerminal=true;
       appendOutput(state, `${state.output && !state.output.endsWith('\n') ? '\n' : ''}[error] ${detail || 'runtime error'}\n`, onOutput);
     }
   } catch {
@@ -1202,12 +1203,16 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
       } else consume(`${line}\n`);
     }
   };
+  let stopFailedRuntime=null;
   const consume = chunk => {
     if (invocation.format !== 'json-lines') { appendOutput(state, chunk, emitOutput); return; }
     state.lineBuffer += String(chunk || '');
     const lines = state.lineBuffer.split(/\r?\n/);
     state.lineBuffer = lines.pop() || '';
-    for (const line of lines) parseRuntimeStreamLine(redactBoundSecret(line), state, emitOutput, emitStage);
+    for (const line of lines) {
+      parseRuntimeStreamLine(redactBoundSecret(line), state, emitOutput, emitStage);
+      if(state.runtimeErrorTerminal)stopFailedRuntime?.();
+    }
   };
   if(beforeSpawn) {try{await runBeforeSpawnAdmission(beforeSpawn);}catch(error){interactionBridge?.close();codexSession?.close();maintenancePrepared?.close();cleanupOverlay();throw error;}}
   return new Promise((resolve, reject) => {
@@ -1216,11 +1221,18 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
     catch (error) { interactionBridge?.close();codexSession?.close();maintenancePrepared?.close();cleanupOverlay(); reject(error); return; }
     codexSession?.markSpawned();
     const { child } = supervision;
+    stopFailedRuntime=()=>{void supervision.stop();};
     let settled = false;
     let launchError = null;
-    const finish = (result, error = null) => {
+    const finish = async (result, error = null) => {
       if (settled) return;
       settled = true;
+      const exit=result?.result?.processExit || error?.processExit;
+      if((error||result?.status==='failed')&&exit?.activeProcesses>0){
+        const stopped=await supervision.stop();
+        if(result)result={...result,result:{...result.result,processExit:stopped}};
+        else error.processExit=stopped;
+      }
       interactionBridge?.close();
       try{codexSession?.close();}catch(cleanupError){if(!error){if(result)result={...result,status:'failed',code:'CODEX_CONVERSATION_WRITE_FAILED',error:'Codex 会话映射未能持久保存；未重跑原任务'};else error=cleanupError;}}
       maintenancePrepared?.close();
@@ -1260,7 +1272,7 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
       // owned tree; ordinary completion requires a verified root exit.
       const neverLaunched = processExit.launched === false && processExit.treeConfirmed;
       if (process.platform === 'win32' && !neverLaunched && (!processExit.rootConfirmed || ((signal?.aborted || processExit.cancelled) && !processExit.treeConfirmed))) return finish({ status: 'failed', code: 'EXECUTION_UNCERTAIN', executionState: 'uncertain', error: '无法确认本次 CLI 及其子进程的停止状态；工具可能已产生写入，请核实后处理，不要直接重发原消息。', result: exitResult });
-      if (launchError) return finish(null, launchError);
+      if (launchError) {launchError.processExit=processExit;return finish(null, launchError);}
       if (signal?.aborted) return finish({ status: 'failed', code: 'cancelled', error: 'runtime execution cancelled; completed tool writes may already exist', result: exitResult });
     const result = { runtime: resolvedRuntime, model: selectedModel, profile: profile || null, binary: discovered.binary, code, signal: childSignal, processExit, output: state.response.trim() || state.output, diagnostics: state.response.trim() ? state.output : null, truncated: state.truncated, ...(exitResult.codexConversation?{codexConversation:exitResult.codexConversation}:{}), ...(spec.nativeBinding ? { hermesBootstrap: spec.nativeBinding } : {}), ...(creatorPrepared ? { creatorIsolation: creatorIsolation || { ...creatorPrepared, enabled: false, reasonCode: 'native_isolation_unconfirmed' } } : {}), ...(receipt ? { managementMcp: managementMcpReceipt(receipt) } : {}), ...(phoneReceipt ? { terminalMcp: terminalMcpReceipt(phoneReceipt) } : {}), ...(attachments.length ? {inputAttachments:attachments} : {}) };
       if(codexSessionReceipt?.durable)result.nativeSessionId=codexSessionReceipt.threadId;
@@ -1286,7 +1298,7 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
       }
       if (code === 0 && creatorPrepared && !creatorIsolation) return finish({ status: 'failed', code: 'creator_isolation_unconfirmed', error: 'Hermes 未确认实例状态隔离；不能报告执行成功', result });
       const managementFailure = code === 0 ? managementMcpExecutionFailure(result.managementMcp) : null;
-      if (code !== 0) return finish({ status: 'failed', code: 'runtime_failed', error: `${formatRuntimeFailure(resolvedRuntime, code, state.output, state.runtimeError)}${phoneFailure ? `\n${phoneFailure.error}` : ''}`, result });
+      if (code !== 0 || state.runtimeErrorTerminal) return finish({ status: 'failed', code: 'runtime_failed', error: `${formatRuntimeFailure(resolvedRuntime, code, state.output, state.runtimeError)}${phoneFailure ? `\n${phoneFailure.error}` : ''}`, result });
       // The native boundary has already required terminal external receipts.
       // A maintenance pause preserves known tool failures for the resumed task;
       // it does not promote those business operations to success.

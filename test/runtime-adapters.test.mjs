@@ -196,6 +196,13 @@ test('terminal runtime errors override recoverable errors and resist later nonte
   }
 });
 
+test('terminal failure without a diagnostic and Claude error results still request runtime cleanup',()=>{
+  for(const event of [{type:'turn.failed'},{type:'result',is_error:true,result:'provider rejected'}]){
+    const state={output:'',response:'',bytes:0,truncated:false};parseRuntimeStreamLine(JSON.stringify(event),state);assert.equal(state.runtimeErrorTerminal,true);
+  }
+  const state={output:'',response:'',bytes:0,truncated:false};parseRuntimeStreamLine(JSON.stringify({type:'tool_result',is_error:true,text:'retryable tool result'}),state);assert.notEqual(state.runtimeErrorTerminal,true);
+});
+
 test('runtime error summary survives output truncation and remains redacted and bounded', () => {
   const state = { output: 'earlier output', response: '', bytes: 4 * 1024 * 1024, truncated: true };
   parseRuntimeStreamLine(JSON.stringify({ type: 'result', text: 'partial', error: { message: `Error: token=secret-value ${'x'.repeat(1000)}` } }), state);
