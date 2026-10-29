@@ -1,6 +1,7 @@
 import WebSocket from 'ws';
 import { redactSecrets } from './redaction.mjs';
 import {createDshSessionEvidence} from './dsh-session-evidence.mjs';
+import {markDshPrePromptFailure} from './runtime-launch-evidence.mjs';
 
 const errorText = value => typeof value === 'string' ? value : value?.message || JSON.stringify(value || '未知错误');
 const contentText = content => typeof content === 'string' ? content : (content || []).filter(block => block.type === 'text').map(block => block.text).join('');
@@ -27,8 +28,11 @@ export function cancelDshSession({baseUrl=process.env.ZIWEI_DSH_BASE_URL||'http:
 
 export async function executeDshRuntime({baseUrl=process.env.ZIWEI_DSH_BASE_URL||'http://127.0.0.1:7878',botName,prompt,cwd=process.cwd(),sessionId=null,signal,onOutput,onStage,sessionAuthority={},onSessionSupervision,cancellationTimeoutMs=3000,fetchImpl=globalThis.fetch,WebSocketImpl=WebSocket}={}) {
   if(!botName) throw new Error('DSH runtime requires botName');
-  const session=sessionId || (await rpc(baseUrl,botName,'session/create',{request:{cwd}},signal,fetchImpl))?.sessionId;
-  if(!session) throw new Error('DSH session/create did not return sessionId');
+  let session;
+  try{
+    session=sessionId || (await rpc(baseUrl,botName,'session/create',{request:{cwd}},signal,fetchImpl))?.sessionId;
+    if(!session)throw new Error('DSH session/create did not return sessionId');
+  }catch(error){throw markDshPrePromptFailure(error,{...sessionAuthority,botName,sessionId});}
   const requestId=crypto.randomUUID();
   return new Promise(resolve=>{
     let socket,followId,eventsId,retryTimer,cancelTimer,terminalExit,pendingFailure,settled=false,cancelling=false,cancelSent=false,promptSent=false,retries=0,currentTurn=null,targetTurn=null;
@@ -40,7 +44,8 @@ export async function executeDshRuntime({baseUrl=process.env.ZIWEI_DSH_BASE_URL|
       if(settled)return;settled=true;clearTimeout(retryTimer);clearTimeout(cancelTimer);signal?.removeEventListener('abort',cancel);
       try{socket?.close();}catch{}
       const uncertain=promptSent&&!terminalExit?{status:'failed',code:'EXECUTION_UNCERTAIN',executionState:'uncertain'}:{};
-      resolve({...value,...pendingFailure,...uncertain,output:output(),sessionId:session,...(terminalExit?{sessionExit:terminalExit}:{})});
+      const result={...value,...pendingFailure,...uncertain,output:output(),sessionId:session,...(terminalExit?{sessionExit:terminalExit}:{})};
+      resolve(!promptSent?markDshPrePromptFailure(result,{...sessionAuthority,botName,sessionId:session,requestId}):result);
     };
     const sendCancellation=async()=>{
       if(cancelSent||settled||targetTurn===null)return;cancelSent=true;
@@ -48,6 +53,7 @@ export async function executeDshRuntime({baseUrl=process.env.ZIWEI_DSH_BASE_URL|
     };
     const cancel=async()=>{
       if(cancelling || settled)return;cancelling=true;
+      if(!promptSent){finish({status:'failed',code:'cancelled',error:'DSH execution cancelled before prompt'});return;}
       cancelTimer=setTimeout(()=>finish({status:'failed',code:'EXECUTION_UNCERTAIN',executionState:'uncertain',error:'DSH 已请求取消当前任务，但 turn 终态未确认'}),cancellationTimeoutMs);
       await sendCancellation();
     };
@@ -169,6 +175,7 @@ export async function executeDshRuntime({baseUrl=process.env.ZIWEI_DSH_BASE_URL|
     };
     onSessionSupervision?.(evidence.capability);
     if(signal?.aborted){void cancel();return;}
-    signal?.addEventListener('abort',cancel,{once:true});connect();
+    signal?.addEventListener('abort',cancel,{once:true});
+    try{connect();}catch(error){stopForFailure({status:'failed',code:'stream_error',error:errorText(error)});}
   });
 }

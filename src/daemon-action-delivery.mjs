@@ -5,7 +5,7 @@ import {imageArtifactDeliveryBody,imageArtifactEventResult} from './conversation
 import {isCancellationAction} from './daemon-action-scheduler.mjs';
 import {consumeMaintenancePaused,validateMaintenancePause} from './maintenance-checkpoint.mjs';
 import {executionBinding} from './execution-admission.mjs';
-import {isDshAction,matchesDshSessionBinding,sameDshSessionBinding,confirmedDshSessionExit} from './dsh-session-receipt.mjs';
+import {isDshAction,matchesDshSessionBinding,sameDshSessionBinding,confirmedDshSessionExit,confirmedDshPrePromptFailure} from './dsh-session-receipt.mjs';
 
 // The production 10 MiB image roundtrip took 472 seconds. Polling can also
 // contain full image input. Small authenticated receipts have a separate budget.
@@ -133,7 +133,7 @@ export function createActionDelivery({directory,identity,post,dispatch,recoverRe
   return imageArtifactDeliveryBody({status,result:wireResult,error:status==='failed'?(result.error||'ziwei_user execution failed'):null,receiptOnly:true,...(attempt?{maintenanceAttempt:{...attempt}}:{})});
  }
  function definitive(delivery,record){
-  if(isDshAction(record?.action))return Boolean(confirmedDshSessionExit(record.action,delivery,record.dshSessionBinding));
+  if(isDshAction(record?.action))return Boolean(confirmedDshSessionExit(record.action,delivery,record.dshSessionBinding)||confirmedDshPrePromptFailure(record.action,delivery,{...connection,binding:record.dshSessionBinding}));
   const value=delivery?.result,exit=value?.processExit;
   if(!['succeeded','failed'].includes(delivery?.status)||value?.code==='EXECUTION_UNCERTAIN'||value?.executionState==='uncertain'||exit?.launched!==true||!Number.isSafeInteger(exit.rootPid)||exit.rootPid<=0||exit.rootConfirmed!==true||exit.treeConfirmed!==true||exit.activeProcesses!==0)return false;
   if(delivery.status==='succeeded')return exit.rootExitCode===0&&exit.cancelled!==true&&!exit.failureCode&&!exit.signal&&!exit.hostSignal;

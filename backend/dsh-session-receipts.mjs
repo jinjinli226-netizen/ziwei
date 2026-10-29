@@ -1,4 +1,4 @@
-import {matchesDshSessionBinding,sameDshSessionBinding,confirmedDshSessionExit,isDshAction} from '../src/dsh-session-receipt.mjs';
+import {matchesDshSessionBinding,sameDshSessionBinding,confirmedDshSessionExit,confirmedDshPrePromptFailure,isDshAction} from '../src/dsh-session-receipt.mjs';
 
 const parse=value=>{try{return JSON.parse(value);}catch{return {};}};
 const action=row=>({id:row.id,payload:parse(row.payload_json)});
@@ -30,7 +30,7 @@ export function createDshSessionReceipts(db){
   },
   assertReceipt(row,input){
    const p=scopedDevice(row,input.deviceId);
-   const receipt=boundConversation(row,p)&&confirmedDshSessionExit(action(row),input);
+   const receipt=boundConversation(row,p)&&(confirmedDshSessionExit(action(row),input)||row.status!=='failed'&&confirmedDshPrePromptFailure(action(row),input,{workspace:db.prepare('SELECT slug FROM workspaces WHERE id=?').get(row.workspace_id)?.slug,deviceId:input.deviceId}));
    if(!receipt)fail('DSH_SESSION_RECEIPT_REQUIRED','DSH 终态缺少与原已登记 request/session 一致的原生 turn/end 回执');
    return receipt;
   },

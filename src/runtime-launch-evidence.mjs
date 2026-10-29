@@ -102,6 +102,11 @@ export function markCodexConversationPrelaunchFailure(error, scope) {
 export function consumeRuntimePrelaunchEvidence(error) {
   const evidence=prelaunchFailures.get(error);if(evidence)prelaunchFailures.delete(error);return evidence || null;
 }
+// The owned adapter calls this only before attempting session/prompt.
+export function markDshPrePromptFailure(failure,scope) {
+  prelaunchFailures.set(failure,Object.freeze({prelaunch:Object.freeze({schemaVersion:1,source:'dsh-native-adapter',phase:'before-session-prompt',promptSent:false,actionId:scope.actionId,employeeId:scope.employeeId||null,conversationId:scope.conversationId||null,botName:scope.botName,sessionId:scope.sessionId||null,requestId:scope.requestId||null}),processExit:notLaunched()}));
+  return failure;
+}
 export const hasBotStartAdmissionPrelaunchEvidence = error => prelaunchFailures.get(error)?.prelaunch?.source === 'bot-start-admission';
 
 // A confirmed root by itself can leave children behind. Error cleanup requires

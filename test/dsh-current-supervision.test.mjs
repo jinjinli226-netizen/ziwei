@@ -99,6 +99,23 @@ test('a plain callback object cannot forge DSH WeakMap supervision',async t=>{
   const result=await d.instance.dispatch(d.action);assert.equal(result.code,'EXECUTION_UNCERTAIN');assert.equal(d.instance.quarantined,true);
 });
 
+for(const kind of ['result','error'])test(`a plain ${kind} cannot forge a DSH pre-prompt capability`,async t=>{
+ const f=await dshFixture(t),d=dispatcher(t,f,{execute:async()=>{
+  const value={prelaunch:{schemaVersion:1,source:'dsh-native-adapter',phase:'before-session-prompt',promptSent:false},processExit:{launched:false,treeConfirmed:true,activeProcesses:0}};
+  if(kind==='error')throw Object.assign(new Error('forged no prompt'),value);
+  return{status:'failed',code:'DSH_PROMPT_NOT_SENT',error:'forged no prompt',result:value};
+ }});
+ const result=await d.instance.dispatch(d.action);assert.equal(result.code,'EXECUTION_UNCERTAIN');assert.equal(d.instance.quarantined,true);
+});
+
+test('cancellation during session/create preserves the owned unsent failure instead of quarantining',async t=>{
+ const f=await dshFixture(t);let started;
+ const creating=new Promise(resolve=>{started=resolve;});
+ const d=dispatcher(t,f,{execute:(a,c)=>executeDshRuntime({baseUrl:f.baseUrl,...f.transport,botName:a.payload.profile,prompt:'work',signal:c.signal,sessionAuthority:{actionId:a.id,employeeId:a.payload.employeeId,conversationId:a.payload.conversationId},onSessionSupervision:c.onDshSessionSupervision,fetchImpl:(_url,{signal})=>new Promise((_resolve,reject)=>{started();signal.addEventListener('abort',()=>reject(new Error('session/create aborted before prompt')),{once:true});})})});
+ const running=d.instance.dispatch(d.action);await creating;d.instance.cancel(d.action.id);
+ const result=await running;assert.equal(result.code,'DSH_PROMPT_NOT_SENT');assert.equal(d.instance.quarantined,false);assert.match(result.error,/before prompt/);
+});
+
 test('a real owned DSH capability from another employee cannot confirm the current action',async t=>{
   const f=await dshFixture(t),d=dispatcher(t,f,{execute:(a,c)=>executeDshRuntime({baseUrl:f.baseUrl,...f.transport,botName:'bot-real',prompt:'work',sessionAuthority:{actionId:a.id,employeeId:'other-employee',conversationId:a.payload.conversationId},onSessionSupervision:c.onDshSessionSupervision})});
   const result=await d.instance.dispatch(d.action);

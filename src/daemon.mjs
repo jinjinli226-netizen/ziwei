@@ -271,6 +271,13 @@ export class ActionDispatcher {
     const invokeStop=()=>{if(!supervision||stopInvoked)return;stopInvoked=true;void Promise.resolve().then(()=>supervision.stop()).catch(()=>{});};
     const requestStop=reason=>{if(stopReason)return;stopReason=reason;controller.abort();invokeStop();resolveStop({kind:'stop'});};
     const receipt=()=>({...sessionExit?{sessionId:sessionExit.sessionId,sessionExit}:{},partialEffectsPossible:true});
+    const prePromptFailure=outcome=>{
+      const prelaunch=consumeRuntimePrelaunchEvidence(outcome?.error||outcome?.value);
+      if(prelaunch?.prelaunch?.source!=='dsh-native-adapter')return null;
+      const proof=prelaunch.prelaunch,p=action.payload||{};
+      const matches=proof.actionId===action.id&&proof.employeeId===(p.employeeId||null)&&proof.conversationId===(p.conversationId||null)&&proof.botName===dshBotNameForAction(action)&&(!supervision||proof.sessionId===supervision.scope.sessionId&&proof.requestId===supervision.scope.requestId);
+      return matches?this.#failure(action,outcome.error||outcome.value?.error||'DSH prompt was not sent',{code:'DSH_PROMPT_NOT_SENT',result:{code:'DSH_PROMPT_NOT_SENT',...prelaunch,prelaunch:{...proof,workspace:this.#workspace,deviceId:this.#deviceId}}}):null;
+    };
     const recover=()=>{if(executionSettled&&sessionExit)this.#confirmQuarantineStopped(key,this.#failure(action,'DSH 当前 turn 已确认结束；已产生的工具影响保留',{code:stopReason==='cancelled'?'cancelled':'execution_stopped',result:receipt()}));};
     const bounded=async promise=>{let timer;try{return await Promise.race([promise,new Promise(resolve=>{timer=setTimeout(()=>resolve(null),this.#stopGraceMs);})]);}finally{clearTimeout(timer);}};
     controller.signal.addEventListener('abort',()=>requestStop('cancelled'),{once:true});
@@ -303,9 +310,11 @@ export class ActionDispatcher {
         onStage:stage=>{if(stopReason)return;activity();this.#onEvent('action.stage',{actionId:action.id,type:action.type,stage:stage?.stage||'output',message:stage?.message||'DSH 执行活动',detail:stage?.detail||'',...(stage?.summary?{summary:stage.summary}:{}),progress:{phase:'stage',...stage}});}
       })).then(value=>({kind:'execution',value}),error=>({kind:'execution',error})).then(outcome=>{executionSettled=true;recover();return outcome;});
       const outcome=await Promise.race([execution,stopped]);
+      const unsent=prePromptFailure(outcome);if(unsent)return unsent;
       if(!sessionExit&&(outcome.error||outcome.value?.status==='failed'))requestStop('executor_error');
       if(stopReason){
         await bounded(Promise.all([execution,confirmed]));
+        if(executionSettled){const unsent=prePromptFailure(await execution);if(unsent)return unsent;}
         if(!sessionExit||!executionSettled){this.#quarantine(key,'DSH_SESSION_STOP_UNCONFIRMED');return this.#uncertain(action,'DSH_SESSION_STOP_UNCONFIRMED','DSH 已请求取消当前任务，但 turn 终态未确认',{result:receipt()});}
         return this.#failure(action,stopReason==='cancelled'?'DSH execution cancelled':stopReason==='executor_error'?outcome.error||outcome.value?.error||'DSH executor failed':'DSH execution timed out',{code:stopReason==='cancelled'?'cancelled':stopReason==='executor_error'?'executor_failed':'action_timeout',result:receipt()});
       }

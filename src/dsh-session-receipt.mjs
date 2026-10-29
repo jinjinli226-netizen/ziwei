@@ -15,3 +15,12 @@ export function confirmedDshSessionExit(action,delivery,binding=action?.payload?
  if(exit?.schemaVersion!==1||exit.source!=='dsh-native-session'||exit.terminalConfirmed!==true||!Number.isSafeInteger(exit.turn)||exit.turn<0||!text(exit.reason)||result.sessionId!==binding.sessionId||!sameDshSessionBinding(exit,binding))return null;
  return delivery.status==='succeeded'&&exit.reason!=='completed'?null:exit;
 }
+
+export function confirmedDshPrePromptFailure(action,delivery,{workspace,deviceId,binding=action?.payload?.dshSessionBinding}={}){
+ const result=delivery?.result,proof=result?.prelaunch,exit=result?.processExit,p=action?.payload;
+ if(!isDshAction(action)||delivery?.status!=='failed'||result?.code!=='DSH_PROMPT_NOT_SENT'||result.executionState==='uncertain'||result.sessionExit||proof?.schemaVersion!==1||proof.source!=='dsh-native-adapter'||proof.phase!=='before-session-prompt'||proof.promptSent!==false)return null;
+ if(proof.actionId!==action.id||proof.employeeId!==(p.employeeId||null)||proof.conversationId!==(p.conversationId||null)||proof.botName!==dshBotNameForAction(action)||!text(proof.workspace)||!text(proof.deviceId)||workspace!==undefined&&proof.workspace!==workspace||proof.deviceId!==(deviceId||p.deviceId||p.device_id||p.targetDeviceId||p.target_device_id))return null;
+ if(binding&&(!matchesDshSessionBinding(action,binding)||!sameDshSessionBinding(proof,binding)))return null;
+ if(!binding&&(proof.sessionId!==null||proof.requestId!==null))return null;
+ return exit?.supervisor==='runtime-prelaunch'&&exit.launched===false&&exit.rootPid===null&&exit.rootConfirmed===false&&exit.rootExitCode===null&&exit.treeConfirmed===true&&exit.activeProcesses===0&&exit.cancelled===false&&!exit.failureCode?proof:null;
+}
