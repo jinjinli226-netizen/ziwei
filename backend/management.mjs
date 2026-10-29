@@ -10,6 +10,7 @@ const canonical = value => Array.isArray(value) ? value.map(canonical) : (value 
 const fail = (message, code, status = 400) => { const error = new Error(message); error.status = status; error.code = code; throw error; };
 const deviceInput = input => String(input.targetDeviceId ?? input.target_device_id ?? input.deviceId ?? input.device_id ?? '').trim();
 const profileInput = input => { for (const key of ['runtimeProfile','runtime_profile','profile','hermesProfile','hermes_profile']) if (Object.hasOwn(input, key)) return input[key]; return undefined; };
+const assertDshNativeModel=input=>{if(input.model||input.modelId||input.model_id)fail('DSH 使用所选 Bot 的原生模型和 Provider，请在 DSH 中调整。','DSH_NATIVE_MODEL_REQUIRED');};
 
 export function createManagementService(repo) {
   const db = repo.db;
@@ -52,6 +53,19 @@ export function createManagementService(repo) {
     if (!runtimeName) fail('必须明确 runtime，例如 Codex 或 Hermes；不会自动替换运行时。', 'RUNTIME_REQUIRED');
     const deviceId = deviceInput(input);
     const requestedProfile = normalizeRuntimeProfile(profileInput(input));
+    if(runtimeName.toLowerCase()==='dsh'){
+      if(!deviceId)fail('DSH 必须明确选择目标电脑。','DEVICE_REQUIRED');
+      if(!requestedProfile)fail('DSH 必须明确选择目标电脑已发现的真实 Bot。','PROFILE_REQUIRED');
+      assertDshNativeModel(input);
+      const device=discovery(slug,{deviceId,userId:context.actorUserId,deviceScope:context.deviceScope}).devices[0];
+      if(!device||device.status!=='online')fail('DSH 目标电脑不存在、离线或无权访问。','DEVICE_NOT_IN_WORKSPACE');
+      const runtime=device.runtimes.find(row=>row.name==='DSH'),bot=runtime?.profiles.find(row=>row.name===requestedProfile);
+      if(!runtime||runtime.issues.length)fail(runtime?.issues[0]?.message||'目标电脑尚未发现 DSH，请启动原生 DSH Hub 后刷新。',runtime?.issues[0]?.code||'RUNTIME_NOT_DISCOVERED');
+      if(!bot)fail('目标电脑没有这个 DSH Bot，请刷新后重新选择。','PROFILE_NOT_FOUND');
+      if(bot.readiness?.ready!==true)fail(bot.readiness?.reason||'DSH Bot 尚未启动完成，请在原生 DSH 中启动后刷新。','PROFILE_NOT_READY');
+      if(!allowUnknownReadiness&&!runtime.verified)fail('DSH 模型与 Provider 尚无实际运行验证回执。','READINESS_UNKNOWN');
+      return {runtime:'DSH',targetDeviceId:deviceId,runtimeProfile:requestedProfile,readiness:runtime.readiness,...(repo.serverCodeRollout?{executionAdmission:repo.serverCodeRollout.status()}:{})};
+    }
     if (runtimeName.toLowerCase()==='hermes' && deviceId && requestedProfile && db.prepare("SELECT b.profile_binding_json FROM hermes_bots b JOIN employees e ON e.id=b.employee_id WHERE e.target_device_id=? AND e.runtime_profile=? AND e.status='deleted'").all(deviceId,requestedProfile).some(row=>botProfileBinding(row).mode==='owned_profile')) fail('此专属 Profile 保留属于已删除的员工，不能绑定给新员工或模板。','EMPLOYEE_PROFILE_DELETED',409);
     if(repo.serverCodeRollout){const device=discovery(slug,{deviceId,userId:context.actorUserId,deviceScope:context.deviceScope}).devices[0];if(!deviceId||!device)fail('目标电脑必须属于当前工作区','DEVICE_NOT_IN_WORKSPACE');if(context.deviceScope&&context.deviceScope!==deviceId)fail('目标电脑不属于当前设备身份','DEVICE_NOT_IN_WORKSPACE');return {runtime:runtimeName,targetDeviceId:deviceId,runtimeProfile:normalizeRuntimeProfile(profileInput(input)),executionAdmission:repo.serverCodeRollout.status()};}
     if (!deviceId) fail('必须选择当前工作区的目标电脑 targetDeviceId，请先调用 ziwei_discover_environment。', 'DEVICE_REQUIRED');
@@ -161,6 +175,8 @@ export function createManagementService(repo) {
     updateEmployee(slug, id, input, context = {}) {
       repo.preservation?.assert({employeeId:id});
       const previous = employee(slug, id, context);
+      const nativeDsh=String(input.runtime??previous.runtime).toLowerCase()==='dsh';
+      if(nativeDsh)assertDshNativeModel(input);
       if(db.prepare('SELECT 1 FROM hermes_bots WHERE employee_id=?').get(id) && !context.botConfigurationWrite) {
         const bindingKeys=['runtime','targetDeviceId','target_device_id','deviceId','device_id','runtimeProfile','runtime_profile','profile','hermesProfile','hermes_profile'];
         for(const key of bindingKeys) if(Object.hasOwn(input,key)) {
@@ -185,7 +201,7 @@ export function createManagementService(repo) {
       const targetSpecified = ['targetDeviceId','target_device_id','deviceId','device_id'].some(key => Object.hasOwn(input, key));
       const profileSpecified = ['runtimeProfile','runtime_profile','profile','hermesProfile','hermes_profile'].some(key => Object.hasOwn(input, key));
       const merged = { ...previous, ...input, runtime: input.runtime ?? previous.runtime, targetDeviceId: targetSpecified ? deviceInput(input) : previous.target_device_id, runtimeProfile: profileSpecified ? profileInput(input) : previous.runtime_profile, managementMcpEnabled: input.managementMcpEnabled ?? input.management_mcp_enabled ?? input.managementMcp?.enabled ?? previous.management_mcp_enabled };
-      if (configChanged && merged.targetDeviceId) validateSelection(slug, merged, { context });
+      if (configChanged && (merged.targetDeviceId||nativeDsh)) validateSelection(slug, merged, { context });
       return repo.updateEmployee(id, input,trustedContext(context));
     },
     inspectWorkdir(slug,deviceId,input={},context={}) {

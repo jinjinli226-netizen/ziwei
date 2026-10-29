@@ -16,7 +16,11 @@
 
 管理入口为 `POST /api/conversations/:id/queue/pause`、`POST /queue/resume`、`DELETE /queue/:actionId`。它们沿用会话可见性及员工、工作区身份权限。
 
-队列失败或过期会暂停；成功不会解除手动暂停。暂停状态随数据库保留。入队等待不消耗执行期限，ACK 后才开始计算原有执行预算。ACK 继续校验员工占位、配置版本、设备和原生 Profile，不通过时不能启动新一轮。
+按用户后续要求，队列默认开启，失败或过期不会自动锁住后续待发。手动暂停只暂缓待发；提交新消息、点击恢复或恢复 Bot 会重新开启。入队等待不消耗执行期限，ACK 后才开始计算原有执行预算。ACK 继续校验员工占位、配置版本、设备和原生 Profile，不通过时不能启动新一轮。
+
+暂停和领取竞争时，`CONVERSATION_QUEUE_PAUSED`、`CONVERSATION_QUEUE_BLOCKED` 等临时 admission 冲突保留为可重试，不能写入永久 blocked。真实 daemon 保留后端错误 code，避免内存测试可恢复、HTTP 实际传输却丢失原因。
+
+Bot 恢复时，仅给同一工作区、员工、设备、Profile、revision 和权限快照仍完全一致的未 ACK 消息更新 controlEpoch，不覆盖已执行动作或旧配置。compact ACK 携带最新执行输入，使已经 poll 的客户端也使用当前授权；不重复传送图片。仍明确暂停或未验证的 Bot 继续受原控制权限约束。
 
 队列投影与终态回调必须同时匹配真实工作区、员工、会话和 user message；其他工作区携带相同会话字符串的动作不能暂停本队列。附件列表仅返回 name、mimeType、size 元数据，原始图片保留于数据库与执行动作，避免轮询反复传送整个待发队列的图片。
 

@@ -1,4 +1,4 @@
-const defaults=['Claude','Codex','Gemini','Hermes'];
+const defaults=['Claude','Codex','Gemini','Hermes','DSH'];
 export function deviceRuntimes(device,catalog=[]){
   const scoped=Array.isArray(device?.runtimes)?device.runtimes:catalog.flatMap(row=>row.device_id===device?.id?[row]:Array.isArray(row.device_runtimes)?row.device_runtimes.filter(item=>item.device_id===device?.id):[]);
   const rows=scoped.length?scoped:(catalog.length?catalog:defaults.map(name=>({name}))).map(row=>({id:row.id,name:row.name,cli_status:'not_reported',cli_version:null,discovery_state:'not_reported'}));

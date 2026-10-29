@@ -12,7 +12,7 @@ function fixture(){
   const employee={id:'employee-a',name:'A',workspace_id:'ws-a',runtime:'Codex',target_device_id:'device-b',default_working_directory:'D:\\Employees\\A',default_working_directory_device_id:'device-b'};
   const saved={id:'conversation-a',workspace_id:'ws-a',employee_id:employee.id,employee,device_id:null,working_directory:null,messages:[],execution:null};
   const writes={created:[],settings:[],messages:[]},notices=[];
-  const ui={selectedConversation:ref(null),conversations:ref([]),employees:ref([employee]),activeConversationEmployee:ref(employee),devices:ref([{id:'device-a',status:'online',workdir:'C:\\Users\\Other'},{id:'device-b',status:'online',workdir:'C:\\Users\\A'}]),conversationEmployeeId:ref(employee.id),conversationDeviceId:ref(''),conversationModelId:ref(''),conversationWorkingDirectory:ref(''),conversationExecution:ref(null),conversationRouteId:ref(''),page:ref('inbox'),botChatIntent:ref(null),botBindingPending:ref(false),botBindingError:ref(''),conversationBotBinding:ref(null),conversationDirectoryCheck:ref(null)};
+  const ui={selectedConversation:ref(null),conversations:ref([]),employees:ref([employee]),activeConversationEmployee:ref(employee),devices:ref([{id:'device-a',status:'online',workdir:'C:\\Users\\Other'},{id:'device-b',status:'online',workdir:'C:\\Users\\A'}]),conversationEmployeeId:ref(employee.id),conversationDeviceId:ref(''),conversationModelId:ref(''),conversationWorkingDirectory:ref(''),conversationExecution:ref(null),conversationRouteId:ref(''),page:ref('inbox'),botChatIntent:ref(null),botBindingPending:ref(false),botBindingError:ref(''),conversationBotBinding:ref(null),conversationUsesNativeDsh:ref(false),conversationDirectoryCheck:ref(null)};
   const composer=createConversationComposerStore();
   const bindings={...ui,conversationSettingsSnapshot,mergeConversationSettingsDraft,employeeConversationPayload,createConversationRequestSequence,mergeConversationDetail,mergeConversationLists,conversationComposer:composer,workspaceSlug:()=> 'workspace-a',routePath:(page,id)=>'/workspace-a/'+page+'/'+id,conversationComposeKey:()=>`workspace-a\0${ui.selectedConversation.value?.id||''}`,clearConversationAttachment:()=>{},loadConversationExecution:async()=>{},refreshBotChatFailureState:async()=>{},startConversationPolling:()=>{},stopConversationPolling:()=>{},executionNeedsPolling:()=>false,history:{pushState:()=>{}},notify:message=>notices.push(message),api:{
     conversation:async()=>structuredClone(saved),
@@ -67,6 +67,12 @@ for(const defaultDirectory of ['D:\\Employees\\A',null])test(`model save does no
 test('a deliberate temporary directory survives refresh and is sent explicitly',async()=>{
   const f=fixture();await f.openConversation(f.saved);f.conversationWorkingDirectory.value='E:\\Temporary';await f.refreshSelectedConversation();assert.equal(f.conversationWorkingDirectory.value,'E:\\Temporary');
   f.draft();await f.sendConversationMessage();assert.equal(f.writes.messages[0].cwd,'E:\\Temporary');assert.equal(f.saved.working_directory,null);
+});
+
+test('a DSH conversation keeps the native model instead of saving or sending a stale CLI model',async()=>{
+  const f=fixture();f.employee.runtime='DSH';f.saved.employee.runtime='DSH';f.conversationUsesNativeDsh.value=true;
+  await f.openConversation(f.saved);f.conversationModelId.value='previous-codex-model';await f.saveConversationSettings({notifyUser:false});
+  assert.equal(f.writes.settings[0].modelId,null);f.draft();await f.sendConversationMessage();assert.equal(f.writes.messages[0].model,null);
 });
 
 test('an explicit directory choice can pin the same path as the inherited default',async()=>{

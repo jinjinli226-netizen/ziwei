@@ -6,7 +6,7 @@ const emit=defineEmits(['pause','resume','remove']);
 <template>
   <section v-if="queue.count || queue.paused || error" class="conversation-queue-panel" aria-label="待发消息队列" :aria-busy="busy">
     <header><strong>待发 {{ queue.count }} 条</strong><button type="button" :disabled="busy" @click="emit(queue.paused ? 'resume' : 'pause')">{{ queue.paused ? '继续发送' : '暂停待发' }}</button></header>
-    <p role="status">{{ queue.paused ? '队列已暂停，待发消息和附件会保留。' : '当前回答继续，待发消息将按顺序处理。' }}</p>
+    <p role="status">{{ queue.paused ? '队列已暂停，消息和附件已保留；继续发送或提交新消息即可开启。' : '当前回答继续，待发消息将按顺序处理。' }}</p>
     <p v-if="error" class="conversation-queue-error" role="alert">{{ error }}</p>
     <ul v-if="queue.items.length">
       <li v-for="item in queue.items" :key="item.id">

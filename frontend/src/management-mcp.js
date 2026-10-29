@@ -22,6 +22,7 @@ export function employeeReadiness(discovery, { deviceId, runtime, profile = '' }
     issues.push(...(selected.issues || []).map(issueText));
     if (selected.cli_status !== 'available') issues.push(`${runtime} CLI 不可用，请在目标电脑检查安装路径与 CLI 状态。`);
     if (selected.available === false) issues.push(`${runtime} CLI 或设备尚未就绪，请查看发现诊断。`);
+    if (runtime === 'DSH' && !profile) issues.push('请选择目标电脑已发现的 DSH Bot，不能使用员工显示名称代替。');
     if (runtime !== 'Hermes') {
       if (selected.readiness === 'unavailable' || selected.readiness === 'blocked' || selected.readiness?.ready === false || selected.authenticated === false) issues.push(`${runtime} 运行环境未就绪，请检查 CLI 认证、provider 与配置。`);
       if (selected.readiness?.issues) issues.push(...selected.readiness.issues.map(issueText));

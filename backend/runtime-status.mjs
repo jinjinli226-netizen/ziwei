@@ -1,6 +1,6 @@
 const parse=(value,fallback)=>{try{return JSON.parse(value??'')??fallback;}catch{return fallback;}};
 const text=value=>String(value??'').replace(/(token|password|secret|api[_-]?key)(\s*[=:]\s*)[^\s,;]+/gi,'$1$2[redacted]').slice(0,400);
-export function runtimeName(value){const name=String(value??'').trim();return ['Claude','Codex','Gemini','Hermes'].find(item=>item.toLowerCase()===name.toLowerCase())??name;}
+export function runtimeName(value){const name=String(value??'').trim();return ['Claude','Codex','Gemini','Hermes','DSH'].find(item=>item.toLowerCase()===name.toLowerCase())??name;}
 
 export function safeRuntimeDetection(value,status){
   const raw=value&&typeof value==='object'?value:{};
