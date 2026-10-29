@@ -742,6 +742,11 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
     const message = repo.addConversationMessage(req.params.id, { ...(req.body || {}), actorUserId: req.auth?.user_id, actorRole: req.workspaceRole, enforceDeviceOwnership: true, enforceEmployeeVisibility: true });
     res.status(message.duplicate ? 200 : 201).json(message);
   });
+  for(const operation of ['pause','resume'])app.post(`/api/conversations/:id/queue/${operation}`,requireRole('owner','admin','member'),(req,res)=>{
+    const context=employeeContext(req);
+    res.json(operation==='pause'?repo.pauseConversationQueue(req.params.id,context):repo.resumeConversationQueue(req.params.id,context));
+  });
+  app.delete('/api/conversations/:id/queue/:actionId',requireRole('owner','admin','member'),(req,res)=>res.json(repo.removeConversationQueueItem(req.params.id,req.params.actionId,employeeContext(req))));
   app.post('/api/conversations/:id/archive', (req, res) => {
     const conversation = repo.getConversation(req.params.id, employeeContext(req));
     if (!conversation) return res.status(404).json({ error: 'Conversation not found' });

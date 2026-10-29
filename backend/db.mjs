@@ -312,6 +312,10 @@ export function openDatabase(options = {}, {serverCodeRolloutIo={}}={}) {
       sender_user_id TEXT, forward_json TEXT,
       FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS conversation_queue_controls (
+      conversation_id TEXT PRIMARY KEY, paused INTEGER NOT NULL DEFAULT 0 CHECK(paused IN (0,1)), updated_at TEXT NOT NULL,
+      FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+    );
     CREATE TABLE IF NOT EXISTS conversation_reads (
       workspace_id TEXT NOT NULL, conversation_id TEXT NOT NULL, user_id TEXT NOT NULL,
       last_message_id TEXT, last_message_rowid INTEGER NOT NULL DEFAULT 0, last_read_at TEXT NOT NULL,

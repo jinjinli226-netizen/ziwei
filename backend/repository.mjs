@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import {createConversationQueue} from './conversation-queue.mjs';
 import {botExecutionOccupiesSlot} from './bot-execution-occupancy.mjs';
 import {actionExecutionLeaseMs} from '../src/action-execution-budget.mjs';
 import {observeDeviceUpdateHeartbeat} from './device-updates.mjs';
@@ -59,6 +60,7 @@ const hashSecret = value => crypto.createHash('sha256').update(String(value || '
 const parse = value => { try { return JSON.parse(value); } catch { return []; } };
 const explicitBoolean = value => value === true || value === 1 || (typeof value === 'string' && ['true', '1'].includes(value.trim().toLowerCase()));
 const botReplayEvent = Symbol('server stored Bot completion event');
+const conversationQueueAdmission = Symbol('saved user message queue admission');
 const uncertainCompletion = value => Boolean(value && typeof value === 'object' && (value.code === 'EXECUTION_UNCERTAIN' || value.executionState === 'uncertain' || value.status === 'uncertain' || Object.entries(value).some(([key, item]) => {
   // Phone audit calls are observations over time. A later receipt for the same
   // submitted ID supersedes its earlier uncertainty; an unrelated success does not.
@@ -370,6 +372,7 @@ const ownDevice = devices => {
 
 export function createRepository(options = {}, io={}) {
   const db = openDatabase(options,io);
+  const conversationQueue=createConversationQueue(db);
   const botActionCompletionListeners=new Set();
   const allowLocalNetwork = options.memory === true;
   const rollout=serverCodeRolloutFor(db);if(rollout)options={...options,objectStoreDir:rollout.objectStoreDir};
@@ -419,7 +422,9 @@ export function createRepository(options = {}, io={}) {
     const conversation=creatorConversationBinding(employee,conversationId,messageId);
     if (!conversation || !messageId) return prompt;
     const current=db.prepare("SELECT rowid FROM conversation_messages WHERE id=? AND conversation_id=? AND role='user'").get(String(messageId),conversation.id);
-    const before=db.prepare("SELECT rowid,role,substr(content,-12000) AS content FROM conversation_messages WHERE conversation_id=? AND rowid<? AND role IN ('user','assistant') AND trim(content)<>'' ORDER BY rowid DESC LIMIT 16").all(conversation.id,current.rowid);
+    const before=db.prepare(`SELECT m.rowid,m.role,substr(m.content,-12000) AS content FROM conversation_messages m WHERE m.conversation_id=? AND m.rowid<? AND m.role IN ('user','assistant') AND trim(m.content)<>''
+      AND NOT EXISTS(SELECT 1 FROM a2a_actions a WHERE a.error='CONVERSATION_QUEUE_REMOVED' AND a.workspace_id=? AND json_valid(a.payload_json) AND json_extract(a.payload_json,'$.conversationId')=m.conversation_id AND json_extract(a.payload_json,'$.employeeId')=? AND json_extract(a.payload_json,'$.messageId')=m.id)
+      ORDER BY m.rowid DESC LIMIT 16`).all(conversation.id,current.rowid,employee.workspace_id,employee.id);
     // A queued next turn can precede the previous turn's assistant reply in
     // storage order. Include that late reply only through the server's exact
     // result audit -> action -> earlier user message binding. Later queued
@@ -495,7 +500,7 @@ export function createRepository(options = {}, io={}) {
     };
   };
   const pendingConversationPayload = (row,payload) => {
-    if(row.status!=='pending' || row.type!=='conversation.execute' || payload.runtime!=='Codex' || payload.hermesBot || !payload.employeeId || !payload.conversationId || !payload.messageId)return payload;
+    if(row.status!=='pending' || row.type!=='conversation.execute' || !['Codex','Hermes'].includes(payload.runtime) || !payload.employeeId || !payload.conversationId || !payload.messageId)return payload;
     const employee=db.prepare("SELECT * FROM employees WHERE id=? AND workspace_id=? AND status<>'deleted'").get(String(payload.employeeId),row.workspace_id);
     const message=db.prepare("SELECT * FROM conversation_messages WHERE id=? AND conversation_id=? AND role='user'").get(String(payload.messageId),String(payload.conversationId));
     const mismatch=()=>Object.assign(new Error('待执行聊天与当前员工、工作区、目标电脑或用户消息不一致'),{code:'EXECUTION_HISTORY_BINDING_MISMATCH',status:409});
@@ -644,13 +649,15 @@ export function createRepository(options = {}, io={}) {
     // employee (`task.execute`).  Both payloads carry conversationId.  The
     // UI needs the latest one regardless of which dispatch path was used.
     const candidates = thread?null:db.prepare("SELECT * FROM a2a_actions WHERE payload_json LIKE ? AND type IN ('task.execute','conversation.execute') ORDER BY created_at DESC, rowid DESC").all(`%${String(conversationId)}%`);
-    const row = thread?thread.latestAction(workspaceId,conversationId):candidates.find(candidate => parse(candidate.payload_json)?.conversationId === conversationId);
+    let row = conversationQueue.current(conversationId) || (thread?thread.latestAction(workspaceId,conversationId):candidates.find(candidate => parse(candidate.payload_json)?.conversationId === conversationId));
+    if(row?.error==='CONVERSATION_QUEUE_REMOVED'||row&&db.prepare('SELECT error FROM a2a_actions WHERE id=?').get(row.id)?.error==='CONVERSATION_QUEUE_REMOVED')row=db.prepare("SELECT * FROM a2a_actions WHERE workspace_id=(SELECT workspace_id FROM conversations WHERE id=?) AND type IN ('task.execute','conversation.execute') AND error IS NOT 'CONVERSATION_QUEUE_REMOVED' AND json_valid(payload_json) AND json_extract(payload_json,'$.conversationId')=? ORDER BY created_at DESC,rowid DESC LIMIT 1").get(conversationId,conversationId);
     if (!row) return null;
     let current = row;
     if (!rollout && ['pending','acked'].includes(current.status) && current.expires_at && Date.parse(current.expires_at) <= Date.now() && db.prepare('SELECT ziwei_v2_admitted(?) admitted').get(current.id).admitted===1) {
       const timestamp = now();
       db.prepare("UPDATE a2a_actions SET status='expired',completed_at=? WHERE id=? AND ziwei_v2_admitted(id)=1 AND status IN ('pending','acked')").run(timestamp, current.id);
       current = { ...current, status:'expired', completed_at:timestamp };
+      conversationQueue.onTerminal(current);
     }
     const view = thread?thread.execution(current.id,workspaceId):conversationActionView(current);
     view.events = actionEvents(current.id,thread?'mobile':'full');
@@ -1890,7 +1897,8 @@ export function createRepository(options = {}, io={}) {
         employee_binding: employee ? 'bound' : 'unassigned_legacy',
         requires_employee_assignment: !employee,
         execution:conversationExecution(conversationId,thread,row.workspace_id),
-        messages:(page?page.rows:db.prepare('SELECT * FROM conversation_messages WHERE conversation_id=? ORDER BY created_at,rowid').all(conversationId)).map(conversationMessageView),
+        messages:conversationQueue.messages(conversationId,(page?page.rows:db.prepare('SELECT * FROM conversation_messages WHERE conversation_id=? ORDER BY created_at,rowid').all(conversationId)).map(conversationMessageView)),
+        queue:conversationQueue.projection(conversationId),
         ...(page?{messagePage:page.messagePage}:{})
       };
     },
@@ -2035,20 +2043,21 @@ export function createRepository(options = {}, io={}) {
           const saved = db.prepare('SELECT * FROM conversation_messages WHERE id=? AND conversation_id=?').get(existing.resource_id, conversationId);
           if (!saved) { const error = new Error('已提交消息无法读取，请刷新会话后重试'); error.status = 409; throw error; }
           const action = db.prepare('SELECT * FROM a2a_actions WHERE workspace_id=? AND dedupe_key=?').get(ws.id, `conversation:${conversationId}:${saved.id}`);
-          return { ...conversationMessageView(saved), clientMessageId, duplicate: true, execution: conversationActionView(action, { includeEvents: true }) };
+          return { ...conversationMessageView(saved), clientMessageId, duplicate: true, ...(action?{queue_status:conversationQueue.status(action)}:{}), queue:conversationQueue.projection(conversationId), execution: conversationActionView(action, { includeEvents: true }) };
         }
       }
       // Creator history injection needs the new message to exist. Keep that
       // validation and all writes in one savepoint so dispatch failures leave
       // no saved message or audit claiming the upload succeeded.
       db.exec('SAVEPOINT conversation_message');
+      let execution=null;
       try {
         db.prepare('INSERT INTO conversation_messages(id,conversation_id,role,content,attachment_json,created_at,sender_user_id,forward_json) VALUES(?,?,?,?,?,?,?,?)').run(message.id, conversationId, message.role, message.content, JSON.stringify(message.attachments), message.created_at,message.sender_user_id,forward?JSON.stringify(forward):null);
         if (dispatch) {
           const defaultPrompt = message.attachments.some(item => item.mimeType?.startsWith('image/')) ? '请分析所附图片，说明其中的内容并回复用户。' : '请阅读所附文件并回复用户。';
           const payload = executionPayload({ prompt: message.content || defaultPrompt, employee, ...executionSettings, conversationId, targetDeviceId, messageId: message.id, workspaceId:ws.id });
           if (message.attachments.length) payload.attachments = message.attachments;
-          this.createA2AAction(ws.slug, { type: 'conversation.execute', payload, dedupeKey: `conversation:${conversationId}:${message.id}` });
+          execution=this.createA2AAction(ws.slug, { type: 'conversation.execute', payload, dedupeKey: `conversation:${conversationId}:${message.id}`, [conversationQueueAdmission]:true });
         }
         db.prepare('UPDATE conversations SET updated_at=? WHERE id=?').run(message.created_at, conversationId);
         audit(ws.slug, message.role, 'conversation.message.created', { conversationId, messageId: message.id, dispatch,...(forward?{forwardId:forward.id,forwardMode:forward.mode,sourceConversationId:forward.source.conversationId}:{}) });
@@ -2058,7 +2067,22 @@ export function createRepository(options = {}, io={}) {
         db.exec('ROLLBACK TO conversation_message; RELEASE conversation_message');
         throw error;
       }
-      return { ...message, ...(clientMessageId ? { clientMessageId } : {}), execution: conversationExecution(conversationId) };
+      return { ...message, ...(clientMessageId ? { clientMessageId } : {}), ...(execution?{queue_status:'queued'}:{}), queue:conversationQueue.projection(conversationId), execution: execution?conversationActionView(db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(execution.id)):conversationExecution(conversationId) };
+    },
+    pauseConversationQueue(conversationId,input={}) {
+      const conversation=this.getConversationAccess(conversationId,input);if(!conversation)throw botFailure('CONVERSATION_NOT_FOUND','会话不存在或无权访问',404);
+      this.preservation?.assert({employeeId:conversation.employee_id});
+      conversationQueue.setPaused(conversationId,true);return{queue:conversationQueue.projection(conversationId)};
+    },
+    resumeConversationQueue(conversationId,input={}) {
+      const conversation=this.getConversationAccess(conversationId,input);if(!conversation)throw botFailure('CONVERSATION_NOT_FOUND','会话不存在或无权访问',404);
+      this.preservation?.assert({employeeId:conversation.employee_id});this.serverCodeRollout?.assertExecution();
+      conversationQueue.setPaused(conversationId,false);return{queue:conversationQueue.projection(conversationId)};
+    },
+    removeConversationQueueItem(conversationId,actionId,input={}) {
+      const conversation=this.getConversationAccess(conversationId,input);if(!conversation)throw botFailure('CONVERSATION_NOT_FOUND','会话不存在或无权访问',404);
+      this.preservation?.assert({employeeId:conversation.employee_id});
+      return{queue:conversationQueue.remove(conversationId,actionId)};
     },
     archiveConversation(conversationId, archived = true) { const row=db.prepare('SELECT * FROM conversations WHERE id=?').get(conversationId); if(!row) throw new Error('Conversation not found'); db.prepare('UPDATE conversations SET status=? WHERE id=?').run(archived ? 'archived' : 'active',conversationId); return this.getConversation(conversationId); },
     workspaceSlugForA2ATask(taskId) {
@@ -2088,7 +2112,8 @@ export function createRepository(options = {}, io={}) {
       if(input.type==='hermes.bot.native' && input.botInternal!==BOT_INTERNAL)throw botFailure('BOT_NATIVE_ROUTE_REQUIRED','请从版本化 Bot 原生操作入口提交');
       if(input.type==='directory.inspect' && input.botInternal!==BOT_INTERNAL && payload.hermesBot)throw botFailure('BOT_DIRECTORY_ROUTE_REQUIRED','请使用当前聊天目录入口');
       if (isValidation && input.botInternal!==BOT_INTERNAL) throw botFailure('BOT_VALIDATION_ROUTE_REQUIRED','请从 Bot 配置验证入口提交');
-      const bot=assertBotExecution(db,ws.id,payload,{validation:botActionMaintenance(input.type,payload),provisioning:isProvisioning,requireProfile:!isProvisioning,readOnlyInspection});
+      const queueAdmission=input[conversationQueueAdmission]===true;
+      const bot=assertBotExecution(db,ws.id,payload,{validation:botActionMaintenance(input.type,payload),provisioning:isProvisioning,requireProfile:!isProvisioning,readOnlyInspection,queueAdmission});
       if(bot) {
         if(input.type==='directory.inspect' && input.botInternal!==BOT_INTERNAL)throw botFailure('BOT_DIRECTORY_ROUTE_REQUIRED','请使用已认证的聊天目录入口');
         if (!isValidation && !isProvisioning && !['task.execute','agent.execute','runtime.execute','conversation.execute','automation.execute','hermes.bot.native','directory.inspect'].includes(input.type || 'task.execute')) throw botFailure('BOT_ACTION_UNSUPPORTED','此 Bot 执行类型尚未接入');
@@ -2111,22 +2136,23 @@ export function createRepository(options = {}, io={}) {
           payload={...inspection,inspectionEmployeeId:bot.employee.id};
         }
       }
-      const action = { id:id('action'), workspace_id:ws.id, agent_id:agentId, task_id:input.taskId || input.task_id || null, type:String(input.type || 'task.execute'), payload, dedupe_key:dedupeKey, status:'pending', expires_at:input.expiresAt || input.expires_at || new Date(Date.now()+actionExecutionLeaseMs({type:input.type || 'task.execute',payload})).toISOString(), created_at:now(), acked_at:null, completed_at:null, result_json:null, error:null };
+      const action = { id:id('action'), workspace_id:ws.id, agent_id:agentId, task_id:input.taskId || input.task_id || null, type:String(input.type || 'task.execute'), payload, dedupe_key:dedupeKey, status:'pending', expires_at:queueAdmission?null:input.expiresAt || input.expires_at || new Date(Date.now()+actionExecutionLeaseMs({type:input.type || 'task.execute',payload})).toISOString(), created_at:now(), acked_at:null, completed_at:null, result_json:null, error:null };
       db.prepare('INSERT INTO a2a_actions(id,workspace_id,agent_id,task_id,type,payload_json,dedupe_key,status,expires_at,created_at,acked_at,completed_at,result_json,error) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(action.id,action.workspace_id,action.agent_id,action.task_id,action.type,JSON.stringify(action.payload),action.dedupe_key,action.status,action.expires_at,action.created_at,null,null,null,null);
-      if(bot&&!readOnlyInspection)db.prepare('UPDATE hermes_bots SET active_action_id=? WHERE employee_id=?').run(action.id,bot.employee.id);
+      if(bot&&!readOnlyInspection&&(!queueAdmission||!bot.row.active_action_id))db.prepare('UPDATE hermes_bots SET active_action_id=? WHERE employee_id=?').run(action.id,bot.employee.id);
       audit(slug,'user','a2a.action.created',{actionId:action.id,type:action.type,dedupeKey}); return action;
     },
     listA2AActions(slug, input = {}) {
       const ws = workspace(slug); if (!ws) throw new Error('Workspace not found'); const agentId=String(input.agentId || input.agent_id || 'ziwei_user'); const requestedStatus=String(input.status || 'pending');
-      db.prepare("UPDATE a2a_actions SET status='expired',completed_at=? WHERE workspace_id=? AND ziwei_v2_admitted(id)=1 AND status IN ('pending','acked') AND expires_at IS NOT NULL AND expires_at < ?").run(now(),ws.id,now());
+      const expiredActions=db.prepare("UPDATE a2a_actions SET status='expired',completed_at=? WHERE workspace_id=? AND ziwei_v2_admitted(id)=1 AND status IN ('pending','acked') AND expires_at IS NOT NULL AND expires_at < ? RETURNING *").all(now(),ws.id,now());
+      for(const row of expiredActions)conversationQueue.onTerminal(row);
       // `ziwei_user` asks for pending + previously acked work. An ack is only
       // transport receipt; if the daemon crashed before posting a terminal
       // result, the acked action must be delivered again after restart.
       const includeAcked = explicitBoolean(input.includeAcked ?? input.include_acked);
       const statuses = requestedStatus === 'all' ? ['pending','acked','succeeded','failed','expired'] : (requestedStatus === 'pending' && includeAcked ? ['pending','acked'] : [requestedStatus]); const placeholders=statuses.map(()=>'?').join(',');
       const deviceId = String(input.deviceId || input.device_id || '').trim();
-      const rows=db.prepare(`SELECT * FROM a2a_actions WHERE workspace_id=? AND agent_id=? AND status IN (${placeholders}) ORDER BY created_at`).all(ws.id,agentId,...statuses);
-      return rows.filter(row => !deviceId || !actionTargetDevice(row) || actionTargetDevice(row) === deviceId)
+      const rows=db.prepare(`SELECT * FROM a2a_actions WHERE workspace_id=? AND agent_id=? AND status IN (${placeholders}) ORDER BY created_at,rowid`).all(ws.id,agentId,...statuses);
+      return rows.filter(row => (!deviceId || !actionTargetDevice(row) || actionTargetDevice(row) === deviceId) && (input.executionDelivery!==true || conversationQueue.deliverable(row)))
         .flatMap(row => {
           try{return [{...a2aResponseView(row, { payload:executionActionPayload(row), includeResult:input.includeResult !== false }),...historicalActionMetadata(row)}];}
           catch(error){
@@ -2214,9 +2240,11 @@ export function createRepository(options = {}, io={}) {
         else if (['succeeded','failed'].includes(row.status)) response = { ...a2aResponseView(row, { receiptOnly, includeResult:!receiptOnly }),...historicalActionMetadata(row), duplicate:true };
         else {
           const timestamp = now();
+          conversationQueue.assertAdmission(row);
           if(row.status==='pending')assertBotExecution(db,row.workspace_id,{...parse(row.payload_json),...(!actionTargetDevice(row)&&(input.deviceId||input.device_id)?{deviceId:String(input.deviceId||input.device_id).trim()}:{})},{validation:botActionMaintenance(row.type,parse(row.payload_json)),provisioning:row.type==='hermes.bot.provision',requireProfile:row.type!=='hermes.bot.provision',actionId,readOnlyInspection:botActionReadOnlyInspection(row.type,parse(row.payload_json))});
           if (row.expires_at && Date.parse(row.expires_at) <= Date.parse(timestamp)) {
             db.prepare("UPDATE a2a_actions SET status='expired',completed_at=? WHERE id=?").run(timestamp, actionId);
+            conversationQueue.onTerminal({...row,status:'expired'});
             expired = true;
           } else if (row.status === 'acked') {
             if (input.renewLease === true && !maintenanceActionDeadline(db,actionId)) {
@@ -2236,6 +2264,7 @@ export function createRepository(options = {}, io={}) {
             const leaseExpiry = new Date(Date.parse(timestamp) + executionLeaseMs).toISOString();
             const expiresAt = row.expires_at && Date.parse(row.expires_at) > Date.parse(leaseExpiry) ? row.expires_at : leaseExpiry;
             db.prepare("UPDATE a2a_actions SET status='acked',acked_at=?,expires_at=?,payload_json=? WHERE id=? AND status='pending'").run(timestamp, expiresAt, JSON.stringify(payload), actionId);
+            if(payload.hermesBot&&!botActionReadOnlyInspection(row.type,payload))db.prepare('UPDATE hermes_bots SET active_action_id=? WHERE employee_id=?').run(actionId,payload.employeeId);
             markTaskRunning(row.task_id);
             const updated = db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId);
             response = { ...a2aResponseView(updated, { receiptOnly, includeResult:!receiptOnly }), duplicate:false };
@@ -2405,6 +2434,7 @@ export function createRepository(options = {}, io={}) {
           else if(!rollout)try{assertBotExecution(db,row.workspace_id,payload,{actionId});const actions=this.dispatchBotCollaboration(ws.slug,{...payload.collaborationManifest,sourceActionId:actionId},payload.nativeOperation.requestId);result={...result,collaboration:{actions:actions.map(action=>({id:action.id,status:action.status,employeeId:action.payload.employeeId})),groupId:payload.collaborationManifest.groupId}};}catch(dispatchError){status='failed';error=dispatchError.code || 'BOT_COLLABORATION_DISPATCH_FAILED';result={...result,collaboration:{dispatched:false,code:error}};}
         }
         db.prepare('UPDATE a2a_actions SET status=?,completed_at=?,result_json=?,error=? WHERE id=?').run(status, timestamp, result === undefined ? null : JSON.stringify(result), error, actionId);
+        conversationQueue.onTerminal({...row,status,error});
         if (reconciliation) {
           const evidence = { sourceEventId:input[botReplayEvent] || null, previousStatus:row.status, previousCompletedAt:row.completed_at, expiresAt:row.expires_at, deviceId:input.deviceId, resultSha256:hashSecret(JSON.stringify(result)) };
           db.prepare('INSERT INTO a2a_action_events(id,action_id,type,message,data_json,created_at) VALUES(?,?,?,?,?,?)').run(id('action-event'),actionId,'action.reconciled','已根据原设备完成及退出证据核实原执行',JSON.stringify(evidence),timestamp);

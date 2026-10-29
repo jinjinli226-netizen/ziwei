@@ -35,7 +35,7 @@ export const botSnapshot = (db, employeeId, workspaceId) => {
   const providerCredentialIndependent=Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='bot_provider_secrets'").get()&&db.prepare('SELECT 1 FROM bot_provider_secrets WHERE workspace_id=? AND employee_id=?').get(workspaceId,employeeId));
   return {schemaVersion:1,employeeId,workspace,revision:row.revision,controlEpoch:row.control_epoch,config:parse(row.config_json),...(providerCredentialIndependent?{providerCredentialIndependent:true}:{}),sourceProfile:employee.runtime_profile,instance:botProfileBinding(row),deviceId:employee.target_device_id,model:employee.model_id,persona:employee.persona,instructions:employee.instructions,description:employee.description,name:employee.name,conversationId:row.main_conversation_id};
 };
-export function assertBotExecution(db, workspaceId, payload, { validation = false, provisioning = false, requireProfile = !validation, actionId = null, readOnlyInspection = false } = {}) {
+export function assertBotExecution(db, workspaceId, payload, { validation = false, provisioning = false, requireProfile = !validation, actionId = null, readOnlyInspection = false, queueAdmission = false } = {}) {
   // Retired owned profiles cannot be addressed through a raw action without employeeId.
   const targetDeviceId=payload.deviceId || payload.targetDeviceId || payload.device_id || payload.target_device_id;
   const targetProfile=payload.profile || payload.runtimeProfile || payload.runtime_profile || payload.hermesProfile || payload.hermes_profile;
@@ -76,7 +76,7 @@ export function assertBotExecution(db, workspaceId, payload, { validation = fals
     const deferred=db.prepare("SELECT state,intent_json FROM bot_deferred_configs WHERE employee_id=? AND state IN ('pending','validating','connecting')").get(employeeId);
     if(deferred&&(!actionId||deferred.state!=='pending'||parse(deferred.intent_json)?.blocking?.id!==actionId))throw botFailure('BOT_DEFERRED_CONFIG_BUSY','已接受此员工的延后配置，等待原执行结束及配置、连接流程完成后再派新工作');
   }
-  if (!readOnlyInspection && row.active_action_id && row.active_action_id !== actionId) {
+  if (!queueAdmission && !readOnlyInspection && row.active_action_id && row.active_action_id !== actionId) {
     const active = db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(row.active_action_id);
     if (botExecutionOccupiesSlot(active,{workspaceId,employeeId,deviceId:employee.target_device_id,profile:employee.runtime_profile}) && !readHistoricalPrelaunchRecovery(db,active)) throw botFailure('BOT_BUSY','Bot 仍有在途或未确认停止的执行，请查询原回执');
   }

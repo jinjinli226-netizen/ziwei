@@ -36,7 +36,7 @@ test('real repository and durable client recover a lost expired result through a
     return repo.resultA2AAction(id,input);
   }});
   await assert.rejects(delivery.execute(original),/connection loss/);
-  repo.db.prepare("UPDATE a2a_actions SET status='expired',completed_at=?,expires_at=? WHERE id=?").run('2026-01-01T00:16:00.000Z','2026-01-01T00:15:00.000Z',original.id);
+  repo.db.prepare("UPDATE a2a_actions SET status='expired',completed_at=?,expires_at=?,result_json=? WHERE id=?").run('2026-01-01T00:16:00.000Z','2026-01-01T00:15:00.000Z',JSON.stringify({processExit:{launched:true,rootPid:5678,rootConfirmed:false,treeConfirmed:false,activeProcesses:1}}),original.id);
   const current=bots.get(slug,bot.id);
   const stopped=bots.control(slug,bot.id,{expectedRevision:current.revision,expectedControlEpoch:current.control_epoch,operation:'stop'});
   assert.equal(stopped.stop_action.payload.actionId,original.id);loseResult=false;
@@ -50,4 +50,19 @@ test('real repository and durable client recover a lost expired result through a
   const count=repo.getConversation(bot.main_conversation_id).messages.length;
   await delivery.execute(stopped.stop_action);
   assert.equal(repo.getConversation(bot.main_conversation_id).messages.length,count);assert.equal(executeCount,1);
+});
+
+test('an expired execution without positive live-process evidence never creates a stop or replays work',t=>{
+  const repo=createRepository({memory:true}),bots=createManagementService(repo).bots;t.after(()=>repo.db.close());
+  repo.heartbeatDevice('test-111',{deviceId:'expired-pc',runtimes:{Hermes:{status:'available',version:'0.22.5',profiles:[{name:'default'}]}}});
+  let bot=bots.create('test-111',{name:'Expired terminal',sourceProfile:'default',targetDeviceId:'expired-pc',idempotencyKey:'expired-create'});completeOwnedProfile(repo,bot);
+  const validation=bots.validate('test-111',bot.id,{expectedRevision:bot.revision,idempotencyKey:'expired-validate'}).action;
+  repo.ackA2AAction(validation.id,{deviceId:'expired-pc'});repo.resultA2AAction(validation.id,{status:'succeeded',result:{botValidation:{schemaVersion:1,valid:true,employeeId:bot.id,revision:bot.revision}}});
+  bot=bots.control('test-111',bot.id,{expectedRevision:bot.revision,expectedControlEpoch:bot.control_epoch,operation:'activate'});
+  const first=repo.addConversationMessage(bot.main_conversation_id,{content:'Original'});repo.ackA2AAction(first.execution.id,{deviceId:'expired-pc'});
+  repo.db.prepare("UPDATE a2a_actions SET status='expired',completed_at=?,expires_at=? WHERE id=?").run('2026-01-01T00:16:00.000Z','2026-01-01T00:15:00.000Z',first.execution.id);
+  const before=repo.db.prepare('SELECT count(*) AS count FROM a2a_actions').get().count;
+  const stopped=bots.control('test-111',bot.id,{expectedRevision:bot.revision,expectedControlEpoch:bot.control_epoch,operation:'stop'});
+  assert.equal(stopped.stop_action,null);assert.equal(repo.getA2AAction(first.execution.id).status,'expired');
+  assert.equal(repo.db.prepare('SELECT count(*) AS count FROM a2a_actions').get().count,before);
 });

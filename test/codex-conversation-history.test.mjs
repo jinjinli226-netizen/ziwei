@@ -63,7 +63,7 @@ test('a queued Codex turn gains its earlier completed reply without seeing futur
   f.send('UNBOUND_LATE_ASSISTANT',{role:'assistant',dispatch:false});
   // Even an out-of-order terminal receipt for a later request is not history
   // of the current request. The source message binding controls inclusion.
-  f.complete(future.execution.id,'FUTURE_COMPLETED_RESULT');
+  f.repo.resultA2AAction(future.execution.id,{deviceId:'codex-history-pc',status:'succeeded',result:{output:'FUTURE_COMPLETED_RESULT'}});
   const delivered=f.repo.listA2AActions('test-111',{status:'pending',deviceId:'codex-history-pc'}).find(row=>row.id===second.execution.id);
   const entries=f.history(delivered.payload.prompt).entries;
   assert.deepEqual(entries,[{role:'user',content:'EARLIER_REQUEST'},{role:'assistant',content:'EARLIER_COMPLETED_RESULT'}]);
