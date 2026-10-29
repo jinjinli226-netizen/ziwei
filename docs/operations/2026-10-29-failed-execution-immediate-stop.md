@@ -2,6 +2,8 @@
 
 用户在 2026-10-29 明确要求：失败会话或进程立即终止，不等人工操作。本变更基于 `8e4f37a`，只交付源码，未部署或升级正式设备。
 
+用户随后明确“不考虑旧的客户端”，本轮已停止新增服务端旧客户端自动停止兜底；没有加入这项兼容逻辑，只实现新版本自身的即时清理。
+
 ## 执行规则
 
 - 明确的原生终态失败事件、非零进程退出、executor 返回失败或抛错，立即请求终止本次执行拥有的进程树。停止请求在失败路径触发，退出确认只用于如实保存结果，不是终止前的人工门槛。
@@ -20,3 +22,5 @@
 - `test/runtime-group.test.mjs`、`test/dsh-current-*.test.mjs`：群成员清理和 DSH 本次 session 的停止关联。
 
 所有测试使用隔离的本机进程或协议 fixture，没有调用真实模型或生产设备。正式 daemon 的安装、发布与线上可用性仍需单独验收。
+
+最终受影响集合 **331/331** 通过，覆盖队列、DSH、Codex 会话、Hermes/Profile、Provider 密钥、身份权限、调度/投递以及本机/群组进程清理。全部前端测试 **486/486** 通过，lint 和前端构建通过。日志为本工作树 `.local/final-current-baseline-functional.log`、`.local/final-current-baseline-frontend.log`；该受影响集合不是全库验收，历史中间扫描的未结项另见 `2026-10-29-broad-regression-intermediate.md`。

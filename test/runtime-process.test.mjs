@@ -212,7 +212,7 @@ test('Windows assignment failure terminates the still-suspended process without 
 
 test('Windows unexpected host termination closes its Job and kills owned detached descendants without inventing a receipt', { skip: !windows, timeout: 30000 }, async t => {
   const dir = scratch();
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 20 }));
   const pidsFile = path.join(dir, 'owned-pids.json');
   const script = `const p=require('child_process').spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{detached:true,stdio:'ignore',windowsHide:true});p.unref();require('fs').writeFileSync(${JSON.stringify(pidsFile)},JSON.stringify([process.pid,p.pid]));setInterval(()=>{},1000);`;
   const runtime = launch({ command: process.execPath, args: ['-e', script], cwd: dir, env: process.env });
