@@ -44,7 +44,8 @@ function newestExecution(previous, incoming) {
 
 export function mergeConversationDetail(previous, incoming) {
   if (!previous || previous.id!==incoming?.id) return incoming;
-  const execution=newestExecution(previous.execution,incoming.execution);
+  // A sequenced detail can explicitly clear execution; a list or omitted field cannot.
+  const execution=incoming.execution===null?null:newestExecution(previous.execution,incoming.execution);
   const merged=mergeConversationLatest(previous,incoming);
   return execution===previous.execution && execution!==incoming.execution
     ? { ...merged,execution,messages:previous.messages }

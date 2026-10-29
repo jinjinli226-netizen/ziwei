@@ -381,7 +381,7 @@ export class ActionDispatcher {
         }
       };
       let executionSettled = false; let stoppedEvidence = null; let latestEvidence = null; let resolveConfirmed;
-      let executionError=null,completeEvidence=null,resolveComplete,supervisionRejected=false;
+      let executionError=null,executionFailure=null,completeEvidence=null,resolveComplete,supervisionRejected=false;
       const completeConfirmed=new Promise(resolve=>{resolveComplete=resolve;});
       const stopRequested = new Promise(resolve => { resolveStop = resolve; });
       const confirmed = new Promise(resolve => { resolveConfirmed = resolve; });
@@ -389,6 +389,10 @@ export class ActionDispatcher {
       const reliableStop = value => rootFinished(value) && (value.treeConfirmed === true || (process.platform !== 'win32' && value.platform && value.platform !== 'win32'));
       const finalizeStopped = () => {
         if (!executionSettled || (supervision ? !stoppedEvidence : !stopReason) || executionError&&(supervisionRejected||!completeEvidence)) return;
+        if(executionFailure){
+          this.#confirmQuarantineStopped(key,{...executionFailure,result:{...executionFailure.result,processExit:safeProcessExit(stoppedEvidence),partialEffectsPossible:true}});
+          return;
+        }
         const cancelled = stopReason === 'cancelled';
         this.#confirmQuarantineStopped(key, this.#failure(action, executionError || '原动作已确认退出；工具可能已经产生影响，请核实后再决定是否重新提交', {code: executionError ? 'executor_failed' : cancelled ? 'cancelled' : stopReason ? 'action_timeout' : 'execution_stopped', result: {processExit: safeProcessExit(executionError?completeEvidence:stoppedEvidence), partialEffectsPossible: true}}));
       };
@@ -522,6 +526,7 @@ export class ActionDispatcher {
       }
       const result = outcome.value;
       const executorStatus = result && typeof result === 'object' ? String(result.status || '') : '';
+      if(executorStatus==='failed')executionFailure=this.#failure(action,result.error||'Local executor failed',{code:result.code||'executor_failed',result:result.result,...(result.executionState?{executionState:result.executionState}:{}),...(result.reason?{reason:result.reason}:{})});
       if(supervision&&executorStatus&&executorStatus!=='succeeded'&&!(rootFinished(latestEvidence)&&latestEvidence.treeConfirmed===true&&latestEvidence.activeProcesses===0)){
         invokeStop();
         await bounded(completeConfirmed);

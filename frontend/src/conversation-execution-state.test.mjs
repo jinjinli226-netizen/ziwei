@@ -161,6 +161,44 @@ test('new action replaces completed A in every B state without downgrading the s
   assert.equal(state.mergeConversationDetail(terminal,conversation(execution('B','acked',2))).execution.status,'expired');
 });
 
+test('an authoritative empty execution clears the removed queued action and merges cancelled message history',()=>{
+  const previous={...conversation(execution('queued','pending')),messages:[{id:'older',content:'loaded earlier'},{id:'queued-message',status:'queued'}],messagePage:{hasMore:true,beforeCursor:'older',total:20}};
+  const incoming={...conversation(null),messages:[{id:'queued-message',status:'cancelled',error:'Removed from queue'}],messagePage:{hasMore:true,beforeCursor:'queued-message',total:20}};
+  const merged=state.mergeConversationDetail(previous,incoming);
+  assert.equal(merged.execution,null);assert.equal(state.executionNeedsPolling(merged.execution),false);
+  assert.deepEqual(merged.messages.map(message=>message.id),['older','queued-message']);assert.equal(merged.messages[1].status,'cancelled');
+  assert.equal(merged.messages[1].error,'Removed from queue');assert.equal(merged.messagePage.beforeCursor,'older');
+  assert.equal(previous.execution.id,'queued');assert.equal(previous.messages[1].status,'queued');
+});
+
+test('a missing or undefined execution preserves the current action while same-action progress cannot regress',()=>{
+  const previous=conversation(execution('current','acked'));
+  for(const incoming of [{id:previous.id,messages:[]},{id:previous.id,messages:[],execution:undefined}])assert.equal(state.mergeConversationDetail(previous,incoming).execution,previous.execution);
+  assert.equal(state.mergeConversationDetail(previous,conversation(execution('current','pending'))).execution.status,'acked');
+  for(const status of ['succeeded','failed','expired','cancelled']){
+    const completed=conversation(execution('current',status));
+    for(const stale of ['pending','acked'])assert.equal(state.mergeConversationDetail(completed,conversation(execution('current',stale))).execution.status,status);
+  }
+});
+
+test('a current empty detail synchronizes cancelled messages and cannot be undone by an older pending response',async()=>{
+  const old=deferred(),current=deferred();let calls=0;
+  const ui=harness({conversation:()=> (++calls===1?old:current).promise});
+  const pending={...conversation(execution('queued','pending')),messages:[{id:'queued-message',status:'queued'}]};
+  ui.selectedConversation.value=pending;ui.conversationExecution.value=pending.execution;ui.conversations.value=[pending];
+  const stale=ui.refreshSelectedConversation(),latest=ui.refreshSelectedConversation();
+  current.resolve({...conversation(null),messages:[{id:'queued-message',status:'cancelled'}]});await latest;
+  assert.equal(ui.conversationExecution.value,null);assert.equal(ui.conversations.value[0].execution,null);assert.equal(ui.selectedConversation.value.messages[0].status,'cancelled');
+  old.resolve(pending);await stale;
+  assert.equal(ui.conversationExecution.value,null);assert.equal(ui.selectedConversation.value.messages[0].status,'cancelled');
+});
+
+test('an empty detail from an old workspace cannot clear the current execution',async()=>{
+  const response=deferred(),ui=harness({conversation:()=>response.promise}),pending=ui.refreshSelectedConversation();
+  ui.workspace.value='another-workspace';response.resolve(conversation(null));await pending;
+  assert.equal(ui.conversationExecution.value.id,'A');assert.equal(ui.selectedConversation.value.execution.id,'A');
+});
+
 test('same-route actual open preserves composer and edited settings while refreshing state',async()=>{
   const ui=harness({conversation:async()=>conversation(execution('B','pending',2))},{realOpen:true});
   assert.equal(await ui.openConversation('conversation'),true);
