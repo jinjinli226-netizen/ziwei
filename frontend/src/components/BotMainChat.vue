@@ -29,7 +29,10 @@ const uncertain=computed(()=>executionUncertain(props.execution));
 const finalization=computed(()=>props.managed===false?null:(failureFinalization(props.execution)||(!props.execution?pendingBotFailureFinalization(props.bot):null)));
 const finalizationState=computed(()=>finalizationPresentation(finalization.value,{offline:props.device?.status==='offline'}));
 const canFinalize=computed(()=>props.managed!==false&&executionProcessActive(props.execution?.result)&&Boolean(failureFinalizationRequest(props.bot,props.execution)));
-const queue=computed(()=>props.conversation?.queue || {paused:false,count:0,items:[]});
+const queue=computed(()=>{
+  const value=props.conversation?.queue||{},count=Number(value.count);
+  return {paused:value.paused===true,count:Number.isFinite(count)&&count>0?count:0,items:Array.isArray(value.items)?value.items:[]};
+});
 const blocksSending=computed(()=>props.managed!==false&&executionProcessActive(props.execution?.result)&&props.bot?.active_action_id===props.execution?.id);
 const recoveryEvent=computed(()=>props.managed===false?null:botRecoveryEvent(props.execution));
 const stopState=computed(()=>botStopPresentation(props.bot,props.execution));

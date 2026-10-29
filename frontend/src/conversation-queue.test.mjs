@@ -35,9 +35,21 @@ test('actual queue panel shows attachments, escapes message text, and preserves 
   assert.doesNotMatch(await renderToString(vue.createSSRApp(panel,{queue:{count:0,paused:false,items:[]}})),/<section/);
 });
 
+test('queue panel tolerates a partial queue projection without losing queue controls',async()=>{
+  const html=await renderToString(vue.createSSRApp(panel,{queue:{count:1,paused:false}}));
+  assert.match(html,/待发 1 条/);
+  assert.match(html,/暂停待发/);
+});
+
 test('actual main chat keeps a queue send control beside stop while the current action is running',async()=>{
   const html=await renderToString(vue.createSSRApp(chat,{bot:{id:'bot-a',employee:{name:'Fixture',runtime:'Codex'}},conversation:{id:'chat-a',messages:[],queue:{count:1,paused:false,items:[{id:'next',content:'next'}]}},execution:{id:'active',status:'acked'},canStop:true,draft:'second'}));
   assert.match(html,/aria-label="请求停止当前执行"/);assert.match(html,/aria-label="加入队列"/);assert.match(html,/Enter 加入队列/);
+});
+
+test('main chat tolerates a partial queue projection while preserving the send control',async()=>{
+  const html=await renderToString(vue.createSSRApp(chat,{bot:{id:'bot-a',employee:{name:'Fixture',runtime:'Codex'}},conversation:{id:'chat-a',messages:[],queue:{count:1,paused:false}},execution:{id:'active',status:'acked'},canStop:true,draft:'second'}));
+  assert.match(html,/aria-label="加入队列"/);
+  assert.match(html,/待发 1 条/);
 });
 
 function queueController(bindings) {
