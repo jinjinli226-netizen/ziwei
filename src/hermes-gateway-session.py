@@ -107,7 +107,8 @@ class _Session:
     def describe(self, result):
         self.check_home()
         contract = result.get('session_create', {})
-        _check(contract.get('shell_private_mcp_v1') is True and contract.get('strict_reasoning_receipts_v1') is True,
+        _check((not self.servers or contract.get('shell_private_mcp_v1') is True)
+               and (not self.effort or contract.get('strict_reasoning_receipts_v1') is True),
                self.reject, 'BOT_GATEWAY_CAPABILITY_UNSUPPORTED')
         profile = result.get('profile_id')
         _check(_profile(profile) and Path(profile).resolve() == self.home,
@@ -255,7 +256,7 @@ class _Client:
 
 
 def install(config, isolation, *, overlay='', reject=RuntimeError, active=True):
-    if not active or not isolation or isolation.get('kind') != 'hermes-bot':
+    if not active:
         return False
     try:
         gateway = importlib.import_module('hermes_cli.gateway_chat')
@@ -263,6 +264,12 @@ def install(config, isolation, *, overlay='', reject=RuntimeError, active=True):
         if error.name == 'hermes_cli.gateway_chat':
             return False  # Legacy Hermes retains its existing in-process transport guards.
         raise reject('BOT_GATEWAY_SESSION_PROTOCOL_UNSUPPORTED') from None
+    bot = bool(isolation and isolation.get('kind') == 'hermes-bot')
+    servers = _overlay_servers(config, overlay, reject)
+    effort = os.environ.get('ZIWEI_BOT_REASONING_EFFORT') if bot else None
+    _check(effort is None or effort in _EFFORTS, reject, 'BOT_REASONING_INVALID')
+    if not servers and not effort:
+        return False
     original = getattr(gateway, 'run_gateway_chat', None)
     connect = getattr(gateway, 'connect_gateway', None)
     _check(inspect.iscoroutinefunction(original) and callable(connect), reject, 'BOT_GATEWAY_SESSION_PROTOCOL_UNSUPPORTED')
@@ -270,15 +277,11 @@ def install(config, isolation, *, overlay='', reject=RuntimeError, active=True):
     native_view = view_module.GatewayChatView
     baseline = config.load_config().get('model', {})
     home = Path(os.environ.get('HERMES_HOME', '')).resolve()
-    _check(home == Path(os.environ.get('ZIWEI_CREATOR_HOME', '')).resolve()
-           and home == Path(config.get_config_path()).resolve().parent, reject, 'BOT_GATEWAY_HOME_MISMATCH')
+    _check(home == Path(config.get_config_path()).resolve().parent
+           and (not bot or home == Path(os.environ.get('ZIWEI_CREATOR_HOME', '')).resolve()),
+           reject, 'BOT_GATEWAY_HOME_MISMATCH')
     model, provider = baseline.get('default'), baseline.get('provider')
-    _check(isinstance(model, str) and isinstance(provider, str), reject, 'BOT_GATEWAY_ROUTE_INVALID')
-    servers = _overlay_servers(config, overlay, reject)
-    effort = os.environ.get('ZIWEI_BOT_REASONING_EFFORT')
-    _check(effort is None or effort in _EFFORTS, reject, 'BOT_REASONING_INVALID')
-    if not servers and not effort:
-        return False
+    _check(not effort or isinstance(model, str) and isinstance(provider, str), reject, 'BOT_GATEWAY_ROUTE_INVALID')
     context = contextvars.ContextVar('ziwei_gateway_execution', default=None)
 
     class View(native_view):
