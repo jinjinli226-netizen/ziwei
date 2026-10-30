@@ -213,6 +213,14 @@ function projectSettings(data){
 }
 export function projectDshNativeData(resource,data){
  if(resource==='settings')return projectSettings(data);
+ if(resource==='plugins'&&object(data)&&Object.hasOwn(data,'mountBase')){
+  const out={};
+  for(const key of ['application','bridgePackage','version','requestId'])if(typeof data[key]==='string'&&data[key].length<=240)out[key]=redactSecrets(data[key]);
+  if(typeof data.mountBase==='string'&&/^\/runtime\/[a-z0-9][a-z0-9-]{0,23}\/ui\/$/.test(data.mountBase))out.mountBase=data.mountBase;
+  if(object(data.receipt))out.receipt=safeValue(data.receipt);
+  if(typeof data.error==='string')out.error=redactSecrets(data.error).slice(0,400);
+  return out;
+ }
  if(resource==='providers'&&object(data))return{...safeValue(data),...(object(data.settings)?{settings:projectSettings(data.settings)}:{}),...(object(data.credentials)?{credentials:Object.fromEntries(Object.entries(data.credentials).filter(([,value])=>object(value)).map(([ref,value])=>[ref,{configured:value.configured===true,writable:value.writable===true,...(typeof value.source==='string'?{source:redactSecrets(value.source)}:{})}]))}:{})};
  if(resource==='state'){
   const source=object(data?.resources)?data.resources:{};

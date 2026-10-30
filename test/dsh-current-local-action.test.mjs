@@ -52,6 +52,17 @@ test('local DSH sends UTF-8 text and JSON attachments as native text blocks and 
  const rejected=await execute({id:'dsh-pdf',type:'conversation.execute',payload:{runtime:'DSH',profile:'real-bot',prompt:'读取文档',attachments:[{name:'guide.pdf',mimeType:'application/pdf',contentBase64:Buffer.from('pdf').toString('base64')}]}}).catch(error=>error);
  assert.match(rejected.message,/仅支持PNG|文本/);
 });
+test('local DSH prepares the native plugin UI host and validates its bound mount receipt',async t=>{
+ const directory=fs.mkdtempSync(path.join(os.tmpdir(),'ziwei-dsh-plugin-ui-'));t.after(()=>fs.rmSync(directory,{recursive:true,force:true}));
+ const subject={schemaVersion:1,workspace:'fixture-workspace',workspaceId:'fixture-workspace-id',employeeId:'employee-one',ownerUserId:'owner-one',deviceId:'device-one',profile:'real-bot',runtime:'DSH'};
+ const payload={workspace:'fixture-workspace',workspaceId:'fixture-workspace-id',deviceId:'device-one',dshOperation:{schemaVersion:1,subject,scope:{kind:'bot'},resource:'plugins',operation:'prepareUiHost',input:{},requestedBy:{userId:'owner-one',role:'owner',deviceScope:'device-one'}}};
+ const response=body=>new Response(JSON.stringify(body),{status:200,headers:{'content-type':'application/json'}});
+ let mode='good';
+ const fetchImpl=async(url,options)=>{assert.equal(url,'http://native.fixture/api/bots/real-bot/plugin-ui/prepare');assert.equal(options.method,'POST');assert.deepEqual(JSON.parse(options.body),{});return mode==='good'?response({ok:true,application:'applied',version:'0.1.0',bridgePackage:'@dshbot/plugin-ui-host',mountBase:'/runtime/real-bot/ui/',receipt:{application:'applied',bundle:'@dshbot/plugin-ui-host'}}):response({ok:true,application:'applied',version:'0.1.0',bridgePackage:'@dshbot/plugin-ui-host',mountBase:'/runtime/other-bot/ui/'})};
+ const execute=createLocalActionExecutor({runtimeDir:directory,defaultWorkdir:directory,workspace:'fixture-workspace',deviceId:'device-one',admissionHandledByDispatcher:true,dshBaseUrl:'http://native.fixture',dshPluginFetch:fetchImpl});t.after(()=>execute.close());
+ const good=await execute({id:'dsh-plugin-ui-good',type:'employee.dsh.operation',payload});assert.equal(good.status,'succeeded',JSON.stringify(good));assert.equal(good.result.dshNative.status,'applied');assert.equal(good.result.dshNative.data.mountBase,'/runtime/real-bot/ui/');
+ mode='forged-mount';const forged=await execute({id:'dsh-plugin-ui-forged',type:'employee.dsh.operation',payload});assert.equal(forged.status,'failed',JSON.stringify(forged));assert.equal(forged.error,'DSH_NATIVE_OPERATION_UNCONFIRMED');
+});
 test('a group member without an employee directory uses its own native Bot work directory',async t=>{
  const directory=fs.mkdtempSync(path.join(os.tmpdir(),'ziwei-dsh-group-cwd-'));t.after(()=>fs.rmSync(directory,{recursive:true,force:true}));
  const memberDirectory=path.join(directory,'member-work');fs.mkdirSync(memberDirectory);let selected;

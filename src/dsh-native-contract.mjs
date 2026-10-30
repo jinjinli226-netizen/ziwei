@@ -15,6 +15,7 @@ const read=(resource,operation,schema,methods)=>add(resource,operation,schema,{r
 add('state','refresh',object({resources:array({enum:resources},resources.length)},[]),{readOnly:true,scope:'either'});
 read('plugins','list',undefined,['pluginManager/listBundles','pluginManager/listPlugins','pluginInventory/list']);
 read('plugins','registries',undefined,['pluginManager/registries']);
+add('plugins','prepareUiHost',object({}),{nativeMethods:['POST /api/bots/:name/plugin-ui/prepare'],timeoutMs:60000});
 add('plugins','setBundleEnabled',object({name:string(),enabled:boolean}),{nativeMethods:['pluginManager/setBundleEnabled']});
 add('plugins','setPluginEnabled',object({id:string(600),enabled:boolean}),{nativeMethods:['pluginManager/setPluginEnabled']});
 add('plugins','removeBundle',object({name:string()}),{nativeMethods:['pluginManager/removeBundle']});

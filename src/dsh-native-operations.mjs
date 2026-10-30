@@ -85,6 +85,15 @@ export async function executeDshNativeOperation(action,{workspace,deviceId,baseU
    }
    return{...result(outcome.status,outcome.data),...(outcome.reasonCode?{reasonCode:outcome.reasonCode}:{})};
   }
+  if(resource==='plugins'&&operation==='prepareUiHost'){
+   const value=await request(`${botPath}/plugin-ui/prepare`,{method:'POST',body:{},mutation:true});
+   const expectedMount=`/runtime/${subject.profile}/ui/`;
+   const application=typeof value.application==='string'?value.application:'unknown';
+   const valid= value.ok===true && application==='applied' && value.bridgePackage==='@dshbot/plugin-ui-host' && value.mountBase===expectedMount;
+   const data={application,bridgePackage:typeof value.bridgePackage==='string'?value.bridgePackage:null,mountBase:typeof value.mountBase==='string'?value.mountBase:null,version:typeof value.version==='string'?value.version:null,...value.requestId?{requestId:value.requestId}:{},...value.receipt&&object(value.receipt)?{receipt:changeView(value.receipt)}:{},...value.error?{error:safeText(value.error)}:{}};
+   const status=valid?'applied':application==='applied'?'unknown':['restart-required','overridden','failed','cancelled','unknown','unavailable'].includes(application)?application:'unknown';
+   return result(status,data);
+  }
   if(resource==='credentials'||operation==='mutateSecure'||operation==='discoverModelsSecure'){
    if(typeof claimSecret!=='function')fail('DSH_SECRET_CHANNEL_UNAVAILABLE');
    let secret=await claimSecret(action);

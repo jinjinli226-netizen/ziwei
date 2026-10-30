@@ -6,6 +6,8 @@ test('DSH native registry exposes fixed typed operations and honest implementati
  assert.equal(typeof contract.getDshNativeOperation,'function');
  assert.equal(contract.getDshNativeOperation('settings','mutate').implemented,true);
  assert.equal(contract.getDshNativeOperation('groups','send').implemented,true);
+ assert.equal(contract.getDshNativeOperation('plugins','prepareUiHost').implemented,true);
+ assert.deepEqual(contract.normalizeDshNativeInput('plugins','prepareUiHost',{}),{});
  assert.equal(contract.getDshNativeOperation('commands','execute'),null);
  assert.equal(contract.getDshNativeOperation('settings','describe').readOnly,true);
  assert.equal(contract.getDshNativeOperation('settings','mutate').readOnly,false);

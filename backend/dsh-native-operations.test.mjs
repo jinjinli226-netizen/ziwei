@@ -22,6 +22,13 @@ function fixture(t,{feature=true}={}){
  return{repo,db,ws,actor,employee,deviceId,service,state,refresh,action,count,complete,settings,observe};
 }
 
+test('plugin UI prepare projection keeps only the bound mount contract',()=>{
+ const value=projectDshNativeData('plugins',{application:'applied',version:'0.1.0',bridgePackage:'@dshbot/plugin-ui-host',mountBase:'/runtime/alpha/ui/',requestId:'plugin-ui-1',privatePath:'C:\\secret\\profile',receipt:{application:'applied',packageResult:{exitCode:0},rawDiagnostic:'PRIVATE_DIAGNOSTIC'}});
+ assert.deepEqual(value,{application:'applied',version:'0.1.0',bridgePackage:'@dshbot/plugin-ui-host',mountBase:'/runtime/alpha/ui/',requestId:'plugin-ui-1',receipt:{application:'applied',packageResult:{exitCode:0}}});
+ const forged=projectDshNativeData('plugins',{application:'applied',bridgePackage:'@dshbot/plugin-ui-host',mountBase:'https://evil.invalid/runtime/alpha/ui/',privatePath:'PRIVATE'});
+ assert.equal(forged.mountBase,undefined);assert.equal(forged.privatePath,undefined);assert.doesNotMatch(JSON.stringify(forged),/PRIVATE|evil\.invalid/);
+});
+
 test('capability/state reads are side-effect free and distinguish implementation from device support',t=>{
  const f=fixture(t),before=f.count(),cap=f.service.capabilities(SLUG,f.employee.id,f.actor);assert.equal(cap.clientReported,true);assert.equal(cap.operations.find(item=>item.resource==='settings'&&item.operation==='mutate').implemented,true);assert.ok(cap.operations.filter(item=>!item.implemented).every(item=>item.status==='unsupported'&&item.supported===false));assert.equal(f.state().resources.settings.status,'unknown');assert.equal(f.count(),before);
  const old=fixture(t,{feature:false}),view=old.refresh();assert.equal(view.action,null);assert.equal(view.reasonCode,'CLIENT_NOT_REPORTED');assert.equal(old.count(),0);
