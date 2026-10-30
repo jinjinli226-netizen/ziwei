@@ -47,7 +47,7 @@
 
 custom 的实际作者能力是枚举、阅读并选择已由原生提供的自定义 preset；作者 `modes.js` 没有另一个“创建 custom preset”编辑器，本轮不凭名称扩展出作者没有的功能。
 
-## 拟定产品 API（尚未挂载）
+## 产品 API（已挂载源码，尚未发布到正式服务）
 
 所有入口同时挂 `/api/workspaces/:slug` 和 `/mcp/v1/workspaces/:slug`，复用现有当前身份/可见性/设备归属。保留已发布 `/employees/:id/plugins` 三接口。
 
@@ -60,6 +60,8 @@ custom 的实际作者能力是枚举、阅读并选择已由原生提供的自�
 | GET | 已有 `/actions/:actionId` | 原 action 的安全回执、事件与结果；不新增一套执行查询协议 |
 | POST | `/employees/:id/dsh/native/secure-requests` | owner 明确发起凭据/敏感配置/临时发现密钥输入，返回绑定、公钥、短时投递引用；不接明文秘密 |
 | POST | `/employees/:id/dsh/native/secure-requests/:requestId/answer` | `{envelope}`；密文临时中继，设备执行许可后领取，终态清除，不落普通 action/聊天/日志 |
+
+实现状态：API、MCP 路由和设备 action registry 已挂载到当前源码；目标设备仍需报告 `dsh_native_controls_v1`，且正式服务发布和现场写入验收另行进行。未接入的原生能力不会因出现在 registry 之外而被伪装成可用。
 
 具名操作例：
 

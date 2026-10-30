@@ -115,7 +115,11 @@ export async function executeDshRuntime({baseUrl=process.env.ZIWEI_DSH_BASE_URL|
         const attempt={turn:data.turn,step:data.step,text:liveText.get(key)||''};acceptChunk(attempt,data.chunk);
       }
       if(event.type==='tool/call')stage({stage:/pwsh|shell|command|terminal/.test(data.name)?'command':'tool',message:'DSH 工具开始',detail:data.name,callId:data.callId,status:'running'});
-      if(event.type==='tool/result')for(const block of data.message?.content||[])if(block.type==='tool-result')stage({stage:'tool',message:block.isError || data.error?'DSH 工具失败':'DSH 工具完成',detail:data.message?.source?.toolName || block.toolCallId,callId:block.toolCallId,status:block.isError || data.error?'failed':'completed'});
+      if(event.type==='tool/result')for(const block of data.message?.content||[])if(block.type==='tool-result'){
+        const raw=contentText(block.content ?? block.output ?? block.text ?? '');
+        const summary=redactSecrets(raw).slice(0,4000);
+        stage({stage:'tool',message:block.isError || data.error?'DSH 工具失败':'DSH 工具完成',detail:data.message?.source?.toolName || block.toolCallId,summary,callId:block.toolCallId,status:block.isError || data.error?'failed':'completed'});
+      }
       if(event.type==='turn/end') {
         const reason=data.reason||{};
         terminalExit=evidence.finishTurn(data.turn,reason.kind);

@@ -94,6 +94,18 @@ test('native command failure and approval frames project real activity with matc
   assert.ok(stages.some(s=>s.stage==='approval' && s.requestId==='approval-1' && s.sessionId===result.sessionId));
 });
 
+test('native tool results retain a bounded redacted summary for the activity view',{timeout:4000},async t=>{
+  const f=await dshFixture(t,{onPrompt:({request,turn,event,complete})=>{
+    event(request.sessionId,'tool/result',{turn,step:0,message:{source:{toolName:'read'},content:[{type:'tool-result',toolCallId:'read-1',content:[{type:'text',text:'visible result token=sk-secret-tool-output'}]}]}});
+    complete(request,{reply:'已完成'});
+  }});
+  const stages=[];const result=await executeDshRuntime({baseUrl:f.baseUrl,...f.transport,botName:'research-bot',prompt:'读取',onStage:s=>stages.push(s)});
+  assert.equal(result.status,'succeeded');
+  const tool=stages.find(stage=>stage.stage==='tool'&&stage.callId==='read-1');
+  assert.equal(tool.summary,'visible result token=[REDACTED]');
+  assert.ok(tool.summary.length<=4000);
+});
+
 test('resuming a DSH session refuses a different requested cwd before any prompt or replacement session',async t=>{
  const f=await dshFixture(t,{routes:(_request,body,reply)=>{
   if(body.method!=='session/projections')return false;
