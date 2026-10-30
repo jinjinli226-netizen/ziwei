@@ -140,5 +140,3 @@ export function createDshPluginsService(repo,{management,now=Date.now,ttlMs=3000
  }
  return{get:(slug,id,context={})=>read(slug,id,context),refresh:(slug,id,input={},context={})=>queue(slug,id,input,context,'inspect'),apply:(slug,id,input,context={})=>queue(slug,id,input,context,'apply')};
 }
-
-

@@ -158,5 +158,3 @@ test('retrying an original plugin write cannot retarget a changed employee bindi
   assert.equal(f.repo.getA2AAction(originalId).payload.pluginOperation.subject.profile,'first-bot');
  }
 });
-
-
