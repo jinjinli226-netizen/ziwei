@@ -22,3 +22,15 @@
 Root 以实际 Hermes 完整依赖解释器独立运行相关回归：30/30、无跳过；lint 345 文件和 diff 检查通过。新增测试直接调用当前原生 `_resolve_toolsets`、`validate_editor` 与 ACP schema，并验证私有 stdio 握手及共享自助工具 handler。两位代理交叉审查无重要缺陷。
 
 用户明确要求先不部署。候选代码未安装到正式 CLI，未据单元测试宣称正式网页已经恢复；真实隔离集成验收另行记录。此前失败消息与原始回执保留。
+
+## 真实隔离集成验收
+
+候选源码 `9294b1f` 已通过一次真实产品对话：临时内存 API 保持用户/设备认证，正常配对并生成 action，经同一 Dispatcher/Delivery/本机执行器走完授权、Profile 创建、验证、启用与模型对话。使用现有原生安装下唯一临时 owned Profile，其工作区、runtime 和日志位于 D 盘；没有借用正式员工的 Profile、会话或回执。
+
+产品 `conversation.execute` 为 `succeeded`，投递 confirmed，真实模型回复了两句海外 AI 网红运营自我介绍。原生 SDK 请求回执精确匹配 `openai-codex` / `gpt-6.1-sol` / `max`（requested/effective/actual），phase 为 request、status 为 matched；同一测试会话共三个 SDK 请求，包含工具往返。管理 MCP 的 initialize/tools/list 握手真实加载，原自助工具只读 status 请求已发生。
+
+临时 Profile 已通过官方入口删除；临时 API、测试子进程与端口登记均已清理，既有共享 Gateway 和正式网页继续运行。正式 CLI 的源码哈希、PID、创建时间和 build `58134adad81817be4a1b2a81672b570cfe296b4e3d84481755531ec74eb660f9` 保持，未安装或部署候选。
+
+前置尝试的失败证据保留：旧 harness 的执行许可接线和 publicApiBase 先后修正，均无模型请求；全新数据根的官方 detached owner 启动另遇 Windows Job breakaway 与依赖准备限制。最终测试复用既有安装环境，并先按官方方式准备临时 Profile 的 owner，再由受监督 CLI 附着；未修改 Windows breakaway 策略或原生代码。本轮不把这项测试组织调整扩写为冷启动流程的生产修复。
+
+完整脱敏验收记录保存在本机 D 盘隔离测试目录，不进入 Git；正式网页真实员工的部署后对话仍需在用户授权部署后单独验收。
