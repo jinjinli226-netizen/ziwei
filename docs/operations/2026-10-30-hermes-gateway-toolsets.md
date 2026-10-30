@@ -34,3 +34,17 @@ Root 以实际 Hermes 完整依赖解释器独立运行相关回归：30/30、�
 前置尝试的失败证据保留：旧 harness 的执行许可接线和 publicApiBase 先后修正，均无模型请求；全新数据根的官方 detached owner 启动另遇 Windows Job breakaway 与依赖准备限制。最终测试复用既有安装环境，并先按官方方式准备临时 Profile 的 owner，再由受监督 CLI 附着；未修改 Windows breakaway 策略或原生代码。本轮不把这项测试组织调整扩写为冷启动流程的生产修复。
 
 完整脱敏验收记录保存在本机 D 盘隔离测试目录，不进入 Git；正式网页真实员工的部署后对话仍需在用户授权部署后单独验收。
+
+## 用户授权后的本机部署
+
+用户随后明确授权部署。修复及隔离验收源码已推送并核对远端 `4379347fd15aba3873fb1c5a8c8007bee49b4953`。部署包以实际安装的 `58134ada…` 为基底，仅替换本次三个 Python 文件，保留此前增量修复；包 SHA-256 为 `af4196109c381b9ca017f9800b97777402ca47d7231d728d9ee2e48f539a8dc7`。npm staging、实际安装、运行及服务端设备心跳的 build 均为 `675a964b74ea296fb35d2173b5d954de89603d5a41eb7677a0ccd136fcea19a0`。
+
+官方本地包更新终态为 complete。现场原 CLI 已退出且未留下退出原因，本轮恢复唯一正式实例；独立回读 health/ready 均为 200、connected、管理 MCP ready。配置、action-state 及维护快照中 67 个 Profile/身份文件字节保持，网页/API、Hermes Gateway 与 DSH 服务 PID 保持；未发布网页、API 或原生 Hermes。
+
+部署后验收曾遇认证域名 502/超时。原部署维护会话定位并恢复了已停止的既有 WSL PostgreSQL/Keycloak，保留认证数据与配置。恢复后首代令牌生命周期为 301 秒，触发 API 的 300 秒限制；使用官方 CLI 正常刷新下一代后，服务端身份验证通过，未修改已签发令牌或放宽校验。另一次在线身份校验 503 未由现有日志精确归因，后续正式请求及维护会话健康复测通过；不将本次恢复扩写为所有认证间歇故障已修复。
+
+## 正式员工两轮对话验收
+
+在原员工、原 Profile 与原主聊天中发送只读自我介绍验收，再追问上一轮提到的平台。两次正式 `conversation.execute` 均 succeeded，网页聊天 API 回读到两条真实助手回复；第二轮正确列出 TikTok、Instagram、YouTube、X，且两轮 nativeSessionId 完全一致。两轮 SDK 请求分别为五次与一次，均精确匹配 `openai-codex` / `gpt-6.1-sol` / `max`，管理 MCP 均实际 loaded。
+
+通过原员工原生会话库只读选取工具调用元数据，确认私有 `ziwei_autonomy` 的 status 调用及真实服务结果；未读取或展示内部推理内容，未直接写业务或原生数据库。两轮进程正常退出、树确认且活跃进程为零；投递日志均 confirmed、待投递事件为零，聊天队列为空且未暂停。员工名称、配置版本、Profile 和原失败消息保持。最终独立 ready/安装 build 回读一致，完整脱敏验收保存在本机发布目录，不进入 Git。
