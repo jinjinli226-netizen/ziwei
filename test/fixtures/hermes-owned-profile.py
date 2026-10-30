@@ -1,6 +1,7 @@
 """Actual installed Hermes layout/resolver; temporary roots and no model/network."""
 import importlib.util
 import base64
+from contextlib import closing
 import hashlib
 import json
 import os
@@ -17,7 +18,9 @@ class OwnedProfile(unittest.TestCase):
         self.temp=tempfile.TemporaryDirectory(prefix='e02-owned-native-')
         self.addCleanup(self.temp.cleanup)
         self.root=Path(self.temp.name)
-        env=patch.dict(os.environ,{'HERMES_HOME':str(self.root)})
+        env=patch.dict(os.environ,{'HERMES_HOME':str(self.root),'HERMES_MANAGED_DIR':str(self.root/'managed'),
+                                  'HOME':str(self.root/'user'),'USERPROFILE':str(self.root/'user'),
+                                  'LOCALAPPDATA':str(self.root/'local'),'APPDATA':str(self.root/'roaming')})
         env.start();self.addCleanup(env.stop)
         (self.root/'config.yaml').write_text('model:\n  provider: openai\n  default: fixture\n')
         (self.root/'auth.json').write_text('SOURCE AUTH UNCHANGED')
@@ -52,6 +55,25 @@ class OwnedProfile(unittest.TestCase):
         self.assertEqual(result['reasoning'],{'requested':'ultra','actual':None,'status':'configured'})
         import yaml
         self.assertEqual(yaml.safe_load((Path(result['home'])/'config.yaml').read_text())['agent']['reasoning_effort'],'ultra')
+
+    def test_current_native_layout_keeps_template_and_existing_profile_untouched(self):
+        from hermes_cli.profiles import NO_BUNDLED_SKILLS_MARKER,get_profile_dir
+        from hermes_constants import get_hermes_home
+        self.assertEqual(get_profile_dir('default').resolve(),self.root.resolve())
+        self.assertEqual(get_hermes_home().resolve(),self.root.resolve())
+        originals={name:(self.root/name).read_bytes() for name in ('config.yaml','auth.json','.env')}
+        existing=self.root/'profiles'/'kept-profile';existing.mkdir(parents=True)
+        memory=existing/'MEMORY.md';memory.write_text('EXISTING USER MEMORY',encoding='utf-8')
+        result=self.module.provision(self.request())
+        home=Path(result['home'])
+        self.assertTrue((home/NO_BUNDLED_SKILLS_MARKER).is_file())
+        self.assertTrue((home/'.env').is_file())
+        for directory in ('memories','sessions','skills'):
+            self.assertTrue((home/directory).is_dir(),directory)
+        self.assertEqual(memory.read_text(encoding='utf-8'),'EXISTING USER MEMORY')
+        for name,before in originals.items():
+            self.assertEqual((self.root/name).read_bytes(),before,name)
+        self.assertFalse(list(home.parent.glob('.bot-first.owned-*')))
 
     def test_duplicate_preserves_native_config_and_memory(self):
         request=self.request();first=self.module.provision(request);home=Path(first['home'])
@@ -147,7 +169,7 @@ class OwnedProfile(unittest.TestCase):
             self.assertEqual((home/'config.yaml').read_bytes(),configs[index])
             self.assertEqual((home/'memories/MEMORY.md').read_text(),'MEMORY '+result['profile'])
             import sqlite3
-            with sqlite3.connect(home/'state.db') as database:self.assertEqual(database.execute('SELECT name FROM fixture_identity').fetchall(),[(result['profile'],)])
+            with closing(sqlite3.connect(home/'state.db')) as database:self.assertEqual(database.execute('SELECT name FROM fixture_identity').fetchall(),[(result['profile'],)])
             self.assertFalse((home/'auth.json').exists())
 
     def test_different_source_stores_never_reuse_another_sources_rotated_credentials(self):

@@ -23,6 +23,15 @@ test('unknown and private diagnostic fields cannot escape the native boundary',(
   assert.equal(JSON.stringify(profileProvisionFailure({code:'BOT_PROFILE_PRIVATE credential',diagnostic:raw})).includes('PRIVATE'),false);
   assert.equal(safeProfileProvisionDiagnostic({...raw,errno:-1,winerror:Infinity}).errno,undefined);
 });
+test('current native layout source survives JS sanitization and finalization',()=>{
+  const diagnostic={schemaVersion:1,stage:'native_layout',exception:'PermissionError',errno:13,source:{file:'profiles_initialization.py',function:'finish_profile_layout',line:29}};
+  assert.deepEqual(safeProfileProvisionDiagnostic({...diagnostic,message:'PRIVATE',path:'PRIVATE'}),diagnostic);
+  const failed=finalizeOwnedProfileProvision({receipt:{status:'failed',code:'BOT_PROFILE_CREATE_FAILED',diagnostic},processExit});
+  assert.deepEqual(failed.result.diagnostic,diagnostic);
+  assert.match(failed.error,/生成原生目录结构/);
+  assert.equal(safeProfileProvisionDiagnostic({...diagnostic,source:{...diagnostic.source,file:'C:/PRIVATE/profiles_initialization.py'}}).source,undefined);
+  assert.equal(safeProfileProvisionDiagnostic({...diagnostic,source:{...diagnostic.source,function:'PRIVATE'}}).source,undefined);
+});
 test('legacy and explicit ownership failures keep their code without claiming creation success',()=>{
   assert.deepEqual(profileProvisionFailure({code:'BOT_PROFILE_OWNERSHIP_CONFLICT'}),{code:'BOT_PROFILE_OWNERSHIP_CONFLICT',error:'BOT_PROFILE_OWNERSHIP_CONFLICT'});
   assert.deepEqual(profileProvisionFailure({code:'BOT_PROFILE_CREATE_FAILED'}),{code:'BOT_PROFILE_CREATE_FAILED',error:'BOT_PROFILE_CREATE_FAILED'});

@@ -48,8 +48,6 @@ def profile_exists(name):
 def _bootstrap_profile_dir(profile_dir, source_dir):
     for name in ('memories', 'sessions'):
         (profile_dir / name).mkdir(parents=True, exist_ok=True)
-def _finish_profile_layout(profile_dir, *, no_skills, clone_all, description):
-    (profile_dir / '.env').write_text('# empty native profile', encoding='utf-8')
 ''', encoding='utf-8')
         self.profiles = load('fixture_profiles', profiles_file)
         self.profiles.ROOT = self.home
@@ -57,6 +55,11 @@ def _finish_profile_layout(profile_dir, *, no_skills, clone_all, description):
         package.__version__ = '0.22.0'
         native_package = self.root / 'hermes_cli'
         native_package.mkdir()
+        initialization_file = native_package / 'profiles_initialization.py'
+        initialization_file.write_text('''def finish_profile_layout(profile_dir, *, no_skills, clone_all, description, soul=None):
+    (profile_dir / '.env').write_text('# empty native profile', encoding='utf-8')
+''', encoding='utf-8')
+        self.initialization = load('fixture_profiles_initialization', initialization_file)
         package.__path__ = [str(native_package)]
         package.profiles = self.profiles
         (native_package / 'main.py').write_text('# bound legacy source\n', encoding='utf-8')
@@ -66,6 +69,7 @@ def _finish_profile_layout(profile_dir, *, no_skills, clone_all, description):
         constants = types.ModuleType('hermes_constants')
         constants.VALID_REASONING_EFFORTS = ('low', 'max')
         modules = patch.dict(sys.modules, {'hermes_cli': package, 'hermes_cli.profiles': self.profiles,
+                                          'hermes_cli.profiles_initialization': self.initialization,
                                           'yaml': yaml, 'hermes_constants': constants})
         modules.start()
         self.addCleanup(modules.stop)
@@ -109,7 +113,7 @@ def _finish_profile_layout(profile_dir, *, no_skills, clone_all, description):
         if 'source' in diagnostic:
             source = diagnostic['source']
             self.assertEqual(set(source), {'file', 'function', 'line'})
-            self.assertIn(source['file'], {'profiles.py', 'hermes-owned-profile.py'})
+            self.assertIn(source['file'], {'profiles.py', 'profiles_initialization.py', 'hermes-owned-profile.py'})
             self.assertIs(type(source['line']), int)
             self.assertTrue(1 <= source['line'] <= 100000)
         encoded = json.dumps(receipt)
@@ -177,8 +181,12 @@ def _finish_profile_layout(profile_dir, *, no_skills, clone_all, description):
                 self.assertNotIn('missingModule', diagnostic)
 
     def test_actual_native_helper_signature_error_is_identified_without_its_text(self):
-        with patch.object(self.profiles, '_finish_profile_layout', lambda: None):
+        with patch.object(self.initialization, 'finish_profile_layout', lambda: None):
             self.diagnostic(self.execute(), 'native_layout', 'TypeError')
+        with patch.object(Path, 'write_text', side_effect=PermissionError(13, SECRET)):
+            diagnostic = self.diagnostic(self.execute(), 'native_layout', 'PermissionError')
+        self.assertEqual(diagnostic['source']['file'], 'profiles_initialization.py')
+        self.assertEqual(diagnostic['source']['function'], 'finish_profile_layout')
 
     def test_config_serialization_failure_keeps_its_write_stage(self):
         with patch.object(sys.modules['yaml'], 'safe_dump', side_effect=ValueError(SECRET)):

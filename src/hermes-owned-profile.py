@@ -31,8 +31,9 @@ _DIAGNOSTIC_SOURCES = {
     'hermes-owned-profile.py': frozenset({'provision', '_provision', 'verify'}),
     'profiles.py': frozenset({
         'get_profile_dir', 'profile_exists', '_get_profiles_root', '_get_default_hermes_home',
-        '_bootstrap_profile_dir', '_finish_profile_layout', '_seed_model_config', '_seed_file_if_missing',
+        '_bootstrap_profile_dir', '_seed_model_config', '_seed_file_if_missing',
     }),
+    'profiles_initialization.py': frozenset({'finish_profile_layout'}),
 }
 _failure_record = None
 
@@ -87,6 +88,7 @@ def provision(request):
 def _provision(request, state):
     from hermes_cli import __version__
     from hermes_cli import profiles
+    from hermes_cli.profiles_initialization import finish_profile_layout
     yaml_spec = importlib.util.spec_from_file_location('ziwei_yaml_compat', Path(__file__).with_name('hermes-yaml-compat.py'))
     yaml_bridge = importlib.util.module_from_spec(yaml_spec)
     yaml_spec.loader.exec_module(yaml_bridge)
@@ -151,7 +153,7 @@ def _provision(request, state):
             state['stage'] = 'native_bootstrap'
             profiles._bootstrap_profile_dir(stage, None)
             state['stage'] = 'native_layout'
-            profiles._finish_profile_layout(stage, no_skills=True, clone_all=False, description=None)
+            finish_profile_layout(stage, no_skills=True, clone_all=False, description=None)
             state['stage'] = 'write_config'
             (stage / 'config.yaml').write_text(yaml.safe_dump(request['seedConfig'], allow_unicode=True), encoding='utf-8')
             state['stage'] = 'write_soul'

@@ -7,7 +7,7 @@ const stages = {
   receipt: '生成创建回执', cleanup: '清理临时目录'
 };
 const exceptions = new Set(['PermissionError','FileNotFoundError','FileExistsError','NotADirectoryError','IsADirectoryError','OSError','ImportError','ModuleNotFoundError','AttributeError','TypeError','ValueError','KeyError','RuntimeError','UnicodeDecodeError','UnicodeEncodeError','JSONDecodeError','AssertionError','RecursionError','MemoryError','RepresenterError','ParserError','ScannerError','ReaderError','OtherError']);
-const sourceFunctions = new Set(['provision','_provision','verify','_bootstrap_profile_dir','_finish_profile_layout','_seed_model_config','_seed_file_if_missing','_migrate_profile_config_if_outdated','_get_profiles_root','_get_default_hermes_home','get_profile_dir','profile_exists','run','read_request']);
+const sourceFunctions = new Set(['provision','_provision','verify','_bootstrap_profile_dir','_finish_profile_layout','finish_profile_layout','_seed_model_config','_seed_file_if_missing','_migrate_profile_config_if_outdated','_get_profiles_root','_get_default_hermes_home','get_profile_dir','profile_exists','run','read_request']);
 
 // Native diagnostic metadata is projected again at the JS boundary. Never use
 // the exception message, request, environment or full path as a public error.
@@ -18,7 +18,7 @@ export function safeProfileProvisionDiagnostic(value) {
   for(const [key,max] of [['errno',255],['winerror',65535]]) if(Number.isSafeInteger(value[key])&&value[key]>=0&&value[key]<=max)result[key]=value[key];
   if(value.cleanupFailed===true)result.cleanupFailed=true;
   const source=value.source;
-  if(source&&['hermes-owned-profile.py','hermes-mcp-bootstrap.py','profiles.py'].includes(source.file)&&sourceFunctions.has(source.function)&&Number.isSafeInteger(source.line)&&source.line>0&&source.line<=100000)result.source={file:source.file,function:source.function,line:source.line};
+  if(source&&['hermes-owned-profile.py','hermes-mcp-bootstrap.py','profiles.py','profiles_initialization.py'].includes(source.file)&&sourceFunctions.has(source.function)&&Number.isSafeInteger(source.line)&&source.line>0&&source.line<=100000)result.source={file:source.file,function:source.function,line:source.line};
   return result;
 }
 
