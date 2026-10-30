@@ -42,6 +42,16 @@ test('local DSH sends image attachments as native image blocks instead of prompt
  assert.equal(result.status,'succeeded');
  assert.deepEqual(f.calls.find(call=>call.method==='session/prompt').payload.args.request.content,[{type:'text',text:'看这张图'},{type:'image',mediaType:'image/png',data,name:'example.png'}]);
 });
+test('local DSH sends UTF-8 text and JSON attachments as native text blocks and rejects unsupported office media',async t=>{
+ const directory=fs.mkdtempSync(path.join(os.tmpdir(),'ziwei-dsh-text-'));t.after(()=>fs.rmSync(directory,{recursive:true,force:true}));
+ const f=await dshFixture(t),execute=createLocalActionExecutor({runtimeDir:directory,defaultWorkdir:directory,dshBaseUrl:f.baseUrl,dshRuntime:options=>executeDshRuntime({...options,...f.transport})});t.after(()=>execute.close());
+ const utf8=Buffer.from('标题\n内容：跨端同步').toString('base64'),json=Buffer.from(JSON.stringify({ok:true,source:'native'})).toString('base64');
+ const result=await execute({id:'dsh-text',type:'conversation.execute',payload:{runtime:'DSH',profile:'real-bot',prompt:'读取文本',attachments:[{name:'notes.txt',mimeType:'text/plain',contentBase64:utf8},{name:'data.json',mimeType:'application/json',contentBase64:json}]}});
+ assert.equal(result.status,'succeeded');
+ assert.deepEqual(f.calls.find(call=>call.method==='session/prompt').payload.args.request.content,[{type:'text',text:'读取文本'},{type:'text',text:'[附件 notes.txt]\n标题\n内容：跨端同步'},{type:'text',text:'[附件 data.json]\n{"ok":true,"source":"native"}'}]);
+ const rejected=await execute({id:'dsh-pdf',type:'conversation.execute',payload:{runtime:'DSH',profile:'real-bot',prompt:'读取文档',attachments:[{name:'guide.pdf',mimeType:'application/pdf',contentBase64:Buffer.from('pdf').toString('base64')}]}}).catch(error=>error);
+ assert.match(rejected.message,/仅支持PNG|文本/);
+});
 test('a group member without an employee directory uses its own native Bot work directory',async t=>{
  const directory=fs.mkdtempSync(path.join(os.tmpdir(),'ziwei-dsh-group-cwd-'));t.after(()=>fs.rmSync(directory,{recursive:true,force:true}));
  const memberDirectory=path.join(directory,'member-work');fs.mkdirSync(memberDirectory);let selected;
