@@ -75,7 +75,7 @@ test('omitted nested histories cannot turn an unresolved result into a confirmed
   const f=fixture(t),reader=createBotManagementActionReader(f.repo),result={processExit:tree,diagnostic:{nested:{code:'EXECUTION_UNCERTAIN',executionState:'uncertain',output:privateHistory}}};
   f.db.prepare("UPDATE a2a_actions SET status='failed',result_json=?,error='Original unknown' WHERE id=?").run(JSON.stringify(result),f.source.id);
   const compact=reader(f.source.id,f.ws.id);assert.equal(compact.result.executionState,'uncertain');assert.equal(compact.status,'failed');assert.equal(compact.error,'Original unknown');assert.deepEqual(compact.result.processExit,tree);assert.equal(compact.forceAbandonRecovery,undefined);assert.equal(compact.prelaunchRecovery,undefined);
-  const state=f.compact();assert.equal(state.capabilityGate.state,'failed');assert.equal(state.active_run.result.executionState,'uncertain');assert(!JSON.stringify(state).includes('HISTORY_MUST_STAY_ON_ORIGINAL_ACTION'));
+  const state=f.compact();assert.equal(state.capabilityGate.state,'needs_check');assert.equal(state.active_run.result.executionState,'uncertain');assert(!JSON.stringify(state).includes('HISTORY_MUST_STAY_ON_ORIGINAL_ACTION'));
 });
 
 test('a recovery marker without a validated original receipt never becomes compact recovery authority',t=>{

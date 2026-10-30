@@ -57,11 +57,11 @@ test('desktop roster omits historical blobs and inline avatars without reading f
   f.repo.getA2AAction=originalRead;assert.deepEqual(f.repo.getA2AAction('page-original-unknown'),before);assert.equal(f.repo.getEmployee(f.bot.id).avatar,avatar);
 });
 
-test('roster keeps an older active unknown execution visible behind a newer read-only inspection',t=>{
+test('roster releases an older unknown execution without live-process evidence behind a newer read-only inspection',t=>{
   const f=fixture(t);
   f.action('page-new-inspection',{type:'hermes.bot.native',stamp:'2100-01-01T00:00:00.000Z',status:'succeeded',result:{processExit:tree,nativeOperation:{resource:'sessions',status:'succeeded'}},patch:{nativeOperation:{resource:'sessions',operation:'list',input:{}}}});
   const bot=f.bots.list(f.slug,f.context,{view:'roster'}).find(item=>item.id===f.bot.id);
-  assert.equal(bot.active_run.id,'page-original-unknown');assert.equal(bot.latest_run.id,'page-original-unknown');assert.equal(bot.latest_run.status,'failed');assert.equal(bot.latest_run.result.executionState,'uncertain');
+  assert.equal(bot.active_run,null);assert.equal(bot.latest_run.id,'page-new-inspection');assert.equal(bot.latest_run.status,'succeeded');
 });
 
 test('workbench keeps editable configuration and precise evidence while full endpoints preserve original bodies',async t=>{

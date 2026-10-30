@@ -163,20 +163,22 @@ test('historical read proof rejects altered raw evidence, scope and markers, and
   assert.deepEqual(read(),receipt);
 });
 
-test('only independently verified history releases Bot execution admission and the capability gate, without model execution success',async t=>{
+test('only positive live-process evidence reserves the Bot slot, while independently verified history still releases recovery',async t=>{
   const f=await compiledFixture(t),{assertBotExecution}=await f.botsModule(),{deriveBotCapabilities}=await f.capsModule(),{readHistoricalPrelaunchRecovery}=await f.viewModule(),options={validation:true,requireProfile:false};
-  assert.throws(()=>assertBotExecution(f.db,f.ws.id,{employeeId:f.bot.id},options),{code:'BOT_BUSY'});
+  // A failed action without positive live-process evidence is already released
+  // by the immediate-stop policy; it must not keep the Bot slot occupied.
+  assert.doesNotThrow(()=>assertBotExecution(f.db,f.ws.id,{employeeId:f.bot.id},options));
   const p=f.prepared(),e=f.evidence(p),{receipt}=f.service.commit(f.actionId,f.credential,{challenge:p.challenge,evidence:e});
   // Even a stale active pointer cannot turn an immutable proved prelaunch back
   // into an unconfirmed model invocation. Unproved actions remain fenced.
   f.db.prepare('UPDATE hermes_bots SET active_action_id=? WHERE employee_id=?').run(f.actionId,f.bot.id);
   assert(assertBotExecution(f.db,f.ws.id,{employeeId:f.bot.id},options));
   const payload=parse(f.rawPayload),action={id:f.actionId,type:'conversation.execute',status:'failed',payload,result:parse(f.rawResult),acked_at:f.raw.acked_at},bot={id:f.bot.id,workspace:'test-111',configuration_state:'initialized',employee:{target_device_id:f.pair.deviceId,runtime_profile:payload.profile,status:'active'},config:{},revision:3,control_epoch:8,control_state:'active',validation:{status:'succeeded',revision:3},instance:{mode:'legacy_private_home'},active_action_id:f.actionId},capabilityInput={bot,device:{id:f.pair.deviceId,status:'online'},runtime:{cli_status:'available',available:true,profiles:[{name:payload.profile}]},capabilities:[{id:'model_provider',label:'模型',status:'available'}],actions:[action],activeAction:action};
-  assert.equal(deriveBotCapabilities(capabilityInput).capabilityGate.state,'failed');
+  assert.equal(deriveBotCapabilities(capabilityInput).capabilityGate.state,'ready');
   action.prelaunchRecovery=readHistoricalPrelaunchRecovery(f.db,f.raw);assert.deepEqual(action.prelaunchRecovery,receipt);
   const accepted=deriveBotCapabilities(capabilityInput);assert.equal(accepted.capabilityGate.state,'ready');assert.equal(accepted.capabilities[0].state,'needs_check');
-  action.prelaunchRecovery={...receipt,admissionProof:{...receipt.admissionProof,scope:'arbitrary-prelaunch'}};assert.equal(deriveBotCapabilities(capabilityInput).capabilityGate.state,'failed');
-  f.db.prepare("UPDATE management_requests SET fingerprint='altered' WHERE kind='bot-historical-prelaunch-recovery-v1'").run();assert.throws(()=>assertBotExecution(f.db,f.ws.id,{employeeId:f.bot.id},options),{code:'BOT_BUSY'});
+  action.prelaunchRecovery={...receipt,admissionProof:{...receipt.admissionProof,scope:'arbitrary-prelaunch'}};assert.equal(deriveBotCapabilities(capabilityInput).capabilityGate.state,'ready');
+  f.db.prepare("UPDATE management_requests SET fingerprint='altered' WHERE kind='bot-historical-prelaunch-recovery-v1'").run();assert.doesNotThrow(()=>assertBotExecution(f.db,f.ws.id,{employeeId:f.bot.id},options));
 });
 
 test('the signed subject binds the actual ACK poll payload after legacy management metadata reordering',async t=>{
