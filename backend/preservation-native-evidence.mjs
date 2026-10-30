@@ -8,6 +8,7 @@ import {validateMaintenancePause} from '../src/maintenance-checkpoint.mjs';
 import {executionBinding} from '../src/execution-admission.mjs';
 import {actionExecutionTimeoutMs} from '../src/action-execution-budget.mjs';
 import {terminalMcpExecutionFailure} from '../src/terminal-mcp-receipt-failure.mjs';
+import {confirmedDshSessionExit,sameDshSessionBinding} from '../src/dsh-session-receipt.mjs';
 import {inspectClientMaintenance,inspectNativeClientProcess,inspectNativeHealthListener} from '../scripts/client-lifecycle.mjs';
 import {digest,uncertain,exitedTree,executionExit,gatewayResultMatches} from './version-preservation.mjs';
 import {scanOwnedNativeDatabases,nativeActionDigest,attestNativeVersion} from './preservation-native-databases.mjs';
@@ -368,6 +369,19 @@ function retainableConversationFailureHistory(started,completed,state,scope){
   return state.started.filter(row=>row.key===started.key).length===1&&state.started.filter(row=>row.actionId===started.actionId).length===1&&state.completed.filter(row=>row.key===completed.key).length===1&&state.completed.filter(row=>row.result?.actionId===result.actionId).length===1;
 }
 
+function confirmedLocalDshSession(started,completed,record,identity){
+  const action=record?.action,p=action?.payload||{},binding=started.resourceBinding;
+  const expected=Object.fromEntries(Object.entries({workspace:identity.workspace,deviceId:identity.deviceId,workspaceId:action?.workspace_id??action?.workspaceId,actionWorkspace:action?.workspace??action?.workspace_slug,targetDeviceId:p.deviceId??p.device_id??p.targetDeviceId??p.target_device_id}).filter(([,value])=>value!==undefined&&value!==null&&String(value)!=='').map(([key,value])=>[key,String(value)]));
+  return record?.version===2&&record.state==='confirmed'&&record.serverStatus===completed.result.status
+    &&!record.retainEvidence&&Array.isArray(record.events)&&record.events.length===0&&Number.isFinite(Date.parse(record.confirmedAt))
+    &&equal(record.identity,identity)&&record.binding===deliveryBinding(action,identity)
+    &&equal(started.identity,expected)&&['deviceId','device_id','targetDeviceId','target_device_id'].every(key=>p[key]===undefined||p[key]===identity.deviceId)
+    &&started.nativeRuntime===true&&started.actionId===action.id&&started.key===String(action.dedupe_key??action.dedupeKey??action.id)
+    &&binding?.type===action.type&&binding.employeeId===p.employeeId&&binding.revision===null&&binding.controlEpoch===null&&binding.resource===null&&binding.operation===null&&binding.platform===null
+    &&Number.isFinite(completed.result.completedAt)&&completed.result.completedAt>=started.startedAt&&sameDshSessionBinding(started.dshBinding,record.dshSessionBinding)
+    &&Boolean(confirmedDshSessionExit(action,completed.result,started.dshBinding));
+}
+
 /** Read-only evidence. Zero in-memory counters cannot replace these files.
  * localMaintenance is lexical code state, never selected by input JSON. */
 function scanFileEvidence({connections=[],actions=[],homes=[],productionRequest}={},localMaintenance,legacyInterpreter=null) {
@@ -459,6 +473,10 @@ function scanFileEvidence({connections=[],actions=[],homes=[],productionRequest}
         if(localMaintenance&&retainableConversationFailureHistory(started,completed,state,scope)){issue('LOCAL_HISTORY_RETAINED',{actionId:started.actionId,path:stateFile,reason:'conversation_failure_envelope'});retainedHistory.add(stateFile+'\0'+started.actionId);continue;}
         if(failedBackgroundCompletions.has(started.key)){issue('FAILED_BACKGROUND_HISTORY_RETAINED',{actionId:started.actionId,path:stateFile});retainedFailedBackground.add(stateFile+'\0'+started.actionId);continue;}
         if(backgroundCompletions.has(started.key)){issue('BACKGROUND_PROCESS_RETAINED',{actionId:started.actionId,path:stateFile});retainedBackground.add(stateFile+'\0'+started.actionId);continue;}
+        if(localMaintenance&&started.dshBinding){
+          const deliveryFile=path.join(runtimeDir,'action-delivery',hash(JSON.stringify(started.actionId))+'.json');
+          try{if(confirmedLocalDshSession(started,completed,json(read(deliveryFile)),{apiBase:connection.apiBase.replace(/\/$/,''),workspace,deviceId}))continue;}catch{}
+        }
         if(!originals.has(started.actionId)){const exit=executionExit(completed.result);if((started.nativeRuntime||exit)&&!exitedTree(exit)){
           issue('UNMAPPED_NATIVE_EXECUTION',{actionId:started.actionId,path:stateFile});
           if(localMaintenance){
