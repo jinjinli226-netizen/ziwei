@@ -674,7 +674,7 @@ def run():
         module=importlib.util.spec_from_file_location('ziwei_bot_reasoning',Path(__file__).with_name('hermes-bot-reasoning.py'))
         bridge=importlib.util.module_from_spec(module);module.loader.exec_module(bridge)
         reasoning_proof=bridge.install(current,config,isolation,preflight=not(native_operation or gateway_worker),reject=UnsupportedNativeHermes)
-    if isolation and isolation.get('kind') == 'hermes-bot' and not (config_only or discover_only or native_operation or gateway_worker):
+    if not (config_only or discover_only or native_operation or gateway_worker):
         session_spec = importlib.util.spec_from_file_location('ziwei_gateway_session', Path(__file__).with_name('hermes-gateway-session.py'))
         session_bridge = importlib.util.module_from_spec(session_spec); session_spec.loader.exec_module(session_bridge)
         session_bridge.install(config, isolation, overlay=overlay, reject=UnsupportedNativeHermes)

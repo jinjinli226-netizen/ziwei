@@ -14,6 +14,8 @@ import argparse,contextlib,importlib.util,io,json,os,pathlib,sys,types
 sys.stdin.reconfigure(encoding='utf-8');sys.stdout.reconfigure(encoding='utf-8');sys.stderr.reconfigure(encoding='utf-8')
 request=json.loads(sys.stdin.read());root=pathlib.Path(request['root']);home=root/'home';overlay=root/'overlay'
 home.mkdir();overlay.mkdir();os.environ.update(HERMES_HOME=str(home),ZIWEI_CREATOR_HOME=str(home),ZIWEI_MCP_TOKEN='FIXTURE_PRIVATE_MCP',ZIWEI_BOT_REASONING_EFFORT='max')
+if request.get('ordinary'):
+ os.environ.pop('ZIWEI_CREATOR_HOME');os.environ.pop('ZIWEI_BOT_REASONING_EFFORT')
 secret='FIXTURE_PRIVATE_MCP';calls=[];params_seen=[];views=[];mutations=[]
 def audit(event,args):
  if event.startswith(('socket.connect','socket.bind','socket.getaddrinfo','subprocess.','os.exec','os.spawn','os.system')):raise AssertionError('NO_NETWORK_OR_PROCESS')
@@ -59,7 +61,7 @@ class Client:
    return {'profile_id':str(root/'wrong-home') if request.get('wrongHome') else str(home),'authority_epoch':3,'session_create':contract}
   if method in ('session.create','session.resume'):
    if method=='session.create':
-    assert params['source']=='oneshot','SOURCE_REWRITTEN';assert params.get('reasoning')=='max'
+    assert params['source']=='oneshot','SOURCE_REWRITTEN';assert params.get('reasoning')==(None if request.get('ordinary') else 'max')
     assert params['client_env']=={'PATH':'fixture-path'}
     assert 'HERMES_STRICT_REASONING_EFFORT' not in params['client_env'],'NONSECRET_HERMES_ENV_MARKER_ADDED'
    if 'editor' in params:
@@ -72,7 +74,8 @@ class Client:
    assert params['operation']=='editor_mcp' and params['expected_revision']==5 and params['expected_generation']==7
    assert secret in json.dumps(params['payload']);mutations.append(True);return {'status':'applied'}
   if method=='prompt.submit':
-   assert params['strict_reasoning_effort']=='max' and params['strict_reasoning_model']=='gpt-6.1-sol' and params['strict_reasoning_provider']=='openai-codex'
+   if request.get('ordinary'):assert not any(key.startswith('strict_reasoning_') for key in params)
+   else:assert params['strict_reasoning_effort']=='max' and params['strict_reasoning_model']=='gpt-6.1-sol' and params['strict_reasoning_provider']=='openai-codex'
    return {'admission_id':'admission-fixture','execution_generation':8,'status':'started'}
   raise AssertionError('UNEXPECTED_RPC')
 @contextlib.asynccontextmanager
@@ -93,7 +96,7 @@ class View:
   binding={'profile_id':str(home),'session_id':'session-fixture','admission_id':'admission-fixture','execution_generation':8,'authority_epoch':3}
   payload={**binding,'schemaVersion':1,'api_request_id':'a'*32,'model':'gpt-6.1-sol','provider':'openai-codex','requested':'max','actual':'max','nativeActual':'xhigh','mode':'verified_gpt61_sol_max','status':'matched','phase':'request','unknownSecret':secret,'body':{'content':secret}}
   payload.update(request.get('receiptPatch',{}));binding.update(request.get('bindingPatch',{}))
-  if not request.get('missingReceipt'):self.inference_request_callback(payload,binding)
+  if not request.get('missingReceipt') and not request.get('ordinary'):self.inference_request_callback(payload,binding)
   return 'complete'
 viewmodule=module('hermes_cli.gateway_chat_view',GatewayChatView=View)
 async def native_chat(args,emitter=None):
@@ -129,7 +132,7 @@ if request.get('plain'):
 before=dict(vars(args));before_argv=list(sys.argv);stderr=io.StringIO();caught=None;result=None
 try:
  with contextlib.redirect_stderr(stderr):
-  installed=bridge.install(config,{'kind':'hermes-bot','employeeId':'employee-fixture','revision':4,'home':str(home)},overlay=str(overlay),reject=GatewayClientError,active=not request.get('inactive'))
+  installed=bridge.install(config,None if request.get('ordinary') else {'kind':'hermes-bot','employeeId':'employee-fixture','revision':4,'home':str(home)},overlay=str(overlay),reject=GatewayClientError,active=not request.get('inactive'))
   if installed:
    coroutine=gateway.run_gateway_chat(args)
    try:coroutine.send(None)
@@ -187,6 +190,15 @@ test('session bridge composes with independent provider key namespace wrapper',t
 test('ordinary Gateway chats without private MCP or strict reasoning retain the native path',t=>{
  const out=run(t,{plain:true,missingMcpCap:true,missingReasoningCap:true});
  assert.equal(out.result,'not-installed');assert.equal(out.caught,null);assert.deepEqual(out.calls,[]);
+});
+test('ordinary employee Gateway chats retain execution-private MCP without requiring Bot reasoning capabilities',t=>{
+ for(const options of [{},{resume:true},{titled:true},{resume:true,rotate:true}]){
+  const out=run(t,{ordinary:true,missingReasoningCap:true,...options});
+  assert.equal(out.result,'complete',JSON.stringify(out));assert.equal(out.caught,null);assert.deepEqual(out.proofs,[]);
+  assert.ok(out.calls.includes('prompt.submit'));
+ }
+ const rejected=run(t,{ordinary:true,missingMcpCap:true});assert.match(rejected.caught.message,/CAPABILITY_UNSUPPORTED/);
+ assert.equal(rejected.calls.includes('prompt.submit'),false);
 });
 test('canonical nested profile identity is preserved across create, resume, receipt and existing history',t=>{
  for(const options of [{},{resume:true},{titled:true},{resume:true,rotate:true},{snapshotProfile:'matching-top'}]){

@@ -30,6 +30,7 @@ function fixture(t) {
   const home = path.join(directory, 'profiles', 'selected'); fs.mkdirSync(home, { recursive: true });
   fs.writeFileSync(path.join(home, 'config.json'), '{"mcp_servers":{}}'); fs.writeFileSync(path.join(home, 'auth.json'), '{"marker":"original"}'); fs.writeFileSync(path.join(home, 'SOUL.md'), 'Original fixture persona');
   const managed = path.join(directory, 'execution'); fs.mkdirSync(managed);
+  fs.writeFileSync(path.join(managed, 'config.yaml'), '{}');
   fs.writeFileSync(path.join(managed, 'config.json'), JSON.stringify({ mcp_servers: { ziwei_management: { command: 'fixture' }, 'ziwei-terminal': { enabled: false } }, security: { redact_secrets: true } }));
   const env = { ...process.env, PYTHONPATH: directory, HERMES_HOME: home, HERMES_MANAGED_DIR: managed };
   return { python, launcher, home, directory, env, args: ['--profile', 'selected', '-z', 'fixture without model', '--toolsets', 'all'] };
@@ -51,6 +52,23 @@ test('Hermes bootstrap invokes native discovery when raw MCP is empty but execut
   assert.equal(fs.readFileSync(path.join(f.home, 'SOUL.md'), 'utf8'), 'Original fixture persona');
   assert.equal(JSON.parse(fs.readFileSync(path.join(f.home, 'auth.json'), 'utf8')).marker, 'native-rotated');
   assert.equal(fs.existsSync(path.join(f.directory, 'execution', 'auth.json')), false);
+});
+
+test('ordinary employee bootstrap carries its temporary MCP overlay into native Gateway session creation',t=>{
+  const f=fixture(t);if(!f)return;
+  const cli=path.join(f.directory,'hermes_cli');
+  const servers={ziwei_management:{command:'fixture-node',args:['fixture-management.mjs'],env:{WORKSPACE:'fixture-workspace'}}};
+  fs.writeFileSync(path.join(f.env.HERMES_MANAGED_DIR,'config.yaml'),JSON.stringify({mcp_servers:servers}));
+  fs.writeFileSync(path.join(f.env.HERMES_MANAGED_DIR,'config.json'),JSON.stringify({mcp_servers:servers}));
+  fs.appendFileSync(path.join(cli,'config.py'),`\ndef get_config_path():\n return Path(os.environ['HERMES_HOME'])/'config.yaml'\n`);
+  fs.writeFileSync(path.join(cli,'gateway_client.py'),'class GatewayClientError(Exception): pass\n');
+  fs.writeFileSync(path.join(cli,'gateway_chat_view.py'),'class GatewayChatView: pass\n');
+  fs.writeFileSync(path.join(cli,'gateway_chat.py'),`import contextlib,os\nclass Client:\n async def rpc(self,method,**params):\n  home=os.environ['HERMES_HOME']\n  if method=='runtime.describe':return {'profile_id':home,'authority_epoch':1,'session_create':{'shell_private_mcp_v1':True}}\n  if method in ('session.create','session.resume'):\n   assert params.get('editor',{}).get('mcp_servers',[{}])[0].get('name')=='ziwei_management','EXECUTION_MCP_LOST_AT_GATEWAY'\n   return {'stored_session_id':'ordinary-session','authority_epoch':1,'info':{'profile_id':home}}\n  raise AssertionError(method)\n@contextlib.asynccontextmanager\nasync def connect_gateway():yield Client()\nasync def run_gateway_chat(args):\n async with connect_gateway() as client:\n  await client.rpc('runtime.describe')\n  result=await client.rpc('session.create',source='oneshot',client_env={})\n  return {'privateMcpAtGateway':True,'sessionId':result['stored_session_id'],'externalModelCalls':0}\n`);
+  fs.writeFileSync(path.join(cli,'main.py'),`import argparse,asyncio,json\ndef main():\n from hermes_cli.gateway_chat import run_gateway_chat\n print(json.dumps(asyncio.run(run_gateway_chat(argparse.Namespace(resume=None)))))\n return 0\n`);
+  const spec=runtime.hermesMcpSpawnSpec(f.launcher,f.args,{env:f.env});
+  const output=spawnSync(spec.command,spec.args,{env:f.env,encoding:'utf8',windowsHide:true});
+  assert.equal(output.status,0,output.stderr);
+  assert.deepEqual(JSON.parse(output.stdout),{privateMcpAtGateway:true,sessionId:'ordinary-session',externalModelCalls:0});
 });
 
 test('Hermes bootstrap refuses missing/unbound interpreters and foreign console entrypoints', t => {
