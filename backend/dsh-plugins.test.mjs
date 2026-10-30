@@ -11,8 +11,19 @@ import {createApp} from './app.mjs';
 import {createLocalActionExecutor} from '../src/local-action.mjs';
 import {ActionDispatcher} from '../src/daemon.mjs';
 import {createActionDelivery,ACTION_TRANSPORT_BUDGETS} from '../src/daemon-action-delivery.mjs';
+import {projectDshPluginsAction} from './dsh-plugins.mjs';
 
 const SLUG='dsh-plugin-fixture';
+test('public native package and Loader identifiers survive projection without changing plugin identity',()=>{
+ const id='@deepseek-ai/dsh-experimental-cot-translation-bundle',entryId='loader-public-reference-012345678901234567890123456789';
+ const subject={workspace:SLUG,employeeId:'employee',runtime:'DSH',profile:'first-bot'};
+ const receipt={schemaVersion:1,subject,source:'dsh-native',checkedAt:new Date().toISOString(),plugins:[{id,name:'Native plugin',description:'token=sk-private-diagnostic-value-1234567890',enabled:false,required:false}],runtime:{status:'observed',bundles:[{name:id,rows:[{moduleName:id,entryId}]}],entries:[{entryId,moduleName:id,enabled:true,fiberPhase:'active'}],agentPresets:[]}};
+ const action=projectDshPluginsAction({id:'action-reference',type:'employee.plugins.inspect',status:'succeeded',payload:{pluginOperation:{subject,operation:'inspect'}},result:{dshPlugins:receipt}});
+ const projected=action.result.dshPlugins;
+ assert.equal(projected.plugins[0].id,id);assert.equal(projected.runtime.bundles[0].name,id);
+ assert.equal(projected.runtime.entries[0].moduleName,id);assert.equal(projected.runtime.entries[0].entryId,entryId);
+ assert.doesNotMatch(projected.plugins[0].description,/sk-private/);
+});
 function request(app,url,{cookie='',token='',method='GET',body}={}){
  const socket=new Duplex({read(){},write(_chunk,_encoding,done){done();}}),req=new IncomingMessage(socket),res=new ServerResponse(req),chunks=[],bytes=body===undefined?null:Buffer.from(JSON.stringify(body));
  req.method=method;req.url=url;req.headers={host:'plugins.fixture',cookie,...(token?{'x-ziwei-device-token':token}:{}),...(bytes?{'content-type':'application/json','content-length':String(bytes.length)}:{})};

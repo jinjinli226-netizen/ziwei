@@ -59,7 +59,12 @@ function projectSchema(schema,depth=0){
  for(const key of ['oneOf','anyOf','allOf'])if(Array.isArray(schema[key]))out[key]=schema[key].slice(0,30).map(value=>projectSchema(value,depth+1));
  return out;
 }
-const textFields=(item,keys)=>Object.fromEntries(keys.filter(key=>typeof item[key]==='string').map(key=>[key,safeText(item[key])]));
+const referenceFields=new Set(['id','entryId','moduleName','patchId','rowId']);
+const nativeReference=value=>value.length<=240&&/^(?:@[a-z0-9._-]+\/)?[a-z0-9._:-]+$/i.test(value);
+const textFields=(item,keys)=>Object.fromEntries(keys.filter(key=>typeof item[key]==='string').map(key=>{
+ const value=item[key],reference=referenceFields.has(key)||key==='name'&&value.startsWith('@');
+ return[key,reference&&nativeReference(value)?value:safeText(value)];
+}));
 function projectEntry(item){return object(item)?{...textFields(item,['entryId','moduleName','fiberPhase','patchId','rowId']),...(typeof item.enabled==='boolean'||item.enabled==='conditional'?{enabled:item.enabled}:{}),...(item.fiberPhase===null?{fiberPhase:null}:{})}:null;}
 function projectRuntime(value){
  if(!object(value)||!['observed','unavailable'].includes(value.status))return{status:'unavailable',reasonCode:'NOT_OBSERVED'};
