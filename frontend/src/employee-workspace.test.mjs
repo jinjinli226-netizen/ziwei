@@ -4,6 +4,13 @@ import {createManagerHarness} from '../verification/bot-management-harness.mjs';
 
 async function workspace(t){const h=await createManagerHarness({initial:{chatMode:true}});t.after(()=>h.dispose());return h;}
 
+test('the roster retains a unified employee creator and the template market',async t=>{
+  const h=await workspace(t);
+  h.button('新建员工').props.onClick();assert.deepEqual(h.events.at(-1),['create-employee',undefined]);
+  h.button('伙伴市场 Creator').props.onClick();assert.deepEqual(h.events.at(-1),['creator',undefined]);
+  assert.equal(h.button('创建专属 Hermes Bot'),undefined);
+});
+
 test('the shared workspace keeps its management draft when the drawer closes',async t=>{
   const h=await workspace(t),drawer=h.byClass('bot-management-drawer')[0];
   assert.equal(h.byClass('employee-chat-stage').length,1);

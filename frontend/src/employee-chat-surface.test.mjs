@@ -63,6 +63,23 @@ test('ordinary employees retain history, create, archive and checked current-dir
   h.button('更多能力').props.onClick({currentTarget:{}});await h.settle();h.button('归档当前会话').props.onClick();assert.deepEqual(h.events.at(-1),['archive-conversation']);
 });
 
+test('compact message actions keep forwarding and selection bound to each original message',async t=>{
+  const messages=[{id:'message-user',role:'user',content:'用户消息'},{id:'message-assistant',role:'assistant',content:'助手回复'}];
+  const h=await harness(t,{conversation:{id:'chat-actions',messages},forwardSelected:[]});
+  const forwards=h.all(el=>el.type==='button'&&el.props['aria-label']==='转发此消息');
+  const selections=h.all(el=>el.type==='button'&&el.props['aria-label']==='多选消息');
+  for(const [index,message]of h.props.conversation.messages.entries()){
+    forwards[index].props.onClick();assert.deepEqual(h.events.at(-1),['forward',message]);
+    selections[index].props.onClick();assert.deepEqual(h.events.at(-1),['forward-select',message]);
+  }
+  h.props.forwardSelecting=true;h.props.forwardSelected=['message-assistant'];await h.settle();
+  assert.equal(h.button('转发此消息'),undefined);assert.equal(h.button('多选消息'),undefined);
+  const selected=h.all(el=>el.type==='input'&&el.props.type==='checkbox'&&el.props.checked)[0];
+  selected.props.onChange();assert.deepEqual(h.events.at(-1),['forward-toggle','message-assistant']);
+  h.button('转发').props.onClick();assert.deepEqual(h.events.at(-1),['forward-open']);
+  h.button('取消').props.onClick();assert.deepEqual(h.events.at(-1),['forward-cancel']);
+});
+
 test('the shared model and device popovers render the parent conversation controls with their original scope',async t=>{
   const changes=[],h=await harness(t,{}, {slots:{'conversation-settings':({kind})=>vue.h('button',{onClick:()=>changes.push(kind)},'保存当前会话'+kind)}});
   for(const [label,kind]of [['会话模型','model'],['绑定电脑','device']]){h.button(label).props.onClick({currentTarget:{}});await h.settle();h.button('保存当前会话'+kind).props.onClick();}

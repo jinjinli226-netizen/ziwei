@@ -36,6 +36,12 @@
 .bot-chat-message.user .bot-chat-message-body{max-width:82%;padding:12px 17px;background:#f0ebfc;border:1px solid #e9e1fc;border-radius:15px 15px 4px 15px;color:#403355}
 .bot-chat-message-body time{display:block;font-size:11px;color:#a0a5b1;margin-top:8px}
 .bot-chat-message.user time{text-align:right}
+.chat-message-meta{display:flex;align-items:center;gap:8px;margin-top:6px;min-height:28px}
+.bot-chat-message-body .chat-message-meta>time{margin:0}
+.bot-chat-message.user .chat-message-meta{justify-content:flex-end}
+.chat-message-meta .chat-forward-message-actions{margin-top:0}
+.bot-main-chat .chat-forward-message-actions>button{font-size:12px;line-height:1;color:#82798f}
+.bot-main-chat .chat-forward-message-actions>button:hover,.bot-main-chat .chat-forward-message-actions>button:focus-visible{color:#7050b1}
 .bot-chat-message-avatar{width:29px;height:29px;flex:none;display:grid;place-items:center;background:#eef1fa;color:var(--chat-purple);border-radius:50%;font-size:14px;font-weight:600}
 .bot-chat-message.system{font-size:12px;color:#8992a3;justify-content:center}
 .bot-chat-empty{text-align:center;padding:60px 8px;color:#969bae}
