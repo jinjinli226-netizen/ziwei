@@ -16,3 +16,11 @@
 ## 发布边界
 
 本机 CLI 已包含此前 Hermes Gateway/MCP 与 DSH 维护修复，安装包应以其实际安装为基底，仅叠加本次两个运行源文件。源码提交不能当成整树覆盖本机包的依据。通过官方更新流程安装后，再对原员工身份重试 Profile 创建、验证并启用；保留原失败回执，不另建员工冒充恢复。
+
+## 本机发布与真实验收
+
+修复源码 `dec52f3e1d9763d97d72f7d81a58b769e090e1a3` 已推送。候选从原实际安装 build `2c5c054d8ac48e380652da6eaf2c10f3bd604eca450a3f880053d7e4caf1ed29` 复制，仅叠加上述两个运行源文件；包 SHA-256 为 `e175799b740e8578d6035bd099241a29e6df6e481ae3171b6c53769db6956e83`。
+
+CLI 维护会话完成官方升级，独立回读确认运行 build `58134adad81817be4a1b2a81672b570cfe296b4e3d84481755531ec74eb660f9`、20242 单实例、health 200、connected；原配置及 action-state 字节保持。随后在同一原员工与 Profile 身份上重试，真实 `hermes.bot.provision` succeeded，Profile 归属与认证 configured；`hermes.bot.validate` succeeded，原生预检回执的 provider/model/requested/effective/actual 精确匹配 `openai-codex` / `gpt-6.1-sol` / `max`，进程正常退出且树为空，再经正式控制入口启用。原失败回执保留。
+
+该验收确认 Profile 创建和无模型配置验证，不把它扩写成内容生成或对外发布已完成；用户在已知当前严格接线不保持 ultra 后明确选择 max。
