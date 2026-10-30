@@ -11,6 +11,15 @@ test('the roster retains a unified employee creator and the template market',asy
   assert.equal(h.button('创建专属 Hermes Bot'),undefined);
 });
 
+test('only DSH employees expose the native plugins tab while Hermes retains its own native pages',async t=>{
+  const h=await workspace(t);assert.equal(h.button('插件'),undefined);
+  const dsh=h.fixture.roster.find(row=>row.employee.runtime==='DSH');
+  h.byClass('bot-roster-row').find(row=>h.text(row).includes(dsh.employee.name)).props.onClick();await h.settle();
+  h.button('管理员工').props.onClick();await h.settle();assert.ok(h.button('插件'));
+  h.button('插件').props.onClick();await h.settle();assert.equal(h.state.tab.value,'plugins');
+  h.byClass('bot-roster-row')[0].props.onClick();await h.settle();assert.equal(h.button('插件'),undefined);assert.ok(h.button('能力配置'));
+});
+
 test('the shared workspace keeps its management draft when the drawer closes',async t=>{
   const h=await workspace(t),drawer=h.byClass('bot-management-drawer')[0];
   assert.equal(h.byClass('employee-chat-stage').length,1);

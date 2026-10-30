@@ -4,7 +4,7 @@ export const ACTION_EXECUTION_LEASE_BUFFER_MS = 60 * 1000;
 
 const longTasks = new Set(['conversation.execute', 'agent.execute', 'runtime.execute', 'automation.execute']);
 export function actionExecutionTimeoutMs(action = {}) {
-  if(action.type==='employee.capabilities.inspect')return 15000;
+  if(['employee.capabilities.inspect','employee.plugins.inspect','employee.plugins.apply'].includes(action.type))return 15000;
   const payload = action.payload || {}, value = payload.timeoutMs ?? payload.timeout_ms;
   if (value !== undefined && value !== null && String(value).trim() !== '' && Number.isFinite(Number(value))) {
     // Node timers accept signed 32-bit delays; an overflow would stop immediately.

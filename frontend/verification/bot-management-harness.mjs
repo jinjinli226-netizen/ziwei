@@ -7,10 +7,21 @@ import {defaultBotConfig} from '../src/bot-workbench.js';
 const components=new URL('../src/components/',import.meta.url);
 const escaped=value=>String(value).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
 
+function dshPluginsFixture(employee){
+  const subject={workspace:'preview',workspaceId:'ws-preview',employeeId:employee.id,ownerUserId:'fixture-owner',deviceId:employee.target_device_id,runtime:'DSH',profile:employee.runtime_profile,revision:null,controlEpoch:null,configFingerprint:'preview-native-plugins'};
+  const plugins=[{id:'@deepseek-ai/dsh-base',name:'Harness 基础能力（样例）',description:'原生目录中的必需插件，不能关闭。',required:true,enabled:true},{id:'@deepseek-ai/dsh-web-app',name:'Web 界面（样例可选）',description:'已保存为关闭；当前 Loader 观察仍为 active，组合变更下次启动生效。',required:false,enabled:false}];
+  const runtime={status:'observed',bundles:[{name:'@deepseek-ai/dsh-base',enabled:true,availability:'profile',installed:true,optional:false,removable:false,rows:[{rowId:'base-skill',moduleName:'@deepseek-ai/dsh-skill',entryId:'preview-loader-base'}]},{name:'@deepseek-ai/dsh-web-app',enabled:true,availability:'profile',installed:true,optional:true,removable:true,rows:[{rowId:'web-app',moduleName:'@deepseek-ai/dsh-web-app',entryId:'preview-loader-web'}]}],entries:[{entryId:'preview-loader-base',moduleName:'@deepseek-ai/dsh-skill',enabled:true,fiberPhase:'active'},{entryId:'preview-loader-web',moduleName:'@deepseek-ai/dsh-web-app',enabled:true,fiberPhase:'active'}],agentPresets:[{id:'standard',isDefault:true,rows:[{entryId:'preview-preset-tool',moduleName:'native-tool',enabled:'conditional',fiberPhase:null}]}]};
+  const configuration={status:'available',writable:true,schemaFormat:'schemastery',namespaces:[{ns:'agent-loop',revision:'preview-native-revision',schema:{uid:2,refs:{1:{type:'number',meta:{min:1,step:1}},2:{type:'object',dict:{maxParallelToolCalls:1},meta:{}}}}}]};
+  const actionId='preview-plugins-observation',checkedAt='2026-10-30T10:00:01.000Z',notice='样例观察：已保存组合下次启动生效；当前加载以独立 Loader 证据为准。';
+  const snapshot={schemaVersion:1,subject,source:'dsh-native',checkedAt,plugins,runtime,configuration,running:true,ready:true,restartRequired:true,notice,actionId,late:false,stale:false};
+  return{schemaVersion:1,workspace:'preview',employeeId:employee.id,subject,status:'ready',stale:false,reasonCode:null,plugins,runtime,configuration,running:true,ready:true,restartRequired:true,notice,snapshot,pending:null,lastAttempt:{actionId,status:'succeeded',operation:'inspect',createdAt:'2026-10-30T10:00:00.000Z',completedAt:checkedAt,reasonCode:null}};
+}
+
 export function managerFixture(){
   const bot={id:'employee_hermes',workspace:'preview',revision:3,control_epoch:2,configuration_state:'configured',control_state:'active',employee:{id:'employee_hermes',name:'领航 · AI 出海新风向',description:'整理行业信息、撰写内容，与团队一起交付。',runtime:'Hermes',runtime_profile:'bot-navigator',target_device_id:'pc-preview',model_id:'deepseek-flash',status:'active',visibility:'workspace',skills:[]},config:{...defaultBotConfig(),provider:'deepseek'},validation:{status:'succeeded',revision:3},capabilities:[],main_conversation_id:'conversation_hermes',instance:{mode:'owned_profile',profile:'bot-navigator',templateProfile:'default',home:'D:/Ziwei/Bots/navigator',ownershipId:'owned-preview',provisioning:{actionId:'provision-preview',status:'provisioned',authentication:'configured'}},latest_run:null};
   const external=(id,name,runtime,description)=>({id,workspace:'preview',employee:{id,name,runtime,description,runtime_profile:runtime==='Codex'?null:'native-bot',target_device_id:'pc-preview',status:'active',visibility:'workspace'},main_conversation_id:'conversation_'+id});
-  return{bot,roster:[bot,external('employee_dsh','社群主理人','DSH','社群内容策划与日常运营'),external('employee_codex','网站运维伙伴','Codex','维护网站、检查部署与运行记录')],discovery:{workspace:'preview',devices:[{id:'pc-preview',name:'工作电脑',status:'online',healthy:true,runtimes:[{name:'Hermes',cli_status:'available',profiles:[{name:'bot-navigator',owned_profile:true,initialization_source:false},{name:'default',authentication_configured:true}]}]}]},routines:[{id:'routine-preview',name:'每日行业简报',status:'active',next_run:'2026-10-30T01:00:00Z',timezone:'Asia/Shanghai',schedule:'0 9 * * *',prompt:'整理今日行业信息。'}],runs:[]};
+  const dsh=external('employee_dsh','社群主理人','DSH','社群内容策划与日常运营');
+  return{bot,roster:[bot,dsh,external('employee_codex','网站运维伙伴','Codex','维护网站、检查部署与运行记录')],plugins:dshPluginsFixture(dsh.employee),discovery:{workspace:'preview',devices:[{id:'pc-preview',name:'工作电脑',status:'online',healthy:true,runtimes:[{name:'Hermes',cli_status:'available',profiles:[{name:'bot-navigator',owned_profile:true,initialization_source:false},{name:'default',authentication_configured:true}]}]}]},routines:[{id:'routine-preview',name:'每日行业简报',status:'active',next_run:'2026-10-30T01:00:00Z',timezone:'Asia/Shanghai',schedule:'0 9 * * *',prompt:'整理今日行业信息。'}],runs:[]};
 }
 
 export function employeeChatFixture(employee,conversationId){
@@ -43,7 +54,7 @@ async function loadComponent(name,api,cache=new Map()){
       else if(spec==='@ziwei/ui')value=new Proxy({},{get:(_target,key)=>placeholder(key)});
       else if(spec.endsWith('.vue')){
         const child=spec.split('/').at(-1).replace('.vue','');
-        value={default:['ZiSelect','BotInstancePanel','ConversationQueuePanel','EmployeeAvatar','BotAvatarEditor'].includes(child)?await loadComponent(child,api,cache):placeholder(child)};
+        value={default:['ZiSelect','BotInstancePanel','ConversationQueuePanel','EmployeeAvatar','BotAvatarEditor','DshPluginsPanel'].includes(child)?await loadComponent(child,api,cache):placeholder(child)};
       }else value=await import(new URL(spec,filename));
       if(specifier.startsWith('{'))for(const token of specifier.slice(1,-1).split(',')){
         const [key,alias]=token.trim().split(/\s+as\s+/);bindings[alias||key]=value[key];
@@ -69,6 +80,18 @@ export async function createManagerHarness({fixture=managerFixture(),initial={},
   globalThis.localStorage={getItem(){return null;},setItem(){}};
   const calls=[],events=[];
   const api={bots:async workspace=>{calls.push(['bots',workspace]);return{bots:fixture.roster};},botWorkbench:async(id,workspace)=>{calls.push(['bot',id,workspace]);return fixture.bot;},botRuns:async(id,workspace)=>{calls.push(['runs',id,workspace]);return{runs:fixture.runs};},botRoutines:async(id,workspace)=>{calls.push(['routines',id,workspace]);return{routines:fixture.routines};},managementMcpDiscovery:async workspace=>{calls.push(['discovery',workspace]);if(fixture.discoveryError)throw fixture.discoveryError;return fixture.discovery;},botForceAbandonStatus:async()=>({eligible:false,state:'none'}),updateBot:async(id,body,workspace)=>{calls.push(['save',id,body,workspace]);fixture.bot={...fixture.bot,revision:fixture.bot.revision+1,employee:{...fixture.bot.employee,...body.employee,model_id:body.employee.model},config:body.config};fixture.roster[0]=fixture.bot;return fixture.bot;}};
+  const pluginViews=new Map();let pluginAction=0;
+  function pluginView(workspace,id,operation,enabled){
+    const employee=fixture.roster.find(row=>row.id===id).employee,value=structuredClone(pluginViews.get(id)||fixture.plugins);
+    value.workspace=workspace;value.employeeId=id;Object.assign(value.subject,{workspace,employeeId:id,deviceId:employee.target_device_id,profile:employee.runtime_profile});
+    if(enabled)value.plugins=value.plugins.map(plugin=>({...plugin,enabled:enabled.includes(plugin.id)}));
+    if(operation){
+      value.actionId='preview-plugins-'+(++pluginAction);value.lastAttempt={...value.lastAttempt,actionId:value.actionId,operation};
+      value.snapshot={...value.snapshot,subject:value.subject,actionId:value.actionId,plugins:value.plugins};
+    }
+    pluginViews.set(id,value);return structuredClone(value);
+  }
+  Object.assign(api,{employeePlugins:async(workspace,id)=>{calls.push(['plugins',workspace,id]);return pluginView(workspace,id);},refreshEmployeePlugins:async(workspace,id,body)=>{calls.push(['plugins-refresh',workspace,id,body]);return pluginView(workspace,id,'inspect');},updateEmployeePlugins:async(workspace,id,body)=>{calls.push(['plugins-save',workspace,id,body]);return pluginView(workspace,id,'apply',body.enabled);}});
   const cache=new Map(),component=await loadComponent('BotWorkbench',api,cache);
   let setupState;const setup=component.setup;component.setup=(props,context)=>{setupState=setup(props,context);return setupState;};
   const chatOptions=chat===true?{}:chat||{};

@@ -34,8 +34,12 @@ export async function requestJson({origin,path,method='GET',body,form,acceptErro
 }
 const states={pending:'accepted',queued:'accepted',accepted:'accepted',waiting_client:'accepted',not_started:'accepted',acked:'running',running:'running',applying:'running',validating:'running',connecting:'running',authorization_required:'running',connected:'succeeded',provisioned:'succeeded',succeeded:'succeeded',success:'succeeded',completed:'succeeded',failed:'failed',expired:'failed',cancelled:'failed',canceled:'failed',uncertain:'unknown',unknown:'unknown'};
 export function nativeOperationView(native,operation,httpStatus,input={}){
-  if(operation.name.startsWith('employees.capabilities.'))return{native};
+  if(operation.name.startsWith('employees.capabilities.')||operation.name==='employees.plugins.get')return{native};
   let receipt=native?.action||native?.connection||native;
+  if(operation.name.startsWith('employees.plugins.')){
+    receipt=native?.action||native?.pending;
+    if(!receipt)return{native};
+  }
   if(operation.name.startsWith('bots.')&&operation.name!=='bots.runRoutine'&&!native?.action&&!native?.connection)receipt=['bots.create','bots.get','bots.provision'].includes(operation.name)?native?.instance?.provisioning||null:null;
   let query=operation.resultQuery?structuredClone(operation.resultQuery):null;
   let receiptKind='action';

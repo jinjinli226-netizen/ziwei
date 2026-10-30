@@ -14,9 +14,9 @@ CLI 2.0.0 · 规范 1.3.0 · 身份契约 1.0.1 · 机器契约 v1 · 文档 2.0
 
 准备期服务器默认 legacy，保留现网原入口；CLI 默认 unified，这是 2.0.0 的明确行为变更。只有部署方显式配置 `ZIWEI_IDENTITY_MODE=unified`、完整受信 issuer/API 与 web secret/session key，并完成原生身份绑定后，默认 CLI 登录才可用。配置缺失不自动降级旧密码。准备兼容不是最终统一身份交付。
 
-源码基线 commit：19876c0f006af18c9fe3b6ef4a7d9e94c75c14c6；候选实现标识：workspace-unified-identity（未提交增量，尚无新的发布 commit）；命令目录 SHA-256：64a46b405e9a48f73d74472c2fe9bcd7f95c54c05da71f052420c20fba494949。该指纹只标识本文实际引用的 registry，不是安装包校验和或生产版本。最终源码 commit、artifact SHA-256 与发布状态须从交付记录分别核对。
+源码基线 commit：19876c0f006af18c9fe3b6ef4a7d9e94c75c14c6；候选实现标识：workspace-unified-identity（未提交增量，尚无新的发布 commit）；命令目录 SHA-256：bd3d991fe395bbb28c3024c727c41f5b58e01941a9bd91316e95fa758619ee78。该指纹只标识本文实际引用的 registry，不是安装包校验和或生产版本。最终源码 commit、artifact SHA-256 与发布状态须从交付记录分别核对。
 
-已有操作见下方从 registry 生成的 46 项命令/schema。统一身份只在服务器公开配置明确允许的 native/mcp HTTP 路由上传本站 AT：优先对应 native 路由，否则可用原有 MCP 路由。原生资源、角色和幂等边界保持逐项定义。员工绑定可能只允许自己的员工/Bot 路径，集合查询可被明确拒绝。未覆盖：员工机器 client_credentials、全站 OP 退出、通用 actions cancel、dry-run、特权 force-abandon/failure-finalization、其他站点业务命令。
+已有操作见下方从 registry 生成的 49 项命令/schema。统一身份只在服务器公开配置明确允许的 native/mcp HTTP 路由上传本站 AT：优先对应 native 路由，否则可用原有 MCP 路由。原生资源、角色和幂等边界保持逐项定义。员工绑定可能只允许自己的员工/Bot 路径，集合查询可被明确拒绝。未覆盖：员工机器 client_credentials、全站 OP 退出、通用 actions cancel、dry-run、特权 force-abandon/failure-finalization、其他站点业务命令。
 
 ## 安装、升级、卸载与包校验
 
@@ -834,6 +834,289 @@ ziwei-workspace employees mcp-status --input-file "<business-input.json>" --json
 
 ```sh
 ziwei-workspace employees capabilities get --input-file "<business-input.json>" --json --contract v1
+```
+
+<!-- operation:employees.plugins.get -->
+### employees plugins get
+
+读取 DSH 员工绑定电脑与原生 Bot 的插件观察快照。目录、保存开关与实际加载状态分别回读；旧快照不代表当前原生状态。需要最新值先 refresh，等待原 action 后再 get。
+
+输入 schema：
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id"
+  ],
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "workspace": {
+      "type": "string",
+      "description": "可选的明确目标工作区；必须已经在本MCP bearer授权scope中，省略沿用当前工作区。"
+    }
+  }
+}
+```
+
+行为、权限与真实查询入口：
+
+```json
+{
+  "nativeTool": "ziwei_get_employee_plugins",
+  "readOnly": true,
+  "sideEffects": [],
+  "requiredPermissions": [
+    "Unified site roles: access AND read; issued/current intersection",
+    "Unified scope: workspace:read; issued/current intersection",
+    "Original server workspace membership and role policy",
+    "Original employee visibility and device scope checks"
+  ],
+  "unifiedAuthorization": {
+    "requiresAccess": true,
+    "requiredRole": "read",
+    "requiredScope": "workspace:read",
+    "nativeOwnerAdmin": false,
+    "verification": "server every request; issued/current roles and scopes intersect native policy"
+  },
+  "supportsDryRun": false,
+  "idempotency": "unsupported",
+  "idempotencyScope": null,
+  "resultQuery": null,
+  "transports": {
+    "managed": "supported",
+    "native": "supported"
+  },
+  "routes": {
+    "managed": {
+      "method": "GET",
+      "path": "/mcp/v1/workspaces/{workspace}/employees/{id}/plugins"
+    },
+    "native": {
+      "method": "GET",
+      "path": "/api/workspaces/{workspace}/employees/{id}/plugins"
+    }
+  },
+  "idempotencyByTransport": {
+    "managed": "unsupported",
+    "native": "unsupported"
+  }
+}
+```
+
+输入文件模板：
+
+```json
+{
+  "id": "<id>"
+}
+```
+
+```sh
+ziwei-workspace employees plugins get --input-file "<business-input.json>" --json --contract v1
+```
+
+<!-- operation:employees.plugins.refresh -->
+### employees plugins refresh
+
+在 DSH 员工绑定电脑只读刷新原生 Bot 插件目录、保存组合和加载证据；要求客户端 dsh_plugins_v1。返回 pending/actionId 仅表示排队，用 ziwei_get_action 等待，再 get 回读。不启动或重启 Bot，不运行模型或业务。
+
+输入 schema：
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id"
+  ],
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "idempotencyKey": {
+      "type": "string",
+      "maxLength": 128,
+      "pattern": "^[-A-Za-z0-9_.:]{1,128}$"
+    },
+    "workspace": {
+      "type": "string",
+      "description": "可选的明确目标工作区；必须已经在本MCP bearer授权scope中，省略沿用当前工作区。"
+    }
+  }
+}
+```
+
+行为、权限与真实查询入口：
+
+```json
+{
+  "nativeTool": "ziwei_refresh_employee_plugins",
+  "readOnly": false,
+  "sideEffects": [
+    "Queue readonly native plugin discovery on the employee-bound computer; no runtime startup or business execution"
+  ],
+  "requiredPermissions": [
+    "Unified site roles: access AND write; issued/current intersection",
+    "Unified scope: workspace:write; issued/current intersection",
+    "Original server workspace membership and role policy",
+    "Original employee visibility and device scope checks"
+  ],
+  "unifiedAuthorization": {
+    "requiresAccess": true,
+    "requiredRole": "write",
+    "requiredScope": "workspace:write",
+    "nativeOwnerAdmin": false,
+    "verification": "server every request; issued/current roles and scopes intersect native policy"
+  },
+  "supportsDryRun": false,
+  "idempotency": "supported",
+  "idempotencyScope": "Only original endpoint semantics; stable key, same authorized actor/workspace and original resource. Never an automatic retry guarantee.",
+  "resultQuery": {
+    "command": "ziwei-workspace actions get --id <actionId>",
+    "idField": "action.id or id",
+    "note": "Use only the original server action ID; a CLI requestId is not a receipt"
+  },
+  "transports": {
+    "managed": "supported",
+    "native": "supported"
+  },
+  "routes": {
+    "managed": {
+      "method": "POST",
+      "path": "/mcp/v1/workspaces/{workspace}/employees/{id}/plugins/refresh"
+    },
+    "native": {
+      "method": "POST",
+      "path": "/api/workspaces/{workspace}/employees/{id}/plugins/refresh"
+    }
+  },
+  "idempotencyByTransport": {
+    "managed": "supported",
+    "native": "supported"
+  }
+}
+```
+
+输入文件模板：
+
+```json
+{
+  "id": "<id>"
+}
+```
+
+```sh
+ziwei-workspace employees plugins refresh --input-file "<business-input.json>" --json --contract v1
+```
+
+<!-- operation:employees.plugins.apply -->
+### employees plugins apply
+
+将 enabled 中的真实原生 bundle ID 保存到当前 DSH 员工绑定 Bot 的同一份原生插件组合。先 get/refresh 获取目录，保留必需项和已有自定义 bundle，使用稳定 idempotencyKey。pending/actionId 不代表已保存；原 action 成功后 get 确认保存与下次启动生效状态，实际加载另看原生证据。不启动或重启 Bot，不接受外部地址、路径或另一 Bot 目标。
+
+输入 schema：
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "enabled",
+    "idempotencyKey"
+  ],
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "enabled": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {
+        "type": "string",
+        "maxLength": 200
+      }
+    },
+    "idempotencyKey": {
+      "type": "string",
+      "maxLength": 128,
+      "pattern": "^[-A-Za-z0-9_.:]{1,128}$"
+    },
+    "workspace": {
+      "type": "string",
+      "description": "可选的明确目标工作区；必须已经在本MCP bearer授权scope中，省略沿用当前工作区。"
+    }
+  }
+}
+```
+
+行为、权限与真实查询入口：
+
+```json
+{
+  "nativeTool": "ziwei_apply_employee_plugins",
+  "readOnly": false,
+  "sideEffects": [
+    "Queue saving the same native Bot bundle selection; next-start effects and actual loading require separate native evidence; no Bot restart"
+  ],
+  "requiredPermissions": [
+    "Unified site roles: access AND write; issued/current intersection",
+    "Unified scope: workspace:write; issued/current intersection",
+    "Original server workspace membership and role policy",
+    "Original employee visibility and device scope checks"
+  ],
+  "unifiedAuthorization": {
+    "requiresAccess": true,
+    "requiredRole": "write",
+    "requiredScope": "workspace:write",
+    "nativeOwnerAdmin": false,
+    "verification": "server every request; issued/current roles and scopes intersect native policy"
+  },
+  "supportsDryRun": false,
+  "idempotency": "supported",
+  "idempotencyScope": "Only original endpoint semantics; stable key, same authorized actor/workspace and original resource. Never an automatic retry guarantee.",
+  "resultQuery": {
+    "command": "ziwei-workspace actions get --id <actionId>",
+    "idField": "action.id or id",
+    "note": "Use only the original server action ID; a CLI requestId is not a receipt"
+  },
+  "transports": {
+    "managed": "supported",
+    "native": "supported"
+  },
+  "routes": {
+    "managed": {
+      "method": "PUT",
+      "path": "/mcp/v1/workspaces/{workspace}/employees/{id}/plugins"
+    },
+    "native": {
+      "method": "PUT",
+      "path": "/api/workspaces/{workspace}/employees/{id}/plugins"
+    }
+  },
+  "idempotencyByTransport": {
+    "managed": "supported",
+    "native": "supported"
+  }
+}
+```
+
+输入文件模板：
+
+```json
+{
+  "id": "<id>",
+  "enabled": [],
+  "idempotencyKey": "<idempotencyKey>"
+}
+```
+
+```sh
+ziwei-workspace employees plugins apply --input-file "<business-input.json>" --json --contract v1
 ```
 
 <!-- operation:employees.capabilities.report -->

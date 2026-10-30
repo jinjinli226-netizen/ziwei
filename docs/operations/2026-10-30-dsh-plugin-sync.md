@@ -1,0 +1,11 @@
+# DSH 原生插件同步与员工配置按钮
+
+驾驶舱为 DSH 员工新增“插件”页，目录及组合来自目标电脑 DSH Hub 的原生 Bot manifest；运行时加载记录来自原生 Loader 与 Agent preset。保存组合与当前加载分开展示，改动于原生 Bot 下次启动生效。Hermes 保留自身原生配置、Skill 与 MCP 路径。
+
+插件检查/保存经当前员工、工作区、配对设备与真实 Bot 绑定的既有 action 链路执行，服务器只保存设备观察快照。网页、管理 MCP 与独立 workspace CLI 的命令源码使用同一合同。前端保留原请求标识处理未知保存，切换员工不接收旧作用域响应；不因插件启用标记宣称已加载。完整接口与边界见[合同](../contracts/2026-10-30-dsh-native-plugins.md)。
+
+独立审查复现并修正三项实际问题：插件短执行使用既有默认投递租约，避免真实结果始终停在 ACK；最新迟到回执不会被较早新鲜快照盖住；幂等身份不再随员工重绑或配置指纹改变，同一原写请求不能改投另一个 Bot。回归包含真实 Dispatcher、LocalAction、ActionDelivery、授权 ACK/续租与结果持久化的无监听链路。
+
+Root 独立运行真实 DSH Hub route 与 Cordis Loader 隔离验收，确认 alpha 插件 skill 正文和 `modelInvocable:true`，beta 配置及能力保持；未启动 Web Bot、监听或模型。前端真实 Vue 事件、保存回执、必需项、离线/未知状态和 Hermes 隔离通过相关回归。离线真实组件预览六帧覆盖桌面、窄屏和矮屏，无横向溢出；“编辑基础资料 / 高级配置”实测同 top、同高度，桌面 34px，窄/矮屏 36px。
+
+发布以实际安装包增量叠加，保留此前 Hermes 修复；服务端保留现场已部署的统一身份 managed MCP guard，并把其源代码与回归归并入 Git。手机 Agent/Updater 专项会话的未提交实现不属于本批发布，不整树覆盖。源码验证、安装、API/前端发布与真实设备回读分别记录，隔离验收不替代正式 Bot 或完整模型执行验收。

@@ -34,6 +34,7 @@ import {createBotProviderCredentialService} from './bot-provider-credentials.mjs
 import {createBotAutonomyService} from './bot-autonomy.mjs';
 import {createBotInteractions} from './bot-interactions.mjs';
 import {createEmployeeCapabilityInventory} from './employee-capability-inventory.mjs';
+import {createDshPluginsService} from './dsh-plugins.mjs';
 import {botActionMaintenance} from './bots.mjs';
 import { toolDefinitions as managementTools } from '../scripts/ziwei-mcp.mjs';
 import {registerWorkspaceCliDocs} from './workspace-cli-docs.mjs';
@@ -316,6 +317,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   const auth = options.auth || createAuthService(repo.db, options.authOptions);
   const management = createManagementService(repo);
   const employeeCapabilityInventory=createEmployeeCapabilityInventory(repo,{management});
+  const dshPlugins=createDshPluginsService(repo,{management});
   const mobileReadView = createMobileReadView(repo);
   const conversationReads = createConversationReadService(repo);
   const mobileNotifications = createMobileNotificationReadService(repo);
@@ -788,6 +790,9 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   app.get('/api/workspaces/:slug/employees/:id/capability-inventory',requireRole('owner','admin','member'),(req,res)=>{res.setHeader('Cache-Control','no-store');res.vary('Cookie');res.json(employeeCapabilityInventory.get(req.params.slug,req.params.id,employeeContext(req)));});
   app.post('/api/workspaces/:slug/employees/:id/capability-inventory/reports',requireRole('owner','admin','member'),(req,res)=>{res.setHeader('Cache-Control','no-store');res.status(201).json(employeeCapabilityInventory.report(req.params.slug,req.params.id,req.body,employeeContext(req)));});
   app.post('/api/workspaces/:slug/employees/:id/capability-inventory/refresh',requireRole('owner','admin','member'),(req,res)=>{res.setHeader('Cache-Control','no-store');res.status(202).json(employeeCapabilityInventory.refresh(req.params.slug,req.params.id,req.body||{},employeeContext(req)));});
+  app.get('/api/workspaces/:slug/employees/:id/plugins',requireRole('owner','admin','member'),(req,res)=>{res.setHeader('Cache-Control','no-store');res.vary('Cookie');res.json(dshPlugins.get(req.params.slug,req.params.id,employeeContext(req)));});
+  app.post('/api/workspaces/:slug/employees/:id/plugins/refresh',requireRole('owner','admin','member'),(req,res)=>{res.setHeader('Cache-Control','no-store');res.status(202).json(dshPlugins.refresh(req.params.slug,req.params.id,req.body||{},employeeContext(req)));});
+  app.put('/api/workspaces/:slug/employees/:id/plugins',requireRole('owner','admin','member'),(req,res)=>{res.setHeader('Cache-Control','no-store');res.status(202).json(dshPlugins.apply(req.params.slug,req.params.id,req.body,employeeContext(req)));});
   app.get('/api/workspaces/:slug/phone-mcp/setup',requireRole('owner','admin','member'),async(req,res,next)=>{try{const value=await phoneMcp.setup(req.params.slug,{...employeeContext(req),userId:req.auth?.user_id});res.json(req.query.view==='mobile'?{...value,employees:value.employees.map(employee=>mobileReadView.employee(req.params.slug,employee))}:value);}catch(error){next(error);}});
   app.put('/api/workspaces/:slug/employees/:id/phone-mcp',requireRole('owner','admin'),async(req,res,next)=>{
     try {ensureEmployeeInWorkspace(req.params.slug,req.params.id,req);res.json(await phoneMcp.save(req.params.slug,req.params.id,req.body || {},employeeContext(req)));} catch(error) {next(error);}
@@ -952,6 +957,9 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   app.get('/mcp/v1/workspaces/:slug/employees/:id/mcp/status', mcpGuard, (req, res) => res.json(management.employeeStatus(req.params.slug, req.params.id, mcpContext(req))));
   app.get('/mcp/v1/workspaces/:slug/employees/:id/capability-inventory',mcpGuard,mcpEmployeeGuard,(req,res)=>{res.setHeader('Cache-Control','no-store');res.json(employeeCapabilityInventory.get(req.params.slug,req.params.id,mcpContext(req)));});
   app.post('/mcp/v1/workspaces/:slug/employees/:id/capability-inventory/reports',mcpGuard,mcpEmployeeGuard,(req,res)=>{res.setHeader('Cache-Control','no-store');res.status(201).json(employeeCapabilityInventory.report(req.params.slug,req.params.id,req.body,mcpContext(req)));});
+  app.get('/mcp/v1/workspaces/:slug/employees/:id/plugins',mcpGuard,mcpEmployeeGuard,(req,res)=>{res.setHeader('Cache-Control','no-store');res.json(dshPlugins.get(req.params.slug,req.params.id,mcpContext(req)));});
+  app.post('/mcp/v1/workspaces/:slug/employees/:id/plugins/refresh',mcpGuard,mcpEmployeeGuard,(req,res)=>{res.setHeader('Cache-Control','no-store');res.status(202).json(dshPlugins.refresh(req.params.slug,req.params.id,req.body||{},mcpContext(req)));});
+  app.put('/mcp/v1/workspaces/:slug/employees/:id/plugins',mcpGuard,mcpEmployeeGuard,(req,res)=>{res.setHeader('Cache-Control','no-store');res.status(202).json(dshPlugins.apply(req.params.slug,req.params.id,req.body,mcpContext(req)));});
   app.get('/mcp/v1/workspaces/:slug/tasks/:id', mcpGuard, (req, res) => res.json(management.task(req.params.slug, req.params.id, mcpContext(req))));
   app.get('/mcp/v1/workspaces/:slug/actions/:id', mcpGuard, (req, res) => res.json(management.action(req.params.slug, req.params.id, mcpContext(req))));
   app.post('/mcp/v1/workspaces/:slug/devices/:deviceId/workdir/inspect',mcpGuard,(req,res)=>{

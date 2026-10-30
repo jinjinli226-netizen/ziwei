@@ -3,6 +3,7 @@ import { normalizeRuntimeProfile } from '../src/employee-runtime.mjs';
 import { createBotService } from './bots.mjs';
 import {botProfileBinding,assertBotProfileReady} from './bot-profiles.mjs';
 import {assertEmployeeCapabilityAuthority,assertEmployeeCapabilitySubject,projectEmployeeCapabilityAction,EMPLOYEE_CAPABILITY_INSPECTION_TYPE} from './employee-capability-inventory.mjs';
+import {assertDshPluginsSubject,projectDshPluginsAction,DSH_PLUGIN_ACTIONS} from './dsh-plugins.mjs';
 
 const parse = (value, fallback = {}) => { try { return JSON.parse(value) ?? fallback; } catch { return fallback; } };
 const fingerprint = value => crypto.createHash('sha256').update(JSON.stringify(canonical(value))).digest('hex');
@@ -126,6 +127,13 @@ export function createManagementService(repo) {
         if(!repo.listEmployees(slug,actor).some(row=>row.id===current.employeeId))return false;
       }catch{return false;}
     }
+    if(DSH_PLUGIN_ACTIONS.includes(item.type)){
+      try{
+        const current=assertDshPluginsSubject(db,ws(slug).id,payload);
+        assertEmployeeCapabilityAuthority(db,ws(slug).id,current,{userId:actor.actorUserId,role:actor.actorRole,deviceScope:context.deviceScope});
+        if(!repo.listEmployees(slug,actor).some(row=>row.id===current.employeeId))return false;
+      }catch{return false;}
+    }
     const linkedEmployeeId = payload.employeeId || (payload.conversationId ? db.prepare('SELECT employee_id FROM conversations WHERE id=? AND workspace_id=?').get(payload.conversationId, ws(slug).id)?.employee_id : null);
     if (linkedEmployeeId && !repo.listEmployees(slug, actor).some(row => row.id === linkedEmployeeId)) return false;
     const deviceId = payload.deviceId || (linkedEmployeeId ? db.prepare('SELECT target_device_id FROM employees WHERE id=? AND workspace_id=?').get(linkedEmployeeId, ws(slug).id)?.target_device_id : null);
@@ -146,7 +154,7 @@ export function createManagementService(repo) {
   const action = (slug, actionId, context = {}) => {
     const item = repo.getA2AAction(actionId, { workspaceSlug: slug });
     if (!actionVisible(slug, item, context)) fail('执行请求不存在于当前工作区', 'ACTION_NOT_FOUND', 404);
-    return projectEmployeeCapabilityAction(item);
+    return projectDshPluginsAction(projectEmployeeCapabilityAction(item));
   };
   const employeeStatus = (slug, employeeId, context = {}) => {
     const item = employee(slug, employeeId, context);

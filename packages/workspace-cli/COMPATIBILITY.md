@@ -31,7 +31,7 @@ Control `ziwei` is an independently maintained phone-control CLI in another repo
 
 ## Original management MCP tools
 
-`scripts/ziwei-mcp.mjs` is preserved unchanged. Build reuses its schemas and original phone summary inside this independent package; CLI I/O never hijacks stdio MCP output. Explicit legacy managed calls still use the original `/mcp/v1` API and authorization. Unified requests use their own AT only when public server `cliTransports` explicitly declares the mapped route: prefer native, otherwise MCP; never transform the AT into a legacy managed credential. Native routes are explicitly mapped from `backend/app.mjs`; ID-only task/document/skill endpoints retain their original server resource guards. Every unified business request retains backend live token, site role/scope and native resource validation.
+`scripts/ziwei-mcp.mjs` retains its stdio protocol and existing tool behavior. It also exposes the DSH employee plugin endpoints below. Build reuses its schemas and original phone summary inside this independent package; CLI I/O never hijacks stdio MCP output. Explicit legacy managed calls still use the original `/mcp/v1` API and authorization. Unified requests use their own AT only when public server `cliTransports` explicitly declares the mapped route: prefer native, otherwise MCP; never transform the AT into a legacy managed credential. Native routes are explicitly mapped from `backend/app.mjs`; ID-only task/document/skill endpoints retain their original server resource guards. Every unified business request retains backend live token, site role/scope and native resource validation.
 
 | Original tool | New CLI resource/action |
 | --- | --- |
@@ -42,6 +42,9 @@ Control `ziwei` is an independently maintained phone-control CLI in another repo
 | `ziwei_discover_environment` | `environment discover` |
 | `ziwei_get_employee` | `employees get`; MCP route only, native unsupported; unified requires advertised MCP support; use native `employees list` |
 | `ziwei_get_employee_mcp_status` | `employees mcp-status` |
+| `ziwei_get_employee_plugins` | `employees plugins get`; observed snapshot of the employee-bound native DSH Bot |
+| `ziwei_refresh_employee_plugins` | `employees plugins refresh`; queues readonly device discovery, requires `dsh_plugins_v1` |
+| `ziwei_apply_employee_plugins` | `employees plugins apply`; queues saving the same native Bot bundle selection, requires a stable key; does not restart or imply loaded skills/tools |
 | `ziwei_create_hermes_profile` | `profiles create` |
 | `ziwei_get_action` | `actions get`; `actions wait` is bounded readonly polling of that endpoint |
 | `ziwei_get_task` | `tasks get` |

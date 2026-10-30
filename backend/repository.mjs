@@ -30,6 +30,7 @@ import {forwardConversationMessages as forwardMessages,CONVERSATION_FORWARD_INTE
 import { resolveEmployeeDefaultWorkdir } from './employee-workdir.mjs';
 import { assertBotExecution, botSnapshot, botUncertain, BOT_INTERNAL, botActionMaintenance, botActionReadOnlyInspection } from './bots.mjs';
 import {assertEmployeeCapabilitySubject,EMPLOYEE_CAPABILITY_INSPECTION_TYPE} from './employee-capability-inventory.mjs';
+import {assertDshPluginsSubject,DSH_PLUGIN_ACTIONS} from './dsh-plugins.mjs';
 import {verifyBotProvisionReceipt} from './bot-profiles.mjs';
 import {readHistoricalPrelaunchRecovery} from './bot-historical-recovery-view.mjs';
 import {readForceAbandonRecovery} from './bot-force-abandon.mjs';
@@ -2107,9 +2108,11 @@ export function createRepository(options = {}, io={}) {
     registerA2AAgent(slug, input = {}) { const ws = workspace(slug); if (!ws) throw new Error('Workspace not found'); const agentId = String(input.agentId || input.agent_id || 'ziwei_user'); if (agentId !== 'ziwei_user') throw new Error('Only ziwei_user agent is accepted'); return this.heartbeatDevice(slug, { ...input, agentId, serviceName:'ziwei_user' }); },
     createA2AAction(slug, input = {}) {
       const ws = workspace(slug); if (!ws) throw new Error('Workspace not found');
+      if(DSH_PLUGIN_ACTIONS.includes(input.type)&&input.botInternal!==BOT_INTERNAL)throw botFailure('DSH_PLUGINS_ROUTE_REQUIRED','请使用员工原生插件入口');
       const agentId = String(input.agentId || input.agent_id || 'ziwei_user'); if (agentId !== 'ziwei_user') throw new Error('Only ziwei_user agent is accepted');
       const dedupeKey = String(input.dedupeKey || input.dedupe_key || `${input.type || 'action'}:${crypto.randomUUID()}`);
       const existing = db.prepare('SELECT * FROM a2a_actions WHERE workspace_id=? AND dedupe_key=? ORDER BY created_at DESC LIMIT 1').get(ws.id, dedupeKey);
+      if(DSH_PLUGIN_ACTIONS.includes(existing?.type)&&input.botInternal!==BOT_INTERNAL)throw botFailure('DSH_PLUGINS_ROUTE_REQUIRED','请使用员工原生插件入口');
       if (existing) return { ...existing, duplicate: true, payload: parse(existing.payload_json), result: parse(existing.result_json) };
       let payload = trustedTemplatePayload(ws.id,input.payload && typeof input.payload === 'object' ? input.payload : {});
       if(isDshAction({payload})){const {dshSessionBinding:_untrusted,...unbound}=payload;payload=unbound;}
@@ -2117,6 +2120,7 @@ export function createRepository(options = {}, io={}) {
         if(input.botInternal!==BOT_INTERNAL)throw botFailure('EMPLOYEE_CAPABILITIES_ROUTE_REQUIRED','请使用员工只读能力清单入口');
         assertEmployeeCapabilitySubject(db,ws.id,payload);
       }
+      if(DSH_PLUGIN_ACTIONS.includes(input.type))assertDshPluginsSubject(db,ws.id,payload);
       const isValidation=input.type==='hermes.bot.validate';
       const isProvisioning=input.type==='hermes.bot.provision';
       const readOnlyInspection=botActionReadOnlyInspection(input.type,payload);
@@ -2178,6 +2182,10 @@ export function createRepository(options = {}, io={}) {
     assertEmployeeCapabilitiesInspection(actionId){
       const row=db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId);
       if(row?.type===EMPLOYEE_CAPABILITY_INSPECTION_TYPE)assertEmployeeCapabilitySubject(db,row.workspace_id,parse(row.payload_json));
+    },
+    assertDshPluginsOperation(actionId){
+      const row=db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId);
+      if(DSH_PLUGIN_ACTIONS.includes(row?.type))assertDshPluginsSubject(db,row.workspace_id,parse(row.payload_json));
     },
     authorizeBotStart(actionId,input={}) {
       const row=db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId);
@@ -2243,6 +2251,7 @@ export function createRepository(options = {}, io={}) {
         if (input.agentId && String(input.agentId) !== row.agent_id) throw new Error('A2A agent mismatch');
         assertActionDevice(row, input);
         if(['pending','acked'].includes(row.status)&&row.type===EMPLOYEE_CAPABILITY_INSPECTION_TYPE)assertEmployeeCapabilitySubject(db,row.workspace_id,parse(row.payload_json));
+        if(['pending','acked'].includes(row.status)&&DSH_PLUGIN_ACTIONS.includes(row.type))assertDshPluginsSubject(db,row.workspace_id,parse(row.payload_json));
         if(settleExpiredMaintenanceAction(this,row,input)){const updated=db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId);response={...a2aResponseView(updated,{receiptOnly,includeResult:!receiptOnly}),duplicate:true};}
         else if (row.status === 'expired') {
           if (!receiptOnly || !(recoverableBotCompletion(row)||recoverableDshCompletion(row)) || !input.deviceId || input.deviceId !== actionTargetDevice(row)) throw new Error('A2A action expired');

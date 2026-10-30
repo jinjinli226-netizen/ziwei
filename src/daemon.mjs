@@ -359,7 +359,7 @@ export class ActionDispatcher {
       const nativeRuntime = isNativeRuntimeAction(action);
       const requestedTimeout = action.payload?.timeoutMs ?? action.payload?.timeout_ms;
       const hasHardTimeout = requestedTimeout !== undefined && requestedTimeout !== null && String(requestedTimeout).trim() !== '' && Number.isFinite(Number(requestedTimeout));
-      let hardTimeoutMs = hasHardTimeout || nativeRuntime || action.type==='employee.capabilities.inspect' ? actionExecutionTimeoutMs(action) : null;
+      let hardTimeoutMs = hasHardTimeout || nativeRuntime || ['employee.capabilities.inspect','employee.plugins.inspect','employee.plugins.apply'].includes(action.type) ? actionExecutionTimeoutMs(action) : null;
       if (nativeRuntime && expiresAt) {
         const remaining = Date.parse(String(expiresAt)) - this.#now() - ACTION_EXECUTION_LEASE_BUFFER_MS;
         if (!Number.isFinite(remaining) || remaining < 100) return this.#rejectAdmission(action,key,identity,'lease','A2A action lease leaves insufficient time for execution and confirmed shutdown','ACTION_LEASE_INSUFFICIENT');

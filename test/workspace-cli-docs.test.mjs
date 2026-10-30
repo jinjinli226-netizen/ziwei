@@ -126,9 +126,9 @@ test('identity round docs distinguish server preparation default from CLI defaul
   }
 });
 
-test('all 46 CLI routes advertise the actual server unified role and scope including phone binding admin', async () => {
+test('all 49 CLI routes advertise the actual server unified role and scope including phone binding admin', async () => {
   const {requiredPermission} = await import('../backend/identity/native.mjs');
-  assert.equal(operations.length,46);
+  assert.equal(operations.length,49);
   for (const op of operations) for (const route of Object.values(op.routes).filter(Boolean)) {
     const permission=requiredPermission({method:route.method,originalUrl:route.path.replaceAll('{workspace}','example-workspace').replace(/\{[^}]+\}/g,'example-id')});
     assert.equal(op.unifiedAuthorization?.requiredRole,permission,op.name);

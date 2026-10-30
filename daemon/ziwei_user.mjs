@@ -198,7 +198,7 @@ remoteClientUpdates = createRemoteClientUpdates({
   log,
 });
 function clientRuntimeDiscovery() {
-  return { checkedAt: runtimeDiscovery.discoveredAt, platform: runtimeDiscovery.bridge.platform, arch: runtimeDiscovery.bridge.arch, clientBuild: CLIENT_BUILD, features: ['employee_capabilities_inspect_v2','bot_mcp_oauth_relay_v1','failed_action_finalization_v1', ...(remoteUpdateEnabled ? [REMOTE_CLIENT_UPDATE_FEATURE,'maintenance_checkpoint_resume_v1','native_worker_update_verification_v1'] : [])], ...(maintenanceHostId ? { maintenanceHostId } : {}) };
+  return { checkedAt: runtimeDiscovery.discoveredAt, platform: runtimeDiscovery.bridge.platform, arch: runtimeDiscovery.bridge.arch, clientBuild: CLIENT_BUILD, features: ['dsh_plugins_v1','employee_capabilities_inspect_v2','bot_mcp_oauth_relay_v1','failed_action_finalization_v1', ...(remoteUpdateEnabled ? [REMOTE_CLIENT_UPDATE_FEATURE,'maintenance_checkpoint_resume_v1','native_worker_update_verification_v1'] : [])], ...(maintenanceHostId ? { maintenanceHostId } : {}) };
 }
 process.on('uncaughtException', error => log('uncaught_exception', { error: error.stack || error.message }));
 process.on('unhandledRejection', error => log('unhandled_rejection', { error: error?.stack || String(error) }));

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import {toolDefinitions} from '../vendor/native-schemas.mjs';
 const main = await import('../src/main.mjs').catch(e => { if (e.code === 'ERR_MODULE_NOT_FOUND') return {}; throw e; });
 const registry = await import('../src/registry.mjs').catch(e => { if (e.code === 'ERR_MODULE_NOT_FOUND') return {}; throw e; });
 async function invoke(args, options={}) {
@@ -52,7 +53,7 @@ test('catalog covers all native tools and every Bot operation without cross-site
   assert.equal(typeof registry.getCapabilities,'function');
   const c=registry.getCapabilities();
   for(const o of c.operations) for(const field of ['name','inputSchema','readOnly','sideEffects','requiredPermissions','supportsDryRun','idempotency','resultQuery']) assert.ok(Object.hasOwn(o,field),`${o.name}.${field}`);
-  assert.equal(new Set(c.operations.map(o=>o.nativeTool)).size,26);
+  assert.deepEqual(new Set(c.operations.map(o=>o.nativeTool)),new Set(toolDefinitions.map(tool=>tool.name)));
   assert.ok(c.operations.some(o=>o.name==='bots.cancelMcpConnection'));
   assert.ok(c.operations.some(o=>o.name==='actions.wait'&&o.readOnly));
   assert.ok(c.operations.find(o=>o.name==='phone-mcp.check').sideEffects.length>0);

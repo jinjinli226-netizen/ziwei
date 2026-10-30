@@ -75,12 +75,15 @@
 .bot-drawer-heading { position:sticky; top:0; z-index:6; display:flex; align-items:center; justify-content:space-between; padding:14px 0; margin-bottom:12px; background:#fff; border-bottom:1px solid var(--bot-line); font-size:13px; }
 .bot-management-drawer .bot-management-header { position:static; padding:6px 24px 0; margin:0 -24px 24px; }.bot-management-drawer .bot-detail-heading { flex-wrap:wrap; gap:10px; }.bot-management-drawer .bot-detail-heading>.bot-button.primary { display:none; }.bot-management-drawer .bot-identity h2 { font-size:16px; }.bot-management-drawer .bot-avatar.large { width:36px; height:36px; font-size:18px; }.bot-management-drawer .bot-tabs { gap:14px; }.bot-management-drawer .bot-tabs>button { font-size:11px; }.bot-management-drawer .bot-tabs>button>svg { display:none; }.bot-management-drawer .bot-more-select { width:120px; }.bot-management-drawer .bot-facts,.bot-management-drawer .bot-overview-grid,.bot-management-drawer .bot-fields,.bot-management-drawer .bot-management-grid { grid-template-columns:1fr; }.bot-management-drawer .bot-facts { gap:14px; }.bot-management-drawer .bot-facts article { padding:0; border:0; }.bot-management-drawer .bot-section-heading { flex-wrap:wrap; }.bot-management-drawer .bot-save-bar { align-items:flex-start; }
 .employee-binding-facts { display:grid; gap:16px; font-size:12px; margin-bottom:24px; }.employee-binding-facts>div { display:grid; grid-template-columns:92px minmax(0,1fr); gap:12px; }.employee-binding-facts dt { color:var(--bot-muted); }.employee-binding-facts dd { margin:0; overflow-wrap:anywhere; }
+.employee-binding-actions { align-items:center; gap:8px; }
+.employee-binding-actions>.bot-button { box-sizing:border-box; height:34px; min-height:34px; padding-block:0; }
 .employee-workspace-return { display:none; }
 @media(max-width:1280px) { .chat-layout,.chat-layout.management-open { grid-template-columns:228px minmax(0,1fr); }.chat-layout .bot-management-drawer { position:absolute; inset:0 0 0 auto; width:min(560px,calc(100% - 228px)); box-sizing:border-box; box-shadow:-14px 0 38px #342b4f14; } }
 @media(min-width:761px) { .bot-main>.bot-form-section:first-child { padding-top:24px; } }
 @media(max-width:760px),(max-height:560px),(pointer:coarse) {
   .bot-search,.bot-roster :deep(.ziwei-select) { height:36px; }
   .bot-roster :deep(.ziwei-select__trigger) { min-height:36px; height:36px; }
+  .employee-binding-actions>.bot-button { height:36px; min-height:36px; }
 }
 @media(max-width:760px),(max-height:560px) {
   .bot-roster.mobile-expanded { overflow-y:auto; overscroll-behavior:contain; }

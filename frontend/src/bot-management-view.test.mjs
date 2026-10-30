@@ -88,7 +88,8 @@ for(const runtime of ['DSH','Codex'])test(`actual ${runtime} roster selection us
   const h=await harness(t),employee=h.fixture.roster.find(row=>row.employee.runtime===runtime);
   const reads=h.calls.filter(call=>call[0]==='bot').length;
   h.byClass('bot-roster-row').find(row=>h.text(row).includes(employee.employee.name)).props.onClick();await h.settle();
-  assert.equal(h.calls.filter(call=>call[0]==='bot').length,reads);assert.equal(h.byClass('bot-instance').length,0);assert.equal(h.byClass('bot-tabs').length,0);
+  assert.equal(h.calls.filter(call=>call[0]==='bot').length,reads);assert.equal(h.byClass('bot-instance').length,0);assert.equal(h.byClass('bot-tabs').length,runtime==='DSH'?1:0);
+  assert.equal(Boolean(h.button('插件')),runtime==='DSH');
   h.button('员工设置').props.onClick();assert.deepEqual(h.events.at(-1),['employee-settings',{workspace:'preview',employee:employee.employee,conversationId:employee.main_conversation_id}]);
   h.button('打开原有聊天').props.onClick();assert.equal(h.events.at(-1)[0],'employee-chat');assert.equal(h.events.at(-1)[1].employee.id,employee.id);
   assert.ok(h.findAll(item=>item.props['data-fixture-component']==='EmployeeCapabilityInventory').length);

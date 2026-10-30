@@ -19,6 +19,7 @@ import { createImageArtifactSession } from './conversation-image-artifacts.mjs';
 import {requestBotStartAdmission,markManagementPrelaunchFailure} from './runtime-launch-evidence.mjs';
 import {bindCodexConversationToHost} from './codex-conversation-session.mjs';
 import {executeDshRuntime} from './dsh-runtime.mjs';
+import {executeDshPlugins} from './dsh-plugins.mjs';
 import {dshBotNameForAction} from './dsh-session-evidence.mjs';
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
@@ -374,7 +375,7 @@ function runCommand({runtimeDir, action, executable, baseArgs = [], allowedExecu
  * Unknown/unsupported actions fail loudly so the cloud never sees a fake
  * success merely because an action was accepted by the daemon.
  */
-export function createLocalActionExecutor({runtimeDir, admissionHandledByDispatcher = false, defaultWorkdir = process.cwd(), allowedExecutables = [], executorCommand = null, executorArgs = [], defaultRuntime = null, hermesHomePath = null, codexMcpDisabledServers = [], managementMcpConfig = {}, managementBootstrap = null, terminalMcpConfig = {}, workspace = null, apiBase = null, deviceId = null, deviceToken = null, onWorkspaceConnect = null, capabilityCollector = collectEmployeeCapabilityInventory, machineCapabilityInventory = sharedMachineCapabilityInventory, dshBaseUrl=process.env.ZIWEI_DSH_BASE_URL||'http://127.0.0.1:7878', dshRuntime=executeDshRuntime} = {}) {
+export function createLocalActionExecutor({runtimeDir, admissionHandledByDispatcher = false, defaultWorkdir = process.cwd(), allowedExecutables = [], executorCommand = null, executorArgs = [], defaultRuntime = null, hermesHomePath = null, codexMcpDisabledServers = [], managementMcpConfig = {}, managementBootstrap = null, terminalMcpConfig = {}, workspace = null, apiBase = null, deviceId = null, deviceToken = null, onWorkspaceConnect = null, capabilityCollector = collectEmployeeCapabilityInventory, machineCapabilityInventory = sharedMachineCapabilityInventory, dshBaseUrl=process.env.ZIWEI_DSH_BASE_URL||'http://127.0.0.1:7878', dshRuntime=executeDshRuntime, dshPluginFetch=globalThis.fetch} = {}) {
   if (!runtimeDir) throw new TypeError('runtimeDir is required');
   fs.mkdirSync(runtimeDir, {recursive: true});
   const automaticManagement = managementBootstrap || (workspace && deviceToken ? createManagementBootstrap({ workspace, apiBase, deviceId, deviceToken, cacheDirectory: path.join(runtimeDir, 'management-mcp-credentials') }) : null);
@@ -388,6 +389,7 @@ export function createLocalActionExecutor({runtimeDir, admissionHandledByDispatc
     const type = String(action?.type || '');
     if (action?.payload?.deviceId && deviceId && action.payload.deviceId !== deviceId) throw new Error('执行目标设备与本机已配对设备不一致；不会回退其他设备');
     if (action?.workspace && workspace && action.workspace !== workspace) throw new Error('执行工作区与本机已配对工作区不一致');
+    if(type==='employee.plugins.inspect'||type==='employee.plugins.apply')return{status:'succeeded',result:{dshPlugins:await executeDshPlugins(action,{workspace,deviceId,baseUrl:dshBaseUrl,signal:context.signal,fetchImpl:dshPluginFetch})}};
     if(type==='employee.capabilities.inspect'){
       const payload=action.payload||{},inspection=payload.capabilityInspection,subject=inspection?.subject;
       if(inspection?.schemaVersion!==1||!subject||subject.workspace!==workspace||payload.workspace!==workspace||subject.deviceId!==deviceId||payload.deviceId!==deviceId||subject.runtime!==payload.runtime||(subject.profile??null)!==(payload.profile??null)||payload.hermesBot||payload.employeeId)throw Object.assign(new Error('能力清单检查身份不匹配'),{code:'EMPLOYEE_CAPABILITIES_SUBJECT_INVALID'});
