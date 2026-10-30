@@ -28,21 +28,21 @@ def _profile(value):
     return isinstance(value, str) and 0 < len(value) <= 1024 and all(ord(c) >= 32 and ord(c) != 127 for c in value)
 
 
-def _overlay_servers(config, overlay, reject):
-    if not overlay:
-        return []
-    path = Path(overlay) / 'config.yaml'
+def _overlay_servers(config, overlay, reject, isolation=None):
     try:
-        text = path.read_text(encoding='utf-8')
-        try:
-            policy = json.loads(text)
-        except ValueError:
-            spec = importlib.util.spec_from_file_location('ziwei_gateway_yaml', Path(__file__).with_name('hermes-yaml-compat.py'))
-            bridge = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(bridge)
-            policy = bridge.load_native_yaml().safe_load(text)
+        policy = {}
+        if overlay:
+            text = (Path(overlay) / 'config.yaml').read_text(encoding='utf-8')
+            try:
+                policy = json.loads(text)
+            except ValueError:
+                spec = importlib.util.spec_from_file_location('ziwei_gateway_yaml', Path(__file__).with_name('hermes-yaml-compat.py'))
+                bridge = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(bridge)
+                policy = bridge.load_native_yaml().safe_load(text)
         configured = (policy or {}).get('mcp_servers', {})
-        effective = config.load_config().get('mcp_servers', {})
+        native_config = config.load_config()
+        effective = native_config.get('mcp_servers', {})
         _check(isinstance(configured, dict) and isinstance(effective, dict), reject, 'BOT_GATEWAY_MCP_CONFIG_INVALID')
         servers = []
         for name in ('ziwei_management', 'ziwei-terminal'):
@@ -80,6 +80,14 @@ def _overlay_servers(config, overlay, reject):
                 _check(isinstance(args, list), reject, 'BOT_GATEWAY_MCP_CONFIG_INVALID')
                 servers.append({'name': name, 'type': 'stdio', 'command': literal(entry.get('command')),
                                 'args': [literal(arg) for arg in args], 'env': fields(entry.get('env', {}))})
+        selected = native_config.get('platform_toolsets', {}).get('cli', [])
+        disabled = native_config.get('agent', {}).get('disabled_toolsets', [])
+        if isolation and isolation.get('kind') == 'hermes-bot' and 'ziwei_autonomy' in selected and not {'all', 'ziwei_autonomy'}.intersection(disabled):
+            names = ('ZIWEI_BOT_ACTION_ID', 'ZIWEI_BOT_DEVICE_TOKEN', 'ZIWEI_API_BASE')
+            if all(os.environ.get(name) for name in names):
+                servers.append({'name': 'ziwei_autonomy', 'type': 'stdio', 'command': sys.executable,
+                                'args': [str(Path(__file__).with_name('hermes-bot-tools-mcp.py'))],
+                                'env': [{'name': name, 'value': os.environ[name]} for name in names]})
         secrets = [item['value'] for server in servers for item in server.get('env', []) + server.get('headers', [])
                    if re.search(r'token|secret|password|api.?key|authorization', item['name'], re.I) and item['value']]
         for server in servers:
@@ -218,11 +226,17 @@ class _Client:
                 _check('editor' not in params, state.reject, 'BOT_GATEWAY_MCP_OVERRIDE_REFUSED')
                 params['editor'] = {'mcp_servers': state.servers}
             if method == 'session.create':
+                # Private MCP toolsets are added by the owner under its session namespace.
+                # Their execution aliases are not native registry entries at launch time.
+                if isinstance(params.get('toolsets'), list):
+                    private = {alias for server in state.servers for alias in (server['name'], 'mcp-' + server['name'])}
+                    params['toolsets'] = [name for name in params['toolsets'] if name not in private]
                 if state.effort:
                     _check(params.get('reasoning') in (None, state.effort), state.reject, 'BOT_REASONING_GATEWAY_CONFLICT')
                     params['reasoning'] = state.effort
                 if 'client_env' in params:
                     private_names = {item['name'] for server in state.servers for item in server.get('env', [])}
+                    private_names.update(('ZIWEI_BOT_ACTION_ID', 'ZIWEI_BOT_DEVICE_TOKEN', 'ZIWEI_API_BASE'))
                     params['client_env'] = {key: value for key, value in params['client_env'].items() if key not in private_names}
                     secrets = [item['value'] for server in state.servers for item in server.get('env', []) + server.get('headers', [])
                                if re.search(r'token|secret|password|api.?key|authorization', item['name'], re.I) and item['value']]
@@ -265,7 +279,7 @@ def install(config, isolation, *, overlay='', reject=RuntimeError, active=True):
             return False  # Legacy Hermes retains its existing in-process transport guards.
         raise reject('BOT_GATEWAY_SESSION_PROTOCOL_UNSUPPORTED') from None
     bot = bool(isolation and isolation.get('kind') == 'hermes-bot')
-    servers = _overlay_servers(config, overlay, reject)
+    servers = _overlay_servers(config, overlay, reject, isolation)
     effort = os.environ.get('ZIWEI_BOT_REASONING_EFFORT') if bot else None
     _check(effort is None or effort in _EFFORTS, reject, 'BOT_REASONING_INVALID')
     if not servers and not effort:

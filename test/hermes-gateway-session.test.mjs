@@ -32,6 +32,12 @@ entry={'command':'fixture-node','args':['fixture-management.mjs'],'env':{'ZIWEI_
 if request.get('badRef'):entry['args'].append('$'+'{ZIWEI_MCP_TOKEN}')
 (overlay/'config.yaml').write_text(json.dumps({'mcp_servers':{'ziwei_management':entry,'ziwei-terminal':{'enabled':False},'untrusted':{'command':'NO'}}}),encoding='utf-8')
 effective={'model':{'provider':'openai-codex','default':'gpt-6.1-sol'},'mcp_servers':{'ziwei_management':entry,'ziwei-terminal':{'enabled':False},'untrusted':{'command':'NO'},'host-only':{'command':'NO'}}}
+effective['platform_toolsets']={'cli':request.get('toolsets',[])}
+if request.get('autonomy'):
+ os.environ.update(ZIWEI_BOT_ACTION_ID=request.get('actionId','action-fixture'),ZIWEI_BOT_DEVICE_TOKEN='FIXTURE_DEVICE_SECRET',ZIWEI_API_BASE='https://fixture.invalid')
+if request.get('noAuthorization'):os.environ.pop('ZIWEI_BOT_DEVICE_TOKEN',None)
+if request.get('readOnly'):
+ effective['agent']={'disabled_toolsets':['all']};effective['mcp_servers']={}
 config=module('hermes_cli.config',load_config=lambda:effective,get_config_path=lambda:home/'config.yaml')
 class GatewayClientError(Exception):pass
 module('hermes_cli.gateway_client',GatewayClientError=GatewayClientError,RESUME_KEY_MISMATCH='RESUME_KEY_MISMATCH')
@@ -63,9 +69,14 @@ class Client:
    if method=='session.create':
     assert params['source']=='oneshot','SOURCE_REWRITTEN';assert params.get('reasoning')==(None if request.get('ordinary') else 'max')
     assert params['client_env']=={'PATH':'fixture-path'}
+    if 'expectedToolsets' in request:assert params.get('toolsets')==request['expectedToolsets'],'PRIVATE_ALIAS_SENT_TO_NATIVE_TOOLSETS'
     assert 'HERMES_STRICT_REASONING_EFFORT' not in params['client_env'],'NONSECRET_HERMES_ENV_MARKER_ADDED'
    if 'editor' in params:
-    specs=params['editor']['mcp_servers'];assert len(specs)==1 and specs[0]['name']=='ziwei_management'
+    specs=params['editor']['mcp_servers'];assert sorted(spec['name'] for spec in specs)==request.get('expectedServers',['ziwei_management'])
+    if request.get('autonomy') and 'ziwei_autonomy' in request.get('expectedServers',[]):
+     own=next(spec for spec in specs if spec['name']=='ziwei_autonomy')
+     assert own['command']==sys.executable and own['args']==[str(pathlib.Path(request['bridge']).with_name('hermes-bot-tools-mcp.py'))]
+     assert dict((item['name'],item['value']) for item in own['env'])=={'ZIWEI_BOT_ACTION_ID':request.get('actionId','action-fixture'),'ZIWEI_BOT_DEVICE_TOKEN':'FIXTURE_DEVICE_SECRET','ZIWEI_API_BASE':'https://fixture.invalid'}
     assert specs[0]['env'][0]=={'name':'WORKSPACE','value':'fixture-workspace'} or specs[0]['env'][1]=={'name':'WORKSPACE','value':'fixture-workspace'}
     assert secret in json.dumps(specs) and secret not in json.dumps(params.get('client_env',{}))
     if method=='session.resume' and request.get('rotate') and not mutations:raise GatewayClientError('acp_mcp_policy_conflict')
@@ -103,7 +114,11 @@ async def native_chat(args,emitter=None):
  async with gateway.connect_gateway() as client:
   await client.rpc('runtime.describe')
   if args.resume:snap=await client.rpc('session.resume',session_id=args.resume)
-  else:snap=await client.rpc('session.create',source='oneshot',client_env={'PATH':'fixture-path','ZIWEI_MCP_TOKEN':secret},model='gpt-6.1-sol',provider='openai-codex')
+  else:
+   client_env={'PATH':'fixture-path'} if request.get('readOnly') else {'PATH':'fixture-path','ZIWEI_MCP_TOKEN':secret}
+   if request.get('autonomy'):client_env.update({key:os.environ[key] for key in ('ZIWEI_BOT_ACTION_ID','ZIWEI_BOT_DEVICE_TOKEN','ZIWEI_API_BASE') if key in os.environ})
+   if request.get('secretAlias'):client_env['HERMES_UNKNOWN']='FIXTURE_DEVICE_SECRET'
+   snap=await client.rpc('session.create',source='oneshot',client_env=client_env,model='gpt-6.1-sol',provider='openai-codex',**({'toolsets':request['toolsets']} if 'toolsets' in request else {}))
   # Existing native resume guards still see the caller's original creation flags.
   assert args.reasoning is None,'RESUME_CREATION_POLICY_CHANGED'
   return await viewmodule.GatewayChatView(client,snap).run()
@@ -140,7 +155,7 @@ try:
   else:result='not-installed'
 except Exception as error:caught={'type':type(error).__name__,'message':str(error)}
 assert vars(args)==before and sys.argv==before_argv,'CALLER_STATE_MUTATED'
-assert secret not in stderr.getvalue() and 'FIXTURE_PROVIDER_KEY' not in stderr.getvalue(),'SECRET_IN_RECEIPT'
+assert secret not in stderr.getvalue() and 'FIXTURE_PROVIDER_KEY' not in stderr.getvalue() and 'FIXTURE_DEVICE_SECRET' not in stderr.getvalue(),'SECRET_IN_RECEIPT'
 proofs=[json.loads(line.split(':',1)[1]) for line in stderr.getvalue().splitlines() if line.startswith('ZIWEI_BOT_REASONING:')]
 print(json.dumps({'result':result,'caught':caught,'calls':calls,'mutations':len(mutations),'proofs':proofs,'externalModelCalls':0,'networkCalls':0,'namespaceUnchanged':True}))
 `;
@@ -216,4 +231,20 @@ test('native snapshot authority epoch must match the authenticated description b
  for(const snapshotEpoch of [4,'3',true,-1,9007199254740992]){
   const out=run(t,{snapshotEpoch});assert.equal(out.result,null);assert.equal(out.calls.includes('prompt.submit'),false);assert.equal(out.proofs.length,0);
  }
+});
+test('execution-private toolsets become session MCP servers while native toolsets remain selected',t=>{
+ const toolsets=['terminal','file','ziwei_autonomy','ziwei_management'];
+ for(const options of [{},{resume:true},{titled:true},{resume:true,rotate:true},{actionId:'action-next'}]){
+  const out=run(t,{autonomy:true,toolsets,expectedToolsets:['terminal','file'],expectedServers:['ziwei_autonomy','ziwei_management'],...options});
+  assert.equal(out.result,'complete',JSON.stringify(out));assert.equal(out.proofs.length,1);
+ }
+});
+test('unmapped toolsets are preserved for native refusal and autonomy needs its exact execution grant',t=>{
+ for(const options of [{ordinary:true},{noAuthorization:true}]){
+  const out=run(t,{autonomy:true,toolsets:['terminal','ziwei_autonomy','custom-unmapped','ziwei_management'],expectedToolsets:['terminal','ziwei_autonomy','custom-unmapped'],...options});
+  assert.equal(out.result,'complete',JSON.stringify(out));
+ }
+ const readOnly=run(t,{autonomy:true,readOnly:true,toolsets:[],expectedToolsets:[],expectedServers:[]});assert.equal(readOnly.result,'complete',JSON.stringify(readOnly));
+ const leak=run(t,{autonomy:true,toolsets:['ziwei_autonomy'],expectedServers:['ziwei_autonomy','ziwei_management'],secretAlias:true});
+ assert.match(leak.caught.message,/CLIENT_ENV_SECRET/);assert.equal(leak.calls.includes('prompt.submit'),false);
 });

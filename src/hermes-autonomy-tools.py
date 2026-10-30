@@ -16,10 +16,7 @@ def _open(request, timeout):
     return urllib.request.build_opener(NoRedirect()).open(request, timeout=timeout)
 
 
-def install(isolation):
-    from tools.registry import registry
-    from toolsets import TOOLSETS
-
+def create_tool():
     def call(args, **_kwargs):
         try:
             action = os.environ.get('ZIWEI_BOT_ACTION_ID', '')
@@ -57,5 +54,12 @@ def install(isolation):
         'parameters': {'type': 'object', 'required': ['operation'], 'additionalProperties': False, 'properties': {
             'operation': {'type': 'string', 'enum': ['status', 'routines', 'configure', 'createRoutine', 'pauseRoutine']},
             'input': {'type': 'object'}, 'routineId': {'type': 'string'}, 'idempotencyKey': {'type': 'string'}}}}
+    return schema, call
+
+
+def install(isolation):
+    from tools.registry import registry
+    from toolsets import TOOLSETS
+    schema, call = create_tool()
     registry.register(name='ziwei_autonomy', toolset='ziwei_autonomy', schema=schema, handler=call, override=True)
     TOOLSETS['ziwei_autonomy'] = {'tools': ['ziwei_autonomy'], 'description': 'Employee-scoped platform configuration and scheduling.'}
