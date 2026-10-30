@@ -49,6 +49,70 @@ export function handle(app, path, { method = "GET", headers = {}, body } = {}) {
     });
   });
 }
+
+async function managedDeviceFixture(t) {
+  const f = await fixture();
+  t.after(() => f.db.close());
+  let clock = Date.now();
+  const app = createApp({
+    memory: true,
+    enableScheduler: false,
+    managementMcpNow: () => clock,
+    mcpOptions: { token: "legacy-static-owner-token", workspace: "managed-fixture" },
+    identityOptions: { env: f.env, fetch: f.fetch },
+  });
+  t.after(() => { app.locals.botDeferredConfig.stop(); app.locals.repo.db.close(); });
+  const auth = app.locals.auth;
+  const user = auth.setup({ email: "managed@example.test", name: "Managed", password: "synthetic-managed-only" });
+  const { workspace } = auth.createWorkspace(user.user_id, { name: "Managed fixture", slug: "managed-fixture", kind: "team" });
+  const repo = app.locals.repo;
+  const paired = repo.claimDevicePairing({ code: repo.createDevicePairing(workspace.slug, { createdBy: user.user_id }).code });
+  const other = repo.claimDevicePairing({ code: repo.createDevicePairing(workspace.slug, { createdBy: user.user_id }).code });
+  auth.createWorkspace(user.user_id, { name: "Foreign fixture", slug: "foreign-fixture", kind: "team" });
+  const bootstrap = await handle(app, `/api/workspaces/${workspace.slug}/mcp/bootstrap`, {
+    method: "POST", headers: { "x-ziwei-device-token": paired.deviceToken }, body: {},
+  });
+  assert.equal(bootstrap.status, 200, JSON.stringify(bootstrap.body));
+  assert.equal(bootstrap.body.managed, true);
+  return { app, repo, workspace, user, paired, other, token: bootstrap.body.token, advance: ms => { clock += ms; } };
+}
+
+test("unified MCP accepts paired-device bootstrap credentials while preserving device and human scopes", async t => {
+  const f = await managedDeviceFixture(t);
+  const headers = { authorization: "Bearer " + f.token };
+  const health = await handle(f.app, "/mcp/v1/workspaces/managed-fixture/health", { headers });
+  assert.equal(health.status, 200, JSON.stringify(health.body));
+  const discovery = await handle(f.app, "/mcp/v1/workspaces/managed-fixture/discovery", {
+    headers: { "x-ziwei-mcp-token": f.token },
+  });
+  assert.equal(discovery.status, 200, JSON.stringify(discovery.body));
+  assert.deepEqual(discovery.body.devices.map(device => device.id), [f.paired.deviceId]);
+  assert.equal(discovery.body.devices.some(device => device.id === f.other.deviceId), false);
+  const humanApi = await handle(f.app, "/api/workspaces/managed-fixture/tasks", { headers });
+  assert.equal(humanApi.status, 401);
+});
+
+test("unified MCP rejects forged expired cross-workspace revoked and static-owner credentials", async t => {
+  const f = await managedDeviceFixture(t);
+  const route = "/mcp/v1/workspaces/managed-fixture/health";
+  const request = token => handle(f.app, route, { headers: { authorization: "Bearer " + token } });
+  const forged = f.token.slice(0, -1) + (f.token.endsWith("0") ? "1" : "0");
+  assert.equal((await request(forged)).status, 401);
+  assert.equal((await request("legacy-static-owner-token")).status, 401);
+  assert.equal((await handle(f.app, "/mcp/v1/workspaces/foreign-fixture/health", {
+    headers: { authorization: "Bearer " + f.token },
+  })).status, 403);
+  f.advance(60 * 60 * 1000);
+  assert.equal((await request(f.token)).status, 401);
+  f.advance(-60 * 60 * 1000);
+  f.repo.setDeviceStatus(f.paired.deviceId, "disabled");
+  assert.equal((await request(f.token)).status, 401);
+  f.repo.setDeviceStatus(f.paired.deviceId, "pending");
+  f.repo.db.prepare("DELETE FROM members WHERE workspace_id=? AND user_id=?").run(f.workspace.id, f.user.user_id);
+  assert.equal((await request(f.token)).status, 403);
+  f.repo.db.prepare("UPDATE device_credentials SET revoked_at=? WHERE device_id=?").run(new Date().toISOString(), f.paired.deviceId);
+  assert.equal((await request(f.token)).status, 401);
+});
 test("unified HTTP config/status and all legacy human auth paths fail closed without listening", async () => {
   const f = await fixture();
   const app = createApp({

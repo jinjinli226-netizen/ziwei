@@ -13,7 +13,7 @@ import { createAuthService } from './auth.mjs';
 import {installUnifiedIdentity} from './identity/routes.mjs';
 import {createAuthorizedStream} from './identity/stream.mjs';
 import { deviceTokenFromRequest, readA2AToken, safeTokenEqual, tokenFromRequest } from './a2a-auth.mjs';
-import { mcpTokenRequired } from './mcp-auth.mjs';
+import { mcpTokenFromRequest, mcpTokenRequired } from './mcp-auth.mjs';
 import { createZiweiConnect } from './ziwei-connect.mjs';
 import { createManagementService } from './management.mjs';
 import { createEmployeeTemplateService } from './employees/templates.mjs';
@@ -868,7 +868,15 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
     res.setHeader('Cache-Control', 'no-store');
     res.json(repo.requestManagementMcpRetry(req.params.slug, String(req.body?.deviceId || ''), employeeContext(req)));
   });
-  const mcpGuard = unifiedIdentity?.mcpGuard || mcpTokenRequired({ ...mcpOptions, authorize: managementBootstrap.authorize });
+  // Device bootstrap capabilities retain their paired-device scope in unified
+  // mode; all other credentials still require the verified human identity guard.
+  const mcpGuard = unifiedIdentity ? (req,res,next) => {
+    try {
+      const managed=managementBootstrap.authorize(mcpTokenFromRequest(req),req.params.slug);
+      if(managed){req.mcpCredential=managed;return next();}
+      return unifiedIdentity.mcpGuard(req,res,next);
+    } catch(error) { next(error); }
+  } : mcpTokenRequired({ ...mcpOptions, authorize: managementBootstrap.authorize });
   const mcpContext = req => ({ actorUserId: req.mcpCredential.actorUserId, actorRole: req.mcpCredential.actorRole, deviceScope: req.mcpCredential.deviceScope, deviceCredentialDeviceId: req.mcpCredential.deviceId, authenticatedMcp:true, enforceEmployeeVisibility: true, enforceDeviceOwnership: true });
   const mcpEmployeeGuard = (req, _res, next) => {
     try {
