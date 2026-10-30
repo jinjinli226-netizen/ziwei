@@ -66,7 +66,7 @@ export function createConversationQueue(db){
   },
   deliverable(row){return !controlled(row)||row.status!=='pending'||!paused(payload(row).conversationId);},
   remove(conversationId,actionId){
-   db.exec('BEGIN IMMEDIATE');
+   db.exec('SAVEPOINT conversation_queue_remove');
    try{
     const row=db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId);
     if(!row||!controlled(row)||payload(row).conversationId!==conversationId||row.workspace_id!==db.prepare('SELECT workspace_id FROM conversations WHERE id=?').get(conversationId)?.workspace_id)fail('CONVERSATION_QUEUE_ITEM_NOT_FOUND','待发消息不存在于此会话',404);
@@ -75,8 +75,8 @@ export function createConversationQueue(db){
      db.prepare("UPDATE a2a_actions SET status='failed',completed_at=?,error=?,result_json=? WHERE id=? AND status='pending' AND acked_at IS NULL").run(new Date().toISOString(),removedCode,JSON.stringify({queueRemoved:true}),row.id);
      db.prepare('UPDATE hermes_bots SET active_action_id=NULL WHERE active_action_id=?').run(row.id);
     }
-    db.exec('COMMIT');return projection(conversationId);
-   }catch(error){db.exec('ROLLBACK');throw error;}
+    db.exec('RELEASE conversation_queue_remove');return projection(conversationId);
+   }catch(error){db.exec('ROLLBACK TO conversation_queue_remove; RELEASE conversation_queue_remove');throw error;}
   },
  };
 }

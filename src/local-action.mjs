@@ -20,6 +20,12 @@ import {requestBotStartAdmission,markManagementPrelaunchFailure} from './runtime
 import {bindCodexConversationToHost} from './codex-conversation-session.mjs';
 import {executeDshRuntime} from './dsh-runtime.mjs';
 import {executeDshPlugins} from './dsh-plugins.mjs';
+import {executeDshNativeOperation} from './dsh-native-operations.mjs';
+import {DSH_NATIVE_TYPE,getDshNativeOperation} from './dsh-native-contract.mjs';
+import {createDshNativeInstallManager} from './dsh-native-install.mjs';
+import {createDshNativeMutationJournal} from './dsh-native-journal.mjs';
+import {createDshNativeInteractionManager} from './dsh-native-interactions.mjs';
+import {claimDshNativeSecret} from './dsh-native-secret-client.mjs';
 import {dshBotNameForAction} from './dsh-session-evidence.mjs';
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
@@ -375,11 +381,20 @@ function runCommand({runtimeDir, action, executable, baseArgs = [], allowedExecu
  * Unknown/unsupported actions fail loudly so the cloud never sees a fake
  * success merely because an action was accepted by the daemon.
  */
-export function createLocalActionExecutor({runtimeDir, admissionHandledByDispatcher = false, defaultWorkdir = process.cwd(), allowedExecutables = [], executorCommand = null, executorArgs = [], defaultRuntime = null, hermesHomePath = null, codexMcpDisabledServers = [], managementMcpConfig = {}, managementBootstrap = null, terminalMcpConfig = {}, workspace = null, apiBase = null, deviceId = null, deviceToken = null, onWorkspaceConnect = null, capabilityCollector = collectEmployeeCapabilityInventory, machineCapabilityInventory = sharedMachineCapabilityInventory, dshBaseUrl=process.env.ZIWEI_DSH_BASE_URL||'http://127.0.0.1:7878', dshRuntime=executeDshRuntime, dshPluginFetch=globalThis.fetch} = {}) {
+export function createLocalActionExecutor({runtimeDir, admissionHandledByDispatcher = false, defaultWorkdir = process.cwd(), allowedExecutables = [], executorCommand = null, executorArgs = [], defaultRuntime = null, hermesHomePath = null, codexMcpDisabledServers = [], managementMcpConfig = {}, managementBootstrap = null, terminalMcpConfig = {}, workspace = null, apiBase = null, deviceId = null, deviceToken = null, onWorkspaceConnect = null, capabilityCollector = collectEmployeeCapabilityInventory, machineCapabilityInventory = sharedMachineCapabilityInventory, dshBaseUrl=process.env.ZIWEI_DSH_BASE_URL||'http://127.0.0.1:7878', dshRuntime=executeDshRuntime, dshPluginFetch=globalThis.fetch,dshDeviceFetch=globalThis.fetch,dshSecretFetch=globalThis.fetch,dshSecretStore} = {}) {
   if (!runtimeDir) throw new TypeError('runtimeDir is required');
   fs.mkdirSync(runtimeDir, {recursive: true});
   const automaticManagement = managementBootstrap || (workspace && deviceToken ? createManagementBootstrap({ workspace, apiBase, deviceId, deviceToken, cacheDirectory: path.join(runtimeDir, 'management-mcp-credentials') }) : null);
   const gateways=createBotGatewayManager({apiBase,workspace,deviceToken});
+  const dshInstallManager=createDshNativeInstallManager({directory:path.join(runtimeDir,'dsh-native-installs')});
+  const dshMutationJournal=createDshNativeMutationJournal({directory:path.join(runtimeDir,'dsh-native-mutations')});
+  const dshInteractions=createDshNativeInteractionManager();
+  const dshDeviceRequest=async(method,route,body,signal)=>{
+    if(!apiBase||!workspace||!deviceId||!deviceToken)throw Object.assign(new Error('DSH 群聊缺少当前已配对设备凭据'),{code:'DSH_NATIVE_GROUP_DEVICE_REQUIRED'});
+    const response=await dshDeviceFetch(`${String(apiBase).replace(/\/$/,'')}${route}${method==='GET'?`?workspace=${encodeURIComponent(workspace)}`:''}`,{method,headers:{'content-type':'application/json','x-ziwei-device-token':deviceToken},...(method==='POST'?{body:JSON.stringify({...body,workspace})}:{}),redirect:'error',signal:signal?AbortSignal.any([signal,AbortSignal.timeout(10000)]):AbortSignal.timeout(10000)});
+    if(!response.ok)throw Object.assign(new Error('DSH 群聊动作设备核验失败'),{code:'DSH_NATIVE_GROUP_DEVICE_REFUSED'});
+    return response.json();
+  };
   const admissions=new Map(),maintenanceAttempts=new Map();
   const execute = async (action, context = {}) => {
     const permit=admissionHandledByDispatcher?admissions.get(action.id):await authorizeNativeExecution(action,{apiBase,workspace,deviceId,deviceToken,signal:context.signal,hermesHome:hermesHomePath||hermesHome(),runtimeDir,defaultWorkdir});
@@ -390,6 +405,16 @@ export function createLocalActionExecutor({runtimeDir, admissionHandledByDispatc
     if (action?.payload?.deviceId && deviceId && action.payload.deviceId !== deviceId) throw new Error('执行目标设备与本机已配对设备不一致；不会回退其他设备');
     if (action?.workspace && workspace && action.workspace !== workspace) throw new Error('执行工作区与本机已配对工作区不一致');
     if(type==='employee.plugins.inspect'||type==='employee.plugins.apply')return{status:'succeeded',result:{dshPlugins:await executeDshPlugins(action,{workspace,deviceId,baseUrl:dshBaseUrl,signal:context.signal,fetchImpl:dshPluginFetch})}};
+    if(type===DSH_NATIVE_TYPE){
+      const requested=action.payload.dshOperation.runtimeContext?.cwd||action.payload.workdir||defaultWorkdir;
+      const cwd=process.platform==='win32'?resolveWindowsWorkdir(defaultWorkdir,requested):resolveApprovedPath(defaultWorkdir,requested);
+      const operation=action.payload.dshOperation,entry=getDshNativeOperation(operation.resource,operation.operation);
+      const run=()=>executeDshNativeOperation(action,{workspace,deviceId,baseUrl:dshBaseUrl,cwd,signal:context.signal,fetchImpl:dshPluginFetch,installManager:dshInstallManager,interactionManager:dshInteractions,onStage:context.onStage,devicePost:(route,body)=>dshDeviceRequest('POST',route,body,context.signal),readMemberAction:id=>dshDeviceRequest('GET',`/a2a/v1/actions/${encodeURIComponent(id)}`,undefined,context.signal),claimSecret:original=>claimDshNativeSecret(original,{apiBase,workspace,deviceId,deviceToken,signal:context.signal,fetchImpl:dshSecretFetch,store:dshSecretStore})});
+      const installation=operation.resource==='plugins'&&['installBundle','waitForInstall','cancelInstall'].includes(operation.operation);
+      const dshNative=entry?.readOnly||installation?await run():await dshMutationJournal.run(action,run);
+      const failed=['failed','unknown','partial'].includes(dshNative.status);
+      return{status:failed?'failed':'succeeded',...(failed?{error:dshNative.error?.code||'DSH_NATIVE_OPERATION_UNCONFIRMED'}:{}),result:{dshNative}};
+    }
     if(type==='employee.capabilities.inspect'){
       const payload=action.payload||{},inspection=payload.capabilityInspection,subject=inspection?.subject;
       if(inspection?.schemaVersion!==1||!subject||subject.workspace!==workspace||payload.workspace!==workspace||subject.deviceId!==deviceId||payload.deviceId!==deviceId||subject.runtime!==payload.runtime||(subject.profile??null)!==(payload.profile??null)||payload.hermesBot||payload.employeeId)throw Object.assign(new Error('能力清单检查身份不匹配'),{code:'EMPLOYEE_CAPABILITIES_SUBJECT_INVALID'});
@@ -462,10 +487,11 @@ export function createLocalActionExecutor({runtimeDir, admissionHandledByDispatc
       const payload = action.payload || {};
       const approvedWorkdir = process.platform === 'win32' ? resolveWindowsWorkdirPath(defaultWorkdir, payload.workdir || '.') : payload.workdir || payload.workingDirectory || payload.working_directory || process.cwd();
       const requestedCwd = payload.cwd || payload.workingDirectory || payload.working_directory || (process.platform === 'win32' ? '.' : payload.workdir || '.');
-      const safeCwd = process.platform === 'win32' ? resolveWindowsWorkdir(approvedWorkdir, requestedCwd) : resolveApprovedPath(approvedWorkdir, requestedCwd);
+      let safeCwd = process.platform === 'win32' ? resolveWindowsWorkdir(approvedWorkdir, requestedCwd) : resolveApprovedPath(approvedWorkdir, requestedCwd);
       const runtime = payload.runtime || payload.agent || payload.runtimeName || defaultRuntime
         || Object.values(discoverInstalledRuntimes().runtimes).find(item => item.status === 'available')?.runtime;
       const prompt = payload.prompt ?? payload.message ?? payload.content ?? payload.instructions;
+      if(String(runtime).toLowerCase()==='dsh'&&Array.isArray(payload.attachments)&&payload.attachments.length>10)throw new Error('DSH 每条消息最多支持10个附件');
       const attachmentPaths = materializeRuntimeAttachments({attachments: payload.attachments, cwd: safeCwd, actionId: action.id});
       const attachmentPromptSuffix=attachmentPaths.length?`\n\n[本机附件]\n${attachmentPaths.map(item => `- ${item.name}: ${item.path}`).join('\n')}`:'';
       const promptWithAttachments = attachmentPromptSuffix ? String(prompt || '').trim()+attachmentPromptSuffix : prompt;
@@ -473,10 +499,17 @@ export function createLocalActionExecutor({runtimeDir, admissionHandledByDispatc
         const botName=dshBotNameForAction(action);
         if(!botName)throw new Error('DSH 员工缺少真实 Bot 绑定；显示名称不能作为运行时标识');
         if(payload.hermesBot)throw new Error('DSH 执行不能使用 Hermes owned Profile 身份');
-        return dshRuntime({baseUrl:dshBaseUrl,botName,prompt:promptWithAttachments,cwd:safeCwd,
+        if(payload.dshGroup&&!payload.cwd&&!payload.workdir&&!payload.workingDirectory&&!payload.working_directory){
+          const response=await dshPluginFetch(`${String(dshBaseUrl).replace(/\/$/,'')}/api/state`,{redirect:'error',signal:context.signal?AbortSignal.any([context.signal,AbortSignal.timeout(10000)]):AbortSignal.timeout(10000)});
+          const state=await response.json(),workdir=state.bots?.find(item=>item.name===botName)?.workdir;
+          if(!response.ok||typeof workdir!=='string'||!path.isAbsolute(workdir))throw Object.assign(new Error('DSH 群成员原生工作目录未确认'),{code:'DSH_NATIVE_GROUP_WORKDIR_UNVERIFIED'});
+          safeCwd=process.platform==='win32'?resolveWindowsWorkdir(workdir,'.'):resolveApprovedPath(workdir,'.');
+        }
+        return dshRuntime({baseUrl:dshBaseUrl,botName,prompt,content:dshMessageContent(prompt,attachmentPaths),cwd:safeCwd,
           sessionId:payload.runtimeSessionId||payload.runtime_session_id||payload.sessionId||payload.session_id||null,
           sessionAuthority:{actionId:action.id,employeeId:payload.employeeId||null,conversationId:payload.conversationId||null},
-          signal:context.signal,onOutput:context.onOutput,onStage:context.onStage,onSessionSupervision:context.onDshSessionSupervision});
+          signal:context.signal,onOutput:context.onOutput,onStage:context.onStage,onSessionSupervision:context.onDshSessionSupervision,
+          onInteractionChannel:channel=>dshInteractions.attach({workspace,deviceId,employeeId:payload.employeeId,profile:botName,conversationId:payload.conversationId,nativeSessionId:channel.sessionId,actionId:action.id},channel)});
       }
       // Refuse unsupported vision combinations before preparing any MCP session.
       runtimeInvocation(runtime,{prompt:promptWithAttachments,attachments:attachmentPaths});
@@ -538,7 +571,19 @@ export function createLocalActionExecutor({runtimeDir, admissionHandledByDispatc
   };
   execute.maintenanceStatus=()=>gateways.maintenanceStatus();
   execute.authorizeExecution=async (action,{maintenanceAttempt}={})=>{const permit=await authorizeNativeExecution(action,{apiBase,workspace,deviceId,deviceToken,hermesHome:hermesHomePath||hermesHome(),runtimeDir,defaultWorkdir,maintenanceAttempt});admissions.set(action.id,permit);if(maintenanceAttempt)maintenanceAttempts.set(action.id,maintenanceAttempt);return permit;};
-  execute.close=()=>gateways.close();
+  execute.close=()=>{dshInteractions.close();return gateways.close();};
   return execute;
+}
+
+function dshMessageContent(prompt,attachments){
+  const content=String(prompt||'').trim()?[{type:'text',text:String(prompt)}]:[];
+  for(const attachment of attachments){
+    if(attachment.bytes>2*1024*1024)throw new Error('DSH 单个附件不能超过2MiB');
+    const bytes=fs.readFileSync(attachment.path);
+    if(['image/png','image/jpeg','image/gif','image/webp'].includes(attachment.mimeType))content.push({type:'image',mediaType:attachment.mimeType,data:bytes.toString('base64'),name:attachment.name});
+    else if(attachment.mimeType.startsWith('text/')||attachment.mimeType==='application/json')content.push({type:'text',text:`[附件 ${attachment.name}]\n${bytes.toString('utf8')}`});
+    else throw new Error('DSH 附件仅支持PNG/JPEG/GIF/WebP图片和文本');
+  }
+  return content;
 }
 

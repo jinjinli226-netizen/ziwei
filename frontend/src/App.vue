@@ -18,7 +18,10 @@ import EmployeeAvatar from './components/EmployeeAvatar.vue';
 import BotAvatarEditor from './components/BotAvatarEditor.vue';
 const BotWorkbench=defineAsyncComponent(()=>import('./components/BotWorkbench.vue'));
 const BotMainChat=defineAsyncComponent(()=>import('./components/BotMainChat.vue'));
+const DshConversationTools=defineAsyncComponent(()=>import('./components/DshConversationTools.vue'));
+const dshConversationTools=ref(null);
 import {botMainChatView,botWorkTasks} from './bot-main-chat.js';
+import {loadedConversationMarkdown} from './conversation-export.js';
 import {employeeConversationView} from './employee-conversation-view.js';
 import {avatarSpec,avatarValue} from '../../src/employee-avatar.mjs';
 import WorkdirPicker from './components/WorkdirPicker.vue';
@@ -358,8 +361,24 @@ const botChatWorkScope=computed(()=>employeeChatView.value.ready?JSON.stringify(
 watch(botChatWorkScope,scope=>{botChatWorkGeneration++;botChatWork.value={runs:[],routines:[],tasks:[]};botChatStopBusy.value=false;botChatReconcileBusy.value=false;botChatFinalizationBusy.value=false;// Work histories load only when the work panel is opened.
 });
 watch(employeeWorkspaceShell,focused=>{if(focused){closeAgentComposer();showSearch.value=false;showTask.value=false;showTaskDetail.value=false;showEmployee.value=false;showDoc.value=false;showDocEditor.value=false;showAutomation.value=false;showDevice.value=false;showMemberEditor.value=false;showInvite.value=false;showPhoneSkillSetup.value=false;showApiKeys.value=false;showCalendarEvent.value=false;showSkillModal.value=false;showSkillVersions.value=false;showSkillImport.value=false;showDeviceEditor.value=false;showGitSync.value=false;showAutomationDetails.value=false;}});
-async function stopBotChat(){if(botChatStopBusy.value||botChatReconcileBusy.value||botChatFinalizationBusy.value||!botChatView.value.ready)return;const workspace=workspaceSlug(),botId=conversationBotBinding.value.id,conversationId=selectedConversation.value.id,actor=authState.value.user?.id,generation=conversationOpenGeneration;const current=()=>generation===conversationOpenGeneration&&workspace===workspaceSlug()&&actor===authState.value.user?.id&&conversationId===selectedConversation.value?.id&&botId===conversationBotBinding.value?.id;botChatStopBusy.value=true;
-  try{const bot=await api.bot(botId,workspace);if(!current()||bot.main_conversation_id!==conversationId)return;const result=await api.controlBot(botId,{operation:'stop',expectedRevision:bot.revision,expectedControlEpoch:bot.control_epoch},workspace);if(!current())return;botChatBindingGeneration++;botBindingPending.value=false;conversationBotBinding.value=result;notify(botStopPresentation(result).label);await refreshConversationState({force:true});if(current()){startConversationPolling();void loadBotChatWork();}}catch(error){if(current())notify(error.message,'error');}finally{if(current())botChatStopBusy.value=false;}
+async function stopBotChat(){
+  if(botChatStopBusy.value||botChatReconcileBusy.value||botChatFinalizationBusy.value||!employeeChatView.value.ready)return;
+  const managed=botChatView.value.ready,run=conversationExecution.value;
+  if(!managed&&(!conversationUsesNativeDsh.value||run?.status!=='acked'))return;
+  const workspace=workspaceSlug(),botId=managed?conversationBotBinding.value.id:null,conversationId=selectedConversation.value.id,employeeId=selectedConversation.value.employee_id,actor=authState.value.user?.id,generation=conversationOpenGeneration;
+  const current=()=>generation===conversationOpenGeneration&&workspace===workspaceSlug()&&actor===authState.value.user?.id&&conversationId===selectedConversation.value?.id&&employeeId===selectedConversation.value?.employee_id&&(!managed||botId===conversationBotBinding.value?.id);
+  botChatStopBusy.value=true;
+  try{
+    if(managed){
+      const bot=await api.bot(botId,workspace);if(!current()||bot.main_conversation_id!==conversationId)return;
+      const result=await api.controlBot(botId,{operation:'stop',expectedRevision:bot.revision,expectedControlEpoch:bot.control_epoch},workspace);if(!current())return;
+      botChatBindingGeneration++;botBindingPending.value=false;conversationBotBinding.value=result;notify(botStopPresentation(result).label);
+    }else{
+      await api.stopConversationExecution(conversationId,{expectedActionId:run.id},workspace);if(!current())return;
+      notify('停止请求已下发，等待原会话终态确认。');
+    }
+    await refreshConversationState({force:true});if(current()){startConversationPolling();void loadBotChatWork();}
+  }catch(error){if(current())notify(error.message,'error');}finally{if(current())botChatStopBusy.value=false;}
 }
 async function reconcileBotChat(){
   const run=conversationExecution.value,event=botRecoveryEvent(run);
@@ -407,6 +426,7 @@ const taskTabs = computed(() => [{value:'all',label:'全部',count:tasks.value.l
 const taskStateOptions = [{label:'待规划',value:'planned'},{label:'待办',value:'todo'},{label:'进行中',value:'in_progress'},{label:'审核中',value:'review'},{label:'已完成',value:'completed'},{label:'已阻塞',value:'blocked'}];
 const deviceOptions = computed(() => devices.value.map(device => ({ label:`${device.name} · ${device.status === 'online' ? '在线' : '离线'}`, value:device.id })));
 const conversationUsesNativeDsh=computed(()=>(selectedConversation.value?.employee?.runtime||employees.value.find(item=>item.id===selectedConversation.value?.employee_id)?.runtime)==='DSH');
+const conversationCanStop=computed(()=>employeeChatView.value.ready&&(botChatView.value.ready?(conversationExecutionBusy.value||(conversationBotBinding.value?.active_action_id===conversationExecution.value?.id&&executionProcessActive(conversationExecution.value?.result))):conversationUsesNativeDsh.value&&conversationExecution.value?.status==='acked'));
 const conversationModelOptions = computed(() => conversationUsesNativeDsh.value?[{label:'沿用 DSH Bot 原生模型',value:''}]:[{ label:'默认（数字员工配置）', value:'' }, ...models.value.map(model => ({ label:`${model.provider} · ${model.label}`, value:model.id }))]);
 const selectedConversationDevice = computed(() => devices.value.find(device => device.id === conversationDeviceId.value) || null);
 const conversationEmployeeOptions = computed(() => [
@@ -815,7 +835,14 @@ async function createConversation() {
     if(!current())return;
     conversations.value=[item,...conversations.value];
     await openConversation(item);
+    return item;
   } catch(error) { if(current())notify(error.message); }
+}
+async function createDshPresetConversation({agentPreset}){
+  const employeeId=conversationEmployeeId.value,actor=authState.value.user?.id,workspace=workspaceSlug();
+  const item=await createConversation();
+  if(!item||workspace!==workspaceSlug()||actor!==authState.value.user?.id||employeeId!==conversationEmployeeId.value||item.id!==selectedConversation.value?.id)return;
+  await nextTick();await dshConversationTools.value?.createSession(agentPreset);
 }
 async function openEmployeeConversation(employee) {
   if (!employee?.id) return;
@@ -1024,6 +1051,12 @@ function removeConversationAttachment(index) {
 }
 function openConversationImage(attachment) {
   if(conversationAttachmentPreviewSrc(attachment))conversationImagePreview.value=attachment;
+}
+function exportLoadedChat(){
+  if(!selectedConversation.value)return;
+  const exported=loadedConversationMarkdown(selectedConversation.value,{employeeName:employeeChatEmployee.value?.name});
+  const url=URL.createObjectURL(new Blob([exported.content],{type:'text/markdown;charset=utf-8'})),link=document.createElement('a');
+  link.href=url;link.download=exported.filename;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
 function downloadConversationAttachment(attachment) {
   const src=conversationAttachmentPreviewSrc(attachment);if(!src)return notify('该附件缺少可下载的图片内容','error');
@@ -1898,7 +1931,8 @@ onMounted(async () => { applyDisplayPreferences(); if (page.value==='android-ins
             <template #chat="{employeeId,openSection}">
               <div v-if="employeeChatView.pending" class="bot-chat-loading" role="status">正在打开员工聊天…</div>
               <div v-else-if="employeeChatView.error" class="bot-chat-loading" role="alert"><p>{{employeeChatView.error}}</p><button class="pill" @click="navigate('bots')">返回员工名册</button></div>
-              <BotMainChat v-if="employeeChatView.ready&&employeeId===selectedConversation.employee_id" :managed="botChatView.ready" :employee="employeeChatEmployee" :bot="botChatView.ready?conversationBotBinding:null" :conversation="selectedConversation" :execution="conversationExecution" :events="executionEventRows(conversationExecution?.events||[])" v-model:draft="conversationDraft" :attachments="conversationAttachments" :device="selectedConversationDevice" :model-label="conversationUsesNativeDsh?'沿用 DSH Bot 原生模型':models.find(model=>model.id===(conversationBotBinding?.employee?.model_id||conversationModelId))?.label || conversationBotBinding?.employee?.model_id || conversationModelId || '沿用员工默认模型'" :working-directory="conversationWorkingDirectory" :send-pending="conversationSendPending" :attachment-reading="conversationAttachmentReading" :status-loading="conversationStatusLoading||botBindingPending||Boolean(botBindingError)" :history-loading="conversationHistoryLoading" :history-error="conversationHistoryError" @load-history="loadEarlierConversationMessages" :send-error="conversationSendError" :queue-busy="conversationQueueBusy" :queue-error="conversationQueueError" @queue-pause="updateConversationQueue('pause')" @queue-resume="updateConversationQueue('resume')" @queue-remove="updateConversationQueue('remove',$event)" :stop-busy="botChatStopBusy" :reconcile-busy="botChatReconcileBusy" :finalization-busy="botChatFinalizationBusy" :can-stop="botChatView.ready&&(conversationExecutionBusy||(conversationBotBinding?.active_action_id===conversationExecution?.id&&executionProcessActive(conversationExecution?.result)))" :preview="previewMode" :work="botChatWork" :work-loading="botChatWorkLoading" :work-error="botChatWorkError" :preview-src="conversationAttachmentPreviewSrc" :size-label="conversationAttachmentSizeLabel" :forward-selecting="conversationForward.selecting" :forward-selected="conversationForward.messageIds" :forward-error="conversationForward.error" :forward-result="conversationForward.result" @forward-view="openForwardTargetConversation" :read-scope="conversationReadScope" @forward="startConversationForward($event)" @forward-select="startConversationForward($event,true)" @forward-toggle="conversationForwarder.toggle($event)" @forward-open="openConversationForward" @forward-cancel="conversationForwarder.cancel()" :on-visible-message="markVisibleConversationMessage" @send="sendConversationMessage" @retry-message="restoreConversationMessage" @settings="openSection($event)" @return="navigate('bots')" @directory="openConversationDirectoryPicker" @attachment="handleConversationAttachment" @paste-attachment="handleConversationPaste" @remove-attachment="removeConversationAttachment" @preview-image="openConversationImage" @download="downloadConversationAttachment" @stop="stopBotChat" @reconcile="reconcileBotChat" @finalize-failure="finalizeBotChatFailure" @refresh-work="loadBotChatWork" @phone="openBotPhone({workspace:workspaceSlug(),employeeId:selectedConversation.employee_id})" @workspace-tasks="navigate('issues')" @history="openEmployeeConversationHistory" @new-conversation="createEmployeeConversation" @archive-conversation="archiveSelectedConversation">
+              <BotMainChat v-if="employeeChatView.ready&&employeeId===selectedConversation.employee_id" :managed="botChatView.ready" :employee="employeeChatEmployee" :bot="botChatView.ready?conversationBotBinding:null" :conversation="selectedConversation" :execution="conversationExecution" :events="executionEventRows(conversationExecution?.events||[])" v-model:draft="conversationDraft" :attachments="conversationAttachments" :device="selectedConversationDevice" :model-label="conversationUsesNativeDsh?'沿用 DSH Bot 原生模型':models.find(model=>model.id===(conversationBotBinding?.employee?.model_id||conversationModelId))?.label || conversationBotBinding?.employee?.model_id || conversationModelId || '沿用员工默认模型'" :working-directory="conversationWorkingDirectory" :send-pending="conversationSendPending" :attachment-reading="conversationAttachmentReading" :status-loading="conversationStatusLoading||botBindingPending||Boolean(botBindingError)" :history-loading="conversationHistoryLoading" :history-error="conversationHistoryError" @load-history="loadEarlierConversationMessages" :send-error="conversationSendError" :queue-busy="conversationQueueBusy" :queue-error="conversationQueueError" @queue-pause="updateConversationQueue('pause')" @queue-resume="updateConversationQueue('resume')" @queue-remove="updateConversationQueue('remove',$event)" :stop-busy="botChatStopBusy" :reconcile-busy="botChatReconcileBusy" :finalization-busy="botChatFinalizationBusy" :can-stop="conversationCanStop" :preview="previewMode" :work="botChatWork" :work-loading="botChatWorkLoading" :work-error="botChatWorkError" :preview-src="conversationAttachmentPreviewSrc" :size-label="conversationAttachmentSizeLabel" :forward-selecting="conversationForward.selecting" :forward-selected="conversationForward.messageIds" :forward-error="conversationForward.error" :forward-result="conversationForward.result" @forward-view="openForwardTargetConversation" :read-scope="conversationReadScope" @forward="startConversationForward($event)" @forward-select="startConversationForward($event,true)" @forward-toggle="conversationForwarder.toggle($event)" @forward-open="openConversationForward" @forward-cancel="conversationForwarder.cancel()" :on-visible-message="markVisibleConversationMessage" @send="sendConversationMessage" @retry-message="restoreConversationMessage" @settings="openSection($event)" @return="navigate('bots')" @directory="openConversationDirectoryPicker" @attachment="handleConversationAttachment" @paste-attachment="handleConversationPaste" @remove-attachment="removeConversationAttachment" @preview-image="openConversationImage" @download="downloadConversationAttachment" @stop="stopBotChat" @reconcile="reconcileBotChat" @finalize-failure="finalizeBotChatFailure" @refresh-work="loadBotChatWork" @phone="openBotPhone({workspace:workspaceSlug(),employeeId:selectedConversation.employee_id})" @workspace-tasks="navigate('issues')" @history="openEmployeeConversationHistory" @new-conversation="createEmployeeConversation" @archive-conversation="archiveSelectedConversation" @export-loaded="exportLoadedChat">
+                <template #runtime-controls><DshConversationTools v-if="conversationUsesNativeDsh&&!previewMode" ref="dshConversationTools" :key="selectedConversation.id" :workspace="workspaceSlugValue" :actor-id="authState.user?.id||''" :employee="employeeChatEmployee" :conversation="selectedConversation" :execution="conversationExecution" @new-conversation="createDshPresetConversation"/></template>
                 <template #conversation-settings="{kind}">
                   <label v-if="kind==='model'" class="conversation-device"><span>会话模型</span><ZiSelect id="employee-chat-model" v-model="conversationModelId" :options="conversationModelOptions" :disabled="conversationUsesNativeDsh||botBindingPending||Boolean(conversationBotBinding)" aria-label="选择会话模型" @update:model-value="saveConversationSettings"/></label>
                   <label v-else-if="kind==='device'" class="conversation-device"><span>目标设备</span><ZiSelect id="employee-chat-device" :model-value="conversationDeviceId" :options="deviceOptions" :disabled="botBindingPending||Boolean(conversationBotBinding)" aria-label="选择会话目标设备" @update:model-value="selectConversationDevice"/></label>

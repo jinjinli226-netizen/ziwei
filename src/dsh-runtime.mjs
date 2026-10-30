@@ -1,4 +1,5 @@
 import WebSocket from 'ws';
+import path from 'node:path';
 import { redactSecrets } from './redaction.mjs';
 import {createDshSessionEvidence} from './dsh-session-evidence.mjs';
 import {markDshPrePromptFailure} from './runtime-launch-evidence.mjs';
@@ -26,22 +27,32 @@ export function cancelDshSession({baseUrl=process.env.ZIWEI_DSH_BASE_URL||'http:
   return rpc(baseUrl,botName,'session/cancel',{request:{sessionId}},signal,fetchImpl);
 }
 
-export async function executeDshRuntime({baseUrl=process.env.ZIWEI_DSH_BASE_URL||'http://127.0.0.1:7878',botName,prompt,cwd=process.cwd(),sessionId=null,signal,onOutput,onStage,sessionAuthority={},onSessionSupervision,cancellationTimeoutMs=3000,fetchImpl=globalThis.fetch,WebSocketImpl=WebSocket}={}) {
+export async function executeDshRuntime({baseUrl=process.env.ZIWEI_DSH_BASE_URL||'http://127.0.0.1:7878',botName,prompt,content,cwd=null,sessionId=null,signal,onOutput,onStage,sessionAuthority={},onSessionSupervision,onInteractionChannel,cancellationTimeoutMs=3000,fetchImpl=globalThis.fetch,WebSocketImpl=WebSocket}={}) {
   if(!botName) throw new Error('DSH runtime requires botName');
   let session;
   try{
-    session=sessionId || (await rpc(baseUrl,botName,'session/create',{request:{cwd}},signal,fetchImpl))?.sessionId;
+    if(sessionId&&cwd){
+      const projection=await rpc(baseUrl,botName,'session/projections',{request:{sessionId}},signal,fetchImpl);
+      let actual=projection?.values?.workingDirectory;
+      if(typeof actual!=='string')actual=(await rpc(baseUrl,botName,'session/list',{_request:{}},signal,fetchImpl))?.items?.find(item=>item.sessionId===sessionId)?.cwd;
+      if(typeof actual!=='string')throw Object.assign(new Error('无法核实原生会话工作目录，请刷新或明确新建会话'),{code:'DSH_SESSION_CWD_UNVERIFIED'});
+      const normalize=value=>process.platform==='win32'?path.win32.normalize(value).toLowerCase():path.posix.normalize(value);
+      if(normalize(actual)!==normalize(cwd))throw Object.assign(new Error('原生会话工作目录与当前选择不同，请明确新建会话；原会话保留'),{code:'DSH_SESSION_CWD_CONFLICT'});
+    }
+    session=sessionId || (await rpc(baseUrl,botName,'session/create',{request:{cwd:cwd||process.cwd()}},signal,fetchImpl))?.sessionId;
     if(!session)throw new Error('DSH session/create did not return sessionId');
   }catch(error){throw markDshPrePromptFailure(error,{...sessionAuthority,botName,sessionId});}
   const requestId=crypto.randomUUID();
   return new Promise(resolve=>{
-    let socket,followId,eventsId,retryTimer,cancelTimer,terminalExit,pendingFailure,settled=false,cancelling=false,cancelSent=false,promptSent=false,retries=0,currentTurn=null,targetTurn=null;
+    let socket,followId,eventsId,retryTimer,cancelTimer,terminalExit,pendingFailure,detachInteractions,eventClientId=null,settled=false,cancelling=false,cancelSent=false,promptSent=false,retries=0,currentTurn=null,targetTurn=null;
+    const interactions=new Map();
     const evidence=createDshSessionEvidence({...sessionAuthority,botName,sessionId:session,requestId},()=>cancel());
     const seen=new Set(); const messages=new Map(); const liveText=new Map(); const attempts=new Map();
     const output=()=>[...new Map([...liveText,...messages]).values()].filter(Boolean).join('\n\n');
     const stage=value=>{try{onStage?.({...value,sessionId:session});}catch(error){stopForFailure({status:'failed',code:'adapter_error',error:errorText(error)});}};
     const finish=value=>{
       if(settled)return;settled=true;clearTimeout(retryTimer);clearTimeout(cancelTimer);signal?.removeEventListener('abort',cancel);
+      interactions.clear();eventClientId=null;detachInteractions?.();
       try{socket?.close();}catch{}
       const uncertain=promptSent&&!terminalExit?{status:'failed',code:'EXECUTION_UNCERTAIN',executionState:'uncertain'}:{};
       const result={...value,...pendingFailure,...uncertain,output:output(),sessionId:session,...(terminalExit?{sessionExit:terminalExit}:{})};
@@ -126,9 +137,22 @@ export async function executeDshRuntime({baseUrl=process.env.ZIWEI_DSH_BASE_URL|
     };
     const submit=()=>{
       if(promptSent || settled || cancelling)return;promptSent=true;
-      void rpc(baseUrl,botName,'session/prompt',{request:{requestId,sessionId:session,mode:'queue',content:[{type:'text',text:String(prompt||'')}],clientTimeZone:'Asia/Shanghai'}},signal,fetchImpl).catch(error=>{
+      void rpc(baseUrl,botName,'session/prompt',{request:{requestId,sessionId:session,mode:'queue',content:content||[{type:'text',text:String(prompt||'')}],clientTimeZone:'Asia/Shanghai'}},signal,fetchImpl).catch(error=>{
         if(!signal?.aborted)stopForFailure({status:'failed',code:'prompt_failed',error:error.message});
       });
+    };
+    const interactionList=()=>[...interactions.values()].map(({eventId,...value})=>structuredClone(value));
+    const publishInteractions=()=>stage({stage:'interaction',message:interactions.size?'DSH 等待你的回答':'DSH 交互已更新',interactions:interactionList()});
+    const answerInteraction=async({interactionId,decision,answers,dismiss=false})=>{
+      const pending=[...interactions.values()].find(value=>value.interactionId===interactionId);
+      if(settled||!eventClientId||!pending)throw Object.assign(new Error('DSH_INTERACTION_EXPIRED'),{code:'DSH_INTERACTION_EXPIRED'});
+      let outcome;
+      if(pending.kind==='approval'){
+        if(!['allowed-once','rejected'].includes(decision))throw Object.assign(new Error('DSH_INTERACTION_DECISION_INVALID'),{code:'DSH_INTERACTION_DECISION_INVALID'});
+        outcome={kind:'result',value:decision};
+      }else outcome=dismiss?{kind:'rejected',error:{name:'UserQuestionError',code:'ASK_CANCELLED',message:'the user cancelled ask_user_question'}}:{kind:'result',value:{answers}};
+      await rpc(baseUrl,botName,'$events/result',{clientId:eventClientId,eventId:pending.eventId,outcome},signal,fetchImpl);
+      interactions.delete(pending.eventId);publishInteractions();return{accepted:true};
     };
     const connect=()=>{
       if(settled)return;
@@ -146,6 +170,15 @@ export async function executeDshRuntime({baseUrl=process.env.ZIWEI_DSH_BASE_URL|
         if(frame.type==='item' && (!frame.value || typeof frame.value!=='object')) {stopForFailure({status:'failed',code:'invalid_frame',error:'DSH stream item is missing its native value'});return;}
         if(frame.streamId===thisEventsId && frame.type==='item') {
           const value=frame.value;
+          if(value.type==='ready')eventClientId=value.clientId;
+          if(value.type==='cancel'&&interactions.delete(value.eventId))publishInteractions();
+          if(value.type==='waterfall'){
+            if(value.agentId===session&&['approval/request','user-questions/request'].includes(value.event)){
+              const question=value.event==='user-questions/request';
+              interactions.set(value.eventId,{eventId:value.eventId,interactionId:crypto.randomUUID(),kind:question?'question':'approval',sessionId:session,...question?{questions:value.request?.questions||[],callId:value.request?.wait?.callId,continued:false}:{toolName:value.request?.toolName,callId:value.request?.callId,reason:value.request?.reason}});
+              publishInteractions();
+            }else if(eventClientId)void rpc(baseUrl,botName,'$events/result',{clientId:eventClientId,eventId:value.eventId,outcome:{kind:'next'}},signal,fetchImpl).catch(()=>{});
+          }
           if(value.type==='waterfall' && value.event==='approval/request' && value.agentId===session)stage({stage:'approval',message:'DSH 等待审批',detail:value.request?.toolName || '工具审批',requestId:value.eventId});
           if(value.type==='emit' && value.event==='api-session/error' && value.args?.[0]===session && targetTurn!==null)stopForFailure({status:'failed',code:'session_error',error:errorText(value.args[1])});
           return;
@@ -167,12 +200,14 @@ export async function executeDshRuntime({baseUrl=process.env.ZIWEI_DSH_BASE_URL|
       activeSocket.on('error',error=>stopForFailure({status:'failed',code:'stream_error',error:errorText(error)}));
       activeSocket.on('close',()=>{
         if(settled || socket!==activeSocket)return;
+        eventClientId=null;interactions.clear();publishInteractions();
         stopForFailure({status:'failed',code:'stream_closed',error:'DSH 实时订阅连接中断，已请求取消当前 turn'});
         if(settled||retries>=3)return;
         stage({stage:'progress',message:'DSH 正在恢复订阅以核实停止',detail:`Bot ${botName} · session ${session}`});
         retryTimer=setTimeout(connect,200*2**retries++);
       });
     };
+    detachInteractions=onInteractionChannel?.({sessionId:session,list:interactionList,answer:answerInteraction});
     onSessionSupervision?.(evidence.capability);
     if(signal?.aborted){void cancel();return;}
     signal?.addEventListener('abort',cancel,{once:true});

@@ -49,7 +49,7 @@ export function createConversationReadService(repo) {
         SELECT active.id FROM conversations active WHERE active.employee_id=e.id AND active.workspace_id=c.workspace_id AND active.status='active' ORDER BY active.updated_at DESC,active.rowid DESC LIMIT 1)))
       ORDER BY c.updated_at DESC,c.rowid DESC`).all(actor.actorUserId,ws.id,privileged,actor.actorUserId);
     const preview=db.prepare("SELECT CASE WHEN forward_json IS NOT NULL THEN '[聊天记录]' ELSE substr(content,1,180) END AS content,CASE WHEN attachment_json<>'[]' THEN 1 ELSE 0 END AS has_attachments FROM conversation_messages WHERE id=?");
-    const chats=rows.map(row=>{
+    const chats=rows.filter(row=>repo.getConversationAccess(row.id,actor)).map(row=>{
       const last=row.latest_message_id?preview.get(row.latest_message_id):null;
       const employee=view.employee(slug,{id:row.employee_id,name:row.name,runtime:row.runtime,avatar:row.avatar,visibility:row.visibility});
       if(!String(employee.avatar||'').startsWith('/api/workspaces/'))employee.avatar='';

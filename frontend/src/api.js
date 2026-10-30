@@ -39,6 +39,7 @@ async function request(path, options = {}) {
     const error = new Error(data.error || (response.status === 413 ? '请求内容超过服务器限制，请选择更小的附件后重试' : `请求失败 ${response.status}`));
     error.status = response.status;
     error.code = data.code;
+    if(data.code==='settings/conflict')for(const key of ['expectedRevision','actualRevision'])if(Number.isSafeInteger(data[key]))error[key]=data[key];
     throw error;
   }
   return data;
@@ -224,6 +225,14 @@ export const api = {
   },
   forwardConversation: (id, body) => request(`/api/conversations/${encodeURIComponent(id)}/forwards`, { method:'POST', body:JSON.stringify(body) }),
   markConversationRead: (id, messageId) => request(`/api/conversations/${encodeURIComponent(id)}/read`, { method:'POST', body:JSON.stringify({messageId}) }),
+  stopConversationExecution: (id, body) => request(`/api/conversations/${encodeURIComponent(id)}/execution/stop`, {method:'POST',body:JSON.stringify(body)}),
+  dshNativeCapabilities: (id, slug=workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/employees/${encodeURIComponent(id)}/dsh/native/capabilities`),
+  dshNativeState: (id, query={}, slug=workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/employees/${encodeURIComponent(id)}/dsh/native/state${query.conversationId?'?'+new URLSearchParams({conversationId:query.conversationId}):''}`),
+  refreshDshNative: (id, body, slug=workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/employees/${encodeURIComponent(id)}/dsh/native/refresh`, {method:'POST',body:JSON.stringify(body)}),
+  submitDshNative: (id, body, slug=workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/employees/${encodeURIComponent(id)}/dsh/native/actions`, {method:'POST',body:JSON.stringify(body)}),
+  prepareDshNativeSecret: (id, body, slug=workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/employees/${encodeURIComponent(id)}/dsh/native/secure-requests`, {method:'POST',body:JSON.stringify(body)}),
+  answerDshNativeSecret: (id, requestId, body, slug=workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/employees/${encodeURIComponent(id)}/dsh/native/secure-requests/${encodeURIComponent(requestId)}/answer`, {method:'POST',body:JSON.stringify(body)}),
+  dshNativeAction: (id, slug=workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/actions/${encodeURIComponent(id)}`),
   inspectConversationDirectory: (id, body = {}) => request(`/api/conversations/${encodeURIComponent(id)}/workdir/inspect`, { method:'POST', body:JSON.stringify(body) }),
   conversationDirectoryAction: (id, actionId) => request(`/api/conversations/${encodeURIComponent(id)}/workdir/actions/${encodeURIComponent(actionId)}`),
   addConversationMessage: (id, body) => request(`/api/conversations/${id}/messages`, { method:'POST', body:JSON.stringify(body) }),

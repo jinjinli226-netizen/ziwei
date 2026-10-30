@@ -5,6 +5,8 @@ const flush=()=>new Promise(resolve=>setImmediate(resolve));
 const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};};
 const action=(id,employeeId,type='task.execute')=>({id,type,workspace_id:'workspace-one',payload:{employeeId,deviceId:'device-one'}});
 const child=(id,employeeId,parent)=>({...action(id,employeeId,'conversation.execute'),payload:{...action(id,employeeId).payload,collaboration:{sourceActionId:parent.id,sourceEmployeeId:parent.payload.employeeId,mode:'delegate',messageId:'message-'+id,fingerprint:'a'.repeat(64),groupId:null,nativeTask:null}}});
+const dshNative=(id,employeeId,resource='groups',operation='send')=>({id,type:'employee.dsh.operation',workspace_id:'workspace-one',payload:{deviceId:'device-one',dshOperation:{schemaVersion:1,subject:{workspaceId:'workspace-one',workspace:'one',employeeId,deviceId:'device-one',runtime:'DSH',profile:'bot-'+employeeId},scope:resource==='groups'?{kind:'group',groupId:'g-native'}:{kind:'bot'},resource,operation,input:resource==='groups'?{groupId:'g-native',content:'Discuss'}:{},groupMembers:[{employeeId:'A',profile:'bot-A'},{employeeId:'B',profile:'bot-B'}]}}});
+const dshGroupChild=(id,employeeId,parent)=>({...action(id,employeeId,'conversation.execute'),payload:{...action(id,employeeId).payload,runtime:'DSH',profile:'bot-'+employeeId,dshGroup:{schemaVersion:1,sourceActionId:parent.id,groupId:'g-native',memberProfile:'bot-'+employeeId}}});
 
 const kinds={
  conversation:(id,employee)=>action(id,employee,'conversation.execute'),
@@ -134,4 +136,65 @@ test('a newer collaboration child never overtakes its employee earlier pending c
  const scheduler=createActionScheduler({execute:async a=>{calls.push(a.id);if(a.id==='p1')await parentOne.promise;else if(a.id==='p2')await parentTwo.promise;else if(a.id==='a1')await head.promise;else if(a.id==='child2')parentOne.resolve();}});
  scheduler.schedule([p1,p2]);await flush();assert.deepEqual(scheduler.schedule([a1,c2]),[],'a resource-blocked earlier message retains its employee queue head');await flush();assert.deepEqual(calls,['p1','p2']);
  parentTwo.resolve();await flush();assert.deepEqual(scheduler.schedule([a1,c2]),['a1']);await flush();assert.deepEqual(calls,['p1','p2','a1']);assert.deepEqual(scheduler.schedule([c2]),[]);head.resolve();await flush();assert.deepEqual(scheduler.schedule([c2]),['child2']);await scheduler.whenIdle();assert.deepEqual(calls,['p1','p2','a1','child2']);
+});
+
+test('native operations serialize by the bound subject employee instead of independent action ids',async t=>{
+ const release=deferred();t.after(()=>release.resolve());const calls=[],scheduler=createActionScheduler({concurrency:3,execute:async a=>{calls.push(a.id);await release.promise;}});
+ assert.deepEqual(scheduler.schedule([dshNative('settings-one','A','settings','mutate'),dshNative('settings-two','A','settings','mutate'),action('chat','A','conversation.execute'),action('other','B')]),['settings-one','other']);await flush();assert.deepEqual(calls,['settings-one','other']);release.resolve();await scheduler.whenIdle();assert.deepEqual(scheduler.schedule([dshNative('settings-two','A','settings','mutate'),action('chat','A','conversation.execute')]),['settings-two']);await scheduler.whenIdle();
+});
+
+test('one native group coordinator can await all members including itself with concurrency one',async t=>{
+ const finish=deferred(),memberOne=deferred();t.after(()=>{finish.resolve();memberOne.resolve();});const calls=[],parent=dshNative('native-parent','A'),children=[dshGroupChild('native-a','A',parent),dshGroupChild('native-b','B',parent)];
+ const scheduler=createActionScheduler({concurrency:1,execute:async a=>{calls.push(a.id);if(a.id===parent.id)await finish.promise;if(a.id==='native-a')await memberOne.promise;if(a.id==='native-b')finish.resolve();}});
+ assert.deepEqual(scheduler.schedule([parent,...children]),['native-parent','native-a']);await flush();assert.deepEqual(calls,['native-parent','native-a']);assert.equal(scheduler.activeCount,2);assert.deepEqual(scheduler.schedule([children[1],action('ordinary','C')]),[]);memberOne.resolve();await flush();assert.deepEqual(scheduler.schedule([children[1],action('ordinary','C')]),['native-b']);await scheduler.whenIdle();assert.deepEqual(calls,['native-parent','native-a','native-b']);assert.equal(scheduler.activeCount,0);
+});
+
+test('the independent native group budget permits at most one coordinator and the original bounded workers',async t=>{
+ const release=deferred();t.after(()=>release.resolve());const scheduler=createActionScheduler({concurrency:2,execute:()=>release.promise}),one=dshNative('native-one','A'),two=dshNative('native-two','B');
+ assert.deepEqual(scheduler.schedule([one,two,action('worker-one','C'),action('worker-two','D'),action('worker-extra','E')]),['native-one','worker-one','worker-two']);assert.equal(scheduler.activeCount,3);assert.deepEqual(scheduler.schedule([two]),[]);release.resolve();await scheduler.whenIdle();assert.deepEqual(scheduler.schedule([two]),['native-two']);await scheduler.whenIdle();
+});
+
+test('native group children stay behind an earlier chat and never overlap their employee worker',async t=>{
+ const parentEnd=deferred(),chatEnd=deferred();t.after(()=>{parentEnd.resolve();chatEnd.resolve();});const calls=[],p=dshNative('native-parent','A'),c=dshGroupChild('native-a','A',p),earlier=action('earlier-chat','A','conversation.execute');
+ const scheduler=createActionScheduler({concurrency:1,execute:async a=>{calls.push(a.id);if(a.id===p.id)await parentEnd.promise;if(a.id===earlier.id)await chatEnd.promise;if(a.id===c.id)parentEnd.resolve();}});
+ assert.deepEqual(scheduler.schedule([p,earlier,c]),['native-parent','earlier-chat']);await flush();assert.deepEqual(scheduler.schedule([c]),[]);chatEnd.resolve();await flush();assert.deepEqual(scheduler.schedule([action('unrelated','C'),c]),['native-a']);await scheduler.whenIdle();assert.deepEqual(calls,['native-parent','earlier-chat','native-a']);
+});
+
+for(const[name,mutate]of Object.entries({
+ missingSource:a=>{a.payload.dshGroup.sourceActionId='inactive';},
+ wrongGroup:a=>{a.payload.dshGroup.groupId='g-other';},
+ wrongProfile:a=>{a.payload.dshGroup.memberProfile='bot-other';},
+ wrongRuntime:a=>{a.payload.runtime='Hermes';},
+ wrongVersion:a=>{a.payload.dshGroup.schemaVersion=2;},
+ unboundEmployee:a=>{a.payload.employeeId='outside';a.payload.profile='bot-outside';a.payload.dshGroup.memberProfile='bot-outside';},
+ otherWorkspace:a=>{a.workspace_id='workspace-other';},
+ otherDevice:a=>{a.payload.deviceId='device-other';},
+ creator:a=>{a.payload.employeeTemplateId='ziwei-employee-creator';},
+}))test(`a ${name} DSH group tag cannot borrow native child priority or its parent reservation`,async t=>{
+ const release=deferred();t.after(()=>release.resolve());const parent=dshNative('native-parent','A'),generic=action('generic-parent','C','conversation.execute'),candidate=dshGroupChild('candidate','B',parent),scheduler=createActionScheduler({concurrency:2,execute:()=>release.promise});
+ assert.deepEqual(scheduler.schedule([parent,generic]),['native-parent','generic-parent']);mutate(candidate);assert.deepEqual(scheduler.schedule([candidate]),[]);release.resolve();await scheduler.whenIdle();
+});
+
+test('an exact native group child uses bounded worker capacity while its coordinator and another parent wait',async t=>{
+ const release=deferred();t.after(()=>release.resolve());const parent=dshNative('native-parent','A'),generic=action('generic-parent','C','conversation.execute'),scheduler=createActionScheduler({concurrency:2,execute:()=>release.promise});
+ assert.deepEqual(scheduler.schedule([parent,generic]),['native-parent','generic-parent']);assert.deepEqual(scheduler.schedule([dshGroupChild('native-b','B',parent),action('extra','D')]),['native-b']);assert.equal(scheduler.activeCount,3);release.resolve();await scheduler.whenIdle();
+});
+
+test('precise native controls bypass concurrency one during group work with only one control slot',async t=>{
+ const release=deferred(),control=deferred();t.after(()=>{release.resolve();control.resolve();});const parent=dshNative('native-parent','A'),calls=[],scheduler=createActionScheduler({concurrency:1,execute:async a=>{calls.push(a.id);await(a.id.startsWith('control-')?control.promise:release.promise);}});
+ assert.deepEqual(scheduler.schedule([parent,dshGroupChild('native-a','A',parent)]),['native-parent','native-a']);
+ for(const[resource,operation]of[['interactions','list'],['interactions','approve'],['interactions','answer'],['interactions','dismiss'],['plugins','cancelInstall'],['groups','cancel']]){
+  const one=dshNative(`control-${operation}`,'A',resource,operation),extra=dshNative('extra-control','B','groups','cancel');assert.deepEqual(scheduler.schedule([one,extra,dshNative('not-control','A','interactions','claim')]),[one.id]);assert.equal(scheduler.activeCount,3);control.resolve();await flush();
+ }
+ release.resolve();await scheduler.whenIdle();assert.equal(calls.filter(id=>id.startsWith('control-')).length,6);
+});
+
+test('native coordinator execution failure releases its independent reservation and leaves employee workers usable',async()=>{
+ const calls=[],scheduler=createActionScheduler({concurrency:1,execute:async a=>{calls.push(a.id);if(a.id==='bad-native')throw Error('group request failed');}});
+ scheduler.schedule([dshNative('bad-native','A')]);await scheduler.whenIdle();assert.deepEqual(scheduler.schedule([dshNative('next-native','A'),action('chat','A')]),['next-native','chat']);await scheduler.whenIdle();assert.equal(scheduler.activeCount,0);assert.deepEqual(calls,['bad-native','next-native','chat']);
+});
+
+test('a completed native coordinator cannot lend priority or a worker reservation to a later tagged child',async t=>{
+ const release=deferred();t.after(()=>release.resolve());const old=dshNative('old-native','A'),scheduler=createActionScheduler({concurrency:2,execute:async a=>{if(a.id!==old.id)await release.promise;}});
+ scheduler.schedule([old]);await scheduler.whenIdle();assert.deepEqual(scheduler.schedule([action('ordinary-parent','C','conversation.execute')]),['ordinary-parent']);assert.deepEqual(scheduler.schedule([dshGroupChild('late-child','B',old)]),[]);release.resolve();await scheduler.whenIdle();
 });

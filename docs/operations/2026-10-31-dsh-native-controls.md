@@ -1,0 +1,40 @@
+# DSH 原生控制与驾驶舱接线
+
+本批从 `c289028` 后继续实现，2026-10-31 汇总。作者当前工作树是协议来源，包含未提交的新功能；见[完整能力合同](../contracts/2026-10-30-dsh-native-parity.md)和[扩展边界](../contracts/2026-10-30-extension-boundaries.md)。Hermes 原生能力与 Profile 配置路径保持独立。
+
+## 本批实现
+
+后端与设备桥注册 58 个具名操作：插件目录、运行启停/移除、配置 schema/CAS、市场、来源检查、安装/构建批准/日志/查询/取消；Provider/模型与密文凭据；preset/Plan、会话创建/投影/历史、审批/提问；Bot 状态/进程启停/人设/metadata；文件、日志、原生 Routine；原生群 CRUD、定向群发、逐成员执行与取消。每项能力仍需目标电脑实际报告 feature 和原生观察，源码有方法不等于正式设备已经就绪。
+
+网页为 DSH 员工增加模型、例行工作、文件、群聊和运行日志入口；插件页增加运行条目、配置、市场与安装，保留原启动组合。会话中增加模式/Plan、原生审批与问答、默认/下一轮模型的独立选择。所有调用使用当前员工、工作区、目标设备和 Bot 的原生绑定，配置存回原生系统；不接收浏览器指定任意 Hub/RPC 或 session。
+
+聊天补齐 assistant Markdown、当前已加载聊天的 Markdown 导出，以及 DSH 普通员工会话停止。停止走原 `action.cancel` 和原 dispatcher，不关闭共享 Bot；停止请求成功不代表原生 turn 已停止。图片现在进入原生 image block，文本/JSON 可进入 UTF-8 文本块。
+
+密钥通过现有设备公钥和浏览器加密传输，Provider 配置与 Key 分步回读；部分完成和未知保留原引用。安装与群取消使用独立控制 lane，不覆盖原安装/群请求，也不把取消回执当作原执行终态。群成员分别经过现有员工锁与执行监督，群专用 session 不进入私人会话。DSH Routine 使用原生调度，紫薇不复制第二个相同 schedule。
+
+## 审查中修正的正常流程问题
+
+- 正在等待审批的会话只通过 `interactions.list` 控制操作读取待办，避免普通状态刷新排在原执行后产生死锁。
+- 文件面板重开立即恢复已读预览和相对目录。
+- 例行工作只在本次原生 create 已 applied 且真实 item ID 回读后关闭创建表单，避免再次创建；未知保留原草稿。
+- 原生问答保留多选、自填、完整计划和原生 `intent.approve`；已有内容更换 preset 显式新建平台聊天。
+- 新建原生会话通过原 create 回执确认映射升级；不能把旧 actor/员工/设备/会话响应套给当前界面。
+- 原 native 源端配置与新管理入口互斥，未知旧组合保存期间不能从另一页覆盖 manifest。
+
+## 验证与状态
+
+相关前端、设备协议、调度、预算、持久化交付、秘密绑定及群成员执行的无监听回归已通过；前端生产构建和 402 个源文件 lint 通过。独立审查复现问题后重新验证面板与停止的 14 项回归通过；新的实际 HTTP 测试覆盖网页登录身份、设备公钥注册、prepare/浏览器加密/answer、设备 ACK/领取/解密，以及普通动作读取不含秘密。
+
+测试入口：`frontend/src/dsh-{native,settings,models,groups,workspace-panels}*.test.mjs`、`backend/dsh-native-*.test.mjs`、`backend/conversation-stop.test.mjs`、`test/dsh-native-*.test.mjs`、`test/dsh-current-*.test.mjs`、`test/daemon-dsh-native-controls.test.mjs`。其中 relay 容量专项已运行并通过，常规增量验证无需重复其较长的容量用例。
+
+2026-10-31 00:31（北京时间）以新源码设备适配器进行原生 API 只读检查：插件、设置、Provider、preset 和 Bot 状态五资源均 observed；读到 20 个 bundle、197 个 Loader 条目、21 个配置 namespace、43 个 Provider 描述和 4 个 preset，原 Bot manifest hash 不变。没有模型请求、Bot 重启或正式写入。该检查证明原生传输/字段可读，不能替代尚未发布的新 CLI 正式投递验收。
+
+实际组件的隔离预览覆盖例行表单、相对文件列表和模式/计划审批，共 9 帧（1440×1000、390×844、844×360）。独立 headless Edge 通过 pipe 读取本地 HTML，无监听、无真实业务数据；页面未横向溢出，输入控件均在可视宽度内。它验证组件布局，不替代完整驾驶舱登录后的设备验收。
+
+本文件记录源码集成，不宣称这 58 项已全部在正式 Bot 写入验收或发布。正式运行仍为此前插件组合版本；本批尚需独立的服务端/网页、CLI 增量发布及目标设备验证。手机 Agent/Updater 与手机版专项修改不属于这批源码发布，不整树覆盖。
+
+## 后续依赖
+
+原生 Bot 新建/永久删除/打开本机窗口没有加入本 registry；会话 snapshot 最多 1000 条，完整历史翻页与独立完整工具结果读取仍需补齐。PDF、Office、音视频附件不在本批支持范围，文本/JSON 尚缺单独整链验收。
+
+用户已在 DSH 作者会话选择先补桌面版原生插件 UI 宿主；其工作独立进行。任意原生 React 插件安装后自动贡献界面的能力不属于当前手写 Vue 管理面板，待作者完成真实宿主验收后复用其迁移契约，不再实现第二套 Loader 或插件启用配置。

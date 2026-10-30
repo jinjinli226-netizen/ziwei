@@ -31,6 +31,9 @@ import { resolveEmployeeDefaultWorkdir } from './employee-workdir.mjs';
 import { assertBotExecution, botSnapshot, botUncertain, BOT_INTERNAL, botActionMaintenance, botActionReadOnlyInspection } from './bots.mjs';
 import {assertEmployeeCapabilitySubject,EMPLOYEE_CAPABILITY_INSPECTION_TYPE} from './employee-capability-inventory.mjs';
 import {assertDshPluginsSubject,DSH_PLUGIN_ACTIONS} from './dsh-plugins.mjs';
+import {assertDshNativeSubject,registerDshNativeResult} from './dsh-native-operations.mjs';
+import {DSH_NATIVE_TYPE} from '../src/dsh-native-contract.mjs';
+import {DSH_GROUP_MESSAGE_INTERNAL,assertDshNativeGroupChild,assertDshNativeGroupConversationVisible} from './dsh-native-group-dispatch.mjs';
 import {verifyBotProvisionReceipt} from './bot-profiles.mjs';
 import {readHistoricalPrelaunchRecovery} from './bot-historical-recovery-view.mjs';
 import {readForceAbandonRecovery} from './bot-force-abandon.mjs';
@@ -391,6 +394,10 @@ export function createRepository(options = {}, io={}) {
     actorUserId: String(input?.actorUserId || '').trim() || null,
     actorRole: String(input?.actorRole || input?.role || '').trim().toLowerCase()
   });
+  const groupConversationVisible=(row,input)=>{
+    try{assertDshNativeGroupConversationVisible(db,row.workspace_id,row.id,{userId:input.actorUserId,role:input.actorRole||input.role,deviceScope:input.deviceScope});return true;}
+    catch{return false;}
+  };
   const employeeVisible = (row, input = {}) => {
     if (row?.status === 'deleted') return false;
     if (!row || row.visibility !== 'personal' || !input.enforceVisibility) return Boolean(row);
@@ -1870,6 +1877,7 @@ export function createRepository(options = {}, io={}) {
         .filter(row => {
           const employee = row.employee_id ? db.prepare('SELECT * FROM employees WHERE id=? AND workspace_id=?').get(row.employee_id, ws.id) : null;
           if (row.employee_id && !employeeVisible(employee, context)) return false;
+          if(!groupConversationVisible(row,input))return false;
           if (employeeFilter === null || employeeFilter === '') return true;
           if (employeeFilter === 'unassigned') return !row.employee_id;
           return row.employee_id === employeeFilter;
@@ -1890,12 +1898,14 @@ export function createRepository(options = {}, io={}) {
       const row=db.prepare('SELECT id,workspace_id,employee_id,device_id FROM conversations WHERE id=?').get(conversationId); if(!row) return null;
       const employee=row.employee_id ? db.prepare('SELECT status,visibility,owner_user_id FROM employees WHERE id=? AND workspace_id=?').get(row.employee_id,row.workspace_id) : null;
       if (row.employee_id && !employeeVisible(employee, employeeAccessContext(input))) return null;
+      if(!groupConversationVisible(row,input))return null;
       return row;
     },
     getConversation(conversationId, input = {},options={}) {
       const row=db.prepare('SELECT * FROM conversations WHERE id=?').get(conversationId); if(!row) return null;
       const employee = row.employee_id ? db.prepare('SELECT * FROM employees WHERE id=? AND workspace_id=?').get(row.employee_id,row.workspace_id) : null;
       if (row.employee_id && !employeeVisible(employee, employeeAccessContext(input))) return null;
+      if(!groupConversationVisible(row,input))return null;
       const thread=options?.view==='thread'?(conversationThreadView??=createConversationThreadView(this)):null;
       const page=thread?.messages(conversationId,options);
       return {
@@ -2021,6 +2031,7 @@ export function createRepository(options = {}, io={}) {
       const recordOnly=forward?.mode==='reference';
       const conversation = db.prepare('SELECT * FROM conversations WHERE id=?').get(conversationId);
       if (!conversation) throw new Error('Conversation not found');
+      if(!input[DSH_GROUP_MESSAGE_INTERNAL]&&!groupConversationVisible(conversation,input))throw botFailure('CONVERSATION_NOT_FOUND','会话不存在或无权访问',404);
       const ws = db.prepare('SELECT * FROM workspaces WHERE id=?').get(conversation.workspace_id);
       const employee = conversation.employee_id ? assertEmployeeVisible(db.prepare('SELECT * FROM employees WHERE id=? AND workspace_id=?').get(conversation.employee_id, conversation.workspace_id), input) : null;
       const targetDeviceId = String(input.targetDeviceId || input.target_device_id || input.deviceId || input.device_id || conversation.device_id || employee?.target_device_id || '').trim() || null;
@@ -2065,7 +2076,9 @@ export function createRepository(options = {}, io={}) {
           const defaultPrompt = message.attachments.some(item => item.mimeType?.startsWith('image/')) ? '请分析所附图片，说明其中的内容并回复用户。' : '请阅读所附文件并回复用户。';
           const payload = executionPayload({ prompt: message.content || defaultPrompt, employee, ...executionSettings, conversationId, targetDeviceId, messageId: message.id, workspaceId:ws.id });
           if (message.attachments.length) payload.attachments = message.attachments;
-          execution=this.createA2AAction(ws.slug, { type: 'conversation.execute', payload, dedupeKey: `conversation:${conversationId}:${message.id}`, [conversationQueueAdmission]:true });
+          const group=input[DSH_GROUP_MESSAGE_INTERNAL];
+          if(group){payload.workspace=ws.slug;payload.workspaceId=ws.id;payload.dshGroup={schemaVersion:group.schemaVersion,sourceActionId:group.sourceActionId,groupId:group.groupId,memberProfile:group.memberProfile};payload.timeoutMs=group.timeoutMs;}
+          execution=this.createA2AAction(ws.slug, { type: 'conversation.execute', payload,...(group?{botInternal:BOT_INTERNAL}:{}),dedupeKey: `conversation:${conversationId}:${message.id}`, [conversationQueueAdmission]:true });
           conversationQueue.setPaused(conversationId,false);
         }
         db.prepare('UPDATE conversations SET updated_at=? WHERE id=?').run(message.created_at, conversationId);
@@ -2109,10 +2122,14 @@ export function createRepository(options = {}, io={}) {
     createA2AAction(slug, input = {}) {
       const ws = workspace(slug); if (!ws) throw new Error('Workspace not found');
       if(DSH_PLUGIN_ACTIONS.includes(input.type)&&input.botInternal!==BOT_INTERNAL)throw botFailure('DSH_PLUGINS_ROUTE_REQUIRED','请使用员工原生插件入口');
+      if(input.type===DSH_NATIVE_TYPE&&input.botInternal!==BOT_INTERNAL)throw botFailure('DSH_NATIVE_ROUTE_REQUIRED','请使用员工 DSH 原生能力入口');
+      if(input.payload?.dshGroup&&input.botInternal!==BOT_INTERNAL)throw botFailure('DSH_NATIVE_GROUP_ROUTE_REQUIRED','请使用原生群聊动作入口');
       const agentId = String(input.agentId || input.agent_id || 'ziwei_user'); if (agentId !== 'ziwei_user') throw new Error('Only ziwei_user agent is accepted');
       const dedupeKey = String(input.dedupeKey || input.dedupe_key || `${input.type || 'action'}:${crypto.randomUUID()}`);
       const existing = db.prepare('SELECT * FROM a2a_actions WHERE workspace_id=? AND dedupe_key=? ORDER BY created_at DESC LIMIT 1').get(ws.id, dedupeKey);
       if(DSH_PLUGIN_ACTIONS.includes(existing?.type)&&input.botInternal!==BOT_INTERNAL)throw botFailure('DSH_PLUGINS_ROUTE_REQUIRED','请使用员工原生插件入口');
+      if(existing?.type===DSH_NATIVE_TYPE&&input.botInternal!==BOT_INTERNAL)throw botFailure('DSH_NATIVE_ROUTE_REQUIRED','请使用员工 DSH 原生能力入口');
+      if(parse(existing?.payload_json)?.dshGroup&&input.botInternal!==BOT_INTERNAL)throw botFailure('DSH_NATIVE_GROUP_ROUTE_REQUIRED','请使用原生群聊动作入口');
       if (existing) return { ...existing, duplicate: true, payload: parse(existing.payload_json), result: parse(existing.result_json) };
       let payload = trustedTemplatePayload(ws.id,input.payload && typeof input.payload === 'object' ? input.payload : {});
       if(isDshAction({payload})){const {dshSessionBinding:_untrusted,...unbound}=payload;payload=unbound;}
@@ -2121,6 +2138,8 @@ export function createRepository(options = {}, io={}) {
         assertEmployeeCapabilitySubject(db,ws.id,payload);
       }
       if(DSH_PLUGIN_ACTIONS.includes(input.type))assertDshPluginsSubject(db,ws.id,payload);
+      if(input.type===DSH_NATIVE_TYPE)assertDshNativeSubject(db,ws.id,payload);
+      if(payload.dshGroup)assertDshNativeGroupChild(db,{type:input.type,payload});
       const isValidation=input.type==='hermes.bot.validate';
       const isProvisioning=input.type==='hermes.bot.provision';
       const readOnlyInspection=botActionReadOnlyInspection(input.type,payload);
@@ -2187,6 +2206,11 @@ export function createRepository(options = {}, io={}) {
       const row=db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId);
       if(DSH_PLUGIN_ACTIONS.includes(row?.type))assertDshPluginsSubject(db,row.workspace_id,parse(row.payload_json));
     },
+    assertDshNativeOperation(actionId){
+      const row=db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId);
+      if(row?.type===DSH_NATIVE_TYPE)assertDshNativeSubject(db,row.workspace_id,parse(row.payload_json));
+      if(parse(row?.payload_json)?.dshGroup)assertDshNativeGroupChild(db,row);
+    },
     authorizeBotStart(actionId,input={}) {
       const row=db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId);
       if(!row || row.status!=='acked')throw botFailure('BOT_START_INVALID','执行尚未被当前设备领取');
@@ -2252,6 +2276,8 @@ export function createRepository(options = {}, io={}) {
         assertActionDevice(row, input);
         if(['pending','acked'].includes(row.status)&&row.type===EMPLOYEE_CAPABILITY_INSPECTION_TYPE)assertEmployeeCapabilitySubject(db,row.workspace_id,parse(row.payload_json));
         if(['pending','acked'].includes(row.status)&&DSH_PLUGIN_ACTIONS.includes(row.type))assertDshPluginsSubject(db,row.workspace_id,parse(row.payload_json));
+        if(['pending','acked'].includes(row.status)&&row.type===DSH_NATIVE_TYPE)assertDshNativeSubject(db,row.workspace_id,parse(row.payload_json));
+        if(['pending','acked'].includes(row.status)&&parse(row.payload_json)?.dshGroup)assertDshNativeGroupChild(db,row);
         if(settleExpiredMaintenanceAction(this,row,input)){const updated=db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId);response={...a2aResponseView(updated,{receiptOnly,includeResult:!receiptOnly}),duplicate:true};}
         else if (row.status === 'expired') {
           if (!receiptOnly || !(recoverableBotCompletion(row)||recoverableDshCompletion(row)) || !input.deviceId || input.deviceId !== actionTargetDevice(row)) throw new Error('A2A action expired');
@@ -2452,6 +2478,7 @@ export function createRepository(options = {}, io={}) {
       db.exec('SAVEPOINT conversation_result');
       try {
         assertMaintenanceAttempt(db,db.prepare('SELECT * FROM a2a_actions WHERE id=?').get(actionId),input);
+        registerDshNativeResult(db,row,{...input,status,result});
         if(row.type==='hermes.bot.provision'&&status==='succeeded')verifyBotProvisionReceipt(payload,result);
         if(row.type==='hermes.bot.validate'&&status==='succeeded'&&payload.hermesBot?.config.reasoningEffort){
           const validation=result?.botValidation || result?.result?.botValidation;

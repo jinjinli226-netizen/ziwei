@@ -1,4 +1,6 @@
 import {executionBinding} from './execution-admission.mjs';
+import {DSH_NATIVE_TYPE,isDshNativeControlAction} from './dsh-native-contract.mjs';
+import {isCancellationAction} from './daemon-action-scheduler.mjs';
 import {markMaintenancePaused,consumeMaintenancePaused,validateMaintenancePause} from './maintenance-checkpoint.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -35,6 +37,13 @@ function safeProcessExit(value,depth=0) {
   for (const key of ['platform', 'supervisor', 'failureCode', 'signal', 'hostSignal']) if (typeof value[key] === 'string' && /^[a-zA-Z0-9_-]{1,100}$/.test(value[key])) result[key] = value[key];
   if(value.supervisor==='runtime-group'&&Array.isArray(value.children)&&value.children.length<=64)result.children=value.children.map(child=>safeProcessExit(child,depth+1));
   return result;
+}
+
+export function canStartDaemonAction(action,admission,{actionDelivery,dispatcher,maintenanceReady,blocksNewActions,executionAllowed}){
+  if(isCancellationAction(action)||isDshNativeControlAction(action)||actionDelivery.canDeliverWithoutExecution(action))return true;
+  const pause=dispatcher.getMaintenancePause(action.id),employee=(action.type===DSH_NATIVE_TYPE?action.payload?.dshOperation?.subject?.employeeId:null)||action.payload?.employeeId||action.payload?.employee_id||action.payload?.assignee;
+  if(pause&&!maintenanceReady.has(action.id)||!pause&&employee&&dispatcher.hasPausedEmployee(employee))return false;
+  return(!blocksNewActions||admission.collaborationChild)&&executionAllowed();
 }
 
 export class ActionDispatcher {
@@ -350,16 +359,17 @@ export class ActionDispatcher {
       if (expiresAt && Number.isFinite(Date.parse(String(expiresAt))) && Date.parse(String(expiresAt)) <= Date.now()) throw new Error('A2A action expired');
       admissionPhase='workdir';
       const workdir = this.#validateWorkdir(action);
+      const nativeGroupCwd=Boolean(action.payload?.dshGroup)&&!['cwd','workdir','workingDirectory','working_directory'].some(key=>action.payload[key]);
       const executableAction = process.platform === 'win32' || (action.payload && typeof action.payload === 'object') ? {...action, payload: {
         ...(action.payload && typeof action.payload === 'object' ? action.payload : {}),
-        workdir, ...(needsNativeCwd(action) ? { cwd: workdir } : {})
+        ...(nativeGroupCwd?{}:{workdir,...(needsNativeCwd(action)?{cwd:workdir}:{})})
       }} : action;
       if (this.quarantined || !this.#canExecute(action)) return this.#uncertain(action, 'EXECUTION_QUARANTINED', '本机仍有未确认停止的执行；未启动新动作');
       admissionPhase='budget';
       const nativeRuntime = isNativeRuntimeAction(action);
       const requestedTimeout = action.payload?.timeoutMs ?? action.payload?.timeout_ms;
       const hasHardTimeout = requestedTimeout !== undefined && requestedTimeout !== null && String(requestedTimeout).trim() !== '' && Number.isFinite(Number(requestedTimeout));
-      let hardTimeoutMs = hasHardTimeout || nativeRuntime || ['employee.capabilities.inspect','employee.plugins.inspect','employee.plugins.apply'].includes(action.type) ? actionExecutionTimeoutMs(action) : null;
+      let hardTimeoutMs = hasHardTimeout || nativeRuntime || [DSH_NATIVE_TYPE,'employee.capabilities.inspect','employee.plugins.inspect','employee.plugins.apply'].includes(action.type) ? actionExecutionTimeoutMs(action) : null;
       if (nativeRuntime && expiresAt) {
         const remaining = Date.parse(String(expiresAt)) - this.#now() - ACTION_EXECUTION_LEASE_BUFFER_MS;
         if (!Number.isFinite(remaining) || remaining < 100) return this.#rejectAdmission(action,key,identity,'lease','A2A action lease leaves insufficient time for execution and confirmed shutdown','ACTION_LEASE_INSUFFICIENT');
@@ -370,7 +380,7 @@ export class ActionDispatcher {
       const requestedIdleTimeout = action.payload?.idleTimeoutMs ?? action.payload?.idle_timeout_ms;
       const hasIdleTimeout = requestedIdleTimeout !== undefined && requestedIdleTimeout !== null && String(requestedIdleTimeout).trim() !== '' && Number.isFinite(Number(requestedIdleTimeout));
       const idleTimeoutMs = hasIdleTimeout ? Math.max(100, Number(requestedIdleTimeout)) : 2 * 60 * 1000;
-      const enforceIdle = !nativeRuntime || hasIdleTimeout;
+      const enforceIdle = (!nativeRuntime&&action.type!==DSH_NATIVE_TYPE) || hasIdleTimeout;
       admissionPhase=null;
       this.#markStarted(action, key, identity,{startedAt:resumeTiming?.startedAt,hardDeadline});
       if(maintenanceResume)this.#onEvent('action.maintenance_resumed',{actionId,updateId:maintenanceResume.updateId,targetBuild:maintenanceResume.targetBuild});

@@ -134,3 +134,8 @@ test('the actual Vue panel edits the dynamic catalog, locks required plugins and
   boxes[1].props.onChange({target:{checked:true}});await h.settle();h.button('保存插件组合').props.onClick();await h.settle();assert.equal(writes.length,1);assert.doesNotMatch(notices(),/插件组合已保存/);assert.match(h.text(),/原生 DSH/);
   assert.equal(h.button('回读状态').props.disabled,false);h.button('回读状态').props.onClick();await h.settle();assert.match(notices(),/插件组合已保存/);assert.match(h.text(),/下次启动生效/);assert.match(h.text(),/尚无运行时加载证据/);
 });
+
+test('legacy combination respects an external native request lock while keeping GET readback available',async t=>{
+  const writes=[];const h=await panelHarness(t,{employeePlugins:async()=>completed(scope(),'inspect'),refreshEmployeePlugins:async()=>completed(scope(),'inspect'),updateEmployeePlugins:async(...args)=>writes.push(args)});
+  const box=h.all(el=>el.type==='input'&&el.props['aria-label']==='启用插件：设备动态插件')[0];box.props.onChange({target:{checked:true}});await h.settle();h.props.externalBlocked=true;await h.settle();assert.equal(box.props.disabled,true);assert.equal(h.button('保存插件组合').props.disabled,true);h.button('保存插件组合').props.onClick();await h.settle();assert.equal(writes.length,0);assert.equal(h.button('回读状态').props.disabled,false);assert.match(h.text(),/原生管理还有未核实/);
+});

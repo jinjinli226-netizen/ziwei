@@ -33,3 +33,19 @@ test('local DSH executor and dispatcher use the native session evidence end to e
   assert.equal(result.status,'succeeded');assert.equal(result.result.output,'DSH 完成');assert.equal(result.result.sessionExit.botName,'real-bot');
   assert.equal(result.result.processExit,undefined);
 });
+
+test('local DSH sends image attachments as native image blocks instead of prompt paths',async t=>{
+ const directory=fs.mkdtempSync(path.join(os.tmpdir(),'ziwei-dsh-image-'));t.after(()=>fs.rmSync(directory,{recursive:true,force:true}));
+ const f=await dshFixture(t),data=Buffer.from('isolated-image-content').toString('base64');
+ const execute=createLocalActionExecutor({runtimeDir:directory,defaultWorkdir:directory,dshBaseUrl:f.baseUrl,dshRuntime:options=>executeDshRuntime({...options,...f.transport})});t.after(()=>execute.close());
+ const result=await execute({id:'dsh-image',type:'conversation.execute',payload:{runtime:'DSH',profile:'real-bot',prompt:'看这张图',attachments:[{name:'example.png',mimeType:'image/png',contentBase64:data}]}});
+ assert.equal(result.status,'succeeded');
+ assert.deepEqual(f.calls.find(call=>call.method==='session/prompt').payload.args.request.content,[{type:'text',text:'看这张图'},{type:'image',mediaType:'image/png',data,name:'example.png'}]);
+});
+test('a group member without an employee directory uses its own native Bot work directory',async t=>{
+ const directory=fs.mkdtempSync(path.join(os.tmpdir(),'ziwei-dsh-group-cwd-'));t.after(()=>fs.rmSync(directory,{recursive:true,force:true}));
+ const memberDirectory=path.join(directory,'member-work');fs.mkdirSync(memberDirectory);let selected;
+ const execute=createLocalActionExecutor({runtimeDir:directory,defaultWorkdir:directory,dshPluginFetch:async url=>{assert.equal(url,'http://127.0.0.1:7878/api/state');return Response.json({bots:[{name:'member-b',workdir:memberDirectory}]});},dshRuntime:async options=>{selected=options;return{status:'succeeded'};}});t.after(()=>execute.close());
+ await execute({id:'child-group',type:'conversation.execute',payload:{runtime:'DSH',profile:'member-b',employeeId:'eb',conversationId:'group-conv',prompt:'group discussion',dshGroup:{schemaVersion:1,sourceActionId:'group-parent',groupId:'g',memberProfile:'member-b'}}});
+ assert.equal(selected.cwd,memberDirectory);assert.equal(selected.botName,'member-b');
+});

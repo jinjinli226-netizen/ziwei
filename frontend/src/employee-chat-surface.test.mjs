@@ -80,6 +80,20 @@ test('compact message actions keep forwarding and selection bound to each origin
   h.button('取消').props.onClick();assert.deepEqual(h.events.at(-1),['forward-cancel']);
 });
 
+test('assistant Markdown uses the escaped renderer while user messages remain plain text',async t=>{
+  const content='**结论**\n\n- 下一步\n\n<script>alert(1)</script>',h=await harness(t,{conversation:{id:'markdown-chat',messages:[{id:'user',role:'user',content},{id:'assistant',role:'assistant',content}]}});
+  const rendered=h.all(el=>el.props.class==='bot-chat-markdown');assert.equal(rendered.length,1);
+  assert.match(rendered[0].props.innerHTML,/<strong>结论<\/strong>/);assert.match(rendered[0].props.innerHTML,/&lt;script&gt;/);assert.doesNotMatch(rendered[0].props.innerHTML,/<script>/);
+  assert.ok(h.all(el=>el.type==='p'&&el.text===content).length);
+});
+
+test('the loaded-chat export is explicitly scoped and ordinary DSH stop uses its parent action',async t=>{
+  const h=await harness(t,{employee:{id:'dsh',runtime:'DSH',name:'社群主理人'},execution:{id:'run',status:'acked'},canStop:true});
+  h.button('请求停止当前执行').props.onClick();assert.deepEqual(h.events.at(-1),['stop']);
+  h.button('更多能力').props.onClick({currentTarget:{}});await h.settle();
+  h.button('导出当前已加载聊天').props.onClick();assert.deepEqual(h.events.at(-1),['export-loaded']);
+});
+
 test('the shared model and device popovers render the parent conversation controls with their original scope',async t=>{
   const changes=[],h=await harness(t,{}, {slots:{'conversation-settings':({kind})=>vue.h('button',{onClick:()=>changes.push(kind)},'保存当前会话'+kind)}});
   for(const [label,kind]of [['会话模型','model'],['绑定电脑','device']]){h.button(label).props.onClick({currentTarget:{}});await h.settle();h.button('保存当前会话'+kind).props.onClick();}

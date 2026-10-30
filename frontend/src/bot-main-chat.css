@@ -33,6 +33,19 @@
 .bot-chat-message.user{justify-content:flex-end}
 .bot-chat-message-body{max-width:calc(100% - 44px);min-width:0;font-size:15px;line-height:1.8}
 .bot-chat-message-body>p{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
+.bot-chat-markdown{min-width:0;overflow-wrap:anywhere}
+.bot-chat-markdown :deep(p){margin:0 0 12px}
+.bot-chat-markdown :deep(:last-child){margin-bottom:0}
+.bot-chat-markdown :deep(h1),.bot-chat-markdown :deep(h2),.bot-chat-markdown :deep(h3){margin:16px 0 8px;font-size:1.12em;line-height:1.5}
+.bot-chat-markdown :deep(ul),.bot-chat-markdown :deep(ol){padding-left:22px;margin:8px 0 12px}
+.bot-chat-markdown :deep(a){color:#6847bc;text-decoration:underline;text-underline-offset:3px}
+.bot-chat-markdown :deep(pre){max-width:100%;box-sizing:border-box;overflow:auto;padding:12px 14px;border-radius:8px;background:#f5f4f8;font:12px/1.7 Consolas,monospace;white-space:pre}
+.bot-chat-markdown :deep(code){padding:1px 4px;border-radius:4px;background:#f5f4f8;font: .9em Consolas,monospace}
+.bot-chat-markdown :deep(pre code){padding:0;background:none;font:inherit}
+.bot-chat-markdown :deep(table){display:block;max-width:100%;overflow:auto;border-collapse:collapse;margin:12px 0;font-size:13px}
+.bot-chat-markdown :deep(th),.bot-chat-markdown :deep(td){padding:7px 10px;border:1px solid var(--chat-line);text-align:left}
+.bot-chat-markdown :deep(th){background:#f8f7fb;font-weight:600}
+.bot-chat-markdown :deep(blockquote){margin:12px 0;padding:3px 12px;border-left:3px solid #ded7ed;color:#777084}
 .bot-chat-message.user .bot-chat-message-body{max-width:82%;padding:12px 17px;background:#f0ebfc;border:1px solid #e9e1fc;border-radius:15px 15px 4px 15px;color:#403355}
 .bot-chat-message-body time{display:block;font-size:11px;color:#a0a5b1;margin-top:8px}
 .bot-chat-message.user time{text-align:right}

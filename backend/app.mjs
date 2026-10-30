@@ -35,6 +35,11 @@ import {createBotAutonomyService} from './bot-autonomy.mjs';
 import {createBotInteractions} from './bot-interactions.mjs';
 import {createEmployeeCapabilityInventory} from './employee-capability-inventory.mjs';
 import {createDshPluginsService} from './dsh-plugins.mjs';
+import {createConversationStop} from './conversation-stop.mjs';
+import {createDshNativeService} from './dsh-native-operations.mjs';
+import {mountDshNativeRoutes} from './dsh-native-routes.mjs';
+import {createDshNativeSecrets} from './dsh-native-secrets.mjs';
+import {createDshNativeGroupDispatch} from './dsh-native-group-dispatch.mjs';
 import {botActionMaintenance} from './bots.mjs';
 import { toolDefinitions as managementTools } from '../scripts/ziwei-mcp.mjs';
 import {registerWorkspaceCliDocs} from './workspace-cli-docs.mjs';
@@ -318,6 +323,10 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   const management = createManagementService(repo);
   const employeeCapabilityInventory=createEmployeeCapabilityInventory(repo,{management});
   const dshPlugins=createDshPluginsService(repo,{management});
+  const stopConversationExecution=createConversationStop(repo);
+  const dshNative=createDshNativeService(repo,{management});
+  const dshNativeSecrets=createDshNativeSecrets(repo,{management,nativeService:dshNative});
+  const dshNativeGroupDispatch=createDshNativeGroupDispatch(repo,{management});
   const mobileReadView = createMobileReadView(repo);
   const conversationReads = createConversationReadService(repo);
   const mobileNotifications = createMobileNotificationReadService(repo);
@@ -704,6 +713,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   app.get('/api/workspaces/:slug/mobile/notifications-v2/wait',async(req,res,next)=>{try{const page=await mobileNotificationsV2.wait(req,res,req.params.slug,notificationV2Input(req,true));if(page&&!res.destroyed)res.json(page);}catch(error){if(!res.destroyed)next(error);}});
   app.get('/api/workspaces/:slug/mobile/notifications-v2/items/:id',(req,res)=>res.json(mobileNotificationsV2.resolve(req,req.params.slug,req.params.id)));
   app.post('/api/conversations/:id/read', (req,res)=>res.json(conversationReads.read(req.params.id,req.body||{},employeeContext(req))));
+  app.post('/api/conversations/:id/execution/stop',requireRole('owner','admin','member'),(req,res)=>{res.setHeader('Cache-Control','no-store');res.status(202).json(stopConversationExecution(req.params.id,req.body||{},employeeContext(req)));});
   app.post('/api/conversations/:id/forwards', requireRole('owner','admin','member'), (req,res)=>{
     const result=repo.forwardConversationMessages(req.params.id,req.body||{},employeeContext(req));
     res.status(result.duplicate?200:201).json(result);
@@ -1035,6 +1045,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
     requireDevice: app.locals.requireDeviceAuth,
     deviceVerifier: req => verifyDeviceRequest(repo, req)
   }));
+  mountDshNativeRoutes(app,{service:dshNative,secretService:dshNativeSecrets,groupDispatchService:dshNativeGroupDispatch,requireRole,mcpGuard,mcpEmployeeGuard,employeeContext,mcpContext});
   const updateDevice = req => ({slug:String(req.query.workspace||''),id:String(req.query.deviceId||'')});
   app.get('/a2a/v1/failure-finalizations',(req,res)=>{res.setHeader('Cache-Control','no-store');res.json(botFailureFinalization.pending(req.deviceCredential,req.query));});
   app.get('/a2a/v1/actions/:id/failure-finalization',(req,res)=>{res.setHeader('Cache-Control','no-store');if(!assertA2AActionWorkspace(repo,req,res))return;res.json(botFailureFinalization.read(req.params.id,req.deviceCredential));});
@@ -1079,7 +1090,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   app.get('/a2a/v1/tasks/:id', (req, res) => { if (!assertA2ATaskWorkspace(repo, req, res)) return; const task=repo.getTask(req.params.id); if(!task) return res.status(404).json({error:'Task not found'}); res.json({id:task.id,status:{state:task.state,timestamp:task.updated_at},task,messages:repo.getTaskMessages(task.id)}); });
   app.post('/a2a/v1/tasks/:id/messages', (req, res) => { if (!assertA2ATaskWorkspace(repo, req, res)) return; return res.status(201).json({ message:repo.addTaskMessage(req.params.id,req.body), accepted:true }); });
 
-  app.use((err, _req, res, _next) => { const databaseBusy = err?.code === 'ERR_SQLITE_ERROR' && [5,6].includes(err.errcode); const status = Number(err?.status) || (databaseBusy ? 503 : (/not found|不存在/i.test(err.message || '') ? 404 : 400)); if (databaseBusy) res.setHeader('Retry-After', '1'); res.status(status).json({ error: err.message || 'Bad request', ...(err.code ? { code: err.code } : {}) }); });
+  app.use((err, _req, res, _next) => { const databaseBusy = err?.code === 'ERR_SQLITE_ERROR' && [5,6].includes(err.errcode); const status = Number(err?.status) || (databaseBusy ? 503 : (/not found|不存在/i.test(err.message || '') ? 404 : 400)); if (databaseBusy) res.setHeader('Retry-After', '1'); const conflict=err.code==='settings/conflict'?Object.fromEntries(['expectedRevision','actualRevision'].filter(key=>Number.isSafeInteger(err.details?.[key])).map(key=>[key,err.details[key]])):{}; res.status(status).json({ error: err.message || 'Bad request', ...(err.code ? { code: err.code } : {}),...conflict }); });
   return app;
 }
 

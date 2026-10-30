@@ -1,11 +1,12 @@
 import {syncBotProviderCredentials} from '../src/bot-provider-credential-client.mjs';
+import {DSH_NATIVE_FEATURE} from '../src/dsh-native-contract.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
 import { timingSafeEqual, randomBytes, createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { ActionDispatcher } from '../src/daemon.mjs';
-import { createActionScheduler, isCancellationAction } from '../src/daemon-action-scheduler.mjs';
+import { ActionDispatcher,canStartDaemonAction } from '../src/daemon.mjs';
+import { createActionScheduler } from '../src/daemon-action-scheduler.mjs';
 import { createActionDelivery, ACTION_TRANSPORT_BUDGETS } from '../src/daemon-action-delivery.mjs';
 import { createLocalActionExecutor } from '../src/local-action.mjs';
 import { redactSecrets } from '../src/redaction.mjs';
@@ -139,13 +140,7 @@ function installConnections() {
       },onEvent:(event,extra)=>log(event,{workspace:config.workspace,...extra})});
     state.actionScheduler = createActionScheduler({
       execute: action => state.actionDelivery.execute(action),
-      canStart: (action, admission) => {
-        if(isCancellationAction(action)||state.actionDelivery.canDeliverWithoutExecution(action))return true;
-        const pause=state.dispatcher.getMaintenancePause(action.id);
-        const employee=action.payload?.employeeId||action.payload?.employee_id||action.payload?.assignee;
-        if(pause&&!state.maintenanceReady.has(action.id)||!pause&&employee&&state.dispatcher.hasPausedEmployee(employee))return false;
-        return (!remoteClientUpdates?.blocksNewActions||admission.collaborationChild)&&executionAllowed();
-      },
+      canStart: (action, admission) => canStartDaemonAction(action,admission,{actionDelivery:state.actionDelivery,dispatcher:state.dispatcher,maintenanceReady:state.maintenanceReady,blocksNewActions:remoteClientUpdates?.blocksNewActions,executionAllowed}),
       quarantinedActionIds: () => state.dispatcher.quarantinedActionIds,
       onError: (error, action) => log('a2a_action_failed', { workspace: config.workspace, actionId: action.id, error: error.message }),
     });
@@ -198,7 +193,7 @@ remoteClientUpdates = createRemoteClientUpdates({
   log,
 });
 function clientRuntimeDiscovery() {
-  return { checkedAt: runtimeDiscovery.discoveredAt, platform: runtimeDiscovery.bridge.platform, arch: runtimeDiscovery.bridge.arch, clientBuild: CLIENT_BUILD, features: ['dsh_plugins_v1','employee_capabilities_inspect_v2','bot_mcp_oauth_relay_v1','failed_action_finalization_v1', ...(remoteUpdateEnabled ? [REMOTE_CLIENT_UPDATE_FEATURE,'maintenance_checkpoint_resume_v1','native_worker_update_verification_v1'] : [])], ...(maintenanceHostId ? { maintenanceHostId } : {}) };
+  return { checkedAt: runtimeDiscovery.discoveredAt, platform: runtimeDiscovery.bridge.platform, arch: runtimeDiscovery.bridge.arch, clientBuild: CLIENT_BUILD, features: ['dsh_plugins_v1',DSH_NATIVE_FEATURE,'employee_capabilities_inspect_v2','bot_mcp_oauth_relay_v1','failed_action_finalization_v1', ...(remoteUpdateEnabled ? [REMOTE_CLIENT_UPDATE_FEATURE,'maintenance_checkpoint_resume_v1','native_worker_update_verification_v1'] : [])], ...(maintenanceHostId ? { maintenanceHostId } : {}) };
 }
 process.on('uncaughtException', error => log('uncaught_exception', { error: error.stack || error.message }));
 process.on('unhandledRejection', error => log('unhandled_rejection', { error: error?.stack || String(error) }));

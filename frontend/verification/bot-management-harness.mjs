@@ -129,7 +129,7 @@ export async function createManagerHarness({fixture=managerFixture(),initial={},
     if(target.type==='#comment')return'';if(target.type==='#text')return escaped(target.text);if(target.type==='root')return target.children.map(html).join('');
     const attributes={...target.props,...(Object.keys(target.style).length?{style:{...target.props.style,...target.style}}:{}),...(target.type==='input'&&target.value?{value:target.value}:{}),...(target.checked?{checked:true}:{})};
     const attrs=Object.entries(attributes).filter(([key,value])=>!key.startsWith('on')&&!['innerHTML','textContent','ref'].includes(key)&&value!==null&&value!==undefined&&(value!==false||key.startsWith('aria-'))).map(([key,value])=>` ${key}="${escaped(key==='style'?Object.entries(value).map(([k,v])=>k.replace(/[A-Z]/g,s=>'-'+s.toLowerCase())+':'+v).join(';'):value)}"`).join('');
-    return`<${target.type}${attrs}>${escaped(target.type==='textarea'?target.value:target.text)}${target.children.map(html).join('')}</${target.type}>`;
+    return`<${target.type}${attrs}>${target.props.innerHTML??escaped(target.type==='textarea'?target.value:target.text)}${target.children.map(html).join('')}</${target.type}>`;
   }
   return{props,fixture,calls,events,root,body,text,findAll,byClass,button,html,get state(){return setupState;},async settle(){await settle();},dispose(){app.unmount();Object.assign(globalThis,previous);}};
 }

@@ -93,3 +93,29 @@ test('native command failure and approval frames project real activity with matc
   assert.ok(stages.some(s=>s.stage==='tool' && s.status==='failed'));
   assert.ok(stages.some(s=>s.stage==='approval' && s.requestId==='approval-1' && s.sessionId===result.sessionId));
 });
+
+test('resuming a DSH session refuses a different requested cwd before any prompt or replacement session',async t=>{
+ const f=await dshFixture(t,{routes:(_request,body,reply)=>{
+  if(body.method!=='session/projections')return false;
+  reply({type:'server-response',rpcId:body.rpcId,result:{ok:true,value:{values:{workingDirectory:'D:/old-project'}}}});return true;
+ }});
+ await assert.rejects(executeDshRuntime({baseUrl:f.baseUrl,...f.transport,botName:'real-bot',sessionId:'retained-session',cwd:'D:/new-project',prompt:'continue'}),{code:'DSH_SESSION_CWD_CONFLICT'});
+ assert.equal(f.calls.some(call=>['session/create','session/prompt','session/cancel'].includes(call.method)),false);
+});
+
+test('a live DSH approval answers only its owned event connection and explicit single-use choice',async t=>{
+ let channel,finish;
+ const f=await dshFixture(t,{onPrompt:ctx=>{
+  finish=()=>ctx.complete(ctx.request);const ws=ctx.connections.at(-1);
+  ws.deliver({type:'item',streamId:ws.eventsId,value:{type:'waterfall',event:'approval/request',agentId:ctx.request.sessionId,eventId:'native-event',request:{toolName:'pwsh',callId:'tool-call',reason:'read workspace'}}});
+ }});
+ const running=executeDshRuntime({baseUrl:f.baseUrl,...f.transport,botName:'alpha',prompt:'check',onInteractionChannel:value=>{channel=value;}});
+ for(let attempt=0;attempt<20&&!channel?.list().length;attempt++)await new Promise(resolve=>setImmediate(resolve));
+ assert.ok(channel?.list().length,'owned live interaction channel must expose the native request');
+ const pending=channel.list()[0];assert.equal(pending.kind,'approval');assert.notEqual(pending.interactionId,'native-event');
+ await assert.rejects(channel.answer({interactionId:pending.interactionId,decision:'always'}));
+ await channel.answer({interactionId:pending.interactionId,decision:'allowed-once'});
+ const call=f.calls.find(item=>item.method==='$events/result');assert.deepEqual(call.payload.args,{clientId:'fixture-client',eventId:'native-event',outcome:{kind:'result',value:'allowed-once'}});
+ assert.equal(channel.list().length,0);finish();assert.equal((await running).status,'succeeded');
+ await assert.rejects(channel.answer({interactionId:pending.interactionId,decision:'allowed-once'}));
+});
