@@ -157,6 +157,11 @@ test('real native attachment reference is materialized on device and saved once 
  assert.equal(value.status,'observed');assert.equal(value.observations,undefined);f.complete(action.id,value.data,{status:value.status});
  const saved=f.repo.getConversation(chat.id).messages[0];assert.equal(saved.content,'原生图文');assert.equal(saved.attachments[0]?.content,png);assert.equal(saved.attachments[0]?.size,ref.bytes);
 });
+test('routine presented image artifacts are delivered in normal chat and repeated reads remain single',t=>{
+ const f=fixture(t),chat=f.repo.createConversation(SLUG,{employeeId:f.employee.id}),png=rasterFixtures.png.toString('base64'),snapshot=routineSnapshot([[{type:'text',text:'文件交付完成'}]]);
+ snapshot.snapshot.records.splice(1,0,routineEvent('deliverables/presented',{turn:1,files:[{path:'D:/work/receipt.png'}],outputArtifacts:[{name:'receipt.png',mimeType:'image/png',contentEncoding:'base64',content:png,size:rasterFixtures.png.length}]},2));
+ readRoutine(f,'presented-1',snapshot);readRoutine(f,'presented-2',snapshot);const messages=f.repo.getConversation(chat.id).messages;assert.equal(messages.length,1);assert.equal(messages[0].attachments[0]?.content,png);assert.equal(messages[0].attachments[0]?.name,'receipt.png');
+});
 
 test('an explicit unavailable observation invalidates current data and retains the older canonical snapshot as history',t=>{
  const f=fixture(t),old=f.observe(),next=f.action({resource:'settings',operation:'describe',input:{},idempotencyKey:'settings-offline'});f.complete(next.action.id,null,{status:'unknown',observations:{settings:{status:'unavailable',reasonCode:'DSH_NATIVE_NOT_READY',data:null}}});const section=f.state().resources.settings;assert.equal(section.status,'unknown');assert.equal(section.reasonCode,'DSH_NATIVE_NOT_READY');assert.equal(section.data,null);assert.equal(section.snapshot.actionId,old);assert.equal(section.snapshot.stale,true);

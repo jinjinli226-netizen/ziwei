@@ -1,3 +1,4 @@
+import path from 'node:path';
 import {MAX_CONVERSATION_IMAGE_BYTES,validateImageBytes} from './conversation-image-artifacts.mjs';
 
 export async function executeDshNativeSessionOperation({resource,operation,input={},scope,rpc,followSnapshot}={}){
@@ -79,17 +80,38 @@ async function materializeHistoryImages(snapshot,sessionId,rpc){
   const events=snapshot.records.map(record=>record?.event||record),start=events.findLastIndex(event=>event?.type==='turn/start'),tail=events.slice(Math.max(0,start));
   const end=tail.findLast(event=>event?.type==='turn/end'),turn=events[start]?.data?.turn??end?.data?.turn;
   if(!end||end.data?.turn!==turn||!['completed','aborted','blocked','error','max-tokens','interrupted','forked','failed'].includes(end.data?.reason?.kind))return;
-  const seen=new Set();let count=0,total=0;
+  const seen=new Set();let count=0,total=0,workingDirectory=snapshot.projections?.values?.workingDirectory;
   for(const event of tail){
-    if(!['assistant/message','tool/result'].includes(event?.type)||event.data?.turn!==turn||event.surfaceOp&&event.surfaceOp!=='append')continue;
+    if(event.data?.turn!==turn||event.surfaceOp&&event.surfaceOp!=='append')continue;
+    if(event.type==='deliverables/presented'){
+      event.data.outputArtifacts=[];event.data.rejectedOutputImages=0;
+      for(const file of Array.isArray(event.data.files)?event.data.files:[]){
+        if(typeof file?.path!=='string'||!/\.(?:png|jpe?g|gif|webp)$/i.test(file.path))continue;
+        if(typeof workingDirectory!=='string'||!workingDirectory){snapshot.projections=await readProjections(rpc,sessionId);workingDirectory=snapshot.projections?.values?.workingDirectory;}
+        const relative=presentedImagePath(workingDirectory,file.path),key=`file:${process.platform==='win32'?relative.toLowerCase():relative}`;
+        if(seen.has(key))continue;
+        seen.add(key);
+        if(count>=20||total>=MAX_CONVERSATION_IMAGE_BYTES){event.data.rejectedOutputImages++;continue;}
+        const value=await rpc('workspaceFiles/readBytes',{workspaceFileScopeId:sessionId,path:relative,options:{}});
+        if(!(value?.data instanceof Uint8Array))throw Error('Invalid native presented image response');
+        const bytes=Buffer.from(value.data);
+        if(total+bytes.length>MAX_CONVERSATION_IMAGE_BYTES){event.data.rejectedOutputImages++;continue;}
+        const mimeType=validateImageBytes(bytes);
+        event.data.outputArtifacts.push({name:path.posix.basename(relative),mimeType,contentEncoding:'base64',content:bytes.toString('base64'),size:bytes.length});
+        count++;total+=bytes.length;
+      }
+      continue;
+    }
+    if(!['assistant/message','tool/result'].includes(event.type))continue;
     const blocks=event.data?.message?.content||event.data?.content;
     if(!Array.isArray(blocks))continue;
     for(const block of blocks){
       if(block?.type!=='image'||!block.attachment)continue;
       const ref=block.attachment;
       if(typeof ref.attachmentId!=='string'||!ref.attachmentId||!Number.isSafeInteger(ref.bytes)||ref.bytes<=0)throw Error('Invalid native image reference');
-      if(seen.has(ref.attachmentId))continue;
-      seen.add(ref.attachmentId);
+      const key=`attachment:${ref.attachmentId}`;
+      if(seen.has(key))continue;
+      seen.add(key);
       if(count>=20||total+ref.bytes>MAX_CONVERSATION_IMAGE_BYTES)continue;
       const value=await rpc('session/attachment',{request:{sessionId,attachmentId:ref.attachmentId}}),image=decodeHistoryAttachment(value,ref);
       count++;total+=ref.bytes;
@@ -97,6 +119,14 @@ async function materializeHistoryImages(snapshot,sessionId,rpc){
       Object.assign(block,image);
     }
   }
+}
+function presentedImagePath(root,filename){
+  if(typeof root!=='string'||!root)throw Error('Native session working directory unavailable');
+  const windows=/^(?:[A-Za-z]:[\\/]|\\\\)/.test(root),paths=windows?path.win32:path.posix;
+  if(!paths.isAbsolute(root)||!paths.isAbsolute(filename)||windows&&!/^(?:[A-Za-z]:[\\/]|\\\\)/.test(filename))throw Error('Native presented image path must be absolute');
+  const relative=paths.relative(root,filename);
+  if(!relative||relative==='..'||relative.startsWith(`..${paths.sep}`)||paths.isAbsolute(relative))throw Error('Native presented image is outside its session workspace');
+  return relative.replace(/\\/g,'/');
 }
 function decodeHistoryAttachment(value,ref){
   if(value?.attachment?.attachmentId!==ref.attachmentId||value.attachment.mediaType!==ref.mediaType||value.attachment.bytes!==ref.bytes||typeof value.data!=='string'||value.data.length>Math.ceil(MAX_CONVERSATION_IMAGE_BYTES/3)*4)throw Error('Invalid native image response');

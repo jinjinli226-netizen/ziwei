@@ -11,6 +11,12 @@ export function dshRoutineHistoryReply(result){
  if(!end||!['completed','error','max-tokens','blocked','interrupted','forked','failed','aborted'].includes(end.data?.reason?.kind))return null;
  const texts=[],images=[],imageIds=new Set();let rejectedImages=0;
  for(const event of tail){
+  if(event?.type==='deliverables/presented'&&event.data?.turn===turn){
+   rejectedImages+=event.data.rejectedOutputImages||0;
+   for(const item of event.data.outputArtifacts||[]){
+    try{const normalized=normalizeConversationAttachments([...images,item],{imagesOnly:true});images.splice(0,images.length,...normalized);}catch{rejectedImages++;}
+   }
+  }
   if(!['assistant/message','tool/result'].includes(event?.type)||event.data?.turn!==turn||event.surfaceOp&&event.surfaceOp!=='append')continue;
   const content=event.data?.message?.content||event.data?.content;
   if(!Array.isArray(content))continue;

@@ -7,6 +7,7 @@ import {executeDshNativeGroupMetadata} from './dsh-native-groups.mjs';
 import {publicDshSettings} from './dsh-native-settings.mjs';
 import {updateDshNativeProvider} from './dsh-native-provider.mjs';
 import {executeDshNativeGroupRun} from './dsh-native-group-run.mjs';
+import {MAX_CONVERSATION_IMAGE_BYTES} from './conversation-image-artifacts.mjs';
 
 const object=value=>value!==null&&typeof value==='object'&&!Array.isArray(value);
 const pick=(value,keys)=>Object.fromEntries(keys.filter(key=>Object.hasOwn(value,key)).map(key=>[key,value[key]]));
@@ -33,7 +34,7 @@ export async function executeDshNativeOperation(action,{workspace,deviceId,baseU
   let response,value;
   try{
    response=await fetchImpl(`${baseUrl.replace(/\/$/,'')}${path}`,{method,redirect:'error',headers:body===undefined?undefined:{'content-type':'application/json'},body:body===undefined?undefined:JSON.stringify(body),signal:signal?AbortSignal.any([signal,AbortSignal.timeout(entry.timeoutMs)]):AbortSignal.timeout(entry.timeoutMs)});
-   value=await response.json();
+   value=body?.method==='workspaceFiles/readBytes'&&response.headers.get('content-type')?.toLowerCase().startsWith('multipart/form-data')?await workspaceBytesResponse(response):await response.json();
   }catch{fail('DSH_NATIVE_TRANSPORT_UNAVAILABLE');}
   if(!response.ok||value?.ok===false)throw Object.assign(new Error('DSH_NATIVE_HTTP_FAILED'),{code:'DSH_NATIVE_HTTP_FAILED',nativeRefused:!response.ok&&response.status>=400&&response.status<500});
   if(mutation&&value.type!=='server-response')mutationAccepted=true;
@@ -232,6 +233,19 @@ export async function executeDshNativeOperation(action,{workspace,deviceId,baseU
   if(!mutationSent)throw error;
   return result(!mutationAccepted&&error.nativeRefused?'failed':'unknown',{error:errorView(error),...(mutationAccepted?{writeAccepted:true}:{})});
  }
+}
+
+async function workspaceBytesResponse(response){
+ const form=await response.formData(),metadata=form.get('metadata');
+ if(typeof metadata!=='string')fail('DSH_NATIVE_RPC_INVALID');
+ const value=JSON.parse(metadata),parts=value.attachments;
+ if(!Array.isArray(parts)||parts.length!==1)fail('DSH_NATIVE_RPC_INVALID');
+ const part=parts[0];
+ if(part?.codec!=='bytes'||!Array.isArray(part.path)||part.path.length!==1||part.path[0]!=='data'||typeof part.part!=='string'||!object(value.result?.value))fail('DSH_NATIVE_RPC_INVALID');
+ const bytes=form.get(part.part);
+ if(!(bytes instanceof Blob)||bytes.size>MAX_CONVERSATION_IMAGE_BYTES)fail('DSH_NATIVE_RPC_INVALID');
+ value.result.value.data=new Uint8Array(await bytes.arrayBuffer());
+ return value;
 }
 
 function requireNamespace(configuration,name,expectedRevision){

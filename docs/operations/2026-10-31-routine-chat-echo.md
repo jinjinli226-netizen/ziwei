@@ -8,6 +8,7 @@
 - DSH 沿用原生 Routine 调度。`backend/dsh-routine-sync.mjs` 通过既有服务端 tick 排队 `routines.list` / `sessions.history` 只读动作，不创建第二套 schedule、不重放原业务；浏览器关闭或切换员工仍采集。
 - 采集指针保存到 `management_requests`，多任务公平读取、重启后查原动作、断线后读取保留的尝试历史。空结果、进行中和图片读取失败可再次读取，不写已送达标记。
 - `src/dsh-native-session-operations.mjs` 对当前终态 turn 的 assistant/tool 输出 image attachment ref，调用绑定 session 的 `session/attachment` 取回真实字节。用户输入、旧 turn 和非 append 压缩副本不成为新结果；图片共享 20 张/10 MiB 限制。history 不再重复放入 canonical observations，避免双份 base64。
+- 原生 `deliverables/presented` 的文件引用走绑定 session 的 `workspaceFiles/readBytes`；根据原生 workingDirectory 换算受约束相对路径，解码真实 multipart bytes。不使用本机路径直接读文件，不伪造 attachmentId。物化结果在该原生事件的 `data.outputArtifacts` 中传回。
 - `backend/dsh-routine-results.mjs` 汇集同一终态 turn 的文本/图片；成功、原生 error/max-tokens/blocked/interrupted/forked 和取消分别保持真实结果。终态与当前员工绑定核实后，消息和每次尝试的幂等标记在同一 savepoint 保存，排除群专用会话。
 - 前端例行页不显示结果正文，也不靠前端定时采集；正常聊天复用已有消息、图片预览/下载及实时刷新。
 
@@ -17,6 +18,7 @@
 - 新增后台采集/主聊天落库/原生附件读取及其相关测试 104/104 通过，覆盖完整原生附件 ref→设备字节→服务端聊天附件；图片读取失败保留 unknown。
 - lint 413 源文件通过；前端生产构建通过。
 - 使用新源码适配器只读读取 DSH 已有真实文字测试 session：31 条记录、completed 终态、238 字 assistant 正文；没有新增模型任务。此项没有图片，不能代替真实图片验收。
+- 随后 DSH 作者生成实际图文测试任务，Root 用新适配器独立只读读取真实 session：203 字 assistant 正文及 `receipt.png`（PNG、174 bytes）；SHA256 `4080cdc298b5f05a310e274626e6ad4f2477d8b130dca197eda989caa6a71ba4` 与原文件相同。取图与主聊天落库相关组合回归 130/130 通过。此证据是源码适配器对实际原生任务的读取，尚非正式网页已发布证明。
 
 ## 发布边界
 

@@ -1,9 +1,47 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {rasterFixtures} from './fixtures/raster-images.mjs';
 const module=await import('../src/dsh-native-operations.mjs').catch(error=>{if(error.code!=='ERR_MODULE_NOT_FOUND')throw error;return {};});
 const subject={workspace:'test',workspaceId:'ws',employeeId:'employee',deviceId:'pc',runtime:'DSH',profile:'alpha'};
 const action=(resource,operation,input={})=>({id:'native-action',type:'employee.dsh.operation',payload:{workspace:'test',workspaceId:'ws',deviceId:'pc',dshOperation:{schemaVersion:1,subject,scope:{kind:'bot'},resource,operation,input}}});
 const copy=value=>structuredClone(value);
+const presentedSnapshot=()=>({type:'snapshot',projections:{values:{workingDirectory:'D:\\native-work'}},records:[
+ {type:'event',event:{type:'turn/start',data:{turn:1}}},
+ {type:'event',event:{type:'deliverables/presented',data:{turn:1,files:[{path:'D:\\native-work\\result.png'}]}}},
+ {type:'event',event:{type:'turn/end',data:{turn:1,reason:{kind:'completed'}}}},
+]});
+function workspaceBytesResponse(rpcId,{attachment={path:['data'],codec:'bytes',part:'bytes-0'},bytes=rasterFixtures.png,includeBytes=true}={}){
+ const form=new FormData();
+ form.set('metadata',JSON.stringify({type:'server-response',rpcId,result:{ok:true,value:{data:null}},attachments:[attachment]}));
+ if(includeBytes)form.set('bytes-0',new Blob([bytes]),'result.png');
+ return new Response(form);
+}
+
+test('session history reads native presented image bytes from the multipart workspace RPC',async()=>{
+ const calls=[],result=await module.executeDshNativeOperation(action('sessions','history',{sessionId:'image-session'}),{
+  workspace:'test',deviceId:'pc',baseUrl:'http://local-hub',followSnapshot:async()=>presentedSnapshot(),fetchImpl:async(url,init)=>{
+   const request=JSON.parse(init.body);calls.push({url,request});return workspaceBytesResponse(request.rpcId);
+  },
+ });
+ assert.equal(result.status,'observed');
+ assert.equal(result.data.snapshot.records[1].event.data.outputArtifacts[0].content,rasterFixtures.png.toString('base64'));
+ assert.equal(calls.length,1);assert.equal(calls[0].url,'http://local-hub/runtime/alpha/api/workspaceFiles/readBytes');
+ assert.deepEqual(calls[0].request.payload.args,{workspaceFileScopeId:'image-session',path:'result.png',options:{}});
+ assert.equal(result.observations,undefined);
+});
+
+for(const failure of ['path','codec','part','oversized'])test(`malformed multipart workspace image ${failure} stays retryable`,async()=>{
+ const attachment={path:['data'],codec:'bytes',part:'bytes-0'};
+ if(failure==='path')attachment.path=['private','data'];
+ if(failure==='codec')attachment.codec='json';
+ const responseOptions={attachment,includeBytes:failure!=='part',...(failure==='oversized'?{bytes:Buffer.alloc(10*1024*1024+1)}:{})};
+ const result=await module.executeDshNativeOperation(action('sessions','history',{sessionId:'image-session'}),{
+  workspace:'test',deviceId:'pc',baseUrl:'http://local-hub',followSnapshot:async()=>presentedSnapshot(),fetchImpl:async(_url,init)=>workspaceBytesResponse(JSON.parse(init.body).rpcId,responseOptions),
+ });
+ assert.equal(result.status,'unknown');assert.equal(result.reasonCode,'DSH_NATIVE_SESSION_ATTACHMENTS_UNAVAILABLE');
+ assert.deepEqual(result.data.snapshot.records[1].event.data.outputArtifacts,[]);
+});
+
 function fixture(extra={}){
  const calls=[],namespaces=[
   {ns:'agent-loop',revision:3,applies:'live',schema:{uid:1,refs:{1:{type:'object',dict:{count:2,password:3}},2:{type:'number'},3:{type:'string',meta:{role:'secret'}}}},value:{count:2},base:{count:1},user:{count:2},secrets:[{path:['password'],set:true}]},

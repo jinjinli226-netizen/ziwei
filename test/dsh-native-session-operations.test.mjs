@@ -262,3 +262,50 @@ for(const failure of ['identity','bytes','encoding','mime'])test(`native attachm
  const result=await executeDshNativeSessionOperation({resource:'sessions',operation:'history',scope,rpc:async()=>value,followSnapshot:async()=>completedImages([image])});
  assert.equal(result.status,'unknown');assert.equal(result.reasonCode,'DSH_NATIVE_SESSION_ATTACHMENTS_UNAVAILABLE');
 });
+
+const presentedSnapshot=(files,workingDirectory='D:\\DSH_Bots\\community-lead\\work')=>({type:'snapshot',projections:projection({workingDirectory}),records:[
+ historyEvent('turn/start',{turn:1}),historyEvent('deliverables/presented',{turn:1,callId:'present-files',files}),historyEvent('turn/end',{turn:1,reason:{kind:'completed'}}),
+]});
+
+test('native presented PNG files are hydrated through their exact session workspace scope',async()=>{
+ const file={path:'D:\\DSH_Bots\\community-lead\\work\\.routine-acceptance\\20261031-image-proof\\receipt.png',description:'Routine image proof'},calls=[];
+ const result=await executeDshNativeSessionOperation({resource:'sessions',operation:'history',input:{sessionId:'routine-session'},scope:{kind:'bot'},rpc:async(method,args)=>{
+  calls.push({method,args});return{data:new Uint8Array(rasterFixtures.png)};
+ },followSnapshot:async()=>presentedSnapshot([file,file,{path:'D:\\DSH_Bots\\community-lead\\work\\notes.txt'}])});
+ assert.equal(result.status,'observed');assert.deepEqual(calls,[{method:'workspaceFiles/readBytes',args:{workspaceFileScopeId:'routine-session',path:'.routine-acceptance/20261031-image-proof/receipt.png',options:{}}}]);
+ assert.deepEqual(result.data.snapshot.records[1].event.data.outputArtifacts,[{name:'receipt.png',mimeType:'image/png',contentEncoding:'base64',content:rasterFixtures.png.toString('base64'),size:rasterFixtures.png.length}]);
+ assert.deepEqual(result.data.snapshot.records[1].event.data.files,[file,file,{path:'D:\\DSH_Bots\\community-lead\\work\\notes.txt'}]);
+});
+
+test('presented files obtain missing working directory from the bound native session projection',async()=>{
+ const calls=[],snapshot=presentedSnapshot([{path:'/native/work/result.png'}]);delete snapshot.projections;
+ const result=await executeDshNativeSessionOperation({resource:'sessions',operation:'history',input:{sessionId:'different-input'},scope,rpc:async(method,args)=>{
+  calls.push({method,args});return method==='session/projections'?projection({workingDirectory:'/native/work'}):{data:new Uint8Array(rasterFixtures.png)};
+ },followSnapshot:async()=>snapshot});
+ assert.equal(result.status,'observed');assert.deepEqual(calls,[{method:'session/projections',args:{request:{sessionId:'native-session'}}},{method:'workspaceFiles/readBytes',args:{workspaceFileScopeId:'native-session',path:'result.png',options:{}}}]);
+ assert.equal(result.data.snapshot.records[1].event.data.outputArtifacts.length,1);
+});
+
+for(const path of ['D:\\DSH_Bots\\other-bot\\work\\private.png','D:\\DSH_Bots\\community-lead\\work-neighbor\\private.png','D:\\DSH_Bots\\community-lead\\work\\..\\private.png','relative.png'])test(`presented image outside its native root is not read: ${path}`,async()=>{
+ const result=await executeDshNativeSessionOperation({resource:'sessions',operation:'history',scope,rpc:async()=>assert.fail('no unrelated workspace file access'),followSnapshot:async()=>presentedSnapshot([{path}])});
+ assert.equal(result.status,'unknown');assert.equal(result.reasonCode,'DSH_NATIVE_SESSION_ATTACHMENTS_UNAVAILABLE');
+ assert.equal(result.data.snapshot.records[1].event.data.files[0].path,path);
+});
+
+test('a failed presented-file read stays unknown with earlier image bytes intact for retry',async()=>{
+ const calls=[],snapshot=presentedSnapshot([{path:'D:\\DSH_Bots\\community-lead\\work\\first.png'},{path:'D:\\DSH_Bots\\community-lead\\work\\missing.png'}]);
+ const result=await executeDshNativeSessionOperation({resource:'sessions',operation:'history',scope,rpc:async(_method,args)=>{
+  calls.push(args.path);if(args.path==='missing.png')throw Error('private local read diagnostic');return{data:new Uint8Array(rasterFixtures.png)};
+ },followSnapshot:async()=>snapshot});
+ assert.equal(result.status,'unknown');assert.equal(result.reasonCode,'DSH_NATIVE_SESSION_ATTACHMENTS_UNAVAILABLE');assert.deepEqual(calls,['first.png','missing.png']);
+ assert.equal(result.data.snapshot.records[1].event.data.outputArtifacts[0].content,rasterFixtures.png.toString('base64'));assert.doesNotMatch(JSON.stringify(result),/private local read diagnostic/);
+});
+
+test('presented image output shares the same twenty-image limit as native image references',async()=>{
+ const refs=Array.from({length:20},(_,index)=>nativeImage(`ref-${index}`)),snapshot=presentedSnapshot([{path:'D:\\DSH_Bots\\community-lead\\work\\late.png'}]);
+ snapshot.records.splice(1,0,historyEvent('assistant/message',{turn:1,message:{content:refs}}));
+ const result=await executeDshNativeSessionOperation({resource:'sessions',operation:'history',scope,rpc:async(method,args)=>{
+  assert.equal(method,'session/attachment');return{attachment:refs.find(block=>block.attachment.attachmentId===args.request.attachmentId).attachment,data:rasterFixtures.png.toString('base64')};
+ },followSnapshot:async()=>snapshot});
+ assert.equal(result.status,'observed');assert.deepEqual(result.data.snapshot.records[2].event.data.outputArtifacts,[]);assert.equal(result.data.snapshot.records[2].event.data.rejectedOutputImages,1);
+});
