@@ -37,6 +37,7 @@ import {createEmployeeCapabilityInventory} from './employee-capability-inventory
 import {createDshPluginsService} from './dsh-plugins.mjs';
 import {createConversationStop} from './conversation-stop.mjs';
 import {createDshNativeService} from './dsh-native-operations.mjs';
+import {createDshRoutineSync} from './dsh-routine-sync.mjs';
 import {mountDshNativeRoutes} from './dsh-native-routes.mjs';
 import {createDshNativeSecrets} from './dsh-native-secrets.mjs';
 import {createDshNativeGroupDispatch} from './dsh-native-group-dispatch.mjs';
@@ -327,6 +328,8 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   const dshPlugins=createDshPluginsService(repo,{management});
   const stopConversationExecution=createConversationStop(repo);
   const dshNative=createDshNativeService(repo,{management});
+  const dshRoutineSync=createDshRoutineSync(repo,{nativeService:dshNative});
+  app.locals.dshRoutineSync=dshRoutineSync;
   const dshNativeSecrets=createDshNativeSecrets(repo,{management,nativeService:dshNative});
   const dshNativeGroupDispatch=createDshNativeGroupDispatch(repo,{management});
   const dshPluginUiRelay=createDshPluginUiRelayService(repo,{management,nativeService:dshNative});
@@ -542,7 +545,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   });
   // The scheduler is repository backed: every workspace is scanned from its
   // durable next_run value, and webhook retries are drained in the same tick.
-  const scheduler = repo.serverCodeRollout || options.memory || options.enableScheduler === false ? null : setInterval(() => { try { repo.tickAutomations(); } catch {} }, Number(process.env.ZIWEI_SCHEDULER_MS || 15000));
+  const scheduler = repo.serverCodeRollout || options.memory || options.enableScheduler === false ? null : setInterval(() => { try { repo.tickAutomations(); } catch {} try { dshRoutineSync.tick(); } catch {} }, Number(process.env.ZIWEI_SCHEDULER_MS || 15000));
   scheduler?.unref?.();
   app.locals.scheduler=scheduler;
 
@@ -1143,7 +1146,7 @@ export function startServer({ port = Number(process.env.API_PORT || 4178), host 
   const app = createApp({ ...options, objectStoreDir });
   const server = app.listen(port, host, () => console.log(JSON.stringify({ event:'started', service:'ziwei-api', cli:'ziwei_user', host, port, pid:process.pid, at:new Date().toISOString() })));
   attachRealtimeWebSocket(server, app);
-  server.on('close',()=>app.locals.botDeferredConfig.stop());
+  server.on('close',()=>{app.locals.botDeferredConfig.stop();clearInterval(app.locals.scheduler);});
   return server;
 }
 

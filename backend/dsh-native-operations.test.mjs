@@ -5,6 +5,7 @@ import {createManagementService} from './management.mjs';
 import {createDshNativeService,assertDshNativeSubject,projectDshNativeAction,registerDshNativeResult,assertDshNativeActionVisible,projectDshNativeData,dshNativeGroupTargets} from './dsh-native-operations.mjs';
 import {DSH_NATIVE_FEATURE,DSH_NATIVE_TYPE} from '../src/dsh-native-contract.mjs';
 import {rasterFixtures} from '../test/fixtures/raster-images.mjs';
+import {executeDshNativeOperation} from '../src/dsh-native-operations.mjs';
 
 const SLUG='test-111',BUNDLE='@deepseek-ai/dsh-experimental-cot-translation-bundle',ENTRY='loader-public-reference-012345678901234567890123456789';
 function fixture(t,{feature=true}={}){
@@ -109,10 +110,52 @@ test('native session-created registration is restricted to the original empty co
 test('a DSH routine history result is echoed to the employee main chat with images once',t=>{
  const f=fixture(t),conversation=f.repo.createConversation(SLUG,{employeeId:f.employee.id,title:'主聊天'}),png=rasterFixtures.png.toString('base64');
  const queued=f.action({resource:'sessions',operation:'history',input:{sessionId:'routine-session',routineId:'routine-one',maxMessages:100},idempotencyKey:'routine-history-1'}),action=f.repo.getA2AAction(queued.action.id);
- f.complete(action.id,{snapshot:{type:'snapshot',records:[{type:'event',seq:7,event:{type:'assistant/message',data:{message:{content:[{type:'text',text:'例行结果已完成'}, {type:'image',mimeType:'image/png',data:png}]}}}}]}});
+ f.complete(action.id,routineSnapshot([[{type:'text',text:'例行结果已完成'}, {type:'image',mimeType:'image/png',data:png}]]));
  let history=f.repo.getConversation(conversation.id);assert.equal(history.messages.length,1);assert.equal(history.messages[0].content,'例行结果已完成');assert.equal(history.messages[0].attachments[0].content,png);assert.equal(history.messages[0].attachments[0].mimeType,'image/png');
- const retry=f.action({resource:'sessions',operation:'history',input:{sessionId:'routine-session',routineId:'routine-one',maxMessages:100},idempotencyKey:'routine-history-2'});f.complete(retry.action.id,{snapshot:{type:'snapshot',records:[{type:'event',seq:7,event:{type:'assistant/message',data:{message:{content:[{type:'text',text:'例行结果已完成'}, {type:'image',mimeType:'image/png',data:png}]}}}}]}});
+ const retry=f.action({resource:'sessions',operation:'history',input:{sessionId:'routine-session',routineId:'routine-one',maxMessages:100},idempotencyKey:'routine-history-2'});f.complete(retry.action.id,routineSnapshot([[{type:'text',text:'例行结果已完成'}, {type:'image',mimeType:'image/png',data:png}]]));
  history=f.repo.getConversation(conversation.id);assert.equal(history.messages.length,1);assert.equal(f.db.prepare("SELECT count(*) n FROM management_requests WHERE kind='dsh-routine-result-v1'").get().n,1);
+});
+
+const routineEvent=(type,data,seq)=>({type:'event',event:{type,data,seq}});
+function routineSnapshot(blocks){return {snapshot:{type:'snapshot',records:[routineEvent('turn/start',{turn:1},1),...blocks.map((content,index)=>routineEvent('assistant/message',{turn:1,step:index,message:{content}},index+2)),routineEvent('turn/end',{turn:1,reason:{kind:'completed'}},blocks.length+2)]}};}
+function readRoutine(f,key,data){const action=f.action({resource:'sessions',operation:'history',input:{sessionId:'real-routine-session',routineId:'daily'},idempotencyKey:key});f.complete(action.action.id,data);return action;}
+test('routine sync waits for a completed turn rather than saving partial or empty history',t=>{
+ const f=fixture(t),chat=f.repo.createConversation(SLUG,{employeeId:f.employee.id});
+ readRoutine(f,'partial',{snapshot:{records:[routineEvent('turn/start',{turn:1},1),routineEvent('assistant/message',{turn:1,message:{content:[{type:'text',text:'正在读取'}]}},2)]}});
+ assert.equal(f.repo.getConversation(chat.id).messages.length,0);
+ readRoutine(f,'complete',routineSnapshot([[{type:'text',text:'最终日报'}]]));assert.equal(f.repo.getConversation(chat.id).messages[0].content,'最终日报');
+});
+test('one completed routine keeps earlier image blocks together with its final answer',t=>{
+ const f=fixture(t),chat=f.repo.createConversation(SLUG,{employeeId:f.employee.id}),png=rasterFixtures.png.toString('base64');
+ readRoutine(f,'image-and-final',routineSnapshot([[{type:'image',mimeType:'image/png',data:png}],[{type:'text',text:'图文日报'}]]));
+ const messages=f.repo.getConversation(chat.id).messages;assert.equal(messages.length,1);assert.equal(messages[0].content,'图文日报');assert.equal(messages[0].attachments[0]?.content,png);
+});
+test('routine delivery excludes newer restricted group chats',t=>{
+ const f=fixture(t),chat=f.repo.createConversation(SLUG,{employeeId:f.employee.id}),group=f.repo.createConversation(SLUG,{employeeId:f.employee.id,title:'DSH Group: peer'});
+ f.db.prepare('INSERT INTO management_requests VALUES(?,?,?,?,?,?)').run(f.ws.id,'dsh.group.conversation','group-binding','group-binding',group.id,new Date().toISOString());
+ f.db.prepare('UPDATE conversations SET updated_at=? WHERE id=?').run('2099-01-01T00:00:00Z',group.id);
+ readRoutine(f,'normal-chat',routineSnapshot([[{type:'text',text:'正常主聊天结果'}]]));
+ assert.equal(f.repo.getConversation(chat.id).messages.length,1);assert.equal(f.db.prepare('SELECT count(*) n FROM conversation_messages WHERE conversation_id=?').get(group.id).n,0);
+});
+for(const reason of ['error','max-tokens','blocked','interrupted','forked'])test(`native ${reason} terminal routine is reported as failed in normal chat`,t=>{
+ const f=fixture(t),chat=f.repo.createConversation(SLUG,{employeeId:f.employee.id}),snapshot=routineSnapshot([[{type:'text',text:'部分结果'}]]);
+ snapshot.snapshot.records.at(-1).event.data.reason={kind:reason};readRoutine(f,'terminal-'+reason,snapshot);
+ assert.match(f.repo.getConversation(chat.id).messages[0]?.content||'',/例行工作执行失败/);
+});
+test('routine output preserves generated tool images but excludes user images and compaction copies',t=>{
+ const f=fixture(t),chat=f.repo.createConversation(SLUG,{employeeId:f.employee.id}),png=rasterFixtures.png.toString('base64'),snapshot=routineSnapshot([[{type:'text',text:'最终正文'}]]);
+ snapshot.snapshot.records.splice(1,0,routineEvent('user/message',{turn:1,content:[{type:'image',mimeType:'image/png',data:png}]},2),routineEvent('tool/result',{turn:1,message:{content:[{type:'tool-result',content:[{type:'image',mimeType:'image/png',data:png}]}]}},3),{type:'event',event:{type:'assistant/message',surfaceOp:'replace',data:{turn:1,message:{content:[{type:'text',text:'压缩副本'}]}}}});
+ readRoutine(f,'native-tool-image',snapshot);const saved=f.repo.getConversation(chat.id).messages[0];assert.equal(saved.content,'最终正文');assert.equal(saved.attachments.length,1);assert.equal(saved.attachments[0].content,png);
+});
+test('real native attachment reference is materialized on device and saved once in the employee chat',async t=>{
+ const f=fixture(t),chat=f.repo.createConversation(SLUG,{employeeId:f.employee.id}),ref={attachmentId:'generated-native-image',mediaType:'image/png',bytes:rasterFixtures.png.length},png=rasterFixtures.png.toString('base64');
+ const queued=f.action({resource:'sessions',operation:'history',input:{sessionId:'native-image-session',routineId:'daily',attemptId:'first'},idempotencyKey:'native-image-ref'}),action=f.repo.getA2AAction(queued.action.id),snapshot=routineSnapshot([[{type:'text',text:'原生图文'}]]);
+ snapshot.snapshot.records.splice(1,0,routineEvent('tool/result',{turn:1,message:{content:[{type:'image',attachment:ref}]}},2));
+ const value=await executeDshNativeOperation(action,{workspace:SLUG,deviceId:f.deviceId,baseUrl:'http://native.invalid',followSnapshot:async()=>snapshot.snapshot,fetchImpl:async(_url,init)=>{
+  const request=JSON.parse(init.body);assert.equal(request.method,'session/attachment');assert.deepEqual(request.payload.args.request,{sessionId:'native-image-session',attachmentId:ref.attachmentId});return Response.json({type:'server-response',rpcId:request.rpcId,result:{ok:true,value:{attachment:ref,data:png}}});
+ }});
+ assert.equal(value.status,'observed');assert.equal(value.observations,undefined);f.complete(action.id,value.data,{status:value.status});
+ const saved=f.repo.getConversation(chat.id).messages[0];assert.equal(saved.content,'原生图文');assert.equal(saved.attachments[0]?.content,png);assert.equal(saved.attachments[0]?.size,ref.bytes);
 });
 
 test('an explicit unavailable observation invalidates current data and retains the older canonical snapshot as history',t=>{

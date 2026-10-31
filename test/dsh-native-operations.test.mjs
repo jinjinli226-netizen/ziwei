@@ -195,6 +195,11 @@ test('explicit workspace refresh reads routines files logs groups and bot sessio
  assert.equal(Object.values(result.data.resources).every(row=>row.status==='observed'),true);
  assert.equal(result.data.resources.groups.data.items[0].id,'g');assert.equal(result.data.resources.logs.data.lines[0],'native line');
 });
+test('session history images appear once on the result and do not duplicate into canonical observations',async()=>{
+ const f=fixture(),a=action('sessions','history',{sessionId:'routine-session'}),snapshot={type:'snapshot',records:[],hasMore:false};
+ const result=await module.executeDshNativeOperation(a,{...f.options,followSnapshot:async()=>snapshot});
+ assert.equal(result.status,'observed');assert.deepEqual(result.data.snapshot.records,[]);assert.equal(result.observations,undefined);
+});
 test('secure credential writes accept only native provider references and return credential status fields',async()=>{
  const f=fixture({'credentials/set':args=>{assert.deepEqual(args,{ref:'CUSTOM_API_KEY',value:'only-in-memory'});},'credentials/describe':()=>({CUSTOM_API_KEY:{configured:true,writable:true,source:'file',value:'never-return-this'}})});
  const options={...f.options,claimSecret:async()=>({value:'only-in-memory'})};

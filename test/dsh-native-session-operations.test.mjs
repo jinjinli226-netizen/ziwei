@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {executeDshNativeSessionOperation} from '../src/dsh-native-session-operations.mjs';
+import {rasterFixtures} from './fixtures/raster-images.mjs';
 
 const scope={kind:'conversation',conversationId:'platform-conversation',nativeSessionId:'native-session'};
 const subject={workspace:'test',employeeId:'employee',deviceId:'pc',runtime:'DSH',profile:'bot'};
@@ -167,4 +168,97 @@ test('history without a native snapshot never claims observed history',async()=>
   const result=await executeDshNativeSessionOperation({resource:'sessions',operation:'history',input:{},scope,subject,rpc:async()=>assert.fail('no unary fallback'),followSnapshot});
   assert.equal(result.status,'unknown');assert.equal(result.reasonCode,'DSH_NATIVE_SESSION_HISTORY_UNAVAILABLE');
  }
+});
+
+const historyEvent=(type,data,extra={})=>({type:'event',event:{type,data,...extra}});
+const nativeImage=(attachmentId,bytes=rasterFixtures.png.length)=>({type:'image',attachment:{attachmentId,mediaType:'image/png',bytes,width:12,height:9}});
+const completedImages=blocks=>({type:'snapshot',records:[historyEvent('turn/start',{turn:1}),historyEvent('assistant/message',{turn:1,message:{content:blocks}}),historyEvent('turn/end',{turn:1,reason:{kind:'completed'}})]});
+
+test('native history materializes current completed assistant and tool images once without returning user or compacted images',async()=>{
+ const tool=nativeImage('tool-output'),assistant=nativeImage('assistant-output'),calls=[];
+ const records=[
+  historyEvent('turn/start',{turn:0}),historyEvent('assistant/message',{turn:0,message:{content:[nativeImage('old-output')]}}),historyEvent('turn/end',{turn:0,reason:{kind:'completed'}}),
+  historyEvent('turn/start',{turn:1}),historyEvent('user/message',{turn:1,content:[nativeImage('user-input')]}),
+  historyEvent('tool/result',{turn:1,message:{content:[tool]}}),
+  historyEvent('assistant/message',{turn:1,message:{content:[nativeImage('tool-output'),{type:'text',text:'Image report'},assistant]}}),
+  historyEvent('assistant/message',{turn:1,message:{content:[nativeImage('compacted-output')]}},{surfaceOp:{op:'replace',from:1,to:2}}),
+  historyEvent('turn/end',{turn:1,reason:{kind:'completed'}}),
+ ];
+ const result=await executeDshNativeSessionOperation({resource:'sessions',operation:'history',input:{sessionId:'untrusted-input'},scope,rpc:async(method,args)=>{
+  calls.push({method,args});return{attachment:args.request.attachmentId==='tool-output'?tool.attachment:assistant.attachment,data:rasterFixtures.png.toString('base64')};
+ },followSnapshot:async()=>({type:'snapshot',records})});
+ assert.equal(result.status,'observed');
+ assert.deepEqual(calls,['tool-output','assistant-output'].map(attachmentId=>({method:'session/attachment',args:{request:{sessionId:'native-session',attachmentId}}})));
+ const output=result.data.snapshot.records;
+ assert.equal(output[5].event.data.message.content[0].data,rasterFixtures.png.toString('base64'));
+ assert.equal(output[5].event.data.message.content[0].mediaType,'image/png');assert.deepEqual(output[5].event.data.message.content[0].attachment,tool.attachment);
+ assert.equal(output[6].event.data.message.content[2].data,rasterFixtures.png.toString('base64'));
+ assert.equal(output[6].event.data.message.content[0].data,undefined);
+ assert.equal(output[1].event.data.message.content[0].data,undefined);assert.equal(output[4].event.data.content[0].data,undefined);assert.equal(output[7].event.data.message.content[0].data,undefined);
+ assert.equal(tool.data,undefined);
+});
+
+test('routine history reads attachment bytes only from the explicit bot-scoped native session',async()=>{
+ const image=nativeImage('routine-image'),calls=[];
+ const result=await executeDshNativeSessionOperation({resource:'sessions',operation:'history',input:{sessionId:'routine-session'},scope:{kind:'bot'},rpc:async(method,args)=>{
+  calls.push({method,args});return{attachment:image.attachment,data:rasterFixtures.png.toString('base64')};
+ },followSnapshot:async()=>completedImages([image])});
+ assert.equal(result.status,'observed');assert.deepEqual(calls,[{method:'session/attachment',args:{request:{sessionId:'routine-session',attachmentId:'routine-image'}}}]);
+ assert.equal(result.data.snapshot.records[1].event.data.message.content[0].data,rasterFixtures.png.toString('base64'));
+});
+
+test('unavailable native attachment bytes preserve known history and require a retry instead of reporting delivery',async()=>{
+ const first=nativeImage('known-image'),second=nativeImage('unavailable-image'),snapshot=completedImages([first,second]);
+ const result=await executeDshNativeSessionOperation({resource:'sessions',operation:'history',scope,rpc:async(_method,args)=>{
+  if(args.request.attachmentId==='unavailable-image')throw Error('private native path and credential');
+  return{attachment:first.attachment,data:rasterFixtures.png.toString('base64')};
+ },followSnapshot:async()=>snapshot});
+ assert.equal(result.status,'unknown');assert.equal(result.reasonCode,'DSH_NATIVE_SESSION_ATTACHMENTS_UNAVAILABLE');
+ assert.equal(result.data.snapshot.records[1].event.data.message.content[0].data,rasterFixtures.png.toString('base64'));
+ assert.deepEqual(result.data.snapshot.records[1].event.data.message.content[1],second);
+ assert.doesNotMatch(JSON.stringify(result),/private native path|credential/);
+});
+
+test('running native turns do not read output attachments before terminal history is available',async()=>{
+ const snapshot=completedImages([nativeImage('running-image')]);snapshot.records.pop();
+ const result=await executeDshNativeSessionOperation({resource:'sessions',operation:'history',scope,rpc:async()=>assert.fail('running images are not ready'),followSnapshot:async()=>snapshot});
+ assert.equal(result.status,'observed');assert.equal(result.data.snapshot.records[1].event.data.message.content[0].data,undefined);
+});
+
+test('native history materializes at most twenty distinct image references',async()=>{
+ const images=Array.from({length:21},(_,index)=>nativeImage(`image-${index}`)),calls=[];
+ const result=await executeDshNativeSessionOperation({resource:'sessions',operation:'history',scope,rpc:async(_method,args)=>{
+  calls.push(args.request.attachmentId);return{attachment:images.find(image=>image.attachment.attachmentId===args.request.attachmentId).attachment,data:rasterFixtures.png.toString('base64')};
+ },followSnapshot:async()=>completedImages(images)});
+ assert.equal(result.status,'observed');assert.equal(calls.length,20);assert.equal(result.data.snapshot.records[1].event.data.message.content.filter(block=>block.data).length,20);
+ assert.equal(result.data.snapshot.records[1].event.data.message.content[20].data,undefined);
+});
+
+test('native image byte budget skips an oversized reference while still returning a later supported image',async()=>{
+ const huge=nativeImage('oversized',10*1024*1024+1),small=nativeImage('small'),calls=[];
+ const result=await executeDshNativeSessionOperation({resource:'sessions',operation:'history',scope,rpc:async(_method,args)=>{
+  calls.push(args.request.attachmentId);return{attachment:small.attachment,data:rasterFixtures.png.toString('base64')};
+ },followSnapshot:async()=>completedImages([huge,small])});
+ assert.equal(result.status,'observed');assert.deepEqual(calls,['small']);assert.equal(result.data.snapshot.records[1].event.data.message.content[0].data,undefined);
+ assert.equal(result.data.snapshot.records[1].event.data.message.content[1].data,rasterFixtures.png.toString('base64'));
+});
+
+test('native history shares the ten MiB image budget across unique output references',async()=>{
+ const bytes=Buffer.concat([rasterFixtures.png,Buffer.alloc(6*1024*1024-rasterFixtures.png.length)]),images=[nativeImage('first-large',bytes.length),nativeImage('second-large',bytes.length)],calls=[];
+ const result=await executeDshNativeSessionOperation({resource:'sessions',operation:'history',scope,rpc:async(_method,args)=>{
+  calls.push(args.request.attachmentId);return{attachment:images[0].attachment,data:bytes.toString('base64')};
+ },followSnapshot:async()=>completedImages(images)});
+ assert.equal(result.status,'observed');assert.deepEqual(calls,['first-large']);
+ assert.equal(Buffer.from(result.data.snapshot.records[1].event.data.message.content[0].data,'base64').length,bytes.length);
+ assert.equal(result.data.snapshot.records[1].event.data.message.content[1].data,undefined);
+});
+
+for(const failure of ['identity','bytes','encoding','mime'])test(`native attachment ${failure} mismatch stays unknown and retryable`,async()=>{
+ const image=nativeImage('expected'),value={attachment:{...image.attachment},data:rasterFixtures.png.toString('base64')};
+ if(failure==='identity')value.attachment.attachmentId='other';
+ if(failure==='bytes')value.attachment.bytes++;
+ if(failure==='encoding')value.data='invalid base64';
+ if(failure==='mime')value.attachment.mediaType='image/jpeg';
+ const result=await executeDshNativeSessionOperation({resource:'sessions',operation:'history',scope,rpc:async()=>value,followSnapshot:async()=>completedImages([image])});
+ assert.equal(result.status,'unknown');assert.equal(result.reasonCode,'DSH_NATIVE_SESSION_ATTACHMENTS_UNAVAILABLE');
 });

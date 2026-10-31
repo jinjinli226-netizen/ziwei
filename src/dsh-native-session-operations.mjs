@@ -1,3 +1,5 @@
+import {MAX_CONVERSATION_IMAGE_BYTES,validateImageBytes} from './conversation-image-artifacts.mjs';
+
 export async function executeDshNativeSessionOperation({resource,operation,input={},scope,rpc,followSnapshot}={}){
   const supported=['sessions.list','sessions.history','sessions.projections','presets.select','plan.capabilities','plan.set','models.selectSession'];
   if(!supported.includes(`${resource}.${operation}`))return result('failed',{},'DSH_NATIVE_OPERATION_UNSUPPORTED');
@@ -21,7 +23,8 @@ export async function executeDshNativeSessionOperation({resource,operation,input
       if(typeof followSnapshot!=='function')return result('unknown',data,'DSH_NATIVE_SESSION_HISTORY_UNAVAILABLE');
       const snapshot=await followSnapshot({request:{address:{kind:'session',sessionId},assistantStream:true,maxMessages:input.maxMessages??100}});
       if(snapshot?.type!=='snapshot'||!Array.isArray(snapshot.records))return result('unknown',data,'DSH_NATIVE_SESSION_HISTORY_UNAVAILABLE');
-      data.snapshot={type:'snapshot',records:snapshot.records,hasMore:snapshot.hasMore===true,projections:projectProjections(snapshot.projections),...(snapshot.assistantStream?{assistantStream:snapshot.assistantStream}:{})};
+      data.snapshot={type:'snapshot',records:structuredClone(snapshot.records),hasMore:snapshot.hasMore===true,projections:projectProjections(snapshot.projections),...(snapshot.assistantStream?{assistantStream:snapshot.assistantStream}:{})};
+      try{await materializeHistoryImages(data.snapshot,sessionId,rpc);}catch{return result('unknown',data,'DSH_NATIVE_SESSION_ATTACHMENTS_UNAVAILABLE');}
       return result('observed',data);
     }
     if(resource==='sessions'){
@@ -72,6 +75,35 @@ export async function executeDshNativeSessionOperation({resource,operation,input
 }
 
 const result=(status,data,reasonCode)=>({status,data,...(reasonCode?{reasonCode}:{})});
+async function materializeHistoryImages(snapshot,sessionId,rpc){
+  const events=snapshot.records.map(record=>record?.event||record),start=events.findLastIndex(event=>event?.type==='turn/start'),tail=events.slice(Math.max(0,start));
+  const end=tail.findLast(event=>event?.type==='turn/end'),turn=events[start]?.data?.turn??end?.data?.turn;
+  if(!end||end.data?.turn!==turn||!['completed','aborted','blocked','error','max-tokens','interrupted','forked','failed'].includes(end.data?.reason?.kind))return;
+  const seen=new Set();let count=0,total=0;
+  for(const event of tail){
+    if(!['assistant/message','tool/result'].includes(event?.type)||event.data?.turn!==turn||event.surfaceOp&&event.surfaceOp!=='append')continue;
+    const blocks=event.data?.message?.content||event.data?.content;
+    if(!Array.isArray(blocks))continue;
+    for(const block of blocks){
+      if(block?.type!=='image'||!block.attachment)continue;
+      const ref=block.attachment;
+      if(typeof ref.attachmentId!=='string'||!ref.attachmentId||!Number.isSafeInteger(ref.bytes)||ref.bytes<=0)throw Error('Invalid native image reference');
+      if(seen.has(ref.attachmentId))continue;
+      seen.add(ref.attachmentId);
+      if(count>=20||total+ref.bytes>MAX_CONVERSATION_IMAGE_BYTES)continue;
+      const value=await rpc('session/attachment',{request:{sessionId,attachmentId:ref.attachmentId}}),image=decodeHistoryAttachment(value,ref);
+      count++;total+=ref.bytes;
+      // Inline each durable image once; repeated refs otherwise multiply upload bytes.
+      Object.assign(block,image);
+    }
+  }
+}
+function decodeHistoryAttachment(value,ref){
+  if(value?.attachment?.attachmentId!==ref.attachmentId||value.attachment.mediaType!==ref.mediaType||value.attachment.bytes!==ref.bytes||typeof value.data!=='string'||value.data.length>Math.ceil(MAX_CONVERSATION_IMAGE_BYTES/3)*4)throw Error('Invalid native image response');
+  const bytes=Buffer.from(value.data,'base64');
+  if(bytes.length!==ref.bytes||bytes.toString('base64')!==value.data)throw Error('Invalid native image bytes');
+  return{data:value.data,mediaType:validateImageBytes(bytes,ref.mediaType)};
+}
 async function readProjections(rpc,sessionId){
   return projectProjections(await rpc('session/projections',{request:{sessionId}}));
 }

@@ -13,38 +13,17 @@ const pluginPanel=ref(null),persona=ref(''),metadata=reactive({displayName:'',av
 const bot=computed(()=>native.resource('bot')?.data);
 const lock=computed(()=>secure.state.busy||secure.state.unknown);
 const busy=computed(()=>lock.value||native.state.loading||native.state.submitting||Boolean(native.state.request)||Boolean(native.state.value?.pending?.length));
-let visit=0,routineTimer=null,routineSyncing=false;
-const routineEchoed=new Set(),routinePending=new Map();
+let visit=0;
 watch(()=>[props.actorId,props.workspace,props.employee.id,props.employee.target_device_id,props.employee.runtime_profile],async()=>{
  const selected=++visit;secure.clear();await native.select(null);if(selected!==visit)return;
  await native.select({actorId:props.actorId,workspace:props.workspace,employeeId:props.employee.id},{active:props.active});
 },{immediate:true});
-watch(()=>props.active,active=>{if(native.state.subject)void native.select(native.state.subject,{active});if(active)void syncRoutineList();else clearRoutineTimer();});
+watch(()=>props.active,active=>{if(native.state.subject)void native.select(native.state.subject,{active});});
 watch(bot,(value,previous)=>{if(!value)return;if(!previous||persona.value===(previous.persona||''))persona.value=value.persona||'';const next=value.metadata&&typeof value.metadata==='object'?value.metadata:value;for(const key of Object.keys(metadata))if(!previous||metadata[key]===previous.metadata?.[key]||metadata[key]===previous[key])metadata[key]=next[key]??metadata[key];});
 watch(()=>secure.state.action,action=>{if(action?.status==='succeeded'&&action.result?.dshNative?.status==='applied'&&action.payload?.dshOperation?.resource==='settings')pluginPanel.value?.resetSettings();});
-watch(()=>native.state.action,action=>{const input=action?.payload?.dshOperation?.input,operation=action?.payload?.dshOperation;if(operation?.resource!=='sessions'||operation.operation!=='history'||typeof input?.routineId!=='string')return;const key=routinePending.get(action.id);if(!key||!['succeeded','failed','expired','cancelled'].includes(action.status))return;routinePending.delete(action.id);if(action.status==='succeeded')routineEchoed.add(key);else routineEchoed.delete(key);});
-watch(()=>[native.state.value,native.state.request,native.state.loading,native.state.submitting,native.resource('routines')?.data],()=>{if(props.active&&!busy.value){if(native.resource('routines')?.data)void syncRoutineHistory();else void syncRoutineList();}},{deep:true});
-function clearRoutineTimer(){if(routineTimer!==null)clearTimeout(routineTimer);routineTimer=null;}
-function scheduleRoutineList(){clearRoutineTimer();if(!props.active)return;routineTimer=setTimeout(async()=>{routineTimer=null;await syncRoutineList();scheduleRoutineList();},30000);routineTimer?.unref?.();}
-async function syncRoutineList(){
- if(!props.active||routineSyncing||busy.value||!native.state.subject||!native.supported('routines','list'))return;
- routineSyncing=true;
- try{await native.submit('routines','list',{});scheduleRoutineList();}finally{routineSyncing=false;}
-}
-async function syncRoutineHistory(){
- if(!props.active||routineSyncing||busy.value||!native.supported('sessions','history'))return;
- const items=native.resource('routines')?.data?.items||[];
- for(const item of items){
-  if(!item?.id||!item.lastSessionId)continue;
-  const key=`${item.id}:${item.lastSessionId}:${item.lastAttemptId||item.lastRun||''}`;
-  if(routineEchoed.has(key)||busy.value)return;
-  const result=await native.submit('sessions','history',{sessionId:item.lastSessionId,routineId:item.id,maxMessages:100});
-  if(result?.action?.id)routinePending.set(result.action.id,key);else routineEchoed.delete(key);
- }
-}
 function processControl(operation){if(operation==='stop'&&!window.confirm('停止当前 DSH Bot 进程会中断它的全部会话。继续停止？'))return;return native.submit('bot',operation,{});}
 function saveMetadata(){return native.submit('bot','metadata',{displayName:metadata.displayName,avatar:metadata.avatar,section:metadata.section,pinned:metadata.pinned,hidden:metadata.hidden,notify:metadata.notify});}
-onBeforeUnmount(()=>{visit++;clearRoutineTimer();secure.dispose();native.dispose();});
+onBeforeUnmount(()=>{visit++;secure.dispose();native.dispose();});
 </script>
 <template>
  <section class="dsh-native-management">
