@@ -646,7 +646,7 @@ async function changeLanguage(value) {
 }
 function refreshVisibleWorkspace() {
   void loadNotifications();
-  if(page.value==='bots')return;
+  if(page.value==='bots'){if(selectedConversation.value?.id)void refreshSelectedConversation();return;}
   if(focusedConversation.value){void refreshConversationState();return;}
   void refreshTasks();void refreshConversationState();
 }

@@ -56,7 +56,7 @@ for(const [resource,operation,scope,inputSchema] of [
  ['sessions','list','bot',object({})],
  ['sessions','projections','conversation',object({})],
  ['sessions','create','conversation',object({agentPreset:string()},[])],
- ['sessions','history','either',object({sessionId:string(600),maxMessages:{type:'integer',minimum:1,maximum:1000}},[])],
+ ['sessions','history','either',object({sessionId:string(600),routineId:string(240),maxMessages:{type:'integer',minimum:1,maximum:1000}},[])],
  ['plan','capabilities','conversation',object({})],
  ['plan','set','conversation',object({active:boolean})],
  ['models','selectSession','conversation',object(selection,['provider','model'])],

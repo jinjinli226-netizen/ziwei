@@ -4,6 +4,7 @@ import {createRepository} from './repository.mjs';
 import {createManagementService} from './management.mjs';
 import {createDshNativeService,assertDshNativeSubject,projectDshNativeAction,registerDshNativeResult,assertDshNativeActionVisible,projectDshNativeData,dshNativeGroupTargets} from './dsh-native-operations.mjs';
 import {DSH_NATIVE_FEATURE,DSH_NATIVE_TYPE} from '../src/dsh-native-contract.mjs';
+import {rasterFixtures} from '../test/fixtures/raster-images.mjs';
 
 const SLUG='test-111',BUNDLE='@deepseek-ai/dsh-experimental-cot-translation-bundle',ENTRY='loader-public-reference-012345678901234567890123456789';
 function fixture(t,{feature=true}={}){
@@ -103,6 +104,15 @@ test('native session-created registration is restricted to the original empty co
  assert.throws(()=>registerDshNativeResult(f.db,row,{deviceId:f.deviceId,status:'succeeded',result:{dshNative:{...dshNative,data:{sessionId:'other-native-session'}}}}),{code:'DSH_NATIVE_SESSION_BINDING_CONFLICT'});
  assert.equal(registerDshNativeResult(f.db,row,{deviceId:f.deviceId,status:'failed',result:{dshNative}}),null);assert.throws(()=>assertDshNativeSubject(f.db,f.ws.id,action.payload),{code:'DSH_NATIVE_SCOPE_CHANGED'});
  f.repo.resultA2AAction(action.id,{deviceId:f.deviceId,status:'succeeded',result:{dshNative:{...dshNative,observations:{sessions:{status:'observed',data:dshNative.data}}}}});const completed=f.repo.getA2AAction(action.id);assert.equal(assertDshNativeActionVisible(f.db,f.ws.id,completed).employeeId,f.employee.id);assert.equal(f.state({conversationId:conversation.id}).resources.sessions.data.sessionId,'created-native-session');f.db.prepare('DELETE FROM conversations WHERE id=?').run(conversation.id);assert.doesNotThrow(()=>f.state());
+});
+
+test('a DSH routine history result is echoed to the employee main chat with images once',t=>{
+ const f=fixture(t),conversation=f.repo.createConversation(SLUG,{employeeId:f.employee.id,title:'主聊天'}),png=rasterFixtures.png.toString('base64');
+ const queued=f.action({resource:'sessions',operation:'history',input:{sessionId:'routine-session',routineId:'routine-one',maxMessages:100},idempotencyKey:'routine-history-1'}),action=f.repo.getA2AAction(queued.action.id);
+ f.complete(action.id,{snapshot:{type:'snapshot',records:[{type:'event',seq:7,event:{type:'assistant/message',data:{message:{content:[{type:'text',text:'例行结果已完成'}, {type:'image',mimeType:'image/png',data:png}]}}}}]}});
+ let history=f.repo.getConversation(conversation.id);assert.equal(history.messages.length,1);assert.equal(history.messages[0].content,'例行结果已完成');assert.equal(history.messages[0].attachments[0].content,png);assert.equal(history.messages[0].attachments[0].mimeType,'image/png');
+ const retry=f.action({resource:'sessions',operation:'history',input:{sessionId:'routine-session',routineId:'routine-one',maxMessages:100},idempotencyKey:'routine-history-2'});f.complete(retry.action.id,{snapshot:{type:'snapshot',records:[{type:'event',seq:7,event:{type:'assistant/message',data:{message:{content:[{type:'text',text:'例行结果已完成'}, {type:'image',mimeType:'image/png',data:png}]}}}}]}});
+ history=f.repo.getConversation(conversation.id);assert.equal(history.messages.length,1);assert.equal(f.db.prepare("SELECT count(*) n FROM management_requests WHERE kind='dsh-routine-result-v1'").get().n,1);
 });
 
 test('an explicit unavailable observation invalidates current data and retains the older canonical snapshot as history',t=>{

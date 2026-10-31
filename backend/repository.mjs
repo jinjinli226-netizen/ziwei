@@ -92,6 +92,52 @@ const executionResultMessage = (status, error, result, fallback = '执行完成'
   const detail = `${label}：${error || '员工未提供具体错误'}`;
   return output && output.trim() !== String(error || '').trim() ? `${detail}\n\n${output}` : detail;
 };
+const dshRoutineImageMimeTypes = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+function dshRoutineHistoryReply(result) {
+  const native = result?.dshNative || result?.result?.dshNative;
+  const records = native?.data?.snapshot?.records;
+  if (!Array.isArray(records)) return null;
+  let latest = null;
+  records.forEach((record, recordIndex) => {
+    const event = record?.event || record;
+    if (event?.type !== 'assistant/message') return;
+    const blocks = event.data?.message?.content || event.data?.content;
+    if (!Array.isArray(blocks)) return;
+    const text = blocks.filter(block => block?.type === 'text' && typeof block.text === 'string').map(block => block.text).join('').trim();
+    const images = [];
+    for (const [blockIndex, block] of blocks.entries()) {
+      if (block?.type !== 'image') continue;
+      const declared = String(block.mediaType || block.mimeType || '').toLowerCase();
+      const raw = typeof block.data === 'string' ? block.data.trim() : typeof block.content === 'string' ? block.content.trim() : typeof block.contentBase64 === 'string' ? block.contentBase64.trim() : '';
+      const dataUrl = raw.match(/^data:([^;,]+);base64,(.*)$/s);
+      const mimeType = declared || String(dataUrl?.[1] || '').toLowerCase();
+      const content = dataUrl ? dataUrl[2].trim() : raw;
+      if (!dshRoutineImageMimeTypes.has(mimeType) || !content) continue;
+      try {
+        const attachment = normalizeConversationAttachments([{
+          name: `dsh-routine-${event.seq || recordIndex + 1}-${blockIndex + 1}${mimeType === 'image/jpeg' ? '.jpg' : mimeType === 'image/png' ? '.png' : mimeType === 'image/gif' ? '.gif' : '.webp'}`,
+          mimeType, contentEncoding: 'base64', content
+        }], { imagesOnly: true })[0];
+        if (images.reduce((sum, item) => sum + Number(item.size || 0), 0) + Number(attachment.size || 0) <= 10 * 1024 * 1024) images.push(attachment);
+      } catch {
+        // A malformed image should not hide a valid text result from the routine.
+      }
+    }
+    if (text || images.length) latest = { text, images, sourceKey: String(event.seq ?? record.seq ?? event.id ?? recordIndex) };
+  });
+  return latest;
+}
+function dshRoutineConversation(db, workspaceId, employeeId) {
+  const preferred = [
+    db.prepare('SELECT conversation_id AS id FROM employee_template_instances WHERE workspace_id=? AND employee_id=? AND conversation_id IS NOT NULL').get(workspaceId, employeeId)?.id,
+    db.prepare('SELECT main_conversation_id AS id FROM hermes_bots WHERE workspace_id=? AND employee_id=? AND main_conversation_id IS NOT NULL').get(workspaceId, employeeId)?.id
+  ].filter(Boolean);
+  for (const conversationId of preferred) {
+    const conversation = db.prepare("SELECT * FROM conversations WHERE id=? AND workspace_id=? AND employee_id=? AND status='active'").get(conversationId, workspaceId, employeeId);
+    if (conversation) return conversation;
+  }
+  return db.prepare("SELECT * FROM conversations WHERE workspace_id=? AND employee_id=? AND status='active' ORDER BY updated_at DESC, created_at ASC, rowid DESC LIMIT 1").get(workspaceId, employeeId) || null;
+}
 const canonicalJson = value => JSON.stringify(value, (_key, item) => item && typeof item === 'object' && !Array.isArray(item) ? Object.fromEntries(Object.keys(item).sort().map(key => [key, item[key]])) : item);
 const conversationAttachmentMetadata = attachments => Array.isArray(attachments) ? attachments.map(item => ({ name:item?.name ?? item?.filename, mimeType:item?.mimeType ?? item?.mime_type, size:item?.size })) : [];
 const conversationResultView = result => {
@@ -2510,6 +2556,25 @@ export function createRepository(options = {}, io={}) {
           db.prepare('INSERT INTO conversation_messages(id,conversation_id,role,content,attachment_json,created_at) VALUES(?,?,?,?,?,?)').run(messageId, conversation.id, 'assistant', String(content), JSON.stringify(outputArtifacts), timestamp);
           db.prepare('UPDATE conversations SET updated_at=? WHERE id=?').run(timestamp, conversation.id);
           audit(ws.slug, 'assistant', 'conversation.message.created', { conversationId: conversation.id, messageId, actionId, dispatch: false });
+        }
+        const dshOperation = payload.dshOperation;
+        const routineId = dshOperation?.input?.routineId;
+        if (status === 'succeeded' && row.type === DSH_NATIVE_TYPE && dshOperation?.resource === 'sessions' && dshOperation.operation === 'history' && typeof routineId === 'string' && routineId.trim()) {
+          const employeeId = dshOperation.subject?.employeeId;
+          const reply = dshRoutineHistoryReply(result);
+          const dshConversation = employeeId ? dshRoutineConversation(db, row.workspace_id, employeeId) : null;
+          if (reply && dshConversation) {
+            const content = reply.text || '已收到 DSH 例行工作图片结果';
+            const fingerprint = hashSecret(JSON.stringify({ employeeId, routineId, sessionId: dshOperation.input.sessionId, sourceKey: reply.sourceKey, content, attachments: reply.images }));
+            const requestKey = `dsh-routine:${hashSecret(JSON.stringify({ employeeId, routineId, sessionId: dshOperation.input.sessionId, sourceKey: reply.sourceKey }))}`;
+            const messageId = id('convmsg');
+            const marker = db.prepare('INSERT OR IGNORE INTO management_requests(workspace_id,kind,request_key,fingerprint,resource_id,created_at) VALUES(?,?,?,?,?,?)').run(row.workspace_id, 'dsh-routine-result-v1', requestKey, fingerprint, messageId, timestamp);
+            if (marker.changes) {
+              db.prepare('INSERT INTO conversation_messages(id,conversation_id,role,content,attachment_json,created_at) VALUES(?,?,?,?,?,?)').run(messageId, dshConversation.id, 'assistant', content, JSON.stringify(reply.images), timestamp);
+              db.prepare('UPDATE conversations SET updated_at=? WHERE id=?').run(timestamp, dshConversation.id);
+              audit(ws.slug, 'assistant', 'conversation.message.created', { conversationId: dshConversation.id, messageId, actionId, dispatch: false, source: 'dsh-routine', routineId, sessionId: dshOperation.input.sessionId });
+            }
+          }
         }
         if (['automation.execute','hermes.bot.native'].includes(row.type) && payload.runId) {
           if (reconciliation || maintenanceTerminal) db.prepare("UPDATE automation_runs SET status=?,result_json=?,error=?,finished_at=?,message=? WHERE id=? AND action_id=? AND status NOT IN ('completed','failed')").run(status==='succeeded'?'completed':'failed',JSON.stringify(result),error,timestamp,maintenanceTerminal?'维护暂停后原任务已终结；没有重新派发或重试':'已核实原执行终态；未重新派发或重试',payload.runId,actionId);
