@@ -7,7 +7,7 @@
 - `plugins.prepareUiHost` 由绑定设备调用 DSH Hub `POST /api/bots/:profile/plugin-ui/prepare`。
 - 设备回执只保留当前 subject 的 `application`、`version`、`bridgePackage`、严格匹配的 `mountBase` 和安全 receipt。
 - `application: applied` 只证明 DSH Host inventory 的 bridge entry 已 active，不证明 iframe 已收到 `ready`。
-- 紫薇当前没有浏览器到目标电脑的长连接 relay；因此不能把 `127.0.0.1:7878`、Hub Cookie 或任意 DSH URL 返回给网页。
+- 紫薇现在有短期 relay session 的人类 API和绑定校验，但还没有浏览器到目标电脑的长连接数据通道；因此不能把 `127.0.0.1:7878`、Hub Cookie 或任意 DSH URL 返回给网页。
 
 ## Relay 会话绑定
 
@@ -35,7 +35,7 @@
 
 ## 分阶段实现与验收
 
-1. 增加设备 capability、relay session 表和人类 API 的创建/关闭/撤权测试。
+1. 增加设备 capability、relay session API 和人类 API 的创建/关闭/撤权测试（已完成 session 绑定与路径/Header 校验；数据转发仍未接通）。
 2. 先实现同源静态 HTTP 资产/JSON 请求的受限 relay，验证路径、大小、超时、员工串线和撤权。
 3. 接入插件 SSE `plugins/events`，验证序号、断线、HMR `unmounted → ready`。
 4. 接入 remote.mux WebSocket，验证双向 frame、关闭和未知结果。

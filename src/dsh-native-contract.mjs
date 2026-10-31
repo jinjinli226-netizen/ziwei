@@ -1,4 +1,5 @@
 export const DSH_NATIVE_FEATURE='dsh_native_controls_v1';
+export const DSH_PLUGIN_UI_RELAY_FEATURE='dsh_plugin_ui_relay_v1';
 export const DSH_NATIVE_TYPE='employee.dsh.operation';
 const string=(maxLength=240)=>({type:'string',minLength:1,maxLength});
 const boolean={type:'boolean'},integer={type:'integer',minimum:0},json={};

@@ -47,3 +47,5 @@ DSH 桌面版原生插件 UI 宿主已在隔离环境完成真实生命周期验
 全量后端并发串跑曾暴露 3 个旧测试仍期待已废弃的行为：失败但没有正面存活进程证据时继续抛 `BOT_BUSY`、能力证据缺失时直接标成 `failed`、只读检查后继续投影没有存活证明的旧 active unknown。现已把这 3 个回归断言对齐到当前语义，并单独复跑 36/36 通过：失败立即释放无存活证据的执行槽，能力缺失保持 `needs_check`，只读检查不会让无存活证据的旧执行继续占槽。移动专项全量并发失败主要是测试资源耗尽，手机改动仍留在未提交专项范围。
 
 DSH 桌面侧新增的 `POST /api/bots/:name/plugin-ui/prepare` 已通过紫薇设备动作接入，结果只保留当前员工绑定 Profile 的 `mountBase`、bridgePackage、version、application 和安全回执；伪造其他 Bot 的挂载路径会被标为 unknown。设备侧同源 HTTP/SSE/WebSocket relay 尚未接入，网页端不会直接暴露 `127.0.0.1`、Hub Cookie 或把 `application: applied` 当作界面已挂载。
+
+本轮新增了短期 relay session 服务和人类 API：会话绑定 workspace、employee、device、Profile、actor、viewKey 与 prepare 回执；路径只允许当前 Profile 的 `/runtime/<profile>/ui/` 前缀，Cookie、Authorization、绝对 URL 和跨 Profile 路径均拒绝；撤权、能力消失、关闭和过期会终止会话。它目前只完成安全合同和生命周期校验，尚未转发 HTTP/SSE/WebSocket 数据。

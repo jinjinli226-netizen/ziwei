@@ -40,6 +40,7 @@ import {createDshNativeService} from './dsh-native-operations.mjs';
 import {mountDshNativeRoutes} from './dsh-native-routes.mjs';
 import {createDshNativeSecrets} from './dsh-native-secrets.mjs';
 import {createDshNativeGroupDispatch} from './dsh-native-group-dispatch.mjs';
+import {createDshPluginUiRelayService} from './dsh-plugin-ui-relay.mjs';
 import {botActionMaintenance} from './bots.mjs';
 import { toolDefinitions as managementTools } from '../scripts/ziwei-mcp.mjs';
 import {registerWorkspaceCliDocs} from './workspace-cli-docs.mjs';
@@ -327,6 +328,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   const dshNative=createDshNativeService(repo,{management});
   const dshNativeSecrets=createDshNativeSecrets(repo,{management,nativeService:dshNative});
   const dshNativeGroupDispatch=createDshNativeGroupDispatch(repo,{management});
+  const dshPluginUiRelay=createDshPluginUiRelayService(repo,{management,nativeService:dshNative});
   const mobileReadView = createMobileReadView(repo);
   const conversationReads = createConversationReadService(repo);
   const mobileNotifications = createMobileNotificationReadService(repo);
@@ -357,6 +359,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   app.locals.ziweiConnect = ziweiConnect;
   app.locals.phoneMcp = phoneMcp;
   app.locals.managementBootstrap = managementBootstrap;
+  app.locals.dshPluginUiRelay = dshPluginUiRelay;
   app.locals.botMcpConnections=botMcpConnections;
   app.locals.botProviderCredentials=botProviderCredentials;
   app.locals.botAutonomy=botAutonomy;
@@ -803,6 +806,9 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   app.get('/api/workspaces/:slug/employees/:id/plugins',requireRole('owner','admin','member'),(req,res)=>{res.setHeader('Cache-Control','no-store');res.vary('Cookie');res.json(dshPlugins.get(req.params.slug,req.params.id,employeeContext(req)));});
   app.post('/api/workspaces/:slug/employees/:id/plugins/refresh',requireRole('owner','admin','member'),(req,res)=>{res.setHeader('Cache-Control','no-store');res.status(202).json(dshPlugins.refresh(req.params.slug,req.params.id,req.body||{},employeeContext(req)));});
   app.put('/api/workspaces/:slug/employees/:id/plugins',requireRole('owner','admin','member'),(req,res)=>{res.setHeader('Cache-Control','no-store');res.status(202).json(dshPlugins.apply(req.params.slug,req.params.id,req.body,employeeContext(req)));});
+  app.post('/api/workspaces/:slug/employees/:id/dsh/plugin-ui/relay',requireRole('owner','admin','member'),(req,res,next)=>{try{ensureEmployeeInWorkspace(req.params.slug,req.params.id,req);res.setHeader('Cache-Control','no-store');res.status(201).json(dshPluginUiRelay.open(req.params.slug,req.params.id,req.body||{},employeeContext(req)));}catch(error){next(error);}});
+  app.get('/api/workspaces/:slug/employees/:id/dsh/plugin-ui/relay/:relayId',requireRole('owner','admin','member'),(req,res,next)=>{try{ensureEmployeeInWorkspace(req.params.slug,req.params.id,req);res.setHeader('Cache-Control','no-store');res.json(dshPluginUiRelay.status(req.params.relayId,employeeContext(req)));}catch(error){next(error);}});
+  app.delete('/api/workspaces/:slug/employees/:id/dsh/plugin-ui/relay/:relayId',requireRole('owner','admin','member'),(req,res,next)=>{try{ensureEmployeeInWorkspace(req.params.slug,req.params.id,req);res.setHeader('Cache-Control','no-store');res.json(dshPluginUiRelay.close(req.params.relayId,employeeContext(req)));}catch(error){next(error);}});
   app.get('/api/workspaces/:slug/phone-mcp/setup',requireRole('owner','admin','member'),async(req,res,next)=>{try{const value=await phoneMcp.setup(req.params.slug,{...employeeContext(req),userId:req.auth?.user_id});res.json(req.query.view==='mobile'?{...value,employees:value.employees.map(employee=>mobileReadView.employee(req.params.slug,employee))}:value);}catch(error){next(error);}});
   app.put('/api/workspaces/:slug/employees/:id/phone-mcp',requireRole('owner','admin'),async(req,res,next)=>{
     try {ensureEmployeeInWorkspace(req.params.slug,req.params.id,req);res.json(await phoneMcp.save(req.params.slug,req.params.id,req.body || {},employeeContext(req)));} catch(error) {next(error);}
