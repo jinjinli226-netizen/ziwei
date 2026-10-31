@@ -18,10 +18,6 @@ const object = value => value !== null && typeof value === 'object' && !Array.is
 const text = (value, max) => typeof value === 'string' && value.length > 0 && value.length <= max && !/[\u0000-\u001f\u007f]/.test(value);
 const safeErrorCode = value => typeof value === 'string' && /^DSH_PLUGIN_UI_RELAY_[A-Z0-9_]+$/.test(value) ? value : 'DSH_PLUGIN_UI_RELAY_UPSTREAM_ERROR';
 
-function sameOrigin(left, right) {
-  try { return new URL(left).origin === new URL(right).origin; } catch { return false; }
-}
-
 function sameWebOrigin(left, right) {
   try {
     const expected = new URL(left), actual = new URL(right);
