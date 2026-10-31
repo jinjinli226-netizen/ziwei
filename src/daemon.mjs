@@ -1,5 +1,6 @@
 import {executionBinding} from './execution-admission.mjs';
 import {DSH_NATIVE_TYPE,isDshNativeControlAction} from './dsh-native-contract.mjs';
+import {DSH_PLUGIN_UI_RELAY_TYPE} from './dsh-plugin-ui-relay.mjs';
 import {isCancellationAction} from './daemon-action-scheduler.mjs';
 import {markMaintenancePaused,consumeMaintenancePaused,validateMaintenancePause} from './maintenance-checkpoint.mjs';
 import fs from 'node:fs';
@@ -369,7 +370,7 @@ export class ActionDispatcher {
       const nativeRuntime = isNativeRuntimeAction(action);
       const requestedTimeout = action.payload?.timeoutMs ?? action.payload?.timeout_ms;
       const hasHardTimeout = requestedTimeout !== undefined && requestedTimeout !== null && String(requestedTimeout).trim() !== '' && Number.isFinite(Number(requestedTimeout));
-      let hardTimeoutMs = hasHardTimeout || nativeRuntime || [DSH_NATIVE_TYPE,'employee.capabilities.inspect','employee.plugins.inspect','employee.plugins.apply'].includes(action.type) ? actionExecutionTimeoutMs(action) : null;
+      let hardTimeoutMs = hasHardTimeout || nativeRuntime || [DSH_NATIVE_TYPE,DSH_PLUGIN_UI_RELAY_TYPE,'employee.capabilities.inspect','employee.plugins.inspect','employee.plugins.apply'].includes(action.type) ? actionExecutionTimeoutMs(action) : null;
       if (nativeRuntime && expiresAt) {
         const remaining = Date.parse(String(expiresAt)) - this.#now() - ACTION_EXECUTION_LEASE_BUFFER_MS;
         if (!Number.isFinite(remaining) || remaining < 100) return this.#rejectAdmission(action,key,identity,'lease','A2A action lease leaves insufficient time for execution and confirmed shutdown','ACTION_LEASE_INSUFFICIENT');
@@ -380,7 +381,7 @@ export class ActionDispatcher {
       const requestedIdleTimeout = action.payload?.idleTimeoutMs ?? action.payload?.idle_timeout_ms;
       const hasIdleTimeout = requestedIdleTimeout !== undefined && requestedIdleTimeout !== null && String(requestedIdleTimeout).trim() !== '' && Number.isFinite(Number(requestedIdleTimeout));
       const idleTimeoutMs = hasIdleTimeout ? Math.max(100, Number(requestedIdleTimeout)) : 2 * 60 * 1000;
-      const enforceIdle = (!nativeRuntime&&action.type!==DSH_NATIVE_TYPE) || hasIdleTimeout;
+      const enforceIdle = (!nativeRuntime&&action.type!==DSH_NATIVE_TYPE&&action.type!==DSH_PLUGIN_UI_RELAY_TYPE) || hasIdleTimeout;
       admissionPhase=null;
       this.#markStarted(action, key, identity,{startedAt:resumeTiming?.startedAt,hardDeadline});
       if(maintenanceResume)this.#onEvent('action.maintenance_resumed',{actionId,updateId:maintenanceResume.updateId,targetBuild:maintenanceResume.targetBuild});

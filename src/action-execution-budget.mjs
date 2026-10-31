@@ -2,10 +2,12 @@ export const NATIVE_LONG_TASK_TIMEOUT_MS = 24 * 60 * 60 * 1000;
 export const DEFAULT_ACTION_EXECUTION_TIMEOUT_MS = 15 * 60 * 1000;
 export const ACTION_EXECUTION_LEASE_BUFFER_MS = 60 * 1000;
 import {DSH_NATIVE_TYPE,getDshNativeOperation} from './dsh-native-contract.mjs';
+import {DSH_PLUGIN_UI_RELAY_TYPE} from './dsh-plugin-ui-relay.mjs';
 
 const longTasks = new Set(['conversation.execute', 'agent.execute', 'runtime.execute', 'automation.execute']);
 export function actionExecutionTimeoutMs(action = {}) {
   if(action.type===DSH_NATIVE_TYPE)return getDshNativeOperation(action.payload?.dshOperation?.resource,action.payload?.dshOperation?.operation)?.timeoutMs||15000;
+  if(action.type===DSH_PLUGIN_UI_RELAY_TYPE)return 15*60*1000;
   if(['employee.capabilities.inspect','employee.plugins.inspect','employee.plugins.apply'].includes(action.type))return 15000;
   const payload = action.payload || {}, value = payload.timeoutMs ?? payload.timeout_ms;
   if (value !== undefined && value !== null && String(value).trim() !== '' && Number.isFinite(Number(value))) {

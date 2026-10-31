@@ -7,6 +7,15 @@ import {createLocalActionExecutor} from '../src/local-action.mjs';
 import {ActionDispatcher} from '../src/daemon.mjs';
 import {executeDshRuntime} from '../src/dsh-runtime.mjs';
 import {dshFixture} from './fixtures/dsh-protocol.mjs';
+import {EventEmitter} from 'node:events';
+
+class RelaySocket extends EventEmitter {
+  static all=[];
+  constructor(url){super();this.url=url;this.sent=[];this.readyState=0;this.closed=false;RelaySocket.all.push(this);queueMicrotask(()=>{this.readyState=1;this.emit('open');});}
+  send(value){this.sent.push(value);}
+  close(code=1000,reason=''){if(this.closed)return;this.closed=true;this.readyState=3;this.emit('close',code,reason);}
+  deliver(value){this.emit('message',Buffer.from(JSON.stringify(value)));}
+}
 
 test('local DSH branch uses the real profile and local endpoint before any Hermes or Codex preparation',async t=>{
   const directory=fs.mkdtempSync(path.join(os.tmpdir(),'ziwei-dsh-local-'));t.after(()=>fs.rmSync(directory,{recursive:true,force:true}));
@@ -62,6 +71,12 @@ test('local DSH prepares the native plugin UI host and validates its bound mount
  const execute=createLocalActionExecutor({runtimeDir:directory,defaultWorkdir:directory,workspace:'fixture-workspace',deviceId:'device-one',admissionHandledByDispatcher:true,dshBaseUrl:'http://native.fixture',dshPluginFetch:fetchImpl});t.after(()=>execute.close());
  const good=await execute({id:'dsh-plugin-ui-good',type:'employee.dsh.operation',payload});assert.equal(good.status,'succeeded',JSON.stringify(good));assert.equal(good.result.dshNative.status,'applied');assert.equal(good.result.dshNative.data.mountBase,'/runtime/real-bot/ui/');
  mode='forged-mount';const forged=await execute({id:'dsh-plugin-ui-forged',type:'employee.dsh.operation',payload});assert.equal(forged.status,'failed',JSON.stringify(forged));assert.equal(forged.error,'DSH_NATIVE_OPERATION_UNCONFIRMED');
+});
+test('local executor keeps the bound DSH UI relay action alive until the server closes it',async t=>{
+ const directory=fs.mkdtempSync(path.join(os.tmpdir(),'ziwei-dsh-relay-action-'));t.after(()=>fs.rmSync(directory,{recursive:true,force:true}));RelaySocket.all=[];
+ const execute=createLocalActionExecutor({runtimeDir:directory,defaultWorkdir:directory,workspace:'fixture-workspace',apiBase:'http://server.fixture',deviceId:'device-one',deviceToken:'device-secret',dshBaseUrl:'http://native.fixture',dshPluginUiWebSocket:RelaySocket,dshPluginFetch:async()=>{throw Error('no local request expected');},admissionHandledByDispatcher:true});t.after(()=>execute.close());
+ const action={id:'relay-action-1',workspace:'fixture-workspace',type:'employee.dsh.ui.relay.open',payload:{workspace:'fixture-workspace',employeeId:'employee-one',deviceId:'device-one',profile:'real-bot',viewKey:'v'.repeat(16),relayId:'relay-one',expiresAt:new Date(Date.now()+60_000).toISOString()}};
+ const running=execute(action);await new Promise(resolve=>setImmediate(resolve));const socket=RelaySocket.all[0];assert.match(JSON.parse(socket.sent[0]).protocol,/dsh-plugin-ui-relay-v1/);assert.equal(JSON.parse(socket.sent[0]).deviceId,'device-one');assert.equal(JSON.parse(socket.sent[0]).workspace,'fixture-workspace');socket.deliver({type:'ready',relayId:'relay-one',accepted:true});socket.deliver({type:'close',relayId:'relay-one',reason:'browser_closed'});const result=await running;assert.equal(result.status,'succeeded');assert.equal(result.result.closedReason,'browser_closed');
 });
 test('a group member without an employee directory uses its own native Bot work directory',async t=>{
  const directory=fs.mkdtempSync(path.join(os.tmpdir(),'ziwei-dsh-group-cwd-'));t.after(()=>fs.rmSync(directory,{recursive:true,force:true}));

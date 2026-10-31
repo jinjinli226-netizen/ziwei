@@ -27,6 +27,7 @@ import {createDshNativeMutationJournal} from './dsh-native-journal.mjs';
 import {createDshNativeInteractionManager} from './dsh-native-interactions.mjs';
 import {claimDshNativeSecret} from './dsh-native-secret-client.mjs';
 import {dshBotNameForAction} from './dsh-session-evidence.mjs';
+import {createDshPluginUiRelayClient} from './dsh-plugin-ui-relay.mjs';
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_OUTPUT_BYTES = 1024 * 1024;
@@ -381,7 +382,7 @@ function runCommand({runtimeDir, action, executable, baseArgs = [], allowedExecu
  * Unknown/unsupported actions fail loudly so the cloud never sees a fake
  * success merely because an action was accepted by the daemon.
  */
-export function createLocalActionExecutor({runtimeDir, admissionHandledByDispatcher = false, defaultWorkdir = process.cwd(), allowedExecutables = [], executorCommand = null, executorArgs = [], defaultRuntime = null, hermesHomePath = null, codexMcpDisabledServers = [], managementMcpConfig = {}, managementBootstrap = null, terminalMcpConfig = {}, workspace = null, apiBase = null, deviceId = null, deviceToken = null, onWorkspaceConnect = null, capabilityCollector = collectEmployeeCapabilityInventory, machineCapabilityInventory = sharedMachineCapabilityInventory, dshBaseUrl=process.env.ZIWEI_DSH_BASE_URL||'http://127.0.0.1:7878', dshRuntime=executeDshRuntime, dshPluginFetch=globalThis.fetch,dshDeviceFetch=globalThis.fetch,dshSecretFetch=globalThis.fetch,dshSecretStore} = {}) {
+export function createLocalActionExecutor({runtimeDir, admissionHandledByDispatcher = false, defaultWorkdir = process.cwd(), allowedExecutables = [], executorCommand = null, executorArgs = [], defaultRuntime = null, hermesHomePath = null, codexMcpDisabledServers = [], managementMcpConfig = {}, managementBootstrap = null, terminalMcpConfig = {}, workspace = null, apiBase = null, deviceId = null, deviceToken = null, onWorkspaceConnect = null, capabilityCollector = collectEmployeeCapabilityInventory, machineCapabilityInventory = sharedMachineCapabilityInventory, dshBaseUrl=process.env.ZIWEI_DSH_BASE_URL||'http://127.0.0.1:7878', dshRuntime=executeDshRuntime, dshPluginFetch=globalThis.fetch,dshPluginUiWebSocket,dshDeviceFetch=globalThis.fetch,dshSecretFetch=globalThis.fetch,dshSecretStore} = {}) {
   if (!runtimeDir) throw new TypeError('runtimeDir is required');
   fs.mkdirSync(runtimeDir, {recursive: true});
   const automaticManagement = managementBootstrap || (workspace && deviceToken ? createManagementBootstrap({ workspace, apiBase, deviceId, deviceToken, cacheDirectory: path.join(runtimeDir, 'management-mcp-credentials') }) : null);
@@ -389,6 +390,7 @@ export function createLocalActionExecutor({runtimeDir, admissionHandledByDispatc
   const dshInstallManager=createDshNativeInstallManager({directory:path.join(runtimeDir,'dsh-native-installs')});
   const dshMutationJournal=createDshNativeMutationJournal({directory:path.join(runtimeDir,'dsh-native-mutations')});
   const dshInteractions=createDshNativeInteractionManager();
+  const dshPluginUiRelay = apiBase && workspace && deviceId && deviceToken ? createDshPluginUiRelayClient({apiBase,workspace,deviceId,deviceToken,dshBaseUrl,fetchImpl:dshPluginFetch,WebSocketImpl:dshPluginUiWebSocket}) : null;
   const dshDeviceRequest=async(method,route,body,signal)=>{
     if(!apiBase||!workspace||!deviceId||!deviceToken)throw Object.assign(new Error('DSH 群聊缺少当前已配对设备凭据'),{code:'DSH_NATIVE_GROUP_DEVICE_REQUIRED'});
     const response=await dshDeviceFetch(`${String(apiBase).replace(/\/$/,'')}${route}${method==='GET'?`?workspace=${encodeURIComponent(workspace)}`:''}`,{method,headers:{'content-type':'application/json','x-ziwei-device-token':deviceToken},...(method==='POST'?{body:JSON.stringify({...body,workspace})}:{}),redirect:'error',signal:signal?AbortSignal.any([signal,AbortSignal.timeout(10000)]):AbortSignal.timeout(10000)});
@@ -404,6 +406,10 @@ export function createLocalActionExecutor({runtimeDir, admissionHandledByDispatc
     const type = String(action?.type || '');
     if (action?.payload?.deviceId && deviceId && action.payload.deviceId !== deviceId) throw new Error('执行目标设备与本机已配对设备不一致；不会回退其他设备');
     if (action?.workspace && workspace && action.workspace !== workspace) throw new Error('执行工作区与本机已配对工作区不一致');
+    if(type==='employee.dsh.ui.relay.open'){
+      if(!dshPluginUiRelay)throw Object.assign(new Error('DSH 插件 UI relay 缺少当前设备连接凭据'),{code:'DSH_PLUGIN_UI_RELAY_DEVICE_REQUIRED'});
+      return dshPluginUiRelay.execute(action,{signal:context.signal,onActivity:context.onActivity,onStage:context.onStage});
+    }
     if(type==='employee.plugins.inspect'||type==='employee.plugins.apply')return{status:'succeeded',result:{dshPlugins:await executeDshPlugins(action,{workspace,deviceId,baseUrl:dshBaseUrl,signal:context.signal,fetchImpl:dshPluginFetch})}};
     if(type===DSH_NATIVE_TYPE){
       const requested=action.payload.dshOperation.runtimeContext?.cwd||action.payload.workdir||defaultWorkdir;

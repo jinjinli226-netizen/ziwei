@@ -1,5 +1,5 @@
 import {syncBotProviderCredentials} from '../src/bot-provider-credential-client.mjs';
-import {DSH_NATIVE_FEATURE} from '../src/dsh-native-contract.mjs';
+import {DSH_NATIVE_FEATURE,DSH_PLUGIN_UI_RELAY_FEATURE} from '../src/dsh-native-contract.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
@@ -193,7 +193,9 @@ remoteClientUpdates = createRemoteClientUpdates({
   log,
 });
 function clientRuntimeDiscovery() {
-  return { checkedAt: runtimeDiscovery.discoveredAt, platform: runtimeDiscovery.bridge.platform, arch: runtimeDiscovery.bridge.arch, clientBuild: CLIENT_BUILD, features: ['dsh_plugins_v1',DSH_NATIVE_FEATURE,'employee_capabilities_inspect_v2','bot_mcp_oauth_relay_v1','failed_action_finalization_v1', ...(remoteUpdateEnabled ? [REMOTE_CLIENT_UPDATE_FEATURE,'maintenance_checkpoint_resume_v1','native_worker_update_verification_v1'] : [])], ...(maintenanceHostId ? { maintenanceHostId } : {}) };
+  const dsh=runtimeDiscovery.runtimes?.DSH;
+  const dshRelayReady=dsh?.status==='available'&&Array.isArray(dsh.profiles)&&dsh.profiles.some(profile=>profile?.readiness?.ready===true);
+  return { checkedAt: runtimeDiscovery.discoveredAt, platform: runtimeDiscovery.bridge.platform, arch: runtimeDiscovery.bridge.arch, clientBuild: CLIENT_BUILD, features: ['dsh_plugins_v1',DSH_NATIVE_FEATURE,...(dshRelayReady?[DSH_PLUGIN_UI_RELAY_FEATURE]:[]),'employee_capabilities_inspect_v2','bot_mcp_oauth_relay_v1','failed_action_finalization_v1', ...(remoteUpdateEnabled ? [REMOTE_CLIENT_UPDATE_FEATURE,'maintenance_checkpoint_resume_v1','native_worker_update_verification_v1'] : [])], ...(maintenanceHostId ? { maintenanceHostId } : {}) };
 }
 process.on('uncaughtException', error => log('uncaught_exception', { error: error.stack || error.message }));
 process.on('unhandledRejection', error => log('unhandled_rejection', { error: error?.stack || String(error) }));
