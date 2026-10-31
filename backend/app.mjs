@@ -46,6 +46,7 @@ import {createDshPluginUiRelayTransport, parseRelayCookie, cookieValue} from './
 import {botActionMaintenance} from './bots.mjs';
 import { toolDefinitions as managementTools } from '../scripts/ziwei-mcp.mjs';
 import {registerWorkspaceCliDocs} from './workspace-cli-docs.mjs';
+import {createMixedGroupStore} from './mixed-group-store.mjs';
 
 const allowedOrigin = process.env.FRONTEND_ORIGIN || 'http://127.0.0.1:5178';
 
@@ -324,6 +325,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   });
   const auth = options.auth || createAuthService(repo.db, options.authOptions);
   const management = createManagementService(repo);
+  const mixedGroups = createMixedGroupStore(repo);
   const employeeCapabilityInventory=createEmployeeCapabilityInventory(repo,{management});
   const dshPlugins=createDshPluginsService(repo,{management});
   const stopConversationExecution=createConversationStop(repo);
@@ -550,6 +552,13 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   app.locals.scheduler=scheduler;
 
   app.get('/api/workspaces/:slug/summary', (req, res) => res.json(repo.getSummary(req.params.slug, { userId: req.auth?.user_id })));
+  app.get('/api/workspaces/:slug/mixed-groups', requireRole('owner','admin','member'), (req, res, next) => { try { res.json({ groups: mixedGroups.list(req.params.slug) }); } catch (error) { next(error); } });
+  app.post('/api/workspaces/:slug/mixed-groups', requireRole('owner','admin','member'), (req, res, next) => { try { res.status(201).json(mixedGroups.create(req.params.slug, req.body || {})); } catch (error) { next(error); } });
+  app.get('/api/workspaces/:slug/mixed-groups/:id', requireRole('owner','admin','member'), (req, res, next) => { try { res.json(mixedGroups.get(req.params.slug, req.params.id)); } catch (error) { next(error); } });
+  app.patch('/api/workspaces/:slug/mixed-groups/:id', requireRole('owner','admin','member'), (req, res, next) => { try { res.json(mixedGroups.update(req.params.slug, req.params.id, req.body || {})); } catch (error) { next(error); } });
+  app.delete('/api/workspaces/:slug/mixed-groups/:id', requireRole('owner','admin','member'), (req, res, next) => { try { res.json(mixedGroups.remove(req.params.slug, req.params.id)); } catch (error) { next(error); } });
+  app.post('/api/workspaces/:slug/mixed-groups/:id/messages', requireRole('owner','admin','member'), (req, res, next) => { try { res.status(202).json(mixedGroups.planSend(req.params.slug, req.params.id, req.body || {})); } catch (error) { next(error); } });
+  app.post('/api/workspaces/:slug/mixed-groups/:id/cancel', requireRole('owner','admin','member'), (req, res, next) => { try { res.status(202).json(mixedGroups.cancel(req.params.slug, req.params.id, req.body?.sourceActionId)); } catch (error) { next(error); } });
   app.get('/api/workspaces/:slug/tasks', (req, res) => res.json({ tasks: repo.listTasks(req.params.slug, req.query) }));
   app.post('/api/workspaces/:slug/tasks', (req, res) => res.status(201).json(repo.createTask(req.params.slug, { ...(req.body || {}), actorUserId: req.auth?.user_id, actorRole: req.workspaceRole, enforceDeviceOwnership: true, enforceEmployeeVisibility: true, createdBy: req.auth?.user_id || req.body?.createdBy })));
   app.patch('/api/tasks/:id', (req, res) => res.json(repo.updateTask(req.params.id, req.body)));
