@@ -16,6 +16,7 @@ const HTTP_METHODS = new Set(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE']);
 const fail = (code, message = code) => { throw Object.assign(new Error(message), { code }); };
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const text = (value, max) => typeof value === 'string' && value.length > 0 && value.length <= max && !/[\u0000-\u001f\u007f]/.test(value);
+const safeErrorCode = value => typeof value === 'string' && /^DSH_PLUGIN_UI_RELAY_[A-Z0-9_]+$/.test(value) ? value : 'DSH_PLUGIN_UI_RELAY_UPSTREAM_ERROR';
 
 function sameOrigin(left, right) {
   try { return new URL(left).origin === new URL(right).origin; } catch { return false; }
@@ -234,7 +235,7 @@ export function createDshPluginUiRelayClient({ apiBase, workspace = null, device
       }
       inputSequence = input.seq; onActivity();
       try { if (input.kind === 'ws') await dispatchWs(input); else await dispatchHttp(input); }
-      catch (error) { sendError(error?.code || 'DSH_PLUGIN_UI_RELAY_UPSTREAM_ERROR', error?.message || String(error), input.requestId); }
+      catch (error) { const code = safeErrorCode(error?.code); sendError(code, code, input.requestId); }
     };
     return await new Promise((resolve, reject) => {
       const finish = () => { if (settled) return; settled = true; clear(); if (fatalError) reject(fatalError); else resolve({status:'succeeded',result:{relayId:binding.relayId,profile:binding.profile,viewKey:binding.viewKey,frames,closedReason:safeReason(closedReason)}}); };
@@ -248,7 +249,7 @@ export function createDshPluginUiRelayClient({ apiBase, workspace = null, device
         let input; try { input = JSON.parse(String(raw)); } catch { sendError('DSH_PLUGIN_UI_RELAY_INPUT_INVALID'); return; }
         if (input?.type === 'close' && input.relayId === binding.relayId) { closedReason = safeReason(input.reason, 'server_closed'); try { socket.close(1000, closedReason); } catch {} return; }
         if (input?.type === 'ready' && input.relayId === binding.relayId && input.accepted === true) return;
-        inputQueue = inputQueue.then(() => handle(input)).catch(error => sendError(error?.code || 'DSH_PLUGIN_UI_RELAY_UPSTREAM_ERROR', error?.message || String(error)));
+        inputQueue = inputQueue.then(() => handle(input)).catch(error => { const code = safeErrorCode(error?.code); sendError(code, code, input?.requestId); });
       });
       socket.on('error', error => { if (!ready) { fatalError = Object.assign(new Error('DSH_PLUGIN_UI_RELAY_TRANSPORT_ERROR'), {code:'DSH_PLUGIN_UI_RELAY_TRANSPORT_ERROR',cause:error}); try { socket.close(); } catch {} } else sendError('DSH_PLUGIN_UI_RELAY_TRANSPORT_ERROR'); });
       socket.on('close', (code, reason) => {
