@@ -7,6 +7,7 @@ export const OFFICIAL_CLIENT_MANIFEST='https://qzelynth.top/downloads/cli/releas
 const HASH=/^[a-f0-9]{64}$/;
 const TERMINAL=new Set(['succeeded','failed','cancelled']);
 export const DEVICE_UPDATE_UNCONFIRMED_TIMEOUT_MS=2*60*60*1000;
+export const DEVICE_UPDATE_REQUEST_TIMEOUT_MS=24*60*60*1000;
 const STATES=['requested','accepted','waiting_idle','updating','awaiting_heartbeat','succeeded','failed','cancelled'];
 const parse=value=>{try{return JSON.parse(value||'{}');}catch{return {};}};
 const fail=(code,message,status=409)=>{throw Object.assign(new Error(message),{code,status});};
@@ -14,7 +15,7 @@ const sameSecret=(a,b)=>typeof a==='string'&&typeof b==='string'&&HASH.test(a)&&
 const runtimeExecutionTypes=['conversation.execute','task.execute','agent.execute','runtime.execute','automation.execute'];
 const fresh=(row,now)=>{const seen=Date.parse(row.heartbeat_at||row.last_seen||'');return row.status!=='disabled'&&Number.isFinite(seen)&&seen<=now+5_000&&now-seen<90_000;};
 const host=row=>parse(row.runtime_discovery_json).maintenanceHostId;
-const REASONS=Object.freeze({CLIENT_UPDATE_AUTHORITY_REVOKED:'原升级授权已失效，请由当前管理员重新发起',CLIENT_UPDATE_INTERRUPTED:'维护程序已中断，可重新发起官方升级',CLIENT_UPDATE_UNCONFIRMED_TIMEOUT:'维护回执超时，尚未确认升级结果；下次请求仍检查本机维护进程',CLIENT_UPDATE_RELEASE_CHANGED:'官方安装包已变化，请重新发起升级',CLIENT_UPDATE_WORKER_FAILED:'本机官方升级程序失败，原安装及连接配置按维护结果保留',CLIENT_UPDATE_SOURCE_INVALID:'官方更新地址校验失败',CLIENT_UPDATE_BUILD_MISMATCH:'安装版本与本次升级目标不一致',CLIENT_UPDATE_CANCELLED:'升级请求已取消',CLIENT_UPDATE_ROLLED_BACK:'原生维护失败并已核验恢复原安装及运行状态'});
+const REASONS=Object.freeze({CLIENT_UPDATE_AUTHORITY_REVOKED:'原升级授权已失效，请由当前管理员重新发起',CLIENT_UPDATE_INTERRUPTED:'维护程序已中断，可重新发起官方升级',CLIENT_UPDATE_UNCONFIRMED_TIMEOUT:'维护回执超时，尚未确认升级结果；下次请求仍检查本机维护进程',CLIENT_UPDATE_REQUEST_TIMEOUT:'升级排队窗口已结束；已保留原请求证据，未声称安装或重启成功',CLIENT_UPDATE_RELEASE_CHANGED:'官方安装包已变化，请重新发起升级',CLIENT_UPDATE_WORKER_FAILED:'本机官方升级程序失败，原安装及连接配置按维护结果保留',CLIENT_UPDATE_SOURCE_INVALID:'官方更新地址校验失败',CLIENT_UPDATE_BUILD_MISMATCH:'安装版本与本次升级目标不一致',CLIENT_UPDATE_CANCELLED:'升级请求已取消',CLIENT_UPDATE_ROLLED_BACK:'原生维护失败并已核验恢复原安装及运行状态'});
 const reasonFor=code=>code?(REASONS[code]||'客户端升级未完成，请查看官方维护结果'):null;
 const evidence=row=>parse(row.evidence_json);
 function view(row){
@@ -69,6 +70,11 @@ export function expireUnconfirmedDeviceUpdates(db,hostId,at=Date.now()){
  // worker has exited; the client still enforces its independent worker lock.
  const cutoff=new Date(at-DEVICE_UPDATE_UNCONFIRMED_TIMEOUT_MS).toISOString();
  db.prepare("UPDATE device_updates SET state='failed',reason_code='CLIENT_UPDATE_UNCONFIRMED_TIMEOUT',updated_at=? WHERE host_id=? AND state IN ('updating','awaiting_heartbeat') AND updated_at<?").run(new Date(at).toISOString(),hostId,cutoff);
+ const requestCutoff=new Date(at-DEVICE_UPDATE_REQUEST_TIMEOUT_MS).toISOString();
+ // Requests that were never allowed to install must also release the host
+ // mutex. This is a server intent timeout; no client process or installation
+ // result is inferred and the original request/evidence remains queryable.
+ db.prepare("UPDATE device_updates SET state='failed',reason_code='CLIENT_UPDATE_REQUEST_TIMEOUT',updated_at=? WHERE host_id=? AND state IN ('requested','accepted','waiting_idle') AND updated_at<?").run(new Date(at).toISOString(),hostId,requestCutoff);
 }
 
 export function invalidateUnauthorizedPreUpdateIntents(db,hostId,at=Date.now()){
@@ -195,7 +201,7 @@ export function createDeviceUpdateService(repo,{now=()=>Date.now(),fetch:fetcher
   return[null,null];
  }
  function deviceView(row,identity,manifest){const[code,reason]=readiness(row),operation=latest(row),stalled=Boolean(operation&&['updating','awaiting_heartbeat'].includes(operation.state)&&now()-Date.parse(operation.updated_at)>DEVICE_UPDATE_UNCONFIRMED_TIMEOUT_MS);return{id:row.id,name:row.name,os:row.os,status:row.status==='disabled'?'disabled':fresh(row,now())?'online':'offline',currentBuild:row.client_build||null,currentVersion:row.version||null,targetBuild:manifest?.targetBuild||null,version:manifest?.version||null,supported:!code,reasonCode:code,reason,canManage:['owner','admin'].includes(identity.role),operation:operation?{...view(operation),stalled,stalledReason:stalled?'维护回执超时；此记录不会证明升级成功或维护进程已退出，重新请求前客户端仍检查本机维护锁':null}:null};}
- async function list(slug,context={}){const identity=actor(slug,context);let manifest,releaseError=null;try{manifest=await release();}catch(error){releaseError=error.code;manifest=null;}const rows=db.prepare('SELECT * FROM devices WHERE workspace_id=? ORDER BY name').all(identity.ws.id).filter(row=>identity.ws.kind!=='personal'||row.owner_user_id===identity.userId);return{release:manifest,releaseError,devices:rows.map(row=>deviceView(row,identity,manifest))};}
+ async function list(slug,context={}){const identity=actor(slug,context);let manifest,releaseError=null;try{manifest=await release();}catch(error){releaseError=error.code;manifest=null;}const rows=db.prepare('SELECT * FROM devices WHERE workspace_id=? ORDER BY name').all(identity.ws.id).filter(row=>identity.ws.kind!=='personal'||row.owner_user_id===identity.userId);for(const row of rows)expireUnconfirmedDeviceUpdates(db,host(row),now());return{release:manifest,releaseError,devices:rows.map(row=>deviceView(row,identity,manifest))};}
  async function get(slug,id,requestId,context={}){const identity=actor(slug,context),row=device(identity.ws,id,identity.userId);if(requestId){const request=db.prepare('SELECT * FROM device_updates WHERE id=? AND workspace_id=? AND device_id=?').get(requestId,identity.ws.id,id);if(!request)fail('CLIENT_UPDATE_NOT_FOUND','升级请求不存在',404);return{request:view(request)};}let manifest=null;try{manifest=await release();}catch{}return{device:deviceView(row,identity,manifest)};}
  async function create(slug,id,input={},context={}){
   const identity=actor(slug,context,true),row=device(identity.ws,id,identity.userId);
@@ -236,8 +242,8 @@ export function createDeviceUpdateService(repo,{now=()=>Date.now(),fetch:fetcher
    AND CASE WHEN json_valid(payload_json) THEN COALESCE(NULLIF(NULLIF(json_extract(payload_json,'$.deviceId'),''),0),NULLIF(NULLIF(json_extract(payload_json,'$.device_id'),''),0),NULLIF(NULLIF(json_extract(payload_json,'$.targetDeviceId'),''),0),NULLIF(NULLIF(json_extract(payload_json,'$.target_device_id'),''),0)) END=?
    AND lower(trim(CASE WHEN json_valid(payload_json) THEN COALESCE(NULLIF(NULLIF(json_extract(payload_json,'$.runtime'),''),0),NULLIF(NULLIF(json_extract(payload_json,'$.agent'),''),0),NULLIF(NULLIF(json_extract(payload_json,'$.runtimeName'),''),0),'') ELSE '' END))<>'hermes' LIMIT 1`).get(row.workspace_id,...runtimeExecutionTypes,row.id));
  }
- function pending(slug,id,credential){const row=credentialDevice(credential,slug,id),request=latest(row);if(request?.state==='requested'&&nonPausableExecutionInFlight(row))return{request:null};return{request:request?{...view(request),workspace:slug,hostId:request.host_id}:null};}
- function bound(slug,id,requestId,credential){const row=credentialDevice(credential,slug,id),request=db.prepare('SELECT * FROM device_updates WHERE id=? AND device_id=? AND workspace_id=?').get(requestId,id,row.workspace_id);if(!request)fail('CLIENT_UPDATE_NOT_FOUND','升级请求不存在',404);return{row,request};}
+ function pending(slug,id,credential){const row=credentialDevice(credential,slug,id);expireUnconfirmedDeviceUpdates(db,host(row),now());const request=latest(row);if(request?.state==='requested'&&nonPausableExecutionInFlight(row))return{request:null};return{request:request?{...view(request),workspace:slug,hostId:request.host_id}:null};}
+ function bound(slug,id,requestId,credential){const row=credentialDevice(credential,slug,id);expireUnconfirmedDeviceUpdates(db,host(row),now());const request=db.prepare('SELECT * FROM device_updates WHERE id=? AND device_id=? AND workspace_id=?').get(requestId,id,row.workspace_id);if(!request)fail('CLIENT_UPDATE_NOT_FOUND','升级请求不存在',404);return{row,request};}
  function claim(slug,id,requestId,input={},credential){const{row,request}=bound(slug,id,requestId,credential);
   invalidateUnauthorizedPreUpdateIntents(db,request.host_id,now());
   if(db.prepare('SELECT reason_code FROM device_updates WHERE id=?').get(request.id)?.reason_code==='CLIENT_UPDATE_AUTHORITY_REVOKED')fail('CLIENT_UPDATE_AUTHORITY_REVOKED','原升级授权已失效，请由当前管理员重新发起',403);

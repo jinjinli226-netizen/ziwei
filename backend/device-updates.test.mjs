@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {createRepository} from './repository.mjs';
 import {createAuthService} from './auth.mjs';
-import {createDeviceUpdateService,OFFICIAL_CLIENT_SOURCE,REMOTE_UPDATE_FEATURE} from './device-updates.mjs';
+import {createDeviceUpdateService,OFFICIAL_CLIENT_SOURCE,REMOTE_UPDATE_FEATURE,DEVICE_UPDATE_REQUEST_TIMEOUT_MS} from './device-updates.mjs';
 import {createApp} from './app.mjs';
 import {createRemoteClientUpdates} from '../src/client-remote-update.mjs';
 
@@ -42,6 +42,16 @@ test('stable idempotency survives manifest change and deduplicates every employe
  const b=await f.create();assert.equal(b.duplicate,true);assert.equal(b.request.id,a.request.id);assert.equal(b.request.targetBuild,TARGET);
  const c=await f.service.create(f.slug,f.pair.deviceId,{...f.input,idempotencyKey:'other-employee-request'},f.context);assert.equal(c.request.id,a.request.id);assert.equal(f.db.prepare('SELECT count(*) n FROM device_updates').get().n,1);
  assert.equal(f.db.prepare('SELECT count(*) n FROM a2a_actions').get().n,0,'maintenance is never an employee execution');
+});
+
+test('an unclaimed maintenance request expires automatically and releases the host mutex',async t=>{
+ const f=fixture(t),created=await f.create();
+ f.db.prepare('UPDATE device_updates SET updated_at=? WHERE id=?').run(new Date(Date.now()-DEVICE_UPDATE_REQUEST_TIMEOUT_MS-1_000).toISOString(),created.request.id);
+ const listed=await f.service.list(f.slug,f.context),operation=listed.devices[0].operation;
+ assert.equal(operation.state,'failed');assert.equal(operation.code,'CLIENT_UPDATE_REQUEST_TIMEOUT');assert.equal(operation.heartbeatVerified,false);
+ const row=f.db.prepare('SELECT state,reason_code FROM device_updates WHERE id=?').get(created.request.id);assert.equal(row.state,'failed');assert.equal(row.reason_code,'CLIENT_UPDATE_REQUEST_TIMEOUT');
+ const next=await f.service.create(f.slug,f.pair.deviceId,{...f.input,idempotencyKey:'fixture-after-request-timeout'},f.context);
+ assert.equal(next.request.state,'requested');assert.notEqual(next.request.id,created.request.id);
 });
 
 test('offline, old client and non-Windows remain explicit and never create requests',async t=>{

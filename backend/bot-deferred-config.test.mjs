@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {createRepository} from './repository.mjs';
 import {createManagementService} from './management.mjs';
 import {completeOwnedProfile} from '../test-support/owned-profile.mjs';
-import {deferredConfigIdleEvidence} from './bot-deferred-config.mjs';
+import {deferredConfigIdleEvidence,BOT_DEFERRED_CONFIG_TTL_MS} from './bot-deferred-config.mjs';
 import {createBotMcpConnections} from './bot-mcp-connections.mjs';
 import crypto from 'node:crypto';
 
@@ -43,6 +43,19 @@ test('busy explicit update only stores one durable intent; immediate behavior an
   assert.throws(()=>f.enqueue({config:{...f.current().config,provider:'different'}}),{code:'BOT_DEFERRED_IDEMPOTENCY_CONFLICT'});
   assert.throws(()=>f.enqueue({idempotencyKey:'second'}),{code:'BOT_DEFERRED_CONFIG_PENDING'});
   f.drain();assert.equal(f.current().deferredConfig.phase,'waiting_for_execution_evidence');assert.equal(f.raw().revision,before.revision);
+});
+
+test('offline deferred intent expires to a retained failure and releases the pending gate',t=>{
+  const f=fixture(t),queued=f.enqueue();
+  assert.equal(queued.deferredConfig.state,'pending');
+  assert.ok(BOT_DEFERRED_CONFIG_TTL_MS>0);
+  f.db.prepare('UPDATE bot_deferred_configs SET created_at=? WHERE id=?').run('2000-01-01T00:00:00.000Z',queued.deferredConfig.id);
+  f.drain();
+  const state=f.db.prepare('SELECT state,phase,error_code,intent_json FROM bot_deferred_configs WHERE id=?').get(queued.deferredConfig.id);
+  assert.deepEqual({state:state.state,phase:state.phase,error_code:state.error_code},{state:'failed',phase:'expired',error_code:'BOT_DEFERRED_TIMEOUT'});
+  assert.equal(JSON.parse(state.intent_json).schemaVersion,1);
+  const current=f.current();assert.equal(current.deferredConfig.state,'failed');assert.equal(current.deferredConfig.errorCode,'BOT_DEFERRED_TIMEOUT');
+  assert.doesNotThrow(()=>f.enqueue({idempotencyKey:'after-timeout'}));
 });
 
 test('real completion wake applies then waits for actual validation before restoring the original active state',async t=>{

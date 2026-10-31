@@ -1,6 +1,12 @@
 import {isDshAction,confirmedDshSessionExit,confirmedDshPrePromptFailure} from '../src/dsh-session-receipt.mjs';
 
 const removedCode='CONVERSATION_QUEUE_REMOVED';
+// Queued conversation input is durable user intent, but it must not occupy a
+// Bot slot forever when the assigned client stays offline. Once this bounded
+// wait expires we retain the message/action evidence and finish the queue item
+// as a known local timeout; an acknowledged action keeps its normal execution
+// lease and is never rewritten here.
+export const CONVERSATION_QUEUE_TTL_MS = 24 * 60 * 60 * 1000;
 const fail=(code,message,status=409)=>{throw Object.assign(new Error(message),{code,status});};
 const parse=value=>{try{return JSON.parse(value);}catch{return {};}};
 const payload=row=>parse(row.payload_json);
@@ -20,12 +26,29 @@ export function createConversationQueue(db){
  const binding=db.prepare("SELECT 1 FROM conversations c JOIN conversation_messages m ON m.conversation_id=c.id WHERE c.id=? AND c.workspace_id=? AND c.employee_id IS ? AND m.id=? AND m.role='user'");
  const controlled=row=>{if(row?.type!=='conversation.execute')return false;const data=payload(row);return Boolean(data.conversationId&&data.messageId&&binding.get(data.conversationId,row.workspace_id,data.employeeId??null,data.messageId));};
  const paused=conversationId=>Boolean(state.get(conversationId)?.paused);
+ const expirePending=(conversationId=null)=>{
+  const timestamp=new Date().toISOString();
+  const rows=db.prepare(`SELECT a.id FROM a2a_actions a
+   WHERE a.type='conversation.execute' AND a.status='pending' AND a.acked_at IS NULL
+    AND a.expires_at IS NOT NULL AND a.expires_at<=?
+    AND json_valid(a.payload_json) AND json_extract(a.payload_json,'$.conversationId') IS NOT NULL
+    ${conversationId===null?'':'AND json_extract(a.payload_json,\'$.conversationId\')=?'}`).all(...(conversationId===null?[timestamp]:[timestamp,conversationId]));
+  for(const row of rows){
+   const result=JSON.stringify({code:'CONVERSATION_QUEUE_TIMEOUT',queueExpired:true,archivedUnconfirmed:false});
+   db.prepare("UPDATE a2a_actions SET status='failed',completed_at=?,error='CONVERSATION_QUEUE_TIMEOUT',result_json=? WHERE id=? AND status='pending' AND acked_at IS NULL").run(timestamp,result,row.id);
+   // A queued first turn may have reserved the Bot slot before a later turn
+   // was added. Release only that exact reservation; never touch a newer run.
+   db.prepare('UPDATE hermes_bots SET active_action_id=NULL WHERE active_action_id=?').run(row.id);
+  }
+  return rows.length;
+ };
  const status=row=>row.error===removedCode?'cancelled':({pending:'queued',acked:'running',succeeded:'completed'})[row.status]||row.status;
  function setPaused(conversationId,value){
   db.prepare(`INSERT INTO conversation_queue_controls(conversation_id,paused,updated_at) VALUES(?,?,?)
    ON CONFLICT(conversation_id) DO UPDATE SET paused=excluded.paused,updated_at=excluded.updated_at`).run(conversationId,value?1:0,new Date().toISOString());
  }
  function projection(conversationId){
+  expirePending(conversationId);
   const pending=rows.all(conversationId).filter(row=>row.status==='pending');
   const items=pending.map(row=>{const data=payload(row),message=db.prepare('SELECT content,attachment_json,created_at FROM conversation_messages WHERE id=? AND conversation_id=?').get(data.messageId,conversationId);return{id:row.id,message_id:data.messageId,content:message?.content||'',attachments:message?JSON.parse(message.attachment_json).map(item=>({name:item.name,mimeType:item.mimeType,size:item.size})):[],created_at:message?.created_at||row.created_at};});
   return{paused:paused(conversationId),items,count:items.length};
@@ -45,12 +68,14 @@ export function createConversationQueue(db){
  return{
   controlled,paused,projection,status,
   messages(conversationId,messages){
+   expirePending(conversationId);
    if(!messages.length)return messages;
    const placeholders=messages.map(()=>'?').join(','),actions=new Map(db.prepare(`SELECT a.status,a.error,json_extract(a.payload_json,'$.messageId') AS message_id FROM a2a_actions a
     WHERE a.type='conversation.execute' AND json_valid(a.payload_json) AND a.workspace_id=(SELECT workspace_id FROM conversations WHERE id=?) AND json_extract(a.payload_json,'$.employeeId') IS (SELECT employee_id FROM conversations WHERE id=?) AND json_extract(a.payload_json,'$.conversationId')=? AND json_extract(a.payload_json,'$.messageId') IN (${placeholders}) ORDER BY a.created_at,a.rowid`).all(conversationId,conversationId,conversationId,...messages.map(message=>message.id)).map(row=>[row.message_id,row]));
    return messages.map(message=>actions.has(message.id)?{...message,queue_status:status(actions.get(message.id))}:message);
   },
-  current(conversationId){const actions=rows.all(conversationId);return actions.find(row=>row.status==='acked')||actions.find(row=>row.status==='pending')||null;},
+  current(conversationId){expirePending(conversationId);const actions=rows.all(conversationId);return actions.find(row=>row.status==='acked')||actions.find(row=>row.status==='pending')||null;},
+  expirePending,
   setPaused,assertAdmission,
   controlBot(workspaceId,employeeId,snapshot,value){
    for(const conversation of db.prepare('SELECT id FROM conversations WHERE workspace_id=? AND employee_id=?').all(workspaceId,employeeId)){

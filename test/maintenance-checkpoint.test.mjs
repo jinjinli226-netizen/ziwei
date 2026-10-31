@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {ActionDispatcher} from '../src/daemon.mjs';
+import {MAINTENANCE_COMMIT_TTL_MS} from '../src/daemon.mjs';
 import {createActionDelivery} from '../src/daemon-action-delivery.mjs';
 import {executionBinding} from '../src/execution-admission.mjs';
 import {validateMaintenancePause,markMaintenancePaused,consumeMaintenancePaused} from '../src/maintenance-checkpoint.mjs';
@@ -60,6 +61,13 @@ test('pause server commit is retried and cannot authorize execution until durabl
  let commits=0,allow=false,calls=0;const {f,a,d}=await pauseDispatcher(t,{onMaintenancePaused:async()=>{commits++;return allow;}});
  assert.equal(d.maintenancePendingCommits.length,1);assert.equal((await d.dispatch(a)).status,'maintenance_paused');assert.equal(d.maintenancePendingCommits.length,1);allow=true;assert.deepEqual(await d.retryMaintenanceCommits([a]),{pending:0});assert.equal(commits,3);
  const restarted=new ActionDispatcher({...f,onMaintenancePaused:async()=>false,authorizeResume:async()=>{calls++;return true;},execute:async()=>{calls++;}});assert.equal((await restarted.dispatch(a)).status,'maintenance_paused');assert.equal(calls,0);
+});
+
+test('a maintenance commit that never reaches the server is archived after its deadline',async t=>{
+ let clock=Date.now();const {f,a,d}=await pauseDispatcher(t,{now:()=>clock,onMaintenancePaused:async()=>false});
+ assert.equal(d.maintenancePendingCommits.length,1);clock+=MAINTENANCE_COMMIT_TTL_MS+1;
+ assert.deepEqual(await d.retryMaintenanceCommits([a]),{pending:0});
+ const result=d.completedResult(a);assert.equal(result.code,'MAINTENANCE_COMMIT_TIMEOUT');assert.equal(result.executionState,'uncertain');assert.equal(result.result.maintenanceCommitUnknown,true);assert.equal(d.maintenancePausedActions.length,0);assert.equal(d.quarantined,false);
 });
 test('modified payload, device, profile or resume window cannot reuse checkpoint after restart',async t=>{
  const {f,a}=await pauseDispatcher(t);const base=fs.readFileSync(f.stateFile);

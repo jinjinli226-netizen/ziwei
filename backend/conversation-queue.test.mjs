@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {createRepository} from './repository.mjs';
+import {CONVERSATION_QUEUE_TTL_MS} from './conversation-queue.mjs';
 import {createManagementService} from './management.mjs';
 import {completeOwnedProfile} from '../test-support/owned-profile.mjs';
 import {createActionScheduler} from '../src/daemon-action-scheduler.mjs';
@@ -40,12 +41,24 @@ test('attachments and idempotency stay on the original queued action until its e
  f.repo.pauseConversationQueue(f.conversation.id);
  const first=f.send('ATTACHMENT',{attachments,clientMessageId:'queue-image'}),duplicate=f.send('ATTACHMENT',{attachments,clientMessageId:'queue-image'});
  assert.equal(duplicate.id,first.id);assert.equal(duplicate.execution.id,first.execution.id);assert.equal(duplicate.duplicate,true);
- assert.equal(first.queue.items[0].attachments[0].name,'queued.png');assert.equal('content' in first.queue.items[0].attachments[0],false);assert.equal(f.repo.db.prepare('SELECT expires_at FROM a2a_actions WHERE id=?').get(first.execution.id).expires_at,null);
+ assert.equal(first.queue.items[0].attachments[0].name,'queued.png');assert.equal('content' in first.queue.items[0].attachments[0],false);assert.ok(Date.parse(f.repo.db.prepare('SELECT expires_at FROM a2a_actions WHERE id=?').get(first.execution.id).expires_at)>Date.now());
  assert.equal(f.repo.getConversation(f.conversation.id,{},{view:'thread'}).queue.count,1);
  assert.equal(f.repo.getConversation(f.conversation.id).queue.paused,false,'new input explicitly enables sending');
  f.repo.pauseConversationQueue(f.conversation.id);assert.equal(f.poll().length,0);f.repo.resumeConversationQueue(f.conversation.id);
  const ack=f.repo.ackA2AAction(first.execution.id,{deviceId:'queue-pc'});
  assert.ok(Date.parse(ack.expires_at)>Date.now());assert.equal(ack.payload.attachments[0].content,attachments[0].content);
+});
+
+test('offline queued input expires to a retained terminal timeout and releases the Bot slot',t=>{
+ const f=fixture(t),message=f.send('EXPIRE_ME');
+ const before=f.repo.db.prepare('SELECT expires_at FROM a2a_actions WHERE id=?').get(message.execution.id).expires_at;
+ assert.ok(Date.parse(before)-Date.now()<=CONVERSATION_QUEUE_TTL_MS);
+ f.repo.db.prepare('UPDATE a2a_actions SET expires_at=? WHERE id=?').run('2000-01-01T00:00:00.000Z',message.execution.id);
+ assert.equal(f.repo.getConversation(f.conversation.id).queue.count,0);
+ const action=f.repo.getA2AAction(message.execution.id);
+ assert.equal(action.status,'failed');assert.equal(action.error,'CONVERSATION_QUEUE_TIMEOUT');
+ assert.deepEqual(action.result,{code:'CONVERSATION_QUEUE_TIMEOUT',queueExpired:true,archivedUnconfirmed:false});
+ assert.equal(f.repo.getConversation(f.conversation.id).messages[0].queue_status,'failed');
 });
 
 test('pause retains pending input, removal never cancels current execution or enters later history',t=>{

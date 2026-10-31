@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createRepository } from '../backend/repository.mjs';
+import { createRepository, AUTOMATION_RUN_ORPHAN_TTL_MS, WEBHOOK_SENDING_TTL_MS } from '../backend/repository.mjs';
 import { createApp } from '../backend/app.mjs';
 
 test('automation actions write results and schedule a bounded retry', () => {
@@ -19,6 +19,28 @@ test('automation actions write results and schedule a bounded retry', () => {
   repo.resultA2AAction(retry.action_id, { status: 'succeeded', result: { ok: true } });
   assert.equal(repo.listAutomationRuns(automation.id)[0].status, 'completed');
   assert.deepEqual(repo.listAutomationRuns(automation.id)[0].result, { ok: true });
+});
+
+test('orphaned queued automation runs are auto-finalized while preserving the run record', () => {
+  const repo = createRepository({ memory: true });
+  const automation = repo.createAutomation('test-111', { name: 'orphan', schedule: '手动' });
+  const run = repo.runAutomation(automation.id);
+  repo.db.prepare('UPDATE automation_runs SET action_id=NULL,created_at=? WHERE id=?').run(new Date(Date.now() - AUTOMATION_RUN_ORPHAN_TTL_MS - 1000).toISOString(), run.id);
+  const view = repo.listAutomationRuns(automation.id)[0];
+  assert.equal(view.status, 'failed');
+  assert.match(view.error, /超时或丢失/);
+  assert.equal(view.result.code, 'AUTOMATION_ACTION_TIMEOUT');
+  assert.equal(view.result.archivedUnconfirmed, true);
+});
+
+test('stale webhook sending rows re-enter bounded retry or terminal failure', () => {
+  const repo = createRepository({ memory: true });
+  const automation = repo.createAutomation('test-111', { name: 'stale webhook', schedule: '手动', webhookUrl: 'http://127.0.0.1:9/hook', webhookSecret: 'secret', maxRetries: 2 });
+  const run = repo.runAutomation(automation.id), queued = repo.queueWebhookDelivery(run.id, 'completed', { ok: true }, null);
+  repo.db.prepare("UPDATE webhook_deliveries SET status='sending',attempts=1,created_at=? WHERE id=?").run(new Date(Date.now() - WEBHOOK_SENDING_TTL_MS - 1000).toISOString(), queued.id);
+  const delivery = repo.listWebhookDeliveries(run.id)[0];
+  assert.equal(delivery.status, 'retrying');
+  assert.equal(delivery.error, 'WEBHOOK_SEND_INTERRUPTED');
 });
 
 test('notifications, conversations, binary documents, skills and key rotation persist', async () => {

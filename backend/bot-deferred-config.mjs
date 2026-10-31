@@ -1,6 +1,11 @@
 import crypto from 'node:crypto';
 import {normalizeBotConfigUpdate,botFailure} from '../src/hermes-bot-config.mjs';
 
+// A deferred mutation is durable user intent, but an offline/abandoned client
+// must not reserve the employee forever. Expiry only closes the orchestration
+// record; the intent, action IDs and existing configuration remain intact.
+export const BOT_DEFERRED_CONFIG_TTL_MS = 24 * 60 * 60 * 1000;
+
 const canonical=value=>JSON.stringify(value,(_key,item)=>item&&typeof item==='object'&&!Array.isArray(item)?Object.fromEntries(Object.entries(item).sort(([a],[b])=>a.localeCompare(b))):item);
 const digest=value=>crypto.createHash('sha256').update(canonical(value)).digest('hex');
 const parse=value=>{try{return JSON.parse(value);}catch{return null;}};
@@ -17,6 +22,7 @@ const reasons={
   BOT_DEFERRED_VALIDATION_FAILED:'新配置的原生验证未成功，Bot 未自动恢复工作。',
   BOT_DEFERRED_EXECUTION_FAILED:'原执行失败，延后配置已结束；未自动应用配置。',
   BOT_DEFERRED_CONNECTION_FAILED:'MCP 原连接未成功；保留原连接回执，不重复派发。',
+  BOT_DEFERRED_TIMEOUT:'延后配置等待窗口已结束；意图已归档，当前配置未自动修改。',
   BOT_DEFERRED_APPLY_FAILED:'延后配置未能完成，保留当前配置与原执行记录。',
   BOT_MCP_CLIENT_REQUIRED:'目标电脑的客户端尚不支持远程 MCP 授权，未创建替代连接。',
   BOT_PERMISSION_CONFLICT:'当前配置未授权此原生操作，未扩大工具权限。',
@@ -60,7 +66,7 @@ const actionBinding=action=>action?{id:action.id,type:action.type,agentId:action
 /** Durable intent runner. All external hooks are synchronous API service calls;
  * actual device work and OAuth approval remain represented by their A2A actions.
  */
-export function createBotDeferredConfig(repo,{resolve,get,update,validate,control}, {now=()=>new Date().toISOString()}={}){
+export function createBotDeferredConfig(repo,{resolve,get,update,validate,control}, {now=()=>new Date().toISOString(),ttlMs=BOT_DEFERRED_CONFIG_TTL_MS}={}){
   const db=repo.db;
   let started=false,queued=false,draining=false,timer=null,unsubscribe=null,hooks={};
   const atomic=fn=>{db.exec('SAVEPOINT bot_deferred_config');try{const result=fn();db.exec('RELEASE bot_deferred_config');return result;}catch(error){db.exec('ROLLBACK TO bot_deferred_config; RELEASE bot_deferred_config');throw error;}};
@@ -180,6 +186,8 @@ export function createBotDeferredConfig(repo,{resolve,get,update,validate,contro
   function drain(){
     if(draining)return[];draining=true;
     try{
+      const stamp=now(),cutoff=new Date(Date.parse(stamp)-ttlMs).toISOString();
+      db.prepare("UPDATE bot_deferred_configs SET state='failed',phase='expired',error_code='BOT_DEFERRED_TIMEOUT',updated_at=? WHERE state IN ('pending','validating','connecting') AND created_at<=?").run(stamp,cutoff);
       const rows=db.prepare("SELECT * FROM bot_deferred_configs WHERE state IN ('pending','validating','connecting') ORDER BY created_at,rowid").all();
       for(const row of rows)try{step(row);}catch(error){
         if(['DEVICE_OFFLINE','BOT_DEVICE_OFFLINE','DISCOVERY_STALE','MCP_OAUTH_RELAY_BUSY'].includes(error.code))db.prepare('UPDATE bot_deferred_configs SET phase=?,updated_at=? WHERE id=?').run('waiting_for_device',now(),row.id);

@@ -124,6 +124,12 @@ function installConnections() {
       onConfirmed:(action,status)=>state.dispatcher.settleMaintenanceFromServer(action,status,'SERVER_TERMINAL_CONFIRMED'),
       onSuccess: async action => { if (action.type === 'hermes.profile.create') await refreshRuntimeDiscovery(state); },
       onEvent: (event, extra) => log(event, { workspace: config.workspace, ...extra }),
+      // A permanent server refusal or an expired lease cannot be retried
+      // safely forever. Keep the authenticated input/result blobs locally and
+      // classify the delivery as archived-unconfirmed at the failure or next
+      // recovery pass; this releases only local stop maintenance and never
+      // fabricates a server terminal or successful execution.
+      autoArchiveUnconfirmed: true,
     });
     state.failureFinalizations=createClientFailureFinalizations({runtimeDir:connectionRuntimeDir,
       identity:{apiBase:config.apiBase,workspace:config.workspace,deviceId:config.deviceId},
@@ -362,11 +368,13 @@ function healthPayload() {
   const gateway=[...connections.values()].map(connection=>connection.localExecutor.maintenanceStatus());
   const fileEvidence=inspectLocalDaemonMaintenanceFiles({connections:[...connections.values()].map(connection=>({workspace:connection.config.workspace,deviceId:connection.config.deviceId,apiBase:connection.config.apiBase,runtimeDir:connection.runtimeDir}))});
   const gatewaySafe=gateway.every(row=>row.safe===true);
-  const maintenance={safe:fileEvidence.safe&&gatewaySafe&&quarantinedActionCount===0,stopSafe:fileEvidence.stopSafe&&gatewaySafe&&quarantinedActionCount===0,retainedDeliveryCount:fileEvidence.retainedDeliveryCount,retainedBackgroundCount:fileEvidence.retainedBackgroundCount,pendingDeliveryCount:[...connections.values()].reduce((n,c)=>n+c.actionDelivery.pendingCount,0),blockedDeliveryCount:[...connections.values()].reduce((n,c)=>n+c.actionDelivery.blockedCount,0),gatewaySafe,gatewayWorkers:gateway.flatMap(row=>row.workers),fileIssues:fileEvidence.issues,stopIssues:fileEvidence.stopIssues.map(({code})=>({code}))};
+  const deliveryDiagnostics=(fileEvidence.archivedUnconfirmed||[]).slice(0,32).map(item=>({code:item.code,message:item.message,actionId:item.actionId,reason:item.reason,httpStatus:item.httpStatus,archivedAt:item.archivedAt,evidencePath:item.evidencePath,evidencePaths:item.evidencePaths,blocking:false,resultUnknown:true}));
+  const maintenance={safe:fileEvidence.safe&&gatewaySafe&&quarantinedActionCount===0,stopSafe:fileEvidence.stopSafe&&gatewaySafe&&quarantinedActionCount===0,retainedDeliveryCount:fileEvidence.retainedDeliveryCount,retainedBackgroundCount:fileEvidence.retainedBackgroundCount,pendingDeliveryCount:[...connections.values()].reduce((n,c)=>n+c.actionDelivery.pendingCount,0),blockedDeliveryCount:[...connections.values()].reduce((n,c)=>n+c.actionDelivery.blockedCount,0),archivedUnconfirmedDeliveryCount:fileEvidence.archivedUnconfirmedCount??0,gatewaySafe,gatewayWorkers:gateway.flatMap(row=>row.workers),fileIssues:fileEvidence.issues,stopIssues:fileEvidence.stopIssues.map(({code})=>({code})),deliveryDiagnostics};
   return { service: 'ziwei_user', version: VERSION, clientBuild: CLIENT_BUILD, bridge: 'ziwei_user', agentId: 'ziwei_user', workspace: config.workspace, deviceId: config.deviceId, runtimes: runtimeDiscovery.runtimes, managementMcp: primaryConnection?.managementBootstrap.status(), terminalMcp: primaryConnection?.terminalStatus, lastHeartbeat, lastHeartbeatAgeMs: lastHeartbeatAt ? Math.max(0, Date.now() - lastHeartbeatAt) : null, lastPoll, pid: process.pid,
     lifecycle: { nonce: lifecycleNonce, root: ROOT, configPath, configSha256: lifecycleConfigurationHash(), runtimeDir, startedAt: lifecycleStartedAt, managedAuxiliaryCount: maintenance.gatewayWorkers.filter(row=>row.processAlive!==false).length }, maintenance, remoteClientUpdate: remoteClientUpdates.status(),
     connectionState: draining ? 'draining' : executionQuarantined ? 'quarantined' : 'connected', executionQuarantined, quarantinedActionCount, maintenancePausedActionCount, maintenancePendingCommitCount, activeActionCount: [...connections.values()].reduce((total, connection) => total + connection.actionScheduler.activeCount, 0), pollingCount: [...connections.values()].filter(connection => connection.polling).length,
     connections: [...connections.values()].map(connection => ({ workspace: connection.config.workspace, deviceId: connection.config.deviceId, primary: connection.config.primary, configured: true, ready: !draining && !executionQuarantined && connection.lastHeartbeatAt > 0 && Date.now() - connection.lastHeartbeatAt <= Math.max(45_000, (Number(config.heartbeatMs) || 15_000) * 3), lastHeartbeat: connection.lastHeartbeat, managementMcp: connection.managementBootstrap.status(), terminalMcp: connection.terminalStatus })), connectionErrors,
+    diagnostics:{delivery:deliveryDiagnostics},
   };
 }
 function localStopRefusal(state) {

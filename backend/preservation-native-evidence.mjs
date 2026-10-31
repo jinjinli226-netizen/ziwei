@@ -13,9 +13,15 @@ import {inspectClientMaintenance,inspectNativeClientProcess,inspectNativeHealthL
 import {digest,uncertain,exitedTree,executionExit,gatewayResultMatches} from './version-preservation.mjs';
 import {scanOwnedNativeDatabases,nativeActionDigest,attestNativeVersion} from './preservation-native-databases.mjs';
 import {isLegacySourceInterpreter} from './preservation-legacy-source.mjs';
+import {ARCHIVED_UNCONFIRMED_STATE} from '../src/daemon-action-delivery.mjs';
 
 const hash=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
 const json=value=>{try{return JSON.parse(value);}catch{return null;}};
+const archivedDeliveryReasons=new Set(['PERMANENT_SERVER_REJECTION','SERVER_LEASE_EXPIRED','SERVER_TERMINAL_UNCONFIRMED']);
+function validArchivedUnconfirmed(record){
+  const archive=record?.archive;
+  return record?.state===ARCHIVED_UNCONFIRMED_STATE&&record?.retainEvidence===true&&!Object.hasOwn(record,'serverStatus')&&!Object.hasOwn(record,'blockedStatus')&&!Object.hasOwn(record,'confirmedAt')&&archive&&Object.keys(archive).sort().join(',')==='archivedAt,disposition,httpStatus,kind,reason,schemaVersion,serverStatus,serverTerminal'&&archive.schemaVersion===1&&archive.kind==='local-delivery-archive'&&archive.disposition==='archived-unconfirmed'&&archivedDeliveryReasons.has(archive.reason)&&archive.serverTerminal===false&&archive.serverStatus===null&&Number.isFinite(Date.parse(archive.archivedAt))&&(archive.httpStatus===null||Number.isInteger(archive.httpStatus)&&archive.httpStatus>=400&&archive.httpStatus<500&&![408,429].includes(archive.httpStatus));
+}
 const equal=(a,b)=>digest(a)===digest(b);
 const deliveryBinding=(action,identity)=>{const p=action.payload||{};return hash(JSON.stringify({id:action.id,type:action.type,agent:action.agent_id||action.agentId||'ziwei_user',workspace:action.workspace_id||identity.workspace,device:identity.deviceId,employee:p.employeeId||p.employee_id||p.assignee||null,conversation:p.conversationId||p.conversation_id||null,message:p.messageId||p.message_id||null,dedupe:action.dedupe_key||action.dedupeKey||null}));};
 function normalizedAction(row){return {...row,payload:row.payload||json(row.payload_json)||{},result:row.result||json(row.result_json)};}
@@ -68,8 +74,8 @@ export function scanNativeFiles(options={}, {legacySource=null}={}) {
 
 /** Current daemon admission only; this cannot attest a production namespace. */
 export function inspectLocalDaemonMaintenanceFiles({connections=[]}={}) {
-  const {safe,stopSafe,issues,stopIssues,retainedDeliveryCount,retainedPrelaunchCount,retainedBackgroundCount,retainedHistoryCount,retainedFailedBackgroundCount,retainedPendingCount,maintenancePausedCount,files,directories}=scanFileEvidence({connections},true);
-  return {safe,stopSafe,issues,stopIssues,retainedDeliveryCount,retainedPrelaunchCount,retainedBackgroundCount,retainedHistoryCount,retainedFailedBackgroundCount,retainedPendingCount,maintenancePausedCount,files,directories};
+  const {safe,stopSafe,issues,stopIssues,retainedDeliveryCount,retainedPrelaunchCount,retainedBackgroundCount,retainedHistoryCount,retainedFailedBackgroundCount,retainedPendingCount,archivedUnconfirmedCount,archivedUnconfirmed,maintenancePausedCount,files,directories}=scanFileEvidence({connections},true);
+  return {safe,stopSafe,issues,stopIssues,retainedDeliveryCount,retainedPrelaunchCount,retainedBackgroundCount,retainedHistoryCount,retainedFailedBackgroundCount,retainedPendingCount,archivedUnconfirmedCount,archivedUnconfirmed,maintenancePausedCount,files,directories};
 }
 
 function pausedMaintenancePair(started,record,original,receipt,identity){
@@ -385,7 +391,7 @@ function confirmedLocalDshSession(started,completed,record,identity){
 /** Read-only evidence. Zero in-memory counters cannot replace these files.
  * localMaintenance is lexical code state, never selected by input JSON. */
 function scanFileEvidence({connections=[],actions=[],homes=[],productionRequest}={},localMaintenance,legacyInterpreter=null) {
-  const issues=[],files=[],directories=[],gatewayExits=[],legacyHistoryProofs=[],legacyNeverDispatchedProofs=[],retainedDeliveries=new Set(),retainedPrelaunch=new Set(),retainedBackground=new Set(),retainedHistory=new Set(),retainedFailedBackground=new Set(),retainedPending=new Set(),maintenancePauses=new Set(),originals=new Map(actions.map(row=>[row.id,normalizedAction(row)]));
+  const issues=[],files=[],directories=[],gatewayExits=[],legacyHistoryProofs=[],legacyNeverDispatchedProofs=[],retainedDeliveries=new Set(),retainedPrelaunch=new Set(),retainedBackground=new Set(),retainedHistory=new Set(),retainedFailedBackground=new Set(),retainedPending=new Set(),archivedUnconfirmed=[],maintenancePauses=new Set(),originals=new Map(actions.map(row=>[row.id,normalizedAction(row)]));
   const issue=(code,detail={})=>issues.push({code,...detail});
   const read=file=>{try{const stat=fs.lstatSync(file,{bigint:true});if(!stat.isFile()||stat.isSymbolicLink()||stat.nlink!==1n)throw new Error('not regular file');const bytes=fs.readFileSync(file);files.push({path:path.resolve(file),exists:true,sha256:hash(bytes),bytes:bytes.length,identity:{dev:String(stat.dev),ino:String(stat.ino)}});return bytes.toString('utf8');}catch(error){if(error.code==='ENOENT')files.push({path:path.resolve(file),exists:false});throw error;}};
   const directoryProof=directory=>{try{const stat=fs.lstatSync(directory,{bigint:true});if(!stat.isDirectory()||stat.isSymbolicLink())throw Error('identity');const names=fs.readdirSync(directory).sort();directories.push({path:path.resolve(directory),exists:true,names,identity:{dev:String(stat.dev),ino:String(stat.ino)}});}catch(error){if(error.code==='ENOENT')directories.push({path:path.resolve(directory),exists:false,names:[]});else issue('DIRECTORY_UNREADABLE',{path:directory});}};
@@ -509,7 +515,7 @@ function scanFileEvidence({connections=[],actions=[],homes=[],productionRequest}
     const consumed=new Set();
     for(const name of names.filter(name=>/^[a-f0-9]{64}\.json$/.test(name))){
       const file=path.join(directory,name);let record,originalAction,deliveryResult;
-      try{record=json(read(file));if(record?.version!==2||!record.action?.id||!Array.isArray(record.events)||!['awaiting_ack','acked','maintenance_paused','result_pending','confirmed','blocked'].includes(record.state)||name!==`${hash(JSON.stringify(String(record.action.id)))}.json`)throw new Error('invalid record');consumed.add(name);
+      try{record=json(read(file));if(record?.version!==2||!record.action?.id||!Array.isArray(record.events)||!['awaiting_ack','acked','maintenance_paused','result_pending','confirmed','blocked',ARCHIVED_UNCONFIRMED_STATE].includes(record.state)||name!==`${hash(JSON.stringify(String(record.action.id)))}.json`)throw new Error('invalid record');if(record.state===ARCHIVED_UNCONFIRMED_STATE&&!validArchivedUnconfirmed(record))throw new Error('invalid archived record');consumed.add(name);
         const identity={apiBase:connection.apiBase.replace(/\/$/,''),workspace,deviceId};
         if(!equal(record.identity,identity)||record.binding!==deliveryBinding(record.action,identity))throw new Error('identity mismatch');
         if(record.state!=='confirmed'||record.retainEvidence){
@@ -525,10 +531,20 @@ function scanFileEvidence({connections=[],actions=[],homes=[],productionRequest}
           if(localMaintenance&&record.state==='maintenance_paused'&&maintenancePauses.has(stateFile+'\0'+record.action.id)&&pausedMaintenancePair(state.started.find(row=>row.actionId===record.action.id),record,originalAction,receipt,identity))continue;
         }
         // Unmapped/removed connections and queues are not guessed to be legacy.
-        if(record.state!=='confirmed'||record.retainEvidence||record.events.length)issue('DELIVERY_NOT_DRAINED',{actionId:record.action.id,state:record.state,path:file});
+        if(record.state===ARCHIVED_UNCONFIRMED_STATE){
+          // This is a local terminal disposition: the original bytes remain
+          // auditable, but no server terminal or business success is inferred.
+          // It therefore does not hold maintenance red while its diagnostic
+          // remains visible to health/readyz callers.
+        }else if(record.state!=='confirmed'||record.retainEvidence||record.events.length)issue('DELIVERY_NOT_DRAINED',{actionId:record.action.id,state:record.state,path:file});
         else if(!['succeeded','failed','expired'].includes(record.serverStatus)||!Number.isFinite(Date.parse(record.confirmedAt)))throw new Error('invalid terminal receipt');
-        const original=originals.get(record.action.id);if(original&&original.status!==record.serverStatus)issue('DELIVERY_SERVER_MISMATCH',{actionId:record.action.id,path:file});
+        const original=originals.get(record.action.id);if(record.state!==ARCHIVED_UNCONFIRMED_STATE&&original&&original.status!==record.serverStatus)issue('DELIVERY_SERVER_MISMATCH',{actionId:record.action.id,path:file});
         const admission=localMaintenance&&state?.completed.find(completed=>completed.result?.actionId===record.action.id&&isDispatcherAdmissionRejected({completed,identity:scope,started:state.started}));
+        if(record.state===ARCHIVED_UNCONFIRMED_STATE){
+          const evidencePaths=[path.resolve(file),path.resolve(file.replace(/\.json$/,'.action.json')),...(record.resultDigest?[path.resolve(file.replace(/\.json$/,'.result.json'))]:[])];
+          archivedUnconfirmed.push({actionId:record.action.id,code:'DELIVERY_ARCHIVED_UNCONFIRMED',message:'服务器终态未确认；原始 action/result 证据已本地归档，不阻塞维护',reason:record.archive.reason,httpStatus:record.archive.httpStatus,archivedAt:record.archive.archivedAt,evidencePath:path.resolve(file),evidencePaths,blocking:false,resultUnknown:true});
+          if(localMaintenance)retainedDeliveries.add(file);
+        }
         if(localMaintenance&&retainableLocalDelivery(record,originalAction,deliveryResult,identity,admission))retainedDeliveries.add(file);
         if(localMaintenance&&retainableFailedBackgroundDelivery(record,originalAction,deliveryResult,state,identity)){retainedDeliveries.add(file);if(record.state==='result_pending')retainedPending.add(file);}
       }catch{issue('DELIVERY_CORRUPT',{path:file,actionId:record?.action?.id||null});}
@@ -554,7 +570,7 @@ function scanFileEvidence({connections=[],actions=[],homes=[],productionRequest}
     for(const action of [...originals.values()].filter(row=>row.type==='hermes.bot.native'&&row.payload.employeeId===item.employeeId&&row.payload.nativeOperation?.resource==='gateway'&&row.payload.nativeOperation.operation==='connect'&&row.acked_at))if(!starts.some(entry=>entry.sourceActionId===action.id))issue('GATEWAY_LIFECYCLE_MISSING',{actionId:action.id,path:file});
   }
   const stopIssues=localMaintenance?issues.filter(item=>!(item.code==='DELIVERY_NOT_DRAINED'&&retainedDeliveries.has(item.path))&&!(item.code==='UNMAPPED_NATIVE_EXECUTION'&&retainedPrelaunch.has(item.path+'\0'+item.actionId))&&!(item.code==='BACKGROUND_PROCESS_RETAINED'&&retainedBackground.has(item.path+'\0'+item.actionId))&&!(item.code==='LOCAL_HISTORY_RETAINED'&&retainedHistory.has(item.path+'\0'+item.actionId))&&!(item.code==='FAILED_BACKGROUND_HISTORY_RETAINED'&&retainedFailedBackground.has(item.path+'\0'+item.actionId))):null;
-  return {safe:issues.length===0,issues,files,directories,gatewayExits,legacyHistoryProofs,originalActionProofs:[...legacyHistoryProofs,...legacyNeverDispatchedProofs],...(localMaintenance?{stopSafe:stopIssues.length===0,stopIssues,retainedDeliveryCount:retainedDeliveries.size,retainedPrelaunchCount:retainedPrelaunch.size,retainedBackgroundCount:retainedBackground.size,retainedHistoryCount:retainedHistory.size,retainedFailedBackgroundCount:retainedFailedBackground.size,retainedPendingCount:retainedPending.size,maintenancePausedCount:maintenancePauses.size}:{})};
+  return {safe:issues.length===0,issues,files,directories,gatewayExits,legacyHistoryProofs,originalActionProofs:[...legacyHistoryProofs,...legacyNeverDispatchedProofs],archivedUnconfirmed, ...(localMaintenance?{stopSafe:stopIssues.length===0,stopIssues,retainedDeliveryCount:retainedDeliveries.size,retainedPrelaunchCount:retainedPrelaunch.size,retainedBackgroundCount:retainedBackground.size,retainedHistoryCount:retainedHistory.size,retainedFailedBackgroundCount:retainedFailedBackground.size,retainedPendingCount:retainedPending.size,archivedUnconfirmedCount:archivedUnconfirmed.length,maintenancePausedCount:maintenancePauses.size}:{})};
 }
 
 /** Only actual native maintenance inspection + loopback health is accepted. */

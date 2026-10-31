@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import {createConversationQueue} from './conversation-queue.mjs';
+import {createConversationQueue,CONVERSATION_QUEUE_TTL_MS} from './conversation-queue.mjs';
 import {createDshSessionReceipts,recoverableDshCompletion} from './dsh-session-receipts.mjs';
 import {isDshAction} from '../src/dsh-session-receipt.mjs';
 import {botExecutionOccupiesSlot} from './bot-execution-occupancy.mjs';
@@ -63,6 +63,9 @@ function finishRepository(repo,rollout){
 }
 // End constructor provenance.
 const now = () => new Date().toISOString();
+export const AUTOMATION_RUN_ORPHAN_TTL_MS = 24 * 60 * 60 * 1000;
+export const WEBHOOK_SENDING_TTL_MS = 10 * 60 * 1000;
+export const BOT_GATEWAY_QUEUE_TTL_MS = 24 * 60 * 60 * 1000;
 const id = prefix => `${prefix}_${crypto.randomUUID()}`;
 const hashSecret = value => crypto.createHash('sha256').update(String(value || '')).digest('hex');
 const parse = value => { try { return JSON.parse(value); } catch { return []; } };
@@ -709,6 +712,34 @@ export function createRepository(options = {}, io={}) {
     const workspaceRow = db.prepare('SELECT slug FROM workspaces WHERE id=?').get(task.workspace_id);
     if (workspaceRow) audit(workspaceRow.slug, 'ziwei_user', 'task.execution.started', { taskId, from:task.state, to:'in_progress' });
   };
+  const sweepAutomationRuns = (workspaceId = null) => {
+    const cutoff = new Date(Date.now() - AUTOMATION_RUN_ORPHAN_TTL_MS).toISOString();
+    const rows = db.prepare(`SELECT * FROM automation_runs WHERE status='queued' AND created_at<=?${workspaceId ? ' AND workspace_id=?' : ''}`).all(...(workspaceId ? [cutoff,workspaceId] : [cutoff]));
+    for (const run of rows) {
+      if (Number(run.attempt || 0) > 0 || run.next_retry_at) continue;
+      const action = run.action_id ? db.prepare('SELECT status,result_json,error FROM a2a_actions WHERE id=?').get(run.action_id) : null;
+      // A terminal failed/expired action is a safe, explicit failure for the
+      // orchestration row. Missing actions are archived after the same bound;
+      // pending actions remain authoritative until their own lease expires.
+      if (action && !['failed','expired'].includes(action.status) && action.status !== undefined) continue;
+      const result = action?.result_json ? parse(action.result_json) : { code:'AUTOMATION_ACTION_TIMEOUT', archivedUnconfirmed:true };
+      const error = action?.error || '自动化动作已超时或丢失，原始运行记录已归档，未自动重放';
+      db.prepare("UPDATE automation_runs SET status='failed',result_json=?,error=?,message=?,finished_at=? WHERE id=? AND status='queued'").run(JSON.stringify(result),error,'自动化运行已按超时结束；原动作证据保留，未自动重放',now(),run.id);
+    }
+  };
+  const recoverStaleWebhookSending = (at = Date.now()) => {
+    const cutoff = new Date(at - WEBHOOK_SENDING_TTL_MS).toISOString();
+    const rows = db.prepare("SELECT id,attempts,max_attempts FROM webhook_deliveries WHERE status='sending' AND created_at<=?").all(cutoff);
+    for (const row of rows) {
+      const exhausted = Number(row.attempts || 0) >= Number(row.max_attempts || 1);
+      db.prepare('UPDATE webhook_deliveries SET status=?,next_retry_at=?,error=? WHERE id=? AND status=\'sending\'').run(exhausted?'failed':'retrying',exhausted?null:new Date(at).toISOString(),'WEBHOOK_SEND_INTERRUPTED',row.id);
+    }
+    return rows.length;
+  };
+  const expireGatewayInbox = (workspaceId,employeeId,at = Date.now()) => {
+    const cutoff = new Date(at - BOT_GATEWAY_QUEUE_TTL_MS).toISOString();
+    return db.prepare("UPDATE bot_gateway_inbox SET status='expired',error='BOT_GATEWAY_QUEUE_TIMEOUT' WHERE workspace_id=? AND employee_id=? AND status='queued' AND action_id IS NULL AND created_at<=?").run(workspaceId,employeeId,cutoff).changes;
+  };
   return finishRepository(guardRepository({
     db,
     onBotActionCompleted(listener) {
@@ -1248,10 +1279,11 @@ export function createRepository(options = {}, io={}) {
       db.prepare('UPDATE automation_runs SET action_id=? WHERE id=?').run(action.id,run.id); db.prepare('UPDATE automations SET last_run=?,next_run=? WHERE id=?').run(timestamp,parseSchedule(row.schedule,new Date(timestamp),row.timezone || 'Asia/Shanghai'),automationId);
       return {...run,automation_id:automationId,action_id:action.id};
     },
-    listAutomationRuns(automationId) { return db.prepare('SELECT * FROM automation_runs WHERE automation_id=? ORDER BY created_at DESC').all(automationId).map(row=>{ const delivery=db.prepare('SELECT status,attempts,next_retry_at,response_status,error,sent_at FROM webhook_deliveries WHERE run_id=? AND event=?').get(row.id,'automation.completed') || db.prepare('SELECT status,attempts,next_retry_at,response_status,error,sent_at FROM webhook_deliveries WHERE run_id=? ORDER BY created_at DESC LIMIT 1').get(row.id); return {...row,result:jsonObject(row.result_json),webhook:delivery || null}; }); },
+    listAutomationRuns(automationId) { const automation=db.prepare('SELECT workspace_id FROM automations WHERE id=?').get(automationId);if(automation)sweepAutomationRuns(automation.workspace_id);return db.prepare('SELECT * FROM automation_runs WHERE automation_id=? ORDER BY created_at DESC').all(automationId).map(row=>{ const delivery=db.prepare('SELECT status,attempts,next_retry_at,response_status,error,sent_at FROM webhook_deliveries WHERE run_id=? AND event=?').get(row.id,'automation.completed') || db.prepare('SELECT status,attempts,next_retry_at,response_status,error,sent_at FROM webhook_deliveries WHERE run_id=? ORDER BY created_at DESC LIMIT 1').get(row.id); return {...row,result:jsonObject(row.result_json),webhook:delivery || null}; }); },
     tickAutomations(slug, at = new Date()) {
       const selected = slug ? workspace(slug) : null; if (slug && !selected) throw new Error('Workspace not found');
       const rows = slug ? [selected] : db.prepare('SELECT * FROM workspaces').all();
+      for(const ws of rows.filter(Boolean))sweepAutomationRuns(ws.id);
       const due=[]; for (const ws of rows.filter(Boolean)) {
         const items=db.prepare("SELECT * FROM automations WHERE workspace_id=? AND status='active' AND next_run IS NOT NULL AND next_run<=?").all(ws.id,at.toISOString());
         for (const item of items) {
@@ -1271,6 +1303,7 @@ export function createRepository(options = {}, io={}) {
       return {id:deliveryId,event,signature};
     },
     async dispatchWebhookDeliveries(at = new Date()) {
+      recoverStaleWebhookSending(at.getTime());
       const rows=db.prepare("SELECT * FROM webhook_deliveries WHERE ziwei_v2_automation_admitted(automation_id)=1 AND status IN ('queued','retrying') AND (next_retry_at IS NULL OR next_retry_at<=?) ORDER BY created_at LIMIT 20").all(at.toISOString());
       for (const row of rows) {
         const attempts=Number(row.attempts || 0)+1; db.prepare('UPDATE webhook_deliveries SET status=\'sending\',attempts=? WHERE id=?').run(attempts,row.id);
@@ -1286,14 +1319,23 @@ export function createRepository(options = {}, io={}) {
       return rows.length;
     },
     listWebhookDeliveries(runId) {
+      recoverStaleWebhookSending();
       return db.prepare('SELECT id,automation_id,run_id,workspace_id,url,event,status,attempts,max_attempts,next_retry_at,response_status,error,created_at,sent_at FROM webhook_deliveries WHERE run_id=? ORDER BY created_at DESC').all(runId);
     },
     completeAutomationRun(runId, input = {}) {
       const botRun=db.prepare('SELECT r.action_id FROM automation_runs r JOIN bot_routines b ON b.automation_id=r.automation_id WHERE r.id=?').get(runId);
       if(botRun && (input.botInternal!==BOT_INTERNAL || input.sourceActionId!==botRun.action_id))throw botFailure('BOT_RESULT_ROUTE_REQUIRED','Bot Routine 结果只接受原设备 action 的真实回执');
       const run=db.prepare('SELECT * FROM automation_runs WHERE id=?').get(runId); if(!run) throw new Error('Automation run not found'); if(['completed','failed'].includes(run.status)) return {...run,duplicate:true,result:jsonObject(run.result_json)};
-      if(botUncertain(input.result)) {db.prepare("UPDATE automation_runs SET status='failed',result_json=?,error=?,message=?,finished_at=? WHERE id=?").run(JSON.stringify(input.result),input.error || '执行失败','执行失败；原始回执已保留，不自动重跑',now(),runId);return {...db.prepare('SELECT * FROM automation_runs WHERE id=?').get(runId),result:input.result};}
-      const status=String(input.status || (input.error ? 'failed' : 'completed')); if(!['completed','failed'].includes(status)) throw new Error('Automation run status must be completed or failed'); const result=input.result === undefined ? null : JSON.stringify(input.result); const error=input.error ? String(input.error) : null; const finished=now();
+      const uncertain=botUncertain(input.result),status=String(input.status || (input.error ? 'failed' : 'completed')); if(!['completed','failed'].includes(status)) throw new Error('Automation run status must be completed or failed'); const result=input.result === undefined ? null : JSON.stringify(input.result); const error=input.error ? String(input.error) : null; const finished=now();
+      const auto=db.prepare('SELECT * FROM automations WHERE id=?').get(run.automation_id);
+      const retryable=status==='failed'&&!uncertain&&!botRun&&run.attempt+1<run.max_attempts&&auto;
+      if(retryable){
+        const nextAttempt=run.attempt+1,ws=db.prepare('SELECT slug FROM workspaces WHERE id=?').get(run.workspace_id),retryAt=new Date(Date.now()+Math.max(100,Number(auto.retry_backoff_ms||1000))*2**run.attempt).toISOString();
+        const action=this.createA2AAction(ws.slug,{type:'automation.execute',dedupeKey:`automation:${run.automation_id}:${run.id}:${nextAttempt}`,payload:{automationId:run.automation_id,runId:run.id,prompt:auto.prompt,outputMode:auto.output_mode,webhookUrl:auto.webhook_url,attempt:nextAttempt}});
+        db.prepare("UPDATE automation_runs SET status='queued',error=?,result_json=?,message=?,attempt=?,next_retry_at=?,action_id=?,finished_at=NULL WHERE id=? AND status NOT IN ('completed','failed')").run(error,result,`上次执行失败，系统已安排第 ${nextAttempt} 次自动重试`,nextAttempt,retryAt,action.id,runId);
+        return {...db.prepare('SELECT * FROM automation_runs WHERE id=?').get(runId),result:jsonObject(result),retryScheduled:true};
+      }
+      if(uncertain){db.prepare("UPDATE automation_runs SET status='failed',result_json=?,error=?,message=?,finished_at=? WHERE id=?").run(result,error || '执行结果未确认','执行结果未确认；原始回执已保留，不自动重放',finished,runId);return {...db.prepare('SELECT * FROM automation_runs WHERE id=?').get(runId),result:jsonObject(result)};}
       db.prepare('UPDATE automation_runs SET status=?,error=?,result_json=?,finished_at=?,message=? WHERE id=?').run(status,error,result,finished,status==='completed'?'执行完成':'执行失败',runId); const ws=db.prepare('SELECT slug FROM workspaces WHERE id=?').get(run.workspace_id); audit(ws.slug,'ziwei_user',`automation.${status}`,{automationId:run.automation_id,runId,error}); const delivery=rollout?null:this.queueWebhookDelivery(runId,status,input.result,error); if (delivery) void this.dispatchWebhookDeliveries(); return {...db.prepare('SELECT * FROM automation_runs WHERE id=?').get(runId),result:jsonObject(result),webhook:delivery};
     },
     queueAutomationRetry(runId, retryAt = now()) { const run=db.prepare('SELECT * FROM automation_runs WHERE id=?').get(runId); if(!run) throw new Error('Automation run not found'); if(phoneRetryForbidden(parse(run.result_json)))throw botFailure('PHONE_RETRY_FORBIDDEN','手机动作已有原回执；系统继续读取原回执和当前页面，不允许重放整轮业务'); if(botUncertain(parse(run.result_json)) || run.status==='uncertain' || db.prepare('SELECT 1 FROM bot_routines WHERE automation_id=?').get(run.automation_id))throw botFailure('BOT_RETRY_FORBIDDEN','Bot Routine 不自动重试；先核对原执行证据'); const auto=db.prepare('SELECT * FROM automations WHERE id=?').get(run.automation_id); const ws=db.prepare('SELECT slug FROM workspaces WHERE id=?').get(run.workspace_id); const action=this.createA2AAction(ws.slug,{type:'automation.execute',dedupeKey:`automation:${run.automation_id}:${run.id}:${run.attempt}`,payload:{automationId:run.automation_id,runId:run.id,prompt:auto.prompt,outputMode:auto.output_mode,webhookUrl:auto.webhook_url,attempt:run.attempt}}); db.prepare('UPDATE automation_runs SET status=\'queued\',action_id=?,next_retry_at=? WHERE id=?').run(action.id,retryAt,runId); return {...db.prepare('SELECT * FROM automation_runs WHERE id=?').get(runId),action_id:action.id}; },
@@ -2172,13 +2214,15 @@ export function createRepository(options = {}, io={}) {
           payload={...inspection,inspectionEmployeeId:bot.employee.id};
         }
       }
-      const action = { id:id('action'), workspace_id:ws.id, agent_id:agentId, task_id:input.taskId || input.task_id || null, type:String(input.type || 'task.execute'), payload, dedupe_key:dedupeKey, status:'pending', expires_at:queueAdmission?null:input.expiresAt || input.expires_at || new Date(Date.now()+actionExecutionLeaseMs({type:input.type || 'task.execute',payload})).toISOString(), created_at:now(), acked_at:null, completed_at:null, result_json:null, error:null };
+      const createdAt=now();
+      const action = { id:id('action'), workspace_id:ws.id, agent_id:agentId, task_id:input.taskId || input.task_id || null, type:String(input.type || 'task.execute'), payload, dedupe_key:dedupeKey, status:'pending', expires_at:queueAdmission?new Date(Date.parse(createdAt)+CONVERSATION_QUEUE_TTL_MS).toISOString():input.expiresAt || input.expires_at || new Date(Date.now()+actionExecutionLeaseMs({type:input.type || 'task.execute',payload})).toISOString(), created_at:createdAt, acked_at:null, completed_at:null, result_json:null, error:null };
       db.prepare('INSERT INTO a2a_actions(id,workspace_id,agent_id,task_id,type,payload_json,dedupe_key,status,expires_at,created_at,acked_at,completed_at,result_json,error) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(action.id,action.workspace_id,action.agent_id,action.task_id,action.type,JSON.stringify(action.payload),action.dedupe_key,action.status,action.expires_at,action.created_at,null,null,null,null);
       if(bot&&!readOnlyInspection&&(!queueAdmission||!bot.row.active_action_id))db.prepare('UPDATE hermes_bots SET active_action_id=? WHERE employee_id=?').run(action.id,bot.employee.id);
       audit(slug,'user','a2a.action.created',{actionId:action.id,type:action.type,dedupeKey}); return action;
     },
     listA2AActions(slug, input = {}) {
       const ws = workspace(slug); if (!ws) throw new Error('Workspace not found'); const agentId=String(input.agentId || input.agent_id || 'ziwei_user'); const requestedStatus=String(input.status || 'pending');
+      conversationQueue.expirePending();
       db.prepare("UPDATE a2a_actions SET status='expired',completed_at=? WHERE workspace_id=? AND ziwei_v2_admitted(id)=1 AND status IN ('pending','acked') AND expires_at IS NOT NULL AND expires_at < ?").run(now(),ws.id,now());
       // `ziwei_user` asks for pending + previously acked work. An ack is only
       // transport receipt; if the daemon crashed before posting a terminal
@@ -2251,9 +2295,12 @@ export function createRepository(options = {}, io={}) {
       return{delivery:this.botGatewayDelivery(actionId,key,input),duplicate:Boolean(prior),accepted:true};
     },
     botGatewayDelivery(sourceId,deliveryId,input={}) {
-      const source=this.deviceAction(sourceId,input),delivery=db.prepare('SELECT * FROM bot_gateway_inbox WHERE id=? AND workspace_id=? AND employee_id=?').get(deliveryId,workspace(source.payload.hermesBot.workspace).id,source.payload.hermesBot?.employeeId);
+      const source=this.deviceAction(sourceId,input),sourceWorkspace=workspace(source.payload.hermesBot.workspace),sourceEmployeeId=source.payload.hermesBot?.employeeId;
+      expireGatewayInbox(sourceWorkspace.id,sourceEmployeeId);
+      const delivery=db.prepare('SELECT * FROM bot_gateway_inbox WHERE id=? AND workspace_id=? AND employee_id=?').get(deliveryId,sourceWorkspace.id,sourceEmployeeId);
       if(!delivery)throw botFailure('BOT_GATEWAY_DELIVERY_NOT_FOUND','Gateway 消息不属于此连接',404);
       if(delivery.source_action_id!==sourceId||delivery.platform!==source.payload.nativeOperation?.input?.platform)throw botFailure('BOT_GATEWAY_DELIVERY_FORBIDDEN','入站消息仅属于原平台和原连接；恢复需要重新授权',403);
+      if(delivery.status==='expired')return{id:delivery.id,status:'expired',action:null,error:'BOT_GATEWAY_QUEUE_TIMEOUT',archivedUnconfirmed:true};
       if(delivery.action_id)return{id:delivery.id,status:'dispatched',action:this.getA2AAction(delivery.action_id)};
       try{
         const lease=this.authorizeBotGateway(sourceId,input);

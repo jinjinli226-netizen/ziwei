@@ -18,9 +18,15 @@ function externalError(message, status = 502, details = null) {
 }
 
 const terminalActions = new Set(['health', 'screenshot', 'tap', 'swipe', 'text', 'global', 'launch']);
+// A run is inserted before the upstream command POST. If the process dies in
+// that window there is no command ID to read back, so retain the run as an
+// expired/unknown record after a bounded interval instead of leaving a
+// permanent queued row that looks actionable.
+export const ZIWEI_CONNECT_RUN_TTL_MS = 15 * 60 * 1000;
 const commandStatuses = new Set(['queued', 'delivered', 'executing', 'succeeded', 'failed', 'cancelled', 'expired', 'uncertain', 'acknowledged']);
 const settledCommandStatuses = new Set(['succeeded', 'failed', 'cancelled', 'expired', 'acknowledged']);
 const commandStatus = command => commandStatuses.has(command?.status) ? command.status : 'queued';
+const snapshotMatchesCommand = (snapshot, commandId) => snapshot?.commandId === commandId && Boolean(snapshot.data);
 const commandPreDispatchRejections = new WeakMap();
 // A private transport provenance marker. A downstream Error with similarly
 // named public properties is not evidence that its command was never created.
@@ -59,6 +65,7 @@ function terminalRequest(method, path, body) {
     } else if (method === 'GET' && (match = pathname.match(/^\/android-devices\/([^/]+)(?:\/(status|snapshot))?$/))) {
       target = `/android-devices/${terminalId(match[1])}${match[2] ? `/${match[2]}` : ''}`;
       if (match[2] === 'status') queryKeys = ['commandId', 'updateId'];
+      if (match[2] === 'snapshot') queryKeys = ['commandId'];
     } else if (method === 'POST' && (match = pathname.match(/^\/android-devices\/([^/]+)\/(control|commands|updates|archive)(?:\/([^/]+)\/resolve)?$/))) {
       const [, deviceId, operation, receiptId] = match;
       if (receiptId && !['commands', 'updates'].includes(operation)) throw externalError('终端管理接口不存在', 404);
@@ -88,6 +95,7 @@ function terminalRequest(method, path, body) {
  */
 export function createZiweiConnect(repo, options = {}) {
   const db = repo.db;
+  const queuedRunTtlMs = Number.isFinite(options.queuedRunTtlMs) && options.queuedRunTtlMs > 0 ? options.queuedRunTtlMs : ZIWEI_CONNECT_RUN_TTL_MS;
   const apiBase = String(options.apiBase || process.env.ZIWEI_CONNECT_API_BASE || 'http://127.0.0.1:5191/api').replace(/\/$/, '');
   let endpoint;
   try { endpoint = new URL(apiBase); } catch { throw externalError('紫薇·互联 API 地址配置无效', 503); }
@@ -264,6 +272,11 @@ export function createZiweiConnect(repo, options = {}) {
     if (response.status >= 400) throw externalError(response.body.message || response.body.error || `紫薇·互联控制 API 返回 ${response.status}`, response.status >= 500 ? 502 : response.status, response.body);
     return response.body;
   };
+  const commandSnapshot = async (deviceId, commandId) => {
+    const payload = await request(`/android-devices/${encodeURIComponent(deviceId)}/snapshot?commandId=${encodeURIComponent(commandId)}`);
+    if (payload.deviceId !== deviceId || !snapshotMatchesCommand(payload.snapshot, commandId)) throw externalError('截图图片缺失或与原命令、设备的关联未确认，不能作为本次截图交付');
+    return payload.snapshot;
+  };
   const normalizeDevice = item => {
     const nodes = Array.isArray(item.nodes) ? item.nodes : [];
     const onlineNodes = nodes.filter(node => node?.status === 'online');
@@ -310,9 +323,15 @@ export function createZiweiConnect(repo, options = {}) {
   });
   const getRun = (slug, runId) => {
     const ws = workspace(slug);
+    expireQueuedRuns(ws.id);
     const row = db.prepare('SELECT * FROM ziwei_connect_runs WHERE id=? AND workspace_id=?').get(runId, ws.id);
     if (!row) throw Object.assign(new Error('紫薇·互联运行记录不存在'), { status: 404 });
     return { ws, row };
+  };
+  const expireQueuedRuns = workspaceId => {
+    const at = now(), cutoff = new Date(Date.parse(at) - queuedRunTtlMs).toISOString();
+    const result = JSON.stringify({ code:'ZIWEI_CONNECT_RUN_TIMEOUT', executionState:'uncertain', archivedUnconfirmed:true, commandId:null, recovery:{ retryAllowed:false, nextAction:'observe' } });
+    return db.prepare("UPDATE ziwei_connect_runs SET status='expired',result_json=?,error=?,updated_at=? WHERE workspace_id=? AND status='queued' AND command_id IS NULL AND created_at<=?").run(result,'手机命令提交窗口已超时；已保留原运行记录，未重复提交',at,workspaceId,cutoff).changes;
   };
   const updateRun = (row, values) => {
     const next = { status: values.status ?? row.status, result_json: values.result === undefined ? row.result_json : JSON.stringify(values.result), error: values.error === undefined ? row.error : (values.error || null), updated_at: now() };
@@ -370,6 +389,7 @@ export function createZiweiConnect(repo, options = {}) {
     async run(slug, input = {}, { fullToolset = false, configurationRevision = null, executionId = null } = {}) {
       repo.serverCodeRollout?.assertExecution();
       const ws = workspace(slug); const employeeId = text(input.employeeId || input.employee_id, 'employeeId'); employee(ws, employeeId);
+      expireQueuedRuns(ws.id);
       const action = text(input.action, 'action', 32).toLowerCase();
       if (!(fullToolset ? terminalActions.has(action) : ['health', 'screenshot', 'dry-run'].includes(action))) throw Object.assign(new Error('不支持该手机动作'), { status: 400 });
       const binding = db.prepare('SELECT * FROM ziwei_connect_bindings WHERE workspace_id=? AND employee_id=?').get(ws.id, employeeId);
@@ -403,8 +423,9 @@ export function createZiweiConnect(repo, options = {}) {
         const command = statusPayload.device?.commands?.find(item => item.id === commandId) || statusPayload.command || commandPayload.command;
         const result = { command, device: statusPayload.device || null };
         if (action === 'screenshot' && command?.status === 'succeeded') {
-          const snap = await request(`/android-devices/${encodeURIComponent(deviceId)}/snapshot`);
-          result.snapshot = snap.snapshot || null;
+          try {
+            result.snapshot = await commandSnapshot(deviceId, commandId);
+          } catch (error) { result.snapshotError = error.message; }
         }
         const status = commandStatus(command);
         row = updateRun(row, { status, result, error: command?.error || null });
@@ -428,7 +449,19 @@ export function createZiweiConnect(repo, options = {}) {
       const terminal=async(method,suffix,body={})=>{const result=await this.terminal(slug,method,suffix,body);if(result.status>=400) throw externalError(result.body.error || result.body.message || '手机工具请求失败',result.status);return result.body;};
       const syncReceipt=async device=>{
         const rows=db.prepare('SELECT * FROM ziwei_connect_runs WHERE workspace_id=? AND employee_id=? AND device_id=? AND execution_id=? AND command_id IS NOT NULL').all(workspace(slug).id,scope.employeeId,phoneId,scope.actionId);
-        for(const row of rows){const command=device?.commands?.find(item=>item.id===row.command_id);if(!command)continue;const previous=parse(row.result_json,{});let snapshot=previous.snapshot || previous.device?.snapshot || null;let snapshotError;if(row.action==='screenshot'&&command.status==='succeeded'&&!snapshot?.data){try{snapshot=(await terminal('GET',`${path}/snapshot`)).snapshot || null;}catch(error){snapshotError=error.message;}}updateRun(row,{status:commandStatus(command),result:{command,device,snapshot,...snapshotError?{snapshotError}:{}},error:command.error || null});}
+        for(const row of rows){
+          const command=device?.commands?.find(item=>item.id===row.command_id);
+          if(!command)continue;
+          const previous=parse(row.result_json,{});
+          let snapshot=previous.snapshot || previous.device?.snapshot || null;
+          let snapshotError;
+          if(!snapshotMatchesCommand(snapshot,row.command_id))snapshot=null;
+          if(row.action==='screenshot'&&command.status==='succeeded'&&!snapshot){
+            try{snapshot=await commandSnapshot(phoneId,row.command_id);}
+            catch(error){snapshotError=error.message;}
+          }
+          updateRun(row,{status:commandStatus(command),result:{command,device,snapshot,...snapshotError?{snapshotError}:{}},error:command.error || null});
+        }
         return device;
       };
       const detail=async()=>syncReceipt((await terminal('GET',`${path}/status${args.commandId || args.updateId ? `?${new URLSearchParams({...args.commandId?{commandId:args.commandId}:{},...args.updateId?{updateId:args.updateId}:{}})}`:''}`)).device);
@@ -474,11 +507,11 @@ export function createZiweiConnect(repo, options = {}) {
         }
         let verificationError;
         if(action==='screenshot'&&command.status==='succeeded'){
-          try{device={...device,snapshot:run.result?.snapshot || (await terminal('GET',`${path}/snapshot`)).snapshot};}
-          catch(error){verificationError=`手机已完成截图，图片读取暂失败；继续读取现有截图：${error.message}`;}
+          try{device={...device,snapshot:run.result?.snapshot || await commandSnapshot(phoneId,run.commandId)};}
+          catch(error){device={...device,snapshot:null};verificationError=`手机已完成截图，图片读取暂失败；继续读取原命令截图：${error.message}`;}
         }
         const row=db.prepare('SELECT * FROM ziwei_connect_runs WHERE id=?').get(run.id);
-        updateRun(row,{status:commandStatus(command),result:{command,device,snapshot:device.snapshot || null},error:command.error || null});
+        updateRun(row,{status:commandStatus(command),result:{command,device,snapshot:device.snapshot || null,...verificationError?{snapshotError:verificationError}:{}},error:command.error || null});
         return{command,device,runId:run.id,...verificationError?{verificationError,nextAction:'observe'}:{}};
       };
       if(name==='ziwei_phone_list') return {devices:(await listExternalDevices()).filter(row=>row.id===phoneId)};
@@ -496,7 +529,7 @@ export function createZiweiConnect(repo, options = {}) {
       }
       if(name==='ziwei_phone_upgrade'){
         const before=await detail();const preflight=await action('screenshot',{},8);if(preflight.command?.status!=='succeeded'||!preflight.device?.snapshot?.data) throw externalError('升级前截图检查尚未成功，请回读原commandId',409);
-        const releaseIndex=String(options.releaseIndex || process.env.ZIWEI_ANDROID_RELEASE_INDEX || 'https://qzelynth.top/downloads/android/index.json');
+        const releaseIndex=String(options.releaseIndex || process.env.ZIWEI_ANDROID_RELEASE_INDEX || 'https://ziwei.qzelynth.top/downloads/android/index.json');
         const response=await fetch(releaseIndex,{redirect:'error',signal:AbortSignal.timeout(10000)});if(!response.ok) throw externalError('无法读取已发布安装包索引');const manifest=await response.json();const current=before?.nodes?.find(row=>row.role===args.targetRole)?.versionCode || 0;const release=(manifest.releases || []).find(row=>args.versionCode ? row.versionCode===args.versionCode : row.versionCode>current);const pkg=release?.packages?.[args.targetRole];
         if(!pkg || release.versionCode<=current) throw externalError('没有符合要求的已发布更新版本',409);
         const apkUrl=new URL(pkg.path || pkg.file,releaseIndex).toString();const result=await terminal('POST',`${path}/updates`,{targetRole:args.targetRole,apkUrl,sha256:pkg.sha256,signerSha256:pkg.signerSha256,versionCode:release.versionCode,preflightCommandId:preflight.command.id});
@@ -507,22 +540,35 @@ export function createZiweiConnect(repo, options = {}) {
     async refresh(slug, runId) {
       const { row } = getRun(slug, runId);
       if(repo.serverCodeRollout)return {...outputRun(row),readOnly:true,serverCodeRollout:repo.serverCodeRollout.status()};
-      if (!row.command_id || row.action === 'dry-run' || settledCommandStatuses.has(row.status)) return outputRun(row);
-      try {
-        const payload = await request(`/android-devices/${encodeURIComponent(row.device_id)}/status?commandId=${encodeURIComponent(row.command_id)}`);
-        const command = payload.device?.commands?.find(item => item.id === row.command_id);
-        const result = { command, device: payload.device || null };
-        if (row.action === 'screenshot' && command?.status === 'succeeded') result.snapshot = (await request(`/android-devices/${encodeURIComponent(row.device_id)}/snapshot`)).snapshot || null;
-        const status = commandStatus(command);
-        const next = updateRun(row, { status, result, error: command?.error || null });
-        return outputRun(next);
-      } catch (error) {
-        const next = updateRun(row, { status: 'failed', error: error.message });
-        return outputRun(next);
+      let result = parse(row.result_json, {});
+      const imagePending = row.action === 'screenshot' && row.status === 'succeeded' && !snapshotMatchesCommand(result.snapshot || result.device?.snapshot, row.command_id);
+      if (!row.command_id || row.action === 'dry-run' || (settledCommandStatuses.has(row.status) && !imagePending)) return outputRun(row);
+      let status = row.status, error = row.error;
+      if (!settledCommandStatuses.has(status)) {
+        try {
+          const payload = await request(`/android-devices/${encodeURIComponent(row.device_id)}/status?commandId=${encodeURIComponent(row.command_id)}`);
+          const command = payload.device?.commands?.find(item => item.id === row.command_id);
+          if (!command) throw externalError('紫薇·互联未返回原命令回执，请继续读取原 commandId');
+          result = { command, device: payload.device || null };
+          status = commandStatus(command);
+          error = command.error || null;
+        } catch (error) {
+          // A failed observation cannot establish that the accepted phone action failed.
+          return outputRun(updateRun(row, { status: 'uncertain', error: error.message }));
+        }
       }
+      if (row.action === 'screenshot' && status === 'succeeded') {
+        result.snapshot = null;
+        if (result.device?.snapshot) result.device = { ...result.device, snapshot: null };
+        try {
+          result.snapshot = await commandSnapshot(row.device_id, row.command_id);
+          delete result.snapshotError;
+        } catch (error) { result.snapshotError = error.message; }
+      }
+      return outputRun(updateRun(row, { status, result, error }));
     },
     listRuns(slug, limit = 50) {
-      const ws = workspace(slug); const n = Math.min(100, Math.max(1, Number(limit) || 50));
+      const ws = workspace(slug); expireQueuedRuns(ws.id); const n = Math.min(100, Math.max(1, Number(limit) || 50));
       return db.prepare('SELECT * FROM ziwei_connect_runs WHERE workspace_id=? ORDER BY created_at DESC LIMIT ?').all(ws.id, n).map(outputRun);
     },
   };

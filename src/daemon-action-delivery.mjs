@@ -11,6 +11,8 @@ import {isDshAction,matchesDshSessionBinding,sameDshSessionBinding,confirmedDshS
 // contain full image input. Small authenticated receipts have a separate budget.
 export const ACTION_TRANSPORT_BUDGETS=Object.freeze({poll:600_000,ack:15_000,event:15_000,result:600_000});
 const terminal=new Set(['succeeded','failed','expired']);
+export const ARCHIVED_UNCONFIRMED_STATE='archived_unconfirmed';
+const archiveReasons=new Set(['PERMANENT_SERVER_REJECTION','SERVER_LEASE_EXPIRED','SERVER_TERMINAL_UNCONFIRMED']);
 const hash=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const transientAdmission=new Set(['CONVERSATION_QUEUE_PAUSED','CONVERSATION_QUEUE_BLOCKED','BOT_BUSY','DSH_SESSION_UNCONFIRMED','BOT_NOT_ACTIVE','BOT_DEFERRED_CONFIG_BUSY']);
@@ -34,7 +36,7 @@ function minimalAction(action){const p=action.payload||{};return {...Object.from
  * A journal cannot authorize execution: every recovery first checks an authenticated
  * server ACK, and terminal ACKs never reach the executor.
  */
-export function createActionDelivery({directory,identity,post,dispatch,recoverResult=()=>null,retryDelays=[250,1000],onEvent=()=>{},onSuccess=async()=>{},onConfirmed=async()=>{},maxConfirmedRecords=1000,confirmedRetentionMs=7*24*60*60*1000,now=()=>Date.now()}={}){
+export function createActionDelivery({directory,identity,post,dispatch,recoverResult=()=>null,retryDelays=[250,1000],onEvent=()=>{},onSuccess=async()=>{},onConfirmed=async()=>{},maxConfirmedRecords=1000,confirmedRetentionMs=7*24*60*60*1000,now=()=>Date.now(),autoArchiveUnconfirmed=false}={}){
  if(!directory||typeof post!=='function'||typeof dispatch!=='function'||typeof onConfirmed!=='function')throw new TypeError('Action delivery requires directory, transport and dispatcher');
  const connection=scope(identity||{}),records=new Map(),active=new Map(),activeBindings=new Map(),eventFlushes=new Map();
  const fileFor=id=>path.join(directory,`${hash(String(id))}.json`);
@@ -73,8 +75,9 @@ export function createActionDelivery({directory,identity,post,dispatch,recoverRe
    try{record=JSON.parse(fs.readFileSync(file,'utf8'));}catch{throw new Error(`Action delivery journal corrupt: ${action.id}`);}
   }
   if(record){
-   if(record.version!==2||record.action?.id!==action.id||!Array.isArray(record.events)||!['awaiting_ack','acked','maintenance_paused','result_pending','confirmed','blocked'].includes(record.state))throw new Error(`Action delivery journal corrupt: ${action.id}`);
+   if(record.version!==2||record.action?.id!==action.id||!Array.isArray(record.events)||!['awaiting_ack','acked','maintenance_paused','result_pending','confirmed','blocked',ARCHIVED_UNCONFIRMED_STATE].includes(record.state))throw new Error(`Action delivery journal corrupt: ${action.id}`);
    if(record.state==='confirmed'&&(!terminal.has(record.serverStatus)||!Number.isFinite(Date.parse(record.confirmedAt))))throw new Error(`Action delivery journal corrupt: ${action.id}`);
+   if(record.state===ARCHIVED_UNCONFIRMED_STATE&&!validArchivedUnconfirmed(record))throw new Error(`Action delivery journal corrupt: ${action.id}`);
    if(record.state!=='confirmed'||record.retainEvidence){
     const original=readBlob(record,'action');if(hash(original.identity)!==hash(connection)||original.binding!==record.binding||binding(original.action,connection)!==record.binding)throw new Error(`Action delivery identity mismatch: ${action.id}`);
     if(record.state==='maintenance_paused'&&!record.pauseDigest||record.pauseDigest&&!validateMaintenancePause(readBlob(record,'pause'),{actionId:original.action.id,executionBinding:executionBinding(original.action)}))throw new Error(`Action delivery journal corrupt (pause): ${action.id}`);
@@ -92,13 +95,24 @@ export function createActionDelivery({directory,identity,post,dispatch,recoverRe
   record={version:2,identity:connection,binding:actionBinding,action:minimalAction(action),actionDigest,state:'awaiting_ack',events:[],createdAt:new Date(now()).toISOString()};
   save(record);records.set(action.id,record);return record;
  }
+ function validArchivedUnconfirmed(record){
+  const archive=record?.archive;
+  return record?.state===ARCHIVED_UNCONFIRMED_STATE&&record?.retainEvidence===true&&!Object.hasOwn(record,'serverStatus')&&!Object.hasOwn(record,'blockedStatus')&&!Object.hasOwn(record,'confirmedAt')&&archive&&Object.keys(archive).sort().join(',')==='archivedAt,disposition,httpStatus,kind,reason,schemaVersion,serverStatus,serverTerminal'&&archive.schemaVersion===1&&archive.kind==='local-delivery-archive'&&archive.disposition==='archived-unconfirmed'&&archiveReasons.has(archive.reason)&&archive.serverTerminal===false&&archive.serverStatus===null&&Number.isFinite(Date.parse(archive.archivedAt))&&(archive.httpStatus===null||Number.isInteger(archive.httpStatus)&&archive.httpStatus>=400&&archive.httpStatus<500&&![408,429].includes(archive.httpStatus));
+ }
+ function archiveUnconfirmed(record,{reason='SERVER_TERMINAL_UNCONFIRMED',httpStatus=null}={}){
+  if(!autoArchiveUnconfirmed||record.state===ARCHIVED_UNCONFIRMED_STATE||record.state==='confirmed'&&!record.retainEvidence)return false;
+  if(!archiveReasons.has(reason)||httpStatus!==null&&(!Number.isInteger(httpStatus)||httpStatus<400||httpStatus>=500||[408,429].includes(httpStatus)))return false;
+  record.state=ARCHIVED_UNCONFIRMED_STATE;record.retainEvidence=true;delete record.blockedStatus;delete record.serverStatus;delete record.confirmedAt;
+  record.archive={schemaVersion:1,kind:'local-delivery-archive',disposition:'archived-unconfirmed',reason,serverTerminal:false,serverStatus:null,httpStatus,archivedAt:new Date(now()).toISOString()};
+  save(record);report('a2a_delivery_archived_unconfirmed',{actionId:record.action.id,reason,httpStatus});return true;
+ }
  async function retry(operation,{attempts=retryDelays.length+1}={}){
   for(let i=0;i<attempts;i++){try{return await operation();}catch(error){if(permanent(error)||i===attempts-1)throw error;await wait(retryDelays[i]||0);}}
  }
  async function flushEvents(record){
   const id=record.action.id;if(eventFlushes.has(id))return eventFlushes.get(id);
   const promise=(async()=>{
-   while(record.events.length&&!['confirmed','blocked'].includes(record.state)){
+  while(record.events.length&&!['confirmed','blocked',ARCHIVED_UNCONFIRMED_STATE].includes(record.state)){
     const event=record.events[0];
     try{await retry(()=>post(`/a2a/v1/actions/${encodeURIComponent(id)}/events`,event,{timeoutMs:ACTION_TRANSPORT_BUDGETS.event}));}
     catch(error){if(error.status!==404)throw error;report('a2a_events_unsupported',{actionId:id});}
@@ -108,7 +122,7 @@ export function createActionDelivery({directory,identity,post,dispatch,recoverRe
   eventFlushes.set(id,promise);return promise;
  }
  function recordEvent(id,type,data={}){
-  const record=records.get(id);if(!record||['confirmed','blocked'].includes(record.state))return false;
+  const record=records.get(id);if(!record||['confirmed','blocked',ARCHIVED_UNCONFIRMED_STATE].includes(record.state))return false;
   // Bound progress storage; completed results and image bytes use the result
   // envelope. An overflow is explicit in diagnostics, never unbounded retries.
   if(record.events.length>=256){report('a2a_event_queue_full',{actionId:id,type});return false;}
@@ -168,13 +182,16 @@ export function createActionDelivery({directory,identity,post,dispatch,recoverRe
   let metadata;try{metadata=JSON.parse(fs.readFileSync(fileFor(id),'utf8'));}catch(error){if(error.code==='ENOENT')return {state:'unconfirmed',status:null};throw error;}
   const record=read(metadata.action,{create:false});
   if(!record)return {state:'unconfirmed',status:null};
+  if(record.state===ARCHIVED_UNCONFIRMED_STATE)return {state:record.state,status:null,reason:record.archive?.reason||null};
   const restored=restoreCompleted(record);
   if(!restored&&!(record.state==='result_pending'&&definitive(readBlob(record,'result'),record)))return {state:record.state==='confirmed'&&!record.retainEvidence?'confirmed':'unconfirmed',status:record.serverStatus||null};
   return execute(record.action);
  }
  async function run(action){
   const record=read(action);
-  if(['confirmed','blocked'].includes(record.state))return {state:record.state,status:record.serverStatus||null};
+   if(record.state===ARCHIVED_UNCONFIRMED_STATE)return {state:record.state,status:null,reason:record.archive?.reason||null};
+   if(record.state==='blocked'&&archiveUnconfirmed(record,{reason:'PERMANENT_SERVER_REJECTION',httpStatus:record.blockedStatus}))return {state:record.state,status:null,reason:record.archive.reason};
+   if(['confirmed','blocked'].includes(record.state))return {state:record.state,status:record.serverStatus||null};
   try{
    let resumingResult=record.state==='result_pending',reconciling=false;
    const receipt=await retry(()=>post(`/a2a/v1/actions/${encodeURIComponent(action.id)}/ack`,{agentId:'ziwei_user',receiptOnly:true,renewLease:resumingResult&&Boolean(connection.deviceId)},{timeoutMs:ACTION_TRANSPORT_BUDGETS.ack}));
@@ -184,7 +201,9 @@ export function createActionDelivery({directory,identity,post,dispatch,recoverRe
    if(receipt.status==='expired'||receipt.reconciliationRequired===true){
     restoreCompleted(record);
     if(!(receipt.acked_at||record.action.acked_at)||record.state!=='result_pending'||!definitive(readBlob(record,'result'),record)){
-     report('a2a_expired_result_unconfirmed',{actionId:action.id,status:receipt.status});return {state:'unconfirmed',status:receipt.status};
+     report('a2a_expired_result_unconfirmed',{actionId:action.id,status:receipt.status});
+     if(archiveUnconfirmed(record,{reason:'SERVER_LEASE_EXPIRED'}))return {state:record.state,status:null,reason:record.archive.reason};
+     return {state:'unconfirmed',status:receipt.status};
     }
     reconciling=true;resumingResult=true;
    }else if(terminal.has(receipt.status)){
@@ -237,7 +256,7 @@ export function createActionDelivery({directory,identity,post,dispatch,recoverRe
     const renewal=await retry(()=>post(`/a2a/v1/actions/${encodeURIComponent(action.id)}/ack`,{agentId:'ziwei_user',receiptOnly:true,renewLease:true},{timeoutMs:ACTION_TRANSPORT_BUDGETS.ack}));
     if(renewal?.id!==action.id||!['acked',...terminal].includes(renewal?.status)|| (renewal.deviceId&&connection.deviceId&&renewal.deviceId!==connection.deviceId))throw new Error('Invalid result delivery ACK receipt');
     if(renewal.status==='expired'||renewal.reconciliationRequired===true){
-     if(!(renewal.acked_at||record.action.acked_at)||!definitive(readBlob(record,'result'),record)){report('a2a_expired_result_unconfirmed',{actionId:action.id,status:renewal.status});return {state:'unconfirmed',status:renewal.status};}
+     if(!(renewal.acked_at||record.action.acked_at)||!definitive(readBlob(record,'result'),record)){report('a2a_expired_result_unconfirmed',{actionId:action.id,status:renewal.status});if(archiveUnconfirmed(record,{reason:'SERVER_LEASE_EXPIRED'}))return {state:record.state,status:null,reason:record.archive.reason};return {state:'unconfirmed',status:renewal.status};}
      reconciling=true;
     }else if(terminal.has(renewal.status)){await confirm(record,renewal.status);return {state:'confirmed',status:renewal.status};}
     record.action={...record.action,expires_at:renewal.expires_at,expiresAt:renewal.expires_at};save(record);
@@ -248,12 +267,13 @@ export function createActionDelivery({directory,identity,post,dispatch,recoverRe
    // pass ACKs again, which can observe a committed terminal result. This avoids
    // blindly sending a 10 MiB body repeatedly while its receipt is missing.
    const confirmation=await retry(()=>post(`/a2a/v1/actions/${encodeURIComponent(action.id)}/result`,readBlob(record,'result'),{timeoutMs:ACTION_TRANSPORT_BUDGETS.result}),{attempts:1});
+   if((confirmation?.status==='expired'||confirmation?.reconciliationRequired===true)&&archiveUnconfirmed(record,{reason:'SERVER_LEASE_EXPIRED'}))return {state:record.state,status:null,reason:record.archive.reason};
    if(confirmation?.id!==action.id||!terminal.has(confirmation.status)||confirmation.reconciliationRequired===true||reconciling&&confirmation.status==='expired')throw new Error('Invalid action result receipt; durable result retained');
    if(confirmation.deviceId&&connection.deviceId&&confirmation.deviceId!==connection.deviceId)throw new Error('Action result identity mismatch; durable result retained');
    await confirm(record,confirmation.status);
    report('a2a_result',{actionId:action.id,status:confirmation.status,dispatcherStatus:record.dispatcherStatus});return {state:'confirmed',status:confirmation.status};
   }catch(error){
-   if(permanent(error)){record.state='blocked';record.blockedStatus=error.status;save(record);report('a2a_delivery_blocked',{actionId:action.id,httpStatus:error.status,error:error.message});}
+   if(permanent(error)){record.state='blocked';record.blockedStatus=error.status;save(record);report('a2a_delivery_blocked',{actionId:action.id,httpStatus:error.status,error:error.message});if(archiveUnconfirmed(record,{reason:'PERMANENT_SERVER_REJECTION',httpStatus:error.status}))return {state:record.state,status:null,reason:record.archive.reason};}
    else report('a2a_delivery_pending',{actionId:action.id,state:record.state,error:error.message});
    throw error;
   }
@@ -290,7 +310,7 @@ export function createActionDelivery({directory,identity,post,dispatch,recoverRe
    await Promise.allSettled([...records.values()].filter(record=>record.state==='maintenance_paused'&&record.events.length).map(async record=>{try{await flushEvents(record);}catch(error){report('a2a_maintenance_events_pending',{actionId:record.action.id,pendingEvents:record.events.length,error:error.message});}}));
    return {pending:this.maintenanceEventsPending};
   },
-  get pendingEventCount(){return [...records.values()].filter(r=>!['confirmed','blocked'].includes(r.state)).reduce((sum,r)=>sum+r.events.length,0);},
+  get pendingEventCount(){return [...records.values()].filter(r=>!['confirmed','blocked',ARCHIVED_UNCONFIRMED_STATE].includes(r.state)).reduce((sum,r)=>sum+r.events.length,0);},
   get maintenanceEventsPending(){return [...records.values()].filter(r=>r.state==='maintenance_paused').reduce((sum,r)=>sum+r.events.length,0);},
   setMaintenanceAttempt,
   maintenanceAttempt(id){const record=getRecord(id);return record?.maintenanceAttempt?{...record.maintenanceAttempt}:null;},
@@ -300,13 +320,14 @@ export function createActionDelivery({directory,identity,post,dispatch,recoverRe
    if(!fs.existsSync(directory))return [];
    const actions=[];
    for(const name of fs.readdirSync(directory).filter(n=>/^[a-f0-9]{64}\.json$/.test(n))){
-    try{const data=JSON.parse(fs.readFileSync(path.join(directory,name),'utf8'));if(!data.action?.id||name!==path.basename(fileFor(data.action.id)))throw new Error('Action delivery journal corrupt');const record=read(data.action,{create:false});if(record?.state==='confirmed'&&(record.retainEvidence||record.serverStatus==='expired'))restoreCompleted(record);if(record&&!['confirmed','blocked'].includes(record.state))actions.push(full?{...readBlob(record,'action').action,...record.action,payload:{...readBlob(record,'action').action.payload,...record.action.payload}}:record.action);}
+    try{const data=JSON.parse(fs.readFileSync(path.join(directory,name),'utf8'));if(!data.action?.id||name!==path.basename(fileFor(data.action.id)))throw new Error('Action delivery journal corrupt');const record=read(data.action,{create:false});if(record?.state==='blocked'&&archiveUnconfirmed(record,{reason:'PERMANENT_SERVER_REJECTION',httpStatus:record.blockedStatus}))continue;if(record?.state==='confirmed'&&(record.retainEvidence||record.serverStatus==='expired'))restoreCompleted(record);if(record&&!['confirmed','blocked',ARCHIVED_UNCONFIRMED_STATE].includes(record.state))actions.push(full?{...readBlob(record,'action').action,...record.action,payload:{...readBlob(record,'action').action.payload,...record.action.payload}}:record.action);}
     catch(error){report('a2a_journal_recovery_refused',{file:name,error:error.message});}
    }
    pruneConfirmed();return actions;
   },
-  get pendingCount(){return [...records.values()].filter(r=>!['confirmed','blocked','maintenance_paused'].includes(r.state)).length;},
+  get pendingCount(){return [...records.values()].filter(r=>!['confirmed','blocked',ARCHIVED_UNCONFIRMED_STATE,'maintenance_paused'].includes(r.state)).length;},
   get blockedCount(){return [...records.values()].filter(r=>r.state==='blocked').length;},
+  get archivedUnconfirmedCount(){return [...records.values()].filter(r=>r.state===ARCHIVED_UNCONFIRMED_STATE).length;},
   async whenIdle(){await Promise.allSettled([...active.values(),...eventFlushes.values()]);},
  };
 }

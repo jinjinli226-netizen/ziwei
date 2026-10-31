@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { fail, FORMAL_ISSUER, ROLES, rolesForSite, SITES, validateContext, uncertain } from './contract.mjs';
+export const MEMBER_PROVISION_UNKNOWN_TTL_MS = 24 * 60 * 60 * 1000;
 const table=(db,name)=>!!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name);
 function transaction(db,run){db.exec('BEGIN IMMEDIATE');try{const result=run();db.exec('COMMIT');return result;}catch(e){db.exec('ROLLBACK');throw e;}}
 const unknown=c=>uncertain(c);
@@ -78,10 +79,10 @@ export function createNativeEnrollment({db,identityDb,config,fault=()=>{}}={}){
  function prepare(c,action){
   let row=getMember(c);if(row)checkRow(c,row);
   if(action==='grant'){
-   if(row){if(row.generation===c.generation)fail(409,'GENERATION_TOMBSTONE');if(row.phase!=='revoked'||c.nativeId!==row.native_id)fail(409,'EXACT_RETAINED_NATIVE_ID_REQUIRED');row={...row,generation:c.generation,phase:'prepared',role:c.role,binding_version:row.binding_version+1};writeNativeRole(c,row);}
+   if(row){if(row.generation===c.generation)fail(409,'GENERATION_TOMBSTONE');if(!['revoked','archived_unknown'].includes(row.phase)||c.nativeId!==row.native_id)fail(409,'EXACT_RETAINED_NATIVE_ID_REQUIRED');row={...row,generation:c.generation,phase:'prepared',role:c.role,binding_version:row.binding_version+1};writeNativeRole(c,row);}
    else row=newNative(c);
   }else{
-   if(!row||row.generation!==c.generation||!['active','prepared'].includes(row.phase))fail(409,'ACTIVE_GENERATION_REQUIRED');row={...row,phase:'revoking',binding_version:row.binding_version+1};
+   if(!row||row.generation!==c.generation||!['active','prepared','archived_unknown'].includes(row.phase)||row.phase==='archived_unknown'&&c.nativeId!==row.native_id)fail(409,'ACTIVE_GENERATION_REQUIRED');row={...row,phase:'revoking',binding_version:row.binding_version+1};
   }
   saveMember(row);const time=new Date().toISOString();db.prepare('INSERT INTO member_enrollment_operations VALUES(?,?,?,?,?,?,?,?,?,?,?)').run(c.operationId,c.requestDigest,site,c.memberId,c.generation,action,JSON.stringify(c),'prepared',null,time,time);audit(c,`${action}.prepared`,row);return row;
  }
@@ -114,7 +115,7 @@ export function createNativeEnrollment({db,identityDb,config,fault=()=>{}}={}){
  }
  function reconcile(c,action){
   const row=getMember(c);checkRow(c,row);if(row.generation!==c.generation||row.phase!==(action==='grant'?'prepared':'revoking'))return unknown(c);
-  try{teamBinding(c,row,action);fault('after_identity_commit');return transaction(db,()=>{fault('before_finish_commit');return finish(c,action);});}catch{return unknown(c);}
+  try{teamBinding(c,row,action);fault('after_identity_commit');return transaction(db,()=>{fault('before_finish_commit');return finish(c,action);});}catch{try{db.prepare("UPDATE member_enrollment_operations SET phase='unknown',context_json=?,updated_at=? WHERE operation_id=? AND request_digest=? AND phase='prepared'").run(JSON.stringify(c),new Date().toISOString(),c.operationId,c.requestDigest);}catch{}return unknown(c);}
  }
  async function run(input,action){
   const {context:c}=validateContext(input,site,action);
@@ -135,5 +136,5 @@ export function createNativeEnrollment({db,identityDb,config,fault=()=>{}}={}){
    return native.active===1&&payload.id===native.id&&payload.userId===native.user_id&&payload.role===native.role&&payload.revision===native.revision&&payload.active===true&&!!binding&&binding.enabled===1&&binding.member_id===row.native_member_id&&binding.native_user_id===row.native_user_id&&binding.workspace_id===workspaceId&&binding.revision===row.binding_version&&managedTeamBindingAllowed(db,identityDb,c.issuer,c.subject,row.native_id);
   }catch{return false;}
  }
- return Object.freeze({configured:true,roles:rolesForSite(site),supportsEnsure:false,grant:c=>run(c,'grant'),revoke:c=>run(c,'revoke'),async status(input){const {context:c}=validateContext(input,site,'status');const old=checked(c);if(!old)return {phase:'not_found',operationId:c.operationId,requestDigest:c.requestDigest};const row=getMember(c);checkRow(c,row);if(row.generation!==c.generation)return unknown(c);if(row.phase==='revoked')return receipt(c,row,'revoked');if(row.phase!=='active'||!old.receipt_json||!liveNativeAccess(c,row))return unknown(c);return JSON.parse(old.receipt_json);}});
+ return Object.freeze({configured:true,roles:rolesForSite(site),supportsEnsure:false,grant:c=>run(c,'grant'),revoke:c=>run(c,'revoke'),async status(input){const {context:c}=validateContext(input,site,'status');const old=checked(c);if(!old)return {phase:'not_found',operationId:c.operationId,requestDigest:c.requestDigest};if(old.phase==='unknown'&&Date.parse(old.updated_at)<=Date.now()-MEMBER_PROVISION_UNKNOWN_TTL_MS){const archived={phase:'expired_unknown',operationId:c.operationId,requestDigest:c.requestDigest,evidenceRetained:true,archivedAt:new Date().toISOString()};db.prepare('UPDATE member_enrollment_operations SET phase=?,receipt_json=?,updated_at=? WHERE operation_id=? AND phase=?').run('expired_unknown',JSON.stringify(archived),archived.archivedAt,c.operationId,'unknown');const row=getMember(c);if(row&&['prepared','revoking'].includes(row.phase))db.prepare('UPDATE member_enrollment_members SET phase=? WHERE site=? AND member_id=? AND generation=?').run('archived_unknown',site,c.memberId,c.generation);return archived;}if(old.phase==='expired_unknown'&&old.receipt_json)return JSON.parse(old.receipt_json);const row=getMember(c);checkRow(c,row);if(row.generation!==c.generation)return unknown(c);if(row.phase==='revoked')return receipt(c,row,'revoked');if(row.phase!=='active'||!old.receipt_json||!liveNativeAccess(c,row))return unknown(c);return JSON.parse(old.receipt_json);}});
 }

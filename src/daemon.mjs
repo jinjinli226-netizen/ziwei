@@ -40,6 +40,12 @@ function safeProcessExit(value,depth=0) {
   return result;
 }
 
+// A checkpoint commit is only a transport/ledger step after the native tool
+// batch has already exited. A dead API must not keep the local daemon paused
+// forever; after this bound we archive the exact checkpoint as unknown and
+// release the local occupancy without claiming the server accepted it.
+export const MAINTENANCE_COMMIT_TTL_MS = 10 * 60 * 1000;
+
 export function canStartDaemonAction(action,admission,{actionDelivery,dispatcher,maintenanceReady,blocksNewActions,executionAllowed}){
   if(isCancellationAction(action)||isDshNativeControlAction(action)||actionDelivery.canDeliverWithoutExecution(action))return true;
   const pause=dispatcher.getMaintenancePause(action.id),employee=(action.type===DSH_NATIVE_TYPE?action.payload?.dshOperation?.subject?.employeeId:null)||action.payload?.employeeId||action.payload?.employee_id||action.payload?.assignee;
@@ -210,6 +216,7 @@ export class ActionDispatcher {
   async #commitPause(action,key,receipt){
     if(this.#maintenanceCommitted.has(key))return true;
     try{const value=await this.#onMaintenancePaused(action,receipt);if(value===true||value?.committed===true){if(!this.#completed.has(key))this.#maintenanceCommitted.add(key);return true;}}catch{}
+    const item=this.#started.get(key);if(item&&!Number.isFinite(item.maintenanceCommitStartedAt)){item.maintenanceCommitStartedAt=this.#now();try{this.#saveState();}catch{}}
     this.#onEvent('action.maintenance_commit_pending',{actionId:action.id});return false;
   }
   get maintenancePausedActions(){return [...this.#started.values()].filter(item=>!this.#completed.has(item.key)&&this.#validPaused(item)).map(item=>({actionId:item.actionId,employeeId:item.resourceBinding?.employeeId||null,receipt:JSON.parse(JSON.stringify(item.maintenancePause))}));}
@@ -218,7 +225,16 @@ export class ActionDispatcher {
   hasPausedEmployee(employeeId){return this.maintenancePausedActions.some(row=>row.employeeId===employeeId);}
   async retryMaintenanceCommits(actions=[]){
     for(const action of actions){const entry=this.#findByActionId(this.#started,action?.id,item=>item.actionId);if(entry&&this.#validPaused(entry[1],action))this.#maintenanceActions.set(entry[0],action);}
-    for(const row of this.maintenancePendingCommits){const entry=this.#findByActionId(this.#started,row.actionId,item=>item.actionId),action=entry&&this.#maintenanceActions.get(entry[0]);if(action&&this.#validPaused(entry[1],action))await this.#commitPause(action,entry[0],entry[1].maintenancePause);}
+    for(const row of this.maintenancePendingCommits){
+      const entry=this.#findByActionId(this.#started,row.actionId,item=>item.actionId),action=entry&&this.#maintenanceActions.get(entry[0]);
+      if(!entry)continue;
+      const [key,item]=entry;
+      if(Number.isFinite(item.maintenanceCommitStartedAt)&&this.#now()-item.maintenanceCommitStartedAt>MAINTENANCE_COMMIT_TTL_MS){
+        const result=this.#failure(action||{id:item.actionId},'维护暂停回执提交超时；已归档原退出证据，原业务结果未确认且未重新执行',{code:'MAINTENANCE_COMMIT_TIMEOUT',executionState:'uncertain',result:{maintenanceCommitUnknown:true,maintenanceCheckpoint:item.maintenancePause,processExit:item.maintenancePause.processExit,partialEffectsPossible:true}});
+        this.#completed.set(key,result);this.#completedIdentity.set(key,item.identity);this.#maintenanceActions.delete(key);try{this.#saveState();}catch{this.#completed.delete(key);this.#completedIdentity.delete(key);continue;}this.#onEvent('action.maintenance_commit_expired',{actionId:item.actionId});continue;
+      }
+      if(action&&this.#validPaused(item,action))await this.#commitPause(action,key,item.maintenancePause);
+    }
     return {pending:this.maintenancePendingCommits.length};
   }
   async requestMaintenancePause(update){

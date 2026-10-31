@@ -6,7 +6,7 @@ import path from 'node:path';
 import {randomUUID} from 'node:crypto';
 import childProcess from 'node:child_process';
 import {syncBuiltinESMExports} from 'node:module';
-import {bindCodexConversationToHost,prepareCodexConversationSession} from '../src/codex-conversation-session.mjs';
+import {bindCodexConversationToHost,prepareCodexConversationSession,CODEX_CONVERSATION_PENDING_TTL_MS} from '../src/codex-conversation-session.mjs';
 import {runtimeInvocation,executeRuntime,resetRuntimeDiscovery,discoverInstalledRuntimes} from '../src/runtime-adapters.mjs';
 import {createLocalActionExecutor} from '../src/local-action.mjs';
 import {ActionDispatcher} from '../src/daemon.mjs';
@@ -46,6 +46,14 @@ test('parallel employees and conversations share HOME without borrowing each oth
 
 test('same conversation reservation refuses concurrent launch then releases even before spawn',t=>{
  const f=fixture(t),s=f.start();assert.throws(()=>f.start(),{code:'CODEX_CONVERSATION_BUSY'});s.close();const next=f.start();assert.equal(next.invocation.args.includes('resume'),false);next.close();assert.equal(fs.readdirSync(path.join(f.runtimeDir,'codex-conversation-sessions')).length,0);
+});
+
+test('an abandoned old pending map is archived as unknown and no longer blocks a fresh turn',t=>{
+ const f=fixture(t),s=f.start(),file=f.record(),saved=JSON.parse(fs.readFileSync(file,'utf8'));s.close();
+ saved.state='pending';saved.startedAt=Date.now()-CODEX_CONVERSATION_PENDING_TTL_MS-2;saved.updatedAt=Date.now()-CODEX_CONVERSATION_PENDING_TTL_MS-1;
+ fs.writeFileSync(file,JSON.stringify(saved)+'\n',{mode:0o600});
+ const next=f.start();assert.equal(next.invocation.args.includes('resume'),false);next.close();
+ const names=fs.readdirSync(path.dirname(file));assert.ok(names.some(name=>name.startsWith(path.basename(file,'.json')+'.archived-')));
 });
 
 test('malformed map refuses only that scope and leaves evidence unchanged',t=>{

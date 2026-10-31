@@ -11,6 +11,7 @@ const exact=(value,keys)=>value&&typeof value==='object'&&!Array.isArray(value)&
 const fail=(code,message)=>Object.assign(new Error(message),{code});
 const scopeKeys=['origin','workspace','deviceId','employeeId','conversationId','profile','home','cwd'];
 const recordKeys=['schemaVersion','key','scope','state','threadId','rollout','actionId','attemptId','startedAt','updatedAt'];
+export const CODEX_CONVERSATION_PENDING_TTL_MS = 24 * 60 * 60 * 1000;
 function noLinks(file){for(let current=path.resolve(file);;current=path.dirname(current)){let stat;try{stat=fs.lstatSync(current);}catch(error){if(error.code!=='ENOENT')throw error;}if(stat?.isSymbolicLink())throw fail('CODEX_CONVERSATION_PATH_UNSAFE','Codex 会话目录包含链接，未启动会话');if(current===path.dirname(current))break;}}
 function privateDirectory(directory){if(!path.isAbsolute(directory))throw fail('CODEX_CONVERSATION_PATH_UNSAFE','Codex 会话缺少宿主私有目录');noLinks(directory);fs.mkdirSync(directory,{recursive:true,mode:0o700});if(process.platform!=='win32')fs.chmodSync(directory,0o700);return fs.realpathSync.native(directory);}
 function readJson(file,max=64*1024){noLinks(file);const stat=fs.lstatSync(file);if(!stat.isFile()||stat.nlink!==1||stat.size>max)throw fail('CODEX_CONVERSATION_STATE_INVALID','Codex 会话映射不是有效的私有普通文件');if(process.platform!=='win32'&&(stat.mode&0o077))throw fail('CODEX_CONVERSATION_PERMISSIONS','Codex 会话映射权限过宽，未读取会话');return JSON.parse(fs.readFileSync(file,'utf8'));}
@@ -37,7 +38,7 @@ export function bindCodexConversationToHost(options={}){
 }
 
 function validateRecord(value,key,scope){
- if(!exact(value,recordKeys)||value.schemaVersion!==1||value.key!==key||!exact(value.scope,scopeKeys)||!scopeKeys.every(k=>typeof value.scope[k]==='string')||!['pending','ready','unconfirmed'].includes(value.state)||value.threadId!==null&&(typeof value.threadId!=='string'||!UUID.test(value.threadId))||value.rollout!==null&&typeof value.rollout!=='string'||!id(value.actionId,'action_')||typeof value.attemptId!=='string'||!UUID.test(value.attemptId)||!Number.isFinite(value.startedAt)||!Number.isFinite(value.updatedAt)||value.updatedAt<value.startedAt)throw fail('CODEX_CONVERSATION_STATE_INVALID','此聊天的 Codex 会话映射损坏；未改动原生会话或启动新任务');
+ if(!exact(value,recordKeys)||value.schemaVersion!==1||value.key!==key||!exact(value.scope,scopeKeys)||!scopeKeys.every(k=>typeof value.scope[k]==='string')||!['pending','ready','unconfirmed','archived_unconfirmed'].includes(value.state)||value.threadId!==null&&(typeof value.threadId!=='string'||!UUID.test(value.threadId))||value.rollout!==null&&typeof value.rollout!=='string'||!id(value.actionId,'action_')||typeof value.attemptId!=='string'||!UUID.test(value.attemptId)||!Number.isFinite(value.startedAt)||!Number.isFinite(value.updatedAt)||value.updatedAt<value.startedAt)throw fail('CODEX_CONVERSATION_STATE_INVALID','此聊天的 Codex 会话映射损坏；未改动原生会话或启动新任务');
  if(!sameScope(value.scope,scope))throw fail('CODEX_CONVERSATION_SCOPE_CHANGED','此聊天的 Codex profile、HOME 或工作目录已变化；未连接其他会话，请先明确迁移会话');
  if(value.state==='ready'&&(!value.threadId||!value.rollout))throw fail('CODEX_CONVERSATION_STATE_INVALID','此聊天的 Codex 会话缺少原生会话记录');
  return value;
@@ -99,6 +100,11 @@ function prepareSession({binding,invocation,codexHome,profile='default',cwd,now=
  try{
   try{previous=validateRecord(readJson(file),key,scope);}catch(error){if(error.code!=='ENOENT'){if(error.code?.startsWith('CODEX_CONVERSATION_'))throw error;throw fail('CODEX_CONVERSATION_STATE_INVALID','此聊天的 Codex 会话映射无法读取，未修改原记录');}}
   restorePrevious=previous;
+  if(previous&&previous.state==='pending'&&now()-previous.updatedAt>CODEX_CONVERSATION_PENDING_TTL_MS){
+   const archived={...previous,state:'archived_unconfirmed',updatedAt:now()};
+   writeJson(path.join(directory,key+'.archived-'+String(previous.updatedAt)),archived);
+   previous=null;restorePrevious=null;
+  }
   if(previous&&previous.state!=='ready'){
    const prior=priorActionResult(host.stateFile,previous);
    if(!prior||!ownedRootExited(prior.result?.processExit))throw fail('CODEX_CONVERSATION_PREVIOUS_UNCONFIRMED','此聊天上次 Codex 执行尚无匹配退出证据；仅暂停此会话，未重放旧任务');
