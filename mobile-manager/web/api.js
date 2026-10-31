@@ -127,17 +127,29 @@ export function createApi({ identity = createNativeIdentity(), fetchImpl = globa
     hermesProfiles: (workspace, deviceId) => get(`${ws(workspace)}/hermes/profiles${query({ deviceId })}`),
     employeeMcpStatus: (workspace, id) => get(`${ws(workspace)}/employees/${enc(id)}/mcp/status`),
     bots: workspace => get(mobile(`${ws(workspace)}/bots`)),
+    mixedGroups: workspace => get(mobile(`${ws(workspace)}/mixed-groups`)),
+    mixedGroup: (workspace, id) => get(mobile(`${ws(workspace)}/mixed-groups/${enc(id)}`)),
+    createMixedGroup: (workspace, body) => post(`${ws(workspace)}/mixed-groups`, body),
+    sendMixedGroupMessage: (workspace, id, body) => post(`${ws(workspace)}/mixed-groups/${enc(id)}/messages`, body),
+    cancelMixedGroup: (workspace, id, body = {}) => post(`${ws(workspace)}/mixed-groups/${enc(id)}/cancel`, body),
     bot: (workspace, id, options) => get(mobile(botPath(workspace, id)), readOptions(options)),
     botRuns: (workspace, id, options) => get(mobile(`${botPath(workspace, id)}/runs`), readOptions(options)),
     botNativeAction: (workspace, id, body) => post(`${botPath(workspace, id)}/native/actions`, body),
     collaborateBot: (workspace, id, body) => post(`${botPath(workspace, id)}/collaboration`, body),
     managementAction: (workspace, id, options) => get(mobile(`${ws(workspace)}/actions/${enc(id)}`), readOptions(options)),
+    conversationActivity: async (workspace, actionId, conversationId, employeeId, options) => {
+      const action = await get(`${ws(workspace)}/actions/${enc(actionId)}`, readOptions(options));
+      if (action?.id !== actionId || action.payload?.conversationId !== conversationId || action.payload?.employeeId !== employeeId) throw new Error('执行回执与当前聊天不一致，请重新读取');
+      return action;
+    },
     mobileNotifications: (workspace, filters = {}, options) => get(`${ws(workspace)}/mobile/notifications-v2${query(filters)}`, readOptions(options)),
     mobileNotification: (workspace, eventId, options) => get(`${ws(workspace)}/mobile/notifications-v2/items/${enc(eventId)}`, readOptions(options)),
     botCapabilities: (workspace, deviceId) => get(`${ws(workspace)}/bots/capabilities${query({ deviceId })}`),
     validateBot: (workspace, id, body) => post(`${botPath(workspace, id)}/validate`, body),
     updateBot: (workspace, id, body) => patch(botPath(workspace, id), body),
     controlBot: (workspace, id, body) => post(`${botPath(workspace, id)}/control`, body),
+    botInteractions: (workspace, id, options) => get(`${botPath(workspace,id)}/interactions`,readOptions(options)),
+    answerBotInteraction: (workspace, id, requestId, body) => post(`${botPath(workspace,id)}/interactions/${enc(requestId)}`,body),
     updateEmployee: (workspace, id, body) => patch(`${ws(workspace)}/employees/${enc(id)}`, body),
     phoneMcpSetup: workspace => get(mobile(`${ws(workspace)}/phone-mcp/setup`)),
     phoneMcpStatus: (workspace, id) => get(`${ws(workspace)}/employees/${enc(id)}/phone-mcp/status`),
@@ -186,6 +198,15 @@ export function createApi({ identity = createNativeIdentity(), fetchImpl = globa
       if (conversation?.id !== id || !Array.isArray(conversation.messages)) throw new Error('聊天记录返回异常，请刷新重试');
       return conversation;
     },
+    conversationPage: async (id, { before, limit = 10, signal } = {}) => {
+      const conversation = await get(`/api/conversations/${enc(id)}${query({ view:'thread', limit, before })}`, { signal });
+      if (conversation?.id !== id || !Array.isArray(conversation.messages)) throw new Error('聊天记录返回异常，请刷新重试');
+      return conversation;
+    },
+    pauseConversationQueue: id => post(`/api/conversations/${enc(id)}/queue/pause`),
+    resumeConversationQueue: id => post(`/api/conversations/${enc(id)}/queue/resume`),
+    removeConversationQueueItem: (id, actionId) => request(`/api/conversations/${enc(id)}/queue/${enc(actionId)}`, { method:'DELETE' }),
+    stopConversationExecution: (id, expectedActionId) => post(`/api/conversations/${enc(id)}/execution/stop`, { expectedActionId }),
     sendMessage: (id, body) => post(`/api/conversations/${enc(id)}/messages`, {
       content: body.content || '', attachments: body.attachments || [], clientMessageId: body.clientMessageId,
     }),
@@ -206,13 +227,13 @@ export function createApi({ identity = createNativeIdentity(), fetchImpl = globa
     if (!bot && !employee.main_conversation_id && employee.runtime === 'Hermes') bot = await api.bot(workspace, employee.id, options);
     requireSameAuthentication(expectedAuthentication);
     const mainId = employee.main_conversation_id || bot?.main_conversation_id;
-    if (mainId) return api.conversation(mainId, options);
+    if (mainId) return options.page ? api.conversationPage(mainId, options) : api.conversation(mainId, options);
     if (bot?.configuration_state === 'initialized') throw new Error('这位员工的主聊天尚未就绪，请在电脑版核对');
     const result = await api.conversations(workspace, employee.id, options);
     requireSameAuthentication(expectedAuthentication);
     requireActiveRead(options.signal, lookupPath, startedAt);
     const existing = (result.conversations || []).find(row => row.employee_id === employee.id && row.status === 'active');
-    if (existing) return api.conversation(existing.id, options);
+    if (existing) return options.page ? api.conversationPage(existing.id, options) : api.conversation(existing.id, options);
     // Share a submitted creation until all concurrent opening scopes finish.
     // A lookup may have captured an empty result before that creation committed.
     if (!creatingConversations.has(key)) {
@@ -228,7 +249,7 @@ export function createApi({ identity = createNativeIdentity(), fetchImpl = globa
     if (!scopes) { scopes = new Map(); openingConversations.set(key, scopes); }
     const signal = options.signal || null;
     if (!scopes.has(signal)) {
-      const opening = resolveEmployeeConversation(workspace, employee, expectedAuthentication, readOptions(options), key).then(value => { requireSameAuthentication(expectedAuthentication); return value; }).finally(() => {
+      const opening = resolveEmployeeConversation(workspace, employee, expectedAuthentication, {...readOptions(options),page:options.page}, key).then(value => { requireSameAuthentication(expectedAuthentication); return value; }).finally(() => {
         if (scopes.get(signal) === opening) scopes.delete(signal);
         if (!scopes.size && openingConversations.get(key) === scopes) { openingConversations.delete(key); creatingConversations.delete(key); }
       });

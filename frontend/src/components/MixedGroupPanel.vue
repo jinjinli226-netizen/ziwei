@@ -1,0 +1,33 @@
+<script setup>
+import {computed,onMounted,ref} from 'vue';
+import {api} from '../api.js';
+import {MIXED_GROUP_RUNTIMES,mixedGroupMemberDescriptor,mixedGroupStatus} from '../mixed-group.js';
+
+const props=defineProps({workspace:{type:String,required:true},employee:{type:Object,required:true},employees:{type:Array,default:()=>[]}});
+const groups=ref([]),selectedId=ref(''),selected=ref(null),title=ref(''),memberIds=ref([props.employee.id]),draft=ref(''),busy=ref(false),error=ref('');
+const candidates=computed(()=>props.employees.filter(employee=>MIXED_GROUP_RUNTIMES.includes(employee.runtime)&&employee.status!=='deleted'));
+const currentStatus=computed(()=>mixedGroupStatus(selected.value));
+const load=async()=>{try{const value=await api.mixedGroups(props.workspace);groups.value=value.groups||[];if(!selectedId.value&&groups.value[0])selectedId.value=groups.value[0].id;if(selectedId.value)selected.value=await api.mixedGroup(selectedId.value,props.workspace);}catch(reason){error.value=reason.message||'混合群读取失败';}};
+const toggle=id=>{memberIds.value=memberIds.value.includes(id)?memberIds.value.filter(value=>value!==id):[...memberIds.value,id];};
+const create=async()=>{busy.value=true;error.value='';try{const members=memberIds.value.map(id=>mixedGroupMemberDescriptor(candidates.value.find(employee=>employee.id===id)));const value=await api.createMixedGroup({id:`mix_${crypto.randomUUID().replaceAll('-','').slice(0,20)}`,title:title.value.trim()||'混合群',members},props.workspace);selectedId.value=value.id;title.value='';await load();}catch(reason){error.value=reason.message||'混合群创建失败';}finally{busy.value=false;}};
+const send=async()=>{if(!selected.value||!draft.value.trim())return;busy.value=true;error.value='';try{await api.sendMixedGroupMessage(selected.value.id,{content:draft.value},props.workspace);draft.value='';await load();}catch(reason){error.value=reason.message||'混合群发送失败';}finally{busy.value=false;}};
+const cancel=async()=>{if(!selected.value)return;busy.value=true;try{await api.cancelMixedGroup(selected.value.id,{},props.workspace);await load();}catch(reason){error.value=reason.message||'混合群取消失败';}finally{busy.value=false;}};
+const select=async id=>{selectedId.value=id;selected.value=await api.mixedGroup(id,props.workspace);};
+onMounted(load);
+</script>
+<template>
+ <section class="mixed-group-panel" aria-label="Hermes DSH Codex 混合群">
+  <header><div><h3>混合群聊</h3><p>Hermes、DSH、Codex 在同一群中协作；每个成员仍使用自己的 Profile、设备和专属会话。</p></div><span class="mixed-group-status">{{currentStatus}}</span></header>
+  <p v-if="error" class="mixed-group-error" role="alert">{{error}}</p>
+  <div class="mixed-group-layout">
+   <aside><button v-for="group in groups" :key="group.id" type="button" :class="{selected:group.id===selectedId}" @click="select(group.id)">{{group.title}}<small>{{group.members.length}} 位成员</small></button><p v-if="!groups.length">还没有混合群。</p></aside>
+   <main>
+    <form class="mixed-group-create" @submit.prevent="create"><input v-model="title" maxlength="480" placeholder="新混合群名称" aria-label="新混合群名称"/><div class="mixed-group-members"><label v-for="employee in candidates" :key="employee.id"><input type="checkbox" :checked="memberIds.includes(employee.id)" @change="toggle(employee.id)"/> {{employee.name}} <small>{{employee.runtime}}</small></label></div><button type="submit" :disabled="busy||memberIds.length<2">创建混合群</button></form>
+    <template v-if="selected"><div class="mixed-group-roster"><span v-for="member in selected.members" :key="member.employeeId">{{member.name}} · {{member.runtime}}</span></div><div class="mixed-group-history"><article v-for="message in selected.messages" :key="message.id"><small>{{message.runtime||message.role}} · {{message.status}}</small><p>{{message.text}}</p></article><p v-if="!selected.messages.length">尚无消息。</p></div><div class="mixed-group-compose"><textarea v-model="draft" rows="3" maxlength="20000" placeholder="输入消息；不写 @ 默认发送给全员"/><button type="button" :disabled="busy||!draft.trim()" @click="send">发送到混合群</button><button type="button" :disabled="busy||!selected.runs?.some(run=>['pending','acked','running'].includes(run.status))" @click="cancel">取消当前回合</button></div><div class="mixed-group-runs"><div v-for="run in selected.runs" :key="run.actionId"><strong>{{run.profile}}</strong><span>{{run.runtime}} · {{run.status}}</span><small v-if="run.error">{{run.error}}</small></div></div></template>
+   </main>
+  </div>
+ </section>
+</template>
+<style scoped>
+.mixed-group-panel{padding:18px;color:#4b4058}.mixed-group-panel header,.mixed-group-layout,.mixed-group-roster,.mixed-group-compose{display:flex;gap:14px}.mixed-group-panel header{justify-content:space-between;align-items:flex-start}.mixed-group-panel h3{margin:0 0 8px}.mixed-group-panel p{line-height:1.7;color:#8c7d98}.mixed-group-status{padding:5px 9px;border-radius:99px;background:#f2edf8}.mixed-group-layout{margin-top:18px}.mixed-group-layout aside{width:190px;display:grid;align-content:start;gap:5px}.mixed-group-layout aside button{text-align:left;border:0;background:#f7f3fa;padding:9px;border-radius:7px;color:inherit}.mixed-group-layout aside button.selected{background:#eae0f6}.mixed-group-layout aside small,.mixed-group-layout aside p{display:block;font-size:11px;color:#9989a4}.mixed-group-layout main{flex:1;min-width:0}.mixed-group-create{display:grid;gap:10px;padding:12px;background:#faf8fd;border-radius:9px}.mixed-group-create input,.mixed-group-compose textarea{border:0;box-shadow:inset 0 0 0 .5px #ded4e9;border-radius:7px;padding:9px;font:inherit}.mixed-group-members{display:flex;gap:9px;flex-wrap:wrap}.mixed-group-members label{font-size:12px}.mixed-group-create button,.mixed-group-compose button{border:0;border-radius:7px;background:#7655c7;color:white;padding:8px 12px}.mixed-group-create button:disabled,.mixed-group-compose button:disabled{opacity:.45}.mixed-group-roster{flex-wrap:wrap;margin:14px 0}.mixed-group-roster span{padding:5px 8px;background:#f2edf8;border-radius:6px;font-size:12px}.mixed-group-history{max-height:360px;overflow:auto;border-block:1px solid #eee7f2}.mixed-group-history article{padding:10px 0;border-bottom:1px solid #f2edf5}.mixed-group-history p{white-space:pre-wrap;margin:5px 0}.mixed-group-compose{margin-top:14px;align-items:flex-end}.mixed-group-compose textarea{flex:1;resize:vertical}.mixed-group-runs{display:grid;gap:7px;margin-top:14px}.mixed-group-runs div{display:flex;gap:9px;flex-wrap:wrap;padding:8px;border-top:1px solid #f2edf5}.mixed-group-runs small,.mixed-group-error{color:#a26075}@media(max-width:700px){.mixed-group-layout{display:grid}.mixed-group-layout aside{width:auto;grid-template-columns:repeat(2,minmax(0,1fr))}.mixed-group-compose{display:grid}}
+</style>

@@ -19,7 +19,17 @@ export function mobileGroupCandidates(state) {
   const map = new Map();
   for (const bot of rows(state.bots)) if (bot?.employee?.id && bot.kind !== 'creator') map.set(bot.employee.id, { ...bot.employee, bot });
   for (const employee of rows(state.employees)) if (employee?.id) map.set(employee.id, { ...map.get(employee.id), ...employee });
-  return [...map.values()].filter(employee => employee.runtime === 'Hermes' && employee.bot?.kind !== 'creator' && employee.kind !== 'creator' && stable(employee.id) && employee.status !== 'deleted');
+  return [...map.values()].filter(employee => ['Hermes', 'DSH', 'Codex'].includes(employee.runtime) && employee.bot?.kind !== 'creator' && employee.kind !== 'creator' && stable(employee.id) && employee.status !== 'deleted');
+}
+
+export function mobileGroupMemberDescriptors(state, employeeIds) {
+  const candidates = new Map(mobileGroupCandidates(state).map(employee => [employee.id, employee]));
+  return [...new Set(employeeIds)].map(employeeId => candidates.get(employeeId)).filter(Boolean).map(employee => ({
+    employeeId: employee.id,
+    runtime: employee.runtime,
+    ...(employee.runtime_profile || employee.profile ? { profile: employee.runtime_profile || employee.profile } : {}),
+    ...(employee.name ? { displayName: employee.name } : {}),
+  }));
 }
 
 function capabilityBinding(bot) {
@@ -178,7 +188,7 @@ export function createMobileGroups({ state, api, current, valid, draw = () => {}
   async function choose(sourceId) {
     if (disposed) return false;
     if (!sourceId) { generation++; state.groups = initial(); state.page = 'groups'; draw(); return true; }
-    if (!mobileGroupCandidates(state).some(employee => employee.id === sourceId)) { ensure().error = '请选择当前工作区可见的 Hermes 员工'; draw(); return false; }
+    if (!mobileGroupCandidates(state).some(employee => employee.id === sourceId)) { ensure().error = '请选择当前工作区可见的员工'; draw(); return false; }
     generation++; const visit = generation, token = capture(), g = initial(); state.groups = g; g.sourceId = sourceId; state.page = 'groups'; g.busy = true; draw();
     try {
       const bot = await api.bot(workspaceId(state), sourceId);
@@ -283,6 +293,8 @@ export function createMobileGroups({ state, api, current, valid, draw = () => {}
         const roomId = g.newGroup ? `group_${(await fingerprint([g.sourceId, requestId])).slice(0, 20)}` : g.room?.room_id;
         if (!groupId(roomId)) throw failure('请先读取当前原生群组');
         body = { expectedRevision: g.bot.revision, expectedControlEpoch: g.bot.control_epoch, idempotencyKey: requestId, mode: 'group', groupId: roomId, targetEmployeeIds: ids, content };
+        const descriptors = mobileGroupMemberDescriptors(state, [g.sourceId, ...ids]);
+        if (descriptors.some(member => member.runtime !== 'Hermes')) body.memberDescriptors = descriptors;
         input = { groupId: roomId };
       } else body = { expectedRevision: g.bot.revision, expectedControlEpoch: g.bot.control_epoch, idempotencyKey: requestId, resource, operation, input };
       pending = { storageKey: pendingKey(g), workspace, sourceId: g.sourceId, revision: g.bot.revision, controlEpoch: g.bot.control_epoch,

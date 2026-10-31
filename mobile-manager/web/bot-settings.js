@@ -228,6 +228,11 @@ export function createBotSettings({state,api,current,valid,fail,draw=()=>{},acce
       for(const name of checkboxes)field(settings,name,'',data.has(name));
       const extras=names(data.get('bot.toolsetsExtra'));
       settings.draft.config.toolsets=[...new Set([...data.getAll('bot.toolsets'),...extras])];
+      // The native autonomy toolset is the implementation of workspace
+      // management. A full form submit still includes its old extra value
+      // when the management checkbox was just turned off; drop it at the
+      // boundary so the server receives a self-consistent permission set.
+      if(!data.has('bot.management')) settings.draft.config.toolsets=settings.draft.config.toolsets.filter(value=>value!=='ziwei_autonomy');
       for(const name of Object.keys(settings.draft.config.mcpServers || {}))field(settings,`bot.mcp.${name}.enabled`,'',data.has(`bot.mcp.${name}.enabled`));
     }
     settings.draft.employee.skills=[...new Set(data.getAll('bot.skills'))];

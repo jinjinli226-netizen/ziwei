@@ -136,7 +136,7 @@ test('chat home keeps a direct report entry alongside groups and notifications',
 
 test('native login is one unified button, and unregistered clients cannot submit password or fake success',()=>{
   const html=render({...initialState(),phase:'login',identity:{available:true,mode:'oidc',configured:true,authenticated:false}});
-  assert.match(html,/data-action="unified-login"/);assert.match(html,/统一登录/);
+  assert.match(html,/data-action="unified-login"/);assert.match(html,/原账号邮箱和密码登录/);assert.match(html,/系统浏览器中输入邮箱和密码/);
   assert.doesNotMatch(html,/name="username"|name="password"|data-form="login"/);
   const blocked=render({...initialState(),phase:'login',identity:{available:true,mode:'oidc',configured:false,authenticated:false,message:'Android 客户端尚未注册'}});
   assert.match(blocked,/Android 客户端尚未注册/);assert.match(blocked,/data-action="unified-login"[^>]*disabled/);

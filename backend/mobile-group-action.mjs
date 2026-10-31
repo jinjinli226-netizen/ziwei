@@ -149,10 +149,27 @@ export function createMobileGroupActionView(repo){
       const nested=resultView(value.result,depth+1);
       return native===value.nativeOperation&&nested===value.result?value:{...value,...(native!==value.nativeOperation?{nativeOperation:native}:{}),...(nested!==value.result?{result:nested}:{})};
     }
-    const result=resultView(action.result),mainReceipts=receipts,events=Array.isArray(action.events)?action.events.map(event=>{
+    const compactEvents=events=>{
+      if(!Array.isArray(events)||events.length<=8)return events;
+      const evidence=event=>{
+        const value=event?.data?.result;
+        const result=object(value?.result)?value.result:value;
+        const native=object(result?.nativeOperation)?result.nativeOperation:null;
+        return {result:{
+          ...(result?.processExit?{processExit:result.processExit}:{}),
+          ...(result?.stopConfirmed!==undefined?{stopConfirmed:result.stopConfirmed}:{}),
+          ...(result?.code?{code:result.code}:{}),
+          ...(result?.executionState?{executionState:result.executionState}:{}),
+          ...(native?{nativeOperation:{resource:native.resource,operation:native.operation,data:native.data?.historyPointer?{historyPointer:native.data.historyPointer}:{}}}:{}),
+        }};
+      };
+      const first=events[0],last=events.at(-1),omitted=events.length-2;
+      return [{...first,data:evidence(first)},{id:`${action.id}:events-omitted`,action_id:action.id,type:'events.omitted',message:'中间群聊事件已折叠；完整历史通过群分页读取',created_at:last?.created_at||first?.created_at||new Date().toISOString(),data:{omitted:true,count:omitted}},{...last,data:evidence(last)}];
+    };
+    const result=resultView(action.result),mainReceipts=receipts,events=Array.isArray(action.events)?compactEvents(action.events.map(event=>{
       const result=resultView(event?.data?.result);
       return result===event?.data?.result?event:{...event,data:{...event.data,result}};
-    }):action.events;
+    })):action.events;
     if(action.status==='succeeded'&&mainReceipts===0)failure();
     if(options.validateOnly)return action;
     return result===action.result&&events===action.events&&!upgradeRequired?action:{...action,result,...(events!==action.events?{events}:{}),...(upgradeRequired?{mobileReadError:upgradeError}:{})};
@@ -191,7 +208,9 @@ export function createMobileGroupActionView(repo){
           nativeResources[key]={...(id(cached.actionId)?{actionId:cached.actionId}:{}),resourceState:'unavailable',readError:readError(error)};
         }
       }
-      return {...value,...(latest!==value.latest_run?{latest_run:latest}:{}),...(stop!==value.stop_action?{stop_action:stop}:{}),...(active!==value.active_run?{active_run:active}:{}),...(value.nativeResources?{nativeResources}:{})};
+      const output={...value,...(latest!==value.latest_run?{latest_run:latest}:{}),...(stop!==value.stop_action?{stop_action:stop}:{}),...(active!==value.active_run?{active_run:active}:{}),...(value.nativeResources?{nativeResources}:{})};
+      if(partial)return Object.fromEntries(['id','employee_id','workspace','employee','configuration_state','nativeResources','latest_run','stop_action'].filter(key=>Object.hasOwn(output,key)).map(key=>[key,output[key]]));
+      return output;
     } catch(error) {
       if(!partial||!expectedError(error))throw error;
       // A list remains useful when one employee's group is no longer visible.

@@ -60,12 +60,14 @@ await context.route('**/*',async route=>{
     const employeeMatch=p.match(new RegExp(`^${base}/employees/([^/]+)$`));
     if(employeeMatch&&method==='PATCH')return json(route,repo.updateEmployee(employeeMatch[1],body));
     if(p===base+'/devices')return json(route,{devices:repo.listDevices(slug)});
+    const activity=p.match(new RegExp(`^${base}/actions/([^/]+)$`));
+    if(activity&&method==='GET')return json(route,repo.getA2AAction(activity[1]));
     if(p===base+'/conversations'){
       if(method==='POST')return json(route,repo.createConversation(slug,body),201);
       return json(route,{conversations:repo.listConversations(slug,{conversationEmployeeId:url.searchParams.get('employeeId')})});
     }
     const conv=p.match(/^\/api\/conversations\/([^/]+)(\/messages)?$/);
-    if(conv){if(method==='POST')return json(route,repo.addConversationMessage(conv[1],{...body,...readActor}),201);return json(route,repo.getConversation(conv[1]));}
+    if(conv){if(method==='POST')return json(route,repo.addConversationMessage(conv[1],{...body,...readActor}),201);return json(route,repo.getConversation(conv[1],readActor,url.searchParams.get('view')==='thread'?Object.fromEntries(url.searchParams):undefined));}
     const taskMatch=p.match(/^\/api\/tasks\/([^/]+)(\/state)?$/);
     if(taskMatch){if(method==='PATCH')return json(route,repo.updateTask(taskMatch[1],body));if(method==='POST')return json(route,repo.transitionTask(taskMatch[1],body.state));return json(route,repo.getTask(taskMatch[1]));}
     if(p===base+'/ziwei-connect/terminal/android-devices')return json(route,{devices:[phone]});

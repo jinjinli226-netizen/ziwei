@@ -1,5 +1,7 @@
 # 紫薇 Android 管理 App
 
+2026-10-31 新增本地 **0.7.1-mobile-candidate / code20**：聊天界面、已有多会话、历史分页、连续队列、Markdown与真实活动、Hermes加密提问/审批。原签名候选已构建，已在登记的 Android 15 AVD 覆盖升级并完成壳层与系统浏览器入口检查；真实邮箱回调受 AVD 网络阻塞。具体包哈希、API版本及未测边界见[移动驾驶舱候选](../docs/mobile/2026-10-31-mobile-cockpit-candidate.md)与[Android VM记录](../docs/mobile/2026-10-31-android-vm-qa.md)。以下 code18 及更早说明是各自历史验收，不能用来证明 code20 已完成真实账号/员工业务验收。
+
 当前统一身份版本是 `0.6.0-internal / code18`，已沿用原签名构建并[发布 APK](https://ziwei.qzelynth.top/downloads/android/ziwei-manager-0.6.0-internal-code18.apk)。服务器已接通专用 public client；准确包已在独立 Android 15 模拟器实测原统一超管登录、返回 App、BigTron 管理与提醒读取、冷启动续期、退出及重新登录。请直接覆盖更新管理 App，保留原数据；真实手机覆盖升级尚未实测。原 `code17` 未激活审阅包保持历史字节；详见[code18 交付记录](../docs/operations/2026-10-25-android-unified-login-code18.md)及[候选交付与升级边界](../docs/operations/2026-10-23-android-identity-candidate.md)。
 
 `0.5.4-internal / code 16` 已发布内部测试版，补齐服务端“本轮失败自动收尾”合同的显示与发送判断。原电脑归档后可继续派新工作，待收尾时显示自动处理，保留原未知结果，不要求用户手工核实。公开安装包与 manifest 已匿名下载核验；本版尚未安装真机或模拟器。见[本轮验收与发布记录](../docs/operations/2026-10-21-android-failure-finalization-candidate.md)。

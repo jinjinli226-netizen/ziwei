@@ -37,12 +37,26 @@ export function createMixedGroupStore(repo) {
       const action = repo.getA2AAction(run.actionId, { workspaceSlug: slug });
       return action ? { ...run, status: action.status, error: action.error || null, output: action.result?.output || action.result?.result?.output || null } : run;
     });
-    if (JSON.stringify(refreshed) !== JSON.stringify(runs)) db.prepare('UPDATE mixed_groups SET runs_json=?,updated_at=? WHERE id=?').run(JSON.stringify(refreshed), nowIso(), id);
-    return { ...value, runs: refreshed };
+    let messages=value.messages;
+    const completed=refreshed.filter(run=>['succeeded','failed','cancelled','expired'].includes(run.status));
+    const known=new Set(messages.map(message=>message.actionId).filter(Boolean));
+    const outcomes=completed.filter(run=>!known.has(run.actionId)).map(run=>({
+      employeeId:run.employeeId,runtime:run.runtime,profile:run.profile,actionId:run.actionId,
+      status:run.status==='expired'?'unknown':run.status,output:run.output,error:run.error,
+    }));
+    if(outcomes.length){
+      const userMessage=messages.find(message=>message.id===runMessageId(refreshed));
+      if(userMessage)messages=appendMixedGroupTurn({...value,messages},{messageId:userMessage.id,content:userMessage.text,runs:outcomes,updatedAt:nowIso()}).messages;
+    }
+    const nextMessages=JSON.stringify(messages),nextRuns=JSON.stringify(refreshed);
+    if(nextRuns!==JSON.stringify(runs)||nextMessages!==JSON.stringify(value.messages))db.prepare('UPDATE mixed_groups SET runs_json=?,messages_json=?,updated_at=? WHERE id=?').run(nextRuns,nextMessages,nowIso(),id);
+    const states=refreshed.map(run=>run.status==='expired'?'unknown':run.status),state=states.some(value=>value==='unknown')?'unknown':states.some(value=>value==='failed')&&states.some(value=>value==='succeeded')?'partial':states.every(value=>value==='succeeded')?'succeeded':states.every(value=>value==='failed')?'failed':states.every(value=>value==='cancelled')?'cancelled':states.some(value=>['pending','acked','running'].includes(value))?'running':'planned';
+    return { ...value, messages, runs: refreshed, state };
   }
+  function runMessageId(runs){return runs.find(run=>run.messageId)?.messageId || null;}
   function list(slug) {
     const ws = workspace(slug);
-    return db.prepare('SELECT g.*,w.slug AS workspace_slug FROM mixed_groups g JOIN workspaces w ON w.id=g.workspace_id WHERE g.workspace_id=? ORDER BY g.updated_at DESC').all(ws.id).map(rowView);
+    return db.prepare('SELECT g.id FROM mixed_groups g WHERE g.workspace_id=? ORDER BY g.updated_at DESC').all(ws.id).map(row => get(slug, row.id));
   }
   function create(slug, input) {
     const ws = workspace(slug), value = normalizeMixedGroup({ ...input, workspace: slug });
@@ -72,17 +86,17 @@ export function createMixedGroupStore(repo) {
     return { id, deleted: true };
   }
   function planSend(slug, id, input = {}) {
-    const group = get(slug, id), plan = planMixedGroupDispatch({ group, content: input.content, targetEmployeeIds: input.targetEmployeeIds, source: { type: 'user', messageId: input.messageId || `mixed-message:${randomUUID()}` } });
+    const group = get(slug, id), plan = planMixedGroupDispatch({ group, content: input.content, attachments: input.attachments || [], targetEmployeeIds: input.targetEmployeeIds, source: { type: 'user', messageId: input.messageId || `mixed-message:${randomUUID()}` } });
     const runs = [];
     db.exec('SAVEPOINT mixed_group_send');
     try {
       for (const member of plan.members) {
-        const message = repo.addConversationMessage(member.conversationId, { content: member.prompt, dispatch: true, clientMessageId: `mixed-group:${group.id}:${plan.source.messageId}:${member.employeeId}` });
+        const message = repo.addConversationMessage(member.conversationId, { content: member.prompt, attachments: member.attachments, dispatch: true, clientMessageId: `mixed-group:${group.id}:${plan.source.messageId}:${member.employeeId}` });
         const actionId = message.execution?.id || message.execution?.actionId;
         if (!actionId) throw Object.assign(new Error('混合群成员动作未创建'), { code: 'MIXED_GROUP_ACTION_CREATE_FAILED', status: 502 });
-        runs.push({ employeeId: member.employeeId, runtime: member.runtime, profile: member.profile, conversationId: member.conversationId, actionId, status: 'pending' });
+        runs.push({ employeeId: member.employeeId, runtime: member.runtime, profile: member.profile, conversationId: member.conversationId, actionId, messageId: plan.source.messageId, status: 'pending' });
       }
-      const messages = [...group.messages, { id: plan.source.messageId, role: 'user', text: plan.content, status: 'pending' }].slice(-300);
+      const messages = [...group.messages, { id: plan.source.messageId, role: 'user', text: plan.content, status: 'pending', ...(plan.attachments.length ? { attachments: plan.attachments } : {}) }].slice(-300);
       db.prepare('UPDATE mixed_groups SET messages_json=?,runs_json=?,updated_at=? WHERE id=?').run(JSON.stringify(messages), JSON.stringify(runs), nowIso(), id);
       db.exec('RELEASE mixed_group_send');
     } catch (error) { db.exec('ROLLBACK TO mixed_group_send; RELEASE mixed_group_send'); throw error; }

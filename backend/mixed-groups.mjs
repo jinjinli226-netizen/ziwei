@@ -65,6 +65,7 @@ function normalizeMessage(message) {
     ...(message.actionId ? { actionId: String(message.actionId) } : {}),
     ...(message.status ? { status: String(message.status) } : {}),
     ...(message.error ? { error: String(message.error).slice(0, 4000) } : {}),
+    ...(Array.isArray(message.attachments) ? { attachments: message.attachments.slice(0, 20) } : {}),
   };
 }
 
@@ -85,9 +86,10 @@ export function resolveMixedGroupTargets(groupInput, content) {
   return group.members.filter(member => targets.includes(member.employeeId)).map(member => member.employeeId);
 }
 
-export function planMixedGroupDispatch({ group: groupInput, content, targetEmployeeIds, source = {} } = {}) {
+export function planMixedGroupDispatch({ group: groupInput, content, targetEmployeeIds, attachments = [], source = {} } = {}) {
   const group = normalizeMixedGroup(groupInput);
   if (!text(content, 20000)) fail('MIXED_GROUP_MESSAGE_INVALID', '混合群消息不能为空');
+  if (!Array.isArray(attachments) || attachments.length > 20) fail('MIXED_GROUP_ATTACHMENT_INVALID', '混合群附件最多 20 个');
   const targets = targetEmployeeIds === undefined ? resolveMixedGroupTargets(group, content) : targetEmployeeIds;
   if (!Array.isArray(targets) || !targets.length || new Set(targets).size !== targets.length) fail('MIXED_GROUP_TARGET_INVALID', '混合群目标不能为空且必须唯一');
   const selected = group.members.filter(member => targets.includes(member.employeeId));
@@ -99,12 +101,14 @@ export function planMixedGroupDispatch({ group: groupInput, content, targetEmplo
     rosterHash: group.rosterHash,
     source: { ...source },
     content,
+    attachments: attachments.slice(),
     members: selected.map(member => ({
       ...member,
       groupId: group.id,
       rosterHash: group.rosterHash,
       prompt: prompt(member),
       sourceMessageId: source.messageId || null,
+      attachments: attachments.slice(),
     })),
   };
 }
@@ -113,7 +117,7 @@ export function appendMixedGroupTurn(groupInput, turn = {}) {
   const group = normalizeMixedGroup(groupInput);
   if (!text(turn.messageId, 240) || !text(turn.content, 65536) || !Array.isArray(turn.runs)) fail('MIXED_GROUP_TURN_INVALID', '混合群回合需要消息和成员结果');
   const memberMap = new Map(group.members.map(member => [member.employeeId, member]));
-  const messages = [...group.messages, { id: turn.messageId, role: 'user', text: turn.content, status: 'complete' }];
+  const messages = [...group.messages, { id: turn.messageId, role: 'user', text: turn.content, status: 'complete', ...(Array.isArray(turn.attachments) ? { attachments: turn.attachments.slice(0, 20) } : {}) }];
   for (const run of turn.runs) {
     const member = memberMap.get(run.employeeId);
     if (!member || run.runtime !== member.runtime || (run.profile && run.profile !== member.profile)) fail('MIXED_GROUP_RUN_BINDING_INVALID', '混合群成员结果绑定不匹配');

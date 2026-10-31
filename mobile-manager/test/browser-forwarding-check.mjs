@@ -43,7 +43,7 @@ async function inMemoryRequest(method,url,body){
   request.method=method;request.url=url;request.headers={host:'ziwei-forwarding.invalid',cookie,...(body===undefined?{}:{'content-type':'application/json','content-length':String(Buffer.byteLength(payload))})};
   const chunks=[],result=new Promise((resolve,reject)=>{
     response.write=(chunk,encoding,callback)=>{if(chunk)chunks.push(Buffer.isBuffer(chunk)?chunk:Buffer.from(chunk,encoding));callback?.();return true;};
-    response.end=(chunk,encoding,callback)=>{if(chunk)chunks.push(Buffer.isBuffer(chunk)?chunk:Buffer.from(chunk,typeof encoding==='string'?encoding:undefined));callback?.();const text=Buffer.concat(chunks).toString();resolve({status:response.statusCode,body:text?JSON.parse(text):{}});response.emit('finish');return response;};
+    response.end=(chunk,encoding,callback)=>{if(chunk)chunks.push(Buffer.isBuffer(chunk)?chunk:Buffer.from(chunk,typeof encoding==='string'?encoding:undefined));callback?.();const bytes=Buffer.concat(chunks),contentType=String(response.getHeader('content-type')||'application/json');resolve({status:response.statusCode,contentType,body:contentType.startsWith('image/')?bytes:bytes.length?JSON.parse(bytes.toString()):{}});response.emit('finish');return response;};
     response.on('error',reject);request.on('error',reject);app.handle(request,response,error=>reject(error||new Error(`Unhandled ${method} ${url}`)));
   });
   request.push(payload||null);if(payload)request.push(null);
@@ -77,7 +77,7 @@ await context.route('**/*',async route=>{
     const result=await inMemoryRequest(method,p+url.search,body);entry.status=result.status;
     if(p.endsWith('/forwards'))entry.receipt=result.body;
     if(method==='POST'&&p.endsWith('/forwards')&&loseNextForwardReceipt&&result.status>=200&&result.status<300){loseNextForwardReceipt=false;lostReceipts++;entry.receiptLost=true;return route.abort('failed');}
-    return route.fulfill({status:result.status,contentType:'application/json',body:JSON.stringify(result.body)});
+    return route.fulfill({status:result.status,contentType:result.contentType,body:Buffer.isBuffer(result.body)?result.body:JSON.stringify(result.body)});
   }catch(error){errors.push(error.stack||error.message);return route.fulfill({status:500,contentType:'application/json',body:JSON.stringify({error:error.message})});}
 });
 const action=(name,id)=>page.locator(`${['forward-cancel','forward-detail-close'].includes(name)?'.forward-sheet > header ':''}[data-action="${name}"]${id?`[data-id="${id}"]`:''}`).first();
@@ -148,7 +148,7 @@ try{
   await action('forward-open-target').click();await page.getByRole('heading',{name:targetEmployee.name,exact:true}).waitFor();await page.getByText('目标员工原来就有的历史 TARGET-ORIGINAL',{exact:true}).waitFor();
   const forwardedId=reference.receipt.message.id,record=page.locator(`[data-action=forward-detail][data-id="${forwardedId}"]`);await record.waitFor();assert.equal(await page.locator(`[data-message-id="${forwardedId}"] > .message-body > .message-bubble > .prose`).count(),1,'Only the note is shown beside the compact snapshot card');
   await record.click();await page.locator('.forward-detail-messages').waitFor();await page.getByText(photoMessage.content,{exact:true}).waitFor();assert.equal(await page.evaluate(()=>typeof window.__snapshotUnsafe),'undefined');
-  const snapshotImage=page.locator('.forward-detail-messages .message-image img');await snapshotImage.evaluate(element=>element.decode());assert.equal(await snapshotImage.getAttribute('src'),`data:image/png;base64,${png}`);await capture('04-forward-record-detail');await snapshotImage.locator('..').tap();await page.locator('.image-overlay').waitFor();await action('close-image').click();await action('forward-detail-close').click();
+  const snapshotImage=page.locator('.forward-detail-messages .message-image img');await snapshotImage.evaluate(element=>element.decode());assert.equal(new URL(await snapshotImage.getAttribute('src'),origin).pathname,`/api/conversations/${target.id}/messages/${forwardedId}/forwards/1/images/0`);assert.deepEqual(await snapshotImage.evaluate(async element=>Array.from(new Uint8Array(await (await fetch(element.src)).arrayBuffer()))),Array.from(Buffer.from(png,'base64')));await capture('04-forward-record-detail');await snapshotImage.locator('..').tap();await page.locator('.image-overlay').waitFor();await action('close-image').click();await action('forward-detail-close').click();
   checks.push('server v1 card renders a compact snapshot; detail escapes original text and decodes the original image entirely in App');
 
   await sourceHome();await singleForward(userMessage.id,'');const emptyNoteBefore=repo.getConversation(target.id).messages.length;await submitForward();await complete();

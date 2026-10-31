@@ -10,6 +10,8 @@ import { createMobileTasks } from './mobile-tasks.js';
 import { createMobileNotifications } from './mobile-notifications.js';
 import { createNotificationPresence } from './notification-presence.js';
 import {failureFinalization,finalizationPresentation} from './failure-finalization.mjs';
+import {mergeLatestChat,prependChatHistory,canQueueChat} from './chat-history.js';
+import {createChatInteractions} from './chat-interactions.js';
 
 const IMAGE_LIMIT = 10 * 1024 * 1024;
 const avatarLimit = 2 * 1024 * 1024;
@@ -67,7 +69,7 @@ export function createController({ state, api, render = () => {}, storage = glob
   state.resources ||= initialResources();
   state.employeeResources ||= initialEmployeeResources();
   const workspaceKey = userId => `ziwei.mobile.workspace:${userId}`;
-  const messageKey = () => `ziwei.manager.message.v1:${encodeURIComponent(accountId(state))}:${encodeURIComponent(workspaceId(state))}:${encodeURIComponent(state.selectedEmployee?.id || '')}`;
+  const messageKey = () => `ziwei.manager.message.v1:${encodeURIComponent(accountId(state))}:${encodeURIComponent(workspaceId(state))}:${encodeURIComponent(draftIdentity())}`;
   const current = () => ({ epoch, navigationEpoch, scope: scopeKey(state), employeeEpoch, employeeId: state.selectedEmployee?.id });
   const valid = (token, employee = false) => !disposed && token.epoch === epoch && token.scope === scopeKey(state) && (!employee || (token.employeeEpoch === employeeEpoch && token.employeeId === state.selectedEmployee?.id));
   const validNavigation = token => valid(token) && token.navigationEpoch === navigationEpoch;
@@ -86,11 +88,16 @@ export function createController({ state, api, render = () => {}, storage = glob
     try { for (let index = 0; index < storage.length; index++) keys.add(storage.key(index)); } catch {}
     for (const key of keys) if (key?.startsWith(prefix)) { try { storage?.removeItem(key); } catch {} messageKeys.delete(key); }
   }
-  const composerKey = () => JSON.stringify([accountId(state),workspaceId(state),state.selectedEmployee?.id || '']);
+  function draftIdentity() {
+    const employeeId = state.selectedEmployee?.id || '';
+    const mainId = state.primaryConversationId || state.selectedEmployee?.main_conversation_id || state.bot?.main_conversation_id || state.chatThreads.find(thread=>thread.employeeId===employeeId)?.conversationId;
+    return chatConversationId && mainId && chatConversationId !== mainId ? JSON.stringify(['conversation',employeeId,chatConversationId]) : employeeId;
+  }
+  const composerKey = () => JSON.stringify([accountId(state),workspaceId(state),draftIdentity()]);
   function composer() {
     const key = composerKey();
     if (!composers.has(key)) {
-      const scope = localScope(), employeeId = state.selectedEmployee?.id || '';
+      const scope = localScope(), employeeId = draftIdentity();
       composers.set(key, { draft:preferences.getDraft(scope,employeeId),attachments:[],request:null,revision:0,scope,employeeId,accountGeneration });
     }
     return composers.get(key);
@@ -129,8 +136,9 @@ export function createController({ state, api, render = () => {}, storage = glob
     navigationEpoch++; employeeEpoch++; chatReadEpoch++; chatWriteEpoch++; phoneEpoch++; attachmentEpoch++;
     renewEmployeeGets();
     chatConversationId = null; forwarding.reset(); state.forwardDetail = null; state.chatReadError = ''; state.chatFind = null; state.chatJump = null;
+    state.historyLoading = false; state.historyError = ''; state.queueBusy = false; state.conversationStop = null; state.chatActivity = null; state.chatSessions = null; chatInteractions.reset();
     conversationReads.clear(); employeeReadEpoch++; employeeReads.clear(); state.employeeResources = initialEmployeeResources();
-    state.selectedEmployee = null; state.bot = null; state.conversation = null; state.messages = [];
+    state.selectedEmployee = null; state.bot = null; state.conversation = null; state.primaryConversationId = null; state.messages = [];
     state.runs = []; state.routines = []; state.phone = null; state.draft = ''; state.attachments = [];
     state.sending = false; state.attachmentReading = false; state.employeeSaving = false; state.stopBusy = false;
     state.employeeAvatar = undefined; state.phoneLoading = false; state.busy = false; state.task = null; state.chatLoading = false;
@@ -173,6 +181,7 @@ export function createController({ state, api, render = () => {}, storage = glob
     resource.diagnostic = Object.fromEntries(['requestPath','method','elapsedMs','status','code'].filter(key => error?.[key] !== undefined).map(key => [key,error[key]]));
     draw();
   }
+  const chatInteractions = createChatInteractions({state,api,current,valid,draw,fail,readOptions:()=>({signal:employeeGets.signal})});
   function employeeReadSucceeded(name) {
     Object.assign(state.employeeResources[name], {phase:'ready',error:'',lastUpdated:new Date().toISOString(),diagnostic:null});
   }
@@ -380,10 +389,14 @@ export function createController({ state, api, render = () => {}, storage = glob
       try {
         // A cached authoritative main ID needs no Bot round-trip. Failed reads never create a replacement.
         if (initial && !conversationId && cachedBot?.configuration_state === 'initialized' && !cachedBot.main_conversation_id) throw new Error('这位员工的主聊天尚未就绪，请在电脑版核对');
-        const conversation = conversationId ? await api.conversation(conversationId, options) : await api.getEmployeeConversation(workspace, { ...employee, ...(cachedBot ? { bot: cachedBot } : {}) }, options);
+        const conversation = conversationId ? await readLatestChat(conversationId, options) : await api.getEmployeeConversation(workspace, { ...employee, ...(cachedBot ? { bot: cachedBot } : {}) }, {...options,page:true});
         if (!validChat(token, readEpoch)) return;
         if (conversation.employee_id && conversation.employee_id !== employee.id) throw new Error('聊天与当前员工身份不一致，请刷新核对');
-        state.conversation = conversation; state.messages = conversation.messages || [];
+        state.primaryConversationId ||= conversation.id;
+        state.conversation = mergeLatestChat(state.conversation, conversation); state.messages = state.conversation.messages || [];
+        void readChatActivity(token);
+        if (['pending','acked','running','executing'].includes(conversation.execution?.status)) void chatInteractions.refresh();
+        else chatInteractions.reset();
         forwarding.synchronize();
         employeeReadSucceeded('conversation');
         state.chatLoading = false;
@@ -397,6 +410,50 @@ export function createController({ state, api, render = () => {}, storage = glob
     conversationReads.set(key, request);
     void request.finally(() => { if (conversationReads.get(key) === request) conversationReads.delete(key); });
     return request;
+  }
+  function readLatestChat(conversationId, options) {
+    return api.conversationPage ? api.conversationPage(conversationId, options) : api.conversation(conversationId, options);
+  }
+  async function readChatActivity(token = current()) {
+    const conversationId = state.conversation?.id, actionId = state.conversation?.execution?.id;
+    if (!actionId || !api.conversationActivity || state.chatActivity?.actionId === actionId && state.chatActivity.phase === 'loading') return;
+    const previous = state.chatActivity?.actionId === actionId ? state.chatActivity.action : null;
+    state.chatActivity = {actionId,phase:'loading',error:'',action:previous};
+    try {
+      const action = await api.conversationActivity(workspaceId(state),actionId,conversationId,token.employeeId,{signal:employeeGets.signal});
+      if (valid(token,true) && state.conversation?.id === conversationId && state.conversation.execution?.id === actionId) state.chatActivity = {actionId,phase:'ready',error:'',action};
+    } catch (error) {
+      if (error.status === 401) fail(error,token);
+      else if (valid(token,true) && state.conversation?.execution?.id === actionId) state.chatActivity = {actionId,phase:'error',error:error.message,action:previous};
+    } finally { if (valid(token,true)) draw(); }
+  }
+  async function loadEarlierChat() {
+    const conversation = state.conversation, page = conversation?.messagePage;
+    if (state.page !== 'chat' || !page?.hasMore || !page.beforeCursor || state.historyLoading || !api.conversationPage) return;
+    const token = current(), readEpoch = chatReadEpoch;
+    state.historyLoading = true; state.historyError = ''; draw();
+    try {
+      const older = await api.conversationPage(conversation.id, {before:page.beforeCursor, signal:employeeGets.signal});
+      if (!validChat(token,readEpoch) || state.conversation?.id !== conversation.id) return;
+      state.conversation = prependChatHistory(state.conversation, older); state.messages = state.conversation.messages;
+    } catch (error) {
+      if (error.status === 401) fail(error, token);
+      else if (validChat(token,readEpoch)) state.historyError = error.message;
+    } finally { if (validChat(token,readEpoch)) {state.historyLoading = false;draw();} }
+  }
+  async function changeChatQueue(operation, actionId) {
+    const conversationId = state.conversation?.id, token = current();
+    if (!conversationId || state.queueBusy) return;
+    chatReadEpoch++; conversationReads.clear(); state.historyLoading = false;
+    state.queueBusy = true; state.error = ''; draw();
+    try {
+      const result = await (operation === 'remove' ? api.removeConversationQueueItem(conversationId,actionId) : operation === 'pause' ? api.pauseConversationQueue(conversationId) : api.resumeConversationQueue(conversationId));
+      if (!valid(token,true) || state.conversation?.id !== conversationId) return;
+      chatReadEpoch++; conversationReads.clear(); state.historyLoading = false;
+      state.conversation = {...state.conversation,queue:result.queue};
+      await readChat(token);
+    } catch (error) { fail(error,token,true); }
+    finally { if (valid(token,true)) {state.queueBusy = false;draw();} }
   }
   async function refreshEmployee(token = current(), { skipConversation = false } = {}) {
     const employee = state.selectedEmployee;
@@ -470,13 +527,16 @@ export function createController({ state, api, render = () => {}, storage = glob
     else { state.phase = 'workspace'; state.page = 'workspaces'; state.workspace = null; draw(); }
     if(state.phase==='ready')void notifications.handleNative();
   }
-  function enterEmployeePage(employeeId, page, busy = true, { conversationId } = {}) {
+  function enterEmployeePage(employeeId, page, busy = true, { conversationId, primaryConversationId } = {}) {
     const thread = state.chatThreads?.find(item => item.employeeId === employeeId && item.employee?.id === employeeId);
     const employee = state.employees.find(item => item.id === employeeId) || thread?.employee;
     if (!employee) throw new Error('这位员工不在当前工作区中，请刷新');
+    const previousMain = state.selectedEmployee?.id === employeeId ? state.primaryConversationId || state.conversation?.id : null;
     stashComposer(); clearSelection(); state.selectedEmployee = employee;
+    state.chatVisit = (state.chatVisit || 0) + 1;
     if (page === 'chat') chatConversationId = conversationId || thread?.conversationId || null;
     state.bot = employee.bot || state.bots.find(bot => (bot.employee_id || bot.id) === employeeId) || null;
+    state.primaryConversationId = employee.main_conversation_id || state.bot?.main_conversation_id || primaryConversationId || thread?.conversationId || previousMain;
     state.page = page; state.error = ''; state.busy = busy; state.chatLoading = page === 'chat'; restoreComposer(); draw();
     return current();
   }
@@ -509,7 +569,7 @@ export function createController({ state, api, render = () => {}, storage = glob
     }
     if (!state.conversation?.id || !state.selectedEmployee) throw new Error('请先打开员工聊天');
     const blocking=blockingChatExecution(state);
-    if(blocking){const finalization=failureFinalization(blocking);throw new Error(finalization?finalizationPresentation(finalization).detail:'当前工作尚未结束，请等待回执或使用停止入口');}
+    if(blocking && !canQueueChat(state,blocking)){const finalization=failureFinalization(blocking);throw new Error(finalization?finalizationPresentation(finalization).detail:'当前工作尚未结束，请等待回执或使用停止入口');}
     stashComposer();
     const item = composer(), content = item.draft.trim(), attachments = [...item.attachments];
     if (!content && !attachments.length) return;
@@ -518,6 +578,7 @@ export function createController({ state, api, render = () => {}, storage = glob
     const sendEpoch = ++chatWriteEpoch;
     const validSend = () => valid(token, true) && sendEpoch === chatWriteEpoch;
     chatReadEpoch++;
+    state.historyLoading = false;
     conversationReads.clear();
     const primaryResource = state.employeeResources.conversation;
     if (primaryResource.phase === 'loading') primaryResource.phase = primaryResource.error ? 'error' : primaryResource.lastUpdated ? 'ready' : 'idle';
@@ -534,7 +595,14 @@ export function createController({ state, api, render = () => {}, storage = glob
       const request = item.request;
       // Store only a hash and request identity, never the message or its image bytes.
       persistMessage(requestKey, request);
-      await api.sendMessage(conversationId, { content, attachments, clientMessageId: request.clientMessageId });
+      const receipt = await api.sendMessage(conversationId, { content, attachments, clientMessageId: request.clientMessageId });
+      if (validSend()) {
+        if (receipt?.queue) state.conversation = {...state.conversation,queue:receipt.queue};
+        if (receipt?.id && receipt.role) {
+          state.messages = [...state.messages.filter(message=>message.id!==receipt.id),receipt];
+          state.conversation = {...state.conversation,messages:state.messages};
+        }
+      }
       if (valid(token)) { inbox.invalidate(); void inbox.load(token); }
       // A different employee may now be open. Complete only the original composer's draft.
       let clearedVisibleComposer = false;
@@ -560,8 +628,8 @@ export function createController({ state, api, render = () => {}, storage = glob
       const readEpoch = chatReadEpoch, options = { signal:employeeGets.signal };
       state.employeeResources.conversation.phase = 'loading';
       try {
-        const conversation = await api.conversation(conversationId, options);
-        if (validChat(token, readEpoch)) { state.conversation = conversation; state.messages = conversation.messages || []; forwarding.synchronize(); employeeReadSucceeded('conversation'); }
+        const conversation = await readLatestChat(conversationId, options);
+        if (validChat(token, readEpoch)) { state.conversation = mergeLatestChat(state.conversation,conversation); state.messages = state.conversation.messages || []; forwarding.synchronize(); employeeReadSucceeded('conversation'); void readChatActivity(token); }
       } catch (error) { employeeReadFailed('conversation',error,token,() => validChat(token,readEpoch)); }
     } catch (error) { if (error?.status === 401 || validSend()) fail(error, token, true); }
     finally { finishWrite(); if (validSend()) { state.sending = false; draw(); } }
@@ -671,7 +739,7 @@ export function createController({ state, api, render = () => {}, storage = glob
         const previous = state.settingsTrail?.pop() || { page: 'home', tab: 'me' };
         stashComposer(); clearSelection(); state.error = ''; state.tab = previous.tab || state.tab;
         if (['chat', 'detail', 'bot-settings'].includes(previous.page) && previous.employeeId) {
-          if (previous.page === 'chat') await openEmployee(previous.employeeId, 'chat', { conversationId: previous.conversationId });
+          if (previous.page === 'chat') await openEmployee(previous.employeeId, 'chat', { conversationId: previous.conversationId, primaryConversationId: previous.primaryConversationId });
           else if (previous.page === 'detail') await openEmployee(previous.employeeId, 'detail');
           else { enterEmployeePage(previous.employeeId, 'bot-settings', false); await botSettings.load(); }
         } else {
@@ -692,6 +760,25 @@ export function createController({ state, api, render = () => {}, storage = glob
       if(!result.ok)state.chatPreferencesError=result.error;
       draw();return result.accepted;
     }),
+    'chat-history': action(loadEarlierChat),
+    'chat-sessions': action(async () => {
+      if (state.chatSessions) {state.chatSessions = null;draw();return;}
+      if (!state.selectedEmployee || state.page !== 'chat') return;
+      const token = current(); state.chatSessions = {phase:'loading',items:[],error:''}; draw();
+      try {
+        const response = await api.conversations(workspaceId(state),token.employeeId,{signal:employeeGets.signal});
+        if (valid(token,true) && state.chatSessions) state.chatSessions = {phase:'ready',items:list(response,'conversations').filter(row=>row.employee_id===token.employeeId && row.status==='active'),error:''};
+      } catch (error) {if(error.status===401)fail(error,token);else if(valid(token,true) && state.chatSessions)state.chatSessions = {phase:'error',items:[],error:error.message};}
+      finally {if(valid(token,true))draw();}
+    }),
+    'chat-session-open': action(({id:conversationId}) => {
+      if (!state.chatSessions?.items.some(row=>row.id===conversationId)) return;
+      const employeeId = state.selectedEmployee.id;
+      return openEmployee(employeeId,'chat',{conversationId});
+    }),
+    'queue-pause': action(() => changeChatQueue('pause')),
+    'queue-resume': action(() => changeChatQueue('resume')),
+    'queue-remove': action(({id}) => changeChatQueue('remove',id)),
     'chat-find-open': action(() => {
       if(state.page!=='chat'||!state.conversation?.id||state.forward)return false;
       state.chatFind={query:''};draw();return true;
@@ -778,6 +865,14 @@ export function createController({ state, api, render = () => {}, storage = glob
       const finishWrite = beginEmployeeWrite(token, employeeId);
       pendingMutations.add(key); invalidateResources('employees', 'bots'); state.stopBusy = true; state.error = ''; draw();
       try {
+        if (state.selectedEmployee?.runtime === 'DSH' && state.conversation?.id && api.stopConversationExecution) {
+          const run = blockingChatExecution(state);
+          if (!run || run.status !== 'acked' || run.payload?.conversationId !== state.conversation.id) throw new Error('当前会话没有可停止的 DSH 执行，请刷新核对');
+          const result = await api.stopConversationExecution(state.conversation.id,run.id);
+          if (valid(token,true)) { state.conversationStop = result; state.notice = '停止请求已提交，等待原执行终态确认'; }
+          finishWrite(); if (valid(token,true)) await refresh({silent:true});
+          return;
+        }
         const bot = await api.bot(workspace, employeeId);
         if (!valid(token)) return;
         if (bot.configuration_state !== 'initialized') throw new Error('这位员工尚未提供手机端停止入口，请在电脑版处理');
@@ -845,7 +940,7 @@ export function createController({ state, api, render = () => {}, storage = glob
   }
   function rememberSettingsPage() {
     state.settingsTrail ||= [];
-    state.settingsTrail.push({ page: state.page, tab: state.tab, employeeId: state.selectedEmployee?.id, conversationId: state.conversation?.id || chatConversationId });
+    state.settingsTrail.push({ page: state.page, tab: state.tab, employeeId: state.selectedEmployee?.id, conversationId: state.conversation?.id || chatConversationId, primaryConversationId:state.primaryConversationId });
   }
   function newReport() {
     if (state.busy || state.sending) return;
@@ -878,6 +973,7 @@ export function createController({ state, api, render = () => {}, storage = glob
         if (valid(token)) await loadPrincipal(principal);
       } else if (name === 'forward') await forwarding.submit(data);
       else if (name === 'chat') await sendChat(data);
+      else if (name === 'chat-interaction') await chatInteractions.submit(data);
       else if (name === 'employee') await saveEmployee(data);
       else if (name === 'routine') {
         const routineId = String(data.get('routineId') || data.get('id') || '');

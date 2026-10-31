@@ -61,6 +61,14 @@ test('read-only permission conflicts and malformed MCP edits fail without a serv
   edit(f,'mcp.external-tools.env','not json');assert.equal(await f.settings.submit(),false);assert.equal(f.calls.length,0);
 });
 
+test('turning off management removes the retained native autonomy toolset from a full form submit', async()=>{
+  const config=createDefaultBotConfig({gateway:{platforms:{},profileRoutes:[]},permissions:{mode:'execute',management:true},toolsets:['web','ziwei_autonomy']});
+  const f=fixture();f.setBot({...f.bot,config});await f.settings.load();
+  const data=new FormData();data.set('bot.form','1');data.set('bot.permission','execute');data.set('bot.toolsets','web');data.set('bot.toolsetsExtra','ziwei_autonomy');
+  // The browser sends no checkbox field when management is unchecked.
+  assert.equal(await f.settings.submit(null,data),true);assert.equal(f.calls.length,1);assert.equal(f.calls[0].body.config.permissions.management,false);assert.deepEqual(f.calls[0].body.config.toolsets,['web']);
+});
+
 test('409 preserves the draft and lost-save retries keep the original CAS body', async()=>{
   const attempts=[];let failOnce=true;
   const f=fixture({api:{updateBot:async(_ws,_id,body)=>{attempts.push(copy(body));if(failOnce){failOnce=false;throw new TypeError('lost response');}return {...f.bot,revision:5,config:copy(body.config),employee:{...f.bot.employee,model_id:body.employee.model}};}}});
