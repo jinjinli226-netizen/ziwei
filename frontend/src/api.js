@@ -2,9 +2,12 @@ import { resolveApiBase } from './api-base.js';
 import { boundedRead } from './bounded-read.js';
 
 const runtimeOrigin = typeof window === 'undefined' ? '' : window.location.origin;
+// Vite injects import.meta.env in the browser build; direct Node component
+// tests do not. Treat the latter as a production-like same-origin build.
+const viteEnv = import.meta.env || {};
 export const API_BASE = resolveApiBase({
-  configured: import.meta.env.VITE_API_URL,
-  dev: import.meta.env.DEV,
+  configured: viteEnv.VITE_API_URL,
+  dev: viteEnv.DEV,
   origin: runtimeOrigin,
 });
 const WORKSPACE_KEY = 'ziwei.workspace';
@@ -233,6 +236,9 @@ export const api = {
   prepareDshNativeSecret: (id, body, slug=workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/employees/${encodeURIComponent(id)}/dsh/native/secure-requests`, {method:'POST',body:JSON.stringify(body)}),
   answerDshNativeSecret: (id, requestId, body, slug=workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/employees/${encodeURIComponent(id)}/dsh/native/secure-requests/${encodeURIComponent(requestId)}/answer`, {method:'POST',body:JSON.stringify(body)}),
   dshNativeAction: (id, slug=workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/actions/${encodeURIComponent(id)}`),
+  dshPluginUiRelayOpen: (id, body, slug=workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/employees/${encodeURIComponent(id)}/dsh/plugin-ui/relay`, {method:'POST',body:JSON.stringify(body)}),
+  dshPluginUiRelayStatus: (id, relayId, slug=workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/employees/${encodeURIComponent(id)}/dsh/plugin-ui/relay/${encodeURIComponent(relayId)}`),
+  dshPluginUiRelayClose: (id, relayId, slug=workspaceSlug()) => request(`/api/workspaces/${encodeURIComponent(slug)}/employees/${encodeURIComponent(id)}/dsh/plugin-ui/relay/${encodeURIComponent(relayId)}`, {method:'DELETE'}),
   inspectConversationDirectory: (id, body = {}) => request(`/api/conversations/${encodeURIComponent(id)}/workdir/inspect`, { method:'POST', body:JSON.stringify(body) }),
   conversationDirectoryAction: (id, actionId) => request(`/api/conversations/${encodeURIComponent(id)}/workdir/actions/${encodeURIComponent(actionId)}`),
   addConversationMessage: (id, body) => request(`/api/conversations/${id}/messages`, { method:'POST', body:JSON.stringify(body) }),

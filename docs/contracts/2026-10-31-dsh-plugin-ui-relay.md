@@ -7,7 +7,7 @@
 - `plugins.prepareUiHost` 由绑定设备调用 DSH Hub `POST /api/bots/:profile/plugin-ui/prepare`。
 - 设备回执只保留当前 subject 的 `application`、`version`、`bridgePackage`、严格匹配的 `mountBase` 和安全 receipt。
 - `application: applied` 只证明 DSH Host inventory 的 bridge entry 已 active，不证明 iframe 已收到 `ready`。
-- 紫薇现在有短期 relay session 的人类 API和绑定校验，但还没有浏览器到目标电脑的长连接数据通道；因此不能把 `127.0.0.1:7878`、Hub Cookie 或任意 DSH URL 返回给网页。
+- 紫薇现在有短期 relay session、同源 HTTP/SSE/WS 数据通道和人类 API。浏览器只访问紫薇同源 `/runtime/<profile>/ui/`，服务端通过一次性 viewKey 交换 HttpOnly relay cookie；`127.0.0.1:7878`、Hub Cookie 和任意目标 URL 永不返回给网页。
 
 ## Relay 会话绑定
 
@@ -28,17 +28,14 @@
 1. 用户显式打开当前 DSH Bot 的插件工作区。
 2. 紫薇读取并锁定当前 employee/device/profile，发起 prepare；停止 Bot 不自动启动。
 3. prepare 成功后创建 relay session，生成随机 viewKey，创建隐藏同源 iframe。
-4. iframe 只接收 `/runtime/<profile>/ui/` 的 relay 根路径，并附加 `dshbotPluginWorkspace=1`、`botName`、`viewKey`。
+4. iframe 只接收 `/runtime/<profile>/ui/` 的 relay 根路径，并附加 relay 标识、`botName`、`viewKey`；相对 HTTP、SSE 和 remote.mux WS 资源继续使用同源 HttpOnly cookie。
 5. 父页面只接受 `event.source === iframe.contentWindow`、当前 relay origin、`channel === 'dshbot-plugin-ui'`、`version === 1`、botName 和 viewKey 都匹配的消息。
 6. 只收到 child `ready` 后显示 iframe；`catalog` 只来自原生 slots，`selected` 只表示面板选择。
 7. 收到 `unmounted` 时先隐藏 iframe并等待同一 relay 的新 `ready`，超时才显示宿主断开并允许重试；关闭工作区只卸载 relay，不取消员工任务。
 
 ## 分阶段实现与验收
 
-1. 增加设备 capability、relay session API 和人类 API 的创建/关闭/撤权测试（已完成 session 绑定与路径/Header 校验；数据转发仍未接通）。
-2. 先实现同源静态 HTTP 资产/JSON 请求的受限 relay，验证路径、大小、超时、员工串线和撤权。
-3. 接入插件 SSE `plugins/events`，验证序号、断线、HMR `unmounted → ready`。
-4. 接入 remote.mux WebSocket，验证双向 frame、关闭和未知结果。
-5. 最后接 Vue iframe/catalog/selected/context，并用隔离 Bot 验收安装、面板出现、更新、停用和卸载。
-
-在 relay 完成前，网页只能显示“宿主已准备，远程界面未接通”，不能显示插件面板，也不能把 prepare 回执当作 UI 挂载成功。
+1. 增加设备 capability、relay session API 和人类 API 的创建/关闭/撤权测试（已完成）。
+2. 同源静态 HTTP/JSON、插件 SSE `plugins/events` 和 remote.mux WebSocket 已接入，覆盖路径、大小、序号、超时、员工串线和撤权。
+3. Vue iframe 宿主已接入：只在 child `ready` 后显示，校验 source/origin/channel/version/botName/viewKey，处理 `unmounted → ready` 和 relay 过期。
+4. 真实 DSH Bot 生命周期（安装、面板出现、更新、停用、卸载）仍需目标电脑发布新 daemon 后做现场验收；本地协议测试不能替代该验收。

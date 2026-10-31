@@ -5,6 +5,7 @@ import DshRuntimePlugins from './DshRuntimePlugins.vue';
 import DshPluginMarket from './DshPluginMarket.vue';
 import DshPluginInstall from './DshPluginInstall.vue';
 import DshSettingsEditor from './DshSettingsEditor.vue';
+import DshPluginUiHost from './DshPluginUiHost.vue';
 import {dshNativeReason} from '../dsh-native.js';
 import {nativeApplication,nativeInstallAttempt} from '../dsh-native-plugins.js';
 const props=defineProps({controller:{type:Object,required:true},workspace:{type:String,required:true},employee:{type:Object,required:true},actorId:{type:String,required:true},active:{type:Boolean,default:true},secureAvailable:{type:Boolean,default:false},secureBusy:Boolean});
@@ -33,7 +34,7 @@ watch(namespaces,rows=>{if(!rows.some(row=>row.ns===namespace.value))namespace.v
 function configure(ns){namespace.value=ns;tab.value='settings';}
 const resourcesForTab=()=>tab.value==='runtime'?['plugins','settings']:tab.value==='market'?['plugins','settings','market']:[currentResource.value];
 async function sync(){if(!props.active||!scopeCurrent.value||legacy.value.pending||props.secureBusy)return;await c.value.refresh(resourcesForTab());}
-async function openTab(value){tab.value=value;if(value!=='combination'&&s.value.value&&!busy.value&&supported('state','refresh')&&resourcesForTab().some(name=>descriptor(name)?.status!=='observed'||descriptor(name)?.stale))await sync();}
+async function openTab(value){tab.value=value;if(value!=='combination'&&value!=='ui'&&s.value.value&&!busy.value&&supported('state','refresh')&&resourcesForTab().some(name=>descriptor(name)?.status!=='observed'||descriptor(name)?.stale))await sync();}
 async function marketAction({operation,input}){if(!supported('market',operation))return;if(operation==='search'){page.value=null;searchIntent={input,scopeKey:scopeKey.value};}await c.value.submit('market',operation,input);}
 async function pluginAction({operation,input}){if(!pluginOperation(operation)||legacy.value.pending)return;if(['waitForInstall','cancelInstall'].includes(operation))return c.value.control(operation,input);if(operation==='installBundle'){if(!editable('plugins')||busy.value)return;installIntent={input,scopeKey:scopeKey.value};}await c.value.submit('plugins',operation,input);}
 async function inspect(value){
@@ -70,9 +71,10 @@ defineExpose({resetSettings:()=>editor.value?.reset()});
 </script>
 <template>
   <section class="dsh-native-plugins" aria-label="DSH 原生插件管理">
-    <nav class="dshp-tabs" aria-label="原生插件管理分区"><button v-for="[key,label] in [['combination','启动组合'],['runtime','运行条目'],['settings','插件配置'],['market','插件市场'],['install','安装任务']]" :key="key" type="button" :class="{selected:tab===key}" :aria-current="tab===key?'page':undefined" @click="openTab(key)">{{label}}</button></nav>
+    <nav class="dshp-tabs" aria-label="原生插件管理分区"><button v-for="[key,label] in [['combination','启动组合'],['ui','插件工作区'],['runtime','运行条目'],['settings','插件配置'],['market','插件市场'],['install','安装任务']]" :key="key" type="button" :class="{selected:tab===key}" :aria-current="tab===key?'page':undefined" @click="openTab(key)">{{label}}</button></nav>
     <DshPluginsPanel :key="scopeKey" v-show="tab==='combination'" :workspace="workspace" :employee="employee" :actor-id="actorId" :active="active&&(legacy.pending||tab==='combination'&&!nativeBlocked)" :external-blocked="nativeBlocked" @state="legacy=$event"/>
-    <section v-show="tab!=='combination'" class="dshp-native-section">
+    <section v-show="tab==='ui'" class="dshp-native-section"><DshPluginUiHost :key="scopeKey+':ui'" :controller="c" :workspace="workspace" :actor-id="actorId" :employee="employee" :active="active&&tab==='ui'"/></section>
+    <section v-show="tab!=='combination'&&tab!=='ui'" class="dshp-native-section">
       <header class="dshp-heading"><div><h3>{{({runtime:'运行条目',settings:'原生插件配置',market:'原生插件市场',install:'安装任务'})[tab]}}</h3><p class="dshp-help">绑定 Bot {{employee.runtime_profile||'尚未指定'}} · 来源 dsh-native<span v-if="currentDescriptor?.checkedAt"> · {{new Date(currentDescriptor.checkedAt).toLocaleString('zh-CN')}}</span></p></div><div class="dshp-actions"><button type="button" class="dshp-button" :disabled="s.loading||s.submitting" @click="c.load()">回读原生状态</button><button type="button" class="dshp-button" :disabled="busy||!supported('state','refresh')" @click="sync">同步当前页</button></div></header>
       <p v-if="!scopeCurrent" class="dshp-notice">正在核对当前员工的原生管理绑定，旧员工记录不会显示在这里。</p>
       <p v-else-if="s.capabilities?.clientReported===false" class="dshp-notice">运行电脑尚未支持完整原生管理。启动组合仍保留原有同步与保存入口。</p>

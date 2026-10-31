@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { employeeCapabilitySubject, assertEmployeeCapabilityAuthority } from './employee-capability-inventory.mjs';
 import { DSH_PLUGIN_UI_RELAY_FEATURE } from '../src/dsh-native-contract.mjs';
 
@@ -57,13 +57,27 @@ export function createDshPluginUiRelayService(repo,{management,nativeService,now
  function find(relayId){const row=sessions.get(relayId);if(!row)fail('DSH_PLUGIN_UI_RELAY_NOT_FOUND',404);return row;}
  function open(slug,employeeId,input,context={}){
   const value=validateInput(input),checked=current(slug,employeeId,context),key=`${slug}:${employeeId}:${context.actorUserId||''}:${value.idempotencyKey}`;
-  const previous=sessions.get(idempotency.get(key));if(previous){if(previous.viewKey!==value.viewKey||previous.prepareActionId!==value.prepareActionId)fail('IDEMPOTENCY_CONFLICT');live(previous,context);return{...normalizeView(previous),duplicate:true,prepareAction:previous.prepareAction};}
-  const prepareAction=proof(slug,employeeId,value.prepareActionId,context,checked.subject),relayId=randomId(),row={relayId,workspace:slug,workspaceId:checked.ws.id,employeeId,deviceId:checked.subject.deviceId,profile:checked.subject.profile,actorUserId:context.actorUserId||null,actorRole:context.actorRole||'member',viewKey:value.viewKey,prepareActionId:value.prepareActionId,prepareAction,createdAt:nowIso(now),expiresAt:new Date(now()+ttlMs).toISOString(),status:'open'};
-  sessions.set(relayId,row);idempotency.set(key,relayId);return{...normalizeView(row),prepareAction};
+  const previous=sessions.get(idempotency.get(key));if(previous){if(previous.viewKey!==value.viewKey||previous.prepareActionId!==value.prepareActionId)fail('IDEMPOTENCY_CONFLICT');live(previous,context);const action=repo.getA2AAction?.(previous.relayActionId);return{...normalizeView(previous),duplicate:true,prepareAction:previous.prepareAction,relayAction:{id:previous.relayActionId,status:action?.status||'pending',type:'employee.dsh.ui.relay.open'}};}
+  const prepareAction=proof(slug,employeeId,value.prepareActionId,context,checked.subject),relayId=randomId(),expiresAt=new Date(now()+ttlMs).toISOString();
+  const scopeHash=createHash('sha256').update(JSON.stringify({workspace:slug,employeeId,deviceId:checked.subject.deviceId,profile:checked.subject.profile,viewKey:value.viewKey,relayId})).digest('hex');
+  const relayAction=repo.createA2AAction(slug,{agentId:'ziwei_user',type:'employee.dsh.ui.relay.open',dedupeKey:`dsh-ui-relay:${employeeId}:${context.actorUserId||'anonymous'}:${value.idempotencyKey}`,expiresAt,payload:{workspace:slug,workspaceId:checked.ws.id,employeeId,deviceId:checked.subject.deviceId,profile:checked.subject.profile,viewKey:value.viewKey,relayId,expiresAt,scopeHash}});
+  const row={relayId,workspace:slug,workspaceId:checked.ws.id,employeeId,deviceId:checked.subject.deviceId,profile:checked.subject.profile,actorUserId:context.actorUserId||null,actorRole:context.actorRole||'member',viewKey:value.viewKey,prepareActionId:value.prepareActionId,prepareAction,relayActionId:relayAction.id,scopeHash,createdAt:nowIso(now),expiresAt,status:'open'};
+  sessions.set(relayId,row);idempotency.set(key,relayId);return{...normalizeView(row),prepareAction,relayAction:{id:relayAction.id,status:relayAction.status,type:relayAction.type}};
  }
  function status(relayId,context={}){const row=find(relayId);if(row.status==='closed')return normalizeView(row);const liveRow=live(row,context);return{...normalizeView(liveRow.row),prepareAction:liveRow.row.prepareAction};}
- function close(relayId,context={}){const row=find(relayId);if(row.status==='closed')return normalizeView(row);live(row,context);row.status='closed';row.closedAt=nowIso(now);return normalizeView(row);}
+ function close(relayId,context={}){const row=find(relayId);if(row.status==='closed')return normalizeView(row);live(row,context);row.status='closed';row.closedAt=nowIso(now);for(const listener of row.closeListeners||[])try{listener({reason:'revoked'});}catch{};return normalizeView(row);}
+ function assertDevice(relayId,input={}){
+  const row=find(relayId),checked=live(row,{actorUserId:row.actorUserId,actorRole:row.actorRole});
+  if(!exact(input,['deviceId','workspace','profile','viewKey','actionId'])||!text(input.deviceId,200)||!text(input.workspace,200)||!text(input.profile,80)||!text(input.viewKey,200)||!text(input.actionId,200)||String(input.deviceId)!==String(row.deviceId)||String(input.workspace)!==String(row.workspace)||String(input.profile)!==String(row.profile)||String(input.viewKey)!==String(row.viewKey)||String(input.actionId)!==String(row.relayActionId))fail('DSH_PLUGIN_UI_RELAY_DEVICE_BINDING_INVALID',403);
+  return normalizeView(row);
+ }
+ function assertBrowser(relayId,input={}){
+  const row=find(relayId),checked=live(row,{actorUserId:input.actorUserId ?? row.actorUserId,actorRole:input.actorRole||row.actorRole||'member'});
+  if(!text(input.viewKey,200)||input.viewKey!==row.viewKey)fail('DSH_PLUGIN_UI_RELAY_VIEW_KEY_INVALID',403);
+  return normalizeView(checked.row);
+ }
+ function onClose(relayId,listener){const row=find(relayId);row.closeListeners ||= new Set();row.closeListeners.add(listener);return()=>row.closeListeners?.delete(listener);}
  function assertRequest(relayId,input,context={}){const {row,checked}=live(find(relayId),context);if(!exact(input,['method','path','headers','bodyBase64','requestId'])||!text(input.method,10)||!['GET','HEAD','POST','PUT','PATCH','DELETE'].includes(input.method.toUpperCase())||!text(input.requestId,200))fail('DSH_PLUGIN_UI_RELAY_INPUT_INVALID',400);validatePath(row.profile,input.path);validateHeaders(input.headers);if(input.bodyBase64!==undefined&&(!text(input.bodyBase64,700000)||!/^[-A-Za-z0-9+/=]*$/.test(input.bodyBase64)))fail('DSH_PLUGIN_UI_RELAY_BODY_INVALID',400);return{relay:normalizeView(row),subject:checked.subject,method:input.method.toUpperCase(),path:input.path,headers:validateHeaders(input.headers),bodyBase64:input.bodyBase64||'',requestId:input.requestId};}
  function dispose(){sessions.clear();idempotency.clear();}
- return{open,status,close,assertRequest,dispose,feature:DSH_PLUGIN_UI_RELAY_FEATURE};
+ return{open,status,close,assertRequest,assertDevice,assertBrowser,onClose,dispose,feature:DSH_PLUGIN_UI_RELAY_FEATURE};
 }

@@ -1,7 +1,7 @@
 import {createHash,randomUUID} from 'node:crypto';
 import {BOT_INTERNAL} from './bots.mjs';
 import {employeeCapabilitySubject,assertEmployeeCapabilityAuthority} from './employee-capability-inventory.mjs';
-import {DSH_NATIVE_FEATURE,DSH_NATIVE_TYPE,DSH_NATIVE_OPERATIONS,DSH_NATIVE_REFRESH_RESOURCES,getDshNativeOperation,normalizeDshNativeInput} from '../src/dsh-native-contract.mjs';
+import {DSH_NATIVE_FEATURE,DSH_PLUGIN_UI_RELAY_FEATURE,DSH_NATIVE_TYPE,DSH_NATIVE_OPERATIONS,DSH_NATIVE_REFRESH_RESOURCES,getDshNativeOperation,normalizeDshNativeInput} from '../src/dsh-native-contract.mjs';
 import {redactSecrets} from '../src/redaction.mjs';
 import {publicDshSettings} from '../src/dsh-native-settings.mjs';
 import {normalizeConversationAttachments} from './conversation-attachments.mjs';
@@ -321,7 +321,9 @@ export function createDshNativeService(repo,{management,now=Date.now,ttlMs=30000
  }
  function capabilities(slug,id,context={}){
   const data=scoped(slug,id,{},context),reported=supports(data.device);
-  return{schemaVersion:1,workspace:slug,employeeId:id,subject:data.subject,scope:data.scope,subjectHash:dshNativeSubjectHash(data.subject,data.scope),feature:DSH_NATIVE_FEATURE,clientReported:reported,reasonCode:deviceReason(data.device),operations:DSH_NATIVE_OPERATIONS.map(entry=>({...entry,status:entry.implemented?(reported?'implemented':'client_required'):'unsupported',supported:entry.implemented&&reported}))};
+  const features=parse(data.device?.runtime_discovery_json)?.features;
+  const pluginUiRelayReported=Array.isArray(features)&&features.includes(DSH_PLUGIN_UI_RELAY_FEATURE);
+  return{schemaVersion:1,workspace:slug,employeeId:id,subject:data.subject,scope:data.scope,subjectHash:dshNativeSubjectHash(data.subject,data.scope),feature:DSH_NATIVE_FEATURE,clientReported:reported,pluginUiRelayReported,reasonCode:deviceReason(data.device),operations:DSH_NATIVE_OPERATIONS.map(entry=>({...entry,status:entry.implemented?(reported?'implemented':'client_required'):'unsupported',supported:entry.implemented&&reported}))};
  }
  function groupRoster(slug,data,context){
   return db.prepare("SELECT id FROM employees WHERE workspace_id=? AND target_device_id=? AND runtime='DSH' AND status<>'deleted' ORDER BY id").all(data.ws.id,data.subject.deviceId).flatMap(row=>{

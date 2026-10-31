@@ -38,7 +38,7 @@
 
 原生 Bot 新建/永久删除/打开本机窗口没有加入本 registry；会话 snapshot 最多 1000 条，完整历史翻页与独立完整工具结果读取仍需补齐。PDF、Office、音视频附件不在本批支持范围，文本/JSON 尚缺单独整链验收。
 
-DSH 桌面版原生插件 UI 宿主已在隔离环境完成真实生命周期验收；紫薇当前只接入 `plugins.prepareUiHost` 设备动作与安全回执。远程网页同源 UI relay 尚未实现，因此 prepare 成功仍不能显示为 iframe 已挂载；待 relay 完成后复用 DSH 的 bridge/proxy/message contract，不实现第二套 Loader 或插件启用配置。
+DSH 桌面版原生插件 UI 宿主已在隔离环境完成真实生命周期验收；紫薇已接入 `plugins.prepareUiHost`、短期 relay session、设备长连接和同源网页宿主。网页复用 DSH 的 bridge/proxy/message contract：服务端代理 HTTP/SSE/remote.mux WS，设备侧固定当前 Profile 路径并过滤 Cookie/Auth/绝对 URL；Vue 只在收到绑定 iframe 的 `ready` 后显示。正式目标设备仍需发布新 daemon 后验收完整安装、热更新、停用和卸载生命周期。
 
 ## 2026-10-31 追加审计
 
@@ -48,4 +48,4 @@ DSH 桌面版原生插件 UI 宿主已在隔离环境完成真实生命周期验
 
 DSH 桌面侧新增的 `POST /api/bots/:name/plugin-ui/prepare` 已通过紫薇设备动作接入，结果只保留当前员工绑定 Profile 的 `mountBase`、bridgePackage、version、application 和安全回执；伪造其他 Bot 的挂载路径会被标为 unknown。设备侧同源 HTTP/SSE/WebSocket relay 尚未接入，网页端不会直接暴露 `127.0.0.1`、Hub Cookie 或把 `application: applied` 当作界面已挂载。
 
-本轮新增了短期 relay session 服务和人类 API：会话绑定 workspace、employee、device、Profile、actor、viewKey 与 prepare 回执；路径只允许当前 Profile 的 `/runtime/<profile>/ui/` 前缀，Cookie、Authorization、绝对 URL 和跨 Profile 路径均拒绝；撤权、能力消失、关闭和过期会终止会话。它目前只完成安全合同和生命周期校验，尚未转发 HTTP/SSE/WebSocket 数据。
+本轮新增了短期 relay session 服务和人类 API：会话绑定 workspace、employee、device、Profile、actor、viewKey 与 prepare 回执；路径只允许当前 Profile 的 `/runtime/<profile>/ui/` 前缀，Cookie、Authorization、绝对 URL 和跨 Profile 路径均拒绝；撤权、能力消失、关闭和过期会终止会话。设备通过 `employee.dsh.ui.relay.open` 建立出站 WS，服务端将同源 HTTP/SSE/remote.mux WS 以有序受限 frame 转发；本地协议、服务端配对和 Vue bridge 测试已通过，真实目标设备发布验收仍待进行。

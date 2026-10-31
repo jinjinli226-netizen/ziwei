@@ -41,6 +41,7 @@ import {mountDshNativeRoutes} from './dsh-native-routes.mjs';
 import {createDshNativeSecrets} from './dsh-native-secrets.mjs';
 import {createDshNativeGroupDispatch} from './dsh-native-group-dispatch.mjs';
 import {createDshPluginUiRelayService} from './dsh-plugin-ui-relay.mjs';
+import {createDshPluginUiRelayTransport, parseRelayCookie, cookieValue} from './dsh-plugin-ui-relay-transport.mjs';
 import {botActionMaintenance} from './bots.mjs';
 import { toolDefinitions as managementTools } from '../scripts/ziwei-mcp.mjs';
 import {registerWorkspaceCliDocs} from './workspace-cli-docs.mjs';
@@ -329,6 +330,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   const dshNativeSecrets=createDshNativeSecrets(repo,{management,nativeService:dshNative});
   const dshNativeGroupDispatch=createDshNativeGroupDispatch(repo,{management});
   const dshPluginUiRelay=createDshPluginUiRelayService(repo,{management,nativeService:dshNative});
+  const dshPluginUiRelayTransport=createDshPluginUiRelayTransport({relay:dshPluginUiRelay});
   const mobileReadView = createMobileReadView(repo);
   const conversationReads = createConversationReadService(repo);
   const mobileNotifications = createMobileNotificationReadService(repo);
@@ -360,6 +362,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   app.locals.phoneMcp = phoneMcp;
   app.locals.managementBootstrap = managementBootstrap;
   app.locals.dshPluginUiRelay = dshPluginUiRelay;
+  app.locals.dshPluginUiRelayTransport = dshPluginUiRelayTransport;
   app.locals.botMcpConnections=botMcpConnections;
   app.locals.botProviderCredentials=botProviderCredentials;
   app.locals.botAutonomy=botAutonomy;
@@ -462,6 +465,41 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   // explicit guards as documentation, while this catch-all covers newly added
   // sensitive routes and id-based mutations consistently.
   app.use('/api', resourceRoleGuard);
+  const authorizeRelayBrowser = async (req, relayId) => {
+    const bypass = app.locals.authBypass === true;
+    const principal = bypass ? null : (app.locals.identity ? await app.locals.identity.authorizeRequest(req) : auth.authenticate(req));
+    if (!bypass && !principal) throw Object.assign(new Error('请先登录紫薇'), { code:'AUTH_REQUIRED', status:401 });
+    const actorUserId = principal?.user_id || null;
+    const hint = dshPluginUiRelay.status(relayId, { actorRole:'owner' });
+    let actorRole = principal?.workspace?.role || principal?.role || (bypass ? 'owner' : 'member');
+    if (!bypass) {
+      const membership = app.locals.identity
+        ? principal.memberships?.find(member => member.slug === hint.workspace)
+        : auth.canAccess(actorUserId, hint.workspace);
+      if (!membership) throw Object.assign(new Error('当前用户无权访问该 DSH relay'), { code:'DSH_PLUGIN_UI_RELAY_FORBIDDEN', status:403 });
+      actorRole = membership.role || actorRole;
+    }
+    dshPluginUiRelay.status(relayId, { actorUserId, actorRole });
+    return { actorUserId, actorRole };
+  };
+  app.locals.authorizeRelayBrowser = authorizeRelayBrowser;
+  // The iframe and its relative JavaScript/SSE/WebSocket resources all stay
+  // under this same-origin mount. The first URL carries a short-lived relay
+  // id/viewKey; the server exchanges it for a host-only HttpOnly cookie so
+  // relative resources do not need to repeat either value.
+  app.use('/runtime/:profile/ui', async (req, res, next) => {
+    try {
+      const relayInfo = dshPluginUiRelayTransport.runtimeRelay(req);
+      if (!relayInfo) return res.status(401).json({ error:'DSH relay cookie required', code:'DSH_PLUGIN_UI_RELAY_COOKIE_REQUIRED' });
+      const context = await authorizeRelayBrowser(req, relayInfo.relayId);
+      // The global API default is DENY.  This route is the explicitly bound,
+      // same-origin iframe host and must opt into SAMEORIGIN while keeping
+      // every external embedding origin blocked.
+      res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+      res.setHeader('Content-Security-Policy', "frame-ancestors 'self'; base-uri 'self'");
+      return dshPluginUiRelayTransport.proxyRuntimeHttp(req, res, context);
+    } catch (error) { return next(error); }
+  });
   app.get('/api/auth/status', (req, res) => res.json(auth.status(req)));
   app.post('/api/auth/setup', (req, res, next) => {
     try {
@@ -1117,6 +1155,7 @@ export function startServer({ port = Number(process.env.API_PORT || 4178), host 
  */
 export function attachRealtimeWebSocket(server, app, { pathPrefix = '/api/workspaces/' } = {}) {
   const sockets = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
+  const relaySockets = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
   const prefix = String(pathPrefix).replace(/\/$/, '/');
   const matchPath = pathname => {
     if (!pathname.startsWith(prefix) || !pathname.endsWith('/notifications/ws')) return null;
@@ -1127,6 +1166,51 @@ export function attachRealtimeWebSocket(server, app, { pathPrefix = '/api/worksp
     socket.on('error', () => socket.destroy());
     socket.end(`HTTP/1.1 ${status} ${message}\r\nConnection: close\r\n${status === 503 ? 'Retry-After: 1\r\n' : ''}\r\n`, () => socket.destroy());
   };
+  const relayPath = pathname => {
+    const device = pathname.match(/^\/a2a\/v1\/dsh-ui-relays\/([^/]+)\/device\/?$/);
+    if (device) return { kind:'device', relayId:decodeURIComponent(device[1]) };
+    const browser = pathname.match(/^\/api\/workspaces\/([^/]+)\/employees\/([^/]+)\/dsh\/plugin-ui\/relay\/([^/]+)\/ws\/?$/);
+    if (browser) return { kind:'browser', workspace:decodeURIComponent(browser[1]), employeeId:decodeURIComponent(browser[2]), relayId:decodeURIComponent(browser[3]) };
+    // DSH serves static/plugin resources below /ui/, but the live native mux
+    // is exposed at the sibling /api/remote.mux path.  Both must resolve the
+    // same profile-scoped relay cookie.
+    const runtime = pathname.match(/^\/runtime\/([^/]+)\/(?:ui(?:\/.*)?|api\/remote\.mux)\/?$/);
+    if (runtime) return { kind:'runtime', profile:decodeURIComponent(runtime[1]) };
+    return null;
+  };
+  const relayUpgrade = async (req, socket, head, url) => {
+    const matched = relayPath(url.pathname);
+    if (!matched) return false;
+    const transport = app.locals.dshPluginUiRelayTransport;
+    const service = app.locals.dshPluginUiRelay;
+    if (!transport || !service) { reject(socket, 503, 'Service Unavailable'); return true; }
+    try {
+      if (matched.kind === 'device') {
+        const token = deviceTokenFromRequest(req), credential = app.locals.repo.authenticateDeviceToken(token);
+        if (!credential) { reject(socket, 401, 'Unauthorized'); return true; }
+        const row = service.status(matched.relayId, { actorRole:'owner' });
+        if (row.workspace !== credential.workspace || row.deviceId !== credential.deviceId) { reject(socket, 403, 'Forbidden'); return true; }
+        relaySockets.handleUpgrade(req, socket, head, ws => { try { transport.acceptDevice(matched.relayId, ws, { deviceId:credential.deviceId }); } catch { ws.close(1008, 'relay binding invalid'); } });
+        return true;
+      }
+      const origin = String(req.headers.origin || '');
+      if (origin && origin !== (app.locals.identity?.config.origin || allowedOrigin)) { reject(socket, 403, 'Forbidden'); return true; }
+      const cookie = parseRelayCookie(cookieValue(req.headers.cookie));
+      let relayId = matched.relayId || url.searchParams.get('dshPluginUiRelay') || url.searchParams.get('relayId') || cookie?.relayId, viewKey = url.searchParams.get('viewKey') || cookie?.viewKey || '';
+      if (matched.kind === 'runtime') {
+        viewKey ||= cookie?.viewKey || '';
+        if (!relayId || !viewKey) { reject(socket, 401, 'Unauthorized'); return true; }
+      }
+      if (!relayId) { reject(socket, 400, 'Bad Request'); return true; }
+      if (!viewKey) { reject(socket, 401, 'Unauthorized'); return true; }
+      const context = await app.locals.authorizeRelayBrowser(req, relayId);
+      const row = service.status(relayId, context);
+      if (matched.kind === 'browser' && (row.workspace !== matched.workspace || row.employeeId !== matched.employeeId)) { reject(socket, 403, 'Forbidden'); return true; }
+      if (matched.kind === 'runtime' && row.profile !== matched.profile) { reject(socket, 409, 'Conflict'); return true; }
+      relaySockets.handleUpgrade(req, socket, head, ws => { try { transport.bindBrowser(relayId, ws, context, viewKey || row.viewKey); } catch { ws.close(1008, 'relay binding invalid'); } });
+      return true;
+    } catch (error) { reject(socket, Number(error.status) || 500, Number(error.status) === 401 ? 'Unauthorized' : Number(error.status) === 403 ? 'Forbidden' : 'Bad Request'); return true; }
+  };
   server.on('upgrade', async (req, socket, head) => {
     // Upgrade callbacks run outside Express's request error middleware.
     // Authentication touches session rows, so even a transient SQLite lock
@@ -1134,6 +1218,7 @@ export function attachRealtimeWebSocket(server, app, { pathPrefix = '/api/worksp
     try {
       let url;
       try { url = new URL(req.url || '/', `http://${req.headers.host || '127.0.0.1'}`); } catch { reject(socket, 400, 'Bad Request'); return; }
+      if (await relayUpgrade(req, socket, head, url)) return;
       const slug = matchPath(url.pathname);
       if (!slug) { reject(socket, 404, 'Not Found'); return; }
       const origin = String(req.headers.origin || '');
