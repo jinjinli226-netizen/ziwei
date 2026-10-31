@@ -10,7 +10,7 @@ const MAX_HEADER_VALUE_LENGTH = 2_000;
 const MAX_PATH_LENGTH = 2_048;
 const MAX_QUERY_LENGTH = 1_000;
 const ALLOWED_REQUEST_HEADERS = new Set(['accept', 'cache-control', 'content-type', 'last-event-id', 'x-requested-with']);
-const ALLOWED_RESPONSE_HEADERS = new Set(['cache-control', 'content-type', 'etag', 'last-modified']);
+const ALLOWED_RESPONSE_HEADERS = new Set(['cache-control', 'content-type', 'etag', 'last-modified', 'location', 'retry-after']);
 const HTTP_METHODS = new Set(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE']);
 
 const fail = (code, message = code) => { throw Object.assign(new Error(message), { code }); };
