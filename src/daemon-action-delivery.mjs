@@ -325,6 +325,20 @@ export function createActionDelivery({directory,identity,post,dispatch,recoverRe
    }
    pruneConfirmed();return actions;
   },
+  archiveBlockedDeliveries(){
+   if(!fs.existsSync(directory))return {archived:0,remaining:0};
+   let archived=0,remaining=0;
+   for(const name of fs.readdirSync(directory).filter(n=>/^[a-f0-9]{64}\.json$/.test(n))){
+    try{
+     const data=JSON.parse(fs.readFileSync(path.join(directory,name),'utf8'));
+     if(!data.action?.id||name!==path.basename(fileFor(data.action.id)))throw new Error('Action delivery journal corrupt');
+     const record=read(data.action,{create:false});
+     if(record?.state==='blocked'&&archiveUnconfirmed(record,{reason:'PERMANENT_SERVER_REJECTION',httpStatus:record.blockedStatus}))archived++;
+     if(record?.state==='blocked')remaining++;
+    }catch(error){report('a2a_journal_archive_refused',{file:name,error:error.message});}
+   }
+   return {archived,remaining};
+  },
   get pendingCount(){return [...records.values()].filter(r=>!['confirmed','blocked',ARCHIVED_UNCONFIRMED_STATE,'maintenance_paused'].includes(r.state)).length;},
   get blockedCount(){return [...records.values()].filter(r=>r.state==='blocked').length;},
   get archivedUnconfirmedCount(){return [...records.values()].filter(r=>r.state===ARCHIVED_UNCONFIRMED_STATE).length;},

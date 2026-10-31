@@ -291,6 +291,15 @@ async function performClientUpdateInternal({ root, env = process.env, directory,
   };
   try {
     progress.stage = 'recover_history';
+    const migrationPath = path.join(candidate, 'src/client-delivery-update-migration.mjs');
+    // Older verified packages may not contain the migration helper. They keep
+    // the existing recovery protocol; newer candidates add the automatic
+    // terminal-delivery archive before the old daemon stop gate.
+    if (fs.existsSync(migrationPath)) {
+      const migrationModule = await import(pathToFileURL(migrationPath).href);
+      const deliveryMigration = migrationModule.archiveBlockedDeliveriesForUpdate({ root, env });
+      log('delivery_archive_migration', deliveryMigration);
+    }
     const finalization = await recoverFailureFinalizationsBeforeUpdateStop({candidate,root,env,log});
     const recovery = finalization.recovered ? finalization : await recoverBeforeClientUpdateStop({ candidate, root, env, log });
     // Historical quarantine is included in the old daemon's active count. Its
