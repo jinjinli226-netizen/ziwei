@@ -156,6 +156,12 @@ test('native history reads one trusted session snapshot without invoking a unary
  assert.deepEqual(result.data.snapshot.records,records);assert.equal(result.data.snapshot.hasMore,true);assert.equal(result.data.snapshot.projections.values.workingDirectory,'D:/native-work');assert.equal(result.data.snapshot.unreviewedPlugin,undefined);
 });
 
+test('bot-scoped history can read a DSH routine result session by explicit session id',async()=>{
+ let requested;
+ const result=await executeDshNativeSessionOperation({resource:'sessions',operation:'history',input:{sessionId:'routine-session',maxMessages:100},scope:{kind:'bot'},subject,rpc:async()=>assert.fail('history is a stream'),followSnapshot:async args=>{requested=args;return{type:'snapshot',hasMore:false,records:[{type:'event',event:{type:'assistant/message',data:{message:{content:[{type:'text',text:'定时结果'}]}}}}]}}});
+ assert.equal(result.status,'observed');assert.equal(requested.request.address.sessionId,'routine-session');assert.equal(result.data.snapshot.records[0].event.data.message.content[0].text,'定时结果');
+});
+
 test('history without a native snapshot never claims observed history',async()=>{
  for(const followSnapshot of [undefined,async()=>({type:'event',event:{}})]){
   const result=await executeDshNativeSessionOperation({resource:'sessions',operation:'history',input:{},scope,subject,rpc:async()=>assert.fail('no unary fallback'),followSnapshot});

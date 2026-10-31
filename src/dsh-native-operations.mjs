@@ -127,7 +127,7 @@ export async function executeDshNativeOperation(action,{workspace,deviceId,baseU
    if(input.agentPreset&&projections?.values?.agentPreset!==input.agentPreset)return result('unknown',{sessionId:created.sessionId,projections});
    return result('applied',{sessionId:created.sessionId,projections},{sessions:{sessionId:created.sessionId,projections}});
   }
-  if(resource!=='state'&&(scope.kind==='conversation'||resource==='sessions'&&operation==='list')){
+  if(resource!=='state'&&(scope.kind==='conversation'||resource==='sessions'&&['list','history'].includes(operation))){
    const outcome=await executeDshNativeSessionOperation({resource,operation,input,subject,scope,followSnapshot:followSnapshot||((args)=>readDshNativeSnapshot({baseUrl,botName:subject.profile,args,signal,WebSocketImpl})),rpc:(method,args)=>rpc(method,args,!entry.readOnly)});
    const observed=['observed','applied'].includes(outcome.status)?{[resource]:outcome.data,...outcome.data.projections?{sessions:{projections:outcome.data.projections}}:{}}:{};
    return{...result(outcome.status,outcome.data,observed),...(outcome.reasonCode?{reasonCode:outcome.reasonCode}:{})};

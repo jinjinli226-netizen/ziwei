@@ -2,8 +2,9 @@ export async function executeDshNativeSessionOperation({resource,operation,input
   const supported=['sessions.list','sessions.history','sessions.projections','presets.select','plan.capabilities','plan.set','models.selectSession'];
   if(!supported.includes(`${resource}.${operation}`))return result('failed',{},'DSH_NATIVE_OPERATION_UNSUPPORTED');
   const listing=resource==='sessions'&&operation==='list';
-  if(listing?(scope?.kind!=='bot'||typeof rpc!=='function'):(scope?.kind!=='conversation'||!scope.conversationId||!scope.nativeSessionId||typeof rpc!=='function'))return result('failed',{},listing?'DSH_NATIVE_BOT_SCOPE_REQUIRED':'DSH_NATIVE_CONVERSATION_SCOPE_REQUIRED');
-  const sessionId=scope.nativeSessionId,data={};let mutationSent=false;
+  const history=resource==='sessions'&&operation==='history';
+  if(listing?(scope?.kind!=='bot'||typeof rpc!=='function'):(history?(scope?.kind==='conversation'&&!scope.conversationId||scope.kind==='conversation'&&!scope.nativeSessionId||scope?.kind==='bot'&&!input.sessionId||typeof rpc!=='function'):(scope?.kind!=='conversation'||!scope.conversationId||!scope.nativeSessionId||typeof rpc!=='function')))return result('failed',{},listing?'DSH_NATIVE_BOT_SCOPE_REQUIRED':history?'DSH_NATIVE_SESSION_SCOPE_REQUIRED':'DSH_NATIVE_CONVERSATION_SCOPE_REQUIRED');
+  const sessionId=scope.kind==='bot'?input.sessionId:scope.nativeSessionId,data={};let mutationSent=false;
   const mutate=(method,args)=>{mutationSent=true;return rpc(method,args);};
   try{
     if(listing){
