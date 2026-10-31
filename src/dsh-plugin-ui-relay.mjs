@@ -175,7 +175,11 @@ export function createDshPluginUiRelayClient({ apiBase, workspace = null, device
     const aborters = new Set();
     const expireTimer = setTimeout(() => socket?.close(1000, 'expired'), Math.max(0, binding.expiresAt - now()));
     const clear = () => { clearTimeout(expireTimer); for (const controller of aborters) controller.abort(); for (const item of upstream.values()) { try { item.close(); } catch {} } upstream.clear(); requests.clear(); };
-    const send = value => { if (!socket || socket.closed || socket.readyState === 3) return; socket.send(JSON.stringify(value)); };
+    const send = value => {
+      if (!socket || socket.closed || socket.readyState === 3) return;
+      try { socket.send(JSON.stringify(value)); }
+      catch (error) { fatalError ||= Object.assign(new Error('DSH_PLUGIN_UI_RELAY_TRANSPORT_ERROR'), {code:'DSH_PLUGIN_UI_RELAY_TRANSPORT_ERROR',cause:error}); }
+    };
     const sendError = (code, message = code, requestId = undefined) => send({type:'error',relayId:binding.relayId,seq:++frameSequence,...(text(requestId, 200) ? {requestId} : {}),code,message: safeReason(message)});
     const sendFrame = ({kind,requestId,status,headersAllowlist = {},body = Buffer.alloc(0),end = true}) => {
       const encoded = encodeBody(body);
