@@ -36,7 +36,7 @@ function minimalAction(action){const p=action.payload||{};return {...Object.from
  * A journal cannot authorize execution: every recovery first checks an authenticated
  * server ACK, and terminal ACKs never reach the executor.
  */
-export function createActionDelivery({directory,identity,post,dispatch,recoverResult=()=>null,retryDelays=[250,1000],onEvent=()=>{},onSuccess=async()=>{},onConfirmed=async()=>{},maxConfirmedRecords=1000,confirmedRetentionMs=7*24*60*60*1000,now=()=>Date.now(),autoArchiveUnconfirmed=false}={}){
+export function createActionDelivery({directory,identity,post,dispatch,attachmentTransfer=null,recoverResult=()=>null,retryDelays=[250,1000],onEvent=()=>{},onSuccess=async()=>{},onConfirmed=async()=>{},maxConfirmedRecords=1000,confirmedRetentionMs=7*24*60*60*1000,now=()=>Date.now(),autoArchiveUnconfirmed=false}={}){
  if(!directory||typeof post!=='function'||typeof dispatch!=='function'||typeof onConfirmed!=='function')throw new TypeError('Action delivery requires directory, transport and dispatcher');
  const connection=scope(identity||{}),records=new Map(),active=new Map(),activeBindings=new Map(),eventFlushes=new Map(),archivedRetries=new Map();
  const fileFor=id=>path.join(directory,`${hash(String(id))}.json`);
@@ -153,6 +153,41 @@ export function createActionDelivery({directory,identity,post,dispatch,recoverRe
   if(delivery.status==='succeeded')return exit.rootExitCode===0&&exit.cancelled!==true&&!exit.failureCode&&!exit.signal&&!exit.hostSignal;
   return Number.isSafeInteger(exit.rootExitCode)||(exit.rootExitCode===null&&exit.cancelled===true);
  }
+ function resultArtifacts(body){return body.result?.outputArtifacts??body.result?.result?.outputArtifacts??[];}
+ function hasAttachmentReferences(body){const artifacts=resultArtifacts(body);return Array.isArray(artifacts)&&artifacts.some(item=>typeof item?.path==='string'||typeof item?.attachmentId==='string');}
+ function artifactMetadata(body){
+  const artifacts=resultArtifacts(body);
+  if(!Array.isArray(artifacts))throw retryFailure('DELIVERY_RETRY_INCOMPLETE');
+  return artifacts.map(item=>{
+   const sha256=typeof item?.content==='string'&&item.contentEncoding==='base64'?createHash('sha256').update(Buffer.from(item.content,'base64')).digest('hex'):(typeof item?.path==='string'||typeof item?.attachmentId==='string')&&typeof item.sha256==='string'?item.sha256:null;
+   if(!sha256)throw retryFailure('DELIVERY_RETRY_INCOMPLETE');
+   return {name:item.name,mimeType:item.mimeType,size:item.size,sha256};
+  });
+ }
+ function artifactReceiptMatches(expected,confirmation){
+  const actual=confirmation?.result?.outputArtifacts;
+  return actual===undefined&&expected.length===0||Array.isArray(actual)&&JSON.stringify(actual.map(({name,mimeType,size,sha256})=>({name,mimeType,size,sha256})))===JSON.stringify(expected);
+ }
+ async function prepareAttachments(record,body){
+  const artifacts=resultArtifacts(body);
+  if(!Array.isArray(artifacts)||!artifacts.some(item=>typeof item?.path==='string'))return body;
+  if(!attachmentTransfer)throw new Error('Attachment transfer is required for local result files');
+  const prepared=[];
+  for(const [index,artifact] of artifacts.entries()){
+   if(typeof artifact?.path!=='string'){prepared.push(artifact);continue;}
+   const onState=async state=>{const previous=record.attachmentUploads;record.attachmentUploads={...previous,[index]:state};try{save(record);}catch(error){if(previous)record.attachmentUploads=previous;else delete record.attachmentUploads;throw error;}};
+   const ref=await attachmentTransfer.upload({actionId:record.action.id,artifact,state:record.attachmentUploads?.[index],onState});
+   if(record.attachmentUploads?.[index]?.ref!==ref)await onState({...record.attachmentUploads?.[index],ref});
+   prepared.push(ref);
+  }
+  return body.result?.outputArtifacts?{...body,result:{...body.result,outputArtifacts:prepared}}:{...body,result:{...body.result,result:{...body.result.result,outputArtifacts:prepared}}};
+ }
+ function needsAttachmentReceipt(record,status){
+  if(record.state!=='result_pending')return false;
+  const body=readBlob(record,'result');if(!hasAttachmentReferences(body))return false;
+  if(status!==body.status)throw new Error('Attachment result terminal status mismatch; durable result retained');
+  return true;
+ }
  function stageResult(record,result){
   const delivery=resultBody(result,record.maintenanceAttempt);
   record.resultDigest=writeBlob(record.action.id,'result',delivery);
@@ -194,7 +229,7 @@ export function createActionDelivery({directory,identity,post,dispatch,recoverRe
    if(record.state==='blocked'&&archiveUnconfirmed(record,{reason:'PERMANENT_SERVER_REJECTION',httpStatus:record.blockedStatus}))return {state:record.state,status:null,reason:record.archive.reason};
    if(['confirmed','blocked'].includes(record.state))return {state:record.state,status:record.serverStatus||null};
   try{
-   let resumingResult=record.state==='result_pending',reconciling=false;
+   let resumingResult=record.state==='result_pending',reconciling=false,terminalResult=false;
    const receipt=await retry(()=>post(`/a2a/v1/actions/${encodeURIComponent(action.id)}/ack`,{agentId:'ziwei_user',receiptOnly:true,renewLease:resumingResult&&Boolean(connection.deviceId)},{timeoutMs:ACTION_TRANSPORT_BUDGETS.ack}));
    if(receipt?.id!==action.id||!['acked',...terminal].includes(receipt?.status))throw new Error('Invalid action ACK receipt; execution was not authorized');
    if(receipt.deviceId&&connection.deviceId&&receipt.deviceId!==connection.deviceId)throw new Error('Action ACK identity mismatch');
@@ -208,11 +243,11 @@ export function createActionDelivery({directory,identity,post,dispatch,recoverRe
     }
     reconciling=true;resumingResult=true;
    }else if(terminal.has(receipt.status)){
-    await confirm(record,receipt.status);
-    report('a2a_terminal_confirmed',{actionId:action.id,status:receipt.status});return {state:'confirmed',status:receipt.status};
+    if(needsAttachmentReceipt(record,receipt.status)){terminalResult=true;resumingResult=true;}
+    else{await confirm(record,receipt.status);report('a2a_terminal_confirmed',{actionId:action.id,status:receipt.status});return {state:'confirmed',status:receipt.status};}
    }
    const lease=receipt.expires_at||receipt.expiresAt;
-   if(!reconciling&&(!lease||!Number.isFinite(Date.parse(lease))||Date.parse(lease)<=now()))throw new Error('Invalid or expired action ACK lease; execution was not authorized');
+   if(!reconciling&&!terminalResult&&(!lease||!Number.isFinite(Date.parse(lease))||Date.parse(lease)<=now()))throw new Error('Invalid or expired action ACK lease; execution was not authorized');
    if(record.state!=='result_pending'&&receipt.executionInput){
     const original=readBlob(record,'action').action;
     const authorized={...original,payload:{...original.payload,...receipt.executionInput}};
@@ -259,18 +294,20 @@ export function createActionDelivery({directory,identity,post,dispatch,recoverRe
     if(renewal.status==='expired'||renewal.reconciliationRequired===true){
      if(!(renewal.acked_at||record.action.acked_at)||!definitive(readBlob(record,'result'),record)){report('a2a_expired_result_unconfirmed',{actionId:action.id,status:renewal.status});if(archiveUnconfirmed(record,{reason:'SERVER_LEASE_EXPIRED'}))return {state:record.state,status:null,reason:record.archive.reason};return {state:'unconfirmed',status:renewal.status};}
      reconciling=true;
-    }else if(terminal.has(renewal.status)){await confirm(record,renewal.status);return {state:'confirmed',status:renewal.status};}
+    }else if(terminal.has(renewal.status)){if(needsAttachmentReceipt(record,renewal.status))terminalResult=true;else{await confirm(record,renewal.status);return {state:'confirmed',status:renewal.status};}}
     record.action={...record.action,expires_at:renewal.expires_at,expiresAt:renewal.expires_at};save(record);
    }
    const remainingLease=Date.parse(record.action.expires_at)-now();
-   if(!reconciling&&(!Number.isFinite(remainingLease)||remainingLease<ACTION_TRANSPORT_BUDGETS.result+30_000))throw new Error('Insufficient result delivery lease; durable result retained');
+   if(!reconciling&&!terminalResult&&(!Number.isFinite(remainingLease)||remainingLease<ACTION_TRANSPORT_BUDGETS.result+30_000))throw new Error('Insufficient result delivery lease; durable result retained');
    // One full upload per scheduling pass. After an ambiguous failure the next
    // pass ACKs again, which can observe a committed terminal result. This avoids
    // blindly sending a 10 MiB body repeatedly while its receipt is missing.
-   const confirmation=await retry(()=>post(`/a2a/v1/actions/${encodeURIComponent(action.id)}/result`,readBlob(record,'result'),{timeoutMs:ACTION_TRANSPORT_BUDGETS.result}),{attempts:1});
+   const storedBody=readBlob(record,'result'),deliveryBody=await prepareAttachments(record,storedBody);
+   const confirmation=await retry(()=>post(`/a2a/v1/actions/${encodeURIComponent(action.id)}/result`,deliveryBody,{timeoutMs:ACTION_TRANSPORT_BUDGETS.result}),{attempts:1});
    if((confirmation?.status==='expired'||confirmation?.reconciliationRequired===true)&&archiveUnconfirmed(record,{reason:'SERVER_LEASE_EXPIRED'}))return {state:record.state,status:null,reason:record.archive.reason};
    if(confirmation?.id!==action.id||!terminal.has(confirmation.status)||confirmation.reconciliationRequired===true||reconciling&&confirmation.status==='expired')throw new Error('Invalid action result receipt; durable result retained');
    if(confirmation.deviceId&&connection.deviceId&&confirmation.deviceId!==connection.deviceId)throw new Error('Action result identity mismatch; durable result retained');
+   if(hasAttachmentReferences(storedBody)&&(confirmation.status!==storedBody.status||confirmation.deviceId!==connection.deviceId||!Number.isFinite(Date.parse(confirmation.completed_at))||!artifactReceiptMatches(artifactMetadata(storedBody),confirmation)))throw new Error('Invalid attachment result receipt; durable result retained');
    await confirm(record,confirmation.status);
    report('a2a_result',{actionId:action.id,status:confirmation.status,dispatcherStatus:record.dispatcherStatus});return {state:'confirmed',status:confirmation.status};
   }catch(error){
@@ -296,9 +333,7 @@ export function createActionDelivery({directory,identity,post,dispatch,recoverRe
    if(!definitive(body,record))throw retryFailure('DELIVERY_RETRY_INCOMPLETE');
   }catch(error){return Promise.reject(error);}
   const promise=Promise.resolve().then(async()=>{
-   const artifacts=body.result?.outputArtifacts??body.result?.result?.outputArtifacts??[];
-   if(!Array.isArray(artifacts)||artifacts.some(item=>typeof item?.content!=='string'||item.contentEncoding!=='base64'))throw retryFailure('DELIVERY_RETRY_INCOMPLETE');
-   const expectedArtifacts=artifacts.map(({name,mimeType,size,content})=>({name,mimeType,size,sha256:createHash('sha256').update(Buffer.from(content,'base64')).digest('hex')}));
+   const expectedArtifacts=artifactMetadata(body);
    let stage='ack';
    report('a2a_delivery_retry_started',{actionId:id});
    try{
@@ -307,10 +342,9 @@ export function createActionDelivery({directory,identity,post,dispatch,recoverRe
     // Always submit the original bytes, even after a terminal ACK. Only the
     // result endpoint's artifact hashes prove the full image was persisted.
     stage='result';
-    const confirmation=await post(`/a2a/v1/actions/${encodeURIComponent(id)}/result`,body,{timeoutMs:ACTION_TRANSPORT_BUDGETS.result});
-    let actualArtifacts=confirmation?.result?.outputArtifacts;
-    if(actualArtifacts===undefined&&expectedArtifacts.length===0)actualArtifacts=[];
-    if(confirmation?.id!==id||confirmation.deviceId!==connection.deviceId||confirmation.status!==body.status||confirmation.reconciliationRequired===true||!Number.isFinite(Date.parse(confirmation.completed_at))||!Array.isArray(actualArtifacts)||JSON.stringify(actualArtifacts.map(({name,mimeType,size,sha256})=>({name,mimeType,size,sha256})))!==JSON.stringify(expectedArtifacts))throw retryFailure('DELIVERY_RETRY_RESULT_INVALID');
+    const deliveryBody=await prepareAttachments(record,body);
+    const confirmation=await post(`/a2a/v1/actions/${encodeURIComponent(id)}/result`,deliveryBody,{timeoutMs:ACTION_TRANSPORT_BUDGETS.result});
+    if(confirmation?.id!==id||confirmation.deviceId!==connection.deviceId||confirmation.status!==body.status||confirmation.reconciliationRequired===true||!Number.isFinite(Date.parse(confirmation.completed_at))||!artifactReceiptMatches(expectedArtifacts,confirmation))throw retryFailure('DELIVERY_RETRY_RESULT_INVALID');
     await confirm(record,confirmation.status);
     report('a2a_delivery_retry_confirmed',{actionId:id,status:confirmation.status});
     return {state:'confirmed',status:confirmation.status};
