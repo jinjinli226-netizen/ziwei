@@ -13,7 +13,7 @@ const threads=[
 
 test('home navigation gives chat a first-class tab and keeps devices reachable from My',()=>{
   const home=render(state({tab:'chat'})),nav=home.match(/<nav class="bottom-nav"[\s\S]*?<\/nav>/)[0];
-  assert.deepEqual([...nav.matchAll(/data-tab="([^"]+)"/g)].map(match=>match[1]),['chat','employees','work','me']);
+  assert.deepEqual([...nav.matchAll(/data-tab="([^"]+)"/g)].map(match=>match[1]),['employees','chat','work','me']);
   assert.match(nav,/data-tab="chat" class="nav-item active"/);
   assert.match(render(state({tab:'me'})),/data-action="navigate" data-tab="devices"/);
   const devices=render(state({tab:'devices'}));
@@ -56,7 +56,7 @@ test('recent chat failures retain rows and do not claim original histories are e
 
 test('contacts and chat keep original detail, report, read-error and timeline contracts',()=>{
   const contacts=render(state({tab:'employees'}));
-  assert.match(contacts,/data-action="report-setup"/);assert.match(contacts,/name="search"/);
+  assert.doesNotMatch(contacts,/data-action="report-setup"|report-entry|mobile-shortcuts/);assert.match(contacts,/name="search"/);
   assert.match(contacts,/data-action="employee-detail" data-id="employee-original-one"/);
   assert.match(contacts,/data-action="chat" data-id="employee-original-one"/);
   const chat=render(state({tab:'chat',page:'chat',selectedEmployee:first,conversation:{id:'original-main-one'},messages:[{id:'old-one',role:'assistant',content:'原历史消息'}],employeeResources:{conversation:{phase:'error',error:'暂时不可读'}}}));
@@ -128,15 +128,20 @@ test('forward cards use the server snapshot without duplicating legacy fallback 
   assert.match(missing,/这段记录暂未加载/);
 });
 
-test('chat home keeps a direct report entry alongside groups and notifications',()=>{
+test('employee home shows every employee directly and keeps a single group entry without report shortcuts',()=>{
+  const employees=render(state());
+  assert.match(employees,/data-action="chat" data-id="employee-original-one"/);
+  assert.match(employees,/data-action="chat" data-id="employee-original-two"/);
+  assert.match(employees,/data-action="groups-open"/);
+  assert.doesNotMatch(employees,/data-action="report-setup"|mobile-shortcuts/);
   const home=render(state({tab:'chat',chatThreads:threads}));
-  assert.match(home,/data-action="report-setup"[^>]*>[\s\S]*?<strong>汇报<\/strong>/);
-  assert.match(home,/逐个听员工汇报/);assert.match(home,/data-action="notifications-open"/);assert.match(home,/data-action="groups-open"/);
+  assert.doesNotMatch(home,/data-action="report-setup"|mobile-shortcuts/);
+  assert.match(render(state({tab:'me'})),/data-action="notifications-open"/);
 });
 
 test('native login is one unified button, and unregistered clients cannot submit password or fake success',()=>{
   const html=render({...initialState(),phase:'login',identity:{available:true,mode:'oidc',configured:true,authenticated:false}});
-  assert.match(html,/data-action="unified-login"/);assert.match(html,/原账号邮箱和密码登录/);assert.match(html,/系统浏览器中输入邮箱和密码/);
+  assert.match(html,/data-action="unified-login"/);assert.match(html,/原账号邮箱和密码登录/);assert.match(html,/安全登录面板/);assert.match(html,/自动保持登录/);
   assert.doesNotMatch(html,/name="username"|name="password"|data-form="login"/);
   const blocked=render({...initialState(),phase:'login',identity:{available:true,mode:'oidc',configured:false,authenticated:false,message:'Android 客户端尚未注册'}});
   assert.match(blocked,/Android 客户端尚未注册/);assert.match(blocked,/data-action="unified-login"[^>]*disabled/);

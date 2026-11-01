@@ -85,6 +85,7 @@ async function fixture(width) {
     if (p === `${base}/employees`) return json(route, { employees });
     if (p === `${base}/bots`) return json(route, { bots: employees.map(employee => bot(employee.id)) });
     if (p === `${base}/chats`) return json(route, { chats: [], unreadCount: 0 });
+    if (p === `${base}/mixed-groups` && method === 'GET') return json(route, { groups: [] });
     if (p === `${base}/devices`) return json(route, { devices: [] });
     if (p === `${base}/tasks`) {
       if (method === 'GET') return json(route, { tasks });
@@ -110,7 +111,7 @@ async function fixture(width) {
     return json(route, { error: 'Unsupported fixture route' }, 404);
   });
   const session = { page, context, control, close: () => context.close() }; sessions.push(session);
-  await page.goto(`${origin}/__ziwei_manager__/index.html`); await page.getByRole('heading', { name: '聊天', exact: true }).waitFor();
+  await page.goto(`${origin}/__ziwei_manager__/index.html`); await page.getByRole('heading', { name: '我的员工', exact: true }).waitFor();
   return session;
 }
 
@@ -129,7 +130,7 @@ async function settleNative(page) {
 try {
   for (const width of [390, 320]) {
     const f = await fixture(width), { page, control } = f;
-    await click(page, 'groups-open'); await page.locator('[name=groupSource]').selectOption('source');
+    await click(page, 'groups-open'); await click(page, 'native-groups-open'); await page.locator('[name=groupSource]').selectOption('source');
     await page.getByRole('button', { name: '读取员工群组', exact: true }).waitFor();
     assert.equal(control.nativePosts.length, 0, 'Opening/selecting cannot dispatch a native read or model work');
     await click(page, 'groups-read'); assert.equal(control.nativePosts.length, 1); await settleNative(page);
@@ -174,7 +175,7 @@ try {
     assert.equal(control.sends.length,sendsBeforeLegacyBypass,'Known unsupported host cannot dispatch via back/new/member/send');
     await page.getByText(/目标电脑暂不支持手机分页群记录/).first().waitFor();
     const count = control.nativePosts.length; await page.evaluate(() => window.dispatchEvent(new Event('ziwei:resume'))); await raf(page); assert.equal(control.nativePosts.length, count, 'Resume/periodic polling cannot dispatch a fresh groups.read');
-    await click(page, 'back'); await click(page, 'back');
+    await click(page, 'back'); await click(page, 'back'); await click(page, 'back');
     await page.locator('.bottom-nav [data-action=navigate][data-tab=work]').click(); await page.locator('.task-filters').waitFor();
     await click(page, 'work-filter', 'pending'); assert.deepEqual(await page.locator('.task-card').evaluateAll(elements => elements.map(element => element.dataset.id)), ['planned-task']);
     await click(page, 'work-filter', 'running'); assert.deepEqual(await page.locator('.task-card').evaluateAll(elements => elements.map(element => element.dataset.id)), ['running-task']);
@@ -187,7 +188,7 @@ try {
     assert.deepEqual(control.taskPosts, [{ title, description, assignee: 'source', state: 'planned' }]);
     assert.equal(await page.locator(`.task-card[data-id="saved-task-${width}"] img`).count(), 0); assert.equal(control.sends.length, 1, 'Task save does not dispatch employee/group work');
     await noOverflow(page, `task-list-${width}`); await capture(page, `task-${width}-saved-pending`);
-    await page.locator('.bottom-nav [data-action=navigate][data-tab=chat]').click(); await click(page, 'notifications-open');
+    await page.locator('.bottom-nav [data-action=navigate][data-tab=me]').click(); await click(page, 'notifications-open');
     await page.locator('.notification-item').first().waitFor(); assert.equal(await page.locator('.notification-item').count(), 2);
     assert.equal(await page.locator('.notification-list script').count(), 0); assert.equal(await page.locator('[data-action=notifications-enable]').count(), 0, 'Ordinary browser cannot claim a native system notification bridge');
     await noOverflow(page, `notifications-${width}`); await capture(page, `notifications-${width}-in-app`);
@@ -195,11 +196,11 @@ try {
     await page.getByRole('heading', { name: '已经完成的工作', exact: true }).waitFor();
     assert.ok(requests.some(request => request.width === width && request.method === 'GET' && request.path.endsWith('/mobile/notifications-v2/items/notice-task')));
     assert.ok(requests.some(request => request.width === width && request.method === 'GET' && request.path === '/api/tasks/done-task'));
-    await click(page, 'back'); await page.locator('.bottom-nav [data-action=navigate][data-tab=chat]').click(); await click(page, 'notifications-open');
+    await click(page, 'back'); await page.locator('.bottom-nav [data-action=navigate][data-tab=me]').click(); await click(page, 'notifications-open');
     const writes = requests.filter(request => request.width === width && request.method !== 'GET').length;
     await click(page, 'notifications-read-all'); assert.equal(await page.locator('.notification-item.is-unread').count(), 0);
     assert.equal(requests.filter(request => request.width === width && request.method !== 'GET').length, writes, 'Notification read-all is a local preference, not a shared server mutation');
-    await page.reload(); await page.getByRole('heading', { name: '聊天', exact: true }).waitFor(); await click(page, 'notifications-open'); await page.locator('.notification-item').first().waitFor();
+    await page.reload(); await page.getByRole('heading', { name: '我的员工', exact: true }).waitFor(); await page.locator('.bottom-nav [data-action=navigate][data-tab=me]').click(); await click(page, 'notifications-open'); await page.locator('.notification-item').first().waitFor();
     assert.equal(await page.locator('.notification-item.is-unread').count(), 0, 'Personal notification read markers survive reload');
     control.denyResolve = true; await click(page, 'notifications-target', 'notice-chat');
     await page.getByText('当前已无权查看这条提醒', { exact: true }).waitFor(); assert.equal(await page.locator('.app-shell').getAttribute('data-page'), 'notifications');

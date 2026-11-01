@@ -1,5 +1,11 @@
 # 紫薇 Android 管理 App
 
+**0.7.5-mobile-attachments / code24 可发布候选（未上传正式入口）**：已把电脑端头像同步和 500 MiB 附件一起用原签名构建，QA AVD 覆盖安装、18 项实际 APK 烟测通过；系统保存窗口打开及取消已验，真实账号 500 MiB 手机网络整链未验。普通聊天和工作区群聊采用分块上传、进度、显式失败恢复、引用消息及原生流式下载。源码回归 621 项通过。详见[code24 产物、哈希与验收](../docs/mobile/2026-11-01-attachments-code24.md)及[源码合同与边界](docs/attachments-500mib-candidate.md)。
+
+2026-11-01 本地 **0.7.4-mobile-avatar-sync / code23** 同步电脑端已有的小眼睛角色头像，保留原形状、颜色和上传图片；未设头像时也按相同员工 ID 生成同一默认角色，替换 App 旧姓名首字占位。原签名 APK 已在 Android QA AVD 覆盖安装。构建自动从 `src/employee-avatar.mjs` 同步 `web/employee-avatar.js`，后者是生成文件，不手工修改。详见[code23 头像同步记录](../docs/mobile/2026-11-01-avatar-sync-code23.md)。
+
+2026-11-01 本地 **0.7.3-mobile-groups-login / code22** 修复混合群 API 尚未接入实际页面的问题：默认首页展示全部员工，去掉汇报快捷条，群聊按钮进入工作区混合群列表。首次授权改用 Custom Tabs 安全登录面板；网络失败时保留原登录并提供重试恢复。已覆盖安装 Android 15 AVD，正式邮箱密码页可加载；本轮未输入真实账号，不能称为正式账号业务全链路通过。具体证据见[code22 验收记录](../docs/mobile/2026-11-01-home-groups-login-code22.md)。
+
 2026-11-01 新增本地 **0.7.2-mobile-mixed-group / code21**：在 code20 的聊天、历史分页、连续队列、Markdown、真实活动和 Hermes 加密提问/审批基础上，同步 Hermes / DSH / Codex 混合群聊 API、运行时标签和大历史移动投影。原签名候选已构建，并在登记的 Android 15 AVD 覆盖安装；登录页与系统浏览器 OIDC 入口已实测，真实邮箱回调仍受 AVD 网络阻塞。APK 哈希、投影字节和安装回执见[混合群聊部署记录](../docs/operations/2026-11-01-mobile-mixed-group-code21.md)。
 
 2026-10-31 的 **0.7.1-mobile-candidate / code20** 是上一轮聊天体验候选：真实邮箱回调受 AVD 网络阻塞。具体包哈希、API版本及未测边界见[移动驾驶舱候选](../docs/mobile/2026-10-31-mobile-cockpit-candidate.md)与[Android VM记录](../docs/mobile/2026-10-31-android-vm-qa.md)。以下 code18 及更早说明是各自历史验收，不能用来证明 code21 已完成真实账号/员工业务验收。

@@ -74,7 +74,8 @@ const bounds=async()=>{
  assert(await page.locator('.composer').evaluate(node=>{const box=node.getBoundingClientRect();return box.top>=0&&box.bottom<=innerHeight+1;}));
 };
 try{
- await page.goto(`${origin}/__ziwei_manager__/index.html`);await page.locator('.thread-row').first().waitFor();await capture('01-inbox-390');
+ await page.goto(`${origin}/__ziwei_manager__/index.html`);await page.getByRole('heading',{name:'我的员工',exact:true}).waitFor();await page.locator('.employee-identity').first().waitFor();await capture('01-employees-390');
+ await page.locator('.bottom-nav [data-action=navigate][data-tab=chat]').click();await page.locator('.thread-row').first().waitFor();await capture('01-inbox-390');checks.push('signed-in default entry shows employees; recent chats opens through its explicit navigation');
  await click('chat',employees[0].id);await page.locator('.markdown table').waitFor();
  assert.equal(await page.locator('.message').count(),10);assert(requests.some(request=>request.path===`/api/conversations/${first.id}`&&request.query.includes('view=thread')));
  await bounds();await capture('02-chat-390');
@@ -101,7 +102,7 @@ try{
  interactionKeys=generateKeyPairSync('rsa',{modulusLength:3072,publicKeyEncoding:{type:'spki',format:'pem'},privateKeyEncoding:{type:'pkcs8',format:'pem'}});
  const expiresAt=Math.floor(Date.now()/1000)+300;
  interactionRequest={requestId:'fixture-approval',workspace:slug,employeeId:employees[0].id,actionId:execution.id,kind:'approval',secure:false,state:'waiting',expiresAt:expiresAt*1000,display:{description:'将本次确认的脚本写入当前工作目录'},choices:['once','deny'],devicePublicKey:interactionKeys.publicKey,binding:{purpose:'hermes-interaction',requestId:'fixture-approval',kind:'approval',expiresAt,workspaceId:repo.getWorkspace(slug).id,employeeId:employees[0].id,actionId:execution.id,deviceId,profile:'default',revision:1,controlEpoch:1,keyId:'fixture-device-key'}};
- interactionMode=true;await page.setViewportSize({width:390,height:844});await page.reload();await page.locator('.thread-row').first().waitFor();await click('chat',employees[0].id);
+ interactionMode=true;await page.setViewportSize({width:390,height:844});await page.reload();await page.getByRole('heading',{name:'我的员工',exact:true}).waitFor();await page.locator('.bottom-nav [data-action=navigate][data-tab=chat]').click();await page.locator('.thread-row').first().waitFor();await click('chat',employees[0].id);
  await page.getByRole('button',{name:'仅本次允许',exact:true}).waitFor();assert.equal(interactionPosts,0);await capture('07-approval-390');
  await page.getByRole('button',{name:'仅本次允许',exact:true}).click();await page.getByText('已提交，等待员工接收',{exact:true}).waitFor();assert.equal(interactionPosts,1);checks.push('explicit Hermes approval click includes submitter value and sends only a device-compatible encrypted envelope');
  assert.deepEqual(errors,[]);

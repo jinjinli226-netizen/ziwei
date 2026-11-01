@@ -45,7 +45,7 @@ function scheduleRead(){
   });
 }
 function draw(){
-  const view=`${state.phase}:${scopeKey(state)}:${state.page}:${state.tab}:${state.selectedEmployee?.id||''}:${state.chatVisit||0}:${state.report?.index||0}`;
+  const view=`${state.phase}:${scopeKey(state)}:${state.page}:${state.tab}:${state.selectedEmployee?.id||''}:${state.chatVisit||0}:${state.workspaceGroups?.selectedId||''}:${state.report?.index||0}`;
   const sameView=view===lastView,markup=render(state);
   // A revalidated poll often changes no visible content. Keep decoded images,
   // long history nodes, selection and scroll intact instead of rebuilding them.
@@ -94,7 +94,7 @@ root.addEventListener('input',event=>{if(event.target.name==='draft'){const time
 root.addEventListener('compositionstart',event=>{domRenderer.compositionStart(event.target);void controller.change(event);});
 root.addEventListener('compositionend',event=>{domRenderer.compositionEnd(event.target);void controller.change(event);});
 root.addEventListener('change',event=>{if(event.target.type==='file'||event.target.tagName==='SELECT')void controller.change(event);});
-window.addEventListener('ziwei:back',event=>{syncDraft();if(state.imagePreview||state.forwardDetail||state.forward||state.phase==='ready'&&state.page!=='home'){event.preventDefault();void controller.actions.back();}else if(state.phase==='ready'&&state.tab!=='chat'){event.preventDefault();void controller.actions.navigate({tab:state.tab==='devices'?'me':'chat'});}});
+window.addEventListener('ziwei:back',event=>{syncDraft();if(state.imagePreview||state.forwardDetail||state.forward||state.phase==='ready'&&state.page!=='home'){event.preventDefault();void controller.actions.back();}else if(state.phase==='ready'&&state.tab!=='employees'){event.preventDefault();void controller.actions.navigate({tab:state.tab==='devices'?'me':'employees'});}});
 function resize(){if(renderScheduled)return;renderScheduled=true;const saved=captureChatScroll(root.querySelector('.chat-timeline'));requestAnimationFrame(()=>{document.documentElement.style.setProperty('--app-height',`${Math.round(window.visualViewport?.height||window.innerHeight)}px`);restoreChatScroll(root.querySelector('.chat-timeline'),saved,true);updateLatestButton();renderScheduled=false;scheduleRead();});}
 window.visualViewport?.addEventListener('resize',resize);window.addEventListener('resize',resize);resize();
 window.addEventListener('pagehide',()=>{if(state.page==='chat')root.querySelector('[name=draft]')?.dispatchEvent(new Event('input',{bubbles:true}));});

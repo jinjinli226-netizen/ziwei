@@ -10,6 +10,7 @@ import android.net.http.SslError;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Message;
+import android.provider.DocumentsContract;
 import android.view.Gravity;
 import android.view.View;
 import android.view.WindowInsets;
@@ -46,10 +47,12 @@ import java.util.Map;
 /** Management UI with optional bounded notification checks. No device agent or accessibility service. */
 public final class MainActivity extends Activity {
     private static final int PICK_IMAGES = 301;
+    private static final int SAVE_ATTACHMENT = 302;
     private static final int BACKGROUND = Color.rgb(248, 246, 253);
     private FrameLayout root;
     private WebView webView;
     private ValueCallback<Uri[]> imageCallback;
+    private boolean imagePickerOnly;
     private boolean handlingBack;
     private OnBackInvokedCallback backCallback;
     private NotificationBridge notificationBridge;
@@ -57,6 +60,12 @@ public final class MainActivity extends Activity {
     private volatile boolean trustedDocument;
     private volatile boolean foreground;
     private volatile long documentGeneration;
+    private volatile AttachmentDownload attachmentDownload;
+
+    private static final class AttachmentDownload {
+        final IdentityBridge bridge;final String id,path;final long epoch,document;final IdentityRead read;
+        AttachmentDownload(IdentityBridge bridge,String id,String path,long epoch,long document){this.bridge=bridge;this.id=id;this.path=path;this.epoch=epoch;this.document=document;read=new IdentityRead(epoch,document,"GET");}
+    }
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -235,15 +244,16 @@ public final class MainActivity extends Activity {
                 return true;
             }
             imageCallback = callback;
+            imagePickerOnly = AttachmentTransferRules.imagesOnly(params.getAcceptTypes());
             Intent pick = new Intent(Intent.ACTION_OPEN_DOCUMENT);
             pick.addCategory(Intent.CATEGORY_OPENABLE);
-            pick.setType("image/*");
+            pick.setType(imagePickerOnly ? "image/*" : "*/*");
             pick.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, params.getMode() == FileChooserParams.MODE_OPEN_MULTIPLE);
             pick.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            try { startActivityForResult(Intent.createChooser(pick, "选择图片"), PICK_IMAGES); }
+            try { startActivityForResult(Intent.createChooser(pick, imagePickerOnly ? "选择图片" : "选择附件"), PICK_IMAGES); }
             catch (ActivityNotFoundException exception) {
                 cancelImagePicker();
-                Toast.makeText(MainActivity.this, "未找到可用的图片选择器", Toast.LENGTH_SHORT).show();
+                Toast.makeText(MainActivity.this, "未找到可用的文件选择器", Toast.LENGTH_SHORT).show();
             }
             return true;
         }
@@ -251,6 +261,7 @@ public final class MainActivity extends Activity {
 
     @Override protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
+        if(request==SAVE_ATTACHMENT){finishAttachmentPicker(result,data);return;}
         if (request != PICK_IMAGES || imageCallback == null) return;
         ValueCallback<Uri[]> callback = imageCallback;
         imageCallback = null;
@@ -259,7 +270,7 @@ public final class MainActivity extends Activity {
                 && UrlPolicy.isAppDocument(webView.getUrl())) {
             ClipData clip = data.getClipData();
             if (clip != null) {
-                for (int index = 0; index < clip.getItemCount() && index < 20; index++) {
+                for (int index = 0; index < clip.getItemCount() && index < 21; index++) {
                     addImage(selected, clip.getItemAt(index).getUri());
                 }
             } else addImage(selected, data.getData());
@@ -267,11 +278,58 @@ public final class MainActivity extends Activity {
         callback.onReceiveValue(selected.isEmpty() ? null : selected.toArray(new Uri[0]));
     }
 
+    void beginAttachmentDownload(IdentityBridge bridge,String id,String path,String name,String mimeType,long before,long document){
+        if(attachmentDownload!=null){bridge.downloadResult(this,id,false,false,0,"Another attachment save is pending",before,document);return;}
+        AttachmentDownload download=new AttachmentDownload(bridge,id,path,before,document);attachmentDownload=download;
+        Intent save=new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType(mimeType).putExtra(Intent.EXTRA_TITLE,name);
+        try{startActivityForResult(save,SAVE_ATTACHMENT);AttachmentTransferLog.append(getNoBackupFilesDir(),"download_picker",0);}
+        catch(RuntimeException unavailable){attachmentDownload=null;bridge.downloadResult(this,id,false,false,0,"No document saver is available",before,document);}
+    }
+    void cancelAttachmentDownload(String id){
+        AttachmentDownload download=attachmentDownload;
+        if(download!=null&&(id==null||download.id.equals(id)))download.read.cancel(download.epoch,download.document);
+    }
+    void cancelStaleAttachmentDownload(){
+        AttachmentDownload download=attachmentDownload;
+        if(download!=null&&(!IdentitySession.get(this).current(download.epoch)||documentGeneration!=download.document))download.read.cancel(download.epoch,download.document);
+    }
+    private void finishAttachmentPicker(int result,Intent data){
+        final AttachmentDownload download=attachmentDownload;
+        if(download==null)return;
+        final Uri uri=result==RESULT_OK&&data!=null?data.getData():null;
+        if(uri==null){attachmentDownload=null;AttachmentTransferLog.append(getNoBackupFilesDir(),"download_cancelled",0);download.bridge.downloadResult(this,download.id,false,true,0,null,download.epoch,download.document);return;}
+        if(!"content".equals(uri.getScheme())){attachmentDownload=null;download.bridge.downloadResult(this,download.id,false,false,0,"Invalid document save location",download.epoch,download.document);return;}
+        IdentitySession.NETWORK.execute(()->{
+            long bytes=0;boolean saved=false;
+            try{
+                checkAttachmentDownload(download);AttachmentTransferLog.append(getNoBackupFilesDir(),"download_started",0);
+                try(java.io.OutputStream output=getContentResolver().openOutputStream(uri,"w")){
+                    if(output==null)throw new IOException("Document could not be opened");
+                    bytes=IdentitySession.get(this).downloadAttachment(download.path,output,download.epoch,download.read);
+                    checkAttachmentDownload(download);output.flush();
+                }
+                checkAttachmentDownload(download);saved=true;
+                AttachmentTransferLog.append(getNoBackupFilesDir(),"download_saved",bytes);
+                download.bridge.downloadResult(this,download.id,true,false,bytes,null,download.epoch,download.document);
+            }catch(Exception failure){
+                AttachmentTransferLog.append(getNoBackupFilesDir(),"download_failed",bytes);
+                download.bridge.downloadResult(this,download.id,false,false,0,"Attachment save did not complete",download.epoch,download.document);
+            }finally{
+                if(!saved)try{DocumentsContract.deleteDocument(getContentResolver(),uri);}catch(Exception ignored){ }
+                if(attachmentDownload==download)attachmentDownload=null;
+            }
+        });
+    }
+    private void checkAttachmentDownload(AttachmentDownload download)throws IOException{
+        download.read.check();
+        if(!trustedDocument||documentGeneration!=download.document||!IdentitySession.get(this).current(download.epoch))throw new IOException("Attachment identity changed");
+    }
+
     private void addImage(LinkedHashSet<Uri> selected, Uri uri) {
         if (uri == null || !"content".equals(uri.getScheme())) return;
         try {
             String mime = getContentResolver().getType(uri);
-            if (mime != null && mime.toLowerCase(Locale.ROOT).startsWith("image/")) selected.add(uri);
+            if (!imagePickerOnly || mime != null && mime.toLowerCase(Locale.ROOT).startsWith("image/")) selected.add(uri);
         } catch (RuntimeException exception) { /* Provider did not return a readable image. */ }
     }
 

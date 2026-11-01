@@ -48,7 +48,7 @@ async function heldNativeFixture(t,prepare,consume){
 
 test('feature entries flush the current chat draft before leaving and keep their own page',async t=>{
   const f=fixture(t);await f.controller.actions.chat({id:'employee_one'});await f.controller.change({name:'draft',value:'继续写的草稿'});
-  await f.controller.actions['groups-open']();assert.equal(f.state.page,'groups');assert.equal(f.state.selectedEmployee,null);
+  await f.controller.actions['native-groups-open']();assert.equal(f.state.page,'groups');assert.equal(f.state.selectedEmployee,null);
   assert.equal(createChatPreferences({storage:f.storage}).getDraft({accountId:'user_one',workspaceId:'work-one'},'employee_one'),'继续写的草稿');
   await f.controller.actions['mobile-task-new']();assert.equal(f.state.page,'mobile-task-new');
   await f.controller.actions['notifications-open']();assert.equal(f.state.page,'notifications');assert.equal(f.state.notifications.items.length,1);
@@ -136,7 +136,7 @@ test('a delayed native status keeps its pending click unconsumed after manual na
 
 for(const route of ['group-new','group-open','group-back','groups-source','groupSource-change'])test(`a held native click cannot replace the delegated ${route} navigation`,async t=>{
   const f=await heldNativeFixture(t,async f=>{
-    await f.controller.actions['groups-open']();
+    await f.controller.actions['native-groups-open']();
     if(route==='group-back'||route==='group-open')await f.controller.actions['group-new']();
     if(route==='groups-source'||route==='groupSource-change'){
       f.state.employees=[{...employees[0],runtime:'Hermes'}];
@@ -178,7 +178,7 @@ for(const route of ['image','chat-find-open','message-menu','phone'])test(`a hel
 
 test('manual group navigation also revokes a native click already awaiting consumePendingTarget',async t=>{
   const target=deferred(),started=deferred();
-  const f=await heldNativeFixture(t,f=>f.controller.actions['groups-open'](),()=>{started.resolve();return target.promise;});
+  const f=await heldNativeFixture(t,f=>f.controller.actions['native-groups-open'](),()=>{started.resolve();return target.promise;});
   f.status.resolve(pendingNativeStatus());await started.promise;
   await f.controller.actions['group-new']();target.resolve(pendingNativeTarget());await settle();
   assert.equal(f.state.page,'group');assert.equal(f.state.groups.newGroup,true);

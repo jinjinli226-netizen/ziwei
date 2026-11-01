@@ -5,9 +5,11 @@ import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.SystemClock;
+import android.os.Bundle;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.lang.ref.WeakReference;
 import java.net.URL;
 import java.net.URLEncoder;
@@ -53,10 +55,17 @@ final class IdentitySession {
     void login(Activity activity){
         if(!OidcRules.CONFIGURED){changed();return;}
         final OidcRules.Pending flow;
-        synchronized(lock){clearLocked("正在系统浏览器中登录");flow=new OidcRules.Pending(SystemClock.elapsedRealtime());pending=flow;pendingEpoch=fence.epoch();}
+        synchronized(lock){clearLocked("请在安全登录面板输入邮箱和密码");flow=new OidcRules.Pending(SystemClock.elapsedRealtime());pending=flow;pendingEpoch=fence.epoch();}
         NativeNotifications.clear(context);changed();
         String url=OidcRules.ISSUER+"/protocol/openid-connect/auth?response_type=code&client_id="+encode(OidcRules.CLIENT)+"&redirect_uri="+encode(OidcRules.CALLBACK)+"&scope="+encode(OidcRules.SCOPE)+"&code_challenge_method=S256&code_challenge="+encode(OidcRules.challenge(flow.verifier))+"&state="+flow.state+"&nonce="+flow.nonce;
-        try{activity.startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(url)).addCategory(Intent.CATEGORY_BROWSABLE));}
+        // Custom Tabs keep authorization attached to the App while the browser owns credentials.
+        Bundle panel=new Bundle();panel.putBinder("android.support.customtabs.extra.SESSION",null);
+        Intent authorization=new Intent(Intent.ACTION_VIEW,Uri.parse(url)).addCategory(Intent.CATEGORY_BROWSABLE)
+                .putExtras(panel).putExtra("android.support.customtabs.extra.TOOLBAR_COLOR",0xfffafafa)
+                .putExtra("android.support.customtabs.extra.TITLE_VISIBILITY",1)
+                .putExtra("androidx.browser.customtabs.extra.SHARE_STATE",2)
+                .putExtra("android.support.customtabs.extra.ENABLE_INSTANT_APPS",false);
+        try{activity.startActivity(authorization);}
         catch(RuntimeException unavailable){synchronized(lock){if(pending==flow){pending=null;message="未找到可用的系统浏览器";}}changed();}
     }
     void callback(Intent intent){
@@ -122,7 +131,8 @@ final class IdentitySession {
         Map<String,String> outgoing=new HashMap<>();
         for(Map.Entry<String,String> entry:headers.entrySet()){
             String key=entry.getKey().toLowerCase(java.util.Locale.ROOT),value=entry.getValue();
-            if(!key.matches("accept|content-type|if-none-match|if-modified-since")||value.length()>2048||value.indexOf('\r')>=0||value.indexOf('\n')>=0)throw OidcRules.invalid();
+            if(!key.matches("accept|content-type|if-none-match|if-modified-since|idempotency-key")||value.length()>2048||value.indexOf('\r')>=0||value.indexOf('\n')>=0)throw OidcRules.invalid();
+            if(key.equals("idempotency-key")&&!AttachmentTransferRules.idempotency(path,method,value))throw OidcRules.invalid();
             if(key.equals("content-type")&&!value.equalsIgnoreCase("application/json"))throw OidcRules.invalid();outgoing.put(key,value);
         }
         outgoing.put("Authorization","Bearer "+bearer(before));
@@ -134,6 +144,44 @@ final class IdentitySession {
         if(!fence.current(before))throw new InvalidGrant();
         if(response.status==401)invalidate(before,"登录已失效，请重新登录");
         return response; // A dispatched mutation is never retried, including after 401.
+    }
+    Response uploadChunk(String path,Map<String,String> headers,String encoded,long before)throws Exception{
+        AttachmentTransferRules.uploadPath(path);
+        byte[] body=AttachmentTransferRules.decodeChunk(encoded);
+        Map<String,String> outgoing=new HashMap<>();
+        for(Map.Entry<String,String> entry:headers.entrySet()){
+            String key=entry.getKey().toLowerCase(java.util.Locale.ROOT),value=entry.getValue();
+            if(key.equals("content-type")&&!"application/octet-stream".equalsIgnoreCase(value)
+                    ||key.equals("accept")&&!"application/json".equalsIgnoreCase(value)
+                    ||!key.matches("content-type|accept"))throw OidcRules.invalid();
+        }
+        outgoing.put("Content-Type","application/octet-stream");outgoing.put("Authorization","Bearer "+bearer(before));
+        if(!fence.current(before))throw new InvalidGrant();
+        AttachmentTransferLog.append(context.getNoBackupFilesDir(),"upload_chunk_started",body.length);
+        final Response response;
+        try{response=http(OidcRules.API+path,"PUT",outgoing,body,120000,262144,before);}
+        catch(Exception failure){AttachmentTransferLog.append(context.getNoBackupFilesDir(),"upload_chunk_unconfirmed",body.length);throw failure;}
+        AttachmentTransferLog.append(context.getNoBackupFilesDir(),response.status>=200&&response.status<300?"upload_chunk_acknowledged":"upload_chunk_rejected",body.length);
+        if(!fence.current(before))throw new InvalidGrant();
+        if(response.status==401)invalidate(before,"登录已失效，请重新登录");
+        return response;
+    }
+    long downloadAttachment(String path,OutputStream output,long before,IdentityRead read)throws Exception{
+        AttachmentTransferRules.downloadPath(path);read.check();
+        String authorization="Bearer "+bearer(before);read.check();
+        HttpsURLConnection connection=(HttpsURLConnection)new URL(OidcRules.API+path).openConnection();
+        try{
+            if(!read.attach(connection))throw new IOException("Attachment download cancelled");
+            connection.setInstanceFollowRedirects(false);connection.setUseCaches(false);connection.setConnectTimeout(15000);connection.setReadTimeout(60000);
+            connection.setRequestMethod("GET");connection.setRequestProperty("Authorization",authorization);connection.setRequestProperty("Accept-Encoding","identity");
+            if(!fence.current(before))throw new InvalidGrant();read.check();
+            int status=connection.getResponseCode();
+            if(status==401){invalidate(before,"登录已失效，请重新登录");throw new InvalidGrant();}
+            if(status!=200)throw new IOException("Attachment download unavailable");
+            try(InputStream input=connection.getInputStream()){
+                return AttachmentTransferRules.copy(input,output,connection.getContentLengthLong(),()->{read.check();if(!fence.current(before))throw new InvalidGrant();});
+            }
+        }finally{read.detach(connection);connection.disconnect();}
     }
     String notificationBearer(String handle)throws Exception{long before=fence.epoch();if(!sameHandle(handle))throw new InvalidGrant();String result=bearer(before);if(!sameHandle(handle)||!fence.current(before))throw new InvalidGrant();return result;}
     void unauthorizedHandle(String handle){if(sameHandle(handle))invalidate(fence.epoch(),"登录已失效，请重新登录");}

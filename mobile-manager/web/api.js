@@ -42,7 +42,7 @@ export function createApi({ identity = createNativeIdentity(), fetchImpl = globa
       code: 'READ_CANCELLED', uncertain: false, requestPath: path, method: 'GET', elapsedMs: Math.max(0, Date.now() - startedAt),
     });
   }
-  async function request(path, { method = 'GET', body, signal, invalidateReads = true } = {}) {
+  async function request(path, { method = 'GET', body, signal, headers = {}, binary = false, invalidateReads = true } = {}) {
     const startedAt = Date.now();
     const epoch = cacheEpoch, authentication = authEpoch, cached = method === 'GET' ? readCache.get(path) : null;
     const readController = method === 'GET' && readTimeoutMs > 0 ? new AbortController() : null;
@@ -58,8 +58,8 @@ export function createApi({ identity = createNativeIdentity(), fetchImpl = globa
         if (method === 'GET') requireActiveRead(signal, path, startedAt);
         response = await fetchImpl(`${identity ? '' : base}${path}`, {
           method, credentials: identity ? 'omit' : 'include', cache: 'no-store',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...(cached ? { 'If-None-Match': cached.etag } : {}) },
-          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+          headers: { 'Content-Type': binary ? 'application/octet-stream' : 'application/json', Accept: 'application/json', ...(cached ? { 'If-None-Match': cached.etag } : {}), ...headers },
+          ...(body === undefined ? {} : { body: binary ? body : JSON.stringify(body) }),
           ...((readController?.signal || signal) ? { signal: readController?.signal || signal } : {}),
         });
         requireSameAuthentication(authentication);
@@ -86,7 +86,7 @@ export function createApi({ identity = createNativeIdentity(), fetchImpl = globa
         throw error;
       }
       if (!response.ok) {
-        const error = new Error(data.error || data.message || (response.status === 413 ? '图片内容超过服务器限制，请选择更小的图片' : `请求失败（${response.status}）`));
+        const error = new Error(data.error || data.message || (response.status === 413 ? '附件内容超过服务器限制，请选择更小的文件' : `请求失败（${response.status}）`));
         error.status = response.status;
         error.code = data.code;
         error.data = data;
@@ -127,10 +127,10 @@ export function createApi({ identity = createNativeIdentity(), fetchImpl = globa
     hermesProfiles: (workspace, deviceId) => get(`${ws(workspace)}/hermes/profiles${query({ deviceId })}`),
     employeeMcpStatus: (workspace, id) => get(`${ws(workspace)}/employees/${enc(id)}/mcp/status`),
     bots: workspace => get(mobile(`${ws(workspace)}/bots`)),
-    mixedGroups: workspace => get(mobile(`${ws(workspace)}/mixed-groups`)),
-    mixedGroup: (workspace, id) => get(mobile(`${ws(workspace)}/mixed-groups/${enc(id)}`)),
-    createMixedGroup: (workspace, body) => post(`${ws(workspace)}/mixed-groups`, body),
-    sendMixedGroupMessage: (workspace, id, body) => post(`${ws(workspace)}/mixed-groups/${enc(id)}/messages`, body),
+    mixedGroups: (workspace, filters = {}) => get(`${ws(workspace)}/mixed-groups${query({...filters,view:'mobile'})}`),
+    mixedGroup: (workspace, id, filters = {}) => get(`${ws(workspace)}/mixed-groups/${enc(id)}${query({...filters,view:'mobile'})}`),
+    createMixedGroup: (workspace, body) => post(`${ws(workspace)}/mixed-groups?view=mobile`, body),
+    sendMixedGroupMessage: (workspace, id, body) => post(`${ws(workspace)}/mixed-groups/${enc(id)}/messages?view=mobile`, body),
     cancelMixedGroup: (workspace, id, body = {}) => post(`${ws(workspace)}/mixed-groups/${enc(id)}/cancel`, body),
     bot: (workspace, id, options) => get(mobile(botPath(workspace, id)), readOptions(options)),
     botRuns: (workspace, id, options) => get(mobile(`${botPath(workspace, id)}/runs`), readOptions(options)),
@@ -193,6 +193,18 @@ export function createApi({ identity = createNativeIdentity(), fetchImpl = globa
       return value;
     },
     createConversation: (workspace, body) => post(`${ws(workspace)}/conversations`, body),
+    createAttachmentUpload: (conversationId, body, key) => request(`/api/conversations/${enc(conversationId)}/attachments/uploads`, { method: 'POST', body, headers: { 'Idempotency-Key': key } }),
+    attachmentUploadStatus: (conversationId, uploadId) => get(`/api/conversations/${enc(conversationId)}/attachments/uploads/${enc(uploadId)}`),
+    putAttachmentChunk: (conversationId, uploadId, offset, blob) => request(`/api/conversations/${enc(conversationId)}/attachments/uploads/${enc(uploadId)}?offset=${offset}`, { method: 'PUT', body: blob, binary: true }),
+    completeAttachmentUpload: (conversationId, uploadId) => post(`/api/conversations/${enc(conversationId)}/attachments/uploads/${enc(uploadId)}/complete`),
+    downloadAttachment: async (conversationId, attachmentId, { name = '附件', mimeType = 'application/octet-stream' } = {}) => {
+      const path = `/api/conversations/${enc(conversationId)}/attachments/${enc(attachmentId)}`;
+      if (identity) return identity.downloadAttachment(path, name, mimeType);
+      const anchor = globalThis.document?.createElement('a');
+      if (!anchor) throw new Error('当前环境无法打开附件下载');
+      anchor.href = `${base}${path}?download=1`; anchor.download = name; anchor.rel = 'noopener';
+      document.body.append(anchor); anchor.click(); anchor.remove(); return { opened: true };
+    },
     conversation: async (id, options) => {
       const conversation = await get(mobile(`/api/conversations/${enc(id)}`), readOptions(options));
       if (conversation?.id !== id || !Array.isArray(conversation.messages)) throw new Error('聊天记录返回异常，请刷新重试');

@@ -1,8 +1,9 @@
 import { accountId, workspaceId, scopeKey, employeeName, id } from './model.js';
+import { MAX_ATTACHMENTS, MAX_ATTACHMENT_TOTAL_BYTES } from './conversation-attachment-policy.js';
 
 export const FORWARD_MESSAGE_LIMIT = 20;
 export const FORWARD_NOTE_LIMIT = 4000;
-const imageLimit = 20, imageByteLimit = 10 * 1024 * 1024, textLimit = 100000;
+const textLimit = 100000;
 const modes = new Set(['reference', 'execute']);
 const uncertainCodes = new Set(['FORWARD_REQUEST_CONFLICT', 'FORWARD_RECEIPT_INVALID']);
 const rows = value => Array.isArray(value) ? value : [];
@@ -51,8 +52,8 @@ function imageBytes(attachment) {
 function preflight(messages) {
   if (messages.reduce((sum, message) => sum + String(message.content ?? message.text ?? '').length, 0) > textLimit) throw new Error('所选聊天文本超过 100000 字，请减少选择');
   const images = messages.flatMap(message => rows(message.attachments || message.images || message.metadata?.attachments));
-  if (images.length > imageLimit) throw new Error('所选聊天图片超过 20 张，请减少选择');
-  if (images.reduce((sum, attachment) => sum + imageBytes(attachment), 0) > imageByteLimit) throw new Error('所选聊天图片合计超过 10 MiB，请减少选择');
+  if (images.length > MAX_ATTACHMENTS) throw new Error('所选聊天附件超过 20 个，请减少选择');
+  if (images.reduce((sum, attachment) => sum + imageBytes(attachment), 0) > MAX_ATTACHMENT_TOTAL_BYTES) throw new Error('所选聊天附件合计超过 500 MiB，请减少选择');
 }
 function requireReceipt(result, body) {
   const receipt = result?.forward, execution = result?.execution;

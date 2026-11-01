@@ -1,11 +1,14 @@
 /** Native owns all credentials. This adapter exposes only JSON API responses. */
-export function createNativeIdentity({ bridge = globalThis.ZiweiIdentity, events = globalThis, readTimeoutMs = 60000, mutationTimeoutMs = 120000, maxPending = 32 } = {}) {
+export function createNativeIdentity({ bridge = globalThis.ZiweiIdentity, events = globalThis, readTimeoutMs = 60000, mutationTimeoutMs = 120000, downloadTimeoutMs = 1800000, maxPending = 32 } = {}) {
   if (bridge === undefined || bridge === null) return null;
   const pending = new Map(), listeners = new Set();
   let generation = 0, serial = 0, status = null, disposed = false;
   const prefix = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const error = (message, code, extra = {}) => Object.assign(new Error(message), { code, ...extra });
   const isRead = method => method === 'GET' || method === 'HEAD';
+  const uploadCollection = /^\/api\/conversations\/[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}\/attachments\/uploads$/;
+  const uploadChunk = /^\/api\/conversations\/[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}\/attachments\/uploads\/[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}\?offset=(0|[1-9][0-9]{0,9})$/;
+  const attachmentDownload = /^\/api\/conversations\/[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}\/attachments\/(?!uploads(?:$|[/?]))[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/;
   function cancelRead(entry) {
     if (!isRead(entry.method) || typeof bridge.cancel !== 'function') return;
     try { Promise.resolve(bridge.cancel(entry.id)).catch(() => {}); } catch {}
@@ -46,6 +49,11 @@ export function createNativeIdentity({ bridge = globalThis.ZiweiIdentity, events
         if (entry.generation !== generation || disposed) throw error('登录状态已变化，请重新打开聊天', 'AUTH_CHANGED');
         if (entry.signal?.aborted) throw error('读取已取消', 'READ_CANCELLED', { name: 'AbortError' });
       };
+      if (entry.download) {
+        ensureLive(); const result = JSON.parse(body);
+        if (code !== 200 || typeof result.saved !== 'boolean' || typeof result.cancelled !== 'boolean' || !Number.isSafeInteger(result.bytes) || result.bytes < 0 || result.bytes > 500 * 1024 * 1024) throw new Error();
+        entry.resolve(result); return;
+      }
       // Body parsing is deferred, as with fetch, and fenced against logout too.
       entry.resolve({ status: code, ok: code >= 200 && code < 300, headers,
         json: async () => { ensureLive(); return JSON.parse(body); },
@@ -75,9 +83,24 @@ export function createNativeIdentity({ bridge = globalThis.ZiweiIdentity, events
     const path = String(url);
     if (!path.startsWith('/api/') || path.includes('\\') || path.includes('#') || /(?:^|\/)\.{1,2}(?:\/|\?|$)/.test(decodeURIComponent(path))) throw error('仅允许第一方 API 请求', 'NATIVE_PATH_INVALID');
     const headers = new Headers(options.headers || {});
-    for (const name of headers.keys()) if (!['accept', 'content-type', 'if-none-match'].includes(name.toLowerCase())) throw error('原生请求包含不支持的请求头', 'NATIVE_HEADERS_INVALID');
-    if (options.body !== undefined && typeof options.body !== 'string') throw error('原生请求仅支持 JSON 文本', 'NATIVE_BODY_INVALID');
-    if (options.body !== undefined) JSON.parse(options.body);
+    for (const name of headers.keys()) {
+      if (name.toLowerCase() === 'idempotency-key' && method === 'POST' && uploadCollection.test(path) && /^[A-Za-z0-9._:-]{1,128}$/.test(headers.get(name))) continue;
+      if (!['accept', 'content-type', 'if-none-match'].includes(name.toLowerCase())) throw error('原生请求包含不支持的请求头', 'NATIVE_HEADERS_INVALID');
+    }
+    const binary = typeof Blob !== 'undefined' && options.body instanceof Blob;
+    let body = options.body;
+    if (binary) {
+      const match = uploadChunk.exec(path);
+      if (method !== 'PUT' || !match || Number(match[1]) > 500 * 1024 * 1024 || !body.size || body.size > 8 * 1024 * 1024 || headers.get('content-type') !== 'application/octet-stream' || [...headers.keys()].some(name => !['accept', 'content-type'].includes(name))) throw error('文件分片路径、类型或大小无效', 'NATIVE_BINARY_INVALID');
+      if (typeof bridge.requestBinary !== 'function') throw error('请更新 App 后上传文件', 'NATIVE_BINARY_UNAVAILABLE');
+      const bytes = new Uint8Array(await body.arrayBuffer()); let text = '';
+      for (let offset = 0; offset < bytes.length; offset += 32768) text += String.fromCharCode(...bytes.subarray(offset, offset + 32768));
+      body = btoa(text);
+      if (expected !== generation || disposed) throw error('登录状态已变化，请重新打开聊天', 'AUTH_CHANGED');
+    } else {
+      if (body !== undefined && typeof body !== 'string') throw error('原生请求仅支持 JSON 文本或文件分片', 'NATIVE_BODY_INVALID');
+      if (body !== undefined) JSON.parse(body);
+    }
     if (options.signal?.aborted) throw error('读取已取消', 'READ_CANCELLED', { name: 'AbortError' });
     if (pending.size >= maxPending) throw error('当前请求较多，请稍后再试', 'NATIVE_PENDING_LIMIT', { uncertain: false });
     return new Promise((resolve, reject) => {
@@ -90,12 +113,32 @@ export function createNativeIdentity({ bridge = globalThis.ZiweiIdentity, events
       const duration = isRead(method) ? readTimeoutMs : mutationTimeoutMs;
       timer = setTimeout(() => { cancelRead(entry); entry.reject(error(isRead(method) ? '读取超时，请刷新重试' : '尚未收到操作回执，请先刷新核对', isRead(method) ? 'READ_TIMEOUT' : 'NATIVE_REQUEST_TIMEOUT', { uncertain: !isRead(method) })); }, Math.max(1, duration));
       options.signal?.addEventListener('abort', abort, { once: true });
-      try { Promise.resolve(bridge.request(id, path, method, JSON.stringify(Object.fromEntries(headers)), options.body || '')).catch(() => entry.reject(error('原生请求未完成，请刷新核对', 'NATIVE_REQUEST_FAILED', { uncertain: method !== 'GET' }))); }
+      try { Promise.resolve(binary ? bridge.requestBinary(id, path, JSON.stringify(Object.fromEntries(headers)), body) : bridge.request(id, path, method, JSON.stringify(Object.fromEntries(headers)), body || '')).catch(() => entry.reject(error('原生请求未完成，请刷新核对', 'NATIVE_REQUEST_FAILED', { uncertain: method !== 'GET' }))); }
       catch { entry.reject(error('原生请求未完成，请刷新核对', 'NATIVE_REQUEST_FAILED', { uncertain: method !== 'GET' })); }
     });
   }
+  async function downloadAttachment(path, name, mimeType, { signal } = {}) {
+    const expected = generation, value = status || await getStatus();
+    if (expected !== generation || disposed) throw error('登录状态已变化，请重新打开聊天', 'AUTH_CHANGED');
+    requireConfigured(value);
+    if (!value.authenticated) throw error('请使用统一登录后继续', 'NATIVE_AUTH_REQUIRED', { status: 401 });
+    if (!attachmentDownload.test(path) || typeof name !== 'string' || !name.trim() || name.length > 255 || /[\\/\x00-\x1f\x7f]/.test(name) || typeof mimeType !== 'string' || mimeType.length > 255 || !/^[A-Za-z0-9!#$&^_.+-]+\/[A-Za-z0-9!#$&^_.+-]+$/.test(mimeType)) throw error('文件保存信息无效', 'NATIVE_DOWNLOAD_INVALID');
+    if (typeof bridge.downloadAttachment !== 'function') throw error('请更新 App 后保存文件', 'NATIVE_DOWNLOAD_UNAVAILABLE');
+    if (signal?.aborted) throw error('保存已取消', 'READ_CANCELLED', { name: 'AbortError' });
+    if (pending.size >= maxPending) throw error('当前请求较多，请稍后再试', 'NATIVE_PENDING_LIMIT');
+    return new Promise((resolve, reject) => {
+      const id = `${prefix}_${++serial}`; let timer;
+      function finish(done, result) { clearTimeout(timer); signal?.removeEventListener('abort', abort); pending.delete(id); done(result); }
+      const entry = { id, method: 'GET', download: true, generation: expected, signal, resolve: value => finish(resolve, value), reject: cause => finish(reject, cause) };
+      const abort = () => { cancelRead(entry); entry.reject(error('保存已取消', 'READ_CANCELLED', { name: 'AbortError' })); };
+      pending.set(id, entry); signal?.addEventListener('abort', abort, { once: true });
+      timer = setTimeout(() => { cancelRead(entry); entry.reject(error('保存文件超时，请重新选择保存位置', 'NATIVE_DOWNLOAD_TIMEOUT')); }, downloadTimeoutMs);
+      try { Promise.resolve(bridge.downloadAttachment(id, path, name, mimeType)).catch(() => entry.reject(error('保存文件未完成', 'NATIVE_DOWNLOAD_FAILED'))); }
+      catch { entry.reject(error('保存文件未完成', 'NATIVE_DOWNLOAD_FAILED')); }
+    });
+  }
   return {
-    fetch, getStatus, invalidate,
+    fetch, downloadAttachment, getStatus, invalidate,
     subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
     async login() {
       const value = await getStatus(); requireConfigured(value);

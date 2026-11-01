@@ -75,6 +75,8 @@ async function fixture(name, width) {
   const releaseRead = async () => { for (const release of control.held.splice(0)) await release(); await raf(page); };
   const session = { context, page, control, releaseRead, close: async () => { await releaseRead(); await context.close(); } }; sessions.push(session);
   await page.goto(`${origin}/__ziwei_manager__/index.html`);
+  await page.getByRole('heading', { name: '我的员工', exact: true }).waitFor();
+  await page.locator('.bottom-nav [data-action=navigate][data-tab=chat]').click();
   await page.getByRole('heading', { name: '聊天', exact: true }).waitFor();
   await page.locator('.thread-row').first().waitFor();
   return session;
@@ -171,7 +173,8 @@ try {
     assert.equal(await page.locator('.thread-preview img').count(), 0);
     assert.equal(await page.evaluate(() => window.__draftExecuted), undefined);
     await capture(page, `pinned-draft-${width}`);
-    await page.reload(); await page.locator('.thread-preview.has-draft').waitFor();
+    await page.reload(); await page.getByRole('heading', { name: '我的员工', exact: true }).waitFor();
+    await page.locator('.bottom-nav [data-action=navigate][data-tab=chat]').click(); await page.locator('.thread-preview.has-draft').waitFor();
     assert.equal(await page.locator('.thread-row').first().getAttribute('data-id'), employees[0].id);
     await openChat(session); assert.equal(await page.locator('[name=draft]').inputValue(), draft);
     checks.push(`${width}px: escaped literal search/highlights, stable image/timeline during open/type/poll/reopen and two different ordinary jumps, caret through poll and resized viewport, centered ordinary jumps, exact forwarded quote jump, native back ordering, pin sort/reload and escaped draft preview/restore`);

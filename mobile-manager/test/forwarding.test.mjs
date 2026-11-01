@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createForwarding, isForwardableMessage, orderedForwardMessages, FORWARD_MESSAGE_LIMIT, FORWARD_NOTE_LIMIT } from '../web/forwarding.js';
 import { initialState, scopeKey } from '../web/model.js';
+import { MAX_ATTACHMENT_BYTES, MAX_ATTACHMENT_TOTAL_BYTES, MAX_ATTACHMENTS, ATTACHMENT_CHUNK_BYTES } from '../web/conversation-attachment-policy.js';
+import { readFile } from 'node:fs/promises';
 
 const deferred = () => { let resolve, reject; const promise = new Promise((done, fail) => { resolve = done; reject = fail; }); return { promise, resolve, reject }; };
 const tick = () => new Promise(resolve => setImmediate(resolve));
@@ -45,6 +47,26 @@ async function prepare(f, ids = ['first']) {
   await f.module.actions['forward-target']({ id: 'target' });
   assert.equal(f.state.forward.phase, 'confirm');
 }
+
+test('mobile attachment policy is generated from canonical source with exact 500MiB and 8MiB limits', async () => {
+  assert.equal(MAX_ATTACHMENT_BYTES, 524288000); assert.equal(MAX_ATTACHMENT_TOTAL_BYTES, MAX_ATTACHMENT_BYTES);
+  assert.equal(MAX_ATTACHMENTS, 20); assert.equal(ATTACHMENT_CHUNK_BYTES, 8388608);
+  assert.deepEqual(await readFile(new URL('../web/conversation-attachment-policy.js', import.meta.url)), await readFile(new URL('../../src/conversation-attachment-policy.mjs', import.meta.url)));
+});
+
+test('forwarding a 500MiB stored attachment submits only original message ids and never file content', async t => {
+  const f = fixture({ state: { messages: [{ id: 'large-original', role: 'assistant', content: '原始大文件', attachments: [{ attachmentId: 'attachment-original', name: 'archive.bin', mimeType: 'application/octet-stream', size: MAX_ATTACHMENT_BYTES, sha256: 'a'.repeat(64) }] }] } });
+  t.after(() => f.module.dispose()); await prepare(f, ['large-original']);
+  assert.equal(await f.module.submit(), true);
+  const body = f.calls[0][1]; assert.deepEqual(body.messageIds, ['large-original']);
+  assert(!Object.hasOwn(body, 'attachments')); assert(Buffer.byteLength(JSON.stringify(body)) < 1000);
+});
+
+test('forwarding aggregates attachment references across original messages before the network call', async t => {
+  const f = fixture({ state: { messages: [{ id: 'one', role: 'assistant', attachments: [{ attachmentId: 'file-one', size: MAX_ATTACHMENT_BYTES }] }, { id: 'two', role: 'user', attachments: [{ attachmentId: 'file-two', size: 1 }] }] } });
+  t.after(() => f.module.dispose()); await prepare(f, ['one', 'two']);
+  assert.equal(await f.module.submit(), false); assert.equal(f.calls.length, 0); assert.match(f.state.forward.error, /500 MiB/);
+});
 
 test('only stable ordinary user/assistant messages can be forwarded, and selection follows source order', () => {
   const source = [{ id: 'a', role: 'user' }, { id: 'b', role: 'assistant' }];
@@ -175,7 +197,7 @@ test('selection, text, image and note limits reject the whole forward without cl
     { messages: Array.from({ length: 21 }, (_, i) => ({ id: `m${i}`, role: 'user', content: 'a' })) },
     { messages: [{ id: 'm0', role: 'user', content: 'a'.repeat(100001) }] },
     { messages: [{ id: 'm0', role: 'user', attachments: Array.from({ length: 21 }, () => ({ url: 'https://example.invalid/image.png' })) }] },
-    { messages: [{ id: 'm0', role: 'user', attachments: [{ url: 'https://example.invalid/image.png', size: 10 * 1024 * 1024 + 1 }] }] },
+    { messages: [{ id: 'm0', role: 'user', attachments: [{ attachmentId: 'attachment-original', name: 'large.bin', size: 500 * 1024 * 1024 + 1 }] }] },
     { messages: [{ id: 'm0', role: 'user', content: 'a' }], note: 'a'.repeat(4001) },
   ];
   for (const { messages, note = '' } of cases) {

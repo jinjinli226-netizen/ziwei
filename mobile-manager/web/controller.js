@@ -6,14 +6,17 @@ import { createForwarding } from './forwarding.js';
 import { createChatPreferences } from './chat-preferences.js';
 import { searchChatMessages } from './chat-search.js';
 import { createMobileGroups } from './mobile-groups.js';
+import { createWorkspaceGroups } from './workspace-groups.js';
 import { createMobileTasks } from './mobile-tasks.js';
 import { createMobileNotifications } from './mobile-notifications.js';
 import { createNotificationPresence } from './notification-presence.js';
 import {failureFinalization,finalizationPresentation} from './failure-finalization.mjs';
 import {mergeLatestChat,prependChatHistory,canQueueChat} from './chat-history.js';
 import {createChatInteractions} from './chat-interactions.js';
+import { createDraftAttachments, createAttachmentUploader, releaseDraftAttachments } from './attachment-upload.js';
+import { INLINE_ATTACHMENT_BYTES, MAX_ATTACHMENTS } from './conversation-attachment-policy.js';
 
-const IMAGE_LIMIT = 10 * 1024 * 1024;
+const IMAGE_LIMIT = INLINE_ATTACHMENT_BYTES;
 const avatarLimit = 2 * 1024 * 1024;
 const botReadWarning = value => [value?.mobileReadError,value?.latest_run?.mobileReadError,
   ...['groups','collaboration'].map(key=>value?.nativeResources?.[key]?.readError||value?.nativeResources?.[key]?.mobileReadError)]
@@ -32,7 +35,7 @@ const imageMime = bytes => {
   return '';
 };
 async function readImages(files) {
-  if (files.length > 20) throw new Error('每条消息最多附加 20 张图片');
+  if (files.length > MAX_ATTACHMENTS) throw new Error('每条消息最多附加 20 张图片');
   if (files.reduce((sum, file) => sum + file.size, 0) > IMAGE_LIMIT) throw new Error('图片合计不能超过 10 MiB');
   const values = [];
   for (const file of files) {
@@ -52,6 +55,7 @@ export function createController({ state, api, render = () => {}, storage = glob
   let epoch = 0, bootEpoch = 0, navigationEpoch = 0, accountGeneration = 0, employeeEpoch = 0, chatReadEpoch = 0, chatConversationId = null, employeeReadEpoch = 0, phoneEpoch = 0, phoneRead = null, disposed = false, timer = null, attachmentEpoch = 0, nativePaused = false;
   if (api.identityMode === 'oidc') state.identity = {available:true,mode:'oidc',configured:false,authenticated:false};
   const composers = new Map(), pendingMutations = new Set(), routineRequests = new Map(), messageKeys = new Set(), conversationReads = new Map();
+  const uploadAttachment = createAttachmentUploader({ api });
   const resourceReads = new Map(), employeeReads = new Map(), employeeWrites = new Map();
   let employeeGets = new AbortController(), chatWriteEpoch = 0;
   const preferences = createChatPreferences({storage}), draftTimers = new Map();
@@ -127,6 +131,33 @@ export function createController({ state, api, render = () => {}, storage = glob
   function restoreComposer() {
     const item = composer(); state.draft = item.draft; state.attachments = item.attachments;
   }
+  async function uploadDraftAttachments(item, token, conversationId) {
+    if (item.uploadPromise) return item.uploadPromise;
+    const active = () => valid(token, true) && state.page === 'chat' && state.conversation?.id === conversationId && composer() === item;
+    item.uploadPromise = (async () => {
+      while (active()) {
+        const attachment = item.attachments.find(value => value.file && !value.ref && value.upload.phase === 'idle');
+        if (!attachment) return;
+        attachment.upload = { phase: 'uploading', offset: attachment.upload.offset, total: attachment.size, error: '' }; draw();
+        try {
+          attachment.ref = await uploadAttachment(conversationId, attachment.file, {
+            active: () => active() && item.attachments.includes(attachment),
+            onProgress: progress => { attachment.upload = { phase: 'uploading', ...progress, error: '' }; if (active()) draw(); },
+          });
+          attachment.upload = { phase: 'complete', offset: attachment.size, total: attachment.size, error: '' };
+        } catch (error) {
+          attachment.upload = { ...attachment.upload, phase: 'failed', error: error.message || '附件上传失败，请重试继续' };
+          if (error?.status === 401) fail(error, token, true);
+        }
+        if (active()) draw();
+      }
+    })();
+    try { await item.uploadPromise; }
+    finally {
+      item.uploadPromise = null;
+      if (!active()) for (const attachment of item.attachments) if (attachment.file && !attachment.ref && attachment.upload.phase === 'idle') attachment.upload = { ...attachment.upload, phase: 'failed', error: '已离开原聊天，点击重试继续上传' };
+    }
+  }
   function renewEmployeeGets() {
     const previous = employeeGets;
     employeeGets = new AbortController();
@@ -145,9 +176,9 @@ export function createController({ state, api, render = () => {}, storage = glob
   }
   function clearWorkspace() {
     clearSelection(); state.employees = []; state.bots = []; state.tasks = []; state.devices = []; state.phones = [];
-    inbox.reset(); groups.reset(); mobileTasks.reset(); notifications.reset(); state.chatSearch = '';
+    inbox.reset(); groups.reset(); workspaceGroups.reset(); mobileTasks.reset(); notifications.reset(); state.chatSearch = '';
     resourceReads.clear(); employeeWrites.clear(); phoneRead = null; state.resources = initialResources();
-    state.report = null; state.reportSelection = []; state.page = 'home'; state.tab = 'chat'; state.imagePreview = null;
+    state.report = null; state.reportSelection = []; state.page = 'home'; state.tab = 'employees'; state.filter = 'all'; state.search = ''; state.imagePreview = null;
     state.phoneCommand = null; state.phoneError = ''; state.loading = false; state.busy = false;
     state.botSettings = null; state.deviceSettings = null; state.settingsTrail = [];
   }
@@ -159,12 +190,12 @@ export function createController({ state, api, render = () => {}, storage = glob
     accountGeneration++;
     reporting?.clear?.(state);
     if (explicitLogout && userId) {
-      clearAccountRequests(userId); forwarding.reset({ clearAccount: true }); groups.reset({clearAccount:true});
+      clearAccountRequests(userId); forwarding.reset({ clearAccount: true }); groups.reset({clearAccount:true}); workspaceGroups.reset({clearAccount:true});
       const cleared = preferences.clearAccount(userId); if(!cleared.ok)message = cleared.error;
     }
     if (explicitLogout && userId) { try { storage?.removeItem(workspaceKey(userId)); } catch {} }
-    epoch++; bootEpoch++; composers.clear(); pendingMutations.clear(); routineRequests.clear(); clearWorkspace();
-    state.user = null; state.workspace = null; state.workspaces = []; state.phase = 'login'; state.error = message; state.notice = ''; draw();
+    epoch++; bootEpoch++; for (const item of composers.values()) releaseDraftAttachments(item.attachments); composers.clear(); pendingMutations.clear(); routineRequests.clear(); clearWorkspace();
+    state.user = null; state.workspace = null; state.workspaces = []; state.phase = 'login'; state.identityRestore = false; state.error = message; state.notice = ''; draw();
   }
   function fail(error, token = current(), employee = false) {
     if (error?.status === 401) { if (valid(token)) requireLogin('登录已过期，请重新登录'); return false; }
@@ -267,6 +298,7 @@ export function createController({ state, api, render = () => {}, storage = glob
     },
   });
   const groups = createMobileGroups({state,api,current,valid,draw,fail,storage});
+  const workspaceGroups = createWorkspaceGroups({state,api,current,valid,draw,fail});
   const mobileTasks = createMobileTasks({state,api,current,valid,draw,fail,
     onSaved: (_task, token) => { if(valid(token))invalidateResources('tasks'); },
   });
@@ -350,6 +382,7 @@ export function createController({ state, api, render = () => {}, storage = glob
     if (disposed || nativePaused || globalThis.document?.hidden || !state.user || !workspaceId(state) || state.phase !== 'ready') return false;
     const token = current(), primary = primaryResource();
     void groups.poll();
+    void workspaceGroups.poll();
     if(typeof api.mobileNotifications==='function')void notifications.poll();
     if (!silent) draw();
     // The inbox has its own lifecycle. A slow index cannot hold employee/history reads open.
@@ -571,7 +604,9 @@ export function createController({ state, api, render = () => {}, storage = glob
     const blocking=blockingChatExecution(state);
     if(blocking && !canQueueChat(state,blocking)){const finalization=failureFinalization(blocking);throw new Error(finalization?finalizationPresentation(finalization).detail:'当前工作尚未结束，请等待回执或使用停止入口');}
     stashComposer();
-    const item = composer(), content = item.draft.trim(), attachments = [...item.attachments];
+    const item = composer(), content = item.draft.trim();
+    if (item.attachments.some(attachment => attachment.file && !attachment.ref)) throw new Error('附件尚未上传完成，请等待上传或点击重试后再发送');
+    const attachments = item.attachments.map(attachment => attachment.ref || attachment);
     if (!content && !attachments.length) return;
     const fingerprint = JSON.stringify([state.conversation.id, content, attachments]);
     const token = current(), conversationId = state.conversation.id, revision = item.revision, requestKey = messageKey();
@@ -608,7 +643,7 @@ export function createController({ state, api, render = () => {}, storage = glob
       let clearedVisibleComposer = false;
       if (item.request === request) {
         if (item.revision === revision) {
-          item.draft = ''; item.attachments = []; persistComposer(item);
+          releaseDraftAttachments(item.attachments); item.draft = ''; item.attachments = []; persistComposer(item);
           // Returning to this employee creates a new visit, but still uses the
           // original composer. Do not let its stale visible text repopulate a
           // draft that this accepted request has just cleared.
@@ -718,10 +753,14 @@ export function createController({ state, api, render = () => {}, storage = glob
     finally { finishWrite(); if (valid(token, true)) { state.busy = false; draw(); } }
   }
   const actions = {
+    'identity-restore': action(async () => {
+      if (api.identityMode === 'oidc' && state.phase === 'login' && state.identityRestore && state.identity?.configured && state.identity.authenticated) return boot();
+    }),
     'unified-login': action(async () => {
       if (api.identityMode !== 'oidc' || !state.identity?.configured || state.busy) return;
+      if (state.identityRestore) return boot();
       const token = current(); state.busy = true; state.error = ''; state.notice = ''; draw();
-      try { await api.login(); if (valid(token)) { state.notice = '已打开系统浏览器，请完成统一登录后返回应用'; draw(); } }
+      try { await api.login(); if (valid(token)) { state.notice = '请在安全登录面板完成登录，成功后自动返回应用'; draw(); } }
       finally { if (valid(token)) { state.busy = false; draw(); } }
     }),
     navigate: action(async ({ tab }) => {
@@ -734,6 +773,8 @@ export function createController({ state, api, render = () => {}, storage = glob
       if (state.forwardDetail) { state.forwardDetail = null; draw(); return; }
       if (state.chatFind) { state.chatFind = null; draw(); return; }
       if (state.forward) { await forwarding.actions['forward-back'](); return; }
+      if (['workspace-group', 'workspace-group-new'].includes(state.page)) { await workspaceGroups.open(); return; }
+      if (state.page === 'groups') { await workspaceGroups.open(); return; }
       if (state.page === 'group') { state.page='groups';draw();return; }
       if (['detail', 'employee-detail', 'settings', 'bot-settings', 'device-settings'].includes(state.page)) {
         const previous = state.settingsTrail?.pop() || { page: 'home', tab: 'me' };
@@ -750,7 +791,7 @@ export function createController({ state, api, render = () => {}, storage = glob
       }
       stashComposer(); clearSelection(); state.settingsTrail = []; state.page = 'home'; state.phase = workspaceId(state) ? 'ready' : 'workspace'; state.error = ''; draw();
     }),
-    refresh: action(() => state.page === 'bot-settings' ? botSettings.load() : state.page === 'device-settings' ? deviceSettings.load() : refresh()),
+    refresh: action(() => state.page === 'workspace-groups' ? workspaceGroups.actions['workspace-groups-refresh']() : state.page === 'workspace-group' ? workspaceGroups.actions['workspace-group-refresh']() : state.page === 'bot-settings' ? botSettings.load() : state.page === 'device-settings' ? deviceSettings.load() : refresh()),
     'switch-workspace': action(() => { stashComposer(); clearSelection(); state.phase = 'workspace'; state.page = 'workspaces'; draw(); }),
     'select-workspace': action(({ id: slug }) => chooseWorkspace(state.workspaces.find(item => item.slug === slug || item.workspace_id === slug))),
     chat: action(({ id: employeeId }) => { if (state.page === 'chat' && state.selectedEmployee?.id === employeeId) return; state.settingsTrail = []; return openEmployee(employeeId, 'chat'); }),
@@ -799,7 +840,9 @@ export function createController({ state, api, render = () => {}, storage = glob
     }),
     ...forwarding.actions,
     ...Object.fromEntries(Object.entries(groups.actions).map(([name, fn]) => [name, action(fn)])),
-    'groups-open': action(async () => { stashComposer();clearSelection();await groups.open(); }),
+    ...Object.fromEntries(Object.entries(workspaceGroups.actions).map(([name, fn]) => [name, action(fn)])),
+    'groups-open': action(async () => { stashComposer();clearSelection();await workspaceGroups.open(); }),
+    'native-groups-open': action(async () => { stashComposer();clearSelection();await groups.open(); }),
     'groups-settings': action(async ({id:employeeId}) => {
       if(state.groups?.busy)return false;
       rememberSettingsPage();enterEmployeePage(employeeId,'bot-settings',false);await botSettings.load();
@@ -883,7 +926,26 @@ export function createController({ state, api, render = () => {}, storage = glob
       } catch (error) { fail(error, token); }
       finally { finishWrite(); pendingMutations.delete(key); if (valid(token,true)) { invalidateResources('employees', 'bots'); state.stopBusy = false; syncLoading(); draw(); } }
     }),
-    'remove-attachment': action(({ id: index }) => { state.attachments = state.attachments.filter((_, i) => i !== Number(index)); if (state.selectedEmployee && state.page === 'chat') { stashComposer(); composer().revision++; } draw(); }),
+    'remove-attachment': action(({ id: value }) => {
+      const removed = state.attachments.filter((attachment, index) => attachment.localId ? attachment.localId === value : index === Number(value));
+      releaseDraftAttachments(removed); state.attachments = state.attachments.filter(attachment => !removed.includes(attachment));
+      if (state.selectedEmployee && state.page === 'chat') { stashComposer(); composer().revision++; } draw();
+    }),
+    'attachment-retry': action(async ({ id: localId }) => {
+      if (state.page !== 'chat' || !state.conversation?.id || state.sending) return;
+      const item = composer(), attachment = item.attachments.find(value => value.localId === localId);
+      if (!attachment || attachment.ref || attachment.upload.phase !== 'failed') return;
+      attachment.upload.phase = 'idle'; attachment.upload.error = ''; state.error = ''; draw();
+      await uploadDraftAttachments(item, current(), state.conversation.id);
+    }),
+    'attachment-download': action(async ({ id: attachmentId, conversationId = state.conversation?.id }) => {
+      if (!conversationId || conversationId !== state.conversation?.id) return;
+      const attachments = state.messages.flatMap(message => [...(message.attachments || []), ...(message.forward?.messages || []).flatMap(quote => quote.attachments || [])]);
+      const attachment = attachments.find(value => value.attachmentId === attachmentId);
+      if (!attachment) return;
+      const token = current(), result = await api.downloadAttachment(conversationId, attachmentId, attachment);
+      if (valid(token, true)) { state.notice = result?.cancelled ? '已取消保存附件' : result?.saved ? '附件已保存' : '已打开附件下载'; draw(); }
+    }),
     phone: action(async ({ id: phoneId }) => {
       if (!canUsePhones()) throw new Error('手机互联需要工作区 Owner 或管理员权限');
       const phone = state.phones.find(item => item.id === phoneId);
@@ -927,6 +989,7 @@ export function createController({ state, api, render = () => {}, storage = glob
   for (const name of [
     'navigate', 'back', 'switch-workspace', 'select-workspace', 'chat', 'employee-detail',
     'settings', 'bot-settings', 'device-settings', 'groups-open', 'groups-settings',
+    'native-groups-open', 'workspace-group-open', 'workspace-group-new',
     'groups-source', 'group-new', 'group-open', 'mobile-task-new', 'mobile-task-another',
     'mobile-task-save', 'mobile-task-review', 'task', 'notifications-open',
     'notifications-target', 'notifications-pending', 'phone', 'logout',
@@ -993,6 +1056,7 @@ export function createController({ state, api, render = () => {}, storage = glob
     if (target.isConnected === false) return;
     if (forwarding.change(event)) return;
     if (mobileTasks.change(event)) return;
+    if (['workspace-groups', 'workspace-group', 'workspace-group-new'].includes(state.page)) { workspaceGroups.change(event); return; }
     if (['groups','group'].includes(state.page)) {
       if (target.name === 'groupSource') navigationEpoch++;
       await groups.change(event);return;
@@ -1009,11 +1073,23 @@ export function createController({ state, api, render = () => {}, storage = glob
       return;
     }
     if (!['images', 'attachments', 'avatar'].includes(target.name) || !target.files?.length) return;
+    if (state.page === 'chat' && target.name !== 'avatar') {
+      const token = current();
+      try {
+        if (!state.conversation?.id || !state.selectedEmployee) throw new Error('请先打开员工聊天再添加附件');
+        const selected = createDraftAttachments(Array.from(target.files), state.attachments);
+        state.attachments = [...state.attachments, ...selected]; stashComposer();
+        const item = composer(); item.revision++; state.error = ''; draw();
+        await uploadDraftAttachments(item, token, state.conversation.id);
+      } catch (error) { fail(error, token, true); }
+      finally { target.value = ''; }
+      return;
+    }
     const token = current(), readToken = ++attachmentEpoch, avatar = target.name === 'avatar', page = state.page, reportIndex = state.report?.index;
     state.attachmentReading = true; state.error = ''; draw();
     try {
       const files = Array.from(target.files), original = [...state.attachments];
-      if (!avatar && original.length + files.length > 20) throw new Error('每条消息最多附加 20 张图片');
+      if (!avatar && original.length + files.length > MAX_ATTACHMENTS) throw new Error('每条消息最多附加 20 张图片');
       if (avatar && files.length !== 1) throw new Error('请选择一张头像');
       if (avatar && files[0].size > avatarLimit) throw new Error('头像不能超过 2 MiB');
       const images = await readImages(files);
@@ -1026,7 +1102,7 @@ export function createController({ state, api, render = () => {}, storage = glob
     } catch (error) { fail(error, token); }
     finally { if (attachmentEpoch === readToken && valid(token)) { state.attachmentReading = false; draw(); } target.value = ''; }
   }
-  const resume = () => { nativePaused = false; if (!disposed) {void refresh({ silent: true });if(state.phase==='ready')void notifications.handleNative();} };
+  const resume = () => { nativePaused = false; if (!disposed) {if(state.phase==='login'&&state.identityRestore)void boot();else void refresh({ silent: true });if(state.phase==='ready')void notifications.handleNative();} };
   const notificationEvent = event => { if(!disposed&&!nativePaused&&state.phase==='ready')void notifications.handleNative(event?.detail); };
   const pause = () => {
     if (disposed || nativePaused) return;
@@ -1050,7 +1126,7 @@ export function createController({ state, api, render = () => {}, storage = glob
     if (disposed) return;
     const token = current(), visit = ++bootEpoch;
     const live = () => !disposed && visit === bootEpoch && token.epoch === epoch;
-    state.phase = 'boot'; state.error = ''; draw();
+    state.phase = 'boot'; state.identityRestore = false; state.error = ''; state.notice = ''; draw();
     globalThis.document?.addEventListener('visibilitychange', visibility);
     globalThis.addEventListener?.('ziwei:resume', resume);
     globalThis.addEventListener?.('ziwei:pause', pause);
@@ -1068,7 +1144,12 @@ export function createController({ state, api, render = () => {}, storage = glob
     } catch (error) {
       if (live()) {
         if (error.status === 401) requireLogin();
-        else { state.phase = 'login'; state.error = error.message; draw(); }
+        else {
+          state.phase = 'login'; state.error = error.message;
+          state.identityRestore = api.identityMode === 'oidc' && state.identity?.configured === true && state.identity.authenticated === true;
+          if (state.identityRestore) state.notice = '已保留本机登录，请检查网络后重试进入。';
+          draw();
+        }
       }
     }
   }
@@ -1082,11 +1163,11 @@ export function createController({ state, api, render = () => {}, storage = glob
   function dispose() {
     stashComposer(); flushDrafts();
     for (const pending of draftTimers.values()) clearTimeout(pending); draftTimers.clear();
-    disposed = true; epoch++; clearInterval(timer); timer = null; composers.clear(); pendingMutations.clear(); routineRequests.clear(); resourceReads.clear(); employeeReads.clear(); employeeWrites.clear(); phoneRead = null;
+    disposed = true; epoch++; clearInterval(timer); timer = null; for (const item of composers.values()) releaseDraftAttachments(item.attachments); composers.clear(); pendingMutations.clear(); routineRequests.clear(); resourceReads.clear(); employeeReads.clear(); employeeWrites.clear(); phoneRead = null;
     unsubscribeIdentity?.();
     employeeGets.abort();
     botSettings.dispose?.(); deviceSettings.dispose?.();
-    inbox.dispose(); forwarding.dispose(); groups.dispose(); mobileTasks.dispose(); notifications.dispose(); notificationPresence.dispose();
+    inbox.dispose(); forwarding.dispose(); groups.dispose(); workspaceGroups.dispose(); mobileTasks.dispose(); notifications.dispose(); notificationPresence.dispose();
     globalThis.document?.removeEventListener('visibilitychange', visibility);
     globalThis.removeEventListener?.('ziwei:resume', resume);
     globalThis.removeEventListener?.('ziwei:pause', pause);

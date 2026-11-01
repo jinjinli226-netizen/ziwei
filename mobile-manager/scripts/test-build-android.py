@@ -14,6 +14,21 @@ spec.loader.exec_module(build)
 
 
 class BuildSafetyTests(unittest.TestCase):
+    def test_shared_avatar_is_copied_from_canonical_source_and_updated_on_resync(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            module = repo / "mobile-manager"
+            (module / "web").mkdir(parents=True)
+            (repo / "src").mkdir()
+            (repo / "src/conversation-attachment-policy.mjs").write_bytes(b"export const version = 1;\n")
+            source = repo / "src/employee-avatar.mjs"
+            source.write_bytes(b"export const version = 1;\n")
+            build.sync_shared_web_assets(module, repo)
+            self.assertEqual((module / "web/employee-avatar.js").read_bytes(), source.read_bytes())
+            source.write_bytes(b"export const version = 2;\n")
+            build.sync_shared_web_assets(module, repo)
+            self.assertEqual((module / "web/employee-avatar.js").read_bytes(), source.read_bytes())
+
     def input_fixture(self, root):
         for relative, data in {"android/src/com/example/Main.java": b"class Main {}",
                                "android/res/values/strings.xml": b"<resources />",

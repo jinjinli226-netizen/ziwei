@@ -1,6 +1,7 @@
 // Shared presentation uses the same receipt rules as the desktop product.
 import {botPresence, botStopPresentation, executionUncertain, executionOccupiesSlot} from './bot-presentation.js';
 import {pendingFinalizationAction} from './failure-finalization.mjs';
+import {employeeAvatarSrc,isCharacterAvatar} from './employee-avatar.js';
 
 export {executionUncertain, botStopPresentation};
 function executionScopeMatches(run, state, {requireEmployee = false} = {}) {
@@ -40,8 +41,13 @@ export const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, c => 
 export const employeeName = value => value?.employee?.name || value?.name || '数字员工';
 export function avatarUrl(value) {
   const candidate = value?.employee?.avatar || value?.employee?.avatar_url || value?.avatar || value?.avatar_url || '';
+  const seed = value?.employee?.id || value?.id || employeeName(value);
+  if (isCharacterAvatar(candidate)) return employeeAvatarSrc(candidate, seed);
   if (/^data:image\/(png|jpeg|gif|webp);base64,[a-z0-9+/=\s]+$/i.test(candidate)) return candidate;
-  try { const url = new URL(candidate, 'https://qzelynth.top'); return url.protocol === 'https:' && (candidate.startsWith('https:') || candidate.startsWith('/')) ? url.href : ''; } catch { return ''; }
+  const character = value?.employee?.avatar_character || value?.avatar_character;
+  if (isCharacterAvatar(character)) return employeeAvatarSrc(character, seed);
+  try { const url = new URL(candidate, 'https://qzelynth.top'); if (url.protocol === 'https:' && (candidate.startsWith('https:') || candidate.startsWith('/'))) return url.href; } catch {}
+  return employeeAvatarSrc(null, seed);
 }
 export function presence(value) {
   const bot = value?.bot || value;
@@ -67,7 +73,7 @@ export function initialEmployeeResources() {
   return Object.fromEntries(['conversation','bot','runs','routines'].map(name=>[name,{phase:'idle',error:'',lastUpdated:null,diagnostic:null}]));
 }
 export function initialState() {
-  return {phase:'boot',user:null,workspaces:[],workspace:null,tab:'chat',page:'home',employees:[],bots:[],tasks:[],devices:[],phones:[],resources:initialResources(),employeeResources:initialEmployeeResources(),chatThreads:[],chatThreadsResource:{phase:'idle',error:'',lastUpdated:null},unreadCount:0,chatSearch:'',chatReadError:'',pinnedChatIds:[],chatDraftPreviews:{},chatPreferencesError:'',chatFind:null,chatJump:null,forward:null,forwardDetail:null,selectedEmployee:null,bot:null,conversation:null,messages:[],runs:[],routines:[],report:null,phone:null,draft:'',attachments:[],busy:false,chatLoading:false,error:'',notice:'',filter:'all',search:'',imagePreview:null,task:null,reportSelection:[],botSettings:null,deviceSettings:null,settingsTrail:[]};
+  return {phase:'boot',user:null,workspaces:[],workspace:null,tab:'employees',page:'home',employees:[],bots:[],tasks:[],devices:[],phones:[],resources:initialResources(),employeeResources:initialEmployeeResources(),chatThreads:[],chatThreadsResource:{phase:'idle',error:'',lastUpdated:null},unreadCount:0,chatSearch:'',chatReadError:'',pinnedChatIds:[],chatDraftPreviews:{},chatPreferencesError:'',chatFind:null,chatJump:null,forward:null,forwardDetail:null,selectedEmployee:null,bot:null,conversation:null,messages:[],runs:[],routines:[],report:null,phone:null,draft:'',attachments:[],busy:false,chatLoading:false,error:'',notice:'',filter:'all',search:'',imagePreview:null,task:null,reportSelection:[],botSettings:null,deviceSettings:null,settingsTrail:[]};
 }
 export const id = () => globalThis.crypto?.randomUUID?.() || `mobile-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 export function accountId(state) { return String(state.user?.user_id || state.user?.user?.id || state.user?.id || ''); }

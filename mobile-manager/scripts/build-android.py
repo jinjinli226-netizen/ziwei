@@ -21,6 +21,15 @@ CACHE = Path.home() / ".cache/ziwei-manager-android"
 ORIGINAL_SIGNER_SHA256 = "507531ee91afe6369a2d519d653713a76d2fa54b8f5f76119672f668230ced35"
 TOOL_INPUT_DIRECTORIES = ("android/src", "android/res", "web")
 TOOL_INPUT_MANIFEST = "android/AndroidManifest.xml"
+SHARED_WEB_ASSETS = {"employee-avatar.js": "src/employee-avatar.mjs", "conversation-attachment-policy.js": "src/conversation-attachment-policy.mjs"}
+
+
+def sync_shared_web_assets(module=MODULE, repo=REPO):
+    for target, source in SHARED_WEB_ASSETS.items():
+        data = (repo / source).read_bytes()
+        output = module / "web" / target
+        if not output.is_file() or output.read_bytes() != data:
+            output.write_bytes(data)
 
 
 def run(command, *, env=None, capture=False):
@@ -98,6 +107,7 @@ def source_provenance(repo=REPO, module=MODULE):
     files = sorted(path for directory in (module / "android", module / "web", module / "scripts")
                    if directory.is_dir() for path in directory.rglob("*")
                    if path.is_file() and "__pycache__" not in path.parts and path.suffix != ".pyc")
+    files.extend(repo / source for source in SHARED_WEB_ASSETS.values() if (repo / source).is_file())
     return {"sourceRevision": revision, "sourceDirty": bool(status.strip()),
             "sourceStatus": status.splitlines(),
             "sourceHashes": {archive_name(path.relative_to(repo)): sha256(path) for path in files}}
@@ -205,6 +215,7 @@ def verify_web():
 
 
 def build(args):
+    sync_shared_web_assets()
     if args.bootstrap:
         spec = importlib.util.spec_from_file_location("android_tools", Path(__file__).with_name("android-tools.py"))
         tools = importlib.util.module_from_spec(spec)
@@ -320,6 +331,7 @@ def build(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bootstrap", action="store_true", help="download pinned verified tools for Apple Silicon")
+    parser.add_argument("--sync-assets-only", action="store_true", help="sync shared desktop web assets without building or signing")
     parser.add_argument("--java-home", type=Path)
     parser.add_argument("--sdk-root", type=Path)
     parser.add_argument("--cache", type=Path, default=CACHE)
@@ -334,6 +346,10 @@ def main():
     parser.add_argument("--version-code", type=int, default=17)
     parser.add_argument("--version-name", default="0.6.0-identity-candidate")
     args = parser.parse_args()
+    if args.sync_assets_only:
+        sync_shared_web_assets()
+        print("Shared web assets synchronized from canonical source")
+        return 0
     if args.version_code < 1 or not re.fullmatch(r"[A-Za-z0-9._-]+", args.version_name):
         parser.error("Invalid Android version")
     if args.expected_signer_sha256:

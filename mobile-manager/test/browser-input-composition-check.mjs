@@ -83,6 +83,7 @@ const refresh=async()=>{
 const editor=page.locator('textarea[name=draft]');
 try{
   await page.goto(`${origin}/__ziwei_manager__/index.html`);
+  await page.getByRole('heading',{name:'我的员工',exact:true}).waitFor();await page.locator('.bottom-nav [data-action=navigate][data-tab=chat]').click();
   await page.locator(`.thread-row[data-id="${employeeId}"]`).click();await page.locator('[data-message-id=image-message]').waitFor();await raf();
   await page.locator('.chat-timeline').evaluate(node=>{node.scrollTop=node.scrollHeight;});
   await page.locator('[data-message-id=image-message] img').evaluate(img=>img.decode());
@@ -148,14 +149,14 @@ try{
   assert.equal(await editor.inputValue(),secondDraft);assert.equal(await editor.evaluate(field=>field.selectionStart),0,'new editor does not inherit another chat caret');
   await editor.focus();await cdp.send('Input.imeSetComposition',{text:'跨区',selectionStart:2,selectionEnd:2});
   const finalSecondDraft=await editor.inputValue();
-  await jump('select-workspace',otherSlug);await page.locator(`.thread-row[data-id="${employeeId}"]`).waitFor();await jump('chat',employeeId);
+  await jump('select-workspace',otherSlug);await page.locator(`.employee-identity[data-id="${employeeId}"]`).waitFor();await jump('chat',employeeId);
   await page.locator('[data-message-id=other-message]').waitFor();await unfocused();assert.equal(await editor.inputValue(),'');assert.equal(await editor.evaluate(field=>field.selectionStart),0);
   await editor.fill('第二工作区专用草稿');await editor.evaluate(field=>field.setSelectionRange(3,3));await cdp.send('Input.imeSetComposition',{text:'独立',selectionStart:2,selectionEnd:2});
   const otherDraft=await editor.inputValue();
-  await jump('select-workspace',slug);await page.locator(`.thread-row[data-id="${employeeId}"]`).waitFor();await jump('chat',employeeId);
+  await jump('select-workspace',slug);await page.locator(`.employee-identity[data-id="${employeeId}"]`).waitFor();await jump('chat',employeeId);
   await page.locator('[data-message-id=image-message]').waitFor();await unfocused();assert.equal(await editor.inputValue(),firstDraft);assert.equal(await editor.evaluate(field=>field.selectionStart),0);
   await jump('chat',secondId);await page.locator('[data-message-id=second-message]').waitFor();assert.equal(await editor.inputValue(),finalSecondDraft);await unfocused();
-  await jump('select-workspace',otherSlug);await page.locator(`.thread-row[data-id="${employeeId}"]`).waitFor();await jump('chat',employeeId);
+  await jump('select-workspace',otherSlug);await page.locator(`.employee-identity[data-id="${employeeId}"]`).waitFor();await jump('chat',employeeId);
   await page.locator('[data-message-id=other-message]').waitFor();await unfocused();assert.equal(await editor.inputValue(),otherDraft);
   checks.push('A/B chat and workspace navigation saves the outgoing live composition to its own draft and never restores its focus or caret onto a different editor');
   assert.deepEqual(errors,[]);

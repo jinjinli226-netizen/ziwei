@@ -43,9 +43,9 @@ function initializedFixture(apiOverrides = {}, render = () => {}) {
 }
 const chatThread = (overrides = {}) => ({ conversationId:'original-main',employeeId:'one',employee:{id:'one',name:'员工甲',runtime:'Other'},title:'长期聊天',preview:'最新消息',updatedAt:'2026-10-17T08:00:00.000Z',unreadCount:1,latestMessageId:'history',messageCount:1,...overrides });
 
-test('the initial product state opens the chat tab with explicit empty read and forward state', () => {
+test('the initial product state opens all employees with explicit empty read and forward state', () => {
   const state = initialState();
-  assert.equal(state.tab,'chat'); assert.deepEqual(state.chatThreads,[]); assert.equal(state.unreadCount,0);
+  assert.equal(state.tab,'employees'); assert.equal(state.filter,'all'); assert.deepEqual(state.chatThreads,[]); assert.equal(state.unreadCount,0);
   assert.deepEqual(state.chatThreadsResource,{phase:'idle',error:'',lastUpdated:null});
   assert.equal(state.forward,null); assert.equal(state.forwardDetail,null); assert.equal(state.chatReadError,'');
 });
@@ -247,7 +247,7 @@ test('switching workspace or logging out clears inbox, selection and only the ex
   const f=await preparedForwardFixture();t.after(()=>f.controller.dispose());
   f.state.forwardDetail={messageId:'first'};f.state.chatReadError='old';f.state.chatSearch='old';f.state.chatThreads=[chatThread()];f.state.unreadCount=7;
   await f.controller.actions['select-workspace']({id:'workspace-two'});await tick();
-  assert.equal(f.state.tab,'chat');assert.equal(f.state.forward,null);assert.equal(f.state.forwardDetail,null);assert.equal(f.state.chatReadError,'');assert.equal(f.state.chatSearch,'');assert.equal(f.state.unreadCount,0);
+  assert.equal(f.state.tab,'employees');assert.equal(f.state.forward,null);assert.equal(f.state.forwardDetail,null);assert.equal(f.state.chatReadError,'');assert.equal(f.state.chatSearch,'');assert.equal(f.state.unreadCount,0);
   f.storage.setItem('ziwei.manager.forward.v1:user-one:workspace-one:source-main','own');f.storage.setItem('ziwei.manager.forward.v1:another-user:workspace-one:source-main','kept');
   await f.controller.actions.logout();
   assert.equal(f.storage.getItem('ziwei.manager.forward.v1:user-one:workspace-one:source-main'),null);assert.equal(f.storage.getItem('ziwei.manager.forward.v1:another-user:workspace-one:source-main'),'kept');
@@ -412,9 +412,9 @@ test('401 clears account-specific UI and member permissions cannot invoke phone 
   await member.controller.actions['phone-refresh']({id:'phone-one'});assert.equal(commands,0);assert.match(member.state.error,/管理员权限/);
 });
 
-test('image byte verification rejects spoofed files and limits the total attachment count', async t => {
+test('avatar byte verification still rejects spoofed images while ordinary attachments keep the 20-file limit', async t => {
   const f=fixture();t.after(()=>f.controller.dispose());await f.controller.actions.chat({id:'one'});
-  await f.controller.change({name:'images',files:[{name:'fake.png',size:2,arrayBuffer:async()=>new Uint8Array([1,2]).buffer}],value:''});
+  await f.controller.change({name:'avatar',files:[{name:'fake.png',size:2,arrayBuffer:async()=>new Uint8Array([1,2]).buffer}],value:''});
   assert.match(f.state.error,/请选择 PNG/);assert.deepEqual(f.state.attachments,[]);
   f.state.attachments=Array.from({length:20},()=>({size:1}));
   await f.controller.change({name:'images',files:[{name:'new.png',size:1}],value:''});assert.match(f.state.error,/最多附加 20/);

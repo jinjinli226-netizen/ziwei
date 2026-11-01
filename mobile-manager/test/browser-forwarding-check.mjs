@@ -115,7 +115,7 @@ async function realTouchHold(locator,durationMs){
 }
 
 try{
-  await page.goto(`${origin}/__ziwei_manager__/index.html`);await page.getByRole('heading',{name:'聊天',exact:true}).waitFor();await action('chat',sourceEmployee.id).waitFor();
+  await page.goto(`${origin}/__ziwei_manager__/index.html`);await page.getByRole('heading',{name:'我的员工',exact:true}).waitFor();await page.locator('.bottom-nav [data-action=navigate][data-tab=chat]').click();await page.getByRole('heading',{name:'聊天',exact:true}).waitFor();await action('chat',sourceEmployee.id).waitFor();
   assert.equal(await page.locator('.nav-item.active').getAttribute('data-tab'),'chat');assert.ok(await page.locator('.nav-unread').count());await capture('01-recent-chats');
   await action('chat',sourceEmployee.id).click();await page.locator(`[data-message-id="${originalLatest.id}"]`).waitFor();
   await until(()=>readRequests().some(request=>request.body.messageId===originalLatest.id&&request.status===200),'latest visible persisted system message was acknowledged read');
