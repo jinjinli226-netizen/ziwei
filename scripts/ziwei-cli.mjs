@@ -24,6 +24,7 @@ function usage() {
   ziwei_user update [--json]                      Windows：验证官方包后升级，保留连接和身份
   ziwei_user update-check [--json]                只读核验升级实例；早期旧版需确认未知任务状态
   ziwei_user update-status [--json]               查看包外升级任务的真实完成/失败结果
+  ziwei_user delivery retry --action <actionId> [--workspace <slug>] [--json]  仅补交指定原结果，不重新执行任务
   ziwei_user uninstall [--json]                   Windows：卸载本客户端，保留配置、认证和记忆
   ziwei_user remove                              uninstall 的别名
   ziwei_user change
@@ -448,6 +449,14 @@ async function main() {
   if (command === 'setup') return setup(args);
   if (command === 'connect') return connect(args);
   if (command === 'start') return start();
+  if (command === 'delivery') {
+    rejectSecrets(args);
+    if(args._.length!==2||args._[1]!=='retry'||Object.keys(args).some(key=>!['_','action','workspace','json'].includes(key)))throw new Error('用法: ziwei_user delivery retry --action <actionId> [--workspace <slug>] [--json]');
+    const {retryClientDelivery}=await import('./client-lifecycle.mjs');
+    const result=await retryClientDelivery({root:ROOT,env:process.env,actionId:args.action,workspace:args.workspace});
+    console.log(args.json?JSON.stringify(result):`原结果已由服务器确认：${result.actionId}（${result.status}）；未重新执行任务。`);
+    return;
+  }
   if (command === 'stop') {
     rejectSecrets(args);
     const { stopClient } = await import('./client-lifecycle.mjs');

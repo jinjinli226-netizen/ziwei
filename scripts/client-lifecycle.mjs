@@ -160,6 +160,25 @@ export async function inspectClientMaintenance({ root, env = process.env, config
   return { state: 'ready', wasRunning: true, pid: initial.pid, activeActionCount: initial.activeActionCount, pollingCount: initial.pollingCount };
 }
 
+/** Ask the live owner to upload one retained result; no second journal writer or executor. */
+export async function retryClientDelivery({root,env=process.env,actionId,workspace}={}) {
+  if(typeof actionId!=='string'||!/^action_[A-Za-z0-9_-]{1,100}$/.test(actionId))throw failure('DELIVERY_ACTION_INVALID','补交需要明确的原 action ID');
+  const {ACTION_TRANSPORT_BUDGETS}=await import('../src/daemon-action-delivery.mjs');
+  root=path.resolve(root);const file=resolveConfigPath({root,env}),snapshot=readConfiguration(file),origin=healthOrigin(snapshot.config,env);
+  const initial=await health(origin);
+  validateHealth(initial,{root,file,snapshot,build:clientBuildIdentity(root)});
+  if(!snapshot.config.deviceToken||!initial.lifecycle?.nonce)throw failure('CONTROL_AUTH_MISSING','当前 daemon 不支持经过身份绑定的本机结果补交');
+  const target=workspace||snapshot.config.workspace;
+  if(readConfiguration(file).hash!==snapshot.hash)throw failure('CONFIG_CHANGED','本机连接配置发生变化，未请求补交');
+  let response;
+  try {response=await fetch(origin+'/local/delivery-retry',{method:'POST',redirect:'error',headers:{'content-type':'application/json','x-ziwei-local-control':snapshot.config.deviceToken},body:JSON.stringify({nonce:initial.lifecycle.nonce,workspace:target,actionId}),signal:AbortSignal.timeout(ACTION_TRANSPORT_BUDGETS.ack+ACTION_TRANSPORT_BUDGETS.result+30000)});}
+  catch {throw failure('DELIVERY_RETRY_UNCONFIRMED','结果补交的确认暂不可用；请读取原 action，勿重新执行模型任务');}
+  const body=await response.json().catch(()=>null);
+  if(!response.ok)throw Object.assign(failure('DELIVERY_RETRY_REJECTED',`结果补交被拒绝（HTTP ${response.status}）；原证据保留`),{httpStatus:response.status});
+  if(body?.actionId!==actionId||body.state!=='confirmed'||!['succeeded','failed'].includes(body.status))throw failure('DELIVERY_RETRY_UNCONFIRMED','服务器终态尚未核实；原证据保留，未重新执行模型任务');
+  return {actionId:body.actionId,state:body.state,status:body.status};
+}
+
 async function stopPreIdentityClient(context, { env, initial, allowLegacyStop, legacyProof, timeoutMs, shutdownTimeoutMs }) {
   if (context.expectedNonce !== undefined) throw failure('LIFECYCLE_DOWNGRADE', 'daemon 实例 nonce 缺失，拒绝降级停止');
   const { inspectLegacyClientIdentity, validateLegacyHealth } = await legacyIdentity();
