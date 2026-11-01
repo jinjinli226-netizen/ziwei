@@ -22,3 +22,11 @@
 验收回执：`D:\Ziwei-Local\artifacts\attachment-http-20261101\HTTP-ACCEPTANCE.json`；独立监督日志在其`logs`目录，含10秒健康心跳、PID和隔离退出37/0，失败fixture也保留。服务已关闭并释放临时端口。500MiB图片容器验证实际读取131072字节、结束偏移524288000；另有大IDAT和末尾截断测试。
 
 上述是源码及隔离验证，正式API/Web/CLI/Android按各自发布回执验收。Android候选独立构建并保留头像修正，真实手机未连接不代表已安装。
+
+## 正式发布
+
+API/Web已发布`b1701bc`：API24个增量文件哈希一致，网页入口`assets/index-BJw6qDt8.js`。手机源码`7dc9caf`，code24 APK（0.7.5-mobile-attachments）已进入正式下载索引，SHA256为`6e5e57a3d5dd400aadc15a34f744dbbaad06b40275ece661c12af9202a39fde4`。本会话独立核对公网index、入口JS及APK字节摘要均匹配候选。
+
+CLI启动探针在现场正确ready响应耗时1.1–2秒时仍仅允许1秒，`5851971`将单次探针放宽为5秒，保留整体启动预算及身份验证；真实probe回归先红后绿。新包SHA256为`4a57324ae0add16572a4fe524993199c2c8437aad0d95f0af801297951db03d4`，clientBuild为`2a0f212fbac2fb27a0697da2235a0867d4935e5e118520c5807fd6b9f924ed14`。本轮官方updater实际complete，原生start退出0，PID43912、ready200；原配置及3个Profile、共享Gateway保留，之前失败记录未改。CLI下载迁移漏路由也已修复，正式包与更新元数据已同步。
+
+发布回执：`D:\Ziwei-Local\artifacts\attachment-b1701bc-20261101\api-deployment-receipt.json`、同目录`web-mobile-publication.json`，以及`D:\Ziwei-Local\artifacts\cli-download-5851971-20261101\FINAL-PUBLICATION.json`。设备安装回执在`D:\AINavtie\ops\ziwei\startup-probe-release-20261101\INSTALL-ACCEPTANCE.json`。手机实际APK覆盖安装烟测18项通过；认证大文件的真机网络与保存字节尚未验收，不把桌面HTTP验证写成手机真机完成。
