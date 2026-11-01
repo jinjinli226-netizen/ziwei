@@ -55,6 +55,7 @@ function routeFromPath(pathname) { if (isAndroidInstallPath(pathname)) return 'a
 function conversationIdFromPath(pathname = location.pathname) { const parts = routeParts(pathname); return parts[1] === 'inbox' ? (parts[2] || '') : ''; }
 function conversationEmployeeFromPath() { return new URLSearchParams(location.search).get('employee') || ''; }
 function botIdFromPath(pathname = location.pathname) { const parts=routeParts(pathname); return parts[1]==='bots' ? decodeURIComponent(parts[2] || '') : ''; }
+function mixedGroupIdFromPath(){return new URLSearchParams(location.search).get('group')||'';}
 function employeeIdFromPath(pathname = location.pathname) { const parts = routeParts(pathname); return parts[1] === 'employee' ? (parts[2] || '') : ''; }
 function routePath(key, detailId = '', workspaceOverride = '') { const activeSlug = String(workspaceOverride || workspaceSlug()).trim(); const prefix = activeSlug ? `/${encodeURIComponent(activeSlug)}` : ''; if (key === 'invite') return `${prefix}/me/invite` || '/me/invite'; const map = {home:'home',issues:'issues',calendar:'calendar',docs:'project-docs',members:'members',runtimes:'runtimes',skills:'skills',settings:'settings',open:'open-platform',automations:'autopilots',inbox:'inbox',employee:'employee','ziwei-connect':'ziwei-connect'}; const base = `${prefix}/${map[key] || key}`; return (key === 'inbox' || key === 'employee' || key === 'bots') && detailId ? `${base}/${encodeURIComponent(detailId)}` : base; }
 const page = ref(routeFromPath(location.pathname));
@@ -63,6 +64,7 @@ const employeeRemovalBusy=ref(''),employeeRemovalBlocked=ref('');
 const loadedBotOptionsWorkspace=ref('');
 const previewMode=import.meta.env.VITE_ZIWEI_PREVIEW==='true';
 const botRouteId=ref(botIdFromPath()),botWorkspace=ref(workspaceSlug()),botInitialTab=ref(botSectionFromPath());
+const mixedGroupRouteId=ref(mixedGroupIdFromPath());
 const conversationBotId=ref(new URLSearchParams(location.search).get('bot') || '');
 const conversationBotBinding=ref(null),botBindingPending=ref(false),botBindingError=ref('');
 const botChatIntent=ref(conversationBotId.value&&conversationIdFromPath()?{workspace:workspaceSlug(),botId:conversationBotId.value,conversationId:conversationIdFromPath(),pending:true}:null);
@@ -543,7 +545,8 @@ const docsUsedPercent = computed(() => Math.min(100, (docsUsedBytes.value / (10 
 // focused conversation id in Vue state so selecting/creating a conversation
 // immediately switches the inbox into the dedicated persistent-session view.
 let workspaceLoadGeneration = 0,fullWorkspaceDataKey='';
-watch(()=>authState.value.user?.id,()=>{
+watch(()=>authState.value.user?.id,(_actor,previousActor)=>{
+  if(previousActor)mixedGroupRouteId.value='';
   workspaceLoadGeneration++;conversationOpenGeneration++;conversationListGeneration++;fullWorkspaceDataKey='';loadedBotOptionsWorkspace.value='';
   selectedConversation.value=null;conversationExecution.value=null;conversations.value=[];
   employeeBots.value=[];employeeBotsWorkspace.value='';employees.value=[];tasks.value=[];
@@ -559,7 +562,7 @@ const employeeProfileTasks = computed(() => { const employee = employeeProfile.v
 const employeeProfileConversations = computed(() => { const employee = employeeProfile.value; if (!employee) return []; return conversations.value.filter(item => item.employee_id === employee.id); });
 const pageTitle = computed(() => ({home:'首页',issues:'问题与任务',calendar:'日历',docs:'项目文档',members:'成员与设备',runtimes:'运行时',skills:'技能中心',settings:'工作区设置',invite:'邀请加入紫薇',open:'开放平台',automations:'自动化',inbox:focusedConversation.value ? '持久会话' : '收件箱',employee:employeeProfile.value?.name || '数字伙伴','ziwei-connect':'紫薇·互联'}[page.value] || '紫薇'));
 
-function navigate(key,{focused=false}={}) { const leavingBotPage=page.value==='bots'||focusedConversation.value;botChatIntent.value=null;  if (key==='bots') { botWorkspace.value=workspaceSlug();botRouteId.value='';botInitialTab.value='chat'; }  if (key === 'workflow') key='automations'; if (key === 'skills') { search.value=''; skillScope.value='platform'; skillTab.value='all'; } if (key === 'inbox') { clearConversationAttachment({preserve:true}); ++conversationOpenGeneration; selectedConversation.value=null; conversationExecution.value=null; conversationDraft.value=''; conversationRouteId.value=''; clearConversationAttachment(); stopConversationPolling(); } if (key !== 'employee') { employeeRouteId.value=''; employeeActionId.value=''; } page.value = key; history.pushState({},'',routePath(key)); if(!focused&&(key==='members'||(leavingBotPage&&key!=='bots'&&fullWorkspaceDataKey!==workspaceDataKey(workspaceSlug(),authState.value.user?.id))))void load(); if (key === 'open') loadApiKeys(); if (key === 'ziwei-connect') void loadZiweiConnect(); }
+function navigate(key,{focused=false}={}) { mixedGroupRouteId.value='';const leavingBotPage=page.value==='bots'||focusedConversation.value;botChatIntent.value=null;  if (key==='bots') { botWorkspace.value=workspaceSlug();botRouteId.value='';botInitialTab.value='chat'; }  if (key === 'workflow') key='automations'; if (key === 'skills') { search.value=''; skillScope.value='platform'; skillTab.value='all'; } if (key === 'inbox') { clearConversationAttachment({preserve:true}); ++conversationOpenGeneration; selectedConversation.value=null; conversationExecution.value=null; conversationDraft.value=''; conversationRouteId.value=''; clearConversationAttachment(); stopConversationPolling(); } if (key !== 'employee') { employeeRouteId.value=''; employeeActionId.value=''; } page.value = key; history.pushState({},'',routePath(key)); if(!focused&&(key==='members'||(leavingBotPage&&key!=='bots'&&fullWorkspaceDataKey!==workspaceDataKey(workspaceSlug(),authState.value.user?.id))))void load(); if (key === 'open') loadApiKeys(); if (key === 'ziwei-connect') void loadZiweiConnect(); }
 async function switchWorkspace(slug) {
   const nextSlug=String(slug || '').trim();
   if (!nextSlug || nextSlug === workspaceSlug()) return;
@@ -570,7 +573,7 @@ async function switchWorkspace(slug) {
   conversationEmployeeId.value=''; conversationDeviceId.value=''; conversations.value=[];
   conversationModelId.value=''; conversationWorkingDirectory.value=''; conversationStatusLoading.value=false;
   showEmployee.value=false; conversationDirectoryPickerOpen.value=false;
-  botWorkspace.value=nextSlug;botRouteId.value='';conversationBotId.value='';employeeBots.value=[];employeeBotsWorkspace.value='';
+  botWorkspace.value=nextSlug;botRouteId.value='';mixedGroupRouteId.value='';conversationBotId.value='';employeeBots.value=[];employeeBotsWorkspace.value='';
   setWorkspaceSlug(nextSlug);
   history.pushState({},'',routePath(page.value,'',nextSlug));
   await load();
@@ -1647,7 +1650,7 @@ function rosterEmployee({workspace,employee}={}){
   employees.value.push(employee);return employee;
 }
 let rosterEntryGeneration=0;
-function openRosterEmployeeChat(value){rosterEntryGeneration++;const employee=rosterEmployee(value);if(employee)return openEmployeeConversation(employee);}
+function openRosterEmployeeChat(value){rosterEntryGeneration++;const employee=rosterEmployee(value);if(employee){mixedGroupRouteId.value='';return openEmployeeConversation(employee);}}
 async function openRosterEmployeeSettings(value,{editor=false}={}){
   const generation=++rosterEntryGeneration,workspaceGeneration=workspaceLoadGeneration;
   try{
@@ -1664,15 +1667,22 @@ async function refreshEmployeeBots(workspace,generation){
 }
 function botChanged(){employeeRosterRefreshKey.value++;void refreshEmployeeBots(workspaceSlug(),workspaceLoadGeneration);}
 function returnBotToTeam(employee){navigate('members');employeeActionId.value=employee?.id||'';}
+function openMixedGroup(id){
+  if(!id)return;
+  ++conversationOpenGeneration;++rosterEntryGeneration;stopConversationPolling();botChatIntent.value=null;botBindingPending.value=false;
+  botWorkspace.value=workspaceSlug();botRouteId.value='';botInitialTab.value='chat';mixedGroupRouteId.value=id;page.value='bots';
+  history.pushState({},'',routePath('bots','',workspaceSlug())+'?group='+encodeURIComponent(id));
+}
 function selectEmployeeWorkspaceRoute(id){if(page.value==='bots')selectBotRoute(id);else rosterEntryGeneration++;}
 function selectEmployeeWorkspaceSection(section){if(page.value==='bots')selectBotSection(section);else employeeManagementSection.value=section;}
 function selectBotRoute(id) {
-  rosterEntryGeneration++;
+  mixedGroupRouteId.value='';rosterEntryGeneration++;
   botRouteId.value=id;botInitialTab.value='chat';history.pushState({},'',routePath('bots',id,botWorkspace.value));
 }
 function botSectionFromPath(){const value=new URLSearchParams(location.search).get('section');return ['chat','settings','capabilities','knowledge','collaboration','channels','proactive','routines','activity'].includes(value)?value:'chat';}
 function selectBotSection(section){botInitialTab.value=section;history.pushState({},'',routePath('bots',botRouteId.value,botWorkspace.value)+'?section='+encodeURIComponent(section));}
 function openBotSettings(id,section='settings') {
+  mixedGroupRouteId.value='';
   botWorkspace.value=workspaceSlug();botRouteId.value=id;botInitialTab.value=section;page.value='bots';
   stopConversationPolling();history.pushState({},'',routePath('bots',id)+'?section='+encodeURIComponent(section));
 }
@@ -1866,7 +1876,7 @@ window.addEventListener('popstate', () => {
   if (isAndroidInstallPath(location.pathname)) { page.value='android-install'; closeRealtime(); stopConversationPolling(); return; }
   const urlWorkspace = workspaceSlug();
   if (urlWorkspace) setWorkspaceSlug(urlWorkspace);
-  botWorkspace.value=urlWorkspace;botRouteId.value=botIdFromPath();botInitialTab.value=botSectionFromPath();conversationBotId.value=new URLSearchParams(location.search).get('bot') || '';
+  botWorkspace.value=urlWorkspace;botRouteId.value=botIdFromPath();mixedGroupRouteId.value=mixedGroupIdFromPath();if(mixedGroupRouteId.value){conversationOpenGeneration++;rosterEntryGeneration++;stopConversationPolling();}botInitialTab.value=botSectionFromPath();conversationBotId.value=new URLSearchParams(location.search).get('bot') || '';
   botChatIntent.value=conversationBotId.value&&conversationIdFromPath()?{workspace:urlWorkspace,botId:conversationBotId.value,conversationId:conversationIdFromPath(),pending:true}:null;
   page.value=routeFromPath(location.pathname); conversationRouteId.value=conversationIdFromPath(); conversationEmployeeId.value=conversationEmployeeFromPath() || conversationEmployeeId.value; employeeRouteId.value=employeeIdFromPath(); employeeActionId.value=''; inviteCode.value=new URLSearchParams(location.search).get('code') || '';
   if (page.value==='invite-accept') loadInvite();
@@ -1927,7 +1937,7 @@ onMounted(async () => { applyDisplayPreferences(); if (page.value==='android-ins
           <div class="workspace-load-error-copy"><strong>工作区数据读取失败</strong><span>{{ workspaceLoadError }}</span></div>
           <button type="button" class="pill" @click="load">重试</button>
         </div>
-        <BotWorkbench v-if="employeeWorkspaceShell" :key="(authState.user?.id||'')+':'+employeeWorkspaceSlug" :workspace="employeeWorkspaceSlug" :roster-refresh-key="employeeRosterRefreshKey" chat-mode :auto-open-chat="page==='bots'&&Boolean(botRouteId)&&botInitialTab==='chat'" :actor-id="authState.user?.id || ''" :bot-id="page==='bots'?botRouteId:conversationEmployeeId" :initial-tab="page==='bots'?botInitialTab:employeeManagementSection" :models="loadedBotOptionsWorkspace===employeeWorkspaceSlug?models:[]" :skills="loadedBotOptionsWorkspace===employeeWorkspaceSlug?skills:[]" @select="selectEmployeeWorkspaceRoute" @section="selectEmployeeWorkspaceSection" @chat="openBotConversation" @employee-chat="openRosterEmployeeChat" @employee-settings="openRosterEmployeeSettings" @employee-edit="openRosterEmployeeSettings($event,{editor:true})" @creator="openBotCreator" @create-employee="openEmployeeModal()" @phone="openBotPhone" @employee="returnBotToTeam" @changed="botChanged">
+        <BotWorkbench v-if="employeeWorkspaceShell" :key="(authState.user?.id||'')+':'+employeeWorkspaceSlug" :workspace="employeeWorkspaceSlug" :roster-refresh-key="employeeRosterRefreshKey" chat-mode :group-id="page==='bots'?mixedGroupRouteId:''" :auto-open-chat="page==='bots'&&!mixedGroupRouteId&&Boolean(botRouteId)&&botInitialTab==='chat'" :actor-id="authState.user?.id || ''" :bot-id="page==='bots'?botRouteId:conversationEmployeeId" :initial-tab="page==='bots'?botInitialTab:employeeManagementSection" :models="loadedBotOptionsWorkspace===employeeWorkspaceSlug?models:[]" :skills="loadedBotOptionsWorkspace===employeeWorkspaceSlug?skills:[]" @group-select="openMixedGroup" @select="selectEmployeeWorkspaceRoute" @section="selectEmployeeWorkspaceSection" @chat="openBotConversation" @employee-chat="openRosterEmployeeChat" @employee-settings="openRosterEmployeeSettings" @employee-edit="openRosterEmployeeSettings($event,{editor:true})" @creator="openBotCreator" @create-employee="openEmployeeModal()" @phone="openBotPhone" @employee="returnBotToTeam" @changed="botChanged">
             <template #chat="{employeeId,openSection}">
               <div v-if="employeeChatView.pending" class="bot-chat-loading" role="status">正在打开员工聊天…</div>
               <div v-else-if="employeeChatView.error" class="bot-chat-loading" role="alert"><p>{{employeeChatView.error}}</p><button class="pill" @click="navigate('bots')">返回员工名册</button></div>

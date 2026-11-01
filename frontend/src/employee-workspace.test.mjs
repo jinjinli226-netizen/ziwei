@@ -4,6 +4,45 @@ import {createManagerHarness} from '../verification/bot-management-harness.mjs';
 
 async function workspace(t){const h=await createManagerHarness({initial:{chatMode:true}});t.after(()=>h.dispose());return h;}
 
+for(const botId of ['', 'employee_hermes','employee_dsh','employee_codex'])test(`workspace group is visible independently of selected employee ${botId||'none'}`,async t=>{
+  const {managerFixture}=await import('../verification/bot-management-harness.mjs'),fixture=managerFixture();
+  fixture.groups=[{id:'mix_averinyo_ops_v1',title:'Averinyo · 全链路经营团队',members:fixture.roster.map(row=>({employeeId:row.id}))}];
+  const h=await createManagerHarness({fixture,initial:{chatMode:true,botId}});t.after(()=>h.dispose());
+  assert.equal(h.byClass('bot-group-row').length,1);assert.match(h.text(h.byClass('bot-group-row')[0]),/Averinyo · 全链路经营团队/);
+  h.state.runtimeFilter.value='Hermes';h.state.search.value='不存在的员工';await h.settle();
+  assert.equal(h.byClass('bot-group-row').length,1);
+  const before=h.events.length;h.byClass('bot-group-row')[0].props.onClick();await h.settle();
+  assert.deepEqual(h.events.slice(before),[['group-select','mix_averinyo_ops_v1']]);
+  h.props.groupId='mix_averinyo_ops_v1';await h.settle();
+  assert.ok(h.findAll(node=>node.props['data-fixture-component']==='MixedGroupPanel').length);
+  assert.equal(h.byClass('employee-chat-start').length,0);
+});
+
+test('a selected group prevents automatic employee entry but leaves explicit employee selection usable',async t=>{
+  const h=await createManagerHarness({initial:{chatMode:true,autoOpenChat:true,groupId:'group'}});t.after(()=>h.dispose());
+  assert.deepEqual(h.events.filter(event=>event[0]==='chat'),[]);
+  h.byClass('bot-roster-row')[0].props.onClick();await h.settle();
+  assert.equal(h.events.at(-1)[0],'chat');
+});
+
+test('opening a group preserves the employee management draft without an extra confirmation',async t=>{
+  const h=await workspace(t),draft=h.state.s.draft;draft.employee.instructions='尚未保存的员工职责';
+  h.state.selectGroup('group');h.props.groupId='group';h.props.botId='';await h.settle();
+  assert.equal(h.state.s.draft,draft);assert.equal(h.state.s.draft.employee.instructions,'尚未保存的员工职责');
+  h.props.groupId='';h.props.botId='employee_hermes';await h.settle();
+  assert.equal(h.state.s.draft,draft);
+});
+
+test('returning to a group abandons a pending employee click before its chat can open',async t=>{
+  const {managerFixture}=await import('../verification/bot-management-harness.mjs'),fixture=managerFixture();let finish;
+  fixture.botPromise=new Promise(resolve=>{finish=resolve;});
+  const h=await createManagerHarness({fixture,initial:{chatMode:true,botId:'employee_dsh'}});t.after(()=>h.dispose());
+  h.byClass('bot-roster-row').find(row=>h.text(row).includes(fixture.bot.employee.name)).props.onClick();await h.settle();
+  h.props.groupId='mix_ops';h.props.botId='';await h.settle();finish(fixture.bot);await h.settle();
+  assert.deepEqual(h.events.filter(event=>['chat','employee-chat'].includes(event[0])),[]);
+  assert.equal(h.props.groupId,'mix_ops');
+});
+
 for(const runtime of ['Hermes','DSH','Codex'])test(`${runtime} default employee entry opens its chat without an intermediate choice`,async t=>{
   const h=await createManagerHarness({initial:{chatMode:true,autoOpenChat:true,botId:`employee_${runtime.toLowerCase()}`}});t.after(()=>h.dispose());
   const opened=h.events.filter(event=>['chat','employee-chat'].includes(event[0]));

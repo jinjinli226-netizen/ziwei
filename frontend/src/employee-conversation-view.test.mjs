@@ -57,7 +57,7 @@ const defer=()=>{let resolve;const promise=new Promise(done=>resolve=done);retur
 
 test('actual App management handlers preserve inbox routes while retaining Bot deep links',()=>{
   const page=ref('bots'),employeeManagementSection=ref('chat'),writes=[];
-  const ui=functions(['selectBotRoute','selectBotSection','selectEmployeeWorkspaceRoute','selectEmployeeWorkspaceSection'],{page,employeeManagementSection,botRouteId:ref('employee'),botInitialTab:ref('chat'),botWorkspace:ref('team'),history:{pushState:(_state,_title,url)=>writes.push(url)},routePath:(_page,id,workspace)=>`/${workspace}/bots/${id}`},'let rosterEntryGeneration=0;');
+  const ui=functions(['selectBotRoute','selectBotSection','selectEmployeeWorkspaceRoute','selectEmployeeWorkspaceSection'],{page,employeeManagementSection,botRouteId:ref('employee'),botInitialTab:ref('chat'),botWorkspace:ref('team'),mixedGroupRouteId:ref('old-group'),history:{pushState:(_state,_title,url)=>writes.push(url)},routePath:(_page,id,workspace)=>`/${workspace}/bots/${id}`},'let rosterEntryGeneration=0;');
   ui.selectEmployeeWorkspaceRoute('employee');assert.deepEqual(writes,['/team/bots/employee']);
   ui.selectEmployeeWorkspaceSection('routines');assert.equal(writes.at(-1),'/team/bots/employee?section=routines');
   page.value='inbox';ui.selectEmployeeWorkspaceRoute('other');ui.selectEmployeeWorkspaceSection('knowledge');
@@ -121,7 +121,7 @@ const imports=compiled.code.match(/^import \{(.*?)\} from "vue"/m)[1].split(',')
 const render=new Function(...imports.map(([,alias])=>alias),compiled.code.replace(/^import .* from "vue"\n/m,'').replace('export function render','return function render'))(...imports.map(([name])=>vue[name]));
 function wiring(overrides={}){
   const calls=[],workbench={name:'WorkbenchSeam'},chat={name:'ChatSeam'},select={name:'SelectSeam'};
-  const setup=new Proxy({employeeWorkspaceShell:true,authState:{user:{id:'owner'}},employeeWorkspaceSlug:'team',page:'inbox',conversationEmployeeId:'employee',employeeManagementSection:'chat',loadedBotOptionsWorkspace:'team',models:[],skills:[],employeeChatView:{ready:true,pending:false,error:''},botChatView:{ready:false},employeeChatEmployee:{id:'employee',runtime:'Codex'},selectedConversation:{id:'conversation',employee_id:'employee'},conversationExecution:null,conversationBotBinding:null,conversationExecutionBusy:false,conversationCanStop:false,conversationForward:{messageIds:[]},conversationUsesNativeDsh:false,conversationStatusLoading:false,botBindingPending:false,botBindingError:'',BotWorkbench:workbench,BotMainChat:chat,ZiSelect:select,...overrides},{get:(target,key)=>key in target?target[key]:(...args)=>calls.push([key,...args])});
+  const setup=new Proxy({employeeWorkspaceShell:true,authState:{user:{id:'owner'}},employeeWorkspaceSlug:'team',page:'inbox',mixedGroupRouteId:'',conversationEmployeeId:'employee',employeeManagementSection:'chat',loadedBotOptionsWorkspace:'team',models:[],skills:[],employeeChatView:{ready:true,pending:false,error:''},botChatView:{ready:false},employeeChatEmployee:{id:'employee',runtime:'Codex'},selectedConversation:{id:'conversation',employee_id:'employee'},conversationExecution:null,conversationBotBinding:null,conversationExecutionBusy:false,conversationCanStop:false,conversationForward:{messageIds:[]},conversationUsesNativeDsh:false,conversationStatusLoading:false,botBindingPending:false,botBindingError:'',BotWorkbench:workbench,BotMainChat:chat,ZiSelect:select,...overrides},{get:(target,key)=>key in target?target[key]:(...args)=>calls.push([key,...args])});
   const outer=render({},[],null,setup);return{setup,calls,outer,chat,select,openSection:section=>calls.push(['section',section])};
 }
 test('compiled App uses one persistent workbench and only renders the selected employee chat',()=>{
@@ -137,6 +137,15 @@ test('compiled App opens chat automatically only for the default employee route'
   assert.equal(wiring({page:'bots',botRouteId:'employee',botInitialTab:'settings'}).outer.props['auto-open-chat'],false);
   assert.equal(wiring({page:'inbox'}).outer.props['auto-open-chat'],false);
   assert.equal(wiring({page:'bots',botRouteId:'',botInitialTab:'chat'}).outer.props['auto-open-chat'],false);
+  const group=wiring({page:'bots',botRouteId:'employee',botInitialTab:'chat',mixedGroupRouteId:'group'});
+  assert.equal(group.outer.props['auto-open-chat'],false);assert.equal(group.outer.props['group-id'],'group');
+});
+
+test('group entry retains a workspace route and explicit employee entry clears group selection',()=>{
+  const writes=[],stops=[],opened=[],state={mixedGroupRouteId:ref(''),page:ref('inbox'),botWorkspace:ref(''),botRouteId:ref('employee'),botInitialTab:ref('settings'),botChatIntent:ref({pending:true}),botBindingPending:ref(true)};
+  const ui=functions(['openMixedGroup','openRosterEmployeeChat'],{...state,workspaceSlug:()=> 'team',stopConversationPolling:()=>stops.push(true),history:{pushState:(_state,_title,url)=>writes.push(url)},routePath:()=>'/team/bots',rosterEmployee:value=>value.employee,openEmployeeConversation:employee=>opened.push(employee.id)},'let conversationOpenGeneration=0,rosterEntryGeneration=0;');
+  ui.openMixedGroup('mix_group');assert.equal(state.page.value,'bots');assert.equal(state.mixedGroupRouteId.value,'mix_group');assert.equal(state.botRouteId.value,'');assert.equal(state.botChatIntent.value,null);assert.equal(state.botBindingPending.value,false);assert.equal(stops.length,1);assert.equal(writes.at(-1),'/team/bots?group=mix_group');
+  ui.openRosterEmployeeChat({employee:{id:'employee'}});assert.equal(state.mixedGroupRouteId.value,'');assert.deepEqual(opened,['employee']);
 });
 test('compiled App retains strict Bot controls and actual DSH model/device settings policy',()=>{
   const bot={id:'employee',employee:{model_id:'configured'}},managed=wiring({botChatView:{ready:true},conversationBotBinding:bot,conversationExecutionBusy:true,conversationCanStop:true});
@@ -159,11 +168,12 @@ test('the real App setup initializes ordinary, management and employee routes wi
     code=code.replace(statement,'');
   }
   const make=new Function(...Object.keys(bindings),'window','document','location','localStorage','sessionStorage',code.replaceAll('import.meta.env','({VITE_ZIWEI_PREVIEW:"true"})').replace('export default','return'));
-  for(const path of ['/team/home','/team/bots/employee','/team/inbox/conversation?employee=employee']){
-    const scope=vue.effectScope(),location=new URL(path,'https://fixture.invalid'),storage={getItem(){return null;},setItem(){},removeItem(){}};
+  for(const path of ['/team/home','/team/bots/employee','/team/bots?group=mix_ops','/team/inbox/conversation?employee=employee']){
+    const scope=vue.effectScope(),location=new URL(path,'https://fixture.invalid'),storage={getItem(){return null;},setItem(){},removeItem(){}},listeners={};
     try{
-      const component=make(...Object.values(bindings),{addEventListener(){},removeEventListener(){}},{documentElement:{dataset:{}},addEventListener(){},removeEventListener(){}},location,storage,storage);
-      const state=scope.run(()=>component.setup({}, {expose(){}}));assert.equal(state.page.value,path.includes('/bots/')?'bots':path.includes('/inbox/')?'inbox':'home');assert.equal(state.employeeWorkspaceShell.value,!path.endsWith('/home'));
+      const component=make(...Object.values(bindings),{addEventListener(name,callback){listeners[name]=callback;},removeEventListener(){}},{documentElement:{dataset:{}},addEventListener(){},removeEventListener(){}},location,storage,storage);
+      const state=scope.run(()=>component.setup({}, {expose(){}}));assert.equal(state.page.value,path.includes('/bots')?'bots':path.includes('/inbox/')?'inbox':'home');assert.equal(state.employeeWorkspaceShell.value,!path.endsWith('/home'));
+      if(path.includes('?group=')){assert.equal(state.mixedGroupRouteId.value,'mix_ops');location.search='?group=another';listeners.popstate();assert.equal(state.mixedGroupRouteId.value,'another');location.pathname='/team/bots/employee';location.search='';listeners.popstate();assert.equal(state.mixedGroupRouteId.value,'');}
     }finally{scope.stop();}
   }
   assert.deepEqual(calls,[]);
