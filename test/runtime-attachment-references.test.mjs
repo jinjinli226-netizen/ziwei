@@ -19,14 +19,14 @@ function reference(size=12*MiB,name='large.png'){
   for(let offset=0;offset<size;offset+=chunk.length)sum.update(chunk.subarray(0,Math.min(chunk.length,size-offset)));
   return{attachmentId:'attachment-fixture',name,mimeType:'image/png',size,sha256:sum.digest('hex')};
 }
-async function transferFor(attachment){
+async function transferFor(attachment,content=null){
   const {createAttachmentTransfer}=await import('../src/conversation-attachment-transfer.mjs');
   let requests=0;
   const transfer=createAttachmentTransfer({apiBase:'https://attachment.fixture',headers:{'x-ziwei-device-token':'fixture-device'},fetchImpl:async(url,options)=>{
     requests++;assert.equal(new URL(url).pathname,`/a2a/v1/actions/reference-action/attachments/${attachment.attachmentId}`);
     assert.equal(options.headers.get('x-ziwei-device-token'),'fixture-device');assert.equal(options.redirect,'error');
     let remaining=attachment.size;
-    return new Response(new ReadableStream({pull(controller){if(!remaining){controller.close();return;}const bytes=Buffer.alloc(Math.min(64*1024,remaining),61);remaining-=bytes.length;controller.enqueue(bytes);}}));
+    return new Response(new ReadableStream({pull(controller){if(!remaining){controller.close();return;}const length=Math.min(64*1024,remaining),bytes=content?content.subarray(attachment.size-remaining,attachment.size-remaining+length):Buffer.alloc(length,61);remaining-=bytes.length;controller.enqueue(bytes);}}));
   }});
   return{transfer,get requests(){return requests;}};
 }
@@ -66,6 +66,39 @@ for(const runtime of ['Codex','Hermes'])test(`${runtime} sends reference images 
   assert.equal(referenced.args.includes('--image'),false);assert.ok(String(referenced.stdin).includes(attachment.path));
   const legacy=runtimeInvocation(runtime,{prompt:'Inspect legacy image',attachments:[{...attachment,bytes:128,nativeVision:undefined}]});
   assert.equal(legacy.args.includes('--image'),true);
+});
+
+for(const runtime of ['Codex','Hermes'])test(`${runtime} retains native vision for a downloaded and verified small raster reference`,async t=>{
+  const root=fixture(t),content=rasterFixtures.png,attachment={...reference(0,'small.png'),size:content.length,sha256:createHash('sha256').update(content).digest('hex')},f=await transferFor(attachment,content);
+  const [file]=await localAction.materializeRuntimeAttachmentsAsync({attachments:[attachment],cwd:root,actionId:'reference-action',runtime,transfer:f.transfer});
+  assert.equal(file.nativeVision,true);assert.equal(file.mimeType,'image/png');
+  const invocation=runtimeInvocation(runtime,{prompt:'Inspect the image',attachments:[file]});assert.equal(invocation.args.includes('--image'),true);
+});
+
+test('small reference images beyond the native 10 MiB budget fall back to paths instead of rejecting the file batch',async t=>{
+  const root=fixture(t),content=Buffer.concat([rasterFixtures.png,Buffer.alloc(4*MiB-rasterFixtures.png.length)]),attachment={...reference(0,'medium.png'),size:content.length,sha256:createHash('sha256').update(content).digest('hex')},f=await transferFor(attachment,content);
+  const files=await localAction.materializeRuntimeAttachmentsAsync({attachments:Array.from({length:3},(_,index)=>({...attachment,name:`medium-${index}.png`})),cwd:root,actionId:'reference-action',runtime:'Codex',transfer:f.transfer});
+  assert.deepEqual(files.map(file=>file.nativeVision),[true,true,false]);assert.equal(files.length,3);
+});
+
+test('a small reference with invalid raster bytes is rejected before native vision',async t=>{
+  const root=fixture(t),attachment=reference(128,'invalid.png'),f=await transferFor(attachment);
+  await assert.rejects(localAction.materializeRuntimeAttachmentsAsync({attachments:[attachment],cwd:root,actionId:'reference-action',runtime:'Codex',transfer:f.transfer}),/图片格式|魔数/);
+});
+
+test('DSH receives native small raster references and keeps the rest of a 20-file batch as paths',async t=>{
+  const root=fixture(t),content=rasterFixtures.png,attachment={...reference(0,'small.png'),size:content.length,sha256:createHash('sha256').update(content).digest('hex')},f=await transferFor(attachment,content);let selected;
+  const execute=localAction.createLocalActionExecutor({runtimeDir:path.join(root,'runtime'),defaultWorkdir:root,attachmentTransfer:f.transfer,dshRuntime:async options=>{selected=options;return{status:'succeeded'};}});t.after(()=>execute.close());
+  await execute({id:'reference-action',type:'conversation.execute',payload:{runtime:'DSH',profile:'bot-real',prompt:'Inspect the images',attachments:Array.from({length:20},(_,index)=>({...attachment,name:`small-${index}.png`}))}});
+  const images=selected.content.filter(block=>block.type==='image');assert.equal(images.length,10);assert.equal(images[0].data,content.toString('base64'));assert.match(selected.prompt,/small-19\.png/);
+});
+
+test('DSH keeps a raster reference over its 2 MiB native limit path-only without buffering it',async t=>{
+  const root=fixture(t),content=Buffer.concat([rasterFixtures.png,Buffer.alloc(3*MiB-rasterFixtures.png.length)]),attachment={...reference(0,'dsh-large.png'),size:content.length,sha256:createHash('sha256').update(content).digest('hex')},f=await transferFor(attachment,content);let selected;
+  const execute=localAction.createLocalActionExecutor({runtimeDir:path.join(root,'runtime'),defaultWorkdir:root,attachmentTransfer:f.transfer,dshRuntime:async options=>{selected=options;return{status:'succeeded'};}});t.after(()=>execute.close());
+  const read=fs.readFileSync;t.mock.method(fs,'readFileSync',(file,...args)=>{assert.equal(String(file).endsWith('dsh-large.png'),false,'DSH must not buffer images above its native limit');return read(file,...args);});
+  await execute({id:'reference-action',type:'conversation.execute',payload:{runtime:'DSH',profile:'bot-real',prompt:'Use file tools',attachments:[attachment]}});
+  assert.equal(selected.content.length,1);assert.equal(selected.content[0].type,'text');assert.match(selected.prompt,/dsh-large\.png/);
 });
 
 test('an attachment-only legacy DSH image keeps its native image block without an invented prompt',async t=>{

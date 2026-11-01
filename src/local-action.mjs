@@ -227,7 +227,7 @@ export function materializeRuntimeAttachments({attachments = [], cwd, actionId =
   return paths;
 }
 
-export async function materializeRuntimeAttachmentsAsync({attachments=[],cwd,actionId='action',transfer,signal}={}){
+export async function materializeRuntimeAttachmentsAsync({attachments=[],cwd,actionId='action',runtime,transfer,signal}={}){
   if(!Array.isArray(attachments)||!attachments.some(item=>item?.attachmentId!==undefined))return materializeRuntimeAttachments({attachments,cwd,actionId});
   if(attachments.length>MAX_ATTACHMENTS)throw new Error('每条消息最多附加 20 个附件');
   if(!transfer)throw new Error('附件下载缺少当前设备连接');
@@ -239,6 +239,10 @@ export async function materializeRuntimeAttachmentsAsync({attachments=[],cwd,act
     if(bytes&&(inlineTotal+=size)>INLINE_ATTACHMENT_BYTES)throw new Error('内联会话附件总大小不能超过 10 MiB');
     return{attachment,bytes};
   });
+  const nativeRuntime=String(runtime).toLowerCase(),dsh=nativeRuntime==='dsh',visionLimit=dsh?2*1024*1024:INLINE_ATTACHMENT_BYTES;
+  const raster=attachment=>/^image\/(?:png|jpe?g|gif|webp)$/i.test(attachment.mimeType||attachment.mime_type||'')||/\.(?:png|jpe?g|gif|webp)$/i.test(attachment.name||attachment.filename||'');
+  const inlineImages=inputs.filter(({attachment,bytes})=>bytes&&raster(attachment));
+  let nativeBytes=dsh?inlineTotal:inlineImages.reduce((sum,{bytes})=>sum+bytes.length,0),nativeCount=dsh?inputs.filter(({bytes})=>bytes).length:inlineImages.length;
   const root=resolveApprovedPath(cwd||process.cwd(),'.');
   const folder=resolveApprovedPath(root,path.join('.ziwei','attachments',safeFileName(actionId)));
   fs.mkdirSync(folder,{recursive:true});
@@ -249,19 +253,29 @@ export async function materializeRuntimeAttachmentsAsync({attachments=[],cwd,act
     let name=attachmentFileName(attachment.name||attachment.filename,index);
     const base=name;let suffix=1;while(used.has(name))name=`${base}-${suffix++}`;used.add(name);
     const target=path.join(folder,name);
+    let input;
     if(bytes){
       if(fs.existsSync(target)){
         if(fs.lstatSync(target).isSymbolicLink()||!fs.statSync(target).isFile()||!fs.readFileSync(target).equals(bytes))throw new Error(`附件目标已存在且内容不同: ${name}`);
       }else fs.writeFileSync(target,bytes,{flag:'wx',mode:0o600});
-      paths.push({name,path:target,bytes:bytes.length,mimeType:String(attachment.mimeType||attachment.mime_type||'application/octet-stream')});
+      input={name,path:target,bytes:bytes.length,mimeType:String(attachment.mimeType||attachment.mime_type||'application/octet-stream')};
     }else if(fs.existsSync(target)){
       validateAttachmentReference(attachment);
       const stat=fs.lstatSync(target),sum=createHash('sha256');let size=0;
       if(!stat.isFile()||stat.isSymbolicLink()||stat.size!==attachment.size)throw new Error(`附件目标已存在且内容不同: ${name}`);
       for await(const chunk of fs.createReadStream(target,{highWaterMark:64*1024,signal})){size+=chunk.length;sum.update(chunk);}
       if(size!==attachment.size||sum.digest('hex')!==attachment.sha256)throw new Error(`附件目标已存在且内容不同: ${name}`);
-      paths.push({attachmentId:attachment.attachmentId,name,path:target,mimeType:attachment.mimeType,size,bytes:size,sha256:attachment.sha256,nativeVision:false});
-    }else paths.push({...await transfer.download({actionId,attachment,destination:target,signal}),name,nativeVision:false});
+      input={attachmentId:attachment.attachmentId,name,path:target,mimeType:attachment.mimeType,size,bytes:size,sha256:attachment.sha256,nativeVision:false};
+    }else input={...await transfer.download({actionId,attachment,destination:target,signal}),name,nativeVision:false};
+    if(!bytes&&['codex','hermes','dsh'].includes(nativeRuntime)&&raster(attachment)){
+      const stat=fs.lstatSync(target);
+      if(!stat.isFile()||stat.isSymbolicLink()||stat.size!==input.bytes)throw new Error(`附件实际文件大小或类型不匹配: ${name}`);
+      if(stat.size<=visionLimit&&nativeBytes+stat.size<=INLINE_ATTACHMENT_BYTES&&nativeCount<(dsh?10:MAX_ATTACHMENTS)){
+        const mimeType=imageArtifactChannel.validateImageBytes(fs.readFileSync(target),/^image\//i.test(input.mimeType)?input.mimeType:null);
+        input={...input,mimeType,nativeVision:true};nativeBytes+=stat.size;nativeCount++;
+      }
+    }
+    paths.push(input);
   }
   return paths;
 }
@@ -542,7 +556,7 @@ export function createLocalActionExecutor({runtimeDir, admissionHandledByDispatc
       const prompt = payload.prompt ?? payload.message ?? payload.content ?? payload.instructions;
       const dsh=String(runtime).toLowerCase()==='dsh';
       if(dsh&&Array.isArray(payload.attachments)&&payload.attachments.filter(item=>item?.attachmentId===undefined).length>10)throw new Error('DSH 每条消息最多支持10个内联附件');
-      const attachmentPaths = await materializeRuntimeAttachmentsAsync({attachments: payload.attachments, cwd: safeCwd, actionId: action.id,transfer:attachmentChannel,signal:context.signal});
+      const attachmentPaths = await materializeRuntimeAttachmentsAsync({attachments: payload.attachments, cwd: safeCwd, actionId: action.id,runtime,transfer:attachmentChannel,signal:context.signal});
       const attachmentPromptSuffix=attachmentPaths.length?`\n\n[本机附件]\n${attachmentPaths.map(item => `- ${item.name}: ${item.path}`).join('\n')}`:'';
       const promptWithAttachments = attachmentPromptSuffix ? String(prompt || '').trim()+attachmentPromptSuffix : prompt;
       if(!dsh)runtimeInvocation(runtime,{prompt:promptWithAttachments,attachments:attachmentPaths});
