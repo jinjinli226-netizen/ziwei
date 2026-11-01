@@ -2,6 +2,7 @@ import {normalizeNativeOperation,nativeIsExecution} from './hermes-native-contra
 import {loadBotProviderCredential} from './bot-provider-credential-client.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
+import {createHash} from 'node:crypto';
 import {collectEmployeeCapabilityInventory,createMachineCapabilityInventory,deriveCapabilityRuntimeContext} from './employee-capability-inventory.mjs';
 import {executeHermesNative} from './hermes-native-runtime.mjs';
 import {createBotGatewayManager} from './hermes-gateway-runtime.mjs';
@@ -15,7 +16,9 @@ import {provisionHermesBotProfile} from './hermes-owned-profile.mjs';
 import { createManagementBootstrap } from './management-bootstrap.mjs';
 import {normalizeRuntimeProfile} from './employee-runtime.mjs';
 import { isNativeRuntimeAction, resolveWindowsWorkdir, resolveWindowsWorkdirPath, windowsDirectoryError } from './windows-workdir.mjs';
-import { createImageArtifactSession } from './conversation-image-artifacts.mjs';
+import * as imageArtifactChannel from './conversation-image-artifacts.mjs';
+import {createAttachmentTransfer,validateAttachmentReference} from './conversation-attachment-transfer.mjs';
+import {MAX_ATTACHMENT_TOTAL_BYTES,MAX_ATTACHMENTS,INLINE_ATTACHMENT_BYTES} from './conversation-attachment-policy.mjs';
 import {requestBotStartAdmission,markManagementPrelaunchFailure} from './runtime-launch-evidence.mjs';
 import {bindCodexConversationToHost} from './codex-conversation-session.mjs';
 import {executeDshRuntime} from './dsh-runtime.mjs';
@@ -224,6 +227,45 @@ export function materializeRuntimeAttachments({attachments = [], cwd, actionId =
   return paths;
 }
 
+export async function materializeRuntimeAttachmentsAsync({attachments=[],cwd,actionId='action',transfer,signal}={}){
+  if(!Array.isArray(attachments)||!attachments.some(item=>item?.attachmentId!==undefined))return materializeRuntimeAttachments({attachments,cwd,actionId});
+  if(attachments.length>MAX_ATTACHMENTS)throw new Error('每条消息最多附加 20 个附件');
+  if(!transfer)throw new Error('附件下载缺少当前设备连接');
+  let total=0,inlineTotal=0;
+  const inputs=attachments.map(attachment=>{
+    const bytes=attachment?.attachmentId===undefined?decodeAttachmentContent(attachment):null;
+    const size=bytes?bytes.length:attachment.size;
+    if(!Number.isSafeInteger(size)||size<0||(total+=size)>MAX_ATTACHMENT_TOTAL_BYTES)throw new Error('会话附件总大小不能超过 500 MiB');
+    if(bytes&&(inlineTotal+=size)>INLINE_ATTACHMENT_BYTES)throw new Error('内联会话附件总大小不能超过 10 MiB');
+    return{attachment,bytes};
+  });
+  const root=resolveApprovedPath(cwd||process.cwd(),'.');
+  const folder=resolveApprovedPath(root,path.join('.ziwei','attachments',safeFileName(actionId)));
+  fs.mkdirSync(folder,{recursive:true});
+  if(!isInside(fs.realpathSync.native(root),fs.realpathSync.native(folder)))throw new Error('附件目录解析到已批准根目录之外');
+  const paths=[],used=new Set();
+  for(const [index,{attachment,bytes}]of inputs.entries()){
+    signal?.throwIfAborted();
+    let name=attachmentFileName(attachment.name||attachment.filename,index);
+    const base=name;let suffix=1;while(used.has(name))name=`${base}-${suffix++}`;used.add(name);
+    const target=path.join(folder,name);
+    if(bytes){
+      if(fs.existsSync(target)){
+        if(fs.lstatSync(target).isSymbolicLink()||!fs.statSync(target).isFile()||!fs.readFileSync(target).equals(bytes))throw new Error(`附件目标已存在且内容不同: ${name}`);
+      }else fs.writeFileSync(target,bytes,{flag:'wx',mode:0o600});
+      paths.push({name,path:target,bytes:bytes.length,mimeType:String(attachment.mimeType||attachment.mime_type||'application/octet-stream')});
+    }else if(fs.existsSync(target)){
+      validateAttachmentReference(attachment);
+      const stat=fs.lstatSync(target),sum=createHash('sha256');let size=0;
+      if(!stat.isFile()||stat.isSymbolicLink()||stat.size!==attachment.size)throw new Error(`附件目标已存在且内容不同: ${name}`);
+      for await(const chunk of fs.createReadStream(target,{highWaterMark:64*1024,signal})){size+=chunk.length;sum.update(chunk);}
+      if(size!==attachment.size||sum.digest('hex')!==attachment.sha256)throw new Error(`附件目标已存在且内容不同: ${name}`);
+      paths.push({attachmentId:attachment.attachmentId,name,path:target,mimeType:attachment.mimeType,size,bytes:size,sha256:attachment.sha256,nativeVision:false});
+    }else paths.push({...await transfer.download({actionId,attachment,destination:target,signal}),name,nativeVision:false});
+  }
+  return paths;
+}
+
 /**
  * Create a Hermes profile on the paired computer.  Profile contents are
  * deliberately written below the daemon user's Hermes home; the API server
@@ -382,9 +424,10 @@ function runCommand({runtimeDir, action, executable, baseArgs = [], allowedExecu
  * Unknown/unsupported actions fail loudly so the cloud never sees a fake
  * success merely because an action was accepted by the daemon.
  */
-export function createLocalActionExecutor({runtimeDir, admissionHandledByDispatcher = false, defaultWorkdir = process.cwd(), allowedExecutables = [], executorCommand = null, executorArgs = [], defaultRuntime = null, hermesHomePath = null, codexMcpDisabledServers = [], managementMcpConfig = {}, managementBootstrap = null, terminalMcpConfig = {}, workspace = null, apiBase = null, deviceId = null, deviceToken = null, onWorkspaceConnect = null, capabilityCollector = collectEmployeeCapabilityInventory, machineCapabilityInventory = sharedMachineCapabilityInventory, dshBaseUrl=process.env.ZIWEI_DSH_BASE_URL||'http://127.0.0.1:7878', dshRuntime=executeDshRuntime, dshPluginFetch=globalThis.fetch,dshPluginUiWebSocket,dshDeviceFetch=globalThis.fetch,dshSecretFetch=globalThis.fetch,dshSecretStore} = {}) {
+export function createLocalActionExecutor({runtimeDir, admissionHandledByDispatcher = false, defaultWorkdir = process.cwd(), allowedExecutables = [], executorCommand = null, executorArgs = [], defaultRuntime = null, hermesHomePath = null, codexMcpDisabledServers = [], managementMcpConfig = {}, managementBootstrap = null, terminalMcpConfig = {}, workspace = null, apiBase = null, deviceId = null, deviceToken = null, attachmentTransfer=null, onWorkspaceConnect = null, capabilityCollector = collectEmployeeCapabilityInventory, machineCapabilityInventory = sharedMachineCapabilityInventory, dshBaseUrl=process.env.ZIWEI_DSH_BASE_URL||'http://127.0.0.1:7878', dshRuntime=executeDshRuntime, dshPluginFetch=globalThis.fetch,dshPluginUiWebSocket,dshDeviceFetch=globalThis.fetch,dshSecretFetch=globalThis.fetch,dshSecretStore} = {}) {
   if (!runtimeDir) throw new TypeError('runtimeDir is required');
   fs.mkdirSync(runtimeDir, {recursive: true});
+  const attachmentChannel=attachmentTransfer||(apiBase&&deviceToken?{download:options=>createAttachmentTransfer({apiBase,headers:{'x-ziwei-device-token':deviceToken}}).download(options)}:null);
   const automaticManagement = managementBootstrap || (workspace && deviceToken ? createManagementBootstrap({ workspace, apiBase, deviceId, deviceToken, cacheDirectory: path.join(runtimeDir, 'management-mcp-credentials') }) : null);
   const gateways=createBotGatewayManager({apiBase,workspace,deviceToken});
   const dshInstallManager=createDshNativeInstallManager({directory:path.join(runtimeDir,'dsh-native-installs')});
@@ -497,11 +540,14 @@ export function createLocalActionExecutor({runtimeDir, admissionHandledByDispatc
       const runtime = payload.runtime || payload.agent || payload.runtimeName || defaultRuntime
         || Object.values(discoverInstalledRuntimes().runtimes).find(item => item.status === 'available')?.runtime;
       const prompt = payload.prompt ?? payload.message ?? payload.content ?? payload.instructions;
-      if(String(runtime).toLowerCase()==='dsh'&&Array.isArray(payload.attachments)&&payload.attachments.length>10)throw new Error('DSH 每条消息最多支持10个附件');
-      const attachmentPaths = materializeRuntimeAttachments({attachments: payload.attachments, cwd: safeCwd, actionId: action.id});
+      const dsh=String(runtime).toLowerCase()==='dsh';
+      if(dsh&&Array.isArray(payload.attachments)&&payload.attachments.filter(item=>item?.attachmentId===undefined).length>10)throw new Error('DSH 每条消息最多支持10个内联附件');
+      const attachmentPaths = await materializeRuntimeAttachmentsAsync({attachments: payload.attachments, cwd: safeCwd, actionId: action.id,transfer:attachmentChannel,signal:context.signal});
       const attachmentPromptSuffix=attachmentPaths.length?`\n\n[本机附件]\n${attachmentPaths.map(item => `- ${item.name}: ${item.path}`).join('\n')}`:'';
       const promptWithAttachments = attachmentPromptSuffix ? String(prompt || '').trim()+attachmentPromptSuffix : prompt;
-      if(String(runtime).toLowerCase()==='dsh'){
+      if(!dsh)runtimeInvocation(runtime,{prompt:promptWithAttachments,attachments:attachmentPaths});
+      const imageArtifacts = !dsh||attachmentChannel?imageArtifactChannel.createImageArtifactSession({runtimeDir,actionId:action.id,conversationId:payload.conversationId || null,references:Boolean(attachmentChannel)}):null;
+      if(dsh){
         const botName=dshBotNameForAction(action);
         if(!botName)throw new Error('DSH 员工缺少真实 Bot 绑定；显示名称不能作为运行时标识');
         if(payload.hermesBot)throw new Error('DSH 执行不能使用 Hermes owned Profile 身份');
@@ -511,15 +557,18 @@ export function createLocalActionExecutor({runtimeDir, admissionHandledByDispatc
           if(!response.ok||typeof workdir!=='string'||!path.isAbsolute(workdir))throw Object.assign(new Error('DSH 群成员原生工作目录未确认'),{code:'DSH_NATIVE_GROUP_WORKDIR_UNVERIFIED'});
           safeCwd=process.platform==='win32'?resolveWindowsWorkdir(workdir,'.'):resolveApprovedPath(workdir,'.');
         }
-        return dshRuntime({baseUrl:dshBaseUrl,botName,prompt,content:dshMessageContent(prompt,attachmentPaths),cwd:safeCwd,
+        const dshPrompt=String((attachmentPaths.some(item=>item.nativeVision===false)?promptWithAttachments:prompt)??'')+(imageArtifacts?imageArtifactChannel.imageArtifactInstructions(imageArtifacts):'');
+        const outcome=await dshRuntime({baseUrl:dshBaseUrl,botName,prompt:dshPrompt,content:dshMessageContent(dshPrompt,attachmentPaths),cwd:safeCwd,
           sessionId:payload.runtimeSessionId||payload.runtime_session_id||payload.sessionId||payload.session_id||null,
           sessionAuthority:{actionId:action.id,employeeId:payload.employeeId||null,conversationId:payload.conversationId||null},
           signal:context.signal,onOutput:context.onOutput,onStage:context.onStage,onSessionSupervision:context.onDshSessionSupervision,
           onInteractionChannel:channel=>dshInteractions.attach({workspace,deviceId,employeeId:payload.employeeId,profile:botName,conversationId:payload.conversationId,nativeSessionId:channel.sessionId,actionId:action.id},channel)});
+        if(!imageArtifacts||outcome.status!=='succeeded')return outcome;
+        const result={...(outcome.result||outcome),...(attachmentPaths.length?{inputAttachments:attachmentPaths}:{})};
+        try{result.outputArtifacts=await imageArtifactChannel.readImageArtifactDescriptors(imageArtifacts);}
+        catch(error){return{status:'failed',code:error.code||'image_artifact_invalid',error:error.message,result};}
+        return{status:'succeeded',result};
       }
-      // Refuse unsupported vision combinations before preparing any MCP session.
-      runtimeInvocation(runtime,{prompt:promptWithAttachments,attachments:attachmentPaths});
-      const imageArtifacts = createImageArtifactSession({runtimeDir,actionId:action.id,conversationId:payload.conversationId || null});
       if (payload.terminalMcp?.enabled === true && terminalMcpConfig.enabled === false) throw new Error('本机手机 MCP 已明确禁用');
       if(payload.hermesBot?.config.permissions.mode==='read_only' && payload.terminalMcp?.enabled)throw new Error('Bot 只读对话权限不允许手机 MCP');
       const executionGuard=PRODUCT_ROLE==='v1-compat'||['preparing','sealed'].includes(permit?.productState)?createHermesExecutionGuard(action,{protectedHomes:permit?.protectedHomes||[],runtimeDir,defaultWorkdir}):null;
@@ -584,6 +633,7 @@ export function createLocalActionExecutor({runtimeDir, admissionHandledByDispatc
 function dshMessageContent(prompt,attachments){
   const content=String(prompt||'').trim()?[{type:'text',text:String(prompt)}]:[];
   for(const attachment of attachments){
+    if(attachment.nativeVision===false)continue;
     if(attachment.bytes>2*1024*1024)throw new Error('DSH 单个附件不能超过2MiB');
     const bytes=fs.readFileSync(attachment.path);
     if(['image/png','image/jpeg','image/gif','image/webp'].includes(attachment.mimeType))content.push({type:'image',mediaType:attachment.mimeType,data:bytes.toString('base64'),name:attachment.name});
