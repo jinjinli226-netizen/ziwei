@@ -44,7 +44,7 @@ spec = importlib.util.spec_from_file_location('gateway_bridge', request['bridge'
 bridge = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(bridge)
 selected = ['web', 'browser', 'file', 'terminal', 'vision', 'skills', 'todo', 'memory',
-            'session_search', 'code_execution', 'ziwei_autonomy', 'ziwei_management']
+            'session_search', 'code_execution', 'ziwei_autonomy', 'ziwei_management', 'ziwei_collaboration']
 native_config = {'plugins': {'enabled': [], 'disabled': []}, 'agent': {'disabled_toolsets': []}, 'mcp_servers': {}}
 
 
@@ -71,10 +71,10 @@ entry = {'command': 'fixture-node', 'args': ['fixture-management.mjs'], 'env': {
 (overlay / 'config.yaml').write_text(json.dumps({'mcp_servers': {'ziwei_management': entry}}), encoding='utf-8')
 effective = {'mcp_servers': {'ziwei_management': entry}, 'platform_toolsets': {'cli': selected}, 'agent': {'disabled_toolsets': []}}
 config = type('Config', (), {'load_config': staticmethod(lambda: effective)})
-isolation = {'kind': 'hermes-bot', 'employeeId': 'employee-fixture', 'revision': 1}
+isolation = {'kind': 'hermes-bot', 'employeeId': 'employee-fixture', 'workspace': 'fixture', 'sourceProfile': 'bot-fixture', 'key': 'fixture-key', 'revision': 1}
 os.environ.update(ZIWEI_BOT_ACTION_ID='action-first', ZIWEI_BOT_DEVICE_TOKEN='fixture-device-secret', ZIWEI_API_BASE='https://fixture.invalid')
 servers = bridge._overlay_servers(config, str(overlay), RuntimeError, isolation)
-assert {row['name'] for row in servers} == {'ziwei_management', 'ziwei_autonomy'}
+assert {row['name'] for row in servers} == {'ziwei_management', 'ziwei_autonomy', 'ziwei_collaboration'}
 validate_editor('oneshot', {'mcp_servers': servers})
 first_fingerprint = fingerprint(servers)
 os.environ['ZIWEI_BOT_ACTION_ID'] = 'action-next'
@@ -91,7 +91,7 @@ class Native:
         if method == 'session.create':
             resolve(params['toolsets'])
             validate_editor(params['source'], params['editor'])
-            assert params['toolsets'] == selected[:-2]
+            assert params['toolsets'] == selected[:-3]
             assert params['client_env'] == {'PATH': 'fixture-path'}
             sent.append(params)
         elif method == 'session.resume':
@@ -119,6 +119,6 @@ effective['agent']['disabled_toolsets'] = []
 os.environ.pop('ZIWEI_BOT_DEVICE_TOKEN')
 assert bridge._overlay_servers(config, str(overlay), RuntimeError, isolation) == []
 print(json.dumps({'rawRefusal': raw_refusal, 'managementRefusal': management_refusal,
-                  'adapted': True, 'nativeToolsets': sorted(resolve(selected[:-2])),
+                  'adapted': True, 'nativeToolsets': sorted(resolve(selected[:-3])),
                   'privateServers': sorted(row['name'] for row in servers),
                   'unknownRefusal': unknown_refusal, 'scopeChanged': True, 'externalCalls': 0}))

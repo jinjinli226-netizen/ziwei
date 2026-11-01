@@ -88,6 +88,17 @@ def _overlay_servers(config, overlay, reject, isolation=None):
                 servers.append({'name': 'ziwei_autonomy', 'type': 'stdio', 'command': sys.executable,
                                 'args': [str(Path(__file__).with_name('hermes-bot-tools-mcp.py'))],
                                 'env': [{'name': name, 'value': os.environ[name]} for name in names]})
+        if isolation and isolation.get('kind') == 'hermes-bot' and 'ziwei_collaboration' in selected and not {'all', 'ziwei_collaboration', 'mcp-ziwei_collaboration'}.intersection(disabled):
+            names = ('ZIWEI_BOT_ACTION_ID', 'ZIWEI_BOT_DEVICE_TOKEN', 'ZIWEI_API_BASE')
+            if all(os.environ.get(name) for name in names):
+                binding = {key: isolation.get(key) for key in ('kind', 'employeeId', 'workspace', 'sourceProfile', 'key')}
+                binding['home'] = str(Path(os.environ.get('HERMES_HOME', '')).resolve())
+                _check(all(binding.values()), reject, 'BOT_GATEWAY_COLLABORATION_BINDING_INVALID')
+                private_env = {name: os.environ[name] for name in names}
+                private_env.update(HERMES_HOME=binding['home'], ZIWEI_COLLABORATION_BINDING=json.dumps(binding))
+                servers.append({'name': 'ziwei_collaboration', 'type': 'stdio', 'command': sys.executable,
+                                'args': [str(Path(__file__).with_name('hermes-collaboration-tools-mcp.py'))],
+                                'env': [{'name': name, 'value': value} for name, value in private_env.items()]})
         secrets = [item['value'] for server in servers for item in server.get('env', []) + server.get('headers', [])
                    if re.search(r'token|secret|password|api.?key|authorization', item['name'], re.I) and item['value']]
         for server in servers:
