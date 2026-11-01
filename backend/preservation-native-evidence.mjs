@@ -18,9 +18,14 @@ import {ARCHIVED_UNCONFIRMED_STATE} from '../src/daemon-action-delivery.mjs';
 const hash=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
 const json=value=>{try{return JSON.parse(value);}catch{return null;}};
 const archivedDeliveryReasons=new Set(['PERMANENT_SERVER_REJECTION','SERVER_LEASE_EXPIRED','SERVER_TERMINAL_UNCONFIRMED']);
+function validDeliveryArchive(archive){
+  return archive&&Object.keys(archive).sort().join(',')==='archivedAt,disposition,httpStatus,kind,reason,schemaVersion,serverStatus,serverTerminal'&&archive.schemaVersion===1&&archive.kind==='local-delivery-archive'&&archive.disposition==='archived-unconfirmed'&&archivedDeliveryReasons.has(archive.reason)&&archive.serverTerminal===false&&archive.serverStatus===null&&Number.isFinite(Date.parse(archive.archivedAt))&&(archive.httpStatus===null||Number.isInteger(archive.httpStatus)&&archive.httpStatus>=400&&archive.httpStatus<500&&![408,429].includes(archive.httpStatus));
+}
 function validArchivedUnconfirmed(record){
-  const archive=record?.archive;
-  return record?.state===ARCHIVED_UNCONFIRMED_STATE&&record?.retainEvidence===true&&!Object.hasOwn(record,'serverStatus')&&!Object.hasOwn(record,'blockedStatus')&&!Object.hasOwn(record,'confirmedAt')&&archive&&Object.keys(archive).sort().join(',')==='archivedAt,disposition,httpStatus,kind,reason,schemaVersion,serverStatus,serverTerminal'&&archive.schemaVersion===1&&archive.kind==='local-delivery-archive'&&archive.disposition==='archived-unconfirmed'&&archivedDeliveryReasons.has(archive.reason)&&archive.serverTerminal===false&&archive.serverStatus===null&&Number.isFinite(Date.parse(archive.archivedAt))&&(archive.httpStatus===null||Number.isInteger(archive.httpStatus)&&archive.httpStatus>=400&&archive.httpStatus<500&&![408,429].includes(archive.httpStatus));
+  return record?.state===ARCHIVED_UNCONFIRMED_STATE&&record?.retainEvidence===true&&!Object.hasOwn(record,'serverStatus')&&!Object.hasOwn(record,'blockedStatus')&&!Object.hasOwn(record,'confirmedAt')&&validDeliveryArchive(record.archive);
+}
+function validConfirmedArchivedDelivery(record,result){
+  return record.state==='confirmed'&&record.retainEvidence===true&&validDeliveryArchive(record.archive)&&!Object.hasOwn(record,'blockedStatus')&&['succeeded','failed'].includes(record.serverStatus)&&Number.isFinite(Date.parse(record.confirmedAt))&&record.events.length===0&&result?.status===record.serverStatus&&!uncertain(result)&&exitedTree(executionExit(result));
 }
 const equal=(a,b)=>digest(a)===digest(b);
 const deliveryBinding=(action,identity)=>{const p=action.payload||{};return hash(JSON.stringify({id:action.id,type:action.type,agent:action.agent_id||action.agentId||'ziwei_user',workspace:action.workspace_id||identity.workspace,device:identity.deviceId,employee:p.employeeId||p.employee_id||p.assignee||null,conversation:p.conversationId||p.conversation_id||null,message:p.messageId||p.message_id||null,dedupe:action.dedupe_key||action.dedupeKey||null}));};
@@ -536,6 +541,11 @@ function scanFileEvidence({connections=[],actions=[],homes=[],productionRequest}
           // auditable, but no server terminal or business success is inferred.
           // It therefore does not hold maintenance red while its diagnostic
           // remains visible to health/readyz callers.
+        }else if(record.state==='confirmed'&&Object.hasOwn(record,'archive')){
+          // Explicit redelivery retains the original archive as history. Its
+          // blobs were verified above; only a matching terminal receipt and
+          // definitive execution exit release this retained evidence.
+          if(!validConfirmedArchivedDelivery(record,deliveryResult))throw Error('invalid confirmed archive');
         }else if(record.state!=='confirmed'||record.retainEvidence||record.events.length)issue('DELIVERY_NOT_DRAINED',{actionId:record.action.id,state:record.state,path:file});
         else if(!['succeeded','failed','expired'].includes(record.serverStatus)||!Number.isFinite(Date.parse(record.confirmedAt)))throw new Error('invalid terminal receipt');
         const original=originals.get(record.action.id);if(record.state!==ARCHIVED_UNCONFIRMED_STATE&&original&&original.status!==record.serverStatus)issue('DELIVERY_SERVER_MISMATCH',{actionId:record.action.id,path:file});
