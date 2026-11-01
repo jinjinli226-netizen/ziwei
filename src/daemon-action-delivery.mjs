@@ -38,7 +38,7 @@ function minimalAction(action){const p=action.payload||{};return {...Object.from
  */
 export function createActionDelivery({directory,identity,post,dispatch,recoverResult=()=>null,retryDelays=[250,1000],onEvent=()=>{},onSuccess=async()=>{},onConfirmed=async()=>{},maxConfirmedRecords=1000,confirmedRetentionMs=7*24*60*60*1000,now=()=>Date.now(),autoArchiveUnconfirmed=false}={}){
  if(!directory||typeof post!=='function'||typeof dispatch!=='function'||typeof onConfirmed!=='function')throw new TypeError('Action delivery requires directory, transport and dispatcher');
- const connection=scope(identity||{}),records=new Map(),active=new Map(),activeBindings=new Map(),eventFlushes=new Map();
+ const connection=scope(identity||{}),records=new Map(),active=new Map(),activeBindings=new Map(),eventFlushes=new Map(),archivedRetries=new Map();
  const fileFor=id=>path.join(directory,`${hash(String(id))}.json`);
  const blobFor=(id,kind)=>path.join(directory,`${hash(String(id))}.${kind}.json`);
  const report=(event,data)=>{try{onEvent(event,data);}catch{}};
@@ -161,6 +161,7 @@ export function createActionDelivery({directory,identity,post,dispatch,recoverRe
   return delivery;
  }
  function restoreCompleted(record){
+  if(record.state==='confirmed'&&record.archive)return false;
   const result=recoverResult(record.action);
   if(!result||result.result?.maintenanceServerTerminal||!definitive(resultBody(result),record))return false;
   // A previously confirmed uncertain record retains its original binding blob.
@@ -279,6 +280,43 @@ export function createActionDelivery({directory,identity,post,dispatch,recoverRe
   }
  }
  function getRecord(id){let data=records.get(String(id));if(data)return read(data.action,{create:false});try{data=JSON.parse(fs.readFileSync(fileFor(String(id)),'utf8'));}catch(error){if(error.code==='ENOENT')return null;throw error;}return read(data.action,{create:false});}
+ function retryFailure(code,status=409){return Object.assign(new Error(code),{code,status});}
+ function retryArchivedResult(actionId){
+  const id=String(actionId||'');
+  if(archivedRetries.has(id))return archivedRetries.get(id);
+  if(active.has(id))return Promise.reject(retryFailure('DELIVERY_RETRY_BUSY'));
+  let record,body;
+  try{
+   record=getRecord(id);
+   if(!record)throw retryFailure('DELIVERY_RETRY_NOT_FOUND',404);
+   if(record.state==='confirmed'&&record.archive)return Promise.resolve({state:'confirmed',status:record.serverStatus,alreadyConfirmed:true});
+   if(record.state!==ARCHIVED_UNCONFIRMED_STATE)throw retryFailure('DELIVERY_RETRY_NOT_ARCHIVED');
+   if(!record.resultDigest)throw retryFailure('DELIVERY_RETRY_INCOMPLETE');
+   body=readBlob(record,'result');
+   if(!definitive(body,record))throw retryFailure('DELIVERY_RETRY_INCOMPLETE');
+  }catch(error){return Promise.reject(error);}
+  const promise=Promise.resolve().then(async()=>{
+   const artifacts=body.result?.outputArtifacts??body.result?.result?.outputArtifacts??[];
+   if(!Array.isArray(artifacts)||artifacts.some(item=>typeof item?.content!=='string'||item.contentEncoding!=='base64'))throw retryFailure('DELIVERY_RETRY_INCOMPLETE');
+   const expectedArtifacts=artifacts.map(({name,mimeType,size,content})=>({name,mimeType,size,sha256:createHash('sha256').update(Buffer.from(content,'base64')).digest('hex')}));
+   let stage='ack';
+   report('a2a_delivery_retry_started',{actionId:id});
+   try{
+    const acknowledgement=await post(`/a2a/v1/actions/${encodeURIComponent(id)}/ack`,{agentId:'ziwei_user',receiptOnly:true,renewLease:true},{timeoutMs:ACTION_TRANSPORT_BUDGETS.ack});
+    if(acknowledgement?.id!==id||acknowledgement.deviceId!==connection.deviceId||!['acked','succeeded'].includes(acknowledgement.status)||acknowledgement.status==='succeeded'&&body.status!=='succeeded'||acknowledgement.reconciliationRequired===true)throw retryFailure('DELIVERY_RETRY_ACK_INVALID');
+    // Always submit the original bytes, even after a terminal ACK. Only the
+    // result endpoint's artifact hashes prove the full image was persisted.
+    stage='result';
+    const confirmation=await post(`/a2a/v1/actions/${encodeURIComponent(id)}/result`,body,{timeoutMs:ACTION_TRANSPORT_BUDGETS.result});
+    const actualArtifacts=confirmation?.result?.outputArtifacts;
+    if(confirmation?.id!==id||confirmation.deviceId!==connection.deviceId||confirmation.status!==body.status||confirmation.reconciliationRequired===true||!Number.isFinite(Date.parse(confirmation.completed_at))||!Array.isArray(actualArtifacts)||JSON.stringify(actualArtifacts.map(({name,mimeType,size,sha256})=>({name,mimeType,size,sha256})))!==JSON.stringify(expectedArtifacts))throw retryFailure('DELIVERY_RETRY_RESULT_INVALID');
+    await confirm(record,confirmation.status);
+    report('a2a_delivery_retry_confirmed',{actionId:id,status:confirmation.status});
+    return {state:'confirmed',status:confirmation.status};
+   }catch(error){report('a2a_delivery_retry_failed',{actionId:id,stage,...(Number.isInteger(error.status)?{httpStatus:error.status}:{}),...(typeof error.code==='string'&&/^[A-Z0-9_]{1,100}$/.test(error.code)?{code:error.code}:{})});throw error;}
+  }).finally(()=>{active.delete(id);activeBindings.delete(id);archivedRetries.delete(id);});
+  active.set(id,promise);activeBindings.set(id,record.binding);archivedRetries.set(id,promise);return promise;
+ }
  function getMaintenancePause(id){const record=getRecord(id);return record?.pauseDigest?readBlob(record,'pause'):null;}
  function setMaintenanceAttempt(id,permit){
   if(!validAttempt(permit))throw new TypeError('Invalid maintenance resume permit');
@@ -303,6 +341,7 @@ export function createActionDelivery({directory,identity,post,dispatch,recoverRe
   canDeliverWithoutExecution(action){try{const record=action?.id&&read(action,{create:false});return Boolean(record&&(record.state==='result_pending'||definitive(resultBody(recoverResult(record.action)||{}),record)));}catch{return false;}},
   execute,
   recoverOriginal,
+  retryArchivedResult,
   recordEvent,
   getMaintenancePause,
   async flushActionEvents(id){const record=getRecord(id);if(!record)return {pending:0};await flushEvents(record);return {pending:record.events.length};},
