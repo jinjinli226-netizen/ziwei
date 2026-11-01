@@ -393,6 +393,29 @@ const privateIdentityHandler=privateIdentityConfiguration?createProductionClient
 const privateIdentityRoute=createPrivateIdentityHttpRoute(privateIdentityHandler);
 const health = http.createServer((req, res) => {
   if(privateIdentityRoute(req,res))return;
+  if(req.url==='/local/delivery-retry'){
+    const supplied=Buffer.from(String(req.headers['x-ziwei-local-control']||'')),expected=Buffer.from(String(config.deviceToken||''));
+    const local=['127.0.0.1','::1','::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
+    if(req.method!=='POST'||!local||!expected.length||supplied.length!==expected.length||!timingSafeEqual(supplied,expected)){res.writeHead(401);res.end();return;}
+    let body='',tooLarge=false;req.on('data',chunk=>{body+=chunk;if(body.length>1024){tooLarge=true;req.destroy();}});
+    req.on('end',async()=>{
+      const reply=(status,value)=>{res.writeHead(status,{'content-type':'application/json','cache-control':'no-store'});res.end(JSON.stringify(value));};
+      if(tooLarge)return;
+      let input;try{input=JSON.parse(body);}catch{reply(400,{error:'DELIVERY_RETRY_INPUT_INVALID'});return;}
+      if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).sort().join(',')!=='actionId,nonce,workspace') {reply(400,{error:'DELIVERY_RETRY_INPUT_INVALID'});return;}
+      if(input.nonce!==lifecycleNonce){reply(409,{error:'CLIENT_CONTROL_IDENTITY_CHANGED'});return;}
+      const connection=typeof input.workspace==='string'?connections.get(input.workspace):null;
+      if(!connection||typeof input.actionId!=='string'||!/^action_[A-Za-z0-9_-]{1,100}$/.test(input.actionId)){reply(400,{error:'DELIVERY_RETRY_INPUT_INVALID'});return;}
+      try{
+        const outcome=await connection.actionDelivery.retryArchivedResult(input.actionId);
+        reply(200,{actionId:input.actionId,state:outcome.state,status:outcome.status});
+      }catch(error){
+        const status=Number.isInteger(error?.status)&&error.status>=400&&error.status<=599?error.status:503;
+        const code=['DELIVERY_RETRY_NOT_FOUND','DELIVERY_RETRY_NOT_ARCHIVED','DELIVERY_RETRY_INCOMPLETE','DELIVERY_RETRY_ACK_INVALID','DELIVERY_RETRY_RESULT_INVALID'].includes(error?.code)?error.code:'DELIVERY_RETRY_FAILED';
+        reply(status,{error:code,httpStatus:status});
+      }
+    });return;
+  }
   if(req.url==='/local/failure-finalizations'){
     const supplied=Buffer.from(String(req.headers['x-ziwei-local-control']||'')),expected=Buffer.from(String(config.deviceToken||''));
     const local=['127.0.0.1','::1','::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
