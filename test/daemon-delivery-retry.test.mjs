@@ -109,7 +109,14 @@ test('a definitive original failure can be delivered as failed without another e
   assert.equal(JSON.stringify(f.calls[1].body),f.originalBytes.toString('utf8'));
 });
 
-for(const patch of [{id:'action_foreign'},{deviceId:'foreign-device'},{status:'failed'},{status:'expired'},{reconciliationRequired:true},{result:{outputArtifacts:[]}},{result:{outputArtifacts:[{name:'result.png',mimeType:'image/png',size:image.length,sha256:'wrong'}]}}])test(`retry keeps archived evidence when result receipt differs: ${JSON.stringify(patch)}`,async t=>{
+test('a text-only terminal receipt may omit the empty artifact list',async t=>{
+  const f=await fixture(t,{result:{status:'succeeded',result:{code:0,output:'Original text',processExit:exit}}});
+  f.result=()=>({...f.confirmation(),result:{outputLength:13}});
+  assert.deepEqual(await f.delivery.retryArchivedResult(action.id),{state:'confirmed',status:'succeeded'});
+  assert.equal(f.executions,1);assert.equal(f.confirmed,1);
+});
+
+for(const patch of [{id:'action_foreign'},{deviceId:'foreign-device'},{status:'failed'},{status:'expired'},{reconciliationRequired:true},{result:{}},{result:{outputArtifacts:[]}},{result:{outputArtifacts:[{name:'result.png',mimeType:'image/png',size:image.length,sha256:'wrong'}]}}])test(`retry keeps archived evidence when result receipt differs: ${JSON.stringify(patch)}`,async t=>{
   const f=await fixture(t);f.result=()=>({...f.confirmation(),...patch});
   await assert.rejects(f.delivery.retryArchivedResult(action.id),{code:'DELIVERY_RETRY_RESULT_INVALID'});
   assert.equal(f.calls.length,2);assert.equal(f.confirmed,0);assert.equal(f.executions,1);
@@ -138,7 +145,11 @@ test('unknown, wrong-scope, corrupt or non-definitive archived results are refus
   assert.equal(uncertain.calls.length,0);
 });
 
-test('the original repository receipts restore the original image attachment after one archived rejection',async t=>{
+for(const [name,result] of [
+  ['original image',outcome],
+  ['successful text',{status:'succeeded',result:{code:0,output:'Original text',processExit:exit}}],
+  ['original failure',{status:'failed',error:'Original failure',result:{code:1,processExit:{...exit,rootExitCode:1}}}]
+])test(`the original repository receipts restore ${name} after one archived rejection`,async t=>{
   const repo=createRepository({memory:true});t.after(()=>repo.db.close());
   const device=repo.claimDevicePairing({code:repo.createDevicePairing('test-111',{name:'Receipt retry fixture',os:'Windows'}).code});
   const employee=repo.createEmployee('test-111',{name:'Original image',runtime:'Codex',targetDeviceId:device.deviceId});
@@ -148,20 +159,21 @@ test('the original repository receipts restore the original image attachment aft
   t.after(()=>fs.rmSync(directory,{recursive:true,force:true}));
   let refused=true,executions=0;
   const delivery=createActionDelivery({directory,identity:{apiBase:'https://fixture.invalid',workspace:'test-111',deviceId:device.deviceId},retryDelays:[],autoArchiveUnconfirmed:true,
-    dispatch:async()=>{executions++;return outcome;},post:async(url,body)=>{
+    dispatch:async()=>{executions++;return result;},post:async(url,body)=>{
       if(url.endsWith('/ack'))return repo.ackA2AAction(assigned.id,{...body,deviceId:device.deviceId});
       if(url.endsWith('/events'))return repo.recordA2AEvent(assigned.id,{...body,deviceId:device.deviceId});
       if(refused)throw Object.assign(Error('fixture body rejected'),{status:413});
       const receipt=repo.resultA2AAction(assigned.id,{...body,deviceId:device.deviceId});
-      assert.equal(receipt.status,'succeeded',receipt.error);return receipt;
+      assert.equal(receipt.status,result.status,receipt.error);return receipt;
     }});
   await delivery.execute(assigned);
   assert.equal(repo.getA2AAction(assigned.id).status,'acked');
   assert.equal(repo.getConversation(conversation.id).messages.filter(x=>x.role==='assistant').length,0);
   refused=false;await delivery.retryArchivedResult(assigned.id);
-  assert.equal(repo.getA2AAction(assigned.id).status,'succeeded');assert.equal(executions,1);
+  assert.equal(repo.getA2AAction(assigned.id).status,result.status);assert.equal(executions,1);
   const reply=repo.getConversation(conversation.id).messages.at(-1);
-  assert.equal(reply.attachments.length,1);assert.equal(sha(Buffer.from(reply.attachments[0].content,'base64')),sha(image));
+  assert.equal(reply.attachments.length,result.result.outputArtifacts?.length||0);
+  if(reply.attachments.length)assert.equal(sha(Buffer.from(reply.attachments[0].content,'base64')),sha(image));
   await delivery.retryArchivedResult(assigned.id);
   assert.equal(repo.getConversation(conversation.id).messages.filter(x=>x.role==='assistant').length,1);
 });

@@ -308,7 +308,8 @@ export function createActionDelivery({directory,identity,post,dispatch,recoverRe
     // result endpoint's artifact hashes prove the full image was persisted.
     stage='result';
     const confirmation=await post(`/a2a/v1/actions/${encodeURIComponent(id)}/result`,body,{timeoutMs:ACTION_TRANSPORT_BUDGETS.result});
-    const actualArtifacts=confirmation?.result?.outputArtifacts;
+    let actualArtifacts=confirmation?.result?.outputArtifacts;
+    if(actualArtifacts===undefined&&expectedArtifacts.length===0)actualArtifacts=[];
     if(confirmation?.id!==id||confirmation.deviceId!==connection.deviceId||confirmation.status!==body.status||confirmation.reconciliationRequired===true||!Number.isFinite(Date.parse(confirmation.completed_at))||!Array.isArray(actualArtifacts)||JSON.stringify(actualArtifacts.map(({name,mimeType,size,sha256})=>({name,mimeType,size,sha256})))!==JSON.stringify(expectedArtifacts))throw retryFailure('DELIVERY_RETRY_RESULT_INVALID');
     await confirm(record,confirmation.status);
     report('a2a_delivery_retry_confirmed',{actionId:id,status:confirmation.status});
