@@ -13,6 +13,17 @@ function noLink(file) {try{if(fs.lstatSync(file).isSymbolicLink())throw botFailu
 function write(file,text) {noLink(file);const tmp=`${file}.${randomUUID()}.tmp`;try{fs.writeFileSync(tmp,text,{flag:'wx',mode:0o600});fs.renameSync(tmp,file);}finally{try{fs.unlinkSync(tmp);}catch{}}}
 function readConfig(file) {const document=parseDocument(fs.readFileSync(file,'utf8'));const value=document.toJSON();if(document.errors.length||!value||typeof value!=='object'||Array.isArray(value))throw botFailure('BOT_SOURCE_INVALID','来源 profile config.yaml 无效');return value;}
 
+// Native image routing belongs to this owned Profile, not its initialization template.
+// Preserve only public selectors; native OAuth and plugin credentials stay in their stores.
+function nativeImageGenerationSettings(source) {
+  const image=source.image_gen;
+  if(!image)return {};
+  const image_gen=Object.fromEntries(['provider','model'].filter(key=>typeof image[key]==='string').map(key=>[key,image[key]]));
+  const provider=image_gen.provider;
+  if(provider&&typeof image[provider]?.model==='string')image_gen[provider]={model:image[provider].model};
+  return Object.keys(image_gen).length?{image_gen}:{};
+}
+
 // Public native compression policy only. Source provider secrets remain in
 // their existing authentication store and never enter a derived Bot config.
 function nativeCompressionPolicy(source,model) {
@@ -81,6 +92,7 @@ export function prepareHermesBotHome({context,sourceHome,privateDirectory,worksp
     model:{provider,default:model,...(endpoint?{base_url:endpoint}:{}),...(apiMode?{api_mode:apiMode}:{})},
     ...(custom?{providers:{[providerName]:Object.fromEntries(['base_url','api_mode','default_model','key_env','context_length'].filter(key=>custom[key]!==undefined).map(key=>[key,custom[key]]).concat([['discover_models',false]]))}}:{}),
     ...nativeCompressionPolicy(sourceConfig,model),
+    ...(owned?nativeImageGenerationSettings(sourceConfig):{}),
     fallback_providers:[],updates:{check:false},...(sourceConfig.models_dev?.url?{models_dev:{url:sourceConfig.models_dev.url}}:{}),
     agent:{max_turns:effectiveBotMaxTurns(config),run_budget_seconds:NATIVE_LONG_TASK_TIMEOUT_MS / 1000,bot_mode_protocol:false,coding_context:'off',disabled_toolsets:readOnly?['all']:['cronjob','delegation','kanban'],...(config.reasoningEffort?{reasoning_effort:config.reasoningEffort}:{})},
     platform_toolsets:{cli:hermesBotToolsets(config)},

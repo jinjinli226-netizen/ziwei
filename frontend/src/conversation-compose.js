@@ -25,7 +25,7 @@ export function clipboardImageFiles(clipboardData) {
 export function createConversationComposerStore({makeId=()=>crypto.randomUUID(),wrap=value=>value}={}) {
   const entries=new Map();
   function get(key) {
-    if (!entries.has(key)) entries.set(key,wrap({draft:'',attachments:[],revision:0,draftRevision:0,attachmentRevision:0,reading:false,readToken:0,pending:false,request:null,error:''}));
+    if (!entries.has(key)) entries.set(key,wrap({draft:'',attachments:[],uploadRetry:[],attachmentProgress:0,revision:0,draftRevision:0,attachmentRevision:0,reading:false,readToken:0,pending:false,request:null,error:''}));
     return entries.get(key);
   }
   function updateDraft(key,draft) { const entry=get(key);entry.draft=draft;entry.revision++;entry.draftRevision++; }
@@ -38,7 +38,7 @@ export function createConversationComposerStore({makeId=()=>crypto.randomUUID(),
   }
   function beginSubmission(key,settings={}) {
     const entry=get(key);
-    if(entry.pending || entry.reading || (!entry.draft.trim() && !entry.attachments.length))return null;
+    if(entry.pending || entry.reading || entry.uploadRetry.length || (!entry.draft.trim() && !entry.attachments.length))return null;
     const fingerprint=JSON.stringify([entry.draft.trim(),entry.attachments,settings]);
     if(entry.request?.fingerprint!==fingerprint)entry.request={fingerprint,id:makeId()};
     entry.pending=true;entry.error='';

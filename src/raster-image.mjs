@@ -71,7 +71,7 @@ function jpeg(bytes) {
       for(let i=0;i<count;i++) {const id=bytes[offset+3+i*2];if(!components.has(id)||selected.has(id))return null;selected.add(id);}
       offset=end;let entropy=0,ended=false;
       while (offset<bytes.length) {
-        if (bytes[offset]!==0xff) {entropy++;offset++;continue;}
+        if (bytes[offset]!==0xff) {const marker=bytes.indexOf(0xff,offset),end=marker<0?bytes.length:marker;entropy+=end-offset;offset=end;continue;}
         const start=offset;while(offset<bytes.length&&bytes[offset]===0xff)offset++;
         if (offset>=bytes.length) return null;
         const next=bytes[offset];
@@ -178,6 +178,11 @@ function webp(bytes) {
 export function inspectRasterImage(value) {
   if(!(value instanceof Uint8Array)||!value.length||value.length>MAX_BYTES)return null;
   const bytes=Buffer.isBuffer(value)?value:Buffer.from(value.buffer,value.byteOffset,value.byteLength);
+  return inspectRasterImageReader(bytes);
+}
+// Both byte buffers and the bounded seekable file adapter implement these
+// small read operations; container validation stays in these same parsers.
+export function inspectRasterImageReader(bytes) {
   try {return png(bytes)||jpeg(bytes)||gif(bytes)||webp(bytes);} catch {return null;}
 }
 export const rasterImageMimeType = bytes => inspectRasterImage(bytes)?.mimeType || null;

@@ -20,5 +20,5 @@ test('the installed native Gateway parser accepts mapped private MCP without los
   assert.equal(proof.rawRefusal.field,'toolsets');assert.match(proof.rawRefusal.detail,/ziwei_autonomy/);
   assert.match(proof.managementRefusal.detail,/ziwei_management/);assert.match(proof.unknownRefusal.detail,/custom-unmapped/);
   assert.equal(proof.adapted,true);assert.equal(proof.scopeChanged,true);assert.equal(proof.externalCalls,0);
-  assert.equal(proof.nativeToolsets.length,10);assert.deepEqual(proof.privateServers,['ziwei_autonomy','ziwei_management']);
+  assert.equal(proof.nativeToolsets.length,10);assert.deepEqual(proof.privateServers,['ziwei_autonomy','ziwei_collaboration','ziwei_management']);
 });

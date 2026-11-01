@@ -54,7 +54,7 @@ export function normalizeMixedGroup(input = {}) {
 }
 
 function normalizeMessage(message) {
-  if (!object(message) || !text(message.id, 240) || !text(message.role, 40) || !text(message.text, 65536)) fail('MIXED_GROUP_MESSAGE_INVALID', '混合群历史消息无效');
+  if (!object(message) || !text(message.id, 240) || !text(message.role, 40) || typeof message.text !== 'string' || message.text.length > 65536) fail('MIXED_GROUP_MESSAGE_INVALID', '混合群历史消息无效');
   return {
     id: message.id,
     role: message.role,
@@ -63,6 +63,7 @@ function normalizeMessage(message) {
     ...(message.runtime ? { runtime: String(message.runtime) } : {}),
     ...(message.profile ? { profile: String(message.profile) } : {}),
     ...(message.actionId ? { actionId: String(message.actionId) } : {}),
+    ...(message.sourceConversationId ? { sourceConversationId: String(message.sourceConversationId) } : {}),
     ...(message.status ? { status: String(message.status) } : {}),
     ...(message.error ? { error: String(message.error).slice(0, 4000) } : {}),
     ...(Array.isArray(message.attachments) ? { attachments: message.attachments.slice(0, 20) } : {}),
@@ -88,9 +89,9 @@ export function resolveMixedGroupTargets(groupInput, content) {
 
 export function planMixedGroupDispatch({ group: groupInput, content, targetEmployeeIds, attachments = [], source = {} } = {}) {
   const group = normalizeMixedGroup(groupInput);
-  if (!text(content, 20000)) fail('MIXED_GROUP_MESSAGE_INVALID', '混合群消息不能为空');
+  if (typeof content !== 'string' || content.length > 20000 || (!content.trim() && !attachments.length)) fail('MIXED_GROUP_MESSAGE_INVALID', '混合群消息不能为空');
   if (!Array.isArray(attachments) || attachments.length > 20) fail('MIXED_GROUP_ATTACHMENT_INVALID', '混合群附件最多 20 个');
-  const targets = targetEmployeeIds === undefined ? resolveMixedGroupTargets(group, content) : targetEmployeeIds;
+  const targets = targetEmployeeIds === undefined ? (content.trim() ? resolveMixedGroupTargets(group, content) : group.members.map(member => member.employeeId)) : targetEmployeeIds;
   if (!Array.isArray(targets) || !targets.length || new Set(targets).size !== targets.length) fail('MIXED_GROUP_TARGET_INVALID', '混合群目标不能为空且必须唯一');
   const selected = group.members.filter(member => targets.includes(member.employeeId));
   if (selected.length !== targets.length) fail('MIXED_GROUP_TARGET_INVALID', '混合群目标不属于当前冻结成员');
@@ -115,14 +116,15 @@ export function planMixedGroupDispatch({ group: groupInput, content, targetEmplo
 
 export function appendMixedGroupTurn(groupInput, turn = {}) {
   const group = normalizeMixedGroup(groupInput);
-  if (!text(turn.messageId, 240) || !text(turn.content, 65536) || !Array.isArray(turn.runs)) fail('MIXED_GROUP_TURN_INVALID', '混合群回合需要消息和成员结果');
+  if (!text(turn.messageId, 240) || typeof turn.content !== 'string' || turn.content.length > 65536 || !Array.isArray(turn.runs)) fail('MIXED_GROUP_TURN_INVALID', '混合群回合需要消息和成员结果');
   const memberMap = new Map(group.members.map(member => [member.employeeId, member]));
-  const messages = [...group.messages, { id: turn.messageId, role: 'user', text: turn.content, status: 'complete', ...(Array.isArray(turn.attachments) ? { attachments: turn.attachments.slice(0, 20) } : {}) }];
+  const messages = [...group.messages];
+  if (!messages.some(message => message.id === turn.messageId)) messages.push({ id: turn.messageId, role: 'user', text: turn.content, status: 'complete', ...(Array.isArray(turn.attachments) ? { attachments: turn.attachments.slice(0, 20) } : {}) });
   for (const run of turn.runs) {
     const member = memberMap.get(run.employeeId);
     if (!member || run.runtime !== member.runtime || (run.profile && run.profile !== member.profile)) fail('MIXED_GROUP_RUN_BINDING_INVALID', '混合群成员结果绑定不匹配');
     const status = ['succeeded', 'failed', 'unknown', 'cancelled'].includes(run.status) ? run.status : 'unknown';
-    messages.push({ id: run.actionId, role: status === 'succeeded' ? 'assistant' : 'tool', text: String(run.output || run.error || ''), employeeId: member.employeeId, runtime: member.runtime, profile: member.profile, actionId: run.actionId, status, ...(run.error ? { error: String(run.error).slice(0, 4000) } : {}) });
+    messages.push({ id: run.actionId, role: status === 'succeeded' ? 'assistant' : 'tool', text: String(run.output || run.error || ''), employeeId: member.employeeId, runtime: member.runtime, profile: member.profile, actionId: run.actionId, status, ...(run.conversationId ? {sourceConversationId:run.conversationId} : {}), ...(run.attachments?.length ? {attachments:run.attachments} : {}), ...(run.error ? { error: String(run.error).slice(0, 4000) } : {}) });
   }
   return { ...group, messages: messages.slice(-maxMessages), updatedAt: turn.updatedAt || new Date().toISOString() };
 }

@@ -1,5 +1,6 @@
 <script setup>
 import {computed,nextTick,onBeforeUnmount,reactive,ref,watch} from 'vue';
+import {MAX_ATTACHMENT_TOTAL_BYTES,MAX_ATTACHMENTS} from '../../../src/conversation-attachment-policy.mjs';
 import {api} from '../api.js';
 import {MIXED_GROUP_RUNTIMES,mixedGroupMemberDescriptor,mixedGroupStatus} from '../mixed-group.js';
 import {createBotRequestScope} from '../bot-state.js';
@@ -12,6 +13,8 @@ const groups=ref([]),selectedId=ref(''),selected=ref(null),title=ref(''),memberI
 const reading=ref(false),listReading=ref(false),busy=ref(false),error=ref(''),listError=ref(''),notice=ref('');
 const scope=createBotRequestScope(),enterGuard=createConversationEnterGuard();
 const timeline=ref(null),historyScroll=createConversationScrollTracker({wrap:reactive});
+const files=ref([]),uploading=ref(false),uploadProgress=ref('');
+let uploadController=null,pendingSend=null;
 let pollTimer=null,disposed=false;
 const candidates=computed(()=>props.employees.filter(employee=>MIXED_GROUP_RUNTIMES.includes(employee.runtime)&&employee.status!=='deleted'));
 const activeRuns=computed(()=>selected.value?.runs?.some(run=>['pending','acked','running'].includes(run.status))||false);
@@ -43,6 +46,7 @@ function select(id){
 }
 function resetSelection(){
  clearTimeout(pollTimer);scope.select(props.workspace,selectedId.value);historyScroll.reset();
+ uploadController?.abort();uploadController=null;files.value=[];uploading.value=false;uploadProgress.value='';pendingSend=null;
  selected.value=null;draft.value='';title.value='';memberIds.value=props.employee?[props.employee.id]:[];
  showCreate.value=false;reading.value=false;listReading.value=false;busy.value=false;error.value='';listError.value='';notice.value='';
  void refresh();
@@ -61,17 +65,37 @@ async function create(){
  }catch(reason){if(scope.current(request))error.value=mutationError(reason,'创建');}
  finally{if(scope.current(request)){busy.value=false;schedulePoll();}}
 }
+function chooseFiles(event){
+ const additions=Array.from(event.target.files||[]);event.target.value='';
+ if(files.value.length+additions.length>MAX_ATTACHMENTS||[...files.value,...additions.map(file=>({file}))].reduce((sum,item)=>sum+item.file.size,0)>MAX_ATTACHMENT_TOTAL_BYTES){error.value='每条消息最多 20 个附件，总计不超过 500 MiB';return;}
+ files.value.push(...additions.map(file=>({file,id:crypto.randomUUID()})));pendingSend=null;
+}
+function removeFile(id){files.value=files.value.filter(item=>item.id!==id);pendingSend=null;}
+function cancelUpload(){uploadController?.abort();}
+function imagePreview(item){return ['image/png','image/jpeg','image/gif','image/webp'].includes(item.mimeType)&&item.size<=10*1024*1024&&!!item.url;}
+function attachmentUrl(item,download=false){return api.conversationAttachmentUrl(item.conversationId,item.attachmentId,{download});}
 async function send(){
- if(busy.value||!selected.value||!draft.value.trim())return;
- const request=scope.begin('write'),workspace=props.workspace,id=selectedId.value,content=draft.value;
- busy.value=true;error.value='';notice.value='';clearTimeout(pollTimer);
+ if(busy.value||!selected.value||(!draft.value.trim()&&!files.value.length))return;
+ const request=scope.begin('write'),workspace=props.workspace,id=selectedId.value,content=draft.value,chosen=files.value.slice();
+ const sourceId=selected.value.conversations?.[0]?.id||selected.value.members?.[0]?.conversationId;
+ const controller=new AbortController();uploadController=controller;
+ busy.value=true;uploading.value=!!chosen.length;error.value='';notice.value='';clearTimeout(pollTimer);
  try{
-  await api.sendMixedGroupMessage(id,{content},workspace);
+  const attachments=[];
+  for(const [index,item] of chosen.entries()){
+   attachments.push(await api.uploadConversationAttachment(sourceId,item.file,{signal:controller.signal,onProgress:({loaded,total})=>{if(scope.current(request))uploadProgress.value=`附件 ${index+1}/${chosen.length} · ${Math.round(loaded/total*100)}%`;}}));
+   if(!scope.current(request))return;
+  }
+  uploading.value=false;uploadProgress.value='';
+  const fingerprint=JSON.stringify({content,attachments:attachments.map(item=>item.attachmentId)});
+  if(!pendingSend||pendingSend.fingerprint!==fingerprint)pendingSend={fingerprint,messageId:`mixed-message:${crypto.randomUUID()}`};
+  await api.sendMixedGroupMessage(id,{content,attachments,attachmentSourceConversationId:sourceId,messageId:pendingSend.messageId},workspace);
   if(!scope.current(request))return;
   if(draft.value===content)draft.value='';
+  files.value=files.value.filter(item=>!chosen.some(file=>file.id===item.id));pendingSend=null;
   notice.value='消息已提交，成员结果将自动更新。';emit('changed',{workspace,groupId:id});await readDetail();
- }catch(reason){if(scope.current(request))error.value=mutationError(reason,'发送');}
- finally{if(scope.current(request)){busy.value=false;schedulePoll();}}
+ }catch(reason){if(scope.current(request))error.value=controller.signal.aborted?'上传已取消，文件已保留，可重试继续上传。':mutationError(reason,'发送');}
+ finally{if(scope.current(request)){busy.value=false;uploading.value=false;uploadProgress.value='';uploadController=null;schedulePoll();}}
 }
 async function cancel(){
  if(busy.value||!activeRuns.value)return;
@@ -104,7 +128,7 @@ watch(()=>[props.workspace,props.groupId],([workspace,id],[previousWorkspace]=[]
  if(workspace!==previousWorkspace)groups.value=[];
  selectedId.value=id||'';resetSelection();
 },{immediate:true});
-onBeforeUnmount(()=>{disposed=true;clearTimeout(pollTimer);scope.dispose();});
+onBeforeUnmount(()=>{disposed=true;uploadController?.abort();clearTimeout(pollTimer);scope.dispose();});
 </script>
 <template>
  <section class="mixed-group-panel" :class="{embedded}" aria-label="工作区群聊" :aria-busy="reading">
@@ -118,8 +142,8 @@ onBeforeUnmount(()=>{disposed=true;clearTimeout(pollTimer);scope.dispose();});
     <p v-if="reading&&!selected" class="mixed-group-empty" role="status">正在读取当前群聊…</p>
     <template v-if="selected">
      <div class="mixed-group-roster" aria-label="群聊成员"><span v-for="member in selected.members" :key="member.employeeId"><strong>{{member.name}}</strong><small>{{member.runtime}} · @{{member.profile}}</small></span></div>
-     <div class="mixed-group-history-wrap"><div ref="timeline" class="mixed-group-history" aria-label="群聊消息" aria-live="polite" tabindex="0" @scroll="historyScroll.scroll" @wheel.passive="historyScroll.wheel" @touchstart.passive="historyScroll.touchStart" @touchmove.passive="historyScroll.touchMove" @pointerdown="historyScroll.pointer" @keydown="historyScroll.key"><article v-for="message in selected.messages" :key="message.id" :class="{'is-user':message.role==='user'}"><div class="mixed-group-message-meta"><strong>{{messageName(message)}}</strong><small v-if="message.runtime">{{message.runtime}}</small><small v-if="message.status">{{statusLabel(message.status)}}</small></div><p>{{message.text}}</p></article><p v-if="!selected.messages.length" class="mixed-group-empty">还没有消息，可以开始讨论。</p></div><button v-if="historyScroll.state.showLatest" type="button" class="mixed-group-jump-latest" @click="jumpLatest">跳至最新</button></div>
-     <div class="mixed-group-compose"><textarea v-model="draft" rows="3" maxlength="20000" aria-label="群消息" placeholder="输入消息；不写 @ 默认发送给全员" @compositionstart="enterGuard.compositionStart" @compositionend="enterGuard.compositionEnd" @keydown="keydown"/><div class="mixed-group-compose-footer"><span>Enter 发送 · Shift + Enter 换行</span><div class="mixed-group-actions"><button v-if="activeRuns" type="button" :disabled="busy" @click="cancel">请求取消当前回合</button><button type="button" class="primary" :disabled="busy||!draft.trim()" @click="send">{{busy?'提交中…':'发送到群'}}</button></div></div></div>
+     <div class="mixed-group-history-wrap"><div ref="timeline" class="mixed-group-history" aria-label="群聊消息" aria-live="polite" tabindex="0" @scroll="historyScroll.scroll" @wheel.passive="historyScroll.wheel" @touchstart.passive="historyScroll.touchStart" @touchmove.passive="historyScroll.touchMove" @pointerdown="historyScroll.pointer" @keydown="historyScroll.key"><article v-for="message in selected.messages" :key="message.id" :class="{'is-user':message.role==='user'}"><div class="mixed-group-message-meta"><strong>{{messageName(message)}}</strong><small v-if="message.runtime">{{message.runtime}}</small><small v-if="message.status">{{statusLabel(message.status)}}</small></div><p>{{message.text}}</p><div v-if="message.attachments?.length" class="mixed-group-attachments"><a v-for="item in message.attachments" :key="item.attachmentId" :href="attachmentUrl(item,true)" target="_blank" rel="noopener" :download="item.name"><img v-if="imagePreview(item)" :src="attachmentUrl(item)" :alt="item.name" loading="lazy" @load="scrollMessages"/><span>{{item.name}}</span><small>{{Math.ceil(item.size/1024)}} KB · 下载</small></a></div></article><p v-if="!selected.messages.length" class="mixed-group-empty">还没有消息，可以开始讨论。</p></div><button v-if="historyScroll.state.showLatest" type="button" class="mixed-group-jump-latest" @click="jumpLatest">跳至最新</button></div>
+     <div class="mixed-group-compose"><div v-if="files.length" class="mixed-group-file-list"><div v-for="item in files" :key="item.id"><span>{{item.file.name}}</span><button type="button" :disabled="busy" @click="removeFile(item.id)">移除</button></div></div><p v-if="uploadProgress" role="status">{{uploadProgress}}</p><button v-if="uploading" type="button" @click="cancelUpload">取消上传</button><textarea v-model="draft" rows="3" maxlength="20000" aria-label="群消息" placeholder="输入消息；不写 @ 默认发送给全员" @compositionstart="enterGuard.compositionStart" @compositionend="enterGuard.compositionEnd" @keydown="keydown"/><div class="mixed-group-compose-footer"><span>Enter 发送 · Shift + Enter 换行</span><label class="mixed-group-file-picker">添加附件<input type="file" multiple :disabled="busy" aria-label="群聊附件" @change="chooseFiles"/></label><div class="mixed-group-actions"><button v-if="activeRuns" type="button" :disabled="busy" @click="cancel">请求取消当前回合</button><button type="button" class="primary" :disabled="busy||(!draft.trim()&&!files.length)" @click="send">{{busy?'提交中…':'发送到群'}}</button></div></div></div>
      <section v-if="selected.runs?.length" class="mixed-group-runs" aria-label="群成员执行回执"><h3>成员执行结果</h3><article v-for="run in selected.runs" :key="run.actionId"><div class="mixed-group-run-heading"><strong>{{memberName(run)}}</strong><small>{{run.runtime}} · {{statusLabel(run.status)}}</small></div><p v-if="run.output">{{run.output}}</p><p v-if="run.error" class="mixed-group-error">{{run.error}}</p><details><summary>查看执行回执</summary><dl><div><dt>Profile</dt><dd>{{run.profile}}</dd></div><div><dt>专属会话</dt><dd>{{run.conversationId}}</dd></div><div><dt>执行 ID</dt><dd>{{run.actionId}}</dd></div></dl></details></article></section>
     </template>
     <p v-else-if="!reading&&!error" class="mixed-group-empty">请选择要打开的群聊。</p>
@@ -136,7 +160,7 @@ onBeforeUnmount(()=>{disposed=true;clearTimeout(pollTimer);scope.dispose();});
 .mixed-group-create{display:grid;gap:10px;margin-bottom:18px;padding:16px;background:#faf8fd;border-radius:9px;box-shadow:inset 0 0 0 .5px #e8e0ef}.mixed-group-create p{margin:0;font-size:12px;color:#8b7f96}.mixed-group-create>input,.mixed-group-compose textarea{border:0;box-shadow:inset 0 0 0 .5px #ded4e9;border-radius:8px;padding:11px;font:inherit;color:inherit;background:white}.mixed-group-create button{justify-self:start}.mixed-group-members{display:flex;gap:12px;flex-wrap:wrap}.mixed-group-members label{font-size:12px}
 .mixed-group-roster{flex-wrap:wrap;margin-bottom:18px}.mixed-group-roster>span{display:flex;align-items:center;gap:8px;padding:7px 10px;background:#f7f4fa;border-radius:7px;font-size:12px}.mixed-group-roster small{color:#96869f;font-size:11px}
 .mixed-group-history-wrap{position:relative}.mixed-group-panel .mixed-group-jump-latest{position:absolute;right:8px;bottom:12px;box-shadow:0 2px 8px #3c23552a;background:#7655c7;color:white}.mixed-group-panel .mixed-group-jump-latest:hover{background:#6745b9}.mixed-group-history{min-height:180px;max-height:calc(100vh - 380px);overflow:auto;padding:0 4px}.mixed-group-history article{max-width:90%;padding:12px 14px;margin-bottom:12px;background:#f7f5f9;border-radius:10px}.mixed-group-history article.is-user{margin-left:auto;background:#f0e9fb}.mixed-group-message-meta{font-size:12px;gap:8px}.mixed-group-message-meta small{color:#93869e;font-size:11px}.mixed-group-history article p,.mixed-group-runs article>p{white-space:pre-wrap;overflow-wrap:anywhere;margin:8px 0 0;font-size:13px}
-.mixed-group-compose{margin-top:18px}.mixed-group-compose textarea{display:block;width:100%;box-sizing:border-box;resize:vertical;min-height:90px}.mixed-group-compose-footer{justify-content:space-between;margin-top:9px}.mixed-group-compose-footer>span{font-size:11px;color:#a093a9}
+.mixed-group-attachments,.mixed-group-file-list{display:flex;gap:10px;flex-wrap:wrap}.mixed-group-attachments a{display:grid;gap:5px;color:inherit;max-width:220px;overflow-wrap:anywhere;font-size:12px}.mixed-group-attachments img{width:180px;max-height:140px;object-fit:contain}.mixed-group-file-list>div{display:flex;gap:8px;align-items:center;font-size:12px}.mixed-group-file-picker{font-size:12px;cursor:pointer}.mixed-group-file-picker input{display:block;max-width:180px}.mixed-group-compose{margin-top:18px}.mixed-group-compose textarea{display:block;width:100%;box-sizing:border-box;resize:vertical;min-height:90px}.mixed-group-compose-footer{justify-content:space-between;margin-top:9px}.mixed-group-compose-footer>span{font-size:11px;color:#a093a9}
 .mixed-group-runs{display:grid;gap:9px;margin-top:24px;border-top:.5px solid #eee7f2;padding-top:16px}.mixed-group-runs h3{margin:0 0 4px;font-size:13px}.mixed-group-runs article{padding:12px;border:.5px solid #e8e0ef;border-radius:8px}.mixed-group-run-heading{justify-content:space-between;font-size:12px}.mixed-group-run-heading small{color:#8b7f96}.mixed-group-runs details{margin-top:9px;font-size:11px;color:#8b7f96}.mixed-group-runs summary{cursor:pointer}.mixed-group-runs dl{margin:8px 0 0}.mixed-group-runs dl div{display:flex;gap:8px;margin-top:5px}.mixed-group-runs dt{min-width:60px}.mixed-group-runs dd{margin:0;overflow-wrap:anywhere}
 .mixed-group-error{display:flex;align-items:center;gap:10px;flex-wrap:wrap;color:#a26075;font-size:12px;padding:9px 0}.mixed-group-notice{color:#7c6a8f;font-size:12px;margin-bottom:0}.mixed-group-empty{padding:30px 0;text-align:center;color:#a093a9;font-size:13px}
 @media(max-width:700px){.mixed-group-panel{padding:18px 14px}.mixed-group-heading{flex-direction:column}.mixed-group-layout{display:grid}.mixed-group-layout aside{width:auto;grid-template-columns:repeat(2,minmax(0,1fr))}.mixed-group-history{max-height:50vh}.mixed-group-history article{max-width:100%}.mixed-group-compose-footer{align-items:flex-end;gap:12px}.mixed-group-compose-footer>span{max-width:105px;line-height:1.7}}

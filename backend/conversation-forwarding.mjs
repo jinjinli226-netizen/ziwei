@@ -64,15 +64,15 @@ function selectedRows(repo,input,workspaceId,actor,{accessOnly=false}={}) {
   return rows.sort((a,b)=>a.created_at<b.created_at?-1:a.created_at>b.created_at?1:a.message_rowid-b.message_rowid);
 }
 
-function normalizedAttachments(rows) {
+function normalizedAttachments(repo,rows,sourceScope,targetScope) {
   const groups=rows.map(row=>{const value=parse(row.attachment_json,[]);if(!Array.isArray(value))fail('FORWARD_ATTACHMENT_INVALID','原消息附件结构无效');return value;});
   if(groups.reduce((count,list)=>count+list.length,0)>MAX_CONVERSATION_ATTACHMENTS)fail('FORWARD_LIMIT','转发附件合计最多20个');
   let normalized;
-  try{normalized=normalizeConversationAttachments(groups.flat());}
+  try{normalized=normalizeConversationAttachments(groups.flat(),{resolveReference:item=>repo.conversationAttachmentStore.clone(sourceScope,targetScope,item.attachmentId)});}
   catch(error){fail('FORWARD_ATTACHMENT_INVALID',error.message);}
   // Legacy attachment metadata may contain a local path or an arbitrary object.
   // Carry only display metadata, never paths, URLs, nested forwards or claims.
-  normalized=normalized.map(item=>({name:item.name,...(typeof item.mimeType==='string'?{mimeType:item.mimeType}:{}),
+  normalized=normalized.map(item=>({name:item.name,...(item.attachmentId?{attachmentId:item.attachmentId,sha256:item.sha256}:{}),...(typeof item.mimeType==='string'?{mimeType:item.mimeType}:{}),
     ...(typeof item.content==='string'?{content:item.content,contentEncoding:'base64',size:Buffer.from(item.content,'base64').length}:{}),
     ...(typeof item.content!=='string'&&Number.isSafeInteger(item.size)&&item.size>=0?{size:item.size}:{})}));
   let index=0;
@@ -158,7 +158,7 @@ function forwardingService(repo) {
       if(!targetChat)targetChat=repo.createConversation(workspace.slug,{employeeId:target.id,title:`${target.name} · 主聊天`,...actor});
       visibleConversation(repo,targetChat.id,source.workspace_id,actor);
       const sourceEmployee=source.employee_id?db.prepare('SELECT name FROM employees WHERE id=? AND workspace_id=?').get(source.employee_id,source.workspace_id):null;
-      const attachments=normalizedAttachments(rows);
+      const attachments=normalizedAttachments(repo,rows,{workspaceId:source.workspace_id,conversationId:source.id},{workspaceId:source.workspace_id,conversationId:targetChat.id});
       const snapshot={schemaVersion:1,id:`forward_${randomUUID()}`,source:{conversationId:source.id,employeeId:source.employee_id||null,employeeName:textLabel(sourceEmployee?.name,'未分配员工')},
         messages:rows.map((row,index)=>({sourceMessageId:row.id,role:String(row.role),senderName:senderName(db,row,sourceEmployee?.name),createdAt:row.created_at,content:row.content,attachments:attachments[index]})),
         mode:input.mode,...(input.note?{note:input.note}:{})};

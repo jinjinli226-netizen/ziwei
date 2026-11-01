@@ -5,6 +5,11 @@ import { createConversationComposerStore, createConversationEnterGuard, imageMim
 const image={name:'one.png',mimeType:'image/png',contentEncoding:'base64',content:'iVBORw0KGgo=',size:8};
 function store(){let count=0;return createConversationComposerStore({makeId:()=>`message-${++count}`});}
 
+test('an unfinished file upload cannot silently send a message without that file',()=>{
+  const drafts=store(),entry=drafts.get('a');drafts.updateDraft('a','attached file');entry.uploadRetry=[{name:'pending.bin'}];
+  assert.equal(drafts.beginSubmission('a'),null);entry.uploadRetry=[];assert.ok(drafts.beginSubmission('a'));
+});
+
 test('composer Enter keeps IME selection native and blocks the first 500ms after composition',()=>{
   let now=1000,prevented=0;const guard=createConversationEnterGuard({now:()=>now});
   const enter=patch=>guard.shouldSend({key:'Enter',preventDefault(){prevented++;},...patch});

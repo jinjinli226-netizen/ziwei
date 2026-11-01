@@ -35,6 +35,8 @@ effective={'model':{'provider':'openai-codex','default':'gpt-6.1-sol'},'mcp_serv
 effective['platform_toolsets']={'cli':request.get('toolsets',[])}
 if request.get('autonomy'):
  os.environ.update(ZIWEI_BOT_ACTION_ID=request.get('actionId','action-fixture'),ZIWEI_BOT_DEVICE_TOKEN='FIXTURE_DEVICE_SECRET',ZIWEI_API_BASE='https://fixture.invalid')
+if request.get('collaboration'):
+ os.environ.update(ZIWEI_BOT_ACTION_ID=request.get('actionId','action-fixture'),ZIWEI_BOT_DEVICE_TOKEN='FIXTURE_DEVICE_SECRET',ZIWEI_API_BASE='https://fixture.invalid')
 if request.get('noAuthorization'):os.environ.pop('ZIWEI_BOT_DEVICE_TOKEN',None)
 if request.get('readOnly'):
  effective['agent']={'disabled_toolsets':['all']};effective['mcp_servers']={}
@@ -77,6 +79,14 @@ class Client:
      own=next(spec for spec in specs if spec['name']=='ziwei_autonomy')
      assert own['command']==sys.executable and own['args']==[str(pathlib.Path(request['bridge']).with_name('hermes-bot-tools-mcp.py'))]
      assert dict((item['name'],item['value']) for item in own['env'])=={'ZIWEI_BOT_ACTION_ID':request.get('actionId','action-fixture'),'ZIWEI_BOT_DEVICE_TOKEN':'FIXTURE_DEVICE_SECRET','ZIWEI_API_BASE':'https://fixture.invalid'}
+    if request.get('collaboration') and 'ziwei_collaboration' in request.get('expectedServers',[]):
+     own=next(spec for spec in specs if spec['name']=='ziwei_collaboration')
+     assert own['command']==sys.executable and own['args']==[str(pathlib.Path(request['bridge']).with_name('hermes-collaboration-tools-mcp.py'))]
+     private_env=dict((item['name'],item['value']) for item in own['env'])
+     assert private_env['ZIWEI_BOT_ACTION_ID']==request.get('actionId','action-fixture')
+     assert private_env['ZIWEI_BOT_DEVICE_TOKEN']=='FIXTURE_DEVICE_SECRET' and private_env['HERMES_HOME']==str(home)
+     binding=json.loads(private_env['ZIWEI_COLLABORATION_BINDING'])
+     assert binding=={'kind':'hermes-bot','employeeId':'employee-fixture','workspace':'fixture-workspace','sourceProfile':'bot-fixture','key':'key-fixture','home':str(home)}
     assert specs[0]['env'][0]=={'name':'WORKSPACE','value':'fixture-workspace'} or specs[0]['env'][1]=={'name':'WORKSPACE','value':'fixture-workspace'}
     assert secret in json.dumps(specs) and secret not in json.dumps(params.get('client_env',{}))
     if method=='session.resume' and request.get('rotate') and not mutations:raise GatewayClientError('acp_mcp_policy_conflict')
@@ -147,7 +157,7 @@ if request.get('plain'):
 before=dict(vars(args));before_argv=list(sys.argv);stderr=io.StringIO();caught=None;result=None
 try:
  with contextlib.redirect_stderr(stderr):
-  installed=bridge.install(config,None if request.get('ordinary') else {'kind':'hermes-bot','employeeId':'employee-fixture','revision':4,'home':str(home)},overlay=str(overlay),reject=GatewayClientError,active=not request.get('inactive'))
+  installed=bridge.install(config,None if request.get('ordinary') else {'kind':'hermes-bot','employeeId':'employee-fixture','workspace':'fixture-workspace','sourceProfile':'bot-fixture','key':'key-fixture','revision':4,'home':str(home)},overlay=str(overlay),reject=GatewayClientError,active=not request.get('inactive'))
   if installed:
    coroutine=gateway.run_gateway_chat(args)
    try:coroutine.send(None)
@@ -247,4 +257,18 @@ test('unmapped toolsets are preserved for native refusal and autonomy needs its 
  const readOnly=run(t,{autonomy:true,readOnly:true,toolsets:[],expectedToolsets:[],expectedServers:[]});assert.equal(readOnly.result,'complete',JSON.stringify(readOnly));
  const leak=run(t,{autonomy:true,toolsets:['ziwei_autonomy'],expectedServers:['ziwei_autonomy','ziwei_management'],secretAlias:true});
  assert.match(leak.caught.message,/CLIENT_ENV_SECRET/);assert.equal(leak.calls.includes('prompt.submit'),false);
+});
+
+test('collaboration aliases are replaced only by a bound session-private collaboration MCP',t=>{
+ const toolsets=['terminal','ziwei_collaboration','mcp-ziwei_collaboration','ziwei_management'];
+ for(const options of [{},{resume:true},{titled:true},{actionId:'action-next'}]){
+  const out=run(t,{collaboration:true,toolsets,expectedToolsets:['terminal'],expectedServers:['ziwei_collaboration','ziwei_management'],...options});
+  assert.equal(out.result,'complete',JSON.stringify(out));assert.equal(out.caught,null);
+ }
+ for(const options of [{ordinary:true},{noAuthorization:true}]){
+  const out=run(t,{collaboration:true,toolsets,expectedToolsets:['terminal','ziwei_collaboration','mcp-ziwei_collaboration'],expectedServers:['ziwei_management'],...options});
+  assert.equal(out.result,'complete',JSON.stringify(out));
+ }
+ const readOnly=run(t,{collaboration:true,readOnly:true,toolsets:[],expectedToolsets:[],expectedServers:[]});
+ assert.equal(readOnly.result,'complete',JSON.stringify(readOnly));
 });

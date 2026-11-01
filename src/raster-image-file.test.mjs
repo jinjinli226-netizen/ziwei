@@ -1,0 +1,13 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import {rasterFixtures} from '../test/fixtures/raster-images.mjs';
+import {inspectRasterImage} from './raster-image.mjs';
+import {inspectRasterImageFile,inspectRasterImageFileWithStats} from './raster-image-file.mjs';
+function fixture(t){const base=process.env.ZIWEI_TEST_TMP||(process.platform==='win32'&&fs.existsSync('D:/')?'D:/tmp/ziwei-attachment-tests':os.tmpdir());fs.mkdirSync(base,{recursive:true});const root=fs.mkdtempSync(path.join(base,'raster-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));return root;}
+test('seekable recognizer matches existing complete and malformed raster fixture semantics',async t=>{const root=fixture(t);for(const [name,bytes]of Object.entries(rasterFixtures)){for(const [kind,value]of [['valid',bytes],['truncated',bytes.subarray(0,bytes.length-3)],['signature',bytes.subarray(0,12)],['padded',Buffer.concat([bytes,Buffer.alloc(17)])]]){const filename=path.join(root,`${name}-${kind}`);fs.writeFileSync(filename,value);assert.deepEqual(await inspectRasterImageFile(filename),inspectRasterImage(value),`${name}/${kind}`);}}const zero=Buffer.from(rasterFixtures.png);zero.writeUInt32BE(0,16);const filename=path.join(root,'zero.png');fs.writeFileSync(filename,zero);assert.equal(await inspectRasterImageFile(filename),null);});
+test('500MiB IDAT seeks through its actual declared payload and rejects missing terminal chunk',async t=>{const root=fixture(t),filename=path.join(root,'large-idat.png'),size=500*1024*1024,fd=fs.openSync(filename,'w');try{fs.writeSync(fd,rasterFixtures.png.subarray(0,33),0,33,0);const header=Buffer.alloc(8);header.writeUInt32BE(size-57,0);header.write('IDAT',4);fs.writeSync(fd,header,0,8,33);fs.writeSync(fd,rasterFixtures.png.subarray(-12),0,12,size-12);fs.ftruncateSync(fd,size);}finally{fs.closeSync(fd);}const {image,stats}=await inspectRasterImageFileWithStats(filename);assert.equal(image.mimeType,'image/png');assert.equal(image.endOffset,size);assert.ok(stats.bytesRead<256*1024,JSON.stringify(stats));assert.ok(stats.maxBufferedBytes<=128*1024);fs.truncateSync(filename,size-1);assert.equal(await inspectRasterImageFile(filename),null);});
+const ceo='D:/CEO日报/data/employee-cards/averinyo-deployment/fixtures/upload-boundary-500MiB.png';
+test('actual CEO 500MiB padded PNG is recognized with bounded reads',{skip:!fs.existsSync(ceo)},async()=>{const {image,stats}=await inspectRasterImageFileWithStats(ceo);assert.equal(fs.statSync(ceo).size,500*1024*1024);assert.equal(image.mimeType,'image/png');assert.ok(stats.bytesRead<256*1024,JSON.stringify(stats));assert.ok(stats.maxBufferedBytes<=128*1024);});

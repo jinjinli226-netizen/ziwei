@@ -709,16 +709,12 @@ def platform_call(isolation, body):
         return json.load(response)
 
 
-def install_collaboration_tools(isolation):
-    """Native schemas, platform admission; native subagent/terminal spawn disabled."""
-    from tools.registry import registry
-    from tools import bot_mode_dm, delegate_tool
-    import run_agent
-    from toolsets import TOOLSETS
+def create_collaboration_handlers(isolation, enqueue=None):
+    """The foreground and Gateway transports share platform action admission."""
     def dm(target='', message='', task_id=None, agent=None):
         try:
             data = platform_call(isolation, {'mode': 'message', 'targetEmployeeIds': [target], 'content': message, 'idempotencyKey': 'dm:' + hashlib.sha256(json.dumps([os.environ.get('ZIWEI_BOT_ACTION_ID'), task_id, target, message]).encode()).hexdigest()})
-            envelopes = [enqueue_native(item['payload']['employeeId'], message, isolation) for item in data.get('actions', [])]
+            envelopes = [enqueue(item['payload']['employeeId'], message, isolation) for item in data.get('actions', [])] if enqueue else []
             return json.dumps({'status': 'dispatched', 'actions': [{'id': item['id'], 'status': item['status']} for item in data.get('actions', [])], 'envelopes': envelopes})
         except Exception:
             return json.dumps({'error': 'BOT_COLLABORATION_OUTCOME_UNCONFIRMED', 'outcome_uncertain': True})
@@ -741,10 +737,22 @@ def install_collaboration_tools(isolation):
                 text = (task.get('goal') or '') + '\n' + (task.get('context') or '')
                 result = platform_call(isolation, {'mode': 'delegate', 'targetEmployeeIds': [target], 'content': text, 'idempotencyKey': 'delegate:' + hashlib.sha256(json.dumps([os.environ.get('ZIWEI_BOT_ACTION_ID'), index, target, text]).encode()).hexdigest()})
                 dispatched.extend(result.get('actions', []))
-                enqueue_native(target, text, isolation)
+                if enqueue:
+                    enqueue(target, text, isolation)
             return json.dumps({'status': 'dispatched', 'mode': 'background', 'count': len(dispatched), 'delegation_id': os.environ['ZIWEI_BOT_ACTION_ID'], 'subagent_ids': [item['id'] for item in dispatched], 'goals': [task.get('goal') for task in tasks]})
         except Exception:
             return json.dumps({'error': 'BOT_DELEGATION_OUTCOME_UNCONFIRMED', 'outcome_uncertain': True})
+    return {'message_agent': dm, 'delegate_task': delegate}
+
+
+def install_collaboration_tools(isolation):
+    """Native schemas, platform admission; native subagent/terminal spawn disabled."""
+    from tools.registry import registry
+    from tools import bot_mode_dm, delegate_tool
+    import run_agent
+    from toolsets import TOOLSETS
+    handlers = create_collaboration_handlers(isolation, enqueue_native)
+    dm, delegate = handlers['message_agent'], handlers['delegate_task']
     bot_mode_dm.message_agent_tool = dm
     delegate_tool.delegate_task = lambda **kwargs: delegate(kwargs, kwargs.get('parent_agent'))
     run_agent.AIAgent._dispatch_delegate_task = lambda agent, args: delegate(args, agent)

@@ -50,7 +50,8 @@ test('a failed read has a GET-only retry that keeps the routed group instead of 
 test('the actual composer uses the shared 500ms IME guard and never repeats a pending send',async t=>{
  let now=1000;t.mock.method(Date,'now',()=>now);const pending=deferred();const panel=await mount(t,{send:()=>pending.promise}),field=await enter(panel,'群消息','核对新的经营进展');
  const key=patch=>field.props.onKeydown({key:'Enter',preventDefault(){},...patch});field.props.onCompositionstart();key();field.props.onCompositionend();now=1499;key();now=1500;key({shiftKey:true});assert.equal(panel.calls.filter(call=>call[0]==='POST-send').length,0);
- key();key();await panel.settle();assert.equal(panel.calls.filter(call=>call[0]==='POST-send').length,1);assert.deepEqual(panel.calls.at(-1),['POST-send','mix_ops',{content:'核对新的经营进展'},'team']);
+ key();key();await panel.settle();assert.equal(panel.calls.filter(call=>call[0]==='POST-send').length,1);
+ const [method,id,body,workspace]=panel.calls.at(-1);assert.deepEqual([method,id,body.content,body.attachments,body.attachmentSourceConversationId,workspace],['POST-send','mix_ops','核对新的经营进展',[],'ceo-chat','team']);assert.match(body.messageId,/^mixed-message:/);
  pending.resolve(group());await panel.settle();assert.equal(field.value,'');assert.ok(panel.events.some(event=>event[0]==='changed'));
 });
 

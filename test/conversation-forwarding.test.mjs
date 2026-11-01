@@ -158,7 +158,7 @@ test('missing Bot main returns a conflict without initializing another Bot or co
   const before=f.snapshot();assert.throws(()=>f.request([message],{targetEmployeeId:bot.id}),{code:'FORWARD_MAIN_CHAT_REQUIRED'});assert.deepEqual(f.snapshot(),before);
 });
 
-test('explicit execute keeps Bot validation, pause and busy admission and rolls back all writes on rejection',t=>{
+test('explicit execute rejects paused Bots and queues behind a busy Bot without interrupting its current action',t=>{
   const f=fixture(t),message=f.add('execute only when admitted'),{bots,bot}=botFor(f);
   bots.control(slug,bot.id,{expectedRevision:bot.revision,expectedControlEpoch:bot.control_epoch,operation:'pause'},actor);
   const before=f.snapshot(),beforeEvents=f.events.length;
@@ -166,8 +166,11 @@ test('explicit execute keeps Bot validation, pause and busy admission and rolls 
   assert.deepEqual(f.snapshot(),before);assert.equal(f.events.length,beforeEvents);
   const current=bots.get(slug,bot.id,actor);bots.control(slug,bot.id,{expectedRevision:current.revision,expectedControlEpoch:current.control_epoch,operation:'resume'},actor);
   const running=f.repo.addConversationMessage(bot.main_conversation_id,{...actor,content:'busy'});
-  const busy=f.snapshot();assert.throws(()=>f.request([message],{targetEmployeeId:bot.id,mode:'execute'}),{code:'BOT_BUSY'});assert.deepEqual(f.snapshot(),busy);
-  assert.equal(f.repo.getA2AAction(running.execution.id).status,'pending');
+  f.repo.ackA2AAction(running.execution.id,{deviceId:'forward-pc'});
+  const queued=f.request([message],{targetEmployeeId:bot.id,mode:'execute'});
+  assert.equal(queued.execution.status,'pending');assert.notEqual(queued.execution.id,running.execution.id);
+  assert.equal(f.repo.getConversation(bot.main_conversation_id).queue.count,1);
+  assert.equal(f.repo.getA2AAction(running.execution.id).status,'acked');
 });
 
 test('a late storage failure rolls back a newly created target chat, message, audits and queued notifications',t=>{

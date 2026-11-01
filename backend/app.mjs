@@ -47,6 +47,9 @@ import {botActionMaintenance} from './bots.mjs';
 import { toolDefinitions as managementTools } from '../scripts/ziwei-mcp.mjs';
 import {registerWorkspaceCliDocs} from './workspace-cli-docs.mjs';
 import {createMixedGroupStore} from './mixed-group-store.mjs';
+import {mobileMixedGroup, mobileMixedGroupList} from './mixed-group-mobile.mjs';
+import {mountConversationAttachmentRoutes,attachmentTransfer} from './conversation-attachment-routes.mjs';
+import {CONVERSATION_JSON_LIMIT} from '../src/conversation-attachment-policy.mjs';
 
 const allowedOrigin = process.env.FRONTEND_ORIGIN || 'http://127.0.0.1:5178';
 
@@ -55,7 +58,7 @@ function cors(req, res, next) {
   if (origin === allowedOrigin || !origin) res.setHeader('Access-Control-Allow-Origin', origin || allowedOrigin);
   res.setHeader('Vary', 'Origin');
   res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Workspace-Id, X-Workspace-Role, X-Ziwei-Api-Key, X-Ziwei-Mcp-Token');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Workspace-Id, X-Workspace-Role, X-Ziwei-Api-Key, X-Ziwei-Mcp-Token, Idempotency-Key');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,PUT,DELETE,OPTIONS');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
@@ -390,7 +393,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   // Task attachments are sent as Base64 JSON; allow the 10 MiB attachment
   // limit plus encoding and envelope overhead without accepting unbounded
   // request bodies.
-  app.use(express.json({limit:'16mb'}));
+  app.use(express.json({limit:CONVERSATION_JSON_LIMIT}));
   const unifiedIdentity=installUnifiedIdentity(app,repo.db,options.identityOptions);
   if(unifiedIdentity) {app.locals.authBypass=false;app.locals.requireDeviceAuth=true;}
   app.get('/api/mcp-oauth/callback',(req,res)=>{
@@ -552,12 +555,12 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   app.locals.scheduler=scheduler;
 
   app.get('/api/workspaces/:slug/summary', (req, res) => res.json(repo.getSummary(req.params.slug, { userId: req.auth?.user_id })));
-  app.get('/api/workspaces/:slug/mixed-groups', requireRole('owner','admin','member'), (req, res, next) => { try { res.json({ groups: mixedGroups.list(req.params.slug) }); } catch (error) { next(error); } });
-  app.post('/api/workspaces/:slug/mixed-groups', requireRole('owner','admin','member'), (req, res, next) => { try { res.status(201).json(mixedGroups.create(req.params.slug, req.body || {})); } catch (error) { next(error); } });
-  app.get('/api/workspaces/:slug/mixed-groups/:id', requireRole('owner','admin','member'), (req, res, next) => { try { res.json(mixedGroups.get(req.params.slug, req.params.id)); } catch (error) { next(error); } });
+  app.get('/api/workspaces/:slug/mixed-groups', requireRole('owner','admin','member'), (req, res, next) => { try { const groups=mixedGroups.list(req.params.slug);res.json(req.query.view==='mobile'?mobileMixedGroupList(groups,req.query):{groups}); } catch (error) { next(error); } });
+  app.post('/api/workspaces/:slug/mixed-groups', requireRole('owner','admin','member'), (req, res, next) => { try { const group=mixedGroups.create(req.params.slug,req.body||{});res.status(201).json(req.query.view==='mobile'?mobileMixedGroup(group):group); } catch (error) { next(error); } });
+  app.get('/api/workspaces/:slug/mixed-groups/:id', requireRole('owner','admin','member'), (req, res, next) => { try { const group=mixedGroups.get(req.params.slug, req.params.id);res.json(req.query.view==='mobile'?mobileMixedGroup(group,req.query):group); } catch (error) { next(error); } });
   app.patch('/api/workspaces/:slug/mixed-groups/:id', requireRole('owner','admin','member'), (req, res, next) => { try { res.json(mixedGroups.update(req.params.slug, req.params.id, req.body || {})); } catch (error) { next(error); } });
   app.delete('/api/workspaces/:slug/mixed-groups/:id', requireRole('owner','admin','member'), (req, res, next) => { try { res.json(mixedGroups.remove(req.params.slug, req.params.id)); } catch (error) { next(error); } });
-  app.post('/api/workspaces/:slug/mixed-groups/:id/messages', requireRole('owner','admin','member'), (req, res, next) => { try { res.status(202).json(mixedGroups.planSend(req.params.slug, req.params.id, req.body || {})); } catch (error) { next(error); } });
+  app.post('/api/workspaces/:slug/mixed-groups/:id/messages', requireRole('owner','admin','member'), (req, res, next) => { try { const result=mixedGroups.planSend(req.params.slug,req.params.id,req.body||{},employeeContext(req));res.status(202).json(req.query.view==='mobile'?{state:result.state,group:mobileMixedGroup(result.group),runs:result.runs,execution:result.execution}:result); } catch (error) { next(error); } });
   app.post('/api/workspaces/:slug/mixed-groups/:id/cancel', requireRole('owner','admin','member'), (req, res, next) => { try { res.status(202).json(mixedGroups.cancel(req.params.slug, req.params.id, req.body?.sourceActionId)); } catch (error) { next(error); } });
   app.get('/api/workspaces/:slug/tasks', (req, res) => res.json({ tasks: repo.listTasks(req.params.slug, req.query) }));
   app.post('/api/workspaces/:slug/tasks', (req, res) => res.status(201).json(repo.createTask(req.params.slug, { ...(req.body || {}), actorUserId: req.auth?.user_id, actorRole: req.workspaceRole, enforceDeviceOwnership: true, enforceEmployeeVisibility: true, createdBy: req.auth?.user_id || req.body?.createdBy })));
@@ -777,6 +780,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
     if (!employeeId) return res.status(400).json({ error: '新建会话必须绑定数字员工' });
     return res.status(201).json(repo.createConversation(req.params.slug, { ...(req.body || {}), employeeId, ...employeeContext(req), enforceDeviceOwnership: true }));
   });
+  mountConversationAttachmentRoutes(app,{repo,employeeContext});
   app.get('/api/conversations/:id', (req, res) => { const context=employeeContext(req),thread=req.query.view==='thread',conversation=repo.getConversation(req.params.id, context,thread?{...req.query,view:'thread'}:undefined); if(!conversation) return res.status(404).json({error:'Conversation not found'}); if(req.query.view==='mobile'||thread){res.setHeader('Cache-Control','no-store');res.vary('Cookie');return res.json(mobileReadView.conversation(mobileGroupAction.conversation(conversation,context)));} res.json(conversation); });
   const conversationImage=(req,res)=>{
     const image=mobileReadView.conversationImage(req.params.id,req.params.messageId,req.params.index,employeeContext(req),req.params.forwardIndex);
@@ -1101,6 +1105,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
     requireDevice: app.locals.requireDeviceAuth,
     deviceVerifier: req => verifyDeviceRequest(repo, req)
   }));
+  mountConversationAttachmentRoutes(app,{repo,employeeContext,mode:'action'});
   mountDshNativeRoutes(app,{service:dshNative,secretService:dshNativeSecrets,groupDispatchService:dshNativeGroupDispatch,requireRole,mcpGuard,mcpEmployeeGuard,employeeContext,mcpContext});
   const updateDevice = req => ({slug:String(req.query.workspace||''),id:String(req.query.deviceId||'')});
   app.get('/a2a/v1/failure-finalizations',(req,res)=>{res.setHeader('Cache-Control','no-store');res.json(botFailureFinalization.pending(req.deviceCredential,req.query));});
@@ -1121,7 +1126,7 @@ export function createApp(options = {}, {productionIdentityIo={}}={}) {
   app.post('/a2a/v1/register', (req, res, next) => { const workspace = String(req.body.workspace || req.body.workspace_slug || '').trim(); if (!workspace) return res.status(400).json({ error: 'A2A register 必须明确 workspace' }); try { return res.json({ ok:true, agent:repo.registerA2AAgent(workspace, req.body), card:{id:'ziwei_user',capabilities:['tasks','messages','heartbeat','actions','ack','result']} }); } catch (error) { return next(error); } });
   app.post('/a2a/v1/actions', (req, res, next) => { const workspace = String(req.body.workspace || req.body.workspace_slug || '').trim(); if (!workspace) return res.status(400).json({ error: 'A2A action 必须明确 workspace' }); try { const action=repo.createA2AAction(workspace, req.body); return res.status(action.duplicate ? 200 : 201).json(action); } catch (error) { return next(error); } });
   app.get('/a2a/v1/actions', (req, res, next) => { const workspace=String(req.query.workspace || '').trim(); if (!workspace) return res.status(400).json({ error: 'A2A poll 必须明确 workspace' }); try { return res.json({ actions:repo.listA2AActions(workspace,{executionDelivery:true,agentId:req.query.agent || req.query.agent_id,status:req.query.status || 'pending',includeAcked:req.query.includeAcked ?? req.query.include_acked,includeResult:String(req.query.includeResult || '').toLowerCase() !== 'false',deviceId:req.deviceCredential?.deviceId}) }); } catch (error) { return next(error); } });
-  app.post('/a2a/v1/actions/:id/ack', (req, res) => { if (!assertA2AActionWorkspace(repo, req, res)) return; return res.json(repo.ackA2AAction(req.params.id, { ...(req.body || {}), deviceId:req.deviceCredential?.deviceId })); });
+  app.post('/a2a/v1/actions/:id/ack', (req, res) => { if (!assertA2AActionWorkspace(repo, req, res)) return; return res.json({...repo.ackA2AAction(req.params.id, { ...(req.body || {}), deviceId:req.deviceCredential?.deviceId }),attachmentTransfer}); });
   app.get('/a2a/v1/actions/:id/maintenance-checkpoint',(req,res)=>{res.setHeader('Cache-Control','no-store');if(!assertA2AActionWorkspace(repo,req,res))return;res.json(actionMaintenance.status(req.params.id,req.deviceCredential));});
   app.post('/a2a/v1/actions/:id/maintenance-checkpoint',(req,res)=>{res.setHeader('Cache-Control','no-store');if(!assertA2AActionWorkspace(repo,req,res))return;res.json(actionMaintenance.checkpoint(req.params.id,req.body,req.deviceCredential));});
   app.post('/a2a/v1/actions/:id/authorize-maintenance-resume',(req,res)=>{res.setHeader('Cache-Control','no-store');if(!assertA2AActionWorkspace(repo,req,res))return;res.json(actionMaintenance.resume(req.params.id,req.body,req.deviceCredential));});

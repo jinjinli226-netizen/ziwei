@@ -39,7 +39,8 @@ import {botPresence,executionUncertain,botStopPresentation,botRecoveryEvent,exec
 import {failureFinalization,pendingBotFailureFinalization,failureFinalizationRequest} from './bot-failure-finalization.mjs';
 import {canForceRemoveEmployee,employeeRemovalPrompt,employeeRemovalNotice,forceEmployeeRemovalDetail} from './employee-removal.js';
 import {deviceRuntimes,runtimePresentation} from './device-runtimes.js';
-import { createConversationComposerStore, createConversationEnterGuard, clipboardImageFiles, readConversationImages, CONVERSATION_IMAGE_LIMIT } from './conversation-compose.js';
+import { createConversationComposerStore, createConversationEnterGuard, clipboardImageFiles } from './conversation-compose.js';
+import {MAX_ATTACHMENT_TOTAL_BYTES,MAX_ATTACHMENTS,INLINE_ATTACHMENT_BYTES} from '../../src/conversation-attachment-policy.mjs';
 import { createConversationRequestSequence, executionPresentation, executionNeedsPolling, mergeConversationDetail, mergeConversationLists } from './conversation-execution-state.mjs';
 import { defaultWorkdirPayload, employeeConversationPayload, conversationSettingsSnapshot, mergeConversationSettingsDraft } from './workdir.js';
 import { Search, Plus, Inbox, Grip, SlidersHorizontal, ArrowDownUp, Kanban, List, MoreHorizontal, CircleDashed, Circle, CircleDot, CheckCircle2, CircleAlert, Zap, ChevronDown, RotateCcw, LayoutList, Tag, UserRound, CalendarClock, CalendarDays, ChevronLeft, ChevronRight, Maximize2, Mic, Paperclip, X, Folder, FolderOpen, FolderPlus, FileText, Upload, Download, RefreshCw, HardDrive, Network, Server, Monitor, Crown, Trash2, ClipboardList, Settings2, Bot, Forward, ListChecks } from 'lucide-vue-next';
@@ -280,6 +281,8 @@ const conversationDraft=computed({get:()=>conversationComposeState.value?.draft 
 const conversationAttachments=computed(()=>conversationComposeState.value?.attachments || []);
 const conversationSendPending=computed(()=>Boolean(conversationComposeState.value?.pending));
 const conversationAttachmentReading=computed(()=>Boolean(conversationComposeState.value?.reading));
+const conversationAttachmentProgress=computed(()=>conversationComposeState.value?.attachmentProgress||0);
+const conversationAttachmentRetry=computed(()=>Boolean(conversationComposeState.value?.uploadRetry?.length)&&!conversationAttachmentReading.value);
 const conversationSendError=computed(()=>conversationComposeState.value?.error || '');
 const conversationQueue=computed(()=>selectedConversation.value?.queue || {paused:false,count:0,items:[]});
 const conversationQueueBusy=ref(false),conversationQueueError=ref('');let conversationQueueRequest=0;
@@ -926,7 +929,7 @@ async function sendConversationMessage() {
     startConversationPolling();
     notify(message.queue_status==='queued'?'消息已加入队列，按顺序处理':'消息已发送，等待数字伙伴回复');
   } catch(error) {
-    const detail=error.status === 413 ? '附件太大，请选择 10 MB 以内的图片后重试（每条消息图片合计）' : (error.message || '消息发送失败，请重试');
+    const detail=error.status === 413 ? '附件传输被服务器拒绝，已保留草稿，请重试上传' : (error.message || '消息发送失败，请重试');
     conversationComposer.failSubmission(submission,detail);
     if(current())notify(detail,'error');
   }
@@ -1003,6 +1006,8 @@ function openConversationAttachmentPicker() { conversationAttachmentInput.value?
 function conversationAttachmentMime(attachment) { return String(attachment?.mimeType || attachment?.mime_type || '').toLowerCase(); }
 function conversationAttachmentPreviewSrc(attachment) {
   const mime=conversationAttachmentMime(attachment);
+  if(attachment?.size>INLINE_ATTACHMENT_BYTES)return '';
+  if(['image/png','image/jpeg','image/gif','image/webp'].includes(mime)&&attachment?.attachmentId)return api.attachmentResourceUrl(attachment.url)||api.conversationAttachmentUrl(selectedConversation.value?.id,attachment.attachmentId);
   const content=String(attachment?.content || attachment?.data || '').trim();
   if (!['image/png','image/jpeg','image/gif','image/webp'].includes(mime) || !/^[A-Za-z0-9+/]*={0,2}$/.test(content) || !content) return '';
   return `data:${mime};base64,${content}`;
@@ -1031,24 +1036,37 @@ async function addConversationImages(files) {
   const entry=conversationComposer.get(key),existing=[...entry.attachments];
   if(entry.pending || entry.reading)return notify(entry.pending?'消息正在发送，请稍后添加图片':'正在读取图片，请稍后再粘贴或选择图片','error');
   const token=conversationComposer.beginRead(key);
+  const controller=new AbortController();entry.uploadController=controller;
+  entry.uploadRetry=[];entry.attachmentProgress=0;entry.error='';
   try {
-    if(existing.length+files.length>20)throw new Error('每条消息最多附加 20 张图片');
-    if(existing.reduce((total,item)=>total+item.size,0)+files.reduce((total,file)=>total+file.size,0)>CONVERSATION_IMAGE_LIMIT)throw new Error('每条消息的图片合计不能超过 10 MB');
-    const attachments=await readConversationImages(files);
-    if([...existing,...attachments].reduce((total,item)=>total+item.size,0)>CONVERSATION_IMAGE_LIMIT)throw new Error('每条消息的图片合计不能超过 10 MB');
-    conversationComposer.finishRead(key,token,[...existing,...attachments]);
+    if(existing.length+files.length>MAX_ATTACHMENTS)throw new Error('每条消息最多附加 20 个附件');
+    const total=files.reduce((sum,file)=>sum+file.size,0);
+    if(existing.reduce((sum,item)=>sum+item.size,0)+total>MAX_ATTACHMENT_TOTAL_BYTES)throw new Error('每条消息的附件合计不能超过 500 MB');
+    entry.uploadRetry=files;
+    const conversationId=selectedConversation.value.id,attachments=[];let uploaded=0;
+    for(const file of files){
+      attachments.push(await api.uploadConversationAttachment(conversationId,file,{signal:controller.signal,onProgress:({loaded})=>{if(entry.readToken===token)entry.attachmentProgress=Math.floor(100*(uploaded+loaded)/total);}}));
+      uploaded+=file.size;
+    }
+    if(conversationComposer.finishRead(key,token,[...existing,...attachments]))entry.uploadRetry=[];
   } catch (error) {
-    if(conversationComposer.finishRead(key,token,existing,error.message) && key===conversationComposeKey())notify(error.message,'error');
-  }
+    const message=controller.signal.aborted?'上传已取消，文件已保留，可重试继续上传。':error.message;
+    if(conversationComposer.finishRead(key,token,existing,message) && key===conversationComposeKey())notify(message,'error');
+  } finally {if(entry.uploadController===controller)entry.uploadController=null;}
 }
+function retryConversationAttachments(){const entry=conversationComposer.get(conversationComposeKey());void addConversationImages([...entry.uploadRetry]);}
+function cancelConversationAttachmentUpload(){const entry=conversationComposer.get(conversationComposeKey());if(entry.reading){entry.uploadController?.abort();return;}entry.uploadRetry=[];entry.error='';}
 function clearConversationAttachment({preserve=false}={}) {
   conversationImagePreview.value=null;
   const key=conversationComposeKey();if(!key)return;
+  conversationComposer.get(key).uploadController?.abort();
   conversationComposer.cancelRead(key);
-  if(!preserve)conversationComposer.setAttachments(key,[]);
+  if(preserve&&conversationComposer.get(key).uploadRetry.length)conversationComposer.get(key).error='附件上传已暂停，原文件已保留，可继续上传。';
+  if(!preserve){conversationComposer.setAttachments(key,[]);conversationComposer.get(key).uploadRetry=[];}
 }
 function removeConversationAttachment(index) {
   const key=conversationComposeKey();if(!key)return;
+  if(conversationComposer.get(key).reading)return;
   conversationComposer.cancelRead(key);
   conversationComposer.setAttachments(key,conversationAttachments.value.filter((_,itemIndex)=>itemIndex!==index));
 }
@@ -1062,6 +1080,7 @@ function exportLoadedChat(){
   link.href=url;link.download=exported.filename;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
 function downloadConversationAttachment(attachment) {
+  if(attachment?.attachmentId){const link=document.createElement('a');const url=api.attachmentResourceUrl(attachment.downloadUrl||attachment.url);link.href=attachment.downloadUrl?url:url?url+(url.includes('?')?'&':'?')+'download=1':api.conversationAttachmentUrl(selectedConversation.value?.id,attachment.attachmentId,{download:true});link.download=attachment.name||'attachment';document.body.append(link);link.click();link.remove();return;}
   const src=conversationAttachmentPreviewSrc(attachment);if(!src)return notify('该附件缺少可下载的图片内容','error');
   try {
     const binary=atob(String(attachment.content || attachment.data)),bytes=Uint8Array.from(binary,char=>char.charCodeAt(0));
@@ -1941,7 +1960,7 @@ onMounted(async () => { applyDisplayPreferences(); if (page.value==='android-ins
             <template #chat="{employeeId,openSection}">
               <div v-if="employeeChatView.pending" class="bot-chat-loading" role="status">正在打开员工聊天…</div>
               <div v-else-if="employeeChatView.error" class="bot-chat-loading" role="alert"><p>{{employeeChatView.error}}</p><button class="pill" @click="navigate('bots')">返回员工名册</button></div>
-              <BotMainChat v-if="employeeChatView.ready&&employeeId===selectedConversation.employee_id" :managed="botChatView.ready" :employee="employeeChatEmployee" :bot="botChatView.ready?conversationBotBinding:null" :conversation="selectedConversation" :execution="conversationExecution" :events="executionEventRows(conversationExecution?.events||[])" v-model:draft="conversationDraft" :attachments="conversationAttachments" :device="selectedConversationDevice" :model-label="conversationUsesNativeDsh?'沿用 DSH Bot 原生模型':models.find(model=>model.id===(conversationBotBinding?.employee?.model_id||conversationModelId))?.label || conversationBotBinding?.employee?.model_id || conversationModelId || '沿用员工默认模型'" :working-directory="conversationWorkingDirectory" :send-pending="conversationSendPending" :attachment-reading="conversationAttachmentReading" :status-loading="conversationStatusLoading||botBindingPending||Boolean(botBindingError)" :history-loading="conversationHistoryLoading" :history-error="conversationHistoryError" @load-history="loadEarlierConversationMessages" :send-error="conversationSendError" :queue-busy="conversationQueueBusy" :queue-error="conversationQueueError" @queue-pause="updateConversationQueue('pause')" @queue-resume="updateConversationQueue('resume')" @queue-remove="updateConversationQueue('remove',$event)" :stop-busy="botChatStopBusy" :reconcile-busy="botChatReconcileBusy" :finalization-busy="botChatFinalizationBusy" :can-stop="conversationCanStop" :preview="previewMode" :work="botChatWork" :work-loading="botChatWorkLoading" :work-error="botChatWorkError" :preview-src="conversationAttachmentPreviewSrc" :size-label="conversationAttachmentSizeLabel" :forward-selecting="conversationForward.selecting" :forward-selected="conversationForward.messageIds" :forward-error="conversationForward.error" :forward-result="conversationForward.result" @forward-view="openForwardTargetConversation" :read-scope="conversationReadScope" @forward="startConversationForward($event)" @forward-select="startConversationForward($event,true)" @forward-toggle="conversationForwarder.toggle($event)" @forward-open="openConversationForward" @forward-cancel="conversationForwarder.cancel()" :on-visible-message="markVisibleConversationMessage" @send="sendConversationMessage" @retry-message="restoreConversationMessage" @settings="openSection($event)" @return="navigate('bots')" @directory="openConversationDirectoryPicker" @attachment="handleConversationAttachment" @paste-attachment="handleConversationPaste" @remove-attachment="removeConversationAttachment" @preview-image="openConversationImage" @download="downloadConversationAttachment" @stop="stopBotChat" @reconcile="reconcileBotChat" @finalize-failure="finalizeBotChatFailure" @refresh-work="loadBotChatWork" @phone="openBotPhone({workspace:workspaceSlug(),employeeId:selectedConversation.employee_id})" @workspace-tasks="navigate('issues')" @history="openEmployeeConversationHistory" @new-conversation="createEmployeeConversation" @archive-conversation="archiveSelectedConversation" @export-loaded="exportLoadedChat">
+              <BotMainChat v-if="employeeChatView.ready&&employeeId===selectedConversation.employee_id" :managed="botChatView.ready" :employee="employeeChatEmployee" :bot="botChatView.ready?conversationBotBinding:null" :conversation="selectedConversation" :execution="conversationExecution" :events="executionEventRows(conversationExecution?.events||[])" v-model:draft="conversationDraft" :attachments="conversationAttachments" :device="selectedConversationDevice" :model-label="conversationUsesNativeDsh?'沿用 DSH Bot 原生模型':models.find(model=>model.id===(conversationBotBinding?.employee?.model_id||conversationModelId))?.label || conversationBotBinding?.employee?.model_id || conversationModelId || '沿用员工默认模型'" :working-directory="conversationWorkingDirectory" :send-pending="conversationSendPending" :attachment-reading="conversationAttachmentReading" :attachment-progress="conversationAttachmentProgress" :attachment-retry="conversationAttachmentRetry" @retry-attachments="retryConversationAttachments" @cancel-attachment-upload="cancelConversationAttachmentUpload" :status-loading="conversationStatusLoading||botBindingPending||Boolean(botBindingError)" :history-loading="conversationHistoryLoading" :history-error="conversationHistoryError" @load-history="loadEarlierConversationMessages" :send-error="conversationSendError" :queue-busy="conversationQueueBusy" :queue-error="conversationQueueError" @queue-pause="updateConversationQueue('pause')" @queue-resume="updateConversationQueue('resume')" @queue-remove="updateConversationQueue('remove',$event)" :stop-busy="botChatStopBusy" :reconcile-busy="botChatReconcileBusy" :finalization-busy="botChatFinalizationBusy" :can-stop="conversationCanStop" :preview="previewMode" :work="botChatWork" :work-loading="botChatWorkLoading" :work-error="botChatWorkError" :preview-src="conversationAttachmentPreviewSrc" :size-label="conversationAttachmentSizeLabel" :forward-selecting="conversationForward.selecting" :forward-selected="conversationForward.messageIds" :forward-error="conversationForward.error" :forward-result="conversationForward.result" @forward-view="openForwardTargetConversation" :read-scope="conversationReadScope" @forward="startConversationForward($event)" @forward-select="startConversationForward($event,true)" @forward-toggle="conversationForwarder.toggle($event)" @forward-open="openConversationForward" @forward-cancel="conversationForwarder.cancel()" :on-visible-message="markVisibleConversationMessage" @send="sendConversationMessage" @retry-message="restoreConversationMessage" @settings="openSection($event)" @return="navigate('bots')" @directory="openConversationDirectoryPicker" @attachment="handleConversationAttachment" @paste-attachment="handleConversationPaste" @remove-attachment="removeConversationAttachment" @preview-image="openConversationImage" @download="downloadConversationAttachment" @stop="stopBotChat" @reconcile="reconcileBotChat" @finalize-failure="finalizeBotChatFailure" @refresh-work="loadBotChatWork" @phone="openBotPhone({workspace:workspaceSlug(),employeeId:selectedConversation.employee_id})" @workspace-tasks="navigate('issues')" @history="openEmployeeConversationHistory" @new-conversation="createEmployeeConversation" @archive-conversation="archiveSelectedConversation" @export-loaded="exportLoadedChat">
                 <template #runtime-controls><DshConversationTools v-if="conversationUsesNativeDsh&&!previewMode" ref="dshConversationTools" :key="selectedConversation.id" :workspace="workspaceSlugValue" :actor-id="authState.user?.id||''" :employee="employeeChatEmployee" :conversation="selectedConversation" :execution="conversationExecution" @new-conversation="createDshPresetConversation"/></template>
                 <template #conversation-settings="{kind}">
                   <label v-if="kind==='model'" class="conversation-device"><span>会话模型</span><ZiSelect id="employee-chat-model" v-model="conversationModelId" :options="conversationModelOptions" :disabled="conversationUsesNativeDsh||botBindingPending||Boolean(conversationBotBinding)" aria-label="选择会话模型" @update:model-value="saveConversationSettings"/></label>

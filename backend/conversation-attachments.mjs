@@ -1,5 +1,6 @@
 import path from 'node:path';
 import {rasterImageMimeType,canonicalRasterMimeType} from '../src/raster-image.mjs';
+import {MAX_ATTACHMENT_TOTAL_BYTES} from '../src/conversation-attachment-policy.mjs';
 
 export const MAX_CONVERSATION_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 export const MAX_CONVERSATION_ATTACHMENTS = 20;
@@ -15,13 +16,20 @@ function decodeBase64(content) {
   return bytes;
 }
 
-export function normalizeConversationAttachments(value, { imagesOnly = false } = {}) {
+export function normalizeConversationAttachments(value, { imagesOnly = false,resolveReference = null } = {}) {
   if (value === undefined || value === null) return [];
   if (!Array.isArray(value)) throw new Error('会话附件格式无效');
   if (value.length > MAX_CONVERSATION_ATTACHMENTS) throw new Error('每条消息最多附加 20 个附件');
   let total = 0;
+  let referenceTotal = 0;
   return value.map((item, index) => {
     if (!item || typeof item !== 'object' || Array.isArray(item)) throw new Error('会话附件格式无效');
+    if(item.attachmentId){
+      if(!resolveReference)throw new Error('附件引用缺少授权来源');
+      const ref=resolveReference(item);referenceTotal+=ref.size;
+      if(referenceTotal+total>MAX_ATTACHMENT_TOTAL_BYTES)throw new Error('会话附件总大小不能超过500 MiB');
+      return ref;
+    }
     const name = path.posix.basename(String(item.name || item.filename || `attachment-${index + 1}`).replace(/\\/g, '/')).slice(0, 255) || `attachment-${index + 1}`;
     const declaredMime = canonicalRasterMimeType(item.mimeType || item.mime_type || 'application/octet-stream').slice(0,255);
     const invalid = message => new Error(`${name}：${message}`);
@@ -38,6 +46,7 @@ export function normalizeConversationAttachments(value, { imagesOnly = false } =
     let bytes;
     try {bytes=encoding==='base64'?decodeBase64(supplied):Buffer.from(String(supplied),'utf8');} catch(error) {throw invalid(error.message);}
     total += bytes.length;
+    if(referenceTotal+total>MAX_ATTACHMENT_TOTAL_BYTES)throw invalid('会话附件总大小不能超过500 MiB');
     if (bytes.length > MAX_CONVERSATION_ATTACHMENT_BYTES || total > MAX_CONVERSATION_ATTACHMENT_BYTES) throw invalid('会话附件总大小不能超过 10 MiB');
     const detectedMime = rasterImageMimeType(bytes);
     if (imageHint && !detectedMime) throw invalid('图片内容无效或格式不支持；支持 PNG、JPEG、GIF、WebP');

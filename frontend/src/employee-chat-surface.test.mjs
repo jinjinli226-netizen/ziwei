@@ -126,3 +126,11 @@ test('ordinary chat keeps the same IME guard and stream-following policy',async 
   const timeline=h.state.timeline.value;timeline.scrollTop=100;h.state.followLatest.value=false;h.props.events.push({id:'stream-1',label:'读取中'});await h.settle();assert.equal(timeline.scrollTop,100);
   h.state.followLatest.value=true;h.props.events.push({id:'stream-2',label:'已读取'});await h.settle();assert.equal(timeline.scrollTop,timeline.scrollHeight);
 });
+
+test('retained uploads expose retry and discard without an error string and keep sending blocked',async t=>{
+ const h=await harness(t,{attachmentRetry:true,sendError:'',draft:'kept draft'});
+ assert.equal(h.button('发送').props.disabled,true);h.button('重试上传').props.onClick();assert.deepEqual(h.events.at(-1),['retry-attachments']);
+ h.button('取消此附件').props.onClick();assert.deepEqual(h.events.at(-1),['cancel-attachment-upload']);
+ h.props.attachmentRetry=false;h.props.attachmentReading=true;h.props.attachmentProgress=42;await h.settle();assert.match(h.text(),/42%/);
+ h.button('取消上传').props.onClick();assert.deepEqual(h.events.at(-1),['cancel-attachment-upload']);
+});

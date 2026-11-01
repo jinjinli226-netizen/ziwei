@@ -4,3 +4,7 @@ export function resolveApiBase({ configured = '', dev = false, origin = '' } = {
   if (dev) return 'http://127.0.0.1:4178';
   return String(origin || '').trim().replace(/\/+$/, '');
 }
+
+export function resolveApiResourceUrl(apiBase,url) {
+  return typeof url==='string'?(url.startsWith('/api/')?`${apiBase}${url}`:url):'';
+}

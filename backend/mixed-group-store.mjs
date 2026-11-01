@@ -35,24 +35,30 @@ export function createMixedGroupStore(repo) {
     const value = rowView(row), runs = parse(row.runs_json) || [];
     const refreshed = runs.map(run => {
       const action = repo.getA2AAction(run.actionId, { workspaceSlug: slug });
-      return action ? { ...run, status: action.status, error: action.error || null, output: action.result?.output || action.result?.result?.output || null } : run;
+      return action ? { ...run, status: action.status, error: action.error || null, output: action.result?.output || action.result?.result?.output || null, attachments: (action.result?.outputArtifacts || action.result?.result?.outputArtifacts || []).filter(item=>item.attachmentId).map(({attachmentId,name,mimeType,size,sha256})=>({attachmentId,name,mimeType,size,sha256})) } : run;
     });
     let messages=value.messages;
     const completed=refreshed.filter(run=>['succeeded','failed','cancelled','expired'].includes(run.status));
     const known=new Set(messages.map(message=>message.actionId).filter(Boolean));
     const outcomes=completed.filter(run=>!known.has(run.actionId)).map(run=>({
       employeeId:run.employeeId,runtime:run.runtime,profile:run.profile,actionId:run.actionId,
-      status:run.status==='expired'?'unknown':run.status,output:run.output,error:run.error,
+      status:run.status==='expired'?'unknown':run.status,output:run.output,error:run.error,conversationId:run.conversationId,attachments:run.attachments,
     }));
     if(outcomes.length){
       const userMessage=messages.find(message=>message.id===runMessageId(refreshed));
       if(userMessage)messages=appendMixedGroupTurn({...value,messages},{messageId:userMessage.id,content:userMessage.text,runs:outcomes,updatedAt:nowIso()}).messages;
     }
-    const nextMessages=JSON.stringify(messages),nextRuns=JSON.stringify(refreshed);
+    const nextMessages=JSON.stringify(persistedMessages(messages)),nextRuns=JSON.stringify(refreshed);
     if(nextRuns!==JSON.stringify(runs)||nextMessages!==JSON.stringify(value.messages))db.prepare('UPDATE mixed_groups SET runs_json=?,messages_json=?,updated_at=? WHERE id=?').run(nextRuns,nextMessages,nowIso(),id);
-    const states=refreshed.map(run=>run.status==='expired'?'unknown':run.status),state=states.some(value=>value==='unknown')?'unknown':states.some(value=>value==='failed')&&states.some(value=>value==='succeeded')?'partial':states.every(value=>value==='succeeded')?'succeeded':states.every(value=>value==='failed')?'failed':states.every(value=>value==='cancelled')?'cancelled':states.some(value=>['pending','acked','running'].includes(value))?'running':'planned';
-    return { ...value, messages, runs: refreshed, state };
+    const states=refreshed.map(run=>run.status==='expired'?'unknown':run.status),state=!states.length?'planned':states.some(value=>value==='unknown')?'unknown':states.some(value=>value==='failed')&&states.some(value=>value==='succeeded')?'partial':states.every(value=>value==='succeeded')?'succeeded':states.every(value=>value==='failed')?'failed':states.every(value=>value==='cancelled')?'cancelled':states.some(value=>['pending','acked','running'].includes(value))?'running':'planned';
+    const projected=messages.map(message=>({...message,...(message.attachments?.length?{attachments:projectAttachments(ws.id,message.sourceConversationId,message.attachments)}:{})}));
+    return { ...value, messages:projected, runs: refreshed.map(run=>({...run,...(run.attachments?.length?{attachments:projectAttachments(ws.id,run.conversationId,run.attachments)}:{})})), state };
   }
+  function projectAttachments(workspaceId,conversationId,items){
+    if(!conversationId)return [];
+    return repo.conversationAttachmentStore.resolve({workspaceId,conversationId},items).map(item=>{const url=`/api/conversations/${encodeURIComponent(conversationId)}/attachments/${encodeURIComponent(item.attachmentId)}`;return {...item,conversationId,url,downloadUrl:`${url}?download=1`};});
+  }
+  function persistedMessages(messages){return messages.map(message=>({...message,...(message.attachments?{attachments:message.attachments.map(({attachmentId,name,mimeType,size,sha256})=>({attachmentId,name,mimeType,size,sha256}))}:{})}));}
   function runMessageId(runs){return runs.find(run=>run.messageId)?.messageId || null;}
   function list(slug) {
     const ws = workspace(slug);
@@ -85,26 +91,39 @@ export function createMixedGroupStore(repo) {
     db.prepare('DELETE FROM mixed_groups WHERE workspace_id=? AND id=?').run(ws.id, id);
     return { id, deleted: true };
   }
-  function planSend(slug, id, input = {}) {
+  function planSend(slug, id, input = {}, actor = {}) {
     const group = get(slug, id), plan = planMixedGroupDispatch({ group, content: input.content, attachments: input.attachments || [], targetEmployeeIds: input.targetEmployeeIds, source: { type: 'user', messageId: input.messageId || `mixed-message:${randomUUID()}` } });
+    const ws=workspace(slug), sourceId=input.attachmentSourceConversationId;
+    const sourceScope={workspaceId:ws.id,conversationId:sourceId};
+    if(plan.attachments.length){
+      if(!group.members.some(member=>member.conversationId===sourceId)||!repo.getConversationAccess(sourceId,actor))throw Object.assign(new Error('附件来源必须是当前群聊有权访问的成员会话'),{status:403});
+      plan.attachments=repo.conversationAttachmentStore.resolve(sourceScope,plan.attachments);
+    }
+    const previous=group.messages.find(message=>message.id===plan.source.messageId);
+    if(previous){
+      if(previous.text!==plan.content||JSON.stringify((previous.attachments||[]).map(item=>item.attachmentId))!==JSON.stringify(plan.attachments.map(item=>item.attachmentId)))throw Object.assign(new Error('群消息标识对应的内容已变化'),{status:409});
+      return {state:'dispatched',group,runs:group.runs.filter(run=>run.messageId===plan.source.messageId),execution:'conversation_execute'};
+    }
     const runs = [];
     db.exec('SAVEPOINT mixed_group_send');
     try {
       for (const member of plan.members) {
-        const message = repo.addConversationMessage(member.conversationId, { content: member.prompt, attachments: member.attachments, dispatch: true, clientMessageId: `mixed-group:${group.id}:${plan.source.messageId}:${member.employeeId}` });
+        const attachments=plan.attachments.map(item=>repo.conversationAttachmentStore.clone(sourceScope,{workspaceId:ws.id,conversationId:member.conversationId},item.attachmentId));
+        member.attachments=attachments;
+        const message = repo.addConversationMessage(member.conversationId, { content: member.prompt, attachments, dispatch: true, clientMessageId: `mixed-group:${group.id}:${plan.source.messageId}:${member.employeeId}` });
         const actionId = message.execution?.id || message.execution?.actionId;
         if (!actionId) throw Object.assign(new Error('混合群成员动作未创建'), { code: 'MIXED_GROUP_ACTION_CREATE_FAILED', status: 502 });
         runs.push({ employeeId: member.employeeId, runtime: member.runtime, profile: member.profile, conversationId: member.conversationId, actionId, messageId: plan.source.messageId, status: 'pending' });
       }
-      const messages = [...group.messages, { id: plan.source.messageId, role: 'user', text: plan.content, status: 'pending', ...(plan.attachments.length ? { attachments: plan.attachments } : {}) }].slice(-300);
-      db.prepare('UPDATE mixed_groups SET messages_json=?,runs_json=?,updated_at=? WHERE id=?').run(JSON.stringify(messages), JSON.stringify(runs), nowIso(), id);
+      const messages = [...group.messages, { id: plan.source.messageId, role: 'user', text: plan.content, status: 'pending', ...(plan.attachments.length ? { attachments: plan.attachments,sourceConversationId:sourceId } : {}) }].slice(-300);
+      db.prepare('UPDATE mixed_groups SET messages_json=?,runs_json=?,updated_at=? WHERE id=?').run(JSON.stringify(persistedMessages(messages)), JSON.stringify(runs), nowIso(), id);
       db.exec('RELEASE mixed_group_send');
     } catch (error) { db.exec('ROLLBACK TO mixed_group_send; RELEASE mixed_group_send'); throw error; }
     return { state: 'dispatched', group: get(slug, id), plan: { ...plan, members: plan.members.map(member => ({ ...member, actionId: runs.find(run => run.employeeId === member.employeeId).actionId })) }, runs, execution: 'conversation_execute' };
   }
   function appendTurn(slug, id, turn) {
     const group = get(slug, id), next = appendMixedGroupTurn(group, turn);
-    db.prepare('UPDATE mixed_groups SET messages_json=?,updated_at=? WHERE id=?').run(JSON.stringify(next.messages), next.updatedAt, id);
+    db.prepare('UPDATE mixed_groups SET messages_json=?,updated_at=? WHERE id=?').run(JSON.stringify(persistedMessages(next.messages)), next.updatedAt, id);
     return get(slug, id);
   }
   function cancel(slug, id, sourceActionId) {

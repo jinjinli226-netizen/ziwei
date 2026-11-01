@@ -1,17 +1,23 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
-import {clipboardImageFiles,createConversationComposerStore,readConversationImages,CONVERSATION_IMAGE_LIMIT} from './conversation-compose.js';
+import {clipboardImageFiles,createConversationComposerStore} from './conversation-compose.js';
+import {MAX_ATTACHMENT_TOTAL_BYTES,MAX_ATTACHMENTS} from '../../src/conversation-attachment-policy.mjs';
+import {normalizeConversationAttachments} from '../../backend/conversation-attachments.mjs';
+import {rasterFixtures} from '../../test/fixtures/raster-images.mjs';
+import {createHash} from 'node:crypto';
 
 const app=await readFile(new URL('./App.vue',import.meta.url),'utf8');
-const bytes=Uint8Array.from([137,80,78,71,13,10,26,10,0]);
+const bytes=new Uint8Array(rasterFixtures.png);
 const png=(name='clipboard.png',read=async()=>bytes.buffer)=>({name,type:'image/png',size:bytes.length,arrayBuffer:read});
 function source(name){const match=new RegExp(`(?:async )?function ${name}\\(`).exec(app);assert.ok(match,name);return app.slice(match.index,app.indexOf('\n}',match.index)+2);}
 function fixture(runtime='Codex'){
   let key='workspace\0one';const composer=createConversationComposerStore(),notices=[];
-  const bindings={conversationComposeKey:()=>key,conversationComposer:composer,employees:{value:[{id:'employee',runtime}]},selectedConversation:{value:{id:'one',employee_id:'employee'}},notify:(message)=>notices.push(message),clipboardImageFiles,readConversationImages,CONVERSATION_IMAGE_LIMIT};
-  const handlers=new Function(...Object.keys(bindings),`${source('addConversationImages')}\n${source('handleConversationPaste')}\n${source('handleConversationAttachment')}\nreturn {paste:handleConversationPaste,pick:handleConversationAttachment};`)(...Object.values(bindings));
-  return {composer,notices,...handlers,key:()=>key,switchTo(next){composer.cancelRead(key);key=next;}};
+  const selectedConversation={value:{id:'one',employee_id:'employee'}};
+  const api={async uploadConversationAttachment(id,file){const content=Buffer.from(await file.arrayBuffer());const [item]=normalizeConversationAttachments([{name:file.name,mimeType:file.type,content:content.toString('base64')}]);return {attachmentId:'attachment_'+file.name,name:item.name,mimeType:item.mimeType,size:item.size,sha256:createHash('sha256').update(content).digest('hex')};}};
+  const bindings={conversationComposeKey:()=>key,conversationComposer:composer,employees:{value:[{id:'employee',runtime}]},selectedConversation,conversationImagePreview:{value:null},conversationAttachments:{get value(){return composer.get(key).attachments;}},notify:(message)=>notices.push(message),clipboardImageFiles,MAX_ATTACHMENT_TOTAL_BYTES,MAX_ATTACHMENTS,api};
+  const handlers=new Function(...Object.keys(bindings),`${source('addConversationImages')}\n${source('clearConversationAttachment')}\n${source('removeConversationAttachment')}\n${source('handleConversationPaste')}\n${source('handleConversationAttachment')}\nreturn {paste:handleConversationPaste,pick:handleConversationAttachment,clear:clearConversationAttachment,remove:removeConversationAttachment};`)(...Object.values(bindings));
+  return {composer,notices,...handlers,key:()=>key,switchTo(next){handlers.clear({preserve:true});key=next;selectedConversation.value.id=next;}};
 }
 function event(files=[],text=''){
   return {prevented:false,preventDefault(){this.prevented=true;},clipboardData:{items:[...files.map(file=>({kind:'file',type:file.type,getAsFile:()=>file})),...(text?[{kind:'string',type:'text/plain'}]:[])],files,getData:()=>text}};
@@ -63,7 +69,7 @@ test('Hermes preserves simultaneous and accumulated images in one ordered submis
   await f.pick({target:{files:[png('third.png',async()=>third.buffer)],value:'selected'}});
   const submission=f.composer.beginSubmission(f.key());assert.equal(submission.draft,'compare all original images');
   assert.deepEqual(submission.attachments.map(x=>x.name),['first.png','second.png','third.png']);
-  assert.deepEqual(submission.attachments.map(x=>x.content),[first,second,third].map(value=>btoa(String.fromCharCode(...value))));
+  assert.deepEqual(submission.attachments.map(x=>x.sha256),[first,second,third].map(value=>createHash('sha256').update(value).digest('hex')));
 });
 
 test('invalid, oversized and excess pastes retain existing attachments for both runtimes',async()=>{
@@ -71,9 +77,21 @@ test('invalid, oversized and excess pastes retain existing attachments for both 
     const f=fixture(runtime);await f.paste(event([png('kept.png')]));
     let incoming=png('rejected.png');
     if(scenario==='invalid')incoming=png('fake.png',async()=>Uint8Array.from([1,2,3]).buffer);
-    if(scenario==='size')incoming={...incoming,size:CONVERSATION_IMAGE_LIMIT};
+    if(scenario==='size')incoming={...incoming,size:MAX_ATTACHMENT_TOTAL_BYTES};
     await f.paste(event(scenario==='count'?Array.from({length:20},()=>incoming):[incoming]));
     assert.deepEqual(f.composer.get(f.key()).attachments.map(x=>x.name),['kept.png']);
-    assert.match(f.composer.get(f.key()).error,scenario==='invalid'?/PNG/:scenario==='size'?/10 MB/:/20 张/);
+    assert.match(f.composer.get(f.key()).error,scenario==='invalid'?/图片/:scenario==='size'?/500 MB/:/20 个/);
   }
+});
+
+test('switching away from an uploading conversation leaves visible resumable files in the original draft',async()=>{
+ const f=fixture();let resolve;const key=f.key();const pending=f.paste(event([png('held.png',()=>new Promise(done=>resolve=done))]));
+ f.switchTo('other-workspace\0two');resolve(bytes.buffer);await pending;
+ const entry=f.composer.get(key);assert.equal(entry.reading,false);assert.equal(entry.uploadRetry.length,1);assert.match(entry.error,/保留|继续上传/);assert.deepEqual(f.composer.get(f.key()).attachments,[]);
+});
+
+test('removing an existing attachment while another file uploads does not invalidate that upload',async()=>{
+ const f=fixture();await f.paste(event([png('kept.png')]));let resolve;const pending=f.paste(event([png('next.png',()=>new Promise(done=>resolve=done))]));
+ f.remove(0);assert.equal(f.composer.get(f.key()).attachments.length,1);resolve(bytes.buffer);await pending;
+ const entry=f.composer.get(f.key());assert.deepEqual(entry.attachments.map(x=>x.name),['kept.png','next.png']);assert.equal(entry.uploadRetry.length,0);assert.ok(f.composer.beginSubmission(f.key()));
 });

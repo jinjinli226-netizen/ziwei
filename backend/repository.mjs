@@ -16,7 +16,8 @@ import { discoverLocalVersions } from './discovery.mjs';
 import {deviceRuntimeView,runtimeName,safeRuntimeDetection} from './runtime-status.mjs';
 import { MAX_SKILL_BYTES, hashSkillContent, parseSkillMarkdown, validateSkillDocument } from './skills/validator.mjs';
 import { extractSkillMarkdownArchive } from './skills/archive.mjs';
-import { objectStoreFromOptions } from './storage.mjs';
+import { objectStoreFromOptions,createLocalObjectStore } from './storage.mjs';
+import {createConversationAttachmentStore} from './conversation-attachment-store.mjs';
 import { sanitizeHtml } from './sanitize.mjs';
 import { composeEmployeePrompt, normalizeRuntimeProfile } from '../src/employee-runtime.mjs';
 import { listHermesProfiles, validateHermesProfile, terminalMcpExecutionFailure } from '../src/runtime-adapters.mjs';
@@ -97,7 +98,7 @@ const executionResultMessage = (status, error, result, fallback = '执行完成'
   return output && output.trim() !== String(error || '').trim() ? `${detail}\n\n${output}` : detail;
 };
 const canonicalJson = value => JSON.stringify(value, (_key, item) => item && typeof item === 'object' && !Array.isArray(item) ? Object.fromEntries(Object.keys(item).sort().map(key => [key, item[key]])) : item);
-const conversationAttachmentMetadata = attachments => Array.isArray(attachments) ? attachments.map(item => ({ name:item?.name ?? item?.filename, mimeType:item?.mimeType ?? item?.mime_type, size:item?.size })) : [];
+const conversationAttachmentMetadata = attachments => Array.isArray(attachments) ? attachments.map(item => ({ name:item?.name ?? item?.filename, mimeType:item?.mimeType ?? item?.mime_type, size:item?.size,...(item?.attachmentId?{attachmentId:item.attachmentId,sha256:item.sha256}:{}) })) : [];
 const conversationResultView = result => {
   if (!result || typeof result !== 'object' || Array.isArray(result)) return result;
   const view = { ...result };
@@ -108,7 +109,8 @@ const conversationResultView = result => {
 const conversationMessageView = row => {
   const { attachment_json: attachmentJson, forward_json:forwardJson, ...view } = row;
   const forward=parse(forwardJson);
-  return { ...view, attachments:parse(attachmentJson),...(forward?.schemaVersion===1&&Array.isArray(forward.messages)?{forward}:{}) };
+  const project=items=>Array.isArray(items)?items.map(item=>item?.attachmentId?{...item,url:`/api/conversations/${encodeURIComponent(row.conversation_id)}/attachments/${encodeURIComponent(item.attachmentId)}`,downloadUrl:`/api/conversations/${encodeURIComponent(row.conversation_id)}/attachments/${encodeURIComponent(item.attachmentId)}?download=1`}:item):items;
+  return { ...view, attachments:project(parse(attachmentJson)),...(forward?.schemaVersion===1&&Array.isArray(forward.messages)?{forward:{...forward,messages:forward.messages.map(message=>({...message,attachments:project(message.attachments)}))}}:{}) };
 };
 const a2aReceiptView = (row, { includeResult = false } = {}) => {
   const payload = parse(row.payload_json);
@@ -125,9 +127,9 @@ const a2aReceiptView = (row, { includeResult = false } = {}) => {
     view.error = row.error ? String(row.error).slice(0, 4000) : null;
     view.result = {
       outputLength:String(output).length,
-      outputArtifacts:Array.isArray(artifacts) ? artifacts.filter(item => typeof item?.content === 'string').map(item => ({
+      outputArtifacts:Array.isArray(artifacts) ? artifacts.filter(item => typeof item?.content === 'string'||item?.attachmentId).map(item => ({
         name:item.name, mimeType:item.mimeType, size:item.size,
-        sha256:crypto.createHash('sha256').update(Buffer.from(item.content, 'base64')).digest('hex')
+        sha256:item.attachmentId?item.sha256:crypto.createHash('sha256').update(Buffer.from(item.content, 'base64')).digest('hex')
       })) : []
     };
   }
@@ -391,6 +393,8 @@ export function createRepository(options = {}, io={}) {
   const rollout=serverCodeRolloutFor(db);if(rollout)options={...options,objectStoreDir:rollout.objectStoreDir};
   const employeeEnvKey = rollout?rollout.environmentKey():encryptionKey(options);
   const objectStore = objectStoreFromOptions(options);
+  const attachmentObjects=objectStore||(!options.memory?createLocalObjectStore({dir:options.conversationAttachmentDir||path.join(path.dirname(options.filename||process.env.ZIWEI_DB_FILE||path.resolve(import.meta.dirname,'../data/ziwei.sqlite')),'objects')}):null);
+  const conversationAttachmentStore=createConversationAttachmentStore({db,objectStore:attachmentObjects});
   const discover = options.discoverLocalVersions || discoverLocalVersions;
   const workspace = slug => db.prepare('SELECT * FROM workspaces WHERE slug = ?').get(slug);
   const employeeAccessContext = input => ({
@@ -742,6 +746,7 @@ export function createRepository(options = {}, io={}) {
   };
   return finishRepository(guardRepository({
     db,
+    conversationAttachmentStore,
     onBotActionCompleted(listener) {
       if(typeof listener!=='function')throw new TypeError('Completion listener must be a function');
       botActionCompletionListeners.add(listener);
@@ -1886,7 +1891,7 @@ export function createRepository(options = {}, io={}) {
     },
     listTaskAttachments(taskId) { const task = db.prepare('SELECT id FROM tasks WHERE id=?').get(taskId); if (!task) throw new Error('Task not found'); return db.prepare('SELECT id,task_id,name,mime_type,size,content_encoding,storage_key,checksum,created_at FROM task_attachments WHERE task_id=? ORDER BY created_at').all(taskId); },
     getTaskAttachment(attachmentId) { const row = db.prepare('SELECT * FROM task_attachments WHERE id=?').get(attachmentId); if (!taskAttachmentView(row)) return null; if (objectStore && row.storage_key) { const bytes=objectStore.get(row.storage_key,{checksum:row.checksum}); return {...taskAttachmentView(row), content:bytes.toString('base64'), content_encoding:'base64'}; } return {...taskAttachmentView(row), content:row.content}; },
-    deleteTaskAttachment(attachmentId) { const row = db.prepare('SELECT a.*,t.workspace_id FROM task_attachments a JOIN tasks t ON t.id=a.task_id WHERE a.id=?').get(attachmentId); if (!row) throw new Error('附件不存在'); db.prepare('DELETE FROM task_attachments WHERE id=?').run(attachmentId); if (objectStore && row.storage_key) { const refs = db.prepare('SELECT COUNT(*) AS count FROM task_attachments WHERE storage_key=?').get(row.storage_key).count; if (!refs) objectStore.delete(row.storage_key); } const ws = db.prepare('SELECT slug FROM workspaces WHERE id=?').get(row.workspace_id); audit(ws.slug,'user','task.attachment.deleted',{taskId:row.task_id,attachmentId}); return taskAttachmentView(row); },
+    deleteTaskAttachment(attachmentId) { const row = db.prepare('SELECT a.*,t.workspace_id FROM task_attachments a JOIN tasks t ON t.id=a.task_id WHERE a.id=?').get(attachmentId); if (!row) throw new Error('附件不存在'); db.prepare('DELETE FROM task_attachments WHERE id=?').run(attachmentId); if (objectStore && row.storage_key) { const refs = db.prepare('SELECT (SELECT COUNT(*) FROM task_attachments WHERE storage_key=?1)+(SELECT COUNT(*) FROM conversation_attachments WHERE storage_key=?1)+(SELECT COUNT(*) FROM documents WHERE storage_key=?1)+(SELECT COUNT(*) FROM document_versions WHERE storage_key=?1) AS count').get(row.storage_key).count; if (!refs) objectStore.delete(row.storage_key); } const ws = db.prepare('SELECT slug FROM workspaces WHERE id=?').get(row.workspace_id); audit(ws.slug,'user','task.attachment.deleted',{taskId:row.task_id,attachmentId}); return taskAttachmentView(row); },
     addTaskMessage(taskId, input={}) { const message={id:id('msg'),task_id:taskId,role:input.role||'user',content:String(input.content||''),created_at:now()}; db.prepare('INSERT INTO task_messages(id,task_id,role,content,created_at) VALUES(?,?,?,?,?)').run(message.id,message.task_id,message.role,message.content,message.created_at); return message; },
     getTaskMessages(taskId) { return db.prepare('SELECT * FROM task_messages WHERE task_id=? ORDER BY created_at').all(taskId); },
     listEmployeeTemplateInstances(slug, ownerUserId) {
@@ -2085,7 +2090,8 @@ export function createRepository(options = {}, io={}) {
         const privilegedDeviceRole = ['owner', 'admin'].includes(String(input.actorRole || '').toLowerCase());
         if (ws.kind === 'personal' && input.enforceDeviceOwnership && !privilegedDeviceRole && (!input.actorUserId || device.owner_user_id !== input.actorUserId)) throw new Error('个人工作区只能使用本人的设备');
       }
-      const message = { id: id('convmsg'), conversation_id: conversationId, role: ['user', 'assistant', 'system'].includes(input.role) ? input.role : 'user', content: String(input.content || '').trim(), attachments: normalizeConversationAttachments(input.attachments), sender_user_id:typeof input.actorUserId==='string'?input.actorUserId.trim()||null:null,created_at: now(),...(forward?{forward}:{}) };
+      const attachmentScope={workspaceId:conversation.workspace_id,conversationId};
+      const message = { id: id('convmsg'), conversation_id: conversationId, role: ['user', 'assistant', 'system'].includes(input.role) ? input.role : 'user', content: String(input.content || '').trim(), attachments: normalizeConversationAttachments(input.attachments,{resolveReference:item=>conversationAttachmentStore.resolve(attachmentScope,[item])[0]}), sender_user_id:typeof input.actorUserId==='string'?input.actorUserId.trim()||null:null,created_at: now(),...(forward?{forward}:{}) };
       if (!message.content && !message.attachments.length) throw new Error('消息内容不能为空');
       const dispatch = message.role === 'user' && input.dispatch !== false;
       const executionSettings = recordOnly?{}:{
@@ -2506,7 +2512,10 @@ export function createRepository(options = {}, io={}) {
       // assistant attachment, including the local-action result wrapper.
       if (status === 'succeeded') {
         try {
-          outputArtifacts = normalizeConversationAttachments(result?.outputArtifacts ?? result?.result?.outputArtifacts, { imagesOnly: true });
+          outputArtifacts = normalizeConversationAttachments(result?.outputArtifacts ?? result?.result?.outputArtifacts, { imagesOnly: true,resolveReference:item=>{
+            if(!conversation)throw new Error('产物缺少绑定会话');
+            return conversationAttachmentStore.resolve({workspaceId:row.workspace_id,conversationId:conversation.id},[item],{actionId})[0];
+          } });
           if (outputArtifacts.length && !conversation) throw new Error('图片回传缺少当前执行绑定的持久会话');
           if (result && typeof result === 'object') {
             if (Object.hasOwn(result, 'outputArtifacts')) result = { ...result, outputArtifacts };

@@ -71,6 +71,17 @@ test('ordinary employee bootstrap carries its temporary MCP overlay into native 
   assert.deepEqual(JSON.parse(output.stdout),{privateMcpAtGateway:true,sessionId:'ordinary-session',externalModelCalls:0});
 });
 
+test('execution bootstrap gives the native single Gateway ensure its bounded cold startup budget',t=>{
+  const f=fixture(t);if(!f)return;
+  const cli=path.join(f.directory,'hermes_cli');
+  fs.writeFileSync(path.join(cli,'gateway_runtime.py'),`def ensure_gateway_runtime(home,*,timeout=60.0,idle_exit=False):\n return {'home':str(home),'timeout':timeout,'idle_exit':idle_exit}\n`);
+  fs.writeFileSync(path.join(cli,'main.py'),`import json,os\ndef main():\n from hermes_cli.gateway_runtime import ensure_gateway_runtime\n print(json.dumps(ensure_gateway_runtime(os.environ['HERMES_HOME'],idle_exit=True)))\n return 0\n`);
+  const spec=runtime.hermesMcpSpawnSpec(f.launcher,f.args,{env:f.env});
+  const output=spawnSync(spec.command,spec.args,{env:f.env,encoding:'utf8',windowsHide:true});
+  assert.equal(output.status,0,output.stderr);
+  assert.deepEqual(JSON.parse(output.stdout),{home:f.home,timeout:180,idle_exit:true});
+});
+
 test('Hermes bootstrap refuses missing/unbound interpreters and foreign console entrypoints', t => {
   assert.equal(typeof runtime.hermesMcpSpawnSpec, 'function');
   const f = fixture(t); if (!f) return;

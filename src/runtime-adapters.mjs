@@ -14,7 +14,7 @@ import { redactSecrets } from './redaction.mjs';
 import { normalizeRuntimeProfile } from './employee-runtime.mjs';
 import { prepareCreatorRuntimeHome, CREATOR_RUNTIME_ENV_KEYS } from './creator-runtime-home.mjs';
 import { createCliDiscoveryContext, discoverRuntimeCli, carryRuntimeDiscoveryEnvironment, runtimeDiscoveryEnvironment } from './runtime-cli-discovery.mjs';
-import { imageArtifactInstructions, readImageArtifacts, validateImageBytes, imageArtifactDeliveryBody, MAX_CONVERSATION_IMAGE_BYTES, MAX_ACTION_RESULT_JSON_BYTES } from './conversation-image-artifacts.mjs';
+import { imageArtifactInstructions, readImageArtifacts, readImageArtifactDescriptors, validateImageBytes, imageArtifactDeliveryBody, MAX_CONVERSATION_IMAGE_BYTES, MAX_ACTION_RESULT_JSON_BYTES } from './conversation-image-artifacts.mjs';
 import { spawnSupervisedRuntime } from './runtime-process.mjs';
 import { prepareHermesBotHome, BOT_RUNTIME_ENV_KEYS } from './hermes-bot-runtime.mjs';
 import { normalizeBotConfig, effectiveBotMaxTurns } from './hermes-bot-config.mjs';
@@ -1020,7 +1020,7 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
   if (!resolvedRuntime) return Promise.reject(new Error(`未知本机运行时: ${runtime || '(empty)'}`));
   if(maintenance?.resume&&resolvedRuntime!=='Hermes')return Promise.reject(Object.assign(new Error('此运行时不支持维护会话恢复；未重放原任务'),{code:'MAINTENANCE_RESUME_UNSUPPORTED'}));
   if(maintenance?.resume)attachments=[];
-  const imageInputs = attachments.filter(item=>/^image\//i.test(item?.mimeType || '') || /\.(?:png|jpe?g|gif|webp)$/i.test(item?.path || ''));
+  const imageInputs = attachments.filter(item=>item?.nativeVision!==false&&(/^image\//i.test(item?.mimeType || '') || /\.(?:png|jpe?g|gif|webp)$/i.test(item?.path || '')));
   let content = maintenance?.resume ? 'Continue the remaining task from this saved session after Ziwei maintenance. Keep completed work and tool receipts. Do not repeat completed external operations; inspect the original receipt or current state before any operation whose result is uncertain.' : String(prompt ?? '').trim();
   if (!content && imageInputs.length) content = '请查看输入图片，并根据图片内容作答。';
   if (!content) return Promise.reject(new Error('agent.execute 需要非空 prompt'));
@@ -1307,7 +1307,7 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
       if (mcpFailure) return finish({ status: 'failed', ...mcpFailure, ...(phoneFailure && managementFailure ? { error: `${phoneFailure.error}\n${managementFailure.error}` } : {}), result });
       if (resolvedRuntime === 'Hermes' && !state.response.trim() && /(?:^|[\r\n])\s*stdin is not a tty\s*(?:[\r\n]|$)/i.test(state.output)) return finish({ status: 'failed', code: 'HERMES_NONINTERACTIVE_FAILED', error: 'Hermes 未进入非交互任务模式（stdin is not a tty），未收到模型答复', result });
       if (imageArtifacts) {
-        try { result.outputArtifacts = readImageArtifacts(imageArtifacts); }
+        try { result.outputArtifacts = imageArtifacts.references?await readImageArtifactDescriptors(imageArtifacts):readImageArtifacts(imageArtifacts); }
         catch (error) { return finish({status:'failed',code:error.code || 'image_artifact_invalid',error:error.message,result}); }
       }
       finish(imageArtifactDeliveryBody({ status: 'succeeded', result },{maxBytes:MAX_ACTION_RESULT_JSON_BYTES-64*1024}));
@@ -1324,7 +1324,7 @@ export function runtimeDefinitions() { return Object.keys(DEFINITIONS).map(runti
 export function runtimeInvocation(runtime, { prompt, model = null, attachments = [] } = {}) {
   const resolvedRuntime = normalizeRuntime(runtime);
   if (!resolvedRuntime) throw new Error(`未知本机运行时: ${runtime || '(empty)'}`);
-  const images = attachments.filter(item=>/^image\//i.test(item?.mimeType || '') || /\.(?:png|jpe?g|gif|webp)$/i.test(item?.path || '')).map(item=>String(item.path || ''));
+  const images = attachments.filter(item=>item?.nativeVision!==false&&(/^image\//i.test(item?.mimeType || '') || /\.(?:png|jpe?g|gif|webp)$/i.test(item?.path || ''))).map(item=>String(item.path || ''));
   if (images.length && !['Codex','Hermes'].includes(resolvedRuntime)) throw new Error(`${resolvedRuntime} 图片输入尚未实现原生视觉通道；不能把图片路径当作视觉输入`);
   if (images.length > 20) throw new Error('每条消息最多附加 20 张图片');
   if (images.some(file=>!file)) throw new Error('图片输入缺少本机文件路径');

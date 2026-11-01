@@ -1,5 +1,6 @@
-import { resolveApiBase } from './api-base.js';
+import { resolveApiBase,resolveApiResourceUrl } from './api-base.js';
 import { boundedRead } from './bounded-read.js';
+import {createConversationAttachmentUploader} from './conversation-attachment-upload.js';
 
 const runtimeOrigin = typeof window === 'undefined' ? '' : window.location.origin;
 // Vite injects import.meta.env in the browser build; direct Node component
@@ -33,7 +34,8 @@ export function setWorkspaceSlug(slug) {
   try { localStorage.setItem(WORKSPACE_KEY, value); } catch {}
 }
 async function request(path, options = {}) {
-  const response = await fetch(`${API_BASE}${path}`, { credentials: 'include', headers: { 'content-type': 'application/json', ...(options.headers || {}) }, ...options });
+  const headers={'content-type':'application/json',...Object.fromEntries(Object.entries(options.headers||{}).map(([key,value])=>[key.toLowerCase(),value]))};
+  const response = await fetch(`${API_BASE}${path}`, { credentials: 'include', ...options, headers });
   if(options.signal?.aborted)throw options.signal.reason || new DOMException('读取已取消','AbortError');
   const data = await response.json().catch(() => ({}));
   if(options.signal?.aborted)throw options.signal.reason || new DOMException('读取已取消','AbortError');
@@ -48,7 +50,11 @@ async function request(path, options = {}) {
   return data;
 }
 function boundedRequest(path,options){return boundedRead(signal=>request(path,{signal}),options);}
+const uploadConversationAttachment=createConversationAttachmentUploader({request});
 export const api = {
+  uploadConversationAttachment,
+  attachmentResourceUrl:url=>resolveApiResourceUrl(API_BASE,url),
+  conversationAttachmentUrl:(conversationId,attachmentId,{download=false}={})=>`${API_BASE}/api/conversations/${encodeURIComponent(conversationId)}/attachments/${encodeURIComponent(attachmentId)}${download?'?download=1':''}`,
   identityConfig: () => request('/api/identity/config'),
   identityLoginUrl: () => new URL('/api/identity/login', window.location.origin).href,
   authStatus: () => request('/api/auth/status'),

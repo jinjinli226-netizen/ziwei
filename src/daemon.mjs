@@ -348,7 +348,8 @@ export class ActionDispatcher {
       if(!sessionExit){this.#quarantine(key,'DSH_SESSION_TERMINAL_UNCONFIRMED');return this.#uncertain(action,'DSH_SESSION_TERMINAL_UNCONFIRMED',outcome.error||outcome.value?.error||'未收到匹配当前请求的 DSH turn/end',{result:receipt()});}
       if(outcome.error)return this.#failure(action,outcome.error,{code:'executor_failed',result:receipt()});
       const value=outcome.value;
-      const result={output:value?.output??value?.result?.output??'',sessionId:sessionExit.sessionId,sessionExit};
+      const details=value?.result??value;
+      const result={output:value?.output??value?.result?.output??'',sessionId:sessionExit.sessionId,sessionExit,...(details?.outputArtifacts?{outputArtifacts:details.outputArtifacts}:{}),...(details?.inputAttachments?{inputAttachments:details.inputAttachments}:{})};
       if(value?.status!=='succeeded')return this.#failure(action,value?.error||'DSH 执行失败',{code:value?.code||'executor_failed',result});
       return {status:'succeeded',actionId:action.id,result,completedAt:this.#now()};
     } finally {clearTimeout(hardTimer);clearInterval(idleTimer);}
