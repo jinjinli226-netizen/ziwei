@@ -1,10 +1,12 @@
 """Execution-only bridge to the native owner's private MCP and SDK receipts."""
 import argparse
+import asyncio
 import contextlib
 import contextvars
 import importlib
 import importlib.util
 import inspect
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -13,6 +15,8 @@ import sys
 
 _EFFORTS = frozenset({'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'})
 _BINDING = ('profile_id', 'session_id', 'admission_id', 'execution_generation', 'authority_epoch')
+CLEANUP_TIMEOUT = 12.0
+CLEANUP_POLL_INTERVAL = 0.1
 
 
 def _check(condition, reject, code):
@@ -22,6 +26,17 @@ def _check(condition, reject, code):
 
 def _identifier(value):
     return isinstance(value, str) and bool(re.fullmatch(r'[A-Za-z0-9_.:-]{1,160}', value))
+
+
+def _loopback_websocket(client):
+    websocket = getattr(client, 'websocket', None)
+    peer = getattr(websocket, 'remote_address', None)
+    try:
+        address = ipaddress.ip_address(peer[0])
+        address = getattr(address, 'ipv4_mapped', None) or address
+        return websocket if address.is_loopback else None
+    except (ValueError, TypeError, IndexError):
+        return None
 
 
 def _profile(value):
@@ -117,6 +132,9 @@ class _Session:
         self.servers, self.isolation, self.reject = servers, isolation, reject
         self.description = None
         self.snapshots, self.admissions = {}, {}
+        self.turns = []
+        self.bot = bool(isolation and isolation.get('kind') == 'hermes-bot')
+        self.cleanup_ok = True
         self.receipts = 0
 
     def check_home(self):
@@ -154,6 +172,104 @@ class _Session:
         _check(type(epoch) is int and 0 <= epoch <= 2**53 - 1 and epoch == self.description['authority_epoch'],
                self.reject, 'BOT_GATEWAY_BINDING_INVALID')
         self.snapshots[sid] = result
+
+    def begin(self, params):
+        sid, input_id = params.get('session_id'), params.get('input_id')
+        _check(sid in self.snapshots and _identifier(input_id), self.reject, 'BOT_GATEWAY_ADMISSION_INVALID')
+        turn = {'schemaVersion': 1, 'source': 'native_gateway',
+                'actionId': os.environ.get('ZIWEI_GATEWAY_ACTION_ID') or (os.environ.get('ZIWEI_BOT_ACTION_ID') if self.bot else None),
+                'employeeId': os.environ.get('ZIWEI_GATEWAY_EMPLOYEE_ID') or (self.isolation or {}).get('employeeId'),
+                'profileHome': self.description['profile_id'],
+                'sessionId': sid, 'inputId': input_id, 'admissionId': None,
+                'authorityEpoch': self.description['authority_epoch'], 'executionGeneration': None,
+                'status': 'unknown', 'outcome': None, 'cancelRequested': False, 'verified': False}
+        self.turns.append(turn)
+        return turn
+
+    def accept(self, turn, receipt):
+        aid = receipt.get('admission_id')
+        _check(_identifier(aid), self.reject, 'BOT_GATEWAY_ADMISSION_INVALID')
+        turn['admissionId'] = aid
+        self.validate_turn_receipt(turn, receipt)
+        self.emit_turn({**turn, 'status': receipt['status']}, 'admission')
+
+    def validate_turn_receipt(self, turn, receipt):
+        ref = receipt.get('ref', {})
+        generation = receipt.get('execution_generation')
+        _check(receipt.get('admission_id') == turn['admissionId']
+               and ref.get('profile_id') == turn['profileHome'] and ref.get('session_id') == turn['sessionId']
+               and receipt.get('authority_epoch') == turn['authorityEpoch']
+               and (generation is None or type(generation) is int and 0 <= generation <= 2**53 - 1)
+               and (turn['executionGeneration'] is None or generation == turn['executionGeneration'])
+               and receipt.get('status') in ('queued', 'started', 'unknown', 'terminal'),
+               self.reject, 'BOT_GATEWAY_TURN_RECEIPT_MISMATCH')
+        turn['executionGeneration'] = generation
+        if receipt['status'] == 'terminal':
+            _check(receipt.get('outcome') in ('completed', 'failed', 'interrupted', 'cancelled', 'rejected', 'steered'),
+                   self.reject, 'BOT_GATEWAY_TURN_RECEIPT_MISMATCH')
+        return receipt
+
+    @staticmethod
+    def emit_turn(turn, phase):
+        print('ZIWEI_HERMES_GATEWAY_TURN:' + json.dumps({**turn, 'phase': phase}), file=sys.stderr, flush=True)
+
+    async def settle_turn(self, client, turn):
+        sid = turn['sessionId']
+        if turn['admissionId'] is None:
+            snapshot = await client.rpc('session.resume', session_id=sid)
+            self.snapshot(snapshot)
+            _check(snapshot['stored_session_id'] == sid, self.reject, 'BOT_GATEWAY_SESSION_MISMATCH')
+            matching = [row for row in snapshot.get('pending', []) if row.get('input_id') == turn['inputId']]
+            if len(matching) != 1:
+                return  # A lost ACK never permits guessing which turn to stop.
+            self.accept(turn, matching[0])
+        params = {'session_id': sid, 'admission_id': turn['admissionId']}
+        receipt = self.validate_turn_receipt(turn, await client.rpc('prompt.receipt', include_result=True, **params))
+        if receipt['status'] in ('queued', 'started'):
+            turn['cancelRequested'] = True
+            await client.rpc('prompt.cancel', **params)
+            while True:
+                receipt = self.validate_turn_receipt(turn, await client.rpc('prompt.receipt', include_result=True, **params))
+                if receipt['status'] not in ('queued', 'started'):
+                    break
+                await asyncio.sleep(CLEANUP_POLL_INTERVAL)
+        if receipt['status'] == 'terminal':
+            turn.update(status='terminal', outcome=receipt['outcome'], verified=True)
+
+    async def reconnect_cleanup(self, native, connect, turn):
+        _check(_loopback_websocket(native) is not None, self.reject, 'BOT_GATEWAY_CLEANUP_UNAVAILABLE')
+        from hermes_cli.gateway_runtime import discover_gateway_endpoint
+        found = await asyncio.to_thread(discover_gateway_endpoint, self.home, timeout=2.0)
+        endpoint = found.endpoint
+        expected = self.description
+        _check(endpoint is not None and endpoint.profile_id == expected['profile_id']
+               and endpoint.authority_epoch == expected['authority_epoch']
+               and endpoint.instance_id == expected.get('instance_id'),
+               self.reject, 'BOT_GATEWAY_CLEANUP_OWNER_CHANGED')
+        # Supplying an endpoint bypasses native ensure/start. Never create or resubmit work here.
+        async with connect(endpoint=endpoint) as client:
+            description = await client.rpc('runtime.describe')
+            _check(all(description.get(key) == expected.get(key) for key in ('profile_id', 'authority_epoch', 'instance_id')),
+                   self.reject, 'BOT_GATEWAY_CLEANUP_OWNER_CHANGED')
+            await self.settle_turn(client, turn)
+
+    async def cleanup(self, native, connect):
+        if not self.turns:
+            return
+        try:
+            async with asyncio.timeout(CLEANUP_TIMEOUT):
+                for turn in self.turns:
+                    try:
+                        await self.settle_turn(native, turn)
+                    except Exception:
+                        # A closed websocket.send raises its own transport exception, not the RPC wrapper.
+                        await self.reconnect_cleanup(native, connect, turn)
+        except Exception:
+            pass  # The caller keeps its original error; the bounded proof preserves uncertainty.
+        finally:
+            for turn in self.turns:
+                self.cleanup_ok = self.cleanup_ok and turn['verified'] and not turn['cancelRequested']
+                self.emit_turn(turn, 'cleanup')
 
     def receipt(self, payload, binding, snapshot):
         reject = self.reject
@@ -265,17 +381,22 @@ class _Client:
                 result = await self._resume(params)
             state.snapshot(result)
             return result
-        if method == 'prompt.submit' and state.effort:
+        if method == 'prompt.submit':
             _check(params.get('session_id') in state.snapshots, state.reject, 'BOT_GATEWAY_SESSION_MISMATCH')
-            for key, value in {'strict_reasoning_effort': state.effort, 'strict_reasoning_model': state.model,
-                               'strict_reasoning_provider': state.provider}.items():
-                _check(params.get(key) in (None, value), state.reject, 'BOT_REASONING_GATEWAY_CONFLICT')
-                params[key] = value
+            if state.effort:
+                for key, value in {'strict_reasoning_effort': state.effort, 'strict_reasoning_model': state.model,
+                                   'strict_reasoning_provider': state.provider}.items():
+                    _check(params.get(key) in (None, value), state.reject, 'BOT_REASONING_GATEWAY_CONFLICT')
+                    params[key] = value
+            turn = state.begin(params)
             result = await self.native.rpc(method, **params)
             aid = result.get('admission_id')
             if aid:
                 _check(_identifier(aid), state.reject, 'BOT_GATEWAY_ADMISSION_INVALID')
                 state.admissions[(params['session_id'], aid)] = result
+                state.accept(turn, result)
+            elif result.get('voice_stopped') is True:
+                state.turns.remove(turn)
             return result
         return await self.native.rpc(method, **params)
 
@@ -293,8 +414,6 @@ def install(config, isolation, *, overlay='', reject=RuntimeError, active=True):
     servers = _overlay_servers(config, overlay, reject, isolation)
     effort = os.environ.get('ZIWEI_BOT_REASONING_EFFORT') if bot else None
     _check(effort is None or effort in _EFFORTS, reject, 'BOT_REASONING_INVALID')
-    if not servers and not effort:
-        return False
     original = getattr(gateway, 'run_gateway_chat', None)
     connect = getattr(gateway, 'connect_gateway', None)
     _check(inspect.iscoroutinefunction(original) and callable(connect), reject, 'BOT_GATEWAY_SESSION_PROTOCOL_UNSUPPORTED')
@@ -321,7 +440,16 @@ def install(config, isolation, *, overlay='', reject=RuntimeError, active=True):
     async def connect_gateway(*args, **kwargs):
         state = context.get()
         async with connect(*args, **kwargs) as client:
-            yield _Client(client, state, importlib.import_module('hermes_cli.gateway_client').GatewayClientError) if state else client
+            websocket = _loopback_websocket(client)
+            if websocket is not None:
+                # Match the native loopback listener: a busy owner may delay pongs for minutes.
+                websocket.ping_timeout = None
+            client_error = importlib.import_module('hermes_cli.gateway_client').GatewayClientError
+            try:
+                yield _Client(client, state, client_error) if state else client
+            finally:
+                if state is not None:
+                    await state.cleanup(client, connect)
 
     async def run_gateway_chat(args, *positional, **kwargs):
         # Preserve caller Namespace/argv and all native resume-policy comparisons.
@@ -331,6 +459,8 @@ def install(config, isolation, *, overlay='', reject=RuntimeError, active=True):
         try:
             result = await original(scoped, *positional, **kwargs)
             _check(not effort or state.receipts > 0, reject, 'BOT_REASONING_GATEWAY_RECEIPT_MISSING')
+            if result == 0 or not isinstance(result, int):
+                _check(state.cleanup_ok, reject, 'BOT_GATEWAY_TURN_NOT_TERMINAL')
             return result
         finally:
             context.reset(token)

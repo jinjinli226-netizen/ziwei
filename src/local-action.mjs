@@ -607,7 +607,7 @@ export function createLocalActionExecutor({runtimeDir, admissionHandledByDispatc
             persona: payload.employeePersona || '', instructions: payload.employeeInstructions || '', description: payload.employeeDescription || '' },
           creatorInstanceDirectory: path.join(runtimeDir, 'creator-instances'),
         } : {}),
-        managementMcp: { request: workspace ? { ...(payload.managementMcp || {}), enabled: true } : payload.managementMcp, config: preparedManagement, workspace, apiBase, auditDirectory: path.join(runtimeDir, 'management-mcp-audit'), actionId: action.id },
+        managementMcp: { request: workspace ? { ...(payload.managementMcp || {}), enabled: true } : payload.managementMcp, config: preparedManagement, workspace, apiBase, auditDirectory: path.join(runtimeDir, 'management-mcp-audit'), actionId: action.id, employeeId: payload.employeeId },
         terminalMcp: { request: payload.terminalMcp, config: phoneSession.config, workspace, auditDirectory: path.join(runtimeDir, 'terminal-mcp-audit'), actionId: action.id },
         signal: context.signal,
         ...(process.platform==='win32'&&String(runtime).toLowerCase()==='hermes'&&typeof context.onMaintenancePauseControl==='function'?{

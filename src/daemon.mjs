@@ -40,6 +40,8 @@ function safeProcessExit(value,depth=0) {
   return result;
 }
 
+const unconfirmedGatewayTurn = result => Array.isArray(result?.gatewayTurns) && result.gatewayTurns.some(turn => turn.source === 'native_gateway' && turn.status === 'unknown');
+
 // A checkpoint commit is only a transport/ledger step after the native tool
 // batch has already exited. A dead API must not keep the local daemon paused
 // forever; after this bound we archive the exact checkpoint as unknown and
@@ -434,13 +436,22 @@ export class ActionDispatcher {
         }
       };
       let executionSettled = false; let stoppedEvidence = null; let latestEvidence = null; let resolveConfirmed;
-      let executionError=null,executionFailure=null,completeEvidence=null,resolveComplete,supervisionRejected=false;
+      let executionError=null,executionFailure=null,executionResult=null,completeEvidence=null,resolveComplete,supervisionRejected=false;
       const completeConfirmed=new Promise(resolve=>{resolveComplete=resolve;});
       const stopRequested = new Promise(resolve => { resolveStop = resolve; });
       const confirmed = new Promise(resolve => { resolveConfirmed = resolve; });
       const rootFinished = value => value?.rootConfirmed === true || (value?.launched === false && value.treeConfirmed === true);
       const reliableStop = value => rootFinished(value) && (value.treeConfirmed === true || (process.platform !== 'win32' && value.platform && value.platform !== 'win32'));
       const finalizeStopped = () => {
+        // The resident Gateway turn is outside this CLI tree, including when its exit evidence arrives late.
+        if (unconfirmedGatewayTurn(executionResult?.result)) {
+          const item = this.#started.get(key);
+          if (item?.quarantine) {
+            item.quarantine = { ...item.quarantine, gatewayTurns: executionResult.result.gatewayTurns, processExit: safeProcessExit(stoppedEvidence || latestEvidence) };
+            try { this.#saveState(); } catch {}
+          }
+          return;
+        }
         if (!executionSettled || (supervision ? !stoppedEvidence : !stopReason) || executionError&&(supervisionRejected||!completeEvidence)) return;
         if(executionFailure){
           this.#confirmQuarantineStopped(key,{...executionFailure,result:{...executionFailure.result,processExit:safeProcessExit(stoppedEvidence),partialEffectsPossible:true}});
@@ -529,6 +540,7 @@ export class ActionDispatcher {
         }); },
       })).then(value => ({kind: 'execution', value}), error => ({kind: 'execution', error})).then(outcome => {
         executionSettled = true;
+        executionResult = outcome.value;
         if (!supervision) resolveConfirmed(true);
         finalizeStopped();
         return outcome;
@@ -542,7 +554,13 @@ export class ActionDispatcher {
           const cancelled=stopReason==='cancelled';
           return this.#failure(action,cancelled?'A2A action cancelled before runtime launch':'A2A action timed out before runtime launch',{code:cancelled?'cancelled':'action_timeout',result:{...prelaunch,processExit:safeProcessExit(prelaunch.processExit)}});
         }
-        const receipt = {result: {processExit: safeProcessExit(stoppedEvidence || latestEvidence), partialEffectsPossible: true}};
+        const gatewayUnknown = unconfirmedGatewayTurn(executionResult?.result);
+        const receipt = {result: {...(gatewayUnknown ? executionResult.result : {}), processExit: safeProcessExit(stoppedEvidence || latestEvidence), partialEffectsPossible: true}};
+        if (gatewayUnknown) {
+          const reason = executionResult.reason || 'GATEWAY_TURN_UNCONFIRMED';
+          this.#quarantine(key, reason); finalizeStopped();
+          return this.#uncertain(action, reason, executionResult.error || 'Hermes Gateway 原执行的终态未确认', receipt);
+        }
         if (!stopped || (supervision ? !stoppedEvidence : !executionSettled)) {
           this.#quarantine(key, 'STOP_UNCONFIRMED');
           return this.#uncertain(action, 'STOP_UNCONFIRMED', '已请求停止，但无法确认运行进程及任务树已退出；工具可能已经写入，请核实后再决定是否重新提交', receipt);
@@ -577,6 +595,7 @@ export class ActionDispatcher {
         await bounded(completeConfirmed);
         if(!completeEvidence){
           this.#quarantine(key,'FAILED_EXECUTOR_STOP_UNCONFIRMED');
+          if(unconfirmedGatewayTurn(result.result))finalizeStopped();
           return this.#uncertain(action,'FAILED_EXECUTOR_STOP_UNCONFIRMED',result.error||'失败执行已立即请求终止，但进程树退出尚未确认',{result:{...result.result,processExit:safeProcessExit(latestEvidence),partialEffectsPossible:true}});
         }
       }
@@ -584,7 +603,8 @@ export class ActionDispatcher {
         await bounded(observeEvidence(supervision.completionEvidence));
         if (!rootFinished(latestEvidence)) {
           this.#quarantine(key, 'ROOT_EXIT_UNCONFIRMED');
-          return this.#uncertain(action, 'ROOT_EXIT_UNCONFIRMED', '运行时返回但未能确认原进程退出', {result: {processExit: safeProcessExit(latestEvidence), partialEffectsPossible: true}});
+          if(unconfirmedGatewayTurn(result.result))finalizeStopped();
+          return this.#uncertain(action, 'ROOT_EXIT_UNCONFIRMED', '运行时返回但未能确认原进程退出', {result: {...(unconfirmedGatewayTurn(result.result) ? result.result : {}), processExit: safeProcessExit(latestEvidence), partialEffectsPossible: true}});
         }
       }
       const pause=consumeMaintenancePaused(result);
@@ -597,7 +617,7 @@ export class ActionDispatcher {
         if (result.code === 'EXECUTION_UNCERTAIN' || result.executionState === 'uncertain') {
           this.#quarantine(key, result.reason || 'EXECUTOR_UNCERTAIN');
           finalizeStopped();
-          return this.#uncertain(action, result.reason || 'EXECUTOR_UNCERTAIN', result.error || '运行时执行状态未确认', {result: {processExit: safeProcessExit(stoppedEvidence || latestEvidence), partialEffectsPossible: true}});
+          return this.#uncertain(action, result.reason || 'EXECUTOR_UNCERTAIN', result.error || '运行时执行状态未确认', {result: {...(unconfirmedGatewayTurn(result.result) ? result.result : {}), processExit: safeProcessExit(stoppedEvidence || latestEvidence), partialEffectsPossible: true}});
         }
         if (executorStatus === 'failed') return this.#failure(action, result.error || 'Local executor failed', {result: supervision ? {...result.result, processExit: safeProcessExit(latestEvidence)} : result.result, code: result.code || 'executor_failed'});
         return this.#failure(action, `Local executor returned non-terminal status: ${executorStatus}`, {result, code: 'execution_not_completed'});

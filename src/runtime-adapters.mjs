@@ -48,6 +48,10 @@ const TERMINAL_ADAPTER = fileURLToPath(new URL('../scripts/ziwei-terminal-mcp.mj
 const TERMINAL_ENV_KEYS = ['ZIWEI_TERMINAL_API_BASE', 'ZIWEI_TERMINAL_WORKSPACE', 'ZIWEI_TERMINAL_TOKEN_FILE', 'ZIWEI_TERMINAL_AUDIT_FILE', 'ZIWEI_TERMINAL_EMPLOYEE_ID', 'ZIWEI_TERMINAL_DEVICE_ID'];
 const LEGACY_TERMINAL_ENV_KEYS = ['ZIWEI_CONTROL_API', 'ZIWEI_CONTROL_AUTH', 'ZIWEI_CONTROL_CREDENTIALS_FILE', 'ZIWEI_CONTROL_SESSION_FILE', 'CONTROL_MCP_API_URL', 'CONTROL_MCP_AUTH'];
 
+const GATEWAY_TURN_MARKER = 'ZIWEI_HERMES_GATEWAY_TURN:';
+const GATEWAY_ENV_KEYS = ['ZIWEI_GATEWAY_ACTION_ID', 'ZIWEI_GATEWAY_EMPLOYEE_ID'];
+const gatewayIdentifier = value => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/.test(value);
+
 function trustedApiUrl(value) {
   let url;
   try { url = new URL(value); } catch { throw new Error('手机 MCP API 地址未配置或无效'); }
@@ -1025,6 +1029,40 @@ export function parseRuntimeStreamLine(line, state, onOutput = () => {}, onStage
   }
 }
 
+// Only the owned stderr reader supplies these native receipts; a CLI tree exit cannot settle an admitted Gateway turn.
+function createHermesGatewayTurnEvidence(binding) {
+  const turns = new Map();
+  const home = value => process.platform === 'win32' ? path.resolve(value).toLowerCase() : path.resolve(value);
+  return {
+    consume(line) {
+      let value;
+      try { value = JSON.parse(line.slice(GATEWAY_TURN_MARKER.length)); } catch { return; }
+      if (value?.schemaVersion !== 1 || value.source !== 'native_gateway' || value.actionId !== binding.actionId || value.employeeId !== binding.employeeId
+          || typeof value.profileHome !== 'string' || !path.isAbsolute(value.profileHome) || home(value.profileHome) !== home(binding.profileHome)
+          || !gatewayIdentifier(value.sessionId) || !gatewayIdentifier(value.inputId) || value.admissionId !== null && !gatewayIdentifier(value.admissionId)
+          || !Number.isSafeInteger(value.authorityEpoch) || value.authorityEpoch < 0
+          || value.executionGeneration !== null && (!Number.isSafeInteger(value.executionGeneration) || value.executionGeneration < 0)
+          || typeof value.cancelRequested !== 'boolean' || typeof value.verified !== 'boolean') return;
+      const terminal = value.status === 'terminal' && value.verified && gatewayIdentifier(value.admissionId) && ['completed', 'failed', 'interrupted', 'cancelled', 'rejected', 'steered'].includes(value.outcome);
+      if (!(value.phase === 'admission' && ['queued', 'started', 'terminal', 'unknown'].includes(value.status)
+          || value.phase === 'cleanup' && (terminal || value.status === 'unknown' && value.verified === false && value.outcome === null))) return;
+      const key = JSON.stringify([value.sessionId, value.inputId]), prior = turns.get(key);
+      if (prior && (prior.admissionId !== null && value.admissionId !== prior.admissionId || prior.authorityEpoch !== value.authorityEpoch
+          || prior.executionGeneration !== null && value.executionGeneration !== prior.executionGeneration)) return;
+      const fields = ['schemaVersion', 'source', 'actionId', 'employeeId', 'profileHome', 'sessionId', 'inputId', 'admissionId', 'authorityEpoch', 'executionGeneration', 'phase', 'status', 'outcome', 'cancelRequested', 'verified'];
+      turns.set(key, Object.fromEntries(fields.map(field => [field, value[field]])));
+    },
+    complete(execution) {
+      if (!turns.size) return execution;
+      const receipts = [...turns.values()].map(value => value.phase === 'cleanup' ? value : { ...value, phase: 'cleanup', status: 'unknown', outcome: null, verified: false });
+      const result = { ...execution.result, gatewayTurns: receipts };
+      if (receipts.some(value => value.status === 'unknown')) return { ...execution, status: 'failed', code: 'EXECUTION_UNCERTAIN', executionState: 'uncertain', error: '无法确认 Hermes Gateway 原执行的终态；CLI 已退出不代表后台任务已停止，请核实原会话，不要重发原任务。' + (execution.error ? `\n${execution.error}` : ''), result: { ...result, executionState: 'uncertain' } };
+      if (execution.status === 'succeeded' && receipts.some(value => value.outcome !== 'completed')) return { ...execution, status: 'failed', code: 'runtime_failed', error: 'Hermes Gateway 原执行已结束，但未完成本轮任务', result };
+      return { ...execution, result };
+    }
+  };
+}
+
 /** Build the noninteractive Bot chat command; budgets live in its native YAML. */
 export function hermesBotChatInvocation(context,prepared,{content,imageInputs=[]}={}) {
   // Both classic Hermes and its gateway read agent.run_budget_seconds from
@@ -1072,7 +1110,7 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
   }
   delete childEnv.ZIWEI_CONFIG;
   // An employee with MCP disabled must not inherit daemon management credentials.
-  for (const key of [...MANAGEMENT_ENV_KEYS, ...TERMINAL_ENV_KEYS, ...LEGACY_TERMINAL_ENV_KEYS, ...CREATOR_RUNTIME_ENV_KEYS, ...BOT_RUNTIME_ENV_KEYS]) delete childEnv[key];
+  for (const key of [...MANAGEMENT_ENV_KEYS, ...TERMINAL_ENV_KEYS, ...LEGACY_TERMINAL_ENV_KEYS, ...CREATOR_RUNTIME_ENV_KEYS, ...BOT_RUNTIME_ENV_KEYS, ...GATEWAY_ENV_KEYS]) delete childEnv[key];
   delete childEnv.ZIWEI_DEVICE_TOKEN;
   delete childEnv.ZIWEI_DAEMON_DEVICE_TOKEN;
   delete childEnv.ZIWEI_EXECUTION_PROFILE_BOUND;
@@ -1185,6 +1223,10 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
     try{interactionBridge=await createBotInteractionBridge({apiBase:managementMcp.apiBase,workspace:hermesBot.workspace,deviceId:hermesBot.deviceId,deviceToken:botAuthority.deviceToken,context:hermesBot,actionId:botAuthority.actionId,signal,onWait:value=>onStage?.({type:'interaction',...value})});Object.assign(childEnv,interactionBridge.env);}
     catch{onStage?.({type:'interaction',state:'unsupported',code:'BOT_INTERACTION_RELAY_UNAVAILABLE'});}
   }
+  if (resolvedRuntime === 'Hermes') {
+    const actionId = botAuthority?.actionId || managementMcp?.actionId, employeeId = hermesBot?.employeeId || managementMcp?.employeeId;
+    if (gatewayIdentifier(actionId) && gatewayIdentifier(employeeId)) Object.assign(childEnv, { ZIWEI_GATEWAY_ACTION_ID: actionId, ZIWEI_GATEWAY_EMPLOYEE_ID: employeeId });
+  }
   childEnv = runtimeTerminalEnvironment({ runtime: resolvedRuntime, invocation, env: childEnv });
   let spec;
   try { spec = resolvedRuntime === 'Hermes' && childEnv.HERMES_MANAGED_DIR && (receipt || hermesBot || profileBinding || controlledImages.length>1 || maintenancePrepared) ? hermesMcpSpawnSpec(discovered.binary, invocation.args, { env: childEnv, boundProfile:profileBinding, inputImages:controlledImages.length>1?controlledImages:[],maintenanceControl:maintenancePrepared?.controlFile }) : runtimeSpawnSpec(discovered.binary, invocation.args); }
@@ -1200,17 +1242,20 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
     }
   }
   const redactBoundSecret=value=>redactBoundBotSecret(value,childEnv.ZIWEI_BOT_PROVIDER_KEY);
+  const gatewayTurnEvidence = resolvedRuntime === 'Hermes' && childEnv.ZIWEI_GATEWAY_ACTION_ID ? createHermesGatewayTurnEvidence({ actionId: childEnv.ZIWEI_GATEWAY_ACTION_ID, employeeId: childEnv.ZIWEI_GATEWAY_EMPLOYEE_ID, profileHome: childEnv.ZIWEI_CREATOR_HOME || selectedProfileHome || hermesProfileHome(profile || 'default', { baseHome: profileBaseHome }) }) : null;
   const state = { output: '', response: '', bytes: 0, truncated: false, lineBuffer: '' };
   const emitOutput = chunk => { if (!signal?.aborted) onOutput?.(chunk); };
   const emitStage = stage => { if (!signal?.aborted) onStage?.(stage); };
   let diagnosticBuffer = '';
   const consumeDiagnostics = chunk => {
-    if (!creatorPrepared) { consume(chunk); return; }
+    if (!creatorPrepared && !gatewayTurnEvidence) { consume(chunk); return; }
     diagnosticBuffer += String(chunk || '');
     if (diagnosticBuffer.length > MAX_OUTPUT_BYTES) { consume(diagnosticBuffer.slice(0, MAX_OUTPUT_BYTES)); diagnosticBuffer = diagnosticBuffer.slice(MAX_OUTPUT_BYTES); }
     const lines = diagnosticBuffer.split(/\r?\n/); diagnosticBuffer = lines.pop() || '';
     for (const line of lines) {
-      if (creatorPrepared && line.startsWith('ZIWEI_CREATOR_ISOLATION:')) {
+      if (gatewayTurnEvidence && line.startsWith(GATEWAY_TURN_MARKER)) {
+        gatewayTurnEvidence.consume(line);
+      } else if (creatorPrepared && line.startsWith('ZIWEI_CREATOR_ISOLATION:')) {
         try {
           const value = JSON.parse(line.slice('ZIWEI_CREATOR_ISOLATION:'.length));
           if (Object.keys(value).length === Object.keys(creatorPrepared).length && Object.entries(creatorPrepared).every(([key, item]) => typeof item==='object'?JSON.stringify(value[key])===JSON.stringify(item):value[key] === item)) creatorIsolation = creatorPrepared;
@@ -1247,6 +1292,7 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
     const finish = async (result, error = null) => {
       if (settled) return;
       settled = true;
+      if (result) result = gatewayTurnEvidence?.complete(result) || result;
       const exit=result?.result?.processExit || error?.processExit;
       if((error||result?.status==='failed')&&exit?.activeProcesses>0){
         const stopped=await supervision.stop();
