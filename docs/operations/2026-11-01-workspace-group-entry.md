@@ -11,3 +11,11 @@
 入口源码：`frontend/src/App.vue`、`frontend/src/components/BotWorkbench.vue`、`frontend/src/components/MixedGroupPanel.vue`。真实 Vue renderer/路由测试入口：`employee-workspace.test.mjs`、`employee-conversation-view.test.mjs`、`mixed-group-panel.test.mjs`（均在 `frontend/src/`）。仅发布前端静态资源，API/CLI/手机协议及正式业务数据保持。
 
 本轮相关回归 123/123 通过，lint 检查 422 个源文件通过，生产构建通过；未使用 computer use 或触发真实群任务作验收。
+
+## 发布与业务回读补充
+
+网页 `6bf363148977b75c146dd61d382ddce43caec563` 已静态发布，公网入口 `assets/index-DwpGp2np.js`，17 个资源 SHA 与候选一致，群直达 HTML、healthz 和身份配置均 200；API、CLI、Gateway、DSH 未因网页发布重启。回执：`D:\Ziwei-Local\artifacts\frontend-6bf3631-20261101\deployment-receipt.json`。
+
+2026-11-01 16:37（Asia/Shanghai），原创建会话完成同一群的新一轮内部联调。本会话独立读取 `D:\CEO日报\data\employee-cards\averinyo-deployment\team-smoke-succeeded.json`：群 id/workspace 保持，6 名成员（3 Hermes、3 DSH）的本轮 action 全部 succeeded，群 state=succeeded。此前失败保留，未通过重建群或改写原失败来验收。此结果证明本轮六人文字群联调通过；增长岗图片生成另在验收，不计入已通过能力。
+
+Hermes 入职阻断由独立 CLI 修复分支 `codex/averinyo-gateway-fix` 处理，源码记录为 `0d2eced`，已安装 build `688d6582022472835acc76d62fb5402bbfe057d56981afc946e1ba078774b9ba`；完整回执 `D:\AINavtie\ops\ziwei\averinyo-gateway-20261101\FINAL-ACCEPTANCE.json`。该运行时增量不属于本轮前端候选，后续升级须按该分支与回执核对，不用前端源码整树覆盖实际客户端。
