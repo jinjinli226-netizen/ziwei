@@ -145,10 +145,11 @@ test('unknown, wrong-scope, corrupt or non-definitive archived results are refus
   assert.equal(uncertain.calls.length,0);
 });
 
-for(const [name,result] of [
+for(const [name,result,loseResponse=false] of [
   ['original image',outcome],
   ['successful text',{status:'succeeded',result:{code:0,output:'Original text',processExit:exit}}],
-  ['original failure',{status:'failed',error:'Original failure',result:{code:1,processExit:{...exit,rootExitCode:1}}}]
+  ['original failure',{status:'failed',error:'Original failure',result:{code:1,processExit:{...exit,rootExitCode:1}}}],
+  ['original failure after a committed result response is lost',{status:'failed',error:'Original failure',result:{code:1,processExit:{...exit,rootExitCode:1}}},true]
 ])test(`the original repository receipts restore ${name} after one archived rejection`,async t=>{
   const repo=createRepository({memory:true});t.after(()=>repo.db.close());
   const device=repo.claimDevicePairing({code:repo.createDevicePairing('test-111',{name:'Receipt retry fixture',os:'Windows'}).code});
@@ -157,23 +158,40 @@ for(const [name,result] of [
   const original=repo.addConversationMessage(conversation.id,{content:'Synthetic original generation'}).execution;
   const assigned=repo.getA2AAction(original.id),directory=fs.mkdtempSync(path.join(os.tmpdir(),'ziwei-original-retry-'));
   t.after(()=>fs.rmSync(directory,{recursive:true,force:true}));
-  let refused=true,executions=0;
+  let refused=true,executions=0,lost=false;const uploads=[];
   const delivery=createActionDelivery({directory,identity:{apiBase:'https://fixture.invalid',workspace:'test-111',deviceId:device.deviceId},retryDelays:[],autoArchiveUnconfirmed:true,
     dispatch:async()=>{executions++;return result;},post:async(url,body)=>{
       if(url.endsWith('/ack'))return repo.ackA2AAction(assigned.id,{...body,deviceId:device.deviceId});
       if(url.endsWith('/events'))return repo.recordA2AEvent(assigned.id,{...body,deviceId:device.deviceId});
       if(refused)throw Object.assign(Error('fixture body rejected'),{status:413});
       const receipt=repo.resultA2AAction(assigned.id,{...body,deviceId:device.deviceId});
-      assert.equal(receipt.status,result.status,receipt.error);return receipt;
+      assert.equal(receipt.status,result.status,receipt.error);uploads.push(JSON.stringify(body));
+      if(loseResponse&&!lost){lost=true;throw Object.assign(Error('Committed response lost'),{code:'ECONNRESET'});}
+      return receipt;
     }});
   await delivery.execute(assigned);
   assert.equal(repo.getA2AAction(assigned.id).status,'acked');
   assert.equal(repo.getConversation(conversation.id).messages.filter(x=>x.role==='assistant').length,0);
-  refused=false;await delivery.retryArchivedResult(assigned.id);
+  const name=sha(JSON.stringify(assigned.id)),journalPath=path.join(directory,name+'.json'),resultPath=path.join(directory,name+'.result.json');
+  const archived=JSON.parse(fs.readFileSync(journalPath,'utf8')),originalBytes=fs.readFileSync(resultPath);
+  refused=false;
+  if(loseResponse){
+    await assert.rejects(delivery.retryArchivedResult(assigned.id),{code:'ECONNRESET'});
+    assert.equal(repo.getA2AAction(assigned.id).status,'failed');
+    assert.equal(repo.getConversation(conversation.id).messages.filter(x=>x.role==='assistant').length,1);
+    assert.deepEqual(JSON.parse(fs.readFileSync(journalPath,'utf8')),archived);
+    assert.deepEqual(fs.readFileSync(resultPath),originalBytes);
+  }
+  await delivery.retryArchivedResult(assigned.id);
   assert.equal(repo.getA2AAction(assigned.id).status,result.status);assert.equal(executions,1);
   const reply=repo.getConversation(conversation.id).messages.at(-1);
   assert.equal(reply.attachments.length,result.result.outputArtifacts?.length||0);
   if(reply.attachments.length)assert.equal(sha(Buffer.from(reply.attachments[0].content,'base64')),sha(image));
+  assert.equal(uploads.length,loseResponse?2:1);
+  for(const uploaded of uploads)assert.equal(uploaded,originalBytes.toString('utf8'));
+  const confirmed=JSON.parse(fs.readFileSync(journalPath,'utf8'));
+  assert.equal(confirmed.state,'confirmed');assert.deepEqual(confirmed.archive,archived.archive);
+  assert.deepEqual(fs.readFileSync(resultPath),originalBytes);
   await delivery.retryArchivedResult(assigned.id);
   assert.equal(repo.getConversation(conversation.id).messages.filter(x=>x.role==='assistant').length,1);
 });

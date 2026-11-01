@@ -303,7 +303,7 @@ export function createActionDelivery({directory,identity,post,dispatch,recoverRe
    report('a2a_delivery_retry_started',{actionId:id});
    try{
     const acknowledgement=await post(`/a2a/v1/actions/${encodeURIComponent(id)}/ack`,{agentId:'ziwei_user',receiptOnly:true,renewLease:true},{timeoutMs:ACTION_TRANSPORT_BUDGETS.ack});
-    if(acknowledgement?.id!==id||acknowledgement.deviceId!==connection.deviceId||!['acked','succeeded'].includes(acknowledgement.status)||acknowledgement.status==='succeeded'&&body.status!=='succeeded'||acknowledgement.reconciliationRequired===true)throw retryFailure('DELIVERY_RETRY_ACK_INVALID');
+    if(acknowledgement?.id!==id||acknowledgement.deviceId!==connection.deviceId||!['acked',body.status].includes(acknowledgement.status)||acknowledgement.reconciliationRequired===true)throw retryFailure('DELIVERY_RETRY_ACK_INVALID');
     // Always submit the original bytes, even after a terminal ACK. Only the
     // result endpoint's artifact hashes prove the full image was persisted.
     stage='result';
