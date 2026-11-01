@@ -322,11 +322,11 @@ export function isRetainedBackgroundCompletion(input){return retainedBackgroundC
  * Business uncertainty stays in the original result; no child exit is inferred. */
 export function isRetainedFailedBackgroundCompletion(input){return retainedBackgroundCompletion(input,true);}
 
-function retainableFailedBackgroundDelivery(record,action,result,state,identity){
-  if(!state||record.dispatcherStatus!=='failed'||!['result_pending','blocked','confirmed'].includes(record.state)||record.state==='confirmed'&&(record.serverStatus!=='failed'||!Number.isFinite(Date.parse(record.confirmedAt)))||record.state==='blocked'&&(!Number.isInteger(record.blockedStatus)||record.blockedStatus<400||record.blockedStatus>499||[408,429].includes(record.blockedStatus))||record.serverStatus!==undefined&&record.serverStatus!==null&&record.serverStatus!=='failed'||!Array.isArray(record.events)||record.events.length||result?.receiptOnly!==true||result.status!=='failed')return false;
-  const matches=state.completed.filter(row=>row?.result?.actionId===record.action.id),starts=state.started.filter(row=>row?.actionId===record.action.id);
-  if(matches.length!==1||starts.length!==1)return false;
-  const completed=matches[0],started=starts[0];
+function retainableFailedBackgroundDelivery(record,action,result,index,identity){
+  if(!index||record.dispatcherStatus!=='failed'||!['result_pending','blocked','confirmed'].includes(record.state)||record.state==='confirmed'&&(record.serverStatus!=='failed'||!Number.isFinite(Date.parse(record.confirmedAt)))||record.state==='blocked'&&(!Number.isInteger(record.blockedStatus)||record.blockedStatus<400||record.blockedStatus>499||[408,429].includes(record.blockedStatus))||record.serverStatus!==undefined&&record.serverStatus!==null&&record.serverStatus!=='failed'||!Array.isArray(record.events)||record.events.length||result?.receiptOnly!==true||result.status!=='failed')return false;
+  const matches=index.completedByActionId.get(record.action.id),starts=index.startedByActionId.get(record.action.id);
+  if(matches?.count!==1||starts?.count!==1)return false;
+  const completed=matches.first,started=starts.first;
   // A known terminal phone failure is not marked uncertain by the producer.
   // Retain its exact pending bytes without inventing a retainEvidence flag.
   if(record.retainEvidence!==true&&!(record.retainEvidence===false&&retainedTerminalReceiptFailure(completed)))return false;
@@ -365,33 +365,53 @@ function localHistoryIdentity(value,scope){
 
 // A retained terminal cache is neither an execution-start nor an exit proof.
 // This exception releases only local maintenance, never formal preservation.
-function retainableOrphanLocalHistory(completed,started,scope){
+function retainableOrphanLocalHistory(completed,index,scope){
   const result=completed?.result;
-  return exactKeys(completed,['key','identity','result'])&&typeof completed.key==='string'&&completed.key&&localHistoryIdentity(completed.identity,scope)&&result&&['succeeded','failed'].includes(result.status)&&typeof result.actionId==='string'&&result.actionId&&Number.isFinite(result.completedAt)&&result.completedAt>=0&&!backgroundControlUnknown(result)&&!syntheticEvidence(result)&&!started.some(row=>row.key===completed.key||row.actionId===result.actionId);
+  return exactKeys(completed,['key','identity','result'])&&typeof completed.key==='string'&&completed.key&&localHistoryIdentity(completed.identity,scope)&&result&&['succeeded','failed'].includes(result.status)&&typeof result.actionId==='string'&&result.actionId&&Number.isFinite(result.completedAt)&&result.completedAt>=0&&!backgroundControlUnknown(result)&&!syntheticEvidence(result)&&!index.startedByKey.has(completed.key)&&!index.startedByActionId.has(result.actionId);
 }
 
 // Old ordinary chat failures sometimes persisted only a terminal envelope.
 // Retain that history without inferring whether any original runtime launched
 // or exited. This never applies to a live/quarantined/control/native worker.
-function retainableConversationFailureHistory(started,completed,state,scope){
+function retainableConversationFailureHistory(started,completed,index,scope){
   if(!exactKeys(started,['key','actionId','identity','startedAt','nativeRuntime','resourceBinding'])||!exactKeys(completed,['key','identity','result'])||started.nativeRuntime!==true||typeof started.key!=='string'||!started.key||typeof started.actionId!=='string'||!started.actionId||started.key!==completed.key||started.actionId!==completed.result?.actionId||!localHistoryIdentity(started.identity,scope)||!equal(started.identity,completed.identity))return false;
   const binding=started.resourceBinding,result=completed.result;
   if(!exactKeys(binding,['type','employeeId','revision','controlEpoch','resource','operation','platform'])||binding.type!=='conversation.execute'||typeof binding.employeeId!=='string'||!binding.employeeId||!Number.isSafeInteger(binding.revision)||binding.revision<=0||!Number.isSafeInteger(binding.controlEpoch)||binding.controlEpoch<=0||binding.resource!==null||binding.operation!==null||binding.platform!==null)return false;
   if(!exactKeys(result,['status','actionId','error','completedAt'])||result.status!=='failed'||typeof result.error!=='string'||!result.error||!Number.isFinite(started.startedAt)||started.startedAt<0||!Number.isFinite(result.completedAt)||result.completedAt<started.startedAt)return false;
-  return state.started.filter(row=>row.key===started.key).length===1&&state.started.filter(row=>row.actionId===started.actionId).length===1&&state.completed.filter(row=>row.key===completed.key).length===1&&state.completed.filter(row=>row.result?.actionId===result.actionId).length===1;
+  return index.startedByKey.get(started.key)?.count===1&&index.startedByActionId.get(started.actionId)?.count===1&&index.completedByKey.get(completed.key)?.count===1&&index.completedByActionId.get(result.actionId)?.count===1;
 }
 
-function confirmedLocalDshSession(started,completed,record,identity){
-  const action=record?.action,p=action?.payload||{},binding=started.resourceBinding;
-  const expected=Object.fromEntries(Object.entries({workspace:identity.workspace,deviceId:identity.deviceId,workspaceId:action?.workspace_id??action?.workspaceId,actionWorkspace:action?.workspace??action?.workspace_slug,targetDeviceId:p.deviceId??p.device_id??p.targetDeviceId??p.target_device_id}).filter(([,value])=>value!==undefined&&value!==null&&String(value)!=='').map(([key,value])=>[key,String(value)]));
-  return record?.version===2&&record.state==='confirmed'&&record.serverStatus===completed.result.status
-    &&(!record.retainEvidence||validConfirmedArchivedDelivery(record,completed.result,identity))&&Array.isArray(record.events)&&record.events.length===0&&Number.isFinite(Date.parse(record.confirmedAt))
-    &&equal(record.identity,identity)&&record.binding===deliveryBinding(action,identity)
-    &&equal(started.identity,expected)&&['deviceId','device_id','targetDeviceId','target_device_id'].every(key=>p[key]===undefined||p[key]===identity.deviceId)
-    &&started.nativeRuntime===true&&started.actionId===action.id&&started.key===String(action.dedupe_key??action.dedupeKey??action.id)
-    &&binding?.type===action.type&&binding.employeeId===p.employeeId&&binding.revision===null&&binding.controlEpoch===null&&binding.resource===null&&binding.operation===null&&binding.platform===null
-    &&Number.isFinite(completed.result.completedAt)&&completed.result.completedAt>=started.startedAt&&sameDshSessionBinding(started.dshBinding,record.dshSessionBinding)
-    &&Boolean(confirmedDshSessionExit(action,completed.result,started.dshBinding));
+// Delivery journals may be pruned after confirmation or retained as unknown.
+// The dispatcher's bound native turn remains the local exit authority in both
+// cases; neither a process exit nor server acceptance is inferred from it.
+function confirmedLocalDshSession(started,completed,record,identity,index){
+  const binding=started.resourceBinding,native=started.dshBinding;
+  if(started.nativeRuntime!==true||!localHistoryIdentity(started.identity,identity)||!equal(started.identity,completed.identity)||started.key!==completed.key||started.actionId!==completed.result?.actionId
+    ||index.startedByActionId.get(started.actionId)?.count!==1||index.completedByActionId.get(started.actionId)?.count!==1
+    ||!exactKeys(binding,['type','employeeId','revision','controlEpoch','resource','operation','platform'])||!['conversation.execute','task.execute','runtime.execute','agent.execute','automation.execute'].includes(binding.type)
+    ||typeof binding.employeeId!=='string'||!binding.employeeId||binding.revision!==null||binding.controlEpoch!==null||binding.resource!==null||binding.operation!==null||binding.platform!==null
+    ||!native||typeof native.botName!=='string'||!native.botName.trim()||!Number.isFinite(completed.result.completedAt)||completed.result.completedAt<started.startedAt)return false;
+  const action={id:started.actionId,type:binding.type,payload:{runtime:'DSH',employeeId:binding.employeeId,conversationId:native.conversationId,profile:native.botName}};
+  if(!confirmedDshSessionExit(action,completed.result,native))return false;
+  if(record===undefined)return true;
+  const original=record?.action,p=original?.payload||{};
+  const expected=Object.fromEntries(Object.entries({workspace:identity.workspace,deviceId:identity.deviceId,workspaceId:original?.workspace_id??original?.workspaceId,actionWorkspace:original?.workspace??original?.workspace_slug,targetDeviceId:p.deviceId??p.device_id??p.targetDeviceId??p.target_device_id}).filter(([,value])=>value!==undefined&&value!==null&&String(value)!=='').map(([key,value])=>[key,String(value)]));
+  return record?.version===2&&original?.id===started.actionId&&equal(record.identity,identity)&&record.binding===deliveryBinding(original,identity)&&equal(started.identity,expected)
+    &&original.type===binding.type&&p.employeeId===binding.employeeId&&started.key===String(original.dedupe_key??original.dedupeKey??original.id)
+    &&['deviceId','device_id','targetDeviceId','target_device_id'].every(key=>p[key]===undefined||p[key]===identity.deviceId)
+    &&(record.serverStatus===undefined||record.serverStatus===completed.result.status)&&(!record.dshSessionBinding||sameDshSessionBinding(native,record.dshSessionBinding))
+    &&Boolean(confirmedDshSessionExit(original,completed.result,native));
+}
+
+function indexActionRecords(rows,key){
+  const index=new Map();
+  for(const row of rows){const value=key(row),entry=index.get(value);if(entry)entry.count++;else index.set(value,{first:row,count:1});}
+  return index;
+}
+
+function dispatcherAdmissionRejected(completed,identity,index){
+  const started=[index.startedByKey.get(completed?.key)?.first,index.startedByActionId.get(completed?.result?.actionId)?.first].filter(Boolean);
+  return isDispatcherAdmissionRejected({completed,identity,started});
 }
 
 /** Read-only evidence. Zero in-memory counters cannot replace these files.
@@ -405,12 +425,13 @@ function scanFileEvidence({connections=[],actions=[],homes=[],productionRequest}
     const {runtimeDir,workspace,deviceId}=connection,scope={workspace,deviceId};
     directoryProof(runtimeDir);directoryProof(path.join(runtimeDir,'action-delivery'));directoryProof(path.join(runtimeDir,'shared-workspaces'));
     const relevant=[...originals.values()].filter(action=>!action.payload.deviceId||action.payload.deviceId===deviceId);
-    const stateFile=path.join(runtimeDir,'action-state.json');let state;const backgroundCompletions=new Set(),failedBackgroundCompletions=new Set();
+    const stateFile=path.join(runtimeDir,'action-state.json');let state,index;const backgroundCompletions=new Set(),failedBackgroundCompletions=new Set(),admissionsByActionId=new Map();
     try{
       state=json(read(stateFile));
       const legacyShape=state?.version===1&&Array.isArray(state.completed)&&(localMaintenance&&state.updatedAt===undefined||Number.isFinite(Date.parse(state.updatedAt||'')))&&Object.keys(state).every(key=>['version','updatedAt','completed'].includes(key));
       const modernShape=state?.version===2&&Array.isArray(state.completed)&&Array.isArray(state.started);
       if(!modernShape&&!(legacyShape&&(localMaintenance||productionRequest)))throw Error('invalid version/shape');
+      index={startedByKey:indexActionRecords(state.started||[],row=>row?.key),startedByActionId:indexActionRecords(state.started||[],row=>row?.actionId),completedByKey:indexActionRecords(state.completed,row=>row?.key),completedByActionId:indexActionRecords(state.completed,row=>row?.result?.actionId)};
       const validIdentity=value=>value===undefined||(value&&typeof value==='object'&&!Array.isArray(value)&&Object.values(value).every(item=>typeof item==='string'));
       const startedKeys=new Set();
       for(const started of state.started||[]){
@@ -419,18 +440,19 @@ function scanFileEvidence({connections=[],actions=[],homes=[],productionRequest}
       }
       const completedKeys=new Set();
       for(const completed of state.completed){
-        const admission=localMaintenance&&state.version===2&&isDispatcherAdmissionRejected({completed,identity:scope,started:state.started});
+        const admission=localMaintenance&&state.version===2&&dispatcherAdmissionRejected(completed,scope,index);
+        if(admission&&!admissionsByActionId.has(completed.result.actionId))admissionsByActionId.set(completed.result.actionId,completed);
         if(Object.hasOwn(completed||{},'admissionRejected')&&!admission)throw Error('invalid admission rejection record');
-        const orphan=localMaintenance&&state.version===2&&retainableOrphanLocalHistory(completed,state.started,scope);
+        const orphan=localMaintenance&&state.version===2&&retainableOrphanLocalHistory(completed,index,scope);
         const cliExited=localMaintenance&&exitedTree(executionExit(completed?.result));
-        const background=localMaintenance&&state.version===2&&state.started.filter(row=>row?.actionId===completed?.result?.actionId).length===1&&state.completed.filter(row=>row?.result?.actionId===completed?.result?.actionId).length===1&&isRetainedBackgroundCompletion({started:state.started.find(row=>row?.key===completed?.key),completed,identity:scope});
-        const failedBackground=localMaintenance&&state.version===2&&state.started.filter(row=>row?.actionId===completed?.result?.actionId).length===1&&state.completed.filter(row=>row?.result?.actionId===completed?.result?.actionId).length===1&&isRetainedFailedBackgroundCompletion({started:state.started.find(row=>row?.key===completed?.key),completed,identity:scope});
+        const background=localMaintenance&&state.version===2&&index.startedByActionId.get(completed?.result?.actionId)?.count===1&&index.completedByActionId.get(completed?.result?.actionId)?.count===1&&isRetainedBackgroundCompletion({started:index.startedByKey.get(completed?.key)?.first,completed,identity:scope});
+        const failedBackground=localMaintenance&&state.version===2&&index.startedByActionId.get(completed?.result?.actionId)?.count===1&&index.completedByActionId.get(completed?.result?.actionId)?.count===1&&isRetainedFailedBackgroundCompletion({started:index.startedByKey.get(completed?.key)?.first,completed,identity:scope});
         const inspected=background||failedBackground?backgroundCompletionView(completed):completed;
         const historyUnknown=legacyHistoryUncertain(inspected,localMaintenance||state.version===1||completed?.legacy===true)||localMaintenance&&explicitExitUnknown(inspected);
         if(!completed||typeof completed.key!=='string'||!completed.key||completedKeys.has(completed.key)||!completed.result||!['succeeded','failed'].includes(completed.result.status)||typeof completed.result.actionId!=='string'||!completed.result.actionId||!validIdentity(completed.identity)||localMaintenance&&completed.identity&&!localHistoryIdentity(completed.identity,scope)||historyUnknown&&!orphan&&!cliExited&&!failedBackground)throw Error('invalid completed record');
         if((state.version===1||completed.legacy===true)&&Object.keys(completed).some(key=>!(state.version===1?['key','result']:['key','result','legacy']).includes(key)))throw Error('unknown legacy wrapper');
         completedKeys.add(completed.key);
-        if(state.version===2&&completed.legacy!==true&&!admission&&!orphan&&(!completed.identity||!(state.started||[]).some(started=>started?.key===completed.key&&started.actionId===completed.result.actionId)))throw Error('unpaired completed record');
+        if(state.version===2&&completed.legacy!==true&&!admission&&!orphan&&(!completed.identity||index.startedByKey.get(completed.key)?.first.actionId!==completed.result.actionId))throw Error('unpaired completed record');
         if(orphan||cliExited&&historyUnknown){issue('LOCAL_HISTORY_RETAINED',{actionId:completed.result.actionId,path:stateFile,reason:orphan?'orphan_terminal':'completed_cli_exit'});retainedHistory.add(stateFile+'\0'+completed.result.actionId);}
         if(background)backgroundCompletions.add(completed.key);
         if(failedBackground)failedBackgroundCompletions.add(completed.key);
@@ -461,7 +483,7 @@ function scanFileEvidence({connections=[],actions=[],homes=[],productionRequest}
       const keys=new Set();
       for(const started of state.started||[]){
         if(!started?.key||keys.has(started.key)||!started.identity||!Number.isFinite(started.startedAt)){issue('ACTION_STATE_CORRUPT',{path:stateFile});continue;}keys.add(started.key);
-        const completed=state.completed.find(row=>row.key===started.key);
+        const completed=index.completedByKey.get(started.key)?.first;
         if(!completed){
           if(localMaintenance&&started.maintenancePause)try{
             const directory=path.join(runtimeDir,'action-delivery'),stem=hash(JSON.stringify(String(started.actionId))),record=json(read(path.join(directory,stem+'.json'))),bytes=read(path.join(directory,stem+'.action.json')),blob=json(bytes),pauseBytes=read(path.join(directory,stem+'.pause.json')),receipt=json(pauseBytes),identity={apiBase:connection.apiBase.replace(/\/$/,''),workspace,deviceId};
@@ -475,19 +497,20 @@ function scanFileEvidence({connections=[],actions=[],homes=[],productionRequest}
         const gateway=completed.result?.result?.nativeOperation,worker=gateway?.data?.residentWorker;
         if(localMaintenance&&worker&&!exitedTree(executionExit(completed.result)))issue('GATEWAY_TREE_UNKNOWN',{actionId:started.actionId,path:stateFile});
         if(gateway?.resource==='gateway'){const binding=started.resourceBinding;if(!binding||binding.type!=='hermes.bot.native'||binding.resource!=='gateway'||binding.operation!==gateway.operation||binding.employeeId!==gateway.employeeId||binding.revision!==gateway.revision||worker&&(binding.platform!==worker.platform||binding.controlEpoch!==worker.controlEpoch)||originals.has(started.actionId)&&!gatewayResultMatches(originals.get(started.actionId),completed.result.result))issue('GATEWAY_CACHE_IDENTITY_MISMATCH',{actionId:started.actionId,path:stateFile});}
-        if(gateway?.resource==='gateway'&&worker){const originalConnection=state.completed.find(row=>row.result?.actionId===worker.sourceActionId),originalWorker=originalConnection?.result?.result?.nativeOperation?.data?.residentWorker;
+        if(gateway?.resource==='gateway'&&worker){const originalConnection=index.completedByActionId.get(worker.sourceActionId)?.first,originalWorker=originalConnection?.result?.result?.nativeOperation?.data?.residentWorker;
           if(worker.workspace!==workspace||!worker.workerNonce||!Number.isInteger(worker.rootPid)||gateway.operation==='connect'&&worker.sourceActionId!==started.actionId||gateway.operation!=='connect'&&!equal(worker,originalWorker))issue('GATEWAY_CACHE_IDENTITY_MISMATCH',{actionId:started.actionId,path:stateFile});
         }
         // An independently authenticated historical admission recovery only releases
         // local maintenance. Formal preservation still requires its own evidence.
         if(localMaintenance&&isHistoricalPrelaunchCompletion({started,completed,identity:scope}))continue;
         if(localMaintenance&&started.quarantine&&started.quarantine.stopConfirmed!==true)issue('ACTION_QUARANTINE_UNCONFIRMED',{actionId:started.actionId,path:stateFile});
-        if(localMaintenance&&retainableConversationFailureHistory(started,completed,state,scope)){issue('LOCAL_HISTORY_RETAINED',{actionId:started.actionId,path:stateFile,reason:'conversation_failure_envelope'});retainedHistory.add(stateFile+'\0'+started.actionId);continue;}
+        if(localMaintenance&&retainableConversationFailureHistory(started,completed,index,scope)){issue('LOCAL_HISTORY_RETAINED',{actionId:started.actionId,path:stateFile,reason:'conversation_failure_envelope'});retainedHistory.add(stateFile+'\0'+started.actionId);continue;}
         if(failedBackgroundCompletions.has(started.key)){issue('FAILED_BACKGROUND_HISTORY_RETAINED',{actionId:started.actionId,path:stateFile});retainedFailedBackground.add(stateFile+'\0'+started.actionId);continue;}
         if(backgroundCompletions.has(started.key)){issue('BACKGROUND_PROCESS_RETAINED',{actionId:started.actionId,path:stateFile});retainedBackground.add(stateFile+'\0'+started.actionId);continue;}
         if(localMaintenance&&started.dshBinding){
           const deliveryFile=path.join(runtimeDir,'action-delivery',hash(JSON.stringify(started.actionId))+'.json');
-          try{if(confirmedLocalDshSession(started,completed,json(read(deliveryFile)),{apiBase:connection.apiBase.replace(/\/$/,''),workspace,deviceId}))continue;}catch{}
+          let record;try{record=json(read(deliveryFile));}catch(error){if(error.code!=='ENOENT')record=null;}
+          if(confirmedLocalDshSession(started,completed,record,{apiBase:connection.apiBase.replace(/\/$/,''),workspace,deviceId},index))continue;
         }
         if(!originals.has(started.actionId)){const exit=executionExit(completed.result);if((started.nativeRuntime||exit)&&!exitedTree(exit)){
           issue('UNMAPPED_NATIVE_EXECUTION',{actionId:started.actionId,path:stateFile});
@@ -514,7 +537,7 @@ function scanFileEvidence({connections=[],actions=[],homes=[],productionRequest}
         const action=originals.get(legacyInterpreter.subjectActionId),proof=legacyInterpreter.neverDispatchedProof({productionRequest,connection,action,state});
         legacyNeverDispatchedProofs.push(proof);legacyActions.add(action.id);
       }catch{issue('LEGACY_NEVER_DISPATCHED_UNPROVEN',{actionId:legacyInterpreter.subjectActionId,path:stateFile});}
-      for(const action of relevant.filter(row=>row.acked_at))if(!(state.started||[]).some(row=>row.actionId===action.id)&&!legacyActions.has(action.id))issue('ACTION_STATE_BINDING_MISSING',{actionId:action.id,path:stateFile});
+      for(const action of relevant.filter(row=>row.acked_at))if(!index.startedByActionId.has(action.id)&&!legacyActions.has(action.id))issue('ACTION_STATE_BINDING_MISSING',{actionId:action.id,path:stateFile});
     }
     const directory=path.join(runtimeDir,'action-delivery');let names=[];
     try{names=fs.readdirSync(directory);}catch(error){if(error.code!=='ENOENT')issue('DELIVERY_DIRECTORY_UNREADABLE',{path:directory});}
@@ -534,7 +557,7 @@ function scanFileEvidence({connections=[],actions=[],homes=[],productionRequest}
         if(record.pauseDigest){
           const pauseName=name.replace(/\.json$/,'.pause.json'),bytes=read(path.join(directory,pauseName)),receipt=json(bytes);consumed.add(pauseName);
           if(hash(bytes)!==record.pauseDigest||!validateMaintenancePause(receipt,{actionId:record.action.id,executionBinding:executionBinding(originalAction||{})}))throw Error('invalid pause digest');
-          if(localMaintenance&&record.state==='maintenance_paused'&&maintenancePauses.has(stateFile+'\0'+record.action.id)&&pausedMaintenancePair(state.started.find(row=>row.actionId===record.action.id),record,originalAction,receipt,identity))continue;
+          if(localMaintenance&&record.state==='maintenance_paused'&&maintenancePauses.has(stateFile+'\0'+record.action.id)&&pausedMaintenancePair(index.startedByActionId.get(record.action.id)?.first,record,originalAction,receipt,identity))continue;
         }
         // Unmapped/removed connections and queues are not guessed to be legacy.
         if(record.state===ARCHIVED_UNCONFIRMED_STATE){
@@ -550,14 +573,14 @@ function scanFileEvidence({connections=[],actions=[],homes=[],productionRequest}
         }else if(record.state!=='confirmed'||record.retainEvidence||record.events.length)issue('DELIVERY_NOT_DRAINED',{actionId:record.action.id,state:record.state,path:file});
         else if(!['succeeded','failed','expired'].includes(record.serverStatus)||!Number.isFinite(Date.parse(record.confirmedAt)))throw new Error('invalid terminal receipt');
         const original=originals.get(record.action.id);if(record.state!==ARCHIVED_UNCONFIRMED_STATE&&original&&original.status!==record.serverStatus)issue('DELIVERY_SERVER_MISMATCH',{actionId:record.action.id,path:file});
-        const admission=localMaintenance&&state?.completed.find(completed=>completed.result?.actionId===record.action.id&&isDispatcherAdmissionRejected({completed,identity:scope,started:state.started}));
+        const admission=localMaintenance&&state&&admissionsByActionId.get(record.action.id);
         if(record.state===ARCHIVED_UNCONFIRMED_STATE){
           const evidencePaths=[path.resolve(file),path.resolve(file.replace(/\.json$/,'.action.json')),...(record.resultDigest?[path.resolve(file.replace(/\.json$/,'.result.json'))]:[])];
           archivedUnconfirmed.push({actionId:record.action.id,code:'DELIVERY_ARCHIVED_UNCONFIRMED',message:'服务器终态未确认；原始 action/result 证据已本地归档，不阻塞维护',reason:record.archive.reason,httpStatus:record.archive.httpStatus,archivedAt:record.archive.archivedAt,evidencePath:path.resolve(file),evidencePaths,blocking:false,resultUnknown:true});
           if(localMaintenance)retainedDeliveries.add(file);
         }
         if(localMaintenance&&retainableLocalDelivery(record,originalAction,deliveryResult,identity,admission))retainedDeliveries.add(file);
-        if(localMaintenance&&retainableFailedBackgroundDelivery(record,originalAction,deliveryResult,state,identity)){retainedDeliveries.add(file);if(record.state==='result_pending')retainedPending.add(file);}
+        if(localMaintenance&&retainableFailedBackgroundDelivery(record,originalAction,deliveryResult,state&&index,identity)){retainedDeliveries.add(file);if(record.state==='result_pending')retainedPending.add(file);}
       }catch{issue('DELIVERY_CORRUPT',{path:file,actionId:record?.action?.id||null});}
     }
     for(const name of names)if(!consumed.has(name))issue('DELIVERY_ORPHAN_OR_TEMP',{path:path.join(directory,name)});

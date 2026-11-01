@@ -94,7 +94,7 @@ test('a confirmed cancelled DSH turn permits local maintenance with its failed s
   assert.equal(f.journal().serverStatus,'failed');assert.equal(f.inspect().stopSafe,true);assert.deepEqual(snapshot(f.root),before);
 });
 
-test('a DSH cached terminal without its confirmed delivery journal remains unproven',async t=>{
+test('a DSH cached terminal permits local stop after its confirmed delivery journal was pruned',async t=>{
   const f=await fixture(t);fs.unlinkSync(f.journalFile);const before=snapshot(f.root);
-  assert.equal(f.inspect().stopSafe,false);assert.deepEqual(snapshot(f.root),before);
+  assert.equal(f.inspect().stopSafe,true);assert.equal(scanNativeFiles({connections:f.connections}).safe,false);assert.deepEqual(snapshot(f.root),before);
 });

@@ -62,7 +62,6 @@ const connections = new Map();
 let remoteClientUpdates;
 const remoteUpdateEnabled = process.platform === 'win32' && path.basename(ROOT) === 'ziwei' && path.basename(path.dirname(ROOT)) === 'node_modules' && Boolean(standaloneHome);
 const maintenanceHostId = remoteUpdateEnabled ? remoteMaintenanceHostId(dataDir) : null;
-const executionAllowed = () => ![...connections.values()].some(connection => connection.dispatcher?.quarantined);
 let connectionErrors = [];
 function installConnections() {
   const resolved = resolveWorkspaceConnections(config, { configPath, root: ROOT });
@@ -111,7 +110,6 @@ function installConnections() {
       authorizeExecute:action=>localExecutor.authorizeExecution(action,{maintenanceAttempt:state.actionDelivery?.maintenanceAttempt(action.id)}),
       onMaintenancePaused:(action,receipt)=>state.maintenanceResume.commit(action,receipt),
       authorizeResume:(action,receipt)=>state.maintenanceResume.authorize(action,receipt),
-      canExecute: executionAllowed,
       onEvent: (event, extra) => {
         log(event, { workspace: config.workspace, ...extra });
         if (extra?.actionId && ['action.started', 'action.output', 'action.progress', 'action.stage', 'action.waiting'].includes(event)) state.actionDelivery?.recordEvent(extra.actionId, event, extra);
@@ -150,7 +148,7 @@ function installConnections() {
       },onEvent:(event,extra)=>log(event,{workspace:config.workspace,...extra})});
     state.actionScheduler = createActionScheduler({
       execute: action => state.actionDelivery.execute(action),
-      canStart: (action, admission) => canStartDaemonAction(action,admission,{actionDelivery:state.actionDelivery,dispatcher:state.dispatcher,maintenanceReady:state.maintenanceReady,blocksNewActions:remoteClientUpdates?.blocksNewActions,executionAllowed}),
+      canStart: (action, admission) => canStartDaemonAction(action,admission,{actionDelivery:state.actionDelivery,dispatcher:state.dispatcher,maintenanceReady:state.maintenanceReady,blocksNewActions:remoteClientUpdates?.blocksNewActions,executionAllowed:action=>!state.dispatcher.isExecutionQuarantined(action)}),
       quarantinedActionIds: () => state.dispatcher.quarantinedActionIds,
       onError: (error, action) => log('a2a_action_failed', { workspace: config.workspace, actionId: action.id, error: error.message }),
     });
@@ -357,18 +355,18 @@ async function pollConnection(connection) {
     log('a2a_poll_failed', { error: error.message });
   } finally { connection.polling = false; connection.pollAbort = null; }
 }
-function heartbeatFresh() {
-  if (!lastHeartbeatAt) return false;
-  const interval = Math.max(1000, Number(config.heartbeatMs) || 15000);
-  const timeout = Math.max(interval * 3, Number(config.heartbeatTimeoutMs) || 45000);
-  return Date.now() >= lastHeartbeatAt && Date.now() - lastHeartbeatAt <= timeout;
+function heartbeatFresh(connection=primaryConnection) {
+  if (!connection?.lastHeartbeatAt) return false;
+  const interval = Math.max(1000, Number(connection.config.heartbeatMs) || 15000);
+  const timeout = Math.max(interval * 3, Number(connection.config.heartbeatTimeoutMs) || 45000);
+  return Date.now() >= connection.lastHeartbeatAt && Date.now() - connection.lastHeartbeatAt <= timeout;
 }
 function lifecycleConfigurationHash() { try { return createHash('sha256').update(fs.readFileSync(configPath)).digest('hex'); } catch { return null; } }
 function healthPayload() {
-  const executionQuarantined = !executionAllowed();
   const maintenancePausedActionCount=[...connections.values()].reduce((total,connection)=>total+connection.dispatcher.maintenancePausedActions.length,0);
   const maintenancePendingCommitCount=[...connections.values()].reduce((total,connection)=>total+connection.dispatcher.maintenancePendingCommits.length,0);
   const quarantinedActionCount = [...connections.values()].reduce((total, connection) => total + connection.dispatcher.quarantinedActionIds.length, 0);
+  const executionQuarantined = connections.size>0&&[...connections.values()].every(connection=>connection.dispatcher.workspaceQuarantined);
   const gateway=[...connections.values()].map(connection=>connection.localExecutor.maintenanceStatus());
   const fileEvidence=inspectLocalDaemonMaintenanceFiles({connections:[...connections.values()].map(connection=>({workspace:connection.config.workspace,deviceId:connection.config.deviceId,apiBase:connection.config.apiBase,runtimeDir:connection.runtimeDir}))});
   const gatewaySafe=gateway.every(row=>row.safe===true);
@@ -377,10 +375,11 @@ function healthPayload() {
   return { service: 'ziwei_user', version: VERSION, clientBuild: CLIENT_BUILD, bridge: 'ziwei_user', agentId: 'ziwei_user', workspace: config.workspace, deviceId: config.deviceId, runtimes: runtimeDiscovery.runtimes, managementMcp: primaryConnection?.managementBootstrap.status(), terminalMcp: primaryConnection?.terminalStatus, lastHeartbeat, lastHeartbeatAgeMs: lastHeartbeatAt ? Math.max(0, Date.now() - lastHeartbeatAt) : null, lastPoll, pid: process.pid,
     lifecycle: { nonce: lifecycleNonce, root: ROOT, configPath, configSha256: lifecycleConfigurationHash(), runtimeDir, startedAt: lifecycleStartedAt, managedAuxiliaryCount: maintenance.gatewayWorkers.filter(row=>row.processAlive!==false).length }, maintenance, remoteClientUpdate: remoteClientUpdates.status(),
     connectionState: draining ? 'draining' : executionQuarantined ? 'quarantined' : 'connected', executionQuarantined, quarantinedActionCount, maintenancePausedActionCount, maintenancePendingCommitCount, activeActionCount: [...connections.values()].reduce((total, connection) => total + connection.actionScheduler.activeCount, 0), pollingCount: [...connections.values()].filter(connection => connection.polling).length,
-    connections: [...connections.values()].map(connection => ({ workspace: connection.config.workspace, deviceId: connection.config.deviceId, primary: connection.config.primary, configured: true, ready: !draining && !executionQuarantined && connection.lastHeartbeatAt > 0 && Date.now() - connection.lastHeartbeatAt <= Math.max(45_000, (Number(config.heartbeatMs) || 15_000) * 3), lastHeartbeat: connection.lastHeartbeat, managementMcp: connection.managementBootstrap.status(), terminalMcp: connection.terminalStatus })), connectionErrors,
+    connections: [...connections.values()].map(connection => ({ workspace: connection.config.workspace, deviceId: connection.config.deviceId, primary: connection.config.primary, configured: true, workspaceQuarantined:connection.dispatcher.workspaceQuarantined, ready: connectionReady(connection), lastHeartbeat: connection.lastHeartbeat, managementMcp: connection.managementBootstrap.status(), terminalMcp: connection.terminalStatus })), connectionErrors,
     diagnostics:{delivery:deliveryDiagnostics},
   };
 }
+function connectionReady(connection){return !draining&&!connection.dispatcher.workspaceQuarantined&&heartbeatFresh(connection);}
 function localStopRefusal(state) {
   const reasons=new Map(),add=(code,count=1)=>reasons.set(code,(reasons.get(code)||0)+count);
   if(state.connectionState!=='draining')add('CONNECTION_NOT_DRAINING');
@@ -459,7 +458,7 @@ const health = http.createServer((req, res) => {
     return;
   }
   if (req.url === '/healthz') { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ ok: true, ...healthPayload() })); return; }
-  if (req.url === '/readyz') { const ready = !draining && executionAllowed() && heartbeatFresh(); res.writeHead(ready ? 200 : 503, { 'content-type': 'application/json' }); res.end(JSON.stringify({ ready, ...healthPayload() })); return; }
+  if (req.url === '/readyz') { const ready = [...connections.values()].some(connectionReady); res.writeHead(ready ? 200 : 503, { 'content-type': 'application/json' }); res.end(JSON.stringify({ ready, ...healthPayload() })); return; }
   res.writeHead(404); res.end();
 });
 let stopping = false;

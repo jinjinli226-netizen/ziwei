@@ -8,7 +8,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 
-test('real isolated daemon retains recovered quarantine across workspaces, reports unready and refuses drained stop', { timeout: 15000 }, async t => {
+test('real isolated daemon retains quarantine in its workspace while another workspace stays ready and drained stop stays unsafe', { timeout: 15000 }, async t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ziwei-quarantine-health-'));
   const home = path.join(root, 'user'); const calls = []; let child;
   const server = http.createServer((req, res) => {
@@ -20,6 +20,10 @@ test('real isolated daemon retains recovered quarantine across workspaces, repor
     } else if (req.url.startsWith('/a2a/v1/actions?')) {
       const workspace = new URL(req.url, 'http://fixture').searchParams.get('workspace');
       body = { actions: [{ id: `blocked_${workspace}`, workspace, type: 'directory.inspect', payload: { path: root, deviceId: `device_${workspace}` } }] };
+    } else if(req.url==='/a2a/v1/actions/blocked_shared/ack'){
+      body={id:'blocked_shared',status:'acked',deviceId:'device_shared',acked_at:new Date().toISOString(),expires_at:new Date(Date.now()+600000).toISOString()};
+    } else if(req.url==='/a2a/v1/actions/blocked_shared/result'){
+      body={id:'blocked_shared',status:'succeeded',deviceId:'device_shared'};
     }
     res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(body));
   });
@@ -52,16 +56,21 @@ test('real isolated daemon retains recovered quarantine across workspaces, repor
   let health;
   for (let index = 0; index < 100; index++) {
     try { health = await (await fetch(`http://127.0.0.1:${port}/healthz`)).json(); } catch {}
-    if (health?.lastHeartbeat && calls.filter(url => url.startsWith('/a2a/v1/actions?')).length >= 4) break;
+    if (health?.lastHeartbeat && calls.filter(url => url.startsWith('/a2a/v1/actions?')).length >= 4 && calls.includes('/a2a/v1/actions/blocked_shared/result')) break;
     await delay(50);
   }
   assert.equal(health?.pid, child.pid, diagnostics);
-  assert.equal(health.executionQuarantined, true); assert.equal(health.quarantinedActionCount, 1); assert.equal(health.activeActionCount, 1);
-  assert.equal(health.connectionState, 'quarantined'); assert.equal(health.connections.length, 2);
-  assert(health.connections.every(item => item.ready === false));
+  assert.equal(health.executionQuarantined, false); assert.equal(health.quarantinedActionCount, 1); assert.equal(health.activeActionCount, 1);
+  assert.equal(health.connectionState, 'connected'); assert.equal(health.connections.length, 2);
+  assert.equal(health.connections.find(item=>item.workspace==='primary').workspaceQuarantined,true);
+  assert.equal(health.connections.find(item=>item.workspace==='shared').workspaceQuarantined,false);
+  assert.equal(health.connections.find(item=>item.workspace==='primary').ready,false);
+  assert.equal(health.connections.find(item=>item.workspace==='shared').ready,true);
   assert(calls.includes('/api/workspaces/primary/heartbeat')); assert(calls.includes('/api/workspaces/shared/heartbeat'));
-  assert.equal(calls.some(url => url.endsWith('/ack')), false);
-  const ready = await fetch(`http://127.0.0.1:${port}/readyz`); assert.equal(ready.status, 503); assert.equal((await ready.json()).ready, false);
+  assert.equal(calls.includes('/a2a/v1/actions/blocked_primary/ack'),false);
+  assert.equal(calls.includes('/a2a/v1/actions/blocked_shared/ack'),true);
+  assert.equal(calls.includes('/a2a/v1/actions/blocked_shared/result'),true);
+  const ready = await fetch(`http://127.0.0.1:${port}/readyz`); assert.equal(ready.status, 200); assert.equal((await ready.json()).ready, true);
   const control = operation => fetch(`http://127.0.0.1:${port}/local/connection-control`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-ziwei-local-control': 'isolated-primary-token' }, body: JSON.stringify({ operation, nonce: health.lifecycle.nonce }) });
   assert.equal((await control('pause')).status, 200);
   assert.equal((await control('stop')).status, 409);

@@ -46,11 +46,13 @@ function safeProcessExit(value,depth=0) {
 // release the local occupancy without claiming the server accepted it.
 export const MAINTENANCE_COMMIT_TTL_MS = 10 * 60 * 1000;
 
+const actionEmployeeId=action=>(action.type===DSH_NATIVE_TYPE?action.payload?.dshOperation?.subject?.employeeId:null)||action.payload?.employeeId||action.payload?.employee_id||action.payload?.assignee;
+
 export function canStartDaemonAction(action,admission,{actionDelivery,dispatcher,maintenanceReady,blocksNewActions,executionAllowed}){
   if(isCancellationAction(action)||isDshNativeControlAction(action)||actionDelivery.canDeliverWithoutExecution(action))return true;
-  const pause=dispatcher.getMaintenancePause(action.id),employee=(action.type===DSH_NATIVE_TYPE?action.payload?.dshOperation?.subject?.employeeId:null)||action.payload?.employeeId||action.payload?.employee_id||action.payload?.assignee;
+  const pause=dispatcher.getMaintenancePause(action.id),employee=actionEmployeeId(action);
   if(pause&&!maintenanceReady.has(action.id)||!pause&&employee&&dispatcher.hasPausedEmployee(employee))return false;
-  return(!blocksNewActions||admission.collaborationChild)&&executionAllowed();
+  return(!blocksNewActions||admission.collaborationChild)&&executionAllowed(action);
 }
 
 export class ActionDispatcher {
@@ -111,6 +113,7 @@ export class ActionDispatcher {
         if (!item || typeof item.key !== 'string' || !item.key || (!['string', 'number'].includes(typeof item.actionId) && item.actionId !== null) || !item.identity || !validIdentity(item.identity) || !Number.isFinite(item.startedAt) || started.has(item.key)) throw new Error('Invalid started action state');
         if (item.nativeRuntime !== undefined && typeof item.nativeRuntime !== 'boolean') throw new Error('Invalid runtime ownership state');
         if (item.quarantine !== undefined && (!item.quarantine || typeof item.quarantine.stopConfirmed !== 'boolean')) throw new Error('Invalid execution quarantine state');
+        if(item.resourceBinding?.employeeId!=null&&(typeof item.resourceBinding.employeeId!=='string'||!item.resourceBinding.employeeId.trim()))throw new Error('Invalid execution employee binding');
         started.set(item.key, item);
       }
       this.#completed = completed; this.#completedIdentity = identities; this.#admissionRejected = admissions; this.#legacyCompleted = legacy; this.#started = started;
@@ -177,7 +180,7 @@ export class ActionDispatcher {
     return {status: 'duplicate', actionId: action?.id, originalStatus: result.status, result: result.result, error: result.error, completedAt: result.completedAt, ...(result.code ? {code: result.code} : {}), ...(result.reason ? {reason: result.reason} : {}), ...(result.executionState ? {executionState: result.executionState} : {})};
   }
   #markStarted(action, key, identity,timing={}) {
-    this.#started.set(key, {key, actionId: action?.id ?? null, identity, startedAt: timing.startedAt??this.#now(),...(timing.hardDeadline!==undefined?{hardDeadline:timing.hardDeadline}:{}), ...(isNativeRuntimeAction(action) ? {nativeRuntime: true,resourceBinding:{type:action.type,employeeId:action.payload?.employeeId||null,revision:action.payload?.hermesBot?.revision||null,controlEpoch:action.payload?.hermesBot?.controlEpoch||null,resource:action.payload?.nativeOperation?.resource||null,operation:action.payload?.nativeOperation?.operation||null,platform:action.payload?.nativeOperation?.input?.platform||null}} : {})});
+    this.#started.set(key, {key, actionId: action?.id ?? null, identity, startedAt: timing.startedAt??this.#now(),...(timing.hardDeadline!==undefined?{hardDeadline:timing.hardDeadline}:{}), ...(isNativeRuntimeAction(action) ? {nativeRuntime: true,resourceBinding:{type:action.type,employeeId:actionEmployeeId(action)||null,revision:action.payload?.hermesBot?.revision||null,controlEpoch:action.payload?.hermesBot?.controlEpoch||null,resource:action.payload?.nativeOperation?.resource||null,operation:action.payload?.nativeOperation?.operation||null,platform:action.payload?.nativeOperation?.input?.platform||null}} : {})});
     if(isNativeRuntimeAction(action)&&String(action.payload?.runtime||action.payload?.agent||action.payload?.runtimeName||'').toLowerCase()==='dsh')this.#started.get(key).dshBinding={botName:dshBotNameForAction(action),conversationId:action.payload?.conversationId||null};
     try { this.#saveState(); }
     catch (error) { throw Object.assign(new Error(error?.message || String(error)), {code: 'ACTION_STATE_WRITE_FAILED'}); }
@@ -205,6 +208,12 @@ export class ActionDispatcher {
   }
   get quarantined() { return this.#stateError !== null || this.#quarantines.size > 0; }
   get quarantinedActionIds() { return [...this.#quarantines].map(key => String(this.#started.get(key)?.actionId ?? key)).concat(this.#stateError ? ['state-corrupt'] : []); }
+  get workspaceQuarantined(){return this.#stateError!==null||[...this.#quarantines].some(key=>!this.#started.get(key)?.resourceBinding?.employeeId);}
+  isExecutionQuarantined(action){
+    if(this.workspaceQuarantined)return true;
+    const employee=actionEmployeeId(action);
+    return [...this.#quarantines].some(key=>{const item=this.#started.get(key);return String(item.actionId)===String(action.id)||Boolean(employee&&item.resourceBinding.employeeId===employee);});
+  }
   #validPaused(item,action=null){
     const receipt=item?.maintenancePause;
     if(!item||item.nativeRuntime!==true||item.quarantine||item.maintenanceResumeStarted===true||!Number.isFinite(item.hardDeadline)||item.hardDeadline<item.startedAt||!item.identity||item.identity.workspace!==this.#workspace||item.identity.deviceId!==this.#deviceId||!validateMaintenancePause(receipt,{actionId:String(item.actionId)}))return false;
@@ -382,7 +391,7 @@ export class ActionDispatcher {
         ...(action.payload && typeof action.payload === 'object' ? action.payload : {}),
         ...(nativeGroupCwd?{}:{workdir,...(needsNativeCwd(action)?{cwd:workdir}:{})})
       }} : action;
-      if (this.quarantined || !this.#canExecute(action)) return this.#uncertain(action, 'EXECUTION_QUARANTINED', '本机仍有未确认停止的执行；未启动新动作');
+      if ((!isDshNativeControlAction(action)&&this.isExecutionQuarantined(action)) || !this.#canExecute(action)) return this.#uncertain(action, 'EXECUTION_QUARANTINED', '当前员工或工作区仍有未确认停止的执行；未启动新动作');
       admissionPhase='budget';
       const nativeRuntime = isNativeRuntimeAction(action);
       const requestedTimeout = action.payload?.timeoutMs ?? action.payload?.timeout_ms;
