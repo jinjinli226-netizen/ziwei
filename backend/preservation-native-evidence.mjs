@@ -8,7 +8,7 @@ import {validateMaintenancePause} from '../src/maintenance-checkpoint.mjs';
 import {executionBinding} from '../src/execution-admission.mjs';
 import {actionExecutionTimeoutMs} from '../src/action-execution-budget.mjs';
 import {terminalMcpExecutionFailure} from '../src/terminal-mcp-receipt-failure.mjs';
-import {confirmedDshSessionExit,sameDshSessionBinding} from '../src/dsh-session-receipt.mjs';
+import {isDshAction,confirmedDshSessionExit,confirmedDshPrePromptFailure,sameDshSessionBinding} from '../src/dsh-session-receipt.mjs';
 import {inspectClientMaintenance,inspectNativeClientProcess,inspectNativeHealthListener} from '../scripts/client-lifecycle.mjs';
 import {digest,uncertain,exitedTree,executionExit,gatewayResultMatches} from './version-preservation.mjs';
 import {scanOwnedNativeDatabases,nativeActionDigest,attestNativeVersion} from './preservation-native-databases.mjs';
@@ -24,8 +24,9 @@ function validDeliveryArchive(archive){
 function validArchivedUnconfirmed(record){
   return record?.state===ARCHIVED_UNCONFIRMED_STATE&&record?.retainEvidence===true&&!Object.hasOwn(record,'serverStatus')&&!Object.hasOwn(record,'blockedStatus')&&!Object.hasOwn(record,'confirmedAt')&&validDeliveryArchive(record.archive);
 }
-function validConfirmedArchivedDelivery(record,result){
-  return record.state==='confirmed'&&record.retainEvidence===true&&validDeliveryArchive(record.archive)&&!Object.hasOwn(record,'blockedStatus')&&['succeeded','failed'].includes(record.serverStatus)&&Number.isFinite(Date.parse(record.confirmedAt))&&record.events.length===0&&result?.status===record.serverStatus&&!uncertain(result)&&exitedTree(executionExit(result));
+function validConfirmedArchivedDelivery(record,result,identity){
+  return record.state==='confirmed'&&record.retainEvidence===true&&validDeliveryArchive(record.archive)&&!Object.hasOwn(record,'blockedStatus')&&['succeeded','failed'].includes(record.serverStatus)&&Number.isFinite(Date.parse(record.confirmedAt))&&record.events.length===0&&result?.status===record.serverStatus&&!uncertain(result)
+    &&(isDshAction(record.action)?Boolean(confirmedDshSessionExit(record.action,result,record.dshSessionBinding)||confirmedDshPrePromptFailure(record.action,result,{...identity,binding:record.dshSessionBinding})):exitedTree(executionExit(result)));
 }
 const equal=(a,b)=>digest(a)===digest(b);
 const deliveryBinding=(action,identity)=>{const p=action.payload||{};return hash(JSON.stringify({id:action.id,type:action.type,agent:action.agent_id||action.agentId||'ziwei_user',workspace:action.workspace_id||identity.workspace,device:identity.deviceId,employee:p.employeeId||p.employee_id||p.assignee||null,conversation:p.conversationId||p.conversation_id||null,message:p.messageId||p.message_id||null,dedupe:action.dedupe_key||action.dedupeKey||null}));};
@@ -384,7 +385,7 @@ function confirmedLocalDshSession(started,completed,record,identity){
   const action=record?.action,p=action?.payload||{},binding=started.resourceBinding;
   const expected=Object.fromEntries(Object.entries({workspace:identity.workspace,deviceId:identity.deviceId,workspaceId:action?.workspace_id??action?.workspaceId,actionWorkspace:action?.workspace??action?.workspace_slug,targetDeviceId:p.deviceId??p.device_id??p.targetDeviceId??p.target_device_id}).filter(([,value])=>value!==undefined&&value!==null&&String(value)!=='').map(([key,value])=>[key,String(value)]));
   return record?.version===2&&record.state==='confirmed'&&record.serverStatus===completed.result.status
-    &&!record.retainEvidence&&Array.isArray(record.events)&&record.events.length===0&&Number.isFinite(Date.parse(record.confirmedAt))
+    &&(!record.retainEvidence||validConfirmedArchivedDelivery(record,completed.result,identity))&&Array.isArray(record.events)&&record.events.length===0&&Number.isFinite(Date.parse(record.confirmedAt))
     &&equal(record.identity,identity)&&record.binding===deliveryBinding(action,identity)
     &&equal(started.identity,expected)&&['deviceId','device_id','targetDeviceId','target_device_id'].every(key=>p[key]===undefined||p[key]===identity.deviceId)
     &&started.nativeRuntime===true&&started.actionId===action.id&&started.key===String(action.dedupe_key??action.dedupeKey??action.id)
@@ -545,7 +546,7 @@ function scanFileEvidence({connections=[],actions=[],homes=[],productionRequest}
           // Explicit redelivery retains the original archive as history. Its
           // blobs were verified above; only a matching terminal receipt and
           // definitive execution exit release this retained evidence.
-          if(!validConfirmedArchivedDelivery(record,deliveryResult))throw Error('invalid confirmed archive');
+          if(!validConfirmedArchivedDelivery(record,deliveryResult,identity))throw Error('invalid confirmed archive');
         }else if(record.state!=='confirmed'||record.retainEvidence||record.events.length)issue('DELIVERY_NOT_DRAINED',{actionId:record.action.id,state:record.state,path:file});
         else if(!['succeeded','failed','expired'].includes(record.serverStatus)||!Number.isFinite(Date.parse(record.confirmedAt)))throw new Error('invalid terminal receipt');
         const original=originals.get(record.action.id);if(record.state!==ARCHIVED_UNCONFIRMED_STATE&&original&&original.status!==record.serverStatus)issue('DELIVERY_SERVER_MISMATCH',{actionId:record.action.id,path:file});
