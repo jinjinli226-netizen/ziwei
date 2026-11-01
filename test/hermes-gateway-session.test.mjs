@@ -18,7 +18,7 @@ if request.get('ordinary'):
  os.environ.pop('ZIWEI_CREATOR_HOME');os.environ.pop('ZIWEI_BOT_REASONING_EFFORT')
 if request.get('supervised'):
  os.environ.update(ZIWEI_GATEWAY_ACTION_ID='action-gateway-fixture',ZIWEI_GATEWAY_EMPLOYEE_ID='employee-gateway-fixture')
-secret='FIXTURE_PRIVATE_MCP';calls=[];params_seen=[];views=[];mutations=[];sockets=[];reconnects=[];receipt_index=0
+secret='FIXTURE_PRIVATE_MCP';calls=[];params_seen=[];views=[];mutations=[];sockets=[];reconnects=[];receipt_index=0;budgets=[]
 loop=asyncio.new_event_loop()  # Windows creates its private wakeup socket before the network guard.
 def audit(event,args):
  if event.startswith(('socket.connect','socket.bind','socket.getaddrinfo','subprocess.','os.exec','os.spawn','os.system')):raise AssertionError('NO_NETWORK_OR_PROCESS')
@@ -72,15 +72,20 @@ class Client:
   self.connection=len(sockets)
   self.websocket=types.SimpleNamespace(remote_address=(request.get('peer','127.0.0.1'),6716),ping_timeout=20,ping_interval=20)
   sockets.append(self.websocket)
- async def rpc(self,method,**params):
+ async def rpc(self,method,*,_timeout=None,**params):
   global receipt_index
   calls.append(method);params_seen.append((method,params))
+  budgets.append({'method':method,'timeout':_timeout})
+  if request.get('rpcErrorMethod')==method:
+   raise {'timeout':TimeoutError,'os':OSError,'native':GatewayClientError}[request.get('rpcErrorType','timeout')]('fixture-rpc-failure')
+  if method in ('session.create','session.resume') and request.get('sessionDelay',0) > (30 if _timeout is None else _timeout):raise TimeoutError('fixture-session-work-exceeded-answer-budget')
   if method=='runtime.describe':
    contract={'sources':['cli','oneshot'],'parameters':['model','provider','client_env','reasoning','editor','cwd','title','api_key','base_url','toolsets']}
    if not request.get('missingMcpCap'):contract['shell_private_mcp_v1']=True
    if not request.get('missingReasoningCap'):contract['strict_reasoning_receipts_v1']=True
    return {'instance_id':'owner-fixture','profile_id':str(root/'wrong-home') if request.get('wrongHome') else str(home),'authority_epoch':3,'session_create':contract}
   if method in ('session.create','session.resume'):
+   if request.get('cleanupResumeHang') and method=='session.resume' and 'prompt.submit' in calls:await asyncio.Event().wait()
    if method=='session.create':
     assert params['source']=='oneshot','SOURCE_REWRITTEN';assert params.get('reasoning')==(None if request.get('ordinary') or request.get('plain') else 'max')
     assert params['client_env']=={'PATH':'fixture-path'}
@@ -160,12 +165,12 @@ viewmodule=module('hermes_cli.gateway_chat_view',GatewayChatView=View)
 async def native_chat(args,emitter=None):
  async with gateway.connect_gateway() as client:
   await client.rpc('runtime.describe')
-  if args.resume:snap=await client.rpc('session.resume',session_id=args.resume)
+  if args.resume:snap=await client.rpc('session.resume',session_id=args.resume,**({'_timeout':request['explicitTimeout']} if 'explicitTimeout' in request else {}))
   else:
    client_env={'PATH':'fixture-path'} if request.get('readOnly') or request.get('plain') else {'PATH':'fixture-path','ZIWEI_MCP_TOKEN':secret}
    if request.get('autonomy'):client_env.update({key:os.environ[key] for key in ('ZIWEI_BOT_ACTION_ID','ZIWEI_BOT_DEVICE_TOKEN','ZIWEI_API_BASE') if key in os.environ})
    if request.get('secretAlias'):client_env['HERMES_UNKNOWN']='FIXTURE_DEVICE_SECRET'
-   snap=await client.rpc('session.create',source='oneshot',client_env=client_env,model='gpt-6.1-sol',provider='openai-codex',**({'toolsets':request['toolsets']} if 'toolsets' in request else {}))
+   snap=await client.rpc('session.create',source='oneshot',client_env=client_env,model='gpt-6.1-sol',provider='openai-codex',**({'toolsets':request['toolsets']} if 'toolsets' in request else {}),**({'_timeout':request['explicitTimeout']} if 'explicitTimeout' in request else {}))
   # Existing native resume guards still see the caller's original creation flags.
   assert args.reasoning is None,'RESUME_CREATION_POLICY_CHANGED'
   return await viewmodule.GatewayChatView(client,snap).run()
@@ -187,7 +192,7 @@ if request.get('composeKey'):
  spec=importlib.util.spec_from_file_location('key_bridge',request['keyBridge']);key=importlib.util.module_from_spec(spec);spec.loader.exec_module(key)
  key.install(GatewayClientError)
 spec=importlib.util.spec_from_file_location('session_bridge',request['bridge']);bridge=importlib.util.module_from_spec(spec);spec.loader.exec_module(bridge)
-if request.get('cleanupHang') or request.get('neverSettles'):bridge.CLEANUP_TIMEOUT=0.05;bridge.CLEANUP_POLL_INTERVAL=0.001
+if request.get('cleanupHang') or request.get('neverSettles') or request.get('cleanupResumeHang'):bridge.CLEANUP_TIMEOUT=0.05;bridge.CLEANUP_POLL_INTERVAL=0.001
 args=argparse.Namespace(reasoning=None,resume='session-fixture' if request.get('resume') else None,provider=None,base_url=None,api_key=None,query='Synthetic fixture only',quiet=True,continue_last='Ziwei fixture' if request.get('titled') else None,create_if_missing=bool(request.get('titled')))
 if 'toolsets' in request and not request.get('resume'):args.toolsets=request['toolsets']
 if request.get('plain'):
@@ -200,12 +205,13 @@ try:
   if installed:
    result=loop.run_until_complete(gateway.run_gateway_chat(args))
   else:result='not-installed'
-except BaseException as error:caught={'type':type(error).__name__,'message':str(error)}
+except BaseException as error:caught={'type':type(error).__name__,'message':str(error),'cause':type(error.__cause__).__name__ if error.__cause__ else None}
 assert vars(args)==before and sys.argv==before_argv,'CALLER_STATE_MUTATED'
 assert secret not in stderr.getvalue() and 'FIXTURE_PROVIDER_KEY' not in stderr.getvalue() and 'FIXTURE_DEVICE_SECRET' not in stderr.getvalue(),'SECRET_IN_RECEIPT'
 proofs=[json.loads(line.split(':',1)[1]) for line in stderr.getvalue().splitlines() if line.startswith('ZIWEI_BOT_REASONING:')]
 turns=[json.loads(line.split(':',1)[1]) for line in stderr.getvalue().splitlines() if line.startswith('ZIWEI_HERMES_GATEWAY_TURN:')]
-print(json.dumps({'result':result,'caught':caught,'calls':calls,'mutations':len(mutations),'proofs':proofs,'turns':turns,'params':[{'method':method,**{key:value for key,value in params.items() if key in ('session_id','input_id','admission_id','include_result')}} for method,params in params_seen],'reconnects':reconnects,'sockets':[vars(ws) for ws in sockets],'externalModelCalls':0,'networkCalls':0,'namespaceUnchanged':True}))
+preparations=[json.loads(line.split(':',1)[1]) for line in stderr.getvalue().splitlines() if line.startswith('ZIWEI_HERMES_GATEWAY_PREPARE:')]
+print(json.dumps({'result':result,'caught':caught,'calls':calls,'mutations':len(mutations),'proofs':proofs,'turns':turns,'preparations':preparations,'budgets':budgets,'params':[{'method':method,**{key:value for key,value in params.items() if key in ('session_id','input_id','admission_id','include_result')}} for method,params in params_seen],'reconnects':reconnects,'sockets':[vars(ws) for ws in sockets],'externalModelCalls':0,'networkCalls':0,'namespaceUnchanged':True}))
 `;
 function run(t,options={}){
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'ziwei-gateway-session-'));
@@ -230,6 +236,51 @@ test('only an actual loopback Gateway socket tolerates delayed pong without chan
   const out=run(t,{peer});assert.equal(out.result,'complete',JSON.stringify(out));
   assert.equal(out.sockets[0].ping_timeout,20);
  }
+});
+test('session preparation alone receives one finite 180-second answer budget without resubmitting work',t=>{
+ const out=run(t,{sessionDelay:35,supervised:true});assert.equal(out.result,'complete',JSON.stringify(out));
+ assert.equal(out.calls.filter(x=>x==='session.create').length,1);assert.equal(out.calls.filter(x=>x==='prompt.submit').length,1);
+ for(const {method,timeout} of out.budgets)assert.equal(timeout,method==='session.create'||method==='session.resume'?180:null,method);
+ assert.deepEqual(out.preparations.map(x=>[x.method,x.status]),[['session.create','started'],['session.create','ready'],['session.resume','started'],['session.resume','ready']]);
+ for(const proof of out.preparations){assert.equal(proof.timeoutMs,180000);assert.equal(proof.actionId,'action-gateway-fixture');assert.equal(proof.employeeId,'employee-gateway-fixture');assert.equal(proof.schemaVersion,1);assert.equal(proof.source,'native_gateway');}
+});
+test('resume policy conflict preserves the original fenced flow while every resume receives the preparation budget',t=>{
+ const out=run(t,{resume:true,rotate:true,supervised:true});assert.equal(out.result,'complete',JSON.stringify(out));assert.equal(out.mutations,1);
+ assert.equal(out.calls.filter(x=>x==='session.create').length,0);
+ assert.ok(out.budgets.filter(x=>x.method==='session.resume').every(x=>x.timeout===180));
+ assert.ok(out.budgets.filter(x=>x.method!=='session.resume').every(x=>x.timeout===null));
+});
+test('an explicit session RPC timeout remains explicit and preparation markers use its actual budget',t=>{
+ for(const options of [{},{resume:true}]){
+  const out=run(t,{nativeGateway:null,explicitTimeout:7,supervised:true,...options});assert.equal(out.result,'complete',JSON.stringify(out));
+  const first=out.budgets.find(x=>x.method===(options.resume?'session.resume':'session.create'));assert.equal(first.timeout,7);
+  assert.equal(out.preparations[0].timeoutMs,7000);
+ }
+});
+test('only preparation RPC TimeoutError becomes a specific native Gateway error with its cause retained',t=>{
+ for(const method of ['session.create','session.resume']){
+  const out=run(t,{rpcErrorMethod:method,supervised:true});assert.equal(out.result,null);
+  assert.equal(out.caught.type,'GatewayClientError');assert.equal(out.caught.message,'BOT_GATEWAY_SESSION_PREPARE_TIMEOUT');assert.equal(out.caught.cause,'TimeoutError');
+  assert.equal(out.calls.filter(x=>x===method).length,1);assert.equal(out.calls.includes('prompt.submit'),false);
+  assert.equal(out.preparations.at(-1).status,'timeout');assert.equal(out.preparations.at(-1).method,method);
+ }
+ for(const rpcErrorType of ['os','native']){
+  const out=run(t,{rpcErrorMethod:'session.create',rpcErrorType,supervised:true});assert.equal(out.caught.message,'fixture-rpc-failure');
+  assert.equal(out.preparations.at(-1).status,'started');assert.equal(out.preparations.some(x=>x.status==='timeout'),false);
+ }
+ for(const method of ['runtime.describe','prompt.submit']){
+  const out=run(t,{rpcErrorMethod:method});assert.equal(out.caught.type,'TimeoutError');assert.equal(out.caught.message,'fixture-rpc-failure');
+ }
+});
+test('unsupervised ordinary callers get the preparation budget without emitting attributed preparation markers',t=>{
+ const out=run(t,{ordinary:true,plain:true,sessionDelay:35});assert.equal(out.result,'complete',JSON.stringify(out));
+ assert.ok(out.budgets.filter(x=>x.method==='session.create').every(x=>x.timeout===180));assert.deepEqual(out.preparations,[]);
+});
+test('cleanup keeps its whole-operation deadline even while its lost-ACK resume has the longer native budget',t=>{
+ const start=Date.now();const out=run(t,{lostAck:true,cleanupResumeHang:true,supervised:true});
+ assert.equal(out.caught.message,'fixture-submit-disconnected');assert.equal(out.turns.at(-1).status,'unknown');
+ assert.equal(out.budgets.findLast(x=>x.method==='session.resume').timeout,180);assert.ok(Date.now()-start<2000);
+ assert.equal(out.preparations.at(-1).status,'started');assert.equal(out.preparations.some(x=>x.status==='timeout'),false);
 });
 test('old session without explicit reasoning keeps history and rotates transport via fenced native mutation',t=>{
  const out=run(t,{resume:true,rotate:true});assert.equal(out.result,'complete',JSON.stringify(out));assert.equal(out.mutations,1);

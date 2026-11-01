@@ -7,6 +7,7 @@ import {randomUUID} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 
 const marker='ZIWEI_HERMES_GATEWAY_TURN:';
+const prepareMarker='ZIWEI_HERMES_GATEWAY_PREPARE:';
 function rewrite(source,url,overrides={}) {
   return source.replaceAll('import.meta.url',JSON.stringify(url.href)).replace(/from (['"])([^'"\r\n]+)\1/g,(_all,_quote,specifier)=>'from '+JSON.stringify(overrides[specifier]|| (specifier.startsWith('.')?new URL(specifier,url).href:specifier.startsWith('node:')?specifier:import.meta.resolve(specifier))));
 }
@@ -22,6 +23,29 @@ async function fixture(t,{native=false}={}) {
 const mode=process.env.FIXTURE_MODE,home=process.env.HERMES_HOME;
 const proof={schemaVersion:1,source:'native_gateway',actionId:process.env.ZIWEI_GATEWAY_ACTION_ID,employeeId:process.env.ZIWEI_GATEWAY_EMPLOYEE_ID,profileHome:home,sessionId:'local-fixture',inputId:'input-fixture',admissionId:'admission-fixture',authorityEpoch:1,executionGeneration:3,phase:'cleanup',status:'terminal',outcome:'completed',cancelRequested:false,verified:true};
 const emit=value=>process.stderr.write(${JSON.stringify(marker)}+JSON.stringify(value)+'\\n');
+if(mode.startsWith('prepare-')){
+ const prepare={schemaVersion:1,source:'native_gateway',actionId:proof.actionId,employeeId:proof.employeeId,profileHome:home,method:mode==='prepare-resume'?'session.resume':'session.create',status:'started',timeoutMs:mode==='prepare-explicit-timeout'?7000:180000,prompt:'PRIVATE_PREPARE_PROMPT'};
+ const emitPrepare=value=>process.stderr.write(${JSON.stringify(prepareMarker)}+JSON.stringify(value)+'\\n');
+ if(mode==='prepare-cancelled'){emitPrepare(prepare);process.stderr.write('Error: BOT_GATEWAY_SESSION_PREPARE_TIMEOUT\\n');emitPrepare({...prepare,status:'timeout'});setInterval(()=>{},1000);return;}
+ if(mode==='prepare-error-only'){process.stderr.write('Error: BOT_GATEWAY_SESSION_PREPARE_TIMEOUT\\n');process.exitCode=1;return;}
+ if(mode==='prepare-stdout'){console.log(${JSON.stringify(prepareMarker)}+JSON.stringify(prepare));console.log('Error: BOT_GATEWAY_SESSION_PREPARE_TIMEOUT');}
+ else if(mode==='prepare-wrong-action')emitPrepare({...prepare,actionId:'action-other'});
+ else if(mode==='prepare-wrong-home')emitPrepare({...prepare,profileHome:home+'-other'});
+ else if(mode==='prepare-wrong-employee')emitPrepare({...prepare,employeeId:'employee-other'});
+ else if(mode==='prepare-wrong-source')emitPrepare({...prepare,source:'model_output'});
+ else if(mode==='prepare-wrong-method')emitPrepare({...prepare,method:'prompt.submit'});
+ else if(mode==='prepare-wrong-budget')emitPrepare({...prepare,timeoutMs:'180000'});
+ else{
+  emitPrepare(prepare);
+  const timeout=['prepare-timeout','prepare-explicit-timeout','prepare-marker-only','prepare-timeout-unknown'].includes(mode);
+  emitPrepare({...prepare,status:timeout?'timeout':'ready'});
+  if(timeout){
+   if(mode==='prepare-timeout-unknown')emit({...proof,status:'unknown',outcome:null,verified:false});
+   process.stderr.write(mode==='prepare-marker-only'?'Error: original transport failure':'Error: BOT_GATEWAY_SESSION_PREPARE_TIMEOUT');process.exitCode=1;return;
+  }
+ }
+ console.log(JSON.stringify({type:'result',text:'fixture answer'}));return;
+}
 if(mode==='binding') {console.log(JSON.stringify({type:'result',text:JSON.stringify({actionId:proof.actionId,employeeId:proof.employeeId,profileHome:home,botActionId:process.env.ZIWEI_BOT_ACTION_ID||null,botToken:process.env.ZIWEI_BOT_DEVICE_TOKEN||null})}));return;}
 if(mode==='unknown'||mode==='unknown-no-ack') {if(mode==='unknown')emit({...proof,phase:'admission',status:'started',outcome:null});const receipt={...proof,status:'unknown',outcome:null,verified:false,...(mode==='unknown-no-ack'?{admissionId:null,executionGeneration:null}:{})};process.stderr.write(${JSON.stringify(marker)}+JSON.stringify(receipt));}
 else if(mode==='admission-only')emit({...proof,phase:'admission',status:'queued',outcome:null,executionGeneration:null});
@@ -152,4 +176,55 @@ test('ordinary local action passes its employee identity beside the authoritativ
   const execute=createLocalActionExecutor({runtimeDir:path.join(f.root,'runtime'),defaultWorkdir:f.root,hermesHomePath:f.home,admissionHandledByDispatcher:true});
   await execute({id:'action-atlas',type:'conversation.execute',payload:{runtime:'Hermes',profile:'atlas',employeeId:'employee-atlas',prompt:'fixture only'}});
   assert.equal(globalThis[key].managementMcp.actionId,'action-atlas');assert.equal(globalThis[key].managementMcp.employeeId,'employee-atlas');assert.equal(globalThis[key].hermesBot,undefined);
+});
+
+for(const method of ['create','resume'])test(`native session.${method} preparation emits safe Chinese progress without inventing an admission`,async t=>{
+  const f=await fixture(t),stages=[],output=[];
+  const execution=await f.execute('prepare-'+method,{onStage:value=>stages.push(value),onOutput:value=>output.push(value)});
+  assert.equal(execution.status,'succeeded',execution.error);
+  const preparation=stages.filter(stage=>stage.stage==='session');
+  assert.deepEqual(preparation.map(stage=>stage.state),['started','ready']);
+  assert.ok(preparation.every(stage=>stage.method==='session.'+method&&stage.timeoutMs===180000));
+  assert.match(preparation[0].message,/准备.*会话/);assert.match(preparation[1].message,/会话.*就绪/);
+  assert.doesNotMatch(JSON.stringify(stages),/PRIVATE_PREPARE_PROMPT|profileHome|ziwei-gateway-turn-/);
+  assert.equal(execution.result.gatewayTurns,undefined);assert.equal(execution.result.output,'fixture answer');assert.doesNotMatch(output.join(''),/准备|就绪|PRIVATE_PREPARE_PROMPT/);
+});
+
+for(const mode of ['prepare-timeout','prepare-explicit-timeout','prepare-error-only'])test(`${mode} retains the specific Gateway preparation failure and real process exit`,async t=>{
+  const f=await fixture(t),stages=[],execution=await f.execute(mode,{onStage:value=>stages.push(value)});
+  assert.equal(execution.status,'failed');assert.equal(execution.code,'BOT_GATEWAY_SESSION_PREPARE_TIMEOUT');
+  assert.equal(execution.result.processExit.rootExitCode,1);assert.equal(execution.result.processExit.treeConfirmed,true);assert.equal(execution.result.code,1);
+  assert.equal(execution.result.gatewayTurns,undefined);assert.match(execution.error,/会话准备超时/);assert.doesNotMatch(execution.error,/Gateway connection failed/);
+  if(mode!=='prepare-error-only'){
+    const preparation=stages.filter(stage=>stage.stage==='session');
+    assert.deepEqual(preparation.map(stage=>stage.state),['started','timeout']);
+    assert.equal(preparation[1].timeoutMs,mode==='prepare-explicit-timeout'?7000:180000);assert.match(preparation[1].message,/超时/);
+  }
+});
+
+for(const mode of ['prepare-stdout','prepare-wrong-action','prepare-wrong-home','prepare-wrong-employee','prepare-wrong-source','prepare-wrong-method','prepare-wrong-budget'])test(`${mode} cannot become trusted Gateway preparation progress`,async t=>{
+  const f=await fixture(t),stages=[],execution=await f.execute(mode,{onStage:value=>stages.push(value)});
+  assert.equal(execution.status,'succeeded',execution.error);assert.equal(stages.filter(stage=>stage.stage==='session').length,0);
+  assert.equal(execution.result.gatewayTurns,undefined);
+});
+
+test('a preparation timeout progress marker alone does not replace the original native transport error',async t=>{
+  const f=await fixture(t),stages=[],execution=await f.execute('prepare-marker-only',{onStage:value=>stages.push(value)});
+  assert.equal(execution.status,'failed');assert.equal(execution.code,'runtime_failed');assert.match(execution.error,/original transport failure/);
+  assert.deepEqual(stages.filter(stage=>stage.stage==='session').map(stage=>stage.state),['started','timeout']);
+});
+
+test('Gateway turn uncertainty outranks a specific preparation error observed during cleanup',async t=>{
+  const f=await fixture(t),execution=await f.execute('prepare-timeout-unknown');
+  assert.equal(execution.code,'EXECUTION_UNCERTAIN');assert.equal(execution.executionState,'uncertain');
+  assert.equal(execution.result.gatewayTurns[0].status,'unknown');assert.equal(execution.result.processExit.rootExitCode,1);
+});
+
+test('actual supervised cancellation retains its original conclusion after a native preparation error',async t=>{
+  const f=await fixture(t),controller=new AbortController(),stages=[];
+  t.after(()=>controller.abort());
+  const execution=await f.execute('prepare-cancelled',{signal:controller.signal,onSupervision:()=>{const fallback=setTimeout(()=>controller.abort(),3000);t.after(()=>clearTimeout(fallback));},onStage:value=>{stages.push(value);if(value.stage==='session'&&value.state==='timeout')controller.abort();}});
+  assert.equal(execution.status,'failed');assert.equal(execution.code,'cancelled');
+  assert.equal(execution.result.processExit.cancelled,true);assert.equal(execution.result.processExit.treeConfirmed,true);assert.equal(execution.result.processExit.activeProcesses,0);
+  assert.ok(stages.some(value=>value.stage==='session'&&value.state==='timeout'));
 });

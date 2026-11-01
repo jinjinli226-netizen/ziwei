@@ -8,6 +8,7 @@ import importlib.util
 import inspect
 import ipaddress
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -15,6 +16,7 @@ import sys
 
 _EFFORTS = frozenset({'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'})
 _BINDING = ('profile_id', 'session_id', 'admission_id', 'execution_generation', 'authority_epoch')
+SESSION_PREPARE_TIMEOUT = 180.0
 CLEANUP_TIMEOUT = 12.0
 CLEANUP_POLL_INTERVAL = 0.1
 
@@ -134,6 +136,8 @@ class _Session:
         self.snapshots, self.admissions = {}, {}
         self.turns = []
         self.bot = bool(isolation and isolation.get('kind') == 'hermes-bot')
+        self.action_id = os.environ.get('ZIWEI_GATEWAY_ACTION_ID') or (os.environ.get('ZIWEI_BOT_ACTION_ID') if self.bot else None)
+        self.employee_id = os.environ.get('ZIWEI_GATEWAY_EMPLOYEE_ID') or (isolation or {}).get('employeeId')
         self.cleanup_ok = True
         self.receipts = 0
 
@@ -173,12 +177,35 @@ class _Session:
                self.reject, 'BOT_GATEWAY_BINDING_INVALID')
         self.snapshots[sid] = result
 
+    async def prepare(self, native, method, **params):
+        params.setdefault('_timeout', SESSION_PREPARE_TIMEOUT)
+        budget = params['_timeout']
+        if budget is None:
+            budget = getattr(importlib.import_module('hermes_cli.gateway_client'), 'DEFAULT_RPC_TIMEOUT', 30)
+        self.emit_prepare(method, 'started', budget)
+        try:
+            result = await native.rpc(method, **params)
+        except TimeoutError as error:
+            self.emit_prepare(method, 'timeout', budget)
+            from hermes_cli.gateway_client import GatewayClientError
+            # Keep the native context manager from relabelling an RPC timeout as connection failure.
+            raise GatewayClientError('BOT_GATEWAY_SESSION_PREPARE_TIMEOUT') from error
+        self.emit_prepare(method, 'ready', budget)
+        return result
+
+    def emit_prepare(self, method, status, budget):
+        if not (_identifier(self.action_id) and _identifier(self.employee_id)) or not math.isfinite(budget):
+            return
+        proof = {'schemaVersion': 1, 'source': 'native_gateway', 'actionId': self.action_id,
+                 'employeeId': self.employee_id, 'profileHome': self.description['profile_id'],
+                 'method': method, 'status': status, 'timeoutMs': int(budget * 1000)}
+        print('ZIWEI_HERMES_GATEWAY_PREPARE:' + json.dumps(proof), file=sys.stderr, flush=True)
+
     def begin(self, params):
         sid, input_id = params.get('session_id'), params.get('input_id')
         _check(sid in self.snapshots and _identifier(input_id), self.reject, 'BOT_GATEWAY_ADMISSION_INVALID')
         turn = {'schemaVersion': 1, 'source': 'native_gateway',
-                'actionId': os.environ.get('ZIWEI_GATEWAY_ACTION_ID') or (os.environ.get('ZIWEI_BOT_ACTION_ID') if self.bot else None),
-                'employeeId': os.environ.get('ZIWEI_GATEWAY_EMPLOYEE_ID') or (self.isolation or {}).get('employeeId'),
+                'actionId': self.action_id, 'employeeId': self.employee_id,
                 'profileHome': self.description['profile_id'],
                 'sessionId': sid, 'inputId': input_id, 'admissionId': None,
                 'authorityEpoch': self.description['authority_epoch'], 'executionGeneration': None,
@@ -216,7 +243,7 @@ class _Session:
     async def settle_turn(self, client, turn):
         sid = turn['sessionId']
         if turn['admissionId'] is None:
-            snapshot = await client.rpc('session.resume', session_id=sid)
+            snapshot = await self.prepare(client, 'session.resume', session_id=sid)
             self.snapshot(snapshot)
             _check(snapshot['stored_session_id'] == sid, self.reject, 'BOT_GATEWAY_SESSION_MISMATCH')
             matching = [row for row in snapshot.get('pending', []) if row.get('input_id') == turn['inputId']]
@@ -314,9 +341,22 @@ class _Session:
         self.receipts += 1
 
 
+class _PreparationClient:
+    def __init__(self, native, state):
+        self.native, self.state = native, state
+
+    def __getattr__(self, name):
+        return getattr(self.native, name)
+
+    async def rpc(self, method, **params):
+        if method in ('session.create', 'session.resume'):
+            return await self.state.prepare(self.native, method, **params)
+        return await self.native.rpc(method, **params)
+
+
 class _Client:
     def __init__(self, native, state, client_error):
-        self.native, self.state, self.client_error = native, state, client_error
+        self.native, self.state, self.client_error = _PreparationClient(native, state), state, client_error
 
     def __getattr__(self, name):
         return getattr(self.native, name)

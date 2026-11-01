@@ -49,6 +49,8 @@ const TERMINAL_ENV_KEYS = ['ZIWEI_TERMINAL_API_BASE', 'ZIWEI_TERMINAL_WORKSPACE'
 const LEGACY_TERMINAL_ENV_KEYS = ['ZIWEI_CONTROL_API', 'ZIWEI_CONTROL_AUTH', 'ZIWEI_CONTROL_CREDENTIALS_FILE', 'ZIWEI_CONTROL_SESSION_FILE', 'CONTROL_MCP_API_URL', 'CONTROL_MCP_AUTH'];
 
 const GATEWAY_TURN_MARKER = 'ZIWEI_HERMES_GATEWAY_TURN:';
+const GATEWAY_PREPARE_MARKER = 'ZIWEI_HERMES_GATEWAY_PREPARE:';
+const GATEWAY_PREPARE_TIMEOUT = 'BOT_GATEWAY_SESSION_PREPARE_TIMEOUT';
 const GATEWAY_ENV_KEYS = ['ZIWEI_GATEWAY_ACTION_ID', 'ZIWEI_GATEWAY_EMPLOYEE_ID'];
 const gatewayIdentifier = value => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/.test(value);
 
@@ -1032,14 +1034,25 @@ export function parseRuntimeStreamLine(line, state, onOutput = () => {}, onStage
 // Only the owned stderr reader supplies these native receipts; a CLI tree exit cannot settle an admitted Gateway turn.
 function createHermesGatewayTurnEvidence(binding) {
   const turns = new Map();
+  let preparationError = false;
   const home = value => process.platform === 'win32' ? path.resolve(value).toLowerCase() : path.resolve(value);
   return {
-    consume(line) {
+    consume(line, onPrepare) {
+      if (line === `Error: ${GATEWAY_PREPARE_TIMEOUT}`) { preparationError = true; return; }
+      const preparing = line.startsWith(GATEWAY_PREPARE_MARKER);
       let value;
-      try { value = JSON.parse(line.slice(GATEWAY_TURN_MARKER.length)); } catch { return; }
+      try { value = JSON.parse(line.slice(preparing ? GATEWAY_PREPARE_MARKER.length : GATEWAY_TURN_MARKER.length)); } catch { return; }
       if (value?.schemaVersion !== 1 || value.source !== 'native_gateway' || value.actionId !== binding.actionId || value.employeeId !== binding.employeeId
-          || typeof value.profileHome !== 'string' || !path.isAbsolute(value.profileHome) || home(value.profileHome) !== home(binding.profileHome)
-          || !gatewayIdentifier(value.sessionId) || !gatewayIdentifier(value.inputId) || value.admissionId !== null && !gatewayIdentifier(value.admissionId)
+          || typeof value.profileHome !== 'string' || !path.isAbsolute(value.profileHome) || home(value.profileHome) !== home(binding.profileHome)) return;
+      if (preparing) {
+        if (!['session.create', 'session.resume'].includes(value.method) || !['started', 'ready', 'timeout'].includes(value.status) || !Number.isSafeInteger(value.timeoutMs) || value.timeoutMs < 0) return;
+        const operation = value.method === 'session.create' ? '创建' : '恢复', seconds = Math.ceil(value.timeoutMs / 1000);
+        const message = { started: '准备 Hermes 会话', ready: 'Hermes 会话已就绪', timeout: 'Hermes 会话准备超时' }[value.status];
+        const detail = value.status === 'started' ? `正在${operation}原生会话（最长等待 ${seconds} 秒）` : value.status === 'ready' ? `原生会话已${operation}` : `${operation}原生会话等待超时（${seconds} 秒）`;
+        onPrepare?.({ stage: 'session', message, detail, state: value.status, method: value.method, timeoutMs: value.timeoutMs });
+        return;
+      }
+      if (!gatewayIdentifier(value.sessionId) || !gatewayIdentifier(value.inputId) || value.admissionId !== null && !gatewayIdentifier(value.admissionId)
           || !Number.isSafeInteger(value.authorityEpoch) || value.authorityEpoch < 0
           || value.executionGeneration !== null && (!Number.isSafeInteger(value.executionGeneration) || value.executionGeneration < 0)
           || typeof value.cancelRequested !== 'boolean' || typeof value.verified !== 'boolean') return;
@@ -1053,6 +1066,7 @@ function createHermesGatewayTurnEvidence(binding) {
       turns.set(key, Object.fromEntries(fields.map(field => [field, value[field]])));
     },
     complete(execution) {
+      if (preparationError && execution.code !== 'EXECUTION_UNCERTAIN' && execution.executionState !== 'uncertain' && (execution.code === 'runtime_failed' || execution.status === 'succeeded')) execution = { ...execution, status: 'failed', code: GATEWAY_PREPARE_TIMEOUT, error: 'Hermes 原生会话准备超时；请检查本机 Gateway 的会话状态。' };
       if (!turns.size) return execution;
       const receipts = [...turns.values()].map(value => value.phase === 'cleanup' ? value : { ...value, phase: 'cleanup', status: 'unknown', outcome: null, verified: false });
       const result = { ...execution.result, gatewayTurns: receipts };
@@ -1253,8 +1267,8 @@ export async function executeRuntime({ runtime, prompt, model = null, profile = 
     if (diagnosticBuffer.length > MAX_OUTPUT_BYTES) { consume(diagnosticBuffer.slice(0, MAX_OUTPUT_BYTES)); diagnosticBuffer = diagnosticBuffer.slice(MAX_OUTPUT_BYTES); }
     const lines = diagnosticBuffer.split(/\r?\n/); diagnosticBuffer = lines.pop() || '';
     for (const line of lines) {
-      if (gatewayTurnEvidence && line.startsWith(GATEWAY_TURN_MARKER)) {
-        gatewayTurnEvidence.consume(line);
+      if (gatewayTurnEvidence && (line.startsWith(GATEWAY_TURN_MARKER) || line.startsWith(GATEWAY_PREPARE_MARKER) || line === `Error: ${GATEWAY_PREPARE_TIMEOUT}`)) {
+        gatewayTurnEvidence.consume(line, emitStage);
       } else if (creatorPrepared && line.startsWith('ZIWEI_CREATOR_ISOLATION:')) {
         try {
           const value = JSON.parse(line.slice('ZIWEI_CREATOR_ISOLATION:'.length));
