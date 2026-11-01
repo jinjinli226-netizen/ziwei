@@ -4,6 +4,54 @@ import {createManagerHarness} from '../verification/bot-management-harness.mjs';
 
 async function workspace(t){const h=await createManagerHarness({initial:{chatMode:true}});t.after(()=>h.dispose());return h;}
 
+for(const runtime of ['Hermes','DSH','Codex'])test(`${runtime} default employee entry opens its chat without an intermediate choice`,async t=>{
+  const h=await createManagerHarness({initial:{chatMode:true,autoOpenChat:true,botId:`employee_${runtime.toLowerCase()}`}});t.after(()=>h.dispose());
+  const opened=h.events.filter(event=>['chat','employee-chat'].includes(event[0]));
+  assert.equal(opened.length,1);
+  assert.equal(opened[0][1].employee.id,`employee_${runtime.toLowerCase()}`);
+  assert.equal(opened[0][0],runtime==='Hermes'?'chat':'employee-chat');
+  assert.equal(h.button('打开聊天'),undefined);assert.equal(h.button('管理员工'),undefined);
+});
+
+test('a routed employee change opens the new chat once while preserving a direct management entry',async t=>{
+  const h=await createManagerHarness({initial:{chatMode:true,autoOpenChat:true}});t.after(()=>h.dispose());
+  h.props.botId='employee_dsh';await h.settle();
+  assert.deepEqual(h.events.filter(event=>['chat','employee-chat'].includes(event[0])).map(event=>event[1].employee.id),['employee_hermes','employee_dsh']);
+  h.props.autoOpenChat=false;h.props.initialTab='settings';h.props.botId='employee_codex';await h.settle();
+  assert.equal(h.state.currentEmployee.value.id,'employee_codex');
+  assert.equal(h.events.filter(event=>['chat','employee-chat'].includes(event[0])).length,2);
+  assert.notEqual(h.byClass('bot-management-drawer')[0].style.display,'none');
+});
+
+test('an existing inbox conversation does not reopen the employee main chat on mount',async t=>{
+  const h=await workspace(t);
+  assert.deepEqual(h.events.filter(event=>['chat','employee-chat'].includes(event[0])),[]);
+});
+
+test('returning from inbox to the same employee default route opens chat',async t=>{
+  const h=await workspace(t);h.props.autoOpenChat=true;await h.settle();
+  assert.equal(h.events.filter(event=>event[0]==='chat').length,1);
+});
+
+test('an automatic entry neither reopens on refresh nor duplicates a roster click',async t=>{
+  const h=await createManagerHarness({initial:{chatMode:true,autoOpenChat:true}});t.after(()=>h.dispose());
+  await h.state.refresh();await h.settle();
+  assert.equal(h.events.filter(event=>['chat','employee-chat'].includes(event[0])).length,1);
+  const dsh=h.fixture.roster.find(row=>row.employee.runtime==='DSH');
+  h.byClass('bot-roster-row').find(row=>h.text(row).includes(dsh.employee.name)).props.onClick();await h.settle();
+  assert.deepEqual(h.events.filter(event=>['chat','employee-chat'].includes(event[0])).map(event=>event[1].employee.id),['employee_hermes',dsh.id]);
+});
+
+test('retrying a failed initial employee read opens the recovered chat',async t=>{
+  const {managerFixture}=await import('../verification/bot-management-harness.mjs');
+  const fixture=managerFixture();fixture.botError=Error('暂时无法读取员工');
+  const h=await createManagerHarness({fixture,initial:{chatMode:true,autoOpenChat:true}});t.after(()=>h.dispose());
+  assert.deepEqual(h.events.filter(event=>event[0]==='chat'),[]);
+  assert.ok(h.findAll(node=>node.props.role==='alert'&&h.text(node).includes('暂时无法读取员工')).length);
+  fixture.botError=null;h.button('重试打开聊天').props.onClick();await h.settle();
+  assert.equal(h.events.filter(event=>event[0]==='chat').length,1);
+});
+
 test('the roster retains a unified employee creator and the template market',async t=>{
   const h=await workspace(t);
   h.button('新建员工').props.onClick();assert.deepEqual(h.events.at(-1),['create-employee',undefined]);

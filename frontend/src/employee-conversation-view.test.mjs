@@ -131,6 +131,13 @@ test('compiled App uses one persistent workbench and only renders the selected e
   assert.equal(ui.outer.children.chat({employeeId:'other',openSection:ui.openSection}).some(value=>value.type===ui.chat),false);
   const pending=wiring({employeeChatView:{ready:false,pending:true,error:''}});assert.equal(pending.outer.children.chat({employeeId:'employee',openSection:pending.openSection}).some(value=>value.type===pending.chat),false);
 });
+
+test('compiled App opens chat automatically only for the default employee route',()=>{
+  assert.equal(wiring({page:'bots',botRouteId:'employee',botInitialTab:'chat'}).outer.props['auto-open-chat'],true);
+  assert.equal(wiring({page:'bots',botRouteId:'employee',botInitialTab:'settings'}).outer.props['auto-open-chat'],false);
+  assert.equal(wiring({page:'inbox'}).outer.props['auto-open-chat'],false);
+  assert.equal(wiring({page:'bots',botRouteId:'',botInitialTab:'chat'}).outer.props['auto-open-chat'],false);
+});
 test('compiled App retains strict Bot controls and actual DSH model/device settings policy',()=>{
   const bot={id:'employee',employee:{model_id:'configured'}},managed=wiring({botChatView:{ready:true},conversationBotBinding:bot,conversationExecutionBusy:true,conversationCanStop:true});
   const strict=managed.outer.children.chat({employeeId:'employee',openSection:managed.openSection}).find(value=>value.type===managed.chat);assert.equal(strict.props.bot,bot);assert.equal(strict.props.managed,true);assert.equal(strict.props['can-stop'],true);
