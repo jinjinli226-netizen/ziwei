@@ -15,4 +15,12 @@
 
 原生现场证据：`D:\AINavtie\ops\ziwei\dsh-unmapped-20261101\NATIVE-DSH-EVIDENCE.json`。工具进程存在旧文件视图，诊断使用独立原生 helper；不以旧视图覆盖正在运行客户端的状态文件。未删除正式动作、投递记录或员工。
 
-源码验证完成；客户端安装与现场收敛在发布后另行记录，不把源码测试当作已上线。
+## 实际安装与发布
+
+源码提交 `1b7c8b278f5660684e50b9e5bf28f61819b7f3b9` 已推送并核对远端。官方 updater 返回 `complete`，原生启动退出 0；新 PID 为 73204，build 为 `4a663272913077c1209d221e38834424126f480f55e545882aea3425a7b4ad72`。原生验收 `healthz/readyz` 均为 200、connected，空闲时 `safe/stopSafe=true` 且 issues 为空。根会话另行读回 ready=200、目标 build 一致，旧历史 UNMAPPED 已消失；正常活动任务仍按实际状态报告待投递。
+
+旧客户端已排空，在精确核对实例及候选扫描安全后，只结束其旧根进程以加载修复。原 action-state 摘要前后一致；3 个 Profile、原配置和 Gateway 6716 均保留。没有手工删除旧动作来绕过问题。
+
+正式 CLI 包已发布，704762 字节，SHA256 `0b311b191ec1e7255cb1fe0b640e6d1af50454a9f9c8294bb517fba9f0ac2d9e`；本轮无需替换网页、API 或手机版。安装回执：`D:\AINavtie\ops\ziwei\dsh-settlement-release-20261101\INSTALL-ACCEPTANCE.json`；发布回执：`D:\Ziwei-Local\artifacts\cli-download-1b7c8b2-20261101\PUBLISHED.json`。
+
+现场单次扫描与网络响应仍受文件 I/O 和活动投递影响，不把访问次数回归写成普遍的响应耗时提速。本轮没有新增模型调用或重放业务。
