@@ -1,8 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {waitForClientReady} from '../src/client-start-readiness.mjs';
+import {readFile} from 'node:fs/promises';
+import {setTimeout as sleep} from 'node:timers/promises';
 
 const build='a'.repeat(64),pid=123;
+
+test('the real startup health probe accepts a correctly bound response taking over one second',async()=>{
+ const source=await readFile(new URL('../scripts/start-ziwei-user.mjs',import.meta.url),'utf8');
+ const match=source.match(/async function probe\(url\) \{[\s\S]*?\n\}/);assert.ok(match);
+ const body={service:'ziwei_user',agentId:'ziwei_user',workspace:'probe-fixture',deviceId:'fixture-device'};
+ const fetch=async(_url,{signal})=>{await sleep(1200,undefined,{signal});return{ok:true,status:200,json:async()=>body};};
+ const probe=new Function('fetch','expectedWorkspace','expectedAgent','config',match[0]+'\nreturn probe;')(fetch,'probe-fixture','ziwei_user',{deviceId:'fixture-device'});
+ assert.equal((await probe('http://127.0.0.1/isolated-no-network')).ok,true);
+});
 function clock(){let value=0;return{now:()=>value,sleep:async ms=>{value+=ms;},advance:ms=>{value+=ms;}};}
 
 test('a correctly bound daemon can finish first connection after the former 15-second window',async()=>{

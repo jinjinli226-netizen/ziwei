@@ -27,7 +27,7 @@ const readyUrl = `http://${host}:${port}/readyz`;
 
 async function probe(url) {
   try {
-    const response = await fetch(url, { signal: AbortSignal.timeout(1000) });
+    const response = await fetch(url, { signal: AbortSignal.timeout(5000) });
     const body = await response.json().catch(() => ({}));
     // Older daemons did not expose identity on /readyz.  Accept omitted
     // fields for upgrade compatibility, while rejecting an explicit mismatch.
