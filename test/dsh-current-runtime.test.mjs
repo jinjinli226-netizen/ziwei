@@ -7,7 +7,8 @@ test('DSH uses native method URLs, value frames, tool events, streaming text and
   const f=await dshFixture(t);const stages=[];const output=[];
   const result=await executeDshRuntime({baseUrl:f.baseUrl,...f.transport,botName:'research-bot',prompt:'检查状态',onStage:s=>stages.push(s),onOutput:c=>output.push(c)});
   assert.equal(result.status,'succeeded');assert.equal(result.output,'DSH 完成');assert.equal(result.sessionId,'research-bot-session-1');
-  assert.ok(stages.some(s=>s.stage==='reasoning' && s.summary==='先读取状态'));
+  assert.ok(stages.some(s=>s.stage==='reasoning' && !s.summary));
+  assert.ok(stages.some(s=>s.stage==='response' && s.text==='DSH '));
   assert.ok(stages.some(s=>s.stage==='tool' && s.detail.includes('read')));
   assert.equal(output.join(''),'DSH 完成');assert.ok(f.calls.some(c=>c.path.endsWith('/api/session/prompt')));
 });

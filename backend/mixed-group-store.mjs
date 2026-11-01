@@ -35,7 +35,7 @@ export function createMixedGroupStore(repo) {
     const value = rowView(row), runs = parse(row.runs_json) || [];
     const refreshed = runs.map(run => {
       const action = repo.getA2AAction(run.actionId, { workspaceSlug: slug });
-      return action ? { ...run, status: action.status, error: action.error || null, output: action.result?.output || action.result?.result?.output || null, attachments: (action.result?.outputArtifacts || action.result?.result?.outputArtifacts || []).filter(item=>item.attachmentId).map(({attachmentId,name,mimeType,size,sha256})=>({attachmentId,name,mimeType,size,sha256})) } : run;
+      return action ? { ...run, ...(action.stream?{stream:action.stream}:{}), status: action.status, error: action.error || null, output: action.result?.output || action.result?.result?.output || null, attachments: (action.result?.outputArtifacts || action.result?.result?.outputArtifacts || []).filter(item=>item.attachmentId).map(({attachmentId,name,mimeType,size,sha256})=>({attachmentId,name,mimeType,size,sha256})) } : run;
     });
     let messages=value.messages;
     const completed=refreshed.filter(run=>['succeeded','failed','cancelled','expired'].includes(run.status));
@@ -48,7 +48,7 @@ export function createMixedGroupStore(repo) {
       const userMessage=messages.find(message=>message.id===runMessageId(refreshed));
       if(userMessage)messages=appendMixedGroupTurn({...value,messages},{messageId:userMessage.id,content:userMessage.text,runs:outcomes,updatedAt:nowIso()}).messages;
     }
-    const nextMessages=JSON.stringify(persistedMessages(messages)),nextRuns=JSON.stringify(refreshed);
+    const nextMessages=JSON.stringify(persistedMessages(messages)),nextRuns=JSON.stringify(refreshed.map(({stream:_stream,...run})=>run));
     if(nextRuns!==JSON.stringify(runs)||nextMessages!==JSON.stringify(value.messages))db.prepare('UPDATE mixed_groups SET runs_json=?,messages_json=?,updated_at=? WHERE id=?').run(nextRuns,nextMessages,nowIso(),id);
     const states=refreshed.map(run=>run.status==='expired'?'unknown':run.status),state=!states.length?'planned':states.some(value=>value==='unknown')?'unknown':states.some(value=>value==='failed')&&states.some(value=>value==='succeeded')?'partial':states.every(value=>value==='succeeded')?'succeeded':states.every(value=>value==='failed')?'failed':states.every(value=>value==='cancelled')?'cancelled':states.some(value=>['pending','acked','running'].includes(value))?'running':'planned';
     const projected=messages.map(message=>({...message,...(message.attachments?.length?{attachments:projectAttachments(ws.id,message.sourceConversationId,message.attachments)}:{})}));

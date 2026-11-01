@@ -134,3 +134,66 @@ test('retained uploads expose retry and discard without an error string and keep
  h.props.attachmentRetry=false;h.props.attachmentReading=true;h.props.attachmentProgress=42;await h.settle();assert.match(h.text(),/42%/);
  h.button('取消上传').props.onClick();assert.deepEqual(h.events.at(-1),['cancel-attachment-upload']);
 });
+
+test('the real chat renders growing runtime body as one assistant message and replaces it on completion',async t=>{
+ const execution={id:'live-action',status:'acked',stream:{channel:'assistant',messageId:'stream:live-action',sequence:1,text:'**正在核对**'}};
+ const h=await harness(t,{execution,conversation:{id:'live-chat',messages:[{id:'u',role:'user',content:'请汇总'}]}});
+ const answers=()=>h.all(el=>el.type==='article'&&el.props['data-streaming']==='true');
+ assert.equal(answers().length,1);const first=answers()[0];
+ assert.equal(first.props['data-message-id'],undefined,'transient output cannot advance the saved-message read watermark');
+ assert.match(h.all(el=>el.props.class==='bot-chat-markdown')[0].props.innerHTML,/<strong>正在核对<\/strong>/);
+ assert.equal(h.button('转发此消息')!==undefined,true);
+ assert.equal(h.all(el=>el.type==='button'&&el.props['aria-label']==='转发此消息').length,1,'only saved user messages can be forwarded');
+ const timeline=h.state.timeline.value;timeline.scrollTop=100;h.state.followLatest.value=false;
+ h.props.execution.stream={...execution.stream,sequence:2,text:'**正在核对**全部数据'};await h.settle();
+ assert.equal(answers()[0],first);assert.equal(timeline.scrollTop,100);
+ h.props.execution.stream={...h.props.execution.stream};await h.settle();assert.equal(answers().length,1);
+ h.props.execution={...h.props.execution,status:'succeeded'};
+ h.props.conversation.messages.push({id:'final',role:'assistant',content:'正式回答',attachments:[{name:'实际结果.csv'}]});await h.settle();
+ assert.equal(answers().length,0);assert.equal(h.all(el=>el.props.class==='bot-chat-markdown').length,1);
+ assert.equal(h.all(el=>el.props.class==='bot-chat-markdown')[0].props.innerHTML,'<p>正式回答</p>');
+ assert.match(h.text(),/实际结果.csv/);assert.doesNotMatch(h.text(),/正在输出/);
+});
+
+test('an active turn without body reports waiting while tool and public summary remain separate',async t=>{
+ const h=await harness(t,{execution:{id:'waiting',status:'acked'},events:[{id:'tool',label:'读取文件',detail:'本机命令活动'},{id:'reasoning',label:'思考摘要',summary:'公开摘要'}]});
+ assert.match(h.text(),/等待运行时返回正文/);assert.match(h.text(),/读取文件/);assert.match(h.text(),/公开摘要/);
+ assert.equal(h.all(el=>el.props['data-streaming']==='true').length,0);
+});
+
+test('growing body snapshots follow within 40px and preserve history with a jump beyond 120px',async t=>{
+ const h=await harness(t,{execution:{id:'live',status:'acked',stream:{responseId:'live:assistant',sequence:1,text:'正文'}}}),timeline=h.state.timeline.value;
+ let top=700;timeline.scrollHeight=1000;timeline.clientHeight=300;
+ Object.defineProperty(timeline,'scrollTop',{get:()=>top,set:value=>{top=Math.max(0,Math.min(value,timeline.scrollHeight-timeline.clientHeight));}});
+ const scrolled=()=>timeline.props.onScroll({currentTarget:timeline});
+ timeline.props.onWheelPassive({deltaY:1});top=660;scrolled();timeline.scrollHeight=1100;
+ h.props.execution.stream={...h.props.execution.stream,sequence:2,text:'正文增加'};await h.settle();assert.equal(top,800);
+ timeline.props.onWheelPassive({deltaY:-1});top=759;scrolled();timeline.scrollHeight=1200;
+ h.props.execution.stream={...h.props.execution.stream,sequence:3,text:'正文继续增加'};await h.settle();assert.equal(top,759);assert.ok(h.button('跳至最新'));
+ timeline.props.onWheelPassive({deltaY:1});top=780;scrolled();await h.settle();assert.equal(h.button('跳至最新'),undefined);
+ top=779;scrolled();await h.settle();assert.ok(h.button('跳至最新'));
+ h.button('跳至最新').props.onClick();await h.settle();assert.equal(top,900);
+ timeline.scrollHeight=1300;h.props.execution.stream={...h.props.execution.stream,sequence:4,text:'正文仍然增长'};await h.settle();assert.equal(top,1000);
+});
+
+test('real repository thread snapshots drive the Vue waiting, streaming and authoritative terminal states',async t=>{
+ const {createRepository}=await import('../../backend/repository.mjs');
+ const repo=createRepository({memory:true}),slug='test-111',deviceId='vue-stream-pc';t.after(()=>repo.db.close());
+ repo.heartbeatDevice(slug,{deviceId,runtimes:{Codex:{status:'available'}}});
+ const employee=repo.createEmployee(slug,{name:'真实投影',runtime:'Codex',runtimeProfile:'vue-stream',targetDeviceId:deviceId,status:'active'});
+ const conversation=repo.createConversation(slug,{employeeId:employee.id}),sent=repo.addConversationMessage(conversation.id,{content:'逐步回答'}),actionId=sent.execution.id;
+ const thread=()=>repo.getConversation(conversation.id,{}, {view:'thread'}),initial=thread();
+ const h=await harness(t,{employee,conversation:initial,execution:initial.execution});
+ assert.match(h.text(),/等待运行时返回正文/);
+ repo.ackA2AAction(actionId,{deviceId});
+ repo.recordA2AEvent(actionId,{deviceId,eventId:'vue-response',type:'action.response',data:{schemaVersion:1,responseId:`${actionId}:assistant`,sequence:1,phase:'streaming',text:'**终态前出现的正文**',format:'markdown'}});
+ repo.recordA2AEvent(actionId,{deviceId,eventId:'vue-tool',type:'action.stage',data:{stage:'tool',detail:'核对资料'}});
+ let current=thread();h.props.conversation=current;h.props.execution=current.execution;await h.settle();
+ assert.equal(h.all(el=>el.props['data-streaming']==='true').length,1);assert.doesNotMatch(h.text(),/等待运行时返回正文/);
+ assert.match(h.all(el=>el.props.class==='bot-chat-markdown')[0].props.innerHTML,/<strong>终态前出现的正文<\/strong>/);
+ repo.resultA2AAction(actionId,{deviceId,status:'succeeded',result:{output:'正式完成正文'}});
+ current=thread();h.props.conversation=current;h.props.execution=current.execution;await h.settle();
+ assert.equal(h.all(el=>el.props['data-streaming']==='true').length,0);assert.equal(h.state.executionState.value.busy,false);
+ assert.doesNotMatch(h.text(),/等待运行时返回正文|正在输出/);assert.equal(h.all(el=>el.props.class==='bot-chat-markdown').length,1);
+ assert.equal(h.all(el=>el.props.class==='bot-chat-markdown')[0].props.innerHTML,'<p>正式完成正文</p>');
+});

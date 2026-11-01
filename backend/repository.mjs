@@ -40,6 +40,7 @@ import {verifyBotProvisionReceipt} from './bot-profiles.mjs';
 import {readHistoricalPrelaunchRecovery} from './bot-historical-recovery-view.mjs';
 import {readForceAbandonRecovery} from './bot-force-abandon.mjs';
 import {botReasoningProof} from '../src/hermes-bot-reasoning.mjs';
+import {validateActionResponse,createActionResponseReader,actionEventDataSql} from './action-response-stream.mjs';
 import { botFailure } from '../src/hermes-bot-config.mjs';
 import { CREATOR_BOT_GUIDANCE } from './employees/creator-template.mjs';
 import { assertMaintenanceAttempt, maintenancePublicEventData, maintenanceActionDeadline, guardMaintenanceExecutionAdmission, isMaintenanceTerminalInput, settleExpiredMaintenanceAction } from './action-maintenance.mjs';
@@ -592,9 +593,10 @@ export function createRepository(options = {}, io={}) {
     catch(error){db.exec('ROLLBACK TO task_assignment_write; RELEASE task_assignment_write');throw error;}
     if(parentEvents)parentEvents.push(...events);else for(const event of events)options.onEvent?.(event);
   };
+  const actionResponseStream=createActionResponseReader(db);
   const actionEvents = (actionId, eventView = 'full') => db.prepare(eventView === 'mobile'
-    ? "SELECT id,action_id,type,message,data_json,created_at FROM a2a_action_events WHERE action_id=? AND (type IN ('succeeded','failed','cancelled','expired') OR id=(SELECT id FROM a2a_action_events WHERE action_id=? ORDER BY created_at DESC,id DESC LIMIT 1)) ORDER BY created_at,id"
-    : 'SELECT id,action_id,type,message,data_json,created_at FROM a2a_action_events WHERE action_id=? ORDER BY created_at,id').all(...(eventView === 'mobile' ? [actionId,actionId] : [actionId])).map(event => ({
+    ? `SELECT id,action_id,type,message,${actionEventDataSql},created_at FROM a2a_action_events WHERE action_id=? AND (type IN ('succeeded','failed','cancelled','expired') OR id=(SELECT id FROM a2a_action_events WHERE action_id=? ORDER BY created_at DESC,id DESC LIMIT 1)) ORDER BY created_at,id`
+    : `SELECT id,action_id,type,message,${actionEventDataSql},created_at FROM a2a_action_events WHERE action_id=? ORDER BY created_at,id`).all(...(eventView === 'mobile' ? [actionId,actionId] : [actionId])).map(event => ({
     id:event.id, action_id:event.action_id, type:event.type, message:event.message,
     data:maintenancePublicEventData(event.type,parse(event.data_json)), created_at:event.created_at
   }));
@@ -608,7 +610,10 @@ export function createRepository(options = {}, io={}) {
     return employeeWorkspace ? { ...rest, managementMcp: { enabled: true, workspace: employeeWorkspace } } : rest;
   };
   const historicalActionMetadata = row => { const prelaunchRecovery=readHistoricalPrelaunchRecovery(db,row),forceAbandonRecovery=readForceAbandonRecovery(db,row),failureFinalization=readBotFailureFinalization(db,row); return {...(prelaunchRecovery?{prelaunchRecovery}:{}),...(forceAbandonRecovery?{forceAbandonRecovery}:{}),...(failureFinalization?{failureFinalization,reconciliationRequired:false}:{})}; };
-  const actionView = (row, { includeEvents = false, eventView = 'full' } = {}) => row ? ({
+  const actionView = (row, { includeEvents = false, eventView = 'full' } = {}) => {
+    if(!row)return null;
+    const stream=actionResponseStream(row);
+    return {
     id: row.id,
     task_id: row.task_id,
     agent_id: row.agent_id,
@@ -622,8 +627,10 @@ export function createRepository(options = {}, io={}) {
     result: parse(row.result_json),
     error: row.error || null,
     ...historicalActionMetadata(row),
+    ...(stream?{stream}:{}),
     ...(includeEvents ? { events: actionEvents(row.id,eventView), ...(eventView === 'mobile' ? {event_count:db.prepare('SELECT COUNT(*) AS count FROM a2a_action_events WHERE action_id=?').get(row.id).count} : {}) } : {})
-  }) : null;
+    };
+  };
   // Message attachments are the canonical image bytes. History/sidebar and
   // send-status views retain execution metadata without retransmitting them.
   const conversationActionView = (row, options) => {
@@ -682,6 +689,7 @@ export function createRepository(options = {}, io={}) {
       current = { ...current, status:'expired', completed_at:timestamp };
     }
     const view = thread?thread.execution(current.id,workspaceId):conversationActionView(current);
+    if(thread){const stream=actionResponseStream(current);if(stream)view.stream=stream;}
     view.events = actionEvents(current.id,thread?'mobile':'full');
     if(thread)view.event_count=db.prepare('SELECT COUNT(*) AS count FROM a2a_action_events WHERE action_id=?').get(current.id).count;
     return view;
@@ -2396,7 +2404,8 @@ export function createRepository(options = {}, io={}) {
         const suppliedId = input.eventId;
         if (suppliedId !== undefined && suppliedId !== null && (typeof suppliedId !== 'string' || !suppliedId.trim() || suppliedId.length > 200)) throw new Error('A2A eventId must be a nonempty string of at most 200 characters');
         const eventId = suppliedId === undefined || suppliedId === null ? id('action-event') : `action-event_${hashSecret(JSON.stringify([actionId, suppliedId.trim()]))}`;
-        const type = String(input.type || 'progress').slice(0,80), message = String(input.message || '').slice(0,4000);
+        const type = String(input.type || 'progress').slice(0,80), message = type==='action.response'?'正在生成回答':String(input.message || '').slice(0,4000);
+        if(type==='action.response')validateActionResponse(actionId,input.data);
         if (type.startsWith('maintenance.')) throw Object.assign(new Error('Maintenance events require the dedicated checkpoint endpoint'), {code:'MAINTENANCE_EVENT_RESERVED',status:403});
         const maintenance = assertMaintenanceAttempt(db,row,input);
         const eventData = maintenance ? { ...(input.data && typeof input.data==='object' && !Array.isArray(input.data) ? input.data : {value:input.data ?? null}), maintenanceGeneration:maintenance.generation } : input.data ?? null;
@@ -2434,9 +2443,10 @@ export function createRepository(options = {}, io={}) {
       }
       if (expired) throw new Error('A2A action expired');
       for (const auditEvent of deferredEvents) options.onEvent?.(auditEvent);
+      if(event.type==='action.response'){const {text:_text,...metadata}=event.data;return {...event,data:metadata};}
       return event;
     },
-    listA2AEvents(actionId) { const row=db.prepare('SELECT id FROM a2a_actions WHERE id=?').get(actionId); if (!row) throw new Error('A2A action not found'); return db.prepare('SELECT id,action_id,type,message,data_json,created_at FROM a2a_action_events WHERE action_id=? ORDER BY created_at,id').all(actionId).map(({data_json,...item}) => ({...item,data:maintenancePublicEventData(item.type,parse(data_json))})); },
+    listA2AEvents(actionId) { const row=db.prepare('SELECT id FROM a2a_actions WHERE id=?').get(actionId); if (!row) throw new Error('A2A action not found'); return db.prepare(`SELECT id,action_id,type,message,${actionEventDataSql},created_at FROM a2a_action_events WHERE action_id=? ORDER BY created_at,id`).all(actionId).map(({data_json,...item}) => ({...item,data:maintenancePublicEventData(item.type,parse(data_json))})); },
     dispatchBotCollaboration(slug,manifest,key) {
       if(typeof key!=='string'||!key||key.length>160)throw botFailure('IDEMPOTENCY_KEY_REQUIRED','协作需要稳定请求标识',400);
       const ws=workspace(slug);db.exec('SAVEPOINT bot_collaboration');

@@ -51,6 +51,7 @@ fs.mkdirSync(runtimeDir, { recursive: true });
 if (config.hermesHome) process.env.HERMES_HOME = String(config.hermesHome);
 const logPath = path.join(logDir, 'daemon.log');
 function log(event, extra = {}) {
+  if(event==='action.response')extra={workspace:extra.workspace,actionId:extra.actionId,type:extra.type,bytes:Buffer.byteLength(extra.text||'')};
   const line = redactSecrets(JSON.stringify({ at: new Date().toISOString(), pid: process.pid, event, service: 'ziwei_user', version: VERSION, agentId: 'ziwei_user', ...extra }));
   fs.appendFileSync(logPath, line + '\n');
   // The exit event can only perform synchronous cleanup. Do not enqueue a
@@ -112,7 +113,7 @@ function installConnections() {
       authorizeResume:(action,receipt)=>state.maintenanceResume.authorize(action,receipt),
       onEvent: (event, extra) => {
         log(event, { workspace: config.workspace, ...extra });
-        if (extra?.actionId && ['action.started', 'action.output', 'action.progress', 'action.stage', 'action.waiting'].includes(event)) state.actionDelivery?.recordEvent(extra.actionId, event, extra);
+        if (extra?.actionId && ['action.started', 'action.output', 'action.progress', 'action.stage', 'action.waiting','action.response'].includes(event)) state.actionDelivery?.recordEvent(extra.actionId, event, extra);
         if (extra?.actionId && event === 'action.result_recovered') void state.actionDelivery?.recoverOriginal(extra.actionId).catch(error => log('a2a_recovered_result_pending', { workspace: config.workspace, actionId: extra.actionId, error: error.message }));
       },
     });

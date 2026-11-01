@@ -1,6 +1,7 @@
 import { escapeHtml, employeeName, avatarUrl, presence, messageText, formatTime, executionUncertain, botStopPresentation, blockingChatExecution } from './model.js';
 import {failureFinalization,finalizationPresentation} from './failure-finalization.mjs';
 import { renderBotSettings } from './bot-settings.js';
+import { assistantResponseStream } from './chat-stream.js';
 import { renderDeviceSettings } from './device-settings.js';
 import { isForwardableMessage, orderedForwardMessages, FORWARD_MESSAGE_LIMIT, FORWARD_NOTE_LIMIT } from './forwarding.js';
 import { searchChatMessages } from './chat-search.js';
@@ -286,10 +287,12 @@ function chatSessions(state) {
 }
 function chatPage(state) {
   const employee=state.selectedEmployee || state.bot?.employee || state.bot || {}, status=statusOf(state.bot || {...employee,execution:state.conversation?.execution});
+  const stream=assistantResponseStream(state.conversation?.execution);
+  const response=stream?`<article class="message incoming streaming-response" data-response-id="${e(stream.responseId)}" aria-label="正在生成的回复" aria-busy="true">${avatar(employee,'message-avatar')}<div class="message-body"><div class="message-bubble"><div class="prose markdown">${renderMarkdown(stream.text)}</div></div><div class="message-meta"><span class="message-time">正在回复…</span></div></div></article>`:'';
   const extra=`<div class="chat-header-actions"><button type="button" class="icon-button" data-action="chat-sessions" aria-label="切换会话"${state.conversation?.id?'':' disabled'}>${icon('chat')}</button><button type="button" class="icon-button" data-action="chat-find-open" aria-label="查找聊天记录"${state.conversation?.id?'':' disabled'}>${icon('search')}</button><button class="icon-button" data-action="employee-detail" data-id="${e(employee.id || state.bot?.id)}" aria-label="员工详情">${icon('more')}</button></div>`;
   const history=rows(state.messages).length ? `<div class="conversation-start">${icon('link')}长期聊天 · 与电脑端同步</div>${state.messages.map(message=>messageCard(message,employee,state,true)).join('')}` : state.chatLoading ? '<div class="empty-state" role="status"><span class="spinner"></span><h3>正在读取原聊天记录</h3><p>稍等，正在与电脑端同步</p></div>' : !state.conversation?.id ? empty('alert','聊天记录暂未加载','请重新读取原聊天记录',actionButton('refresh','重新加载','refresh','soft')) : empty('chat',`和${nameOf(employee)}聊聊`,'交代一件事，或发送图片一起看');
   const earlier=state.conversation?.messagePage?.hasMore?`<div class="chat-history-control"><button type="button" class="button secondary" data-action="chat-history"${state.historyLoading?' disabled':''}>${state.historyLoading?'正在加载…':'加载更早消息'}</button>${state.historyError?`<p role="alert">${e(state.historyError)}</p>`:''}</div>`:'';
-  return `${pageHeader(state,nameOf(employee),status.label,extra,employee)}<main class="chat-main">${alerts(state)}${employeeReadNotices(state,true)}${chatPreferencesNotice(state)}${chatFindPanel(state)}${chatSessions(state)}<div class="chat-history chat-timeline" data-chat-scroll>${earlier}${history}${renderChatActivity(state)}${renderChatInteractions(state)}<div data-chat-end></div></div></main>${state.forward?.phase==='select'?forwardSelectionBar(state):composer(state)}`;
+  return `${pageHeader(state,nameOf(employee),status.label,extra,employee)}<main class="chat-main">${alerts(state)}${employeeReadNotices(state,true)}${chatPreferencesNotice(state)}${chatFindPanel(state)}${chatSessions(state)}<div class="chat-history chat-timeline" data-chat-scroll>${earlier}${history}${response}${renderChatActivity(state)}${renderChatInteractions(state)}<div data-chat-end></div></div></main>${state.forward?.phase==='select'?forwardSelectionBar(state):composer(state)}`;
 }
 function forwardSelectionBar(state) {
   const selected=orderedForwardMessages(state.messages,state.forward?.selectedIds);

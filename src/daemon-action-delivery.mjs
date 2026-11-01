@@ -11,6 +11,7 @@ import {isDshAction,matchesDshSessionBinding,sameDshSessionBinding,confirmedDshS
 // contain full image input. Small authenticated receipts have a separate budget.
 export const ACTION_TRANSPORT_BUDGETS=Object.freeze({poll:600_000,ack:15_000,event:15_000,result:600_000});
 const terminal=new Set(['succeeded','failed','expired']);
+const RESPONSE_TEXT_BYTES=1024*1024;
 export const ARCHIVED_UNCONFIRMED_STATE='archived_unconfirmed';
 const archiveReasons=new Set(['PERMANENT_SERVER_REJECTION','SERVER_LEASE_EXPIRED','SERVER_TERMINAL_UNCONFIRMED']);
 const hash=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -38,7 +39,7 @@ function minimalAction(action){const p=action.payload||{};return {...Object.from
  */
 export function createActionDelivery({directory,identity,post,dispatch,attachmentTransfer=null,recoverResult=()=>null,retryDelays=[250,1000],onEvent=()=>{},onSuccess=async()=>{},onConfirmed=async()=>{},maxConfirmedRecords=1000,confirmedRetentionMs=7*24*60*60*1000,now=()=>Date.now(),autoArchiveUnconfirmed=false}={}){
  if(!directory||typeof post!=='function'||typeof dispatch!=='function'||typeof onConfirmed!=='function')throw new TypeError('Action delivery requires directory, transport and dispatcher');
- const connection=scope(identity||{}),records=new Map(),active=new Map(),activeBindings=new Map(),eventFlushes=new Map(),archivedRetries=new Map();
+ const connection=scope(identity||{}),records=new Map(),active=new Map(),activeBindings=new Map(),eventFlushes=new Map(),archivedRetries=new Map(),inFlightEvents=new Map(),responseTimers=new Map();
  const fileFor=id=>path.join(directory,`${hash(String(id))}.json`);
  const blobFor=(id,kind)=>path.join(directory,`${hash(String(id))}.${kind}.json`);
  const report=(event,data)=>{try{onEvent(event,data);}catch{}};
@@ -55,6 +56,7 @@ export function createActionDelivery({directory,identity,post,dispatch,attachmen
   const original=record.actionDigest?readBlob(record,'action').action:record.action;
   await onConfirmed({...original,...record.action,payload:{...original.payload,...record.action.payload}},status);
   const confirmed={...record,state:'confirmed',serverStatus:status,events:[],confirmedAt:new Date(now()).toISOString(),action:minimalAction(record.action)};
+  delete confirmed.responseSequence;
   // Once the authenticated server owns the terminal result, the delivery
   // journal needs only identity and confirmation. Keep large images in the
   // existing dispatcher cache and server history, not another retained copy.
@@ -64,6 +66,8 @@ export function createActionDelivery({directory,identity,post,dispatch,attachmen
   // Confirmation must be durable before the shared in-memory record changes.
   // A failed save must remain recoverable and must never enter retention.
   save(confirmed);
+  clearTimeout(responseTimers.get(record.action.id));responseTimers.delete(record.action.id);
+  if(inFlightEvents.get(record.action.id)?.type==='action.response')eventFlushes.delete(record.action.id);
   for(const key of Object.keys(record))if(!Object.hasOwn(confirmed,key))delete record[key];
   Object.assign(record,confirmed);
   if(!record.retainEvidence)removeBlobs(record.action.id);pruneConfirmed();
@@ -76,6 +80,7 @@ export function createActionDelivery({directory,identity,post,dispatch,attachmen
   }
   if(record){
    if(record.version!==2||record.action?.id!==action.id||!Array.isArray(record.events)||!['awaiting_ack','acked','maintenance_paused','result_pending','confirmed','blocked',ARCHIVED_UNCONFIRMED_STATE].includes(record.state))throw new Error(`Action delivery journal corrupt: ${action.id}`);
+   if(record.responseSequence!==undefined&&(!Number.isSafeInteger(record.responseSequence)||record.responseSequence<0))throw new Error(`Action delivery journal corrupt (response sequence): ${action.id}`);
    if(record.state==='confirmed'&&(!terminal.has(record.serverStatus)||!Number.isFinite(Date.parse(record.confirmedAt))))throw new Error(`Action delivery journal corrupt: ${action.id}`);
    if(record.state===ARCHIVED_UNCONFIRMED_STATE&&!validArchivedUnconfirmed(record))throw new Error(`Action delivery journal corrupt: ${action.id}`);
    if(record.state!=='confirmed'||record.retainEvidence){
@@ -114,15 +119,51 @@ export function createActionDelivery({directory,identity,post,dispatch,attachmen
   const promise=(async()=>{
   while(record.events.length&&!['confirmed','blocked',ARCHIVED_UNCONFIRMED_STATE].includes(record.state)){
     const event=record.events[0];
+    if(event.type==='action.response'&&responseTimers.has(id))break;
+    inFlightEvents.set(id,event);
     try{await retry(()=>post(`/a2a/v1/actions/${encodeURIComponent(id)}/events`,event,{timeoutMs:ACTION_TRANSPORT_BUDGETS.event}));}
     catch(error){if(error.status!==404)throw error;report('a2a_events_unsupported',{actionId:id});}
+    finally{inFlightEvents.delete(id);}
     record.events=record.events.filter(item=>item.eventId!==event.eventId);save(record);
    }
   })().finally(()=>eventFlushes.delete(id));
   eventFlushes.set(id,promise);return promise;
  }
+ function flushResponse(record){
+  const id=record.action.id;if(!responseTimers.has(id))return;
+  clearTimeout(responseTimers.get(id));
+  try{save(record);}catch(error){responseTimers.set(id,null);report('a2a_event_persistence_failed',{actionId:id,type:'action.response',error:error.message});return;}
+  responseTimers.delete(id);
+  void flushEvents(record).catch(error=>report('a2a_event_pending',{actionId:id,error:error.message}));
+ }
+ function recordResponse(record,data){
+  if(typeof data?.text!=='string')return false;
+  const id=record.action.id,previousEvents=record.events,previousSequence=record.responseSequence;
+  const sequence=(previousSequence||0)+1;if(!Number.isSafeInteger(sequence))return false;
+  const bytes=Buffer.from(data.text,'utf8');let end=Math.min(bytes.length,RESPONSE_TEXT_BYTES);
+  if(end<bytes.length)while((bytes[end]&0xc0)===0x80)end--;
+  const text=bytes.subarray(0,end).toString('utf8'),inFlight=inFlightEvents.get(id)?.eventId;
+  // A queued event may already exist on the server after a lost receipt.
+  // Replacements always get a new ID; the in-flight body stays untouched.
+  const events=previousEvents.filter(event=>event.type!=='action.response'||event.eventId===inFlight);
+  if(events.length>=256){
+   const index=events.findLastIndex(event=>event.eventId!==inFlight&&!terminal.has(event.type));
+   if(index<0)return false;
+   report('a2a_event_queue_full',{actionId:id,type:events[index].type});events.splice(index,1);
+  }
+  events.push({agentId:'ziwei_user',eventId:randomUUID(),type:'action.response',message:'正在生成回答',data:{schemaVersion:1,responseId:`${id}:assistant`,sequence,phase:'streaming',text,format:'markdown'},...(record.maintenanceAttempt?{maintenanceAttempt:{...record.maintenanceAttempt}}:{})});
+  record.events=events;record.responseSequence=sequence;
+  if(!previousSequence){
+   try{save(record);}catch(error){record.events=previousEvents;delete record.responseSequence;report('a2a_event_persistence_failed',{actionId:id,type:'action.response',error:error.message});return false;}
+   void flushEvents(record).catch(error=>report('a2a_event_pending',{actionId:id,error:error.message}));
+  }else if(!responseTimers.get(id)){
+   const timer=setTimeout(()=>flushResponse(record),100);timer.unref?.();responseTimers.set(id,timer);
+  }
+  return true;
+ }
  function recordEvent(id,type,data={}){
   const record=records.get(id);if(!record||['confirmed','blocked',ARCHIVED_UNCONFIRMED_STATE].includes(record.state))return false;
+  if(type==='action.response')return recordResponse(record,data);
   // Bound progress storage; completed results and image bytes use the result
   // envelope. An overflow is explicit in diagnostics, never unbounded retries.
   if(record.events.length>=256){report('a2a_event_queue_full',{actionId:id,type});return false;}
@@ -225,6 +266,7 @@ export function createActionDelivery({directory,identity,post,dispatch,attachmen
  }
  async function run(action){
   const record=read(action);
+  flushResponse(record);
    if(record.state===ARCHIVED_UNCONFIRMED_STATE)return {state:record.state,status:null,reason:record.archive?.reason||null};
    if(record.state==='blocked'&&archiveUnconfirmed(record,{reason:'PERMANENT_SERVER_REJECTION',httpStatus:record.blockedStatus}))return {state:record.state,status:null,reason:record.archive.reason};
    if(['confirmed','blocked'].includes(record.state))return {state:record.state,status:record.serverStatus||null};
@@ -259,7 +301,9 @@ export function createActionDelivery({directory,identity,post,dispatch,attachmen
    if(isDshAction(record.action)&&receipt.runtimeSessionId)record.action.payload={...record.action.payload,runtimeSessionId:receipt.runtimeSessionId};
    if(record.state!=='result_pending'){record.state='acked';save(record);
     const original=readBlob(record,'action').action;
-    const result=await dispatch({...original,...record.action,payload:{...original.payload,...record.action.payload}});
+    let result;
+    try{result=await dispatch({...original,...record.action,payload:{...original.payload,...record.action.payload}});}
+    finally{flushResponse(record);}
     const pause=consumeMaintenancePaused(result);
     if(pause){
      if(!validateMaintenancePause(pause,{actionId:original.id,executionBinding:executionBinding(original)}))throw new Error('Maintenance checkpoint binding mismatch');
@@ -284,7 +328,12 @@ export function createActionDelivery({directory,identity,post,dispatch,attachmen
     recordEvent(action.id,delivery.status,{result:imageArtifactEventResult(delivery.result),error:delivery.error});
     if(status==='succeeded')await onSuccess(record.action,result);
    }
-   if(!reconciling)try{await flushEvents(record);}catch(error){report('a2a_progress_delivery_incomplete',{actionId:action.id,pendingEvents:record.events.length,error:error.message});}
+   if(!reconciling)try{
+    const flushing=flushEvents(record);
+    // The final result owns the answer even if its last progress POST stalls.
+    if(inFlightEvents.get(action.id)?.type==='action.response')void flushing.catch(error=>report('a2a_progress_delivery_incomplete',{actionId:action.id,pendingEvents:record.events.length,error:error.message}));
+    else await flushing;
+   }catch(error){report('a2a_progress_delivery_incomplete',{actionId:action.id,pendingEvents:record.events.length,error:error.message});}
    if(!resumingResult&&connection.deviceId){
     // A model may have used most of its original lease. The authenticated ACK
     // renewal marks delivery of a durable completed result, not fake execution
@@ -379,7 +428,7 @@ export function createActionDelivery({directory,identity,post,dispatch,attachmen
   retryArchivedResult,
   recordEvent,
   getMaintenancePause,
-  async flushActionEvents(id){const record=getRecord(id);if(!record)return {pending:0};await flushEvents(record);return {pending:record.events.length};},
+  async flushActionEvents(id){const record=getRecord(id);if(!record)return {pending:0};flushResponse(record);await flushEvents(record);return {pending:record.events.length};},
   async flushMaintenanceEvents(){
    await Promise.allSettled([...records.values()].filter(record=>record.state==='maintenance_paused'&&record.events.length).map(async record=>{try{await flushEvents(record);}catch(error){report('a2a_maintenance_events_pending',{actionId:record.action.id,pendingEvents:record.events.length,error:error.message});}}));
    return {pending:this.maintenanceEventsPending};

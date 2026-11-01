@@ -15,6 +15,7 @@ import {mergeLatestChat,prependChatHistory,canQueueChat} from './chat-history.js
 import {createChatInteractions} from './chat-interactions.js';
 import { createDraftAttachments, createAttachmentUploader, releaseDraftAttachments } from './attachment-upload.js';
 import { INLINE_ATTACHMENT_BYTES, MAX_ATTACHMENTS } from './conversation-attachment-policy.js';
+import { chatExecutionRunning } from './chat-stream.js';
 
 const IMAGE_LIMIT = INLINE_ATTACHMENT_BYTES;
 const avatarLimit = 2 * 1024 * 1024;
@@ -405,7 +406,7 @@ export function createController({ state, api, render = () => {}, storage = glob
     } catch (error) { return fail(error, token); }
     finally { if (valid(token)) { syncLoading(); draw(); } }
   }
-  function readChat(token = current()) {
+  function readChat(token = current(), {activity = true} = {}) {
     const employee = state.selectedEmployee;
     if (!employee || state.page !== 'chat' || state.sending || !valid(token, true)) return Promise.resolve();
     const readEpoch = chatReadEpoch;
@@ -426,10 +427,20 @@ export function createController({ state, api, render = () => {}, storage = glob
         if (!validChat(token, readEpoch)) return;
         if (conversation.employee_id && conversation.employee_id !== employee.id) throw new Error('聊天与当前员工身份不一致，请刷新核对');
         state.primaryConversationId ||= conversation.id;
+        const execution=conversation.execution,previous=state.conversation?.execution;
+        const finished=!activity&&execution?.id===previous?.id&&chatExecutionRunning(previous)&&['succeeded','failed','cancelled','expired'].includes(execution?.status);
         state.conversation = mergeLatestChat(state.conversation, conversation); state.messages = state.conversation.messages || [];
-        void readChatActivity(token);
-        if (['pending','acked','running','executing'].includes(conversation.execution?.status)) void chatInteractions.refresh();
-        else chatInteractions.reset();
+        if (finished) {
+          invalidateEmployeeReads();
+          const settle=run=>run?.id===execution.id?{...run,...execution}:run;
+          if (state.chatActivity?.actionId===execution.id) state.chatActivity={...state.chatActivity,phase:'ready',action:settle(state.chatActivity.action)||execution};
+          state.runs=state.runs.map(settle);
+          if (state.bot?.latest_run?.id===execution.id) acceptBot({...state.bot,latest_run:settle(state.bot.latest_run)});
+          void refreshEmployee(token,{skipConversation:true});
+        }
+        if (activity||finished) void readChatActivity(token);
+        if (!chatExecutionRunning(conversation.execution)) chatInteractions.reset();
+        else if (activity) void chatInteractions.refresh();
         forwarding.synchronize();
         employeeReadSucceeded('conversation');
         state.chatLoading = false;
@@ -451,13 +462,13 @@ export function createController({ state, api, render = () => {}, storage = glob
     const conversationId = state.conversation?.id, actionId = state.conversation?.execution?.id;
     if (!actionId || !api.conversationActivity || state.chatActivity?.actionId === actionId && state.chatActivity.phase === 'loading') return;
     const previous = state.chatActivity?.actionId === actionId ? state.chatActivity.action : null;
-    state.chatActivity = {actionId,phase:'loading',error:'',action:previous};
+    const activityRead={actionId,phase:'loading',error:'',action:previous};state.chatActivity=activityRead;
     try {
       const action = await api.conversationActivity(workspaceId(state),actionId,conversationId,token.employeeId,{signal:employeeGets.signal});
-      if (valid(token,true) && state.conversation?.id === conversationId && state.conversation.execution?.id === actionId) state.chatActivity = {actionId,phase:'ready',error:'',action};
+      if (valid(token,true) && state.chatActivity===activityRead && state.conversation?.id === conversationId && state.conversation.execution?.id === actionId) state.chatActivity = {actionId,phase:'ready',error:'',action};
     } catch (error) {
       if (error.status === 401) fail(error,token);
-      else if (valid(token,true) && state.conversation?.execution?.id === actionId) state.chatActivity = {actionId,phase:'error',error:error.message,action:previous};
+      else if (valid(token,true) && state.chatActivity===activityRead && state.conversation?.execution?.id === actionId) state.chatActivity = {actionId,phase:'error',error:error.message,action:previous};
     } finally { if (valid(token,true)) draw(); }
   }
   async function loadEarlierChat() {
@@ -1119,7 +1130,14 @@ export function createController({ state, api, render = () => {}, storage = glob
   const visibility = () => { if (globalThis.document?.hidden) pause(); else resume(); };
   function schedule() {
     if (timer) clearInterval(timer);
-    timer = setInterval(() => { if (!nativePaused && !globalThis.document?.hidden) void refresh({ silent: true }); }, 8000);
+    let ticks = 0;
+    timer = setInterval(() => {
+      if (nativePaused || globalThis.document?.hidden) return;
+      if (++ticks === 8) { ticks = 0; void refresh({ silent: true }); return; }
+      if (state.phase !== 'ready') return;
+      if (state.page === 'chat' && chatExecutionRunning(state.conversation?.execution)) void readChat(current(), {activity:false});
+      else if (state.page === 'workspace-group') void workspaceGroups.poll();
+    }, 1000);
     timer.unref?.();
   }
   async function boot() {

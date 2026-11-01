@@ -305,3 +305,14 @@ test('focused chat realtime coalesces progress bursts without downloading the co
   trailing.resolve(conversation(execution('B','succeeded',2)));await current;
   assert.equal(ui.conversationExecution.value.status,'succeeded');assert.equal(detailRequests,2);assert.equal(listRequests,0);
 });
+
+test('the employee workbench accepts slow stream refreshes and coalesces realtime bursts',async()=>{
+ const first=deferred(),trailing=deferred();let detailRequests=0,listRequests=0;
+ const ui=harness({conversation:()=> (++detailRequests===1?first:trailing).promise,conversations:async()=>{listRequests++;return {conversations:[]};}},{realtime:true});ui.page.value='bots';
+ ui.openRealtime();ui.realtimeSubscription.value.onEvent({type:'a2a.action.event'});
+ for(let index=0;index<30;index++)ui.realtimeSubscription.value.onEvent({type:'a2a.action.event'});
+ assert.equal(detailRequests,1);assert.equal(listRequests,0);
+ first.resolve(conversation({...execution('live','acked',2),stream:{channel:'assistant',text:'正文片段'}}));await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(ui.conversationExecution.value.stream.text,'正文片段');assert.equal(detailRequests,2);
+ trailing.resolve(conversation(execution('live','succeeded',2)));await new Promise(resolve=>setImmediate(resolve));assert.equal(ui.conversationExecution.value.status,'succeeded');
+});

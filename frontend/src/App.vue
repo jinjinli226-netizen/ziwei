@@ -652,7 +652,7 @@ async function changeLanguage(value) {
 }
 function refreshVisibleWorkspace() {
   void loadNotifications();
-  if(page.value==='bots'){if(selectedConversation.value?.id)void refreshSelectedConversation();return;}
+  if(page.value==='bots'){if(selectedConversation.value?.id)void refreshConversationState();return;}
   if(focusedConversation.value){void refreshConversationState();return;}
   void refreshTasks();void refreshConversationState();
 }
@@ -775,7 +775,7 @@ function refreshConversationState({ force=false } = {}) {
   refresh.promise=(async()=>{
     do {
       refresh.again=false;
-      if(focusedConversation.value)await refreshSelectedConversation();
+      if(focusedConversation.value||page.value==='bots')await refreshSelectedConversation();
       else await Promise.all([loadConversations({autoSelect:false}),refreshSelectedConversation()]);
       if (conversationRefresh!==refresh || scope()!==key) return;
       if (executionNeedsPolling(conversationExecution.value,conversationBotBinding.value)) { if (!conversationPollTimer) startConversationPolling(); }
@@ -1569,6 +1569,7 @@ function executionEventSummary(event) {
 function executionEventRows(events) {
   const rows = [];
   for (const event of Array.isArray(events) ? events : []) {
+    if(event?.type==='action.response')continue;
     const label = executionEventLabel(event);
     const detail = executionEventDetail(event);
     const summary = executionEventSummary(event);

@@ -57,6 +57,7 @@
 .bot-main-chat .chat-forward-message-actions>button:hover,.bot-main-chat .chat-forward-message-actions>button:focus-visible{color:#7050b1}
 .bot-chat-message-avatar{width:29px;height:29px;flex:none;display:grid;place-items:center;background:#eef1fa;color:var(--chat-purple);border-radius:50%;font-size:14px;font-weight:600}
 .bot-chat-message.system{font-size:12px;color:#8992a3;justify-content:center}
+.bot-chat-stream-status{margin:0 0 16px 42px;font-size:12px;color:#8b829b}
 .bot-chat-empty{text-align:center;padding:60px 8px;color:#969bae}
 .bot-chat-empty>.bot-chat-avatar{margin:auto;width:48px;height:48px}
 .bot-chat-empty h2{font-size:20px;color:#677086;font-weight:500;margin:21px 0 10px}

@@ -7,8 +7,12 @@ const group=(id='mix_ops',extra={})=>({id,workspace:'team',title:id==='mix_ops'?
 const deferred=()=>{let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return{promise,resolve,reject};};
 const fields=(panel,label)=>panel.find(node=>['input','textarea'].includes(node.type)&&node.props['aria-label']===label);
 async function enter(panel,label,value){const field=fields(panel,label)[0];field.value=value;field.dispatch('input');field.props.onInput?.({target:field});await panel.settle();return field;}
-async function mount(t,{props={},read,send,create,cancel,list}={}){
+async function mount(t,{props={},read,send,create,cancel,list,realtime=false}={}){
  const previousDocument=globalThis.document;globalThis.document??={hidden:false};t.after(()=>{globalThis.document=previousDocument;});
+ const globals={window:globalThis.window,WebSocket:globalThis.WebSocket,EventSource:globalThis.EventSource},sockets=[];
+ globalThis.WebSocket=realtime?class{constructor(url){this.url=url;this.closed=false;sockets.push(this);}close(){this.closed=true;}}:undefined;
+ globalThis.EventSource=undefined;if(realtime)globalThis.window={};
+ t.after(()=>Object.assign(globalThis,globals));
  const original=Object.fromEntries(['mixedGroups','mixedGroup','sendMixedGroupMessage','createMixedGroup','cancelMixedGroup'].map(key=>[key,api[key]])),calls=[],events=[];
  api.mixedGroups=async workspace=>{calls.push(['GET-list',workspace]);return list?list(workspace):{groups:[group(),group('mix_other')]};};
  api.mixedGroup=async(id,workspace)=>{calls.push(['GET',id,workspace]);return read?read(id,workspace):group(id);};
@@ -16,7 +20,7 @@ async function mount(t,{props={},read,send,create,cancel,list}={}){
  api.createMixedGroup=async(body,workspace)=>{calls.push(['POST-create',body,workspace]);return create?create(body,workspace):group('mix_created');};
  api.cancelMixedGroup=async(id,body,workspace)=>{calls.push(['POST-cancel',id,body,workspace]);return cancel?cancel(id,body,workspace):group(id);};
  const panel=await mountPanel('../src/components/MixedGroupPanel.vue',{workspace:'team',groupId:'mix_ops',embedded:true,...props},{onSelect:id=>events.push(['select',id]),onChanged:value=>events.push(['changed',value])});
- t.after(()=>{panel.dispose();Object.assign(api,original);});await panel.settle();return Object.assign(panel,{calls,events});
+ t.after(()=>{panel.dispose();Object.assign(api,original);});await panel.settle();return Object.assign(panel,{calls,events,sockets});
 }
 
 test('a workspace group opens without an employee and prioritizes its actual chat and bound results',async t=>{
@@ -109,4 +113,28 @@ test('the actual group message viewport follows within 40px and offers a jump on
  timeline.props.onWheelPassive({deltaY:1});top=780;scrolled();await panel.settle();assert.equal(panel.button('跳至最新'),undefined);top=779;scrolled();await panel.settle();assert.ok(panel.button('跳至最新'));
  panel.button('跳至最新').props.onClick();await panel.settle();assert.equal(top,900);assert.equal(panel.button('跳至最新'),undefined);
  timeline.scrollHeight=1300;await panel.button('刷新群聊').props.onClick();await panel.settle();assert.equal(top,1000);
+});
+
+test('group snapshots grow member bodies in the history and terminal replies replace previews',async t=>{
+ let current=group('mix_ops',{runs:[{employeeId:'writer',actionId:'stream-action',runtime:'Codex',status:'running',stream:{channel:'assistant',messageId:'stream:writer',sequence:1,text:'正在核对数据'}}]});
+ const panel=await mount(t,{read:()=>current}),preview=()=>panel.find(node=>node.type==='article'&&node.props['data-streaming']==='true');
+ assert.equal(preview().length,1);assert.match(panel.text(),/正在核对数据/);const first=preview()[0];
+ current={...current,runs:current.runs.map(run=>({...run,stream:{...run.stream,sequence:2,text:'已核对全部数据'}}))};
+ await panel.button('刷新群聊').props.onClick();await panel.settle();assert.equal(preview()[0],first);assert.match(panel.text(),/已核对全部数据/);
+ current={...current,messages:[...current.messages,{id:'final-writer',role:'assistant',employeeId:'writer',actionId:'stream-action',text:'正式核对结果',status:'succeeded'}],runs:current.runs.map(run=>({...run,status:'succeeded',output:'正式核对结果'}))};
+ await panel.button('刷新群聊').props.onClick();await panel.settle();assert.equal(preview().length,0);assert.doesNotMatch(panel.text(),/已核对全部数据/);
+ assert.equal(panel.text().split('正式核对结果').length-1,1,'the same final body is not repeated in the receipt card');
+});
+
+test('group realtime compensates by scoped GET, coalesces bursts and closes on workspace changes',async t=>{
+ const pending=deferred();let reads=0;
+ const running=group('mix_ops',{runs:[{employeeId:'writer',actionId:'stream-action',runtime:'Codex',status:'running'}]});
+ const panel=await mount(t,{realtime:true,read:(_id,workspace)=>++reads===2?pending.promise:{...running,workspace}});
+ assert.equal(panel.sockets.length,1);let socket=panel.sockets[0];assert.match(socket.url,/workspaces\/team\/notifications\/ws$/);
+ socket.onopen();const emit=actionId=>socket.onmessage({data:JSON.stringify({type:'notification',event:{action:'a2a.action.event',data:{actionId}}})});
+ emit('unrelated-action');await panel.settle();assert.equal(reads,1);
+ for(let index=0;index<20;index++)emit('stream-action');await panel.settle();assert.equal(reads,2);
+ pending.resolve(running);await panel.settle();assert.equal(reads,3);
+ panel.props.workspace='other';await panel.settle();assert.equal(socket.closed,true);assert.match(panel.sockets.at(-1).url,/workspaces\/other\/notifications\/ws$/);
+ socket=panel.sockets.at(-1);panel.dispose();assert.equal(socket.closed,true);
 });

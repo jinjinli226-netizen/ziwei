@@ -342,7 +342,7 @@ export class ActionDispatcher {
           if(stopReason)invokeStop();
         },
         onOutput:chunk=>{if(stopReason)return;activity();this.#onEvent('action.output',{actionId:action.id,type:action.type,...classifyOutputStage(chunk),bytes:Buffer.byteLength(String(chunk||''))});},
-        onStage:stage=>{if(stopReason)return;activity();this.#onEvent('action.stage',{actionId:action.id,type:action.type,stage:stage?.stage||'output',message:stage?.message||'DSH 执行活动',detail:stage?.detail||'',...(stage?.summary?{summary:stage.summary}:{}),progress:{phase:'stage',...stage}});}
+        onStage:stage=>{if(stopReason)return;activity();this.#emitRuntimeStage(action,stage,'DSH 执行活动');}
       })).then(value=>({kind:'execution',value}),error=>({kind:'execution',error})).then(outcome=>{executionSettled=true;recover();return outcome;});
       const outcome=await Promise.race([execution,stopped]);
       const unsent=prePromptFailure(outcome);if(unsent)return unsent;
@@ -362,6 +362,13 @@ export class ActionDispatcher {
       if(value?.status!=='succeeded')return this.#failure(action,value?.error||'DSH 执行失败',{code:value?.code||'executor_failed',result});
       return {status:'succeeded',actionId:action.id,result,completedAt:this.#now()};
     } finally {clearTimeout(hardTimer);clearInterval(idleTimer);}
+  }
+  #emitRuntimeStage(action,stage,message='执行活动'){
+    if(stage?.stage==='response'&&typeof stage.text==='string'){
+      this.#onEvent('action.response',{actionId:action.id,type:action.type,message:'正在生成回答',text:stage.text});
+      return;
+    }
+    this.#onEvent('action.stage',{actionId:action.id,type:action.type,stage:stage?.stage||'output',message:stage?.message||message,detail:stage?.detail||'结构化运行时活动',...(stage?.summary?{summary:stage.summary}:{}),progress:{phase:'stage',...stage}});
   }
   async #run(action, key, identity,maintenanceResume=null,resumeTiming=null) {
     const actionId = action?.id; const controller = new AbortController(); let hardTimeoutHandle = null; let idleWatchdogHandle = null; this.#controllers.set(String(actionId), controller);
@@ -512,15 +519,7 @@ export class ActionDispatcher {
             progress: { phase: 'output', bytes, detail: stage.detail }
           });
         },
-        onStage: stage => { if (stopReason) return; refreshIdleTimeout(); this.#onEvent('action.stage', {
-          actionId,
-          type: action.type,
-          stage: stage?.stage || 'output',
-          message: stage?.message || '执行活动',
-          detail: stage?.detail || '结构化运行时活动',
-          ...(stage?.summary ? { summary: stage.summary } : {}),
-          progress: { phase: 'stage', ...stage }
-        }); },
+        onStage: stage => { if (stopReason) return; refreshIdleTimeout(); this.#emitRuntimeStage(action,stage); },
         onProgress: progress => { if (stopReason) return; refreshIdleTimeout(); this.#onEvent('action.progress', {
           actionId,
           type: action.type,

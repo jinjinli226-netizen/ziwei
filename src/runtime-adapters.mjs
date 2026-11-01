@@ -914,6 +914,30 @@ function responseText(value) {
   return candidates.find(item => typeof item === 'string' && item.trim()) || null;
 }
 
+function publicResponse(value, state, onStage) {
+  if (value.type === 'text' && typeof value.text === 'string') {
+    state.response = (state.response || '') + value.text;
+  } else if (value.type === 'result' && typeof value.text === 'string') {
+    // Hermes settles the whole answer, including after a native replay gap.
+    state.response = value.text;
+  } else {
+    const item = value.item || value.message || value;
+    if (item.type !== 'agent_message' && item.role !== 'assistant') return;
+    const content = item.text ?? item.content;
+    const text = typeof content === 'string' ? content : Array.isArray(content)
+      ? content.filter(block => ['text', 'output_text'].includes(block.type) && typeof block.text === 'string').map(block => block.text).join('')
+      : null;
+    if (text === null) return;
+    state.responseMessages ||= new Map();
+    state.responseMessages.set(item.id || 'assistant', text);
+    state.response = [...state.responseMessages.values()].join('\n');
+  }
+  const text = redactSecrets(state.response);
+  if (text === state.publishedResponse || !text && state.publishedResponse === undefined) return;
+  state.publishedResponse = text;
+  onStage({stage:'response',message:'正在生成回答',detail:'公开回答',text});
+}
+
 function runtimeStage(value) {
   const type = String(value?.item?.type || value?.type || '').toLowerCase();
   if (/reasoning|thinking/.test(type)) return { stage: 'reasoning', message: '思考摘要' };
@@ -934,7 +958,7 @@ function reasoningSummary(value) {
   const item = value?.item && typeof value.item === 'object' ? value.item : value;
   const type = String(item?.type || value?.type || '').toLowerCase();
   if (!/reasoning|thinking/.test(type)) return null;
-  const raw = summaryText(item?.summary) || summaryText(item?.text) || summaryText(item?.content) || summaryText(value?.summary);
+  const raw = summaryText(item?.summary) || summaryText(value?.summary);
   const cleaned = redactSecrets(raw).replace(/<!--\s*-->/g, '').trim().slice(0, 4000);
   return cleaned || null;
 }
@@ -975,19 +999,15 @@ export function parseRuntimeStreamLine(line, state, onOutput = () => {}, onStage
   try {
     const value = JSON.parse(trimmed);
     if(value.session_id)state.sessionId=String(value.session_id);
-    if(value.type==='result' && typeof value.text==='string')state.response=value.text;
     const stage = runtimeStage(value);
     if (stage) {
       const summary = reasoningSummary(value);
       onStage({...stage, detail: runtimeStageDetail(value, stage), ...(summary ? { summary } : {})});
     }
+    if (!stage) publicResponse(value, state, onStage);
     const text = responseText(value);
     if (typeof text === 'string' && stage?.stage !== 'reasoning') {
       appendOutput(state, text, onOutput);
-      const itemType = String(value?.item?.type || value?.type || '').toLowerCase();
-      if (itemType === 'agent_message' || itemType === 'message' || value?.item?.role === 'assistant') {
-        state.response = `${state.response || ''}${state.response ? '\n' : ''}${text}`;
-      }
     }
     const terminalError=value.type==='turn.failed'||value.type==='result'&&(value.is_error===true||value.status==='failed'||Boolean(value.error));
     if (value?.type === 'error' || value?.error || terminalError) {

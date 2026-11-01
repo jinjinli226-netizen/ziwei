@@ -48,6 +48,7 @@ export async function executeDshRuntime({baseUrl=process.env.ZIWEI_DSH_BASE_URL|
     const interactions=new Map();
     const evidence=createDshSessionEvidence({...sessionAuthority,botName,sessionId:session,requestId},()=>cancel());
     const seen=new Set(); const messages=new Map(); const liveText=new Map(); const attempts=new Map();
+    let publishedResponse='';
     const output=()=>[...new Map([...liveText,...messages]).values()].filter(Boolean).join('\n\n');
     const stage=value=>{try{onStage?.({...value,sessionId:session});}catch(error){stopForFailure({status:'failed',code:'adapter_error',error:errorText(error)});}};
     const finish=value=>{
@@ -76,11 +77,12 @@ export async function executeDshRuntime({baseUrl=process.env.ZIWEI_DSH_BASE_URL|
     const publish=(key,text)=>{
       const before=liveText.get(key)||'';liveText.set(key,text);
       if(text.startsWith(before)){const delta=text.slice(before.length);if(delta)onOutput?.(delta);}
-      else stage({stage:'response',message:'DSH 回答已更新',summary:redactSecrets(text).slice(0,4000)});
+      const response=redactSecrets(output());
+      if(response!==publishedResponse){publishedResponse=response;stage({stage:'response',message:'正在生成回答',detail:'公开回答',text:response});}
     };
     const acceptChunk=(attempt,chunk,publishNow=true)=>{
       if(chunk.type==='text-delta') { attempt.text+=chunk.text; if(publishNow)publish(`${attempt.turn}:${attempt.step}`,attempt.text); }
-      else if(chunk.type==='reasoning-delta')stage({stage:'reasoning',summary:redactSecrets(chunk.text).slice(0,4000)});
+      else if(chunk.type==='reasoning-delta')stage({stage:'reasoning',message:'正在思考'});
       else if(chunk.type==='tool-call-delta' && chunk.name)stage({stage:'tool',detail:chunk.name,message:'DSH 工具调用参数更新'});
     };
     const acceptAssistant=frame=>{
@@ -108,7 +110,7 @@ export async function executeDshRuntime({baseUrl=process.env.ZIWEI_DSH_BASE_URL|
       if(event.surfaceOp && event.surfaceOp!=='append')return;
       if(record.type==='chunks') {
         if(event.type==='chunkrow/text-chunks')publish(key,(liveText.get(key)||'')+(data.texts||[]).join(''));
-        if(event.type==='chunkrow/reasoning-chunks')stage({stage:'reasoning',summary:redactSecrets((data.texts||[]).join('')).slice(0,4000)});
+        if(event.type==='chunkrow/reasoning-chunks')stage({stage:'reasoning',message:'正在思考'});
       }
       if(event.type==='assistant/message') {const text=contentText(data.message?.content);messages.set(key,text);publish(key,text);}
       if(event.type==='assistant/chunk') {

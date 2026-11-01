@@ -9,6 +9,7 @@ export function createDomRenderer(root) {
     const prefix = node.tagName;
     if (node.id) return `${prefix}:id:${node.id}`;
     if (node.hasAttribute('data-message-id')) return `${prefix}:message:${node.dataset.messageId}`;
+    if (node.hasAttribute('data-response-id')) return `${prefix}:response:${node.dataset.responseId}`;
     if (node.hasAttribute('data-read-resource')) return `${prefix}:read:${node.dataset.readResource}`;
     if (node.name) return `${prefix}:field:${node.name}:${node.type || ''}:${/^(radio|checkbox)$/.test(node.type) ? node.value : ''}`;
     if (node.hasAttribute('data-form')) return `${prefix}:form:${node.dataset.form}`;

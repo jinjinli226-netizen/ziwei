@@ -2,7 +2,8 @@
 import {computed,nextTick,onBeforeUnmount,reactive,ref,watch} from 'vue';
 import {MAX_ATTACHMENT_TOTAL_BYTES,MAX_ATTACHMENTS} from '../../../src/conversation-attachment-policy.mjs';
 import {api} from '../api.js';
-import {MIXED_GROUP_RUNTIMES,mixedGroupMemberDescriptor,mixedGroupStatus} from '../mixed-group.js';
+import {MIXED_GROUP_RUNTIMES,mixedGroupMemberDescriptor,mixedGroupStatus,mixedGroupMessages} from '../mixed-group.js';
+import {connectWorkspaceRealtime} from '../realtime.js';
 import {createBotRequestScope} from '../bot-state.js';
 import {createConversationEnterGuard} from '../conversation-compose.js';
 import {createConversationScrollTracker} from '../conversation-history.mjs';
@@ -15,10 +16,11 @@ const scope=createBotRequestScope(),enterGuard=createConversationEnterGuard();
 const timeline=ref(null),historyScroll=createConversationScrollTracker({wrap:reactive});
 const files=ref([]),uploading=ref(false),uploadProgress=ref('');
 let uploadController=null,pendingSend=null;
-let pollTimer=null,disposed=false;
+let pollTimer=null,disposed=false,realtime=null,detailRefresh=null;
 const candidates=computed(()=>props.employees.filter(employee=>MIXED_GROUP_RUNTIMES.includes(employee.runtime)&&employee.status!=='deleted'));
 const activeRuns=computed(()=>selected.value?.runs?.some(run=>['pending','acked','running'].includes(run.status))||false);
 const currentStatus=computed(()=>statusLabel(mixedGroupStatus(selected.value)));
+const messages=computed(()=>mixedGroupMessages(selected.value));
 
 async function refresh(){
  clearTimeout(pollTimer);
@@ -30,7 +32,16 @@ async function readList(){
  catch(reason){if(scope.current(request))listError.value=reason.message||'群聊列表读取失败';}
  finally{if(scope.current(request))listReading.value=false;}
 }
-async function readDetail(){
+function readDetail(){
+ const workspace=props.workspace,id=selectedId.value;
+ if(detailRefresh?.workspace===workspace&&detailRefresh.id===id){detailRefresh.again=true;return detailRefresh.promise;}
+ const refresh={workspace,id,again:false,promise:null};detailRefresh=refresh;
+ refresh.promise=(async()=>{
+  do{refresh.again=false;await loadDetail();}while(!disposed&&detailRefresh===refresh&&refresh.again);
+ })().finally(()=>{if(detailRefresh===refresh)detailRefresh=null;});
+ return refresh.promise;
+}
+async function loadDetail(){
  const request=scope.begin('detail'),workspace=props.workspace,id=selectedId.value;reading.value=true;error.value='';
  try{
   const value=await api.mixedGroup(id,workspace);
@@ -45,11 +56,18 @@ function select(id){
  if(props.groupId===undefined){selectedId.value=id;resetSelection();}
 }
 function resetSelection(){
- clearTimeout(pollTimer);scope.select(props.workspace,selectedId.value);historyScroll.reset();
+ clearTimeout(pollTimer);realtime?.close();realtime=null;detailRefresh=null;scope.select(props.workspace,selectedId.value);historyScroll.reset();
  uploadController?.abort();uploadController=null;files.value=[];uploading.value=false;uploadProgress.value='';pendingSend=null;
  selected.value=null;draft.value='';title.value='';memberIds.value=props.employee?[props.employee.id]:[];
  showCreate.value=false;reading.value=false;listReading.value=false;busy.value=false;error.value='';listError.value='';notice.value='';
- void refresh();
+ void refresh();openRealtime();
+}
+function openRealtime(){
+ if(typeof window==='undefined'||!selectedId.value)return;
+ const refreshCurrent=()=>{if(!disposed&&selectedId.value&&!document.hidden&&!busy.value)void readDetail();};
+ realtime=connectWorkspaceRealtime({wsUrl:api.websocketUrl(props.workspace),sseUrl:api.streamUrl(props.workspace),onReady:refreshCurrent,onEvent:event=>{
+  if(selected.value?.runs?.some(run=>run.actionId===event?.data?.actionId))refreshCurrent();
+ }});
 }
 function toggle(id){memberIds.value=memberIds.value.includes(id)?memberIds.value.filter(value=>value!==id):[...memberIds.value,id];}
 async function create(){
@@ -122,13 +140,14 @@ function schedulePoll(){
 function statusLabel(status){return({planned:'尚未开始',pending:'等待执行',acked:'已接收',running:'执行中',partial:'部分完成',succeeded:'已完成',failed:'执行失败',cancelled:'已取消',unknown:'结果待核实',expired:'结果待核实',complete:'已保存',cancel_requested:'取消请求中'})[status]||'状态待核实';}
 function memberName(row){return selected.value?.members.find(member=>member.employeeId===row.employeeId)?.name||row.profile||'群成员';}
 function messageName(message){return message.role==='user'?'你':message.employeeId?memberName(message):message.role==='system'?'系统':'群成员';}
+function hasRunMessage(run){return selected.value?.messages.some(message=>message.actionId===run.actionId);}
 function mutationError(reason,action){return reason.status?reason.message||`${action}失败`:`${action}请求结果未确认：${reason.message||'连接中断'}。请先重新读取群聊核对结果，草稿已保留。`;}
-watch(()=>selected.value?.messages,scrollMessages,{deep:true});
+watch(messages,scrollMessages,{deep:true});
 watch(()=>[props.workspace,props.groupId],([workspace,id],[previousWorkspace]=[])=>{
  if(workspace!==previousWorkspace)groups.value=[];
  selectedId.value=id||'';resetSelection();
 },{immediate:true});
-onBeforeUnmount(()=>{disposed=true;uploadController?.abort();clearTimeout(pollTimer);scope.dispose();});
+onBeforeUnmount(()=>{disposed=true;realtime?.close();uploadController?.abort();clearTimeout(pollTimer);scope.dispose();});
 </script>
 <template>
  <section class="mixed-group-panel" :class="{embedded}" aria-label="工作区群聊" :aria-busy="reading">
@@ -142,9 +161,9 @@ onBeforeUnmount(()=>{disposed=true;uploadController?.abort();clearTimeout(pollTi
     <p v-if="reading&&!selected" class="mixed-group-empty" role="status">正在读取当前群聊…</p>
     <template v-if="selected">
      <div class="mixed-group-roster" aria-label="群聊成员"><span v-for="member in selected.members" :key="member.employeeId"><strong>{{member.name}}</strong><small>{{member.runtime}} · @{{member.profile}}</small></span></div>
-     <div class="mixed-group-history-wrap"><div ref="timeline" class="mixed-group-history" aria-label="群聊消息" aria-live="polite" tabindex="0" @scroll="historyScroll.scroll" @wheel.passive="historyScroll.wheel" @touchstart.passive="historyScroll.touchStart" @touchmove.passive="historyScroll.touchMove" @pointerdown="historyScroll.pointer" @keydown="historyScroll.key"><article v-for="message in selected.messages" :key="message.id" :class="{'is-user':message.role==='user'}"><div class="mixed-group-message-meta"><strong>{{messageName(message)}}</strong><small v-if="message.runtime">{{message.runtime}}</small><small v-if="message.status">{{statusLabel(message.status)}}</small></div><p>{{message.text}}</p><div v-if="message.attachments?.length" class="mixed-group-attachments"><a v-for="item in message.attachments" :key="item.attachmentId" :href="attachmentUrl(item,true)" target="_blank" rel="noopener" :download="item.name"><img v-if="imagePreview(item)" :src="attachmentUrl(item)" :alt="item.name" loading="lazy" @load="scrollMessages"/><span>{{item.name}}</span><small>{{Math.ceil(item.size/1024)}} KB · 下载</small></a></div></article><p v-if="!selected.messages.length" class="mixed-group-empty">还没有消息，可以开始讨论。</p></div><button v-if="historyScroll.state.showLatest" type="button" class="mixed-group-jump-latest" @click="jumpLatest">跳至最新</button></div>
+     <div class="mixed-group-history-wrap"><div ref="timeline" class="mixed-group-history" aria-label="群聊消息" aria-live="polite" tabindex="0" @scroll="historyScroll.scroll" @wheel.passive="historyScroll.wheel" @touchstart.passive="historyScroll.touchStart" @touchmove.passive="historyScroll.touchMove" @pointerdown="historyScroll.pointer" @keydown="historyScroll.key"><article v-for="message in messages" :key="message.id" :data-streaming="message.streaming?'true':undefined" :class="{'is-user':message.role==='user'}"><div class="mixed-group-message-meta"><strong>{{messageName(message)}}</strong><small v-if="message.runtime">{{message.runtime}}</small><small v-if="message.streaming">正在输出</small><small v-else-if="message.status">{{statusLabel(message.status)}}</small></div><p>{{message.text}}</p><div v-if="message.attachments?.length" class="mixed-group-attachments"><a v-for="item in message.attachments" :key="item.attachmentId" :href="attachmentUrl(item,true)" target="_blank" rel="noopener" :download="item.name"><img v-if="imagePreview(item)" :src="attachmentUrl(item)" :alt="item.name" loading="lazy" @load="scrollMessages"/><span>{{item.name}}</span><small>{{Math.ceil(item.size/1024)}} KB · 下载</small></a></div></article><p v-if="!messages.length" class="mixed-group-empty">还没有消息，可以开始讨论。</p></div><button v-if="historyScroll.state.showLatest" type="button" class="mixed-group-jump-latest" @click="jumpLatest">跳至最新</button></div>
      <div class="mixed-group-compose"><div v-if="files.length" class="mixed-group-file-list"><div v-for="item in files" :key="item.id"><span>{{item.file.name}}</span><button type="button" :disabled="busy" @click="removeFile(item.id)">移除</button></div></div><p v-if="uploadProgress" role="status">{{uploadProgress}}</p><button v-if="uploading" type="button" @click="cancelUpload">取消上传</button><textarea v-model="draft" rows="3" maxlength="20000" aria-label="群消息" placeholder="输入消息；不写 @ 默认发送给全员" @compositionstart="enterGuard.compositionStart" @compositionend="enterGuard.compositionEnd" @keydown="keydown"/><div class="mixed-group-compose-footer"><span>Enter 发送 · Shift + Enter 换行</span><label class="mixed-group-file-picker">添加附件<input type="file" multiple :disabled="busy" aria-label="群聊附件" @change="chooseFiles"/></label><div class="mixed-group-actions"><button v-if="activeRuns" type="button" :disabled="busy" @click="cancel">请求取消当前回合</button><button type="button" class="primary" :disabled="busy||(!draft.trim()&&!files.length)" @click="send">{{busy?'提交中…':'发送到群'}}</button></div></div></div>
-     <section v-if="selected.runs?.length" class="mixed-group-runs" aria-label="群成员执行回执"><h3>成员执行结果</h3><article v-for="run in selected.runs" :key="run.actionId"><div class="mixed-group-run-heading"><strong>{{memberName(run)}}</strong><small>{{run.runtime}} · {{statusLabel(run.status)}}</small></div><p v-if="run.output">{{run.output}}</p><p v-if="run.error" class="mixed-group-error">{{run.error}}</p><details><summary>查看执行回执</summary><dl><div><dt>Profile</dt><dd>{{run.profile}}</dd></div><div><dt>专属会话</dt><dd>{{run.conversationId}}</dd></div><div><dt>执行 ID</dt><dd>{{run.actionId}}</dd></div></dl></details></article></section>
+     <section v-if="selected.runs?.length" class="mixed-group-runs" aria-label="群成员执行回执"><h3>成员执行结果</h3><article v-for="run in selected.runs" :key="run.actionId"><div class="mixed-group-run-heading"><strong>{{memberName(run)}}</strong><small>{{run.runtime}} · {{statusLabel(run.status)}}</small></div><p v-if="run.output&&!hasRunMessage(run)">{{run.output}}</p><p v-if="run.error" class="mixed-group-error">{{run.error}}</p><details><summary>查看执行回执</summary><dl><div><dt>Profile</dt><dd>{{run.profile}}</dd></div><div><dt>专属会话</dt><dd>{{run.conversationId}}</dd></div><div><dt>执行 ID</dt><dd>{{run.actionId}}</dd></div></dl></details></article></section>
     </template>
     <p v-else-if="!reading&&!error" class="mixed-group-empty">请选择要打开的群聊。</p>
    </main>

@@ -1,4 +1,14 @@
+import {conversationStreamMessages} from './conversation-stream.js';
 export const MIXED_GROUP_RUNTIMES = ['Hermes', 'DSH', 'Codex'];
+
+export function mixedGroupMessages(group){
+ const messages=group?.messages||[];
+ const previews=(group?.runs||[]).flatMap(run=>{
+  if(messages.some(message=>message.actionId===run.actionId))return [];
+  return conversationStreamMessages([],{...run,id:run.actionId}).map(message=>({...message,text:message.content,employeeId:run.employeeId,runtime:run.runtime,status:run.status}));
+ });
+ return [...messages,...previews];
+}
 
 export function mixedGroupMemberDescriptor(employee) {
   if (!employee?.id || !MIXED_GROUP_RUNTIMES.includes(employee.runtime)) throw new Error('请选择 Hermes、DSH 或 Codex 员工');

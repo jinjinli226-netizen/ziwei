@@ -259,6 +259,6 @@ export const api = {
   resumeConversationQueue: id => request(`/api/conversations/${encodeURIComponent(id)}/queue/resume`, {method:'POST',body:'{}'}),
   removeConversationQueueItem: (id, actionId) => request(`/api/conversations/${encodeURIComponent(id)}/queue/${encodeURIComponent(actionId)}`, {method:'DELETE'}),
   archiveConversation: (id, archived = true) => request(`/api/conversations/${id}/archive`, { method:'POST', body:JSON.stringify({archived}) }),
-  streamUrl: () => `${API_BASE}/api/workspaces/${encodeURIComponent(workspaceSlug())}/notifications/stream`,
-  websocketUrl: () => `${API_BASE.replace(/^http/i, 'ws')}/api/workspaces/${encodeURIComponent(workspaceSlug())}/notifications/ws`
+  streamUrl: (slug=workspaceSlug()) => `${API_BASE}/api/workspaces/${encodeURIComponent(slug)}/notifications/stream`,
+  websocketUrl: (slug=workspaceSlug()) => `${API_BASE.replace(/^http/i, 'ws')}/api/workspaces/${encodeURIComponent(slug)}/notifications/ws`
 };
