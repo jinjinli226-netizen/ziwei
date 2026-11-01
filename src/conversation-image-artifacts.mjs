@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import {createHash} from 'node:crypto';
 import {rasterImageMimeType,canonicalRasterMimeType} from './raster-image.mjs';
+import {MAX_ATTACHMENT_BYTES,MAX_ATTACHMENT_TOTAL_BYTES,MAX_ATTACHMENTS} from './conversation-attachment-policy.mjs';
 
 export const MAX_CONVERSATION_IMAGE_BYTES = 10 * 1024 * 1024;
 export const MAX_ACTION_RESULT_JSON_BYTES = 15 * 1024 * 1024;
@@ -23,7 +25,7 @@ export function validateImageBytes(bytes, declaredMime = null) {
   return mimeType;
 }
 
-export function createImageArtifactSession({runtimeDir, actionId, conversationId = null} = {}) {
+export function createImageArtifactSession({runtimeDir, actionId, conversationId = null,references=false} = {}) {
   if (!runtimeDir || !String(actionId || '').trim()) throw failure('图片输出缺少本机目录或当前执行 ID');
   fs.mkdirSync(runtimeDir,{recursive:true});
   const canonicalRuntime = fs.realpathSync.native(runtimeDir);
@@ -35,15 +37,19 @@ export function createImageArtifactSession({runtimeDir, actionId, conversationId
   const directory = fs.mkdtempSync(path.join(base,`${prefix}-`));
   const manifestPath = path.join(directory,'manifest.json');
   const rootStat = fs.statSync(directory);
-  return Object.freeze({directory,manifestPath,actionId:String(actionId),conversationId:conversationId ? String(conversationId) : null,rootDev:rootStat.dev,rootIno:rootStat.ino});
+  return Object.freeze({directory,manifestPath,actionId:String(actionId),conversationId:conversationId ? String(conversationId) : null,rootDev:rootStat.dev,rootIno:rootStat.ino,...(references?{references:true}:{})});
 }
 
-export function imageArtifactInstructions(session) {
+export function imageArtifactInstructions(session,{references=session.references===true}={}) {
+  if(references){
+    const example={version:1,actionId:session.actionId,conversationId:session.conversationId,artifacts:[{path:'result.png',name:'result.png',mimeType:'image/png'}]};
+    return `\n\n[本次执行的附件输出通道]\n需要回传的图片或其他文件请写入本次独立目录：${session.directory}\n最后写 UTF-8 JSON 清单：${session.manifestPath}\n清单格式：${JSON.stringify(example)}\npath 只能是此目录内的相对文件路径；version、actionId、conversationId 必须与示例一致。最多 ${MAX_ATTACHMENTS} 个附件，每个及合计最多 500 MiB。mimeType 填实际文件类型。只回传清单声明的文件，不扫描其他目录。输入附件不是产物；修改结果另存本次输出目录。先完成文件，最后写清单。没有文件输出时无需创建清单。`;
+  }
   const example = {version:1,actionId:session.actionId,conversationId:session.conversationId,artifacts:[{path:'result.png',name:'result.png'}]};
   return `\n\n[本次执行的图片输出通道]\n若生成需要回传的图片，请将实际 PNG/JPEG/GIF/WebP 文件写入此独立目录：${session.directory}\n然后写 UTF-8 JSON 清单到：${session.manifestPath}\n清单格式：${JSON.stringify(example)}\npath 只能是此目录内文件的相对路径；version、actionId、conversationId 必须与示例一致。每张和所有图片合计最多 10 MiB。只回传清单声明的图片，不扫描其他目录。输入附件不是输出图片，不要把输入附件路径列入清单；需要修改图片时将结果另存本次输出目录。先完成图片文件，最后写清单。没有图片输出时无需创建清单。`;
 }
 
-function readDeclaredFile(session, relativePath, limit) {
+function openDeclaredFile(session, relativePath, limit) {
   if (typeof relativePath !== 'string' || !relativePath.trim() || path.isAbsolute(relativePath) || path.win32.isAbsolute(relativePath) || /[:\0]/.test(relativePath)) throw failure('图片输出路径必须是当前执行目录内的相对路径');
   const segments = relativePath.replace(/\\/g,'/').split('/');
   if (segments.some(part => !part || part === '.' || part === '..')) throw failure('图片输出路径不能包含目录外跳转');
@@ -58,19 +64,54 @@ function readDeclaredFile(session, relativePath, limit) {
     if (index < segments.length-1 && !initial.isDirectory()) throw failure('图片输出路径的中间节点不是目录');
   }
   if (!initial.isFile() || initial.nlink !== 1) throw failure('图片输出必须是独立普通文件，不能是硬链接');
-  if (initial.size > limit) throw failure(limit === MAX_MANIFEST_BYTES ? '图片清单 manifest 不能超过 64 KiB' : '图片大小不能超过 10 MiB');
+  if (initial.size > limit) throw failure(limit === MAX_MANIFEST_BYTES ? '图片清单 manifest 不能超过 64 KiB' : limit===MAX_ATTACHMENT_BYTES?'附件大小不能超过 500 MiB':'图片大小不能超过 10 MiB');
   if (!inside(session.directory,fs.realpathSync.native(filename))) throw failure('图片输出解析到当前执行目录之外');
   let fd;
   try {
     fd = fs.openSync(filename,fs.constants.O_RDONLY | (process.platform === 'win32' ? 0 : fs.constants.O_NOFOLLOW));
     if (!sameFile(initial,fs.fstatSync(fd))) throw failure('读取前图片文件已变化');
-    const bytes = fs.readFileSync(fd);
-    if (bytes.length > limit || !sameFile(initial,fs.fstatSync(fd)) || !sameFile(initial,fs.lstatSync(filename))) throw failure('读取过程中图片文件已变化或超过大小限制');
-    return bytes;
+    return {fd,initial,filename};
   } catch (error) {
+    if(fd!==undefined)fs.closeSync(fd);
     if (error.code === 'image_artifact_invalid') throw error;
     throw failure('清单声明的图片文件不可安全读取');
-  } finally { if (fd !== undefined) fs.closeSync(fd); }
+  }
+}
+
+function readDeclaredFile(session,relativePath,limit){
+  const {fd,initial,filename}=openDeclaredFile(session,relativePath,limit);
+  try{
+    const bytes=fs.readFileSync(fd);
+    if(bytes.length>limit||!sameFile(initial,fs.fstatSync(fd))||!sameFile(initial,fs.lstatSync(filename)))throw failure('读取过程中图片文件已变化或超过大小限制');
+    return bytes;
+  }finally{fs.closeSync(fd);}
+}
+
+export async function readImageArtifactDescriptors(session){
+  try{fs.lstatSync(session.manifestPath);}catch(error){if(error.code==='ENOENT')return [];throw failure('附件清单 manifest 不可读取');}
+  let manifest;
+  try{manifest=JSON.parse(readDeclaredFile(session,'manifest.json',MAX_MANIFEST_BYTES).toString('utf8'));}catch(error){if(error.code==='image_artifact_invalid')throw error;throw failure('附件清单 manifest 必须是有效 UTF-8 JSON');}
+  if(manifest?.version!==1||manifest.actionId!==session.actionId||(manifest.conversationId??null)!==session.conversationId)throw failure('附件清单 version、执行 ID 或会话 ID 与本次执行不匹配');
+  if(!Array.isArray(manifest.artifacts)||manifest.artifacts.length>MAX_ATTACHMENTS)throw failure('附件清单 artifacts 必须是最多 20 个条目的数组');
+  const output=[],declared=new Set();let total=0;
+  for(const entry of manifest.artifacts){
+    if(!entry||typeof entry!=='object'||typeof entry.path!=='string')throw failure('附件清单条目缺少相对文件路径');
+    const key=process.platform==='win32'?entry.path.replace(/\\/g,'/').toLowerCase():entry.path;
+    if(declared.has(key))throw failure('附件清单不能重复声明同一个文件');declared.add(key);
+    const name=path.win32.basename(String(entry.name||entry.path)).replace(/[\u0000-\u001f\u007f]/g,'_').slice(0,180)||`attachment-${output.length+1}`;
+    const types={'.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.gif':'image/gif','.webp':'image/webp','.txt':'text/plain','.json':'application/json','.pdf':'application/pdf','.csv':'text/csv','.mp4':'video/mp4','.zip':'application/zip'};
+    const mimeType=entry.mimeType||types[path.extname(name).toLowerCase()]||'application/octet-stream';
+    if(typeof mimeType!=='string'||!/^[A-Za-z0-9!#$&^_.+-]+\/[A-Za-z0-9!#$&^_.+-]+$/.test(mimeType))throw failure('附件 MIME 类型无效');
+    const {fd,initial,filename}=openDeclaredFile(session,entry.path,MAX_ATTACHMENT_BYTES);
+    try{
+      total+=initial.size;if(total>MAX_ATTACHMENT_TOTAL_BYTES)throw failure('附件输出合计不能超过 500 MiB');
+      const hash=createHash('sha256');let size=0;
+      for await(const chunk of fs.createReadStream(filename,{fd,autoClose:false,highWaterMark:256*1024})){size+=chunk.length;hash.update(chunk);}
+      if(size!==initial.size||!sameFile(initial,fs.fstatSync(fd))||!sameFile(initial,fs.lstatSync(filename)))throw failure('读取过程中附件文件已变化');
+      output.push({path:filename,name,mimeType,size,sha256:hash.digest('hex')});
+    }finally{fs.closeSync(fd);}
+  }
+  return output;
 }
 
 export function readImageArtifacts(session) {

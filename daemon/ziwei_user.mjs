@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { ActionDispatcher,canStartDaemonAction } from '../src/daemon.mjs';
 import { createActionScheduler } from '../src/daemon-action-scheduler.mjs';
 import { createActionDelivery, ACTION_TRANSPORT_BUDGETS } from '../src/daemon-action-delivery.mjs';
+import {createAttachmentTransfer} from '../src/conversation-attachment-transfer.mjs';
 import { createLocalActionExecutor } from '../src/local-action.mjs';
 import { redactSecrets } from '../src/redaction.mjs';
 import { terminalMcpStatus } from '../src/runtime-adapters.mjs';
@@ -71,9 +72,11 @@ function installConnections() {
     if (connections.has(config.workspace)) continue;
     const connectionRuntimeDir = config.primary ? runtimeDir : path.join(runtimeDir, 'shared-workspaces', config.workspace, config.deviceId);
     const state = { config, runtimeDir:connectionRuntimeDir, hermesHomePath:config.hermesHome || process.env.HERMES_HOME || null, polling: false, lastHeartbeat: null, lastHeartbeatAt: 0, lastPoll: null };
+    state.attachmentTransfer=config.deviceToken?createAttachmentTransfer({apiBase:config.apiBase,headers:()=>daemonHeaders(state,{a2a:true})}):null;
     state.managementBootstrap = createManagementBootstrap({ workspace: config.workspace, deviceId: config.deviceId, deviceToken: config.deviceToken, apiBase: config.apiBase, cacheDirectory: path.join(dataDir, 'management-mcp-credentials') });
     const localExecutor = createLocalActionExecutor({
       runtimeDir: connectionRuntimeDir,
+      attachmentTransfer:state.attachmentTransfer,
       admissionHandledByDispatcher:true,
       defaultWorkdir: config.workdir || process.cwd() || ROOT,
       allowedExecutables: Array.isArray(config.allowedExecutables) ? config.allowedExecutables : [],
@@ -118,6 +121,7 @@ function installConnections() {
     state.actionDelivery = createActionDelivery({
       directory: path.join(connectionRuntimeDir, 'action-delivery'),
       identity: { apiBase: config.apiBase, workspace: config.workspace, deviceId: config.deviceId },
+      attachmentTransfer:state.attachmentTransfer,
       post: (pathname, body, options) => postAction(state, pathname, body, options),
       dispatch: action => state.dispatcher.dispatch(action),
       recoverResult: action => state.dispatcher.completedResult(action),
