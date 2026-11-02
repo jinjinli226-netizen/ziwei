@@ -43,3 +43,15 @@
 用户随后明确由另一位维护者处理重启后的连接恢复。本会话及协作维护会话停止额外服务操作，保留候选包，暂缓正式下载 latest 指针切换；待连接恢复后再只读核对实际生效和发布结果。没有把 14:11 的历史 ready 当作重启后的当前成功。
 
 恢复与启动证据见上述目录的 `owner-recovery/STARTUP-ACCEPTANCE.json`、`RECOVERY-ACCEPTANCE-2026-11-02T06-53-55-171Z.json` 和 `MAINTAINER-HANDOFF.json`。没有清理、迁移或手改正式会话库；也没有全库逐字节比较，不能据此声称所有会话内容均已独立验收。
+
+## 连接恢复后的验收与正式包发布
+
+15:24 只读检查确认当前原生 owner 的 health/ready 均为 200，工作区和配置身份正确，build 为 `b1bd1803…`，管理 MCP ready、心跳新鲜、隔离数为 0。15:30 再次核对已安装 delivery 文件与 Git LF 正文一致，blocked delivery 为 0；此时有 1 个活跃动作和 1 个待投递记录，不能把正常执行中的 pending 或“暂不安全停止”误判为旧队列卡死。102 个 archived-unconfirmed 历史记录保留且不阻塞 ready。本轮没有发起模型任务或重放原动作。
+
+15:30:28 仅更新正式下载的 `ziwei-latest.tgz` 与 `release.json`，保留前版包和元数据。发布方完整公网 GET 核实包为 717513 字节、SHA256 与上述候选一致，release JSON 为 2113 字节，source 为 `0f79c2b…`、build 为 `b1bd1803…`。独立只读复核于 15:32:49–50 确认公网 health 200 和新 release 标识。旧的 15:24 元数据快照已被新证据取代。
+
+独立 Workspace CLI、历史包、公开 docs/llms、API、网页和手机端文件指纹保持发布前状态；没有启停服务、改变转发或 Nginx 配置、写业务数据、请求设备批量升级。正式发布回执为 `D:\Ziwei-Local\artifacts\cli-delivery-priority-0f79c2b-20261102\publication-20261102T073009Z\PUBLISHED.json`，passed=true。本机追加快照为 `POST-RECOVERY-2026-11-02T07-30-37-004Z.json`；其 pending-clear 检查为 false 对应上述正在执行的动作，不表示 ready 或本次投递修复失败。
+
+此处确认的是本投递修复的源码、安装、连接恢复和下载发布，不替代[原生 Gateway 尚未上线候选的验收](2026-11-02-router-private-mcp-discovery.md)。
+
+根会话于 15:41:09 另用无凭据 GET 完整下载正式 tgz，717513 字节与 SHA256 全部一致。此前额外带查询参数的 Node GET 在 20 秒预算内超时；后续普通 health GET 为 200、0.85 秒，完整包回读成功，不将单次探测结果扩大为长期稳定性结论。

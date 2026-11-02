@@ -35,3 +35,9 @@ CEO 会话自行维护紫衡的配置，将故障 sidecar 收起并沿管理 MCP
 原生 identify 控制线程可独立返回 descriptor ready，不能单独证明 asyncio/WS 可服务。13:39 的追加只读 probe 已通过两 profile 的 discovery/ticket/WS；紫衡 runtime.describe 在 485 毫秒返回，知舟未在明确的 3 秒诊断预算内返回。该短预算不等同原业务默认预算，也不足以断言新 owner 与旧 owner 同一栈阻塞。
 
 后续先核验当前 profile 就绪和 hosted-service 主 loop 同步 I/O，不能只调高业务 timeout、把描述符当成功或强制重启有活动的 owner。此处尚未宣称原生问题已修复。新两失败证据在同目录 `gateway-start-failures/REPORT.md` 与 `WATCHDOG-STACKS.json`。
+
+## 原生主循环候选与重启后边界
+
+针对已就绪 hosted service，候选在进入 `owner_scope` 前直接返回，避免 watcher 每秒为 29 个 Profile 重复进行同步路径检查；尚未初始化或尚未安装 transport 的原流程保持。提取真实原生函数的隔离回归 9/9 通过，独立复核通过。候选补丁、测试和报告位于上述诊断目录的 `hosted-loop-candidate.*`，当时没有修改原生安装或重启共享 owner。
+
+电脑重启后，15:32 只读核实原生 Gateway PID 21484 存活，状态文件于 15:31:44 更新为 running、session_store ok、active_agents 0、29 个 Profile，code SHA 仍为 `c2c5eef14924a09021ef8af1e8b9f1135879d89e`。没有取得上述候选已经安装或被新 owner 加载的证据；工具中的 C 盘文件视图也不能独立证明真实加载内容。新 owner 的目标 Profile RPC 稳定性和真实任务链没有在本轮重新验收，不能用客户端 ready 或状态文件正常宣称此原生卡顿问题已经修好。
