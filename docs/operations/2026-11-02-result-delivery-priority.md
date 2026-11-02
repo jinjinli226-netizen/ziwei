@@ -23,3 +23,23 @@
 结果先 durable 保存，仅精确 DSH binding 等必要证据构成完成前屏障；普通进度异步投递，不再等待旧 FIFO。确认 result 后退休旧进度，迟到 POST 不改已确认记录、不继续重试。结果未知时保留原 blob 和事件，后续只投递原结果；附件完整回执与去重规则不变。未修改原正式动作或运行模型。
 
 源码、安装、发布与现场效果分别补录；共享 Gateway 的另一个原生就绪问题不以本投递修复冒充解决。
+
+## 源码与本机安装
+
+修复提交 `0f79c2b728cbbf50785bbdf9a621fe633b8974e5` 已推送。沿实际安装的 `13ce4205…` 增量基线仅覆盖 delivery 模块，保留其他已上线修复，没有用整个 Git 树替换实际安装。新包 `ziwei-0.1.4.tgz` 为 717513 字节，SHA256 `25310169a35625feb6a6afadbd4f26c8bd056b14c3874d1274bd703d68190012`，client build 为 `b1bd1803fb9b42c4a54dfba66069514a3aaf6bdaf70eb508e2c05e4793090d63`。
+
+北京时间 14:11:40，官方 updater 已 complete，原客户端经正式接口停止、自然退出，没有强杀；新原生客户端 health/ready 均为 200，14 项安装检查通过。安装后 138 个非 pyc 源文件与候选一致，delivery 文件 SHA256 为 `1cd468597598accccb39b0aca673a2d9d3fe021775cc995fcfbf863e59f22d17`。根会话再次比较安装文件与 Git 工作树的 LF 正文一致，并重新运行 9 文件组合 145/145；独立复核关键新用例 10/10。员工 Profile、Hermes 根配置、独立 Workspace CLI 2.0.4 保持，未重放原业务或调用模型。
+
+打包、正式 stop、updater 与原生验收证据保存于 `D:\AINavtie\ops\ziwei\terminal-priority-release-20261102\`。原 verifier 固定读取旧 Gateway PID，重启后复跑会覆盖同名安装回执；14:11 成功记录另存 `owner-recovery/HISTORICAL-INSTALL-141140.json`，明确为原工具输出摘要，不冒充完整原始回执。当前状态以独立时间戳回执为准。
+
+## 随后电脑重启与维护分工
+
+电脑于 14:13:57 重启，旧客户端和 Gateway PID 因此失效。14:38 发现自动启动入口固定了 Codex MSIX LocalCache 下的旧工作区配置，当前 build 虽正确，owner 与原生配置不符。原生配置未丢失，也没有历史 delivery 记录阻塞。
+
+既有 `D:\Ziwei-Local\Start-Services.ps1` 仅把 `ZIWEI_USER_HOME` 固定路径改回原生目录，继续同时显式固定 `ZIWEI_CONFIG`；文本差异仅一个 literal，PowerShell 解析无错误。旧重复 Startup VBS 完整移到本次运维目录备份停用，未新增调度器或守护。空闲错误 owner 经正式 pause/drain/stop 自然退出，正确 owner 用既有 CLI 启动；旧 VBS 留下的另一进程没有控制监听，未声称已停止或空闲。没有执行整份多服务启动脚本。
+
+14:53:55 的独立恢复回执确认原生 owner、build、安装源文件、配置、Profile、独立 Workspace CLI 和当前 Gateway 保持，12/13 项通过；唯一未通过为 ready。公网 origin 的 HTTPS 握手完成后仍无 HTTP 响应，管理 MCP bootstrap 超时。根会话的三条无凭据公网 GET 也在 12 秒内无响应；这只能证明当时连接未恢复，不能据此认定 API、转发或网络中的具体故障点。
+
+用户随后明确由另一位维护者处理重启后的连接恢复。本会话及协作维护会话停止额外服务操作，保留候选包，暂缓正式下载 latest 指针切换；待连接恢复后再只读核对实际生效和发布结果。没有把 14:11 的历史 ready 当作重启后的当前成功。
+
+恢复与启动证据见上述目录的 `owner-recovery/STARTUP-ACCEPTANCE.json`、`RECOVERY-ACCEPTANCE-2026-11-02T06-53-55-171Z.json` 和 `MAINTAINER-HANDOFF.json`。没有清理、迁移或手改正式会话库；也没有全库逐字节比较，不能据此声称所有会话内容均已独立验收。
