@@ -11,6 +11,8 @@ import {isDshAction,matchesDshSessionBinding,sameDshSessionBinding,confirmedDshS
 // contain full image input. Small authenticated receipts have a separate budget.
 export const ACTION_TRANSPORT_BUDGETS=Object.freeze({poll:600_000,ack:15_000,event:15_000,result:600_000});
 const terminal=new Set(['succeeded','failed','expired']);
+const resultEvidence=event=>Boolean(event?.type==='action.stage'&&event.data?.stage==='session'&&event.data.progress?.phase==='stage'&&event.data.progress.dshSessionBinding);
+const disposableProgress=event=>['action.started','action.output','action.progress','action.stage','action.waiting','action.response'].includes(event?.type)&&!resultEvidence(event);
 const RESPONSE_TEXT_BYTES=1024*1024;
 export const ARCHIVED_UNCONFIRMED_STATE='archived_unconfirmed';
 const archiveReasons=new Set(['PERMANENT_SERVER_REJECTION','SERVER_LEASE_EXPIRED','SERVER_TERMINAL_UNCONFIRMED']);
@@ -39,7 +41,7 @@ function minimalAction(action){const p=action.payload||{};return {...Object.from
  */
 export function createActionDelivery({directory,identity,post,dispatch,attachmentTransfer=null,recoverResult=()=>null,retryDelays=[250,1000],onEvent=()=>{},onSuccess=async()=>{},onConfirmed=async()=>{},maxConfirmedRecords=1000,confirmedRetentionMs=7*24*60*60*1000,now=()=>Date.now(),autoArchiveUnconfirmed=false}={}){
  if(!directory||typeof post!=='function'||typeof dispatch!=='function'||typeof onConfirmed!=='function')throw new TypeError('Action delivery requires directory, transport and dispatcher');
- const connection=scope(identity||{}),records=new Map(),active=new Map(),activeBindings=new Map(),eventFlushes=new Map(),archivedRetries=new Map(),inFlightEvents=new Map(),responseTimers=new Map();
+ const connection=scope(identity||{}),records=new Map(),active=new Map(),activeBindings=new Map(),eventFlushes=new Map(),eventPosts=new Map(),archivedRetries=new Map(),inFlightEvents=new Map(),responseTimers=new Map();
  const fileFor=id=>path.join(directory,`${hash(String(id))}.json`);
  const blobFor=(id,kind)=>path.join(directory,`${hash(String(id))}.${kind}.json`);
  const report=(event,data)=>{try{onEvent(event,data);}catch{}};
@@ -67,7 +69,7 @@ export function createActionDelivery({directory,identity,post,dispatch,attachmen
   // A failed save must remain recoverable and must never enter retention.
   save(confirmed);
   clearTimeout(responseTimers.get(record.action.id));responseTimers.delete(record.action.id);
-  if(inFlightEvents.get(record.action.id)?.type==='action.response')eventFlushes.delete(record.action.id);
+  eventFlushes.delete(record.action.id);
   for(const key of Object.keys(record))if(!Object.hasOwn(confirmed,key))delete record[key];
   Object.assign(record,confirmed);
   if(!record.retainEvidence)removeBlobs(record.action.id);pruneConfirmed();
@@ -114,6 +116,26 @@ export function createActionDelivery({directory,identity,post,dispatch,attachmen
  async function retry(operation,{attempts=retryDelays.length+1}={}){
   for(let i=0;i<attempts;i++){try{return await operation();}catch(error){if(permanent(error)||i===attempts-1)throw error;await wait(retryDelays[i]||0);}}
  }
+ function postEvent(record,event){
+  if(eventPosts.has(event.eventId))return eventPosts.get(event.eventId);
+  const id=record.action.id;
+  const retired=()=>['confirmed','blocked',ARCHIVED_UNCONFIRMED_STATE].includes(record.state);
+  const promise=(async()=>{
+   try{await retry(async()=>{
+    if(retired())return;
+    try{return await post(`/a2a/v1/actions/${encodeURIComponent(id)}/events`,event,{timeoutMs:ACTION_TRANSPORT_BUDGETS.event});}
+    catch(error){if(!retired())throw error;}
+   });}
+   catch(error){if(error.status!==404||resultEvidence(event))throw error;report('a2a_events_unsupported',{actionId:id});}
+   if(!retired()){record.events=record.events.filter(item=>item.eventId!==event.eventId);save(record);}
+  })().finally(()=>eventPosts.delete(event.eventId));
+  eventPosts.set(event.eventId,promise);return promise;
+ }
+ async function flushResultEvidence(record){
+  // DSH completion is accepted only after the owner registers this exact
+  // request/session binding. It may pass a held ordinary progress POST.
+  for(const event of record.events.filter(resultEvidence))await postEvent(record,event);
+ }
  async function flushEvents(record){
   const id=record.action.id;if(eventFlushes.has(id))return eventFlushes.get(id);
   const promise=(async()=>{
@@ -121,12 +143,10 @@ export function createActionDelivery({directory,identity,post,dispatch,attachmen
     const event=record.events[0];
     if(event.type==='action.response'&&responseTimers.has(id))break;
     inFlightEvents.set(id,event);
-    try{await retry(()=>post(`/a2a/v1/actions/${encodeURIComponent(id)}/events`,event,{timeoutMs:ACTION_TRANSPORT_BUDGETS.event}));}
-    catch(error){if(error.status!==404)throw error;report('a2a_events_unsupported',{actionId:id});}
+    try{await postEvent(record,event);}
     finally{inFlightEvents.delete(id);}
-    record.events=record.events.filter(item=>item.eventId!==event.eventId);save(record);
    }
-  })().finally(()=>eventFlushes.delete(id));
+  })().finally(()=>{if(eventFlushes.get(id)===promise)eventFlushes.delete(id);});
   eventFlushes.set(id,promise);return promise;
  }
  function flushResponse(record){
@@ -147,7 +167,7 @@ export function createActionDelivery({directory,identity,post,dispatch,attachmen
   // Replacements always get a new ID; the in-flight body stays untouched.
   const events=previousEvents.filter(event=>event.type!=='action.response'||event.eventId===inFlight);
   if(events.length>=256){
-   const index=events.findLastIndex(event=>event.eventId!==inFlight&&!terminal.has(event.type));
+   const index=events.findLastIndex(event=>event.eventId!==inFlight&&disposableProgress(event));
    if(index<0)return false;
    report('a2a_event_queue_full',{actionId:id,type:events[index].type});events.splice(index,1);
   }
@@ -166,16 +186,22 @@ export function createActionDelivery({directory,identity,post,dispatch,attachmen
   if(type==='action.response')return recordResponse(record,data);
   // Bound progress storage; completed results and image bytes use the result
   // envelope. An overflow is explicit in diagnostics, never unbounded retries.
-  if(record.events.length>=256){report('a2a_event_queue_full',{actionId:id,type});return false;}
   const safeData=imageArtifactEventResult(data);
   const dshBinding=type==='action.stage'&&safeData?.stage==='session'&&safeData.progress?.phase==='stage'?safeData.progress.dshSessionBinding:null;
   const previousDshBinding=record.dshSessionBinding;
   if(dshBinding){
    if(!matchesDshSessionBinding(record.action,dshBinding)||previousDshBinding&&!sameDshSessionBinding(previousDshBinding,dshBinding)){report('a2a_dsh_binding_rejected',{actionId:id});return false;}
-   record.dshSessionBinding={...dshBinding};
   }
-  record.events.push({agentId:'ziwei_user',eventId:randomUUID(),type,message:String(data?.message||'').slice(0,8192),data:safeData,...(record.maintenanceAttempt?{maintenanceAttempt:{...record.maintenanceAttempt}}:{})});
-  try{save(record);}catch(error){record.events.pop();if(previousDshBinding)record.dshSessionBinding=previousDshBinding;else delete record.dshSessionBinding;report('a2a_event_persistence_failed',{actionId:id,type,error:error.message});return false;}
+  const previousEvents=record.events,events=[...previousEvents];
+  if(events.length>=256){
+   const inFlight=inFlightEvents.get(id)?.eventId;
+   const index=dshBinding||terminal.has(type)?events.findLastIndex(event=>event.eventId!==inFlight&&disposableProgress(event)):-1;
+   report('a2a_event_queue_full',{actionId:id,type});if(index<0)return false;events.splice(index,1);
+  }
+  if(dshBinding)record.dshSessionBinding={...dshBinding};
+  events.push({agentId:'ziwei_user',eventId:randomUUID(),type,message:String(data?.message||'').slice(0,8192),data:safeData,...(record.maintenanceAttempt?{maintenanceAttempt:{...record.maintenanceAttempt}}:{})});
+  record.events=events;
+  try{save(record);}catch(error){record.events=previousEvents;if(previousDshBinding)record.dshSessionBinding=previousDshBinding;else delete record.dshSessionBinding;report('a2a_event_persistence_failed',{actionId:id,type,error:error.message});return false;}
   void flushEvents(record).catch(error=>report('a2a_event_pending',{actionId:id,error:error.message}));
   return true;
  }
@@ -328,12 +354,10 @@ export function createActionDelivery({directory,identity,post,dispatch,attachmen
     recordEvent(action.id,delivery.status,{result:imageArtifactEventResult(delivery.result),error:delivery.error});
     if(status==='succeeded')await onSuccess(record.action,result);
    }
-   if(!reconciling)try{
-    const flushing=flushEvents(record);
-    // The final result owns the answer even if its last progress POST stalls.
-    if(inFlightEvents.get(action.id)?.type==='action.response')void flushing.catch(error=>report('a2a_progress_delivery_incomplete',{actionId:action.id,pendingEvents:record.events.length,error:error.message}));
-    else await flushing;
-   }catch(error){report('a2a_progress_delivery_incomplete',{actionId:action.id,pendingEvents:record.events.length,error:error.message});}
+   await flushResultEvidence(record);
+   // The durable result owns completion. Ordinary progress and the additional
+   // terminal event are best effort; their backlog cannot hold the result lane.
+   if(!reconciling)void flushEvents(record).catch(error=>report('a2a_progress_delivery_incomplete',{actionId:action.id,pendingEvents:record.events.length,error:error.message}));
    if(!resumingResult&&connection.deviceId){
     // A model may have used most of its original lease. The authenticated ACK
     // renewal marks delivery of a durable completed result, not fake execution

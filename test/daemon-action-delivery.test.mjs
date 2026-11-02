@@ -139,12 +139,12 @@ test('journal write failure prevents ACK and CLI start',async t=>{
  const f=fixture(t);const file=path.join(f.dir,'file');fs.writeFileSync(file,'x');
  await assert.rejects(f.create({directory:file}).execute(action()));assert.equal(f.executions,0);assert.equal(f.calls.length,0);
 });
-test('progress uses stable event IDs and flushes before terminal result',async t=>{
+test('progress receipt retries keep stable event IDs without requiring terminal delivery to drain progress',async t=>{
  const f=fixture(t);let e;let eventLost=true;
- e=f.create({dispatch:async()=>{e.recordEvent('action-test','action.started',{message:'start'});e.recordEvent('action-test','action.output',{message:'output'});return {status:'succeeded',result:{output:'ok'}};},post:async(...args)=>{const response=await f.options.post(...args);if(args[0].endsWith('/events')&&eventLost){eventLost=false;throw new Error('event response lost');}return response;}});
+ e=f.create({dispatch:async()=>{e.recordEvent('action-test','action.started',{message:'start'});e.recordEvent('action-test','action.output',{message:'output'});await e.flushActionEvents('action-test');return {status:'succeeded',result:{output:'ok'}};},post:async(...args)=>{const response=await f.options.post(...args);if(args[0].endsWith('/events')&&eventLost){eventLost=false;throw new Error('event response lost');}return response;}});
  await e.execute(action());const events=f.calls.filter(c=>c.url.endsWith('/events'));
  assert.equal(events[0].body.eventId,events[1].body.eventId);assert.equal(new Set(events.map(c=>c.body.eventId)).size,3);
- assert.ok(f.calls.findIndex(c=>c.url.endsWith('/result'))>f.calls.findLastIndex(c=>c.url.endsWith('/events')));
+ assert.equal(f.calls.find(c=>c.url.endsWith('/result')).body.result.output,'ok');
  assert.ok(events.every(c=>!JSON.stringify(c.body).includes('contentEncoding')));
 });
 test('unavailable progress events cannot block a durable terminal result',async t=>{
