@@ -63,17 +63,21 @@ function pendingView(credential,selection,extra={}){return{...publicCredential(c
 function tokenCredential(payload,previous,secrets){
   for(const key of ['access_token','refresh_token','id_token'])if(typeof payload?.[key]==='string')secrets.push(payload[key]);
   if(!payload||typeof payload.access_token!=='string'||!payload.access_token||payload.access_token.length>65536||typeof payload.token_type!=='string'||payload.token_type.toLowerCase()!=='bearer'||!Number.isFinite(payload.expires_in)||payload.expires_in<=0||payload.expires_in>86400||payload.refresh_token!==undefined&&(typeof payload.refresh_token!=='string'||!payload.refresh_token||payload.refresh_token.length>65536))fail('SERVICE_UNAVAILABLE','Identity provider returned an incomplete access-token response');
-  if(typeof payload.scope!=='string'||payload.scope.split(/\s+/).filter(Boolean).some(scope=>!SCOPES.includes(scope)))fail('SERVICE_UNAVAILABLE','Identity provider returned invalid or unexpected site scopes');
-  return{mode:'unified',identitySource:'unified-oidc-device',issuer:previous.issuer,clientId:CLIENT,audience:AUDIENCE,apiBase:previous.apiBase,workspace:previous.workspace,accessToken:payload.access_token,refreshToken:payload.refresh_token||previous.refreshToken||null,expiresAt:new Date(Date.now()+payload.expires_in*1000).toISOString(),scopes:payload.scope.split(/\s+/).filter(Boolean),identity:previous.identity||null};
+  const allowed=previous.loginMode==='long-lived'?[...SCOPES,'offline_access']:SCOPES;
+  if(typeof payload.scope!=='string'||payload.scope.split(/\s+/).filter(Boolean).some(scope=>!allowed.includes(scope)))fail('SERVICE_UNAVAILABLE','Identity provider returned invalid or unexpected site scopes');
+  if(previous.loginMode==='long-lived'&&!payload.scope.split(/\s+/).includes('offline_access'))fail('SERVICE_UNAVAILABLE','The issuer did not authorize the explicitly requested long-lived login');
+  if(payload.refresh_expires_in!==undefined&&(!Number.isFinite(payload.refresh_expires_in)||payload.refresh_expires_in<0))fail('SERVICE_UNAVAILABLE','Identity provider returned an invalid refresh idle interval');
+  return{mode:'unified',identitySource:'unified-oidc-device',issuer:previous.issuer,clientId:CLIENT,audience:AUDIENCE,apiBase:previous.apiBase,workspace:previous.workspace,accessToken:payload.access_token,refreshToken:payload.refresh_token||previous.refreshToken||null,expiresAt:new Date(Date.now()+payload.expires_in*1000).toISOString(),refreshIdleSeconds:payload.refresh_expires_in>0?payload.refresh_expires_in:null,refreshIdleExpiresAt:payload.refresh_expires_in>0?new Date(Date.now()+payload.refresh_expires_in*1000).toISOString():null,loginMode:previous.loginMode||'standard',loginSessionExpiresAt:previous.loginSessionExpiresAt||null,scopes:payload.scope.split(/\s+/).filter(Boolean),identity:previous.identity||null};
 }
 async function verifyMe(context,credential,previous){
   const result=await context.request({path:'/api/identity/me',credential});
   const native=result.payload;
-  if(native?.verified!==true||native.verification!=='server'||native.identity?.issuer!==credential.issuer||typeof native.identity?.subject!=='string'||!native.identity.subject||!native.user?.id||!Array.isArray(native.memberships)||!Array.isArray(native.scopes)||native.scopes.some(scope=>typeof scope!=='string'||!SCOPES.includes(scope)))fail('UNAUTHENTICATED','The workspace API did not verify the unified identity and native binding');
+  const allowed=credential.loginMode==='long-lived'?[...SCOPES,'offline_access']:SCOPES;
+  if(native?.verified!==true||native.verification!=='server'||native.identity?.issuer!==credential.issuer||typeof native.identity?.subject!=='string'||!native.identity.subject||!native.user?.id||!Array.isArray(native.memberships)||!Array.isArray(native.scopes)||native.scopes.some(scope=>typeof scope!=='string'||!allowed.includes(scope)))fail('UNAUTHENTICATED','The workspace API did not verify the unified identity and native binding');
   if(previous?.identity?.subject&&native.identity.subject!==previous.identity.subject)fail('UNAUTHENTICATED','The verified subject changed during token refresh');
   if(!native.memberships.some(member=>member.slug===credential.workspace))fail('FORBIDDEN','The verified unified identity has no native membership in the selected workspace');
   credential.identity={issuer:credential.issuer,subject:native.identity.subject,nativeUserId:native.user.id};
-  credential.scopes=credential.scopes.filter(scope=>native.scopes.includes(scope)||scope==='openid');
+  credential.scopes=credential.scopes.filter(scope=>native.scopes.includes(scope)||scope==='openid'||scope==='offline_access'&&credential.loginMode==='long-lived');
   return native;
 }
 export async function revokeUnified(context,endpoints,credential){
@@ -104,21 +108,18 @@ async function returnedCredential(context,endpoints,payload,previous){
   }
 }
 async function persistVerified(context,endpoints,snapshot,credential){
-  try{
-    const server=await verifyMe(context,credential,snapshot.credential);
-    const saved=await context.store.compareAndSwap(context.selection,snapshot.version,credential);
-    if(!saved){const cleanup=await discardTokens(context,endpoints,credential);fail('CONFLICT','Authorization changed while the identity provider was responding; returned tokens were not saved',{lateRevocation:cleanup,outcomeUnknown:cleanup.remoteRevocation!=='accepted',localSessionRestored:false});}
-    return{...publicCredential(credential,context.selection),state:'succeeded',completed:true,verification:'server',serverVerified:true,server};
-  }catch(error){
-    if(error.code==='CONFLICT')throw error;
-    const cleanup=await discardTokens(context,endpoints,credential);
-    if(error instanceof CliError)error.details={...error.details,returnedGrantRevocation:cleanup,...(cleanup.remoteRevocation!=='accepted'?{outcomeUnknown:true}:{})};
-    throw error;
-  }
+  credential.serverVerificationPending=true;
+  const saved=await context.store.compareAndSwap(context.selection,snapshot.version,credential,{settleAfterCancellation:true});
+  if(!saved){const cleanup=await discardTokens(context,endpoints,credential);fail('CONFLICT','Authorization changed while the identity provider was responding; returned tokens were not saved',{lateRevocation:cleanup,outcomeUnknown:cleanup.remoteRevocation!=='accepted',localSessionRestored:false});}
+  const server=await verifyMe(context,credential,snapshot.credential);
+  delete credential.serverVerificationPending;
+  if(!await context.store.compareAndSwap(context.selection,saved.version,credential))fail('CONFLICT','Login changed during identity verification; it was not restored');
+  return{...publicCredential(credential,context.selection),state:'succeeded',completed:true,verification:'server',serverVerified:true,server};
 }
 async function begin(context,options){
   if(context.selection.purpose==='employee'&&options.mode==='machine')fail('NOT_SUPPORTED','Explicit registered employee machine clients are not supported by this CLI version');
   for(const key of ['email','password-stdin','managed-file','managed-stdin'])if(options[key])fail('USAGE','Unified device login does not accept passwords or imported bearer credentials');
+  if(options['long-lived']&&context.selection.purpose!=='person')fail('USAGE','Long-lived login is only available for a human person profile');
   const workspace=validateWorkspace(options.workspace);
   const snapshot=await context.store.snapshot(context.selection);
   if(snapshot.credential)fail('CONFLICT','This credential slot is occupied; logout explicitly before starting another authorization');
@@ -127,14 +128,15 @@ async function begin(context,options){
   const endpoints=await discover(context,config);
   const codeVerifier=crypto.randomBytes(32).toString('base64url');context.secrets.push(codeVerifier);
   const codeChallenge=crypto.createHash('sha256').update(codeVerifier).digest('base64url');
-  const result=await oauth(context,endpoints.device_authorization_endpoint,{client_id:CLIENT,scope:SCOPES.join(' '),code_challenge:codeChallenge,code_challenge_method:'S256'});
+  const loginMode=options['long-lived']?'long-lived':'standard';
+  const result=await oauth(context,endpoints.device_authorization_endpoint,{client_id:CLIENT,scope:[...SCOPES,...(loginMode==='long-lived'?['offline_access']:[])].join(' '),code_challenge:codeChallenge,code_challenge_method:'S256'});
   if(!result.ok)throw oauthFailure(result);
   const body=result.payload;if(typeof body?.device_code==='string')context.secrets.push(body.device_code);
   if(!body||typeof body.device_code!=='string'||!body.device_code||body.device_code.length>8192||typeof body.user_code!=='string'||!body.user_code||body.user_code.length>1024||!Number.isFinite(body.expires_in)||body.expires_in<=0||body.expires_in>3600||body.interval!==undefined&&(!Number.isInteger(body.interval)||body.interval<1||body.interval>300))fail('SERVICE_UNAVAILABLE','Identity provider returned an invalid device authorization response');
   const uri=trustedUrl(body.verification_uri,context.env),base=new URL(config.issuer);
   if(uri.origin!==base.origin||!uri.pathname.startsWith(base.pathname.replace(/\/$/,'')+'/'))fail('SERVICE_UNAVAILABLE','Device verification URI leaves the trusted issuer realm');
   const intervalSeconds=body.interval||5;
-  const credential={mode:'unified',identitySource:'unified-oidc-device',issuer:config.issuer,clientId:CLIENT,audience:AUDIENCE,apiBase:context.selection.origin,workspace,scopes:[],expiresAt:new Date(Date.now()+body.expires_in*1000).toISOString(),pending:{deviceCode:body.device_code,codeVerifier,userCode:body.user_code,verificationUri:uri.href,intervalSeconds,nextPollAt:Date.now()+intervalSeconds*1000}};
+  const credential={mode:'unified',identitySource:'unified-oidc-device',issuer:config.issuer,clientId:CLIENT,audience:AUDIENCE,apiBase:context.selection.origin,workspace,loginMode,scopes:[],expiresAt:new Date(Date.now()+body.expires_in*1000).toISOString(),pending:{deviceCode:body.device_code,codeVerifier,userCode:body.user_code,verificationUri:uri.href,intervalSeconds,nextPollAt:Date.now()+intervalSeconds*1000}};
   const saved=await context.store.compareAndSwap(context.selection,snapshot.version,credential);
   if(!saved)fail('CONFLICT','The credential slot changed while device authorization was starting; no local pending authorization was saved');
   return pendingView(credential,context.selection,{state:'authorization_required'});
@@ -187,11 +189,19 @@ async function complete(context,options,wait){
     }
   }
 }
-async function refresh(context){
+async function rotate(context,{force=false}={}){
+ return context.store.withSessionLock(context.selection,async()=>{
   const snapshot=await context.store.snapshot(context.selection),credential=snapshot.credential;
+  if(!force&&credential?.mode==='unified'&&!credential.pending&&Date.parse(credential.expiresAt)>Date.now()+30000){
+    remember(credential,context.secrets);
+    if(credential.serverVerificationPending){await identityConfig(context,credential);await verifyMe(context,credential,credential);const checked={...credential};delete checked.serverVerificationPending;await context.store.compareAndSwap(context.selection,snapshot.version,checked);return{credential:checked};}
+    assertCredential(credential);
+    return{credential};
+  }
   if(credential?.mode!=='unified'||!credential.accessToken||!credential.refreshToken||credential.pending)fail('UNAUTHENTICATED','This slot has no online unified refresh grant');
   remember(credential,context.secrets);
-  if(credential.refreshState)fail('CONFLICT','A refresh is running or its outcome is unknown; inspect status and logout before authorizing again',{state:credential.refreshState});
+  if(credential.refreshIdleExpiresAt&&Date.parse(credential.refreshIdleExpiresAt)<=Date.now())fail('UNAUTHENTICATED','The issuer refresh idle window has ended; authorize this profile again. The stored record was preserved.');
+  if(credential.refreshState)fail(credential.refreshState==='reauthorization_required'?'UNAUTHENTICATED':'OUTCOME_UNKNOWN','The previous refresh outcome is unresolved; the stored grant was preserved and will not be replayed',{state:credential.refreshState,outcomeUnknown:credential.refreshState!=='reauthorization_required'});
   const config=await identityConfig(context,credential),endpoints=await discover(context,config);
   const running={...credential,refreshState:'running'};
   const claimed=await context.store.compareAndSwap(context.selection,snapshot.version,running);
@@ -199,12 +209,30 @@ async function refresh(context){
   let result;
   try{result=await oauth(context,endpoints.token_endpoint,{client_id:CLIENT,grant_type:'refresh_token',refresh_token:credential.refreshToken});}
   catch(error){await settle(context,claimed.version,error.details?.outcomeUnknown?{...credential,refreshState:'unknown'}:credential,error);throw error;}
-  if(!result.ok){await settle(context,claimed.version,result.payload?.error==='invalid_grant'?null:credential);throw oauthFailure(result);}
+  if(!result.ok){
+    const latest=await context.store.snapshot(context.selection);
+    if(latest.version!==claimed.version){if(latest.credential?.mode==='unified'&&Date.parse(latest.credential.expiresAt)>Date.now()+30000){assertCredential(latest.credential);remember(latest.credential,context.secrets);return{credential:latest.credential};}fail('CONFLICT','This login changed during refresh; no stored credentials were removed');}
+    await settle(context,claimed.version,result.payload?.error==='invalid_grant'?{...credential,refreshState:'reauthorization_required'}:credential);throw oauthFailure(result);
+  }
   let next;
   try{next=await returnedCredential(context,endpoints,result.payload,credential);}catch(error){await settle(context,claimed.version,{...credential,refreshState:'unknown'},error);throw error;}
-  try{return await persistVerified(context,endpoints,claimed,next);}
-  catch(error){await settle(context,claimed.version,{...credential,refreshState:'unknown'},error);throw error;}
+  // Rotation consumes the previous RT. Persist the returned generation before
+  // the separate API read, so a 503 or network failure there cannot lose it.
+  next.serverVerificationPending=true;
+  const saved=await context.store.compareAndSwap(context.selection,claimed.version,next,{settleAfterCancellation:true});
+  if(!saved){const cleanup=await discardTokens(context,endpoints,next);fail('CONFLICT','Login changed during refresh; returned grant was not restored',{lateRevocation:cleanup});}
+  const server=await verifyMe(context,next,credential);delete next.serverVerificationPending;
+  const verified=await context.store.compareAndSwap(context.selection,saved.version,next);
+  if(!verified)fail('CONFLICT','Login changed during identity verification; it was not restored');
+  return{credential:next,server};
+ });
 }
+export async function ensureUnifiedCredential(context){
+ const current=await context.store.load(context.selection);
+ if(current?.mode!=='unified'||current.identitySource==='unified-oidc-machine'){assertCredential(current);return current;}
+ return(await rotate(context)).credential;
+}
+async function refresh(context){const result=await rotate(context,{force:true});return{...publicCredential(result.credential,context.selection),state:'succeeded',completed:true,verification:result.server?'server':'local',serverVerified:Boolean(result.server),...(result.server?{server:result.server}:{})};}
 export async function logoutUnified(context,credential,options){
   const base={localCleared:true,scope:'current CLI credential slot and this site client grant',allSitesLoggedOut:false};
   remember(credential,context.secrets);
@@ -234,9 +262,9 @@ export async function unifiedCommand(action,options,context){
     if(!credential)fail('UNAUTHENTICATED','No identity in the selected slot; use auth login');
     if(options.local)return{...publicCredential(credential,context.selection),verification:'local',serverVerified:false};
     if(credential.pending)return pendingView(credential,context.selection);
-    assertCredential(credential);await identityConfig(context,credential);
-    const server=await verifyMe(context,{...credential},credential);
-    return{...publicCredential(credential,context.selection),verification:'server',serverVerified:true,server};
+    const active=await ensureUnifiedCredential(context);await identityConfig(context,active);
+    const server=await verifyMe(context,{...active},active);
+    return{...publicCredential(active,context.selection),verification:'server',serverVerified:true,server};
   }
   fail('USAGE','Use auth login, complete, wait, refresh, status or logout');
 }

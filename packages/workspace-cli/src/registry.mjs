@@ -1,7 +1,7 @@
 import {toolDefinitions} from '../vendor/native-schemas.mjs';
 import {NATIVE_OPERATIONS} from '../vendor/hermes-native-contract.mjs';
 import {fail} from './errors.mjs';
-export const CLI_VERSION='2.0.0';
+export const CLI_VERSION='2.0.4';
 export const STANDARD_VERSION='1.3.0';
 export const DOCS_URL='https://ziwei.qzelynth.top/docs';
 export const DEFAULT_API='https://ziwei.qzelynth.top';
@@ -93,7 +93,7 @@ export const unsupportedOperations=Object.freeze({
   'bots.failure-finalization':'Privileged failure recovery is not exposed by this CLI version.'
 });
 export const getOperation=name=>operations.find(o=>o.name===name);
-export function getCapabilities(){return{cliVersion:CLI_VERSION,standardVersion:STANDARD_VERSION,contract:'v1',operations:structuredClone(operations),unsupportedOperations:{...unsupportedOperations},authorization:{verification:'offline',grantsVerified:false,note:'Catalog describes implemented endpoints. Installation and local credential presence grant no permission; the backend checks every request.'},identity:{native:'explicit legacy compatibility requires server declaration',managed:'explicit legacy compatibility requires server declaration',unified:'implemented; requires configured ready server and trusted identity provider; production deployment pending',clientId:'ziwei-workspace-cli',audience:'ziwei-workspace-api',requestedScopes:['openid','workspace:read','workspace:write'],flow:'device_authorization',transport:'Public server cliTransports must explicitly allow native or mcp. Prefer the mapped native route; otherwise use the mapped mcp route. Both carry the same current-site access token, never a legacy managed token. Original per-route idempotency applies.',machine:'not_supported; never substitutes shared administrator credentials'}};}
+export function getCapabilities(){return{cliVersion:CLI_VERSION,standardVersion:STANDARD_VERSION,contract:'v1',operations:structuredClone(operations),unsupportedOperations:{...unsupportedOperations},authorization:{verification:'offline',grantsVerified:false,note:'Catalog describes implemented endpoints. Installation and local credential presence grant no permission; the backend checks every request.'},identity:{native:'explicit legacy compatibility requires server declaration',managed:'explicit legacy compatibility requires server declaration',unified:'implemented; requires configured ready server and trusted identity provider; backend verifies every request',clientId:'ziwei-workspace-cli',audience:'ziwei-workspace-api',requestedScopes:['openid','workspace:read','workspace:write'],flow:'device_authorization',transport:'Public server cliTransports must explicitly allow native or mcp. Prefer the mapped native route; otherwise use the mapped mcp route. Both carry the same current-site access token, never a legacy managed token. Original per-route idempotency applies.',machine:'implemented; auth login --mode machine --purpose employee --workspace <slug> --worker-file <absolute private JSON>; explicitly provisioned per-employee/site client and subject with a single employee/workspace native binding; requires configured ready server and trusted issuer; access token <=300 seconds, no refresh token; no shared administrator credentials'}};}
 export function createOperationRequest(op,input,{mode,workspace}){
   const route=op.routes[mode];if(!route)fail('NOT_SUPPORTED',`${op.name} has no corresponding ${mode} endpoint in this backend version`,{operation:op.name});
   const values={...input,workspace};

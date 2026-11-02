@@ -1,0 +1,77 @@
+{
+  "baselineCommit": "a8b3e3194ea94f8ffc65b0a527c47219f7195e07",
+  "accepted203PackageSha256": "2f6401718659f82f0961d6b7d74a87333afea7884f45b2defbc2352e115d3708",
+  "tddRed": "node --test test/long-lived-auth.test.mjs: 1 failed for unrecognized --long-lived, exit 1",
+  "files": [
+    {
+      "file": "src/auth.mjs",
+      "beforeSha256": "a8afba7dc9dec49b9c3ce6059afeacc2fd6ae5d38f27194248b23a142fd789a8",
+      "accepted203Sha256": "cee8de7d785ec98234700c64ab8c7f0863fd009f51ae91fa361c4dda854ab65a",
+      "mergedSha256": "cee8de7d785ec98234700c64ab8c7f0863fd009f51ae91fa361c4dda854ab65a",
+      "normalizedAcceptedMatch": true
+    },
+    {
+      "file": "src/config.mjs",
+      "beforeSha256": "0a11bde7405a4261cf4e9b5e33118e0418fdd88ed23046d88a3c4a35381405c2",
+      "accepted203Sha256": "f277e6bd8bb8d36723cfb1e2a128fa4716f533be6efbbb3a02d0f70069abd7a3",
+      "mergedSha256": "807e32e104886e855cdb8400aecd99108563a4a422a003525e715160526ede21",
+      "normalizedAcceptedMatch": true
+    },
+    {
+      "file": "src/unified.mjs",
+      "beforeSha256": "8772174578225ad9b205be2bf85de09ee7564353f6e50718c6e26f09f61ff794",
+      "accepted203Sha256": "f8eb8cc224cf68005169f48d214f0393f8b45f75346a9704b65988f377ff836e",
+      "mergedSha256": "a4f12b3e5514a9a9a741c67340135b30e48d22b0a58316b5fb248319abb84421",
+      "normalizedAcceptedMatch": false,
+      "additionalVerifiedFix": "Move the ordinary credential identity assertion after pending server verification so first-completion /me 503 recovery reuses the persisted generation, without another token exchange or premature business dispatch."
+    },
+    {
+      "file": "src/main.mjs",
+      "beforeSha256": "ca35fa0f92d63ca0c0a87238105e2d90c9631911f67a19621d864d4d5857d0ef",
+      "accepted203Sha256": "d4ec6c415398de8e3bd33efb1f1a8225b41c8ca6b53f61ec5ced9cf610515239",
+      "mergedSha256": "4fd3720021364d7d452164868c935c42f16ee3e842254aae5589adf554fae1f8",
+      "helpChange": "Use issuer-provided expiry, no fixed duration promise",
+      "normalizedAcceptedMatch": false
+    },
+    {
+      "file": "src/registry.mjs",
+      "beforeSha256": "1130133f00d4aee0dda31869eb1f6ec0726346c6c1f479df62ebe2e13aab18fc",
+      "mergedSha256": "f7a445464904ec12b7a655f80de8493fdcd1d63dfa7ce3c5aee64522ffcf04cf",
+      "policy": "Keep all 49 branch operations and mixed schemas; change version and identity descriptions only"
+    },
+    {
+      "file": "src/transport.mjs",
+      "beforeSha256": "b3bf97f594ec8811ed93d465d279abcc18c14e3316e8d86df1c221c6b4981f8e",
+      "mergedSha256": "b3bf97f594ec8811ed93d465d279abcc18c14e3316e8d86df1c221c6b4981f8e",
+      "policy": "Retain branch plugin transport and receipt implementation unchanged"
+    }
+  ],
+  "otherSourcePolicy": "Keep branch registry plugin/mixed schemas and transport receipts; update version/capability descriptions separately",
+  "installed": false,
+  "published": false,
+  "verification": {
+    "fullPackageTests": {
+      "command": "npm test",
+      "passed": 111,
+      "failed": 0
+    },
+    "build": {
+      "command": "npm run build",
+      "exitCode": 0,
+      "banner": "workspace-cli 2.0.4"
+    },
+    "candidateReceipt": ".local/release-2.0.4-recovery-fix/CANDIDATE-ACCEPTANCE.json",
+    "candidateSha256": "666a0e34323b818d14696b4666404e145f2c442cd572f541eda6a195ab60c2c8",
+    "independentReview": "passed; inherited first-completion recovery P2 closed; no unresolved blocker",
+    "firstCompletionRecovery": {
+      "test": "first completion recovers after /me 503 by verifying the saved generation without another exchange",
+      "red": "UNAUTHENTICATED exit 3 instead of 0",
+      "green": "1/1, preserved RT, one total exchange, one business call after verification"
+    }
+  },
+  "historicalCandidate": {
+    "sha256": "564f63231958d95074b915ee9b333e9e20bbaae4c212209aa95a65ac0e7549ce",
+    "path": ".local/release-2.0.4/ziwei-workspace-cli-2.0.4.tgz",
+    "historyOnly": true
+  }
+}

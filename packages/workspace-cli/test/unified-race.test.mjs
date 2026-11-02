@@ -10,7 +10,7 @@ const mainUrl=new URL('../src/main.mjs',import.meta.url).href;
 const origin='https://workspace.example.test',issuer='https://identity.example.test/realms/ziwei';
 const selection={origin,profile:'default',account:'default',purpose:'person'};
 async function waitForFile(file){const deadline=Date.now()+5000;while(Date.now()<deadline){try{await fs.access(file);return;}catch{}await new Promise(resolve=>setTimeout(resolve,10));}assert.fail('Isolated refresh did not reach its synthetic exchange barrier');}
-test('cross-process refresh returns rotated grant after logout, cannot restore store and requests token cleanup',async()=>{
+test('cross-process local logout waits for refresh and then clears the rotated generation',async()=>{
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'workspace-unified-race-'));
   const ready=path.join(root,'synthetic-ready'),release=path.join(root,'synthetic-release');
   let finished;
@@ -39,11 +39,17 @@ test('cross-process refresh returns rotated grant after logout, cannot restore s
     let output='',stderr='';child.stdout.on('data',value=>output+=value);child.stderr.on('data',value=>stderr+=value);
     finished=new Promise((resolve,reject)=>{child.on('error',reject);child.on('exit',exit=>exit===0?resolve():reject(new Error(`Synthetic refresh worker failed (${exit}): ${stderr}`)));});
     await waitForFile(ready);
-    let stdout='';const result=await runCli(['auth','logout','--api',origin,'--local'],{env:{ZIWEI_WORKSPACE_CONFIG_DIR:root},stdout:value=>stdout+=value,fetchImpl:async()=>assert.fail('local logout must not fetch')});
-    assert.equal(result.exitCode,0,stdout);assert.equal(await store.load(selection),null);
-    await fs.writeFile(release,'release');await finished;
-    const observed=JSON.parse(output);assert.equal(observed.exitCode,6,output);assert.equal(observed.envelope.error.details.localSessionRestored,false);assert.equal(observed.envelope.error.details.lateRevocation.remoteRevocation,'accepted');
-    assert.deepEqual(observed.revoked,[{hint:'refresh_token',syntheticMatch:true,client:'ziwei-workspace-cli'},{hint:'access_token',syntheticMatch:true,client:'ziwei-workspace-cli'}]);
+    let stdout='',logoutFinished=false;
+    const logout=runCli(['auth','logout','--api',origin,'--local'],{env:{ZIWEI_WORKSPACE_CONFIG_DIR:root},stdout:value=>stdout+=value,fetchImpl:async()=>assert.fail('local logout must not fetch')}).then(result=>{logoutFinished=true;return result;});
+    try{
+      await new Promise(resolve=>setTimeout(resolve,100));
+      assert.equal(logoutFinished,false,'local logout must wait while another process holds the session lock');
+      assert.equal((await store.load(selection)).refreshState,'running');
+    }finally{await fs.writeFile(release,'release');}
+    await finished;const result=await logout;
+    assert.equal(result.exitCode,0,stdout);assert.equal(result.envelope.data.localCleared,true);
+    const observed=JSON.parse(output);assert.equal(observed.exitCode,0,output);assert.equal(observed.envelope.data.serverVerified,true);
+    assert.deepEqual(observed.revoked,[]);
     assert.equal(await store.load(selection),null);
     for(const secret of ['synthetic-old-access','synthetic-old-refresh','synthetic-late-access','synthetic-late-refresh'])assert.ok(!output.includes(secret));
   }finally{

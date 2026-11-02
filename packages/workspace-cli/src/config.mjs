@@ -26,13 +26,29 @@ const slotVersion=(data,key)=>recordVersion(data.slots[key])||data.versions?.[ke
 function bumpVersion(data,key){data.versions??={};const version=crypto.randomUUID();data.versions[key]=version;return version;}
 export class CredentialStore{
   constructor(root,{lockTimeoutMs=5000,signal}={}){this.root=root;this.file=path.join(root,'credentials.json');this.lockDirectory=path.join(root,'credentials.lock');this.lockTimeoutMs=lockTimeoutMs;this.signal=signal;}
+  async withSessionLock(selection,operation){
+    // Hold a per-profile lock across read -> OAuth exchange -> atomic CAS.
+    // The short shared file transaction lock remains separate, so unrelated
+    // profiles never hold each other up during network I/O.
+    await fs.mkdir(this.root,{recursive:true,mode:0o700});
+    const directory=path.join(this.root,`.session-${keyFor(selection)}.lock`);
+    const deadline=Date.now()+this.lockTimeoutMs;let acquired=false;
+    while(!acquired){
+      if(this.signal?.aborted)fail('CANCELLED','Cancelled before acquiring the login refresh lock',{outcomeUnknown:false});
+      try{await fs.mkdir(directory,{mode:0o700});acquired=true;}
+      catch(error){if(error.code!=='EEXIST')fail('SERVICE_UNAVAILABLE','Cannot acquire login refresh lock');if(Date.now()>=deadline)fail('CONFLICT','Another process is updating this login; retry after it finishes',{lockBusy:true});await new Promise(resolve=>setTimeout(resolve,25));}
+    }
+    const owner=path.join(directory,'owner.json');
+    try{await fs.writeFile(owner,JSON.stringify({pid:process.pid,startedAt:new Date().toISOString()}),{mode:0o600,flag:'wx'});return await operation();}
+    finally{await fs.rm(owner,{force:true});await fs.rmdir(directory);}
+  }
   async read(){try{const parsed=JSON.parse(await fs.readFile(this.file,'utf8'));if(parsed.schemaVersion!==1||parsed.service!=='workspace'||!parsed.slots||typeof parsed.slots!=='object')fail('SERVICE_UNAVAILABLE','Workspace credential store has an unsupported format');return parsed;}catch(error){if(error.code==='ENOENT')return{schemaVersion:1,service:'workspace',slots:{}};if(error.code==='SERVICE_UNAVAILABLE')throw error;fail('SERVICE_UNAVAILABLE','Workspace credential store is unreadable');}}
   async load(selection){const data=await this.read();const item=data.slots[keyFor(selection)];if(!item)return null;if(JSON.stringify(item.selector)!==JSON.stringify(selection))fail('SERVICE_UNAVAILABLE','Credential selector mismatch');return item.credential;}
   async snapshot(selection){const data=await this.read(),key=keyFor(selection),item=data.slots[key];if(item&&JSON.stringify(item.selector)!==JSON.stringify(selection))fail('SERVICE_UNAVAILABLE','Credential selector mismatch');return{credential:item?.credential||null,version:slotVersion(data,key)};}
   async #write(data){
     await fs.mkdir(this.root,{recursive:true,mode:0o700});
     const temp=path.join(this.root,`.credentials-${crypto.randomUUID()}.tmp`);
-    try{await fs.writeFile(temp,JSON.stringify(data),{encoding:'utf8',mode:0o600,flag:'wx'});await fs.rename(temp,this.file);await fs.chmod(this.file,0o600);}catch{await fs.rm(temp,{force:true}).catch(()=>{});fail('SERVICE_UNAVAILABLE','Cannot save workspace credential store');}
+    try{const file=await fs.open(temp,'wx',0o600);try{await file.writeFile(JSON.stringify(data),'utf8');await file.sync();}finally{await file.close();}await fs.rename(temp,this.file);await fs.chmod(this.file,0o600);}catch{await fs.rm(temp,{force:true}).catch(()=>{});fail('SERVICE_UNAVAILABLE','Cannot save workspace credential store');}
   }
   async #mutate(change,{settleAfterCancellation=false}={}){
     // Settling an already dispatched authorization only records its known/unknown
@@ -67,7 +83,7 @@ export class CredentialStore{
   async take(selection){return this.#mutate(data=>{const key=keyFor(selection),item=data.slots[key];if(item&&JSON.stringify(item.selector)!==JSON.stringify(selection))fail('SERVICE_UNAVAILABLE','Credential selector mismatch');delete data.slots[key];bumpVersion(data,key);return{changed:true,value:item?.credential||null};});}
   async clear(selection){return this.#mutate(data=>{const key=keyFor(selection),existed=Object.hasOwn(data.slots,key);delete data.slots[key];bumpVersion(data,key);return{changed:true,value:existed};});}
 }
-export function publicCredential(credential,selection){return{service:'workspace',...selection,mode:credential.mode,identitySource:credential.identitySource,identity:credential.identity||null,workspace:credential.workspace,expiresAt:credential.expiresAt||null,...(credential.mode==='unified'?{issuer:credential.issuer,audience:credential.audience,scopes:credential.scopes||[],scopeSource:credential.pending?'not verified; awaiting authorization':'last server-verified site identity; scopes never grant native permissions',state:credential.pending?(credential.pending.outcomeUnknown?'unknown':credential.pending.exchangeState||'authorization_required'):credential.refreshState||'succeeded',completed:!credential.pending&&!credential.refreshState}:{}),...(credential.deviceId?{deviceId:credential.deviceId}:{}),unified:credential.mode==='unified'?'implemented_requires_configured_server':'pending'};}
+export function publicCredential(credential,selection){return{service:'workspace',...selection,mode:credential.mode,identitySource:credential.identitySource,identity:credential.identity||null,workspace:credential.workspace,expiresAt:credential.expiresAt||null,...(credential.mode==='unified'?{accessExpiresAt:credential.pending?null:credential.expiresAt||null,refreshIdleExpiresAt:credential.refreshIdleExpiresAt||null,loginSessionExpiresAt:credential.loginSessionExpiresAt||null,loginMode:credential.loginMode||'standard',automaticRefresh:Boolean(credential.refreshToken),longLivedIdleDays:credential.loginMode==='long-lived'&&credential.refreshIdleSeconds?credential.refreshIdleSeconds/86400:null,sessionExpirySource:'Access expiry is not login expiry; refresh idle expiry rolls with successful renewal; final session limits are enforced by the issuer.',issuer:credential.issuer,audience:credential.audience,scopes:credential.scopes||[],scopeSource:credential.pending?'not verified; awaiting authorization':'last server-verified site identity; scopes never grant native permissions',state:credential.pending?(credential.pending.outcomeUnknown?'unknown':credential.pending.exchangeState||'authorization_required'):credential.refreshState||'succeeded',completed:!credential.pending&&!credential.refreshState}:{}),...(credential.deviceId?{deviceId:credential.deviceId}:{}),unified:credential.mode==='unified'?'implemented_requires_configured_server':'pending'};}
 export function validateManagedToken(token,metadata,errorCode='USAGE'){
   const invalid=()=>fail(errorCode,'Expected an original restricted zmcp1 managed credential; static owner tokens and conflicting claims are not accepted');
   if(typeof token!=='string'||token.length>8192)invalid();

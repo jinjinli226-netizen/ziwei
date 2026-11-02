@@ -1,6 +1,6 @@
 # 紫薇驾驶舱 CLI 接入说明
 
-CLI 2.0.0 · 规范 1.3.0 · 身份契约 1.0.1 · 机器契约 v1 · 文档 2.0.0 · 更新 2026-10-22
+CLI 2.0.4 · 规范 1.3.0 · 身份契约 1.0.1 · 机器契约 v1 · 文档 2.1.0 · 更新 2026-11-02
 
 本站：https://ziwei.qzelynth.top。公开索引：https://ziwei.qzelynth.top/docs；完整说明：https://ziwei.qzelynth.top/docs/cli.md；发现索引：https://ziwei.qzelynth.top/llms.txt。匿名阅读这些说明不授予任何业务权限。
 
@@ -10,28 +10,30 @@ CLI 2.0.0 · 规范 1.3.0 · 身份契约 1.0.1 · 机器契约 v1 · 文档 2.0
 
 本主版本新 CLI 默认机器契约 v1，也接受显式 `--contract v1`。原有 `ziwei_user` 是电脑执行客户端，原管理 MCP 仍保留；手机 Control 的 `ziwei` 是配套工具。本 CLI 不安装或启动这些程序。
 
-当前统一身份已在候选源码接线，CLI 使用公共设备授权、按站 AT/RT、显式刷新与退出；真实 OP、本站端到端和生产切换的验收须分别核实，不能以离线通过盖章 C13。尚未发布到公共 npm，未部署这次身份、文档路由或 CLI 改动到生产。以下绝对 URL 是本站发布目标，公网可用性 pending；仓库文件和本地测试不表示 URL 已上线。
+本站三个文档入口可匿名读取。CLI 默认 unified，使用公共设备授权、按站 AT/RT、续期与退出；人员可按需申请长期授权，已登记员工可使用受限机器身份。文档可读、版本包分发、统一身份配置和真实业务完成是不同状态，应分别核对。
 
-准备期服务器默认 legacy，保留现网原入口；CLI 默认 unified，这是 2.0.0 的明确行为变更。只有部署方显式配置 `ZIWEI_IDENTITY_MODE=unified`、完整受信 issuer/API 与 web secret/session key，并完成原生身份绑定后，默认 CLI 登录才可用。配置缺失不自动降级旧密码。准备兼容不是最终统一身份交付。
+截至本次文档更新，本站 `GET /api/identity/config` 公开配置为 `mode:unified`、`ready:true`、`legacyAllowed:false`，并声明 native 与 mcp 两种 CLI HTTP 路由族。运行时以所选站点的实时响应为准；配置缺失不自动降级旧密码。`ready:true` 只表示身份配置就绪，不代表所有模型或 SSO 全流程均已验收。每次业务仍须验证当前身份、工作区和原生资源授权。
 
-源码基线 commit：19876c0f006af18c9fe3b6ef4a7d9e94c75c14c6；候选实现标识：workspace-unified-identity（未提交增量，尚无新的发布 commit）；命令目录 SHA-256：bd3d991fe395bbb28c3024c727c41f5b58e01941a9bd91316e95fa758619ee78。该指纹只标识本文实际引用的 registry，不是安装包校验和或生产版本。最终源码 commit、artifact SHA-256 与发布状态须从交付记录分别核对。
+官方源码：[当前维护分支](https://github.com/jinjinli226-netizen/ziwei/tree/codex/ziwei-current-baseline-20261029)（私有仓库需权限）；命令目录 SHA-256：bfa544919c75f26991bd6bc3fae243d747c7187f74d2f58073850af5c21bafe2。该指纹只标识本文实际引用的 registry，不是安装包校验和或生产版本。版本包的来源与校验值见下方发布回执；电脑客户端的实际安装版本另行核对。
 
-已有操作见下方从 registry 生成的 49 项命令/schema。统一身份只在服务器公开配置明确允许的 native/mcp HTTP 路由上传本站 AT：优先对应 native 路由，否则可用原有 MCP 路由。原生资源、角色和幂等边界保持逐项定义。员工绑定可能只允许自己的员工/Bot 路径，集合查询可被明确拒绝。未覆盖：员工机器 client_credentials、全站 OP 退出、通用 actions cancel、dry-run、特权 force-abandon/failure-finalization、其他站点业务命令。
+已有操作见下方从 registry 生成的 49 项命令/schema。统一身份只在服务器公开配置明确允许的 native/mcp HTTP 路由上传本站 AT：优先对应 native 路由，否则可用原有 MCP 路由。原生资源、角色和幂等边界保持逐项定义。员工绑定可能只允许自己的员工/Bot 路径，集合查询可被明确拒绝。未覆盖：全站 OP 退出、通用 actions cancel、dry-run、特权 force-abandon/failure-finalization、其他站点业务命令。
 
 ## 安装、升级、卸载与包校验
 
 运行要求：Node.js >=20.11 与 npm；使用 Node 内置 fetch，无运行时第三方依赖。设计面向 Windows、macOS、Linux；各平台的实际安装验收以交付证据为准，不将本地 Windows 验证称为三平台实测。
 
-分发来源是本项目维护者交付的独立 tarball `ziwei-workspace-cli-2.0.0.tgz`，须通过授权渠道取得文件及独立可信 SHA-256。真实不可变 HTTPS 下载 URL 在发布后由交付回执提供；当前没有可宣称已可用的公共 npm 包或公共下载地址。不要把电脑客户端的下载包当成本包。以下尖括号必须替换为真实获授权的交付参数。
+本站按版本分发独立包 [ziwei-workspace-cli-2.0.4.tgz](https://ziwei.qzelynth.top/downloads/workspace-cli/2.0.4/ziwei-workspace-cli-2.0.4.tgz)；同目录 [release.json 发布回执](https://ziwei.qzelynth.top/downloads/workspace-cli/2.0.4/release.json)用于核对版本、SHA-256 与发布来源。安装使用这个版本化 tarball，不使用公共 npm 包名，也不要把 `ziwei_user` 电脑客户端的下载包当成本包。
 
-在 PowerShell 中先验证；文件名可按实际交付路径替换：
+在 PowerShell 中下载包与发布回执，先比对可信 SHA-256，再安装：
 
 ```powershell
-(Get-FileHash -Algorithm SHA256 -LiteralPath "<artifact-file.tgz>").Hash
-# 将结果与可信交付记录中的 <expected-sha256> 逐字比对，相同才安装。
-npm install --global "<artifact-file.tgz>"
-# 发布后也可直接安装回执给出的真实 HTTPS 版本包；下面 URL 是模板，当前不可声称已上线。
-npm install --global "https://<trusted-release-origin>/<release-path>/ziwei-workspace-cli-2.0.0.tgz"
+Invoke-WebRequest -Uri "https://ziwei.qzelynth.top/downloads/workspace-cli/2.0.4/ziwei-workspace-cli-2.0.4.tgz" -OutFile "ziwei-workspace-cli-2.0.4.tgz"
+Invoke-WebRequest -Uri "https://ziwei.qzelynth.top/downloads/workspace-cli/2.0.4/release.json" -OutFile "release.json"
+(Get-FileHash -Algorithm SHA256 -LiteralPath "ziwei-workspace-cli-2.0.4.tgz").Hash
+# 将结果与 release.json 及可信交付记录中的 SHA-256 比对，相同才安装。
+npm install --global "./ziwei-workspace-cli-2.0.4.tgz"
+# 也可使用同一个版本化 HTTPS 包地址安装：
+npm install --global "https://ziwei.qzelynth.top/downloads/workspace-cli/2.0.4/ziwei-workspace-cli-2.0.4.tgz"
 ziwei-workspace --version
 ziwei-workspace --help
 ```
@@ -47,7 +49,7 @@ npm uninstall --global @ziwei/workspace-cli
 
 ## 登录、身份、权限和安全输入
 
-统一身份使用同一人或员工的受信 `(issuer, subject)`，每站分别授权并限制 audience。本站公共设备客户端固定 `ziwei-workspace-cli`，API audience 为 `ziwei-workspace-api`。只申请 `openid workspace:read workspace:write`，普通刷新不申请 `offline_access`。不会按同名/邮箱合并账号，也不把客户端自报 employeeId、email 或角色当身份。
+统一身份使用同一人或员工的受信 `(issuer, subject)`，每站分别授权并限制 audience。本站公共设备客户端固定 `ziwei-workspace-cli`，API audience 为 `ziwei-workspace-api`。默认申请 `openid workspace:read workspace:write`；人员可显式加 `--long-lived` 申请 `offline_access`，授权范围与有效期以服务端实际返回为准。不会按同名/邮箱合并账号，也不把客户端自报 employeeId、email 或角色当身份。
 
 CLI 默认 unified；`auth login --mode unified --workspace "<workspace-slug>"` 先匿名读取所选 origin 的 `GET /api/identity/config`，精确核对服务、client、audience、scope、issuer 与 readiness。可选 `ZIWEI_IDENTITY_ISSUER` 只作精确 pin；服务器配置缺失时不能使用缓存 issuer 降级。OP discovery issuer 必须一致，device/token/revocation endpoint 必须是该 issuer origin/realm 下的受信 HTTPS 地址，拒绝重定向。公开 `ready:true` 只表示本地配置齐备，不证明 OP/DNS/绑定/生产已验收。
 
@@ -63,19 +65,31 @@ ziwei-workspace auth refresh --profile "<profile>" --account "<account-slot>" --
 ziwei-workspace auth logout --profile "<profile>" --account "<account-slot>" --json
 ```
 
+人员需要长期登录时，可将上面的 login 替换为以下命令，其余 complete/wait/status 步骤相同。长期授权取决于服务端策略与实际返回的期限，不保证固定天数：
+
+```sh
+ziwei-workspace auth login --mode unified --purpose person --long-lived --workspace "<workspace-slug>" --profile "<profile>" --account "<account-slot>" --non-interactive --json
+```
+
+`auth status` 的安全摘要区分 `accessExpiresAt`、`refreshIdleExpiresAt`、`loginSessionExpiresAt` 和 `loginMode`。AT 到期不等于整次登录失效；刷新闲置期限随成功续期变化，最终会话上限仍由身份服务执行。缺少期限时不推算固定登录时长。
+
 `auth complete` 只在轮询间隔到期后兑换一次；`auth wait` 按 interval/slow_down 在总 --timeout 内等待，已知未批准时返回 `state:pending,completed:false,timedOut:true`，不把待批准说成登录完成。每流只允许一个兑换在途。终止拒绝/到期只清理对应版本；已发兑换或刷新超时/SIGINT保留 unknown，禁止自动重放。
 
-CLI 将 AT/RT 作为不透明凭据；保存登录/刷新前必须用新 AT 请求 `GET /api/identity/me`，由服务器实际验签、逐次 confidential introspection 与原生绑定验证，并确认工作区 membership。刷新必须保持原 issuer/subject。每个后续业务请求还需本站 access/read/write/admin 角色、scope 与原生资源权限交集；安装和本地凭据不授予权限。员工可用自己的交互设备账号，非交互员工使用 `auth login --mode machine --purpose employee --workspace <slug> --worker-file <绝对私有JSON>`，文件固定本站 issuer/origin/clientId/subject/clientSecret；仅登记的单员工 client 可用，300秒 AT 先经后端验签、实时 introspection 和原生绑定，secret 不进 token 槽；过期需显式重新授权。
+CLI 将 AT/RT 作为不透明凭据；登录或续期后的新 AT 必须请求 `GET /api/identity/me`，由服务器实际验签、逐次 confidential introspection 与原生绑定验证，并确认工作区 membership。续期必须保持原 issuer/subject；新轮换的 AT/RT 先持久保存，再验证新 AT，验证暂时不可用不会丢弃已经轮换的 RT。每个后续业务请求还需本站 access/read/write/admin 角色、scope 与原生资源权限交集；安装和本地凭据不授予权限。
+
+业务调用前，AT 临近过期且槽内有可用 RT 时会自动续期；也可显式运行 `auth refresh`。这不是后台常驻保活。业务返回 401 或网络失败时不重发业务请求；写入结果 unknown 仍须按原 action 回读。续期结果未知会保留围栏，`invalid_grant` 要求重新授权；不能靠重试刷新或重发业务绕过。
+
+员工可用自己的交互设备账号；非交互员工使用 `auth login --mode machine --purpose employee --workspace <slug> --worker-file <绝对私有JSON>`。受保护文件固定本站 issuer/origin/clientId/subject/clientSecret，仅已登记的单员工 client 可用；不借用共享管理员身份。机器 AT 最长 300 秒，经后端验签、实时 introspection 和原生绑定后使用；secret 不进凭据槽，不保存 RT，不能套用人员长期授权或 RT 自动续期，到期后需重新执行受限机器授权。
 
 每项命令公开 `unifiedAuthorization` 的实际 requiredRole/requiredScope，并与服务器两个路由族做对照测试。尤其 `phone-mcp configure` 是绑定管理，需当前 access + admin、workspace:write 及原生工作区 owner/admin；普通 task/document 写仍需 write。字段是离线规则，不能据此宣称当前账号有 grant。
 
-`auth status` 默认验证 `/api/identity/me`，区分 unified 与 legacy，并保留安全的服务器原生状态；`--local` 只报告本地非敏感摘要、`verification:local,serverVerified:false`。短跨进程锁和版本 CAS 保护凭据：网络与等待不持锁；logout 原子取走最新 AT/RT，迟到刷新/兑换不复活槽，并尽力显式撤销返回 token。异常清理失败或结果未知如实保留。
+`auth status` 默认验证 `/api/identity/me`，区分 unified 与 legacy，并保留安全的服务器原生状态；`--local` 只报告本地非敏感摘要、`verification:local,serverVerified:false`。同一 origin/profile/account/purpose 的续期与注销使用跨进程身份锁，文件更新另用短锁和版本 CAS；logout 清除最新 AT/RT，迟到兑换不复活已退出的槽，并尽力显式撤销返回 token。异常清理失败或结果未知如实保留。
 
 统一模式 logout 默认只撤当前站点/槽最新 RT 和 AT，直接使用公共 client 的受信 OP revocation endpoint，不把 RT 发给业务 API。RFC 7009 HTTP 200 仅报告 `remoteRevocation:accepted,revocationConfirmed:false`，不证明 token 已 inactive。`--local` 为 not_requested；远端失败/超时不抹去 localCleared。它不代表全站或 OP SSO 退出。待批准设备码本地退出后按 OP 原期限失效，不虚称已取消 OP 授权。
 
-准备期显式兼容：只有服务器公开声明 `mode:legacy,legacyAllowed:true` 时，才可使用 `--mode native` 或 `--mode managed`。统一服务器拒绝旧密码、旧 Cookie、静态 owner Bearer 和旧 MCP 网站凭据；不以兼容请求成功算统一交付。1.x 本地 legacy 记录须重新显式授权后才能供服务器调用，仍可读取本地摘要和退出。
+旧协议显式兼容：只有所选服务器公开声明 `mode:legacy,legacyAllowed:true` 时，CLI 才可使用 `--mode native` 或 `--mode managed`；本站当前 `legacyAllowed:false`，不提供这两个旧登录入口。旧密码、旧 Cookie、静态 owner Bearer 不能替代统一身份。已配对设备的受限管理 bootstrap 凭据沿原生设备守卫验证，不等于 CLI 人员登录。1.x 本地 legacy 记录仍可读取本地摘要和退出。
 
-legacy native 需 `--mode native`、`--email`、`--workspace`、`--password-stdin`。密码只从 stdin 读且不保存，记录原 Set-Cookie 会话。下面模板只在准备期 legacy 服务器使用；保护秘密输入文件及 OS 权限，不把真实密码放入 argv、历史、业务 JSON 或日志。
+legacy native 需 `--mode native`、`--email`、`--workspace`、`--password-stdin`。密码只从 stdin 读且不保存，记录原 Set-Cookie 会话。下面模板只供明确允许 legacy 的服务器使用；保护秘密输入文件及 OS 权限，不把真实密码放入 argv、历史、业务 JSON 或日志。
 
 ```powershell
 Get-Content -LiteralPath "<protected-password-file>" -Raw | ziwei-workspace auth login --mode native --email "<account-email>" --workspace "<workspace-slug>" --password-stdin --profile "<profile>" --account "<account-slot>" --purpose person --non-interactive --json --contract v1
@@ -115,6 +129,7 @@ legacy native logout 清当前槽并尝试原会话退出；legacy managed 远�
 | `--api <HTTPS-origin>` | 默认本站 origin；无 userinfo、query 或业务子路径；仅显式 ZIWEI_WORKSPACE_ALLOW_LOOPBACK_HTTP=1 的隔离测试可用 literal loopback HTTP |
 | `--account <slot>` | 本站账号槽标识，默认 default，不代表已认证账号 |
 | `--purpose person` / `--purpose employee` | 凭据用途隔离；默认 person |
+| `--long-lived` | 人员 unified login 显式申请长期授权；期限由服务端决定，不适用于机器 client_credentials |
 | `--workspace <slug>` | 明确目标工作区，须通过原服务器权限验证；与业务 JSON 同字段不可重复 |
 
 公共参数在资源/动作前后都有效。重复参数、未知参数、非法超时或跨来源同字段冲突均拒绝。工作区 slug 使用 2–63 位字母数字、下划线或连字符。普通 JSON 输入保持长 ID 为字符串；金额按原 schema 的精确类型传递，不将字符串 ID/金额转换成浮点数。
@@ -207,11 +222,11 @@ ziwei-workspace capabilities --json --contract v1
 
 ## 原管理 MCP 接入
 
-本项目已有管理 MCP 是 stdio 服务器 `scripts/ziwei-mcp.mjs`。可核对[保留的原管理 MCP 源码](https://github.com/jinjinli226-netizen/ziwei/blob/543e81d344fa0337328b088134cf742128c1d43d/scripts/ziwei-mcp.mjs)（私有仓库需权限；该文件与当前候选字节一致，该远端标识不含本轮未提交身份增量）。它内部调用管理 HTTP API，HTTP API 地址不是远程 MCP transport URL。本包不新增 `ziwei-workspace mcp` 命令，也没有可宣称的公网 HTTP MCP endpoint。
+本项目已有管理 MCP 是 stdio 服务器 `scripts/ziwei-mcp.mjs`。可核对[管理 MCP 源码](https://github.com/jinjinli226-netizen/ziwei/blob/4bd8b22a55464928bcd799eeb9e73137c61b2aa6/scripts/ziwei-mcp.mjs)及上方当前维护分支（私有仓库需权限）。它内部调用管理 HTTP API，HTTP API 地址不是远程 MCP transport URL。本包不新增 `ziwei-workspace mcp` 命令，也不把 HTTP 管理 API 当作公网 MCP endpoint。
 
 原 stdio 脚本未新增统一 OP 授权、设备流或 RT 刷新。其保留的 managed token-file 模板只适用于原协议受控兼容条件，不能当成统一模式 CLI 的代理授权，也不能推断所有 Bot 管理 MCP 已迁完。CLI 的统一 AT HTTP 路由覆盖与 stdio 运行时身份迁移分别验收。既有 daemon pairing/A2A/terminal 机器协议有独立认证边界，不自动等于网站 MCP 授权。
 
-以下 stdio 模板仅用于已获授权且服务端允许的旧协议/准备兼容；服务器 unified 时不能用旧 managed token 绕过 AT 验证。路径均为自己的授权来源/私有文件占位：
+以下 stdio 模板须使用当前受支持流程取得的受限管理凭据，并由服务器原生策略校验；它不是 CLI 统一身份的代理登录入口，不能填入旧静态 owner 凭据绕过授权。路径均为自己的授权来源/私有文件占位：
 
 ```json
 {
@@ -236,6 +251,8 @@ MCP 业务 schema 与资源边界保留，原脚本 stdout 仍为 JSON-RPC。统
 ## 命令目录与完整输入 schema
 
 以下内容直接由本包 registry 生成。命令拼写保留原资源和动作（包括大小写）；inputSchema 是实际 CLI 校验。transports.native/managed 与 routes 说明原 API 族；unified 根据本站公开 cliTransports 在这些精确路由上使用 AT，不导入旧 managed token。idempotencyByTransport 须按实际选中的路由族判断。readOnly、sideEffects、requiredPermissions、supportsDryRun、idempotency 与 resultQuery 同 capabilities 共源。Bot data 保留原生嵌套校验，示例空对象须按原生能力补齐，不代表任意字段有效。
+
+混合群成员通过 `bots collaboration` 的 `data.members` / `data.memberDescriptors` 描述，运行时可为 Hermes、DSH、Codex；仍沿该操作的原员工、工作区、版本和授权边界。本包没有独立的 groups CLI 命令，不能把成员 schema 当作额外命令。
 
 逐项 JSON 示例只展示根 schema 所需字段；请把它保存到自己的业务输入文件再使用该条命令。所有 ID、路径和其他尖括号值都是占位符。
 <!-- operation:workdirs.inspect -->
@@ -2990,7 +3007,9 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
         "runtime": {
           "type": "string",
           "enum": [
-            "Hermes"
+            "Hermes",
+            "DSH",
+            "Codex"
           ]
         },
         "model": {
@@ -3074,6 +3093,76 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
           "items": {
             "type": "string"
           }
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "employeeId": {
+                "type": "string"
+              },
+              "runtime": {
+                "type": "string",
+                "enum": [
+                  "Hermes",
+                  "DSH",
+                  "Codex"
+                ]
+              },
+              "profile": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "employeeId",
+              "runtime"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 6
+        },
+        "memberDescriptors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "employeeId": {
+                "type": "string"
+              },
+              "runtime": {
+                "type": "string",
+                "enum": [
+                  "Hermes",
+                  "DSH",
+                  "Codex"
+                ]
+              },
+              "profile": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "employeeId",
+              "runtime"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 6
         },
         "content": {
           "type": "string"
@@ -3219,7 +3308,9 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
         "runtime": {
           "type": "string",
           "enum": [
-            "Hermes"
+            "Hermes",
+            "DSH",
+            "Codex"
           ]
         },
         "model": {
@@ -3303,6 +3394,76 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
           "items": {
             "type": "string"
           }
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "employeeId": {
+                "type": "string"
+              },
+              "runtime": {
+                "type": "string",
+                "enum": [
+                  "Hermes",
+                  "DSH",
+                  "Codex"
+                ]
+              },
+              "profile": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "employeeId",
+              "runtime"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 6
+        },
+        "memberDescriptors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "employeeId": {
+                "type": "string"
+              },
+              "runtime": {
+                "type": "string",
+                "enum": [
+                  "Hermes",
+                  "DSH",
+                  "Codex"
+                ]
+              },
+              "profile": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "employeeId",
+              "runtime"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 6
         },
         "content": {
           "type": "string"
@@ -3450,7 +3611,9 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
         "runtime": {
           "type": "string",
           "enum": [
-            "Hermes"
+            "Hermes",
+            "DSH",
+            "Codex"
           ]
         },
         "model": {
@@ -3534,6 +3697,76 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
           "items": {
             "type": "string"
           }
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "employeeId": {
+                "type": "string"
+              },
+              "runtime": {
+                "type": "string",
+                "enum": [
+                  "Hermes",
+                  "DSH",
+                  "Codex"
+                ]
+              },
+              "profile": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "employeeId",
+              "runtime"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 6
+        },
+        "memberDescriptors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "employeeId": {
+                "type": "string"
+              },
+              "runtime": {
+                "type": "string",
+                "enum": [
+                  "Hermes",
+                  "DSH",
+                  "Codex"
+                ]
+              },
+              "profile": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "employeeId",
+              "runtime"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 6
         },
         "content": {
           "type": "string"
@@ -3698,7 +3931,9 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
         "runtime": {
           "type": "string",
           "enum": [
-            "Hermes"
+            "Hermes",
+            "DSH",
+            "Codex"
           ]
         },
         "model": {
@@ -3782,6 +4017,76 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
           "items": {
             "type": "string"
           }
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "employeeId": {
+                "type": "string"
+              },
+              "runtime": {
+                "type": "string",
+                "enum": [
+                  "Hermes",
+                  "DSH",
+                  "Codex"
+                ]
+              },
+              "profile": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "employeeId",
+              "runtime"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 6
+        },
+        "memberDescriptors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "employeeId": {
+                "type": "string"
+              },
+              "runtime": {
+                "type": "string",
+                "enum": [
+                  "Hermes",
+                  "DSH",
+                  "Codex"
+                ]
+              },
+              "profile": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "employeeId",
+              "runtime"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 6
         },
         "content": {
           "type": "string"
@@ -3942,7 +4247,9 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
         "runtime": {
           "type": "string",
           "enum": [
-            "Hermes"
+            "Hermes",
+            "DSH",
+            "Codex"
           ]
         },
         "model": {
@@ -4026,6 +4333,76 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
           "items": {
             "type": "string"
           }
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "employeeId": {
+                "type": "string"
+              },
+              "runtime": {
+                "type": "string",
+                "enum": [
+                  "Hermes",
+                  "DSH",
+                  "Codex"
+                ]
+              },
+              "profile": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "employeeId",
+              "runtime"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 6
+        },
+        "memberDescriptors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "employeeId": {
+                "type": "string"
+              },
+              "runtime": {
+                "type": "string",
+                "enum": [
+                  "Hermes",
+                  "DSH",
+                  "Codex"
+                ]
+              },
+              "profile": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "employeeId",
+              "runtime"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 6
         },
         "content": {
           "type": "string"
@@ -4176,7 +4553,9 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
         "runtime": {
           "type": "string",
           "enum": [
-            "Hermes"
+            "Hermes",
+            "DSH",
+            "Codex"
           ]
         },
         "model": {
@@ -4260,6 +4639,76 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
           "items": {
             "type": "string"
           }
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "employeeId": {
+                "type": "string"
+              },
+              "runtime": {
+                "type": "string",
+                "enum": [
+                  "Hermes",
+                  "DSH",
+                  "Codex"
+                ]
+              },
+              "profile": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "employeeId",
+              "runtime"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 6
+        },
+        "memberDescriptors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "employeeId": {
+                "type": "string"
+              },
+              "runtime": {
+                "type": "string",
+                "enum": [
+                  "Hermes",
+                  "DSH",
+                  "Codex"
+                ]
+              },
+              "profile": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "employeeId",
+              "runtime"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 6
         },
         "content": {
           "type": "string"
@@ -4423,7 +4872,9 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
         "runtime": {
           "type": "string",
           "enum": [
-            "Hermes"
+            "Hermes",
+            "DSH",
+            "Codex"
           ]
         },
         "model": {
@@ -4507,6 +4958,76 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
           "items": {
             "type": "string"
           }
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "employeeId": {
+                "type": "string"
+              },
+              "runtime": {
+                "type": "string",
+                "enum": [
+                  "Hermes",
+                  "DSH",
+                  "Codex"
+                ]
+              },
+              "profile": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "employeeId",
+              "runtime"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 6
+        },
+        "memberDescriptors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "employeeId": {
+                "type": "string"
+              },
+              "runtime": {
+                "type": "string",
+                "enum": [
+                  "Hermes",
+                  "DSH",
+                  "Codex"
+                ]
+              },
+              "profile": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "employeeId",
+              "runtime"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 6
         },
         "content": {
           "type": "string"
@@ -4670,7 +5191,9 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
         "runtime": {
           "type": "string",
           "enum": [
-            "Hermes"
+            "Hermes",
+            "DSH",
+            "Codex"
           ]
         },
         "model": {
@@ -4754,6 +5277,76 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
           "items": {
             "type": "string"
           }
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "employeeId": {
+                "type": "string"
+              },
+              "runtime": {
+                "type": "string",
+                "enum": [
+                  "Hermes",
+                  "DSH",
+                  "Codex"
+                ]
+              },
+              "profile": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "employeeId",
+              "runtime"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 6
+        },
+        "memberDescriptors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "employeeId": {
+                "type": "string"
+              },
+              "runtime": {
+                "type": "string",
+                "enum": [
+                  "Hermes",
+                  "DSH",
+                  "Codex"
+                ]
+              },
+              "profile": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "employeeId",
+              "runtime"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 6
         },
         "content": {
           "type": "string"
@@ -4917,7 +5510,9 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
         "runtime": {
           "type": "string",
           "enum": [
-            "Hermes"
+            "Hermes",
+            "DSH",
+            "Codex"
           ]
         },
         "model": {
@@ -5007,6 +5602,76 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
           "items": {
             "type": "string"
           }
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "employeeId": {
+                "type": "string"
+              },
+              "runtime": {
+                "type": "string",
+                "enum": [
+                  "Hermes",
+                  "DSH",
+                  "Codex"
+                ]
+              },
+              "profile": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "employeeId",
+              "runtime"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 6
+        },
+        "memberDescriptors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "employeeId": {
+                "type": "string"
+              },
+              "runtime": {
+                "type": "string",
+                "enum": [
+                  "Hermes",
+                  "DSH",
+                  "Codex"
+                ]
+              },
+              "profile": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "employeeId",
+              "runtime"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 6
         },
         "content": {
           "type": "string"
@@ -5170,7 +5835,9 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
         "runtime": {
           "type": "string",
           "enum": [
-            "Hermes"
+            "Hermes",
+            "DSH",
+            "Codex"
           ]
         },
         "model": {
@@ -5254,6 +5921,76 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
           "items": {
             "type": "string"
           }
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "employeeId": {
+                "type": "string"
+              },
+              "runtime": {
+                "type": "string",
+                "enum": [
+                  "Hermes",
+                  "DSH",
+                  "Codex"
+                ]
+              },
+              "profile": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "employeeId",
+              "runtime"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 6
+        },
+        "memberDescriptors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "employeeId": {
+                "type": "string"
+              },
+              "runtime": {
+                "type": "string",
+                "enum": [
+                  "Hermes",
+                  "DSH",
+                  "Codex"
+                ]
+              },
+              "profile": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "employeeId",
+              "runtime"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 6
         },
         "content": {
           "type": "string"
@@ -5403,7 +6140,9 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
         "runtime": {
           "type": "string",
           "enum": [
-            "Hermes"
+            "Hermes",
+            "DSH",
+            "Codex"
           ]
         },
         "model": {
@@ -5487,6 +6226,76 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
           "items": {
             "type": "string"
           }
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "employeeId": {
+                "type": "string"
+              },
+              "runtime": {
+                "type": "string",
+                "enum": [
+                  "Hermes",
+                  "DSH",
+                  "Codex"
+                ]
+              },
+              "profile": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "employeeId",
+              "runtime"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 6
+        },
+        "memberDescriptors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "employeeId": {
+                "type": "string"
+              },
+              "runtime": {
+                "type": "string",
+                "enum": [
+                  "Hermes",
+                  "DSH",
+                  "Codex"
+                ]
+              },
+              "profile": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "employeeId",
+              "runtime"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 6
         },
         "content": {
           "type": "string"
@@ -5637,7 +6446,9 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
         "runtime": {
           "type": "string",
           "enum": [
-            "Hermes"
+            "Hermes",
+            "DSH",
+            "Codex"
           ]
         },
         "model": {
@@ -5721,6 +6532,76 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
           "items": {
             "type": "string"
           }
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "employeeId": {
+                "type": "string"
+              },
+              "runtime": {
+                "type": "string",
+                "enum": [
+                  "Hermes",
+                  "DSH",
+                  "Codex"
+                ]
+              },
+              "profile": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "employeeId",
+              "runtime"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 6
+        },
+        "memberDescriptors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "employeeId": {
+                "type": "string"
+              },
+              "runtime": {
+                "type": "string",
+                "enum": [
+                  "Hermes",
+                  "DSH",
+                  "Codex"
+                ]
+              },
+              "profile": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "employeeId",
+              "runtime"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 6
         },
         "content": {
           "type": "string"
@@ -5883,7 +6764,9 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
         "runtime": {
           "type": "string",
           "enum": [
-            "Hermes"
+            "Hermes",
+            "DSH",
+            "Codex"
           ]
         },
         "model": {
@@ -5967,6 +6850,76 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
           "items": {
             "type": "string"
           }
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "employeeId": {
+                "type": "string"
+              },
+              "runtime": {
+                "type": "string",
+                "enum": [
+                  "Hermes",
+                  "DSH",
+                  "Codex"
+                ]
+              },
+              "profile": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "employeeId",
+              "runtime"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 6
+        },
+        "memberDescriptors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "employeeId": {
+                "type": "string"
+              },
+              "runtime": {
+                "type": "string",
+                "enum": [
+                  "Hermes",
+                  "DSH",
+                  "Codex"
+                ]
+              },
+              "profile": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "employeeId",
+              "runtime"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 6
         },
         "content": {
           "type": "string"
@@ -6125,7 +7078,9 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
         "runtime": {
           "type": "string",
           "enum": [
-            "Hermes"
+            "Hermes",
+            "DSH",
+            "Codex"
           ]
         },
         "model": {
@@ -6209,6 +7164,76 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
           "items": {
             "type": "string"
           }
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "employeeId": {
+                "type": "string"
+              },
+              "runtime": {
+                "type": "string",
+                "enum": [
+                  "Hermes",
+                  "DSH",
+                  "Codex"
+                ]
+              },
+              "profile": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "employeeId",
+              "runtime"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 6
+        },
+        "memberDescriptors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "employeeId": {
+                "type": "string"
+              },
+              "runtime": {
+                "type": "string",
+                "enum": [
+                  "Hermes",
+                  "DSH",
+                  "Codex"
+                ]
+              },
+              "profile": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "employeeId",
+              "runtime"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 6
         },
         "content": {
           "type": "string"
@@ -6367,7 +7392,9 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
         "runtime": {
           "type": "string",
           "enum": [
-            "Hermes"
+            "Hermes",
+            "DSH",
+            "Codex"
           ]
         },
         "model": {
@@ -6451,6 +7478,76 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
           "items": {
             "type": "string"
           }
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "employeeId": {
+                "type": "string"
+              },
+              "runtime": {
+                "type": "string",
+                "enum": [
+                  "Hermes",
+                  "DSH",
+                  "Codex"
+                ]
+              },
+              "profile": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "employeeId",
+              "runtime"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 6
+        },
+        "memberDescriptors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "employeeId": {
+                "type": "string"
+              },
+              "runtime": {
+                "type": "string",
+                "enum": [
+                  "Hermes",
+                  "DSH",
+                  "Codex"
+                ]
+              },
+              "profile": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "employeeId",
+              "runtime"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 6
         },
         "content": {
           "type": "string"
@@ -6613,7 +7710,9 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
         "runtime": {
           "type": "string",
           "enum": [
-            "Hermes"
+            "Hermes",
+            "DSH",
+            "Codex"
           ]
         },
         "model": {
@@ -6697,6 +7796,76 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
           "items": {
             "type": "string"
           }
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "employeeId": {
+                "type": "string"
+              },
+              "runtime": {
+                "type": "string",
+                "enum": [
+                  "Hermes",
+                  "DSH",
+                  "Codex"
+                ]
+              },
+              "profile": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "employeeId",
+              "runtime"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 6
+        },
+        "memberDescriptors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "employeeId": {
+                "type": "string"
+              },
+              "runtime": {
+                "type": "string",
+                "enum": [
+                  "Hermes",
+                  "DSH",
+                  "Codex"
+                ]
+              },
+              "profile": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "employeeId",
+              "runtime"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 6
         },
         "content": {
           "type": "string"
@@ -7087,7 +8256,9 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
         "runtime": {
           "type": "string",
           "enum": [
-            "Hermes"
+            "Hermes",
+            "DSH",
+            "Codex"
           ]
         },
         "model": {
@@ -7171,6 +8342,76 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
           "items": {
             "type": "string"
           }
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "employeeId": {
+                "type": "string"
+              },
+              "runtime": {
+                "type": "string",
+                "enum": [
+                  "Hermes",
+                  "DSH",
+                  "Codex"
+                ]
+              },
+              "profile": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "employeeId",
+              "runtime"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 6
+        },
+        "memberDescriptors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "employeeId": {
+                "type": "string"
+              },
+              "runtime": {
+                "type": "string",
+                "enum": [
+                  "Hermes",
+                  "DSH",
+                  "Codex"
+                ]
+              },
+              "profile": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "employeeId",
+              "runtime"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 6
         },
         "content": {
           "type": "string"
@@ -7339,7 +8580,9 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
         "runtime": {
           "type": "string",
           "enum": [
-            "Hermes"
+            "Hermes",
+            "DSH",
+            "Codex"
           ]
         },
         "model": {
@@ -7423,6 +8666,76 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
           "items": {
             "type": "string"
           }
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "employeeId": {
+                "type": "string"
+              },
+              "runtime": {
+                "type": "string",
+                "enum": [
+                  "Hermes",
+                  "DSH",
+                  "Codex"
+                ]
+              },
+              "profile": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "employeeId",
+              "runtime"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 6
+        },
+        "memberDescriptors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "employeeId": {
+                "type": "string"
+              },
+              "runtime": {
+                "type": "string",
+                "enum": [
+                  "Hermes",
+                  "DSH",
+                  "Codex"
+                ]
+              },
+              "profile": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "employeeId",
+              "runtime"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 6
         },
         "content": {
           "type": "string"
@@ -7575,7 +8888,9 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
         "runtime": {
           "type": "string",
           "enum": [
-            "Hermes"
+            "Hermes",
+            "DSH",
+            "Codex"
           ]
         },
         "model": {
@@ -7659,6 +8974,76 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
           "items": {
             "type": "string"
           }
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "employeeId": {
+                "type": "string"
+              },
+              "runtime": {
+                "type": "string",
+                "enum": [
+                  "Hermes",
+                  "DSH",
+                  "Codex"
+                ]
+              },
+              "profile": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "employeeId",
+              "runtime"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 6
+        },
+        "memberDescriptors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "employeeId": {
+                "type": "string"
+              },
+              "runtime": {
+                "type": "string",
+                "enum": [
+                  "Hermes",
+                  "DSH",
+                  "Codex"
+                ]
+              },
+              "profile": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "employeeId",
+              "runtime"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 6
         },
         "content": {
           "type": "string"
@@ -7826,7 +9211,9 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
         "runtime": {
           "type": "string",
           "enum": [
-            "Hermes"
+            "Hermes",
+            "DSH",
+            "Codex"
           ]
         },
         "model": {
@@ -7910,6 +9297,76 @@ Hermes Bot 统一管理。capabilities/list发现；create创建专属命名Prof
           "items": {
             "type": "string"
           }
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "employeeId": {
+                "type": "string"
+              },
+              "runtime": {
+                "type": "string",
+                "enum": [
+                  "Hermes",
+                  "DSH",
+                  "Codex"
+                ]
+              },
+              "profile": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "employeeId",
+              "runtime"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 6
+        },
+        "memberDescriptors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "employeeId": {
+                "type": "string"
+              },
+              "runtime": {
+                "type": "string",
+                "enum": [
+                  "Hermes",
+                  "DSH",
+                  "Codex"
+                ]
+              },
+              "profile": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "employeeId",
+              "runtime"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 6
         },
         "content": {
           "type": "string"
@@ -8102,10 +9559,10 @@ ziwei-workspace actions wait --input-file "<business-input.json>" --json --contr
 - `bots force-abandon`：Privileged failure recovery is not exposed by this CLI version.
 - `bots failure-finalization`：Privileged failure recovery is not exposed by this CLI version.
 
-- 员工机器 client_credentials、全站 OP 退出和原 stdio MCP 的统一授权迁移未由本 CLI 实现。
+- 全站 OP 退出，以及为原 stdio MCP 新增统一 OP 设备授权/RT 刷新，不在本 CLI 的实现范围。
 
 ## 版本与线上边界
 
-CLI 2.0.0 · 规范 1.3.0 · 身份契约 1.0.1 · 机器契约 v1 · 文档 2.0.0 · 更新 2026-10-22
+CLI 2.0.4 · 规范 1.3.0 · 身份契约 1.0.1 · 机器契约 v1 · 文档 2.1.0 · 更新 2026-11-02
 
-此文档和三个匿名入口是候选源码的一部分。服务器准备期 legacy 与 CLI 默认 unified 必须分别核对；统一切换需经受控发布窗口、完整配置/显式绑定及验收，不能用长期兼容替代交付。包构建/安装、纯 handler/本地 HTTP、真实 OP、生产源码和公网读取分别验收。未部署前公网与生产 SSO 保持 pending。
+文档正文、版本包及 release.json、实时身份配置和每次业务结果分别核对。公开文档可读不代表当前账号有业务权限；包可下载不证明目标电脑已经安装；配置 ready 不代表所有模型或 SSO 全流程均已验收。业务完成以原生资源或原 action 的真实终态为准；未知结果不自动重放。

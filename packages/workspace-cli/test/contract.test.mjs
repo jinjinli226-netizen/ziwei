@@ -30,7 +30,7 @@ test('public flags work before and after commands and ordinary output is one v1 
 });
 test('help and version are text, include real docs and do not need credentials',async()=>{
   const h=await invoke(['bots','create','--help']); assert.equal(h.exitCode,0); assert.match(h.stdout,/https:\/\/ziwei.qzelynth.top\/docs/);
-  const v=await invoke(['--version']); assert.equal(v.stdout.trim(),'2.0.0');
+  const v=await invoke(['--version']); assert.equal(v.stdout.trim(),'2.0.4');
 });
 for(const args of [ ['--no-such-flag'],['capabilities','--profile'],['capabilities','--json','--json'],['capabilities','--timeout','99'],['capabilities','--timeout','300001'],['capabilities','--timeout','1.5'],['capabilities','--contract','legacy'],['capabilities','extra'] ]) {
   test(`strict usage rejects ${args.join(' ')}`,async()=>{ const r=await invoke(args); assert.equal(r.exitCode,2);assert.equal(r.json.error.code,'USAGE'); });

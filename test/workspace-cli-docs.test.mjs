@@ -106,24 +106,53 @@ test('public instructions state distribution, identity, native MCP and deploymen
   const {buildWorkspaceCliDocs} = await import(generatorUrl);
   const files = buildWorkspaceCliDocs();
   const markdown = files['cli.md'];
-  for (const text of ['@ziwei/workspace-cli', 'ziwei-workspace', '--password-stdin', '--managed-stdin', '--input-stdin', 'OUTCOME_UNKNOWN', 'CANCELLED', 'no automatic write retry', 'SSO', 'pending', 'scripts/ziwei-mcp.mjs', 'stdio', '尚未发布到公共 npm', '未部署', 'SHA-256']) assert.ok(markdown.includes(text), text);
+  for (const text of ['@ziwei/workspace-cli', 'ziwei-workspace', 'ziwei_user', '--password-stdin', '--managed-stdin', '--input-stdin', 'OUTCOME_UNKNOWN', 'CANCELLED', 'no automatic write retry', 'SSO', 'scripts/ziwei-mcp.mjs', 'stdio', 'SHA-256', 'release.json']) assert.ok(markdown.includes(text), text);
   for (const code of [0,1,2,3,4,5,6,7,8,9,130]) assert.match(markdown, new RegExp(`\\| ${code} \\|`));
   for (const url of [`${origin}/docs`, `${origin}/docs/cli.md`, `${origin}/llms.txt`]) assert.ok(files['llms.txt'].includes(url));
   assert.doesNotMatch(markdown, /npm install --global @ziwei\/workspace-cli|https:\/\/ziwei\.qzelynth\.top\/mcp(?:\s|["')])/);
+  for (const content of Object.values(files)) assert.doesNotMatch(content, /未提交增量|当前候选字节一致|公网可用性 pending|公网读取 pending|改动未部署|未部署这次|未覆盖：员工机器 client_credentials|client_credentials[^\n]*未由本 CLI 实现|19876c0f006af18c9fe3b6ef4a7d9e94c75c14c6/);
 });
 
-test('identity round docs distinguish server preparation default from CLI default and state the full public protocol', async () => {
+test('identity docs describe current unified configuration and the full public protocol without conflating acceptance', async () => {
   const {buildWorkspaceCliDocs} = await import(generatorUrl);
   const files = buildWorkspaceCliDocs(), markdown = files['cli.md'];
-  for (const text of ['CLI 2.0.0', '规范 1.3.0', '身份契约 1.0.1', 'ZIWEI_IDENTITY_MODE=unified', '服务器默认 legacy', 'CLI 默认 unified', 'auth complete', 'auth wait', 'auth refresh', 'PKCE S256', 'ziwei-workspace-api', 'ziwei-workspace-cli', '/api/identity/config', '/api/identity/me', 'offline_access', 'revocationConfirmed:false', 'legacyAllowed:true', 'stdio 脚本未新增统一 OP 授权']) assert.ok(markdown.includes(text), text);
+  for (const text of [`CLI ${CLI_VERSION}`, `规范 ${STANDARD_VERSION}`, '身份契约 1.0.1', 'CLI 默认 unified', 'mode:unified', 'ready:true', 'legacyAllowed:false', 'native', 'mcp', 'auth complete', 'auth wait', 'auth refresh', 'PKCE S256', 'ziwei-workspace-api', 'ziwei-workspace-cli', '/api/identity/config', '/api/identity/me', 'offline_access', 'revocationConfirmed:false', 'legacyAllowed:true', 'stdio 脚本未新增统一 OP 授权', '不代表所有模型或 SSO 全流程均已验收']) assert.ok(markdown.includes(text), text);
   assert.doesNotMatch(markdown, /统一身份[^\n]{0,80}返回[^\n]{0,40}NOT_SUPPORTED|native 模式默认|未覆盖：统一身份|ziwei-workspace-cli-1\.0\.0\.tgz/);
-  assert.match(markdown, /npm install --global "https:\/\/[^"\n]+2\.0\.0\.tgz"/);
   for (const name of ['index.html','llms.txt']) {
-    assert.match(files[name], /2\.0\.0/);
+    assert.ok(files[name].includes(`CLI ${CLI_VERSION}`));
     assert.match(files[name], /1\.0\.1/);
     assert.match(files[name], /legacy/);
     assert.match(files[name], /unified/);
   }
+});
+
+test('versioned public documentation links the matching package and receipt and retains the complete catalog', async () => {
+  const {buildWorkspaceCliDocs, DOCUMENT_VERSION, UPDATED_AT} = await import(generatorUrl);
+  const files = buildWorkspaceCliDocs(), markdown = files['cli.md'];
+  const releaseBase = `${origin}/downloads/workspace-cli/${CLI_VERSION}`;
+  const artifact = `${releaseBase}/ziwei-workspace-cli-${CLI_VERSION}.tgz`;
+  assert.equal(DOCUMENT_VERSION, '2.1.0');
+  assert.equal(UPDATED_AT, '2026-11-02');
+  assert.equal(operations.length, 49);
+  assert.equal([...markdown.matchAll(/<!-- operation:/g)].length, operations.length);
+  for (const content of Object.values(files)) {
+    assert.ok(content.includes(`文档 ${DOCUMENT_VERSION}`));
+    assert.ok(content.includes(`更新 ${UPDATED_AT}`));
+    assert.ok(content.includes(artifact));
+    assert.ok(content.includes(`${releaseBase}/release.json`));
+  }
+  assert.ok(markdown.includes(`npm install --global "${artifact}"`));
+  assert.ok(markdown.includes('bots collaboration'));
+  assert.ok(markdown.includes('members'));
+  assert.ok(markdown.includes('memberDescriptors'));
+  assert.ok(markdown.includes('没有独立的 groups CLI 命令'));
+});
+
+test('person long-lived authorization and automatic renewal keep worker and uncertain-write boundaries explicit', async () => {
+  const {buildWorkspaceCliDocs} = await import(generatorUrl);
+  const markdown = buildWorkspaceCliDocs()['cli.md'];
+  for (const text of ['--long-lived', '--purpose person', 'offline_access', 'accessExpiresAt', 'refreshIdleExpiresAt', 'loginSessionExpiresAt', 'loginMode', '业务调用前', '临近过期', '自动续期', '401', '不重发业务请求', '--mode machine', '--worker-file', '不保存 RT', '实际返回的期限']) assert.ok(markdown.includes(text), text);
+  assert.doesNotMatch(markdown, /offline_access`?。不会|offline_access`?。普通|offline_access`?永不|永久登录|保证[^\n]*365/);
 });
 
 test('all 49 CLI routes advertise the actual server unified role and scope including phone binding admin', async () => {

@@ -6,6 +6,7 @@ import {unifiedCommand,logoutUnified,requireLegacy} from './unified.mjs';
 import {machineLogin} from './machine.mjs';
 export async function authCommand(action,options,context){
   const{store,selection,request,readStdin,secrets}=context;
+  if(options['long-lived']&&(action!=='login'||options.mode&&options.mode!=='unified'))fail('USAGE','--long-lived is only available for human unified auth login');
   if(options.mode==='machine'){
     if(action==='login'&&options['worker-file'])return machineLogin(context,options);
     fail('NOT_SUPPORTED','Machine login requires an explicit protected per-employee --worker-file');
@@ -56,6 +57,7 @@ export async function authCommand(action,options,context){
   }
   if(!['status','logout'].includes(action))fail('USAGE','Use auth login, auth status or auth logout');
   if(action==='logout'){
+   return store.withSessionLock(selection,async()=>{
     const credential=await store.take(selection),localCleared=Boolean(credential);
     if(!credential)return{localCleared,remoteRevocation:'not_attempted',scope:'current CLI credential slot',allSitesLoggedOut:false};
     if(credential.mode==='unified')return logoutUnified(context,credential,options);
@@ -64,6 +66,7 @@ export async function authCommand(action,options,context){
     if(options.local)return{localCleared,remoteRevocation:'not_requested',scope:'current CLI credential slot',allSitesLoggedOut:false};
     try{await requireLegacy(context,credential);await request({path:'/api/auth/logout',method:'POST',credential});return{localCleared,remoteRevocation:'succeeded',scope:'this original native session and current CLI credential slot',allSitesLoggedOut:false};}
     catch(error){if(error instanceof CliError){error.details={...error.details,localCleared,remoteRevocation:error.details.outcomeUnknown?'unknown':error.code==='CANCELLED'?'not_attempted':'failed',allSitesLoggedOut:false};}throw error;}
+   });
   }
   const credential=await store.load(selection);
   if(credential?.mode==='unified')return unifiedCommand(action,options,context);
